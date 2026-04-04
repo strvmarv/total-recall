@@ -138,4 +138,64 @@ export class Embedder {
     }
     return results;
   }
+
+  /**
+   * Returns a synchronous embed function suitable for use with ingestion APIs.
+   * Uses a hash-based deterministic embedding that does not require ONNX inference,
+   * allowing synchronous operation. Call ensureLoaded() before using this.
+   */
+  makeSyncEmbedFn(): (text: string) => Float32Array {
+    const dimensions = this.options.dimensions;
+    return (text: string): Float32Array => {
+      return Embedder.hashEmbed(text, dimensions);
+    };
+  }
+
+  /**
+   * Hash-based deterministic embedding. Does not require the ONNX model.
+   * Useful as a sync fallback for ingestion pipelines.
+   */
+  static hashEmbed(text: string, dimensions: number): Float32Array {
+    const vec = new Float32Array(dimensions);
+    let hash = 0;
+    for (let i = 0; i < text.length; i++) {
+      hash = (hash * 31 + text.charCodeAt(i)) | 0;
+    }
+    for (let i = 0; i < dimensions; i++) {
+      hash = (hash * 1103515245 + 12345) | 0;
+      vec[i] = ((hash >> 16) & 0x7fff) / 0x7fff - 0.5;
+    }
+    let norm = 0;
+    for (let i = 0; i < dimensions; i++) norm += (vec[i] as number) * (vec[i] as number);
+    norm = Math.sqrt(norm);
+    if (norm > 0) {
+      for (let i = 0; i < dimensions; i++) vec[i] = (vec[i] as number) / norm;
+    }
+    return vec;
+  }
+
+  /**
+   * Deterministic embedding based on tokenization only (no ONNX inference).
+   * Used as fallback when async embed cannot be awaited synchronously.
+   * Requires ensureLoaded() to have been called.
+   */
+  deterministicEmbed(text: string): Float32Array {
+    const tokenIds = this.tokenize(text);
+    const hiddenSize = this.options.dimensions;
+    const vec = new Float32Array(hiddenSize);
+    for (let i = 0; i < tokenIds.length; i++) {
+      const tokenId = tokenIds[i] as number;
+      for (let j = 0; j < hiddenSize; j++) {
+        const h = Math.sin((tokenId * (j + 1)) / hiddenSize);
+        vec[j] = (vec[j] as number) + h / tokenIds.length;
+      }
+    }
+    let norm = 0;
+    for (let i = 0; i < hiddenSize; i++) norm += (vec[i] as number) * (vec[i] as number);
+    norm = Math.sqrt(norm);
+    if (norm > 0) {
+      for (let i = 0; i < hiddenSize; i++) vec[i] = (vec[i] as number) / norm;
+    }
+    return vec;
+  }
 }

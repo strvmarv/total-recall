@@ -6,6 +6,10 @@ import type { TotalRecallConfig } from "../types.js";
 import type { Embedder } from "../embedding/embedder.js";
 import { MEMORY_TOOLS, handleMemoryTool } from "./memory-tools.js";
 import { SYSTEM_TOOLS, handleSystemTool } from "./system-tools.js";
+import { registerKbTools, handleKbTool } from "./kb-tools.js";
+import { registerEvalTools, handleEvalTool } from "./eval-tools.js";
+import { registerImportTools, handleImportTool } from "./import-tools.js";
+import { registerSessionTools, handleSessionTool } from "./session-tools.js";
 
 export interface ToolContext {
   db: Database.Database;
@@ -20,19 +24,35 @@ export async function startServer(ctx: ToolContext): Promise<void> {
     { capabilities: { tools: {} } },
   );
 
+  const allTools = [
+    ...MEMORY_TOOLS,
+    ...SYSTEM_TOOLS,
+    ...registerKbTools(),
+    ...registerEvalTools(),
+    ...registerImportTools(),
+    ...registerSessionTools(),
+  ];
+
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return { tools: [...MEMORY_TOOLS, ...SYSTEM_TOOLS] };
+    return { tools: allTools };
   });
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: rawArgs } = request.params;
     const args = (rawArgs ?? {}) as Record<string, unknown>;
 
-    const memoryResult = await handleMemoryTool(name, args, ctx);
-    if (memoryResult !== null) return memoryResult;
-
-    const systemResult = handleSystemTool(name, args, ctx);
-    if (systemResult !== null) return systemResult;
+    const memResult = await handleMemoryTool(name, args ?? {}, ctx);
+    if (memResult !== null) return memResult;
+    const sysResult = handleSystemTool(name, args ?? {}, ctx);
+    if (sysResult !== null) return sysResult;
+    const kbResult = await handleKbTool(name, args ?? {}, ctx);
+    if (kbResult !== null) return kbResult;
+    const evalResult = await handleEvalTool(name, args ?? {}, ctx);
+    if (evalResult !== null) return evalResult;
+    const importResult = await handleImportTool(name, args ?? {}, ctx);
+    if (importResult !== null) return importResult;
+    const sessionResult = await handleSessionTool(name, args ?? {}, ctx);
+    if (sessionResult !== null) return sessionResult;
 
     return {
       content: [
