@@ -1,0 +1,12 @@
+{
+  "name": "total-recall",
+  "description": "Multi-tiered memory and knowledge base for TUI coding assistants",
+  "version": "0.1.0",
+  "skills": "./skills/",
+  "mcpServers": {
+    "total-recall": {
+      "command": "node",
+      "args": ["dist/index.js"]
+    }
+  }
+}
