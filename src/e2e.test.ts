@@ -41,7 +41,7 @@ describe("total-recall e2e", () => {
       (r) => r.entry.project === "my-app",
     );
     expect(hotFiltered.length).toBe(1);
-    expect(hotFiltered[0].entry.content).toContain("pnpm");
+    expect(hotFiltered[0]!.entry.content).toContain("pnpm");
 
     // Promote to warm
     promoteEntry(db, embed, id, "hot", "memory", "warm", "memory");
@@ -59,7 +59,7 @@ describe("total-recall e2e", () => {
       (r) => r.entry.project === "my-app",
     );
     expect(warmFiltered.length).toBe(1);
-    expect(warmFiltered[0].tier).toBe("warm");
+    expect(warmFiltered[0]!.tier).toBe("warm");
   });
 
   it("multi-project isolation", () => {
@@ -107,7 +107,7 @@ describe("total-recall e2e", () => {
     expect(results.length).toBe(3);
     // Results should be ranked by score
     for (let i = 1; i < results.length; i++) {
-      expect(results[i - 1].score).toBeGreaterThanOrEqual(results[i].score);
+      expect(results[i - 1]!.score).toBeGreaterThanOrEqual(results[i]!.score);
     }
   });
 });
