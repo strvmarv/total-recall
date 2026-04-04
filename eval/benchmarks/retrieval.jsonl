@@ -1,0 +1,20 @@
+{"query":"which package manager should I use","expected_content_contains":"pnpm","expected_tier":"warm"}
+{"query":"testing strategy database mocking","expected_content_contains":"integration tests","expected_tier":"warm"}
+{"query":"how does authentication work","expected_content_contains":"Passport","expected_tier":"warm"}
+{"query":"deployment pipeline process","expected_content_contains":"staging","expected_tier":"warm"}
+{"query":"test runner framework","expected_content_contains":"vitest","expected_tier":"warm"}
+{"query":"database ORM setup","expected_content_contains":"Drizzle","expected_tier":"warm"}
+{"query":"API error format","expected_content_contains":"RFC 7807","expected_tier":"warm"}
+{"query":"which endpoints need auth","expected_content_contains":"/health","expected_tier":"warm"}
+{"query":"input validation library","expected_content_contains":"zod","expected_tier":"warm"}
+{"query":"what is redis used for","expected_content_contains":"session","expected_tier":"warm"}
+{"query":"git branch naming convention","expected_content_contains":"feat/","expected_tier":"warm"}
+{"query":"environment variable security","expected_content_contains":".env","expected_tier":"warm"}
+{"query":"frontend framework","expected_content_contains":"React","expected_tier":"warm"}
+{"query":"styling approach","expected_content_contains":"Tailwind","expected_tier":"warm"}
+{"query":"how to run migrations","expected_content_contains":"Drizzle Kit","expected_tier":"warm"}
+{"query":"logging format","expected_content_contains":"pino","expected_tier":"warm"}
+{"query":"file upload architecture","expected_content_contains":"S3","expected_tier":"warm"}
+{"query":"background job queue","expected_content_contains":"BullMQ","expected_tier":"warm"}
+{"query":"realtime communication","expected_content_contains":"socket.io","expected_tier":"warm"}
+{"query":"user communication preferences","expected_content_contains":"terse","expected_tier":"warm"}

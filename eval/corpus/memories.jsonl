@@ -1,0 +1,20 @@
+{"content":"User prefers pnpm over npm for package management","type":"correction","tags":["tooling","packages"]}
+{"content":"Always use integration tests with real databases, never mock the data layer","type":"preference","tags":["testing","databases"]}
+{"content":"Auth system uses Passport.js with JWT tokens","type":"decision","tags":["auth","architecture"]}
+{"content":"Deploy to staging first via GitHub Actions, production requires manual approval","type":"preference","tags":["deployment","ci"]}
+{"content":"Use vitest as the test runner, not jest","type":"correction","tags":["testing","tooling"]}
+{"content":"Project uses PostgreSQL with Drizzle ORM","type":"decision","tags":["database","orm"]}
+{"content":"Error responses should use RFC 7807 Problem Details format","type":"preference","tags":["api","errors"]}
+{"content":"All API endpoints require authentication except /health and /docs","type":"decision","tags":["api","auth"]}
+{"content":"Use zod for runtime schema validation at API boundaries","type":"preference","tags":["validation","api"]}
+{"content":"Redis is used for session storage and rate limiting only","type":"decision","tags":["redis","architecture"]}
+{"content":"Feature branches should be named feat/TICKET-description","type":"preference","tags":["git","workflow"]}
+{"content":"Never commit .env files, use .env.example as template","type":"correction","tags":["security","git"]}
+{"content":"The frontend uses React with TanStack Router","type":"decision","tags":["frontend","react"]}
+{"content":"CSS uses Tailwind with the project's custom design tokens","type":"decision","tags":["frontend","css"]}
+{"content":"All database migrations go through Drizzle Kit","type":"preference","tags":["database","migrations"]}
+{"content":"Logging uses structured JSON via pino","type":"decision","tags":["logging","observability"]}
+{"content":"User prefers terse responses without trailing summaries","type":"preference","tags":["communication"]}
+{"content":"WebSocket connections use socket.io with Redis adapter for scaling","type":"decision","tags":["websockets","architecture"]}
+{"content":"File uploads go to S3 with presigned URLs, never through the API server","type":"decision","tags":["files","architecture"]}
+{"content":"Cron jobs are managed by BullMQ with Redis backend","type":"decision","tags":["jobs","architecture"]}
