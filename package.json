@@ -1,12 +1,65 @@
 {
-  "name": "total-recall",
+  "name": "@strvmarv/total-recall",
   "version": "0.1.0",
+  "description": "Multi-tiered memory and knowledge base plugin for TUI coding assistants",
   "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "total-recall": "dist/index.js"
+  },
   "scripts": {
     "build": "tsup",
+    "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist/",
+    "skills/",
+    "agents/",
+    "hooks/",
+    "eval/",
+    "src/defaults.toml",
+    ".claude-plugin/",
+    ".copilot-plugin/",
+    ".cursor-plugin/",
+    ".opencode/",
+    "README.md",
+    "LICENSE",
+    "CONTRIBUTING.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/strvmarv/total-recall.git"
+  },
+  "homepage": "https://github.com/strvmarv/total-recall",
+  "bugs": {
+    "url": "https://github.com/strvmarv/total-recall/issues"
+  },
+  "author": "strvmarv",
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "memory",
+    "knowledge-base",
+    "claude-code",
+    "copilot-cli",
+    "opencode",
+    "cline",
+    "cursor",
+    "sqlite",
+    "vector-search",
+    "embeddings",
+    "ai-coding",
+    "tui"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",

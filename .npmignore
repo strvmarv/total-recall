@@ -1,0 +1,17 @@
+# Source (dist/ is published instead)
+src/
+tests/
+*.test.ts
+
+# Dev config
+tsconfig.json
+tsup.config.ts
+vitest.config.ts
+.gitignore
+
+# Docs (README and LICENSE included via files field)
+docs/
+.remember/
+
+# Git
+.git/

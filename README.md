@@ -30,35 +30,54 @@ Platform support is via MCP (Model Context Protocol), which means total-recall w
 
 ---
 
-## Quick Start
+## Installation
 
-### Installation
+### Self-Install (Paste Into Any AI Coding Assistant)
 
-```bash
-# Clone and build
-git clone https://github.com/strvmarv/total-recall.git
-cd total-recall
-npm install
-npm run build
-```
+> Install the total-recall memory plugin: fetch and follow the instructions at https://raw.githubusercontent.com/strvmarv/total-recall/main/INSTALL.md
+
+That's it. Your AI assistant will read the instructions and install total-recall for its platform.
 
 ### Claude Code
 
-Add to your Claude Code settings or install as a plugin.
+```
+/plugin install total-recall@strvmarv-marketplace
+```
 
-### Other Platforms
+Or if the marketplace isn't registered:
 
-Configure the MCP server in your tool's config:
+```
+/plugin marketplace add strvmarv/total-recall-marketplace
+/plugin install total-recall@strvmarv-marketplace
+```
+
+### npm (Any MCP-Compatible Tool)
+
+```bash
+npm install -g @strvmarv/total-recall
+```
+
+Then add to your tool's MCP config:
 
 ```json
 {
   "mcpServers": {
     "total-recall": {
-      "command": "node",
-      "args": ["/path/to/total-recall/dist/index.js"]
+      "command": "npx",
+      "args": ["-y", "@strvmarv/total-recall"]
     }
   }
 }
+```
+
+This works with **Copilot CLI**, **OpenCode**, **Cline**, **Cursor**, and any other MCP-compatible tool.
+
+### From Source
+
+```bash
+git clone https://github.com/strvmarv/total-recall.git
+cd total-recall
+npm install && npm run build
 ```
 
 ### First Session
