@@ -1,0 +1,37 @@
+import type Database from "better-sqlite3";
+import { insertEntry } from "../db/entries.js";
+import { insertEmbedding } from "../search/vector-search.js";
+import type { Tier, ContentType, EntryType, SourceTool } from "../types.js";
+
+type EmbedFn = (text: string) => Float32Array;
+
+interface StoreOptions {
+  content: string;
+  type?: EntryType;
+  tier?: Tier;
+  contentType?: ContentType;
+  project?: string | null;
+  tags?: string[];
+  source?: string;
+  source_tool?: SourceTool;
+  parent_id?: string;
+  collection_id?: string;
+}
+
+export function storeMemory(db: Database.Database, embed: EmbedFn, opts: StoreOptions): string {
+  const tier = opts.tier ?? "hot";
+  const contentType = opts.contentType ?? "memory";
+  const id = insertEntry(db, tier, contentType, {
+    content: opts.content,
+    source: opts.source ?? null,
+    source_tool: opts.source_tool ?? "manual",
+    project: opts.project ?? null,
+    tags: opts.tags ?? [],
+    parent_id: opts.parent_id,
+    collection_id: opts.collection_id,
+    metadata: opts.type ? { entry_type: opts.type } : {},
+  });
+  const embedding = embed(opts.content);
+  insertEmbedding(db, tier, contentType, id, embedding);
+  return id;
+}
