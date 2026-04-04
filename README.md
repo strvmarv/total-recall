@@ -1,0 +1,220 @@
+# total-recall
+
+**Multi-tiered memory and knowledge base for TUI coding assistants.**
+
+Your AI coding tool forgets everything. total-recall doesn't.
+
+A cross-platform plugin that gives Claude Code, GitHub Copilot CLI, OpenCode, Cline, and Cursor persistent, semantically searchable memory with a hierarchical knowledge base — backed by local SQLite + vector embeddings, zero external dependencies.
+
+---
+
+## The Problem
+
+Every TUI coding assistant has the same gap:
+
+- **No tiering** — all memories treated equally, leading to context bloat or information loss
+- **Tool-locked** — switching between Claude Code and Copilot means starting from scratch
+- **No knowledge base** — can't ingest your docs and have them retrieved when relevant
+- **No semantic search** — memories retrieved by filename, not by meaning
+- **No observability** — no way to know if memory is helping or just noise
+
+---
+
+## The Solution
+
+total-recall introduces a three-tier memory model: **Hot** memories (up to 50 entries) are auto-injected into every prompt so your most important context is always present. **Warm** memories (up to 10K entries) are retrieved semantically — when you ask about authentication, relevant auth memories surface automatically. **Cold** storage is unlimited hierarchical knowledge base: ingest your docs, README files, API references, and architecture notes, and they're retrieved when relevant.
+
+The knowledge base ingests entire directories — source trees, documentation folders, design specs — and chunks them semantically with heading-aware Markdown parsing and AST-based code parsing. Every chunk is embedded with `all-MiniLM-L6-v2` (384 dimensions, runs locally via ONNX) so retrieval is purely semantic, no keyword matching required.
+
+Platform support is via MCP (Model Context Protocol), which means total-recall works with any MCP-compatible tool. Dedicated importers for Claude Code and Copilot CLI mean your existing memories migrate automatically on first run. An eval framework lets you measure retrieval quality, run benchmarks, and compare configuration changes before committing them.
+
+---
+
+## Quick Start
+
+### Installation
+
+```bash
+# Clone and build
+git clone https://github.com/strvmarv/total-recall.git
+cd total-recall
+npm install
+npm run build
+```
+
+### Claude Code
+
+Add to your Claude Code settings or install as a plugin.
+
+### Other Platforms
+
+Configure the MCP server in your tool's config:
+
+```json
+{
+  "mcpServers": {
+    "total-recall": {
+      "command": "node",
+      "args": ["/path/to/total-recall/dist/index.js"]
+    }
+  }
+}
+```
+
+### First Session
+
+total-recall auto-initializes on first use:
+
+1. Creates `~/.total-recall/` with SQLite database
+2. Downloads embedding model (~80MB, one-time)
+3. Scans for existing memories (Claude Code, Copilot CLI)
+4. Auto-ingests project docs (README, docs/, etc.)
+5. Reports: `total-recall: initialized · 4 memories imported · 12 docs ingested · system verified`
+
+---
+
+## Architecture
+
+```
+MCP Server (Node.js/TypeScript)
+├── Always Loaded: SQLite + vec, MCP Tools, Event Logger
+├── Lazy Loaded: ONNX Embedder, Compactor, Ingestor
+└── Host Importers: Claude Code, Copilot CLI, OpenCode
+
+Tiers:
+  Hot (50 entries)  → auto-injected every prompt
+  Warm (10K entries) → semantic search per query
+  Cold (unlimited)   → hierarchical KB retrieval
+```
+
+**Data flow:**
+
+1. `store` — write a memory, assign tier, embed, persist
+2. `search` — embed query, vector search warm + cold, return ranked results
+3. `compact` — decay scores, demote warm→cold, evict hot→warm, summarize clusters
+4. `ingest` — chunk files, embed chunks, store in cold tier with metadata
+
+All state lives in `~/.total-recall/db.sqlite`. The embedding model is cached at `~/.total-recall/models/`. No network calls after initial model download.
+
+---
+
+## Commands
+
+| Command | Description |
+|---|---|
+| `/memory status` | Dashboard overview |
+| `/memory search <query>` | Semantic search across all tiers |
+| `/memory ingest <path>` | Add files/dirs to knowledge base |
+| `/memory forget <query>` | Find and delete entries |
+| `/memory compact` | Force compaction with preview |
+| `/memory inspect <id>` | Deep dive on single entry |
+| `/memory promote <id>` | Move entry to higher tier |
+| `/memory demote <id>` | Move entry to lower tier |
+| `/memory export` | Export to portable format |
+| `/memory import <file>` | Import from export file |
+| `/memory eval` | Live performance metrics |
+| `/memory eval --benchmark` | Run synthetic benchmark |
+| `/memory eval --compare <name>` | Compare configs |
+| `/memory eval --snapshot <name>` | Save current config baseline |
+| `/memory eval --grow` | Add real misses to benchmark |
+| `/memory config get <key>` | Read config value |
+| `/memory config set <key> <value>` | Update config |
+| `/memory history` | Show recent tier movements |
+| `/memory lineage <id>` | Show compaction ancestry |
+
+---
+
+## Supported Platforms
+
+| Platform | Support | Notes |
+|---|---|---|
+| Claude Code | Full | Native plugin, session hooks, auto-import |
+| Copilot CLI | Full | Auto-import from existing Copilot memory files |
+| OpenCode | MCP | Configure MCP server in opencode config |
+| Cline | MCP | Configure MCP server in Cline settings |
+| Cursor | Full | MCP server + `.cursor-plugin/` wrapper |
+
+---
+
+## Configuration
+
+Copy `~/.total-recall/config.toml` to override defaults:
+
+```toml
+# total-recall configuration
+
+[tiers.hot]
+max_entries = 50          # Max entries auto-injected per prompt
+token_budget = 4000       # Max tokens for hot tier injection
+carry_forward_threshold = 0.7  # Score threshold to stay in hot
+
+[tiers.warm]
+max_entries = 10000       # Max entries in warm tier
+retrieval_top_k = 5       # Results returned per search
+similarity_threshold = 0.65    # Min cosine similarity for retrieval
+cold_decay_days = 30      # Days before unused warm entries decay to cold
+
+[tiers.cold]
+chunk_max_tokens = 512    # Max tokens per knowledge base chunk
+chunk_overlap_tokens = 50 # Overlap between adjacent chunks
+lazy_summary_threshold = 5     # Accesses before generating summary
+
+[compaction]
+decay_half_life_hours = 168    # Score half-life (168h = 1 week)
+warm_threshold = 0.3           # Score below which warm→cold
+promote_threshold = 0.7        # Score above which cold→warm
+warm_sweep_interval_days = 7   # How often to run warm sweep
+
+[embedding]
+model = "all-MiniLM-L6-v2"    # Embedding model name
+dimensions = 384               # Embedding dimensions
+```
+
+---
+
+## Extending
+
+### Adding a New Host Tool
+
+Implement the `HostImporter` interface (~50 lines). It requires four methods: `detect()` to check if the tool is present, `scan()` to report what's available, `importMemories()` to migrate existing memories, and `importKnowledge()` to migrate knowledge files. See [CONTRIBUTING.md](CONTRIBUTING.md) for a full example.
+
+### Adding a New Content Type
+
+Add a row to the `content_type` lookup table in `src/db/schema.ts`, then register a type weight for relevance scoring. No other changes needed.
+
+### Adding a New Chunking Parser
+
+Implement the `Chunk[]`-returning parser interface and register it in `src/ingestion/chunker.ts` alongside the existing Markdown and code parsers. See [CONTRIBUTING.md](CONTRIBUTING.md) for the interface definition.
+
+---
+
+## Built With & Inspired By
+
+### [superpowers](https://github.com/obra/superpowers) by [obra](https://github.com/obra)
+
+total-recall's plugin architecture, skill format, hook system, multi-platform wrapper pattern, and development philosophy are directly inspired by and modeled after the **superpowers** plugin. superpowers demonstrated that a zero-dependency, markdown-driven skill system could fundamentally improve how AI coding assistants behave — total-recall extends that same philosophy to memory and knowledge management.
+
+Specific patterns we learned from superpowers:
+
+- **SKILL.md format** with YAML frontmatter and trigger-condition-focused descriptions
+- **SessionStart hooks** for injecting core behavior at session start
+- **Multi-platform wrappers** (`.claude-plugin/`, `.copilot-plugin/`, `.cursor-plugin/`, `.opencode/`)
+- **Subagent architecture** for isolated, focused task execution
+- **Zero-dependency philosophy** — no external services, no API keys, no cloud
+- **Two-stage review pattern** for quality assurance
+
+If you're building plugins for TUI coding assistants, start with [superpowers](https://github.com/obra/superpowers). It's the foundation this ecosystem needs.
+
+### Core Technologies
+
+- [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) — Fast, synchronous SQLite bindings
+- [sqlite-vec](https://github.com/asg017/sqlite-vec) — Vector similarity search in SQLite
+- [onnxruntime-node](https://github.com/microsoft/onnxruntime) — Local ML inference
+- [all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) — Sentence embeddings (384d)
+- [@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/sdk) — MCP server implementation
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE)
