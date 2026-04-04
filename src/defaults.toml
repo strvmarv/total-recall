@@ -1,0 +1,28 @@
+# total-recall default configuration
+# Copy to ~/.total-recall/config.toml to override
+
+[tiers.hot]
+max_entries = 50
+token_budget = 4000
+carry_forward_threshold = 0.7
+
+[tiers.warm]
+max_entries = 10000
+retrieval_top_k = 5
+similarity_threshold = 0.65
+cold_decay_days = 30
+
+[tiers.cold]
+chunk_max_tokens = 512
+chunk_overlap_tokens = 50
+lazy_summary_threshold = 5
+
+[compaction]
+decay_half_life_hours = 168
+warm_threshold = 0.3
+promote_threshold = 0.7
+warm_sweep_interval_days = 7
+
+[embedding]
+model = "all-MiniLM-L6-v2"
+dimensions = 384
