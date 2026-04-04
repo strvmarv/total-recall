@@ -22,6 +22,7 @@ const compactionConfig = {
   decay_half_life_hours: 168,
   warm_threshold: 0.3,
   promote_threshold: 0.7,
+  warm_sweep_interval_days: 7,
 };
 
 describe("total-recall phase 2 e2e", () => {
