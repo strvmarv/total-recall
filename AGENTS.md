@@ -58,7 +58,7 @@ The launcher (`bin/total-recall.sh`) finds `node` across common install methods:
 
 ### What happens on session_start
 
-1. Import sync — scans Claude Code and Copilot CLI memory dirs, deduplicates via content hash in `import_log`
+1. Import sync — scans Claude Code, Copilot CLI, Cursor, Cline, OpenCode, and Hermes memory dirs, deduplicates via content hash in `import_log`
 2. Warm sweep — if last sweep was more than `warm_sweep_interval_days` ago, moves old unaccessed warm entries to cold. Tracked via `compaction_log` with `reason = 'warm_sweep_decay'`.
 3. Project docs auto-ingest — detects README.md, CONTRIBUTING.md, CLAUDE.md, AGENTS.md, and docs/ in cwd. Ingests into a `{project}-project-docs` KB collection. Deduplicates via `import_log`.
 4. Smoke test — if `_meta.smoke_test_version` differs from current package version, runs a 22-query benchmark from `eval/benchmarks/smoke.jsonl`. Pass threshold: exactMatchRate >= 0.8. Writes version to `_meta` on completion. Result returned as `smokeTest` field.

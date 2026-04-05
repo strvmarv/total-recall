@@ -30,7 +30,7 @@
 
 Your AI coding tool forgets everything. total-recall doesn't.
 
-A cross-platform plugin that gives Claude Code, GitHub Copilot CLI, OpenCode, Cline, and Cursor persistent, semantically searchable memory with a hierarchical knowledge base — backed by local SQLite + vector embeddings, zero external dependencies.
+A cross-platform plugin that gives Claude Code, GitHub Copilot CLI, OpenCode, Cline, Cursor, and Hermes persistent, semantically searchable memory with a hierarchical knowledge base — backed by local SQLite + vector embeddings, zero external dependencies.
 
 ---
 
@@ -52,7 +52,7 @@ total-recall introduces a three-tier memory model: **Hot** memories (up to 50 en
 
 The knowledge base ingests entire directories — source trees, documentation folders, design specs — and chunks them semantically with heading-aware Markdown parsing and regex-based code parsing. Every chunk is embedded with `all-MiniLM-L6-v2` (384 dimensions, runs locally via ONNX) so retrieval is purely semantic, no keyword matching required.
 
-Platform support is via MCP (Model Context Protocol), which means total-recall works with any MCP-compatible tool. Dedicated importers for Claude Code and Copilot CLI mean your existing memories migrate automatically on first run. An eval framework lets you measure retrieval quality, run benchmarks, and compare configuration changes before committing them.
+Platform support is via MCP (Model Context Protocol), which means total-recall works with any MCP-compatible tool. Dedicated importers for Claude Code, Copilot CLI, Cursor, Cline, OpenCode, and Hermes mean your existing memories migrate automatically on first run. An eval framework lets you measure retrieval quality, run benchmarks, and compare configuration changes before committing them.
 
 ---
 
@@ -95,7 +95,7 @@ Then add to your tool's MCP config:
 }
 ```
 
-This works with **Copilot CLI**, **OpenCode**, **Cline**, **Cursor**, and any other MCP-compatible tool.
+This works with **Copilot CLI**, **OpenCode**, **Cline**, **Cursor**, **Hermes**, and any other MCP-compatible tool.
 
 > **Note:** `npx -y @strvmarv/total-recall` does not work due to an [npm bug](https://github.com/npm/cli/issues/3753) with scoped package binaries. Use the global install (`total-recall` command) instead.
 
@@ -111,15 +111,17 @@ npm install && npm run build
 
 On first `session_start`, total-recall initializes `~/.total-recall/` with a SQLite database and loads the bundled embedding model (included in package, no download needed). Every session then runs:
 
-1. **Import sync** — scans Claude Code and Copilot CLI memory directories, deduplicates and imports new entries
+1. **Import sync** — scans Claude Code, Copilot CLI, Cursor, Cline, OpenCode, and Hermes memory directories, deduplicates and imports new entries
 2. **Warm sweep** — if overdue, demotes stale warm entries to cold based on decay
-3. **Project docs ingest** — detects README, CLAUDE.md, AGENTS.md, docs/ in cwd and ingests into a project-scoped KB collection
-4. **Warm-to-hot promotion** — semantically searches warm tier for entries relevant to the current project and promotes them to hot
-5. **Hot tier assembly** — enforces token budget, evicts lowest-decay entries, returns hot tier as injectable context
-6. **Config snapshot** — captures current config for retrieval quality tracking
-7. **Tier summary** — counts entries across all tiers and KB collections for the startup announcement.
-8. **Hint generation** — surfaces high-value warm memories (corrections, preferences, frequently accessed) as actionable one-liners for the agent.
-9. **Session continuity** — computes time since last session for contextual framing.
+3. **Project docs ingest** — detects README.md, CONTRIBUTING.md, CLAUDE.md, AGENTS.md, and docs/ in cwd and ingests into a project-scoped KB collection
+4. **Smoke test** — on version change, runs a 22-query benchmark to validate retrieval quality
+5. **Warm-to-hot promotion** — semantically searches warm tier for entries relevant to the current project and promotes them to hot
+6. **Hot tier assembly** — enforces token budget, evicts lowest-decay entries, returns hot tier as injectable context
+7. **Config snapshot** — captures current config for retrieval quality tracking
+8. **Tier summary** — counts entries across all tiers and KB collections for the startup announcement.
+9. **Hint generation** — surfaces high-value warm memories (corrections, preferences, frequently accessed) as actionable one-liners for the agent.
+10. **Session continuity** — computes time since last session for contextual framing.
+11. **Regression detection** — compares retrieval metrics against previous config snapshot and alerts if quality has dropped.
 
 ---
 
@@ -129,7 +131,7 @@ On first `session_start`, total-recall initializes `~/.total-recall/` with a SQL
 MCP Server (Node.js/TypeScript)
 ├── Always Loaded: SQLite + vec, MCP Tools, Event Logger
 ├── Lazy Loaded: ONNX Embedder, Compactor, Ingestor
-└── Host Importers: Claude Code, Copilot CLI
+└── Host Importers: Claude Code, Copilot CLI, Cursor, Cline, OpenCode, Hermes
 
 Tiers:
   Hot (50 entries)  → auto-injected every prompt
@@ -181,6 +183,7 @@ All commands use `/total-recall <subcommand>`:
 | `/total-recall eval --benchmark` | `eval_benchmark` | Run synthetic benchmark |
 | `/total-recall eval --compare <name>` | `eval_compare` | Compare metrics between two config snapshots |
 | `/total-recall eval --snapshot <name>` | `eval_snapshot` | Manually create a named config snapshot |
+| `/total-recall eval --grow` | `eval_grow` | Review and accept/reject benchmark candidates from retrieval misses |
 | `/total-recall config get <key>` | `config_get` | Read config value |
 | `/total-recall config set <key> <val>` | `config_set` | Update config |
 | `/total-recall import-host` | `import_host` | Import from host tools |
@@ -198,6 +201,7 @@ Memory capture, retrieval, and compaction run automatically in the background �
 | OpenCode | MCP | Configure MCP server in opencode config |
 | Cline | MCP | Configure MCP server in Cline settings |
 | Cursor | Full | MCP server + `.cursor-plugin/` wrapper |
+| Hermes | Full | Auto-import from Hermes memory files |
 
 ---
 
