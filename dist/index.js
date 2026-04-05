@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
 // src/index.ts
-import { randomUUID as randomUUID6 } from "crypto";
+import { randomUUID as randomUUID7 } from "crypto";
 
 // src/config.ts
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
+import { createHash, randomUUID } from "crypto";
 import { parse as parseToml, stringify as stringifyToml } from "@iarna/toml";
 var DEFAULTS_PATH = new URL("./defaults.toml", import.meta.url);
 function getDataDir() {
@@ -48,6 +49,33 @@ function saveUserConfig(overrides) {
   }
   const merged = deepMerge(existing, overrides);
   writeFileSync(configPath, stringifyToml(merged));
+}
+function sortKeysDeep(obj) {
+  if (obj === null || typeof obj !== "object") return obj;
+  if (Array.isArray(obj)) return obj.map(sortKeysDeep);
+  const sorted = {};
+  for (const key of Object.keys(obj).sort()) {
+    sorted[key] = sortKeysDeep(obj[key]);
+  }
+  return sorted;
+}
+function hashConfig(config) {
+  return createHash("sha256").update(JSON.stringify(sortKeysDeep(config))).digest("hex");
+}
+function createConfigSnapshot(db, config, name) {
+  const configJson = JSON.stringify(config);
+  const configHash = hashConfig(config);
+  const latest = db.prepare(
+    "SELECT id, config FROM config_snapshots ORDER BY timestamp DESC LIMIT 1"
+  ).get();
+  if (latest && hashConfig(JSON.parse(latest.config)) === configHash) {
+    return latest.id;
+  }
+  const id = randomUUID();
+  db.prepare(
+    "INSERT INTO config_snapshots (id, name, timestamp, config) VALUES (?, ?, ?, ?)"
+  ).run(id, name ?? null, Date.now(), configJson);
+  return id;
 }
 function deepMerge(target, source) {
   const result = { ...target };
@@ -457,7 +485,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 
 // src/db/entries.ts
-import { randomUUID } from "crypto";
+import { randomUUID as randomUUID2 } from "crypto";
 function rowToEntry(row) {
   return {
     id: row.id,
@@ -479,7 +507,7 @@ function rowToEntry(row) {
 }
 function insertEntry(db, tier, type, opts) {
   const table = tableName(tier, type);
-  const id = randomUUID();
+  const id = randomUUID2();
   const now = Date.now();
   db.prepare(`
     INSERT INTO ${table}
@@ -773,6 +801,73 @@ async function demoteEntry(db, embed, id, fromTier, fromType, toTier, toType) {
   await promoteEntry(db, embed, id, fromTier, fromType, toTier, toType);
 }
 
+// src/eval/event-logger.ts
+import { randomUUID as randomUUID3 } from "crypto";
+function logRetrievalEvent(db, opts) {
+  const id = randomUUID3();
+  const timestamp = Date.now();
+  const top = opts.results[0] ?? null;
+  const result_count = opts.results.length;
+  const top_score = top?.score ?? null;
+  const top_tier = top?.tier ?? null;
+  const top_content_type = top?.content_type ?? null;
+  db.prepare(`
+    INSERT INTO retrieval_events (
+      id, timestamp, session_id, query_text, query_source, query_embedding,
+      results, result_count, top_score, top_tier, top_content_type,
+      config_snapshot_id, latency_ms, tiers_searched, total_candidates_scanned
+    ) VALUES (
+      ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?,
+      ?, ?, ?, ?
+    )
+  `).run(
+    id,
+    timestamp,
+    opts.sessionId,
+    opts.queryText,
+    opts.querySource,
+    opts.queryEmbedding ?? null,
+    JSON.stringify(opts.results),
+    result_count,
+    top_score,
+    top_tier,
+    top_content_type,
+    opts.configSnapshotId,
+    opts.latencyMs ?? null,
+    JSON.stringify(opts.tiersSearched),
+    opts.totalCandidatesScanned ?? null
+  );
+  return id;
+}
+function getRetrievalEvents(db, opts = {}) {
+  const conditions = [];
+  const params = [];
+  if (opts.sessionId !== void 0) {
+    conditions.push("session_id = ?");
+    params.push(opts.sessionId);
+  }
+  if (opts.configSnapshotId !== void 0) {
+    conditions.push("config_snapshot_id = ?");
+    params.push(opts.configSnapshotId);
+  }
+  if (opts.days !== void 0) {
+    const cutoff = Date.now() - opts.days * 24 * 60 * 60 * 1e3;
+    conditions.push("timestamp >= ?");
+    params.push(cutoff);
+  }
+  let sql = "SELECT * FROM retrieval_events";
+  if (conditions.length > 0) {
+    sql += " WHERE " + conditions.join(" AND ");
+  }
+  sql += " ORDER BY timestamp DESC";
+  if (opts.limit !== void 0) {
+    sql += " LIMIT ?";
+    params.push(opts.limit);
+  }
+  return db.prepare(sql).all(...params);
+}
+
 // src/tools/validation.ts
 import { resolve } from "path";
 var VALID_TIERS = /* @__PURE__ */ new Set(["hot", "warm", "cold"]);
@@ -997,10 +1092,27 @@ async function handleMemoryTool(name, args, ctx) {
     const tiers = ALL_TABLE_PAIRS.filter(
       (p) => (!tierFilter || tierFilter.includes(p.tier)) && (!typeFilter || typeFilter.includes(p.type))
     ).map((p) => ({ tier: p.tier, content_type: p.type }));
+    const searchStart = performance.now();
     const results = await searchMemory(ctx.db, embedFn, query, {
       tiers,
       topK,
       minScore
+    });
+    const latencyMs = Math.round(performance.now() - searchStart);
+    logRetrievalEvent(ctx.db, {
+      sessionId: ctx.sessionId,
+      queryText: query,
+      querySource: "mcp_tool",
+      results: results.map((r, i) => ({
+        entry_id: r.entry.id,
+        tier: r.tier,
+        content_type: r.content_type,
+        score: r.score,
+        rank: i + 1
+      })),
+      tiersSearched: tiers.map((t) => t.tier),
+      configSnapshotId: ctx.configSnapshotId,
+      latencyMs
     });
     return { content: [{ type: "text", text: JSON.stringify(results) }] };
   }
@@ -1170,36 +1282,6 @@ function listCollections(db) {
   });
 }
 
-// src/eval/event-logger.ts
-import { randomUUID as randomUUID2 } from "crypto";
-function getRetrievalEvents(db, opts = {}) {
-  const conditions = [];
-  const params = [];
-  if (opts.sessionId !== void 0) {
-    conditions.push("session_id = ?");
-    params.push(opts.sessionId);
-  }
-  if (opts.configSnapshotId !== void 0) {
-    conditions.push("config_snapshot_id = ?");
-    params.push(opts.configSnapshotId);
-  }
-  if (opts.days !== void 0) {
-    const cutoff = Date.now() - opts.days * 24 * 60 * 60 * 1e3;
-    conditions.push("timestamp >= ?");
-    params.push(cutoff);
-  }
-  let sql = "SELECT * FROM retrieval_events";
-  if (conditions.length > 0) {
-    sql += " WHERE " + conditions.join(" AND ");
-  }
-  sql += " ORDER BY timestamp DESC";
-  if (opts.limit !== void 0) {
-    sql += " LIMIT ?";
-    params.push(opts.limit);
-  }
-  return db.prepare(sql).all(...params);
-}
-
 // src/tools/system-tools.ts
 var SYSTEM_TOOLS = [
   {
@@ -1318,6 +1400,7 @@ function handleSystemTool(name, args, ctx) {
   if (name === "config_set") {
     const key = args.key;
     const value = args.value;
+    createConfigSnapshot(ctx.db, ctx.config, `pre-change:${key}`);
     const overrides = setNestedKey({}, key, value);
     saveUserConfig(overrides);
     const refreshed = loadConfig();
@@ -2171,6 +2254,10 @@ async function runBenchmark(db, embed, opts) {
     const matched = topContent !== null && topContent.includes(bq.expected_content_contains);
     const fuzzyMatched = matched || results.slice(1).some((r) => r.entry.content.includes(bq.expected_content_contains));
     const tierRouted = topTier === bq.expected_tier;
+    let negativePass = true;
+    if (bq.expected_absent && topContent) {
+      negativePass = !topContent.toLowerCase().includes(bq.expected_absent.toLowerCase());
+    }
     if (matched) exactMatches++;
     if (fuzzyMatched) fuzzyMatches++;
     if (tierRouted) tierMatches++;
@@ -2180,18 +2267,23 @@ async function runBenchmark(db, embed, opts) {
       topResult: topContent,
       topScore,
       matched,
-      fuzzyMatched
+      fuzzyMatched,
+      hasNegativeAssertion: !!bq.expected_absent,
+      negativePass
     });
   }
   for (const id of seededIds) {
     deleteMemory(db, id);
   }
   const total = queries.length;
+  const negativeQueries = details.filter((d) => d.hasNegativeAssertion);
+  const negativePassRate = negativeQueries.length > 0 ? negativeQueries.filter((d) => d.negativePass).length / negativeQueries.length : 1;
   return {
     totalQueries: total,
     exactMatchRate: total > 0 ? exactMatches / total : 0,
     fuzzyMatchRate: total > 0 ? fuzzyMatches / total : 0,
     tierRoutingRate: total > 0 ? tierMatches / total : 0,
+    negativePassRate,
     avgLatencyMs: total > 0 ? totalLatencyMs / total : 0,
     details
   };
@@ -2281,6 +2373,76 @@ function computeMetrics(events, similarityThreshold, compactionRows = []) {
     compactionHealth: computeCompactionHealth(compactionRows)
   };
 }
+function computeComparisonMetrics(eventsBefore, eventsAfter, similarityThreshold) {
+  const before = computeMetrics(eventsBefore, similarityThreshold);
+  const after = computeMetrics(eventsAfter, similarityThreshold);
+  const deltas = {
+    precision: after.precision - before.precision,
+    hitRate: after.hitRate - before.hitRate,
+    mrr: after.mrr - before.mrr,
+    missRate: after.missRate - before.missRate,
+    avgLatencyMs: after.avgLatencyMs - before.avgLatencyMs
+  };
+  const allTiers = /* @__PURE__ */ new Set([...Object.keys(before.byTier), ...Object.keys(after.byTier)]);
+  const byTier = {};
+  const emptyTier = { precision: 0, hitRate: 0, avgScore: 0, count: 0 };
+  for (const tier of allTiers) {
+    const b = before.byTier[tier] ?? emptyTier;
+    const a = after.byTier[tier] ?? emptyTier;
+    byTier[tier] = {
+      before: b,
+      after: a,
+      deltas: {
+        precision: a.precision - b.precision,
+        hitRate: a.hitRate - b.hitRate,
+        avgScore: a.avgScore - b.avgScore
+      }
+    };
+  }
+  const allTypes = /* @__PURE__ */ new Set([...Object.keys(before.byContentType), ...Object.keys(after.byContentType)]);
+  const byContentType = {};
+  const emptyType = { precision: 0, hitRate: 0, count: 0 };
+  for (const ct of allTypes) {
+    const b = before.byContentType[ct] ?? emptyType;
+    const a = after.byContentType[ct] ?? emptyType;
+    byContentType[ct] = {
+      before: b,
+      after: a,
+      deltas: {
+        precision: a.precision - b.precision,
+        hitRate: a.hitRate - b.hitRate
+      }
+    };
+  }
+  const beforeByQuery = /* @__PURE__ */ new Map();
+  for (const e of eventsBefore) beforeByQuery.set(e.query_text, e);
+  const afterByQuery = /* @__PURE__ */ new Map();
+  for (const e of eventsAfter) afterByQuery.set(e.query_text, e);
+  const regressions = [];
+  const improvements = [];
+  const allQueries = /* @__PURE__ */ new Set([...beforeByQuery.keys(), ...afterByQuery.keys()]);
+  for (const q of allQueries) {
+    const b = beforeByQuery.get(q);
+    const a = afterByQuery.get(q);
+    const bOutcome = !b ? "missing" : b.outcome_used === 1 ? "used" : "unused";
+    const aOutcome = !a ? "missing" : a.outcome_used === 1 ? "used" : "unused";
+    if (bOutcome === aOutcome) continue;
+    const entry = {
+      queryText: q,
+      beforeOutcome: bOutcome,
+      afterOutcome: aOutcome,
+      beforeScore: b?.top_score ?? null,
+      afterScore: a?.top_score ?? null
+    };
+    if (bOutcome === "used" && aOutcome !== "used") regressions.push(entry);
+    if (aOutcome === "used" && bOutcome !== "used") improvements.push(entry);
+  }
+  let warning;
+  if (eventsBefore.length === 0 || eventsAfter.length === 0) {
+    warning = "Comparison requires retrieval events from both snapshots. One side has no data \u2014 metrics may not be meaningful.";
+  }
+  return { before, after, deltas, byTier, byContentType, queryDiff: { regressions, improvements }, warning };
+}
 function computeCompactionHealth(rows) {
   const withRatio = rows.filter((r) => r.preservation_ratio !== null);
   const withDrift = rows.filter((r) => r.semantic_drift !== null && r.semantic_drift > 0.2);
@@ -2318,8 +2480,42 @@ var EVAL_TOOLS = [
       },
       required: []
     }
+  },
+  {
+    name: "eval_compare",
+    description: "Compare retrieval metrics between two config snapshots",
+    inputSchema: {
+      type: "object",
+      properties: {
+        before: { type: "string", description: "Snapshot name or ID for the 'before' config" },
+        after: { type: "string", description: "Snapshot name or ID for the 'after' config (default: latest)" },
+        days: { type: "number", description: "Days of events to include (default: 30)" }
+      },
+      required: ["before"]
+    }
+  },
+  {
+    name: "eval_snapshot",
+    description: "Manually create a named config snapshot",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Name for the snapshot" }
+      },
+      required: ["name"]
+    }
   }
 ];
+function resolveSnapshotId(db, nameOrId) {
+  const byId = db.prepare("SELECT id FROM config_snapshots WHERE id = ?").get(nameOrId);
+  if (byId) return byId.id;
+  if (nameOrId === "latest") {
+    const latest = db.prepare("SELECT id FROM config_snapshots ORDER BY timestamp DESC LIMIT 1").get();
+    return latest?.id ?? null;
+  }
+  const byName = db.prepare("SELECT id FROM config_snapshots WHERE name = ? ORDER BY timestamp DESC LIMIT 1").get(nameOrId);
+  return byName?.id ?? null;
+}
 async function handleEvalTool(name, args, ctx) {
   if (name === "eval_benchmark") {
     await ctx.embedder.ensureLoaded();
@@ -2345,6 +2541,63 @@ async function handleEvalTool(name, args, ctx) {
     const metrics = computeMetrics(events, similarityThreshold, compactionRows);
     return { content: [{ type: "text", text: JSON.stringify({ days, events: events.length, metrics }) }] };
   }
+  if (name === "eval_compare") {
+    const beforeRef = args.before;
+    const afterRef = args.after ?? "latest";
+    const days = args.days ?? 30;
+    const beforeId = resolveSnapshotId(ctx.db, beforeRef);
+    if (!beforeId) {
+      const available = ctx.db.prepare("SELECT name, id FROM config_snapshots ORDER BY timestamp DESC LIMIT 10").all();
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({ error: `Snapshot "${beforeRef}" not found`, available })
+        }],
+        isError: true
+      };
+    }
+    const afterId = resolveSnapshotId(ctx.db, afterRef);
+    if (!afterId) {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({ error: `Snapshot "${afterRef}" not found` })
+        }],
+        isError: true
+      };
+    }
+    const eventsBefore = getRetrievalEvents(ctx.db, { configSnapshotId: beforeId, days });
+    const eventsAfter = getRetrievalEvents(ctx.db, { configSnapshotId: afterId, days });
+    const threshold = ctx.config.tiers.warm.similarity_threshold;
+    const comparison = computeComparisonMetrics(eventsBefore, eventsAfter, threshold);
+    const response = {
+      beforeSnapshot: beforeId,
+      afterSnapshot: afterId,
+      days,
+      beforeEventCount: eventsBefore.length,
+      afterEventCount: eventsAfter.length,
+      ...comparison
+    };
+    if (comparison.warning) {
+      response.warning = comparison.warning;
+    }
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify(response)
+      }]
+    };
+  }
+  if (name === "eval_snapshot") {
+    const snapshotName = args.name;
+    const id = createConfigSnapshot(ctx.db, ctx.config, snapshotName);
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({ id, name: snapshotName, created: true })
+      }]
+    };
+  }
   return null;
 }
 function registerEvalTools() {
@@ -2355,7 +2608,7 @@ function registerEvalTools() {
 import { existsSync as existsSync4, readdirSync as readdirSync3, readFileSync as readFileSync5 } from "fs";
 import { join as join7 } from "path";
 import { homedir } from "os";
-import { createHash } from "crypto";
+import { createHash as createHash2 } from "crypto";
 function parseFrontmatter(raw) {
   const match = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!match) return { frontmatter: null, content: raw };
@@ -2370,10 +2623,10 @@ function parseFrontmatter(raw) {
   return { frontmatter, content: match[2] };
 }
 function contentHash(text) {
-  return createHash("sha256").update(text).digest("hex");
+  return createHash2("sha256").update(text).digest("hex");
 }
 function importLogId(sourceTool, sourcePath, hash) {
-  return createHash("md5").update(`${sourceTool}:${sourcePath}:${hash}`).digest("hex");
+  return createHash2("md5").update(`${sourceTool}:${sourcePath}:${hash}`).digest("hex");
 }
 function isAlreadyImported(db, hash) {
   const row = db.prepare("SELECT id FROM import_log WHERE content_hash = ?").get(hash);
@@ -2498,12 +2751,12 @@ var ClaudeCodeImporter = class {
 import { existsSync as existsSync5, readdirSync as readdirSync4, readFileSync as readFileSync6 } from "fs";
 import { join as join8 } from "path";
 import { homedir as homedir2 } from "os";
-import { createHash as createHash2 } from "crypto";
+import { createHash as createHash3 } from "crypto";
 function contentHash2(text) {
-  return createHash2("sha256").update(text).digest("hex");
+  return createHash3("sha256").update(text).digest("hex");
 }
 function importLogId2(sourceTool, sourcePath, hash) {
-  return createHash2("md5").update(`${sourceTool}:${sourcePath}:${hash}`).digest("hex");
+  return createHash3("md5").update(`${sourceTool}:${sourcePath}:${hash}`).digest("hex");
 }
 function isAlreadyImported2(db, hash) {
   const row = db.prepare("SELECT id FROM import_log WHERE content_hash = ?").get(hash);
@@ -2628,10 +2881,10 @@ function registerImportTools() {
 }
 
 // src/tools/session-tools.ts
-import { randomUUID as randomUUID5 } from "crypto";
+import { randomUUID as randomUUID6 } from "crypto";
 
 // src/compaction/compactor.ts
-import { randomUUID as randomUUID3 } from "crypto";
+import { randomUUID as randomUUID4 } from "crypto";
 
 // src/memory/decay.ts
 var MS_PER_HOUR = 60 * 60 * 1e3;
@@ -2654,7 +2907,7 @@ function calculateDecayScore(entry, compactionConfig, now = Date.now()) {
 
 // src/compaction/compactor.ts
 function logCompactionEvent(db, opts) {
-  const id = randomUUID3();
+  const id = randomUUID4();
   const timestamp = Date.now();
   db.prepare(`
     INSERT INTO compaction_log
@@ -2733,7 +2986,7 @@ async function compactHotTier(db, embed, config, sessionId, configSnapshotId) {
 }
 
 // src/compaction/warm-sweep.ts
-import { randomUUID as randomUUID4 } from "crypto";
+import { randomUUID as randomUUID5 } from "crypto";
 async function sweepWarmTier(db, embed, config, sessionId) {
   const entries = listEntries(db, "warm", "memory");
   const now = Date.now();
@@ -2750,7 +3003,7 @@ async function sweepWarmTier(db, embed, config, sessionId) {
            target_entry_id, decay_scores, reason, config_snapshot_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        randomUUID4(),
+        randomUUID5(),
         now,
         sessionId,
         "warm",
@@ -2772,18 +3025,18 @@ async function sweepWarmTier(db, embed, config, sessionId) {
 // src/importers/project-docs.ts
 import { existsSync as existsSync6, readFileSync as readFileSync7, readdirSync as readdirSync5, statSync as statSync5 } from "fs";
 import { join as join9, basename as basename2 } from "path";
-import { createHash as createHash3 } from "crypto";
+import { createHash as createHash4 } from "crypto";
 var DOC_FILES = ["README.md", "CONTRIBUTING.md", "CLAUDE.md", "AGENTS.md"];
 var DOC_DIRS = ["docs", "doc"];
 function contentHash3(content) {
-  return createHash3("sha256").update(content).digest("hex");
+  return createHash4("sha256").update(content).digest("hex");
 }
 function isAlreadyIngested(db, hash) {
   const row = db.prepare("SELECT id FROM import_log WHERE content_hash = ? AND source_tool = 'project-docs'").get(hash);
   return row !== void 0;
 }
 function logIngest(db, sourcePath, hash, entryId) {
-  const id = createHash3("md5").update(`project-docs:${sourcePath}:${hash}`).digest("hex");
+  const id = createHash4("md5").update(`project-docs:${sourcePath}:${hash}`).digest("hex");
   db.prepare(`
     INSERT OR IGNORE INTO import_log
       (id, timestamp, source_tool, source_path, content_hash, target_entry_id, target_tier, target_type)
@@ -2913,7 +3166,7 @@ async function handleSessionTool(name, args, ctx) {
     const lastSweep = ctx.db.prepare(`SELECT MAX(timestamp) as ts FROM compaction_log WHERE reason = 'warm_sweep_decay'`).get();
     const lastSweepTs = lastSweep?.ts ?? 0;
     if (Date.now() - lastSweepTs > sweepIntervalMs) {
-      const sessionId = ctx.sessionId ?? randomUUID5();
+      const sessionId = ctx.sessionId ?? randomUUID6();
       const result = await sweepWarmTier(ctx.db, embedFn, {
         coldDecayDays: ctx.config.tiers.warm.cold_decay_days
       }, sessionId);
@@ -2967,6 +3220,8 @@ async function handleSessionTool(name, args, ctx) {
       return `- ${e.content}${tags}`;
     });
     const contextText = contextLines.join("\n");
+    const snapshotId = createConfigSnapshot(ctx.db, ctx.config, "session-start");
+    ctx.configSnapshotId = snapshotId;
     return {
       content: [
         {
@@ -2988,8 +3243,8 @@ async function handleSessionTool(name, args, ctx) {
   if (name === "session_end") {
     await ctx.embedder.ensureLoaded();
     const embedFn = (text) => ctx.embedder.embed(text);
-    const sessionId = ctx.sessionId ?? randomUUID5();
-    const result = await compactHotTier(ctx.db, embedFn, ctx.config.compaction, sessionId);
+    const sessionId = ctx.sessionId ?? randomUUID6();
+    const result = await compactHotTier(ctx.db, embedFn, ctx.config.compaction, sessionId, ctx.configSnapshotId);
     return {
       content: [
         {
@@ -3167,7 +3422,8 @@ async function handleExtraTool(name, args, ctx) {
       db,
       embedFn,
       ctx.config.compaction,
-      ctx.sessionId
+      ctx.sessionId,
+      ctx.configSnapshotId
     );
     return {
       content: [
@@ -3439,10 +3695,10 @@ async function main() {
     model: config.embedding.model,
     dimensions: config.embedding.dimensions
   });
-  const sessionId = randomUUID6();
+  const sessionId = randomUUID7();
   process.stderr.write(`total-recall: MCP server starting (db: ${getDataDir()}/total-recall.db)
 `);
-  await startServer({ db, config, embedder, sessionId });
+  await startServer({ db, config, embedder, sessionId, configSnapshotId: "default" });
   const cleanup = () => {
     closeDb();
     process.exit(0);
