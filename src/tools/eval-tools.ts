@@ -115,7 +115,7 @@ export async function handleEvalTool(
       .all(cutoff) as import("../types.js").CompactionLogRow[];
 
     const similarityThreshold = ctx.config.tiers.warm.similarity_threshold ?? 0.5;
-    const metrics = computeMetrics(events, similarityThreshold, compactionRows);
+    const metrics = computeMetrics(events, similarityThreshold, compactionRows, ctx.db);
 
     return { content: [{ type: "text", text: JSON.stringify({ days, events: events.length, metrics }) }] };
   }

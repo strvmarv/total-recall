@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // src/index.ts
-import { randomUUID as randomUUID7 } from "crypto";
+import { randomUUID as randomUUID8 } from "crypto";
 
 // src/config.ts
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
@@ -2313,8 +2313,8 @@ function registerKbTools() {
 }
 
 // src/tools/eval-tools.ts
-import { resolve as resolve2 } from "path";
-import { fileURLToPath } from "url";
+import { resolve as resolve3 } from "path";
+import { fileURLToPath as fileURLToPath2 } from "url";
 
 // src/eval/benchmark-runner.ts
 import { readFileSync as readFileSync4 } from "fs";
@@ -2389,6 +2389,38 @@ async function runBenchmark(db, embed, opts) {
   };
 }
 
+// src/eval/benchmark-candidates.ts
+import { randomUUID as randomUUID4 } from "crypto";
+import { readFileSync as readFileSync5, writeFileSync as writeFileSync2 } from "fs";
+import { resolve as resolve2 } from "path";
+import { fileURLToPath } from "url";
+var __dirname = fileURLToPath(new URL(".", import.meta.url));
+var PACKAGE_ROOT = __dirname.endsWith("dist/") || __dirname.endsWith("dist") ? resolve2(__dirname, "..") : resolve2(__dirname, "..", "..");
+function writeCandidates(db, misses, contexts) {
+  const contextMap = new Map(contexts.map((c) => [c.query, c]));
+  const upsert = db.prepare(`
+    INSERT INTO benchmark_candidates
+      (id, query_text, top_score, top_result_content, top_result_entry_id, first_seen, last_seen, times_seen, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'pending')
+    ON CONFLICT(query_text) DO UPDATE SET
+      top_score = excluded.top_score,
+      last_seen = excluded.last_seen,
+      times_seen = benchmark_candidates.times_seen + 1
+  `);
+  for (const miss of misses) {
+    const ctx = contextMap.get(miss.query);
+    upsert.run(
+      randomUUID4(),
+      miss.query,
+      miss.topScore ?? 0,
+      ctx?.topContent ?? null,
+      ctx?.topEntryId ?? null,
+      miss.timestamp,
+      miss.timestamp
+    );
+  }
+}
+
 // src/eval/metrics.ts
 function computeGroupMetrics(events) {
   const withOutcome = events.filter((e) => e.outcome_used !== null);
@@ -2401,7 +2433,7 @@ function computeGroupMetrics(events) {
   const avgScore = scoresWithValue.length > 0 ? scoresWithValue.reduce((sum, e) => sum + e.top_score, 0) / scoresWithValue.length : 0;
   return { precision, hitRate, avgScore };
 }
-function computeMetrics(events, similarityThreshold, compactionRows = []) {
+function computeMetrics(events, similarityThreshold, compactionRows = [], db) {
   if (events.length === 0) {
     return {
       precision: 0,
@@ -2458,6 +2490,21 @@ function computeMetrics(events, similarityThreshold, compactionRows = []) {
     byContentType[ct] = { precision: p, hitRate: h, count: group.length };
   }
   const topMisses = events.filter((e) => e.top_score === null || e.top_score < similarityThreshold).sort((a, b) => (a.top_score ?? -1) - (b.top_score ?? -1)).slice(0, 10).map((e) => ({ query: e.query_text, topScore: e.top_score, timestamp: e.timestamp }));
+  if (db && topMisses.length > 0) {
+    try {
+      const missContexts = topMisses.map((miss) => {
+        const event = events.find((e) => e.query_text === miss.query);
+        let topEntryId = null;
+        if (event) {
+          const results = JSON.parse(event.results);
+          topEntryId = results[0]?.entry_id ?? null;
+        }
+        return { query: miss.query, topContent: null, topEntryId };
+      });
+      writeCandidates(db, topMisses, missContexts);
+    } catch {
+    }
+  }
   const falsePositives = events.filter((e) => e.outcome_used === 0 && e.top_score !== null && e.top_score >= similarityThreshold).sort((a, b) => (b.top_score ?? 0) - (a.top_score ?? 0)).slice(0, 10).map((e) => ({ query: e.query_text, topScore: e.top_score, timestamp: e.timestamp }));
   return {
     precision,
@@ -2554,8 +2601,8 @@ function computeCompactionHealth(rows) {
 }
 
 // src/tools/eval-tools.ts
-var __dirname = fileURLToPath(new URL(".", import.meta.url));
-var PACKAGE_ROOT = __dirname.endsWith("dist/") || __dirname.endsWith("dist") ? resolve2(__dirname, "..") : resolve2(__dirname, "..", "..");
+var __dirname2 = fileURLToPath2(new URL(".", import.meta.url));
+var PACKAGE_ROOT2 = __dirname2.endsWith("dist/") || __dirname2.endsWith("dist") ? resolve3(__dirname2, "..") : resolve3(__dirname2, "..", "..");
 var EVAL_TOOLS = [
   {
     name: "eval_benchmark",
@@ -2620,8 +2667,8 @@ async function handleEvalTool(name, args, ctx) {
   if (name === "eval_benchmark") {
     await ctx.embedder.ensureLoaded();
     const embedFn = (text) => ctx.embedder.embed(text);
-    const corpusPath = resolve2(PACKAGE_ROOT, "eval", "corpus", "memories.jsonl");
-    const benchmarkPath = resolve2(PACKAGE_ROOT, "eval", "benchmarks", "retrieval.jsonl");
+    const corpusPath = resolve3(PACKAGE_ROOT2, "eval", "corpus", "memories.jsonl");
+    const benchmarkPath = resolve3(PACKAGE_ROOT2, "eval", "benchmarks", "retrieval.jsonl");
     const result = await runBenchmark(ctx.db, embedFn, {
       corpusPath,
       benchmarkPath
@@ -2638,7 +2685,7 @@ async function handleEvalTool(name, args, ctx) {
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1e3;
     const compactionRows = ctx.db.prepare(`SELECT * FROM compaction_log WHERE timestamp >= ? ORDER BY timestamp DESC`).all(cutoff);
     const similarityThreshold = ctx.config.tiers.warm.similarity_threshold ?? 0.5;
-    const metrics = computeMetrics(events, similarityThreshold, compactionRows);
+    const metrics = computeMetrics(events, similarityThreshold, compactionRows, ctx.db);
     return { content: [{ type: "text", text: JSON.stringify({ days, events: events.length, metrics }) }] };
   }
   if (name === "eval_compare") {
@@ -2705,7 +2752,7 @@ function registerEvalTools() {
 }
 
 // src/importers/claude-code.ts
-import { existsSync as existsSync4, readdirSync as readdirSync3, readFileSync as readFileSync5 } from "fs";
+import { existsSync as existsSync4, readdirSync as readdirSync3, readFileSync as readFileSync6 } from "fs";
 import { join as join7 } from "path";
 import { homedir } from "os";
 
@@ -2791,7 +2838,7 @@ var ClaudeCodeImporter = class {
         if (!filename.endsWith(".md") || filename === "MEMORY.md") continue;
         const filePath = join7(memoryDir, filename);
         try {
-          const raw = readFileSync5(filePath, "utf8");
+          const raw = readFileSync6(filePath, "utf8");
           const hash = contentHash(raw);
           if (isAlreadyImported(db, hash)) {
             result.skipped++;
@@ -2827,7 +2874,7 @@ var ClaudeCodeImporter = class {
     const claudeMdPath = join7(this.basePath, "CLAUDE.md");
     if (!existsSync4(claudeMdPath)) return result;
     try {
-      const raw = readFileSync5(claudeMdPath, "utf8");
+      const raw = readFileSync6(claudeMdPath, "utf8");
       const hash = contentHash(raw);
       if (isAlreadyImported(db, hash)) {
         result.skipped++;
@@ -2853,7 +2900,7 @@ var ClaudeCodeImporter = class {
 };
 
 // src/importers/copilot-cli.ts
-import { existsSync as existsSync5, readdirSync as readdirSync4, readFileSync as readFileSync6 } from "fs";
+import { existsSync as existsSync5, readdirSync as readdirSync4, readFileSync as readFileSync7 } from "fs";
 import { join as join8 } from "path";
 import { homedir as homedir2 } from "os";
 var CopilotCliImporter = class {
@@ -2894,7 +2941,7 @@ var CopilotCliImporter = class {
       const planPath = join8(sessionStateDir, entry.name, "plan.md");
       if (!existsSync5(planPath)) continue;
       try {
-        const raw = readFileSync6(planPath, "utf8");
+        const raw = readFileSync7(planPath, "utf8");
         const hash = contentHash(raw);
         if (isAlreadyImported(db, hash)) {
           result.skipped++;
@@ -2917,7 +2964,7 @@ var CopilotCliImporter = class {
 };
 
 // src/importers/cursor.ts
-import { existsSync as existsSync6, readdirSync as readdirSync5, readFileSync as readFileSync7 } from "fs";
+import { existsSync as existsSync6, readdirSync as readdirSync5, readFileSync as readFileSync8 } from "fs";
 import { join as join9 } from "path";
 import { homedir as homedir3 } from "os";
 var CursorImporter = class {
@@ -2942,7 +2989,7 @@ var CursorImporter = class {
         const wsJson = join9(workspaceDir, entry.name, "workspace.json");
         if (!existsSync6(wsJson)) continue;
         try {
-          const ws = JSON.parse(readFileSync7(wsJson, "utf8"));
+          const ws = JSON.parse(readFileSync8(wsJson, "utf8"));
           const projectPath = ws.folder ? decodeURIComponent(new URL(ws.folder).pathname) : ws.workspace ? decodeURIComponent(new URL(ws.workspace).pathname) : null;
           if (!projectPath) continue;
           if (existsSync6(join9(projectPath, ".cursorrules"))) knowledgeFiles++;
@@ -3006,7 +3053,7 @@ var CursorImporter = class {
       const wsJson = join9(workspaceDir, entry.name, "workspace.json");
       if (!existsSync6(wsJson)) continue;
       try {
-        const ws = JSON.parse(readFileSync7(wsJson, "utf8"));
+        const ws = JSON.parse(readFileSync8(wsJson, "utf8"));
         const projectPath = ws.folder ? new URL(ws.folder).pathname : ws.workspace ? new URL(ws.workspace).pathname : null;
         if (projectPath) projectPaths.add(projectPath);
       } catch {
@@ -3028,7 +3075,7 @@ var CursorImporter = class {
   }
   async importRuleFile(db, embed, result, filePath, tags) {
     try {
-      const raw = readFileSync7(filePath, "utf8");
+      const raw = readFileSync8(filePath, "utf8");
       const hash = contentHash(raw);
       if (isAlreadyImported(db, hash)) {
         result.skipped++;
@@ -3052,7 +3099,7 @@ var CursorImporter = class {
 };
 
 // src/importers/cline.ts
-import { existsSync as existsSync7, readdirSync as readdirSync6, readFileSync as readFileSync8 } from "fs";
+import { existsSync as existsSync7, readdirSync as readdirSync6, readFileSync as readFileSync9 } from "fs";
 import { join as join10 } from "path";
 import { homedir as homedir4 } from "os";
 var ClineImporter = class {
@@ -3087,7 +3134,7 @@ var ClineImporter = class {
       const historyPath = join10(stateDir, "taskHistory.json");
       if (existsSync7(historyPath)) {
         try {
-          const items = JSON.parse(readFileSync8(historyPath, "utf8"));
+          const items = JSON.parse(readFileSync9(historyPath, "utf8"));
           sessionFiles = items.length;
         } catch {
         }
@@ -3129,7 +3176,7 @@ var ClineImporter = class {
         if (!filename.endsWith(".md") && !filename.endsWith(".txt")) continue;
         const filePath = join10(dir, filename);
         try {
-          const raw = readFileSync8(filePath, "utf8");
+          const raw = readFileSync9(filePath, "utf8");
           const hash = contentHash(raw);
           if (isAlreadyImported(db, hash)) {
             result.skipped++;
@@ -3157,7 +3204,7 @@ var ClineImporter = class {
     if (!existsSync7(historyPath)) return;
     let items;
     try {
-      items = JSON.parse(readFileSync8(historyPath, "utf8"));
+      items = JSON.parse(readFileSync9(historyPath, "utf8"));
     } catch {
       return;
     }
@@ -3201,7 +3248,7 @@ function countFiles(dir, extensions) {
 }
 
 // src/importers/opencode.ts
-import { existsSync as existsSync8, readdirSync as readdirSync7, readFileSync as readFileSync9 } from "fs";
+import { existsSync as existsSync8, readdirSync as readdirSync7, readFileSync as readFileSync10 } from "fs";
 import { join as join11 } from "path";
 import { homedir as homedir5 } from "os";
 var OpenCodeImporter = class {
@@ -3242,7 +3289,7 @@ var OpenCodeImporter = class {
     const agentsMdPath = join11(this.configPath, "AGENTS.md");
     if (!existsSync8(agentsMdPath)) return;
     try {
-      const raw = readFileSync9(agentsMdPath, "utf8");
+      const raw = readFileSync10(agentsMdPath, "utf8");
       const hash = contentHash(raw);
       if (isAlreadyImported(db, hash)) {
         result.skipped++;
@@ -3304,7 +3351,7 @@ var OpenCodeImporter = class {
   }
   async importSingleFile(db, embed, result, filePath, tags) {
     try {
-      const raw = readFileSync9(filePath, "utf8");
+      const raw = readFileSync10(filePath, "utf8");
       const hash = contentHash(raw);
       if (isAlreadyImported(db, hash)) {
         result.skipped++;
@@ -3328,7 +3375,7 @@ var OpenCodeImporter = class {
 };
 
 // src/importers/hermes.ts
-import { existsSync as existsSync9, readdirSync as readdirSync8, readFileSync as readFileSync10 } from "fs";
+import { existsSync as existsSync9, readdirSync as readdirSync8, readFileSync as readFileSync11 } from "fs";
 import { join as join12 } from "path";
 import { homedir as homedir6 } from "os";
 var HermesImporter = class {
@@ -3391,7 +3438,7 @@ var HermesImporter = class {
   async importMemoryFile(db, embed, result, filePath, tags) {
     if (!existsSync9(filePath)) return;
     try {
-      const raw = readFileSync10(filePath, "utf8");
+      const raw = readFileSync11(filePath, "utf8");
       const entries = raw.split(/\n§\n/).map((e) => e.trim()).filter(Boolean);
       for (const entry of entries) {
         const hash = contentHash(entry);
@@ -3426,7 +3473,7 @@ var HermesImporter = class {
   }
   async importSingleFile(db, embed, result, filePath, tier, tags) {
     try {
-      const raw = readFileSync10(filePath, "utf8");
+      const raw = readFileSync11(filePath, "utf8");
       const hash = contentHash(raw);
       if (isAlreadyImported(db, hash)) {
         result.skipped++;
@@ -3504,10 +3551,10 @@ function registerImportTools() {
 }
 
 // src/tools/session-tools.ts
-import { randomUUID as randomUUID6 } from "crypto";
+import { randomUUID as randomUUID7 } from "crypto";
 
 // src/compaction/compactor.ts
-import { randomUUID as randomUUID4 } from "crypto";
+import { randomUUID as randomUUID5 } from "crypto";
 
 // src/memory/decay.ts
 var MS_PER_HOUR = 60 * 60 * 1e3;
@@ -3530,7 +3577,7 @@ function calculateDecayScore(entry, compactionConfig, now = Date.now()) {
 
 // src/compaction/compactor.ts
 function logCompactionEvent(db, opts) {
-  const id = randomUUID4();
+  const id = randomUUID5();
   const timestamp = Date.now();
   db.prepare(`
     INSERT INTO compaction_log
@@ -3609,7 +3656,7 @@ async function compactHotTier(db, embed, config, sessionId, configSnapshotId) {
 }
 
 // src/compaction/warm-sweep.ts
-import { randomUUID as randomUUID5 } from "crypto";
+import { randomUUID as randomUUID6 } from "crypto";
 async function sweepWarmTier(db, embed, config, sessionId) {
   const entries = listEntries(db, "warm", "memory");
   const now = Date.now();
@@ -3626,7 +3673,7 @@ async function sweepWarmTier(db, embed, config, sessionId) {
            target_entry_id, decay_scores, reason, config_snapshot_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        randomUUID5(),
+        randomUUID6(),
         now,
         sessionId,
         "warm",
@@ -3646,7 +3693,7 @@ async function sweepWarmTier(db, embed, config, sessionId) {
 }
 
 // src/importers/project-docs.ts
-import { existsSync as existsSync10, readFileSync as readFileSync11, readdirSync as readdirSync9, statSync as statSync5 } from "fs";
+import { existsSync as existsSync10, readFileSync as readFileSync12, readdirSync as readdirSync9, statSync as statSync5 } from "fs";
 import { join as join13, basename as basename2 } from "path";
 import { createHash as createHash3 } from "crypto";
 var DOC_FILES = ["README.md", "CONTRIBUTING.md", "CLAUDE.md", "AGENTS.md"];
@@ -3685,7 +3732,7 @@ async function ingestProjectDocs(db, embed, cwd) {
   const existing = listCollections(db).find((c) => c.name === collectionName);
   collectionId = existing ? existing.id : await createCollection(db, embed, { name: collectionName, sourcePath: cwd });
   for (const filePath of filesToIngest) {
-    const content = readFileSync11(filePath, "utf-8").trim();
+    const content = readFileSync12(filePath, "utf-8").trim();
     if (!content) {
       result.skipped++;
       continue;
@@ -3735,11 +3782,11 @@ function detectProject(cwd) {
 }
 
 // src/eval/smoke-test.ts
-import { resolve as resolve3 } from "path";
-import { readFileSync as readFileSync12 } from "fs";
-import { fileURLToPath as fileURLToPath2 } from "url";
-var __dirname2 = fileURLToPath2(new URL(".", import.meta.url));
-var PACKAGE_ROOT2 = __dirname2.endsWith("dist/") || __dirname2.endsWith("dist") ? resolve3(__dirname2, "..") : resolve3(__dirname2, "..", "..");
+import { resolve as resolve4 } from "path";
+import { readFileSync as readFileSync13 } from "fs";
+import { fileURLToPath as fileURLToPath3 } from "url";
+var __dirname3 = fileURLToPath3(new URL(".", import.meta.url));
+var PACKAGE_ROOT3 = __dirname3.endsWith("dist/") || __dirname3.endsWith("dist") ? resolve4(__dirname3, "..") : resolve4(__dirname3, "..", "..");
 var SMOKE_PASS_THRESHOLD = 0.8;
 function getMetaValue(db, key) {
   const row = db.prepare("SELECT value FROM _meta WHERE key = ?").get(key);
@@ -3751,15 +3798,15 @@ function setMetaValue(db, key, value) {
   ).run(key, value);
 }
 function getPackageVersion() {
-  const pkgPath = resolve3(PACKAGE_ROOT2, "package.json");
-  const pkg = JSON.parse(readFileSync12(pkgPath, "utf-8"));
+  const pkgPath = resolve4(PACKAGE_ROOT3, "package.json");
+  const pkg = JSON.parse(readFileSync13(pkgPath, "utf-8"));
   return pkg.version;
 }
 async function runSmokeTest(db, embed, currentVersion) {
   const lastVersion = getMetaValue(db, "smoke_test_version");
   if (lastVersion === currentVersion) return null;
-  const corpusPath = resolve3(PACKAGE_ROOT2, "eval", "corpus", "memories.jsonl");
-  const benchmarkPath = resolve3(PACKAGE_ROOT2, "eval", "benchmarks", "smoke.jsonl");
+  const corpusPath = resolve4(PACKAGE_ROOT3, "eval", "corpus", "memories.jsonl");
+  const benchmarkPath = resolve4(PACKAGE_ROOT3, "eval", "benchmarks", "smoke.jsonl");
   const result = await runBenchmark(db, embed, {
     corpusPath,
     benchmarkPath
@@ -3892,7 +3939,7 @@ async function runSessionInit(ctx) {
   const lastSweep = ctx.db.prepare(`SELECT MAX(timestamp) as ts FROM compaction_log WHERE reason = 'warm_sweep_decay'`).get();
   const lastSweepTs = lastSweep?.ts ?? 0;
   if (Date.now() - lastSweepTs > sweepIntervalMs) {
-    const sessionId = ctx.sessionId ?? randomUUID6();
+    const sessionId = ctx.sessionId ?? randomUUID7();
     const result2 = await sweepWarmTier(ctx.db, embedFn, {
       coldDecayDays: ctx.config.tiers.warm.cold_decay_days
     }, sessionId);
@@ -4002,7 +4049,7 @@ async function handleSessionTool(name, args, ctx) {
   if (name === "session_end") {
     await ctx.embedder.ensureLoaded();
     const embedFn = (text) => ctx.embedder.embed(text);
-    const sessionId = ctx.sessionId ?? randomUUID6();
+    const sessionId = ctx.sessionId ?? randomUUID7();
     const result = await compactHotTier(ctx.db, embedFn, ctx.config.compaction, sessionId, ctx.configSnapshotId);
     return {
       content: [
@@ -4048,7 +4095,7 @@ function registerSessionTools() {
 }
 
 // src/tools/extra-tools.ts
-import { mkdirSync as mkdirSync4, writeFileSync as writeFileSync2, readFileSync as readFileSync13 } from "fs";
+import { mkdirSync as mkdirSync4, writeFileSync as writeFileSync3, readFileSync as readFileSync14 } from "fs";
 import { join as join14 } from "path";
 function registerExtraTools() {
   return [
@@ -4288,7 +4335,7 @@ async function handleExtraTool(name, args, ctx) {
     const exportPath = join14(exportsDir, `${timestamp}.json`);
     const exportData = { version: 1, exported_at: timestamp, entries: allEntries };
     const jsonStr = JSON.stringify(exportData, null, 2);
-    writeFileSync2(exportPath, jsonStr, "utf-8");
+    writeFileSync3(exportPath, jsonStr, "utf-8");
     return {
       content: [
         {
@@ -4306,7 +4353,7 @@ async function handleExtraTool(name, args, ctx) {
     const filePath = validatePath(args.path, "path");
     let raw;
     try {
-      raw = readFileSync13(filePath, "utf-8");
+      raw = readFileSync14(filePath, "utf-8");
     } catch (err) {
       return {
         content: [
@@ -4470,7 +4517,7 @@ async function main() {
     model: config.embedding.model,
     dimensions: config.embedding.dimensions
   });
-  const sessionId = randomUUID7();
+  const sessionId = randomUUID8();
   process.stderr.write(`total-recall: MCP server starting (db: ${getDataDir()}/total-recall.db)
 `);
   await startServer({ db, config, embedder, sessionId, configSnapshotId: "default", sessionInitialized: false, sessionInitResult: null, sessionInitPromise: null });

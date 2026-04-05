@@ -1,4 +1,6 @@
+import type Database from "better-sqlite3";
 import type { RetrievalEventRow, CompactionLogRow } from "../types.js";
+import { writeCandidates, type MissContext } from "./benchmark-candidates.js";
 
 export interface TierMetrics {
   precision: number;
@@ -65,6 +67,7 @@ export function computeMetrics(
   events: RetrievalEventRow[],
   similarityThreshold: number,
   compactionRows: CompactionLogRow[] = [],
+  db?: Database.Database,
 ): Metrics {
   if (events.length === 0) {
     return {
@@ -147,6 +150,24 @@ export function computeMetrics(
     .sort((a, b) => (a.top_score ?? -1) - (b.top_score ?? -1))
     .slice(0, 10)
     .map((e) => ({ query: e.query_text, topScore: e.top_score, timestamp: e.timestamp }));
+
+  // Write miss candidates for evolving benchmarks
+  if (db && topMisses.length > 0) {
+    try {
+      const missContexts: MissContext[] = topMisses.map((miss) => {
+        const event = events.find((e) => e.query_text === miss.query);
+        let topEntryId: string | null = null;
+        if (event) {
+          const results = JSON.parse(event.results) as Array<{ entry_id: string }>;
+          topEntryId = results[0]?.entry_id ?? null;
+        }
+        return { query: miss.query, topContent: null, topEntryId };
+      });
+      writeCandidates(db, topMisses, missContexts);
+    } catch {
+      // Don't fail metrics if candidate write fails
+    }
+  }
 
   // False positives: high score but outcome_used = 0
   const falsePositives: MissEntry[] = events
