@@ -111,8 +111,8 @@ Tiers:
 **Data flow:**
 
 1. `store` — write a memory, assign tier, embed, persist
-2. `search` — embed query, vector search warm + cold, return ranked results
-3. `compact` — decay scores, demote warm→cold, evict hot→warm, summarize clusters
+2. `search` — embed query, vector search across all tiers, return ranked results
+3. `compact` — decay scores, promote hot→warm, demote warm→cold
 4. `ingest` — chunk files, embed chunks, store in cold tier with metadata
 
 All state lives in `~/.total-recall/total-recall.db`. The embedding model is bundled with the package. No network calls required.
@@ -212,7 +212,7 @@ dimensions = 384               # Embedding dimensions
 
 ### Adding a New Host Tool
 
-Implement the `HostImporter` interface (~50 lines). It requires four methods: `detect()` to check if the tool is present, `scan()` to report what's available, `importMemories()` to migrate existing memories, and `importKnowledge()` to migrate knowledge files. See [CONTRIBUTING.md](CONTRIBUTING.md) for a full example.
+Implement the `HostImporter` interface. It requires four methods: `detect()` to check if the tool is present, `scan()` to report what's available, `importMemories()` to migrate existing memories, and `importKnowledge()` to migrate knowledge files. See [CONTRIBUTING.md](CONTRIBUTING.md) for a full example.
 
 ### Adding a New Content Type
 
