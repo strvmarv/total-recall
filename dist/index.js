@@ -1046,6 +1046,117 @@ async function handleMemoryTool(name, args, ctx) {
 }
 
 // src/tools/system-tools.ts
+import { statSync as statSync2 } from "fs";
+import { join as join5 } from "path";
+
+// src/ingestion/hierarchical-index.ts
+function rowToEntry2(row) {
+  return {
+    id: row.id,
+    content: row.content,
+    summary: row.summary,
+    source: row.source,
+    source_tool: row.source_tool,
+    project: row.project,
+    tags: row.tags ? JSON.parse(row.tags) : [],
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    last_accessed_at: row.last_accessed_at,
+    access_count: row.access_count,
+    decay_score: row.decay_score,
+    parent_id: row.parent_id,
+    collection_id: row.collection_id,
+    metadata: row.metadata ? JSON.parse(row.metadata) : {}
+  };
+}
+async function createCollection(db, embed, opts) {
+  const content = `Collection: ${opts.name}`;
+  const id = insertEntry(db, "cold", "knowledge", {
+    content,
+    source: opts.sourcePath,
+    metadata: {
+      type: "collection",
+      name: opts.name,
+      source_path: opts.sourcePath
+    }
+  });
+  const embedding = await embed(content);
+  insertEmbedding(db, "cold", "knowledge", id, embedding);
+  return id;
+}
+async function addDocumentToCollection(db, embed, opts) {
+  const joined = opts.chunks.map((c) => c.content).join("\n\n");
+  const docContent = joined.slice(0, 500);
+  const docId = insertEntry(db, "cold", "knowledge", {
+    content: docContent,
+    source: opts.sourcePath,
+    collection_id: opts.collectionId,
+    metadata: {
+      type: "document",
+      source_path: opts.sourcePath,
+      chunk_count: opts.chunks.length
+    }
+  });
+  const docEmbedding = await embed(docContent);
+  insertEmbedding(db, "cold", "knowledge", docId, docEmbedding);
+  for (const chunk of opts.chunks) {
+    const chunkId = insertEntry(db, "cold", "knowledge", {
+      content: chunk.content,
+      source: opts.sourcePath,
+      parent_id: docId,
+      collection_id: opts.collectionId,
+      metadata: {
+        type: "chunk",
+        heading_path: chunk.headingPath,
+        name: chunk.name,
+        kind: chunk.kind
+      }
+    });
+    const chunkEmbedding = await embed(chunk.content);
+    insertEmbedding(db, "cold", "knowledge", chunkId, chunkEmbedding);
+  }
+  return docId;
+}
+function listCollections(db) {
+  const rows = db.prepare(`SELECT * FROM cold_knowledge WHERE json_extract(metadata, '$.type') = 'collection'`).all();
+  return rows.map((row) => {
+    const entry = rowToEntry2(row);
+    const metadata = entry.metadata;
+    return { ...entry, name: metadata["name"] };
+  });
+}
+
+// src/eval/event-logger.ts
+import { randomUUID as randomUUID2 } from "crypto";
+function getRetrievalEvents(db, opts = {}) {
+  const conditions = [];
+  const params = [];
+  if (opts.sessionId !== void 0) {
+    conditions.push("session_id = ?");
+    params.push(opts.sessionId);
+  }
+  if (opts.configSnapshotId !== void 0) {
+    conditions.push("config_snapshot_id = ?");
+    params.push(opts.configSnapshotId);
+  }
+  if (opts.days !== void 0) {
+    const cutoff = Date.now() - opts.days * 24 * 60 * 60 * 1e3;
+    conditions.push("timestamp >= ?");
+    params.push(cutoff);
+  }
+  let sql = "SELECT * FROM retrieval_events";
+  if (conditions.length > 0) {
+    sql += " WHERE " + conditions.join(" AND ");
+  }
+  sql += " ORDER BY timestamp DESC";
+  if (opts.limit !== void 0) {
+    sql += " LIMIT ?";
+    params.push(opts.limit);
+  }
+  return db.prepare(sql).all(...params);
+}
+
+// src/tools/system-tools.ts
 var SYSTEM_TOOLS = [
   {
     name: "status",
@@ -1087,14 +1198,61 @@ function handleSystemTool(name, args, ctx) {
       const key = `${tier}_${type === "memory" ? "memories" : "knowledge"}`;
       tierSizes[key] = countEntries(ctx.db, tier, type);
     }
-    const dbInfo = {
-      sessionId: ctx.sessionId
-    };
+    const dataDir = getDataDir();
+    const dbPath = join5(dataDir, "total-recall.db");
+    let dbSizeBytes = null;
+    try {
+      dbSizeBytes = statSync2(dbPath).size;
+    } catch {
+    }
+    const collections = listCollections(ctx.db);
+    const kbCollections = collections.map((c) => ({
+      id: c.id,
+      name: c.name
+    }));
+    const totalKbEntries = countEntries(ctx.db, "cold", "knowledge");
+    const totalChunks = totalKbEntries - kbCollections.length;
+    const embeddingModel = ctx.config.embedding.model;
+    const embeddingDimensions = ctx.config.embedding.dimensions;
+    const recentEvents = getRetrievalEvents(ctx.db, { days: 7 });
+    const totalRetrievals = recentEvents.length;
+    const avgTopScore = recentEvents.length > 0 ? recentEvents.reduce((sum, e) => sum + (e.top_score ?? 0), 0) / recentEvents.length : null;
+    const outcomes = recentEvents.filter((e) => e.outcome_signal !== null);
+    const positiveOutcomes = outcomes.filter((e) => e.outcome_signal === "positive").length;
+    const negativeOutcomes = outcomes.filter((e) => e.outcome_signal === "negative").length;
+    const lastCompaction = ctx.db.prepare(`SELECT * FROM compaction_log ORDER BY timestamp DESC LIMIT 1`).get();
     return {
       content: [
         {
           type: "text",
-          text: JSON.stringify({ tierSizes, db: dbInfo })
+          text: JSON.stringify({
+            tierSizes,
+            knowledgeBase: {
+              collections: kbCollections,
+              totalChunks
+            },
+            db: {
+              path: dbPath,
+              sizeBytes: dbSizeBytes,
+              sessionId: ctx.sessionId
+            },
+            embedding: {
+              model: embeddingModel,
+              dimensions: embeddingDimensions
+            },
+            activity: {
+              retrievals7d: totalRetrievals,
+              avgTopScore7d: avgTopScore !== null ? Math.round(avgTopScore * 1e3) / 1e3 : null,
+              positiveOutcomes7d: positiveOutcomes,
+              negativeOutcomes7d: negativeOutcomes
+            },
+            lastCompaction: lastCompaction ? {
+              timestamp: lastCompaction.timestamp,
+              from: lastCompaction.source_tier,
+              to: lastCompaction.target_tier,
+              reason: lastCompaction.reason
+            } : null
+          })
         }
       ]
     };
@@ -1134,11 +1292,11 @@ function handleSystemTool(name, args, ctx) {
 }
 
 // src/tools/kb-tools.ts
-import { statSync as statSync3 } from "fs";
+import { statSync as statSync4 } from "fs";
 
 // src/ingestion/ingest.ts
-import { readFileSync as readFileSync3, readdirSync as readdirSync2, statSync as statSync2 } from "fs";
-import { join as join5, dirname, basename, extname } from "path";
+import { readFileSync as readFileSync3, readdirSync as readdirSync2, statSync as statSync3 } from "fs";
+import { join as join6, dirname, basename, extname } from "path";
 
 // src/ingestion/markdown-parser.ts
 function estimateTokens(text) {
@@ -1539,83 +1697,6 @@ function chunkFile(content, filePath, opts) {
   return splitByParagraphs(content, opts.maxTokens);
 }
 
-// src/ingestion/hierarchical-index.ts
-function rowToEntry2(row) {
-  return {
-    id: row.id,
-    content: row.content,
-    summary: row.summary,
-    source: row.source,
-    source_tool: row.source_tool,
-    project: row.project,
-    tags: row.tags ? JSON.parse(row.tags) : [],
-    created_at: row.created_at,
-    updated_at: row.updated_at,
-    last_accessed_at: row.last_accessed_at,
-    access_count: row.access_count,
-    decay_score: row.decay_score,
-    parent_id: row.parent_id,
-    collection_id: row.collection_id,
-    metadata: row.metadata ? JSON.parse(row.metadata) : {}
-  };
-}
-async function createCollection(db, embed, opts) {
-  const content = `Collection: ${opts.name}`;
-  const id = insertEntry(db, "cold", "knowledge", {
-    content,
-    source: opts.sourcePath,
-    metadata: {
-      type: "collection",
-      name: opts.name,
-      source_path: opts.sourcePath
-    }
-  });
-  const embedding = await embed(content);
-  insertEmbedding(db, "cold", "knowledge", id, embedding);
-  return id;
-}
-async function addDocumentToCollection(db, embed, opts) {
-  const joined = opts.chunks.map((c) => c.content).join("\n\n");
-  const docContent = joined.slice(0, 500);
-  const docId = insertEntry(db, "cold", "knowledge", {
-    content: docContent,
-    source: opts.sourcePath,
-    collection_id: opts.collectionId,
-    metadata: {
-      type: "document",
-      source_path: opts.sourcePath,
-      chunk_count: opts.chunks.length
-    }
-  });
-  const docEmbedding = await embed(docContent);
-  insertEmbedding(db, "cold", "knowledge", docId, docEmbedding);
-  for (const chunk of opts.chunks) {
-    const chunkId = insertEntry(db, "cold", "knowledge", {
-      content: chunk.content,
-      source: opts.sourcePath,
-      parent_id: docId,
-      collection_id: opts.collectionId,
-      metadata: {
-        type: "chunk",
-        heading_path: chunk.headingPath,
-        name: chunk.name,
-        kind: chunk.kind
-      }
-    });
-    const chunkEmbedding = await embed(chunk.content);
-    insertEmbedding(db, "cold", "knowledge", chunkId, chunkEmbedding);
-  }
-  return docId;
-}
-function listCollections(db) {
-  const rows = db.prepare(`SELECT * FROM cold_knowledge WHERE json_extract(metadata, '$.type') = 'collection'`).all();
-  return rows.map((row) => {
-    const entry = rowToEntry2(row);
-    const metadata = entry.metadata;
-    return { ...entry, name: metadata["name"] };
-  });
-}
-
 // src/ingestion/ingest.ts
 var INGESTABLE_EXTENSIONS = /* @__PURE__ */ new Set([
   ".md",
@@ -1696,10 +1777,10 @@ function walkDirectory(dirPath) {
   }
   for (const entry of entries) {
     if (entry.startsWith(".") || entry === "node_modules") continue;
-    const fullPath = join5(dirPath, entry);
+    const fullPath = join6(dirPath, entry);
     let stat;
     try {
-      stat = statSync2(fullPath);
+      stat = statSync3(fullPath);
     } catch {
       continue;
     }
@@ -1905,7 +1986,7 @@ async function handleKbTool(name, args, ctx) {
     let result;
     let isDir = false;
     try {
-      isDir = statSync3(sourcePath).isDirectory();
+      isDir = statSync4(sourcePath).isDirectory();
     } catch (err) {
       return {
         content: [
@@ -2005,36 +2086,6 @@ async function runBenchmark(db, embed, opts) {
     avgLatencyMs: total > 0 ? totalLatencyMs / total : 0,
     details
   };
-}
-
-// src/eval/event-logger.ts
-import { randomUUID as randomUUID2 } from "crypto";
-function getRetrievalEvents(db, opts = {}) {
-  const conditions = [];
-  const params = [];
-  if (opts.sessionId !== void 0) {
-    conditions.push("session_id = ?");
-    params.push(opts.sessionId);
-  }
-  if (opts.configSnapshotId !== void 0) {
-    conditions.push("config_snapshot_id = ?");
-    params.push(opts.configSnapshotId);
-  }
-  if (opts.days !== void 0) {
-    const cutoff = Date.now() - opts.days * 24 * 60 * 60 * 1e3;
-    conditions.push("timestamp >= ?");
-    params.push(cutoff);
-  }
-  let sql = "SELECT * FROM retrieval_events";
-  if (conditions.length > 0) {
-    sql += " WHERE " + conditions.join(" AND ");
-  }
-  sql += " ORDER BY timestamp DESC";
-  if (opts.limit !== void 0) {
-    sql += " LIMIT ?";
-    params.push(opts.limit);
-  }
-  return db.prepare(sql).all(...params);
 }
 
 // src/eval/metrics.ts
@@ -2174,7 +2225,7 @@ function registerEvalTools() {
 
 // src/importers/claude-code.ts
 import { existsSync as existsSync4, readdirSync as readdirSync3, readFileSync as readFileSync5 } from "fs";
-import { join as join6 } from "path";
+import { join as join7 } from "path";
 import { homedir } from "os";
 import { createHash } from "crypto";
 function parseFrontmatter(raw) {
@@ -2212,29 +2263,29 @@ var ClaudeCodeImporter = class {
   name = "claude-code";
   basePath;
   constructor(basePath) {
-    this.basePath = basePath ?? join6(homedir(), ".claude");
+    this.basePath = basePath ?? join7(homedir(), ".claude");
   }
   detect() {
-    return existsSync4(this.basePath) && existsSync4(join6(this.basePath, "projects"));
+    return existsSync4(this.basePath) && existsSync4(join7(this.basePath, "projects"));
   }
   scan() {
     let memoryFiles = 0;
     let knowledgeFiles = 0;
     let sessionFiles = 0;
-    const projectsDir = join6(this.basePath, "projects");
+    const projectsDir = join7(this.basePath, "projects");
     if (!existsSync4(projectsDir)) {
       return { memoryFiles, knowledgeFiles, sessionFiles };
     }
     for (const projectEntry of readdirSync3(projectsDir, { withFileTypes: true })) {
       if (!projectEntry.isDirectory()) continue;
-      const projectDir = join6(projectsDir, projectEntry.name);
-      const memoryDir = join6(projectDir, "memory");
+      const projectDir = join7(projectsDir, projectEntry.name);
+      const memoryDir = join7(projectDir, "memory");
       if (existsSync4(memoryDir)) {
         for (const f of readdirSync3(memoryDir)) {
           if (f.endsWith(".md") && f !== "MEMORY.md") memoryFiles++;
         }
       }
-      if (existsSync4(join6(projectDir, "CLAUDE.md"))) knowledgeFiles++;
+      if (existsSync4(join7(projectDir, "CLAUDE.md"))) knowledgeFiles++;
       for (const f of readdirSync3(projectDir)) {
         if (f.endsWith(".jsonl")) sessionFiles++;
       }
@@ -2243,16 +2294,16 @@ var ClaudeCodeImporter = class {
   }
   async importMemories(db, embed, project) {
     const result = { imported: 0, skipped: 0, errors: [] };
-    const projectsDir = join6(this.basePath, "projects");
+    const projectsDir = join7(this.basePath, "projects");
     if (!existsSync4(projectsDir)) return result;
     for (const projectEntry of readdirSync3(projectsDir, { withFileTypes: true })) {
       if (!projectEntry.isDirectory()) continue;
-      const projectDir = join6(projectsDir, projectEntry.name);
-      const memoryDir = join6(projectDir, "memory");
+      const projectDir = join7(projectsDir, projectEntry.name);
+      const memoryDir = join7(projectDir, "memory");
       if (!existsSync4(memoryDir)) continue;
       for (const filename of readdirSync3(memoryDir)) {
         if (!filename.endsWith(".md") || filename === "MEMORY.md") continue;
-        const filePath = join6(memoryDir, filename);
+        const filePath = join7(memoryDir, filename);
         try {
           const raw = readFileSync5(filePath, "utf8");
           const hash = contentHash(raw);
@@ -2287,7 +2338,7 @@ var ClaudeCodeImporter = class {
   }
   async importKnowledge(db, embed) {
     const result = { imported: 0, skipped: 0, errors: [] };
-    const claudeMdPath = join6(this.basePath, "CLAUDE.md");
+    const claudeMdPath = join7(this.basePath, "CLAUDE.md");
     if (!existsSync4(claudeMdPath)) return result;
     try {
       const raw = readFileSync5(claudeMdPath, "utf8");
@@ -2317,7 +2368,7 @@ var ClaudeCodeImporter = class {
 
 // src/importers/copilot-cli.ts
 import { existsSync as existsSync5, readdirSync as readdirSync4, readFileSync as readFileSync6 } from "fs";
-import { join as join7 } from "path";
+import { join as join8 } from "path";
 import { homedir as homedir2 } from "os";
 import { createHash as createHash2 } from "crypto";
 function contentHash2(text) {
@@ -2342,22 +2393,22 @@ var CopilotCliImporter = class {
   name = "copilot-cli";
   basePath;
   constructor(basePath) {
-    this.basePath = basePath ?? join7(homedir2(), ".copilot");
+    this.basePath = basePath ?? join8(homedir2(), ".copilot");
   }
   detect() {
-    return existsSync5(this.basePath) && existsSync5(join7(this.basePath, "session-state"));
+    return existsSync5(this.basePath) && existsSync5(join8(this.basePath, "session-state"));
   }
   scan() {
     let knowledgeFiles = 0;
     let sessionFiles = 0;
-    const sessionStateDir = join7(this.basePath, "session-state");
+    const sessionStateDir = join8(this.basePath, "session-state");
     if (!existsSync5(sessionStateDir)) {
       return { memoryFiles: 0, knowledgeFiles, sessionFiles };
     }
     for (const entry of readdirSync4(sessionStateDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
-      const sessionDir = join7(sessionStateDir, entry.name);
-      if (existsSync5(join7(sessionDir, "plan.md"))) knowledgeFiles++;
+      const sessionDir = join8(sessionStateDir, entry.name);
+      if (existsSync5(join8(sessionDir, "plan.md"))) knowledgeFiles++;
       for (const f of readdirSync4(sessionDir)) {
         if (f.endsWith(".jsonl")) sessionFiles++;
       }
@@ -2369,11 +2420,11 @@ var CopilotCliImporter = class {
   }
   async importKnowledge(db, embed) {
     const result = { imported: 0, skipped: 0, errors: [] };
-    const sessionStateDir = join7(this.basePath, "session-state");
+    const sessionStateDir = join8(this.basePath, "session-state");
     if (!existsSync5(sessionStateDir)) return result;
     for (const entry of readdirSync4(sessionStateDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
-      const planPath = join7(sessionStateDir, entry.name, "plan.md");
+      const planPath = join8(sessionStateDir, entry.name, "plan.md");
       if (!existsSync5(planPath)) continue;
       try {
         const raw = readFileSync6(planPath, "utf8");
@@ -2672,7 +2723,7 @@ function registerSessionTools() {
 
 // src/tools/extra-tools.ts
 import { mkdirSync as mkdirSync3, writeFileSync, readFileSync as readFileSync7 } from "fs";
-import { join as join8 } from "path";
+import { join as join9 } from "path";
 function registerExtraTools() {
   return [
     {
@@ -2904,10 +2955,10 @@ async function handleExtraTool(name, args, ctx) {
         });
       }
     }
-    const exportsDir = join8(getDataDir(), "exports");
+    const exportsDir = join9(getDataDir(), "exports");
     mkdirSync3(exportsDir, { recursive: true });
     const timestamp = Date.now();
-    const exportPath = join8(exportsDir, `${timestamp}.json`);
+    const exportPath = join9(exportsDir, `${timestamp}.json`);
     const exportData = { version: 1, exported_at: timestamp, entries: allEntries };
     const jsonStr = JSON.stringify(exportData, null, 2);
     writeFileSync(exportPath, jsonStr, "utf-8");
