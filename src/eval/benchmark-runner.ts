@@ -83,9 +83,10 @@ export async function runBenchmark(
   let tierMatches = 0;
   let totalLatencyMs = 0;
 
+  const config = loadConfig();
+
   for (const bq of queries) {
     const start = performance.now();
-    const config = loadConfig();
     const results = await searchMemory(db, embed, bq.query, {
       tiers: [{ tier: "warm", content_type: "memory" }],
       topK: 3,
