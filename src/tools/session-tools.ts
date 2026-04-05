@@ -4,6 +4,10 @@ import type { ToolContext, SessionInitResult } from "./registry.js";
 import { createConfigSnapshot } from "../config.js";
 import { ClaudeCodeImporter } from "../importers/claude-code.js";
 import { CopilotCliImporter } from "../importers/copilot-cli.js";
+import { CursorImporter } from "../importers/cursor.js";
+import { ClineImporter } from "../importers/cline.js";
+import { OpenCodeImporter } from "../importers/opencode.js";
+import { HermesImporter } from "../importers/hermes.js";
 import { listEntries, getEntry, countEntries, listEntriesByMetadata } from "../db/entries.js";
 import { searchMemory } from "../memory/search.js";
 import { promoteEntry, demoteEntry } from "../memory/promote-demote.js";
@@ -141,6 +145,10 @@ export async function runSessionInit(ctx: ToolContext): Promise<SessionInitResul
   const importers = [
     new ClaudeCodeImporter(),
     new CopilotCliImporter(),
+    new CursorImporter(),
+    new ClineImporter(),
+    new OpenCodeImporter(),
+    new HermesImporter(),
   ];
 
   const importSummary: Array<{

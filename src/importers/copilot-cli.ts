@@ -1,44 +1,12 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { createHash } from "node:crypto";
 import type Database from "better-sqlite3";
 import type { HostImporter, ImportResult, EmbedFn } from "./importer.js";
+import { contentHash, isAlreadyImported, logImport } from "./import-utils.js";
 import { insertEntry } from "../db/entries.js";
 import { insertEmbedding } from "../search/vector-search.js";
 import type { Tier, ContentType } from "../types.js";
-
-function contentHash(text: string): string {
-  return createHash("sha256").update(text).digest("hex");
-}
-
-function importLogId(sourceTool: string, sourcePath: string, hash: string): string {
-  return createHash("md5").update(`${sourceTool}:${sourcePath}:${hash}`).digest("hex");
-}
-
-function isAlreadyImported(db: Database.Database, hash: string): boolean {
-  const row = db
-    .prepare("SELECT id FROM import_log WHERE content_hash = ?")
-    .get(hash) as { id: string } | undefined;
-  return row !== undefined;
-}
-
-function logImport(
-  db: Database.Database,
-  sourceTool: string,
-  sourcePath: string,
-  hash: string,
-  entryId: string,
-  tier: Tier,
-  type: ContentType,
-): void {
-  const id = importLogId(sourceTool, sourcePath, hash);
-  db.prepare(`
-    INSERT OR IGNORE INTO import_log
-      (id, timestamp, source_tool, source_path, content_hash, target_entry_id, target_tier, target_type)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, Date.now(), sourceTool, sourcePath, hash, entryId, tier, type);
-}
 
 export class CopilotCliImporter implements HostImporter {
   readonly name = "copilot-cli";

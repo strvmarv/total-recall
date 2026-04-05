@@ -51,12 +51,9 @@ Belt-and-suspenders backup for session initialization. A PreToolUse hook that fi
 **Files:** `hooks/hooks.json`, new `hooks/pre-tool-use/run.sh`
 **Depends on:** Evidence that the current three-layer approach (server-side init, hook directive, `/using-total-recall` skill) is still unreliable.
 
-## Additional Host Importers
+## ~~Additional Host Importers~~ [DONE]
 
-Only Claude Code and Copilot CLI importers exist. Missing: OpenCode, Cline, Cursor.
-
-**Files:** `src/importers/`
-**Pattern:** Implement `HostImporter` interface from `src/importers/importer.ts`
+Added Cursor, Cline, OpenCode, and Hermes importers. Extracted shared utilities to `import-utils.ts`. Cursor imports project rules (`.cursorrules`, `.cursor/rules/*.mdc`) and global rules from SQLite. Cline imports global rules and task summaries. OpenCode imports `AGENTS.md` files and custom agents/commands. Hermes imports `§`-delimited memory entries, skills, and SOUL.md.
 
 ## PDF Parsing
 

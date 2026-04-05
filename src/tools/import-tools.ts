@@ -1,16 +1,20 @@
 import type { ToolContext } from "./registry.js";
 import { ClaudeCodeImporter } from "../importers/claude-code.js";
 import { CopilotCliImporter } from "../importers/copilot-cli.js";
+import { CursorImporter } from "../importers/cursor.js";
+import { ClineImporter } from "../importers/cline.js";
+import { OpenCodeImporter } from "../importers/opencode.js";
+import { HermesImporter } from "../importers/hermes.js";
 import { validateOptionalString } from "./validation.js";
 
 export const IMPORT_TOOLS = [
   {
     name: "import_host",
-    description: "Detect and import memories/knowledge from installed host tools (Claude Code, Copilot CLI)",
+    description: "Detect and import memories/knowledge from installed host tools (Claude Code, Copilot CLI, Cursor, Cline, OpenCode, Hermes)",
     inputSchema: {
       type: "object" as const,
       properties: {
-        source: { type: "string", description: "Optional: restrict to a specific source ('claude-code' or 'copilot-cli')" },
+        source: { type: "string", description: "Optional: restrict to a specific source ('claude-code', 'copilot-cli', 'cursor', 'cline', 'opencode', 'hermes')" },
       },
       required: [],
     },
@@ -32,6 +36,10 @@ export async function handleImportTool(
     const importers = [
       new ClaudeCodeImporter(),
       new CopilotCliImporter(),
+      new CursorImporter(),
+      new ClineImporter(),
+      new OpenCodeImporter(),
+      new HermesImporter(),
     ];
 
     const results: Array<{
