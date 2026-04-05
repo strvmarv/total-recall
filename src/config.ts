@@ -1,7 +1,9 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
 import { parse as parseToml, stringify as stringifyToml } from "@iarna/toml";
 import type { TotalRecallConfig } from "./types.js";
+import type Database from "better-sqlite3";
 
 const DEFAULTS_PATH = new URL("./defaults.toml", import.meta.url);
 
@@ -61,6 +63,46 @@ export function saveUserConfig(overrides: Record<string, unknown>): void {
 
   const merged = deepMerge(existing, overrides);
   writeFileSync(configPath, stringifyToml(merged as Parameters<typeof stringifyToml>[0]));
+}
+
+function sortKeysDeep(obj: unknown): unknown {
+  if (obj === null || typeof obj !== "object") return obj;
+  if (Array.isArray(obj)) return obj.map(sortKeysDeep);
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(obj as Record<string, unknown>).sort()) {
+    sorted[key] = sortKeysDeep((obj as Record<string, unknown>)[key]);
+  }
+  return sorted;
+}
+
+function hashConfig(config: unknown): string {
+  return createHash("sha256")
+    .update(JSON.stringify(sortKeysDeep(config)))
+    .digest("hex");
+}
+
+export function createConfigSnapshot(
+  db: Database.Database,
+  config: unknown,
+  name?: string,
+): string {
+  const configJson = JSON.stringify(config);
+  const configHash = hashConfig(config);
+
+  const latest = db.prepare(
+    "SELECT id, config FROM config_snapshots ORDER BY timestamp DESC LIMIT 1",
+  ).get() as { id: string; config: string } | undefined;
+
+  if (latest && hashConfig(JSON.parse(latest.config)) === configHash) {
+    return latest.id;
+  }
+
+  const id = randomUUID();
+  db.prepare(
+    "INSERT INTO config_snapshots (id, name, timestamp, config) VALUES (?, ?, ?, ?)",
+  ).run(id, name ?? null, Date.now(), configJson);
+
+  return id;
 }
 
 function deepMerge(
