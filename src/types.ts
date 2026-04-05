@@ -8,7 +8,7 @@ export type EntryType =
   | "imported"
   | "compacted"
   | "ingested";
-export type QuerySource = "auto" | "explicit" | "session_start";
+export type QuerySource = "auto" | "explicit" | "session_start" | "mcp_tool";
 export type OutcomeSignal = "positive" | "negative" | "neutral";
 export type SourceTool = "claude-code" | "copilot-cli" | "opencode" | "manual";
 

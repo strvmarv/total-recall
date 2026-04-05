@@ -7,6 +7,7 @@ import { deleteMemory } from "../memory/delete.js";
 import { promoteEntry, demoteEntry } from "../memory/promote-demote.js";
 import type { Tier, ContentType, EntryType, SourceTool } from "../types.js";
 import { ALL_TABLE_PAIRS } from "../types.js";
+import { logRetrievalEvent } from "../eval/event-logger.js";
 import {
   validateContent,
   validateEntryType,
@@ -175,11 +176,31 @@ export async function handleMemoryTool(
         (!typeFilter || typeFilter.includes(p.type)),
     ).map((p) => ({ tier: p.tier, content_type: p.type }));
 
+    const searchStart = performance.now();
     const results = await searchMemory(ctx.db, embedFn, query, {
       tiers,
       topK,
       minScore,
     });
+    const latencyMs = Math.round(performance.now() - searchStart);
+
+    // Log retrieval event for eval metrics
+    logRetrievalEvent(ctx.db, {
+      sessionId: ctx.sessionId,
+      queryText: query,
+      querySource: "mcp_tool",
+      results: results.map((r, i) => ({
+        entry_id: r.entry.id,
+        tier: r.tier,
+        content_type: r.content_type,
+        score: r.score,
+        rank: i + 1,
+      })),
+      tiersSearched: tiers.map((t) => t.tier),
+      configSnapshotId: ctx.configSnapshotId,
+      latencyMs,
+    });
+
     return { content: [{ type: "text", text: JSON.stringify(results) }] };
   }
 
