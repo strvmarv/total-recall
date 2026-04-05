@@ -62,14 +62,23 @@ The launcher (`bin/total-recall.sh`) finds `node` across common install methods:
 2. Warm sweep — if last sweep was more than `warm_sweep_interval_days` ago, moves old unaccessed warm entries to cold. Tracked via `compaction_log` with `reason = 'warm_sweep_decay'`.
 3. Project docs auto-ingest — detects README.md, CONTRIBUTING.md, CLAUDE.md, AGENTS.md, and docs/ in cwd. Ingests into a `{project}-project-docs` KB collection. Deduplicates via `import_log`.
 4. Hot tier assembly — returns current hot entries as injectable context.
+5. Config snapshot — captures current config as a named snapshot (`"session-start"`), sets `ctx.configSnapshotId` for the session so retrieval events and compaction are tagged to this config state.
 
 ### Config persistence
 
-`config_set` writes to `~/.total-recall/config.toml` using `@iarna/toml` stringify. Changes are merged with existing user config and take effect immediately in the current session.
+`config_set` writes to `~/.total-recall/config.toml` using `@iarna/toml` stringify. Changes are merged with existing user config and take effect immediately in the current session. Before writing, `config_set` auto-creates a config snapshot named `pre-change:<key>` so retrieval metrics from before and after can be compared with `eval_compare`.
 
 ### Eval system
 
-`eval_report` returns: precision, hit rate, miss rate, MRR, latency, breakdowns by tier and content type, top misses (lowest scoring queries), false positives (high score but unused), and compaction health (total compactions, preservation ratio, semantic drift). Data comes from `retrieval_events` and `compaction_log` tables.
+`eval_report` returns: precision, hit rate, miss rate, MRR, latency, breakdowns by tier and content type, top misses (lowest scoring queries), false positives (high score but unused), and compaction health (total compactions, preservation ratio, semantic drift). Data comes from `retrieval_events` and `compaction_log` tables. Accepts optional `config_snapshot` param to filter events by a specific config snapshot ID, and `days` param (default: 7).
+
+`eval_compare` compares retrieval metrics between two config snapshots. Required param: `before` (snapshot name or ID). Optional: `after` (default: `"latest"`), `days` (default: 30). Returns summary deltas, per-tier and per-content-type breakdowns, and query-level diff showing regressions (used→unused) and improvements (unused→used). Warns if either snapshot has no retrieval events.
+
+`eval_snapshot` manually creates a named config snapshot. Returns `{ id, name, created }`. Useful for tagging a baseline before config experiments.
+
+### ToolContext
+
+`ToolContext` (in `src/tools/registry.ts`) carries session state through all tool handlers: `db`, `config`, `embedder`, `sessionId`, and `configSnapshotId`. The `configSnapshotId` is set by `session_start` and used by `memory_search` (for retrieval event logging) and `compactHotTier` (for compaction logging). New tools that call `logRetrievalEvent` should pass `ctx.configSnapshotId`.
 
 ## Database Migrations
 

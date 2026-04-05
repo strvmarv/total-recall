@@ -127,6 +127,8 @@ All commands use `/total-recall <subcommand>`:
 | `/total-recall status` | `status` | Dashboard overview |
 | `/total-recall search <query>` | `memory_search` | Semantic search across all tiers |
 | `/total-recall store <content>` | `memory_store` | Manually store a memory |
+| `/total-recall inspect <id>` | `memory_get` | Retrieve a specific entry by ID |
+| — | `memory_update` | Update an existing entry's content, tags, or project |
 | `/total-recall forget <query>` | `memory_search` + `memory_delete` | Find and delete entries |
 | `/total-recall inspect <id>` | `memory_inspect` | Deep dive on single entry |
 | `/total-recall promote <id>` | `memory_promote` | Move entry to higher tier |
@@ -140,9 +142,15 @@ All commands use `/total-recall <subcommand>`:
 | `/total-recall kb list` | `kb_list_collections` | List KB collections |
 | `/total-recall kb refresh <id>` | `kb_refresh` | Re-ingest a collection |
 | `/total-recall kb remove <id>` | `kb_remove` | Remove KB entry |
+| — | `kb_summarize` | Generate summary for a KB collection |
 | `/total-recall compact` | `compact_now` | Force compaction |
-| `/total-recall eval` | `eval_report` | Live performance metrics |
+| — | `session_start` | Initialize session: sync imports, assemble hot tier |
+| — | `session_end` | End session: run compaction |
+| — | `session_context` | Get current hot tier entries as context |
+| `/total-recall eval` | `eval_report` | Retrieval quality metrics (filterable by config snapshot) |
 | `/total-recall eval --benchmark` | `eval_benchmark` | Run synthetic benchmark |
+| `/total-recall eval --compare <name>` | `eval_compare` | Compare metrics between two config snapshots |
+| `/total-recall eval --snapshot <name>` | `eval_snapshot` | Manually create a named config snapshot |
 | `/total-recall config get <key>` | `config_get` | Read config value |
 | `/total-recall config set <key> <val>` | `config_set` | Update config |
 | `/total-recall import-host` | `import_host` | Import from host tools |
