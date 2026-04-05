@@ -17,6 +17,7 @@
   },
   "files": [
     "dist/",
+    "bin/",
     "skills/",
     "agents/",
     "hooks/",
@@ -26,6 +27,7 @@
     ".copilot-plugin/",
     ".cursor-plugin/",
     ".opencode/",
+    ".mcp.json",
     "README.md",
     "LICENSE",
     "CONTRIBUTING.md"

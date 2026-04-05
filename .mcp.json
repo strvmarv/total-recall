@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "total-recall": {
-      "command": "npx",
-      "args": ["-y", "@strvmarv/total-recall"]
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/total-recall.sh",
+      "args": []
     }
   }
 }
