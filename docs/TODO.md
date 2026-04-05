@@ -44,6 +44,13 @@ Alert when retrieval metrics drop below thresholds or trend downward. Surface wa
 **Files:** `src/tools/system-tools.ts`, `src/eval/metrics.ts`
 **Depends on:** Enough retrieval event history to compute meaningful trends.
 
+## PreToolUse Hook (Optional Fallback)
+
+Belt-and-suspenders backup for session initialization. A PreToolUse hook that fires once per session (using a `/tmp` marker keyed on `session_id`) to inject a reminder to call `session_start` if the model hasn't already. Only needed if the server-side `oninitialized` + lazy-init and hook directive prove insufficient.
+
+**Files:** `hooks/hooks.json`, new `hooks/pre-tool-use/run.sh`
+**Depends on:** Evidence that the current three-layer approach (server-side init, hook directive, `/using-total-recall` skill) is still unreliable.
+
 ## Additional Host Importers
 
 Only Claude Code and Copilot CLI importers exist. Missing: OpenCode, Cline, Cursor.

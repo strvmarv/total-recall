@@ -9,8 +9,18 @@ import { SYSTEM_TOOLS, handleSystemTool } from "./system-tools.js";
 import { registerKbTools, handleKbTool } from "./kb-tools.js";
 import { registerEvalTools, handleEvalTool } from "./eval-tools.js";
 import { registerImportTools, handleImportTool } from "./import-tools.js";
-import { registerSessionTools, handleSessionTool } from "./session-tools.js";
+import { registerSessionTools, handleSessionTool, runSessionInit } from "./session-tools.js";
 import { registerExtraTools, handleExtraTool } from "./extra-tools.js";
+
+export interface SessionInitResult {
+  project: string | null;
+  importSummary: Array<{ tool: string; memoriesImported: number; knowledgeImported: number }>;
+  warmSweep: { demoted: number } | null;
+  warmPromoted: number;
+  projectDocs: { filesIngested: number; totalChunks: number } | null;
+  hotEntryCount: number;
+  context: string;
+}
 
 export interface ToolContext {
   db: Database.Database;
@@ -18,6 +28,10 @@ export interface ToolContext {
   embedder: Embedder;
   sessionId: string;
   configSnapshotId: string;
+  sessionInitialized: boolean;
+  sessionInitResult: SessionInitResult | null;
+  /** Promise that resolves when background init (from oninitialized) completes */
+  sessionInitPromise: Promise<void> | null;
 }
 
 export async function startServer(ctx: ToolContext): Promise<void> {
@@ -25,6 +39,18 @@ export async function startServer(ctx: ToolContext): Promise<void> {
     { name: "total-recall", version: "0.1.0" },
     { capabilities: { tools: {} } },
   );
+
+  // Fire-and-forget: start init as soon as MCP handshake completes.
+  // The SDK types oninitialized as () => void, so we can't await —
+  // but we store the promise so the lazy-init guard can await it
+  // instead of re-running the work.
+  server.oninitialized = () => {
+    ctx.sessionInitPromise = runSessionInit(ctx).then(() => {
+      ctx.sessionInitialized = true;
+    }).catch((err) => {
+      process.stderr.write(`total-recall: background init failed: ${err}\n`);
+    });
+  };
 
   const allTools = [
     ...MEMORY_TOOLS,
@@ -43,6 +69,17 @@ export async function startServer(ctx: ToolContext): Promise<void> {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: rawArgs } = request.params;
     const args = (rawArgs ?? {}) as Record<string, unknown>;
+
+    // Lazy-init: ensure session is initialized before any tool runs.
+    // If oninitialized already started it, await that promise instead of re-running.
+    if (!ctx.sessionInitialized) {
+      if (ctx.sessionInitPromise) {
+        await ctx.sessionInitPromise;
+      } else {
+        await runSessionInit(ctx);
+        ctx.sessionInitialized = true;
+      }
+    }
 
     const memResult = await handleMemoryTool(name, args ?? {}, ctx);
     if (memResult !== null) return memResult;

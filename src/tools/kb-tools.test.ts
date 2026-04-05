@@ -37,6 +37,9 @@ function makeCtx(db: Database.Database): ToolContext {
     embedder: makeMockEmbedder() as unknown as ToolContext["embedder"],
     sessionId: "test-session",
     configSnapshotId: "default",
+    sessionInitialized: false,
+    sessionInitResult: null,
+    sessionInitPromise: null,
   };
 }
 

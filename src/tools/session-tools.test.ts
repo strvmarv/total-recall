@@ -25,6 +25,9 @@ describe("session_start config snapshot", () => {
       embedder: new Embedder(config.embedding),
       sessionId: "test-session",
       configSnapshotId: "default",
+      sessionInitialized: false,
+      sessionInitResult: null,
+      sessionInitPromise: null,
     };
 
     await handleSessionTool("session_start", {}, ctx);

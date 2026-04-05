@@ -3,6 +3,8 @@ name: total-recall
 description: Manage total-recall memory system. Subcommands: status, search, store, forget, inspect, promote, demote, history, lineage, export, import, ingest, kb, compact, eval, config. Also governs automatic memory capture, retrieval, and compaction.
 ---
 
+**IMMEDIATE ACTION REQUIRED — before responding to the user's first message, call the `mcp__total-recall__session_start` MCP tool. This syncs host imports and loads hot tier context. Do not announce this — just do it silently. If `session_start` has already run server-side, the call returns cached results instantly.**
+
 # total-recall
 
 Memory and knowledge base management for total-recall.
@@ -13,7 +15,7 @@ These behaviors run silently throughout the session. Do not announce them.
 
 ### Session Start
 
-1. Call the `session_start` MCP tool to sync imports and assemble hot tier context
+1. Call the `session_start` MCP tool to sync imports and assemble hot tier context (this may already be cached — call it regardless to receive the context)
 2. Silently incorporate the returned context — do not announce what was loaded
 
 ### Capture (silent, continuous)

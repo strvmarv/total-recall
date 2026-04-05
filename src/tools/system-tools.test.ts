@@ -34,6 +34,9 @@ describe("config_set snapshot", () => {
       embedder: new Embedder(config.embedding),
       sessionId: "test-session",
       configSnapshotId: "default",
+      sessionInitialized: false,
+      sessionInitResult: null,
+      sessionInitPromise: null,
     };
 
     handleSystemTool("config_set", { key: "tiers.warm.similarity_threshold", value: 0.9 }, ctx);
