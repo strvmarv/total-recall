@@ -151,3 +151,13 @@ Call `compact_now`. Show results: entries carried forward, promoted to warm, dis
 ### import-host [source]
 
 Call `import_host` to detect and import memories from host tools (Claude Code, Copilot CLI). Optionally restrict to a specific source.
+
+### update
+
+Pull the latest version of the plugin from git. Run:
+
+```bash
+cd "$CLAUDE_PLUGIN_ROOT" && git pull origin main
+```
+
+Report what changed (files updated, new version). Then tell the user to run `/reload-plugins` to apply the changes.
