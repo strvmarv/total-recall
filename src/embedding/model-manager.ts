@@ -43,11 +43,23 @@ export async function downloadModel(modelName: string): Promise<string> {
   const modelPath = getModelPath(modelName);
   mkdirSync(modelPath, { recursive: true });
 
-  const files = ["model.onnx", "tokenizer.json", "tokenizer_config.json"];
-  const repoUrl = `${HF_BASE_URL}/sentence-transformers/${modelName}/resolve/${HF_REVISION}/onnx`;
+  // model.onnx lives in onnx/ subdir, tokenizer files at repo root
+  const fileUrls: Array<{ file: string; url: string }> = [
+    {
+      file: "model.onnx",
+      url: `${HF_BASE_URL}/sentence-transformers/${modelName}/resolve/${HF_REVISION}/onnx/model.onnx`,
+    },
+    {
+      file: "tokenizer.json",
+      url: `${HF_BASE_URL}/sentence-transformers/${modelName}/resolve/${HF_REVISION}/tokenizer.json`,
+    },
+    {
+      file: "tokenizer_config.json",
+      url: `${HF_BASE_URL}/sentence-transformers/${modelName}/resolve/${HF_REVISION}/tokenizer_config.json`,
+    },
+  ];
 
-  for (const file of files) {
-    const url = `${repoUrl}/${file}`;
+  for (const { file, url } of fileUrls) {
     const dest = join(modelPath, file);
 
     const response = await fetch(url);
