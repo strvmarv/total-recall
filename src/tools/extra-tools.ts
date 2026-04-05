@@ -198,6 +198,7 @@ export async function handleExtraTool(
       embedFn,
       ctx.config.compaction,
       ctx.sessionId,
+      ctx.configSnapshotId,
     );
     return {
       content: [

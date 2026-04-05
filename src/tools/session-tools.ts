@@ -188,7 +188,7 @@ export async function handleSessionTool(
     const embedFn = (text: string) => ctx.embedder.embed(text);
 
     const sessionId = ctx.sessionId ?? randomUUID();
-    const result = await compactHotTier(ctx.db, embedFn, ctx.config.compaction, sessionId);
+    const result = await compactHotTier(ctx.db, embedFn, ctx.config.compaction, sessionId, ctx.configSnapshotId);
 
     return {
       content: [
