@@ -13,7 +13,7 @@ async function main(): Promise<void> {
   });
   const sessionId = randomUUID();
   process.stderr.write(`total-recall: MCP server starting (db: ${getDataDir()}/total-recall.db)\n`);
-  await startServer({ db, config, embedder, sessionId });
+  await startServer({ db, config, embedder, sessionId, configSnapshotId: "default" });
   const cleanup = () => { closeDb(); process.exit(0); };
   process.on("SIGINT", cleanup);
   process.on("SIGTERM", cleanup);

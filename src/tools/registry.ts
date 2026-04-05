@@ -17,6 +17,7 @@ export interface ToolContext {
   config: TotalRecallConfig;
   embedder: Embedder;
   sessionId: string;
+  configSnapshotId: string;
 }
 
 export async function startServer(ctx: ToolContext): Promise<void> {
