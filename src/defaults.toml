@@ -26,3 +26,8 @@ warm_sweep_interval_days = 7
 [embedding]
 model = "all-MiniLM-L6-v2"
 dimensions = 384
+
+[regression]
+miss_rate_delta = 0.1
+latency_ratio = 2.0
+min_events = 10
