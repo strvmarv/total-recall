@@ -18,3 +18,122 @@
 {"query":"background job queue","expected_content_contains":"BullMQ","expected_tier":"warm"}
 {"query":"realtime communication","expected_content_contains":"socket.io","expected_tier":"warm"}
 {"query":"user communication preferences","expected_content_contains":"terse","expected_tier":"warm"}
+{"query":"how to write ESM imports in TypeScript","expected_content_contains":".js extensions","expected_tier":"warm"}
+{"query":"should I use default or named exports","expected_content_contains":"named exports","expected_tier":"warm"}
+{"query":"literal type narrowing with const","expected_content_contains":"as const","expected_tier":"warm"}
+{"query":"preferred function style for callbacks","expected_content_contains":"Arrow functions","expected_tier":"warm"}
+{"query":"how to unpack objects in TypeScript","expected_content_contains":"destructuring","expected_tier":"warm"}
+{"query":"what to use instead of || for defaults","expected_content_contains":"nullish coalescing","expected_tier":"warm"}
+{"query":"string formatting preference","expected_content_contains":"template literals","expected_tier":"warm"}
+{"query":"collection types for unique keys","expected_content_contains":"Map and Set","expected_tier":"warm"}
+{"query":"typed object map type","expected_content_contains":"Record","expected_tier":"warm"}
+{"query":"how to import only types","expected_content_contains":"import type","expected_tier":"warm"}
+{"query":"how to generate a unique ID","expected_content_contains":"randomUUID","expected_tier":"warm"}
+{"query":"convert iterable to array","expected_content_contains":"Array.from","expected_tier":"warm"}
+{"query":"deep copy an object","expected_content_contains":"structuredClone","expected_tier":"warm"}
+{"query":"how to avoid any type","expected_content_contains":"unknown","expected_tier":"warm"}
+{"query":"how to sort strings with unicode","expected_content_contains":"localeCompare","expected_tier":"warm"}
+{"query":"date math library preference","expected_content_contains":"dayjs","expected_tier":"warm"}
+{"query":"regex readability improvement","expected_content_contains":"named capture groups","expected_tier":"warm"}
+{"query":"custom error class pattern","expected_content_contains":"AppError","expected_tier":"warm"}
+{"query":"handle partial promise failures","expected_content_contains":"Promise.allSettled","expected_tier":"warm"}
+{"query":"retry strategy for flaky operations","expected_content_contains":"exponential backoff","expected_tier":"warm"}
+{"query":"which embedding model is used","expected_content_contains":"all-MiniLM-L6-v2","expected_tier":"warm"}
+{"query":"hot tier size limit","expected_content_contains":"50","expected_tier":"warm"}
+{"query":"warm promotion score threshold","expected_content_contains":"0.5","expected_tier":"warm"}
+{"query":"how long is the decay half-life","expected_content_contains":"7 days","expected_tier":"warm"}
+{"query":"config file format","expected_content_contains":"TOML","expected_tier":"warm"}
+{"query":"SQLite write mode","expected_content_contains":"WAL","expected_tier":"warm"}
+{"query":"vector storage extension","expected_content_contains":"sqlite-vec","expected_tier":"warm"}
+{"query":"how often does compaction run","expected_content_contains":"24 hours","expected_tier":"warm"}
+{"query":"cold tier entry limit","expected_content_contains":"no entry limit","expected_tier":"warm"}
+{"query":"embedding dimension requirement","expected_content_contains":"384","expected_tier":"warm"}
+{"query":"how does inference work locally","expected_content_contains":"ONNX","expected_tier":"warm"}
+{"query":"default number of search results","expected_content_contains":"top_k","expected_tier":"warm"}
+{"query":"how config overrides are applied","expected_content_contains":"deep-merge","expected_tier":"warm"}
+{"query":"where is data stored by default","expected_content_contains":"~/.total-recall","expected_tier":"warm"}
+{"query":"promote threshold for decay scoring","expected_content_contains":"0.3","expected_tier":"warm"}
+{"query":"why do I get BUSY error in SQLite","expected_content_contains":"BUSY","expected_tier":"warm"}
+{"query":"ONNX startup latency","expected_content_contains":"cold start","expected_tier":"warm"}
+{"query":"sqlite-vec loading order","expected_content_contains":"must be loaded before","expected_tier":"warm"}
+{"query":"better-sqlite3 async usage","expected_content_contains":"synchronous","expected_tier":"warm"}
+{"query":"MCP output formatting","expected_content_contains":"newline-terminated","expected_tier":"warm"}
+{"query":"sqlite-vec score interpretation","expected_content_contains":"distance not similarity","expected_tier":"warm"}
+{"query":"empty vector bug","expected_content_contains":"NaN","expected_tier":"warm"}
+{"query":"TOML array syntax","expected_content_contains":"separate line","expected_tier":"warm"}
+{"query":"randomUUID Node.js version requirement","expected_content_contains":"Node 19","expected_tier":"warm"}
+{"query":"vitest mock placement","expected_content_contains":"top level","expected_tier":"warm"}
+{"query":"tsup __dirname issue","expected_content_contains":"import.meta.url","expected_tier":"warm"}
+{"query":"sqlite-vec vector blob format","expected_content_contains":"float[384]","expected_tier":"warm"}
+{"query":"MCP error response format","expected_content_contains":"isError","expected_tier":"warm"}
+{"query":"vitest environment variable leaking","expected_content_contains":"re-imported","expected_tier":"warm"}
+{"query":"deterministic JSON output","expected_content_contains":"sorted keys","expected_tier":"warm"}
+{"query":"how many memory tiers are there","expected_content_contains":"three tiers","expected_tier":"warm"}
+{"query":"how are memory tools exposed","expected_content_contains":"MCP protocol","expected_tier":"warm"}
+{"query":"where are embeddings stored","expected_content_contains":"sqlite-vec","expected_tier":"warm"}
+{"query":"when does compaction happen","expected_content_contains":"session end","expected_tier":"warm"}
+{"query":"how is large content ingested","expected_content_contains":"chunked","expected_tier":"warm"}
+{"query":"pluggable memory import sources","expected_content_contains":"importer interface","expected_tier":"warm"}
+{"query":"how is retrieval logged","expected_content_contains":"config snapshot ID","expected_tier":"warm"}
+{"query":"benchmark setup and teardown","expected_content_contains":"seeds corpus","expected_tier":"warm"}
+{"query":"A/B testing config changes","expected_content_contains":"Config snapshots","expected_tier":"warm"}
+{"query":"automatic tier promotion mechanism","expected_content_contains":"Decay scoring","expected_tier":"warm"}
+{"query":"how many database files are used","expected_content_contains":"single SQLite","expected_tier":"warm"}
+{"query":"how are memories scoped to project","expected_content_contains":"package.json","expected_tier":"warm"}
+{"query":"multi-tier search strategy","expected_content_contains":"fans out","expected_tier":"warm"}
+{"query":"content chunking strategy","expected_content_contains":"sentence boundaries","expected_tier":"warm"}
+{"query":"background process design","expected_content_contains":"No background daemon","expected_tier":"warm"}
+{"query":"tool response encoding","expected_content_contains":"JSON encoded","expected_tier":"warm"}
+{"query":"tool naming convention","expected_content_contains":"snake_case","expected_tier":"warm"}
+{"query":"how to signal an error from a tool","expected_content_contains":"isError","expected_tier":"warm"}
+{"query":"search result fields","expected_content_contains":"tier field","expected_tier":"warm"}
+{"query":"what does store return","expected_content_contains":"entry ID","expected_tier":"warm"}
+{"query":"batch insert support","expected_content_contains":"one entry at a time","expected_tier":"warm"}
+{"query":"null vs undefined in responses","expected_content_contains":"undefined","expected_tier":"warm"}
+{"query":"where are validators defined","expected_content_contains":"dedicated validator","expected_tier":"warm"}
+{"query":"tool description length limit","expected_content_contains":"100 characters","expected_tier":"warm"}
+{"query":"config key format","expected_content_contains":"dot notation","expected_tier":"warm"}
+{"query":"TypeScript import file extension","expected_content_contains":".js file extensions","expected_tier":"warm"}
+{"query":"build output format","expected_content_contains":"single bundle","expected_tier":"warm"}
+{"query":"test file location","expected_content_contains":"colocated","expected_tier":"warm"}
+{"query":"what npm client to install packages","expected_content_contains":"pnpm","expected_tier":"warm"}
+{"query":"which tool runs unit tests","expected_content_contains":"vitest","expected_tier":"warm"}
+{"query":"schema validation at boundaries","expected_content_contains":"zod","expected_tier":"warm"}
+{"query":"how to import only a type","expected_content_contains":"import type","expected_tier":"warm"}
+{"query":"how to clone without mutation","expected_content_contains":"structuredClone","expected_tier":"warm"}
+{"query":"generate a uuid","expected_content_contains":"randomUUID","expected_tier":"warm"}
+{"query":"error class hierarchy","expected_content_contains":"AppError","expected_tier":"warm"}
+{"query":"partial match queries for promise batching","expected_content_contains":"allSettled","expected_tier":"warm"}
+{"query":"retry with delay","expected_content_contains":"backoff","expected_tier":"warm"}
+{"query":"vector dimensions config","expected_content_contains":"384","expected_tier":"warm"}
+{"query":"ONNX runtime location","expected_content_contains":"locally","expected_tier":"warm"}
+{"query":"how search results are ranked","expected_content_contains":"distance not similarity","expected_tier":"warm"}
+{"query":"hot tier","expected_content_contains":"50","expected_tier":"warm"}
+{"query":"warm tier","expected_content_contains":"0.5","expected_tier":"warm"}
+{"query":"cold tier","expected_content_contains":"no entry limit","expected_tier":"warm"}
+{"query":"decay","expected_content_contains":"7 days","expected_tier":"warm"}
+{"query":"TOML","expected_content_contains":"TOML","expected_tier":"warm"}
+{"query":"sqlite-vec","expected_content_contains":"sqlite-vec","expected_tier":"warm"}
+{"query":"MCP","expected_content_contains":"MCP","expected_tier":"warm"}
+{"query":"compaction","expected_content_contains":"compaction","expected_tier":"warm"}
+{"query":"embeddings","expected_content_contains":"all-MiniLM","expected_tier":"warm"}
+{"query":"benchmark","expected_content_contains":"seeds corpus","expected_tier":"warm"}
+{"query":"scoping","expected_content_contains":"package.json","expected_tier":"warm"}
+{"query":"ingestion","expected_content_contains":"chunked","expected_tier":"warm"}
+{"query":"fanout","expected_content_contains":"fans out","expected_tier":"warm"}
+{"query":"snapshot","expected_content_contains":"Config snapshots","expected_tier":"warm"}
+{"query":"query package manager preference","expected_content_contains":"pnpm","expected_tier":"warm","expected_absent":"npm install"}
+{"query":"what test runner is not jest","expected_content_contains":"vitest","expected_tier":"warm","expected_absent":"jest"}
+{"query":"how to handle errors in API","expected_content_contains":"RFC 7807","expected_tier":"warm","expected_absent":"console.error"}
+{"query":"which function style to use","expected_content_contains":"Arrow functions","expected_tier":"warm","expected_absent":"function declarations"}
+{"query":"deep copy preference","expected_content_contains":"structuredClone","expected_tier":"warm","expected_absent":"JSON.parse"}
+{"query":"null handling in responses","expected_content_contains":"undefined","expected_tier":"warm","expected_absent":"null"}
+{"query":"export style preference","expected_content_contains":"named exports","expected_tier":"warm","expected_absent":"default export"}
+{"query":"string default value operator","expected_content_contains":"nullish coalescing","expected_tier":"warm","expected_absent":"logical OR"}
+{"query":"what type to use instead of any","expected_content_contains":"unknown","expected_tier":"warm","expected_absent":"any"}
+{"query":"date math approach","expected_content_contains":"dayjs","expected_tier":"warm","expected_absent":"new Date"}
+{"query":"number of search results returned by default","expected_content_contains":"top_k","expected_tier":"warm","expected_absent":"5"}
+{"query":"error flag in tool response","expected_content_contains":"isError","expected_tier":"warm","expected_absent":"throw"}
+{"query":"which database extension for vectors","expected_content_contains":"sqlite-vec","expected_tier":"warm","expected_absent":"pgvector"}
+{"query":"memory storage backend","expected_content_contains":"single SQLite","expected_tier":"warm","expected_absent":"PostgreSQL"}
+{"query":"how often compaction happens","expected_content_contains":"24 hours","expected_tier":"warm","expected_absent":"hourly"}

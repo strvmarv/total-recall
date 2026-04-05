@@ -11,10 +11,90 @@
 {"content":"Feature branches should be named feat/TICKET-description","type":"preference","tags":["git","workflow"]}
 {"content":"Never commit .env files, use .env.example as template","type":"correction","tags":["security","git"]}
 {"content":"The frontend uses React with TanStack Router","type":"decision","tags":["frontend","react"]}
-{"content":"CSS uses Tailwind with the project's custom design tokens","type":"decision","tags":["frontend","css"]}
+{"content":"CSS uses Tailwind with the custom design tokens","type":"decision","tags":["frontend","css"]}
 {"content":"All database migrations go through Drizzle Kit","type":"preference","tags":["database","migrations"]}
 {"content":"Logging uses structured JSON via pino","type":"decision","tags":["logging","observability"]}
 {"content":"User prefers terse responses without trailing summaries","type":"preference","tags":["communication"]}
 {"content":"WebSocket connections use socket.io with Redis adapter for scaling","type":"decision","tags":["websockets","architecture"]}
 {"content":"File uploads go to S3 with presigned URLs, never through the API server","type":"decision","tags":["files","architecture"]}
 {"content":"Cron jobs are managed by BullMQ with Redis backend","type":"decision","tags":["jobs","architecture"]}
+{"content":"Use ESM imports with .js extensions in all TypeScript source files","type":"preference","tags":["typescript","esm"]}
+{"content":"Prefer named exports over default exports in all modules","type":"preference","tags":["typescript","modules"]}
+{"content":"Use const assertions (as const) for literal type narrowing","type":"preference","tags":["typescript","types"]}
+{"content":"Arrow functions are preferred over function declarations for callbacks","type":"preference","tags":["typescript","style"]}
+{"content":"Use destructuring assignment for object and array unpacking","type":"preference","tags":["typescript","style"]}
+{"content":"Use nullish coalescing (??) instead of logical OR (||) for defaults","type":"preference","tags":["typescript","style"]}
+{"content":"Use template literals instead of string concatenation","type":"preference","tags":["typescript","style"]}
+{"content":"Use Map and Set for collections that need key uniqueness or ordered iteration","type":"preference","tags":["typescript","collections"]}
+{"content":"Use Record<string, T> for typed object maps instead of plain objects","type":"preference","tags":["typescript","types"]}
+{"content":"Use import type syntax for type-only imports to avoid runtime overhead","type":"preference","tags":["typescript","imports"]}
+{"content":"Use crypto.randomUUID() for generating unique identifiers","type":"preference","tags":["typescript","utilities"]}
+{"content":"Use Array.from() to convert iterables to arrays instead of spread","type":"preference","tags":["typescript","arrays"]}
+{"content":"Use structuredClone() for deep copying objects instead of JSON roundtrip","type":"preference","tags":["typescript","utilities"]}
+{"content":"The no-any rule is enforced; use unknown and narrow with type guards","type":"preference","tags":["typescript","types"]}
+{"content":"Use localeCompare for string sorting to handle unicode correctly","type":"preference","tags":["typescript","strings"]}
+{"content":"Use Temporal API or dayjs for all date arithmetic, never raw Date math","type":"preference","tags":["typescript","dates"]}
+{"content":"Use named capture groups in regular expressions for readability","type":"preference","tags":["typescript","regex"]}
+{"content":"Custom errors extend AppError class which wraps code and message","type":"decision","tags":["typescript","errors"]}
+{"content":"Use Promise.allSettled when failures of individual promises should not abort the batch","type":"preference","tags":["typescript","async"]}
+{"content":"Implement exponential backoff with jitter for all retry logic","type":"preference","tags":["typescript","async"]}
+{"content":"Embedding model is all-MiniLM-L6-v2 producing 384-dimensional vectors","type":"decision","tags":["embeddings","config"]}
+{"content":"Hot tier maximum capacity is 50 entries before overflow to warm","type":"decision","tags":["config","tiers"]}
+{"content":"Warm tier promotion threshold score is 0.5","type":"decision","tags":["config","tiers"]}
+{"content":"Decay half-life for memory scoring is 7 days","type":"decision","tags":["config","decay"]}
+{"content":"Config file format is TOML","type":"decision","tags":["config","format"]}
+{"content":"SQLite is opened in WAL mode for concurrent read performance","type":"decision","tags":["sqlite","config"]}
+{"content":"Vector storage uses the sqlite-vec extension","type":"decision","tags":["sqlite","embeddings"]}
+{"content":"Compaction runs every 24 hours at session end","type":"decision","tags":["config","compaction"]}
+{"content":"Cold tier has no entry limit","type":"decision","tags":["config","tiers"]}
+{"content":"Embedding dimensions must exactly match 384 or insertion fails","type":"decision","tags":["embeddings","validation"]}
+{"content":"ONNX inference runs locally without any network calls","type":"decision","tags":["embeddings","onnx"]}
+{"content":"Default top_k for search is 10 results","type":"decision","tags":["config","search"]}
+{"content":"Config overrides use deep-merge semantics so nested keys compose","type":"decision","tags":["config","merging"]}
+{"content":"Data directory defaults to ~/.total-recall","type":"decision","tags":["config","filesystem"]}
+{"content":"Decay-based promote threshold is 0.3 for moving entries to hotter tiers","type":"decision","tags":["config","decay"]}
+{"content":"SQLite BUSY errors appear when multiple processes open the same database file","type":"note","tags":["debugging","sqlite"]}
+{"content":"ONNX model cold start takes 2-3 seconds on first inference call","type":"note","tags":["debugging","onnx"]}
+{"content":"sqlite-vec extension must be loaded before any vec_ functions are called","type":"note","tags":["debugging","sqlite"]}
+{"content":"better-sqlite3 is synchronous; never use it inside async event handlers expecting non-blocking","type":"note","tags":["debugging","sqlite"]}
+{"content":"MCP stdio transport buffers output; flush with newline-terminated JSON only","type":"note","tags":["debugging","mcp"]}
+{"content":"sqlite-vec returns distance not similarity; subtract from 1 to get similarity score","type":"note","tags":["debugging","sqlite"]}
+{"content":"Empty embedding vectors cause NaN distances in sqlite-vec queries","type":"note","tags":["debugging","embeddings"]}
+{"content":"TOML arrays require each item on a separate line under the array key","type":"note","tags":["debugging","config"]}
+{"content":"crypto.randomUUID() is only available in Node 19+ or with web crypto polyfill","type":"note","tags":["debugging","node"]}
+{"content":"vitest vi.mock calls must be at the top level of the test file, not inside describe blocks","type":"note","tags":["debugging","vitest"]}
+{"content":"tsup bundles lose __dirname; use import.meta.url with fileURLToPath instead","type":"note","tags":["debugging","tsup"]}
+{"content":"sqlite-vec stores vectors as float[384] blobs and requires exact dimension match","type":"note","tags":["debugging","sqlite"]}
+{"content":"MCP error responses must use isError: true flag in the content block","type":"note","tags":["debugging","mcp"]}
+{"content":"vitest environment variables set in one test file can leak if the env is not re-imported","type":"note","tags":["debugging","vitest"]}
+{"content":"JSON.stringify key ordering is not guaranteed; use sorted keys for deterministic output","type":"note","tags":["debugging","json"]}
+{"content":"Memory system uses three tiers: hot for recent, warm for active, cold for archived","type":"decision","tags":["architecture","tiers"]}
+{"content":"System exposes memory operations via the MCP protocol","type":"decision","tags":["architecture","mcp"]}
+{"content":"Embedding vectors are stored inside sqlite-vec extension tables in SQLite","type":"decision","tags":["architecture","embeddings"]}
+{"content":"Compaction runs at session end to demote stale hot entries to warm","type":"decision","tags":["architecture","compaction"]}
+{"content":"Corpus ingestion is chunked to avoid blocking the event loop on large files","type":"decision","tags":["architecture","ingestion"]}
+{"content":"Host memory importer implements a standard interface for pluggable import sources","type":"decision","tags":["architecture","import"]}
+{"content":"Retrieval operations log the config snapshot ID for A/B comparison","type":"decision","tags":["architecture","eval"]}
+{"content":"Benchmark runner seeds corpus into warm tier and cleans up after each run","type":"decision","tags":["architecture","benchmark"]}
+{"content":"Config snapshots are stored to enable A/B comparison across runs","type":"decision","tags":["architecture","config"]}
+{"content":"Decay scoring drives automatic promotion from cold to warm tier","type":"decision","tags":["architecture","decay"]}
+{"content":"All tiers share a single SQLite database file","type":"decision","tags":["architecture","sqlite"]}
+{"content":"Project detection scopes memories to the nearest package.json directory","type":"decision","tags":["architecture","scoping"]}
+{"content":"Search fans out across multiple tiers in parallel and merges results","type":"decision","tags":["architecture","search"]}
+{"content":"Long content is split at sentence boundaries before ingestion","type":"decision","tags":["architecture","ingestion"]}
+{"content":"No background daemon process; all operations are synchronous within the MCP call","type":"decision","tags":["architecture","design"]}
+{"content":"Tool response content uses JSON encoded inside text content blocks","type":"preference","tags":["api","mcp"]}
+{"content":"MCP tool names use snake_case convention","type":"preference","tags":["api","mcp"]}
+{"content":"Error responses include an isError flag set to true","type":"preference","tags":["api","errors"]}
+{"content":"Search results include the tier field indicating where the entry was found","type":"preference","tags":["api","search"]}
+{"content":"memory_store tool returns the generated entry ID","type":"preference","tags":["api","store"]}
+{"content":"No batch operations are exposed; tools handle one entry at a time","type":"preference","tags":["api","design"]}
+{"content":"Absent values are represented as undefined not null in tool responses","type":"preference","tags":["api","types"]}
+{"content":"Input validators are defined in dedicated validator modules","type":"preference","tags":["api","validation"]}
+{"content":"MCP tool description strings must be under 100 characters","type":"preference","tags":["api","mcp"]}
+{"content":"Config keys use dot notation for nested access (e.g. tiers.hot.max)","type":"preference","tags":["api","config"]}
+{"content":"All TypeScript imports use .js file extensions for ESM compatibility","type":"preference","tags":["dev","typescript"]}
+{"content":"tsup produces a single bundle entry point","type":"preference","tags":["dev","build"]}
+{"content":"No default exports; all exports are named","type":"preference","tags":["dev","typescript"]}
+{"content":"Test files are colocated next to the source files they test","type":"preference","tags":["dev","testing"]}
+{"content":"Type-only imports always use import type syntax","type":"preference","tags":["dev","typescript"]}
