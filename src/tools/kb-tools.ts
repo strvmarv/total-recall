@@ -4,6 +4,7 @@ import { listCollections } from "../ingestion/hierarchical-index.js";
 import { searchMemory } from "../memory/search.js";
 import { listEntries, deleteEntry } from "../db/entries.js";
 import { deleteEmbedding } from "../search/vector-search.js";
+import { validatePath, validateOptionalString, validateOptionalNumber, validateString } from "./validation.js";
 
 export const KB_TOOLS = [
   {
@@ -86,8 +87,8 @@ export async function handleKbTool(
   ctx: ToolContext,
 ): Promise<ToolResult | null> {
   if (name === "kb_ingest_file") {
-    const filePath = args.path as string;
-    const collectionId = args.collection as string | undefined;
+    const filePath = validatePath(args.path, "path");
+    const collectionId = validateOptionalString(args.collection, "collection");
     await ctx.embedder.ensureLoaded();
     const embedFn = (text: string) => ctx.embedder.embed(text);
     const result = await ingestFile(ctx.db, embedFn, filePath, collectionId);
@@ -95,8 +96,8 @@ export async function handleKbTool(
   }
 
   if (name === "kb_ingest_dir") {
-    const dirPath = args.path as string;
-    const glob = args.glob as string | undefined;
+    const dirPath = validatePath(args.path, "path");
+    const glob = validateOptionalString(args.glob, "glob");
     await ctx.embedder.ensureLoaded();
     const embedFn = (text: string) => ctx.embedder.embed(text);
     const result = await ingestDirectory(ctx.db, embedFn, dirPath, glob);
@@ -104,8 +105,8 @@ export async function handleKbTool(
   }
 
   if (name === "kb_search") {
-    const query = args.query as string;
-    const topK = (args.top_k as number | undefined) ?? 10;
+    const query = validateString(args.query, "query");
+    const topK = validateOptionalNumber(args.top_k, "top_k", 1, 1000) ?? 10;
     await ctx.embedder.ensureLoaded();
     const vec = await ctx.embedder.embed(query);
     const embedFn = () => vec;
@@ -122,7 +123,7 @@ export async function handleKbTool(
   }
 
   if (name === "kb_remove") {
-    const id = args.id as string;
+    const id = validateString(args.id, "id");
     const cascade = (args.cascade as boolean | undefined) ?? false;
 
     if (cascade) {
@@ -142,7 +143,7 @@ export async function handleKbTool(
   }
 
   if (name === "kb_refresh") {
-    const collection = args.collection as string;
+    const collection = validateString(args.collection, "collection");
     return {
       content: [
         {

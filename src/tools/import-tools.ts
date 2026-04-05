@@ -1,6 +1,7 @@
 import type { ToolContext } from "./registry.js";
 import { ClaudeCodeImporter } from "../importers/claude-code.js";
 import { CopilotCliImporter } from "../importers/copilot-cli.js";
+import { validateOptionalString } from "./validation.js";
 
 export const IMPORT_TOOLS = [
   {
@@ -24,7 +25,7 @@ export async function handleImportTool(
   ctx: ToolContext,
 ): Promise<ToolResult | null> {
   if (name === "import_host") {
-    const source = args.source as string | undefined;
+    const source = validateOptionalString(args.source, "source");
     await ctx.embedder.ensureLoaded();
     const embedFn = (text: string) => ctx.embedder.embed(text);
 
