@@ -10,12 +10,6 @@ The MCP server is available as an npm package:
 npm install -g @strvmarv/total-recall
 ```
 
-Or run without installing:
-
-```bash
-npx @strvmarv/total-recall
-```
-
 ## Claude Code
 
 ### Option A: Plugin Install (Recommended)
@@ -23,14 +17,14 @@ npx @strvmarv/total-recall
 Run in Claude Code:
 
 ```
-/plugin install total-recall@strvmarv-marketplace
+/plugin install total-recall@strvmarv-total-recall-marketplace
 ```
 
 If the marketplace isn't registered yet:
 
 ```
 /plugin marketplace add strvmarv/total-recall-marketplace
-/plugin install total-recall@strvmarv-marketplace
+/plugin install total-recall@strvmarv-total-recall-marketplace
 ```
 
 ### Option B: Manual Plugin Install
@@ -58,8 +52,7 @@ Add to your Claude Code MCP config:
 {
   "mcpServers": {
     "total-recall": {
-      "command": "npx",
-      "args": ["-y", "@strvmarv/total-recall"]
+      "command": "total-recall"
     }
   }
 }
@@ -73,8 +66,7 @@ Add to your Copilot CLI MCP config (`~/.copilot/mcp-config.json`):
 {
   "mcpServers": {
     "total-recall": {
-      "command": "npx",
-      "args": ["-y", "@strvmarv/total-recall"]
+      "command": "total-recall"
     }
   }
 }
@@ -88,8 +80,7 @@ Add to your OpenCode config (`opencode.json` or `~/.config/opencode/config.json`
 {
   "mcpServers": {
     "total-recall": {
-      "command": "npx",
-      "args": ["-y", "@strvmarv/total-recall"]
+      "command": "total-recall"
     }
   }
 }
@@ -106,8 +97,7 @@ Add to your Cline MCP settings:
 {
   "mcpServers": {
     "total-recall": {
-      "command": "npx",
-      "args": ["-y", "@strvmarv/total-recall"]
+      "command": "total-recall"
     }
   }
 }
@@ -121,8 +111,7 @@ Add to your Cursor MCP config (`.cursor/mcp.json` or global settings):
 {
   "mcpServers": {
     "total-recall": {
-      "command": "npx",
-      "args": ["-y", "@strvmarv/total-recall"]
+      "command": "total-recall"
     }
   }
 }
@@ -149,7 +138,7 @@ You can verify it's working with:
 
 1. Creates `~/.total-recall/` directory
 2. Creates SQLite database with schema
-3. Downloads embedding model (~80MB, one-time)
+3. Loads bundled embedding model (no download needed)
 4. Scans for existing memories from host tools (Claude Code, Copilot CLI)
 5. Auto-ingests project docs (README, docs/, etc.)
 6. Runs a quick smoke test to verify everything works

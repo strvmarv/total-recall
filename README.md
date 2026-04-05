@@ -41,14 +41,14 @@ That's it. Your AI assistant will read the instructions and install total-recall
 ### Claude Code
 
 ```
-/plugin install total-recall@strvmarv-marketplace
+/plugin install total-recall@strvmarv-total-recall-marketplace
 ```
 
 Or if the marketplace isn't registered:
 
 ```
 /plugin marketplace add strvmarv/total-recall-marketplace
-/plugin install total-recall@strvmarv-marketplace
+/plugin install total-recall@strvmarv-total-recall-marketplace
 ```
 
 ### npm (Any MCP-Compatible Tool)
@@ -63,14 +63,15 @@ Then add to your tool's MCP config:
 {
   "mcpServers": {
     "total-recall": {
-      "command": "npx",
-      "args": ["-y", "@strvmarv/total-recall"]
+      "command": "total-recall"
     }
   }
 }
 ```
 
 This works with **Copilot CLI**, **OpenCode**, **Cline**, **Cursor**, and any other MCP-compatible tool.
+
+> **Note:** `npx -y @strvmarv/total-recall` does not work due to an [npm bug](https://github.com/npm/cli/issues/3753) with scoped package binaries. Use the global install (`total-recall` command) instead.
 
 ### From Source
 
@@ -85,7 +86,7 @@ npm install && npm run build
 total-recall auto-initializes on first use:
 
 1. Creates `~/.total-recall/` with SQLite database
-2. Downloads embedding model (~80MB, one-time)
+2. Loads bundled embedding model (included in package, no download needed)
 3. Scans for existing memories (Claude Code, Copilot CLI)
 4. Auto-ingests project docs (README, docs/, etc.)
 5. Reports: `total-recall: initialized · 4 memories imported · 12 docs ingested · system verified`
@@ -113,7 +114,7 @@ Tiers:
 3. `compact` — decay scores, demote warm→cold, evict hot→warm, summarize clusters
 4. `ingest` — chunk files, embed chunks, store in cold tier with metadata
 
-All state lives in `~/.total-recall/db.sqlite`. The embedding model is cached at `~/.total-recall/models/`. No network calls after initial model download.
+All state lives in `~/.total-recall/db.sqlite`. The embedding model is bundled with the package. No network calls required.
 
 ---
 

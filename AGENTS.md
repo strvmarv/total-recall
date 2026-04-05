@@ -1,0 +1,55 @@
+# Agent & Contributor Guide
+
+## Build & Release
+
+### dist/ is committed
+
+`dist/` is tracked in git (not gitignored). This is intentional — the Claude Code plugin marketplace clones from git, not npm, so `dist/index.js` must be present in the repo for the MCP server to start.
+
+- Always run `npm run build` after changing `src/` and commit the updated `dist/`
+- CI will fail if `dist/` is stale after a clean build (`git diff --exit-code dist/`)
+- `.gitattributes` marks `dist/**` as `linguist-generated` so GitHub collapses diffs in PRs
+
+### ONNX model is tracked via Git LFS
+
+The embedding model (`models/**/*.onnx`) is stored with Git LFS. Contributors need `git lfs install` before cloning. The model is bundled so plugin users get offline embeddings without a HuggingFace download on first run.
+
+If the model is missing at runtime, the code auto-downloads from HuggingFace as a fallback (see `src/embedding/model-manager.ts`).
+
+### Release flow
+
+1. Bump version in both `package.json` and `.claude-plugin/plugin.json` (keep them in sync)
+2. Run `npm run build` and commit the updated `dist/`
+3. Commit with message like `0.x.y`
+4. Tag with `git tag v0.x.y`
+5. Push both: `git push && git push origin v0.x.y`
+6. The `publish.yml` workflow triggers on `v*` tags — runs tests, builds, publishes to npm
+
+## Plugin System
+
+### How marketplace installs work
+
+The marketplace repo (`strvmarv/total-recall-marketplace`) points Claude Code at the source repo via a git URL. Claude Code clones the source repo into `~/.claude/plugins/cache/`. It reads `.mcp.json` to start the MCP server.
+
+### npx does not work for scoped packages
+
+`npx` cannot resolve binaries for scoped packages where the `bin` name differs from the package scope. `npx -y @strvmarv/total-recall` fails with "command not found" because npx looks for a binary matching the scope, not the `bin` field (`total-recall`). This is a known npm bug. Never use `npx` in `.mcp.json` for this package.
+
+### .mcp.json uses the bash launcher
+
+`.mcp.json` invokes `bash bin/total-recall.sh` instead of `npx`. The launcher resolves the server in this order:
+
+1. `dist/index.js` relative to the script (works for git clones and npm installs)
+2. `total-recall` global binary in PATH (works for `npm install -g`)
+3. Entry point in global `node_modules` via `npm root -g` (edge case fallback)
+
+### Removing a plugin install (for testing)
+
+To fully uninstall for a clean reinstall test, remove all three:
+- `~/.claude/plugins/cache/strvmarv-total-recall-marketplace/`
+- `~/.claude/plugins/marketplaces/strvmarv-total-recall-marketplace/`
+- Entries in `~/.claude/settings.json`: `enabledPlugins["total-recall@..."]` and `extraKnownMarketplaces["strvmarv-..."]`
+
+### Node discovery
+
+The launcher (`bin/total-recall.sh`) finds `node` across common install methods: PATH, nvm, fnm, Homebrew (Linux and macOS), and Volta. If adding a new node version manager, add its lookup to the `find_node()` function.
