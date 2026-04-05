@@ -24,6 +24,11 @@
 ╚══════════════════════════════════════════════╝
 ```
 
+[![CI](https://github.com/strvmarv/total-recall/actions/workflows/ci.yml/badge.svg)](https://github.com/strvmarv/total-recall/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@strvmarv/total-recall)](https://www.npmjs.com/package/@strvmarv/total-recall)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node](https://img.shields.io/node/v/@strvmarv/total-recall)](https://www.npmjs.com/package/@strvmarv/total-recall)
+
 # total-recall
 
 **Multi-tiered memory and knowledge base for TUI coding assistants.**
