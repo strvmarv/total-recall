@@ -215,6 +215,7 @@ export async function runSessionInit(ctx: ToolContext): Promise<SessionInitResul
       tiers: [{ tier: "warm", content_type: "memory" }],
       topK: ctx.config.tiers.warm.retrieval_top_k,
       minScore: ctx.config.tiers.warm.similarity_threshold,
+      ftsWeight: ctx.config.search?.fts_weight,
     });
 
     const hotCount = listEntries(ctx.db, "hot", "memory").length;

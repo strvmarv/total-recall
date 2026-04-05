@@ -3,6 +3,7 @@ import type Database from "better-sqlite3";
 import { storeMemory } from "../memory/store.js";
 import { deleteMemory } from "../memory/delete.js";
 import { searchMemory } from "../memory/search.js";
+import { loadConfig } from "../config.js";
 import type { Tier, EntryType } from "../types.js";
 
 type EmbedFn = (text: string) => Float32Array | Promise<Float32Array>;
@@ -84,9 +85,11 @@ export async function runBenchmark(
 
   for (const bq of queries) {
     const start = performance.now();
+    const config = loadConfig();
     const results = await searchMemory(db, embed, bq.query, {
       tiers: [{ tier: "warm", content_type: "memory" }],
       topK: 3,
+      ftsWeight: config.search?.fts_weight,
     });
     const latencyMs = performance.now() - start;
     totalLatencyMs += latencyMs;

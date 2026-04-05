@@ -145,6 +145,9 @@ export interface TotalRecallConfig {
     latency_ratio?: number;
     min_events?: number;
   };
+  search?: {
+    fts_weight?: number;
+  };
 }
 
 export function tableName(tier: Tier, type: ContentType): string {

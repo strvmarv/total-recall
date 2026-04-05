@@ -1345,7 +1345,8 @@ async function handleMemoryTool(name, args, ctx) {
     const results = await searchMemory(ctx.db, embedFn, query, {
       tiers,
       topK,
-      minScore
+      minScore,
+      ftsWeight: ctx.config.search?.fts_weight
     });
     const latencyMs = Math.round(performance.now() - searchStart);
     logRetrievalEvent(ctx.db, {
@@ -2363,7 +2364,8 @@ async function handleKbTool(name, args, ctx) {
         const collectionResults = await searchMemory(ctx.db, embedFn, query, {
           tiers: [{ tier: "cold", content_type: "knowledge" }],
           topK: 3,
-          minScore: ctx.config.tiers.warm.similarity_threshold
+          minScore: ctx.config.tiers.warm.similarity_threshold,
+          ftsWeight: ctx.config.search?.fts_weight
         });
         for (const r of collectionResults) {
           const meta = r.entry.metadata;
@@ -2379,7 +2381,8 @@ async function handleKbTool(name, args, ctx) {
     if (collectionId) {
       const allResults = await searchMemory(ctx.db, embedFn, query, {
         tiers: [{ tier: "cold", content_type: "knowledge" }],
-        topK: topK * 2
+        topK: topK * 2,
+        ftsWeight: ctx.config.search?.fts_weight
       });
       results = allResults.filter(
         (r) => r.entry.collection_id === collectionId || r.entry.parent_id === collectionId
@@ -2390,7 +2393,8 @@ async function handleKbTool(name, args, ctx) {
     } else {
       results = await searchMemory(ctx.db, embedFn, query, {
         tiers: [{ tier: "cold", content_type: "knowledge" }],
-        topK
+        topK,
+        ftsWeight: ctx.config.search?.fts_weight
       });
     }
     let needsSummary = false;
@@ -2535,9 +2539,11 @@ async function runBenchmark(db, embed, opts) {
   let totalLatencyMs = 0;
   for (const bq of queries) {
     const start = performance.now();
+    const config = loadConfig();
     const results = await searchMemory(db, embed, bq.query, {
       tiers: [{ tier: "warm", content_type: "memory" }],
-      topK: 3
+      topK: 3,
+      ftsWeight: config.search?.fts_weight
     });
     const latencyMs = performance.now() - start;
     totalLatencyMs += latencyMs;
@@ -4277,7 +4283,8 @@ async function runSessionInit(ctx) {
     const warmResults = await searchMemory(ctx.db, embedFn, project, {
       tiers: [{ tier: "warm", content_type: "memory" }],
       topK: ctx.config.tiers.warm.retrieval_top_k,
-      minScore: ctx.config.tiers.warm.similarity_threshold
+      minScore: ctx.config.tiers.warm.similarity_threshold,
+      ftsWeight: ctx.config.search?.fts_weight
     });
     const hotCount = listEntries(ctx.db, "hot", "memory").length;
     const budget = ctx.config.tiers.hot.max_entries - hotCount;

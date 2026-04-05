@@ -181,6 +181,7 @@ export async function handleMemoryTool(
       tiers,
       topK,
       minScore,
+      ftsWeight: ctx.config.search?.fts_weight,
     });
     const latencyMs = Math.round(performance.now() - searchStart);
 

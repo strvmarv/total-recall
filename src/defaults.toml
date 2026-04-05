@@ -31,3 +31,6 @@ dimensions = 384
 miss_rate_delta = 0.1
 latency_ratio = 2.0
 min_events = 10
+
+[search]
+fts_weight = 0.3

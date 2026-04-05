@@ -138,6 +138,7 @@ export async function handleKbTool(
           tiers: [{ tier: "cold", content_type: "knowledge" }],
           topK: 3,
           minScore: ctx.config.tiers.warm.similarity_threshold,
+          ftsWeight: ctx.config.search?.fts_weight,
         });
 
         // Find the best matching collection entry
@@ -159,6 +160,7 @@ export async function handleKbTool(
       const allResults = await searchMemory(ctx.db, embedFn, query, {
         tiers: [{ tier: "cold", content_type: "knowledge" }],
         topK: topK * 2,
+        ftsWeight: ctx.config.search?.fts_weight,
       });
       results = allResults.filter(
         (r) => r.entry.collection_id === collectionId || r.entry.parent_id === collectionId,
@@ -172,6 +174,7 @@ export async function handleKbTool(
       results = await searchMemory(ctx.db, embedFn, query, {
         tiers: [{ tier: "cold", content_type: "knowledge" }],
         topK,
+        ftsWeight: ctx.config.search?.fts_weight,
       });
     }
 
