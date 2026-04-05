@@ -163,6 +163,15 @@ export function deleteEntry(
   db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(id);
 }
 
+const ALLOWED_ORDER_COLUMNS = new Set([
+  "created_at",
+  "updated_at",
+  "last_accessed_at",
+  "access_count",
+  "decay_score",
+  "content",
+]);
+
 export function listEntries(
   db: Database.Database,
   tier: Tier,
@@ -170,7 +179,14 @@ export function listEntries(
   opts?: ListEntriesOpts,
 ): Entry[] {
   const table = tableName(tier, type);
-  const orderBy = opts?.orderBy ?? "created_at DESC";
+
+  const orderParts = (opts?.orderBy ?? "created_at DESC").split(" ");
+  const column = orderParts[0]!;
+  const direction = orderParts[1]?.toUpperCase() === "ASC" ? "ASC" : "DESC";
+  if (!ALLOWED_ORDER_COLUMNS.has(column)) {
+    throw new Error(`Invalid orderBy column: ${column}`);
+  }
+  const orderBy = `${column} ${direction}`;
 
   let sql: string;
   let params: unknown[];
