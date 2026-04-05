@@ -178,7 +178,7 @@ export async function handleMemoryTool(
       const vec = await ctx.embedder.embed(newContent);
       embedFn = () => vec;
     }
-    const updated = await updateMemory(ctx.db, embedFn ?? (() => new Float32Array(0)), args.id as string, {
+    const updated = await updateMemory(ctx.db, embedFn, args.id as string, {
       content: newContent,
       summary: args.summary as string | null | undefined,
       tags: args.tags as string[] | undefined,

@@ -8,7 +8,7 @@ type EmbedFn = (text: string) => Float32Array | Promise<Float32Array>;
 
 export async function updateMemory(
   db: Database.Database,
-  embed: EmbedFn,
+  embed: EmbedFn | undefined,
   id: string,
   opts: UpdateEntryOpts,
 ): Promise<boolean> {
@@ -19,7 +19,7 @@ export async function updateMemory(
 
   updateEntry(db, tier, content_type, id, opts);
 
-  if (opts.content !== undefined) {
+  if (opts.content !== undefined && embed !== undefined) {
     deleteEmbedding(db, tier, content_type, id);
     const newEmbedding = await embed(opts.content);
     insertEmbedding(db, tier, content_type, id, newEmbedding);
