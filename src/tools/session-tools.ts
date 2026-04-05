@@ -33,7 +33,7 @@ export function generateHints(
       orderBy: "access_count DESC", limit: 2,
     }),
   ]
-    .sort((a, b) => b.access_count - a.access_count)
+    .sort((a, b) => b.access_count - a.access_count || a.created_at - b.created_at)
     .slice(0, 2);
 
   for (const entry of correctionsAndPrefs) {
@@ -68,7 +68,7 @@ export function generateHints(
 
 export function getLastSessionAge(db: Database.Database): string | null {
   const row = db
-    .prepare(`SELECT MAX(timestamp) as ts FROM compaction_log`)
+    .prepare(`SELECT MAX(timestamp) as ts FROM compaction_log WHERE reason != 'warm_sweep_decay'`)
     .get() as { ts: number | null } | undefined;
 
   const ts = row?.ts;

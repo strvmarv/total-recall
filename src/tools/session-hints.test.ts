@@ -20,10 +20,12 @@ describe("generateHints", () => {
       content: "Always use snake_case for variables",
       metadata: { entry_type: "preference" },
     });
-    insertEntry(db, "warm", "memory", {
+    const correctionId = insertEntry(db, "warm", "memory", {
       content: "Do not mock the database in integration tests",
       metadata: { entry_type: "correction" },
     });
+    // Give correction a higher access_count so sort order is deterministic
+    updateEntry(db, "warm", "memory", correctionId, { touch: true });
     insertEntry(db, "warm", "memory", {
       content: "Regular memory with no type",
     });

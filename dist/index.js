@@ -625,6 +625,37 @@ function countEntries(db, tier, type) {
   const row = db.prepare(`SELECT COUNT(*) as count FROM ${table}`).get();
   return row.count;
 }
+function listEntriesByMetadata(db, tier, type, metadataFilter, opts) {
+  const table = tableName(tier, type);
+  const orderParts = (opts?.orderBy ?? "created_at DESC").split(" ");
+  const column = orderParts[0];
+  const direction = orderParts[1]?.toUpperCase() === "ASC" ? "ASC" : "DESC";
+  if (!ALLOWED_ORDER_COLUMNS.has(column)) {
+    throw new Error(`Invalid orderBy column: ${column}`);
+  }
+  const orderBy = `${column} ${direction}`;
+  const filterKeys = Object.keys(metadataFilter);
+  if (filterKeys.length === 0) {
+    throw new Error("metadataFilter must contain at least one key-value pair");
+  }
+  const KEY_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+  for (const key of filterKeys) {
+    if (!KEY_PATTERN.test(key)) {
+      throw new Error(`Invalid metadata key: ${key}`);
+    }
+  }
+  const whereClauses = filterKeys.map(
+    (key) => `json_extract(metadata, '$.${key}') = ?`
+  );
+  const params = filterKeys.map((key) => metadataFilter[key]);
+  let sql = `SELECT * FROM ${table} WHERE ${whereClauses.join(" AND ")} ORDER BY ${orderBy}`;
+  if (opts?.limit !== void 0) {
+    sql += " LIMIT ?";
+    params.push(opts.limit);
+  }
+  const rows = db.prepare(sql).all(...params);
+  return rows.map(rowToEntry);
+}
 function moveEntry(db, fromTier, fromType, toTier, toType, id) {
   const doMove = db.transaction(() => {
     const entry = getEntry(db, fromTier, fromType, id);
@@ -3112,6 +3143,66 @@ function detectProject(cwd) {
 }
 
 // src/tools/session-tools.ts
+function truncateHint(content, maxLen = 120) {
+  if (content.length <= maxLen) return content;
+  return content.slice(0, maxLen) + "...";
+}
+function generateHints(db, warmPromotedIds) {
+  const seen = /* @__PURE__ */ new Set();
+  const hints = [];
+  const correctionsAndPrefs = [
+    ...listEntriesByMetadata(db, "warm", "memory", { entry_type: "correction" }, {
+      orderBy: "access_count DESC",
+      limit: 2
+    }),
+    ...listEntriesByMetadata(db, "warm", "memory", { entry_type: "preference" }, {
+      orderBy: "access_count DESC",
+      limit: 2
+    })
+  ].sort((a, b) => b.access_count - a.access_count || a.created_at - b.created_at).slice(0, 2);
+  for (const entry of correctionsAndPrefs) {
+    if (!seen.has(entry.id)) {
+      seen.add(entry.id);
+      hints.push(truncateHint(entry.content));
+    }
+  }
+  const frequent = listEntries(db, "warm", "memory", {
+    orderBy: "access_count DESC",
+    limit: 10
+  }).filter((e) => e.access_count >= 3 && !seen.has(e.id));
+  for (const entry of frequent.slice(0, 2)) {
+    seen.add(entry.id);
+    hints.push(truncateHint(entry.content));
+  }
+  for (const id of warmPromotedIds.slice(0, 1)) {
+    if (seen.has(id)) continue;
+    const entry = getEntry(db, "hot", "memory", id);
+    if (entry) {
+      seen.add(entry.id);
+      hints.push(truncateHint(entry.content));
+    }
+  }
+  return hints.slice(0, 5);
+}
+function getLastSessionAge(db) {
+  const row = db.prepare(`SELECT MAX(timestamp) as ts FROM compaction_log WHERE reason != 'warm_sweep_decay'`).get();
+  const ts = row?.ts;
+  if (!ts) return null;
+  const diffMs = Date.now() - ts;
+  const minutes = Math.floor(diffMs / (60 * 1e3));
+  const hours = Math.floor(diffMs / (60 * 60 * 1e3));
+  const days = Math.floor(diffMs / (24 * 60 * 60 * 1e3));
+  const weeks = Math.floor(days / 7);
+  if (minutes === 0) return "just now";
+  if (minutes === 1) return "1 minute ago";
+  if (minutes < 60) return `${minutes} minutes ago`;
+  if (hours === 1) return "1 hour ago";
+  if (hours < 24) return `${hours} hours ago`;
+  if (days === 1) return "1 day ago";
+  if (days < 7) return `${days} days ago`;
+  if (weeks === 1) return "1 week ago";
+  return `${weeks} weeks ago`;
+}
 var SESSION_TOOLS = [
   {
     name: "session_start",
@@ -3141,100 +3232,124 @@ var SESSION_TOOLS = [
     }
   }
 ];
+async function runSessionInit(ctx) {
+  if (ctx.sessionInitResult) return ctx.sessionInitResult;
+  await ctx.embedder.ensureLoaded();
+  const embedFn = (text) => ctx.embedder.embed(text);
+  const project = detectProject(process.cwd());
+  const importers = [
+    new ClaudeCodeImporter(),
+    new CopilotCliImporter()
+  ];
+  const importSummary = [];
+  for (const importer of importers) {
+    if (!importer.detect()) continue;
+    const memResult = await importer.importMemories(ctx.db, embedFn, project ?? void 0);
+    const kbResult = await importer.importKnowledge(ctx.db, embedFn);
+    importSummary.push({
+      tool: importer.name,
+      memoriesImported: memResult.imported,
+      knowledgeImported: kbResult.imported
+    });
+  }
+  let warmSweepResult = null;
+  const sweepIntervalMs = ctx.config.compaction.warm_sweep_interval_days * 24 * 60 * 60 * 1e3;
+  const lastSweep = ctx.db.prepare(`SELECT MAX(timestamp) as ts FROM compaction_log WHERE reason = 'warm_sweep_decay'`).get();
+  const lastSweepTs = lastSweep?.ts ?? 0;
+  if (Date.now() - lastSweepTs > sweepIntervalMs) {
+    const sessionId = ctx.sessionId ?? randomUUID6();
+    const result2 = await sweepWarmTier(ctx.db, embedFn, {
+      coldDecayDays: ctx.config.tiers.warm.cold_decay_days
+    }, sessionId);
+    if (result2.demoted.length > 0) {
+      warmSweepResult = { demoted: result2.demoted.length };
+    }
+  }
+  let projectDocs = null;
+  const docsResult = await ingestProjectDocs(ctx.db, embedFn, process.cwd());
+  if (docsResult.filesIngested > 0) {
+    projectDocs = { filesIngested: docsResult.filesIngested, totalChunks: docsResult.totalChunks };
+  }
+  const warmPromotedIds = [];
+  let warmPromoted = 0;
+  if (project) {
+    const warmResults = await searchMemory(ctx.db, embedFn, project, {
+      tiers: [{ tier: "warm", content_type: "memory" }],
+      topK: ctx.config.tiers.warm.retrieval_top_k,
+      minScore: ctx.config.tiers.warm.similarity_threshold
+    });
+    const hotCount = listEntries(ctx.db, "hot", "memory").length;
+    const budget = ctx.config.tiers.hot.max_entries - hotCount;
+    for (const result2 of warmResults.slice(0, Math.max(0, budget))) {
+      const entry = getEntry(ctx.db, "warm", "memory", result2.entry.id);
+      if (entry && (entry.project === project || entry.project === null)) {
+        await promoteEntry(ctx.db, embedFn, result2.entry.id, "warm", "memory", "hot", "memory");
+        warmPromotedIds.push(result2.entry.id);
+        warmPromoted++;
+      }
+    }
+  }
+  let hotEntries = listEntries(ctx.db, "hot", "memory");
+  const tokenBudget = ctx.config.tiers.hot.token_budget;
+  const estimateTokens4 = (text) => Math.ceil(text.length / 4);
+  let totalTokens = hotEntries.reduce((sum, e) => sum + estimateTokens4(e.content), 0);
+  if (totalTokens > tokenBudget && hotEntries.length > 1) {
+    const sorted = [...hotEntries].sort((a, b) => a.decay_score - b.decay_score);
+    const evicted = [];
+    while (totalTokens > tokenBudget && sorted.length > 1) {
+      const victim = sorted.shift();
+      totalTokens -= estimateTokens4(victim.content);
+      evicted.push(victim.id);
+    }
+    if (evicted.length > 0) {
+      for (const id of evicted) {
+        await demoteEntry(ctx.db, embedFn, id, "hot", "memory", "warm", "memory");
+      }
+      hotEntries = listEntries(ctx.db, "hot", "memory");
+    }
+  }
+  const contextLines = hotEntries.map((e) => {
+    const tags = e.tags.length > 0 ? ` [${e.tags.join(", ")}]` : "";
+    return `- ${e.content}${tags}`;
+  });
+  const contextText = contextLines.join("\n");
+  const snapshotId = createConfigSnapshot(ctx.db, ctx.config, "session-start");
+  ctx.configSnapshotId = snapshotId;
+  const tierSummary = {
+    hot: hotEntries.length,
+    warm: countEntries(ctx.db, "warm", "memory") + countEntries(ctx.db, "warm", "knowledge"),
+    cold: countEntries(ctx.db, "cold", "memory") + countEntries(ctx.db, "cold", "knowledge"),
+    kb: countEntries(ctx.db, "hot", "knowledge") + countEntries(ctx.db, "warm", "knowledge") + countEntries(ctx.db, "cold", "knowledge"),
+    collections: ctx.db.prepare(`SELECT COUNT(DISTINCT collection_id) as count FROM cold_knowledge WHERE collection_id IS NOT NULL`).get().count
+  };
+  const hints = generateHints(ctx.db, warmPromotedIds);
+  const lastSessionAge = getLastSessionAge(ctx.db);
+  const result = {
+    project,
+    importSummary,
+    warmSweep: warmSweepResult,
+    warmPromoted,
+    projectDocs,
+    hotEntryCount: hotEntries.length,
+    context: contextText,
+    tierSummary,
+    hints,
+    lastSessionAge
+  };
+  ctx.sessionInitResult = result;
+  ctx.sessionInitialized = true;
+  return result;
+}
 async function handleSessionTool(name, args, ctx) {
   if (name === "session_start") {
-    await ctx.embedder.ensureLoaded();
-    const embedFn = (text) => ctx.embedder.embed(text);
-    const project = detectProject(process.cwd());
-    const importers = [
-      new ClaudeCodeImporter(),
-      new CopilotCliImporter()
-    ];
-    const importSummary = [];
-    for (const importer of importers) {
-      if (!importer.detect()) continue;
-      const memResult = await importer.importMemories(ctx.db, embedFn, project ?? void 0);
-      const kbResult = await importer.importKnowledge(ctx.db, embedFn);
-      importSummary.push({
-        tool: importer.name,
-        memoriesImported: memResult.imported,
-        knowledgeImported: kbResult.imported
-      });
-    }
-    let warmSweepResult = null;
-    const sweepIntervalMs = ctx.config.compaction.warm_sweep_interval_days * 24 * 60 * 60 * 1e3;
-    const lastSweep = ctx.db.prepare(`SELECT MAX(timestamp) as ts FROM compaction_log WHERE reason = 'warm_sweep_decay'`).get();
-    const lastSweepTs = lastSweep?.ts ?? 0;
-    if (Date.now() - lastSweepTs > sweepIntervalMs) {
-      const sessionId = ctx.sessionId ?? randomUUID6();
-      const result = await sweepWarmTier(ctx.db, embedFn, {
-        coldDecayDays: ctx.config.tiers.warm.cold_decay_days
-      }, sessionId);
-      if (result.demoted.length > 0) {
-        warmSweepResult = { demoted: result.demoted.length };
-      }
-    }
-    let projectDocs = null;
-    const docsResult = await ingestProjectDocs(ctx.db, embedFn, process.cwd());
-    if (docsResult.filesIngested > 0) {
-      projectDocs = { filesIngested: docsResult.filesIngested, totalChunks: docsResult.totalChunks };
-    }
-    let warmPromoted = 0;
-    if (project) {
-      const warmResults = await searchMemory(ctx.db, embedFn, project, {
-        tiers: [{ tier: "warm", content_type: "memory" }],
-        topK: ctx.config.tiers.warm.retrieval_top_k,
-        minScore: ctx.config.tiers.warm.similarity_threshold
-      });
-      const hotCount = listEntries(ctx.db, "hot", "memory").length;
-      const budget = ctx.config.tiers.hot.max_entries - hotCount;
-      for (const result of warmResults.slice(0, Math.max(0, budget))) {
-        const entry = getEntry(ctx.db, "warm", "memory", result.entry.id);
-        if (entry && (entry.project === project || entry.project === null)) {
-          await promoteEntry(ctx.db, embedFn, result.entry.id, "warm", "memory", "hot", "memory");
-          warmPromoted++;
-        }
-      }
-    }
-    let hotEntries = listEntries(ctx.db, "hot", "memory");
-    const tokenBudget = ctx.config.tiers.hot.token_budget;
-    const estimateTokens4 = (text) => Math.ceil(text.length / 4);
-    let totalTokens = hotEntries.reduce((sum, e) => sum + estimateTokens4(e.content), 0);
-    if (totalTokens > tokenBudget && hotEntries.length > 1) {
-      const sorted = [...hotEntries].sort((a, b) => a.decay_score - b.decay_score);
-      const evicted = [];
-      while (totalTokens > tokenBudget && sorted.length > 1) {
-        const victim = sorted.shift();
-        totalTokens -= estimateTokens4(victim.content);
-        evicted.push(victim.id);
-      }
-      if (evicted.length > 0) {
-        for (const id of evicted) {
-          await demoteEntry(ctx.db, embedFn, id, "hot", "memory", "warm", "memory");
-        }
-        hotEntries = listEntries(ctx.db, "hot", "memory");
-      }
-    }
-    const contextLines = hotEntries.map((e) => {
-      const tags = e.tags.length > 0 ? ` [${e.tags.join(", ")}]` : "";
-      return `- ${e.content}${tags}`;
-    });
-    const contextText = contextLines.join("\n");
-    const snapshotId = createConfigSnapshot(ctx.db, ctx.config, "session-start");
-    ctx.configSnapshotId = snapshotId;
+    const result = await runSessionInit(ctx);
     return {
       content: [
         {
           type: "text",
           text: JSON.stringify({
             sessionId: ctx.sessionId,
-            project,
-            importSummary,
-            warmSweep: warmSweepResult,
-            warmPromoted,
-            projectDocs,
-            hotEntryCount: hotEntries.length,
-            context: contextText
+            ...result
           })
         }
       ]
@@ -3641,9 +3756,17 @@ async function handleExtraTool(name, args, ctx) {
 // src/tools/registry.ts
 async function startServer(ctx) {
   const server = new Server(
-    { name: "total-recall", version: "0.1.0" },
+    { name: "total-recall", version: "0.5.0" },
     { capabilities: { tools: {} } }
   );
+  server.oninitialized = () => {
+    ctx.sessionInitPromise = runSessionInit(ctx).then(() => {
+      ctx.sessionInitialized = true;
+    }).catch((err) => {
+      process.stderr.write(`total-recall: background init failed: ${err}
+`);
+    });
+  };
   const allTools = [
     ...MEMORY_TOOLS,
     ...SYSTEM_TOOLS,
@@ -3659,6 +3782,14 @@ async function startServer(ctx) {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: rawArgs } = request.params;
     const args = rawArgs ?? {};
+    if (!ctx.sessionInitialized) {
+      if (ctx.sessionInitPromise) {
+        await ctx.sessionInitPromise;
+      } else {
+        await runSessionInit(ctx);
+        ctx.sessionInitialized = true;
+      }
+    }
     const memResult = await handleMemoryTool(name, args ?? {}, ctx);
     if (memResult !== null) return memResult;
     const sysResult = handleSystemTool(name, args ?? {}, ctx);
@@ -3698,7 +3829,7 @@ async function main() {
   const sessionId = randomUUID7();
   process.stderr.write(`total-recall: MCP server starting (db: ${getDataDir()}/total-recall.db)
 `);
-  await startServer({ db, config, embedder, sessionId, configSnapshotId: "default" });
+  await startServer({ db, config, embedder, sessionId, configSnapshotId: "default", sessionInitialized: false, sessionInitResult: null, sessionInitPromise: null });
   const cleanup = () => {
     closeDb();
     process.exit(0);
