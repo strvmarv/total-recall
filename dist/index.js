@@ -88,7 +88,6 @@ var ALL_TABLE_PAIRS = [
 ];
 
 // src/db/schema.ts
-var SCHEMA_VERSION = 1;
 function contentTableDDL(name) {
   return `
     CREATE TABLE IF NOT EXISTS ${name} (
@@ -186,21 +185,9 @@ var SCHEMA_VERSION_DDL = `
     applied_at INTEGER NOT NULL
   )
 `;
-function initSchema(db) {
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  const applySchema = db.transaction(() => {
-    const versionRow = db.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='_schema_version'"
-    ).get();
-    if (versionRow) {
-      return;
-    }
-    db.prepare(SCHEMA_VERSION_DDL).run();
-    db.prepare("INSERT INTO _schema_version (version, applied_at) VALUES (?, ?)").run(
-      SCHEMA_VERSION,
-      Date.now()
-    );
+var MIGRATIONS = [
+  // Migration 1: Initial schema (v1)
+  (db) => {
     for (const pair of ALL_TABLE_PAIRS) {
       const tbl = tableName(pair.tier, pair.type);
       const vecTbl = vecTableName(pair.tier, pair.type);
@@ -218,8 +205,30 @@ function initSchema(db) {
     for (const idx of SYSTEM_TABLE_INDEXES) {
       db.prepare(idx).run();
     }
+  }
+  // Add future migrations here as (db) => { ... }
+];
+function getCurrentVersion(db) {
+  const hasTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='_schema_version'").get();
+  if (!hasTable) return 0;
+  const row = db.prepare("SELECT MAX(version) as v FROM _schema_version").get();
+  return row?.v ?? 0;
+}
+function initSchema(db) {
+  db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
+  const migrate = db.transaction(() => {
+    db.prepare(SCHEMA_VERSION_DDL).run();
+    const currentVersion = getCurrentVersion(db);
+    for (let i = currentVersion; i < MIGRATIONS.length; i++) {
+      MIGRATIONS[i](db);
+      db.prepare("INSERT INTO _schema_version (version, applied_at) VALUES (?, ?)").run(
+        i + 1,
+        Date.now()
+      );
+    }
   });
-  applySchema();
+  migrate();
 }
 
 // src/db/connection.ts

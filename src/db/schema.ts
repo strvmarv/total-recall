@@ -108,34 +108,14 @@ const SCHEMA_VERSION_DDL = `
   )
 `;
 
-export function initSchema(db: Database.Database): void {
-  // Enable WAL mode and foreign keys outside the transaction (SQLite requirement)
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-
-  const applySchema = db.transaction(() => {
-    // Check if already initialized
-    const versionRow = db
-      .prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='_schema_version'",
-      )
-      .get();
-    if (versionRow) {
-      return; // Schema already applied
-    }
-
-    // Schema version table
-    db.prepare(SCHEMA_VERSION_DDL).run();
-    db.prepare("INSERT INTO _schema_version (version, applied_at) VALUES (?, ?)").run(
-      SCHEMA_VERSION,
-      Date.now(),
-    );
-
-    // Content tables and their vector tables + indexes
+// Each migration runs once, in order. Add new migrations at the end.
+// Migration functions receive the db and run inside a transaction.
+const MIGRATIONS: Array<(db: Database.Database) => void> = [
+  // Migration 1: Initial schema (v1)
+  (db) => {
     for (const pair of ALL_TABLE_PAIRS) {
       const tbl = tableName(pair.tier, pair.type);
       const vecTbl = vecTableName(pair.tier, pair.type);
-
       db.prepare(contentTableDDL(tbl)).run();
       db.prepare(
         `CREATE VIRTUAL TABLE IF NOT EXISTS ${vecTbl} USING vec0(embedding float[384])`,
@@ -144,17 +124,47 @@ export function initSchema(db: Database.Database): void {
         db.prepare(idx).run();
       }
     }
-
-    // System tables
     for (const ddl of SYSTEM_TABLE_DDLS) {
       db.prepare(ddl).run();
     }
-
-    // System table indexes
     for (const idx of SYSTEM_TABLE_INDEXES) {
       db.prepare(idx).run();
     }
+  },
+  // Add future migrations here as (db) => { ... }
+];
+
+function getCurrentVersion(db: Database.Database): number {
+  const hasTable = db
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='_schema_version'")
+    .get();
+  if (!hasTable) return 0;
+
+  const row = db
+    .prepare("SELECT MAX(version) as v FROM _schema_version")
+    .get() as { v: number | null } | undefined;
+  return row?.v ?? 0;
+}
+
+export function initSchema(db: Database.Database): void {
+  // Enable WAL mode and foreign keys outside the transaction (SQLite requirement)
+  db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
+
+  const migrate = db.transaction(() => {
+    // Ensure version table exists
+    db.prepare(SCHEMA_VERSION_DDL).run();
+
+    const currentVersion = getCurrentVersion(db);
+
+    for (let i = currentVersion; i < MIGRATIONS.length; i++) {
+      MIGRATIONS[i]!(db);
+      db.prepare("INSERT INTO _schema_version (version, applied_at) VALUES (?, ?)").run(
+        i + 1,
+        Date.now(),
+      );
+    }
   });
 
-  applySchema();
+  migrate();
 }

@@ -71,6 +71,18 @@ The launcher (`bin/total-recall.sh`) finds `node` across common install methods:
 
 `eval_report` returns: precision, hit rate, miss rate, MRR, latency, breakdowns by tier and content type, top misses (lowest scoring queries), false positives (high score but unused), and compaction health (total compactions, preservation ratio, semantic drift). Data comes from `retrieval_events` and `compaction_log` tables.
 
+## Database Migrations
+
+Schema changes are handled by a sequential migration framework in `src/db/schema.ts`. The `MIGRATIONS` array contains one function per version. On startup, `initSchema()` checks `_schema_version` for the current version and runs any newer migrations.
+
+To add a schema change:
+1. Add a new function to the `MIGRATIONS` array (do NOT modify existing migrations)
+2. The function receives the `db` and runs inside a transaction
+3. Use `CREATE TABLE IF NOT EXISTS` and `ALTER TABLE ... ADD COLUMN` as needed
+4. The version number is the array index + 1
+
+Existing v1 databases (created before the migration framework) are handled correctly — they have `_schema_version.version = 1`, so migration 0 is skipped.
+
 ## Deferred Items
 
 See `docs/TODO.md` for features planned in the design spec but not yet implemented, ordered by impact.
