@@ -3689,6 +3689,45 @@ function detectProject(cwd) {
   return basename3(cwd) || null;
 }
 
+// src/eval/smoke-test.ts
+import { resolve as resolve3 } from "path";
+import { readFileSync as readFileSync12 } from "fs";
+import { fileURLToPath as fileURLToPath2 } from "url";
+var __dirname2 = fileURLToPath2(new URL(".", import.meta.url));
+var PACKAGE_ROOT2 = __dirname2.endsWith("dist/") || __dirname2.endsWith("dist") ? resolve3(__dirname2, "..") : resolve3(__dirname2, "..", "..");
+var SMOKE_PASS_THRESHOLD = 0.8;
+function getMetaValue(db, key) {
+  const row = db.prepare("SELECT value FROM _meta WHERE key = ?").get(key);
+  return row?.value ?? null;
+}
+function setMetaValue(db, key, value) {
+  db.prepare(
+    "INSERT INTO _meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+  ).run(key, value);
+}
+function getPackageVersion() {
+  const pkgPath = resolve3(PACKAGE_ROOT2, "package.json");
+  const pkg = JSON.parse(readFileSync12(pkgPath, "utf-8"));
+  return pkg.version;
+}
+async function runSmokeTest(db, embed, currentVersion) {
+  const lastVersion = getMetaValue(db, "smoke_test_version");
+  if (lastVersion === currentVersion) return null;
+  const corpusPath = resolve3(PACKAGE_ROOT2, "eval", "corpus", "memories.jsonl");
+  const benchmarkPath = resolve3(PACKAGE_ROOT2, "eval", "benchmarks", "smoke.jsonl");
+  const result = await runBenchmark(db, embed, {
+    corpusPath,
+    benchmarkPath
+  });
+  const passed = result.exactMatchRate >= SMOKE_PASS_THRESHOLD;
+  setMetaValue(db, "smoke_test_version", currentVersion);
+  return {
+    passed,
+    exactMatchRate: result.exactMatchRate,
+    avgLatencyMs: result.avgLatencyMs
+  };
+}
+
 // src/tools/session-tools.ts
 function truncateHint(content, maxLen = 120) {
   if (content.length <= maxLen) return content;
@@ -3821,6 +3860,14 @@ async function runSessionInit(ctx) {
   if (docsResult.filesIngested > 0) {
     projectDocs = { filesIngested: docsResult.filesIngested, totalChunks: docsResult.totalChunks };
   }
+  let smokeTest = null;
+  try {
+    const version = getPackageVersion();
+    smokeTest = await runSmokeTest(ctx.db, embedFn, version);
+  } catch (err) {
+    process.stderr.write(`total-recall: smoke test error: ${err}
+`);
+  }
   const warmPromotedIds = [];
   let warmPromoted = 0;
   if (project) {
@@ -3885,7 +3932,8 @@ async function runSessionInit(ctx) {
     context: contextText,
     tierSummary,
     hints,
-    lastSessionAge
+    lastSessionAge,
+    ...smokeTest ? { smokeTest } : {}
   };
   ctx.sessionInitResult = result;
   ctx.sessionInitialized = true;
@@ -3955,7 +4003,7 @@ function registerSessionTools() {
 }
 
 // src/tools/extra-tools.ts
-import { mkdirSync as mkdirSync4, writeFileSync as writeFileSync2, readFileSync as readFileSync12 } from "fs";
+import { mkdirSync as mkdirSync4, writeFileSync as writeFileSync2, readFileSync as readFileSync13 } from "fs";
 import { join as join14 } from "path";
 function registerExtraTools() {
   return [
@@ -4213,7 +4261,7 @@ async function handleExtraTool(name, args, ctx) {
     const filePath = validatePath(args.path, "path");
     let raw;
     try {
-      raw = readFileSync12(filePath, "utf-8");
+      raw = readFileSync13(filePath, "utf-8");
     } catch (err) {
       return {
         content: [

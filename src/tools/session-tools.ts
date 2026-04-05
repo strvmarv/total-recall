@@ -15,6 +15,7 @@ import { compactHotTier } from "../compaction/compactor.js";
 import { sweepWarmTier } from "../compaction/warm-sweep.js";
 import { ingestProjectDocs } from "../importers/project-docs.js";
 import { detectProject } from "../utils/project-detect.js";
+import { runSmokeTest, getPackageVersion, type SmokeTestResult } from "../eval/smoke-test.js";
 
 function truncateHint(content: string, maxLen = 120): string {
   if (content.length <= maxLen) return content;
@@ -195,6 +196,16 @@ export async function runSessionInit(ctx: ToolContext): Promise<SessionInitResul
     projectDocs = { filesIngested: docsResult.filesIngested, totalChunks: docsResult.totalChunks };
   }
 
+  // Smoke test (if version mismatch or first run)
+  let smokeTest: SmokeTestResult | null = null;
+  try {
+    const version = getPackageVersion();
+    smokeTest = await runSmokeTest(ctx.db, embedFn, version);
+  } catch (err) {
+    // Don't fail session init if smoke test errors
+    process.stderr.write(`total-recall: smoke test error: ${err}\n`);
+  }
+
   // Semantic warm search: promote relevant warm entries to hot based on project
   const warmPromotedIds: string[] = [];
   let warmPromoted = 0;
@@ -279,6 +290,7 @@ export async function runSessionInit(ctx: ToolContext): Promise<SessionInitResul
     tierSummary,
     hints,
     lastSessionAge,
+    ...(smokeTest ? { smokeTest } : {}),
   };
 
   ctx.sessionInitResult = result;

@@ -29,6 +29,7 @@ export interface SessionInitResult {
   };
   hints: string[];
   lastSessionAge: string | null;
+  smokeTest?: { passed: boolean; exactMatchRate: number; avgLatencyMs: number };
 }
 
 export interface ToolContext {
