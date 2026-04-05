@@ -1,6 +1,5 @@
 node_modules/
 *.db
 .total-recall/
-*.onnx
 .env
 .remember/
