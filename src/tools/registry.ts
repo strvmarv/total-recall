@@ -45,7 +45,7 @@ export interface ToolContext {
 
 export async function startServer(ctx: ToolContext): Promise<void> {
   const server = new Server(
-    { name: "total-recall", version: "0.1.0" },
+    { name: "total-recall", version: "0.5.0" },
     { capabilities: { tools: {} } },
   );
 
