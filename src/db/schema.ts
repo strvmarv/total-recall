@@ -158,6 +158,43 @@ const MIGRATIONS: Array<(db: Database.Database) => void> = [
       `CREATE INDEX IF NOT EXISTS idx_benchmark_candidates_status ON benchmark_candidates(status)`
     ).run();
   },
+  // Migration 3: FTS5 full-text indexes for hybrid search
+  (db) => {
+    for (const pair of ALL_TABLE_PAIRS) {
+      const tbl = tableName(pair.tier, pair.type);
+      const ftsTbl = `${tbl}_fts`;
+
+      // Content-synced FTS5 table indexing content and tags columns
+      db.prepare(
+        `CREATE VIRTUAL TABLE IF NOT EXISTS ${ftsTbl} USING fts5(content, tags, content=${tbl}, content_rowid=rowid)`,
+      ).run();
+
+      // Sync triggers: keep FTS5 in sync with content table mutations
+      db.prepare(`
+        CREATE TRIGGER IF NOT EXISTS ${tbl}_fts_ai AFTER INSERT ON ${tbl} BEGIN
+          INSERT INTO ${ftsTbl}(rowid, content, tags) VALUES (new.rowid, new.content, new.tags);
+        END
+      `).run();
+
+      db.prepare(`
+        CREATE TRIGGER IF NOT EXISTS ${tbl}_fts_ad AFTER DELETE ON ${tbl} BEGIN
+          INSERT INTO ${ftsTbl}(${ftsTbl}, rowid, content, tags) VALUES('delete', old.rowid, old.content, old.tags);
+        END
+      `).run();
+
+      db.prepare(`
+        CREATE TRIGGER IF NOT EXISTS ${tbl}_fts_au AFTER UPDATE ON ${tbl} BEGIN
+          INSERT INTO ${ftsTbl}(${ftsTbl}, rowid, content, tags) VALUES('delete', old.rowid, old.content, old.tags);
+          INSERT INTO ${ftsTbl}(rowid, content, tags) VALUES (new.rowid, new.content, new.tags);
+        END
+      `).run();
+
+      // Backfill existing data
+      db.prepare(
+        `INSERT INTO ${ftsTbl}(rowid, content, tags) SELECT rowid, content, tags FROM ${tbl}`,
+      ).run();
+    }
+  },
 ];
 
 function getCurrentVersion(db: Database.Database): number {

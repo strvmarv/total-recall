@@ -156,6 +156,10 @@ export function vecTableName(tier: Tier, type: ContentType): string {
   return `${tableName(tier, type)}_vec`;
 }
 
+export function ftsTableName(tier: Tier, type: ContentType): string {
+  return `${tableName(tier, type)}_fts`;
+}
+
 export const ALL_TABLE_PAIRS: Array<{ tier: Tier; type: ContentType }> = [
   { tier: "hot", type: "memory" },
   { tier: "hot", type: "knowledge" },
