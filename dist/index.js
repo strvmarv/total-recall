@@ -2420,6 +2420,46 @@ function writeCandidates(db, misses, contexts) {
     );
   }
 }
+function listCandidates(db) {
+  return db.prepare(`
+    SELECT * FROM benchmark_candidates
+    WHERE status = 'pending'
+    ORDER BY times_seen DESC, top_score ASC
+  `).all();
+}
+function resolveCandidates(db, acceptIds, rejectIds) {
+  const corpusEntries = [];
+  const accept = db.prepare("UPDATE benchmark_candidates SET status = 'accepted' WHERE id = ?");
+  const reject = db.prepare("UPDATE benchmark_candidates SET status = 'rejected' WHERE id = ?");
+  const getById = db.prepare("SELECT * FROM benchmark_candidates WHERE id = ?");
+  for (const id of acceptIds) {
+    const row = getById.get(id);
+    if (!row) continue;
+    accept.run(id);
+    const entry = JSON.stringify({
+      query: row.query_text,
+      expected_content_contains: row.top_result_content?.slice(0, 100) ?? "",
+      expected_tier: "warm",
+      source: "grow",
+      added: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10)
+    });
+    corpusEntries.push(entry);
+  }
+  for (const id of rejectIds) {
+    reject.run(id);
+  }
+  if (corpusEntries.length > 0) {
+    const benchmarkPath = resolve2(PACKAGE_ROOT, "eval", "benchmarks", "retrieval.jsonl");
+    const existing = readFileSync5(benchmarkPath, "utf-8");
+    const trailing = existing.endsWith("\n") ? "" : "\n";
+    writeFileSync2(benchmarkPath, existing + trailing + corpusEntries.join("\n") + "\n");
+  }
+  return {
+    accepted: acceptIds.length,
+    rejected: rejectIds.length,
+    corpusEntries
+  };
+}
 
 // src/eval/metrics.ts
 function computeGroupMetrics(events) {
@@ -2651,6 +2691,19 @@ var EVAL_TOOLS = [
       },
       required: ["name"]
     }
+  },
+  {
+    name: "eval_grow",
+    description: "Review and manage benchmark candidates harvested from retrieval misses",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "'list' to see pending candidates, 'resolve' to accept/reject", enum: ["list", "resolve"] },
+        accept: { type: "array", items: { type: "string" }, description: "Candidate IDs to accept (resolve mode)" },
+        reject: { type: "array", items: { type: "string" }, description: "Candidate IDs to reject (resolve mode)" }
+      },
+      required: []
+    }
   }
 ];
 function resolveSnapshotId(db, nameOrId) {
@@ -2743,6 +2796,29 @@ async function handleEvalTool(name, args, ctx) {
         type: "text",
         text: JSON.stringify({ id, name: snapshotName, created: true })
       }]
+    };
+  }
+  if (name === "eval_grow") {
+    const action = args.action ?? "list";
+    if (action === "list") {
+      const candidates = listCandidates(ctx.db);
+      return { content: [{ type: "text", text: JSON.stringify({ candidates }) }] };
+    }
+    if (action === "resolve") {
+      const acceptIds = args.accept ?? [];
+      const rejectIds = args.reject ?? [];
+      if (acceptIds.length === 0 && rejectIds.length === 0) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: "Provide at least one accept or reject ID" }) }],
+          isError: true
+        };
+      }
+      const result = resolveCandidates(ctx.db, acceptIds, rejectIds);
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+    return {
+      content: [{ type: "text", text: JSON.stringify({ error: `Unknown action: ${action}` }) }],
+      isError: true
     };
   }
   return null;

@@ -6,6 +6,7 @@ import { runBenchmark } from "../eval/benchmark-runner.js";
 import { getRetrievalEvents } from "../eval/event-logger.js";
 import { computeMetrics, computeComparisonMetrics } from "../eval/metrics.js";
 import { createConfigSnapshot } from "../config.js";
+import { listCandidates, resolveCandidates } from "../eval/benchmark-candidates.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 // In dev: __dirname = src/tools/ (2 levels up to root)
@@ -61,6 +62,19 @@ export const EVAL_TOOLS = [
         name: { type: "string", description: "Name for the snapshot" },
       },
       required: ["name"],
+    },
+  },
+  {
+    name: "eval_grow",
+    description: "Review and manage benchmark candidates harvested from retrieval misses",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        action: { type: "string", description: "'list' to see pending candidates, 'resolve' to accept/reject", enum: ["list", "resolve"] },
+        accept: { type: "array", items: { type: "string" }, description: "Candidate IDs to accept (resolve mode)" },
+        reject: { type: "array", items: { type: "string" }, description: "Candidate IDs to reject (resolve mode)" },
+      },
+      required: [],
     },
   },
 ];
@@ -182,6 +196,35 @@ export async function handleEvalTool(
         type: "text",
         text: JSON.stringify({ id, name: snapshotName, created: true }),
       }],
+    };
+  }
+
+  if (name === "eval_grow") {
+    const action = (args.action as string | undefined) ?? "list";
+
+    if (action === "list") {
+      const candidates = listCandidates(ctx.db);
+      return { content: [{ type: "text", text: JSON.stringify({ candidates }) }] };
+    }
+
+    if (action === "resolve") {
+      const acceptIds = (args.accept as string[] | undefined) ?? [];
+      const rejectIds = (args.reject as string[] | undefined) ?? [];
+
+      if (acceptIds.length === 0 && rejectIds.length === 0) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: "Provide at least one accept or reject ID" }) }],
+          isError: true,
+        };
+      }
+
+      const result = resolveCandidates(ctx.db, acceptIds, rejectIds);
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+
+    return {
+      content: [{ type: "text", text: JSON.stringify({ error: `Unknown action: ${action}` }) }],
+      isError: true,
     };
   }
 
