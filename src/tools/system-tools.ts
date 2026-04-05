@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { ToolContext } from "./registry.js";
 import { countEntries } from "../db/entries.js";
 import { listCollections } from "../ingestion/hierarchical-index.js";
+import { setNestedKey, saveUserConfig, loadConfig } from "../config.js";
 import { getRetrievalEvents } from "../eval/event-logger.js";
 import { getDataDir } from "../config.js";
 import { ALL_TABLE_PAIRS } from "../types.js";
@@ -30,7 +31,7 @@ export const SYSTEM_TOOLS = [
   },
   {
     name: "config_set",
-    description: "Set a configuration value (acknowledgment only; full persistence deferred to Phase 2)",
+    description: "Set a configuration value and persist to ~/.total-recall/config.toml",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -150,16 +151,19 @@ export function handleSystemTool(
   if (name === "config_set") {
     const key = args.key as string;
     const value = args.value;
+
+    const overrides = setNestedKey({}, key, value);
+    saveUserConfig(overrides);
+
+    // Reload config into context
+    const refreshed = loadConfig();
+    Object.assign(ctx.config, refreshed);
+
     return {
       content: [
         {
           type: "text",
-          text: JSON.stringify({
-            acknowledged: true,
-            key,
-            value,
-            note: "Config persistence deferred to Phase 2",
-          }),
+          text: JSON.stringify({ key, value, persisted: true }),
         },
       ],
     };

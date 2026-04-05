@@ -4,6 +4,8 @@ import { ClaudeCodeImporter } from "../importers/claude-code.js";
 import { CopilotCliImporter } from "../importers/copilot-cli.js";
 import { listEntries } from "../db/entries.js";
 import { compactHotTier } from "../compaction/compactor.js";
+import { sweepWarmTier } from "../compaction/warm-sweep.js";
+import { ingestProjectDocs } from "../importers/project-docs.js";
 
 export const SESSION_TOOLS = [
   {
@@ -70,6 +72,31 @@ export async function handleSessionTool(
       });
     }
 
+    // Run warm sweep if stale
+    let warmSweepResult: { demoted: number } | null = null;
+    const sweepIntervalMs = ctx.config.compaction.warm_sweep_interval_days * 24 * 60 * 60 * 1000;
+    const lastSweep = ctx.db
+      .prepare(`SELECT MAX(timestamp) as ts FROM compaction_log WHERE reason = 'warm_sweep_decay'`)
+      .get() as { ts: number | null } | undefined;
+    const lastSweepTs = lastSweep?.ts ?? 0;
+
+    if (Date.now() - lastSweepTs > sweepIntervalMs) {
+      const sessionId = ctx.sessionId ?? randomUUID();
+      const result = await sweepWarmTier(ctx.db, embedFn, {
+        coldDecayDays: ctx.config.tiers.warm.cold_decay_days,
+      }, sessionId);
+      if (result.demoted.length > 0) {
+        warmSweepResult = { demoted: result.demoted.length };
+      }
+    }
+
+    // Auto-ingest project docs
+    let projectDocs: { filesIngested: number; totalChunks: number } | null = null;
+    const docsResult = await ingestProjectDocs(ctx.db, embedFn, process.cwd());
+    if (docsResult.filesIngested > 0) {
+      projectDocs = { filesIngested: docsResult.filesIngested, totalChunks: docsResult.totalChunks };
+    }
+
     // Assemble hot tier context
     const hotEntries = listEntries(ctx.db, "hot", "memory");
     const contextLines = hotEntries.map((e) => {
@@ -85,6 +112,8 @@ export async function handleSessionTool(
           text: JSON.stringify({
             sessionId: ctx.sessionId,
             importSummary,
+            warmSweep: warmSweepResult,
+            projectDocs,
             hotEntryCount: hotEntries.length,
             context: contextText,
           }),

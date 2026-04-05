@@ -67,8 +67,13 @@ export async function handleEvalTool(
       configSnapshotId: configSnapshot,
     });
 
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    const compactionRows = ctx.db
+      .prepare(`SELECT * FROM compaction_log WHERE timestamp >= ? ORDER BY timestamp DESC`)
+      .all(cutoff) as import("../types.js").CompactionLogRow[];
+
     const similarityThreshold = ctx.config.tiers.warm.similarity_threshold ?? 0.5;
-    const metrics = computeMetrics(events, similarityThreshold);
+    const metrics = computeMetrics(events, similarityThreshold, compactionRows);
 
     return { content: [{ type: "text", text: JSON.stringify({ days, events: events.length, metrics }) }] };
   }

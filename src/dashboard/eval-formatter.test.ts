@@ -16,6 +16,9 @@ describe("formatEvalReport", () => {
       byContentType: {
         memory: { precision: 0.76, hitRate: 0.89, count: 534 },
       },
+      topMisses: [{ query: "missing query", topScore: 0.2, timestamp: Date.now() }],
+      falsePositives: [{ query: "false positive", topScore: 0.9, timestamp: Date.now() }],
+      compactionHealth: { totalCompactions: 5, avgPreservationRatio: 0.85, entriesWithDrift: 1 },
     });
     expect(output).toContain("Precision");
     expect(output).toContain("0.72");

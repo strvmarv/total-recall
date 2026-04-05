@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { listEntries } from "../db/entries.js";
 import { demoteEntry } from "../memory/promote-demote.js";
@@ -26,6 +27,19 @@ export async function sweepWarmTier(
     const age = now - entry.last_accessed_at;
     if (age > coldDecayMs && entry.access_count === 0) {
       await demoteEntry(db, embed, entry.id, "warm", "memory", "cold", "memory");
+
+      db.prepare(`
+        INSERT INTO compaction_log
+          (id, timestamp, session_id, source_tier, target_tier, source_entry_ids,
+           target_entry_id, decay_scores, reason, config_snapshot_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        randomUUID(), now, sessionId, "warm", "cold",
+        JSON.stringify([entry.id]), entry.id,
+        JSON.stringify([entry.decay_score]),
+        "warm_sweep_decay", "default",
+      );
+
       demoted.push(entry.id);
     } else {
       kept.push(entry.id);

@@ -1,4 +1,4 @@
-import type { RetrievalEventRow } from "../types.js";
+import type { RetrievalEventRow, CompactionLogRow } from "../types.js";
 
 export interface TierMetrics {
   precision: number;
@@ -13,6 +13,18 @@ export interface ContentTypeMetrics {
   count: number;
 }
 
+export interface MissEntry {
+  query: string;
+  topScore: number | null;
+  timestamp: number;
+}
+
+export interface CompactionHealthMetrics {
+  totalCompactions: number;
+  avgPreservationRatio: number | null;
+  entriesWithDrift: number;
+}
+
 export interface Metrics {
   precision: number;
   hitRate: number;
@@ -22,6 +34,9 @@ export interface Metrics {
   totalEvents: number;
   byTier: Record<string, TierMetrics>;
   byContentType: Record<string, ContentTypeMetrics>;
+  topMisses: MissEntry[];
+  falsePositives: MissEntry[];
+  compactionHealth: CompactionHealthMetrics;
 }
 
 function computeGroupMetrics(
@@ -49,6 +64,7 @@ function computeGroupMetrics(
 export function computeMetrics(
   events: RetrievalEventRow[],
   similarityThreshold: number,
+  compactionRows: CompactionLogRow[] = [],
 ): Metrics {
   if (events.length === 0) {
     return {
@@ -60,6 +76,9 @@ export function computeMetrics(
       totalEvents: 0,
       byTier: {},
       byContentType: {},
+      topMisses: [],
+      falsePositives: [],
+      compactionHealth: computeCompactionHealth(compactionRows),
     };
   }
 
@@ -122,6 +141,20 @@ export function computeMetrics(
     byContentType[ct] = { precision: p, hitRate: h, count: group.length };
   }
 
+  // Top misses: queries with lowest scores
+  const topMisses: MissEntry[] = events
+    .filter((e) => e.top_score === null || e.top_score < similarityThreshold)
+    .sort((a, b) => (a.top_score ?? -1) - (b.top_score ?? -1))
+    .slice(0, 10)
+    .map((e) => ({ query: e.query_text, topScore: e.top_score, timestamp: e.timestamp }));
+
+  // False positives: high score but outcome_used = 0
+  const falsePositives: MissEntry[] = events
+    .filter((e) => e.outcome_used === 0 && e.top_score !== null && e.top_score >= similarityThreshold)
+    .sort((a, b) => (b.top_score ?? 0) - (a.top_score ?? 0))
+    .slice(0, 10)
+    .map((e) => ({ query: e.query_text, topScore: e.top_score, timestamp: e.timestamp }));
+
   return {
     precision,
     hitRate,
@@ -131,5 +164,21 @@ export function computeMetrics(
     totalEvents: events.length,
     byTier,
     byContentType,
+    topMisses,
+    falsePositives,
+    compactionHealth: computeCompactionHealth(compactionRows),
+  };
+}
+
+function computeCompactionHealth(rows: CompactionLogRow[]): CompactionHealthMetrics {
+  const withRatio = rows.filter((r) => r.preservation_ratio !== null);
+  const withDrift = rows.filter((r) => r.semantic_drift !== null && r.semantic_drift > 0.2);
+
+  return {
+    totalCompactions: rows.length,
+    avgPreservationRatio: withRatio.length > 0
+      ? withRatio.reduce((sum, r) => sum + (r.preservation_ratio as number), 0) / withRatio.length
+      : null,
+    entriesWithDrift: withDrift.length,
   };
 }

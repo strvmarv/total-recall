@@ -53,3 +53,24 @@ To fully uninstall for a clean reinstall test, remove all three:
 ### Node discovery
 
 The launcher (`bin/total-recall.sh`) finds `node` across common install methods: PATH, nvm, fnm, Homebrew (Linux and macOS), and Volta. If adding a new node version manager, add its lookup to the `find_node()` function.
+
+## Session Lifecycle
+
+### What happens on session_start
+
+1. Import sync — scans Claude Code and Copilot CLI memory dirs, deduplicates via content hash in `import_log`
+2. Warm sweep — if last sweep was more than `warm_sweep_interval_days` ago, moves old unaccessed warm entries to cold. Tracked via `compaction_log` with `reason = 'warm_sweep_decay'`.
+3. Project docs auto-ingest — detects README.md, CONTRIBUTING.md, CLAUDE.md, AGENTS.md, and docs/ in cwd. Ingests into a `{project}-project-docs` KB collection. Deduplicates via `import_log`.
+4. Hot tier assembly — returns current hot entries as injectable context.
+
+### Config persistence
+
+`config_set` writes to `~/.total-recall/config.toml` using `@iarna/toml` stringify. Changes are merged with existing user config and take effect immediately in the current session.
+
+### Eval system
+
+`eval_report` returns: precision, hit rate, miss rate, MRR, latency, breakdowns by tier and content type, top misses (lowest scoring queries), false positives (high score but unused), and compaction health (total compactions, preservation ratio, semantic drift). Data comes from `retrieval_events` and `compaction_log` tables.
+
+## Deferred Items
+
+See `docs/TODO.md` for features planned in the design spec but not yet implemented, ordered by impact.

@@ -62,6 +62,36 @@ export function formatEvalReport(
     }
   }
 
+  // Top Misses
+  if (metrics.topMisses.length > 0) {
+    lines.push("");
+    lines.push("  Top Misses");
+    lines.push("  ----------");
+    for (const m of metrics.topMisses.slice(0, 5)) {
+      const score = m.topScore !== null ? fmt(m.topScore) : "none";
+      lines.push(`  ${padLeft(score, 6)}  ${m.query.slice(0, 50)}`);
+    }
+  }
+
+  // False Positives
+  if (metrics.falsePositives.length > 0) {
+    lines.push("");
+    lines.push("  False Positives (high score, unused)");
+    lines.push("  ------------------------------------");
+    for (const fp of metrics.falsePositives.slice(0, 5)) {
+      const score = fp.topScore !== null ? fmt(fp.topScore) : "none";
+      lines.push(`  ${padLeft(score, 6)}  ${fp.query.slice(0, 50)}`);
+    }
+  }
+
+  // Compaction Health
+  lines.push("");
+  lines.push("  Compaction Health");
+  lines.push("  -----------------");
+  lines.push(`  Total compactions:      ${metrics.compactionHealth.totalCompactions}`);
+  lines.push(`  Avg preservation ratio: ${metrics.compactionHealth.avgPreservationRatio !== null ? fmt(metrics.compactionHealth.avgPreservationRatio) : "N/A"}`);
+  lines.push(`  Entries with drift:     ${metrics.compactionHealth.entriesWithDrift}`);
+
   lines.push("");
   lines.push(`  Total events: ${metrics.totalEvents}`);
   lines.push("");

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
 // src/index.ts
-import { randomUUID as randomUUID5 } from "crypto";
+import { randomUUID as randomUUID6 } from "crypto";
 
 // src/config.ts
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
-import { parse as parseToml } from "@iarna/toml";
+import { parse as parseToml, stringify as stringifyToml } from "@iarna/toml";
 var DEFAULTS_PATH = new URL("./defaults.toml", import.meta.url);
 function getDataDir() {
   return process.env.TOTAL_RECALL_HOME ?? join(process.env.HOME ?? "~", ".total-recall");
@@ -21,6 +21,33 @@ function loadConfig() {
     return deepMerge(defaults, userConfig);
   }
   return defaults;
+}
+function setNestedKey(obj, dotKey, value) {
+  const result = { ...obj };
+  const parts = dotKey.split(".");
+  let current = result;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const part = parts[i];
+    if (typeof current[part] !== "object" || current[part] === null) {
+      current[part] = {};
+    } else {
+      current[part] = { ...current[part] };
+    }
+    current = current[part];
+  }
+  current[parts[parts.length - 1]] = value;
+  return result;
+}
+function saveUserConfig(overrides) {
+  const dataDir = getDataDir();
+  mkdirSync(dataDir, { recursive: true });
+  const configPath = join(dataDir, "config.toml");
+  let existing = {};
+  if (existsSync(configPath)) {
+    existing = parseToml(readFileSync(configPath, "utf-8"));
+  }
+  const merged = deepMerge(existing, overrides);
+  writeFileSync(configPath, stringifyToml(merged));
 }
 function deepMerge(target, source) {
   const result = { ...target };
@@ -39,7 +66,7 @@ function deepMerge(target, source) {
 
 // src/db/connection.ts
 import Database from "better-sqlite3";
-import { mkdirSync, existsSync as existsSync2 } from "fs";
+import { mkdirSync as mkdirSync2, existsSync as existsSync2 } from "fs";
 import { join as join2 } from "path";
 import * as sqliteVec from "sqlite-vec";
 
@@ -201,7 +228,7 @@ function getDb() {
   if (_db) return _db;
   const dataDir = getDataDir();
   if (!existsSync2(dataDir)) {
-    mkdirSync(dataDir, { recursive: true });
+    mkdirSync2(dataDir, { recursive: true });
   }
   const dbPath = join2(dataDir, "total-recall.db");
   _db = new Database(dbPath);
@@ -222,7 +249,7 @@ import { join as join4 } from "path";
 import * as ort from "onnxruntime-node";
 
 // src/embedding/model-manager.ts
-import { existsSync as existsSync3, mkdirSync as mkdirSync2, readdirSync } from "fs";
+import { existsSync as existsSync3, mkdirSync as mkdirSync3, readdirSync } from "fs";
 import { readFileSync as readFileSync2, statSync } from "fs";
 import { writeFile } from "fs/promises";
 import { join as join3 } from "path";
@@ -263,7 +290,7 @@ async function validateDownload(modelPath) {
 }
 async function downloadModel(modelName) {
   const modelPath = getUserModelPath(modelName);
-  mkdirSync2(modelPath, { recursive: true });
+  mkdirSync3(modelPath, { recursive: true });
   const fileUrls = [
     {
       file: "model.onnx",
@@ -809,8 +836,8 @@ function validatePath(value, name) {
       throw new Error(`Access denied: ${name} cannot access ${prefix}`);
     }
   }
-  const basename2 = resolved.split("/").pop() ?? "";
-  if (basename2 === ".env" || basename2 === ".credentials.json") {
+  const basename3 = resolved.split("/").pop() ?? "";
+  if (basename3 === ".env" || basename3 === ".credentials.json") {
     throw new Error(`Access denied: ${name} cannot access sensitive files`);
   }
   return resolved;
@@ -1180,7 +1207,7 @@ var SYSTEM_TOOLS = [
   },
   {
     name: "config_set",
-    description: "Set a configuration value (acknowledgment only; full persistence deferred to Phase 2)",
+    description: "Set a configuration value and persist to ~/.total-recall/config.toml",
     inputSchema: {
       type: "object",
       properties: {
@@ -1274,16 +1301,15 @@ function handleSystemTool(name, args, ctx) {
   if (name === "config_set") {
     const key = args.key;
     const value = args.value;
+    const overrides = setNestedKey({}, key, value);
+    saveUserConfig(overrides);
+    const refreshed = loadConfig();
+    Object.assign(ctx.config, refreshed);
     return {
       content: [
         {
           type: "text",
-          text: JSON.stringify({
-            acknowledged: true,
-            key,
-            value,
-            note: "Config persistence deferred to Phase 2"
-          })
+          text: JSON.stringify({ key, value, persisted: true })
         }
       ]
     };
@@ -2100,7 +2126,7 @@ function computeGroupMetrics(events) {
   const avgScore = scoresWithValue.length > 0 ? scoresWithValue.reduce((sum, e) => sum + e.top_score, 0) / scoresWithValue.length : 0;
   return { precision, hitRate, avgScore };
 }
-function computeMetrics(events, similarityThreshold) {
+function computeMetrics(events, similarityThreshold, compactionRows = []) {
   if (events.length === 0) {
     return {
       precision: 0,
@@ -2110,7 +2136,10 @@ function computeMetrics(events, similarityThreshold) {
       avgLatencyMs: 0,
       totalEvents: 0,
       byTier: {},
-      byContentType: {}
+      byContentType: {},
+      topMisses: [],
+      falsePositives: [],
+      compactionHealth: computeCompactionHealth(compactionRows)
     };
   }
   const withOutcome = events.filter((e) => e.outcome_used !== null);
@@ -2153,6 +2182,8 @@ function computeMetrics(events, similarityThreshold) {
     const { precision: p, hitRate: h } = computeGroupMetrics(group);
     byContentType[ct] = { precision: p, hitRate: h, count: group.length };
   }
+  const topMisses = events.filter((e) => e.top_score === null || e.top_score < similarityThreshold).sort((a, b) => (a.top_score ?? -1) - (b.top_score ?? -1)).slice(0, 10).map((e) => ({ query: e.query_text, topScore: e.top_score, timestamp: e.timestamp }));
+  const falsePositives = events.filter((e) => e.outcome_used === 0 && e.top_score !== null && e.top_score >= similarityThreshold).sort((a, b) => (b.top_score ?? 0) - (a.top_score ?? 0)).slice(0, 10).map((e) => ({ query: e.query_text, topScore: e.top_score, timestamp: e.timestamp }));
   return {
     precision,
     hitRate,
@@ -2161,7 +2192,19 @@ function computeMetrics(events, similarityThreshold) {
     avgLatencyMs,
     totalEvents: events.length,
     byTier,
-    byContentType
+    byContentType,
+    topMisses,
+    falsePositives,
+    compactionHealth: computeCompactionHealth(compactionRows)
+  };
+}
+function computeCompactionHealth(rows) {
+  const withRatio = rows.filter((r) => r.preservation_ratio !== null);
+  const withDrift = rows.filter((r) => r.semantic_drift !== null && r.semantic_drift > 0.2);
+  return {
+    totalCompactions: rows.length,
+    avgPreservationRatio: withRatio.length > 0 ? withRatio.reduce((sum, r) => sum + r.preservation_ratio, 0) / withRatio.length : null,
+    entriesWithDrift: withDrift.length
   };
 }
 
@@ -2213,8 +2256,10 @@ async function handleEvalTool(name, args, ctx) {
       days,
       configSnapshotId: configSnapshot
     });
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1e3;
+    const compactionRows = ctx.db.prepare(`SELECT * FROM compaction_log WHERE timestamp >= ? ORDER BY timestamp DESC`).all(cutoff);
     const similarityThreshold = ctx.config.tiers.warm.similarity_threshold ?? 0.5;
-    const metrics = computeMetrics(events, similarityThreshold);
+    const metrics = computeMetrics(events, similarityThreshold, compactionRows);
     return { content: [{ type: "text", text: JSON.stringify({ days, events: events.length, metrics }) }] };
   }
   return null;
@@ -2500,7 +2545,7 @@ function registerImportTools() {
 }
 
 // src/tools/session-tools.ts
-import { randomUUID as randomUUID4 } from "crypto";
+import { randomUUID as randomUUID5 } from "crypto";
 
 // src/compaction/compactor.ts
 import { randomUUID as randomUUID3 } from "crypto";
@@ -2604,6 +2649,113 @@ async function compactHotTier(db, embed, config, sessionId, configSnapshotId) {
   return { carryForward, promoted, discarded };
 }
 
+// src/compaction/warm-sweep.ts
+import { randomUUID as randomUUID4 } from "crypto";
+async function sweepWarmTier(db, embed, config, sessionId) {
+  const entries = listEntries(db, "warm", "memory");
+  const now = Date.now();
+  const coldDecayMs = config.coldDecayDays * 24 * 60 * 60 * 1e3;
+  const demoted = [];
+  const kept = [];
+  for (const entry of entries) {
+    const age = now - entry.last_accessed_at;
+    if (age > coldDecayMs && entry.access_count === 0) {
+      await demoteEntry(db, embed, entry.id, "warm", "memory", "cold", "memory");
+      db.prepare(`
+        INSERT INTO compaction_log
+          (id, timestamp, session_id, source_tier, target_tier, source_entry_ids,
+           target_entry_id, decay_scores, reason, config_snapshot_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        randomUUID4(),
+        now,
+        sessionId,
+        "warm",
+        "cold",
+        JSON.stringify([entry.id]),
+        entry.id,
+        JSON.stringify([entry.decay_score]),
+        "warm_sweep_decay",
+        "default"
+      );
+      demoted.push(entry.id);
+    } else {
+      kept.push(entry.id);
+    }
+  }
+  return { demoted, kept };
+}
+
+// src/importers/project-docs.ts
+import { existsSync as existsSync6, readFileSync as readFileSync7, readdirSync as readdirSync5, statSync as statSync5 } from "fs";
+import { join as join9, basename as basename2 } from "path";
+import { createHash as createHash3 } from "crypto";
+var DOC_FILES = ["README.md", "CONTRIBUTING.md", "CLAUDE.md", "AGENTS.md"];
+var DOC_DIRS = ["docs", "doc"];
+function contentHash3(content) {
+  return createHash3("sha256").update(content).digest("hex");
+}
+function isAlreadyIngested(db, hash) {
+  const row = db.prepare("SELECT id FROM import_log WHERE content_hash = ? AND source_tool = 'project-docs'").get(hash);
+  return row !== void 0;
+}
+function logIngest(db, sourcePath, hash, entryId) {
+  const id = createHash3("md5").update(`project-docs:${sourcePath}:${hash}`).digest("hex");
+  db.prepare(`
+    INSERT OR IGNORE INTO import_log
+      (id, timestamp, source_tool, source_path, content_hash, target_entry_id, target_tier, target_type)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, Date.now(), "project-docs", sourcePath, hash, entryId, "cold", "knowledge");
+}
+async function ingestProjectDocs(db, embed, cwd) {
+  const result = { filesIngested: 0, totalChunks: 0, skipped: 0 };
+  const collectionName = `${basename2(cwd)}-project-docs`;
+  let collectionId = null;
+  const filesToIngest = [];
+  for (const file of DOC_FILES) {
+    const path = join9(cwd, file);
+    if (existsSync6(path)) filesToIngest.push(path);
+  }
+  for (const dir of DOC_DIRS) {
+    const dirPath = join9(cwd, dir);
+    if (existsSync6(dirPath) && statSync5(dirPath).isDirectory()) {
+      collectMarkdownFiles(dirPath, filesToIngest);
+    }
+  }
+  if (filesToIngest.length === 0) return result;
+  collectionId = await createCollection(db, embed, {
+    name: collectionName,
+    sourcePath: cwd
+  });
+  for (const filePath of filesToIngest) {
+    const content = readFileSync7(filePath, "utf-8").trim();
+    if (!content) {
+      result.skipped++;
+      continue;
+    }
+    const hash = contentHash3(content);
+    if (isAlreadyIngested(db, hash)) {
+      result.skipped++;
+      continue;
+    }
+    const ingestResult = await ingestFile(db, embed, filePath, collectionId);
+    logIngest(db, filePath, hash, collectionId);
+    result.filesIngested++;
+    result.totalChunks += ingestResult.chunkCount;
+  }
+  return result;
+}
+function collectMarkdownFiles(dirPath, files) {
+  for (const entry of readdirSync5(dirPath, { withFileTypes: true })) {
+    const full = join9(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      collectMarkdownFiles(full, files);
+    } else if (entry.name.endsWith(".md")) {
+      files.push(full);
+    }
+  }
+}
+
 // src/tools/session-tools.ts
 var SESSION_TOOLS = [
   {
@@ -2653,6 +2805,24 @@ async function handleSessionTool(name, args, ctx) {
         knowledgeImported: kbResult.imported
       });
     }
+    let warmSweepResult = null;
+    const sweepIntervalMs = ctx.config.compaction.warm_sweep_interval_days * 24 * 60 * 60 * 1e3;
+    const lastSweep = ctx.db.prepare(`SELECT MAX(timestamp) as ts FROM compaction_log WHERE reason = 'warm_sweep_decay'`).get();
+    const lastSweepTs = lastSweep?.ts ?? 0;
+    if (Date.now() - lastSweepTs > sweepIntervalMs) {
+      const sessionId = ctx.sessionId ?? randomUUID5();
+      const result = await sweepWarmTier(ctx.db, embedFn, {
+        coldDecayDays: ctx.config.tiers.warm.cold_decay_days
+      }, sessionId);
+      if (result.demoted.length > 0) {
+        warmSweepResult = { demoted: result.demoted.length };
+      }
+    }
+    let projectDocs = null;
+    const docsResult = await ingestProjectDocs(ctx.db, embedFn, process.cwd());
+    if (docsResult.filesIngested > 0) {
+      projectDocs = { filesIngested: docsResult.filesIngested, totalChunks: docsResult.totalChunks };
+    }
     const hotEntries = listEntries(ctx.db, "hot", "memory");
     const contextLines = hotEntries.map((e) => {
       const tags = e.tags.length > 0 ? ` [${e.tags.join(", ")}]` : "";
@@ -2666,6 +2836,8 @@ async function handleSessionTool(name, args, ctx) {
           text: JSON.stringify({
             sessionId: ctx.sessionId,
             importSummary,
+            warmSweep: warmSweepResult,
+            projectDocs,
             hotEntryCount: hotEntries.length,
             context: contextText
           })
@@ -2676,7 +2848,7 @@ async function handleSessionTool(name, args, ctx) {
   if (name === "session_end") {
     await ctx.embedder.ensureLoaded();
     const embedFn = (text) => ctx.embedder.embed(text);
-    const sessionId = ctx.sessionId ?? randomUUID4();
+    const sessionId = ctx.sessionId ?? randomUUID5();
     const result = await compactHotTier(ctx.db, embedFn, ctx.config.compaction, sessionId);
     return {
       content: [
@@ -2722,8 +2894,8 @@ function registerSessionTools() {
 }
 
 // src/tools/extra-tools.ts
-import { mkdirSync as mkdirSync3, writeFileSync, readFileSync as readFileSync7 } from "fs";
-import { join as join9 } from "path";
+import { mkdirSync as mkdirSync4, writeFileSync as writeFileSync2, readFileSync as readFileSync8 } from "fs";
+import { join as join10 } from "path";
 function registerExtraTools() {
   return [
     {
@@ -2955,13 +3127,13 @@ async function handleExtraTool(name, args, ctx) {
         });
       }
     }
-    const exportsDir = join9(getDataDir(), "exports");
-    mkdirSync3(exportsDir, { recursive: true });
+    const exportsDir = join10(getDataDir(), "exports");
+    mkdirSync4(exportsDir, { recursive: true });
     const timestamp = Date.now();
-    const exportPath = join9(exportsDir, `${timestamp}.json`);
+    const exportPath = join10(exportsDir, `${timestamp}.json`);
     const exportData = { version: 1, exported_at: timestamp, entries: allEntries };
     const jsonStr = JSON.stringify(exportData, null, 2);
-    writeFileSync(exportPath, jsonStr, "utf-8");
+    writeFileSync2(exportPath, jsonStr, "utf-8");
     return {
       content: [
         {
@@ -2979,7 +3151,7 @@ async function handleExtraTool(name, args, ctx) {
     const filePath = validatePath(args.path, "path");
     let raw;
     try {
-      raw = readFileSync7(filePath, "utf-8");
+      raw = readFileSync8(filePath, "utf-8");
     } catch (err) {
       return {
         content: [
@@ -3127,7 +3299,7 @@ async function main() {
     model: config.embedding.model,
     dimensions: config.embedding.dimensions
   });
-  const sessionId = randomUUID5();
+  const sessionId = randomUUID6();
   process.stderr.write(`total-recall: MCP server starting (db: ${getDataDir()}/total-recall.db)
 `);
   await startServer({ db, config, embedder, sessionId });

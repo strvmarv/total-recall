@@ -1,6 +1,26 @@
 import { describe, it, expect } from "vitest";
-import type { RetrievalEventRow } from "../types.js";
+import type { RetrievalEventRow, CompactionLogRow } from "../types.js";
 import { computeMetrics } from "./metrics.js";
+
+function makeCompactionRow(overrides: Partial<CompactionLogRow> = {}): CompactionLogRow {
+  return {
+    id: "cmp-" + Math.random().toString(36).slice(2),
+    timestamp: Date.now(),
+    session_id: "sess-1",
+    source_tier: "hot",
+    target_tier: "warm",
+    source_entry_ids: "[]",
+    target_entry_id: null,
+    semantic_drift: null,
+    facts_preserved: null,
+    facts_in_original: null,
+    preservation_ratio: null,
+    decay_scores: "[]",
+    reason: "decay",
+    config_snapshot_id: "default",
+    ...overrides,
+  };
+}
 
 function makeEvent(overrides: Partial<RetrievalEventRow> = {}): RetrievalEventRow {
   return {
@@ -130,5 +150,40 @@ describe("computeMetrics", () => {
     expect(metrics.precision).toBe(0);
     expect(metrics.hitRate).toBe(0);
     expect(metrics.mrr).toBe(0);
+  });
+
+  it("computes topMisses for low-score queries", () => {
+    const events = [
+      makeEvent({ query_text: "good query", top_score: 0.9 }),
+      makeEvent({ query_text: "bad query", top_score: 0.3 }),
+      makeEvent({ query_text: "no results", top_score: null }),
+    ];
+    const metrics = computeMetrics(events, 0.65);
+    expect(metrics.topMisses).toHaveLength(2);
+    expect(metrics.topMisses[0]!.query).toBe("no results");
+    expect(metrics.topMisses[1]!.query).toBe("bad query");
+  });
+
+  it("computes falsePositives for high-score unused results", () => {
+    const events = [
+      makeEvent({ query_text: "used", top_score: 0.9, outcome_used: 1 }),
+      makeEvent({ query_text: "false positive", top_score: 0.85, outcome_used: 0 }),
+      makeEvent({ query_text: "low score unused", top_score: 0.3, outcome_used: 0 }),
+    ];
+    const metrics = computeMetrics(events, 0.65);
+    expect(metrics.falsePositives).toHaveLength(1);
+    expect(metrics.falsePositives[0]!.query).toBe("false positive");
+  });
+
+  it("computes compactionHealth from compaction rows", () => {
+    const rows = [
+      makeCompactionRow({ preservation_ratio: 0.9, semantic_drift: 0.1 }),
+      makeCompactionRow({ preservation_ratio: 0.8, semantic_drift: 0.3 }),
+      makeCompactionRow({ preservation_ratio: null, semantic_drift: null }),
+    ];
+    const metrics = computeMetrics([], 0.65, rows);
+    expect(metrics.compactionHealth.totalCompactions).toBe(3);
+    expect(metrics.compactionHealth.avgPreservationRatio).toBeCloseTo(0.85);
+    expect(metrics.compactionHealth.entriesWithDrift).toBe(1);
   });
 });
