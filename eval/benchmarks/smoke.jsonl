@@ -1,0 +1,22 @@
+{"query":"which package manager should I use","expected_content_contains":"pnpm","expected_tier":"warm"}
+{"query":"testing strategy database mocking","expected_content_contains":"integration tests","expected_tier":"warm"}
+{"query":"API error format","expected_content_contains":"RFC 7807","expected_tier":"warm"}
+{"query":"test runner framework","expected_content_contains":"vitest","expected_tier":"warm"}
+{"query":"input validation library","expected_content_contains":"zod","expected_tier":"warm"}
+{"query":"how to generate a unique ID","expected_content_contains":"randomUUID","expected_tier":"warm"}
+{"query":"deep copy an object","expected_content_contains":"structuredClone","expected_tier":"warm"}
+{"query":"which embedding model is used","expected_content_contains":"all-MiniLM-L6-v2","expected_tier":"warm"}
+{"query":"hot tier size limit","expected_content_contains":"50","expected_tier":"warm"}
+{"query":"SQLite write mode","expected_content_contains":"WAL","expected_tier":"warm"}
+{"query":"how many memory tiers are there","expected_content_contains":"three tiers","expected_tier":"warm"}
+{"query":"multi-tier search strategy","expected_content_contains":"fans out","expected_tier":"warm"}
+{"query":"background process design","expected_content_contains":"No background daemon","expected_tier":"warm"}
+{"query":"how does compaction happen","expected_content_contains":"session end","expected_tier":"warm"}
+{"query":"sqlite-vec score interpretation","expected_content_contains":"distance not similarity","expected_tier":"warm"}
+{"query":"query package manager preference","expected_content_contains":"pnpm","expected_tier":"warm","expected_absent":"npm install"}
+{"query":"what test runner is not jest","expected_content_contains":"vitest","expected_tier":"warm","expected_absent":"jest"}
+{"query":"deep copy preference","expected_content_contains":"structuredClone","expected_tier":"warm","expected_absent":"JSON.parse"}
+{"query":"which database extension for vectors","expected_content_contains":"sqlite-vec","expected_tier":"warm","expected_absent":"pgvector"}
+{"query":"hot tier","expected_content_contains":"50","expected_tier":"warm"}
+{"query":"MCP","expected_content_contains":"MCP","expected_tier":"warm"}
+{"query":"embeddings","expected_content_contains":"all-MiniLM","expected_tier":"warm"}
