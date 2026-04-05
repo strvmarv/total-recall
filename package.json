@@ -50,14 +50,18 @@
   "keywords": [
     "mcp",
     "memory",
+    "agent-memory",
     "knowledge-base",
+    "rag",
     "claude-code",
     "copilot-cli",
+    "gemini-cli",
     "opencode",
     "cline",
     "cursor",
     "sqlite",
     "vector-search",
+    "hybrid-search",
     "embeddings",
     "ai-coding",
     "tui"
