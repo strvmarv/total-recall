@@ -24,7 +24,7 @@ Every TUI coding assistant has the same gap:
 
 total-recall introduces a three-tier memory model: **Hot** memories (up to 50 entries) are auto-injected into every prompt so your most important context is always present. **Warm** memories (up to 10K entries) are retrieved semantically — when you ask about authentication, relevant auth memories surface automatically. **Cold** storage is unlimited hierarchical knowledge base: ingest your docs, README files, API references, and architecture notes, and they're retrieved when relevant.
 
-The knowledge base ingests entire directories — source trees, documentation folders, design specs — and chunks them semantically with heading-aware Markdown parsing and AST-based code parsing. Every chunk is embedded with `all-MiniLM-L6-v2` (384 dimensions, runs locally via ONNX) so retrieval is purely semantic, no keyword matching required.
+The knowledge base ingests entire directories — source trees, documentation folders, design specs — and chunks them semantically with heading-aware Markdown parsing and regex-based code parsing. Every chunk is embedded with `all-MiniLM-L6-v2` (384 dimensions, runs locally via ONNX) so retrieval is purely semantic, no keyword matching required.
 
 Platform support is via MCP (Model Context Protocol), which means total-recall works with any MCP-compatible tool. Dedicated importers for Claude Code and Copilot CLI mean your existing memories migrate automatically on first run. An eval framework lets you measure retrieval quality, run benchmarks, and compare configuration changes before committing them.
 
@@ -99,7 +99,7 @@ total-recall auto-initializes on first use:
 MCP Server (Node.js/TypeScript)
 ├── Always Loaded: SQLite + vec, MCP Tools, Event Logger
 ├── Lazy Loaded: ONNX Embedder, Compactor, Ingestor
-└── Host Importers: Claude Code, Copilot CLI, OpenCode
+└── Host Importers: Claude Code, Copilot CLI
 
 Tiers:
   Hot (50 entries)  → auto-injected every prompt
@@ -114,7 +114,7 @@ Tiers:
 3. `compact` — decay scores, demote warm→cold, evict hot→warm, summarize clusters
 4. `ingest` — chunk files, embed chunks, store in cold tier with metadata
 
-All state lives in `~/.total-recall/db.sqlite`. The embedding model is bundled with the package. No network calls required.
+All state lives in `~/.total-recall/total-recall.db`. The embedding model is bundled with the package. No network calls required.
 
 ---
 
@@ -127,10 +127,10 @@ All commands use `/total-recall <subcommand>`:
 | `/total-recall status` | `status` | Dashboard overview |
 | `/total-recall search <query>` | `memory_search` | Semantic search across all tiers |
 | `/total-recall store <content>` | `memory_store` | Manually store a memory |
-| `/total-recall inspect <id>` | `memory_get` | Retrieve a specific entry by ID |
+| — | `memory_get` | Retrieve a specific entry by ID |
 | — | `memory_update` | Update an existing entry's content, tags, or project |
 | `/total-recall forget <query>` | `memory_search` + `memory_delete` | Find and delete entries |
-| `/total-recall inspect <id>` | `memory_inspect` | Deep dive on single entry |
+| `/total-recall inspect <id>` | `memory_inspect` | Deep dive on single entry with compaction history |
 | `/total-recall promote <id>` | `memory_promote` | Move entry to higher tier |
 | `/total-recall demote <id>` | `memory_demote` | Move entry to lower tier |
 | `/total-recall history` | `memory_history` | Show recent tier movements |
@@ -215,7 +215,7 @@ Implement the `HostImporter` interface (~50 lines). It requires four methods: `d
 
 ### Adding a New Content Type
 
-Add a row to the `content_type` lookup table in `src/db/schema.ts`, then register a type weight for relevance scoring. No other changes needed.
+Content types (`"memory"` and `"knowledge"`) are defined in `src/types.ts` as the `ContentType` union. Each tier has separate tables per content type (e.g., `hot_memories`, `hot_knowledge`). To add a new content type, add it to the `ContentType` union, create the corresponding tier tables in `src/db/schema.ts`, and update `ALL_TABLE_PAIRS`.
 
 ### Adding a New Chunking Parser
 
