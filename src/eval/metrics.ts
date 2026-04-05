@@ -170,6 +170,130 @@ export function computeMetrics(
   };
 }
 
+export interface QueryDiffEntry {
+  queryText: string;
+  beforeOutcome: "used" | "unused" | "missing";
+  afterOutcome: "used" | "unused" | "missing";
+  beforeScore: number | null;
+  afterScore: number | null;
+}
+
+export interface ComparisonResult {
+  before: Metrics;
+  after: Metrics;
+  deltas: {
+    precision: number;
+    hitRate: number;
+    mrr: number;
+    missRate: number;
+    avgLatencyMs: number;
+  };
+  byTier: Record<string, {
+    before: TierMetrics;
+    after: TierMetrics;
+    deltas: { precision: number; hitRate: number; avgScore: number };
+  }>;
+  byContentType: Record<string, {
+    before: ContentTypeMetrics;
+    after: ContentTypeMetrics;
+    deltas: { precision: number; hitRate: number };
+  }>;
+  queryDiff: {
+    regressions: QueryDiffEntry[];
+    improvements: QueryDiffEntry[];
+  };
+  warning?: string;
+}
+
+export function computeComparisonMetrics(
+  eventsBefore: RetrievalEventRow[],
+  eventsAfter: RetrievalEventRow[],
+  similarityThreshold: number,
+): ComparisonResult {
+  const before = computeMetrics(eventsBefore, similarityThreshold);
+  const after = computeMetrics(eventsAfter, similarityThreshold);
+
+  const deltas = {
+    precision: after.precision - before.precision,
+    hitRate: after.hitRate - before.hitRate,
+    mrr: after.mrr - before.mrr,
+    missRate: after.missRate - before.missRate,
+    avgLatencyMs: after.avgLatencyMs - before.avgLatencyMs,
+  };
+
+  // Per-tier deltas
+  const allTiers = new Set([...Object.keys(before.byTier), ...Object.keys(after.byTier)]);
+  const byTier: ComparisonResult["byTier"] = {};
+  const emptyTier: TierMetrics = { precision: 0, hitRate: 0, avgScore: 0, count: 0 };
+  for (const tier of allTiers) {
+    const b = before.byTier[tier] ?? emptyTier;
+    const a = after.byTier[tier] ?? emptyTier;
+    byTier[tier] = {
+      before: b,
+      after: a,
+      deltas: {
+        precision: a.precision - b.precision,
+        hitRate: a.hitRate - b.hitRate,
+        avgScore: a.avgScore - b.avgScore,
+      },
+    };
+  }
+
+  // Per-content-type deltas
+  const allTypes = new Set([...Object.keys(before.byContentType), ...Object.keys(after.byContentType)]);
+  const byContentType: ComparisonResult["byContentType"] = {};
+  const emptyType: ContentTypeMetrics = { precision: 0, hitRate: 0, count: 0 };
+  for (const ct of allTypes) {
+    const b = before.byContentType[ct] ?? emptyType;
+    const a = after.byContentType[ct] ?? emptyType;
+    byContentType[ct] = {
+      before: b,
+      after: a,
+      deltas: {
+        precision: a.precision - b.precision,
+        hitRate: a.hitRate - b.hitRate,
+      },
+    };
+  }
+
+  // Query-level diff
+  const beforeByQuery = new Map<string, RetrievalEventRow>();
+  for (const e of eventsBefore) beforeByQuery.set(e.query_text, e);
+  const afterByQuery = new Map<string, RetrievalEventRow>();
+  for (const e of eventsAfter) afterByQuery.set(e.query_text, e);
+
+  const regressions: QueryDiffEntry[] = [];
+  const improvements: QueryDiffEntry[] = [];
+
+  const allQueries = new Set([...beforeByQuery.keys(), ...afterByQuery.keys()]);
+  for (const q of allQueries) {
+    const b = beforeByQuery.get(q);
+    const a = afterByQuery.get(q);
+    const bOutcome = !b ? "missing" : b.outcome_used === 1 ? "used" : "unused";
+    const aOutcome = !a ? "missing" : a.outcome_used === 1 ? "used" : "unused";
+
+    if (bOutcome === aOutcome) continue;
+
+    const entry: QueryDiffEntry = {
+      queryText: q,
+      beforeOutcome: bOutcome,
+      afterOutcome: aOutcome,
+      beforeScore: b?.top_score ?? null,
+      afterScore: a?.top_score ?? null,
+    };
+
+    if (bOutcome === "used" && aOutcome !== "used") regressions.push(entry);
+    if (aOutcome === "used" && bOutcome !== "used") improvements.push(entry);
+  }
+
+  let warning: string | undefined;
+  if (eventsBefore.length === 0 || eventsAfter.length === 0) {
+    warning = "Comparison requires retrieval events from both snapshots. One side has no data — metrics may not be meaningful.";
+  }
+
+  return { before, after, deltas, byTier, byContentType, queryDiff: { regressions, improvements }, warning };
+}
+
 function computeCompactionHealth(rows: CompactionLogRow[]): CompactionHealthMetrics {
   const withRatio = rows.filter((r) => r.preservation_ratio !== null);
   const withDrift = rows.filter((r) => r.semantic_drift !== null && r.semantic_drift > 0.2);
