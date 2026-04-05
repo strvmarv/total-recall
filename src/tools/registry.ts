@@ -20,6 +20,15 @@ export interface SessionInitResult {
   projectDocs: { filesIngested: number; totalChunks: number } | null;
   hotEntryCount: number;
   context: string;
+  tierSummary: {
+    hot: number;
+    warm: number;
+    cold: number;
+    kb: number;
+    collections: number;
+  };
+  hints: string[];
+  lastSessionAge: string | null;
 }
 
 export interface ToolContext {

@@ -4,7 +4,7 @@ import type { ToolContext, SessionInitResult } from "./registry.js";
 import { createConfigSnapshot } from "../config.js";
 import { ClaudeCodeImporter } from "../importers/claude-code.js";
 import { CopilotCliImporter } from "../importers/copilot-cli.js";
-import { listEntries, getEntry, listEntriesByMetadata } from "../db/entries.js";
+import { listEntries, getEntry, countEntries, listEntriesByMetadata } from "../db/entries.js";
 import { searchMemory } from "../memory/search.js";
 import { promoteEntry, demoteEntry } from "../memory/promote-demote.js";
 import { compactHotTier } from "../compaction/compactor.js";
@@ -188,6 +188,7 @@ export async function runSessionInit(ctx: ToolContext): Promise<SessionInitResul
   }
 
   // Semantic warm search: promote relevant warm entries to hot based on project
+  const warmPromotedIds: string[] = [];
   let warmPromoted = 0;
   if (project) {
     const warmResults = await searchMemory(ctx.db, embedFn, project, {
@@ -203,6 +204,7 @@ export async function runSessionInit(ctx: ToolContext): Promise<SessionInitResul
       const entry = getEntry(ctx.db, "warm", "memory", result.entry.id);
       if (entry && (entry.project === project || entry.project === null)) {
         await promoteEntry(ctx.db, embedFn, result.entry.id, "warm", "memory", "hot", "memory");
+        warmPromotedIds.push(result.entry.id);
         warmPromoted++;
       }
     }
@@ -243,6 +245,21 @@ export async function runSessionInit(ctx: ToolContext): Promise<SessionInitResul
   const snapshotId = createConfigSnapshot(ctx.db, ctx.config, "session-start");
   ctx.configSnapshotId = snapshotId;
 
+  // Tier summary stats
+  const tierSummary = {
+    hot: hotEntries.length,
+    warm: countEntries(ctx.db, "warm", "memory") + countEntries(ctx.db, "warm", "knowledge"),
+    cold: countEntries(ctx.db, "cold", "memory") + countEntries(ctx.db, "cold", "knowledge"),
+    kb: countEntries(ctx.db, "hot", "knowledge") + countEntries(ctx.db, "warm", "knowledge") + countEntries(ctx.db, "cold", "knowledge"),
+    collections: (ctx.db.prepare(`SELECT COUNT(DISTINCT collection_id) as count FROM cold_knowledge WHERE collection_id IS NOT NULL`).get() as { count: number }).count,
+  };
+
+  // Actionable hints
+  const hints = generateHints(ctx.db, warmPromotedIds);
+
+  // Last session age
+  const lastSessionAge = getLastSessionAge(ctx.db);
+
   const result: SessionInitResult = {
     project,
     importSummary,
@@ -251,6 +268,9 @@ export async function runSessionInit(ctx: ToolContext): Promise<SessionInitResul
     projectDocs,
     hotEntryCount: hotEntries.length,
     context: contextText,
+    tierSummary,
+    hints,
+    lastSessionAge,
   };
 
   ctx.sessionInitResult = result;
