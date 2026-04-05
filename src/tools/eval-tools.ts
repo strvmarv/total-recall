@@ -1,9 +1,11 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type Database from "better-sqlite3";
 import type { ToolContext } from "./registry.js";
 import { runBenchmark } from "../eval/benchmark-runner.js";
 import { getRetrievalEvents } from "../eval/event-logger.js";
-import { computeMetrics } from "../eval/metrics.js";
+import { computeMetrics, computeComparisonMetrics } from "../eval/metrics.js";
+import { createConfigSnapshot } from "../config.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 // In dev: __dirname = src/tools/ (2 levels up to root)
@@ -37,9 +39,46 @@ export const EVAL_TOOLS = [
       required: [],
     },
   },
+  {
+    name: "eval_compare",
+    description: "Compare retrieval metrics between two config snapshots",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        before: { type: "string", description: "Snapshot name or ID for the 'before' config" },
+        after: { type: "string", description: "Snapshot name or ID for the 'after' config (default: latest)" },
+        days: { type: "number", description: "Days of events to include (default: 30)" },
+      },
+      required: ["before"],
+    },
+  },
+  {
+    name: "eval_snapshot",
+    description: "Manually create a named config snapshot",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        name: { type: "string", description: "Name for the snapshot" },
+      },
+      required: ["name"],
+    },
+  },
 ];
 
-type ToolResult = { content: Array<{ type: "text"; text: string }> };
+type ToolResult = { content: Array<{ type: "text"; text: string }>; isError?: true };
+
+function resolveSnapshotId(db: Database.Database, nameOrId: string): string | null {
+  const byId = db.prepare("SELECT id FROM config_snapshots WHERE id = ?").get(nameOrId) as { id: string } | undefined;
+  if (byId) return byId.id;
+
+  if (nameOrId === "latest") {
+    const latest = db.prepare("SELECT id FROM config_snapshots ORDER BY timestamp DESC LIMIT 1").get() as { id: string } | undefined;
+    return latest?.id ?? null;
+  }
+
+  const byName = db.prepare("SELECT id FROM config_snapshots WHERE name = ? ORDER BY timestamp DESC LIMIT 1").get(nameOrId) as { id: string } | undefined;
+  return byName?.id ?? null;
+}
 
 export async function handleEvalTool(
   name: string,
@@ -79,6 +118,71 @@ export async function handleEvalTool(
     const metrics = computeMetrics(events, similarityThreshold, compactionRows);
 
     return { content: [{ type: "text", text: JSON.stringify({ days, events: events.length, metrics }) }] };
+  }
+
+  if (name === "eval_compare") {
+    const beforeRef = args.before as string;
+    const afterRef = (args.after as string) ?? "latest";
+    const days = (args.days as number) ?? 30;
+
+    const beforeId = resolveSnapshotId(ctx.db, beforeRef);
+    if (!beforeId) {
+      const available = ctx.db.prepare("SELECT name, id FROM config_snapshots ORDER BY timestamp DESC LIMIT 10").all();
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({ error: `Snapshot "${beforeRef}" not found`, available }),
+        }],
+        isError: true,
+      };
+    }
+
+    const afterId = resolveSnapshotId(ctx.db, afterRef);
+    if (!afterId) {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({ error: `Snapshot "${afterRef}" not found` }),
+        }],
+        isError: true,
+      };
+    }
+
+    const eventsBefore = getRetrievalEvents(ctx.db, { configSnapshotId: beforeId, days });
+    const eventsAfter = getRetrievalEvents(ctx.db, { configSnapshotId: afterId, days });
+
+    const threshold = ctx.config.tiers.warm.similarity_threshold;
+    const comparison = computeComparisonMetrics(eventsBefore, eventsAfter, threshold);
+
+    const response: Record<string, unknown> = {
+      beforeSnapshot: beforeId,
+      afterSnapshot: afterId,
+      days,
+      beforeEventCount: eventsBefore.length,
+      afterEventCount: eventsAfter.length,
+      ...comparison,
+    };
+    if (comparison.warning) {
+      response.warning = comparison.warning;
+    }
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify(response),
+      }],
+    };
+  }
+
+  if (name === "eval_snapshot") {
+    const snapshotName = args.name as string;
+    const id = createConfigSnapshot(ctx.db, ctx.config, snapshotName);
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({ id, name: snapshotName, created: true }),
+      }],
+    };
   }
 
   return null;
