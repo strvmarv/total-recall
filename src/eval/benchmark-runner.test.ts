@@ -30,6 +30,8 @@ describe("runBenchmark", () => {
       expect(typeof detail.topScore).toBe("number");
       expect(typeof detail.matched).toBe("boolean");
       expect(typeof detail.fuzzyMatched).toBe("boolean");
+      expect(typeof detail.hasNegativeAssertion).toBe("boolean");
+      expect(typeof detail.negativePass).toBe("boolean");
     }
   });
 
@@ -43,5 +45,7 @@ describe("runBenchmark", () => {
     expect(result.exactMatchRate).toBeLessThanOrEqual(1);
     expect(result.tierRoutingRate).toBeGreaterThanOrEqual(0);
     expect(result.tierRoutingRate).toBeLessThanOrEqual(1);
+    expect(result.negativePassRate).toBeGreaterThanOrEqual(0);
+    expect(result.negativePassRate).toBeLessThanOrEqual(1);
   });
 });

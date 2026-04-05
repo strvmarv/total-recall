@@ -17,6 +17,7 @@ interface BenchmarkQuery {
   query: string;
   expected_content_contains: string;
   expected_tier: Tier;
+  expected_absent?: string;
 }
 
 export interface BenchmarkDetail {
@@ -26,6 +27,8 @@ export interface BenchmarkDetail {
   topScore: number;
   matched: boolean;
   fuzzyMatched: boolean;
+  hasNegativeAssertion: boolean;
+  negativePass: boolean;
 }
 
 export interface BenchmarkResult {
@@ -33,6 +36,7 @@ export interface BenchmarkResult {
   exactMatchRate: number;
   fuzzyMatchRate: number;
   tierRoutingRate: number;
+  negativePassRate: number;
   avgLatencyMs: number;
   details: BenchmarkDetail[];
 }
@@ -103,6 +107,11 @@ export async function runBenchmark(
 
     const tierRouted = topTier === bq.expected_tier;
 
+    let negativePass = true;
+    if (bq.expected_absent && topContent) {
+      negativePass = !topContent.toLowerCase().includes(bq.expected_absent.toLowerCase());
+    }
+
     if (matched) exactMatches++;
     if (fuzzyMatched) fuzzyMatches++;
     if (tierRouted) tierMatches++;
@@ -114,6 +123,8 @@ export async function runBenchmark(
       topScore,
       matched,
       fuzzyMatched,
+      hasNegativeAssertion: !!bq.expected_absent,
+      negativePass,
     });
   }
 
@@ -124,11 +135,18 @@ export async function runBenchmark(
 
   const total = queries.length;
 
+  const negativeQueries = details.filter((d) => d.hasNegativeAssertion);
+  const negativePassRate =
+    negativeQueries.length > 0
+      ? negativeQueries.filter((d) => d.negativePass).length / negativeQueries.length
+      : 1.0;
+
   return {
     totalQueries: total,
     exactMatchRate: total > 0 ? exactMatches / total : 0,
     fuzzyMatchRate: total > 0 ? fuzzyMatches / total : 0,
     tierRoutingRate: total > 0 ? tierMatches / total : 0,
+    negativePassRate,
     avgLatencyMs: total > 0 ? totalLatencyMs / total : 0,
     details,
   };
