@@ -106,6 +106,9 @@ function tableName(tier, type) {
 function vecTableName(tier, type) {
   return `${tableName(tier, type)}_vec`;
 }
+function ftsTableName(tier, type) {
+  return `${tableName(tier, type)}_fts`;
+}
 var ALL_TABLE_PAIRS = [
   { tier: "hot", type: "memory" },
   { tier: "hot", type: "knowledge" },
@@ -901,34 +904,101 @@ async function storeMemory(db, embed, opts) {
   return id;
 }
 
+// src/search/fts-search.ts
+function sanitizeFtsQuery(query) {
+  const words = query.split(/\s+/).filter(Boolean).map((w) => `"${w.replace(/"/g, '""')}"`).join(" ");
+  return words;
+}
+function searchByFts(db, tier, type, query, opts) {
+  const contentTable = tableName(tier, type);
+  const ftsTable = ftsTableName(tier, type);
+  const tableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(ftsTable);
+  if (!tableExists) return [];
+  const sanitized = sanitizeFtsQuery(query);
+  if (!sanitized) return [];
+  const rows = db.prepare(
+    `SELECT c.id, rank as bm25_rank
+       FROM ${ftsTable} fts
+       INNER JOIN ${contentTable} c ON c.rowid = fts.rowid
+       WHERE ${ftsTable} MATCH ?
+       ORDER BY rank
+       LIMIT ?`
+  ).all(sanitized, opts.topK);
+  if (rows.length === 0) return [];
+  const rawScores = rows.map((r) => -r.bm25_rank);
+  const maxRaw = Math.max(...rawScores);
+  const minRaw = Math.min(...rawScores);
+  const range = maxRaw - minRaw;
+  return rows.map((r, i) => ({
+    id: r.id,
+    score: range > 0 ? (rawScores[i] - minRaw) / range : 1
+  }));
+}
+
 // src/memory/search.ts
+var DEFAULT_FTS_WEIGHT = 0.3;
 async function searchMemory(db, embed, query, opts) {
   const queryVec = await embed(query);
-  const merged = [];
+  const ftsWeight = opts.ftsWeight ?? DEFAULT_FTS_WEIGHT;
+  const oversampledK = opts.topK * 2;
+  const scoreMap = /* @__PURE__ */ new Map();
   for (const { tier, content_type } of opts.tiers) {
     const vectorResults = searchByVector(db, tier, content_type, queryVec, {
-      topK: opts.topK,
+      topK: oversampledK,
       minScore: opts.minScore
     });
     for (const vr of vectorResults) {
-      const entry = getEntry(db, tier, content_type, vr.id);
-      if (!entry) continue;
-      updateEntry(db, tier, content_type, vr.id, { touch: true });
-      merged.push({
-        entry,
-        tier,
-        content_type,
-        score: vr.score,
-        rank: 0
-      });
+      const existing = scoreMap.get(vr.id);
+      if (!existing || vr.score > existing.vectorScore) {
+        scoreMap.set(vr.id, {
+          vectorScore: vr.score,
+          ftsScore: existing?.ftsScore ?? 0,
+          tier,
+          content_type
+        });
+      }
+    }
+    const ftsResults = searchByFts(db, tier, content_type, query, {
+      topK: oversampledK
+    });
+    for (const fr of ftsResults) {
+      const existing = scoreMap.get(fr.id);
+      if (existing) {
+        existing.ftsScore = Math.max(existing.ftsScore, fr.score);
+      } else {
+        scoreMap.set(fr.id, {
+          vectorScore: 0,
+          ftsScore: fr.score,
+          tier,
+          content_type
+        });
+      }
     }
   }
-  merged.sort((a, b) => b.score - a.score);
-  const topK = merged.slice(0, opts.topK);
-  topK.forEach((r, i) => {
+  const candidates = [];
+  for (const [id, scores] of scoreMap) {
+    const fusedScore = scores.vectorScore + ftsWeight * scores.ftsScore;
+    candidates.push({ id, fusedScore, tier: scores.tier, content_type: scores.content_type });
+  }
+  candidates.sort((a, b) => b.fusedScore - a.fusedScore);
+  const topCandidates = candidates.slice(0, opts.topK);
+  const merged = [];
+  for (const c of topCandidates) {
+    const entry = getEntry(db, c.tier, c.content_type, c.id);
+    if (!entry) continue;
+    updateEntry(db, c.tier, c.content_type, c.id, { touch: true });
+    merged.push({
+      entry,
+      tier: c.tier,
+      content_type: c.content_type,
+      score: c.fusedScore,
+      rank: 0
+    });
+  }
+  merged.forEach((r, i) => {
     r.rank = i + 1;
   });
-  return topK;
+  return merged;
 }
 
 // src/memory/get.ts
