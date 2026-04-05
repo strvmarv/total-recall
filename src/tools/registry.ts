@@ -10,6 +10,7 @@ import { registerKbTools, handleKbTool } from "./kb-tools.js";
 import { registerEvalTools, handleEvalTool } from "./eval-tools.js";
 import { registerImportTools, handleImportTool } from "./import-tools.js";
 import { registerSessionTools, handleSessionTool } from "./session-tools.js";
+import { registerExtraTools, handleExtraTool } from "./extra-tools.js";
 
 export interface ToolContext {
   db: Database.Database;
@@ -31,6 +32,7 @@ export async function startServer(ctx: ToolContext): Promise<void> {
     ...registerEvalTools(),
     ...registerImportTools(),
     ...registerSessionTools(),
+    ...registerExtraTools(),
   ];
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -53,6 +55,8 @@ export async function startServer(ctx: ToolContext): Promise<void> {
     if (importResult !== null) return importResult;
     const sessionResult = await handleSessionTool(name, args ?? {}, ctx);
     if (sessionResult !== null) return sessionResult;
+    const extraResult = await handleExtraTool(name, args ?? {}, ctx);
+    if (extraResult !== null) return extraResult;
 
     return {
       content: [
