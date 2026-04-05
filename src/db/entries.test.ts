@@ -204,4 +204,16 @@ describe("listEntriesByMetadata", () => {
 
     expect(results).toHaveLength(0);
   });
+
+  it("throws on empty metadataFilter", () => {
+    expect(() =>
+      listEntriesByMetadata(db, "warm", "memory", {}),
+    ).toThrow("metadataFilter must contain at least one key-value pair");
+  });
+
+  it("throws on invalid metadata key", () => {
+    expect(() =>
+      listEntriesByMetadata(db, "warm", "memory", { "bad'; DROP TABLE--": "val" }),
+    ).toThrow("Invalid metadata key");
+  });
 });

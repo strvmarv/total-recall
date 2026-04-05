@@ -243,6 +243,18 @@ export function listEntriesByMetadata(
   const orderBy = `${column} ${direction}`;
 
   const filterKeys = Object.keys(metadataFilter);
+
+  if (filterKeys.length === 0) {
+    throw new Error("metadataFilter must contain at least one key-value pair");
+  }
+
+  const KEY_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+  for (const key of filterKeys) {
+    if (!KEY_PATTERN.test(key)) {
+      throw new Error(`Invalid metadata key: ${key}`);
+    }
+  }
+
   const whereClauses = filterKeys.map(
     (key) => `json_extract(metadata, '$.${key}') = ?`,
   );
