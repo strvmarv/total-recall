@@ -1,9 +1,13 @@
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getDataDir } from "../config.js";
 
 const HF_BASE_URL = "https://huggingface.co";
+
+// Pin to a specific revision for reproducibility
+const HF_REVISION = "main"; // Can be changed to a specific commit hash
 
 export function getModelPath(modelName: string): string {
   return join(getDataDir(), "models", modelName);
@@ -19,12 +23,28 @@ export function isModelDownloaded(modelPath: string): boolean {
   }
 }
 
+async function validateDownload(modelPath: string): Promise<void> {
+  // Check model.onnx exists and is substantial
+  const modelStat = statSync(join(modelPath, "model.onnx"));
+  if (modelStat.size < 1_000_000) {
+    throw new Error("model.onnx appears corrupted (< 1MB)");
+  }
+
+  // Check tokenizer.json is valid JSON
+  const tokenizerText = readFileSync(join(modelPath, "tokenizer.json"), "utf-8");
+  try {
+    JSON.parse(tokenizerText);
+  } catch {
+    throw new Error("tokenizer.json is not valid JSON");
+  }
+}
+
 export async function downloadModel(modelName: string): Promise<string> {
   const modelPath = getModelPath(modelName);
   mkdirSync(modelPath, { recursive: true });
 
   const files = ["model.onnx", "tokenizer.json", "tokenizer_config.json"];
-  const repoUrl = `${HF_BASE_URL}/${modelName}/resolve/main`;
+  const repoUrl = `${HF_BASE_URL}/sentence-transformers/${modelName}/resolve/${HF_REVISION}/onnx`;
 
   for (const file of files) {
     const url = `${repoUrl}/${file}`;
@@ -37,8 +57,13 @@ export async function downloadModel(modelName: string): Promise<string> {
       );
     }
     const buffer = await response.arrayBuffer();
+    if (buffer.byteLength === 0) {
+      throw new Error(`Downloaded ${file} is empty`);
+    }
     await writeFile(dest, Buffer.from(buffer));
   }
+
+  await validateDownload(modelPath);
 
   return modelPath;
 }
