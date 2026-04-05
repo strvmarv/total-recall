@@ -27,22 +27,17 @@ Auto-detect user corrections, preferences, and acknowledgments in conversation f
 
 Expanded corpus from 20 to 100 entries across 6 categories. Queries expanded from 20 to 139 including synonym, partial match, and negative assertion queries. Added `expected_absent` support to benchmark runner.
 
-## Evolving Benchmarks (--grow)
+## ~~Evolving Benchmarks (--grow)~~ [DONE]
 
-Harvest real retrieval misses into the benchmark suite. When a search returns no useful results, log the query as a candidate benchmark entry. `/total-recall eval --grow` would review candidates and add confirmed ones to `retrieval.jsonl`.
-
-**Files:** `src/eval/benchmark-runner.ts`, `src/tools/eval-tools.ts`
+Retrieval misses from `eval_report` auto-captured as candidates in `benchmark_candidates` table. `eval_grow` tool supports list mode (pending candidates sorted by frequency) and resolve mode (accept/reject, with accepted entries appended to `retrieval.jsonl`).
 
 ## ~~A/B Config Comparison~~ [DONE]
 
 Config snapshots auto-created on `session_start` and before `config_set`. `eval_compare` tool provides side-by-side metrics with per-tier/per-content-type breakdowns and query-level diff. `eval_snapshot` tool for manual snapshots.
 
-## Regression Detection
+## ~~Regression Detection~~ [DONE]
 
-Alert when retrieval metrics drop below thresholds or trend downward. Surface warnings in `/total-recall status` dashboard.
-
-**Files:** `src/tools/system-tools.ts`, `src/eval/metrics.ts`
-**Depends on:** Enough retrieval event history to compute meaningful trends.
+Compares retrieval metrics between config snapshots at session_start. Alerts when miss rate increases by ≥ `regression.miss_rate_delta` or latency increases by ≥ `regression.latency_ratio`. Configurable thresholds with sensible defaults. Skipped when insufficient data.
 
 ## PreToolUse Hook (Optional Fallback)
 
@@ -61,17 +56,13 @@ Not supported in the chunker. Would need a PDF-to-text library.
 
 **Files:** `src/ingestion/chunker.ts`
 
-## First-Run Smoke Test
+## ~~First-Run Smoke Test~~ [DONE]
 
-Benchmark runner exists but isn't integrated into startup. Design spec called for a <2s smoke test with 20 queries on first run.
+Version-gated smoke test runs on first install and after upgrades. 22-query corpus in `eval/benchmarks/smoke.jsonl` exercises semantic similarity, tier routing, and negative assertions. Results surfaced in `session_start` response as `smokeTest` field. Version tracked in `_meta` table.
 
-**Files:** `src/tools/session-tools.ts`, `src/eval/benchmark-runner.ts`
+## ~~Post-Ingest Validation Queries~~ [DONE]
 
-## Post-Ingest Validation Queries
-
-After ingestion, auto-generate 3 test queries to verify chunks are retrievable. Report validation pass/fail in the ingest response.
-
-**Files:** `src/ingestion/ingest.ts`, `src/tools/kb-tools.ts`
+Replaced single-chunk identity check with 3-probe validation. Probes sample chunks at 0%, 33%, and 66% through the document via scoped vector search. `IngestFileResult` now includes per-probe details. `IngestDirectoryResult` tracks per-file validation failures.
 
 ## ~~Config Snapshot Auto-Creation~~ [DONE]
 
