@@ -9,6 +9,7 @@ import {
   listEntries,
   countEntries,
   moveEntry,
+  listEntriesByMetadata,
 } from "./entries.js";
 
 describe("entries CRUD", () => {
@@ -113,5 +114,94 @@ describe("entries CRUD", () => {
     const after = getEntry(db, "hot", "memory", id)!;
     expect(after.access_count).toBe(1);
     expect(after.last_accessed_at).toBeGreaterThanOrEqual(before.last_accessed_at);
+  });
+});
+
+describe("listEntriesByMetadata", () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it("filters entries by metadata key-value pair", () => {
+    insertEntry(db, "warm", "memory", {
+      content: "correction entry",
+      metadata: { entry_type: "correction" },
+    });
+    insertEntry(db, "warm", "memory", {
+      content: "preference entry",
+      metadata: { entry_type: "preference" },
+    });
+    insertEntry(db, "warm", "memory", {
+      content: "no type entry",
+    });
+
+    const results = listEntriesByMetadata(db, "warm", "memory", {
+      entry_type: "correction",
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]!.content).toBe("correction entry");
+  });
+
+  it("filters by multiple metadata keys", () => {
+    insertEntry(db, "warm", "memory", {
+      content: "match both",
+      metadata: { entry_type: "correction", source_context: "session" },
+    });
+    insertEntry(db, "warm", "memory", {
+      content: "match one",
+      metadata: { entry_type: "correction" },
+    });
+
+    const results = listEntriesByMetadata(db, "warm", "memory", {
+      entry_type: "correction",
+      source_context: "session",
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]!.content).toBe("match both");
+  });
+
+  it("respects orderBy and limit options", () => {
+    insertEntry(db, "warm", "memory", {
+      content: "first",
+      metadata: { entry_type: "correction" },
+    });
+    insertEntry(db, "warm", "memory", {
+      content: "second",
+      metadata: { entry_type: "correction" },
+    });
+    insertEntry(db, "warm", "memory", {
+      content: "third",
+      metadata: { entry_type: "correction" },
+    });
+
+    const results = listEntriesByMetadata(
+      db, "warm", "memory",
+      { entry_type: "correction" },
+      { orderBy: "created_at ASC", limit: 2 },
+    );
+
+    expect(results).toHaveLength(2);
+    expect(results[0]!.content).toBe("first");
+    expect(results[1]!.content).toBe("second");
+  });
+
+  it("returns empty array when no entries match", () => {
+    insertEntry(db, "warm", "memory", {
+      content: "no metadata",
+    });
+
+    const results = listEntriesByMetadata(db, "warm", "memory", {
+      entry_type: "correction",
+    });
+
+    expect(results).toHaveLength(0);
   });
 });

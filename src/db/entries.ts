@@ -225,6 +225,40 @@ export function countEntries(
   return row.count;
 }
 
+export function listEntriesByMetadata(
+  db: Database.Database,
+  tier: Tier,
+  type: ContentType,
+  metadataFilter: Record<string, string>,
+  opts?: { orderBy?: string; limit?: number },
+): Entry[] {
+  const table = tableName(tier, type);
+
+  const orderParts = (opts?.orderBy ?? "created_at DESC").split(" ");
+  const column = orderParts[0]!;
+  const direction = orderParts[1]?.toUpperCase() === "ASC" ? "ASC" : "DESC";
+  if (!ALLOWED_ORDER_COLUMNS.has(column)) {
+    throw new Error(`Invalid orderBy column: ${column}`);
+  }
+  const orderBy = `${column} ${direction}`;
+
+  const filterKeys = Object.keys(metadataFilter);
+  const whereClauses = filterKeys.map(
+    (key) => `json_extract(metadata, '$.${key}') = ?`,
+  );
+  const params: unknown[] = filterKeys.map((key) => metadataFilter[key]);
+
+  let sql = `SELECT * FROM ${table} WHERE ${whereClauses.join(" AND ")} ORDER BY ${orderBy}`;
+
+  if (opts?.limit !== undefined) {
+    sql += " LIMIT ?";
+    params.push(opts.limit);
+  }
+
+  const rows = db.prepare(sql).all(...params) as EntryRow[];
+  return rows.map(rowToEntry);
+}
+
 export function moveEntry(
   db: Database.Database,
   fromTier: Tier,
