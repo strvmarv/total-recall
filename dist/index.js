@@ -384,20 +384,128 @@ async function downloadModel(modelName) {
   return modelPath;
 }
 
-// src/embedding/embedder.ts
+// src/embedding/tokenizer.ts
 var CLS_TOKEN_ID = 101;
 var SEP_TOKEN_ID = 102;
 var UNK_TOKEN_ID = 100;
 var MAX_SEQ_LEN = 512;
+var MAX_INPUT_CHARS_PER_WORD = 100;
+var WordPieceTokenizer = class {
+  vocab;
+  constructor(vocab) {
+    this.vocab = vocab;
+  }
+  tokenize(text) {
+    const normalized = this.normalize(text);
+    const words = this.preTokenize(normalized);
+    const ids = [CLS_TOKEN_ID];
+    for (const word of words) {
+      if (ids.length >= MAX_SEQ_LEN - 1) break;
+      const subIds = this.wordPiece(word);
+      for (const id of subIds) {
+        ids.push(id);
+        if (ids.length >= MAX_SEQ_LEN - 1) break;
+      }
+    }
+    ids.push(SEP_TOKEN_ID);
+    return ids;
+  }
+  normalize(text) {
+    let out = "";
+    for (const ch of text) {
+      const cp = ch.codePointAt(0);
+      if (isControl(cp) && !isWhitespace(cp)) continue;
+      if (isCjk(cp)) {
+        out += ` ${ch} `;
+      } else {
+        out += ch;
+      }
+    }
+    return out.toLowerCase();
+  }
+  preTokenize(text) {
+    const tokens = [];
+    let current = "";
+    for (const ch of text) {
+      const cp = ch.codePointAt(0);
+      if (isWhitespace(cp)) {
+        if (current) tokens.push(current);
+        current = "";
+      } else if (isPunctuation(cp)) {
+        if (current) tokens.push(current);
+        tokens.push(ch);
+        current = "";
+      } else {
+        current += ch;
+      }
+    }
+    if (current) tokens.push(current);
+    return tokens;
+  }
+  wordPiece(word) {
+    if (word.length > MAX_INPUT_CHARS_PER_WORD) return [UNK_TOKEN_ID];
+    const ids = [];
+    let start = 0;
+    while (start < word.length) {
+      let end = word.length;
+      let matched = false;
+      while (start < end) {
+        const substr = start === 0 ? word.slice(0, end) : `##${word.slice(start, end)}`;
+        const id = this.vocab[substr];
+        if (id !== void 0) {
+          ids.push(id);
+          start = end;
+          matched = true;
+          break;
+        }
+        end--;
+      }
+      if (!matched) {
+        return [UNK_TOKEN_ID];
+      }
+    }
+    return ids;
+  }
+};
+function isWhitespace(cp) {
+  return cp === 32 || cp === 9 || cp === 10 || cp === 13;
+}
+function isControl(cp) {
+  if (cp === 9 || cp === 10 || cp === 13) return false;
+  const cat = charCategory(cp);
+  return cat === "Cc" || cat === "Cf";
+}
+function isPunctuation(cp) {
+  if (cp >= 33 && cp <= 47 || cp >= 58 && cp <= 64 || cp >= 91 && cp <= 96 || cp >= 123 && cp <= 126) {
+    return true;
+  }
+  return new RegExp("^\\p{P}$", "u").test(String.fromCodePoint(cp));
+}
+function isCjk(cp) {
+  return cp >= 19968 && cp <= 40959 || cp >= 13312 && cp <= 19903 || cp >= 131072 && cp <= 173791 || cp >= 173824 && cp <= 177983 || cp >= 177984 && cp <= 178207 || cp >= 178208 && cp <= 183983 || cp >= 63744 && cp <= 64255 || cp >= 194560 && cp <= 195103;
+}
+function charCategory(cp) {
+  if (cp <= 31 || cp >= 127 && cp <= 159) return "Cc";
+  if (cp === 173 || cp >= 1536 && cp <= 1541 || cp === 1564 || cp === 1757 || cp === 1807)
+    return "Cf";
+  if (cp === 65279 || cp >= 65529 && cp <= 65531) return "Cf";
+  if (cp >= 8203 && cp <= 8207) return "Cf";
+  if (cp >= 8234 && cp <= 8238) return "Cf";
+  if (cp >= 8288 && cp <= 8292) return "Cf";
+  if (cp >= 8294 && cp <= 8297) return "Cf";
+  return "Lo";
+}
+
+// src/embedding/embedder.ts
 var Embedder = class {
   options;
   session = null;
-  vocab = null;
+  tokenizer = null;
   constructor(options) {
     this.options = options;
   }
   isLoaded() {
-    return this.session !== null && this.vocab !== null;
+    return this.session !== null && this.tokenizer !== null;
   }
   async ensureLoaded() {
     if (this.isLoaded()) return;
@@ -410,19 +518,11 @@ var Embedder = class {
     const tokenizerPath = join4(modelPath, "tokenizer.json");
     const tokenizerText = await readFile(tokenizerPath, "utf-8");
     const tokenizerJson = JSON.parse(tokenizerText);
-    this.vocab = tokenizerJson.model.vocab;
+    this.tokenizer = new WordPieceTokenizer(tokenizerJson.model.vocab);
   }
   tokenize(text) {
-    if (!this.vocab) throw new Error("Tokenizer not loaded");
-    const words = text.toLowerCase().split(/\s+/).filter(Boolean);
-    const ids = [CLS_TOKEN_ID];
-    for (const word of words) {
-      const id = this.vocab[word] ?? UNK_TOKEN_ID;
-      ids.push(id);
-      if (ids.length >= MAX_SEQ_LEN - 1) break;
-    }
-    ids.push(SEP_TOKEN_ID);
-    return ids;
+    if (!this.tokenizer) throw new Error("Tokenizer not loaded");
+    return this.tokenizer.tokenize(text);
   }
   async embed(text) {
     await this.ensureLoaded();
@@ -477,11 +577,6 @@ var Embedder = class {
     }
     return results;
   }
-  /**
-   * Deterministic embedding based on tokenization only (no ONNX inference).
-   * Used as fallback when async embed cannot be awaited synchronously.
-   * Requires ensureLoaded() to have been called.
-   */
   deterministicEmbed(text) {
     const tokenIds = this.tokenize(text);
     const hiddenSize = this.options.dimensions;

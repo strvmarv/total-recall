@@ -2,40 +2,30 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import * as ort from "onnxruntime-node";
 import { getModelPath, isModelDownloaded, downloadModel } from "./model-manager.js";
+import { WordPieceTokenizer } from "./tokenizer.js";
 
 interface EmbedderOptions {
   model: string;
   dimensions: number;
 }
 
-interface TokenizerVocab {
-  [token: string]: number;
-}
-
-interface TokenizerModel {
-  vocab: TokenizerVocab;
-}
-
 interface TokenizerJson {
-  model: TokenizerModel;
+  model: {
+    vocab: Record<string, number>;
+  };
 }
-
-const CLS_TOKEN_ID = 101;
-const SEP_TOKEN_ID = 102;
-const UNK_TOKEN_ID = 100;
-const MAX_SEQ_LEN = 512;
 
 export class Embedder {
   private readonly options: EmbedderOptions;
   private session: ort.InferenceSession | null = null;
-  private vocab: TokenizerVocab | null = null;
+  private tokenizer: WordPieceTokenizer | null = null;
 
   constructor(options: EmbedderOptions) {
     this.options = options;
   }
 
   isLoaded(): boolean {
-    return this.session !== null && this.vocab !== null;
+    return this.session !== null && this.tokenizer !== null;
   }
 
   async ensureLoaded(): Promise<void> {
@@ -52,23 +42,12 @@ export class Embedder {
     const tokenizerPath = join(modelPath, "tokenizer.json");
     const tokenizerText = await readFile(tokenizerPath, "utf-8");
     const tokenizerJson = JSON.parse(tokenizerText) as TokenizerJson;
-    this.vocab = tokenizerJson.model.vocab;
+    this.tokenizer = new WordPieceTokenizer(tokenizerJson.model.vocab);
   }
 
   private tokenize(text: string): number[] {
-    if (!this.vocab) throw new Error("Tokenizer not loaded");
-
-    const words = text.toLowerCase().split(/\s+/).filter(Boolean);
-    const ids: number[] = [CLS_TOKEN_ID];
-
-    for (const word of words) {
-      const id = this.vocab[word] ?? UNK_TOKEN_ID;
-      ids.push(id);
-      if (ids.length >= MAX_SEQ_LEN - 1) break;
-    }
-
-    ids.push(SEP_TOKEN_ID);
-    return ids;
+    if (!this.tokenizer) throw new Error("Tokenizer not loaded");
+    return this.tokenizer.tokenize(text);
   }
 
   async embed(text: string): Promise<Float32Array> {
@@ -102,14 +81,11 @@ export class Embedder {
 
     const results = await this.session.run(feeds);
 
-    // Get the first output (last_hidden_state or similar)
     const outputKey = Object.keys(results)[0];
     if (!outputKey) throw new Error("No output from model");
     const output = results[outputKey];
     if (!output) throw new Error("Output tensor is undefined");
 
-    // Mean pooling over sequence length dimension
-    // output shape: [1, seqLen, hiddenSize]
     const hiddenSize = this.options.dimensions;
     const data = output.data as Float32Array;
     const pooled = new Float32Array(hiddenSize);
@@ -120,7 +96,6 @@ export class Embedder {
       }
     }
 
-    // L2 normalize
     let norm = 0;
     for (let i = 0; i < hiddenSize; i++) norm += (pooled[i] as number) * (pooled[i] as number);
     norm = Math.sqrt(norm);
@@ -139,11 +114,6 @@ export class Embedder {
     return results;
   }
 
-  /**
-   * Deterministic embedding based on tokenization only (no ONNX inference).
-   * Used as fallback when async embed cannot be awaited synchronously.
-   * Requires ensureLoaded() to have been called.
-   */
   deterministicEmbed(text: string): Float32Array {
     const tokenIds = this.tokenize(text);
     const hiddenSize = this.options.dimensions;

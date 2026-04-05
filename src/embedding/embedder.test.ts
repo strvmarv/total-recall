@@ -28,6 +28,25 @@ describe("Embedder", () => {
       expect(Math.sqrt(norm)).toBeCloseTo(1.0, 5);
     });
 
+    it("produces different embeddings for different OOV words", async () => {
+      const embedder = new Embedder({ model: MODEL_NAME, dimensions: DIMENSIONS });
+      const tomlVec = await embedder.embed("toml");
+      const sqliteVec = await embedder.embed("sqlite");
+      const mcpVec = await embedder.embed("mcp");
+
+      const cosineSim = (a: Float32Array, b: Float32Array): number => {
+        let dot = 0;
+        for (let i = 0; i < a.length; i++) dot += (a[i] as number) * (b[i] as number);
+        return dot;
+      };
+
+      const simTomlSqlite = cosineSim(tomlVec, sqliteVec);
+      const simTomlMcp = cosineSim(tomlVec, mcpVec);
+
+      expect(simTomlSqlite).toBeLessThan(0.95);
+      expect(simTomlMcp).toBeLessThan(0.95);
+    });
+
     it("similar texts get higher cosine similarity than dissimilar texts", async () => {
       const embedder = new Embedder({ model: MODEL_NAME, dimensions: DIMENSIONS });
 
