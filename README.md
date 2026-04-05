@@ -83,13 +83,14 @@ npm install && npm run build
 
 ### First Session
 
-total-recall auto-initializes on first use:
+On first `session_start`, total-recall initializes `~/.total-recall/` with a SQLite database and loads the bundled embedding model (included in package, no download needed). Every session then runs:
 
-1. Creates `~/.total-recall/` with SQLite database
-2. Loads bundled embedding model (included in package, no download needed)
-3. Scans for existing memories (Claude Code, Copilot CLI)
-4. Auto-ingests project docs (README, docs/, etc.)
-5. Reports: `total-recall: initialized · 4 memories imported · 12 docs ingested · system verified`
+1. **Import sync** — scans Claude Code and Copilot CLI memory directories, deduplicates and imports new entries
+2. **Warm sweep** — if overdue, demotes stale warm entries to cold based on decay
+3. **Project docs ingest** — detects README, CLAUDE.md, AGENTS.md, docs/ in cwd and ingests into a project-scoped KB collection
+4. **Warm-to-hot promotion** — semantically searches warm tier for entries relevant to the current project and promotes them to hot
+5. **Hot tier assembly** — enforces token budget, evicts lowest-decay entries, returns hot tier as injectable context
+6. **Config snapshot** — captures current config for retrieval quality tracking
 
 ---
 
