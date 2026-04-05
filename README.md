@@ -91,6 +91,9 @@ On first `session_start`, total-recall initializes `~/.total-recall/` with a SQL
 4. **Warm-to-hot promotion** — semantically searches warm tier for entries relevant to the current project and promotes them to hot
 5. **Hot tier assembly** — enforces token budget, evicts lowest-decay entries, returns hot tier as injectable context
 6. **Config snapshot** — captures current config for retrieval quality tracking
+7. **Tier summary** — counts entries across all tiers and KB collections for the startup announcement.
+8. **Hint generation** — surfaces high-value warm memories (corrections, preferences, frequently accessed) as actionable one-liners for the agent.
+9. **Session continuity** — computes time since last session for contextual framing.
 
 ---
 

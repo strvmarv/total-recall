@@ -61,8 +61,11 @@ The launcher (`bin/total-recall.sh`) finds `node` across common install methods:
 1. Import sync — scans Claude Code and Copilot CLI memory dirs, deduplicates via content hash in `import_log`
 2. Warm sweep — if last sweep was more than `warm_sweep_interval_days` ago, moves old unaccessed warm entries to cold. Tracked via `compaction_log` with `reason = 'warm_sweep_decay'`.
 3. Project docs auto-ingest — detects README.md, CONTRIBUTING.md, CLAUDE.md, AGENTS.md, and docs/ in cwd. Ingests into a `{project}-project-docs` KB collection. Deduplicates via `import_log`.
-4. Hot tier assembly — returns current hot entries as injectable context.
-5. Config snapshot — captures current config as a named snapshot (`"session-start"`), sets `ctx.configSnapshotId` for the session so retrieval events and compaction are tagged to this config state.
+4. Hot tier assembly — returns current hot entries as injectable context. Enforces token budget by evicting lowest-decay entries to warm.
+5. Tier summary — counts entries across all tiers and KB collections, returned as `tierSummary` in the response.
+6. Hint generation — `generateHints()` surfaces up to 5 high-value warm memories: corrections and preferences (priority 1), frequently accessed entries with `access_count >= 3` (priority 2), and recently promoted entries (priority 3). Each hint is truncated to 120 chars. No LLM calls — DB queries only.
+7. Session continuity — `getLastSessionAge()` returns human-readable relative time since last compaction event (proxy for last session). Returns `null` for first-time users.
+8. Config snapshot — captures current config as a named snapshot (`"session-start"`), sets `ctx.configSnapshotId` for the session so retrieval events and compaction are tagged to this config state.
 
 ### Config persistence
 
