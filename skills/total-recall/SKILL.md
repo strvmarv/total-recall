@@ -1,5 +1,5 @@
 ---
-name: recall
+name: total-recall
 description: Manage total-recall memory system. Subcommands: status, search, store, forget, inspect, promote, demote, history, lineage, export, import, ingest, kb, compact, eval, config. Also governs automatic memory capture, retrieval, and compaction.
 ---
 
