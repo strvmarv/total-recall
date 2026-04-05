@@ -74,8 +74,6 @@ Current code parser uses basic regex splitting for function/class boundaries. Fu
 
 **Files:** `src/ingestion/code-parser.ts`
 
-## Benchmark Use Cases
+## ~~Benchmark Use Cases~~ [DONE]
 
-Only manual benchmark runner exists. Design spec described three use cases: CI smoke test (run on every build), first-install validation (verify system works on setup), and config tuning (compare metrics before/after config changes).
-
-**Files:** `src/eval/benchmark-runner.ts`, `.github/workflows/ci.yml`
+CI smoke test added — runs 22-query smoke benchmark with real ONNX embedder after build, fails the pipeline if exact match rate drops below 80%. Entry point: `src/eval/ci-smoke.ts`, built as second tsup entry to `dist/eval/ci-smoke.js`, invoked via `npm run benchmark`. First-install validation covered by existing `runSmokeTest()` at session_start. Config tuning covered by `eval_compare` tool.
