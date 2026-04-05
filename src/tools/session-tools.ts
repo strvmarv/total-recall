@@ -1,15 +1,90 @@
 import { randomUUID } from "node:crypto";
+import type Database from "better-sqlite3";
 import type { ToolContext, SessionInitResult } from "./registry.js";
 import { createConfigSnapshot } from "../config.js";
 import { ClaudeCodeImporter } from "../importers/claude-code.js";
 import { CopilotCliImporter } from "../importers/copilot-cli.js";
-import { listEntries, getEntry } from "../db/entries.js";
+import { listEntries, getEntry, listEntriesByMetadata } from "../db/entries.js";
 import { searchMemory } from "../memory/search.js";
 import { promoteEntry, demoteEntry } from "../memory/promote-demote.js";
 import { compactHotTier } from "../compaction/compactor.js";
 import { sweepWarmTier } from "../compaction/warm-sweep.js";
 import { ingestProjectDocs } from "../importers/project-docs.js";
 import { detectProject } from "../utils/project-detect.js";
+
+function truncateHint(content: string, maxLen = 120): string {
+  if (content.length <= maxLen) return content;
+  return content.slice(0, maxLen) + "...";
+}
+
+export function generateHints(
+  db: Database.Database,
+  warmPromotedIds: string[],
+): string[] {
+  const seen = new Set<string>();
+  const hints: string[] = [];
+
+  // Priority 1: corrections & preferences (max 2)
+  const correctionsAndPrefs = [
+    ...listEntriesByMetadata(db, "warm", "memory", { entry_type: "correction" }, {
+      orderBy: "access_count DESC", limit: 2,
+    }),
+    ...listEntriesByMetadata(db, "warm", "memory", { entry_type: "preference" }, {
+      orderBy: "access_count DESC", limit: 2,
+    }),
+  ]
+    .sort((a, b) => b.access_count - a.access_count)
+    .slice(0, 2);
+
+  for (const entry of correctionsAndPrefs) {
+    if (!seen.has(entry.id)) {
+      seen.add(entry.id);
+      hints.push(truncateHint(entry.content));
+    }
+  }
+
+  // Priority 2: frequently accessed (max 2, access_count >= 3)
+  const frequent = listEntries(db, "warm", "memory", {
+    orderBy: "access_count DESC", limit: 10,
+  }).filter((e) => e.access_count >= 3 && !seen.has(e.id));
+
+  for (const entry of frequent.slice(0, 2)) {
+    seen.add(entry.id);
+    hints.push(truncateHint(entry.content));
+  }
+
+  // Priority 3: recently promoted (max 1)
+  for (const id of warmPromotedIds.slice(0, 1)) {
+    if (seen.has(id)) continue;
+    const entry = getEntry(db, "hot", "memory", id);
+    if (entry) {
+      seen.add(entry.id);
+      hints.push(truncateHint(entry.content));
+    }
+  }
+
+  return hints.slice(0, 5);
+}
+
+export function getLastSessionAge(db: Database.Database): string | null {
+  const row = db
+    .prepare(`SELECT MAX(timestamp) as ts FROM compaction_log`)
+    .get() as { ts: number | null } | undefined;
+
+  const ts = row?.ts;
+  if (!ts) return null;
+
+  const diffMs = Date.now() - ts;
+  const minutes = Math.floor(diffMs / (60 * 1000));
+  const hours = Math.floor(diffMs / (60 * 60 * 1000));
+  const days = Math.floor(diffMs / (24 * 60 * 60 * 1000));
+  const weeks = Math.floor(days / 7);
+
+  if (minutes < 60) return `${minutes} minutes ago`;
+  if (hours < 24) return `${hours} hours ago`;
+  if (days < 7) return `${days} days ago`;
+  return `${weeks} weeks ago`;
+}
 
 export const SESSION_TOOLS = [
   {
