@@ -2137,18 +2137,17 @@ import { fileURLToPath } from "url";
 import { readFileSync as readFileSync4 } from "fs";
 async function runBenchmark(db, embed, opts) {
   const corpusLines = readFileSync4(opts.corpusPath, "utf-8").split("\n").filter((line) => line.trim().length > 0);
-  const existingWarmCount = countEntries(db, "warm", "memory");
-  if (existingWarmCount < corpusLines.length) {
-    for (const line of corpusLines) {
-      const entry = JSON.parse(line);
-      await storeMemory(db, embed, {
-        content: entry.content,
-        type: entry.type,
-        tier: "warm",
-        contentType: "memory",
-        tags: entry.tags
-      });
-    }
+  const seededIds = [];
+  for (const line of corpusLines) {
+    const entry = JSON.parse(line);
+    const id = await storeMemory(db, embed, {
+      content: entry.content,
+      type: entry.type,
+      tier: "warm",
+      contentType: "memory",
+      tags: entry.tags
+    });
+    seededIds.push(id);
   }
   const benchmarkLines = readFileSync4(opts.benchmarkPath, "utf-8").split("\n").filter((line) => line.trim().length > 0);
   const queries = benchmarkLines.map((line) => JSON.parse(line));
@@ -2183,6 +2182,9 @@ async function runBenchmark(db, embed, opts) {
       matched,
       fuzzyMatched
     });
+  }
+  for (const id of seededIds) {
+    deleteMemory(db, id);
   }
   const total = queries.length;
   return {
@@ -2804,10 +2806,8 @@ async function ingestProjectDocs(db, embed, cwd) {
     }
   }
   if (filesToIngest.length === 0) return result;
-  collectionId = await createCollection(db, embed, {
-    name: collectionName,
-    sourcePath: cwd
-  });
+  const existing = listCollections(db).find((c) => c.name === collectionName);
+  collectionId = existing ? existing.id : await createCollection(db, embed, { name: collectionName, sourcePath: cwd });
   for (const filePath of filesToIngest) {
     const content = readFileSync7(filePath, "utf-8").trim();
     if (!content) {

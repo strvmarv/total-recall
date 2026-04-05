@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import type Database from "better-sqlite3";
 import { storeMemory } from "../memory/store.js";
+import { deleteMemory } from "../memory/delete.js";
 import { searchMemory } from "../memory/search.js";
-import { countEntries } from "../db/entries.js";
 import type { Tier, EntryType } from "../types.js";
 
 type EmbedFn = (text: string) => Float32Array | Promise<Float32Array>;
@@ -47,23 +47,22 @@ export async function runBenchmark(
   embed: EmbedFn,
   opts: BenchmarkOptions,
 ): Promise<BenchmarkResult> {
-  // Seed corpus into warm tier (skip if already seeded)
+  // Seed corpus into warm tier, tracking IDs for cleanup
   const corpusLines = readFileSync(opts.corpusPath, "utf-8")
     .split("\n")
     .filter((line) => line.trim().length > 0);
 
-  const existingWarmCount = countEntries(db, "warm", "memory");
-  if (existingWarmCount < corpusLines.length) {
-    for (const line of corpusLines) {
-      const entry = JSON.parse(line) as CorpusEntry;
-      await storeMemory(db, embed, {
-        content: entry.content,
-        type: entry.type,
-        tier: "warm",
-        contentType: "memory",
-        tags: entry.tags,
-      });
-    }
+  const seededIds: string[] = [];
+  for (const line of corpusLines) {
+    const entry = JSON.parse(line) as CorpusEntry;
+    const id = await storeMemory(db, embed, {
+      content: entry.content,
+      type: entry.type,
+      tier: "warm",
+      contentType: "memory",
+      tags: entry.tags,
+    });
+    seededIds.push(id);
   }
 
   // Load benchmark queries
@@ -116,6 +115,11 @@ export async function runBenchmark(
       matched,
       fuzzyMatched,
     });
+  }
+
+  // Clean up seeded corpus entries
+  for (const id of seededIds) {
+    deleteMemory(db, id);
   }
 
   const total = queries.length;

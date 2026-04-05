@@ -3,7 +3,7 @@ import { join, basename } from "node:path";
 import { createHash } from "node:crypto";
 import type Database from "better-sqlite3";
 import { ingestFile } from "../ingestion/ingest.js";
-import { createCollection } from "../ingestion/hierarchical-index.js";
+import { createCollection, listCollections } from "../ingestion/hierarchical-index.js";
 
 type EmbedFn = (text: string) => Float32Array | Promise<Float32Array>;
 
@@ -63,11 +63,11 @@ export async function ingestProjectDocs(
 
   if (filesToIngest.length === 0) return result;
 
-  // Create collection lazily
-  collectionId = await createCollection(db, embed, {
-    name: collectionName,
-    sourcePath: cwd,
-  });
+  // Reuse existing collection or create new one
+  const existing = listCollections(db).find((c) => c.name === collectionName);
+  collectionId = existing
+    ? existing.id
+    : await createCollection(db, embed, { name: collectionName, sourcePath: cwd });
 
   for (const filePath of filesToIngest) {
     const content = readFileSync(filePath, "utf-8").trim();
