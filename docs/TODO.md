@@ -23,12 +23,9 @@ Auto-detect user corrections, preferences, and acknowledgments in conversation f
 **Files:** `src/eval/event-logger.ts`, skill instructions
 **Complexity:** High — requires conversation pattern analysis or LLM classification of user responses relative to retrieved context.
 
-## Benchmark Corpus Expansion
+## ~~Benchmark Corpus Expansion~~ [DONE]
 
-Expand eval corpus from ~20 entries to ~100-200. Add entries covering: code snippets, config decisions, debugging notes, architecture decisions, API preferences. Add queries testing: partial matches, synonyms, negatives, multi-word terms.
-
-**Files:** `eval/corpus/memories.jsonl`, `eval/benchmarks/retrieval.jsonl`
-**Blocked by:** Nothing — data work, can be done anytime.
+Expanded corpus from 20 to 100 entries across 6 categories. Queries expanded from 20 to 139 including synonym, partial match, and negative assertion queries. Added `expected_absent` support to benchmark runner.
 
 ## Evolving Benchmarks (--grow)
 
@@ -36,12 +33,9 @@ Harvest real retrieval misses into the benchmark suite. When a search returns no
 
 **Files:** `src/eval/benchmark-runner.ts`, `src/tools/eval-tools.ts`
 
-## A/B Config Comparison
+## ~~A/B Config Comparison~~ [DONE]
 
-Side-by-side metric comparison across config snapshots. `config_snapshots` table exists but snapshots are never auto-created on config change, and no comparison analysis exists.
-
-**Files:** `src/tools/eval-tools.ts`, `src/eval/metrics.ts`
-**Depends on:** Config snapshot auto-creation on `config_set`.
+Config snapshots auto-created on `session_start` and before `config_set`. `eval_compare` tool provides side-by-side metrics with per-tier/per-content-type breakdowns and query-level diff. `eval_snapshot` tool for manual snapshots.
 
 ## Regression Detection
 
@@ -75,11 +69,9 @@ After ingestion, auto-generate 3 test queries to verify chunks are retrievable. 
 
 **Files:** `src/ingestion/ingest.ts`, `src/tools/kb-tools.ts`
 
-## Config Snapshot Auto-Creation
+## ~~Config Snapshot Auto-Creation~~ [DONE]
 
-`config_set` should snapshot the old config before changing. `config_snapshots` table exists but is never populated. Needed for A/B config comparison.
-
-**Files:** `src/tools/system-tools.ts`, `src/config.ts`
+Snapshots auto-created on `session_start` and before `config_set`. Deduplication via SHA-256 hash of recursively key-sorted config JSON. Snapshot IDs threaded through retrieval events and compaction logging.
 
 ## Code Parser AST Analysis
 
