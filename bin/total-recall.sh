@@ -57,14 +57,22 @@ if [ -z "$NODE" ]; then
   exit 1
 fi
 
-# Find the package entry point relative to this script
+# Find the package entry point
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENTRY="$PACKAGE_DIR/dist/index.js"
 
-if [ ! -f "$ENTRY" ]; then
-  echo "total-recall: error: dist/index.js not found. Run 'npm run build' first." >&2
-  exit 1
+# Strategy 1: Local dist/index.js (source install or npm install)
+if [ -f "$ENTRY" ]; then
+  exec "$NODE" "$ENTRY" "$@"
 fi
 
-exec "$NODE" "$ENTRY" "$@"
+# Strategy 2: npx (downloads and runs the npm package)
+NODE_DIR="$(dirname "$NODE")"
+NPX="$NODE_DIR/npx"
+if [ -x "$NPX" ]; then
+  exec "$NPX" -y @strvmarv/total-recall "$@"
+fi
+
+echo "total-recall: error: could not find dist/index.js or npx. Run 'npm run build' or 'npm install -g @strvmarv/total-recall'." >&2
+exit 1
