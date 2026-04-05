@@ -18,6 +18,7 @@
   "files": [
     "dist/",
     "bin/",
+    "models/",
     "skills/",
     "agents/",
     "hooks/",

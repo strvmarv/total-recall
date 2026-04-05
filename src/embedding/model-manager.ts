@@ -9,8 +9,25 @@ const HF_BASE_URL = "https://huggingface.co";
 // Pin to a specific revision for reproducibility
 const HF_REVISION = "main"; // Can be changed to a specific commit hash
 
-export function getModelPath(modelName: string): string {
+/** Bundled model path (shipped with the package) */
+function getBundledModelPath(modelName: string): string {
+  const distDir = new URL(".", import.meta.url).pathname;
+  return join(distDir, "..", "models", modelName);
+}
+
+/** User data model path (~/.total-recall/models/) */
+function getUserModelPath(modelName: string): string {
   return join(getDataDir(), "models", modelName);
+}
+
+/**
+ * Resolve model path: check bundled first, then user data dir.
+ * Returns the first path where the model exists.
+ */
+export function getModelPath(modelName: string): string {
+  const bundled = getBundledModelPath(modelName);
+  if (isModelDownloaded(bundled)) return bundled;
+  return getUserModelPath(modelName);
 }
 
 export function isModelDownloaded(modelPath: string): boolean {
@@ -40,7 +57,8 @@ async function validateDownload(modelPath: string): Promise<void> {
 }
 
 export async function downloadModel(modelName: string): Promise<string> {
-  const modelPath = getModelPath(modelName);
+  // Always download to user data dir, not bundled location
+  const modelPath = getUserModelPath(modelName);
   mkdirSync(modelPath, { recursive: true });
 
   // model.onnx lives in onnx/ subdir, tokenizer files at repo root
