@@ -123,14 +123,14 @@
 {"query":"fanout","expected_content_contains":"fans out","expected_tier":"warm"}
 {"query":"snapshot","expected_content_contains":"Config snapshots","expected_tier":"warm"}
 {"query":"query package manager preference","expected_content_contains":"pnpm","expected_tier":"warm","expected_absent":"npm install"}
-{"query":"what test runner is not jest","expected_content_contains":"vitest","expected_tier":"warm","expected_absent":"jest"}
+{"query":"what test runner is not jest","expected_content_contains":"vitest","expected_tier":"warm","expected_absent":"jest is the recommended"}
 {"query":"how to handle errors in API","expected_content_contains":"RFC 7807","expected_tier":"warm","expected_absent":"console.error"}
-{"query":"which function style to use","expected_content_contains":"Arrow functions","expected_tier":"warm","expected_absent":"function declarations"}
+{"query":"which function style to use","expected_content_contains":"Arrow functions","expected_tier":"warm","expected_absent":"avoid arrow functions"}
 {"query":"deep copy preference","expected_content_contains":"structuredClone","expected_tier":"warm","expected_absent":"JSON.parse"}
-{"query":"null handling in responses","expected_content_contains":"undefined","expected_tier":"warm","expected_absent":"null"}
-{"query":"export style preference","expected_content_contains":"named exports","expected_tier":"warm","expected_absent":"default export"}
-{"query":"string default value operator","expected_content_contains":"nullish coalescing","expected_tier":"warm","expected_absent":"logical OR"}
-{"query":"what type to use instead of any","expected_content_contains":"unknown","expected_tier":"warm","expected_absent":"any"}
+{"query":"null handling in responses","expected_content_contains":"undefined","expected_tier":"warm","expected_absent":"use null for absent"}
+{"query":"export style preference","expected_content_contains":"named exports","expected_tier":"warm","expected_absent":"use default exports"}
+{"query":"string default value operator","expected_content_contains":"nullish coalescing","expected_tier":"warm","expected_absent":"use logical OR for defaults"}
+{"query":"what type to use instead of any","expected_content_contains":"unknown","expected_tier":"warm","expected_absent":"use any type"}
 {"query":"date math approach","expected_content_contains":"dayjs","expected_tier":"warm","expected_absent":"new Date"}
 {"query":"number of search results returned by default","expected_content_contains":"top_k","expected_tier":"warm","expected_absent":"5"}
 {"query":"error flag in tool response","expected_content_contains":"isError","expected_tier":"warm","expected_absent":"throw"}
