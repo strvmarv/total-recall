@@ -1878,6 +1878,48 @@ function chunkFile(content, filePath, opts) {
   return splitByParagraphs(content, opts.maxTokens);
 }
 
+// src/ingestion/ingest-validation.ts
+var PROBE_MIN_SCORE = 0.5;
+var PROBE_TOP_K = 3;
+function selectProbeIndices(totalChunks) {
+  if (totalChunks <= 3) {
+    return Array.from({ length: totalChunks }, (_, i) => i);
+  }
+  return [
+    0,
+    Math.floor(totalChunks / 3),
+    Math.floor(2 * totalChunks / 3)
+  ];
+}
+async function validateChunks(db, embed, chunks, collectionId) {
+  const indices = selectProbeIndices(chunks.length);
+  const probes = [];
+  for (const idx of indices) {
+    const chunk = chunks[idx];
+    const queryVec = await embed(chunk.content);
+    const results = searchByVector(db, "cold", "knowledge", queryVec, {
+      topK: PROBE_TOP_K * 3,
+      minScore: 0
+    });
+    const scoped = results.filter((r) => {
+      const entry = db.prepare(
+        "SELECT collection_id, parent_id FROM cold_knowledge WHERE id = ?"
+      ).get(r.id);
+      return entry?.collection_id === collectionId || entry?.parent_id === collectionId;
+    });
+    const bestScore = scoped.length > 0 ? Math.max(...scoped.map((r) => r.score)) : 0;
+    probes.push({
+      chunkIndex: idx,
+      score: bestScore,
+      passed: bestScore > PROBE_MIN_SCORE
+    });
+  }
+  return {
+    passed: probes.every((p) => p.passed),
+    probes
+  };
+}
+
 // src/ingestion/ingest.ts
 var INGESTABLE_EXTENSIONS = /* @__PURE__ */ new Set([
   ".md",
@@ -1925,20 +1967,17 @@ async function ingestFile(db, embed, filePath, collectionId) {
       kind: c.kind
     }))
   });
-  let validationPassed = false;
-  if (chunks.length > 0) {
-    const firstChunk = chunks[0];
-    const queryVec = await embed(firstChunk.content);
-    const results = searchByVector(db, "cold", "knowledge", queryVec, {
-      topK: 5,
-      minScore: 0
-    });
-    validationPassed = results.some((r) => r.score > 0.5);
-  }
+  const validation = await validateChunks(
+    db,
+    embed,
+    chunks.map((c) => ({ content: c.content })),
+    resolvedCollectionId
+  );
   return {
     documentId,
     chunkCount: chunks.length,
-    validationPassed
+    validationPassed: validation.passed,
+    validation
   };
 }
 function matchesGlob(filename, glob) {
@@ -1986,6 +2025,7 @@ async function ingestDirectory(db, embed, dirPath, glob) {
   let documentCount = 0;
   let totalChunks = 0;
   const errors = [];
+  const validationFailures = [];
   for (const filePath of files) {
     if (glob !== void 0) {
       const name = basename(filePath);
@@ -1995,6 +2035,9 @@ async function ingestDirectory(db, embed, dirPath, glob) {
       const result = await ingestFile(db, embed, filePath, collectionId);
       documentCount++;
       totalChunks += result.chunkCount;
+      if (!result.validationPassed) {
+        validationFailures.push(basename(filePath));
+      }
     } catch (err) {
       errors.push(`${filePath}: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -2003,7 +2046,9 @@ async function ingestDirectory(db, embed, dirPath, glob) {
     collectionId,
     documentCount,
     totalChunks,
-    errors
+    errors,
+    validationPassed: validationFailures.length === 0,
+    validationFailures
   };
 }
 

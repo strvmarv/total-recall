@@ -7,8 +7,9 @@ import {
   addDocumentToCollection,
   type EmbedFn,
 } from "./hierarchical-index.js";
-import { insertEmbedding, searchByVector } from "../search/vector-search.js";
+import { insertEmbedding } from "../search/vector-search.js";
 import { insertEntry } from "../db/entries.js";
+import { validateChunks, type ValidationResult } from "./ingest-validation.js";
 
 const INGESTABLE_EXTENSIONS = new Set([
   ".md",
@@ -39,6 +40,7 @@ export interface IngestFileResult {
   documentId: string;
   chunkCount: number;
   validationPassed: boolean;
+  validation: ValidationResult;
 }
 
 export interface IngestDirectoryResult {
@@ -46,6 +48,8 @@ export interface IngestDirectoryResult {
   documentCount: number;
   totalChunks: number;
   errors: string[];
+  validationPassed: boolean;
+  validationFailures: string[];
 }
 
 export async function ingestFile(
@@ -78,22 +82,19 @@ export async function ingestFile(
     })),
   });
 
-  // Validation: embed first chunk, search by vector, verify score > 0.5
-  let validationPassed = false;
-  if (chunks.length > 0) {
-    const firstChunk = chunks[0]!;
-    const queryVec = await embed(firstChunk.content);
-    const results = searchByVector(db, "cold", "knowledge", queryVec, {
-      topK: 5,
-      minScore: 0,
-    });
-    validationPassed = results.some((r) => r.score > 0.5);
-  }
+  // Validation: probe 3 sample chunks via vector search
+  const validation = await validateChunks(
+    db,
+    embed,
+    chunks.map((c) => ({ content: c.content })),
+    resolvedCollectionId,
+  );
 
   return {
     documentId,
     chunkCount: chunks.length,
-    validationPassed,
+    validationPassed: validation.passed,
+    validation,
   };
 }
 
@@ -158,6 +159,7 @@ export async function ingestDirectory(
   let documentCount = 0;
   let totalChunks = 0;
   const errors: string[] = [];
+  const validationFailures: string[] = [];
 
   for (const filePath of files) {
     // If a glob filter is provided, apply simple basename matching
@@ -170,6 +172,9 @@ export async function ingestDirectory(
       const result = await ingestFile(db, embed, filePath, collectionId);
       documentCount++;
       totalChunks += result.chunkCount;
+      if (!result.validationPassed) {
+        validationFailures.push(basename(filePath));
+      }
     } catch (err) {
       errors.push(`${filePath}: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -180,5 +185,7 @@ export async function ingestDirectory(
     documentCount,
     totalChunks,
     errors,
+    validationPassed: validationFailures.length === 0,
+    validationFailures,
   };
 }
