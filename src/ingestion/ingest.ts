@@ -96,6 +96,15 @@ export async function ingestFile(
   };
 }
 
+function matchesGlob(filename: string, glob: string): boolean {
+  // Only support simple patterns: *.ext, *.{ext1,ext2}, exact names
+  if (glob.startsWith("*.")) {
+    const ext = glob.slice(1); // ".md"
+    return filename.endsWith(ext);
+  }
+  return filename === glob;
+}
+
 function walkDirectory(dirPath: string): string[] {
   const files: string[] = [];
 
@@ -152,9 +161,7 @@ export async function ingestDirectory(
     // If a glob filter is provided, apply simple basename matching
     if (glob !== undefined) {
       const name = basename(filePath);
-      // Convert glob to a simple regex (handle * wildcard only)
-      const pattern = glob.replace(/\./g, "\\.").replace(/\*/g, ".*");
-      if (!new RegExp(`^${pattern}$`).test(name)) continue;
+      if (!matchesGlob(name, glob)) continue;
     }
 
     try {
