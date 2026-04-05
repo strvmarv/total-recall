@@ -3896,6 +3896,47 @@ async function runSmokeTest(db, embed, currentVersion) {
   };
 }
 
+// src/eval/regression.ts
+function checkRegressions(db, config, similarityThreshold) {
+  const snapshots = db.prepare(
+    "SELECT id FROM config_snapshots ORDER BY timestamp DESC LIMIT 2"
+  ).all();
+  if (snapshots.length < 2) return null;
+  const currentSnapshotId = snapshots[0].id;
+  const previousSnapshotId = snapshots[1].id;
+  const currentEvents = getRetrievalEvents(db, { configSnapshotId: currentSnapshotId });
+  const previousEvents = getRetrievalEvents(db, { configSnapshotId: previousSnapshotId });
+  if (currentEvents.length < config.min_events || previousEvents.length < config.min_events) {
+    return null;
+  }
+  const currentMetrics = computeMetrics(currentEvents, similarityThreshold);
+  const previousMetrics = computeMetrics(previousEvents, similarityThreshold);
+  const alerts = [];
+  const missRateDelta = currentMetrics.missRate - previousMetrics.missRate;
+  if (missRateDelta >= config.miss_rate_delta) {
+    alerts.push({
+      metric: "miss_rate",
+      previous: previousMetrics.missRate,
+      current: currentMetrics.missRate,
+      delta: missRateDelta,
+      threshold: config.miss_rate_delta
+    });
+  }
+  if (previousMetrics.avgLatencyMs > 0) {
+    const latencyRatio = currentMetrics.avgLatencyMs / previousMetrics.avgLatencyMs;
+    if (latencyRatio >= config.latency_ratio) {
+      alerts.push({
+        metric: "latency",
+        previous: previousMetrics.avgLatencyMs,
+        current: currentMetrics.avgLatencyMs,
+        delta: latencyRatio,
+        threshold: config.latency_ratio
+      });
+    }
+  }
+  return alerts;
+}
+
 // src/tools/session-tools.ts
 function truncateHint(content, maxLen = 120) {
   if (content.length <= maxLen) return content;
@@ -4081,6 +4122,19 @@ async function runSessionInit(ctx) {
   const contextText = contextLines.join("\n");
   const snapshotId = createConfigSnapshot(ctx.db, ctx.config, "session-start");
   ctx.configSnapshotId = snapshotId;
+  let regressionAlerts = null;
+  try {
+    const regressionConfig = {
+      miss_rate_delta: ctx.config.regression?.miss_rate_delta ?? 0.1,
+      latency_ratio: ctx.config.regression?.latency_ratio ?? 2,
+      min_events: ctx.config.regression?.min_events ?? 10
+    };
+    const threshold = ctx.config.tiers.warm.similarity_threshold;
+    regressionAlerts = checkRegressions(ctx.db, regressionConfig, threshold);
+  } catch (err) {
+    process.stderr.write(`total-recall: regression check error: ${err}
+`);
+  }
   const tierSummary = {
     hot: hotEntries.length,
     warm: countEntries(ctx.db, "warm", "memory") + countEntries(ctx.db, "warm", "knowledge"),
@@ -4101,7 +4155,8 @@ async function runSessionInit(ctx) {
     tierSummary,
     hints,
     lastSessionAge,
-    ...smokeTest ? { smokeTest } : {}
+    ...smokeTest ? { smokeTest } : {},
+    ...regressionAlerts ? { regressionAlerts } : {}
   };
   ctx.sessionInitResult = result;
   ctx.sessionInitialized = true;

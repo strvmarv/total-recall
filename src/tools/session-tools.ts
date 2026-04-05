@@ -16,6 +16,7 @@ import { sweepWarmTier } from "../compaction/warm-sweep.js";
 import { ingestProjectDocs } from "../importers/project-docs.js";
 import { detectProject } from "../utils/project-detect.js";
 import { runSmokeTest, getPackageVersion, type SmokeTestResult } from "../eval/smoke-test.js";
+import { checkRegressions, type RegressionAlert } from "../eval/regression.js";
 
 function truncateHint(content: string, maxLen = 120): string {
   if (content.length <= maxLen) return content;
@@ -264,6 +265,20 @@ export async function runSessionInit(ctx: ToolContext): Promise<SessionInitResul
   const snapshotId = createConfigSnapshot(ctx.db, ctx.config, "session-start");
   ctx.configSnapshotId = snapshotId;
 
+  // Regression detection (after config snapshot so current snapshot exists)
+  let regressionAlerts: RegressionAlert[] | null = null;
+  try {
+    const regressionConfig = {
+      miss_rate_delta: ctx.config.regression?.miss_rate_delta ?? 0.1,
+      latency_ratio: ctx.config.regression?.latency_ratio ?? 2.0,
+      min_events: ctx.config.regression?.min_events ?? 10,
+    };
+    const threshold = ctx.config.tiers.warm.similarity_threshold;
+    regressionAlerts = checkRegressions(ctx.db, regressionConfig, threshold);
+  } catch (err) {
+    process.stderr.write(`total-recall: regression check error: ${err}\n`);
+  }
+
   // Tier summary stats
   const tierSummary = {
     hot: hotEntries.length,
@@ -291,6 +306,7 @@ export async function runSessionInit(ctx: ToolContext): Promise<SessionInitResul
     hints,
     lastSessionAge,
     ...(smokeTest ? { smokeTest } : {}),
+    ...(regressionAlerts ? { regressionAlerts } : {}),
   };
 
   ctx.sessionInitResult = result;

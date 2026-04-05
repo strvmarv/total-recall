@@ -30,6 +30,13 @@ export interface SessionInitResult {
   hints: string[];
   lastSessionAge: string | null;
   smokeTest?: { passed: boolean; exactMatchRate: number; avgLatencyMs: number };
+  regressionAlerts?: Array<{
+    metric: "miss_rate" | "latency";
+    previous: number;
+    current: number;
+    delta: number;
+    threshold: number;
+  }>;
 }
 
 export interface ToolContext {

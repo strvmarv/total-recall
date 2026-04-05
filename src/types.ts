@@ -140,6 +140,11 @@ export interface TotalRecallConfig {
     model: string;
     dimensions: number;
   };
+  regression?: {
+    miss_rate_delta?: number;
+    latency_ratio?: number;
+    min_events?: number;
+  };
 }
 
 export function tableName(tier: Tier, type: ContentType): string {
