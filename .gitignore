@@ -4,3 +4,4 @@ dist/
 .total-recall/
 *.onnx
 .env
+.remember/
