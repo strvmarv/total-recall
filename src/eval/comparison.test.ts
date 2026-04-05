@@ -8,7 +8,7 @@ function makeEvent(overrides: Partial<RetrievalEventRow> = {}): RetrievalEventRo
     timestamp: Date.now(),
     session_id: "s1",
     query_text: "test query",
-    query_source: "manual",
+    query_source: "auto",
     query_embedding: null,
     results: "[]",
     result_count: 1,
@@ -63,8 +63,8 @@ describe("computeComparisonMetrics", () => {
     const result = computeComparisonMetrics(eventsA, eventsB, 0.5);
 
     expect(result.queryDiff.regressions).toHaveLength(1);
-    expect(result.queryDiff.regressions[0].queryText).toBe("q1");
+    expect(result.queryDiff.regressions[0]!.queryText).toBe("q1");
     expect(result.queryDiff.improvements).toHaveLength(1);
-    expect(result.queryDiff.improvements[0].queryText).toBe("q2");
+    expect(result.queryDiff.improvements[0]!.queryText).toBe("q2");
   });
 });
