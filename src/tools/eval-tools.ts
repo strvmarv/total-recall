@@ -6,8 +6,11 @@ import { getRetrievalEvents } from "../eval/event-logger.js";
 import { computeMetrics } from "../eval/metrics.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
-// Package root is two levels up from src/tools/
-const PACKAGE_ROOT = resolve(__dirname, "..", "..");
+// In dev: __dirname = src/tools/ (2 levels up to root)
+// In dist: __dirname = dist/ (1 level up to root)
+const PACKAGE_ROOT = __dirname.endsWith("dist/") || __dirname.endsWith("dist")
+  ? resolve(__dirname, "..")
+  : resolve(__dirname, "..", "..");
 
 export const EVAL_TOOLS = [
   {

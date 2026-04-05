@@ -2291,7 +2291,7 @@ function computeCompactionHealth(rows) {
 
 // src/tools/eval-tools.ts
 var __dirname = fileURLToPath(new URL(".", import.meta.url));
-var PACKAGE_ROOT = resolve2(__dirname, "..", "..");
+var PACKAGE_ROOT = __dirname.endsWith("dist/") || __dirname.endsWith("dist") ? resolve2(__dirname, "..") : resolve2(__dirname, "..", "..");
 var EVAL_TOOLS = [
   {
     name: "eval_benchmark",
