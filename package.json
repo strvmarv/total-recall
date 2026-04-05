@@ -14,7 +14,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "prepare": "git config core.hooksPath git-hooks || true",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "benchmark": "node dist/eval/ci-smoke.js"
   },
   "files": [
     "dist/",
