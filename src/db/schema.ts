@@ -131,7 +131,33 @@ const MIGRATIONS: Array<(db: Database.Database) => void> = [
       db.prepare(idx).run();
     }
   },
-  // Add future migrations here as (db) => { ... }
+  // Migration 2: _meta key-value store + benchmark_candidates
+  (db) => {
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS _meta (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      )
+    `).run();
+
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS benchmark_candidates (
+        id                  TEXT PRIMARY KEY,
+        query_text          TEXT NOT NULL UNIQUE,
+        top_score           REAL NOT NULL,
+        top_result_content  TEXT,
+        top_result_entry_id TEXT,
+        first_seen          INTEGER NOT NULL,
+        last_seen           INTEGER NOT NULL,
+        times_seen          INTEGER DEFAULT 1,
+        status              TEXT DEFAULT 'pending'
+      )
+    `).run();
+
+    db.prepare(
+      `CREATE INDEX IF NOT EXISTS idx_benchmark_candidates_status ON benchmark_candidates(status)`
+    ).run();
+  },
 ];
 
 function getCurrentVersion(db: Database.Database): number {
