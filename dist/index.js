@@ -845,8 +845,8 @@ function validatePath(value, name) {
       throw new Error(`Access denied: ${name} cannot access ${prefix}`);
     }
   }
-  const basename3 = resolved.split("/").pop() ?? "";
-  if (basename3 === ".env" || basename3 === ".credentials.json") {
+  const basename4 = resolved.split("/").pop() ?? "";
+  if (basename4 === ".env" || basename4 === ".credentials.json") {
     throw new Error(`Access denied: ${name} cannot access sensitive files`);
   }
   return resolved;
@@ -1152,6 +1152,14 @@ async function addDocumentToCollection(db, embed, opts) {
     insertEmbedding(db, "cold", "knowledge", chunkId, chunkEmbedding);
   }
   return docId;
+}
+function getCollection(db, id) {
+  const row = db.prepare(`SELECT * FROM cold_knowledge WHERE id = ?`).get(id);
+  if (!row) return null;
+  const entry = rowToEntry2(row);
+  const metadata = entry.metadata;
+  if (metadata["type"] !== "collection") return null;
+  return { ...entry, name: metadata["name"] };
 }
 function listCollections(db) {
   const rows = db.prepare(`SELECT * FROM cold_knowledge WHERE json_extract(metadata, '$.type') = 'collection'`).all();
@@ -1932,6 +1940,18 @@ var KB_TOOLS = [
       },
       required: ["collection"]
     }
+  },
+  {
+    name: "kb_summarize",
+    description: "Store a summary for a knowledge base collection. Call this when a collection's needs_summary flag is true.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        collection: { type: "string", description: "Collection ID" },
+        summary: { type: "string", description: "Summary text for the collection" }
+      },
+      required: ["collection", "summary"]
+    }
   }
 ];
 async function handleKbTool(name, args, ctx) {
@@ -1953,15 +1973,57 @@ async function handleKbTool(name, args, ctx) {
   }
   if (name === "kb_search") {
     const query = validateString(args.query, "query");
+    let collectionId = validateOptionalString(args.collection, "collection");
     const topK = validateOptionalNumber(args.top_k, "top_k", 1, 1e3) ?? 10;
     await ctx.embedder.ensureLoaded();
     const vec = await ctx.embedder.embed(query);
     const embedFn = () => vec;
-    const results = await searchMemory(ctx.db, embedFn, query, {
-      tiers: [{ tier: "cold", content_type: "knowledge" }],
-      topK
-    });
-    return { content: [{ type: "text", text: JSON.stringify(results) }] };
+    let hierarchicalMatch = null;
+    if (!collectionId) {
+      const collections = listCollections(ctx.db);
+      const withSummaries = collections.filter((c) => c.summary);
+      if (withSummaries.length > 0) {
+        const collectionResults = await searchMemory(ctx.db, embedFn, query, {
+          tiers: [{ tier: "cold", content_type: "knowledge" }],
+          topK: 3,
+          minScore: ctx.config.tiers.warm.similarity_threshold
+        });
+        for (const r of collectionResults) {
+          const meta = r.entry.metadata;
+          if (meta["type"] === "collection") {
+            collectionId = r.entry.id;
+            hierarchicalMatch = r.entry.name ?? r.entry.id;
+            break;
+          }
+        }
+      }
+    }
+    let results;
+    if (collectionId) {
+      const allResults = await searchMemory(ctx.db, embedFn, query, {
+        tiers: [{ tier: "cold", content_type: "knowledge" }],
+        topK: topK * 2
+      });
+      results = allResults.filter(
+        (r) => r.entry.collection_id === collectionId || r.entry.parent_id === collectionId
+      ).slice(0, topK);
+      ctx.db.prepare(
+        `UPDATE cold_knowledge SET access_count = access_count + 1, last_accessed_at = ? WHERE id = ?`
+      ).run(Date.now(), collectionId);
+    } else {
+      results = await searchMemory(ctx.db, embedFn, query, {
+        tiers: [{ tier: "cold", content_type: "knowledge" }],
+        topK
+      });
+    }
+    let needsSummary = false;
+    if (collectionId) {
+      const collection = getCollection(ctx.db, collectionId);
+      if (collection && !collection.summary && collection.access_count >= (ctx.config.tiers.cold.lazy_summary_threshold ?? 5)) {
+        needsSummary = true;
+      }
+    }
+    return { content: [{ type: "text", text: JSON.stringify({ results, hierarchicalMatch, needsSummary }) }] };
   }
   if (name === "kb_list_collections") {
     const collections = listCollections(ctx.db);
@@ -2050,6 +2112,16 @@ async function handleKbTool(name, args, ctx) {
         }
       ]
     };
+  }
+  if (name === "kb_summarize") {
+    const collectionId = validateString(args.collection, "collection");
+    const summary = validateString(args.summary, "summary");
+    const entry = getEntry(ctx.db, "cold", "knowledge", collectionId);
+    if (!entry) {
+      return { content: [{ type: "text", text: JSON.stringify({ error: `Collection not found: ${collectionId}` }) }] };
+    }
+    updateEntry(ctx.db, "cold", "knowledge", collectionId, { summary });
+    return { content: [{ type: "text", text: JSON.stringify({ collection: collectionId, summarized: true }) }] };
   }
   return null;
 }
@@ -2765,6 +2837,27 @@ function collectMarkdownFiles(dirPath, files) {
   }
 }
 
+// src/utils/project-detect.ts
+import { execFileSync } from "child_process";
+import { basename as basename3 } from "path";
+function detectProject(cwd) {
+  const home = process.env.HOME ?? "";
+  if (cwd === home || cwd === "/") return null;
+  try {
+    const remote = execFileSync("git", ["remote", "get-url", "origin"], {
+      cwd,
+      timeout: 2e3,
+      stdio: ["pipe", "pipe", "pipe"]
+    }).toString().trim();
+    if (remote) {
+      const name = basename3(remote).replace(/\.git$/, "");
+      if (name) return name;
+    }
+  } catch {
+  }
+  return basename3(cwd) || null;
+}
+
 // src/tools/session-tools.ts
 var SESSION_TOOLS = [
   {
@@ -2799,6 +2892,7 @@ async function handleSessionTool(name, args, ctx) {
   if (name === "session_start") {
     await ctx.embedder.ensureLoaded();
     const embedFn = (text) => ctx.embedder.embed(text);
+    const project = detectProject(process.cwd());
     const importers = [
       new ClaudeCodeImporter(),
       new CopilotCliImporter()
@@ -2806,7 +2900,7 @@ async function handleSessionTool(name, args, ctx) {
     const importSummary = [];
     for (const importer of importers) {
       if (!importer.detect()) continue;
-      const memResult = await importer.importMemories(ctx.db, embedFn);
+      const memResult = await importer.importMemories(ctx.db, embedFn, project ?? void 0);
       const kbResult = await importer.importKnowledge(ctx.db, embedFn);
       importSummary.push({
         tool: importer.name,
@@ -2832,7 +2926,42 @@ async function handleSessionTool(name, args, ctx) {
     if (docsResult.filesIngested > 0) {
       projectDocs = { filesIngested: docsResult.filesIngested, totalChunks: docsResult.totalChunks };
     }
-    const hotEntries = listEntries(ctx.db, "hot", "memory");
+    let warmPromoted = 0;
+    if (project) {
+      const warmResults = await searchMemory(ctx.db, embedFn, project, {
+        tiers: [{ tier: "warm", content_type: "memory" }],
+        topK: ctx.config.tiers.warm.retrieval_top_k,
+        minScore: ctx.config.tiers.warm.similarity_threshold
+      });
+      const hotCount = listEntries(ctx.db, "hot", "memory").length;
+      const budget = ctx.config.tiers.hot.max_entries - hotCount;
+      for (const result of warmResults.slice(0, Math.max(0, budget))) {
+        const entry = getEntry(ctx.db, "warm", "memory", result.entry.id);
+        if (entry && (entry.project === project || entry.project === null)) {
+          await promoteEntry(ctx.db, embedFn, result.entry.id, "warm", "memory", "hot", "memory");
+          warmPromoted++;
+        }
+      }
+    }
+    let hotEntries = listEntries(ctx.db, "hot", "memory");
+    const tokenBudget = ctx.config.tiers.hot.token_budget;
+    const estimateTokens4 = (text) => Math.ceil(text.length / 4);
+    let totalTokens = hotEntries.reduce((sum, e) => sum + estimateTokens4(e.content), 0);
+    if (totalTokens > tokenBudget && hotEntries.length > 1) {
+      const sorted = [...hotEntries].sort((a, b) => a.decay_score - b.decay_score);
+      const evicted = [];
+      while (totalTokens > tokenBudget && sorted.length > 1) {
+        const victim = sorted.shift();
+        totalTokens -= estimateTokens4(victim.content);
+        evicted.push(victim.id);
+      }
+      if (evicted.length > 0) {
+        for (const id of evicted) {
+          await demoteEntry(ctx.db, embedFn, id, "hot", "memory", "warm", "memory");
+        }
+        hotEntries = listEntries(ctx.db, "hot", "memory");
+      }
+    }
     const contextLines = hotEntries.map((e) => {
       const tags = e.tags.length > 0 ? ` [${e.tags.join(", ")}]` : "";
       return `- ${e.content}${tags}`;
@@ -2844,8 +2973,10 @@ async function handleSessionTool(name, args, ctx) {
           type: "text",
           text: JSON.stringify({
             sessionId: ctx.sessionId,
+            project,
             importSummary,
             warmSweep: warmSweepResult,
+            warmPromoted,
             projectDocs,
             hotEntryCount: hotEntries.length,
             context: contextText

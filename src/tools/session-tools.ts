@@ -2,10 +2,13 @@ import { randomUUID } from "node:crypto";
 import type { ToolContext } from "./registry.js";
 import { ClaudeCodeImporter } from "../importers/claude-code.js";
 import { CopilotCliImporter } from "../importers/copilot-cli.js";
-import { listEntries } from "../db/entries.js";
+import { listEntries, getEntry } from "../db/entries.js";
+import { searchMemory } from "../memory/search.js";
+import { promoteEntry, demoteEntry } from "../memory/promote-demote.js";
 import { compactHotTier } from "../compaction/compactor.js";
 import { sweepWarmTier } from "../compaction/warm-sweep.js";
 import { ingestProjectDocs } from "../importers/project-docs.js";
+import { detectProject } from "../utils/project-detect.js";
 
 export const SESSION_TOOLS = [
   {
@@ -48,6 +51,9 @@ export async function handleSessionTool(
     await ctx.embedder.ensureLoaded();
     const embedFn = (text: string) => ctx.embedder.embed(text);
 
+    // Detect project context
+    const project = detectProject(process.cwd());
+
     const importers = [
       new ClaudeCodeImporter(),
       new CopilotCliImporter(),
@@ -62,7 +68,7 @@ export async function handleSessionTool(
     for (const importer of importers) {
       if (!importer.detect()) continue;
 
-      const memResult = await importer.importMemories(ctx.db, embedFn);
+      const memResult = await importer.importMemories(ctx.db, embedFn, project ?? undefined);
       const kbResult = await importer.importKnowledge(ctx.db, embedFn);
 
       importSummary.push({
@@ -97,8 +103,56 @@ export async function handleSessionTool(
       projectDocs = { filesIngested: docsResult.filesIngested, totalChunks: docsResult.totalChunks };
     }
 
-    // Assemble hot tier context
-    const hotEntries = listEntries(ctx.db, "hot", "memory");
+    // Semantic warm search: promote relevant warm entries to hot based on project
+    let warmPromoted = 0;
+    if (project) {
+      const warmResults = await searchMemory(ctx.db, embedFn, project, {
+        tiers: [{ tier: "warm", content_type: "memory" }],
+        topK: ctx.config.tiers.warm.retrieval_top_k,
+        minScore: ctx.config.tiers.warm.similarity_threshold,
+      });
+
+      const hotCount = listEntries(ctx.db, "hot", "memory").length;
+      const budget = ctx.config.tiers.hot.max_entries - hotCount;
+
+      for (const result of warmResults.slice(0, Math.max(0, budget))) {
+        // Only promote entries scoped to this project or unscoped
+        const entry = getEntry(ctx.db, "warm", "memory", result.entry.id);
+        if (entry && (entry.project === project || entry.project === null)) {
+          await promoteEntry(ctx.db, embedFn, result.entry.id, "warm", "memory", "hot", "memory");
+          warmPromoted++;
+        }
+      }
+    }
+
+    // Assemble hot tier context with token budget enforcement
+    let hotEntries = listEntries(ctx.db, "hot", "memory");
+
+    // Enforce token budget — evict lowest-decay entries first
+    const tokenBudget = ctx.config.tiers.hot.token_budget;
+    const estimateTokens = (text: string) => Math.ceil(text.length / 4);
+
+    let totalTokens = hotEntries.reduce((sum, e) => sum + estimateTokens(e.content), 0);
+    if (totalTokens > tokenBudget && hotEntries.length > 1) {
+      // Sort by decay_score ascending — lowest value evicted first
+      const sorted = [...hotEntries].sort((a, b) => a.decay_score - b.decay_score);
+      const evicted: string[] = [];
+
+      while (totalTokens > tokenBudget && sorted.length > 1) {
+        const victim = sorted.shift()!;
+        totalTokens -= estimateTokens(victim.content);
+        evicted.push(victim.id);
+      }
+
+      if (evicted.length > 0) {
+        // Demote evicted entries to warm
+        for (const id of evicted) {
+          await demoteEntry(ctx.db, embedFn, id, "hot", "memory", "warm", "memory");
+        }
+        hotEntries = listEntries(ctx.db, "hot", "memory");
+      }
+    }
+
     const contextLines = hotEntries.map((e) => {
       const tags = e.tags.length > 0 ? ` [${e.tags.join(", ")}]` : "";
       return `- ${e.content}${tags}`;
@@ -111,8 +165,10 @@ export async function handleSessionTool(
           type: "text",
           text: JSON.stringify({
             sessionId: ctx.sessionId,
+            project,
             importSummary,
             warmSweep: warmSweepResult,
+            warmPromoted,
             projectDocs,
             hotEntryCount: hotEntries.length,
             context: contextText,

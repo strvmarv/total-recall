@@ -1,9 +1,9 @@
 import { statSync } from "node:fs";
 import type { ToolContext } from "./registry.js";
 import { ingestFile, ingestDirectory } from "../ingestion/ingest.js";
-import { listCollections } from "../ingestion/hierarchical-index.js";
+import { listCollections, getCollection } from "../ingestion/hierarchical-index.js";
 import { searchMemory } from "../memory/search.js";
-import { listEntries, deleteEntry, getEntry } from "../db/entries.js";
+import { listEntries, deleteEntry, getEntry, updateEntry } from "../db/entries.js";
 import { deleteEmbedding } from "../search/vector-search.js";
 import { validatePath, validateOptionalString, validateOptionalNumber, validateString } from "./validation.js";
 
@@ -78,6 +78,18 @@ export const KB_TOOLS = [
       required: ["collection"],
     },
   },
+  {
+    name: "kb_summarize",
+    description: "Store a summary for a knowledge base collection. Call this when a collection's needs_summary flag is true.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        collection: { type: "string", description: "Collection ID" },
+        summary: { type: "string", description: "Summary text for the collection" },
+      },
+      required: ["collection", "summary"],
+    },
+  },
 ];
 
 type ToolResult = { content: Array<{ type: "text"; text: string }> };
@@ -107,15 +119,72 @@ export async function handleKbTool(
 
   if (name === "kb_search") {
     const query = validateString(args.query, "query");
+    let collectionId = validateOptionalString(args.collection, "collection");
     const topK = validateOptionalNumber(args.top_k, "top_k", 1, 1000) ?? 10;
     await ctx.embedder.ensureLoaded();
     const vec = await ctx.embedder.embed(query);
     const embedFn = () => vec;
-    const results = await searchMemory(ctx.db, embedFn, query, {
-      tiers: [{ tier: "cold", content_type: "knowledge" }],
-      topK,
-    });
-    return { content: [{ type: "text", text: JSON.stringify(results) }] };
+
+    // Hierarchical search: if no collection specified, try matching against
+    // collection summaries first to narrow scope
+    let hierarchicalMatch: string | null = null;
+    if (!collectionId) {
+      const collections = listCollections(ctx.db);
+      const withSummaries = collections.filter((c) => c.summary);
+
+      if (withSummaries.length > 0) {
+        // Search collection entries (which have summaries) by vector similarity
+        const collectionResults = await searchMemory(ctx.db, embedFn, query, {
+          tiers: [{ tier: "cold", content_type: "knowledge" }],
+          topK: 3,
+          minScore: ctx.config.tiers.warm.similarity_threshold,
+        });
+
+        // Find the best matching collection entry
+        for (const r of collectionResults) {
+          const meta = r.entry.metadata as Record<string, unknown>;
+          if (meta["type"] === "collection") {
+            collectionId = r.entry.id;
+            hierarchicalMatch = (r.entry as { name?: string }).name ?? r.entry.id;
+            break;
+          }
+        }
+      }
+    }
+
+    // Search within scope (collection-filtered or flat)
+    let results;
+    if (collectionId) {
+      // Scoped search: only entries in this collection
+      const allResults = await searchMemory(ctx.db, embedFn, query, {
+        tiers: [{ tier: "cold", content_type: "knowledge" }],
+        topK: topK * 2,
+      });
+      results = allResults.filter(
+        (r) => r.entry.collection_id === collectionId || r.entry.parent_id === collectionId,
+      ).slice(0, topK);
+
+      // Track collection access and check summary threshold
+      ctx.db.prepare(
+        `UPDATE cold_knowledge SET access_count = access_count + 1, last_accessed_at = ? WHERE id = ?`
+      ).run(Date.now(), collectionId);
+    } else {
+      results = await searchMemory(ctx.db, embedFn, query, {
+        tiers: [{ tier: "cold", content_type: "knowledge" }],
+        topK,
+      });
+    }
+
+    // Check if collection needs a summary
+    let needsSummary = false;
+    if (collectionId) {
+      const collection = getCollection(ctx.db, collectionId);
+      if (collection && !collection.summary && collection.access_count >= (ctx.config.tiers.cold.lazy_summary_threshold ?? 5)) {
+        needsSummary = true;
+      }
+    }
+
+    return { content: [{ type: "text", text: JSON.stringify({ results, hierarchicalMatch, needsSummary }) }] };
   }
 
   if (name === "kb_list_collections") {
@@ -221,6 +290,19 @@ export async function handleKbTool(
         },
       ],
     };
+  }
+
+  if (name === "kb_summarize") {
+    const collectionId = validateString(args.collection, "collection");
+    const summary = validateString(args.summary, "summary");
+
+    const entry = getEntry(ctx.db, "cold", "knowledge", collectionId);
+    if (!entry) {
+      return { content: [{ type: "text", text: JSON.stringify({ error: `Collection not found: ${collectionId}` }) }] };
+    }
+
+    updateEntry(ctx.db, "cold", "knowledge", collectionId, { summary });
+    return { content: [{ type: "text", text: JSON.stringify({ collection: collectionId, summarized: true }) }] };
   }
 
   return null;

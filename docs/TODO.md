@@ -2,13 +2,6 @@
 
 Features planned in the design spec but not yet implemented. Ordered by impact.
 
-## Hierarchical KB Retrieval
-
-Collection→document→chunk search progression instead of flat search. Currently `kb_search` searches all cold/knowledge entries equally — no filtering by collection hierarchy or summary-guided narrowing.
-
-**Files:** `src/tools/kb-tools.ts`, `src/ingestion/hierarchical-index.ts`
-**Blocked by:** Document/collection summary generation (requires LLM or heuristic summarizer)
-
 ## Compaction Health Fields
 
 Populate `semantic_drift`, `facts_preserved`, `facts_in_original`, `preservation_ratio` in `compaction_log`. Schema columns exist but are always NULL.
@@ -48,7 +41,7 @@ Harvest real retrieval misses into the benchmark suite. When a search returns no
 Side-by-side metric comparison across config snapshots. `config_snapshots` table exists but snapshots are never auto-created on config change, and no comparison analysis exists.
 
 **Files:** `src/tools/eval-tools.ts`, `src/eval/metrics.ts`
-**Depends on:** Config persistence (Batch 1) and config snapshot auto-creation on `config_set`.
+**Depends on:** Config snapshot auto-creation on `config_set`.
 
 ## Regression Detection
 
@@ -64,12 +57,6 @@ Only Claude Code and Copilot CLI importers exist. Missing: OpenCode, Cline, Curs
 **Files:** `src/importers/`
 **Pattern:** Implement `HostImporter` interface from `src/importers/importer.ts`
 
-## File Watching for Host Tool Sync
-
-One-time import only — no ongoing sync when host tool memory files change. Could use `fs.watch` or poll on `session_start`.
-
-**Files:** `src/importers/`, `src/tools/session-tools.ts`
-
 ## PDF Parsing
 
 Not supported in the chunker. Would need a PDF-to-text library.
@@ -81,3 +68,27 @@ Not supported in the chunker. Would need a PDF-to-text library.
 Benchmark runner exists but isn't integrated into startup. Design spec called for a <2s smoke test with 20 queries on first run.
 
 **Files:** `src/tools/session-tools.ts`, `src/eval/benchmark-runner.ts`
+
+## Post-Ingest Validation Queries
+
+After ingestion, auto-generate 3 test queries to verify chunks are retrievable. Report validation pass/fail in the ingest response.
+
+**Files:** `src/ingestion/ingest.ts`, `src/tools/kb-tools.ts`
+
+## Config Snapshot Auto-Creation
+
+`config_set` should snapshot the old config before changing. `config_snapshots` table exists but is never populated. Needed for A/B config comparison.
+
+**Files:** `src/tools/system-tools.ts`, `src/config.ts`
+
+## Code Parser AST Analysis
+
+Current code parser uses basic regex splitting for function/class boundaries. Full AST parsing (via TypeScript compiler API, tree-sitter, etc.) would produce more accurate chunks.
+
+**Files:** `src/ingestion/code-parser.ts`
+
+## Benchmark Use Cases
+
+Only manual benchmark runner exists. Design spec described three use cases: CI smoke test (run on every build), first-install validation (verify system works on setup), and config tuning (compare metrics before/after config changes).
+
+**Files:** `src/eval/benchmark-runner.ts`, `.github/workflows/ci.yml`
