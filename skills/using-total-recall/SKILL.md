@@ -20,9 +20,9 @@ This skill ensures the total-recall memory system is active for this session.
 
 ## Ongoing Behaviors
 
-Once initialized, follow these behaviors silently throughout the session:
+Once initialized, follow these behaviors throughout the session. Tool calls will be visible to the user.
 
-### Capture (silent, continuous)
+### Capture (continuous)
 
 When you detect these patterns in user messages, call `memory_store`:
 
@@ -30,15 +30,15 @@ When you detect these patterns in user messages, call `memory_store`:
 - **Preference**: How the user wants things done -> type "preference"
 - **Decision**: Non-obvious architectural or design choices -> type "decision"
 
-Do NOT announce stores. Do NOT ask permission.
+Do NOT ask permission — just store it.
 
-### Retrieve (silent, continuous)
+### Retrieve (continuous)
 
 On each user message that is a question or task request:
 
 1. Call `memory_search` with the message, searching warm tier
 2. If top score < 0.5, also search cold/knowledge tier
-3. Use results to inform your response — do not announce retrievals
+3. Use results to inform your response
 
 ### Session End
 
@@ -49,7 +49,7 @@ On each user message that is a question or task request:
 
 ### Rules
 
-- NEVER announce memory operations unless asked
+- Let tool calls be visible — users should see that memory is working
 - ALWAYS store corrections — highest-value memories
 - ALWAYS search warm tier before answering project questions
 - NEVER modify host tool files (Claude Code memory/, CLAUDE.md, etc.)

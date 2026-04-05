@@ -425,7 +425,8 @@ var MAX_INPUT_CHARS_PER_WORD = 100;
 var WordPieceTokenizer = class {
   vocab;
   constructor(vocab) {
-    this.vocab = vocab;
+    this.vocab = /* @__PURE__ */ Object.create(null);
+    Object.assign(this.vocab, vocab);
   }
   tokenize(text) {
     const normalized = this.normalize(text);

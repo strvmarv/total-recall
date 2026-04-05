@@ -7,6 +7,20 @@ const MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2";
 const modelPath = getModelPath(MODEL_NAME);
 const modelAvailable = isModelDownloaded(modelPath);
 
+describe("WordPieceTokenizer prototype safety", () => {
+  it("vocab lookup does not inherit Object.prototype properties", () => {
+    const fakeVocab = { hello: 1, world: 2 };
+    const tok = new WordPieceTokenizer(fakeVocab);
+    const ids = tok.tokenize("constructor");
+    // "constructor" is not in fakeVocab, so it should be UNK (100)
+    expect(ids).toContain(100);
+    // Must not contain a function or non-integer
+    for (const id of ids) {
+      expect(typeof id).toBe("number");
+    }
+  });
+});
+
 describe.skipIf(!modelAvailable)("WordPieceTokenizer", () => {
   let tokenizer: WordPieceTokenizer;
 
@@ -76,5 +90,13 @@ describe.skipIf(!modelAvailable)("WordPieceTokenizer", () => {
     const tomlIds = tokenizer.tokenize("toml");
     const sqliteIds = tokenizer.tokenize("sqlite");
     expect(tomlIds).not.toEqual(sqliteIds);
+  });
+
+  it("does not leak Object.prototype properties into token ids", () => {
+    const ids = tokenizer.tokenize("constructor toString valueOf hasOwnProperty");
+    for (const id of ids) {
+      expect(typeof id).toBe("number");
+      expect(Number.isInteger(id)).toBe(true);
+    }
   });
 });

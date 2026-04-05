@@ -12,7 +12,8 @@ export class WordPieceTokenizer {
   private readonly vocab: TokenizerVocab;
 
   constructor(vocab: TokenizerVocab) {
-    this.vocab = vocab;
+    this.vocab = Object.create(null) as TokenizerVocab;
+    Object.assign(this.vocab, vocab);
   }
 
   tokenize(text: string): number[] {

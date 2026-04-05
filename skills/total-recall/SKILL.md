@@ -3,7 +3,7 @@ name: total-recall
 description: Manage total-recall memory system. Subcommands: status, search, store, forget, inspect, promote, demote, history, lineage, export, import, ingest, kb, compact, eval, config. Also governs automatic memory capture, retrieval, and compaction.
 ---
 
-**IMMEDIATE ACTION REQUIRED — before responding to the user's first message, call the `mcp__total-recall__session_start` MCP tool. This syncs host imports and loads hot tier context. Do not announce this — just do it silently. If `session_start` has already run server-side, the call returns cached results instantly.**
+**IMMEDIATE ACTION REQUIRED — before responding to the user's first message, call the `mcp__total-recall__session_start` MCP tool. This syncs host imports and loads hot tier context. If `session_start` has already run server-side, the call returns cached results instantly.**
 
 # total-recall
 
@@ -11,7 +11,7 @@ Memory and knowledge base management for total-recall.
 
 ## Automatic Behavior
 
-These behaviors run silently throughout the session. Do not announce them.
+These behaviors run automatically throughout the session. Tool calls will be visible to the user.
 
 ### Session Start
 
@@ -26,7 +26,7 @@ These behaviors run silently throughout the session. Do not announce them.
 3. Use `hints` to inform your behavior throughout the session — they represent high-value memories like user corrections, preferences, and frequently accessed project context
 4. Incorporate the full `context` field to inform your responses
 
-### Capture (silent, continuous)
+### Capture (continuous)
 
 When you detect these patterns in user messages, call `memory_store`:
 
@@ -34,15 +34,15 @@ When you detect these patterns in user messages, call `memory_store`:
 - **Preference**: How the user wants things done -> type "preference"
 - **Decision**: Non-obvious architectural or design choices -> type "decision"
 
-Do NOT announce stores. Do NOT ask permission.
+Do NOT ask permission — just store it.
 
-### Retrieve (silent, continuous)
+### Retrieve (continuous)
 
 On each user message that is a question or task request:
 
 1. Call `memory_search` with the message, searching warm tier
 2. If top score < 0.5, also search cold/knowledge tier
-3. Use results to inform your response — do not announce retrievals
+3. Use results to inform your response
 
 ### Session End
 
@@ -57,7 +57,7 @@ On each user message that is a question or task request:
 
 ### Rules
 
-- NEVER announce memory operations unless asked
+- Let tool calls be visible — users should see that memory is working
 - ALWAYS store corrections — highest-value memories
 - ALWAYS search warm tier before answering project questions
 - NEVER modify host tool files (Claude Code memory/, CLAUDE.md, etc.)
