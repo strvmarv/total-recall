@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { ToolContext } from "./registry.js";
 import { countEntries } from "../db/entries.js";
 import { listCollections } from "../ingestion/hierarchical-index.js";
-import { setNestedKey, saveUserConfig, loadConfig } from "../config.js";
+import { setNestedKey, saveUserConfig, loadConfig, createConfigSnapshot } from "../config.js";
 import { getRetrievalEvents } from "../eval/event-logger.js";
 import { getDataDir } from "../config.js";
 import { ALL_TABLE_PAIRS } from "../types.js";
@@ -151,6 +151,9 @@ export function handleSystemTool(
   if (name === "config_set") {
     const key = args.key as string;
     const value = args.value;
+
+    // Snapshot current config before changing
+    createConfigSnapshot(ctx.db, ctx.config, `pre-change:${key}`);
 
     const overrides = setNestedKey({}, key, value);
     saveUserConfig(overrides);
