@@ -71,10 +71,8 @@ export function handleSystemTool(
     const parts = key.split(".");
     let value: unknown = ctx.config;
     for (const part of parts) {
-      if (value === null || typeof value !== "object") {
-        value = undefined;
-        break;
-      }
+      if (value === null || typeof value !== "object") return { content: [{ type: "text", text: JSON.stringify({ error: "key not found" }) }] };
+      if (!Object.prototype.hasOwnProperty.call(value, part)) return { content: [{ type: "text", text: JSON.stringify({ error: `key not found: ${key}` }) }] };
       value = (value as Record<string, unknown>)[part];
     }
     return { content: [{ type: "text", text: JSON.stringify({ key, value }) }] };

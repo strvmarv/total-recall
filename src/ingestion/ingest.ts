@@ -45,6 +45,7 @@ export interface IngestDirectoryResult {
   collectionId: string;
   documentCount: number;
   totalChunks: number;
+  errors: string[];
 }
 
 export async function ingestFile(
@@ -156,6 +157,7 @@ export async function ingestDirectory(
 
   let documentCount = 0;
   let totalChunks = 0;
+  const errors: string[] = [];
 
   for (const filePath of files) {
     // If a glob filter is provided, apply simple basename matching
@@ -168,8 +170,8 @@ export async function ingestDirectory(
       const result = await ingestFile(db, embed, filePath, collectionId);
       documentCount++;
       totalChunks += result.chunkCount;
-    } catch {
-      // Skip files that fail to ingest
+    } catch (err) {
+      errors.push(`${filePath}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -177,5 +179,6 @@ export async function ingestDirectory(
     collectionId,
     documentCount,
     totalChunks,
+    errors,
   };
 }

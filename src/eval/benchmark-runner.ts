@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import type Database from "better-sqlite3";
 import { storeMemory } from "../memory/store.js";
 import { searchMemory } from "../memory/search.js";
+import { countEntries } from "../db/entries.js";
 import type { Tier, EntryType } from "../types.js";
 
 type EmbedFn = (text: string) => Float32Array | Promise<Float32Array>;
@@ -46,20 +47,23 @@ export async function runBenchmark(
   embed: EmbedFn,
   opts: BenchmarkOptions,
 ): Promise<BenchmarkResult> {
-  // Seed corpus into warm tier
+  // Seed corpus into warm tier (skip if already seeded)
   const corpusLines = readFileSync(opts.corpusPath, "utf-8")
     .split("\n")
     .filter((line) => line.trim().length > 0);
 
-  for (const line of corpusLines) {
-    const entry = JSON.parse(line) as CorpusEntry;
-    await storeMemory(db, embed, {
-      content: entry.content,
-      type: entry.type,
-      tier: "warm",
-      contentType: "memory",
-      tags: entry.tags,
-    });
+  const existingWarmCount = countEntries(db, "warm", "memory");
+  if (existingWarmCount < corpusLines.length) {
+    for (const line of corpusLines) {
+      const entry = JSON.parse(line) as CorpusEntry;
+      await storeMemory(db, embed, {
+        content: entry.content,
+        type: entry.type,
+        tier: "warm",
+        contentType: "memory",
+        tags: entry.tags,
+      });
+    }
   }
 
   // Load benchmark queries
