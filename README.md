@@ -119,27 +119,24 @@ All state lives in `~/.total-recall/db.sqlite`. The embedding model is cached at
 
 ## Commands
 
-| Command | Description |
-|---|---|
-| `/memory status` | Dashboard overview |
-| `/memory search <query>` | Semantic search across all tiers |
-| `/memory ingest <path>` | Add files/dirs to knowledge base |
-| `/memory forget <query>` | Find and delete entries |
-| `/memory compact` | Force compaction with preview |
-| `/memory inspect <id>` | Deep dive on single entry |
-| `/memory promote <id>` | Move entry to higher tier |
-| `/memory demote <id>` | Move entry to lower tier |
-| `/memory export` | Export to portable format |
-| `/memory import <file>` | Import from export file |
-| `/memory eval` | Live performance metrics |
-| `/memory eval --benchmark` | Run synthetic benchmark |
-| `/memory eval --compare <name>` | Compare configs |
-| `/memory eval --snapshot <name>` | Save current config baseline |
-| `/memory eval --grow` | Add real misses to benchmark |
-| `/memory config get <key>` | Read config value |
-| `/memory config set <key> <value>` | Update config |
-| `/memory history` | Show recent tier movements |
-| `/memory lineage <id>` | Show compaction ancestry |
+| Command | MCP Tool | Description |
+|---|---|---|
+| `/memory status` | `status` | Dashboard overview |
+| `/memory search <query>` | `memory_search` | Semantic search across all tiers |
+| `/memory ingest <path>` | `kb_ingest_file` / `kb_ingest_dir` | Add files/dirs to knowledge base |
+| `/memory forget <query>` | `memory_search` + `memory_delete` | Find and delete entries |
+| `/memory compact` | `compact_now` | Force compaction with preview |
+| `/memory inspect <id>` | `memory_inspect` | Deep dive on single entry |
+| `/memory promote <id>` | `memory_promote` | Move entry to higher tier |
+| `/memory demote <id>` | `memory_demote` | Move entry to lower tier |
+| `/memory export` | `memory_export` | Export to portable JSON format |
+| `/memory import <file>` | `memory_import` | Import from export file |
+| `/memory eval` | `eval_report` | Live performance metrics |
+| `/memory eval --benchmark` | `eval_benchmark` | Run synthetic benchmark |
+| `/memory config get <key>` | `config_get` | Read config value |
+| `/memory config set <key> <value>` | `config_set` | Update config |
+| `/memory history` | `memory_history` | Show recent tier movements |
+| `/memory lineage <id>` | `memory_lineage` | Show compaction ancestry |
 
 ---
 

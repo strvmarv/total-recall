@@ -10,9 +10,8 @@
   "hooks": "./hooks/hooks.json",
   "mcpServers": {
     "total-recall": {
-      "command": "node",
-      "args": ["dist/index.js"],
-      "env": {}
+      "command": "npx",
+      "args": ["-y", "@strvmarv/total-recall"]
     }
   }
 }

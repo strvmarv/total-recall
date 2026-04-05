@@ -5,8 +5,8 @@
   "skills": "./skills/",
   "mcpServers": {
     "total-recall": {
-      "command": "node",
-      "args": ["dist/index.js"]
+      "command": "npx",
+      "args": ["-y", "@strvmarv/total-recall"]
     }
   }
 }

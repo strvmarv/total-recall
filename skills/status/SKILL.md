@@ -30,3 +30,10 @@ Call `eval_benchmark`. Show synthetic benchmark results with pass/fail threshold
 ## For /memory eval --compare <name>
 
 Call `eval_report` with the named config snapshot for comparison. Show side-by-side metrics with deltas and trend arrows.
+
+## For /memory compact
+
+Call `compact_now` to force immediate hot tier compaction. Show results:
+- How many entries were carried forward
+- How many were promoted to warm
+- How many were discarded

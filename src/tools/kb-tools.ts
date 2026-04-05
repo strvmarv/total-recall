@@ -1,8 +1,9 @@
+import { statSync } from "node:fs";
 import type { ToolContext } from "./registry.js";
 import { ingestFile, ingestDirectory } from "../ingestion/ingest.js";
 import { listCollections } from "../ingestion/hierarchical-index.js";
 import { searchMemory } from "../memory/search.js";
-import { listEntries, deleteEntry } from "../db/entries.js";
+import { listEntries, deleteEntry, getEntry } from "../db/entries.js";
 import { deleteEmbedding } from "../search/vector-search.js";
 import { validatePath, validateOptionalString, validateOptionalNumber, validateString } from "./validation.js";
 
@@ -143,15 +144,79 @@ export async function handleKbTool(
   }
 
   if (name === "kb_refresh") {
-    const collection = validateString(args.collection, "collection");
+    const collectionId = validateString(args.collection, "collection");
+
+    // Look up the collection entry to get its source_path from metadata
+    const collectionEntry = getEntry(ctx.db, "cold", "knowledge", collectionId);
+    if (!collectionEntry) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ error: `Collection not found: ${collectionId}` }),
+          },
+        ],
+      };
+    }
+
+    const sourcePath = (collectionEntry.metadata as Record<string, unknown>)?.source_path as string | undefined;
+    if (!sourcePath) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ error: "Collection has no source_path in metadata; cannot refresh" }),
+          },
+        ],
+      };
+    }
+
+    // Delete all child entries (documents and chunks) belonging to this collection
+    const children = listEntries(ctx.db, "cold", "knowledge").filter(
+      (e) => e.collection_id === collectionId || e.parent_id === collectionId,
+    );
+    for (const child of children) {
+      deleteEmbedding(ctx.db, "cold", "knowledge", child.id);
+      deleteEntry(ctx.db, "cold", "knowledge", child.id);
+    }
+    // Delete the collection root entry itself
+    deleteEmbedding(ctx.db, "cold", "knowledge", collectionId);
+    deleteEntry(ctx.db, "cold", "knowledge", collectionId);
+
+    // Re-ingest from source path
+    await ctx.embedder.ensureLoaded();
+    const embedFn = (text: string) => ctx.embedder.embed(text);
+
+    let result: import("../ingestion/ingest.js").IngestDirectoryResult | import("../ingestion/ingest.js").IngestFileResult;
+    let isDir = false;
+    try {
+      isDir = statSync(sourcePath).isDirectory();
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ error: `Cannot stat source path: ${String(err)}` }),
+          },
+        ],
+      };
+    }
+
+    if (isDir) {
+      result = await ingestDirectory(ctx.db, embedFn, sourcePath);
+    } else {
+      result = await ingestFile(ctx.db, embedFn, sourcePath);
+    }
+
     return {
       content: [
         {
           type: "text",
           text: JSON.stringify({
-            acknowledged: true,
-            collection,
-            note: "Refresh scheduled — re-ingest the source path to update",
+            refreshed: true,
+            source_path: sourcePath,
+            deleted_children: children.length,
+            ...result,
           }),
         },
       ],
