@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ToolContext } from "./registry.js";
+import { createConfigSnapshot } from "../config.js";
 import { ClaudeCodeImporter } from "../importers/claude-code.js";
 import { CopilotCliImporter } from "../importers/copilot-cli.js";
 import { listEntries, getEntry } from "../db/entries.js";
@@ -158,6 +159,10 @@ export async function handleSessionTool(
       return `- ${e.content}${tags}`;
     });
     const contextText = contextLines.join("\n");
+
+    // Snapshot config for this session
+    const snapshotId = createConfigSnapshot(ctx.db, ctx.config, "session-start");
+    ctx.configSnapshotId = snapshotId;
 
     return {
       content: [
