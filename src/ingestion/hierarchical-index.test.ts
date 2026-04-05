@@ -17,13 +17,13 @@ describe("hierarchical index", () => {
     db = createTestDb();
   });
 
-  it("creates a collection and adds documents with chunks", () => {
-    const collId = createCollection(db, mockEmbedSemantic, {
+  it("creates a collection and adds documents with chunks", async () => {
+    const collId = await createCollection(db, mockEmbedSemantic, {
       name: "auth-docs",
       sourcePath: "docs/auth/",
     });
 
-    const docId = addDocumentToCollection(db, mockEmbedSemantic, {
+    const docId = await addDocumentToCollection(db, mockEmbedSemantic, {
       collectionId: collId,
       sourcePath: "docs/auth/oauth-flow.md",
       chunks: [
@@ -40,9 +40,9 @@ describe("hierarchical index", () => {
     expect(chunks).toHaveLength(2);
   });
 
-  it("lists all collections", () => {
-    createCollection(db, mockEmbedSemantic, { name: "auth", sourcePath: "docs/auth/" });
-    createCollection(db, mockEmbedSemantic, { name: "deploy", sourcePath: "docs/deploy/" });
+  it("lists all collections", async () => {
+    await createCollection(db, mockEmbedSemantic, { name: "auth", sourcePath: "docs/auth/" });
+    await createCollection(db, mockEmbedSemantic, { name: "deploy", sourcePath: "docs/deploy/" });
     expect(listCollections(db)).toHaveLength(2);
   });
 
@@ -51,13 +51,13 @@ describe("hierarchical index", () => {
     expect(result).toBeNull();
   });
 
-  it("stores chunk metadata correctly", () => {
-    const collId = createCollection(db, mockEmbedSemantic, {
+  it("stores chunk metadata correctly", async () => {
+    const collId = await createCollection(db, mockEmbedSemantic, {
       name: "code-docs",
       sourcePath: "src/",
     });
 
-    const docId = addDocumentToCollection(db, mockEmbedSemantic, {
+    const docId = await addDocumentToCollection(db, mockEmbedSemantic, {
       collectionId: collId,
       sourcePath: "src/utils.ts",
       chunks: [
@@ -71,13 +71,13 @@ describe("hierarchical index", () => {
     expect(chunks[0]!.metadata["kind"]).toBe("function");
   });
 
-  it("associates chunks with collection_id", () => {
-    const collId = createCollection(db, mockEmbedSemantic, {
+  it("associates chunks with collection_id", async () => {
+    const collId = await createCollection(db, mockEmbedSemantic, {
       name: "my-collection",
       sourcePath: "docs/",
     });
 
-    const docId = addDocumentToCollection(db, mockEmbedSemantic, {
+    const docId = await addDocumentToCollection(db, mockEmbedSemantic, {
       collectionId: collId,
       sourcePath: "docs/intro.md",
       chunks: [{ content: "Introduction content here." }],

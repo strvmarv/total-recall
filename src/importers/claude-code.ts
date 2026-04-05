@@ -3,12 +3,10 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import type Database from "better-sqlite3";
-import type { HostImporter, ImportResult } from "./importer.js";
+import type { HostImporter, ImportResult, EmbedFn } from "./importer.js";
 import { insertEntry } from "../db/entries.js";
 import { insertEmbedding } from "../search/vector-search.js";
 import type { Tier, ContentType } from "../types.js";
-
-type EmbedFn = (text: string) => Float32Array;
 
 interface Frontmatter {
   name?: string;
@@ -110,7 +108,7 @@ export class ClaudeCodeImporter implements HostImporter {
     return { memoryFiles, knowledgeFiles, sessionFiles };
   }
 
-  importMemories(db: Database.Database, embed: EmbedFn, project?: string): ImportResult {
+  async importMemories(db: Database.Database, embed: EmbedFn, project?: string): Promise<ImportResult> {
     const result: ImportResult = { imported: 0, skipped: 0, errors: [] };
 
     const projectsDir = join(this.basePath, "projects");
@@ -156,7 +154,7 @@ export class ClaudeCodeImporter implements HostImporter {
             tags: frontmatter?.name ? [frontmatter.name] : [],
           });
 
-          insertEmbedding(db, tier, type, entryId, embed(content));
+          insertEmbedding(db, tier, type, entryId, await embed(content));
           logImport(db, "claude-code", filePath, hash, entryId, tier, type);
           result.imported++;
         } catch (err) {
@@ -168,7 +166,7 @@ export class ClaudeCodeImporter implements HostImporter {
     return result;
   }
 
-  importKnowledge(db: Database.Database, embed: EmbedFn): ImportResult {
+  async importKnowledge(db: Database.Database, embed: EmbedFn): Promise<ImportResult> {
     const result: ImportResult = { imported: 0, skipped: 0, errors: [] };
 
     const claudeMdPath = join(this.basePath, "CLAUDE.md");
@@ -192,7 +190,7 @@ export class ClaudeCodeImporter implements HostImporter {
         tags: ["pinned"],
       });
 
-      insertEmbedding(db, "warm", "knowledge", entryId, embed(content));
+      insertEmbedding(db, "warm", "knowledge", entryId, await embed(content));
       logImport(db, "claude-code", claudeMdPath, hash, entryId, "warm", "knowledge");
       result.imported++;
     } catch (err) {

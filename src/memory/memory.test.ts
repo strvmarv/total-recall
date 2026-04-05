@@ -20,13 +20,13 @@ describe("memory operations", () => {
     db.close();
   });
 
-  it("stores a memory and retrieves it by semantic search", () => {
-    const id = storeMemory(db, mockEmbedSemantic, {
+  it("stores a memory and retrieves it by semantic search", async () => {
+    const id = await storeMemory(db, mockEmbedSemantic, {
       content: "the cat sat on the mat",
       tier: "hot",
     });
 
-    const results = searchMemory(db, mockEmbedSemantic, "cat sat mat", {
+    const results = await searchMemory(db, mockEmbedSemantic, "cat sat mat", {
       tiers: [{ tier: "hot", content_type: "memory" }],
       topK: 5,
     });
@@ -36,8 +36,8 @@ describe("memory operations", () => {
     expect(found).toBeDefined();
   });
 
-  it("stores to hot tier by default", () => {
-    const id = storeMemory(db, mockEmbedSemantic, {
+  it("stores to hot tier by default", async () => {
+    const id = await storeMemory(db, mockEmbedSemantic, {
       content: "default tier memory",
     });
 
@@ -46,21 +46,21 @@ describe("memory operations", () => {
     expect(result!.tier).toBe("hot");
   });
 
-  it("updates memory content and re-embeds", () => {
-    const id = storeMemory(db, mockEmbedSemantic, {
+  it("updates memory content and re-embeds", async () => {
+    const id = await storeMemory(db, mockEmbedSemantic, {
       content: "original content here",
       tier: "hot",
     });
 
-    updateMemory(db, mockEmbedSemantic, id, { content: "updated content now" });
+    await updateMemory(db, mockEmbedSemantic, id, { content: "updated content now" });
 
     const result = getMemory(db, id);
     expect(result).not.toBeNull();
     expect(result!.entry.content).toBe("updated content now");
   });
 
-  it("deletes a memory", () => {
-    const id = storeMemory(db, mockEmbedSemantic, {
+  it("deletes a memory", async () => {
+    const id = await storeMemory(db, mockEmbedSemantic, {
       content: "to be deleted",
       tier: "hot",
     });
@@ -72,26 +72,26 @@ describe("memory operations", () => {
     expect(result).toBeNull();
   });
 
-  it("promotes from hot to warm", () => {
-    const id = storeMemory(db, mockEmbedSemantic, {
+  it("promotes from hot to warm", async () => {
+    const id = await storeMemory(db, mockEmbedSemantic, {
       content: "promote me",
       tier: "hot",
     });
 
-    promoteEntry(db, mockEmbedSemantic, id, "hot", "memory", "warm", "memory");
+    await promoteEntry(db, mockEmbedSemantic, id, "hot", "memory", "warm", "memory");
 
     const result = getMemory(db, id);
     expect(result).not.toBeNull();
     expect(result!.tier).toBe("warm");
   });
 
-  it("demotes from warm to cold", () => {
-    const id = storeMemory(db, mockEmbedSemantic, {
+  it("demotes from warm to cold", async () => {
+    const id = await storeMemory(db, mockEmbedSemantic, {
       content: "demote me",
       tier: "warm",
     });
 
-    demoteEntry(db, mockEmbedSemantic, id, "warm", "memory", "cold", "memory");
+    await demoteEntry(db, mockEmbedSemantic, id, "warm", "memory", "cold", "memory");
 
     const result = getMemory(db, id);
     expect(result).not.toBeNull();

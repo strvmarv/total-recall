@@ -34,7 +34,7 @@ describe("ClaudeCodeImporter", () => {
     expect(importer.detect()).toBe(false);
   });
 
-  it("imports memory files with YAML frontmatter", () => {
+  it("imports memory files with YAML frontmatter", async () => {
     const projectDir = join(tmpDir, "projects", "my-project");
     const memoryDir = join(projectDir, "memory");
     mkdirSync(memoryDir, { recursive: true });
@@ -51,7 +51,7 @@ describe("ClaudeCodeImporter", () => {
     writeFileSync(join(memoryDir, "MEMORY.md"), "This is the MEMORY.md file, skip it.");
 
     const importer = new ClaudeCodeImporter(tmpDir);
-    const result = importer.importMemories(db, mockEmbedSemantic);
+    const result = await importer.importMemories(db, mockEmbedSemantic);
 
     expect(result.imported).toBe(2);
     expect(result.skipped).toBe(0);
@@ -61,7 +61,7 @@ describe("ClaudeCodeImporter", () => {
     expect(entries).toHaveLength(2);
   });
 
-  it("imports CLAUDE.md as pinned knowledge", () => {
+  it("imports CLAUDE.md as pinned knowledge", async () => {
     mkdirSync(join(tmpDir, "projects"), { recursive: true });
     writeFileSync(
       join(tmpDir, "CLAUDE.md"),
@@ -69,7 +69,7 @@ describe("ClaudeCodeImporter", () => {
     );
 
     const importer = new ClaudeCodeImporter(tmpDir);
-    const result = importer.importKnowledge(db, mockEmbedSemantic);
+    const result = await importer.importKnowledge(db, mockEmbedSemantic);
 
     expect(result.imported).toBe(1);
     expect(result.skipped).toBe(0);
@@ -81,7 +81,7 @@ describe("ClaudeCodeImporter", () => {
     expect(entries[0]!.source_tool).toBe("claude-code");
   });
 
-  it("deduplicates on re-import", () => {
+  it("deduplicates on re-import", async () => {
     const projectDir = join(tmpDir, "projects", "proj");
     const memoryDir = join(projectDir, "memory");
     mkdirSync(memoryDir, { recursive: true });
@@ -93,11 +93,11 @@ describe("ClaudeCodeImporter", () => {
 
     const importer = new ClaudeCodeImporter(tmpDir);
 
-    const first = importer.importMemories(db, mockEmbedSemantic);
+    const first = await importer.importMemories(db, mockEmbedSemantic);
     expect(first.imported).toBe(1);
     expect(first.skipped).toBe(0);
 
-    const second = importer.importMemories(db, mockEmbedSemantic);
+    const second = await importer.importMemories(db, mockEmbedSemantic);
     expect(second.imported).toBe(0);
     expect(second.skipped).toBe(1);
 

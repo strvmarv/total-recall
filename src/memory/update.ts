@@ -4,14 +4,14 @@ import { deleteEmbedding, insertEmbedding } from "../search/vector-search.js";
 import type { UpdateEntryOpts } from "../db/entries.js";
 import { getMemory } from "./get.js";
 
-type EmbedFn = (text: string) => Float32Array;
+type EmbedFn = (text: string) => Float32Array | Promise<Float32Array>;
 
-export function updateMemory(
+export async function updateMemory(
   db: Database.Database,
   embed: EmbedFn,
   id: string,
   opts: UpdateEntryOpts,
-): boolean {
+): Promise<boolean> {
   const location = getMemory(db, id);
   if (!location) return false;
 
@@ -21,7 +21,7 @@ export function updateMemory(
 
   if (opts.content !== undefined) {
     deleteEmbedding(db, tier, content_type, id);
-    const newEmbedding = embed(opts.content);
+    const newEmbedding = await embed(opts.content);
     insertEmbedding(db, tier, content_type, id, newEmbedding);
   }
 

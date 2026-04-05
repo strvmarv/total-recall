@@ -47,12 +47,12 @@ export interface IngestDirectoryResult {
   totalChunks: number;
 }
 
-export function ingestFile(
+export async function ingestFile(
   db: Database.Database,
   embed: EmbedFn,
   filePath: string,
   collectionId?: string,
-): IngestFileResult {
+): Promise<IngestFileResult> {
   const content = readFileSync(filePath, "utf-8");
   const chunks = chunkFile(content, filePath, { maxTokens: 512, overlapTokens: 50 });
 
@@ -60,13 +60,13 @@ export function ingestFile(
   if (!resolvedCollectionId) {
     const dirPath = dirname(filePath);
     const dirName = basename(dirPath);
-    resolvedCollectionId = createCollection(db, embed, {
+    resolvedCollectionId = await createCollection(db, embed, {
       name: dirName,
       sourcePath: dirPath,
     });
   }
 
-  const documentId = addDocumentToCollection(db, embed, {
+  const documentId = await addDocumentToCollection(db, embed, {
     collectionId: resolvedCollectionId,
     sourcePath: filePath,
     chunks: chunks.map((c) => ({
@@ -81,7 +81,7 @@ export function ingestFile(
   let validationPassed = false;
   if (chunks.length > 0) {
     const firstChunk = chunks[0]!;
-    const queryVec = embed(firstChunk.content);
+    const queryVec = await embed(firstChunk.content);
     const results = searchByVector(db, "cold", "knowledge", queryVec, {
       topK: 5,
       minScore: 0,
@@ -131,14 +131,14 @@ function walkDirectory(dirPath: string): string[] {
   return files;
 }
 
-export function ingestDirectory(
+export async function ingestDirectory(
   db: Database.Database,
   embed: EmbedFn,
   dirPath: string,
   glob?: string,
-): IngestDirectoryResult {
+): Promise<IngestDirectoryResult> {
   const dirName = basename(dirPath);
-  const collectionId = createCollection(db, embed, {
+  const collectionId = await createCollection(db, embed, {
     name: dirName,
     sourcePath: dirPath,
   });
@@ -158,7 +158,7 @@ export function ingestDirectory(
     }
 
     try {
-      const result = ingestFile(db, embed, filePath, collectionId);
+      const result = await ingestFile(db, embed, filePath, collectionId);
       documentCount++;
       totalChunks += result.chunkCount;
     } catch {

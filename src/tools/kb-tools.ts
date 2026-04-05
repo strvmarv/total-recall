@@ -89,8 +89,8 @@ export async function handleKbTool(
     const filePath = args.path as string;
     const collectionId = args.collection as string | undefined;
     await ctx.embedder.ensureLoaded();
-    const embedFn = ctx.embedder.makeSyncEmbedFn();
-    const result = ingestFile(ctx.db, embedFn, filePath, collectionId);
+    const embedFn = (text: string) => ctx.embedder.embed(text);
+    const result = await ingestFile(ctx.db, embedFn, filePath, collectionId);
     return { content: [{ type: "text", text: JSON.stringify(result) }] };
   }
 
@@ -98,8 +98,8 @@ export async function handleKbTool(
     const dirPath = args.path as string;
     const glob = args.glob as string | undefined;
     await ctx.embedder.ensureLoaded();
-    const embedFn = ctx.embedder.makeSyncEmbedFn();
-    const result = ingestDirectory(ctx.db, embedFn, dirPath, glob);
+    const embedFn = (text: string) => ctx.embedder.embed(text);
+    const result = await ingestDirectory(ctx.db, embedFn, dirPath, glob);
     return { content: [{ type: "text", text: JSON.stringify(result) }] };
   }
 
@@ -109,7 +109,7 @@ export async function handleKbTool(
     await ctx.embedder.ensureLoaded();
     const vec = await ctx.embedder.embed(query);
     const embedFn = () => vec;
-    const results = searchMemory(ctx.db, embedFn, query, {
+    const results = await searchMemory(ctx.db, embedFn, query, {
       tiers: [{ tier: "cold", content_type: "knowledge" }],
       topK,
     });

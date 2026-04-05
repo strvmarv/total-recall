@@ -4,7 +4,7 @@ import { storeMemory } from "../memory/store.js";
 import { searchMemory } from "../memory/search.js";
 import type { Tier, EntryType } from "../types.js";
 
-type EmbedFn = (text: string) => Float32Array;
+type EmbedFn = (text: string) => Float32Array | Promise<Float32Array>;
 
 interface CorpusEntry {
   content: string;
@@ -41,11 +41,11 @@ export interface BenchmarkOptions {
   benchmarkPath: string;
 }
 
-export function runBenchmark(
+export async function runBenchmark(
   db: Database.Database,
   embed: EmbedFn,
   opts: BenchmarkOptions,
-): BenchmarkResult {
+): Promise<BenchmarkResult> {
   // Seed corpus into warm tier
   const corpusLines = readFileSync(opts.corpusPath, "utf-8")
     .split("\n")
@@ -53,7 +53,7 @@ export function runBenchmark(
 
   for (const line of corpusLines) {
     const entry = JSON.parse(line) as CorpusEntry;
-    storeMemory(db, embed, {
+    await storeMemory(db, embed, {
       content: entry.content,
       type: entry.type,
       tier: "warm",
@@ -77,7 +77,7 @@ export function runBenchmark(
 
   for (const bq of queries) {
     const start = performance.now();
-    const results = searchMemory(db, embed, bq.query, {
+    const results = await searchMemory(db, embed, bq.query, {
       tiers: [{ tier: "warm", content_type: "memory" }],
       topK: 3,
     });

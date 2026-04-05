@@ -17,8 +17,8 @@ describe("checkAndPromoteCold", () => {
     db.close();
   });
 
-  it("promotes cold entries accessed 3+ times in 7 days", () => {
-    const id = storeMemory(db, mockEmbedSemantic, {
+  it("promotes cold entries accessed 3+ times in 7 days", async () => {
+    const id = await storeMemory(db, mockEmbedSemantic, {
       content: "frequently accessed cold memory",
       tier: "cold",
     });
@@ -28,7 +28,7 @@ describe("checkAndPromoteCold", () => {
       "UPDATE cold_memories SET access_count = 3, last_accessed_at = ? WHERE id = ?",
     ).run(Date.now(), id);
 
-    const result = checkAndPromoteCold(db, mockEmbedSemantic, {
+    const result = await checkAndPromoteCold(db, mockEmbedSemantic, {
       accessThreshold: 3,
       windowDays: 7,
     });
@@ -40,8 +40,8 @@ describe("checkAndPromoteCold", () => {
     expect(countEntries(db, "warm", "memory")).toBe(1);
   });
 
-  it("does not promote entries below threshold", () => {
-    const id = storeMemory(db, mockEmbedSemantic, {
+  it("does not promote entries below threshold", async () => {
+    const id = await storeMemory(db, mockEmbedSemantic, {
       content: "rarely accessed cold memory",
       tier: "cold",
     });
@@ -51,7 +51,7 @@ describe("checkAndPromoteCold", () => {
       "UPDATE cold_memories SET access_count = 1, last_accessed_at = ? WHERE id = ?",
     ).run(Date.now(), id);
 
-    const result = checkAndPromoteCold(db, mockEmbedSemantic, {
+    const result = await checkAndPromoteCold(db, mockEmbedSemantic, {
       accessThreshold: 3,
       windowDays: 7,
     });

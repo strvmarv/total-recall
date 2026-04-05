@@ -3,9 +3,9 @@ import { getEntry, moveEntry } from "../db/entries.js";
 import { deleteEmbedding, insertEmbedding } from "../search/vector-search.js";
 import type { Tier, ContentType } from "../types.js";
 
-type EmbedFn = (text: string) => Float32Array;
+type EmbedFn = (text: string) => Float32Array | Promise<Float32Array>;
 
-export function promoteEntry(
+export async function promoteEntry(
   db: Database.Database,
   embed: EmbedFn,
   id: string,
@@ -13,7 +13,7 @@ export function promoteEntry(
   fromType: ContentType,
   toTier: Tier,
   toType: ContentType,
-): void {
+): Promise<void> {
   const entry = getEntry(db, fromTier, fromType, id);
   if (!entry) {
     throw new Error(`Entry ${id} not found in ${fromTier}/${fromType}`);
@@ -21,11 +21,11 @@ export function promoteEntry(
 
   deleteEmbedding(db, fromTier, fromType, id);
   moveEntry(db, fromTier, fromType, toTier, toType, id);
-  const newEmbedding = embed(entry.content);
+  const newEmbedding = await embed(entry.content);
   insertEmbedding(db, toTier, toType, id, newEmbedding);
 }
 
-export function demoteEntry(
+export async function demoteEntry(
   db: Database.Database,
   embed: EmbedFn,
   id: string,
@@ -33,6 +33,6 @@ export function demoteEntry(
   fromType: ContentType,
   toTier: Tier,
   toType: ContentType,
-): void {
-  promoteEntry(db, embed, id, fromTier, fromType, toTier, toType);
+): Promise<void> {
+  await promoteEntry(db, embed, id, fromTier, fromType, toTier, toType);
 }

@@ -25,15 +25,15 @@ describe("compactHotTier", () => {
     db.close();
   });
 
-  it("moves low-decay entries from hot to warm", () => {
-    const id = storeMemory(db, mockEmbedSemantic, { content: "old memory" });
+  it("moves low-decay entries from hot to warm", async () => {
+    const id = await storeMemory(db, mockEmbedSemantic, { content: "old memory" });
     const oldTime = Date.now() - 30 * 24 * 60 * 60 * 1000;
     db.prepare(
       "UPDATE hot_memories SET created_at = ?, last_accessed_at = ?, updated_at = ? WHERE id = ?",
     ).run(oldTime, oldTime, oldTime, id);
 
     const before = countEntries(db, "hot", "memory");
-    compactHotTier(db, mockEmbedSemantic, testConfig, "test-session");
+    await compactHotTier(db, mockEmbedSemantic, testConfig, "test-session");
     const hotAfter = countEntries(db, "hot", "memory");
     const warmAfter = countEntries(db, "warm", "memory");
 
@@ -43,21 +43,21 @@ describe("compactHotTier", () => {
     expect(hotAfter + warmAfter).toBeLessThanOrEqual(before);
   });
 
-  it("keeps fresh high-score entries in hot tier", () => {
-    storeMemory(db, mockEmbedSemantic, { content: "just added", type: "correction" });
+  it("keeps fresh high-score entries in hot tier", async () => {
+    await storeMemory(db, mockEmbedSemantic, { content: "just added", type: "correction" });
     const before = countEntries(db, "hot", "memory");
-    compactHotTier(db, mockEmbedSemantic, testConfig, "test-session");
+    await compactHotTier(db, mockEmbedSemantic, testConfig, "test-session");
     expect(countEntries(db, "hot", "memory")).toBe(before);
   });
 
-  it("logs compaction events", () => {
-    const id = storeMemory(db, mockEmbedSemantic, { content: "old memory for logging" });
+  it("logs compaction events", async () => {
+    const id = await storeMemory(db, mockEmbedSemantic, { content: "old memory for logging" });
     const oldTime = Date.now() - 30 * 24 * 60 * 60 * 1000;
     db.prepare(
       "UPDATE hot_memories SET created_at = ?, last_accessed_at = ?, updated_at = ? WHERE id = ?",
     ).run(oldTime, oldTime, oldTime, id);
 
-    compactHotTier(db, mockEmbedSemantic, testConfig, "test-session");
+    await compactHotTier(db, mockEmbedSemantic, testConfig, "test-session");
 
     const rows = db
       .prepare("SELECT * FROM compaction_log WHERE session_id = ?")

@@ -3,7 +3,7 @@ import { getEntry, updateEntry } from "../db/entries.js";
 import { searchByVector } from "../search/vector-search.js";
 import type { Tier, ContentType, SearchResult } from "../types.js";
 
-type EmbedFn = (text: string) => Float32Array;
+type EmbedFn = (text: string) => Float32Array | Promise<Float32Array>;
 
 export interface SearchOptions {
   tiers: Array<{ tier: Tier; content_type: ContentType }>;
@@ -11,13 +11,13 @@ export interface SearchOptions {
   minScore?: number;
 }
 
-export function searchMemory(
+export async function searchMemory(
   db: Database.Database,
   embed: EmbedFn,
   query: string,
   opts: SearchOptions,
-): SearchResult[] {
-  const queryVec = embed(query);
+): Promise<SearchResult[]> {
+  const queryVec = await embed(query);
   const merged: SearchResult[] = [];
 
   for (const { tier, content_type } of opts.tiers) {

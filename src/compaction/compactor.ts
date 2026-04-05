@@ -6,7 +6,7 @@ import { promoteEntry } from "../memory/promote-demote.js";
 import { calculateDecayScore } from "../memory/decay.js";
 import type { TotalRecallConfig } from "../types.js";
 
-type EmbedFn = (text: string) => Float32Array;
+type EmbedFn = (text: string) => Float32Array | Promise<Float32Array>;
 
 export interface CompactHotTierResult {
   carryForward: string[];
@@ -53,13 +53,13 @@ function logCompactionEvent(
   );
 }
 
-export function compactHotTier(
+export async function compactHotTier(
   db: Database.Database,
   embed: EmbedFn,
   config: TotalRecallConfig["compaction"],
   sessionId: string,
   configSnapshotId?: string,
-): CompactHotTierResult {
+): Promise<CompactHotTierResult> {
   const snapshotId = configSnapshotId ?? "default";
   const entries = listEntries(db, "hot", "memory");
   const now = Date.now();
@@ -86,7 +86,7 @@ export function compactHotTier(
     if (score > config.promote_threshold) {
       carryForward.push(entry.id);
     } else if (score >= config.warm_threshold) {
-      promoteEntry(db, embed, entry.id, "hot", "memory", "warm", "memory");
+      await promoteEntry(db, embed, entry.id, "hot", "memory", "warm", "memory");
       promoted.push(entry.id);
       logCompactionEvent(db, {
         sessionId,

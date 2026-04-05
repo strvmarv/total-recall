@@ -45,12 +45,12 @@ export async function handleEvalTool(
 ): Promise<ToolResult | null> {
   if (name === "eval_benchmark") {
     await ctx.embedder.ensureLoaded();
-    const embedFn = ctx.embedder.makeSyncEmbedFn();
+    const embedFn = (text: string) => ctx.embedder.embed(text);
 
     const corpusPath = resolve(PACKAGE_ROOT, "eval", "corpus", "memories.jsonl");
     const benchmarkPath = resolve(PACKAGE_ROOT, "eval", "benchmarks", "retrieval.jsonl");
 
-    const result = runBenchmark(ctx.db, embedFn, {
+    const result = await runBenchmark(ctx.db, embedFn, {
       corpusPath,
       benchmarkPath,
     });

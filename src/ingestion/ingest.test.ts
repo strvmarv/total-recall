@@ -24,13 +24,13 @@ describe("ingestion", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("ingests a single markdown file", () => {
+  it("ingests a single markdown file", async () => {
     writeFileSync(
       join(tmpDir, "readme.md"),
       "# My Project\n\n## Setup\n\nInstall with pnpm.\n\n## Usage\n\nRun the thing.",
     );
 
-    const result = ingestFile(db, mockEmbedSemantic, join(tmpDir, "readme.md"));
+    const result = await ingestFile(db, mockEmbedSemantic, join(tmpDir, "readme.md"));
 
     expect(result.documentId).toBeDefined();
     expect(result.chunkCount).toBeGreaterThan(0);
@@ -38,47 +38,47 @@ describe("ingestion", () => {
     expect(countEntries(db, "cold", "knowledge")).toBeGreaterThan(1);
   });
 
-  it("ingests a directory into a collection", () => {
+  it("ingests a directory into a collection", async () => {
     writeFileSync(join(tmpDir, "auth.md"), "# Auth\n\nAuth docs here.");
     writeFileSync(join(tmpDir, "deploy.md"), "# Deploy\n\nDeploy docs here.");
     mkdirSync(join(tmpDir, "sub"));
     writeFileSync(join(tmpDir, "sub", "nested.md"), "# Nested\n\nNested doc.");
 
-    const result = ingestDirectory(db, mockEmbedSemantic, tmpDir);
+    const result = await ingestDirectory(db, mockEmbedSemantic, tmpDir);
 
     expect(result.collectionId).toBeDefined();
     expect(result.documentCount).toBe(3);
   });
 
-  it("validates ingested content with self-match test", () => {
+  it("validates ingested content with self-match test", async () => {
     writeFileSync(
       join(tmpDir, "api.md"),
       "# API Reference\n\n## Endpoints\n\nGET /users returns a list.",
     );
 
-    const result = ingestFile(db, mockEmbedSemantic, join(tmpDir, "api.md"));
+    const result = await ingestFile(db, mockEmbedSemantic, join(tmpDir, "api.md"));
 
     expect(result.validationPassed).toBe(true);
   });
 
-  it("creates a collection from dirname when no collectionId given", () => {
+  it("creates a collection from dirname when no collectionId given", async () => {
     writeFileSync(join(tmpDir, "doc.md"), "# Doc\n\nSome content.");
 
-    const result = ingestFile(db, mockEmbedSemantic, join(tmpDir, "doc.md"));
+    const result = await ingestFile(db, mockEmbedSemantic, join(tmpDir, "doc.md"));
 
     expect(result.documentId).toBeDefined();
     // Collection entry + document entry + at least 1 chunk
     expect(countEntries(db, "cold", "knowledge")).toBeGreaterThanOrEqual(3);
   });
 
-  it("uses provided collectionId instead of creating a new one", () => {
-    const collId = createCollection(db, mockEmbedSemantic, {
+  it("uses provided collectionId instead of creating a new one", async () => {
+    const collId = await createCollection(db, mockEmbedSemantic, {
       name: "my-coll",
       sourcePath: tmpDir,
     });
 
     writeFileSync(join(tmpDir, "page.md"), "# Page\n\nPage content.");
-    const result = ingestFile(db, mockEmbedSemantic, join(tmpDir, "page.md"), collId);
+    const result = await ingestFile(db, mockEmbedSemantic, join(tmpDir, "page.md"), collId);
 
     expect(result.documentId).toBeDefined();
     // Only 1 collection entry (the one we created)
@@ -88,21 +88,21 @@ describe("ingestion", () => {
     expect(allRows).toHaveLength(1);
   });
 
-  it("reports totalChunks for directory ingestion", () => {
+  it("reports totalChunks for directory ingestion", async () => {
     writeFileSync(join(tmpDir, "a.md"), "# A\n\n## Section 1\n\nContent here.\n\n## Section 2\n\nMore content.");
     writeFileSync(join(tmpDir, "b.md"), "# B\n\nSingle section.");
 
-    const result = ingestDirectory(db, mockEmbedSemantic, tmpDir);
+    const result = await ingestDirectory(db, mockEmbedSemantic, tmpDir);
 
     expect(result.totalChunks).toBeGreaterThan(0);
   });
 
-  it("skips hidden directories when walking", () => {
+  it("skips hidden directories when walking", async () => {
     writeFileSync(join(tmpDir, "visible.md"), "# Visible\n\nContent.");
     mkdirSync(join(tmpDir, ".hidden"));
     writeFileSync(join(tmpDir, ".hidden", "secret.md"), "# Secret\n\nContent.");
 
-    const result = ingestDirectory(db, mockEmbedSemantic, tmpDir);
+    const result = await ingestDirectory(db, mockEmbedSemantic, tmpDir);
 
     expect(result.documentCount).toBe(1);
   });

@@ -3,7 +3,7 @@ import type { Entry } from "../types.js";
 import { insertEntry } from "../db/entries.js";
 import { insertEmbedding } from "../search/vector-search.js";
 
-export type EmbedFn = (text: string) => Float32Array;
+export type EmbedFn = (text: string) => Float32Array | Promise<Float32Array>;
 
 export interface CreateCollectionOpts {
   name: string;
@@ -23,11 +23,11 @@ export interface AddDocumentOpts {
   chunks: ChunkInput[];
 }
 
-export function createCollection(
+export async function createCollection(
   db: Database.Database,
   embed: EmbedFn,
   opts: CreateCollectionOpts,
-): string {
+): Promise<string> {
   const content = `Collection: ${opts.name}`;
   const id = insertEntry(db, "cold", "knowledge", {
     content,
@@ -39,17 +39,17 @@ export function createCollection(
     },
   });
 
-  const embedding = embed(content);
+  const embedding = await embed(content);
   insertEmbedding(db, "cold", "knowledge", id, embedding);
 
   return id;
 }
 
-export function addDocumentToCollection(
+export async function addDocumentToCollection(
   db: Database.Database,
   embed: EmbedFn,
   opts: AddDocumentOpts,
-): string {
+): Promise<string> {
   const joined = opts.chunks.map((c) => c.content).join("\n\n");
   const docContent = joined.slice(0, 500);
 
@@ -64,7 +64,7 @@ export function addDocumentToCollection(
     },
   });
 
-  const docEmbedding = embed(docContent);
+  const docEmbedding = await embed(docContent);
   insertEmbedding(db, "cold", "knowledge", docId, docEmbedding);
 
   for (const chunk of opts.chunks) {
@@ -81,7 +81,7 @@ export function addDocumentToCollection(
       },
     });
 
-    const chunkEmbedding = embed(chunk.content);
+    const chunkEmbedding = await embed(chunk.content);
     insertEmbedding(db, "cold", "knowledge", chunkId, chunkEmbedding);
   }
 

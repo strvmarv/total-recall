@@ -130,7 +130,7 @@ export async function handleMemoryTool(
     await ctx.embedder.ensureLoaded();
     const vec = await ctx.embedder.embed(content);
     const embedFn = () => vec;
-    const id = storeMemory(ctx.db, embedFn, {
+    const id = await storeMemory(ctx.db, embedFn, {
       content,
       tier: (args.tier as Tier) ?? "hot",
       contentType: (args.contentType as ContentType) ?? "memory",
@@ -157,7 +157,7 @@ export async function handleMemoryTool(
         (!typeFilter || typeFilter.includes(p.type)),
     ).map((p) => ({ tier: p.tier, content_type: p.type }));
 
-    const results = searchMemory(ctx.db, embedFn, query, {
+    const results = await searchMemory(ctx.db, embedFn, query, {
       tiers,
       topK: (args.topK as number) ?? 10,
       minScore: args.minScore as number | undefined,
@@ -178,7 +178,7 @@ export async function handleMemoryTool(
       const vec = await ctx.embedder.embed(newContent);
       embedFn = () => vec;
     }
-    const updated = updateMemory(ctx.db, embedFn ?? (() => new Float32Array(0)), args.id as string, {
+    const updated = await updateMemory(ctx.db, embedFn ?? (() => new Float32Array(0)), args.id as string, {
       content: newContent,
       summary: args.summary as string | null | undefined,
       tags: args.tags as string[] | undefined,
@@ -200,7 +200,7 @@ export async function handleMemoryTool(
     await ctx.embedder.ensureLoaded();
     const vec = await ctx.embedder.embed(location.entry.content);
     const embedFn = () => vec;
-    promoteEntry(
+    await promoteEntry(
       ctx.db,
       embedFn,
       args.id as string,
@@ -220,7 +220,7 @@ export async function handleMemoryTool(
     await ctx.embedder.ensureLoaded();
     const vec = await ctx.embedder.embed(location.entry.content);
     const embedFn = () => vec;
-    demoteEntry(
+    await demoteEntry(
       ctx.db,
       embedFn,
       args.id as string,

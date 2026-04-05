@@ -19,9 +19,9 @@ describe("total-recall e2e", () => {
     db.close();
   });
 
-  it("full lifecycle: store -> search -> promote -> search in new tier", () => {
+  it("full lifecycle: store -> search -> promote -> search in new tier", async () => {
     // Store a correction in hot
-    const id = storeMemory(db, embed, {
+    const id = await storeMemory(db, embed, {
       content: "always use pnpm, never npm",
       type: "correction",
       project: "my-app",
@@ -33,7 +33,7 @@ describe("total-recall e2e", () => {
     expect(countEntries(db, "warm", "memory")).toBe(0);
 
     // Search finds it in hot
-    const hotResults = searchMemory(db, embed, "package manager", {
+    const hotResults = await searchMemory(db, embed, "package manager", {
       tiers: [{ tier: "hot", content_type: "memory" }],
       topK: 10,
     });
@@ -44,14 +44,14 @@ describe("total-recall e2e", () => {
     expect(hotFiltered[0]!.entry.content).toContain("pnpm");
 
     // Promote to warm
-    promoteEntry(db, embed, id, "hot", "memory", "warm", "memory");
+    await promoteEntry(db, embed, id, "hot", "memory", "warm", "memory");
 
     // Verify tier move
     expect(countEntries(db, "hot", "memory")).toBe(0);
     expect(countEntries(db, "warm", "memory")).toBe(1);
 
     // Search finds it in warm
-    const warmResults = searchMemory(db, embed, "package manager", {
+    const warmResults = await searchMemory(db, embed, "package manager", {
       tiers: [{ tier: "warm", content_type: "memory" }],
       topK: 10,
     });
@@ -62,16 +62,16 @@ describe("total-recall e2e", () => {
     expect(warmFiltered[0]!.tier).toBe("warm");
   });
 
-  it("multi-project isolation", () => {
-    storeMemory(db, embed, { content: "project A uses React", project: "a" });
-    storeMemory(db, embed, { content: "project B uses Vue", project: "b" });
-    storeMemory(db, embed, {
+  it("multi-project isolation", async () => {
+    await storeMemory(db, embed, { content: "project A uses React", project: "a" });
+    await storeMemory(db, embed, { content: "project B uses Vue", project: "b" });
+    await storeMemory(db, embed, {
       content: "always use TypeScript",
       project: null,
     });
 
     // Search all hot memories then filter: project A or global (null project)
-    const allResults = searchMemory(db, embed, "frontend framework", {
+    const allResults = await searchMemory(db, embed, "frontend framework", {
       tiers: [{ tier: "hot", content_type: "memory" }],
       topK: 10,
     });
@@ -87,16 +87,16 @@ describe("total-recall e2e", () => {
     expect(contents.some((c) => c.includes("Vue"))).toBe(false);
   });
 
-  it("cross-tier ranked search", () => {
-    storeMemory(db, embed, { content: "hot auth memory", tier: "hot" });
-    storeMemory(db, embed, { content: "warm auth pattern", tier: "warm" });
-    storeMemory(db, embed, {
+  it("cross-tier ranked search", async () => {
+    await storeMemory(db, embed, { content: "hot auth memory", tier: "hot" });
+    await storeMemory(db, embed, { content: "warm auth pattern", tier: "warm" });
+    await storeMemory(db, embed, {
       content: "cold auth docs",
       tier: "cold",
       contentType: "knowledge",
     });
 
-    const results = searchMemory(db, embed, "authentication", {
+    const results = await searchMemory(db, embed, "authentication", {
       tiers: [
         { tier: "hot", content_type: "memory" },
         { tier: "warm", content_type: "memory" },

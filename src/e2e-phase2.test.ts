@@ -40,7 +40,7 @@ describe("total-recall phase 2 e2e", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("ingests a directory and searches knowledge base", () => {
+  it("ingests a directory and searches knowledge base", async () => {
     // Create two markdown files in tmpDir
     writeFileSync(
       join(tmpDir, "typescript-tips.md"),
@@ -51,7 +51,7 @@ describe("total-recall phase 2 e2e", () => {
       `# Testing Guide\n\nUse vitest for unit tests.\nWrite integration tests with real databases.\nAvoid mocking the data layer.\n`,
     );
 
-    const result = ingestDirectory(db, embed, tmpDir);
+    const result = await ingestDirectory(db, embed, tmpDir);
 
     expect(result.documentCount).toBe(2);
     expect(result.totalChunks).toBeGreaterThan(0);
@@ -63,7 +63,7 @@ describe("total-recall phase 2 e2e", () => {
 
     // Search the cold/knowledge tier — use minScore -1 to accept all similarity scores
     // since the mock embedder produces pseudo-random vectors (not semantic)
-    const searchResults = searchMemory(db, embed, "TypeScript strict mode configuration", {
+    const searchResults = await searchMemory(db, embed, "TypeScript strict mode configuration", {
       tiers: [{ tier: "cold", content_type: "knowledge" }],
       topK: 5,
       minScore: -1,
@@ -72,21 +72,21 @@ describe("total-recall phase 2 e2e", () => {
     expect(searchResults.length).toBeGreaterThan(0);
   });
 
-  it("compaction moves old hot entries to warm", () => {
+  it("compaction moves old hot entries to warm", async () => {
     // Store 3 memories in hot tier
-    const id1 = storeMemory(db, embed, {
+    const id1 = await storeMemory(db, embed, {
       content: "Fresh memory stored today — keep this one hot",
       tier: "hot",
       contentType: "memory",
     });
 
-    const id2 = storeMemory(db, embed, {
+    const id2 = await storeMemory(db, embed, {
       content: "Old memory from 40 days ago — should move to warm",
       tier: "hot",
       contentType: "memory",
     });
 
-    const id3 = storeMemory(db, embed, {
+    const id3 = await storeMemory(db, embed, {
       content: "Very old memory from 60 days ago — should be discarded or moved",
       tier: "hot",
       contentType: "memory",
@@ -110,7 +110,7 @@ describe("total-recall phase 2 e2e", () => {
     const before = countEntries(db, "hot", "memory");
     expect(before).toBe(3);
 
-    const compactionResult = compactHotTier(db, embed, compactionConfig, "test-session");
+    const compactionResult = await compactHotTier(db, embed, compactionConfig, "test-session");
 
     // id1 should stay hot (fresh), id2 and id3 should be moved to warm or discarded
     expect(compactionResult.carryForward).toContain(id1);
@@ -126,7 +126,7 @@ describe("total-recall phase 2 e2e", () => {
     expect(afterHot).toBe(1);
   });
 
-  it("imports from mock Claude Code directory", () => {
+  it("imports from mock Claude Code directory", async () => {
     // Create a mock ~/.claude directory structure
     const claudeDir = join(tmpDir, "claude");
     const projectDir = join(claudeDir, "projects", "test");
@@ -143,7 +143,7 @@ describe("total-recall phase 2 e2e", () => {
 
     expect(importer.detect()).toBe(true);
 
-    const importResult = importer.importMemories(db, embed);
+    const importResult = await importer.importMemories(db, embed);
 
     expect(importResult.imported).toBe(1);
     expect(importResult.errors).toHaveLength(0);
@@ -222,11 +222,11 @@ describe("total-recall phase 2 e2e", () => {
     expect(metrics.hitRate).toBeLessThanOrEqual(1);
   });
 
-  it("runs benchmark suite without errors", () => {
+  it("runs benchmark suite without errors", async () => {
     const corpusPath = resolve("eval/corpus/memories.jsonl");
     const benchmarkPath = resolve("eval/benchmarks/retrieval.jsonl");
 
-    const result = runBenchmark(db, embed, {
+    const result = await runBenchmark(db, embed, {
       corpusPath,
       benchmarkPath,
     });

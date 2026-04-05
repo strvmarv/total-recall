@@ -34,7 +34,7 @@ describe("CopilotCliImporter", () => {
     expect(importer.detect()).toBe(false);
   });
 
-  it("imports plan.md files as cold knowledge", () => {
+  it("imports plan.md files as cold knowledge", async () => {
     const sessionDir = join(tmpDir, "session-state", "session-abc123");
     mkdirSync(sessionDir, { recursive: true });
 
@@ -44,7 +44,7 @@ describe("CopilotCliImporter", () => {
     );
 
     const importer = new CopilotCliImporter(tmpDir);
-    const result = importer.importKnowledge(db, mockEmbedSemantic);
+    const result = await importer.importKnowledge(db, mockEmbedSemantic);
 
     expect(result.imported).toBe(1);
     expect(result.skipped).toBe(0);

@@ -3,12 +3,10 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import type Database from "better-sqlite3";
-import type { HostImporter, ImportResult } from "./importer.js";
+import type { HostImporter, ImportResult, EmbedFn } from "./importer.js";
 import { insertEntry } from "../db/entries.js";
 import { insertEmbedding } from "../search/vector-search.js";
 import type { Tier, ContentType } from "../types.js";
-
-type EmbedFn = (text: string) => Float32Array;
 
 function contentHash(text: string): string {
   return createHash("sha256").update(text).digest("hex");
@@ -77,11 +75,11 @@ export class CopilotCliImporter implements HostImporter {
     return { memoryFiles: 0, knowledgeFiles, sessionFiles };
   }
 
-  importMemories(_db: Database.Database, _embed: EmbedFn, _project?: string): ImportResult {
+  async importMemories(_db: Database.Database, _embed: EmbedFn, _project?: string): Promise<ImportResult> {
     return { imported: 0, skipped: 0, errors: [] };
   }
 
-  importKnowledge(db: Database.Database, embed: EmbedFn): ImportResult {
+  async importKnowledge(db: Database.Database, embed: EmbedFn): Promise<ImportResult> {
     const result: ImportResult = { imported: 0, skipped: 0, errors: [] };
 
     const sessionStateDir = join(this.basePath, "session-state");
@@ -108,7 +106,7 @@ export class CopilotCliImporter implements HostImporter {
           source_tool: "copilot-cli",
         });
 
-        insertEmbedding(db, "cold", "knowledge", entryId, embed(raw));
+        insertEmbedding(db, "cold", "knowledge", entryId, await embed(raw));
         logImport(db, "copilot-cli", planPath, hash, entryId, "cold", "knowledge");
         result.imported++;
       } catch (err) {

@@ -44,7 +44,7 @@ export async function handleSessionTool(
 ): Promise<ToolResult | null> {
   if (name === "session_start") {
     await ctx.embedder.ensureLoaded();
-    const embedFn = ctx.embedder.makeSyncEmbedFn();
+    const embedFn = (text: string) => ctx.embedder.embed(text);
 
     const importers = [
       new ClaudeCodeImporter(),
@@ -60,8 +60,8 @@ export async function handleSessionTool(
     for (const importer of importers) {
       if (!importer.detect()) continue;
 
-      const memResult = importer.importMemories(ctx.db, embedFn);
-      const kbResult = importer.importKnowledge(ctx.db, embedFn);
+      const memResult = await importer.importMemories(ctx.db, embedFn);
+      const kbResult = await importer.importKnowledge(ctx.db, embedFn);
 
       importSummary.push({
         tool: importer.name,
@@ -95,10 +95,10 @@ export async function handleSessionTool(
 
   if (name === "session_end") {
     await ctx.embedder.ensureLoaded();
-    const embedFn = ctx.embedder.makeSyncEmbedFn();
+    const embedFn = (text: string) => ctx.embedder.embed(text);
 
     const sessionId = ctx.sessionId ?? randomUUID();
-    const result = compactHotTier(ctx.db, embedFn, ctx.config.compaction, sessionId);
+    const result = await compactHotTier(ctx.db, embedFn, ctx.config.compaction, sessionId);
 
     return {
       content: [

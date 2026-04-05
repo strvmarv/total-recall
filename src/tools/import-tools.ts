@@ -26,7 +26,7 @@ export async function handleImportTool(
   if (name === "import_host") {
     const source = args.source as string | undefined;
     await ctx.embedder.ensureLoaded();
-    const embedFn = ctx.embedder.makeSyncEmbedFn();
+    const embedFn = (text: string) => ctx.embedder.embed(text);
 
     const importers = [
       new ClaudeCodeImporter(),
@@ -51,8 +51,8 @@ export async function handleImportTool(
       }
 
       const scan = importer.scan();
-      const memoriesResult = importer.importMemories(ctx.db, embedFn);
-      const knowledgeResult = importer.importKnowledge(ctx.db, embedFn);
+      const memoriesResult = await importer.importMemories(ctx.db, embedFn);
+      const knowledgeResult = await importer.importKnowledge(ctx.db, embedFn);
 
       results.push({
         tool: importer.name,

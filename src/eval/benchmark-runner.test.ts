@@ -5,9 +5,9 @@ import { mockEmbedSemantic } from "../../tests/helpers/embedding.js";
 import { runBenchmark } from "./benchmark-runner.js";
 
 describe("runBenchmark", () => {
-  it("loads corpus, seeds DB, runs queries, and produces report", () => {
+  it("loads corpus, seeds DB, runs queries, and produces report", async () => {
     const db = createTestDb();
-    const result = runBenchmark(db, mockEmbedSemantic, {
+    const result = await runBenchmark(db, mockEmbedSemantic, {
       corpusPath: resolve("eval/corpus/memories.jsonl"),
       benchmarkPath: resolve("eval/benchmarks/retrieval.jsonl"),
     });
@@ -17,9 +17,9 @@ describe("runBenchmark", () => {
     expect(result.avgLatencyMs).toBeGreaterThanOrEqual(0);
   });
 
-  it("returns correct shape for all detail entries", () => {
+  it("returns correct shape for all detail entries", async () => {
     const db = createTestDb();
-    const result = runBenchmark(db, mockEmbedSemantic, {
+    const result = await runBenchmark(db, mockEmbedSemantic, {
       corpusPath: resolve("eval/corpus/memories.jsonl"),
       benchmarkPath: resolve("eval/benchmarks/retrieval.jsonl"),
     });
@@ -33,9 +33,9 @@ describe("runBenchmark", () => {
     }
   });
 
-  it("exactMatchRate and tierRoutingRate are within [0, 1]", () => {
+  it("exactMatchRate and tierRoutingRate are within [0, 1]", async () => {
     const db = createTestDb();
-    const result = runBenchmark(db, mockEmbedSemantic, {
+    const result = await runBenchmark(db, mockEmbedSemantic, {
       corpusPath: resolve("eval/corpus/memories.jsonl"),
       benchmarkPath: resolve("eval/benchmarks/retrieval.jsonl"),
     });

@@ -5,13 +5,13 @@ import { insertEmbedding } from "../search/vector-search.js";
 import type { Entry } from "../types.js";
 import { tableName } from "../types.js";
 
-type EmbedFn = (text: string) => Float32Array;
+type EmbedFn = (text: string) => Float32Array | Promise<Float32Array>;
 
 export interface CheckAndPromoteColdResult {
   promoted: string[];
 }
 
-function copyEntryToWarm(db: Database.Database, embed: EmbedFn, entry: Entry): string {
+async function copyEntryToWarm(db: Database.Database, embed: EmbedFn, entry: Entry): Promise<string> {
   const newId = randomUUID();
   const now = Date.now();
   const toTable = tableName("warm", "memory");
@@ -41,17 +41,17 @@ function copyEntryToWarm(db: Database.Database, embed: EmbedFn, entry: Entry): s
     JSON.stringify(entry.metadata),
   );
 
-  const embedding = embed(entry.content);
+  const embedding = await embed(entry.content);
   insertEmbedding(db, "warm", "memory", newId, embedding);
 
   return newId;
 }
 
-export function checkAndPromoteCold(
+export async function checkAndPromoteCold(
   db: Database.Database,
   embed: EmbedFn,
   config: { accessThreshold: number; windowDays: number },
-): CheckAndPromoteColdResult {
+): Promise<CheckAndPromoteColdResult> {
   const entries = listEntries(db, "cold", "memory");
   const now = Date.now();
   const windowMs = config.windowDays * 24 * 60 * 60 * 1000;
@@ -61,7 +61,7 @@ export function checkAndPromoteCold(
   for (const entry of entries) {
     const withinWindow = now - entry.last_accessed_at <= windowMs;
     if (withinWindow && entry.access_count >= config.accessThreshold) {
-      copyEntryToWarm(db, embed, entry);
+      await copyEntryToWarm(db, embed, entry);
       promoted.push(entry.id);
     }
   }

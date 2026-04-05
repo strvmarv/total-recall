@@ -3,7 +3,7 @@ import { insertEntry } from "../db/entries.js";
 import { insertEmbedding } from "../search/vector-search.js";
 import type { Tier, ContentType, EntryType, SourceTool } from "../types.js";
 
-type EmbedFn = (text: string) => Float32Array;
+type EmbedFn = (text: string) => Float32Array | Promise<Float32Array>;
 
 interface StoreOptions {
   content: string;
@@ -18,7 +18,7 @@ interface StoreOptions {
   collection_id?: string;
 }
 
-export function storeMemory(db: Database.Database, embed: EmbedFn, opts: StoreOptions): string {
+export async function storeMemory(db: Database.Database, embed: EmbedFn, opts: StoreOptions): Promise<string> {
   const tier = opts.tier ?? "hot";
   const contentType = opts.contentType ?? "memory";
   const id = insertEntry(db, tier, contentType, {
@@ -31,7 +31,7 @@ export function storeMemory(db: Database.Database, embed: EmbedFn, opts: StoreOp
     collection_id: opts.collection_id,
     metadata: opts.type ? { entry_type: opts.type } : {},
   });
-  const embedding = embed(opts.content);
+  const embedding = await embed(opts.content);
   insertEmbedding(db, tier, contentType, id, embedding);
   return id;
 }
