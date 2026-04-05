@@ -11,7 +11,7 @@ describe("total-recall phase 3 integration", () => {
   });
 
   it("has all skills", () => {
-    const skills = ["memory", "search", "ingest", "status", "forget"];
+    const skills = ["total-recall"];
     for (const skill of skills) {
       const path = resolve(`skills/${skill}/SKILL.md`);
       expect(existsSync(path), `Missing skill: ${skill}`).toBe(true);

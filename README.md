@@ -120,24 +120,34 @@ All state lives in `~/.total-recall/db.sqlite`. The embedding model is bundled w
 
 ## Commands
 
+All commands use `/total-recall <subcommand>`:
+
 | Command | MCP Tool | Description |
 |---|---|---|
-| `/memory status` | `status` | Dashboard overview |
-| `/memory search <query>` | `memory_search` | Semantic search across all tiers |
-| `/memory ingest <path>` | `kb_ingest_file` / `kb_ingest_dir` | Add files/dirs to knowledge base |
-| `/memory forget <query>` | `memory_search` + `memory_delete` | Find and delete entries |
-| `/memory compact` | `compact_now` | Force compaction with preview |
-| `/memory inspect <id>` | `memory_inspect` | Deep dive on single entry |
-| `/memory promote <id>` | `memory_promote` | Move entry to higher tier |
-| `/memory demote <id>` | `memory_demote` | Move entry to lower tier |
-| `/memory export` | `memory_export` | Export to portable JSON format |
-| `/memory import <file>` | `memory_import` | Import from export file |
-| `/memory eval` | `eval_report` | Live performance metrics |
-| `/memory eval --benchmark` | `eval_benchmark` | Run synthetic benchmark |
-| `/memory config get <key>` | `config_get` | Read config value |
-| `/memory config set <key> <value>` | `config_set` | Update config |
-| `/memory history` | `memory_history` | Show recent tier movements |
-| `/memory lineage <id>` | `memory_lineage` | Show compaction ancestry |
+| `/total-recall status` | `status` | Dashboard overview |
+| `/total-recall search <query>` | `memory_search` | Semantic search across all tiers |
+| `/total-recall store <content>` | `memory_store` | Manually store a memory |
+| `/total-recall forget <query>` | `memory_search` + `memory_delete` | Find and delete entries |
+| `/total-recall inspect <id>` | `memory_inspect` | Deep dive on single entry |
+| `/total-recall promote <id>` | `memory_promote` | Move entry to higher tier |
+| `/total-recall demote <id>` | `memory_demote` | Move entry to lower tier |
+| `/total-recall history` | `memory_history` | Show recent tier movements |
+| `/total-recall lineage <id>` | `memory_lineage` | Show compaction ancestry |
+| `/total-recall export` | `memory_export` | Export to portable JSON format |
+| `/total-recall import <file>` | `memory_import` | Import from export file |
+| `/total-recall ingest <path>` | `kb_ingest_file` / `kb_ingest_dir` | Add files/dirs to knowledge base |
+| `/total-recall kb search <query>` | `kb_search` | Search knowledge base |
+| `/total-recall kb list` | `kb_list_collections` | List KB collections |
+| `/total-recall kb refresh <id>` | `kb_refresh` | Re-ingest a collection |
+| `/total-recall kb remove <id>` | `kb_remove` | Remove KB entry |
+| `/total-recall compact` | `compact_now` | Force compaction |
+| `/total-recall eval` | `eval_report` | Live performance metrics |
+| `/total-recall eval --benchmark` | `eval_benchmark` | Run synthetic benchmark |
+| `/total-recall config get <key>` | `config_get` | Read config value |
+| `/total-recall config set <key> <val>` | `config_set` | Update config |
+| `/total-recall import-host` | `import_host` | Import from host tools |
+
+Memory capture, retrieval, and compaction run automatically in the background — see the "Automatic Behavior" section of the `/total-recall` skill.
 
 ---
 

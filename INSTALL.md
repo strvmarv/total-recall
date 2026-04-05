@@ -131,8 +131,8 @@ total-recall: initialized · X memories imported · Y docs ingested · system ve
 ```
 
 You can verify it's working with:
-- `/memory status` — shows tier sizes and health
-- `/memory search "test"` — runs a test search
+- `/total-recall status` — shows tier sizes and health
+- `/total-recall search "test"` — runs a test search
 
 ## What Happens on First Run
 
