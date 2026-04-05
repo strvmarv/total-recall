@@ -1,3 +1,29 @@
+```
+╔══════════════════════════════════════════════╗
+║  REKALL INC. -- MEMORY IMPLANT SYSTEM v2.84  ║
+╠══════════════════════════════════════════════╣
+║                                              ║
+║  CLIENT: Quaid, Douglas                      ║
+║  STATUS: MEMORY EXTRACTION IN PROGRESS       ║
+║                                              ║
+║  > Loading tier: HOT ............ [OK]       ║
+║  > Loading tier: WARM ........... [OK]       ║
+║  > Loading tier: COLD ........... [OK]       ║
+║  > Semantic index: 384 dimensions  [OK]      ║
+║  > Vector search: ONLINE                     ║
+║                                              ║
+║  ┌──────────────────────────────────┐        ║
+║  │ SELECT PACKAGE:                  │        ║
+║  │                                  │        ║
+║  │  [x] Total Recall -- $899        │        ║
+║  │  [ ] Blue Sky on Mars            │        ║
+║  │  [ ] Secret Agent                │        ║
+║  └──────────────────────────────────┘        ║
+║                                              ║
+║  "For the Memory of a Lifetime"              ║
+╚══════════════════════════════════════════════╝
+```
+
 # total-recall
 
 **Multi-tiered memory and knowledge base for TUI coding assistants.**
