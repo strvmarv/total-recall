@@ -80,9 +80,14 @@ export function getLastSessionAge(db: Database.Database): string | null {
   const days = Math.floor(diffMs / (24 * 60 * 60 * 1000));
   const weeks = Math.floor(days / 7);
 
+  if (minutes === 0) return "just now";
+  if (minutes === 1) return "1 minute ago";
   if (minutes < 60) return `${minutes} minutes ago`;
+  if (hours === 1) return "1 hour ago";
   if (hours < 24) return `${hours} hours ago`;
+  if (days === 1) return "1 day ago";
   if (days < 7) return `${days} days ago`;
+  if (weeks === 1) return "1 week ago";
   return `${weeks} weeks ago`;
 }
 

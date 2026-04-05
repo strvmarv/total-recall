@@ -157,6 +157,26 @@ describe("getLastSessionAge", () => {
     expect(age).toBe("3 days ago");
   });
 
+  it("returns 'just now' for very recent sessions", () => {
+    const tenSecsAgo = Date.now() - 10 * 1000;
+    db.prepare(
+      `INSERT INTO compaction_log (id, timestamp, session_id, source_tier, source_entry_ids, decay_scores, reason, config_snapshot_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("test-id", tenSecsAgo, "sess-1", "hot", "[]", "{}", "decay_score_below_warm_threshold", "snap-1");
+
+    expect(getLastSessionAge(db)).toBe("just now");
+  });
+
+  it("uses singular form for 1 unit", () => {
+    const oneHourAgo = Date.now() - 1 * 60 * 60 * 1000;
+    db.prepare(
+      `INSERT INTO compaction_log (id, timestamp, session_id, source_tier, source_entry_ids, decay_scores, reason, config_snapshot_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("test-id", oneHourAgo, "sess-1", "hot", "[]", "{}", "decay_score_below_warm_threshold", "snap-1");
+
+    expect(getLastSessionAge(db)).toBe("1 hour ago");
+  });
+
   it("returns weeks for very old sessions", () => {
     const threeWeeksAgo = Date.now() - 21 * 24 * 60 * 60 * 1000;
     db.prepare(
