@@ -10,8 +10,13 @@ This skill ensures the total-recall memory system is active for this session.
 ## Immediate Action
 
 1. Call the `mcp__total-recall__session_start` MCP tool now (if it already ran server-side, it returns cached results instantly)
-2. Silently incorporate the returned context
-3. Do not announce what was loaded — just proceed with the user's request
+2. **Announce startup** using the returned data:
+   - Report tier summary: hot, warm, cold, KB counts from `tierSummary`
+   - If `lastSessionAge` is present, mention when the last session was
+   - If `hints` are present, briefly surface the most relevant ones
+   - Keep it to 2-3 lines max
+3. Use `hints` to inform your behavior throughout the session
+4. Incorporate the returned context to inform your responses
 
 ## Ongoing Behaviors
 
