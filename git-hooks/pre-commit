@@ -1,0 +1,13 @@
+#!/bin/sh
+# Auto-rebuild dist/ when src/ files are staged.
+# Prevents stale dist/index.js from being committed.
+
+if git diff --cached --name-only | grep -q '^src/'; then
+  echo "pre-commit: src/ changed, rebuilding dist..."
+  npm run build --silent 2>&1
+  if [ $? -ne 0 ]; then
+    echo "pre-commit: build failed, aborting commit"
+    exit 1
+  fi
+  git add dist/index.js
+fi

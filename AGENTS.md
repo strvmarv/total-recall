@@ -6,7 +6,7 @@
 
 `dist/` is tracked in git (not gitignored). This is intentional — the Claude Code plugin marketplace clones from git, not npm, so `dist/index.js` must be present in the repo for the MCP server to start.
 
-- Always run `npm run build` after changing `src/` and commit the updated `dist/`
+- A pre-commit hook in `git-hooks/pre-commit` auto-rebuilds and stages `dist/` when `src/` files are committed. Activated by `npm install` (via the `prepare` script setting `core.hooksPath`).
 - CI will fail if `dist/` is stale after a clean build (`git diff --exit-code dist/`)
 - `.gitattributes` marks `dist/**` as `linguist-generated` so GitHub collapses diffs in PRs
 
