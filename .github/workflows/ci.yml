@@ -18,3 +18,5 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - name: Check dist/ is up to date
+        run: git diff --exit-code dist/ || (echo "dist/ is outdated — run 'npm run build' and commit" && exit 1)

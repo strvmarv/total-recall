@@ -67,12 +67,18 @@ if [ -f "$ENTRY" ]; then
   exec "$NODE" "$ENTRY" "$@"
 fi
 
-# Strategy 2: npx (downloads and runs the npm package)
-NODE_DIR="$(dirname "$NODE")"
-NPX="$NODE_DIR/npx"
-if [ -x "$NPX" ]; then
-  exec "$NPX" -y @strvmarv/total-recall "$@"
+# Strategy 2: Global install (npm install -g @strvmarv/total-recall)
+if command -v total-recall &>/dev/null; then
+  exec total-recall "$@"
 fi
 
-echo "total-recall: error: could not find dist/index.js or npx. Run 'npm run build' or 'npm install -g @strvmarv/total-recall'." >&2
+# Strategy 3: Find entry point in global node_modules
+NODE_DIR="$(dirname "$NODE")"
+GLOBAL_ENTRY=$("$NODE_DIR/npm" root -g 2>/dev/null)/@strvmarv/total-recall/dist/index.js
+if [ -f "$GLOBAL_ENTRY" ]; then
+  exec "$NODE" "$GLOBAL_ENTRY" "$@"
+fi
+
+echo "total-recall: error: could not find dist/index.js or total-recall binary." >&2
+echo "  Run 'npm run build' (git clone) or 'npm install -g @strvmarv/total-recall'." >&2
 exit 1
