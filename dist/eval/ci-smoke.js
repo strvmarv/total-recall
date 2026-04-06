@@ -984,14 +984,14 @@ function deepMerge(target, source) {
 }
 
 // src/embedding/embedder.ts
-import { readFile } from "fs/promises";
+import { readFile as readFile2 } from "fs/promises";
 import { join as join3 } from "path";
 import * as ort from "onnxruntime-node";
 
 // src/embedding/model-manager.ts
 import { existsSync as existsSync2, mkdirSync as mkdirSync2, readdirSync } from "fs";
 import { readFileSync as readFileSync2, statSync, createReadStream } from "fs";
-import { writeFile, rename, unlink } from "fs/promises";
+import { writeFile, rename, unlink, readFile } from "fs/promises";
 import { createHash as createHash2 } from "crypto";
 import { join as join2, dirname } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
@@ -1198,7 +1198,7 @@ var Embedder = class {
     const onnxPath = join3(modelPath, "model.onnx");
     this.session = await ort.InferenceSession.create(onnxPath);
     const tokenizerPath = join3(modelPath, "tokenizer.json");
-    const tokenizerText = await readFile(tokenizerPath, "utf-8");
+    const tokenizerText = await readFile2(tokenizerPath, "utf-8");
     const tokenizerJson = JSON.parse(tokenizerText);
     this.tokenizer = new WordPieceTokenizer(tokenizerJson.model.vocab);
   }
