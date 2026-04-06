@@ -1,16 +1,40 @@
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
-import { readFileSync, statSync, createReadStream } from "node:fs";
+import { statSync, createReadStream } from "node:fs";
 import { writeFile, rename, unlink, readFile } from "node:fs/promises";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import { createWriteStream } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getDataDir } from "../config.js";
+import { getModelSpec, expandUrl } from "./registry.js";
 import type { ModelSpec } from "./registry.js";
 
-const HF_BASE_URL = "https://huggingface.co";
+export interface DownloadProgress {
+  /** Current filename being downloaded */
+  file: string;
+  /** Bytes downloaded so far for the current file */
+  bytesDone: number;
+  /** Total bytes for the current file (0 if unknown) */
+  bytesTotal: number;
+  /** 0-based index of the current file */
+  fileIndex: number;
+  /** Total number of files */
+  fileCount: number;
+}
 
-// Pin to a specific revision for reproducibility
-const HF_REVISION = "main"; // Can be changed to a specific commit hash
+export interface DownloadOptions {
+  onProgress?: (p: DownloadProgress) => void;
+  signal?: AbortSignal;
+  /** Default: 3 */
+  maxRetries?: number;
+  /**
+   * @internal — injectable sleep function for tests to skip backoff delays.
+   * Defaults to a real setTimeout-based sleep.
+   */
+  _sleep?: (ms: number) => Promise<void>;
+}
 
 /** Bundled model path (shipped with the package) */
 function getBundledModelPath(modelName: string): string {
@@ -19,7 +43,7 @@ function getBundledModelPath(modelName: string): string {
 }
 
 /** User data model path (~/.total-recall/models/) */
-function getUserModelPath(modelName: string): string {
+export function getUserModelPath(modelName: string): string {
   return join(getDataDir(), "models", modelName);
 }
 
@@ -43,62 +67,159 @@ export function isModelDownloaded(modelPath: string): boolean {
   }
 }
 
-async function validateDownload(modelPath: string): Promise<void> {
-  // Check model.onnx exists and is substantial
-  const modelStat = statSync(join(modelPath, "model.onnx"));
-  if (modelStat.size < 1_000_000) {
-    throw new Error("model.onnx appears corrupted (< 1MB)");
-  }
-
-  // Check tokenizer.json is valid JSON
-  const tokenizerText = readFileSync(join(modelPath, "tokenizer.json"), "utf-8");
-  try {
-    JSON.parse(tokenizerText);
-  } catch {
-    throw new Error("tokenizer.json is not valid JSON");
-  }
+/**
+ * Sleep for `ms` milliseconds. Used for exponential backoff between retries.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function downloadModel(modelName: string): Promise<string> {
-  // Always download to user data dir, not bundled location
-  const modelPath = getUserModelPath(modelName);
-  mkdirSync(modelPath, { recursive: true });
+/**
+ * Download a single file with retries and progress reporting.
+ *
+ * If `response.body` is null/undefined (e.g. in tests returning a fake
+ * response), the function falls back to `response.arrayBuffer()` and reports
+ * progress once with bytesDone === bytesTotal === buffer length.
+ */
+async function downloadFile(
+  url: string,
+  dest: string,
+  file: string,
+  fileIndex: number,
+  fileCount: number,
+  options: DownloadOptions,
+  maxRetries: number,
+): Promise<void> {
+  const { onProgress, signal, _sleep: sleepFn = sleep } = options;
+  const tmpPath = `${dest}.tmp.${process.pid}.${Date.now()}`;
 
-  // model.onnx lives in onnx/ subdir, tokenizer files at repo root
-  const fileUrls: Array<{ file: string; url: string }> = [
-    {
-      file: "model.onnx",
-      url: `${HF_BASE_URL}/sentence-transformers/${modelName}/resolve/${HF_REVISION}/onnx/model.onnx`,
-    },
-    {
-      file: "tokenizer.json",
-      url: `${HF_BASE_URL}/sentence-transformers/${modelName}/resolve/${HF_REVISION}/tokenizer.json`,
-    },
-    {
-      file: "tokenizer_config.json",
-      url: `${HF_BASE_URL}/sentence-transformers/${modelName}/resolve/${HF_REVISION}/tokenizer_config.json`,
-    },
-  ];
-
-  for (const { file, url } of fileUrls) {
-    const dest = join(modelPath, file);
-
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(
-        `Failed to download ${file} from ${url}: ${response.status} ${response.statusText}`,
-      );
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (attempt > 0) {
+      // Exponential backoff: 500ms, 1000ms, 2000ms (capped)
+      const delayMs = Math.min(500 * Math.pow(2, attempt - 1), 2000);
+      await sleepFn(delayMs);
     }
-    const buffer = await response.arrayBuffer();
-    if (buffer.byteLength === 0) {
-      throw new Error(`Downloaded ${file} is empty`);
+
+    try {
+      const response = await fetch(url, { signal });
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to download ${file} from ${url}: ${response.status} ${response.statusText}`,
+        );
+      }
+
+      if (response.body) {
+        // Streaming path: pipe response body to tmp file, tracking bytes.
+        const contentLengthRaw = response.headers.get("content-length");
+        const bytesTotal = contentLengthRaw ? parseInt(contentLengthRaw, 10) : 0;
+        let bytesDone = 0;
+
+        const nodeReadable = Readable.fromWeb(
+          response.body as Parameters<typeof Readable.fromWeb>[0],
+        );
+
+        const writeStream = createWriteStream(tmpPath);
+
+        nodeReadable.on("data", (chunk: Buffer) => {
+          bytesDone += chunk.byteLength;
+          onProgress?.({ file, bytesDone, bytesTotal, fileIndex, fileCount });
+        });
+
+        try {
+          await pipeline(nodeReadable, writeStream);
+        } catch (err) {
+          // Best-effort cleanup of tmp file
+          try { await unlink(tmpPath); } catch { /* ignore */ }
+          throw err;
+        }
+      } else {
+        // Fallback path (e.g. test fake responses with body: null):
+        // Read the full buffer and report progress once.
+        const buffer = Buffer.from(await response.arrayBuffer());
+        const bytesDone = buffer.byteLength;
+        const bytesTotal = buffer.byteLength;
+
+        try {
+          await writeFile(tmpPath, buffer);
+        } catch (err) {
+          try { await unlink(tmpPath); } catch { /* ignore */ }
+          throw err;
+        }
+
+        onProgress?.({ file, bytesDone, bytesTotal, fileIndex, fileCount });
+      }
+
+      // Success: rename tmp → final destination
+      if (existsSync(dest)) {
+        try { await unlink(dest); } catch { /* ignore */ }
+      }
+      await rename(tmpPath, dest);
+      return;
+    } catch (err) {
+      // AbortError must not be retried
+      if (err instanceof Error && err.name === "AbortError") {
+        try { await unlink(tmpPath); } catch { /* ignore */ }
+        throw err;
+      }
+      lastErr = err;
+      // Clean up tmp if it exists before retrying
+      try { await unlink(tmpPath); } catch { /* ignore */ }
     }
-    await writeFile(dest, Buffer.from(buffer));
   }
 
-  await validateDownload(modelPath);
+  throw lastErr;
+}
 
-  return modelPath;
+/**
+ * Download all files for a model, verify the sha256 of model.onnx, and write
+ * a `.verified` sidecar so future `isModelChecksumValid` calls hit the cache.
+ *
+ * Downloads are atomic (written to a .tmp file, then renamed). Each file is
+ * retried up to `maxRetries` times (default 3) with exponential backoff.
+ * AbortSignal is honoured and propagates immediately without retry.
+ */
+export async function downloadModel(modelName: string, options: DownloadOptions = {}): Promise<string> {
+  const { maxRetries = 3 } = options;
+
+  // 1. Look up spec — throws if unknown model
+  const spec = getModelSpec(modelName);
+
+  // 2. Ensure target directory exists
+  const target = getUserModelPath(modelName);
+  mkdirSync(target, { recursive: true });
+
+  // 3. Build ordered file list from spec
+  const fileEntries = Object.entries(spec.files).map(([file, urlTemplate]) => ({
+    file,
+    url: expandUrl(urlTemplate, spec.revision),
+  }));
+  const fileCount = fileEntries.length;
+
+  // 4. Download each file sequentially
+  for (let i = 0; i < fileEntries.length; i++) {
+    const { file, url } = fileEntries[i]!;
+    const finalPath = join(target, file);
+    await downloadFile(url, finalPath, file, i, fileCount, options, maxRetries);
+  }
+
+  // 5. Verify sha256 of model.onnx (NOT retried)
+  const onnxPath = join(target, "model.onnx");
+  const actualHash = await sha256File(onnxPath);
+  if (actualHash !== spec.sha256) {
+    // Remove bad model.onnx so a retry will start clean
+    try { await unlink(onnxPath); } catch { /* ignore */ }
+    throw new Error(
+      `sha256 mismatch for model.onnx: expected ${spec.sha256}, actual ${actualHash}`,
+    );
+  }
+
+  // 6. Write .verified sidecar atomically
+  const sidecarPath = join(target, ".verified");
+  await writeFileAtomic(sidecarPath, spec.sha256);
+
+  return target;
 }
 
 export async function sha256File(path: string): Promise<string> {
