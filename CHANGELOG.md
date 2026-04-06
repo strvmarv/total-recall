@@ -1,3 +1,9 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## 0.6.4 - 2026-04-06
 
@@ -13,6 +19,30 @@
 - The MCP tool dispatcher (`src/tools/registry.ts`) translates `ModelNotReadyError` into a structured `model_not_ready` response so the using-total-recall skill can drive recovery.
 - The `using-total-recall` skill now contains a recovery table for the four `model_not_ready` reasons.
 - Manual smoke-test checklist at `tests/manual/model-bootstrap.md`.
+
+## 0.6.3 - 2026-04-06
+
+### Fixed
+- Sync `.claude-plugin/plugin.json` version with `package.json` so the Claude Code marketplace reports the correct installed version. Previously v0.6.2 left `plugin.json` at `0.6.1`, causing `/plugin` to report stale version info.
+
+## 0.6.2 - 2026-04-06
+
+### Added
+- `bin/start.cjs`: CJS bootstrap wrapper that detects missing `node_modules` and runs `npm install` before launching the MCP server, resolving version-gated startup failures after fresh plugin installs or `git pull`.
+- Updated `.mcp.json` to launch via `bin/start.cjs` instead of `dist/index.js` directly.
+
+### Changed
+- Replaced `@iarna/toml` with `smol-toml` (pure ESM, no CJS stream dependency) to fix bundling failures under `noExternal` tsup config.
+- Added `platform: node` to tsup config to fix CJS interop in the ESM bundle.
+
+## 0.6.1 - 2026-04-06
+
+### Added
+- `help` subcommand added to the `total-recall` skill.
+
+### Fixed
+- Bundle `@iarna/toml`, `sqlite-vec`, and the MCP SDK into `dist/` to fix startup failures on marketplace installs where `node_modules` is absent.
+- Cross-platform compatibility pass (Windows `cmd.exe` path fixes, macOS node-direct MCP launcher).
 
 ## [0.5.9](https://github.com/strvmarv/total-recall/compare/v0.5.8...v0.5.9) (2026-04-05)
 
