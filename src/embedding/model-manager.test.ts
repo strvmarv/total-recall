@@ -1,8 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
+import { copyFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getModelPath, isModelDownloaded, sha256File, writeFileAtomic } from "./model-manager.js";
+import { isModelStructurallyValid } from "./model-manager.js";
+import { getModelSpec } from "./registry.js";
 
 describe("getModelPath", () => {
   it("returns path containing model name and .total-recall", () => {
@@ -40,5 +43,38 @@ describe("writeFileAtomic", () => {
     // No leftover tmp files
     const leftovers = readdirSync(dir).filter((f) => f.includes(".tmp."));
     expect(leftovers).toEqual([]);
+  });
+});
+
+describe("isModelStructurallyValid", () => {
+  const spec = getModelSpec("all-MiniLM-L6-v2");
+
+  it("returns false for nonexistent dir", () => {
+    expect(isModelStructurallyValid("/tmp/does-not-exist-xyz-tr", spec)).toBe(false);
+  });
+
+  it("returns false when model.onnx is the LFS pointer fixture", () => {
+    const dir = mkdtempSync(join(tmpdir(), "tr-struct-"));
+    copyFileSync("tests/fixtures/lfs-pointer-model.onnx", join(dir, "model.onnx"));
+    writeFileSync(join(dir, "tokenizer.json"), "{}");
+    writeFileSync(join(dir, "tokenizer_config.json"), "{}");
+    expect(isModelStructurallyValid(dir, spec)).toBe(false);
+  });
+
+  it("returns false when a required file is missing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "tr-struct-"));
+    // Write a fake model.onnx with the right size but no tokenizers
+    const fakeBuf = Buffer.alloc(spec.sizeBytes);
+    writeFileSync(join(dir, "model.onnx"), fakeBuf);
+    expect(isModelStructurallyValid(dir, spec)).toBe(false);
+  });
+
+  it("returns true when all files exist and model.onnx has expected size", () => {
+    const dir = mkdtempSync(join(tmpdir(), "tr-struct-"));
+    const fakeBuf = Buffer.alloc(spec.sizeBytes);
+    writeFileSync(join(dir, "model.onnx"), fakeBuf);
+    writeFileSync(join(dir, "tokenizer.json"), "{}");
+    writeFileSync(join(dir, "tokenizer_config.json"), "{}");
+    expect(isModelStructurallyValid(dir, spec)).toBe(true);
   });
 });

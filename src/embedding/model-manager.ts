@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getDataDir } from "../config.js";
+import type { ModelSpec } from "./registry.js";
 
 const HF_BASE_URL = "https://huggingface.co";
 
@@ -122,5 +123,20 @@ export async function writeFileAtomic(dest: string, data: Buffer | string): Prom
   } catch (err) {
     try { await unlink(tmp); } catch { /* ignore */ }
     throw err;
+  }
+}
+
+export function isModelStructurallyValid(modelPath: string, spec: ModelSpec): boolean {
+  if (!existsSync(modelPath)) return false;
+  for (const file of Object.keys(spec.files)) {
+    const p = join(modelPath, file);
+    if (!existsSync(p)) return false;
+  }
+  try {
+    const onnx = join(modelPath, "model.onnx");
+    const size = statSync(onnx).size;
+    return size === spec.sizeBytes;
+  } catch {
+    return false;
   }
 }
