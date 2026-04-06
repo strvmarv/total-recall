@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { pkgPath } from "../pkg-root.js";
 
 export interface ModelSpec {
   name: string;
@@ -19,10 +18,10 @@ interface RegistryFile {
 let cached: Record<string, ModelSpec> | null = null;
 
 function findRegistryPath(): string {
-  // dist/embedding/registry.js -> ../../models/registry.json (when bundled)
-  // src/embedding/registry.ts -> ../../models/registry.json (when running tests)
-  const here = dirname(fileURLToPath(import.meta.url));
-  return join(here, "..", "..", "models", "registry.json");
+  // Resolved via pkg-root walk so it works in both the source tree and the
+  // bundled dist (which flattens to a single dist/index.js, making any
+  // relative ../.. math from `import.meta.url` layout-dependent and fragile).
+  return pkgPath("models", "registry.json");
 }
 
 export function loadRegistry(): Record<string, ModelSpec> {

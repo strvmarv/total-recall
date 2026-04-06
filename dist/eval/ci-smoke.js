@@ -994,15 +994,39 @@ import { join as join4 } from "path";
 
 // src/embedding/registry.ts
 import { readFileSync as readFileSync2 } from "fs";
+
+// src/pkg-root.ts
+import { existsSync as existsSync2 } from "fs";
 import { dirname, join as join2 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 var cached = null;
+function getPackageRoot() {
+  if (cached) return cached;
+  let dir = dirname(fileURLToPath2(import.meta.url));
+  for (let i = 0; i < 10; i++) {
+    if (existsSync2(join2(dir, "package.json"))) {
+      cached = dir;
+      return dir;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error(
+    `Unable to locate package root from ${fileURLToPath2(import.meta.url)}`
+  );
+}
+function pkgPath(...segments) {
+  return join2(getPackageRoot(), ...segments);
+}
+
+// src/embedding/registry.ts
+var cached2 = null;
 function findRegistryPath() {
-  const here = dirname(fileURLToPath2(import.meta.url));
-  return join2(here, "..", "..", "models", "registry.json");
+  return pkgPath("models", "registry.json");
 }
 function loadRegistry() {
-  if (cached) return cached;
+  if (cached2) return cached2;
   const path = findRegistryPath();
   let raw;
   try {
@@ -1019,11 +1043,11 @@ function loadRegistry() {
   if (parsed.version !== 1) {
     throw new Error(`Unsupported model registry version: ${parsed.version}`);
   }
-  cached = {};
+  cached2 = {};
   for (const [name, spec] of Object.entries(parsed.models)) {
-    cached[name] = { name, ...spec };
+    cached2[name] = { name, ...spec };
   }
-  return cached;
+  return cached2;
 }
 function getModelSpec(name) {
   const reg = loadRegistry();
@@ -1039,7 +1063,7 @@ function expandUrl(template, revision) {
 }
 
 // src/embedding/model-manager.ts
-import { existsSync as existsSync2, mkdirSync as mkdirSync2 } from "fs";
+import { existsSync as existsSync3, mkdirSync as mkdirSync2 } from "fs";
 import { statSync, createReadStream } from "fs";
 import { writeFile, rename, unlink, readFile } from "fs/promises";
 import { Readable } from "stream";
@@ -1119,7 +1143,7 @@ async function downloadFile(url, dest, file, fileIndex, fileCount, options, maxR
         }
         onProgress?.({ file, bytesDone, bytesTotal, fileIndex, fileCount });
       }
-      if (existsSync2(dest)) {
+      if (existsSync3(dest)) {
         try {
           await unlink(dest);
         } catch {
@@ -1187,7 +1211,7 @@ async function writeFileAtomic(dest, data) {
   const tmp = `${dest}.tmp.${process.pid}.${Date.now()}`;
   try {
     await writeFile(tmp, data);
-    if (existsSync2(dest)) {
+    if (existsSync3(dest)) {
       try {
         await unlink(dest);
       } catch {
@@ -1203,10 +1227,10 @@ async function writeFileAtomic(dest, data) {
   }
 }
 function isModelStructurallyValid(modelPath, spec) {
-  if (!existsSync2(modelPath)) return false;
+  if (!existsSync3(modelPath)) return false;
   for (const file of Object.keys(spec.files)) {
     const p = join3(modelPath, file);
-    if (!existsSync2(p)) return false;
+    if (!existsSync3(p)) return false;
   }
   try {
     const onnx = join3(modelPath, "model.onnx");
@@ -1218,15 +1242,15 @@ function isModelStructurallyValid(modelPath, spec) {
 }
 async function isModelChecksumValid(modelPath, spec) {
   const sidecarPath = join3(modelPath, ".verified");
-  if (existsSync2(sidecarPath)) {
+  if (existsSync3(sidecarPath)) {
     try {
-      const cached2 = (await readFile(sidecarPath, "utf8")).trim();
-      if (cached2 === spec.sha256) return true;
+      const cached3 = (await readFile(sidecarPath, "utf8")).trim();
+      if (cached3 === spec.sha256) return true;
     } catch {
     }
   }
   const onnxPath = join3(modelPath, "model.onnx");
-  if (!existsSync2(onnxPath)) return false;
+  if (!existsSync3(onnxPath)) return false;
   let computed;
   try {
     computed = await sha256File(onnxPath);

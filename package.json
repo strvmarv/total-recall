@@ -1,6 +1,6 @@
 {
   "name": "@strvmarv/total-recall",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "description": "Multi-tiered memory and knowledge base plugin for TUI coding assistants",
   "type": "module",
   "main": "dist/index.js",
@@ -12,9 +12,10 @@
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:dist": "vitest run --config vitest.dist.config.ts",
     "typecheck": "tsc --noEmit",
     "prepare": "git config core.hooksPath git-hooks || true",
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "npm run build && npm run test:dist",
     "benchmark": "node dist/eval/ci-smoke.js"
   },
   "files": [

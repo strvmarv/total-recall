@@ -8020,15 +8020,39 @@ import { join as join5 } from "path";
 
 // src/embedding/registry.ts
 import { readFileSync as readFileSync2 } from "fs";
+
+// src/pkg-root.ts
+import { existsSync as existsSync3 } from "fs";
 import { dirname, join as join3 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 var cached = null;
+function getPackageRoot() {
+  if (cached) return cached;
+  let dir = dirname(fileURLToPath2(import.meta.url));
+  for (let i = 0; i < 10; i++) {
+    if (existsSync3(join3(dir, "package.json"))) {
+      cached = dir;
+      return dir;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error(
+    `Unable to locate package root from ${fileURLToPath2(import.meta.url)}`
+  );
+}
+function pkgPath(...segments) {
+  return join3(getPackageRoot(), ...segments);
+}
+
+// src/embedding/registry.ts
+var cached2 = null;
 function findRegistryPath() {
-  const here = dirname(fileURLToPath2(import.meta.url));
-  return join3(here, "..", "..", "models", "registry.json");
+  return pkgPath("models", "registry.json");
 }
 function loadRegistry() {
-  if (cached) return cached;
+  if (cached2) return cached2;
   const path = findRegistryPath();
   let raw;
   try {
@@ -8045,11 +8069,11 @@ function loadRegistry() {
   if (parsed.version !== 1) {
     throw new Error(`Unsupported model registry version: ${parsed.version}`);
   }
-  cached = {};
+  cached2 = {};
   for (const [name, spec] of Object.entries(parsed.models)) {
-    cached[name] = { name, ...spec };
+    cached2[name] = { name, ...spec };
   }
-  return cached;
+  return cached2;
 }
 function getModelSpec(name) {
   const reg = loadRegistry();
@@ -8065,7 +8089,7 @@ function expandUrl(template, revision) {
 }
 
 // src/embedding/model-manager.ts
-import { existsSync as existsSync3, mkdirSync as mkdirSync3 } from "fs";
+import { existsSync as existsSync4, mkdirSync as mkdirSync3 } from "fs";
 import { statSync, createReadStream } from "fs";
 import { writeFile, rename, unlink, readFile } from "fs/promises";
 import { Readable } from "stream";
@@ -8145,7 +8169,7 @@ async function downloadFile(url2, dest, file2, fileIndex, fileCount, options, ma
         }
         onProgress?.({ file: file2, bytesDone, bytesTotal, fileIndex, fileCount });
       }
-      if (existsSync3(dest)) {
+      if (existsSync4(dest)) {
         try {
           await unlink(dest);
         } catch {
@@ -8213,7 +8237,7 @@ async function writeFileAtomic(dest, data) {
   const tmp = `${dest}.tmp.${process.pid}.${Date.now()}`;
   try {
     await writeFile(tmp, data);
-    if (existsSync3(dest)) {
+    if (existsSync4(dest)) {
       try {
         await unlink(dest);
       } catch {
@@ -8229,10 +8253,10 @@ async function writeFileAtomic(dest, data) {
   }
 }
 function isModelStructurallyValid(modelPath, spec) {
-  if (!existsSync3(modelPath)) return false;
+  if (!existsSync4(modelPath)) return false;
   for (const file2 of Object.keys(spec.files)) {
     const p = join4(modelPath, file2);
-    if (!existsSync3(p)) return false;
+    if (!existsSync4(p)) return false;
   }
   try {
     const onnx = join4(modelPath, "model.onnx");
@@ -8244,15 +8268,15 @@ function isModelStructurallyValid(modelPath, spec) {
 }
 async function isModelChecksumValid(modelPath, spec) {
   const sidecarPath = join4(modelPath, ".verified");
-  if (existsSync3(sidecarPath)) {
+  if (existsSync4(sidecarPath)) {
     try {
-      const cached3 = (await readFile(sidecarPath, "utf8")).trim();
-      if (cached3 === spec.sha256) return true;
+      const cached4 = (await readFile(sidecarPath, "utf8")).trim();
+      if (cached4 === spec.sha256) return true;
     } catch {
     }
   }
   const onnxPath = join4(modelPath, "model.onnx");
-  if (!existsSync3(onnxPath)) return false;
+  if (!existsSync4(onnxPath)) return false;
   let computed;
   try {
     computed = await sha256File(onnxPath);
@@ -12606,7 +12630,7 @@ __export(util_exports, {
   assignProp: () => assignProp,
   base64ToUint8Array: () => base64ToUint8Array,
   base64urlToUint8Array: () => base64urlToUint8Array,
-  cached: () => cached2,
+  cached: () => cached3,
   captureStackTrace: () => captureStackTrace,
   cleanEnum: () => cleanEnum,
   cleanRegex: () => cleanRegex,
@@ -12682,7 +12706,7 @@ function jsonStringifyReplacer(_, value) {
     return value.toString();
   return value;
 }
-function cached2(getter) {
+function cached3(getter) {
   const set2 = false;
   return {
     get value() {
@@ -12798,7 +12822,7 @@ var captureStackTrace = "captureStackTrace" in Error ? Error.captureStackTrace :
 function isObject(data) {
   return typeof data === "object" && data !== null && !Array.isArray(data);
 }
-var allowsEval = cached2(() => {
+var allowsEval = cached3(() => {
   if (typeof navigator !== "undefined" && navigator?.userAgent?.includes("Cloudflare")) {
     return false;
   }
@@ -14885,7 +14909,7 @@ var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
       }
     });
   }
-  const _normalized = cached2(() => normalizeDef(def));
+  const _normalized = cached3(() => normalizeDef(def));
   defineLazy(inst._zod, "propValues", () => {
     const shape = def.shape;
     const propValues = {};
@@ -14936,7 +14960,7 @@ var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
 var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) => {
   $ZodObject.init(inst, def);
   const superParse = inst._zod.parse;
-  const _normalized = cached2(() => normalizeDef(def));
+  const _normalized = cached3(() => normalizeDef(def));
   const generateFastpass = (shape) => {
     const doc = new Doc(["shape", "payload", "ctx"]);
     const normalized = _normalized.value;
@@ -15172,7 +15196,7 @@ var $ZodDiscriminatedUnion = /* @__PURE__ */ $constructor("$ZodDiscriminatedUnio
     }
     return propValues;
   });
-  const disc = cached2(() => {
+  const disc = cached3(() => {
     const opts = def.options;
     const map2 = /* @__PURE__ */ new Map();
     for (const o of opts) {
@@ -25071,7 +25095,7 @@ function registerEvalTools() {
 }
 
 // src/importers/claude-code.ts
-import { existsSync as existsSync4, readdirSync as readdirSync2, readFileSync as readFileSync6 } from "fs";
+import { existsSync as existsSync5, readdirSync as readdirSync2, readFileSync as readFileSync6 } from "fs";
 import { join as join9 } from "path";
 import { homedir } from "os";
 
@@ -25118,26 +25142,26 @@ var ClaudeCodeImporter = class {
     this.basePath = basePath ?? join9(homedir(), ".claude");
   }
   detect() {
-    return existsSync4(this.basePath) && existsSync4(join9(this.basePath, "projects"));
+    return existsSync5(this.basePath) && existsSync5(join9(this.basePath, "projects"));
   }
   scan() {
     let memoryFiles = 0;
     let knowledgeFiles = 0;
     let sessionFiles = 0;
     const projectsDir = join9(this.basePath, "projects");
-    if (!existsSync4(projectsDir)) {
+    if (!existsSync5(projectsDir)) {
       return { memoryFiles, knowledgeFiles, sessionFiles };
     }
     for (const projectEntry of readdirSync2(projectsDir, { withFileTypes: true })) {
       if (!projectEntry.isDirectory()) continue;
       const projectDir = join9(projectsDir, projectEntry.name);
       const memoryDir = join9(projectDir, "memory");
-      if (existsSync4(memoryDir)) {
+      if (existsSync5(memoryDir)) {
         for (const f of readdirSync2(memoryDir)) {
           if (f.endsWith(".md") && f !== "MEMORY.md") memoryFiles++;
         }
       }
-      if (existsSync4(join9(projectDir, "CLAUDE.md"))) knowledgeFiles++;
+      if (existsSync5(join9(projectDir, "CLAUDE.md"))) knowledgeFiles++;
       for (const f of readdirSync2(projectDir)) {
         if (f.endsWith(".jsonl")) sessionFiles++;
       }
@@ -25147,12 +25171,12 @@ var ClaudeCodeImporter = class {
   async importMemories(db, embed, project) {
     const result = { imported: 0, skipped: 0, errors: [] };
     const projectsDir = join9(this.basePath, "projects");
-    if (!existsSync4(projectsDir)) return result;
+    if (!existsSync5(projectsDir)) return result;
     for (const projectEntry of readdirSync2(projectsDir, { withFileTypes: true })) {
       if (!projectEntry.isDirectory()) continue;
       const projectDir = join9(projectsDir, projectEntry.name);
       const memoryDir = join9(projectDir, "memory");
-      if (!existsSync4(memoryDir)) continue;
+      if (!existsSync5(memoryDir)) continue;
       for (const filename of readdirSync2(memoryDir)) {
         if (!filename.endsWith(".md") || filename === "MEMORY.md") continue;
         const filePath = join9(memoryDir, filename);
@@ -25191,7 +25215,7 @@ var ClaudeCodeImporter = class {
   async importKnowledge(db, embed) {
     const result = { imported: 0, skipped: 0, errors: [] };
     const claudeMdPath = join9(this.basePath, "CLAUDE.md");
-    if (!existsSync4(claudeMdPath)) return result;
+    if (!existsSync5(claudeMdPath)) return result;
     try {
       const raw = readFileSync6(claudeMdPath, "utf8");
       const hash2 = contentHash(raw);
@@ -25219,7 +25243,7 @@ var ClaudeCodeImporter = class {
 };
 
 // src/importers/copilot-cli.ts
-import { existsSync as existsSync5, readdirSync as readdirSync3, readFileSync as readFileSync7 } from "fs";
+import { existsSync as existsSync6, readdirSync as readdirSync3, readFileSync as readFileSync7 } from "fs";
 import { join as join10 } from "path";
 import { homedir as homedir2 } from "os";
 var CopilotCliImporter = class {
@@ -25229,19 +25253,19 @@ var CopilotCliImporter = class {
     this.basePath = basePath ?? join10(homedir2(), ".copilot");
   }
   detect() {
-    return existsSync5(this.basePath) && existsSync5(join10(this.basePath, "session-state"));
+    return existsSync6(this.basePath) && existsSync6(join10(this.basePath, "session-state"));
   }
   scan() {
     let knowledgeFiles = 0;
     let sessionFiles = 0;
     const sessionStateDir = join10(this.basePath, "session-state");
-    if (!existsSync5(sessionStateDir)) {
+    if (!existsSync6(sessionStateDir)) {
       return { memoryFiles: 0, knowledgeFiles, sessionFiles };
     }
     for (const entry of readdirSync3(sessionStateDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const sessionDir = join10(sessionStateDir, entry.name);
-      if (existsSync5(join10(sessionDir, "plan.md"))) knowledgeFiles++;
+      if (existsSync6(join10(sessionDir, "plan.md"))) knowledgeFiles++;
       for (const f of readdirSync3(sessionDir)) {
         if (f.endsWith(".jsonl")) sessionFiles++;
       }
@@ -25254,11 +25278,11 @@ var CopilotCliImporter = class {
   async importKnowledge(db, embed) {
     const result = { imported: 0, skipped: 0, errors: [] };
     const sessionStateDir = join10(this.basePath, "session-state");
-    if (!existsSync5(sessionStateDir)) return result;
+    if (!existsSync6(sessionStateDir)) return result;
     for (const entry of readdirSync3(sessionStateDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const planPath = join10(sessionStateDir, entry.name, "plan.md");
-      if (!existsSync5(planPath)) continue;
+      if (!existsSync6(planPath)) continue;
       try {
         const raw = readFileSync7(planPath, "utf8");
         const hash2 = contentHash(raw);
@@ -25283,7 +25307,7 @@ var CopilotCliImporter = class {
 };
 
 // src/importers/cursor.ts
-import { existsSync as existsSync6, readdirSync as readdirSync4, readFileSync as readFileSync8 } from "fs";
+import { existsSync as existsSync7, readdirSync as readdirSync4, readFileSync as readFileSync8 } from "fs";
 import { join as join11 } from "path";
 import { homedir as homedir3 } from "os";
 var CursorImporter = class {
@@ -25295,25 +25319,25 @@ var CursorImporter = class {
     this.extensionPath = extensionPath ?? join11(homedir3(), ".cursor");
   }
   detect() {
-    return existsSync6(this.configPath) || existsSync6(this.extensionPath);
+    return existsSync7(this.configPath) || existsSync7(this.extensionPath);
   }
   scan() {
     let knowledgeFiles = 0;
     const globalDb = join11(this.configPath, "User", "globalStorage", "state.vscdb");
-    if (existsSync6(globalDb)) knowledgeFiles++;
+    if (existsSync7(globalDb)) knowledgeFiles++;
     const workspaceDir = join11(this.configPath, "User", "workspaceStorage");
-    if (existsSync6(workspaceDir)) {
+    if (existsSync7(workspaceDir)) {
       for (const entry of readdirSync4(workspaceDir, { withFileTypes: true })) {
         if (!entry.isDirectory()) continue;
         const wsJson = join11(workspaceDir, entry.name, "workspace.json");
-        if (!existsSync6(wsJson)) continue;
+        if (!existsSync7(wsJson)) continue;
         try {
           const ws = JSON.parse(readFileSync8(wsJson, "utf8"));
           const projectPath = ws.folder ? decodeURIComponent(new URL(ws.folder).pathname) : ws.workspace ? decodeURIComponent(new URL(ws.workspace).pathname) : null;
           if (!projectPath) continue;
-          if (existsSync6(join11(projectPath, ".cursorrules"))) knowledgeFiles++;
+          if (existsSync7(join11(projectPath, ".cursorrules"))) knowledgeFiles++;
           const rulesDir = join11(projectPath, ".cursor", "rules");
-          if (existsSync6(rulesDir)) {
+          if (existsSync7(rulesDir)) {
             for (const f of readdirSync4(rulesDir)) {
               if (f.endsWith(".mdc")) knowledgeFiles++;
             }
@@ -25335,7 +25359,7 @@ var CursorImporter = class {
   }
   async importGlobalRules(db, embed, result) {
     const dbPath = join11(this.configPath, "User", "globalStorage", "state.vscdb");
-    if (!existsSync6(dbPath)) return;
+    if (!existsSync7(dbPath)) return;
     let cursorDb = null;
     try {
       const BetterSqlite3 = (await import("better-sqlite3")).default;
@@ -25365,12 +25389,12 @@ var CursorImporter = class {
   }
   async importProjectRules(db, embed, result) {
     const workspaceDir = join11(this.configPath, "User", "workspaceStorage");
-    if (!existsSync6(workspaceDir)) return;
+    if (!existsSync7(workspaceDir)) return;
     const projectPaths = /* @__PURE__ */ new Set();
     for (const entry of readdirSync4(workspaceDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const wsJson = join11(workspaceDir, entry.name, "workspace.json");
-      if (!existsSync6(wsJson)) continue;
+      if (!existsSync7(wsJson)) continue;
       try {
         const ws = JSON.parse(readFileSync8(wsJson, "utf8"));
         const projectPath = ws.folder ? new URL(ws.folder).pathname : ws.workspace ? new URL(ws.workspace).pathname : null;
@@ -25380,11 +25404,11 @@ var CursorImporter = class {
     }
     for (const projectPath of projectPaths) {
       const legacyPath = join11(projectPath, ".cursorrules");
-      if (existsSync6(legacyPath)) {
+      if (existsSync7(legacyPath)) {
         await this.importRuleFile(db, embed, result, legacyPath, ["cursorrules", "legacy"]);
       }
       const rulesDir = join11(projectPath, ".cursor", "rules");
-      if (existsSync6(rulesDir)) {
+      if (existsSync7(rulesDir)) {
         for (const filename of readdirSync4(rulesDir)) {
           if (!filename.endsWith(".mdc")) continue;
           await this.importRuleFile(db, embed, result, join11(rulesDir, filename), ["cursor-rule"]);
@@ -25418,7 +25442,7 @@ var CursorImporter = class {
 };
 
 // src/importers/cline.ts
-import { existsSync as existsSync7, readdirSync as readdirSync5, readFileSync as readFileSync9 } from "fs";
+import { existsSync as existsSync8, readdirSync as readdirSync5, readFileSync as readFileSync9 } from "fs";
 import { join as join12 } from "path";
 import { homedir as homedir4 } from "os";
 var ClineImporter = class {
@@ -25439,19 +25463,19 @@ var ClineImporter = class {
     this.globalRulesPath = join12(homedir4(), "Documents", "Cline", "Rules");
   }
   detect() {
-    return existsSync7(this.dataPath) || existsSync7(this.legacyPath);
+    return existsSync8(this.dataPath) || existsSync8(this.legacyPath);
   }
   scan() {
     let knowledgeFiles = 0;
     let sessionFiles = 0;
     const ruleDirs = [this.globalRulesPath, join12(homedir4(), "Cline", "Rules")];
     for (const dir of ruleDirs) {
-      if (existsSync7(dir)) knowledgeFiles += countFiles(dir, [".md", ".txt"]);
+      if (existsSync8(dir)) knowledgeFiles += countFiles(dir, [".md", ".txt"]);
     }
     const stateDir = this.resolveStateDir();
     if (stateDir) {
       const historyPath = join12(stateDir, "taskHistory.json");
-      if (existsSync7(historyPath)) {
+      if (existsSync8(historyPath)) {
         try {
           const items = JSON.parse(readFileSync9(historyPath, "utf8"));
           sessionFiles = items.length;
@@ -25460,7 +25484,7 @@ var ClineImporter = class {
       }
     }
     const mcpSettings = join12(this.resolveDataDir() ?? "", "settings", "cline_mcp_settings.json");
-    if (existsSync7(mcpSettings)) knowledgeFiles++;
+    if (existsSync8(mcpSettings)) knowledgeFiles++;
     return { memoryFiles: 0, knowledgeFiles, sessionFiles };
   }
   async importMemories(_db2, _embed, _project) {
@@ -25473,15 +25497,15 @@ var ClineImporter = class {
     return result;
   }
   resolveDataDir() {
-    if (existsSync7(this.dataPath)) return this.dataPath;
-    if (existsSync7(this.legacyPath)) return this.legacyPath;
+    if (existsSync8(this.dataPath)) return this.dataPath;
+    if (existsSync8(this.legacyPath)) return this.legacyPath;
     return null;
   }
   resolveStateDir() {
     const dataDir = this.resolveDataDir();
     if (!dataDir) return null;
     const newState = join12(dataDir, "state");
-    if (existsSync7(newState)) return newState;
+    if (existsSync8(newState)) return newState;
     return dataDir;
   }
   async importGlobalRules(db, embed, result) {
@@ -25490,7 +25514,7 @@ var ClineImporter = class {
       join12(homedir4(), "Cline", "Rules")
     ];
     for (const dir of ruleDirs) {
-      if (!existsSync7(dir)) continue;
+      if (!existsSync8(dir)) continue;
       for (const filename of readdirSync5(dir)) {
         if (!filename.endsWith(".md") && !filename.endsWith(".txt")) continue;
         const filePath = join12(dir, filename);
@@ -25520,7 +25544,7 @@ var ClineImporter = class {
     const stateDir = this.resolveStateDir();
     if (!stateDir) return;
     const historyPath = join12(stateDir, "taskHistory.json");
-    if (!existsSync7(historyPath)) return;
+    if (!existsSync8(historyPath)) return;
     let items;
     try {
       items = JSON.parse(readFileSync9(historyPath, "utf8"));
@@ -25559,7 +25583,7 @@ var ClineImporter = class {
 };
 function countFiles(dir, extensions) {
   let count = 0;
-  if (!existsSync7(dir)) return count;
+  if (!existsSync8(dir)) return count;
   for (const f of readdirSync5(dir)) {
     if (extensions.some((ext) => f.endsWith(ext))) count++;
   }
@@ -25567,7 +25591,7 @@ function countFiles(dir, extensions) {
 }
 
 // src/importers/opencode.ts
-import { existsSync as existsSync8, readdirSync as readdirSync6, readFileSync as readFileSync10 } from "fs";
+import { existsSync as existsSync9, readdirSync as readdirSync6, readFileSync as readFileSync10 } from "fs";
 import { join as join13 } from "path";
 import { homedir as homedir5 } from "os";
 var OpenCodeImporter = class {
@@ -25585,14 +25609,14 @@ var OpenCodeImporter = class {
     );
   }
   detect() {
-    return existsSync8(this.dataPath) || existsSync8(this.configPath);
+    return existsSync9(this.dataPath) || existsSync9(this.configPath);
   }
   scan() {
     let knowledgeFiles = 0;
     let sessionFiles = 0;
-    if (existsSync8(join13(this.configPath, "AGENTS.md"))) knowledgeFiles++;
+    if (existsSync9(join13(this.configPath, "AGENTS.md"))) knowledgeFiles++;
     const dbPath = join13(this.dataPath, "opencode.db");
-    if (existsSync8(dbPath)) sessionFiles = 1;
+    if (existsSync9(dbPath)) sessionFiles = 1;
     return { memoryFiles: 0, knowledgeFiles, sessionFiles };
   }
   async importMemories(_db2, _embed, _project) {
@@ -25606,7 +25630,7 @@ var OpenCodeImporter = class {
   }
   async importAgentsMd(db, embed, result) {
     const agentsMdPath = join13(this.configPath, "AGENTS.md");
-    if (!existsSync8(agentsMdPath)) return;
+    if (!existsSync9(agentsMdPath)) return;
     try {
       const raw = readFileSync10(agentsMdPath, "utf8");
       const hash2 = contentHash(raw);
@@ -25632,30 +25656,30 @@ var OpenCodeImporter = class {
     const projectPaths = await this.discoverProjects();
     for (const projectPath of projectPaths) {
       const openCodeDir = join13(projectPath, ".opencode");
-      if (!existsSync8(openCodeDir)) continue;
+      if (!existsSync9(openCodeDir)) continue;
       const agentDir = join13(openCodeDir, "agent");
-      if (existsSync8(agentDir)) {
+      if (existsSync9(agentDir)) {
         await this.importMdDir(db, embed, result, agentDir, ["opencode-agent"]);
       }
       const commandDir = join13(openCodeDir, "command");
-      if (existsSync8(commandDir)) {
+      if (existsSync9(commandDir)) {
         await this.importMdDir(db, embed, result, commandDir, ["opencode-command"]);
       }
       const projectAgentsMd = join13(projectPath, "AGENTS.md");
-      if (existsSync8(projectAgentsMd)) {
+      if (existsSync9(projectAgentsMd)) {
         await this.importSingleFile(db, embed, result, projectAgentsMd, ["agents-md", "project"]);
       }
     }
   }
   async discoverProjects() {
     const dbPath = join13(this.dataPath, "opencode.db");
-    if (!existsSync8(dbPath)) return [];
+    if (!existsSync9(dbPath)) return [];
     let ocDb = null;
     try {
       const BetterSqlite3 = (await import("better-sqlite3")).default;
       ocDb = new BetterSqlite3(dbPath, { readonly: true });
       const rows = ocDb.prepare("SELECT worktree FROM project").all();
-      return rows.map((r) => r.worktree).filter((p) => existsSync8(p));
+      return rows.map((r) => r.worktree).filter((p) => existsSync9(p));
     } catch {
       return [];
     } finally {
@@ -25694,7 +25718,7 @@ var OpenCodeImporter = class {
 };
 
 // src/importers/hermes.ts
-import { existsSync as existsSync9, readdirSync as readdirSync7, readFileSync as readFileSync11 } from "fs";
+import { existsSync as existsSync10, readdirSync as readdirSync7, readFileSync as readFileSync11 } from "fs";
 import { join as join14 } from "path";
 import { homedir as homedir6 } from "os";
 var HermesImporter = class {
@@ -25704,27 +25728,27 @@ var HermesImporter = class {
     this.basePath = basePath ?? (process.env["HERMES_HOME"] || join14(homedir6(), ".hermes"));
   }
   detect() {
-    return existsSync9(this.basePath) && (existsSync9(join14(this.basePath, "state.db")) || existsSync9(join14(this.basePath, "memories")) || existsSync9(join14(this.basePath, "config.yaml")));
+    return existsSync10(this.basePath) && (existsSync10(join14(this.basePath, "state.db")) || existsSync10(join14(this.basePath, "memories")) || existsSync10(join14(this.basePath, "config.yaml")));
   }
   scan() {
     let memoryFiles = 0;
     let knowledgeFiles = 0;
     let sessionFiles = 0;
     const memoriesDir = join14(this.basePath, "memories");
-    if (existsSync9(memoriesDir)) {
-      if (existsSync9(join14(memoriesDir, "MEMORY.md"))) memoryFiles++;
-      if (existsSync9(join14(memoriesDir, "USER.md"))) memoryFiles++;
+    if (existsSync10(memoriesDir)) {
+      if (existsSync10(join14(memoriesDir, "MEMORY.md"))) memoryFiles++;
+      if (existsSync10(join14(memoriesDir, "USER.md"))) memoryFiles++;
     }
     const skillsDir = join14(this.basePath, "skills");
-    if (existsSync9(skillsDir)) {
+    if (existsSync10(skillsDir)) {
       for (const entry of readdirSync7(skillsDir, { withFileTypes: true })) {
-        if (entry.isDirectory() && existsSync9(join14(skillsDir, entry.name, "SKILL.md"))) {
+        if (entry.isDirectory() && existsSync10(join14(skillsDir, entry.name, "SKILL.md"))) {
           knowledgeFiles++;
         }
       }
     }
-    if (existsSync9(join14(this.basePath, "SOUL.md"))) knowledgeFiles++;
-    if (existsSync9(join14(this.basePath, "state.db"))) sessionFiles = 1;
+    if (existsSync10(join14(this.basePath, "SOUL.md"))) knowledgeFiles++;
+    if (existsSync10(join14(this.basePath, "state.db"))) sessionFiles = 1;
     return { memoryFiles, knowledgeFiles, sessionFiles };
   }
   async importMemories(db, embed, _project) {
@@ -25748,14 +25772,14 @@ var HermesImporter = class {
   async importKnowledge(db, embed) {
     const result = { imported: 0, skipped: 0, errors: [] };
     const soulPath = join14(this.basePath, "SOUL.md");
-    if (existsSync9(soulPath)) {
+    if (existsSync10(soulPath)) {
       await this.importSingleFile(db, embed, result, soulPath, "warm", ["hermes-soul"]);
     }
     await this.importSkills(db, embed, result);
     return result;
   }
   async importMemoryFile(db, embed, result, filePath, tags) {
-    if (!existsSync9(filePath)) return;
+    if (!existsSync10(filePath)) return;
     try {
       const raw = readFileSync11(filePath, "utf8");
       const entries = raw.split(/\n§\n/).map((e) => e.trim()).filter(Boolean);
@@ -25782,11 +25806,11 @@ var HermesImporter = class {
   }
   async importSkills(db, embed, result) {
     const skillsDir = join14(this.basePath, "skills");
-    if (!existsSync9(skillsDir)) return;
+    if (!existsSync10(skillsDir)) return;
     for (const entry of readdirSync7(skillsDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const skillPath = join14(skillsDir, entry.name, "SKILL.md");
-      if (!existsSync9(skillPath)) continue;
+      if (!existsSync10(skillPath)) continue;
       await this.importSingleFile(db, embed, result, skillPath, "cold", ["hermes-skill", entry.name]);
     }
   }
@@ -26012,7 +26036,7 @@ async function sweepWarmTier(db, embed, config2, sessionId) {
 }
 
 // src/importers/project-docs.ts
-import { existsSync as existsSync10, readFileSync as readFileSync12, readdirSync as readdirSync8, statSync as statSync5 } from "fs";
+import { existsSync as existsSync11, readFileSync as readFileSync12, readdirSync as readdirSync8, statSync as statSync5 } from "fs";
 import { join as join15, basename as basename4 } from "path";
 import { createHash as createHash4 } from "crypto";
 var DOC_FILES = ["README.md", "CONTRIBUTING.md", "CLAUDE.md", "AGENTS.md"];
@@ -26039,11 +26063,11 @@ async function ingestProjectDocs(db, embed, cwd) {
   const filesToIngest = [];
   for (const file2 of DOC_FILES) {
     const path = join15(cwd, file2);
-    if (existsSync10(path)) filesToIngest.push(path);
+    if (existsSync11(path)) filesToIngest.push(path);
   }
   for (const dir of DOC_DIRS) {
     const dirPath = join15(cwd, dir);
-    if (existsSync10(dirPath) && statSync5(dirPath).isDirectory()) {
+    if (existsSync11(dirPath) && statSync5(dirPath).isDirectory()) {
       collectMarkdownFiles(dirPath, filesToIngest);
     }
   }
@@ -26117,8 +26141,8 @@ function setMetaValue(db, key, value) {
   ).run(key, value);
 }
 function getPackageVersion() {
-  const pkgPath = resolve4(PACKAGE_ROOT3, "package.json");
-  const pkg = JSON.parse(readFileSync13(pkgPath, "utf-8"));
+  const pkgPath2 = resolve4(PACKAGE_ROOT3, "package.json");
+  const pkg = JSON.parse(readFileSync13(pkgPath2, "utf-8"));
   return pkg.version;
 }
 async function runSmokeTest(db, embed, currentVersion) {

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.6.7 - 2026-04-06
+
+### Fixed
+- `session_start` no longer fails with `ENOENT ... models/registry.json` on marketplace installs. Root cause: `src/embedding/registry.ts` computed the registry path with `../../models/registry.json` relative to `import.meta.url`, which was correct for the source tree but wrong after `tsup` bundles the server to a single `dist/index.js` — the resolver walked one level too many and escaped the version-scoped plugin directory. Replaced with a `pkgPath()` helper that walks up to `package.json` and works identically in source, bundled, and sub-bundled layouts.
+
+### Added
+- New `tests/dist-smoke.test.ts` regression test: spawns the built `dist/index.js` as a real MCP subprocess and calls `session_start` against it, so bundler-layout regressions of this kind fail loudly before publish. Wired into `prepublishOnly` via a new `test:dist` npm script. Unit tests previously exercised only the source tree, which is why 0.6.6 shipped broken.
+
 ## 0.6.6 - 2026-04-06
 
 ### Fixed
