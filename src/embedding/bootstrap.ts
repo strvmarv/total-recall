@@ -1,6 +1,9 @@
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { getModelSpec, expandUrl } from "./registry.js";
-import { getModelPath, isModelStructurallyValid, isModelChecksumValid, downloadModel } from "./model-manager.js";
+import { getModelPath, getUserModelPath, isModelStructurallyValid, isModelChecksumValid, downloadModel } from "./model-manager.js";
 import { ModelNotReadyError } from "./errors.js";
+import * as lockfile from "proper-lockfile";
 import type { ModelSpec } from "./registry.js";
 import type { DownloadProgress } from "./model-manager.js";
 
@@ -22,6 +25,22 @@ export interface BootstrapStatus {
   error?: { reason: "missing" | "downloading" | "failed" | "corrupted"; message: string };
 }
 
+export interface LockHandle {
+  release: () => Promise<void>;
+}
+
+export type LockAcquirer = (targetDir: string) => Promise<LockHandle>;
+
+const defaultAcquireLock: LockAcquirer = async (targetDir: string) => {
+  // Ensure directory exists before proper-lockfile tries to create the lockfile
+  mkdirSync(targetDir, { recursive: true });
+  const release = await lockfile.lock(targetDir, {
+    lockfilePath: join(targetDir, ".bootstrap.lock"),
+    retries: { retries: 60, minTimeout: 1000, maxTimeout: 1000 },
+  });
+  return { release: async () => { await release(); } };
+};
+
 export interface BootstrapOptions {
   /** Override for tests; defaults to real registry getModelSpec */
   getSpec?: (name: string) => ModelSpec;
@@ -36,6 +55,10 @@ export interface BootstrapOptions {
     modelName: string,
     options: { onProgress?: (p: DownloadProgress) => void }
   ) => Promise<string>;
+  /** Override for tests; defaults to proper-lockfile-based acquirer */
+  acquireLock?: LockAcquirer;
+  /** Override for tests; defaults to real getUserModelPath from model-manager */
+  getUserModelPath?: (name: string) => string;
 }
 
 /**
@@ -75,20 +98,24 @@ export class ModelBootstrap {
 
   private readonly getSpec: (name: string) => ModelSpec;
   private readonly getModelPath: (name: string) => string;
+  private readonly getUserModelPath: (name: string) => string;
   private readonly isStructurallyValid: (modelPath: string, spec: ModelSpec) => boolean;
   private readonly isChecksumValid: (modelPath: string, spec: ModelSpec) => Promise<boolean>;
   private readonly download: (
     modelName: string,
     options: { onProgress?: (p: DownloadProgress) => void }
   ) => Promise<string>;
+  private readonly acquireLock: LockAcquirer;
 
   constructor(modelName: string, options?: BootstrapOptions) {
     this.status = { state: "idle", modelName };
     this.getSpec = options?.getSpec ?? getModelSpec;
     this.getModelPath = options?.getModelPath ?? getModelPath;
+    this.getUserModelPath = options?.getUserModelPath ?? getUserModelPath;
     this.isStructurallyValid = options?.isStructurallyValid ?? isModelStructurallyValid;
     this.isChecksumValid = options?.isChecksumValid ?? isModelChecksumValid;
     this.download = options?.download ?? ((name, opts) => downloadModel(name, opts));
+    this.acquireLock = options?.acquireLock ?? defaultAcquireLock;
   }
 
   getStatus(): BootstrapStatus {
@@ -132,6 +159,7 @@ export class ModelBootstrap {
 
     const spec = this.getSpec(modelName);
     const modelPath = this.getModelPath(modelName);
+    const userModelPath = this.getUserModelPath(modelName);
 
     const structuralOk = this.isStructurallyValid(modelPath, spec);
     const checksumOk = structuralOk && await this.isChecksumValid(modelPath, spec);
@@ -143,10 +171,35 @@ export class ModelBootstrap {
       return modelPath;
     }
 
-    // Need to download
+    // Need to download — acquire the cross-process lock first
     this.status.state = "downloading";
 
+    let lockHandle: LockHandle;
     try {
+      lockHandle = await this.acquireLock(userModelPath);
+    } catch (err) {
+      // Lock acquisition failed (e.g. timeout after 60s waiting for another process)
+      this.status.state = "failed";
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.status.error = { reason: "failed", message: errMsg };
+      this.inFlight = null;
+      const hint = "Another process may be downloading the model; retry shortly.";
+      throw new ModelNotReadyError({ modelName, reason: "failed", hint, cause: err });
+    }
+
+    try {
+      // Post-lock re-check: another process may have completed the download while we waited
+      const postLockStructuralOk = this.isStructurallyValid(modelPath, spec);
+      const postLockChecksumOk = postLockStructuralOk && await this.isChecksumValid(modelPath, spec);
+
+      if (postLockStructuralOk && postLockChecksumOk) {
+        this.status.state = "ready";
+        this.status.modelPath = modelPath;
+        this.inFlight = null;
+        return modelPath;
+      }
+
+      // Proceed with actual download
       const resolvedPath = await this.download(modelName, {
         onProgress: (p: DownloadProgress) => {
           this.status.progress = p;
@@ -168,6 +221,8 @@ export class ModelBootstrap {
 
       const hint = buildManualInstallHint(modelName, spec, modelPath);
       throw new ModelNotReadyError({ modelName, reason, hint, cause: err });
+    } finally {
+      await lockHandle.release();
     }
   }
 }

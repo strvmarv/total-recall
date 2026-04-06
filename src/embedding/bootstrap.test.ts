@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { ModelBootstrap, buildManualInstallHint } from "./bootstrap.js";
-import type { BootstrapOptions } from "./bootstrap.js";
+import type { BootstrapOptions, LockAcquirer } from "./bootstrap.js";
 import type { ModelSpec } from "./registry.js";
 import { ModelNotReadyError } from "./errors.js";
 
@@ -210,6 +210,120 @@ describe("ModelBootstrap", () => {
     expect(hint).toContain("https://example.com/v1/tokenizer.json");
     expect(hint).toContain("/tmp/test-model");
     expect(hint.toLowerCase()).toMatch(/manual/);
+  });
+
+  it("lock acquired and released on happy download", async () => {
+    const release = vi.fn().mockResolvedValue(undefined);
+    const acquireLock: LockAcquirer = vi.fn().mockResolvedValue({ release });
+    const download = vi.fn().mockResolvedValue("/fake/path");
+
+    const bootstrap = new ModelBootstrap(
+      "test-model",
+      makeOpts({
+        isStructurallyValid: () => false,
+        download,
+        acquireLock,
+        getUserModelPath: () => "/fake/user/path",
+      }),
+    );
+
+    await bootstrap.ensureReady();
+
+    expect(acquireLock).toHaveBeenCalledWith("/fake/user/path");
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it("lock released even on download failure", async () => {
+    const release = vi.fn().mockResolvedValue(undefined);
+    const acquireLock: LockAcquirer = vi.fn().mockResolvedValue({ release });
+    const download = vi.fn().mockRejectedValue(new Error("ECONNREFUSED"));
+
+    const bootstrap = new ModelBootstrap(
+      "test-model",
+      makeOpts({
+        isStructurallyValid: () => false,
+        download,
+        acquireLock,
+        getUserModelPath: () => "/fake/user/path",
+      }),
+    );
+
+    await expect(bootstrap.ensureReady()).rejects.toBeInstanceOf(ModelNotReadyError);
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it("post-lock re-check short-circuits download", async () => {
+    let callCount = 0;
+    const isStructurallyValid = vi.fn().mockImplementation(() => {
+      callCount++;
+      // First call (pre-lock check): false. Second call (post-lock re-check): true.
+      return callCount >= 2;
+    });
+    const isChecksumValid = vi.fn().mockResolvedValue(true);
+    const release = vi.fn().mockResolvedValue(undefined);
+    const acquireLock: LockAcquirer = vi.fn().mockResolvedValue({ release });
+    const download = vi.fn().mockResolvedValue("/fake/path");
+
+    const bootstrap = new ModelBootstrap(
+      "test-model",
+      makeOpts({
+        isStructurallyValid,
+        isChecksumValid,
+        download,
+        acquireLock,
+        getUserModelPath: () => "/fake/user/path",
+      }),
+    );
+
+    const result = await bootstrap.ensureReady();
+    expect(result).toBe("/fake/path");
+    expect(bootstrap.getStatus().state).toBe("ready");
+    expect(download).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it("lock acquisition timeout → ModelNotReadyError with reason failed", async () => {
+    const acquireLock: LockAcquirer = vi.fn().mockRejectedValue(new Error("ELOCKED: timeout"));
+    const download = vi.fn();
+
+    const bootstrap = new ModelBootstrap(
+      "test-model",
+      makeOpts({
+        isStructurallyValid: () => false,
+        download,
+        acquireLock,
+        getUserModelPath: () => "/fake/user/path",
+      }),
+    );
+
+    let thrown: ModelNotReadyError | undefined;
+    try {
+      await bootstrap.ensureReady();
+    } catch (err) {
+      thrown = err as ModelNotReadyError;
+    }
+
+    expect(thrown).toBeInstanceOf(ModelNotReadyError);
+    expect(thrown!.reason).toBe("failed");
+    expect(thrown!.hint).toMatch(/another process/i);
+    expect(download).not.toHaveBeenCalled();
+  });
+
+  it("lock not acquired when already-valid (no download needed)", async () => {
+    const acquireLock: LockAcquirer = vi.fn().mockResolvedValue({ release: vi.fn() });
+
+    const bootstrap = new ModelBootstrap(
+      "test-model",
+      makeOpts({
+        isStructurallyValid: () => true,
+        isChecksumValid: async () => true,
+        acquireLock,
+        getUserModelPath: () => "/fake/user/path",
+      }),
+    );
+
+    await bootstrap.ensureReady();
+    expect(acquireLock).not.toHaveBeenCalled();
   });
 
   it("progress is captured and kept after ready", async () => {
