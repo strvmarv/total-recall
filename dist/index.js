@@ -8016,8 +8016,9 @@ import * as ort from "onnxruntime-node";
 
 // src/embedding/model-manager.ts
 import { existsSync as existsSync3, mkdirSync as mkdirSync3, readdirSync } from "fs";
-import { readFileSync as readFileSync2, statSync } from "fs";
-import { writeFile } from "fs/promises";
+import { readFileSync as readFileSync2, statSync, createReadStream } from "fs";
+import { writeFile, rename, unlink } from "fs/promises";
+import { createHash as createHash2 } from "crypto";
 import { join as join3, dirname } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 var HF_BASE_URL = "https://huggingface.co";
@@ -24741,7 +24742,7 @@ import { join as join7 } from "path";
 import { homedir } from "os";
 
 // src/importers/import-utils.ts
-import { createHash as createHash2 } from "crypto";
+import { createHash as createHash3 } from "crypto";
 function parseFrontmatter(raw) {
   const normalised = raw.replace(/\r\n/g, "\n");
   const match = normalised.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
@@ -24757,10 +24758,10 @@ function parseFrontmatter(raw) {
   return { frontmatter, content: match[2] };
 }
 function contentHash(text) {
-  return createHash2("sha256").update(text).digest("hex");
+  return createHash3("sha256").update(text).digest("hex");
 }
 function importLogId(sourceTool, sourcePath, hash2) {
-  return createHash2("md5").update(`${sourceTool}:${sourcePath}:${hash2}`).digest("hex");
+  return createHash3("md5").update(`${sourceTool}:${sourcePath}:${hash2}`).digest("hex");
 }
 function isAlreadyImported(db, hash2) {
   const row = db.prepare("SELECT id FROM import_log WHERE content_hash = ?").get(hash2);
@@ -25679,18 +25680,18 @@ async function sweepWarmTier(db, embed, config2, sessionId) {
 // src/importers/project-docs.ts
 import { existsSync as existsSync10, readFileSync as readFileSync12, readdirSync as readdirSync9, statSync as statSync5 } from "fs";
 import { join as join13, basename as basename4 } from "path";
-import { createHash as createHash3 } from "crypto";
+import { createHash as createHash4 } from "crypto";
 var DOC_FILES = ["README.md", "CONTRIBUTING.md", "CLAUDE.md", "AGENTS.md"];
 var DOC_DIRS = ["docs", "doc"];
 function contentHash2(content) {
-  return createHash3("sha256").update(content).digest("hex");
+  return createHash4("sha256").update(content).digest("hex");
 }
 function isAlreadyIngested(db, hash2) {
   const row = db.prepare("SELECT id FROM import_log WHERE content_hash = ? AND source_tool = 'project-docs'").get(hash2);
   return row !== void 0;
 }
 function logIngest(db, sourcePath, hash2, entryId) {
-  const id = createHash3("md5").update(`project-docs:${sourcePath}:${hash2}`).digest("hex");
+  const id = createHash4("md5").update(`project-docs:${sourcePath}:${hash2}`).digest("hex");
   db.prepare(`
     INSERT OR IGNORE INTO import_log
       (id, timestamp, source_tool, source_path, content_hash, target_entry_id, target_tier, target_type)

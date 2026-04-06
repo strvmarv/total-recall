@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
-import { readFileSync, statSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { readFileSync, statSync, createReadStream } from "node:fs";
+import { writeFile, rename, unlink } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getDataDir } from "../config.js";
@@ -97,4 +98,29 @@ export async function downloadModel(modelName: string): Promise<string> {
   await validateDownload(modelPath);
 
   return modelPath;
+}
+
+export async function sha256File(path: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash("sha256");
+    const stream = createReadStream(path);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("end", () => resolve(hash.digest("hex")));
+    stream.on("error", reject);
+  });
+}
+
+export async function writeFileAtomic(dest: string, data: Buffer | string): Promise<void> {
+  const tmp = `${dest}.tmp.${process.pid}.${Date.now()}`;
+  try {
+    await writeFile(tmp, data);
+    // On Windows, rename fails if dest exists; remove first.
+    if (existsSync(dest)) {
+      try { await unlink(dest); } catch { /* ignore */ }
+    }
+    await rename(tmp, dest);
+  } catch (err) {
+    try { await unlink(tmp); } catch { /* ignore */ }
+    throw err;
+  }
 }
