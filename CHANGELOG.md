@@ -5,6 +5,32 @@
 
 * use absolute path via CLAUDE_PLUGIN_ROOT in .mcp.json to fix MCP server launch failure when cwd is not the plugin directory
 
+## [0.5.7](https://github.com/strvmarv/total-recall/compare/v0.5.6...v0.5.7) (2026-04-05)
+
+### Features
+
+* add CI smoke benchmark script ([595e8f7](https://github.com/strvmarv/total-recall/commit/595e8f7))
+
+### Bug Fixes
+
+* resolve CodeQL security alerts ([7b2905e](https://github.com/strvmarv/total-recall/commit/7b2905e))
+* handle empty changelog in publish pipeline ([dc80828](https://github.com/strvmarv/total-recall/commit/dc80828))
+
+### Chores
+
+* bump esbuild in the npm_and_yarn group ([eccaec4](https://github.com/strvmarv/total-recall/commit/eccaec4))
+* add CI smoke benchmark step to CI pipeline ([58cee2d](https://github.com/strvmarv/total-recall/commit/58cee2d))
+* bump testTimeout to 20s for vitest 4 compatibility ([d8af19e](https://github.com/strvmarv/total-recall/commit/d8af19e))
+
+## [0.5.6](https://github.com/strvmarv/total-recall/compare/v0.5.5...v0.5.6) (2026-04-05)
+
+### Chores
+
+* add conventional-changelog-cli dev dependency ([ed38ce8](https://github.com/strvmarv/total-recall/commit/ed38ce8))
+* backfill CHANGELOG.md from existing git history ([293d9bb](https://github.com/strvmarv/total-recall/commit/293d9bb))
+* add GitHub Release creation and CHANGELOG.md update to publish pipeline ([b104186](https://github.com/strvmarv/total-recall/commit/b104186))
+* audit fixes for README, AGENTS.md, and skill visibility ([f55d74e](https://github.com/strvmarv/total-recall/commit/f55d74e))
+
 ## [0.5.5](https://github.com/strvmarv/total-recall/compare/v0.5.4...v0.5.5) (2026-04-05)
 
 ### Bug Fixes
