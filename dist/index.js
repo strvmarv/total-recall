@@ -29,7 +29,7 @@ function setNestedKey(obj, dotKey, value) {
   let current = result;
   for (let i = 0; i < parts.length - 1; i++) {
     const part = parts[i];
-    if (DANGEROUS_KEYS.has(part)) {
+    if (!isSafeKey(part)) {
       throw new TypeError(`Invalid config key segment: "${part}"`);
     }
     if (typeof current[part] !== "object" || current[part] === null) {
@@ -40,7 +40,7 @@ function setNestedKey(obj, dotKey, value) {
     current = current[part];
   }
   const lastKey = parts[parts.length - 1];
-  if (DANGEROUS_KEYS.has(lastKey)) {
+  if (!isSafeKey(lastKey)) {
     throw new TypeError(`Invalid config key segment: "${lastKey}"`);
   }
   current[lastKey] = value;
@@ -84,11 +84,13 @@ function createConfigSnapshot(db, config, name) {
   ).run(id, name ?? null, Date.now(), configJson);
   return id;
 }
-var DANGEROUS_KEYS = /* @__PURE__ */ new Set(["__proto__", "constructor", "prototype"]);
+function isSafeKey(key) {
+  return key !== "__proto__" && key !== "constructor" && key !== "prototype";
+}
 function deepMerge(target, source) {
   const result = { ...target };
   for (const key of Object.keys(source)) {
-    if (DANGEROUS_KEYS.has(key)) continue;
+    if (!isSafeKey(key)) continue;
     if (source[key] !== null && typeof source[key] === "object" && !Array.isArray(source[key]) && typeof target[key] === "object" && target[key] !== null) {
       result[key] = deepMerge(
         target[key],
