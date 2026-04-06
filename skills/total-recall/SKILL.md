@@ -1,6 +1,6 @@
 ---
 name: total-recall
-description: Manage total-recall memory system. Subcommands: status, search, store, forget, inspect, promote, demote, history, lineage, export, import, ingest, kb, compact, eval, config. Also governs automatic memory capture, retrieval, and compaction.
+description: Manage total-recall memory system. Subcommands: help, status, search, store, forget, inspect, promote, demote, history, lineage, export, import, ingest, kb, compact, eval, config. Also governs automatic memory capture, retrieval, and compaction.
 ---
 
 **IMMEDIATE ACTION REQUIRED — before responding to the user's first message, call the `mcp__total-recall__session_start` MCP tool. This syncs host imports and loads hot tier context. If `session_start` has already run server-side, the call returns cached results instantly.**
@@ -67,6 +67,35 @@ On each user message that is a question or task request:
 ## Commands
 
 `/total-recall <subcommand> [args]`
+
+### help
+
+Print the command reference table below. Do not call any MCP tools.
+
+| Command | Purpose |
+|---|---|
+| `help` | Show this command reference |
+| `status` | Dashboard with tier sizes, session ID, DB stats |
+| `search <query>` | Semantic search across all tiers |
+| `store <content>` | Store a memory (`--tier`, `--tags`, `--type`) |
+| `forget <query>` | Find and delete memories (with confirmation) |
+| `inspect <id>` | Full details for a single entry |
+| `promote <id>` | Move an entry up one tier |
+| `demote <id>` | Move an entry down one tier |
+| `history` | Timeline of recent tier movements |
+| `lineage <id>` | Compaction ancestry tree for an entry |
+| `export` | Export memories to JSON (`--tiers`, `--types`) |
+| `import <path>` | Import memories from a JSON file |
+| `import-host` | Import from host tools (Claude Code, etc.) |
+| `ingest <path>` | Ingest a file or directory into the knowledge base |
+| `kb search <query>` | Search the knowledge base |
+| `kb list` | List KB collections |
+| `kb refresh <col>` | Re-ingest a KB collection |
+| `kb remove <id>` | Remove a KB entry |
+| `compact` | Run hot-tier compaction now |
+| `eval` | Retrieval quality report (`--benchmark`, `--compare`, `--snapshot`) |
+| `config [get\|set]` | View or update configuration |
+| `update` | Pull latest plugin from git |
 
 ### status
 
