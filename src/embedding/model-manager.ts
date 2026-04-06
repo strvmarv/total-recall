@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { readFileSync, statSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { getDataDir } from "../config.js";
 
 const HF_BASE_URL = "https://huggingface.co";
@@ -11,7 +12,7 @@ const HF_REVISION = "main"; // Can be changed to a specific commit hash
 
 /** Bundled model path (shipped with the package) */
 function getBundledModelPath(modelName: string): string {
-  const distDir = new URL(".", import.meta.url).pathname;
+  const distDir = dirname(fileURLToPath(import.meta.url));
   return join(distDir, "..", "models", modelName);
 }
 

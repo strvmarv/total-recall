@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import type Database from "better-sqlite3";
 import type { MissEntry } from "./metrics.js";
 
-const __dirname = fileURLToPath(new URL(".", import.meta.url));
-const PACKAGE_ROOT = __dirname.endsWith("dist/") || __dirname.endsWith("dist")
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PACKAGE_ROOT = basename(__dirname) === "dist"
   ? resolve(__dirname, "..")
   : resolve(__dirname, "..", "..");
 

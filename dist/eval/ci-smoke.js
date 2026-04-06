@@ -1,6 +1,6 @@
 // src/eval/ci-smoke.ts
-import { resolve } from "path";
-import { fileURLToPath } from "url";
+import { resolve, dirname as dirname2, basename } from "path";
+import { fileURLToPath as fileURLToPath2 } from "url";
 import Database from "better-sqlite3";
 import * as sqliteVec from "sqlite-vec";
 
@@ -269,11 +269,12 @@ import * as ort from "onnxruntime-node";
 import { existsSync as existsSync2, mkdirSync as mkdirSync2, readdirSync } from "fs";
 import { readFileSync as readFileSync2, statSync } from "fs";
 import { writeFile } from "fs/promises";
-import { join as join2 } from "path";
+import { join as join2, dirname } from "path";
+import { fileURLToPath } from "url";
 var HF_BASE_URL = "https://huggingface.co";
 var HF_REVISION = "main";
 function getBundledModelPath(modelName) {
-  const distDir = new URL(".", import.meta.url).pathname;
+  const distDir = dirname(fileURLToPath(import.meta.url));
   return join2(distDir, "..", "models", modelName);
 }
 function getUserModelPath(modelName) {
@@ -910,8 +911,8 @@ async function runBenchmark(db, embed, opts) {
 
 // src/eval/ci-smoke.ts
 var SMOKE_PASS_THRESHOLD = 0.8;
-var __dirname = fileURLToPath(new URL(".", import.meta.url));
-var PACKAGE_ROOT = __dirname.endsWith("dist/") || __dirname.endsWith("dist") ? resolve(__dirname, "..") : resolve(__dirname, "..", "..");
+var __dirname = dirname2(fileURLToPath2(import.meta.url));
+var PACKAGE_ROOT = basename(__dirname) === "dist" ? resolve(__dirname, "..") : resolve(__dirname, "..", "..");
 async function main() {
   const config = loadConfig();
   const db = new Database(":memory:");

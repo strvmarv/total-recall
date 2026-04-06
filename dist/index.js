@@ -356,11 +356,12 @@ import * as ort from "onnxruntime-node";
 import { existsSync as existsSync3, mkdirSync as mkdirSync3, readdirSync } from "fs";
 import { readFileSync as readFileSync2, statSync } from "fs";
 import { writeFile } from "fs/promises";
-import { join as join3 } from "path";
+import { join as join3, dirname } from "path";
+import { fileURLToPath } from "url";
 var HF_BASE_URL = "https://huggingface.co";
 var HF_REVISION = "main";
 function getBundledModelPath(modelName) {
-  const distDir = new URL(".", import.meta.url).pathname;
+  const distDir = dirname(fileURLToPath(import.meta.url));
   return join3(distDir, "..", "models", modelName);
 }
 function getUserModelPath(modelName) {
@@ -1211,8 +1212,8 @@ function validatePath(value, name) {
       throw new Error(`Access denied: ${name} cannot access ${prefix}`);
     }
   }
-  const basename4 = resolved.split("/").pop() ?? "";
-  if (basename4 === ".env" || basename4 === ".credentials.json") {
+  const basename7 = resolved.split("/").pop() ?? "";
+  if (basename7 === ".env" || basename7 === ".credentials.json") {
     throw new Error(`Access denied: ${name} cannot access sensitive files`);
   }
   return resolved;
@@ -1694,7 +1695,7 @@ import { statSync as statSync4 } from "fs";
 
 // src/ingestion/ingest.ts
 import { readFileSync as readFileSync3, readdirSync as readdirSync2, statSync as statSync3 } from "fs";
-import { join as join6, dirname, basename, extname } from "path";
+import { join as join6, dirname as dirname2, basename, extname } from "path";
 
 // src/ingestion/markdown-parser.ts
 function estimateTokens(text) {
@@ -2167,7 +2168,7 @@ async function ingestFile(db, embed, filePath, collectionId) {
   const chunks = chunkFile(content, filePath, { maxTokens: 512, overlapTokens: 50 });
   let resolvedCollectionId = collectionId;
   if (!resolvedCollectionId) {
-    const dirPath = dirname(filePath);
+    const dirPath = dirname2(filePath);
     const dirName = basename(dirPath);
     resolvedCollectionId = await createCollection(db, embed, {
       name: dirName,
@@ -2533,8 +2534,8 @@ function registerKbTools() {
 }
 
 // src/tools/eval-tools.ts
-import { resolve as resolve3 } from "path";
-import { fileURLToPath as fileURLToPath2 } from "url";
+import { resolve as resolve3, dirname as dirname4, basename as basename3 } from "path";
+import { fileURLToPath as fileURLToPath3 } from "url";
 
 // src/eval/benchmark-runner.ts
 import { readFileSync as readFileSync4 } from "fs";
@@ -2614,10 +2615,10 @@ async function runBenchmark(db, embed, opts) {
 // src/eval/benchmark-candidates.ts
 import { randomUUID as randomUUID4 } from "crypto";
 import { readFileSync as readFileSync5, writeFileSync as writeFileSync2 } from "fs";
-import { resolve as resolve2 } from "path";
-import { fileURLToPath } from "url";
-var __dirname = fileURLToPath(new URL(".", import.meta.url));
-var PACKAGE_ROOT = __dirname.endsWith("dist/") || __dirname.endsWith("dist") ? resolve2(__dirname, "..") : resolve2(__dirname, "..", "..");
+import { resolve as resolve2, dirname as dirname3, basename as basename2 } from "path";
+import { fileURLToPath as fileURLToPath2 } from "url";
+var __dirname = dirname3(fileURLToPath2(import.meta.url));
+var PACKAGE_ROOT = basename2(__dirname) === "dist" ? resolve2(__dirname, "..") : resolve2(__dirname, "..", "..");
 function writeCandidates(db, misses, contexts) {
   const contextMap = new Map(contexts.map((c) => [c.query, c]));
   const upsert = db.prepare(`
@@ -2863,8 +2864,8 @@ function computeCompactionHealth(rows) {
 }
 
 // src/tools/eval-tools.ts
-var __dirname2 = fileURLToPath2(new URL(".", import.meta.url));
-var PACKAGE_ROOT2 = __dirname2.endsWith("dist/") || __dirname2.endsWith("dist") ? resolve3(__dirname2, "..") : resolve3(__dirname2, "..", "..");
+var __dirname2 = dirname4(fileURLToPath3(import.meta.url));
+var PACKAGE_ROOT2 = basename3(__dirname2) === "dist" ? resolve3(__dirname2, "..") : resolve3(__dirname2, "..", "..");
 var EVAL_TOOLS = [
   {
     name: "eval_benchmark",
@@ -3992,7 +3993,7 @@ async function sweepWarmTier(db, embed, config, sessionId) {
 
 // src/importers/project-docs.ts
 import { existsSync as existsSync10, readFileSync as readFileSync12, readdirSync as readdirSync9, statSync as statSync5 } from "fs";
-import { join as join13, basename as basename2 } from "path";
+import { join as join13, basename as basename4 } from "path";
 import { createHash as createHash3 } from "crypto";
 var DOC_FILES = ["README.md", "CONTRIBUTING.md", "CLAUDE.md", "AGENTS.md"];
 var DOC_DIRS = ["docs", "doc"];
@@ -4013,7 +4014,7 @@ function logIngest(db, sourcePath, hash, entryId) {
 }
 async function ingestProjectDocs(db, embed, cwd) {
   const result = { filesIngested: 0, totalChunks: 0, skipped: 0 };
-  const collectionName = `${basename2(cwd)}-project-docs`;
+  const collectionName = `${basename4(cwd)}-project-docs`;
   let collectionId = null;
   const filesToIngest = [];
   for (const file of DOC_FILES) {
@@ -4060,7 +4061,7 @@ function collectMarkdownFiles(dirPath, files) {
 
 // src/utils/project-detect.ts
 import { execFileSync } from "child_process";
-import { basename as basename3 } from "path";
+import { basename as basename5 } from "path";
 function detectProject(cwd) {
   const home = process.env.HOME ?? "";
   if (cwd === home || cwd === "/") return null;
@@ -4071,20 +4072,20 @@ function detectProject(cwd) {
       stdio: ["pipe", "pipe", "pipe"]
     }).toString().trim();
     if (remote) {
-      const name = basename3(remote).replace(/\.git$/, "");
+      const name = basename5(remote).replace(/\.git$/, "");
       if (name) return name;
     }
   } catch {
   }
-  return basename3(cwd) || null;
+  return basename5(cwd) || null;
 }
 
 // src/eval/smoke-test.ts
-import { resolve as resolve4 } from "path";
+import { resolve as resolve4, dirname as dirname5, basename as basename6 } from "path";
 import { readFileSync as readFileSync13 } from "fs";
-import { fileURLToPath as fileURLToPath3 } from "url";
-var __dirname3 = fileURLToPath3(new URL(".", import.meta.url));
-var PACKAGE_ROOT3 = __dirname3.endsWith("dist/") || __dirname3.endsWith("dist") ? resolve4(__dirname3, "..") : resolve4(__dirname3, "..", "..");
+import { fileURLToPath as fileURLToPath4 } from "url";
+var __dirname3 = dirname5(fileURLToPath4(import.meta.url));
+var PACKAGE_ROOT3 = basename6(__dirname3) === "dist" ? resolve4(__dirname3, "..") : resolve4(__dirname3, "..", "..");
 var SMOKE_PASS_THRESHOLD = 0.8;
 function getMetaValue(db, key) {
   const row = db.prepare("SELECT value FROM _meta WHERE key = ?").get(key);

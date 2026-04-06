@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { resolve, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import type Database from "better-sqlite3";
 import type { ToolContext } from "./registry.js";
@@ -9,10 +9,10 @@ import { createConfigSnapshot } from "../config.js";
 import { listCandidates, resolveCandidates } from "../eval/benchmark-candidates.js";
 import { coerceStringArray } from "./validation.js";
 
-const __dirname = fileURLToPath(new URL(".", import.meta.url));
+const __dirname = dirname(fileURLToPath(import.meta.url));
 // In dev: __dirname = src/tools/ (2 levels up to root)
 // In dist: __dirname = dist/ (1 level up to root)
-const PACKAGE_ROOT = __dirname.endsWith("dist/") || __dirname.endsWith("dist")
+const PACKAGE_ROOT = basename(__dirname) === "dist"
   ? resolve(__dirname, "..")
   : resolve(__dirname, "..", "..");
 

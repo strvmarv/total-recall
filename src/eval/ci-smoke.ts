@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { resolve, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import * as sqliteVec from "sqlite-vec";
@@ -9,9 +9,9 @@ import { runBenchmark } from "./benchmark-runner.js";
 
 const SMOKE_PASS_THRESHOLD = 0.8;
 
-const __dirname = fileURLToPath(new URL(".", import.meta.url));
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT =
-  __dirname.endsWith("dist/") || __dirname.endsWith("dist")
+  basename(__dirname) === "dist"
     ? resolve(__dirname, "..")
     : resolve(__dirname, "..", "..");
 

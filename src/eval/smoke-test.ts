@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { resolve, dirname, basename } from "node:path";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type Database from "better-sqlite3";
@@ -6,9 +6,9 @@ import { runBenchmark, type BenchmarkResult } from "./benchmark-runner.js";
 
 type EmbedFn = (text: string) => Float32Array | Promise<Float32Array>;
 
-const __dirname = fileURLToPath(new URL(".", import.meta.url));
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT =
-  __dirname.endsWith("dist/") || __dirname.endsWith("dist")
+  basename(__dirname) === "dist"
     ? resolve(__dirname, "..")
     : resolve(__dirname, "..", "..");
 

@@ -47,6 +47,18 @@ find_node() {
     return 0
   fi
 
+  # Check nvm4w (Windows nvm — Git Bash exposes C:\ as /c/)
+  if [ -x "/c/nvm4w/nodejs/node" ]; then
+    echo "/c/nvm4w/nodejs/node"
+    return 0
+  fi
+
+  # Check MacPorts
+  if [ -x "/opt/local/bin/node" ]; then
+    echo "/opt/local/bin/node"
+    return 0
+  fi
+
   echo ""
   return 1
 }
