@@ -95,7 +95,7 @@ Print the command reference table below. Do not call any MCP tools.
 | `compact` | Run hot-tier compaction now |
 | `eval` | Retrieval quality report (`--benchmark`, `--compare`, `--snapshot`) |
 | `config [get\|set]` | View or update configuration |
-| `update` | Pull latest plugin from git |
+| `update` | Update the plugin to the latest version |
 
 ### status
 
@@ -202,10 +202,28 @@ Call `import_host` to detect and import memories from host tools (Claude Code, C
 
 ### update
 
-Pull the latest version of the plugin from git. Run:
+Update the plugin to the latest published version. The correct mechanism depends on how total-recall is installed:
 
-```bash
-cd "$CLAUDE_PLUGIN_ROOT" && git pull origin main
-```
+1. **Detect the install mode.** Check whether the current plugin directory is a git checkout or a marketplace tarball snapshot:
 
-Report what changed (files updated, new version). Then tell the user to run `/reload-plugins` to apply the changes.
+   ```bash
+   if [ -n "$CLAUDE_PLUGIN_ROOT" ] && [ -d "$CLAUDE_PLUGIN_ROOT/.git" ]; then
+     echo "git-checkout"
+   else
+     echo "marketplace-tarball"
+   fi
+   ```
+
+2. **If `git-checkout`:** run `cd "$CLAUDE_PLUGIN_ROOT" && git pull origin main` and report what changed (files updated, new version).
+
+3. **If `marketplace-tarball`** (the common case for users who installed via `/plugin`): do NOT attempt `git pull` — the cache directory has no `.git` and is managed by Claude Code. Instead, instruct the user to update it via Claude Code itself:
+   - Run `/plugin` (or the equivalent plugin UI in their Claude Code version) and update `total-recall` from the `strvmarv-total-recall-marketplace` marketplace.
+   - After the update downloads, run `/reload-plugins` to apply.
+   - Restart the session if an MCP server needs to re-initialize (e.g., to pick up a new bundled model).
+
+   Also report the latest published version so the user knows the target — check it with:
+   ```bash
+   npm view @strvmarv/total-recall version
+   ```
+
+In both cases, end by reminding the user to run `/reload-plugins` after the update completes.
