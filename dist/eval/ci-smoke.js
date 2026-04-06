@@ -985,19 +985,12 @@ function deepMerge(target, source) {
 
 // src/embedding/embedder.ts
 import { readFile as readFile2 } from "fs/promises";
-import { join as join4 } from "path";
+import { join as join5 } from "path";
 import * as ort from "onnxruntime-node";
 
-// src/embedding/model-manager.ts
-import { existsSync as existsSync2, mkdirSync as mkdirSync2, readdirSync } from "fs";
-import { statSync, createReadStream } from "fs";
-import { writeFile, rename, unlink, readFile } from "fs/promises";
-import { Readable } from "stream";
-import { pipeline } from "stream/promises";
-import { createWriteStream } from "fs";
-import { createHash as createHash2 } from "crypto";
-import { join as join3, dirname as dirname2 } from "path";
-import { fileURLToPath as fileURLToPath3 } from "url";
+// src/embedding/bootstrap.ts
+import { mkdirSync as mkdirSync3 } from "fs";
+import { join as join4 } from "path";
 
 // src/embedding/registry.ts
 import { readFileSync as readFileSync2 } from "fs";
@@ -1046,6 +1039,15 @@ function expandUrl(template, revision) {
 }
 
 // src/embedding/model-manager.ts
+import { existsSync as existsSync2, mkdirSync as mkdirSync2 } from "fs";
+import { statSync, createReadStream } from "fs";
+import { writeFile, rename, unlink, readFile } from "fs/promises";
+import { Readable } from "stream";
+import { pipeline } from "stream/promises";
+import { createWriteStream } from "fs";
+import { createHash as createHash2 } from "crypto";
+import { join as join3, dirname as dirname2 } from "path";
+import { fileURLToPath as fileURLToPath3 } from "url";
 function getBundledModelPath(modelName) {
   const distDir = dirname2(fileURLToPath3(import.meta.url));
   return join3(distDir, "..", "models", modelName);
@@ -1055,17 +1057,12 @@ function getUserModelPath(modelName) {
 }
 function getModelPath(modelName) {
   const bundled = getBundledModelPath(modelName);
-  if (isModelDownloaded(bundled)) return bundled;
-  return getUserModelPath(modelName);
-}
-function isModelDownloaded(modelPath) {
-  if (!existsSync2(modelPath)) return false;
   try {
-    const files = readdirSync(modelPath);
-    return files.some((f) => f.endsWith(".onnx"));
+    const spec = getModelSpec(modelName);
+    if (isModelStructurallyValid(bundled, spec)) return bundled;
   } catch {
-    return false;
   }
+  return getUserModelPath(modelName);
 }
 function sleep(ms) {
   return new Promise((resolve2) => setTimeout(resolve2, ms));
@@ -1205,6 +1202,194 @@ async function writeFileAtomic(dest, data) {
     throw err;
   }
 }
+function isModelStructurallyValid(modelPath, spec) {
+  if (!existsSync2(modelPath)) return false;
+  for (const file of Object.keys(spec.files)) {
+    const p = join3(modelPath, file);
+    if (!existsSync2(p)) return false;
+  }
+  try {
+    const onnx = join3(modelPath, "model.onnx");
+    const size = statSync(onnx).size;
+    return size === spec.sizeBytes;
+  } catch {
+    return false;
+  }
+}
+async function isModelChecksumValid(modelPath, spec) {
+  const sidecarPath = join3(modelPath, ".verified");
+  if (existsSync2(sidecarPath)) {
+    try {
+      const cached2 = (await readFile(sidecarPath, "utf8")).trim();
+      if (cached2 === spec.sha256) return true;
+    } catch {
+    }
+  }
+  const onnxPath = join3(modelPath, "model.onnx");
+  if (!existsSync2(onnxPath)) return false;
+  let computed;
+  try {
+    computed = await sha256File(onnxPath);
+  } catch {
+    return false;
+  }
+  if (computed === spec.sha256) {
+    await writeFileAtomic(sidecarPath, spec.sha256);
+    return true;
+  }
+  return false;
+}
+
+// src/embedding/errors.ts
+var ModelNotReadyError = class extends Error {
+  modelName;
+  reason;
+  hint;
+  cause;
+  constructor(details) {
+    const base = `Model '${details.modelName}' not ready: ${details.reason}`;
+    const msg = details.hint ? `${base} (${details.hint})` : base;
+    super(msg);
+    this.name = "ModelNotReadyError";
+    this.modelName = details.modelName;
+    this.reason = details.reason;
+    this.hint = details.hint;
+    this.cause = details.cause;
+  }
+};
+
+// src/embedding/bootstrap.ts
+import * as lockfile from "proper-lockfile";
+var defaultAcquireLock = async (targetDir) => {
+  mkdirSync3(targetDir, { recursive: true });
+  const release = await lockfile.lock(targetDir, {
+    lockfilePath: join4(targetDir, ".bootstrap.lock"),
+    retries: { retries: 60, minTimeout: 1e3, maxTimeout: 1e3 }
+  });
+  return { release: async () => {
+    await release();
+  } };
+};
+function classifyDownloadError(err) {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/sha256|checksum|hash/i.test(msg)) return "corrupted";
+  return "failed";
+}
+function buildManualInstallHint(modelName, spec, modelPath) {
+  const lines = [
+    `To install ${modelName} manually, place these files in ${modelPath}:`
+  ];
+  for (const [filename, urlTemplate] of Object.entries(spec.files)) {
+    const url = expandUrl(urlTemplate, spec.revision);
+    lines.push(`  - ${filename} : ${url}`);
+  }
+  lines.push("Then retry session_start.");
+  return lines.join("\n");
+}
+var ModelBootstrap = class {
+  status;
+  inFlight = null;
+  getSpec;
+  getModelPath;
+  getUserModelPath;
+  isStructurallyValid;
+  isChecksumValid;
+  download;
+  acquireLock;
+  constructor(modelName, options) {
+    this.status = { state: "idle", modelName };
+    this.getSpec = options?.getSpec ?? getModelSpec;
+    this.getModelPath = options?.getModelPath ?? getModelPath;
+    this.getUserModelPath = options?.getUserModelPath ?? getUserModelPath;
+    this.isStructurallyValid = options?.isStructurallyValid ?? isModelStructurallyValid;
+    this.isChecksumValid = options?.isChecksumValid ?? isModelChecksumValid;
+    this.download = options?.download ?? ((name, opts) => downloadModel(name, opts));
+    this.acquireLock = options?.acquireLock ?? defaultAcquireLock;
+  }
+  getStatus() {
+    return { ...this.status };
+  }
+  /**
+   * Trigger or observe bootstrap.
+   * - If already ready: returns immediately with the cached path.
+   * - If idle/checking: runs the validate-and-maybe-download flow once.
+   * - If currently downloading from a previous call: returns the in-flight promise (single-flight).
+   * - retry on re-call: if state === "failed", reset to "idle" and retry from scratch.
+   */
+  ensureReady() {
+    if (this.status.state === "ready") {
+      return Promise.resolve(this.status.modelPath);
+    }
+    if (this.status.state === "failed") {
+      this.status.state = "idle";
+      delete this.status.error;
+      this.inFlight = null;
+    }
+    if (this.status.state === "downloading" && this.inFlight !== null) {
+      return this.inFlight;
+    }
+    this.inFlight = this._runBootstrap();
+    return this.inFlight;
+  }
+  async _runBootstrap() {
+    const { modelName } = this.status;
+    this.status.state = "checking";
+    const spec = this.getSpec(modelName);
+    const modelPath = this.getModelPath(modelName);
+    const userModelPath = this.getUserModelPath(modelName);
+    const structuralOk = this.isStructurallyValid(modelPath, spec);
+    const checksumOk = structuralOk && await this.isChecksumValid(modelPath, spec);
+    if (structuralOk && checksumOk) {
+      this.status.state = "ready";
+      this.status.modelPath = modelPath;
+      this.inFlight = null;
+      return modelPath;
+    }
+    this.status.state = "downloading";
+    let lockHandle;
+    try {
+      lockHandle = await this.acquireLock(userModelPath);
+    } catch (err) {
+      this.status.state = "failed";
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.status.error = { reason: "failed", message: errMsg };
+      this.inFlight = null;
+      const hint = "Another process may be downloading the model; retry shortly.";
+      throw new ModelNotReadyError({ modelName, reason: "failed", hint, cause: err });
+    }
+    try {
+      const postLockStructuralOk = this.isStructurallyValid(modelPath, spec);
+      const postLockChecksumOk = postLockStructuralOk && await this.isChecksumValid(modelPath, spec);
+      if (postLockStructuralOk && postLockChecksumOk) {
+        this.status.state = "ready";
+        this.status.modelPath = modelPath;
+        this.inFlight = null;
+        return modelPath;
+      }
+      const resolvedPath = await this.download(modelName, {
+        onProgress: (p) => {
+          this.status.progress = p;
+        }
+      });
+      this.status.state = "ready";
+      this.status.modelPath = resolvedPath;
+      this.inFlight = null;
+      return resolvedPath;
+    } catch (err) {
+      const reason = classifyDownloadError(err);
+      this.status.state = "failed";
+      this.status.error = {
+        reason,
+        message: err instanceof Error ? err.message : String(err)
+      };
+      this.inFlight = null;
+      const hint = buildManualInstallHint(modelName, spec, modelPath);
+      throw new ModelNotReadyError({ modelName, reason, hint, cause: err });
+    } finally {
+      await lockHandle.release();
+    }
+  }
+};
 
 // src/embedding/tokenizer.ts
 var CLS_TOKEN_ID = 101;
@@ -1324,6 +1509,7 @@ var Embedder = class {
   options;
   session = null;
   tokenizer = null;
+  bootstrap = null;
   constructor(options) {
     this.options = options;
   }
@@ -1332,13 +1518,17 @@ var Embedder = class {
   }
   async ensureLoaded() {
     if (this.isLoaded()) return;
-    const modelPath = getModelPath(this.options.model);
-    if (!isModelDownloaded(modelPath)) {
-      await downloadModel(this.options.model);
+    if (this.bootstrap === null) {
+      if (this.options.bootstrapFactory) {
+        this.bootstrap = this.options.bootstrapFactory(this.options.model);
+      } else {
+        this.bootstrap = new ModelBootstrap(this.options.model);
+      }
     }
-    const onnxPath = join4(modelPath, "model.onnx");
+    const modelPath = await this.bootstrap.ensureReady();
+    const onnxPath = join5(modelPath, "model.onnx");
     this.session = await ort.InferenceSession.create(onnxPath);
-    const tokenizerPath = join4(modelPath, "tokenizer.json");
+    const tokenizerPath = join5(modelPath, "tokenizer.json");
     const tokenizerText = await readFile2(tokenizerPath, "utf-8");
     const tokenizerJson = JSON.parse(tokenizerText);
     this.tokenizer = new WordPieceTokenizer(tokenizerJson.model.vocab);
