@@ -35,15 +35,13 @@ export function setNestedKey(
 ): Record<string, unknown> {
   const result = { ...obj };
   const parts = dotKey.split(".");
-  for (const part of parts) {
-    if (DANGEROUS_KEYS.has(part)) {
-      throw new TypeError(`Invalid config key segment: "${part}"`);
-    }
-  }
   let current: Record<string, unknown> = result;
 
   for (let i = 0; i < parts.length - 1; i++) {
     const part = parts[i]!;
+    if (DANGEROUS_KEYS.has(part)) {
+      throw new TypeError(`Invalid config key segment: "${part}"`);
+    }
     if (typeof current[part] !== "object" || current[part] === null) {
       current[part] = {};
     } else {
@@ -52,7 +50,11 @@ export function setNestedKey(
     current = current[part] as Record<string, unknown>;
   }
 
-  current[parts[parts.length - 1]!] = value;
+  const lastKey = parts[parts.length - 1]!;
+  if (DANGEROUS_KEYS.has(lastKey)) {
+    throw new TypeError(`Invalid config key segment: "${lastKey}"`);
+  }
+  current[lastKey] = value;
   return result;
 }
 

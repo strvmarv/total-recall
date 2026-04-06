@@ -26,14 +26,12 @@ function loadConfig() {
 function setNestedKey(obj, dotKey, value) {
   const result = { ...obj };
   const parts = dotKey.split(".");
-  for (const part of parts) {
-    if (DANGEROUS_KEYS.has(part)) {
-      throw new TypeError(`Invalid config key segment: "${part}"`);
-    }
-  }
   let current = result;
   for (let i = 0; i < parts.length - 1; i++) {
     const part = parts[i];
+    if (DANGEROUS_KEYS.has(part)) {
+      throw new TypeError(`Invalid config key segment: "${part}"`);
+    }
     if (typeof current[part] !== "object" || current[part] === null) {
       current[part] = {};
     } else {
@@ -41,7 +39,11 @@ function setNestedKey(obj, dotKey, value) {
     }
     current = current[part];
   }
-  current[parts[parts.length - 1]] = value;
+  const lastKey = parts[parts.length - 1];
+  if (DANGEROUS_KEYS.has(lastKey)) {
+    throw new TypeError(`Invalid config key segment: "${lastKey}"`);
+  }
+  current[lastKey] = value;
   return result;
 }
 function saveUserConfig(overrides) {
