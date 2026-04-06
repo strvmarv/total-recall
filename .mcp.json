@@ -2,7 +2,8 @@
   "mcpServers": {
     "total-recall": {
       "command": "bash",
-      "args": ["bin/total-recall.sh"]
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/total-recall.sh"],
+      "cwd": "${CLAUDE_PLUGIN_ROOT}"
     }
   }
 }
