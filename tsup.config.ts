@@ -7,6 +7,7 @@ export default defineConfig([
     format: ["esm"],
     target: "node20",
     external: ["better-sqlite3", "onnxruntime-node"],
+    noExternal: ["@iarna/toml", "sqlite-vec", "@modelcontextprotocol/sdk"],
     banner: {
       js: "#!/usr/bin/env node",
     },
@@ -20,6 +21,7 @@ export default defineConfig([
     format: ["esm"],
     target: "node20",
     external: ["better-sqlite3", "onnxruntime-node"],
+    noExternal: ["@iarna/toml", "sqlite-vec", "@modelcontextprotocol/sdk"],
     outDir: "dist/eval",
     clean: false,
     onSuccess: async () => {
