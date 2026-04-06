@@ -1,2030 +1,3 @@
-var __create = Object.create;
-var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
-  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
-}) : x)(function(x) {
-  if (typeof require !== "undefined") return require.apply(this, arguments);
-  throw Error('Dynamic require of "' + x + '" is not supported');
-});
-var __commonJS = (cb, mod) => function __require2() {
-  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
-};
-var __copyProps = (to, from, except, desc) => {
-  if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-  }
-  return to;
-};
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
-  // If the importer is in node compatibility mode or this is not an ESM
-  // file that has been converted to a CommonJS file using a Babel-
-  // compatible transform (i.e. "__esModule" has not been set), then set
-  // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
-  mod
-));
-
-// node_modules/@iarna/toml/lib/parser.js
-var require_parser = __commonJS({
-  "node_modules/@iarna/toml/lib/parser.js"(exports2, module2) {
-    "use strict";
-    var ParserEND = 1114112;
-    var ParserError = class _ParserError extends Error {
-      /* istanbul ignore next */
-      constructor(msg, filename, linenumber) {
-        super("[ParserError] " + msg, filename, linenumber);
-        this.name = "ParserError";
-        this.code = "ParserError";
-        if (Error.captureStackTrace) Error.captureStackTrace(this, _ParserError);
-      }
-    };
-    var State = class {
-      constructor(parser) {
-        this.parser = parser;
-        this.buf = "";
-        this.returned = null;
-        this.result = null;
-        this.resultTable = null;
-        this.resultArr = null;
-      }
-    };
-    var Parser = class {
-      constructor() {
-        this.pos = 0;
-        this.col = 0;
-        this.line = 0;
-        this.obj = {};
-        this.ctx = this.obj;
-        this.stack = [];
-        this._buf = "";
-        this.char = null;
-        this.ii = 0;
-        this.state = new State(this.parseStart);
-      }
-      parse(str) {
-        if (str.length === 0 || str.length == null) return;
-        this._buf = String(str);
-        this.ii = -1;
-        this.char = -1;
-        let getNext;
-        while (getNext === false || this.nextChar()) {
-          getNext = this.runOne();
-        }
-        this._buf = null;
-      }
-      nextChar() {
-        if (this.char === 10) {
-          ++this.line;
-          this.col = -1;
-        }
-        ++this.ii;
-        this.char = this._buf.codePointAt(this.ii);
-        ++this.pos;
-        ++this.col;
-        return this.haveBuffer();
-      }
-      haveBuffer() {
-        return this.ii < this._buf.length;
-      }
-      runOne() {
-        return this.state.parser.call(this, this.state.returned);
-      }
-      finish() {
-        this.char = ParserEND;
-        let last;
-        do {
-          last = this.state.parser;
-          this.runOne();
-        } while (this.state.parser !== last);
-        this.ctx = null;
-        this.state = null;
-        this._buf = null;
-        return this.obj;
-      }
-      next(fn) {
-        if (typeof fn !== "function") throw new ParserError("Tried to set state to non-existent state: " + JSON.stringify(fn));
-        this.state.parser = fn;
-      }
-      goto(fn) {
-        this.next(fn);
-        return this.runOne();
-      }
-      call(fn, returnWith) {
-        if (returnWith) this.next(returnWith);
-        this.stack.push(this.state);
-        this.state = new State(fn);
-      }
-      callNow(fn, returnWith) {
-        this.call(fn, returnWith);
-        return this.runOne();
-      }
-      return(value) {
-        if (this.stack.length === 0) throw this.error(new ParserError("Stack underflow"));
-        if (value === void 0) value = this.state.buf;
-        this.state = this.stack.pop();
-        this.state.returned = value;
-      }
-      returnNow(value) {
-        this.return(value);
-        return this.runOne();
-      }
-      consume() {
-        if (this.char === ParserEND) throw this.error(new ParserError("Unexpected end-of-buffer"));
-        this.state.buf += this._buf[this.ii];
-      }
-      error(err) {
-        err.line = this.line;
-        err.col = this.col;
-        err.pos = this.pos;
-        return err;
-      }
-      /* istanbul ignore next */
-      parseStart() {
-        throw new ParserError("Must declare a parseStart method");
-      }
-    };
-    Parser.END = ParserEND;
-    Parser.Error = ParserError;
-    module2.exports = Parser;
-  }
-});
-
-// node_modules/@iarna/toml/lib/create-datetime.js
-var require_create_datetime = __commonJS({
-  "node_modules/@iarna/toml/lib/create-datetime.js"(exports2, module2) {
-    "use strict";
-    module2.exports = (value) => {
-      const date = new Date(value);
-      if (isNaN(date)) {
-        throw new TypeError("Invalid Datetime");
-      } else {
-        return date;
-      }
-    };
-  }
-});
-
-// node_modules/@iarna/toml/lib/format-num.js
-var require_format_num = __commonJS({
-  "node_modules/@iarna/toml/lib/format-num.js"(exports2, module2) {
-    "use strict";
-    module2.exports = (d, num) => {
-      num = String(num);
-      while (num.length < d) num = "0" + num;
-      return num;
-    };
-  }
-});
-
-// node_modules/@iarna/toml/lib/create-datetime-float.js
-var require_create_datetime_float = __commonJS({
-  "node_modules/@iarna/toml/lib/create-datetime-float.js"(exports2, module2) {
-    "use strict";
-    var f = require_format_num();
-    var FloatingDateTime = class extends Date {
-      constructor(value) {
-        super(value + "Z");
-        this.isFloating = true;
-      }
-      toISOString() {
-        const date = `${this.getUTCFullYear()}-${f(2, this.getUTCMonth() + 1)}-${f(2, this.getUTCDate())}`;
-        const time = `${f(2, this.getUTCHours())}:${f(2, this.getUTCMinutes())}:${f(2, this.getUTCSeconds())}.${f(3, this.getUTCMilliseconds())}`;
-        return `${date}T${time}`;
-      }
-    };
-    module2.exports = (value) => {
-      const date = new FloatingDateTime(value);
-      if (isNaN(date)) {
-        throw new TypeError("Invalid Datetime");
-      } else {
-        return date;
-      }
-    };
-  }
-});
-
-// node_modules/@iarna/toml/lib/create-date.js
-var require_create_date = __commonJS({
-  "node_modules/@iarna/toml/lib/create-date.js"(exports2, module2) {
-    "use strict";
-    var f = require_format_num();
-    var DateTime = global.Date;
-    var Date2 = class extends DateTime {
-      constructor(value) {
-        super(value);
-        this.isDate = true;
-      }
-      toISOString() {
-        return `${this.getUTCFullYear()}-${f(2, this.getUTCMonth() + 1)}-${f(2, this.getUTCDate())}`;
-      }
-    };
-    module2.exports = (value) => {
-      const date = new Date2(value);
-      if (isNaN(date)) {
-        throw new TypeError("Invalid Datetime");
-      } else {
-        return date;
-      }
-    };
-  }
-});
-
-// node_modules/@iarna/toml/lib/create-time.js
-var require_create_time = __commonJS({
-  "node_modules/@iarna/toml/lib/create-time.js"(exports2, module2) {
-    "use strict";
-    var f = require_format_num();
-    var Time = class extends Date {
-      constructor(value) {
-        super(`0000-01-01T${value}Z`);
-        this.isTime = true;
-      }
-      toISOString() {
-        return `${f(2, this.getUTCHours())}:${f(2, this.getUTCMinutes())}:${f(2, this.getUTCSeconds())}.${f(3, this.getUTCMilliseconds())}`;
-      }
-    };
-    module2.exports = (value) => {
-      const date = new Time(value);
-      if (isNaN(date)) {
-        throw new TypeError("Invalid Datetime");
-      } else {
-        return date;
-      }
-    };
-  }
-});
-
-// node_modules/@iarna/toml/lib/toml-parser.js
-var require_toml_parser = __commonJS({
-  "node_modules/@iarna/toml/lib/toml-parser.js"(exports, module) {
-    "use strict";
-    module.exports = makeParserClass(require_parser());
-    module.exports.makeParserClass = makeParserClass;
-    var TomlError = class _TomlError extends Error {
-      constructor(msg) {
-        super(msg);
-        this.name = "TomlError";
-        if (Error.captureStackTrace) Error.captureStackTrace(this, _TomlError);
-        this.fromTOML = true;
-        this.wrapped = null;
-      }
-    };
-    TomlError.wrap = (err) => {
-      const terr = new TomlError(err.message);
-      terr.code = err.code;
-      terr.wrapped = err;
-      return terr;
-    };
-    module.exports.TomlError = TomlError;
-    var createDateTime = require_create_datetime();
-    var createDateTimeFloat = require_create_datetime_float();
-    var createDate = require_create_date();
-    var createTime = require_create_time();
-    var CTRL_I = 9;
-    var CTRL_J = 10;
-    var CTRL_M = 13;
-    var CTRL_CHAR_BOUNDARY = 31;
-    var CHAR_SP = 32;
-    var CHAR_QUOT = 34;
-    var CHAR_NUM = 35;
-    var CHAR_APOS = 39;
-    var CHAR_PLUS = 43;
-    var CHAR_COMMA = 44;
-    var CHAR_HYPHEN = 45;
-    var CHAR_PERIOD = 46;
-    var CHAR_0 = 48;
-    var CHAR_1 = 49;
-    var CHAR_7 = 55;
-    var CHAR_9 = 57;
-    var CHAR_COLON = 58;
-    var CHAR_EQUALS = 61;
-    var CHAR_A = 65;
-    var CHAR_E = 69;
-    var CHAR_F = 70;
-    var CHAR_T = 84;
-    var CHAR_U = 85;
-    var CHAR_Z = 90;
-    var CHAR_LOWBAR = 95;
-    var CHAR_a = 97;
-    var CHAR_b = 98;
-    var CHAR_e = 101;
-    var CHAR_f = 102;
-    var CHAR_i = 105;
-    var CHAR_l = 108;
-    var CHAR_n = 110;
-    var CHAR_o = 111;
-    var CHAR_r = 114;
-    var CHAR_s = 115;
-    var CHAR_t = 116;
-    var CHAR_u = 117;
-    var CHAR_x = 120;
-    var CHAR_z = 122;
-    var CHAR_LCUB = 123;
-    var CHAR_RCUB = 125;
-    var CHAR_LSQB = 91;
-    var CHAR_BSOL = 92;
-    var CHAR_RSQB = 93;
-    var CHAR_DEL = 127;
-    var SURROGATE_FIRST = 55296;
-    var SURROGATE_LAST = 57343;
-    var escapes = {
-      [CHAR_b]: "\b",
-      [CHAR_t]: "	",
-      [CHAR_n]: "\n",
-      [CHAR_f]: "\f",
-      [CHAR_r]: "\r",
-      [CHAR_QUOT]: '"',
-      [CHAR_BSOL]: "\\"
-    };
-    function isDigit(cp) {
-      return cp >= CHAR_0 && cp <= CHAR_9;
-    }
-    function isHexit(cp) {
-      return cp >= CHAR_A && cp <= CHAR_F || cp >= CHAR_a && cp <= CHAR_f || cp >= CHAR_0 && cp <= CHAR_9;
-    }
-    function isBit(cp) {
-      return cp === CHAR_1 || cp === CHAR_0;
-    }
-    function isOctit(cp) {
-      return cp >= CHAR_0 && cp <= CHAR_7;
-    }
-    function isAlphaNumQuoteHyphen(cp) {
-      return cp >= CHAR_A && cp <= CHAR_Z || cp >= CHAR_a && cp <= CHAR_z || cp >= CHAR_0 && cp <= CHAR_9 || cp === CHAR_APOS || cp === CHAR_QUOT || cp === CHAR_LOWBAR || cp === CHAR_HYPHEN;
-    }
-    function isAlphaNumHyphen(cp) {
-      return cp >= CHAR_A && cp <= CHAR_Z || cp >= CHAR_a && cp <= CHAR_z || cp >= CHAR_0 && cp <= CHAR_9 || cp === CHAR_LOWBAR || cp === CHAR_HYPHEN;
-    }
-    var _type = /* @__PURE__ */ Symbol("type");
-    var _declared = /* @__PURE__ */ Symbol("declared");
-    var hasOwnProperty = Object.prototype.hasOwnProperty;
-    var defineProperty = Object.defineProperty;
-    var descriptor = { configurable: true, enumerable: true, writable: true, value: void 0 };
-    function hasKey(obj, key) {
-      if (hasOwnProperty.call(obj, key)) return true;
-      if (key === "__proto__") defineProperty(obj, "__proto__", descriptor);
-      return false;
-    }
-    var INLINE_TABLE = /* @__PURE__ */ Symbol("inline-table");
-    function InlineTable() {
-      return Object.defineProperties({}, {
-        [_type]: { value: INLINE_TABLE }
-      });
-    }
-    function isInlineTable(obj) {
-      if (obj === null || typeof obj !== "object") return false;
-      return obj[_type] === INLINE_TABLE;
-    }
-    var TABLE = /* @__PURE__ */ Symbol("table");
-    function Table() {
-      return Object.defineProperties({}, {
-        [_type]: { value: TABLE },
-        [_declared]: { value: false, writable: true }
-      });
-    }
-    function isTable(obj) {
-      if (obj === null || typeof obj !== "object") return false;
-      return obj[_type] === TABLE;
-    }
-    var _contentType = /* @__PURE__ */ Symbol("content-type");
-    var INLINE_LIST = /* @__PURE__ */ Symbol("inline-list");
-    function InlineList(type) {
-      return Object.defineProperties([], {
-        [_type]: { value: INLINE_LIST },
-        [_contentType]: { value: type }
-      });
-    }
-    function isInlineList(obj) {
-      if (obj === null || typeof obj !== "object") return false;
-      return obj[_type] === INLINE_LIST;
-    }
-    var LIST = /* @__PURE__ */ Symbol("list");
-    function List() {
-      return Object.defineProperties([], {
-        [_type]: { value: LIST }
-      });
-    }
-    function isList(obj) {
-      if (obj === null || typeof obj !== "object") return false;
-      return obj[_type] === LIST;
-    }
-    var _custom;
-    try {
-      const utilInspect = eval("require('util').inspect");
-      _custom = utilInspect.custom;
-    } catch (_) {
-    }
-    var _inspect = _custom || "inspect";
-    var BoxedBigInt = class {
-      constructor(value) {
-        try {
-          this.value = global.BigInt.asIntN(64, value);
-        } catch (_) {
-          this.value = null;
-        }
-        Object.defineProperty(this, _type, { value: INTEGER });
-      }
-      isNaN() {
-        return this.value === null;
-      }
-      /* istanbul ignore next */
-      toString() {
-        return String(this.value);
-      }
-      /* istanbul ignore next */
-      [_inspect]() {
-        return `[BigInt: ${this.toString()}]}`;
-      }
-      valueOf() {
-        return this.value;
-      }
-    };
-    var INTEGER = /* @__PURE__ */ Symbol("integer");
-    function Integer(value) {
-      let num = Number(value);
-      if (Object.is(num, -0)) num = 0;
-      if (global.BigInt && !Number.isSafeInteger(num)) {
-        return new BoxedBigInt(value);
-      } else {
-        return Object.defineProperties(new Number(num), {
-          isNaN: { value: function() {
-            return isNaN(this);
-          } },
-          [_type]: { value: INTEGER },
-          [_inspect]: { value: () => `[Integer: ${value}]` }
-        });
-      }
-    }
-    function isInteger(obj) {
-      if (obj === null || typeof obj !== "object") return false;
-      return obj[_type] === INTEGER;
-    }
-    var FLOAT = /* @__PURE__ */ Symbol("float");
-    function Float(value) {
-      return Object.defineProperties(new Number(value), {
-        [_type]: { value: FLOAT },
-        [_inspect]: { value: () => `[Float: ${value}]` }
-      });
-    }
-    function isFloat(obj) {
-      if (obj === null || typeof obj !== "object") return false;
-      return obj[_type] === FLOAT;
-    }
-    function tomlType(value) {
-      const type = typeof value;
-      if (type === "object") {
-        if (value === null) return "null";
-        if (value instanceof Date) return "datetime";
-        if (_type in value) {
-          switch (value[_type]) {
-            case INLINE_TABLE:
-              return "inline-table";
-            case INLINE_LIST:
-              return "inline-list";
-            /* istanbul ignore next */
-            case TABLE:
-              return "table";
-            /* istanbul ignore next */
-            case LIST:
-              return "list";
-            case FLOAT:
-              return "float";
-            case INTEGER:
-              return "integer";
-          }
-        }
-      }
-      return type;
-    }
-    function makeParserClass(Parser) {
-      class TOMLParser extends Parser {
-        constructor() {
-          super();
-          this.ctx = this.obj = Table();
-        }
-        /* MATCH HELPER */
-        atEndOfWord() {
-          return this.char === CHAR_NUM || this.char === CTRL_I || this.char === CHAR_SP || this.atEndOfLine();
-        }
-        atEndOfLine() {
-          return this.char === Parser.END || this.char === CTRL_J || this.char === CTRL_M;
-        }
-        parseStart() {
-          if (this.char === Parser.END) {
-            return null;
-          } else if (this.char === CHAR_LSQB) {
-            return this.call(this.parseTableOrList);
-          } else if (this.char === CHAR_NUM) {
-            return this.call(this.parseComment);
-          } else if (this.char === CTRL_J || this.char === CHAR_SP || this.char === CTRL_I || this.char === CTRL_M) {
-            return null;
-          } else if (isAlphaNumQuoteHyphen(this.char)) {
-            return this.callNow(this.parseAssignStatement);
-          } else {
-            throw this.error(new TomlError(`Unknown character "${this.char}"`));
-          }
-        }
-        // HELPER, this strips any whitespace and comments to the end of the line
-        // then RETURNS. Last state in a production.
-        parseWhitespaceToEOL() {
-          if (this.char === CHAR_SP || this.char === CTRL_I || this.char === CTRL_M) {
-            return null;
-          } else if (this.char === CHAR_NUM) {
-            return this.goto(this.parseComment);
-          } else if (this.char === Parser.END || this.char === CTRL_J) {
-            return this.return();
-          } else {
-            throw this.error(new TomlError("Unexpected character, expected only whitespace or comments till end of line"));
-          }
-        }
-        /* ASSIGNMENT: key = value */
-        parseAssignStatement() {
-          return this.callNow(this.parseAssign, this.recordAssignStatement);
-        }
-        recordAssignStatement(kv) {
-          let target = this.ctx;
-          let finalKey = kv.key.pop();
-          for (let kw of kv.key) {
-            if (hasKey(target, kw) && (!isTable(target[kw]) || target[kw][_declared])) {
-              throw this.error(new TomlError("Can't redefine existing key"));
-            }
-            target = target[kw] = target[kw] || Table();
-          }
-          if (hasKey(target, finalKey)) {
-            throw this.error(new TomlError("Can't redefine existing key"));
-          }
-          if (isInteger(kv.value) || isFloat(kv.value)) {
-            target[finalKey] = kv.value.valueOf();
-          } else {
-            target[finalKey] = kv.value;
-          }
-          return this.goto(this.parseWhitespaceToEOL);
-        }
-        /* ASSSIGNMENT expression, key = value possibly inside an inline table */
-        parseAssign() {
-          return this.callNow(this.parseKeyword, this.recordAssignKeyword);
-        }
-        recordAssignKeyword(key) {
-          if (this.state.resultTable) {
-            this.state.resultTable.push(key);
-          } else {
-            this.state.resultTable = [key];
-          }
-          return this.goto(this.parseAssignKeywordPreDot);
-        }
-        parseAssignKeywordPreDot() {
-          if (this.char === CHAR_PERIOD) {
-            return this.next(this.parseAssignKeywordPostDot);
-          } else if (this.char !== CHAR_SP && this.char !== CTRL_I) {
-            return this.goto(this.parseAssignEqual);
-          }
-        }
-        parseAssignKeywordPostDot() {
-          if (this.char !== CHAR_SP && this.char !== CTRL_I) {
-            return this.callNow(this.parseKeyword, this.recordAssignKeyword);
-          }
-        }
-        parseAssignEqual() {
-          if (this.char === CHAR_EQUALS) {
-            return this.next(this.parseAssignPreValue);
-          } else {
-            throw this.error(new TomlError('Invalid character, expected "="'));
-          }
-        }
-        parseAssignPreValue() {
-          if (this.char === CHAR_SP || this.char === CTRL_I) {
-            return null;
-          } else {
-            return this.callNow(this.parseValue, this.recordAssignValue);
-          }
-        }
-        recordAssignValue(value) {
-          return this.returnNow({ key: this.state.resultTable, value });
-        }
-        /* COMMENTS: #...eol */
-        parseComment() {
-          do {
-            if (this.char === Parser.END || this.char === CTRL_J) {
-              return this.return();
-            }
-          } while (this.nextChar());
-        }
-        /* TABLES AND LISTS, [foo] and [[foo]] */
-        parseTableOrList() {
-          if (this.char === CHAR_LSQB) {
-            this.next(this.parseList);
-          } else {
-            return this.goto(this.parseTable);
-          }
-        }
-        /* TABLE [foo.bar.baz] */
-        parseTable() {
-          this.ctx = this.obj;
-          return this.goto(this.parseTableNext);
-        }
-        parseTableNext() {
-          if (this.char === CHAR_SP || this.char === CTRL_I) {
-            return null;
-          } else {
-            return this.callNow(this.parseKeyword, this.parseTableMore);
-          }
-        }
-        parseTableMore(keyword) {
-          if (this.char === CHAR_SP || this.char === CTRL_I) {
-            return null;
-          } else if (this.char === CHAR_RSQB) {
-            if (hasKey(this.ctx, keyword) && (!isTable(this.ctx[keyword]) || this.ctx[keyword][_declared])) {
-              throw this.error(new TomlError("Can't redefine existing key"));
-            } else {
-              this.ctx = this.ctx[keyword] = this.ctx[keyword] || Table();
-              this.ctx[_declared] = true;
-            }
-            return this.next(this.parseWhitespaceToEOL);
-          } else if (this.char === CHAR_PERIOD) {
-            if (!hasKey(this.ctx, keyword)) {
-              this.ctx = this.ctx[keyword] = Table();
-            } else if (isTable(this.ctx[keyword])) {
-              this.ctx = this.ctx[keyword];
-            } else if (isList(this.ctx[keyword])) {
-              this.ctx = this.ctx[keyword][this.ctx[keyword].length - 1];
-            } else {
-              throw this.error(new TomlError("Can't redefine existing key"));
-            }
-            return this.next(this.parseTableNext);
-          } else {
-            throw this.error(new TomlError("Unexpected character, expected whitespace, . or ]"));
-          }
-        }
-        /* LIST [[a.b.c]] */
-        parseList() {
-          this.ctx = this.obj;
-          return this.goto(this.parseListNext);
-        }
-        parseListNext() {
-          if (this.char === CHAR_SP || this.char === CTRL_I) {
-            return null;
-          } else {
-            return this.callNow(this.parseKeyword, this.parseListMore);
-          }
-        }
-        parseListMore(keyword) {
-          if (this.char === CHAR_SP || this.char === CTRL_I) {
-            return null;
-          } else if (this.char === CHAR_RSQB) {
-            if (!hasKey(this.ctx, keyword)) {
-              this.ctx[keyword] = List();
-            }
-            if (isInlineList(this.ctx[keyword])) {
-              throw this.error(new TomlError("Can't extend an inline array"));
-            } else if (isList(this.ctx[keyword])) {
-              const next = Table();
-              this.ctx[keyword].push(next);
-              this.ctx = next;
-            } else {
-              throw this.error(new TomlError("Can't redefine an existing key"));
-            }
-            return this.next(this.parseListEnd);
-          } else if (this.char === CHAR_PERIOD) {
-            if (!hasKey(this.ctx, keyword)) {
-              this.ctx = this.ctx[keyword] = Table();
-            } else if (isInlineList(this.ctx[keyword])) {
-              throw this.error(new TomlError("Can't extend an inline array"));
-            } else if (isInlineTable(this.ctx[keyword])) {
-              throw this.error(new TomlError("Can't extend an inline table"));
-            } else if (isList(this.ctx[keyword])) {
-              this.ctx = this.ctx[keyword][this.ctx[keyword].length - 1];
-            } else if (isTable(this.ctx[keyword])) {
-              this.ctx = this.ctx[keyword];
-            } else {
-              throw this.error(new TomlError("Can't redefine an existing key"));
-            }
-            return this.next(this.parseListNext);
-          } else {
-            throw this.error(new TomlError("Unexpected character, expected whitespace, . or ]"));
-          }
-        }
-        parseListEnd(keyword) {
-          if (this.char === CHAR_RSQB) {
-            return this.next(this.parseWhitespaceToEOL);
-          } else {
-            throw this.error(new TomlError("Unexpected character, expected whitespace, . or ]"));
-          }
-        }
-        /* VALUE string, number, boolean, inline list, inline object */
-        parseValue() {
-          if (this.char === Parser.END) {
-            throw this.error(new TomlError("Key without value"));
-          } else if (this.char === CHAR_QUOT) {
-            return this.next(this.parseDoubleString);
-          }
-          if (this.char === CHAR_APOS) {
-            return this.next(this.parseSingleString);
-          } else if (this.char === CHAR_HYPHEN || this.char === CHAR_PLUS) {
-            return this.goto(this.parseNumberSign);
-          } else if (this.char === CHAR_i) {
-            return this.next(this.parseInf);
-          } else if (this.char === CHAR_n) {
-            return this.next(this.parseNan);
-          } else if (isDigit(this.char)) {
-            return this.goto(this.parseNumberOrDateTime);
-          } else if (this.char === CHAR_t || this.char === CHAR_f) {
-            return this.goto(this.parseBoolean);
-          } else if (this.char === CHAR_LSQB) {
-            return this.call(this.parseInlineList, this.recordValue);
-          } else if (this.char === CHAR_LCUB) {
-            return this.call(this.parseInlineTable, this.recordValue);
-          } else {
-            throw this.error(new TomlError("Unexpected character, expecting string, number, datetime, boolean, inline array or inline table"));
-          }
-        }
-        recordValue(value) {
-          return this.returnNow(value);
-        }
-        parseInf() {
-          if (this.char === CHAR_n) {
-            return this.next(this.parseInf2);
-          } else {
-            throw this.error(new TomlError('Unexpected character, expected "inf", "+inf" or "-inf"'));
-          }
-        }
-        parseInf2() {
-          if (this.char === CHAR_f) {
-            if (this.state.buf === "-") {
-              return this.return(-Infinity);
-            } else {
-              return this.return(Infinity);
-            }
-          } else {
-            throw this.error(new TomlError('Unexpected character, expected "inf", "+inf" or "-inf"'));
-          }
-        }
-        parseNan() {
-          if (this.char === CHAR_a) {
-            return this.next(this.parseNan2);
-          } else {
-            throw this.error(new TomlError('Unexpected character, expected "nan"'));
-          }
-        }
-        parseNan2() {
-          if (this.char === CHAR_n) {
-            return this.return(NaN);
-          } else {
-            throw this.error(new TomlError('Unexpected character, expected "nan"'));
-          }
-        }
-        /* KEYS, barewords or basic, literal, or dotted */
-        parseKeyword() {
-          if (this.char === CHAR_QUOT) {
-            return this.next(this.parseBasicString);
-          } else if (this.char === CHAR_APOS) {
-            return this.next(this.parseLiteralString);
-          } else {
-            return this.goto(this.parseBareKey);
-          }
-        }
-        /* KEYS: barewords */
-        parseBareKey() {
-          do {
-            if (this.char === Parser.END) {
-              throw this.error(new TomlError("Key ended without value"));
-            } else if (isAlphaNumHyphen(this.char)) {
-              this.consume();
-            } else if (this.state.buf.length === 0) {
-              throw this.error(new TomlError("Empty bare keys are not allowed"));
-            } else {
-              return this.returnNow();
-            }
-          } while (this.nextChar());
-        }
-        /* STRINGS, single quoted (literal) */
-        parseSingleString() {
-          if (this.char === CHAR_APOS) {
-            return this.next(this.parseLiteralMultiStringMaybe);
-          } else {
-            return this.goto(this.parseLiteralString);
-          }
-        }
-        parseLiteralString() {
-          do {
-            if (this.char === CHAR_APOS) {
-              return this.return();
-            } else if (this.atEndOfLine()) {
-              throw this.error(new TomlError("Unterminated string"));
-            } else if (this.char === CHAR_DEL || this.char <= CTRL_CHAR_BOUNDARY && this.char !== CTRL_I) {
-              throw this.errorControlCharInString();
-            } else {
-              this.consume();
-            }
-          } while (this.nextChar());
-        }
-        parseLiteralMultiStringMaybe() {
-          if (this.char === CHAR_APOS) {
-            return this.next(this.parseLiteralMultiString);
-          } else {
-            return this.returnNow();
-          }
-        }
-        parseLiteralMultiString() {
-          if (this.char === CTRL_M) {
-            return null;
-          } else if (this.char === CTRL_J) {
-            return this.next(this.parseLiteralMultiStringContent);
-          } else {
-            return this.goto(this.parseLiteralMultiStringContent);
-          }
-        }
-        parseLiteralMultiStringContent() {
-          do {
-            if (this.char === CHAR_APOS) {
-              return this.next(this.parseLiteralMultiEnd);
-            } else if (this.char === Parser.END) {
-              throw this.error(new TomlError("Unterminated multi-line string"));
-            } else if (this.char === CHAR_DEL || this.char <= CTRL_CHAR_BOUNDARY && this.char !== CTRL_I && this.char !== CTRL_J && this.char !== CTRL_M) {
-              throw this.errorControlCharInString();
-            } else {
-              this.consume();
-            }
-          } while (this.nextChar());
-        }
-        parseLiteralMultiEnd() {
-          if (this.char === CHAR_APOS) {
-            return this.next(this.parseLiteralMultiEnd2);
-          } else {
-            this.state.buf += "'";
-            return this.goto(this.parseLiteralMultiStringContent);
-          }
-        }
-        parseLiteralMultiEnd2() {
-          if (this.char === CHAR_APOS) {
-            return this.return();
-          } else {
-            this.state.buf += "''";
-            return this.goto(this.parseLiteralMultiStringContent);
-          }
-        }
-        /* STRINGS double quoted */
-        parseDoubleString() {
-          if (this.char === CHAR_QUOT) {
-            return this.next(this.parseMultiStringMaybe);
-          } else {
-            return this.goto(this.parseBasicString);
-          }
-        }
-        parseBasicString() {
-          do {
-            if (this.char === CHAR_BSOL) {
-              return this.call(this.parseEscape, this.recordEscapeReplacement);
-            } else if (this.char === CHAR_QUOT) {
-              return this.return();
-            } else if (this.atEndOfLine()) {
-              throw this.error(new TomlError("Unterminated string"));
-            } else if (this.char === CHAR_DEL || this.char <= CTRL_CHAR_BOUNDARY && this.char !== CTRL_I) {
-              throw this.errorControlCharInString();
-            } else {
-              this.consume();
-            }
-          } while (this.nextChar());
-        }
-        recordEscapeReplacement(replacement) {
-          this.state.buf += replacement;
-          return this.goto(this.parseBasicString);
-        }
-        parseMultiStringMaybe() {
-          if (this.char === CHAR_QUOT) {
-            return this.next(this.parseMultiString);
-          } else {
-            return this.returnNow();
-          }
-        }
-        parseMultiString() {
-          if (this.char === CTRL_M) {
-            return null;
-          } else if (this.char === CTRL_J) {
-            return this.next(this.parseMultiStringContent);
-          } else {
-            return this.goto(this.parseMultiStringContent);
-          }
-        }
-        parseMultiStringContent() {
-          do {
-            if (this.char === CHAR_BSOL) {
-              return this.call(this.parseMultiEscape, this.recordMultiEscapeReplacement);
-            } else if (this.char === CHAR_QUOT) {
-              return this.next(this.parseMultiEnd);
-            } else if (this.char === Parser.END) {
-              throw this.error(new TomlError("Unterminated multi-line string"));
-            } else if (this.char === CHAR_DEL || this.char <= CTRL_CHAR_BOUNDARY && this.char !== CTRL_I && this.char !== CTRL_J && this.char !== CTRL_M) {
-              throw this.errorControlCharInString();
-            } else {
-              this.consume();
-            }
-          } while (this.nextChar());
-        }
-        errorControlCharInString() {
-          let displayCode = "\\u00";
-          if (this.char < 16) {
-            displayCode += "0";
-          }
-          displayCode += this.char.toString(16);
-          return this.error(new TomlError(`Control characters (codes < 0x1f and 0x7f) are not allowed in strings, use ${displayCode} instead`));
-        }
-        recordMultiEscapeReplacement(replacement) {
-          this.state.buf += replacement;
-          return this.goto(this.parseMultiStringContent);
-        }
-        parseMultiEnd() {
-          if (this.char === CHAR_QUOT) {
-            return this.next(this.parseMultiEnd2);
-          } else {
-            this.state.buf += '"';
-            return this.goto(this.parseMultiStringContent);
-          }
-        }
-        parseMultiEnd2() {
-          if (this.char === CHAR_QUOT) {
-            return this.return();
-          } else {
-            this.state.buf += '""';
-            return this.goto(this.parseMultiStringContent);
-          }
-        }
-        parseMultiEscape() {
-          if (this.char === CTRL_M || this.char === CTRL_J) {
-            return this.next(this.parseMultiTrim);
-          } else if (this.char === CHAR_SP || this.char === CTRL_I) {
-            return this.next(this.parsePreMultiTrim);
-          } else {
-            return this.goto(this.parseEscape);
-          }
-        }
-        parsePreMultiTrim() {
-          if (this.char === CHAR_SP || this.char === CTRL_I) {
-            return null;
-          } else if (this.char === CTRL_M || this.char === CTRL_J) {
-            return this.next(this.parseMultiTrim);
-          } else {
-            throw this.error(new TomlError("Can't escape whitespace"));
-          }
-        }
-        parseMultiTrim() {
-          if (this.char === CTRL_J || this.char === CHAR_SP || this.char === CTRL_I || this.char === CTRL_M) {
-            return null;
-          } else {
-            return this.returnNow();
-          }
-        }
-        parseEscape() {
-          if (this.char in escapes) {
-            return this.return(escapes[this.char]);
-          } else if (this.char === CHAR_u) {
-            return this.call(this.parseSmallUnicode, this.parseUnicodeReturn);
-          } else if (this.char === CHAR_U) {
-            return this.call(this.parseLargeUnicode, this.parseUnicodeReturn);
-          } else {
-            throw this.error(new TomlError("Unknown escape character: " + this.char));
-          }
-        }
-        parseUnicodeReturn(char) {
-          try {
-            const codePoint = parseInt(char, 16);
-            if (codePoint >= SURROGATE_FIRST && codePoint <= SURROGATE_LAST) {
-              throw this.error(new TomlError("Invalid unicode, character in range 0xD800 - 0xDFFF is reserved"));
-            }
-            return this.returnNow(String.fromCodePoint(codePoint));
-          } catch (err) {
-            throw this.error(TomlError.wrap(err));
-          }
-        }
-        parseSmallUnicode() {
-          if (!isHexit(this.char)) {
-            throw this.error(new TomlError("Invalid character in unicode sequence, expected hex"));
-          } else {
-            this.consume();
-            if (this.state.buf.length >= 4) return this.return();
-          }
-        }
-        parseLargeUnicode() {
-          if (!isHexit(this.char)) {
-            throw this.error(new TomlError("Invalid character in unicode sequence, expected hex"));
-          } else {
-            this.consume();
-            if (this.state.buf.length >= 8) return this.return();
-          }
-        }
-        /* NUMBERS */
-        parseNumberSign() {
-          this.consume();
-          return this.next(this.parseMaybeSignedInfOrNan);
-        }
-        parseMaybeSignedInfOrNan() {
-          if (this.char === CHAR_i) {
-            return this.next(this.parseInf);
-          } else if (this.char === CHAR_n) {
-            return this.next(this.parseNan);
-          } else {
-            return this.callNow(this.parseNoUnder, this.parseNumberIntegerStart);
-          }
-        }
-        parseNumberIntegerStart() {
-          if (this.char === CHAR_0) {
-            this.consume();
-            return this.next(this.parseNumberIntegerExponentOrDecimal);
-          } else {
-            return this.goto(this.parseNumberInteger);
-          }
-        }
-        parseNumberIntegerExponentOrDecimal() {
-          if (this.char === CHAR_PERIOD) {
-            this.consume();
-            return this.call(this.parseNoUnder, this.parseNumberFloat);
-          } else if (this.char === CHAR_E || this.char === CHAR_e) {
-            this.consume();
-            return this.next(this.parseNumberExponentSign);
-          } else {
-            return this.returnNow(Integer(this.state.buf));
-          }
-        }
-        parseNumberInteger() {
-          if (isDigit(this.char)) {
-            this.consume();
-          } else if (this.char === CHAR_LOWBAR) {
-            return this.call(this.parseNoUnder);
-          } else if (this.char === CHAR_E || this.char === CHAR_e) {
-            this.consume();
-            return this.next(this.parseNumberExponentSign);
-          } else if (this.char === CHAR_PERIOD) {
-            this.consume();
-            return this.call(this.parseNoUnder, this.parseNumberFloat);
-          } else {
-            const result = Integer(this.state.buf);
-            if (result.isNaN()) {
-              throw this.error(new TomlError("Invalid number"));
-            } else {
-              return this.returnNow(result);
-            }
-          }
-        }
-        parseNoUnder() {
-          if (this.char === CHAR_LOWBAR || this.char === CHAR_PERIOD || this.char === CHAR_E || this.char === CHAR_e) {
-            throw this.error(new TomlError("Unexpected character, expected digit"));
-          } else if (this.atEndOfWord()) {
-            throw this.error(new TomlError("Incomplete number"));
-          }
-          return this.returnNow();
-        }
-        parseNoUnderHexOctBinLiteral() {
-          if (this.char === CHAR_LOWBAR || this.char === CHAR_PERIOD) {
-            throw this.error(new TomlError("Unexpected character, expected digit"));
-          } else if (this.atEndOfWord()) {
-            throw this.error(new TomlError("Incomplete number"));
-          }
-          return this.returnNow();
-        }
-        parseNumberFloat() {
-          if (this.char === CHAR_LOWBAR) {
-            return this.call(this.parseNoUnder, this.parseNumberFloat);
-          } else if (isDigit(this.char)) {
-            this.consume();
-          } else if (this.char === CHAR_E || this.char === CHAR_e) {
-            this.consume();
-            return this.next(this.parseNumberExponentSign);
-          } else {
-            return this.returnNow(Float(this.state.buf));
-          }
-        }
-        parseNumberExponentSign() {
-          if (isDigit(this.char)) {
-            return this.goto(this.parseNumberExponent);
-          } else if (this.char === CHAR_HYPHEN || this.char === CHAR_PLUS) {
-            this.consume();
-            this.call(this.parseNoUnder, this.parseNumberExponent);
-          } else {
-            throw this.error(new TomlError("Unexpected character, expected -, + or digit"));
-          }
-        }
-        parseNumberExponent() {
-          if (isDigit(this.char)) {
-            this.consume();
-          } else if (this.char === CHAR_LOWBAR) {
-            return this.call(this.parseNoUnder);
-          } else {
-            return this.returnNow(Float(this.state.buf));
-          }
-        }
-        /* NUMBERS or DATETIMES  */
-        parseNumberOrDateTime() {
-          if (this.char === CHAR_0) {
-            this.consume();
-            return this.next(this.parseNumberBaseOrDateTime);
-          } else {
-            return this.goto(this.parseNumberOrDateTimeOnly);
-          }
-        }
-        parseNumberOrDateTimeOnly() {
-          if (this.char === CHAR_LOWBAR) {
-            return this.call(this.parseNoUnder, this.parseNumberInteger);
-          } else if (isDigit(this.char)) {
-            this.consume();
-            if (this.state.buf.length > 4) this.next(this.parseNumberInteger);
-          } else if (this.char === CHAR_E || this.char === CHAR_e) {
-            this.consume();
-            return this.next(this.parseNumberExponentSign);
-          } else if (this.char === CHAR_PERIOD) {
-            this.consume();
-            return this.call(this.parseNoUnder, this.parseNumberFloat);
-          } else if (this.char === CHAR_HYPHEN) {
-            return this.goto(this.parseDateTime);
-          } else if (this.char === CHAR_COLON) {
-            return this.goto(this.parseOnlyTimeHour);
-          } else {
-            return this.returnNow(Integer(this.state.buf));
-          }
-        }
-        parseDateTimeOnly() {
-          if (this.state.buf.length < 4) {
-            if (isDigit(this.char)) {
-              return this.consume();
-            } else if (this.char === CHAR_COLON) {
-              return this.goto(this.parseOnlyTimeHour);
-            } else {
-              throw this.error(new TomlError("Expected digit while parsing year part of a date"));
-            }
-          } else {
-            if (this.char === CHAR_HYPHEN) {
-              return this.goto(this.parseDateTime);
-            } else {
-              throw this.error(new TomlError("Expected hyphen (-) while parsing year part of date"));
-            }
-          }
-        }
-        parseNumberBaseOrDateTime() {
-          if (this.char === CHAR_b) {
-            this.consume();
-            return this.call(this.parseNoUnderHexOctBinLiteral, this.parseIntegerBin);
-          } else if (this.char === CHAR_o) {
-            this.consume();
-            return this.call(this.parseNoUnderHexOctBinLiteral, this.parseIntegerOct);
-          } else if (this.char === CHAR_x) {
-            this.consume();
-            return this.call(this.parseNoUnderHexOctBinLiteral, this.parseIntegerHex);
-          } else if (this.char === CHAR_PERIOD) {
-            return this.goto(this.parseNumberInteger);
-          } else if (isDigit(this.char)) {
-            return this.goto(this.parseDateTimeOnly);
-          } else {
-            return this.returnNow(Integer(this.state.buf));
-          }
-        }
-        parseIntegerHex() {
-          if (isHexit(this.char)) {
-            this.consume();
-          } else if (this.char === CHAR_LOWBAR) {
-            return this.call(this.parseNoUnderHexOctBinLiteral);
-          } else {
-            const result = Integer(this.state.buf);
-            if (result.isNaN()) {
-              throw this.error(new TomlError("Invalid number"));
-            } else {
-              return this.returnNow(result);
-            }
-          }
-        }
-        parseIntegerOct() {
-          if (isOctit(this.char)) {
-            this.consume();
-          } else if (this.char === CHAR_LOWBAR) {
-            return this.call(this.parseNoUnderHexOctBinLiteral);
-          } else {
-            const result = Integer(this.state.buf);
-            if (result.isNaN()) {
-              throw this.error(new TomlError("Invalid number"));
-            } else {
-              return this.returnNow(result);
-            }
-          }
-        }
-        parseIntegerBin() {
-          if (isBit(this.char)) {
-            this.consume();
-          } else if (this.char === CHAR_LOWBAR) {
-            return this.call(this.parseNoUnderHexOctBinLiteral);
-          } else {
-            const result = Integer(this.state.buf);
-            if (result.isNaN()) {
-              throw this.error(new TomlError("Invalid number"));
-            } else {
-              return this.returnNow(result);
-            }
-          }
-        }
-        /* DATETIME */
-        parseDateTime() {
-          if (this.state.buf.length < 4) {
-            throw this.error(new TomlError("Years less than 1000 must be zero padded to four characters"));
-          }
-          this.state.result = this.state.buf;
-          this.state.buf = "";
-          return this.next(this.parseDateMonth);
-        }
-        parseDateMonth() {
-          if (this.char === CHAR_HYPHEN) {
-            if (this.state.buf.length < 2) {
-              throw this.error(new TomlError("Months less than 10 must be zero padded to two characters"));
-            }
-            this.state.result += "-" + this.state.buf;
-            this.state.buf = "";
-            return this.next(this.parseDateDay);
-          } else if (isDigit(this.char)) {
-            this.consume();
-          } else {
-            throw this.error(new TomlError("Incomplete datetime"));
-          }
-        }
-        parseDateDay() {
-          if (this.char === CHAR_T || this.char === CHAR_SP) {
-            if (this.state.buf.length < 2) {
-              throw this.error(new TomlError("Days less than 10 must be zero padded to two characters"));
-            }
-            this.state.result += "-" + this.state.buf;
-            this.state.buf = "";
-            return this.next(this.parseStartTimeHour);
-          } else if (this.atEndOfWord()) {
-            return this.returnNow(createDate(this.state.result + "-" + this.state.buf));
-          } else if (isDigit(this.char)) {
-            this.consume();
-          } else {
-            throw this.error(new TomlError("Incomplete datetime"));
-          }
-        }
-        parseStartTimeHour() {
-          if (this.atEndOfWord()) {
-            return this.returnNow(createDate(this.state.result));
-          } else {
-            return this.goto(this.parseTimeHour);
-          }
-        }
-        parseTimeHour() {
-          if (this.char === CHAR_COLON) {
-            if (this.state.buf.length < 2) {
-              throw this.error(new TomlError("Hours less than 10 must be zero padded to two characters"));
-            }
-            this.state.result += "T" + this.state.buf;
-            this.state.buf = "";
-            return this.next(this.parseTimeMin);
-          } else if (isDigit(this.char)) {
-            this.consume();
-          } else {
-            throw this.error(new TomlError("Incomplete datetime"));
-          }
-        }
-        parseTimeMin() {
-          if (this.state.buf.length < 2 && isDigit(this.char)) {
-            this.consume();
-          } else if (this.state.buf.length === 2 && this.char === CHAR_COLON) {
-            this.state.result += ":" + this.state.buf;
-            this.state.buf = "";
-            return this.next(this.parseTimeSec);
-          } else {
-            throw this.error(new TomlError("Incomplete datetime"));
-          }
-        }
-        parseTimeSec() {
-          if (isDigit(this.char)) {
-            this.consume();
-            if (this.state.buf.length === 2) {
-              this.state.result += ":" + this.state.buf;
-              this.state.buf = "";
-              return this.next(this.parseTimeZoneOrFraction);
-            }
-          } else {
-            throw this.error(new TomlError("Incomplete datetime"));
-          }
-        }
-        parseOnlyTimeHour() {
-          if (this.char === CHAR_COLON) {
-            if (this.state.buf.length < 2) {
-              throw this.error(new TomlError("Hours less than 10 must be zero padded to two characters"));
-            }
-            this.state.result = this.state.buf;
-            this.state.buf = "";
-            return this.next(this.parseOnlyTimeMin);
-          } else {
-            throw this.error(new TomlError("Incomplete time"));
-          }
-        }
-        parseOnlyTimeMin() {
-          if (this.state.buf.length < 2 && isDigit(this.char)) {
-            this.consume();
-          } else if (this.state.buf.length === 2 && this.char === CHAR_COLON) {
-            this.state.result += ":" + this.state.buf;
-            this.state.buf = "";
-            return this.next(this.parseOnlyTimeSec);
-          } else {
-            throw this.error(new TomlError("Incomplete time"));
-          }
-        }
-        parseOnlyTimeSec() {
-          if (isDigit(this.char)) {
-            this.consume();
-            if (this.state.buf.length === 2) {
-              return this.next(this.parseOnlyTimeFractionMaybe);
-            }
-          } else {
-            throw this.error(new TomlError("Incomplete time"));
-          }
-        }
-        parseOnlyTimeFractionMaybe() {
-          this.state.result += ":" + this.state.buf;
-          if (this.char === CHAR_PERIOD) {
-            this.state.buf = "";
-            this.next(this.parseOnlyTimeFraction);
-          } else {
-            return this.return(createTime(this.state.result));
-          }
-        }
-        parseOnlyTimeFraction() {
-          if (isDigit(this.char)) {
-            this.consume();
-          } else if (this.atEndOfWord()) {
-            if (this.state.buf.length === 0) throw this.error(new TomlError("Expected digit in milliseconds"));
-            return this.returnNow(createTime(this.state.result + "." + this.state.buf));
-          } else {
-            throw this.error(new TomlError("Unexpected character in datetime, expected period (.), minus (-), plus (+) or Z"));
-          }
-        }
-        parseTimeZoneOrFraction() {
-          if (this.char === CHAR_PERIOD) {
-            this.consume();
-            this.next(this.parseDateTimeFraction);
-          } else if (this.char === CHAR_HYPHEN || this.char === CHAR_PLUS) {
-            this.consume();
-            this.next(this.parseTimeZoneHour);
-          } else if (this.char === CHAR_Z) {
-            this.consume();
-            return this.return(createDateTime(this.state.result + this.state.buf));
-          } else if (this.atEndOfWord()) {
-            return this.returnNow(createDateTimeFloat(this.state.result + this.state.buf));
-          } else {
-            throw this.error(new TomlError("Unexpected character in datetime, expected period (.), minus (-), plus (+) or Z"));
-          }
-        }
-        parseDateTimeFraction() {
-          if (isDigit(this.char)) {
-            this.consume();
-          } else if (this.state.buf.length === 1) {
-            throw this.error(new TomlError("Expected digit in milliseconds"));
-          } else if (this.char === CHAR_HYPHEN || this.char === CHAR_PLUS) {
-            this.consume();
-            this.next(this.parseTimeZoneHour);
-          } else if (this.char === CHAR_Z) {
-            this.consume();
-            return this.return(createDateTime(this.state.result + this.state.buf));
-          } else if (this.atEndOfWord()) {
-            return this.returnNow(createDateTimeFloat(this.state.result + this.state.buf));
-          } else {
-            throw this.error(new TomlError("Unexpected character in datetime, expected period (.), minus (-), plus (+) or Z"));
-          }
-        }
-        parseTimeZoneHour() {
-          if (isDigit(this.char)) {
-            this.consume();
-            if (/\d\d$/.test(this.state.buf)) return this.next(this.parseTimeZoneSep);
-          } else {
-            throw this.error(new TomlError("Unexpected character in datetime, expected digit"));
-          }
-        }
-        parseTimeZoneSep() {
-          if (this.char === CHAR_COLON) {
-            this.consume();
-            this.next(this.parseTimeZoneMin);
-          } else {
-            throw this.error(new TomlError("Unexpected character in datetime, expected colon"));
-          }
-        }
-        parseTimeZoneMin() {
-          if (isDigit(this.char)) {
-            this.consume();
-            if (/\d\d$/.test(this.state.buf)) return this.return(createDateTime(this.state.result + this.state.buf));
-          } else {
-            throw this.error(new TomlError("Unexpected character in datetime, expected digit"));
-          }
-        }
-        /* BOOLEAN */
-        parseBoolean() {
-          if (this.char === CHAR_t) {
-            this.consume();
-            return this.next(this.parseTrue_r);
-          } else if (this.char === CHAR_f) {
-            this.consume();
-            return this.next(this.parseFalse_a);
-          }
-        }
-        parseTrue_r() {
-          if (this.char === CHAR_r) {
-            this.consume();
-            return this.next(this.parseTrue_u);
-          } else {
-            throw this.error(new TomlError("Invalid boolean, expected true or false"));
-          }
-        }
-        parseTrue_u() {
-          if (this.char === CHAR_u) {
-            this.consume();
-            return this.next(this.parseTrue_e);
-          } else {
-            throw this.error(new TomlError("Invalid boolean, expected true or false"));
-          }
-        }
-        parseTrue_e() {
-          if (this.char === CHAR_e) {
-            return this.return(true);
-          } else {
-            throw this.error(new TomlError("Invalid boolean, expected true or false"));
-          }
-        }
-        parseFalse_a() {
-          if (this.char === CHAR_a) {
-            this.consume();
-            return this.next(this.parseFalse_l);
-          } else {
-            throw this.error(new TomlError("Invalid boolean, expected true or false"));
-          }
-        }
-        parseFalse_l() {
-          if (this.char === CHAR_l) {
-            this.consume();
-            return this.next(this.parseFalse_s);
-          } else {
-            throw this.error(new TomlError("Invalid boolean, expected true or false"));
-          }
-        }
-        parseFalse_s() {
-          if (this.char === CHAR_s) {
-            this.consume();
-            return this.next(this.parseFalse_e);
-          } else {
-            throw this.error(new TomlError("Invalid boolean, expected true or false"));
-          }
-        }
-        parseFalse_e() {
-          if (this.char === CHAR_e) {
-            return this.return(false);
-          } else {
-            throw this.error(new TomlError("Invalid boolean, expected true or false"));
-          }
-        }
-        /* INLINE LISTS */
-        parseInlineList() {
-          if (this.char === CHAR_SP || this.char === CTRL_I || this.char === CTRL_M || this.char === CTRL_J) {
-            return null;
-          } else if (this.char === Parser.END) {
-            throw this.error(new TomlError("Unterminated inline array"));
-          } else if (this.char === CHAR_NUM) {
-            return this.call(this.parseComment);
-          } else if (this.char === CHAR_RSQB) {
-            return this.return(this.state.resultArr || InlineList());
-          } else {
-            return this.callNow(this.parseValue, this.recordInlineListValue);
-          }
-        }
-        recordInlineListValue(value) {
-          if (this.state.resultArr) {
-            const listType = this.state.resultArr[_contentType];
-            const valueType = tomlType(value);
-            if (listType !== valueType) {
-              throw this.error(new TomlError(`Inline lists must be a single type, not a mix of ${listType} and ${valueType}`));
-            }
-          } else {
-            this.state.resultArr = InlineList(tomlType(value));
-          }
-          if (isFloat(value) || isInteger(value)) {
-            this.state.resultArr.push(value.valueOf());
-          } else {
-            this.state.resultArr.push(value);
-          }
-          return this.goto(this.parseInlineListNext);
-        }
-        parseInlineListNext() {
-          if (this.char === CHAR_SP || this.char === CTRL_I || this.char === CTRL_M || this.char === CTRL_J) {
-            return null;
-          } else if (this.char === CHAR_NUM) {
-            return this.call(this.parseComment);
-          } else if (this.char === CHAR_COMMA) {
-            return this.next(this.parseInlineList);
-          } else if (this.char === CHAR_RSQB) {
-            return this.goto(this.parseInlineList);
-          } else {
-            throw this.error(new TomlError("Invalid character, expected whitespace, comma (,) or close bracket (])"));
-          }
-        }
-        /* INLINE TABLE */
-        parseInlineTable() {
-          if (this.char === CHAR_SP || this.char === CTRL_I) {
-            return null;
-          } else if (this.char === Parser.END || this.char === CHAR_NUM || this.char === CTRL_J || this.char === CTRL_M) {
-            throw this.error(new TomlError("Unterminated inline array"));
-          } else if (this.char === CHAR_RCUB) {
-            return this.return(this.state.resultTable || InlineTable());
-          } else {
-            if (!this.state.resultTable) this.state.resultTable = InlineTable();
-            return this.callNow(this.parseAssign, this.recordInlineTableValue);
-          }
-        }
-        recordInlineTableValue(kv) {
-          let target = this.state.resultTable;
-          let finalKey = kv.key.pop();
-          for (let kw of kv.key) {
-            if (hasKey(target, kw) && (!isTable(target[kw]) || target[kw][_declared])) {
-              throw this.error(new TomlError("Can't redefine existing key"));
-            }
-            target = target[kw] = target[kw] || Table();
-          }
-          if (hasKey(target, finalKey)) {
-            throw this.error(new TomlError("Can't redefine existing key"));
-          }
-          if (isInteger(kv.value) || isFloat(kv.value)) {
-            target[finalKey] = kv.value.valueOf();
-          } else {
-            target[finalKey] = kv.value;
-          }
-          return this.goto(this.parseInlineTableNext);
-        }
-        parseInlineTableNext() {
-          if (this.char === CHAR_SP || this.char === CTRL_I) {
-            return null;
-          } else if (this.char === Parser.END || this.char === CHAR_NUM || this.char === CTRL_J || this.char === CTRL_M) {
-            throw this.error(new TomlError("Unterminated inline array"));
-          } else if (this.char === CHAR_COMMA) {
-            return this.next(this.parseInlineTable);
-          } else if (this.char === CHAR_RCUB) {
-            return this.goto(this.parseInlineTable);
-          } else {
-            throw this.error(new TomlError("Invalid character, expected whitespace, comma (,) or close bracket (])"));
-          }
-        }
-      }
-      return TOMLParser;
-    }
-  }
-});
-
-// node_modules/@iarna/toml/parse-pretty-error.js
-var require_parse_pretty_error = __commonJS({
-  "node_modules/@iarna/toml/parse-pretty-error.js"(exports2, module2) {
-    "use strict";
-    module2.exports = prettyError;
-    function prettyError(err, buf) {
-      if (err.pos == null || err.line == null) return err;
-      let msg = err.message;
-      msg += ` at row ${err.line + 1}, col ${err.col + 1}, pos ${err.pos}:
-`;
-      if (buf && buf.split) {
-        const lines = buf.split(/\n/);
-        const lineNumWidth = String(Math.min(lines.length, err.line + 3)).length;
-        let linePadding = " ";
-        while (linePadding.length < lineNumWidth) linePadding += " ";
-        for (let ii = Math.max(0, err.line - 1); ii < Math.min(lines.length, err.line + 2); ++ii) {
-          let lineNum = String(ii + 1);
-          if (lineNum.length < lineNumWidth) lineNum = " " + lineNum;
-          if (err.line === ii) {
-            msg += lineNum + "> " + lines[ii] + "\n";
-            msg += linePadding + "  ";
-            for (let hh = 0; hh < err.col; ++hh) {
-              msg += " ";
-            }
-            msg += "^\n";
-          } else {
-            msg += lineNum + ": " + lines[ii] + "\n";
-          }
-        }
-      }
-      err.message = msg + "\n";
-      return err;
-    }
-  }
-});
-
-// node_modules/@iarna/toml/parse-string.js
-var require_parse_string = __commonJS({
-  "node_modules/@iarna/toml/parse-string.js"(exports2, module2) {
-    "use strict";
-    module2.exports = parseString;
-    var TOMLParser = require_toml_parser();
-    var prettyError = require_parse_pretty_error();
-    function parseString(str) {
-      if (global.Buffer && global.Buffer.isBuffer(str)) {
-        str = str.toString("utf8");
-      }
-      const parser = new TOMLParser();
-      try {
-        parser.parse(str);
-        return parser.finish();
-      } catch (err) {
-        throw prettyError(err, str);
-      }
-    }
-  }
-});
-
-// node_modules/@iarna/toml/parse-async.js
-var require_parse_async = __commonJS({
-  "node_modules/@iarna/toml/parse-async.js"(exports2, module2) {
-    "use strict";
-    module2.exports = parseAsync;
-    var TOMLParser = require_toml_parser();
-    var prettyError = require_parse_pretty_error();
-    function parseAsync(str, opts) {
-      if (!opts) opts = {};
-      const index = 0;
-      const blocksize = opts.blocksize || 40960;
-      const parser = new TOMLParser();
-      return new Promise((resolve2, reject) => {
-        setImmediate(parseAsyncNext, index, blocksize, resolve2, reject);
-      });
-      function parseAsyncNext(index2, blocksize2, resolve2, reject) {
-        if (index2 >= str.length) {
-          try {
-            return resolve2(parser.finish());
-          } catch (err) {
-            return reject(prettyError(err, str));
-          }
-        }
-        try {
-          parser.parse(str.slice(index2, index2 + blocksize2));
-          setImmediate(parseAsyncNext, index2 + blocksize2, blocksize2, resolve2, reject);
-        } catch (err) {
-          reject(prettyError(err, str));
-        }
-      }
-    }
-  }
-});
-
-// node_modules/@iarna/toml/parse-stream.js
-var require_parse_stream = __commonJS({
-  "node_modules/@iarna/toml/parse-stream.js"(exports2, module2) {
-    "use strict";
-    module2.exports = parseStream;
-    var stream = __require("stream");
-    var TOMLParser = require_toml_parser();
-    function parseStream(stm) {
-      if (stm) {
-        return parseReadable(stm);
-      } else {
-        return parseTransform(stm);
-      }
-    }
-    function parseReadable(stm) {
-      const parser = new TOMLParser();
-      stm.setEncoding("utf8");
-      return new Promise((resolve2, reject) => {
-        let readable;
-        let ended = false;
-        let errored = false;
-        function finish() {
-          ended = true;
-          if (readable) return;
-          try {
-            resolve2(parser.finish());
-          } catch (err) {
-            reject(err);
-          }
-        }
-        function error(err) {
-          errored = true;
-          reject(err);
-        }
-        stm.once("end", finish);
-        stm.once("error", error);
-        readNext();
-        function readNext() {
-          readable = true;
-          let data;
-          while ((data = stm.read()) !== null) {
-            try {
-              parser.parse(data);
-            } catch (err) {
-              return error(err);
-            }
-          }
-          readable = false;
-          if (ended) return finish();
-          if (errored) return;
-          stm.once("readable", readNext);
-        }
-      });
-    }
-    function parseTransform() {
-      const parser = new TOMLParser();
-      return new stream.Transform({
-        objectMode: true,
-        transform(chunk, encoding, cb) {
-          try {
-            parser.parse(chunk.toString(encoding));
-          } catch (err) {
-            this.emit("error", err);
-          }
-          cb();
-        },
-        flush(cb) {
-          try {
-            this.push(parser.finish());
-          } catch (err) {
-            this.emit("error", err);
-          }
-          cb();
-        }
-      });
-    }
-  }
-});
-
-// node_modules/@iarna/toml/parse.js
-var require_parse = __commonJS({
-  "node_modules/@iarna/toml/parse.js"(exports2, module2) {
-    "use strict";
-    module2.exports = require_parse_string();
-    module2.exports.async = require_parse_async();
-    module2.exports.stream = require_parse_stream();
-    module2.exports.prettyError = require_parse_pretty_error();
-  }
-});
-
-// node_modules/@iarna/toml/stringify.js
-var require_stringify = __commonJS({
-  "node_modules/@iarna/toml/stringify.js"(exports2, module2) {
-    "use strict";
-    module2.exports = stringify;
-    module2.exports.value = stringifyInline;
-    function stringify(obj) {
-      if (obj === null) throw typeError("null");
-      if (obj === void 0) throw typeError("undefined");
-      if (typeof obj !== "object") throw typeError(typeof obj);
-      if (typeof obj.toJSON === "function") obj = obj.toJSON();
-      if (obj == null) return null;
-      const type = tomlType2(obj);
-      if (type !== "table") throw typeError(type);
-      return stringifyObject("", "", obj);
-    }
-    function typeError(type) {
-      return new Error("Can only stringify objects, not " + type);
-    }
-    function arrayOneTypeError() {
-      return new Error("Array values can't have mixed types");
-    }
-    function getInlineKeys(obj) {
-      return Object.keys(obj).filter((key) => isInline(obj[key]));
-    }
-    function getComplexKeys(obj) {
-      return Object.keys(obj).filter((key) => !isInline(obj[key]));
-    }
-    function toJSON(obj) {
-      let nobj = Array.isArray(obj) ? [] : Object.prototype.hasOwnProperty.call(obj, "__proto__") ? { ["__proto__"]: void 0 } : {};
-      for (let prop of Object.keys(obj)) {
-        if (obj[prop] && typeof obj[prop].toJSON === "function" && !("toISOString" in obj[prop])) {
-          nobj[prop] = obj[prop].toJSON();
-        } else {
-          nobj[prop] = obj[prop];
-        }
-      }
-      return nobj;
-    }
-    function stringifyObject(prefix, indent, obj) {
-      obj = toJSON(obj);
-      var inlineKeys;
-      var complexKeys;
-      inlineKeys = getInlineKeys(obj);
-      complexKeys = getComplexKeys(obj);
-      var result = [];
-      var inlineIndent = indent || "";
-      inlineKeys.forEach((key) => {
-        var type = tomlType2(obj[key]);
-        if (type !== "undefined" && type !== "null") {
-          result.push(inlineIndent + stringifyKey(key) + " = " + stringifyAnyInline(obj[key], true));
-        }
-      });
-      if (result.length > 0) result.push("");
-      var complexIndent = prefix && inlineKeys.length > 0 ? indent + "  " : "";
-      complexKeys.forEach((key) => {
-        result.push(stringifyComplex(prefix, complexIndent, key, obj[key]));
-      });
-      return result.join("\n");
-    }
-    function isInline(value) {
-      switch (tomlType2(value)) {
-        case "undefined":
-        case "null":
-        case "integer":
-        case "nan":
-        case "float":
-        case "boolean":
-        case "string":
-        case "datetime":
-          return true;
-        case "array":
-          return value.length === 0 || tomlType2(value[0]) !== "table";
-        case "table":
-          return Object.keys(value).length === 0;
-        /* istanbul ignore next */
-        default:
-          return false;
-      }
-    }
-    function tomlType2(value) {
-      if (value === void 0) {
-        return "undefined";
-      } else if (value === null) {
-        return "null";
-      } else if (typeof value === "bigint" || Number.isInteger(value) && !Object.is(value, -0)) {
-        return "integer";
-      } else if (typeof value === "number") {
-        return "float";
-      } else if (typeof value === "boolean") {
-        return "boolean";
-      } else if (typeof value === "string") {
-        return "string";
-      } else if ("toISOString" in value) {
-        return isNaN(value) ? "undefined" : "datetime";
-      } else if (Array.isArray(value)) {
-        return "array";
-      } else {
-        return "table";
-      }
-    }
-    function stringifyKey(key) {
-      var keyStr = String(key);
-      if (/^[-A-Za-z0-9_]+$/.test(keyStr)) {
-        return keyStr;
-      } else {
-        return stringifyBasicString(keyStr);
-      }
-    }
-    function stringifyBasicString(str) {
-      return '"' + escapeString(str).replace(/"/g, '\\"') + '"';
-    }
-    function stringifyLiteralString(str) {
-      return "'" + str + "'";
-    }
-    function numpad(num, str) {
-      while (str.length < num) str = "0" + str;
-      return str;
-    }
-    function escapeString(str) {
-      return str.replace(/\\/g, "\\\\").replace(/[\b]/g, "\\b").replace(/\t/g, "\\t").replace(/\n/g, "\\n").replace(/\f/g, "\\f").replace(/\r/g, "\\r").replace(/([\u0000-\u001f\u007f])/, (c) => "\\u" + numpad(4, c.codePointAt(0).toString(16)));
-    }
-    function stringifyMultilineString(str) {
-      let escaped = str.split(/\n/).map((str2) => {
-        return escapeString(str2).replace(/"(?="")/g, '\\"');
-      }).join("\n");
-      if (escaped.slice(-1) === '"') escaped += "\\\n";
-      return '"""\n' + escaped + '"""';
-    }
-    function stringifyAnyInline(value, multilineOk) {
-      let type = tomlType2(value);
-      if (type === "string") {
-        if (multilineOk && /\n/.test(value)) {
-          type = "string-multiline";
-        } else if (!/[\b\t\n\f\r']/.test(value) && /"/.test(value)) {
-          type = "string-literal";
-        }
-      }
-      return stringifyInline(value, type);
-    }
-    function stringifyInline(value, type) {
-      if (!type) type = tomlType2(value);
-      switch (type) {
-        case "string-multiline":
-          return stringifyMultilineString(value);
-        case "string":
-          return stringifyBasicString(value);
-        case "string-literal":
-          return stringifyLiteralString(value);
-        case "integer":
-          return stringifyInteger(value);
-        case "float":
-          return stringifyFloat(value);
-        case "boolean":
-          return stringifyBoolean(value);
-        case "datetime":
-          return stringifyDatetime(value);
-        case "array":
-          return stringifyInlineArray(value.filter((_) => tomlType2(_) !== "null" && tomlType2(_) !== "undefined" && tomlType2(_) !== "nan"));
-        case "table":
-          return stringifyInlineTable(value);
-        /* istanbul ignore next */
-        default:
-          throw typeError(type);
-      }
-    }
-    function stringifyInteger(value) {
-      return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, "_");
-    }
-    function stringifyFloat(value) {
-      if (value === Infinity) {
-        return "inf";
-      } else if (value === -Infinity) {
-        return "-inf";
-      } else if (Object.is(value, NaN)) {
-        return "nan";
-      } else if (Object.is(value, -0)) {
-        return "-0.0";
-      }
-      var chunks = String(value).split(".");
-      var int = chunks[0];
-      var dec = chunks[1] || 0;
-      return stringifyInteger(int) + "." + dec;
-    }
-    function stringifyBoolean(value) {
-      return String(value);
-    }
-    function stringifyDatetime(value) {
-      return value.toISOString();
-    }
-    function isNumber(type) {
-      return type === "float" || type === "integer";
-    }
-    function arrayType(values) {
-      var contentType = tomlType2(values[0]);
-      if (values.every((_) => tomlType2(_) === contentType)) return contentType;
-      if (values.every((_) => isNumber(tomlType2(_)))) return "float";
-      return "mixed";
-    }
-    function validateArray(values) {
-      const type = arrayType(values);
-      if (type === "mixed") {
-        throw arrayOneTypeError();
-      }
-      return type;
-    }
-    function stringifyInlineArray(values) {
-      values = toJSON(values);
-      const type = validateArray(values);
-      var result = "[";
-      var stringified = values.map((_) => stringifyInline(_, type));
-      if (stringified.join(", ").length > 60 || /\n/.test(stringified)) {
-        result += "\n  " + stringified.join(",\n  ") + "\n";
-      } else {
-        result += " " + stringified.join(", ") + (stringified.length > 0 ? " " : "");
-      }
-      return result + "]";
-    }
-    function stringifyInlineTable(value) {
-      value = toJSON(value);
-      var result = [];
-      Object.keys(value).forEach((key) => {
-        result.push(stringifyKey(key) + " = " + stringifyAnyInline(value[key], false));
-      });
-      return "{ " + result.join(", ") + (result.length > 0 ? " " : "") + "}";
-    }
-    function stringifyComplex(prefix, indent, key, value) {
-      var valueType = tomlType2(value);
-      if (valueType === "array") {
-        return stringifyArrayOfTables(prefix, indent, key, value);
-      } else if (valueType === "table") {
-        return stringifyComplexTable(prefix, indent, key, value);
-      } else {
-        throw typeError(valueType);
-      }
-    }
-    function stringifyArrayOfTables(prefix, indent, key, values) {
-      values = toJSON(values);
-      validateArray(values);
-      var firstValueType = tomlType2(values[0]);
-      if (firstValueType !== "table") throw typeError(firstValueType);
-      var fullKey = prefix + stringifyKey(key);
-      var result = "";
-      values.forEach((table) => {
-        if (result.length > 0) result += "\n";
-        result += indent + "[[" + fullKey + "]]\n";
-        result += stringifyObject(fullKey + ".", indent, table);
-      });
-      return result;
-    }
-    function stringifyComplexTable(prefix, indent, key, value) {
-      var fullKey = prefix + stringifyKey(key);
-      var result = "";
-      if (getInlineKeys(value).length > 0) {
-        result += indent + "[" + fullKey + "]\n";
-      }
-      return result + stringifyObject(fullKey + ".", indent, value);
-    }
-  }
-});
-
-// node_modules/@iarna/toml/toml.js
-var require_toml = __commonJS({
-  "node_modules/@iarna/toml/toml.js"(exports2) {
-    "use strict";
-    exports2.parse = require_parse();
-    exports2.stringify = require_stringify();
-  }
-});
-
 // src/eval/ci-smoke.ts
 import { resolve, dirname as dirname2, basename } from "path";
 import { fileURLToPath as fileURLToPath3 } from "url";
@@ -2281,21 +254,712 @@ function initSchema(db) {
 }
 
 // src/config.ts
-var import_toml = __toESM(require_toml(), 1);
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
 import { createHash, randomUUID } from "crypto";
+
+// node_modules/smol-toml/dist/error.js
+function getLineColFromPtr(string, ptr) {
+  let lines = string.slice(0, ptr).split(/\r\n|\n|\r/g);
+  return [lines.length, lines.pop().length + 1];
+}
+function makeCodeBlock(string, line, column) {
+  let lines = string.split(/\r\n|\n|\r/g);
+  let codeblock = "";
+  let numberLen = (Math.log10(line + 1) | 0) + 1;
+  for (let i = line - 1; i <= line + 1; i++) {
+    let l = lines[i - 1];
+    if (!l)
+      continue;
+    codeblock += i.toString().padEnd(numberLen, " ");
+    codeblock += ":  ";
+    codeblock += l;
+    codeblock += "\n";
+    if (i === line) {
+      codeblock += " ".repeat(numberLen + column + 2);
+      codeblock += "^\n";
+    }
+  }
+  return codeblock;
+}
+var TomlError = class extends Error {
+  line;
+  column;
+  codeblock;
+  constructor(message, options) {
+    const [line, column] = getLineColFromPtr(options.toml, options.ptr);
+    const codeblock = makeCodeBlock(options.toml, line, column);
+    super(`Invalid TOML document: ${message}
+
+${codeblock}`, options);
+    this.line = line;
+    this.column = column;
+    this.codeblock = codeblock;
+  }
+};
+
+// node_modules/smol-toml/dist/util.js
+function isEscaped(str, ptr) {
+  let i = 0;
+  while (str[ptr - ++i] === "\\")
+    ;
+  return --i && i % 2;
+}
+function indexOfNewline(str, start = 0, end = str.length) {
+  let idx = str.indexOf("\n", start);
+  if (str[idx - 1] === "\r")
+    idx--;
+  return idx <= end ? idx : -1;
+}
+function skipComment(str, ptr) {
+  for (let i = ptr; i < str.length; i++) {
+    let c = str[i];
+    if (c === "\n")
+      return i;
+    if (c === "\r" && str[i + 1] === "\n")
+      return i + 1;
+    if (c < " " && c !== "	" || c === "\x7F") {
+      throw new TomlError("control characters are not allowed in comments", {
+        toml: str,
+        ptr
+      });
+    }
+  }
+  return str.length;
+}
+function skipVoid(str, ptr, banNewLines, banComments) {
+  let c;
+  while (1) {
+    while ((c = str[ptr]) === " " || c === "	" || !banNewLines && (c === "\n" || c === "\r" && str[ptr + 1] === "\n"))
+      ptr++;
+    if (banComments || c !== "#")
+      break;
+    ptr = skipComment(str, ptr);
+  }
+  return ptr;
+}
+function skipUntil(str, ptr, sep, end, banNewLines = false) {
+  if (!end) {
+    ptr = indexOfNewline(str, ptr);
+    return ptr < 0 ? str.length : ptr;
+  }
+  for (let i = ptr; i < str.length; i++) {
+    let c = str[i];
+    if (c === "#") {
+      i = indexOfNewline(str, i);
+    } else if (c === sep) {
+      return i + 1;
+    } else if (c === end || banNewLines && (c === "\n" || c === "\r" && str[i + 1] === "\n")) {
+      return i;
+    }
+  }
+  throw new TomlError("cannot find end of structure", {
+    toml: str,
+    ptr
+  });
+}
+function getStringEnd(str, seek) {
+  let first = str[seek];
+  let target = first === str[seek + 1] && str[seek + 1] === str[seek + 2] ? str.slice(seek, seek + 3) : first;
+  seek += target.length - 1;
+  do
+    seek = str.indexOf(target, ++seek);
+  while (seek > -1 && first !== "'" && isEscaped(str, seek));
+  if (seek > -1) {
+    seek += target.length;
+    if (target.length > 1) {
+      if (str[seek] === first)
+        seek++;
+      if (str[seek] === first)
+        seek++;
+    }
+  }
+  return seek;
+}
+
+// node_modules/smol-toml/dist/date.js
+var DATE_TIME_RE = /^(\d{4}-\d{2}-\d{2})?[T ]?(?:(\d{2}):\d{2}(?::\d{2}(?:\.\d+)?)?)?(Z|[-+]\d{2}:\d{2})?$/i;
+var TomlDate = class _TomlDate extends Date {
+  #hasDate = false;
+  #hasTime = false;
+  #offset = null;
+  constructor(date) {
+    let hasDate = true;
+    let hasTime = true;
+    let offset = "Z";
+    if (typeof date === "string") {
+      let match = date.match(DATE_TIME_RE);
+      if (match) {
+        if (!match[1]) {
+          hasDate = false;
+          date = `0000-01-01T${date}`;
+        }
+        hasTime = !!match[2];
+        hasTime && date[10] === " " && (date = date.replace(" ", "T"));
+        if (match[2] && +match[2] > 23) {
+          date = "";
+        } else {
+          offset = match[3] || null;
+          date = date.toUpperCase();
+          if (!offset && hasTime)
+            date += "Z";
+        }
+      } else {
+        date = "";
+      }
+    }
+    super(date);
+    if (!isNaN(this.getTime())) {
+      this.#hasDate = hasDate;
+      this.#hasTime = hasTime;
+      this.#offset = offset;
+    }
+  }
+  isDateTime() {
+    return this.#hasDate && this.#hasTime;
+  }
+  isLocal() {
+    return !this.#hasDate || !this.#hasTime || !this.#offset;
+  }
+  isDate() {
+    return this.#hasDate && !this.#hasTime;
+  }
+  isTime() {
+    return this.#hasTime && !this.#hasDate;
+  }
+  isValid() {
+    return this.#hasDate || this.#hasTime;
+  }
+  toISOString() {
+    let iso = super.toISOString();
+    if (this.isDate())
+      return iso.slice(0, 10);
+    if (this.isTime())
+      return iso.slice(11, 23);
+    if (this.#offset === null)
+      return iso.slice(0, -1);
+    if (this.#offset === "Z")
+      return iso;
+    let offset = +this.#offset.slice(1, 3) * 60 + +this.#offset.slice(4, 6);
+    offset = this.#offset[0] === "-" ? offset : -offset;
+    let offsetDate = new Date(this.getTime() - offset * 6e4);
+    return offsetDate.toISOString().slice(0, -1) + this.#offset;
+  }
+  static wrapAsOffsetDateTime(jsDate, offset = "Z") {
+    let date = new _TomlDate(jsDate);
+    date.#offset = offset;
+    return date;
+  }
+  static wrapAsLocalDateTime(jsDate) {
+    let date = new _TomlDate(jsDate);
+    date.#offset = null;
+    return date;
+  }
+  static wrapAsLocalDate(jsDate) {
+    let date = new _TomlDate(jsDate);
+    date.#hasTime = false;
+    date.#offset = null;
+    return date;
+  }
+  static wrapAsLocalTime(jsDate) {
+    let date = new _TomlDate(jsDate);
+    date.#hasDate = false;
+    date.#offset = null;
+    return date;
+  }
+};
+
+// node_modules/smol-toml/dist/primitive.js
+var INT_REGEX = /^((0x[0-9a-fA-F](_?[0-9a-fA-F])*)|(([+-]|0[ob])?\d(_?\d)*))$/;
+var FLOAT_REGEX = /^[+-]?\d(_?\d)*(\.\d(_?\d)*)?([eE][+-]?\d(_?\d)*)?$/;
+var LEADING_ZERO = /^[+-]?0[0-9_]/;
+var ESCAPE_REGEX = /^[0-9a-f]{2,8}$/i;
+var ESC_MAP = {
+  b: "\b",
+  t: "	",
+  n: "\n",
+  f: "\f",
+  r: "\r",
+  e: "\x1B",
+  '"': '"',
+  "\\": "\\"
+};
+function parseString(str, ptr = 0, endPtr = str.length) {
+  let isLiteral = str[ptr] === "'";
+  let isMultiline = str[ptr++] === str[ptr] && str[ptr] === str[ptr + 1];
+  if (isMultiline) {
+    endPtr -= 2;
+    if (str[ptr += 2] === "\r")
+      ptr++;
+    if (str[ptr] === "\n")
+      ptr++;
+  }
+  let tmp = 0;
+  let isEscape;
+  let parsed = "";
+  let sliceStart = ptr;
+  while (ptr < endPtr - 1) {
+    let c = str[ptr++];
+    if (c === "\n" || c === "\r" && str[ptr] === "\n") {
+      if (!isMultiline) {
+        throw new TomlError("newlines are not allowed in strings", {
+          toml: str,
+          ptr: ptr - 1
+        });
+      }
+    } else if (c < " " && c !== "	" || c === "\x7F") {
+      throw new TomlError("control characters are not allowed in strings", {
+        toml: str,
+        ptr: ptr - 1
+      });
+    }
+    if (isEscape) {
+      isEscape = false;
+      if (c === "x" || c === "u" || c === "U") {
+        let code = str.slice(ptr, ptr += c === "x" ? 2 : c === "u" ? 4 : 8);
+        if (!ESCAPE_REGEX.test(code)) {
+          throw new TomlError("invalid unicode escape", {
+            toml: str,
+            ptr: tmp
+          });
+        }
+        try {
+          parsed += String.fromCodePoint(parseInt(code, 16));
+        } catch {
+          throw new TomlError("invalid unicode escape", {
+            toml: str,
+            ptr: tmp
+          });
+        }
+      } else if (isMultiline && (c === "\n" || c === " " || c === "	" || c === "\r")) {
+        ptr = skipVoid(str, ptr - 1, true);
+        if (str[ptr] !== "\n" && str[ptr] !== "\r") {
+          throw new TomlError("invalid escape: only line-ending whitespace may be escaped", {
+            toml: str,
+            ptr: tmp
+          });
+        }
+        ptr = skipVoid(str, ptr);
+      } else if (c in ESC_MAP) {
+        parsed += ESC_MAP[c];
+      } else {
+        throw new TomlError("unrecognized escape sequence", {
+          toml: str,
+          ptr: tmp
+        });
+      }
+      sliceStart = ptr;
+    } else if (!isLiteral && c === "\\") {
+      tmp = ptr - 1;
+      isEscape = true;
+      parsed += str.slice(sliceStart, tmp);
+    }
+  }
+  return parsed + str.slice(sliceStart, endPtr - 1);
+}
+function parseValue(value, toml, ptr, integersAsBigInt) {
+  if (value === "true")
+    return true;
+  if (value === "false")
+    return false;
+  if (value === "-inf")
+    return -Infinity;
+  if (value === "inf" || value === "+inf")
+    return Infinity;
+  if (value === "nan" || value === "+nan" || value === "-nan")
+    return NaN;
+  if (value === "-0")
+    return integersAsBigInt ? 0n : 0;
+  let isInt = INT_REGEX.test(value);
+  if (isInt || FLOAT_REGEX.test(value)) {
+    if (LEADING_ZERO.test(value)) {
+      throw new TomlError("leading zeroes are not allowed", {
+        toml,
+        ptr
+      });
+    }
+    value = value.replace(/_/g, "");
+    let numeric = +value;
+    if (isNaN(numeric)) {
+      throw new TomlError("invalid number", {
+        toml,
+        ptr
+      });
+    }
+    if (isInt) {
+      if ((isInt = !Number.isSafeInteger(numeric)) && !integersAsBigInt) {
+        throw new TomlError("integer value cannot be represented losslessly", {
+          toml,
+          ptr
+        });
+      }
+      if (isInt || integersAsBigInt === true)
+        numeric = BigInt(value);
+    }
+    return numeric;
+  }
+  const date = new TomlDate(value);
+  if (!date.isValid()) {
+    throw new TomlError("invalid value", {
+      toml,
+      ptr
+    });
+  }
+  return date;
+}
+
+// node_modules/smol-toml/dist/extract.js
+function sliceAndTrimEndOf(str, startPtr, endPtr) {
+  let value = str.slice(startPtr, endPtr);
+  let commentIdx = value.indexOf("#");
+  if (commentIdx > -1) {
+    skipComment(str, commentIdx);
+    value = value.slice(0, commentIdx);
+  }
+  return [value.trimEnd(), commentIdx];
+}
+function extractValue(str, ptr, end, depth, integersAsBigInt) {
+  if (depth === 0) {
+    throw new TomlError("document contains excessively nested structures. aborting.", {
+      toml: str,
+      ptr
+    });
+  }
+  let c = str[ptr];
+  if (c === "[" || c === "{") {
+    let [value, endPtr2] = c === "[" ? parseArray(str, ptr, depth, integersAsBigInt) : parseInlineTable(str, ptr, depth, integersAsBigInt);
+    if (end) {
+      endPtr2 = skipVoid(str, endPtr2);
+      if (str[endPtr2] === ",")
+        endPtr2++;
+      else if (str[endPtr2] !== end) {
+        throw new TomlError("expected comma or end of structure", {
+          toml: str,
+          ptr: endPtr2
+        });
+      }
+    }
+    return [value, endPtr2];
+  }
+  let endPtr;
+  if (c === '"' || c === "'") {
+    endPtr = getStringEnd(str, ptr);
+    let parsed = parseString(str, ptr, endPtr);
+    if (end) {
+      endPtr = skipVoid(str, endPtr);
+      if (str[endPtr] && str[endPtr] !== "," && str[endPtr] !== end && str[endPtr] !== "\n" && str[endPtr] !== "\r") {
+        throw new TomlError("unexpected character encountered", {
+          toml: str,
+          ptr: endPtr
+        });
+      }
+      endPtr += +(str[endPtr] === ",");
+    }
+    return [parsed, endPtr];
+  }
+  endPtr = skipUntil(str, ptr, ",", end);
+  let slice = sliceAndTrimEndOf(str, ptr, endPtr - +(str[endPtr - 1] === ","));
+  if (!slice[0]) {
+    throw new TomlError("incomplete key-value declaration: no value specified", {
+      toml: str,
+      ptr
+    });
+  }
+  if (end && slice[1] > -1) {
+    endPtr = skipVoid(str, ptr + slice[1]);
+    endPtr += +(str[endPtr] === ",");
+  }
+  return [
+    parseValue(slice[0], str, ptr, integersAsBigInt),
+    endPtr
+  ];
+}
+
+// node_modules/smol-toml/dist/struct.js
+var KEY_PART_RE = /^[a-zA-Z0-9-_]+[ \t]*$/;
+function parseKey(str, ptr, end = "=") {
+  let dot = ptr - 1;
+  let parsed = [];
+  let endPtr = str.indexOf(end, ptr);
+  if (endPtr < 0) {
+    throw new TomlError("incomplete key-value: cannot find end of key", {
+      toml: str,
+      ptr
+    });
+  }
+  do {
+    let c = str[ptr = ++dot];
+    if (c !== " " && c !== "	") {
+      if (c === '"' || c === "'") {
+        if (c === str[ptr + 1] && c === str[ptr + 2]) {
+          throw new TomlError("multiline strings are not allowed in keys", {
+            toml: str,
+            ptr
+          });
+        }
+        let eos = getStringEnd(str, ptr);
+        if (eos < 0) {
+          throw new TomlError("unfinished string encountered", {
+            toml: str,
+            ptr
+          });
+        }
+        dot = str.indexOf(".", eos);
+        let strEnd = str.slice(eos, dot < 0 || dot > endPtr ? endPtr : dot);
+        let newLine = indexOfNewline(strEnd);
+        if (newLine > -1) {
+          throw new TomlError("newlines are not allowed in keys", {
+            toml: str,
+            ptr: ptr + dot + newLine
+          });
+        }
+        if (strEnd.trimStart()) {
+          throw new TomlError("found extra tokens after the string part", {
+            toml: str,
+            ptr: eos
+          });
+        }
+        if (endPtr < eos) {
+          endPtr = str.indexOf(end, eos);
+          if (endPtr < 0) {
+            throw new TomlError("incomplete key-value: cannot find end of key", {
+              toml: str,
+              ptr
+            });
+          }
+        }
+        parsed.push(parseString(str, ptr, eos));
+      } else {
+        dot = str.indexOf(".", ptr);
+        let part = str.slice(ptr, dot < 0 || dot > endPtr ? endPtr : dot);
+        if (!KEY_PART_RE.test(part)) {
+          throw new TomlError("only letter, numbers, dashes and underscores are allowed in keys", {
+            toml: str,
+            ptr
+          });
+        }
+        parsed.push(part.trimEnd());
+      }
+    }
+  } while (dot + 1 && dot < endPtr);
+  return [parsed, skipVoid(str, endPtr + 1, true, true)];
+}
+function parseInlineTable(str, ptr, depth, integersAsBigInt) {
+  let res = {};
+  let seen = /* @__PURE__ */ new Set();
+  let c;
+  ptr++;
+  while ((c = str[ptr++]) !== "}" && c) {
+    if (c === ",") {
+      throw new TomlError("expected value, found comma", {
+        toml: str,
+        ptr: ptr - 1
+      });
+    } else if (c === "#")
+      ptr = skipComment(str, ptr);
+    else if (c !== " " && c !== "	" && c !== "\n" && c !== "\r") {
+      let k;
+      let t = res;
+      let hasOwn = false;
+      let [key, keyEndPtr] = parseKey(str, ptr - 1);
+      for (let i = 0; i < key.length; i++) {
+        if (i)
+          t = hasOwn ? t[k] : t[k] = {};
+        k = key[i];
+        if ((hasOwn = Object.hasOwn(t, k)) && (typeof t[k] !== "object" || seen.has(t[k]))) {
+          throw new TomlError("trying to redefine an already defined value", {
+            toml: str,
+            ptr
+          });
+        }
+        if (!hasOwn && k === "__proto__") {
+          Object.defineProperty(t, k, { enumerable: true, configurable: true, writable: true });
+        }
+      }
+      if (hasOwn) {
+        throw new TomlError("trying to redefine an already defined value", {
+          toml: str,
+          ptr
+        });
+      }
+      let [value, valueEndPtr] = extractValue(str, keyEndPtr, "}", depth - 1, integersAsBigInt);
+      seen.add(value);
+      t[k] = value;
+      ptr = valueEndPtr;
+    }
+  }
+  if (!c) {
+    throw new TomlError("unfinished table encountered", {
+      toml: str,
+      ptr
+    });
+  }
+  return [res, ptr];
+}
+function parseArray(str, ptr, depth, integersAsBigInt) {
+  let res = [];
+  let c;
+  ptr++;
+  while ((c = str[ptr++]) !== "]" && c) {
+    if (c === ",") {
+      throw new TomlError("expected value, found comma", {
+        toml: str,
+        ptr: ptr - 1
+      });
+    } else if (c === "#")
+      ptr = skipComment(str, ptr);
+    else if (c !== " " && c !== "	" && c !== "\n" && c !== "\r") {
+      let e = extractValue(str, ptr - 1, "]", depth - 1, integersAsBigInt);
+      res.push(e[0]);
+      ptr = e[1];
+    }
+  }
+  if (!c) {
+    throw new TomlError("unfinished array encountered", {
+      toml: str,
+      ptr
+    });
+  }
+  return [res, ptr];
+}
+
+// node_modules/smol-toml/dist/parse.js
+function peekTable(key, table, meta, type) {
+  let t = table;
+  let m = meta;
+  let k;
+  let hasOwn = false;
+  let state;
+  for (let i = 0; i < key.length; i++) {
+    if (i) {
+      t = hasOwn ? t[k] : t[k] = {};
+      m = (state = m[k]).c;
+      if (type === 0 && (state.t === 1 || state.t === 2)) {
+        return null;
+      }
+      if (state.t === 2) {
+        let l = t.length - 1;
+        t = t[l];
+        m = m[l].c;
+      }
+    }
+    k = key[i];
+    if ((hasOwn = Object.hasOwn(t, k)) && m[k]?.t === 0 && m[k]?.d) {
+      return null;
+    }
+    if (!hasOwn) {
+      if (k === "__proto__") {
+        Object.defineProperty(t, k, { enumerable: true, configurable: true, writable: true });
+        Object.defineProperty(m, k, { enumerable: true, configurable: true, writable: true });
+      }
+      m[k] = {
+        t: i < key.length - 1 && type === 2 ? 3 : type,
+        d: false,
+        i: 0,
+        c: {}
+      };
+    }
+  }
+  state = m[k];
+  if (state.t !== type && !(type === 1 && state.t === 3)) {
+    return null;
+  }
+  if (type === 2) {
+    if (!state.d) {
+      state.d = true;
+      t[k] = [];
+    }
+    t[k].push(t = {});
+    state.c[state.i++] = state = { t: 1, d: false, i: 0, c: {} };
+  }
+  if (state.d) {
+    return null;
+  }
+  state.d = true;
+  if (type === 1) {
+    t = hasOwn ? t[k] : t[k] = {};
+  } else if (type === 0 && hasOwn) {
+    return null;
+  }
+  return [k, t, state.c];
+}
+function parse(toml, { maxDepth = 1e3, integersAsBigInt } = {}) {
+  let res = {};
+  let meta = {};
+  let tbl = res;
+  let m = meta;
+  for (let ptr = skipVoid(toml, 0); ptr < toml.length; ) {
+    if (toml[ptr] === "[") {
+      let isTableArray = toml[++ptr] === "[";
+      let k = parseKey(toml, ptr += +isTableArray, "]");
+      if (isTableArray) {
+        if (toml[k[1] - 1] !== "]") {
+          throw new TomlError("expected end of table declaration", {
+            toml,
+            ptr: k[1] - 1
+          });
+        }
+        k[1]++;
+      }
+      let p = peekTable(
+        k[0],
+        res,
+        meta,
+        isTableArray ? 2 : 1
+        /* Type.EXPLICIT */
+      );
+      if (!p) {
+        throw new TomlError("trying to redefine an already defined table or value", {
+          toml,
+          ptr
+        });
+      }
+      m = p[2];
+      tbl = p[1];
+      ptr = k[1];
+    } else {
+      let k = parseKey(toml, ptr);
+      let p = peekTable(
+        k[0],
+        tbl,
+        m,
+        0
+        /* Type.DOTTED */
+      );
+      if (!p) {
+        throw new TomlError("trying to redefine an already defined table or value", {
+          toml,
+          ptr
+        });
+      }
+      let v = extractValue(toml, k[1], void 0, maxDepth, integersAsBigInt);
+      p[1][p[0]] = v[0];
+      ptr = v[1];
+    }
+    ptr = skipVoid(toml, ptr, true);
+    if (toml[ptr] && toml[ptr] !== "\n" && toml[ptr] !== "\r") {
+      throw new TomlError("each key-value declaration must be followed by an end-of-line", {
+        toml,
+        ptr
+      });
+    }
+    ptr = skipVoid(toml, ptr);
+  }
+  return res;
+}
+
+// src/config.ts
 var DEFAULTS_PATH = new URL("./defaults.toml", import.meta.url);
 function getDataDir() {
   return process.env.TOTAL_RECALL_HOME ?? join(process.env.HOME ?? "~", ".total-recall");
 }
 function loadConfig() {
   const defaultsText = readFileSync(DEFAULTS_PATH, "utf-8");
-  const defaults = (0, import_toml.parse)(defaultsText);
+  const defaults = parse(defaultsText);
   const userConfigPath = join(getDataDir(), "config.toml");
   if (existsSync(userConfigPath)) {
     const userText = readFileSync(userConfigPath, "utf-8");
-    const userConfig = (0, import_toml.parse)(userText);
+    const userConfig = parse(userText);
     return deepMerge(defaults, userConfig);
   }
   return defaults;
@@ -2999,3 +1663,42 @@ main().catch((err) => {
   console.error("Benchmark failed:", err);
   process.exit(1);
 });
+/*! Bundled license information:
+
+smol-toml/dist/error.js:
+smol-toml/dist/util.js:
+smol-toml/dist/date.js:
+smol-toml/dist/primitive.js:
+smol-toml/dist/extract.js:
+smol-toml/dist/struct.js:
+smol-toml/dist/parse.js:
+smol-toml/dist/stringify.js:
+smol-toml/dist/index.js:
+  (*!
+   * Copyright (c) Squirrel Chat et al., All rights reserved.
+   * SPDX-License-Identifier: BSD-3-Clause
+   *
+   * Redistribution and use in source and binary forms, with or without
+   * modification, are permitted provided that the following conditions are met:
+   *
+   * 1. Redistributions of source code must retain the above copyright notice, this
+   *    list of conditions and the following disclaimer.
+   * 2. Redistributions in binary form must reproduce the above copyright notice,
+   *    this list of conditions and the following disclaimer in the
+   *    documentation and/or other materials provided with the distribution.
+   * 3. Neither the name of the copyright holder nor the names of its contributors
+   *    may be used to endorse or promote products derived from this software without
+   *    specific prior written permission.
+   *
+   * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+   * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+   * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+   * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+   * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+   * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+   * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+   * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+   * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+   * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+   *)
+*/

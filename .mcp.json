@@ -2,7 +2,7 @@
   "mcpServers": {
     "total-recall": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/index.js"],
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/start.cjs"],
       "cwd": "${CLAUDE_PLUGIN_ROOT}"
     }
   }

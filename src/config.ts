@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { parse as parseToml, stringify as stringifyToml } from "@iarna/toml";
+import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import type { TotalRecallConfig } from "./types.js";
 import type Database from "better-sqlite3";
 
