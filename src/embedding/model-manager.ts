@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { readFileSync, statSync, createReadStream } from "node:fs";
-import { writeFile, rename, unlink } from "node:fs/promises";
+import { writeFile, rename, unlink, readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -139,4 +139,36 @@ export function isModelStructurallyValid(modelPath: string, spec: ModelSpec): bo
   } catch {
     return false;
   }
+}
+
+export async function isModelChecksumValid(modelPath: string, spec: ModelSpec): Promise<boolean> {
+  const sidecarPath = join(modelPath, ".verified");
+
+  // If sidecar exists and matches spec.sha256, skip re-hashing
+  if (existsSync(sidecarPath)) {
+    try {
+      const cached = (await readFile(sidecarPath, "utf8")).trim();
+      if (cached === spec.sha256) return true;
+    } catch {
+      // Fall through to hash check
+    }
+  }
+
+  // Compute hash of model.onnx
+  const onnxPath = join(modelPath, "model.onnx");
+  if (!existsSync(onnxPath)) return false;
+
+  let computed: string;
+  try {
+    computed = await sha256File(onnxPath);
+  } catch {
+    return false;
+  }
+
+  if (computed === spec.sha256) {
+    await writeFileAtomic(sidecarPath, spec.sha256);
+    return true;
+  }
+
+  return false;
 }

@@ -1,9 +1,10 @@
-import { describe, it, expect } from "vitest";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
+import { describe, it, expect, afterEach } from "vitest";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from "node:fs";
 import { copyFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getModelPath, isModelDownloaded, sha256File, writeFileAtomic } from "./model-manager.js";
+import { createHash } from "node:crypto";
+import { getModelPath, isModelDownloaded, sha256File, writeFileAtomic, isModelChecksumValid } from "./model-manager.js";
 import { isModelStructurallyValid } from "./model-manager.js";
 import { getModelSpec } from "./registry.js";
 
@@ -76,5 +77,96 @@ describe("isModelStructurallyValid", () => {
     writeFileSync(join(dir, "tokenizer.json"), "{}");
     writeFileSync(join(dir, "tokenizer_config.json"), "{}");
     expect(isModelStructurallyValid(dir, spec)).toBe(true);
+  });
+});
+
+describe("isModelChecksumValid", () => {
+  let tmpDir: string;
+
+  afterEach(() => {
+    if (tmpDir) {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("happy path, no sidecar: returns true and writes .verified", async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "tr-checksum-"));
+    const onnxPath = join(tmpDir, "model.onnx");
+    const content = Buffer.from("small test model content for checksum");
+    writeFileSync(onnxPath, content);
+    const expectedHash = createHash("sha256").update(content).digest("hex");
+    const fakeSpec = {
+      name: "test-model",
+      dimensions: 384,
+      revision: "main",
+      sha256: expectedHash,
+      sizeBytes: content.byteLength,
+      files: { "model.onnx": "" },
+    };
+
+    const result = await isModelChecksumValid(tmpDir, fakeSpec);
+
+    expect(result).toBe(true);
+    const sidecarPath = join(tmpDir, ".verified");
+    expect(existsSync(sidecarPath)).toBe(true);
+    expect(readFileSync(sidecarPath, "utf8").trim()).toBe(expectedHash);
+  });
+
+  it("cached sidecar shortcut: returns true even when model.onnx has wrong bytes", async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "tr-checksum-"));
+    const cachedHash = "aaaa1234aaaa1234aaaa1234aaaa1234aaaa1234aaaa1234aaaa1234aaaa1234";
+    // Write sidecar with the spec hash
+    writeFileSync(join(tmpDir, ".verified"), cachedHash);
+    // Write model.onnx with WRONG bytes (hash won't match spec.sha256)
+    writeFileSync(join(tmpDir, "model.onnx"), Buffer.from("wrong bytes that do not match"));
+    const fakeSpec = {
+      name: "test-model",
+      dimensions: 384,
+      revision: "main",
+      sha256: cachedHash,
+      sizeBytes: 0,
+      files: {},
+    };
+
+    const result = await isModelChecksumValid(tmpDir, fakeSpec);
+
+    // Should return true via the cached sidecar shortcut (no re-hash)
+    expect(result).toBe(true);
+  });
+
+  it("mismatch: returns false and does not create .verified", async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "tr-checksum-"));
+    const onnxPath = join(tmpDir, "model.onnx");
+    writeFileSync(onnxPath, Buffer.from("some bytes"));
+    const wrongHash = "0000000000000000000000000000000000000000000000000000000000000000";
+    const fakeSpec = {
+      name: "test-model",
+      dimensions: 384,
+      revision: "main",
+      sha256: wrongHash,
+      sizeBytes: 0,
+      files: {},
+    };
+
+    const result = await isModelChecksumValid(tmpDir, fakeSpec);
+
+    expect(result).toBe(false);
+    expect(existsSync(join(tmpDir, ".verified"))).toBe(false);
+  });
+
+  it("missing model.onnx: returns false without throwing", async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "tr-checksum-"));
+    const fakeSpec = {
+      name: "test-model",
+      dimensions: 384,
+      revision: "main",
+      sha256: "aaaa1234aaaa1234aaaa1234aaaa1234aaaa1234aaaa1234aaaa1234aaaa1234",
+      sizeBytes: 0,
+      files: {},
+    };
+
+    const result = await isModelChecksumValid(tmpDir, fakeSpec);
+
+    expect(result).toBe(false);
   });
 });
