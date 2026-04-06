@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "models": {
+    "all-MiniLM-L6-v2": {
+      "dimensions": 384,
+      "sha256": "6fd5d72fe4589f189f8ebc006442dbb529bb7ce38f8082112682524616046452",
+      "sizeBytes": 90405214,
+      "revision": "main",
+      "files": {
+        "model.onnx": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/{revision}/onnx/model.onnx",
+        "tokenizer.json": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/{revision}/tokenizer.json",
+        "tokenizer_config.json": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/{revision}/tokenizer_config.json"
+      }
+    }
+  }
+}
