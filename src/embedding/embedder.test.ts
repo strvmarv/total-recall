@@ -1,19 +1,61 @@
 import { describe, it, expect } from "vitest";
 import { Embedder } from "./embedder.js";
-import { getModelPath, isModelDownloaded } from "./model-manager.js";
+import { ModelNotReadyError } from "./errors.js";
+import { getModelPath } from "./model-manager.js";
+import { isModelStructurallyValid } from "./model-manager.js";
+import { getModelSpec } from "./registry.js";
 
 const MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2";
 const DIMENSIONS = 384;
 
 const isCI = process.env.CI === "true";
 const modelPath = getModelPath(MODEL_NAME);
-const modelAvailable = isModelDownloaded(modelPath);
+const spec = getModelSpec(MODEL_NAME.split("/").pop()!);
+const modelAvailable = isModelStructurallyValid(modelPath, spec);
 const skipIntegration = isCI || !modelAvailable;
 
 describe("Embedder", () => {
   it("is not loaded before first use", () => {
     const embedder = new Embedder({ model: MODEL_NAME, dimensions: DIMENSIONS });
     expect(embedder.isLoaded()).toBe(false);
+  });
+
+  it("ensureLoaded propagates ModelNotReadyError", async () => {
+    const fakeBootstrap = {
+      ensureReady: async (): Promise<string> => {
+        throw new ModelNotReadyError({ modelName: "x", reason: "failed", hint: "test" });
+      },
+    };
+    const embedder = new Embedder({
+      model: MODEL_NAME,
+      dimensions: DIMENSIONS,
+      bootstrapFactory: () => fakeBootstrap,
+    });
+
+    await expect(embedder.ensureLoaded()).rejects.toBeInstanceOf(ModelNotReadyError);
+    expect(embedder.isLoaded()).toBe(false);
+  });
+
+  it("ensureLoaded short-circuits when already loaded", async () => {
+    let factoryCalled = false;
+    const embedder = new Embedder({
+      model: MODEL_NAME,
+      dimensions: DIMENSIONS,
+      bootstrapFactory: () => {
+        factoryCalled = true;
+        return {
+          ensureReady: async () => "/fake/path",
+        };
+      },
+    });
+
+    // Simulate already-loaded state
+    (embedder as any).session = {};
+    (embedder as any).tokenizer = {};
+
+    await embedder.ensureLoaded();
+
+    expect(factoryCalled).toBe(false);
   });
 
   describe.skipIf(skipIntegration)("integration", () => {

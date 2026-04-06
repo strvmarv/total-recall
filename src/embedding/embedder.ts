@@ -1,12 +1,14 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import * as ort from "onnxruntime-node";
-import { getModelPath, isModelDownloaded, downloadModel } from "./model-manager.js";
+import { ModelBootstrap } from "./bootstrap.js";
 import { WordPieceTokenizer } from "./tokenizer.js";
 
 interface EmbedderOptions {
   model: string;
   dimensions: number;
+  /** Optional bootstrap factory for testing */
+  bootstrapFactory?: (modelName: string) => { ensureReady: () => Promise<string> };
 }
 
 interface TokenizerJson {
@@ -19,6 +21,7 @@ export class Embedder {
   private readonly options: EmbedderOptions;
   private session: ort.InferenceSession | null = null;
   private tokenizer: WordPieceTokenizer | null = null;
+  private bootstrap: { ensureReady: () => Promise<string> } | null = null;
 
   constructor(options: EmbedderOptions) {
     this.options = options;
@@ -31,10 +34,16 @@ export class Embedder {
   async ensureLoaded(): Promise<void> {
     if (this.isLoaded()) return;
 
-    const modelPath = getModelPath(this.options.model);
-    if (!isModelDownloaded(modelPath)) {
-      await downloadModel(this.options.model);
+    if (this.bootstrap === null) {
+      if (this.options.bootstrapFactory) {
+        this.bootstrap = this.options.bootstrapFactory(this.options.model);
+      } else {
+        this.bootstrap = new ModelBootstrap(this.options.model);
+      }
     }
+
+    // Throws ModelNotReadyError on failure — let it propagate unchanged
+    const modelPath = await this.bootstrap.ensureReady();
 
     const onnxPath = join(modelPath, "model.onnx");
     this.session = await ort.InferenceSession.create(onnxPath);

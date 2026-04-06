@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { WordPieceTokenizer } from "./tokenizer.js";
-import { getModelPath, isModelDownloaded } from "./model-manager.js";
+import { getModelPath, isModelStructurallyValid } from "./model-manager.js";
+import { getModelSpec } from "./registry.js";
 
 const MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2";
 const modelPath = getModelPath(MODEL_NAME);
-const modelAvailable = isModelDownloaded(modelPath);
+const modelAvailable = isModelStructurallyValid(modelPath, getModelSpec(MODEL_NAME.split("/").pop()!));
 
 describe("WordPieceTokenizer prototype safety", () => {
   it("vocab lookup does not inherit Object.prototype properties", () => {

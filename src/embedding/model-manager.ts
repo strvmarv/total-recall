@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { statSync, createReadStream } from "node:fs";
 import { writeFile, rename, unlink, readFile } from "node:fs/promises";
 import { Readable } from "node:stream";
@@ -48,23 +48,19 @@ export function getUserModelPath(modelName: string): string {
 }
 
 /**
- * Resolve model path: check bundled first, then user data dir.
- * Returns the first path where the model exists.
+ * Resolve model path: check bundled first (using structural validity to skip
+ * LFS pointer files), then fall back to the user data dir.
+ * Returns the first path where the model structurally exists.
  */
 export function getModelPath(modelName: string): string {
   const bundled = getBundledModelPath(modelName);
-  if (isModelDownloaded(bundled)) return bundled;
-  return getUserModelPath(modelName);
-}
-
-export function isModelDownloaded(modelPath: string): boolean {
-  if (!existsSync(modelPath)) return false;
   try {
-    const files = readdirSync(modelPath);
-    return files.some((f) => f.endsWith(".onnx"));
+    const spec = getModelSpec(modelName);
+    if (isModelStructurallyValid(bundled, spec)) return bundled;
   } catch {
-    return false;
+    // Unknown model name — fall through to user path
   }
+  return getUserModelPath(modelName);
 }
 
 /**
