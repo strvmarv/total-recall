@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import { ModelBootstrap } from "./bootstrap.js";
+import { ModelBootstrap, buildManualInstallHint } from "./bootstrap.js";
 import type { BootstrapOptions } from "./bootstrap.js";
 import type { ModelSpec } from "./registry.js";
+import { ModelNotReadyError } from "./errors.js";
 
 const fakeSpec: ModelSpec = {
   name: "test-model",
@@ -108,6 +109,107 @@ describe("ModelBootstrap", () => {
     // Should not call validation again on second call
     expect(isStructurallyValid).toHaveBeenCalledTimes(1);
     expect(download).not.toHaveBeenCalled();
+  });
+
+  it("download failure → throws ModelNotReadyError + status reflects failure", async () => {
+    const download = vi.fn().mockRejectedValue(new Error("ECONNREFUSED"));
+    const bootstrap = new ModelBootstrap(
+      "test-model",
+      makeOpts({
+        isStructurallyValid: () => false,
+        download,
+      }),
+    );
+
+    await expect(bootstrap.ensureReady()).rejects.toBeInstanceOf(ModelNotReadyError);
+
+    let thrown: ModelNotReadyError | undefined;
+    try {
+      const b2 = new ModelBootstrap("test-model", makeOpts({ isStructurallyValid: () => false, download }));
+      await b2.ensureReady();
+    } catch (err) {
+      thrown = err as ModelNotReadyError;
+    }
+
+    expect(thrown).toBeInstanceOf(ModelNotReadyError);
+    expect(thrown!.reason).toBe("failed");
+    expect(thrown!.modelName).toBe("test-model");
+    expect(thrown!.hint).toContain("manually");
+    expect(thrown!.hint).toContain("https://example.com/");
+
+    const status = bootstrap.getStatus();
+    expect(status.state).toBe("failed");
+    expect(status.error?.reason).toBe("failed");
+    expect(status.error?.message).toContain("ECONNREFUSED");
+  });
+
+  it("sha256 mismatch → ModelNotReadyError with reason corrupted", async () => {
+    const download = vi.fn().mockRejectedValue(
+      new Error("sha256 mismatch for model.onnx: expected abc, actual def"),
+    );
+    const bootstrap = new ModelBootstrap(
+      "test-model",
+      makeOpts({
+        isStructurallyValid: () => false,
+        download,
+      }),
+    );
+
+    let thrown: ModelNotReadyError | undefined;
+    try {
+      await bootstrap.ensureReady();
+    } catch (err) {
+      thrown = err as ModelNotReadyError;
+    }
+
+    expect(thrown).toBeInstanceOf(ModelNotReadyError);
+    expect(thrown!.reason).toBe("corrupted");
+    expect(bootstrap.getStatus().state).toBe("failed");
+    expect(bootstrap.getStatus().error?.reason).toBe("corrupted");
+  });
+
+  it("retry after failure: second call retries and succeeds", async () => {
+    const download = vi.fn()
+      .mockRejectedValueOnce(new Error("ECONNREFUSED"))
+      .mockResolvedValueOnce("/fake/path");
+
+    const bootstrap = new ModelBootstrap(
+      "test-model",
+      makeOpts({
+        isStructurallyValid: () => false,
+        download,
+      }),
+    );
+
+    await expect(bootstrap.ensureReady()).rejects.toBeInstanceOf(ModelNotReadyError);
+    expect(bootstrap.getStatus().state).toBe("failed");
+
+    const result = await bootstrap.ensureReady();
+    expect(result).toBe("/fake/path");
+    expect(bootstrap.getStatus().state).toBe("ready");
+    expect(bootstrap.getStatus().error).toBeUndefined();
+    expect(download).toHaveBeenCalledTimes(2);
+  });
+
+  it("buildManualInstallHint contains URLs and model path", () => {
+    const spec: ModelSpec = {
+      name: "test-model",
+      dimensions: 384,
+      sha256: "abc123",
+      sizeBytes: 1000,
+      revision: "v1",
+      files: {
+        "model.onnx": "https://example.com/{revision}/model.onnx",
+        "tokenizer.json": "https://example.com/{revision}/tokenizer.json",
+      },
+    };
+
+    const hint = buildManualInstallHint("test-model", spec, "/tmp/test-model");
+
+    expect(hint).toContain("https://example.com/v1/model.onnx");
+    expect(hint).toContain("https://example.com/v1/tokenizer.json");
+    expect(hint).toContain("/tmp/test-model");
+    expect(hint.toLowerCase()).toMatch(/manual/);
   });
 
   it("progress is captured and kept after ready", async () => {

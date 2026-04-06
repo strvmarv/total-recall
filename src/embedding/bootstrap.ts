@@ -1,5 +1,6 @@
-import { getModelSpec } from "./registry.js";
+import { getModelSpec, expandUrl } from "./registry.js";
 import { getModelPath, isModelStructurallyValid, isModelChecksumValid, downloadModel } from "./model-manager.js";
+import { ModelNotReadyError } from "./errors.js";
 import type { ModelSpec } from "./registry.js";
 import type { DownloadProgress } from "./model-manager.js";
 
@@ -37,6 +38,37 @@ export interface BootstrapOptions {
   ) => Promise<string>;
 }
 
+/**
+ * Classify a download error into a reason code.
+ * SHA-256 / checksum errors are treated as "corrupted"; everything else is "failed".
+ */
+function classifyDownloadError(err: unknown): "failed" | "corrupted" {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/sha256|checksum|hash/i.test(msg)) return "corrupted";
+  return "failed";
+}
+
+/**
+ * Build a short multi-line hint string that tells the user how to install the
+ * model manually. Accepts the resolved modelPath as a parameter so it can be
+ * tested without touching the filesystem.
+ */
+export function buildManualInstallHint(
+  modelName: string,
+  spec: ModelSpec,
+  modelPath: string,
+): string {
+  const lines: string[] = [
+    `To install ${modelName} manually, place these files in ${modelPath}:`,
+  ];
+  for (const [filename, urlTemplate] of Object.entries(spec.files)) {
+    const url = expandUrl(urlTemplate, spec.revision);
+    lines.push(`  - ${filename} : ${url}`);
+  }
+  lines.push("Then retry session_start.");
+  return lines.join("\n");
+}
+
 export class ModelBootstrap {
   private status: BootstrapStatus;
   private inFlight: Promise<string> | null = null;
@@ -68,11 +100,19 @@ export class ModelBootstrap {
    * - If already ready: returns immediately with the cached path.
    * - If idle/checking: runs the validate-and-maybe-download flow once.
    * - If currently downloading from a previous call: returns the in-flight promise (single-flight).
+   * - retry on re-call: if state === "failed", reset to "idle" and retry from scratch.
    */
   ensureReady(): Promise<string> {
     // Short-circuit if already ready
     if (this.status.state === "ready") {
       return Promise.resolve(this.status.modelPath!);
+    }
+
+    // retry on re-call: reset failed state so the bootstrap runs again from scratch
+    if (this.status.state === "failed") {
+      this.status.state = "idle";
+      delete this.status.error;
+      this.inFlight = null;
     }
 
     // Single-flight: return the existing in-flight promise if downloading
@@ -118,13 +158,16 @@ export class ModelBootstrap {
       this.inFlight = null;
       return resolvedPath;
     } catch (err) {
+      const reason = classifyDownloadError(err);
       this.status.state = "failed";
       this.status.error = {
-        reason: "failed",
+        reason,
         message: err instanceof Error ? err.message : String(err),
       };
       this.inFlight = null;
-      throw err;
+
+      const hint = buildManualInstallHint(modelName, spec, modelPath);
+      throw new ModelNotReadyError({ modelName, reason, hint, cause: err });
     }
   }
 }
