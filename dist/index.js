@@ -8283,6 +8283,9 @@ var ModelNotReadyError = class extends Error {
     this.cause = details.cause;
   }
 };
+function isModelNotReadyError(err) {
+  return err instanceof ModelNotReadyError || typeof err === "object" && err !== null && err.name === "ModelNotReadyError";
+}
 
 // src/embedding/bootstrap.ts
 import * as lockfile from "proper-lockfile";
@@ -26177,6 +26180,31 @@ function checkRegressions(db, config2, similarityThreshold) {
   return alerts;
 }
 
+// src/tools/error-translate.ts
+function translateModelNotReadyError(err) {
+  if (!isModelNotReadyError(err)) return null;
+  const e = err;
+  return {
+    isError: true,
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(
+          {
+            error: "model_not_ready",
+            modelName: e.modelName,
+            reason: e.reason,
+            hint: e.hint,
+            message: e.message
+          },
+          null,
+          2
+        )
+      }
+    ]
+  };
+}
+
 // src/tools/session-tools.ts
 function truncateHint(content, maxLen = 120) {
   if (content.length <= maxLen) return content;
@@ -26405,18 +26433,24 @@ async function runSessionInit(ctx) {
 }
 async function handleSessionTool(name, args, ctx) {
   if (name === "session_start") {
-    const result = await runSessionInit(ctx);
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify({
-            sessionId: ctx.sessionId,
-            ...result
-          })
-        }
-      ]
-    };
+    try {
+      const result = await runSessionInit(ctx);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              sessionId: ctx.sessionId,
+              ...result
+            })
+          }
+        ]
+      };
+    } catch (err) {
+      const translated = translateModelNotReadyError(err);
+      if (translated) return translated;
+      throw err;
+    }
   }
   if (name === "session_end") {
     await ctx.embedder.ensureLoaded();
