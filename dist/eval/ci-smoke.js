@@ -1,6 +1,6 @@
 // src/eval/ci-smoke.ts
-import { resolve, dirname as dirname2, basename } from "path";
-import { fileURLToPath as fileURLToPath3 } from "url";
+import { resolve, dirname as dirname3, basename } from "path";
+import { fileURLToPath as fileURLToPath4 } from "url";
 import Database from "better-sqlite3";
 
 // node_modules/sqlite-vec/index.mjs
@@ -985,24 +985,73 @@ function deepMerge(target, source) {
 
 // src/embedding/embedder.ts
 import { readFile as readFile2 } from "fs/promises";
-import { join as join3 } from "path";
+import { join as join4 } from "path";
 import * as ort from "onnxruntime-node";
 
 // src/embedding/model-manager.ts
 import { existsSync as existsSync2, mkdirSync as mkdirSync2, readdirSync } from "fs";
-import { readFileSync as readFileSync2, statSync, createReadStream } from "fs";
+import { statSync, createReadStream } from "fs";
 import { writeFile, rename, unlink, readFile } from "fs/promises";
+import { Readable } from "stream";
+import { pipeline } from "stream/promises";
+import { createWriteStream } from "fs";
 import { createHash as createHash2 } from "crypto";
-import { join as join2, dirname } from "path";
+import { join as join3, dirname as dirname2 } from "path";
+import { fileURLToPath as fileURLToPath3 } from "url";
+
+// src/embedding/registry.ts
+import { readFileSync as readFileSync2 } from "fs";
+import { dirname, join as join2 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
-var HF_BASE_URL = "https://huggingface.co";
-var HF_REVISION = "main";
+var cached = null;
+function findRegistryPath() {
+  const here = dirname(fileURLToPath2(import.meta.url));
+  return join2(here, "..", "..", "models", "registry.json");
+}
+function loadRegistry() {
+  if (cached) return cached;
+  const path = findRegistryPath();
+  let raw;
+  try {
+    raw = readFileSync2(path, "utf8");
+  } catch (err) {
+    throw new Error(`Failed to read model registry at ${path}: ${err.message}`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`Failed to parse model registry at ${path}: ${err.message}`);
+  }
+  if (parsed.version !== 1) {
+    throw new Error(`Unsupported model registry version: ${parsed.version}`);
+  }
+  cached = {};
+  for (const [name, spec] of Object.entries(parsed.models)) {
+    cached[name] = { name, ...spec };
+  }
+  return cached;
+}
+function getModelSpec(name) {
+  const reg = loadRegistry();
+  const spec = reg[name];
+  if (!spec) {
+    const available = Object.keys(reg).join(", ");
+    throw new Error(`Unknown model "${name}". Available: ${available}`);
+  }
+  return spec;
+}
+function expandUrl(template, revision) {
+  return template.replace(/\{revision\}/g, revision);
+}
+
+// src/embedding/model-manager.ts
 function getBundledModelPath(modelName) {
-  const distDir = dirname(fileURLToPath2(import.meta.url));
-  return join2(distDir, "..", "models", modelName);
+  const distDir = dirname2(fileURLToPath3(import.meta.url));
+  return join3(distDir, "..", "models", modelName);
 }
 function getUserModelPath(modelName) {
-  return join2(getDataDir(), "models", modelName);
+  return join3(getDataDir(), "models", modelName);
 }
 function getModelPath(modelName) {
   const bundled = getBundledModelPath(modelName);
@@ -1018,51 +1067,143 @@ function isModelDownloaded(modelPath) {
     return false;
   }
 }
-async function validateDownload(modelPath) {
-  const modelStat = statSync(join2(modelPath, "model.onnx"));
-  if (modelStat.size < 1e6) {
-    throw new Error("model.onnx appears corrupted (< 1MB)");
-  }
-  const tokenizerText = readFileSync2(join2(modelPath, "tokenizer.json"), "utf-8");
-  try {
-    JSON.parse(tokenizerText);
-  } catch {
-    throw new Error("tokenizer.json is not valid JSON");
-  }
+function sleep(ms) {
+  return new Promise((resolve2) => setTimeout(resolve2, ms));
 }
-async function downloadModel(modelName) {
-  const modelPath = getUserModelPath(modelName);
-  mkdirSync2(modelPath, { recursive: true });
-  const fileUrls = [
-    {
-      file: "model.onnx",
-      url: `${HF_BASE_URL}/sentence-transformers/${modelName}/resolve/${HF_REVISION}/onnx/model.onnx`
-    },
-    {
-      file: "tokenizer.json",
-      url: `${HF_BASE_URL}/sentence-transformers/${modelName}/resolve/${HF_REVISION}/tokenizer.json`
-    },
-    {
-      file: "tokenizer_config.json",
-      url: `${HF_BASE_URL}/sentence-transformers/${modelName}/resolve/${HF_REVISION}/tokenizer_config.json`
+async function downloadFile(url, dest, file, fileIndex, fileCount, options, maxRetries) {
+  const { onProgress, signal, _sleep: sleepFn = sleep } = options;
+  const tmpPath = `${dest}.tmp.${process.pid}.${Date.now()}`;
+  let lastErr;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (attempt > 0) {
+      const delayMs = Math.min(500 * Math.pow(2, attempt - 1), 2e3);
+      await sleepFn(delayMs);
     }
-  ];
-  for (const { file, url } of fileUrls) {
-    const dest = join2(modelPath, file);
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(
-        `Failed to download ${file} from ${url}: ${response.status} ${response.statusText}`
-      );
+    try {
+      const response = await fetch(url, { signal });
+      if (!response.ok) {
+        throw new Error(
+          `Failed to download ${file} from ${url}: ${response.status} ${response.statusText}`
+        );
+      }
+      if (response.body) {
+        const contentLengthRaw = response.headers.get("content-length");
+        const bytesTotal = contentLengthRaw ? parseInt(contentLengthRaw, 10) : 0;
+        let bytesDone = 0;
+        const nodeReadable = Readable.fromWeb(
+          response.body
+        );
+        const writeStream = createWriteStream(tmpPath);
+        nodeReadable.on("data", (chunk) => {
+          bytesDone += chunk.byteLength;
+          onProgress?.({ file, bytesDone, bytesTotal, fileIndex, fileCount });
+        });
+        try {
+          await pipeline(nodeReadable, writeStream);
+        } catch (err) {
+          try {
+            await unlink(tmpPath);
+          } catch {
+          }
+          throw err;
+        }
+      } else {
+        const buffer = Buffer.from(await response.arrayBuffer());
+        const bytesDone = buffer.byteLength;
+        const bytesTotal = buffer.byteLength;
+        try {
+          await writeFile(tmpPath, buffer);
+        } catch (err) {
+          try {
+            await unlink(tmpPath);
+          } catch {
+          }
+          throw err;
+        }
+        onProgress?.({ file, bytesDone, bytesTotal, fileIndex, fileCount });
+      }
+      if (existsSync2(dest)) {
+        try {
+          await unlink(dest);
+        } catch {
+        }
+      }
+      await rename(tmpPath, dest);
+      return;
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        try {
+          await unlink(tmpPath);
+        } catch {
+        }
+        throw err;
+      }
+      lastErr = err;
+      try {
+        await unlink(tmpPath);
+      } catch {
+      }
     }
-    const buffer = await response.arrayBuffer();
-    if (buffer.byteLength === 0) {
-      throw new Error(`Downloaded ${file} is empty`);
-    }
-    await writeFile(dest, Buffer.from(buffer));
   }
-  await validateDownload(modelPath);
-  return modelPath;
+  throw lastErr;
+}
+async function downloadModel(modelName, options = {}) {
+  const { maxRetries = 3 } = options;
+  const spec = getModelSpec(modelName);
+  const target = getUserModelPath(modelName);
+  mkdirSync2(target, { recursive: true });
+  const fileEntries = Object.entries(spec.files).map(([file, urlTemplate]) => ({
+    file,
+    url: expandUrl(urlTemplate, spec.revision)
+  }));
+  const fileCount = fileEntries.length;
+  for (let i = 0; i < fileEntries.length; i++) {
+    const { file, url } = fileEntries[i];
+    const finalPath = join3(target, file);
+    await downloadFile(url, finalPath, file, i, fileCount, options, maxRetries);
+  }
+  const onnxPath = join3(target, "model.onnx");
+  const actualHash = await sha256File(onnxPath);
+  if (actualHash !== spec.sha256) {
+    try {
+      await unlink(onnxPath);
+    } catch {
+    }
+    throw new Error(
+      `sha256 mismatch for model.onnx: expected ${spec.sha256}, actual ${actualHash}`
+    );
+  }
+  const sidecarPath = join3(target, ".verified");
+  await writeFileAtomic(sidecarPath, spec.sha256);
+  return target;
+}
+async function sha256File(path) {
+  return new Promise((resolve2, reject) => {
+    const hash = createHash2("sha256");
+    const stream = createReadStream(path);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("end", () => resolve2(hash.digest("hex")));
+    stream.on("error", reject);
+  });
+}
+async function writeFileAtomic(dest, data) {
+  const tmp = `${dest}.tmp.${process.pid}.${Date.now()}`;
+  try {
+    await writeFile(tmp, data);
+    if (existsSync2(dest)) {
+      try {
+        await unlink(dest);
+      } catch {
+      }
+    }
+    await rename(tmp, dest);
+  } catch (err) {
+    try {
+      await unlink(tmp);
+    } catch {
+    }
+    throw err;
+  }
 }
 
 // src/embedding/tokenizer.ts
@@ -1195,9 +1336,9 @@ var Embedder = class {
     if (!isModelDownloaded(modelPath)) {
       await downloadModel(this.options.model);
     }
-    const onnxPath = join3(modelPath, "model.onnx");
+    const onnxPath = join4(modelPath, "model.onnx");
     this.session = await ort.InferenceSession.create(onnxPath);
-    const tokenizerPath = join3(modelPath, "tokenizer.json");
+    const tokenizerPath = join4(modelPath, "tokenizer.json");
     const tokenizerText = await readFile2(tokenizerPath, "utf-8");
     const tokenizerJson = JSON.parse(tokenizerText);
     this.tokenizer = new WordPieceTokenizer(tokenizerJson.model.vocab);
@@ -1635,7 +1776,7 @@ async function runBenchmark(db, embed, opts) {
 
 // src/eval/ci-smoke.ts
 var SMOKE_PASS_THRESHOLD = 0.8;
-var __dirname = dirname2(fileURLToPath3(import.meta.url));
+var __dirname = dirname3(fileURLToPath4(import.meta.url));
 var PACKAGE_ROOT = basename(__dirname) === "dist" ? resolve(__dirname, "..") : resolve(__dirname, "..", "..");
 async function main() {
   const config = loadConfig();
