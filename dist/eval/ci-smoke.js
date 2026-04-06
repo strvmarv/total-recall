@@ -990,8 +990,9 @@ import * as ort from "onnxruntime-node";
 
 // src/embedding/model-manager.ts
 import { existsSync as existsSync2, mkdirSync as mkdirSync2, readdirSync } from "fs";
-import { readFileSync as readFileSync2, statSync } from "fs";
-import { writeFile } from "fs/promises";
+import { readFileSync as readFileSync2, statSync, createReadStream } from "fs";
+import { writeFile, rename, unlink } from "fs/promises";
+import { createHash as createHash2 } from "crypto";
 import { join as join2, dirname } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 var HF_BASE_URL = "https://huggingface.co";
