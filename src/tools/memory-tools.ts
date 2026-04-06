@@ -12,6 +12,7 @@ import {
   validateContent,
   validateEntryType,
   validateTags,
+  coerceStringArray,
   validateOptionalString,
   validateString,
   validateTier,
@@ -167,8 +168,8 @@ export async function handleMemoryTool(
     const vec = await ctx.embedder.embed(query);
     const embedFn = () => vec;
 
-    const tierFilter = args.tiers as string[] | undefined;
-    const typeFilter = args.contentTypes as string[] | undefined;
+    const tierFilter = coerceStringArray(args.tiers, "tiers");
+    const typeFilter = coerceStringArray(args.contentTypes, "contentTypes");
 
     const tiers = ALL_TABLE_PAIRS.filter(
       (p) =>

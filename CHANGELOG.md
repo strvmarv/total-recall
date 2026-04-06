@@ -1,4 +1,11 @@
 
+## [0.5.9](https://github.com/strvmarv/total-recall/compare/v0.5.8...v0.5.9) (2026-04-05)
+
+### Bug Fixes
+
+* coerce JSON-stringified arrays in MCP tool parameters — fixes `tags must be an array` error when MCP clients serialize array params as strings instead of native arrays
+* apply coercion to all array-typed tool parameters: `tags`, `tiers`, `contentTypes`, `content_types`, `accept`, `reject`
+
 ## [0.5.8](https://github.com/strvmarv/total-recall/compare/v0.5.7...v0.5.8) (2026-04-05)
 
 ### Bug Fixes

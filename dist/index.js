@@ -1184,13 +1184,23 @@ function validateOptionalNumber(value, name, min, max) {
   if (value === void 0 || value === null) return void 0;
   return validateNumber(value, name, min, max);
 }
-function validateTags(value) {
-  if (value === void 0 || value === null) return [];
-  if (!Array.isArray(value)) throw new Error("tags must be an array");
-  return value.map((v, i) => {
-    if (typeof v !== "string") throw new Error(`tags[${i}] must be a string`);
+function coerceStringArray(value, name) {
+  if (value === void 0 || value === null) return void 0;
+  let parsed = value;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+    }
+  }
+  if (!Array.isArray(parsed)) throw new Error(`${name} must be an array`);
+  return parsed.map((v, i) => {
+    if (typeof v !== "string") throw new Error(`${name}[${i}] must be a string`);
     return v;
   });
+}
+function validateTags(value) {
+  return coerceStringArray(value, "tags") ?? [];
 }
 function validatePath(value, name) {
   const path = validateString(value, name);
@@ -1348,8 +1358,8 @@ async function handleMemoryTool(name, args, ctx) {
     await ctx.embedder.ensureLoaded();
     const vec = await ctx.embedder.embed(query);
     const embedFn = () => vec;
-    const tierFilter = args.tiers;
-    const typeFilter = args.contentTypes;
+    const tierFilter = coerceStringArray(args.tiers, "tiers");
+    const typeFilter = coerceStringArray(args.contentTypes, "contentTypes");
     const tiers = ALL_TABLE_PAIRS.filter(
       (p) => (!tierFilter || tierFilter.includes(p.tier)) && (!typeFilter || typeFilter.includes(p.type))
     ).map((p) => ({ tier: p.tier, content_type: p.type }));
@@ -3017,8 +3027,8 @@ async function handleEvalTool(name, args, ctx) {
       return { content: [{ type: "text", text: JSON.stringify({ candidates }) }] };
     }
     if (action === "resolve") {
-      const acceptIds = args.accept ?? [];
-      const rejectIds = args.reject ?? [];
+      const acceptIds = coerceStringArray(args.accept, "accept") ?? [];
+      const rejectIds = coerceStringArray(args.reject, "reject") ?? [];
       if (acceptIds.length === 0 && rejectIds.length === 0) {
         return {
           content: [{ type: "text", text: JSON.stringify({ error: "Provide at least one accept or reject ID" }) }],
@@ -4657,8 +4667,8 @@ async function handleExtraTool(name, args, ctx) {
     };
   }
   if (name === "memory_export") {
-    const tierFilter = args.tiers;
-    const typeFilter = args.content_types;
+    const tierFilter = coerceStringArray(args.tiers, "tiers");
+    const typeFilter = coerceStringArray(args.content_types, "content_types");
     const pairs = ALL_TABLE_PAIRS.filter(
       (p) => (!tierFilter || tierFilter.includes(p.tier)) && (!typeFilter || typeFilter.includes(p.type))
     );
@@ -4791,7 +4801,7 @@ async function handleExtraTool(name, args, ctx) {
 // src/tools/registry.ts
 async function startServer(ctx) {
   const server = new Server(
-    { name: "total-recall", version: "0.5.0" },
+    { name: "total-recall", version: "0.5.9" },
     { capabilities: { tools: {} } }
   );
   server.oninitialized = () => {

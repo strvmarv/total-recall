@@ -7,7 +7,7 @@ import { listEntries, insertEntry } from "../db/entries.js";
 import { getDataDir } from "../config.js";
 import { ALL_TABLE_PAIRS } from "../types.js";
 import type { Tier, ContentType, CompactionLogRow } from "../types.js";
-import { validateString, validatePath, validateOptionalNumber } from "./validation.js";
+import { validateString, validatePath, validateOptionalNumber, coerceStringArray } from "./validation.js";
 import { insertEmbedding } from "../search/vector-search.js";
 
 export function registerExtraTools() {
@@ -292,8 +292,8 @@ export async function handleExtraTool(
   }
 
   if (name === "memory_export") {
-    const tierFilter = args.tiers as string[] | undefined;
-    const typeFilter = args.content_types as string[] | undefined;
+    const tierFilter = coerceStringArray(args.tiers, "tiers");
+    const typeFilter = coerceStringArray(args.content_types, "content_types");
 
     const pairs = ALL_TABLE_PAIRS.filter(
       (p) =>

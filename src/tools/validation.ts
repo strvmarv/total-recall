@@ -63,13 +63,25 @@ export function validateOptionalNumber(value: unknown, name: string, min?: numbe
   return validateNumber(value, name, min, max);
 }
 
-export function validateTags(value: unknown): string[] {
-  if (value === undefined || value === null) return [];
-  if (!Array.isArray(value)) throw new Error("tags must be an array");
-  return value.map((v, i) => {
-    if (typeof v !== "string") throw new Error(`tags[${i}] must be a string`);
+/**
+ * Coerce a value that should be a string array — handles the case where MCP
+ * clients serialize JSON arrays as strings (e.g. '["a","b"]' instead of ["a","b"]).
+ */
+export function coerceStringArray(value: unknown, name: string): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  let parsed = value;
+  if (typeof parsed === "string") {
+    try { parsed = JSON.parse(parsed); } catch { /* fall through to error */ }
+  }
+  if (!Array.isArray(parsed)) throw new Error(`${name} must be an array`);
+  return parsed.map((v: unknown, i: number) => {
+    if (typeof v !== "string") throw new Error(`${name}[${i}] must be a string`);
     return v;
   });
+}
+
+export function validateTags(value: unknown): string[] {
+  return coerceStringArray(value, "tags") ?? [];
 }
 
 export function validatePath(value: unknown, name: string): string {

@@ -7,6 +7,7 @@ import { getRetrievalEvents } from "../eval/event-logger.js";
 import { computeMetrics, computeComparisonMetrics } from "../eval/metrics.js";
 import { createConfigSnapshot } from "../config.js";
 import { listCandidates, resolveCandidates } from "../eval/benchmark-candidates.js";
+import { coerceStringArray } from "./validation.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 // In dev: __dirname = src/tools/ (2 levels up to root)
@@ -208,8 +209,8 @@ export async function handleEvalTool(
     }
 
     if (action === "resolve") {
-      const acceptIds = (args.accept as string[] | undefined) ?? [];
-      const rejectIds = (args.reject as string[] | undefined) ?? [];
+      const acceptIds = coerceStringArray(args.accept, "accept") ?? [];
+      const rejectIds = coerceStringArray(args.reject, "reject") ?? [];
 
       if (acceptIds.length === 0 && rejectIds.length === 0) {
         return {
