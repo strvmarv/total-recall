@@ -4,7 +4,7 @@ import { copyFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { getModelPath, isModelDownloaded, sha256File, writeFileAtomic, isModelChecksumValid, downloadModel, getUserModelPath } from "./model-manager.js";
+import { getModelPath, sha256File, writeFileAtomic, isModelChecksumValid, downloadModel, getUserModelPath } from "./model-manager.js";
 import { isModelStructurallyValid } from "./model-manager.js";
 import { getModelSpec } from "./registry.js";
 import * as registryModule from "./registry.js";
@@ -16,13 +16,6 @@ describe("getModelPath", () => {
     const modelPath = getModelPath(modelName);
     expect(modelPath).toContain("all-MiniLM-L6-v2");
     expect(modelPath).toContain(".total-recall");
-  });
-});
-
-describe("isModelDownloaded", () => {
-  it("returns false for nonexistent path", () => {
-    const result = isModelDownloaded("/tmp/nonexistent-path-that-does-not-exist-xyz");
-    expect(result).toBe(false);
   });
 });
 
