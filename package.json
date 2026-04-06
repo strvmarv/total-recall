@@ -1,6 +1,6 @@
 {
   "name": "@strvmarv/total-recall",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "description": "Multi-tiered memory and knowledge base plugin for TUI coding assistants",
   "type": "module",
   "main": "dist/index.js",
@@ -74,12 +74,14 @@
     "@modelcontextprotocol/sdk": "^1.0.0",
     "better-sqlite3": "^11.0.0",
     "onnxruntime-node": "^1.20.0",
+    "proper-lockfile": "^4.1.2",
     "smol-toml": "^1.6.1",
     "sqlite-vec": "^0.1.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^22.0.0",
+    "@types/proper-lockfile": "^4.1.4",
     "conventional-changelog-cli": "^5.0.0",
     "tsup": "^8.0.0",
     "typescript": "^5.0.0",

@@ -1,6 +1,6 @@
 // src/eval/ci-smoke.ts
-import { resolve, dirname as dirname2, basename } from "path";
-import { fileURLToPath as fileURLToPath3 } from "url";
+import { resolve, dirname as dirname3, basename } from "path";
+import { fileURLToPath as fileURLToPath4 } from "url";
 import Database from "better-sqlite3";
 
 // node_modules/sqlite-vec/index.mjs
@@ -984,85 +984,412 @@ function deepMerge(target, source) {
 }
 
 // src/embedding/embedder.ts
-import { readFile } from "fs/promises";
-import { join as join3 } from "path";
+import { readFile as readFile2 } from "fs/promises";
+import { join as join5 } from "path";
 import * as ort from "onnxruntime-node";
 
-// src/embedding/model-manager.ts
-import { existsSync as existsSync2, mkdirSync as mkdirSync2, readdirSync } from "fs";
-import { readFileSync as readFileSync2, statSync } from "fs";
-import { writeFile } from "fs/promises";
-import { join as join2, dirname } from "path";
+// src/embedding/bootstrap.ts
+import { mkdirSync as mkdirSync3 } from "fs";
+import { join as join4 } from "path";
+
+// src/embedding/registry.ts
+import { readFileSync as readFileSync2 } from "fs";
+import { dirname, join as join2 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
-var HF_BASE_URL = "https://huggingface.co";
-var HF_REVISION = "main";
+var cached = null;
+function findRegistryPath() {
+  const here = dirname(fileURLToPath2(import.meta.url));
+  return join2(here, "..", "..", "models", "registry.json");
+}
+function loadRegistry() {
+  if (cached) return cached;
+  const path = findRegistryPath();
+  let raw;
+  try {
+    raw = readFileSync2(path, "utf8");
+  } catch (err) {
+    throw new Error(`Failed to read model registry at ${path}: ${err.message}`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`Failed to parse model registry at ${path}: ${err.message}`);
+  }
+  if (parsed.version !== 1) {
+    throw new Error(`Unsupported model registry version: ${parsed.version}`);
+  }
+  cached = {};
+  for (const [name, spec] of Object.entries(parsed.models)) {
+    cached[name] = { name, ...spec };
+  }
+  return cached;
+}
+function getModelSpec(name) {
+  const reg = loadRegistry();
+  const spec = reg[name];
+  if (!spec) {
+    const available = Object.keys(reg).join(", ");
+    throw new Error(`Unknown model "${name}". Available: ${available}`);
+  }
+  return spec;
+}
+function expandUrl(template, revision) {
+  return template.replace(/\{revision\}/g, revision);
+}
+
+// src/embedding/model-manager.ts
+import { existsSync as existsSync2, mkdirSync as mkdirSync2 } from "fs";
+import { statSync, createReadStream } from "fs";
+import { writeFile, rename, unlink, readFile } from "fs/promises";
+import { Readable } from "stream";
+import { pipeline } from "stream/promises";
+import { createWriteStream } from "fs";
+import { createHash as createHash2 } from "crypto";
+import { join as join3, dirname as dirname2 } from "path";
+import { fileURLToPath as fileURLToPath3 } from "url";
 function getBundledModelPath(modelName) {
-  const distDir = dirname(fileURLToPath2(import.meta.url));
-  return join2(distDir, "..", "models", modelName);
+  const distDir = dirname2(fileURLToPath3(import.meta.url));
+  return join3(distDir, "..", "models", modelName);
 }
 function getUserModelPath(modelName) {
-  return join2(getDataDir(), "models", modelName);
+  return join3(getDataDir(), "models", modelName);
 }
 function getModelPath(modelName) {
   const bundled = getBundledModelPath(modelName);
-  if (isModelDownloaded(bundled)) return bundled;
+  try {
+    const spec = getModelSpec(modelName);
+    if (isModelStructurallyValid(bundled, spec)) return bundled;
+  } catch {
+  }
   return getUserModelPath(modelName);
 }
-function isModelDownloaded(modelPath) {
-  if (!existsSync2(modelPath)) return false;
+function sleep(ms) {
+  return new Promise((resolve2) => setTimeout(resolve2, ms));
+}
+async function downloadFile(url, dest, file, fileIndex, fileCount, options, maxRetries) {
+  const { onProgress, signal, _sleep: sleepFn = sleep } = options;
+  const tmpPath = `${dest}.tmp.${process.pid}.${Date.now()}`;
+  let lastErr;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (attempt > 0) {
+      const delayMs = Math.min(500 * Math.pow(2, attempt - 1), 2e3);
+      await sleepFn(delayMs);
+    }
+    try {
+      const response = await fetch(url, { signal });
+      if (!response.ok) {
+        throw new Error(
+          `Failed to download ${file} from ${url}: ${response.status} ${response.statusText}`
+        );
+      }
+      if (response.body) {
+        const contentLengthRaw = response.headers.get("content-length");
+        const bytesTotal = contentLengthRaw ? parseInt(contentLengthRaw, 10) : 0;
+        let bytesDone = 0;
+        const nodeReadable = Readable.fromWeb(
+          response.body
+        );
+        const writeStream = createWriteStream(tmpPath);
+        nodeReadable.on("data", (chunk) => {
+          bytesDone += chunk.byteLength;
+          onProgress?.({ file, bytesDone, bytesTotal, fileIndex, fileCount });
+        });
+        try {
+          await pipeline(nodeReadable, writeStream);
+        } catch (err) {
+          try {
+            await unlink(tmpPath);
+          } catch {
+          }
+          throw err;
+        }
+      } else {
+        const buffer = Buffer.from(await response.arrayBuffer());
+        const bytesDone = buffer.byteLength;
+        const bytesTotal = buffer.byteLength;
+        try {
+          await writeFile(tmpPath, buffer);
+        } catch (err) {
+          try {
+            await unlink(tmpPath);
+          } catch {
+          }
+          throw err;
+        }
+        onProgress?.({ file, bytesDone, bytesTotal, fileIndex, fileCount });
+      }
+      if (existsSync2(dest)) {
+        try {
+          await unlink(dest);
+        } catch {
+        }
+      }
+      await rename(tmpPath, dest);
+      return;
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        try {
+          await unlink(tmpPath);
+        } catch {
+        }
+        throw err;
+      }
+      lastErr = err;
+      try {
+        await unlink(tmpPath);
+      } catch {
+      }
+    }
+  }
+  throw lastErr;
+}
+async function downloadModel(modelName, options = {}) {
+  const { maxRetries = 3 } = options;
+  const spec = getModelSpec(modelName);
+  const target = getUserModelPath(modelName);
+  mkdirSync2(target, { recursive: true });
+  const fileEntries = Object.entries(spec.files).map(([file, urlTemplate]) => ({
+    file,
+    url: expandUrl(urlTemplate, spec.revision)
+  }));
+  const fileCount = fileEntries.length;
+  for (let i = 0; i < fileEntries.length; i++) {
+    const { file, url } = fileEntries[i];
+    const finalPath = join3(target, file);
+    await downloadFile(url, finalPath, file, i, fileCount, options, maxRetries);
+  }
+  const onnxPath = join3(target, "model.onnx");
+  const actualHash = await sha256File(onnxPath);
+  if (actualHash !== spec.sha256) {
+    try {
+      await unlink(onnxPath);
+    } catch {
+    }
+    throw new Error(
+      `sha256 mismatch for model.onnx: expected ${spec.sha256}, actual ${actualHash}`
+    );
+  }
+  const sidecarPath = join3(target, ".verified");
+  await writeFileAtomic(sidecarPath, spec.sha256);
+  return target;
+}
+async function sha256File(path) {
+  return new Promise((resolve2, reject) => {
+    const hash = createHash2("sha256");
+    const stream = createReadStream(path);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("end", () => resolve2(hash.digest("hex")));
+    stream.on("error", reject);
+  });
+}
+async function writeFileAtomic(dest, data) {
+  const tmp = `${dest}.tmp.${process.pid}.${Date.now()}`;
   try {
-    const files = readdirSync(modelPath);
-    return files.some((f) => f.endsWith(".onnx"));
+    await writeFile(tmp, data);
+    if (existsSync2(dest)) {
+      try {
+        await unlink(dest);
+      } catch {
+      }
+    }
+    await rename(tmp, dest);
+  } catch (err) {
+    try {
+      await unlink(tmp);
+    } catch {
+    }
+    throw err;
+  }
+}
+function isModelStructurallyValid(modelPath, spec) {
+  if (!existsSync2(modelPath)) return false;
+  for (const file of Object.keys(spec.files)) {
+    const p = join3(modelPath, file);
+    if (!existsSync2(p)) return false;
+  }
+  try {
+    const onnx = join3(modelPath, "model.onnx");
+    const size = statSync(onnx).size;
+    return size === spec.sizeBytes;
   } catch {
     return false;
   }
 }
-async function validateDownload(modelPath) {
-  const modelStat = statSync(join2(modelPath, "model.onnx"));
-  if (modelStat.size < 1e6) {
-    throw new Error("model.onnx appears corrupted (< 1MB)");
+async function isModelChecksumValid(modelPath, spec) {
+  const sidecarPath = join3(modelPath, ".verified");
+  if (existsSync2(sidecarPath)) {
+    try {
+      const cached2 = (await readFile(sidecarPath, "utf8")).trim();
+      if (cached2 === spec.sha256) return true;
+    } catch {
+    }
   }
-  const tokenizerText = readFileSync2(join2(modelPath, "tokenizer.json"), "utf-8");
+  const onnxPath = join3(modelPath, "model.onnx");
+  if (!existsSync2(onnxPath)) return false;
+  let computed;
   try {
-    JSON.parse(tokenizerText);
+    computed = await sha256File(onnxPath);
   } catch {
-    throw new Error("tokenizer.json is not valid JSON");
+    return false;
   }
+  if (computed === spec.sha256) {
+    await writeFileAtomic(sidecarPath, spec.sha256);
+    return true;
+  }
+  return false;
 }
-async function downloadModel(modelName) {
-  const modelPath = getUserModelPath(modelName);
-  mkdirSync2(modelPath, { recursive: true });
-  const fileUrls = [
-    {
-      file: "model.onnx",
-      url: `${HF_BASE_URL}/sentence-transformers/${modelName}/resolve/${HF_REVISION}/onnx/model.onnx`
-    },
-    {
-      file: "tokenizer.json",
-      url: `${HF_BASE_URL}/sentence-transformers/${modelName}/resolve/${HF_REVISION}/tokenizer.json`
-    },
-    {
-      file: "tokenizer_config.json",
-      url: `${HF_BASE_URL}/sentence-transformers/${modelName}/resolve/${HF_REVISION}/tokenizer_config.json`
-    }
+
+// src/embedding/errors.ts
+var ModelNotReadyError = class extends Error {
+  modelName;
+  reason;
+  hint;
+  cause;
+  constructor(details) {
+    const base = `Model '${details.modelName}' not ready: ${details.reason}`;
+    const msg = details.hint ? `${base} (${details.hint})` : base;
+    super(msg);
+    this.name = "ModelNotReadyError";
+    this.modelName = details.modelName;
+    this.reason = details.reason;
+    this.hint = details.hint;
+    this.cause = details.cause;
+  }
+};
+
+// src/embedding/bootstrap.ts
+import * as lockfile from "proper-lockfile";
+var defaultAcquireLock = async (targetDir) => {
+  mkdirSync3(targetDir, { recursive: true });
+  const release = await lockfile.lock(targetDir, {
+    lockfilePath: join4(targetDir, ".bootstrap.lock"),
+    retries: { retries: 60, minTimeout: 1e3, maxTimeout: 1e3 }
+  });
+  return { release: async () => {
+    await release();
+  } };
+};
+function classifyDownloadError(err) {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/sha256|checksum|hash/i.test(msg)) return "corrupted";
+  return "failed";
+}
+function buildManualInstallHint(modelName, spec, modelPath) {
+  const lines = [
+    `To install ${modelName} manually, place these files in ${modelPath}:`
   ];
-  for (const { file, url } of fileUrls) {
-    const dest = join2(modelPath, file);
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(
-        `Failed to download ${file} from ${url}: ${response.status} ${response.statusText}`
-      );
-    }
-    const buffer = await response.arrayBuffer();
-    if (buffer.byteLength === 0) {
-      throw new Error(`Downloaded ${file} is empty`);
-    }
-    await writeFile(dest, Buffer.from(buffer));
+  for (const [filename, urlTemplate] of Object.entries(spec.files)) {
+    const url = expandUrl(urlTemplate, spec.revision);
+    lines.push(`  - ${filename} : ${url}`);
   }
-  await validateDownload(modelPath);
-  return modelPath;
+  lines.push("Then retry session_start.");
+  return lines.join("\n");
 }
+var ModelBootstrap = class {
+  status;
+  inFlight = null;
+  getSpec;
+  getModelPath;
+  getUserModelPath;
+  isStructurallyValid;
+  isChecksumValid;
+  download;
+  acquireLock;
+  constructor(modelName, options) {
+    this.status = { state: "idle", modelName };
+    this.getSpec = options?.getSpec ?? getModelSpec;
+    this.getModelPath = options?.getModelPath ?? getModelPath;
+    this.getUserModelPath = options?.getUserModelPath ?? getUserModelPath;
+    this.isStructurallyValid = options?.isStructurallyValid ?? isModelStructurallyValid;
+    this.isChecksumValid = options?.isChecksumValid ?? isModelChecksumValid;
+    this.download = options?.download ?? ((name, opts) => downloadModel(name, opts));
+    this.acquireLock = options?.acquireLock ?? defaultAcquireLock;
+  }
+  getStatus() {
+    return { ...this.status };
+  }
+  /**
+   * Trigger or observe bootstrap.
+   * - If already ready: returns immediately with the cached path.
+   * - If idle/checking: runs the validate-and-maybe-download flow once.
+   * - If currently downloading from a previous call: returns the in-flight promise (single-flight).
+   * - retry on re-call: if state === "failed", reset to "idle" and retry from scratch.
+   */
+  ensureReady() {
+    if (this.status.state === "ready") {
+      return Promise.resolve(this.status.modelPath);
+    }
+    if (this.status.state === "failed") {
+      this.status.state = "idle";
+      delete this.status.error;
+      this.inFlight = null;
+    }
+    if (this.status.state === "downloading" && this.inFlight !== null) {
+      return this.inFlight;
+    }
+    this.inFlight = this._runBootstrap();
+    return this.inFlight;
+  }
+  async _runBootstrap() {
+    const { modelName } = this.status;
+    this.status.state = "checking";
+    const spec = this.getSpec(modelName);
+    const modelPath = this.getModelPath(modelName);
+    const userModelPath = this.getUserModelPath(modelName);
+    const structuralOk = this.isStructurallyValid(modelPath, spec);
+    const checksumOk = structuralOk && await this.isChecksumValid(modelPath, spec);
+    if (structuralOk && checksumOk) {
+      this.status.state = "ready";
+      this.status.modelPath = modelPath;
+      this.inFlight = null;
+      return modelPath;
+    }
+    this.status.state = "downloading";
+    let lockHandle;
+    try {
+      lockHandle = await this.acquireLock(userModelPath);
+    } catch (err) {
+      this.status.state = "failed";
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.status.error = { reason: "failed", message: errMsg };
+      this.inFlight = null;
+      const hint = "Another process may be downloading the model; retry shortly.";
+      throw new ModelNotReadyError({ modelName, reason: "failed", hint, cause: err });
+    }
+    try {
+      const postLockStructuralOk = this.isStructurallyValid(modelPath, spec);
+      const postLockChecksumOk = postLockStructuralOk && await this.isChecksumValid(modelPath, spec);
+      if (postLockStructuralOk && postLockChecksumOk) {
+        this.status.state = "ready";
+        this.status.modelPath = modelPath;
+        this.inFlight = null;
+        return modelPath;
+      }
+      const resolvedPath = await this.download(modelName, {
+        onProgress: (p) => {
+          this.status.progress = p;
+        }
+      });
+      this.status.state = "ready";
+      this.status.modelPath = resolvedPath;
+      this.inFlight = null;
+      return resolvedPath;
+    } catch (err) {
+      const reason = classifyDownloadError(err);
+      this.status.state = "failed";
+      this.status.error = {
+        reason,
+        message: err instanceof Error ? err.message : String(err)
+      };
+      this.inFlight = null;
+      const hint = buildManualInstallHint(modelName, spec, modelPath);
+      throw new ModelNotReadyError({ modelName, reason, hint, cause: err });
+    } finally {
+      await lockHandle.release();
+    }
+  }
+};
 
 // src/embedding/tokenizer.ts
 var CLS_TOKEN_ID = 101;
@@ -1182,6 +1509,7 @@ var Embedder = class {
   options;
   session = null;
   tokenizer = null;
+  bootstrap = null;
   constructor(options) {
     this.options = options;
   }
@@ -1190,14 +1518,18 @@ var Embedder = class {
   }
   async ensureLoaded() {
     if (this.isLoaded()) return;
-    const modelPath = getModelPath(this.options.model);
-    if (!isModelDownloaded(modelPath)) {
-      await downloadModel(this.options.model);
+    if (this.bootstrap === null) {
+      if (this.options.bootstrapFactory) {
+        this.bootstrap = this.options.bootstrapFactory(this.options.model);
+      } else {
+        this.bootstrap = new ModelBootstrap(this.options.model);
+      }
     }
-    const onnxPath = join3(modelPath, "model.onnx");
+    const modelPath = await this.bootstrap.ensureReady();
+    const onnxPath = join5(modelPath, "model.onnx");
     this.session = await ort.InferenceSession.create(onnxPath);
-    const tokenizerPath = join3(modelPath, "tokenizer.json");
-    const tokenizerText = await readFile(tokenizerPath, "utf-8");
+    const tokenizerPath = join5(modelPath, "tokenizer.json");
+    const tokenizerText = await readFile2(tokenizerPath, "utf-8");
     const tokenizerJson = JSON.parse(tokenizerText);
     this.tokenizer = new WordPieceTokenizer(tokenizerJson.model.vocab);
   }
@@ -1634,7 +1966,7 @@ async function runBenchmark(db, embed, opts) {
 
 // src/eval/ci-smoke.ts
 var SMOKE_PASS_THRESHOLD = 0.8;
-var __dirname = dirname2(fileURLToPath3(import.meta.url));
+var __dirname = dirname3(fileURLToPath4(import.meta.url));
 var PACKAGE_ROOT = basename(__dirname) === "dist" ? resolve(__dirname, "..") : resolve(__dirname, "..", "..");
 async function main() {
   const config = loadConfig();

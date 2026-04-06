@@ -11,6 +11,7 @@ import { registerEvalTools, handleEvalTool } from "./eval-tools.js";
 import { registerImportTools, handleImportTool } from "./import-tools.js";
 import { registerSessionTools, handleSessionTool, runSessionInit } from "./session-tools.js";
 import { registerExtraTools, handleExtraTool } from "./extra-tools.js";
+import { translateModelNotReadyError } from "./error-translate.js";
 
 export interface SessionInitResult {
   project: string | null;
@@ -87,41 +88,47 @@ export async function startServer(ctx: ToolContext): Promise<void> {
     const { name, arguments: rawArgs } = request.params;
     const args = (rawArgs ?? {}) as Record<string, unknown>;
 
-    // Lazy-init: ensure session is initialized before any tool runs.
-    // If oninitialized already started it, await that promise instead of re-running.
-    if (!ctx.sessionInitialized) {
-      if (ctx.sessionInitPromise) {
-        await ctx.sessionInitPromise;
-      } else {
-        await runSessionInit(ctx);
-        ctx.sessionInitialized = true;
+    try {
+      // Lazy-init: ensure session is initialized before any tool runs.
+      // If oninitialized already started it, await that promise instead of re-running.
+      if (!ctx.sessionInitialized) {
+        if (ctx.sessionInitPromise) {
+          await ctx.sessionInitPromise;
+        } else {
+          await runSessionInit(ctx);
+          ctx.sessionInitialized = true;
+        }
       }
+
+      const memResult = await handleMemoryTool(name, args ?? {}, ctx);
+      if (memResult !== null) return memResult;
+      const sysResult = handleSystemTool(name, args ?? {}, ctx);
+      if (sysResult !== null) return sysResult;
+      const kbResult = await handleKbTool(name, args ?? {}, ctx);
+      if (kbResult !== null) return kbResult;
+      const evalResult = await handleEvalTool(name, args ?? {}, ctx);
+      if (evalResult !== null) return evalResult;
+      const importResult = await handleImportTool(name, args ?? {}, ctx);
+      if (importResult !== null) return importResult;
+      const sessionResult = await handleSessionTool(name, args ?? {}, ctx);
+      if (sessionResult !== null) return sessionResult;
+      const extraResult = await handleExtraTool(name, args ?? {}, ctx);
+      if (extraResult !== null) return extraResult;
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({ error: `Unknown tool: ${name}` }),
+          },
+        ],
+        isError: true,
+      };
+    } catch (err) {
+      const translated = translateModelNotReadyError(err);
+      if (translated) return translated;
+      throw err;
     }
-
-    const memResult = await handleMemoryTool(name, args ?? {}, ctx);
-    if (memResult !== null) return memResult;
-    const sysResult = handleSystemTool(name, args ?? {}, ctx);
-    if (sysResult !== null) return sysResult;
-    const kbResult = await handleKbTool(name, args ?? {}, ctx);
-    if (kbResult !== null) return kbResult;
-    const evalResult = await handleEvalTool(name, args ?? {}, ctx);
-    if (evalResult !== null) return evalResult;
-    const importResult = await handleImportTool(name, args ?? {}, ctx);
-    if (importResult !== null) return importResult;
-    const sessionResult = await handleSessionTool(name, args ?? {}, ctx);
-    if (sessionResult !== null) return sessionResult;
-    const extraResult = await handleExtraTool(name, args ?? {}, ctx);
-    if (extraResult !== null) return extraResult;
-
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: JSON.stringify({ error: `Unknown tool: ${name}` }),
-        },
-      ],
-      isError: true,
-    };
   });
 
   const transport = new StdioServerTransport();

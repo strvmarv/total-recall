@@ -17,6 +17,7 @@ import { ingestProjectDocs } from "../importers/project-docs.js";
 import { detectProject } from "../utils/project-detect.js";
 import { runSmokeTest, getPackageVersion, type SmokeTestResult } from "../eval/smoke-test.js";
 import { checkRegressions, type RegressionAlert } from "../eval/regression.js";
+import { translateModelNotReadyError } from "./error-translate.js";
 
 function truncateHint(content: string, maxLen = 120): string {
   if (content.length <= maxLen) return content;
@@ -321,21 +322,27 @@ export async function handleSessionTool(
   ctx: ToolContext,
 ): Promise<ToolResult | null> {
   if (name === "session_start") {
-    // If init already ran (via oninitialized or lazy-init), return cached results.
-    // Otherwise run it now.
-    const result = await runSessionInit(ctx);
+    try {
+      // If init already ran (via oninitialized or lazy-init), return cached results.
+      // Otherwise run it now.
+      const result = await runSessionInit(ctx);
 
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify({
-            sessionId: ctx.sessionId,
-            ...result,
-          }),
-        },
-      ],
-    };
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              sessionId: ctx.sessionId,
+              ...result,
+            }),
+          },
+        ],
+      };
+    } catch (err) {
+      const translated = translateModelNotReadyError(err);
+      if (translated) return translated;
+      throw err;
+    }
   }
 
   if (name === "session_end") {

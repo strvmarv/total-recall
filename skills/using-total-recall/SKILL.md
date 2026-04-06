@@ -22,6 +22,19 @@ This skill ensures the total-recall memory system is active for this session.
 
 Once initialized, follow these behaviors throughout the session. Tool calls will be visible to the user.
 
+### Handling model bootstrap errors
+
+When `session_start` returns an error response containing `"error": "model_not_ready"`, parse the JSON payload and follow the recovery flow based on `reason`:
+
+| reason | What it means | What to do |
+|---|---|---|
+| `downloading` | First-run bootstrap is in progress (90 MB ONNX model). Another process or this one holds the lock. | Wait 5–10 seconds and call `session_start` again. Repeat up to 12 times (~2 minutes total). Surface a brief status to the user on the first retry: "Total-recall is downloading its embedding model on first run. This is a one-time setup." |
+| `missing` | Model not present and no bootstrap has started. | Call `session_start` again to trigger the bootstrap. |
+| `corrupted` | Model file present but failed checksum (e.g., partial download, bad bundled file, Git LFS pointer). | Call `session_start` once more — bootstrap will re-download. If it fails again with the same reason, surface the `hint` field to the user verbatim (it contains manual install instructions) and proceed without memory. |
+| `failed` | Network failure or other unrecoverable download error. | Surface the `hint` field verbatim to the user (manual install commands) and proceed without memory features for this session. Do NOT keep retrying — that will only delay the user. |
+
+After successful recovery, all subsequent total-recall behaviors (capture, retrieve, session end) should resume normally. If recovery is impossible, the assistant must continue helping the user with their actual task — memory unavailability is a degraded mode, not a fatal error.
+
 ### Capture (continuous)
 
 When you detect these patterns in user messages, call `memory_store`:

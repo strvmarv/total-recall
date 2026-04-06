@@ -1,4 +1,19 @@
 
+## 0.6.4 - 2026-04-06
+
+### Fixed
+- **Model bundle resilience**: `session_start` no longer crashes with "Protobuf parsing failed" when the bundled `model.onnx` is a Git LFS pointer file. The embedding model loader now performs structural validation (file size match) and SHA-256 checksum verification, falling back to download from HuggingFace when the bundled file is corrupt or missing.
+
+### Added
+- `ModelBootstrap` state machine (`src/embedding/bootstrap.ts`) coordinates model validation, downloads, and cross-process locking. Uses `proper-lockfile` to prevent concurrent processes from racing on the same download.
+- `ModelNotReadyError` (`src/embedding/errors.ts`) carries structured `reason` ("missing" | "downloading" | "failed" | "corrupted") and a user-facing `hint` with manual install commands.
+- Atomic, retrying `downloadModel` with progress callbacks, exponential backoff, and SHA-256 verification on completion.
+- `.verified` sidecar file that caches the model's checksum so subsequent loads skip the expensive hash computation.
+- Model registry (`models/registry.json`) is now the single source of truth for model metadata (sha256, size, file URLs, revision).
+- The MCP tool dispatcher (`src/tools/registry.ts`) translates `ModelNotReadyError` into a structured `model_not_ready` response so the using-total-recall skill can drive recovery.
+- The `using-total-recall` skill now contains a recovery table for the four `model_not_ready` reasons.
+- Manual smoke-test checklist at `tests/manual/model-bootstrap.md`.
+
 ## [0.5.9](https://github.com/strvmarv/total-recall/compare/v0.5.8...v0.5.9) (2026-04-05)
 
 ### Bug Fixes
