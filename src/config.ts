@@ -35,6 +35,11 @@ export function setNestedKey(
 ): Record<string, unknown> {
   const result = { ...obj };
   const parts = dotKey.split(".");
+  for (const part of parts) {
+    if (DANGEROUS_KEYS.has(part)) {
+      throw new TypeError(`Invalid config key segment: "${part}"`);
+    }
+  }
   let current: Record<string, unknown> = result;
 
   for (let i = 0; i < parts.length - 1; i++) {
@@ -105,12 +110,15 @@ export function createConfigSnapshot(
   return id;
 }
 
+const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
 function deepMerge(
   target: Record<string, unknown>,
   source: Record<string, unknown>,
 ): Record<string, unknown> {
   const result = { ...target };
   for (const key of Object.keys(source)) {
+    if (DANGEROUS_KEYS.has(key)) continue;
     if (
       source[key] !== null &&
       typeof source[key] === "object" &&

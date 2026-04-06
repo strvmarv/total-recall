@@ -26,6 +26,11 @@ function loadConfig() {
 function setNestedKey(obj, dotKey, value) {
   const result = { ...obj };
   const parts = dotKey.split(".");
+  for (const part of parts) {
+    if (DANGEROUS_KEYS.has(part)) {
+      throw new TypeError(`Invalid config key segment: "${part}"`);
+    }
+  }
   let current = result;
   for (let i = 0; i < parts.length - 1; i++) {
     const part = parts[i];
@@ -77,9 +82,11 @@ function createConfigSnapshot(db, config, name) {
   ).run(id, name ?? null, Date.now(), configJson);
   return id;
 }
+var DANGEROUS_KEYS = /* @__PURE__ */ new Set(["__proto__", "constructor", "prototype"]);
 function deepMerge(target, source) {
   const result = { ...target };
   for (const key of Object.keys(source)) {
+    if (DANGEROUS_KEYS.has(key)) continue;
     if (source[key] !== null && typeof source[key] === "object" && !Array.isArray(source[key]) && typeof target[key] === "object" && target[key] !== null) {
       result[key] = deepMerge(
         target[key],
