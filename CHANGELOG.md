@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.6.5 - 2026-04-06
+
+### Security
+- Bump `vite` dev dependency from 8.0.3 to 8.0.5 to address three advisories: `server.fs.deny` bypass via queries (GHSA-v2wj-q39q-566r, high), arbitrary file read via dev-server WebSocket (GHSA-p9ff-h696-f583, high), and path traversal in optimized deps `.map` handling (GHSA-4w7w-66w2-5vf9, moderate). Vite is dev-only and not shipped to end users; advisories were not reachable from the published package.
+
+### Fixed
+- Sync `.claude-plugin/plugin.json` version (was stuck at 0.6.3 — missed during the 0.6.4 release).
+
 ## 0.6.4 - 2026-04-06
 
 ### Fixed
