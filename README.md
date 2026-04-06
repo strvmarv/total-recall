@@ -161,6 +161,7 @@ All commands use `/total-recall <subcommand>`:
 
 | Command | MCP Tool | Description |
 |---|---|---|
+| `/total-recall help` | — | Show command reference table |
 | `/total-recall status` | `status` | Dashboard overview |
 | `/total-recall search <query>` | `memory_search` | Semantic search across all tiers |
 | `/total-recall store <content>` | `memory_store` | Manually store a memory |
