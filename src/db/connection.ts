@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import { Database } from "bun:sqlite";
 import { mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import * as sqliteVec from "sqlite-vec";

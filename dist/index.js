@@ -2,9 +2,8 @@
 import {
   __commonJS,
   __export,
-  __toESM,
-  require_lib
-} from "./chunk-X7JTPKDC.js";
+  __toESM
+} from "./chunk-77HVPD4G.js";
 
 // node_modules/ajv/dist/compile/codegen/code.js
 var require_code = __commonJS({
@@ -7711,7 +7710,7 @@ function deepMerge(target, source) {
 }
 
 // src/db/connection.ts
-var import_better_sqlite3 = __toESM(require_lib(), 1);
+import { Database } from "bun:sqlite";
 import { mkdirSync as mkdirSync2, existsSync as existsSync2 } from "fs";
 import { join as join2 } from "path";
 
@@ -7974,7 +7973,7 @@ function getDb() {
     mkdirSync2(dataDir, { recursive: true });
   }
   const dbPath = join2(dataDir, "total-recall.db");
-  _db = new import_better_sqlite3.default(dbPath);
+  _db = new Database(dbPath);
   load(_db);
   initSchema(_db);
   return _db;
@@ -25339,7 +25338,7 @@ var CursorImporter = class {
     if (!existsSync7(dbPath)) return;
     let cursorDb = null;
     try {
-      const BetterSqlite3 = (await import("./lib-XPKN7IVR.js")).default;
+      const BetterSqlite3 = (await import("./lib-A53WET56.js")).default;
       cursorDb = new BetterSqlite3(dbPath, { readonly: true });
       const row = cursorDb.prepare("SELECT value FROM ItemTable WHERE key = 'aicontext.personalContext'").get();
       if (!row?.value) return;
@@ -25653,7 +25652,7 @@ var OpenCodeImporter = class {
     if (!existsSync9(dbPath)) return [];
     let ocDb = null;
     try {
-      const BetterSqlite3 = (await import("./lib-XPKN7IVR.js")).default;
+      const BetterSqlite3 = (await import("./lib-A53WET56.js")).default;
       ocDb = new BetterSqlite3(dbPath, { readonly: true });
       const rows = ocDb.prepare("SELECT worktree FROM project").all();
       return rows.map((r) => r.worktree).filter((p) => existsSync9(p));
