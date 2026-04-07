@@ -39,7 +39,15 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
       - run: npm ci
       - run: npm run build
-      - run: npm publish --provenance --access public
+      - name: Publish to npm
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [[ "$VERSION" == *"-"* ]]; then
+            PRERELEASE_TAG=$(echo "$VERSION" | sed 's/.*-\([a-z]*\).*/\1/')
+            npm publish --provenance --access public --tag "$PRERELEASE_TAG"
+          else
+            npm publish --provenance --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
