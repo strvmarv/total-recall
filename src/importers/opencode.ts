@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type { Database } from "bun:sqlite";
+import { Database } from "bun:sqlite";
 import type { HostImporter, ImportResult, EmbedFn } from "./importer.js";
 import { contentHash, isAlreadyImported, logImport, parseFrontmatter } from "./import-utils.js";
 import { insertEntry } from "../db/entries.js";
@@ -140,9 +140,8 @@ export class OpenCodeImporter implements HostImporter {
 
     let ocDb: Database | null = null;
     try {
-      const BetterSqlite3 = (await import("better-sqlite3")).default;
-      ocDb = new BetterSqlite3(dbPath, { readonly: true });
-      const rows = ocDb.prepare("SELECT worktree FROM project").all() as { worktree: string }[];
+      ocDb = new Database(dbPath, { readonly: true });
+      const rows = ocDb.query("SELECT worktree FROM project").all() as { worktree: string }[];
       return rows.map((r) => r.worktree).filter((p) => existsSync(p));
     } catch {
       return [];

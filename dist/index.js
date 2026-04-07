@@ -1,9 +1,33 @@
 #!/usr/bin/env node
-import {
-  __commonJS,
-  __export,
-  __toESM
-} from "./chunk-77HVPD4G.js";
+var __create = Object.create;
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __commonJS = (cb, mod) => function __require() {
+  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+};
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
 
 // node_modules/ajv/dist/compile/codegen/code.js
 var require_code = __commonJS({
@@ -25286,6 +25310,7 @@ var CopilotCliImporter = class {
 import { existsSync as existsSync7, readdirSync as readdirSync4, readFileSync as readFileSync8 } from "fs";
 import { join as join11 } from "path";
 import { homedir as homedir3 } from "os";
+import { Database as Database2 } from "bun:sqlite";
 var CursorImporter = class {
   name = "cursor";
   configPath;
@@ -25338,9 +25363,8 @@ var CursorImporter = class {
     if (!existsSync7(dbPath)) return;
     let cursorDb = null;
     try {
-      const BetterSqlite3 = (await import("./lib-WAON75QP.js")).default;
-      cursorDb = new BetterSqlite3(dbPath, { readonly: true });
-      const row = cursorDb.prepare("SELECT value FROM ItemTable WHERE key = 'aicontext.personalContext'").get();
+      cursorDb = new Database2(dbPath, { readonly: true });
+      const row = cursorDb.query("SELECT value FROM ItemTable WHERE key = 'aicontext.personalContext'").get();
       if (!row?.value) return;
       const content = row.value;
       const hash2 = contentHash(content);
@@ -25570,6 +25594,7 @@ function countFiles(dir, extensions) {
 import { existsSync as existsSync9, readdirSync as readdirSync6, readFileSync as readFileSync10 } from "fs";
 import { join as join13 } from "path";
 import { homedir as homedir5 } from "os";
+import { Database as Database3 } from "bun:sqlite";
 var OpenCodeImporter = class {
   name = "opencode";
   dataPath;
@@ -25652,9 +25677,8 @@ var OpenCodeImporter = class {
     if (!existsSync9(dbPath)) return [];
     let ocDb = null;
     try {
-      const BetterSqlite3 = (await import("./lib-WAON75QP.js")).default;
-      ocDb = new BetterSqlite3(dbPath, { readonly: true });
-      const rows = ocDb.prepare("SELECT worktree FROM project").all();
+      ocDb = new Database3(dbPath, { readonly: true });
+      const rows = ocDb.query("SELECT worktree FROM project").all();
       return rows.map((r) => r.worktree).filter((p) => existsSync9(p));
     } catch {
       return [];
@@ -26592,7 +26616,7 @@ function registerExtraTools() {
   ];
 }
 function getCompactionLogForEntry(db, id) {
-  const rows = db.prepare(
+  const rows = db.query(
     `SELECT * FROM compaction_log
        WHERE target_entry_id = ?
           OR source_entry_ids LIKE ?
@@ -26604,7 +26628,7 @@ function buildLineage(db, id, depth) {
   if (depth >= 10) {
     return { id, sources: [] };
   }
-  const row = db.prepare(`SELECT * FROM compaction_log WHERE target_entry_id = ? ORDER BY timestamp DESC LIMIT 1`).get(id);
+  const row = db.query(`SELECT * FROM compaction_log WHERE target_entry_id = ? ORDER BY timestamp DESC LIMIT 1`).get(id);
   if (!row) {
     return { id };
   }
@@ -26671,7 +26695,7 @@ async function handleExtraTool(name, args, ctx) {
   }
   if (name === "memory_history") {
     const limit = validateOptionalNumber(args.limit, "limit", 1, 1e3) ?? 20;
-    const rows = db.prepare(`SELECT * FROM compaction_log ORDER BY timestamp DESC LIMIT ?`).all(limit);
+    const rows = db.query(`SELECT * FROM compaction_log ORDER BY timestamp DESC LIMIT ?`).all(limit);
     const movements = rows.map((row) => {
       let sourceIds = [];
       try {

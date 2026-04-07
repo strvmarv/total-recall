@@ -102,11 +102,11 @@ export function registerExtraTools() {
 type ToolResult = { content: Array<{ type: "text"; text: string }> };
 
 function getCompactionLogForEntry(
-  db: import("better-sqlite3").Database,
+  db: import("bun:sqlite").Database,
   id: string,
 ): CompactionLogRow[] {
   const rows = db
-    .prepare(
+    .query(
       `SELECT * FROM compaction_log
        WHERE target_entry_id = ?
           OR source_entry_ids LIKE ?
@@ -127,7 +127,7 @@ interface LineageNode {
 }
 
 function buildLineage(
-  db: import("better-sqlite3").Database,
+  db: import("bun:sqlite").Database,
   id: string,
   depth: number,
 ): LineageNode {
@@ -136,7 +136,7 @@ function buildLineage(
   }
 
   const row = db
-    .prepare(`SELECT * FROM compaction_log WHERE target_entry_id = ? ORDER BY timestamp DESC LIMIT 1`)
+    .query(`SELECT * FROM compaction_log WHERE target_entry_id = ? ORDER BY timestamp DESC LIMIT 1`)
     .get(id) as CompactionLogRow | undefined;
 
   if (!row) {
@@ -238,7 +238,7 @@ export async function handleExtraTool(
   if (name === "memory_history") {
     const limit = validateOptionalNumber(args.limit, "limit", 1, 1000) ?? 20;
     const rows = db
-      .prepare(`SELECT * FROM compaction_log ORDER BY timestamp DESC LIMIT ?`)
+      .query(`SELECT * FROM compaction_log ORDER BY timestamp DESC LIMIT ?`)
       .all(limit) as CompactionLogRow[];
 
     const movements = rows.map((row) => {

@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type { Database } from "bun:sqlite";
+import { Database } from "bun:sqlite";
 import type { HostImporter, ImportResult, EmbedFn } from "./importer.js";
 import { contentHash, isAlreadyImported, logImport, parseFrontmatter } from "./import-utils.js";
 import { insertEntry } from "../db/entries.js";
@@ -96,12 +96,10 @@ export class CursorImporter implements HostImporter {
 
     let cursorDb: Database | null = null;
     try {
-      // Dynamic import to avoid hard dependency at module level
-      const BetterSqlite3 = (await import("better-sqlite3")).default;
-      cursorDb = new BetterSqlite3(dbPath, { readonly: true });
+      cursorDb = new Database(dbPath, { readonly: true });
 
       const row = cursorDb
-        .prepare("SELECT value FROM ItemTable WHERE key = 'aicontext.personalContext'")
+        .query("SELECT value FROM ItemTable WHERE key = 'aicontext.personalContext'")
         .get() as { value: string } | undefined;
 
       if (!row?.value) return;
