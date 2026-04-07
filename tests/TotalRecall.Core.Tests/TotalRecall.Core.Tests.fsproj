@@ -12,6 +12,7 @@
     <Compile Include="DecayTests.fs" />
     <Compile Include="RankingTests.fs" />
     <Compile Include="CompactionTests.fs" />
+    <Compile Include="ParsersTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
