@@ -1,6 +1,29 @@
 #!/usr/bin/env bash
 # total-recall MCP server launcher
-# Finds node in common locations even when not in PATH
+# Prefers bundled Bun, falls back to system Bun, then system Node.
+
+BUN_VERSION="1.2.10"
+
+find_bundled_bun() {
+  local ext=""
+  if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then
+    ext=".exe"
+  fi
+  local bin="$HOME/.total-recall/bun/$BUN_VERSION/bun${ext}"
+  if [ -x "$bin" ]; then
+    echo "$bin"
+    return 0
+  fi
+  return 1
+}
+
+find_system_bun() {
+  if command -v bun &>/dev/null; then
+    echo "bun"
+    return 0
+  fi
+  return 1
+}
 
 find_node() {
   # Check PATH first
@@ -63,34 +86,39 @@ find_node() {
   return 1
 }
 
-NODE=$(find_node)
-if [ -z "$NODE" ]; then
-  echo "total-recall: error: node.js not found. Install Node.js 20+ via nvm, fnm, Volta, or your package manager." >&2
-  exit 1
-fi
-
 # Find the package entry point
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENTRY="$PACKAGE_DIR/dist/index.js"
 
-# Strategy 1: Local dist/index.js (source install or npm install)
-if [ -f "$ENTRY" ]; then
-  exec "$NODE" "$ENTRY" "$@"
+if [ ! -f "$ENTRY" ]; then
+  echo "total-recall: error: could not find dist/index.js." >&2
+  echo "  Run 'npm run build' (git clone) or 'npm install -g @strvmarv/total-recall'." >&2
+  exit 1
 fi
 
-# Strategy 2: Global install (npm install -g @strvmarv/total-recall)
-if command -v total-recall &>/dev/null; then
-  exec total-recall "$@"
+# Priority 1: bundled Bun
+RUNTIME=$(find_bundled_bun)
+if [ -n "$RUNTIME" ]; then
+  exec "$RUNTIME" "$ENTRY" "$@"
 fi
 
-# Strategy 3: Find entry point in global node_modules
-NODE_DIR="$(dirname "$NODE")"
-GLOBAL_ENTRY=$("$NODE_DIR/npm" root -g 2>/dev/null)/@strvmarv/total-recall/dist/index.js
-if [ -f "$GLOBAL_ENTRY" ]; then
-  exec "$NODE" "$GLOBAL_ENTRY" "$@"
+# Priority 2: system Bun (warn)
+RUNTIME=$(find_system_bun)
+if [ -n "$RUNTIME" ]; then
+  echo "total-recall: warning: bundled bun v$BUN_VERSION not found, using system bun. Version mismatch possible." >&2
+  echo "  Re-run 'npm install' to download bun v$BUN_VERSION." >&2
+  exec "$RUNTIME" "$ENTRY" "$@"
 fi
 
-echo "total-recall: error: could not find dist/index.js or total-recall binary." >&2
-echo "  Run 'npm run build' (git clone) or 'npm install -g @strvmarv/total-recall'." >&2
+# Priority 3: system Node (warn)
+RUNTIME=$(find_node)
+if [ -n "$RUNTIME" ]; then
+  echo "total-recall: warning: bun not found, falling back to node. Native addon ABI issues may occur." >&2
+  echo "  Install bun (https://bun.sh/install) or re-run 'npm install' to fix this." >&2
+  exec "$RUNTIME" "$ENTRY" "$@"
+fi
+
+echo "total-recall: error: neither bun nor node found." >&2
+echo "  Install bun: https://bun.sh/install" >&2
 exit 1
