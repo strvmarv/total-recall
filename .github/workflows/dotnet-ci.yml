@@ -1,0 +1,33 @@
+name: .NET CI
+
+on:
+  push:
+    branches: [main, "rewrite/dotnet"]
+  pull_request:
+    branches: [main, "rewrite/dotnet"]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang (NativeAOT requirement)
+        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore src/TotalRecall.sln
+
+      - name: Build
+        run: dotnet build src/TotalRecall.sln --no-restore --configuration Release
+
+      - name: Test
+        run: dotnet test src/TotalRecall.sln --no-build --configuration Release --logger "console;verbosity=normal"
