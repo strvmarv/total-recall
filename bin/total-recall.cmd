@@ -1,4 +1,5 @@
 @echo off
+SETLOCAL EnableDelayedExpansion
 :: total-recall MCP server launcher for Windows
 :: Prefers bundled Bun, falls back to system Bun, then system Node.
 
@@ -26,7 +27,7 @@ IF %ERRORLEVEL% EQU 0 (
   echo total-recall: warning: bundled bun v%BUN_VERSION% not found, using system bun. Version mismatch possible. 1>&2
   echo   Re-run 'npm install' to download bun v%BUN_VERSION%. 1>&2
   bun "%ENTRY%" %*
-  exit /b %ERRORLEVEL%
+  exit /b !ERRORLEVEL!
 )
 
 :: Priority 3: system Node (warn)
@@ -35,7 +36,7 @@ IF %ERRORLEVEL% EQU 0 (
   echo total-recall: warning: bun not found, falling back to node. ABI issues may occur. 1>&2
   echo   Install bun (https://bun.sh/install) or re-run 'npm install' to fix this. 1>&2
   node "%ENTRY%" %*
-  exit /b %ERRORLEVEL%
+  exit /b !ERRORLEVEL!
 )
 
 echo total-recall: error: neither bun nor node found. 1>&2

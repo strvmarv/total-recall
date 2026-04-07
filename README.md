@@ -64,7 +64,7 @@ Platform support is via MCP (Model Context Protocol), which means total-recall w
 ## Prerequisites
 
 - **Node.js >=20.0.0** — Required to run `npm install`. The plugin runtime uses a bundled Bun binary downloaded automatically on install.
-- **Internet access on first install** — The postinstall script downloads a ~60MB Bun binary to `~/.total-recall/bun/`. Subsequent installs are instant (cached). If download fails, the plugin falls back to system Node with a warning.
+- **Internet access on first install** — The postinstall script downloads a ~60MB Bun binary to `~/.total-recall/bun/` (Linux/macOS) or `%USERPROFILE%\.total-recall\bun\` (Windows). Subsequent installs are instant (cached). If download fails, the plugin falls back to system Node with a warning.
 - **Git LFS** — Required if cloning from source (`git lfs install` before clone). The embedding model is stored in LFS. Runtime auto-downloads from HuggingFace if LFS fetch fails.
 
 ---

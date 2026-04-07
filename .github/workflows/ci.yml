@@ -48,7 +48,11 @@ jobs:
         run: test -x "$HOME/.total-recall/bun/1.2.10/bun"
       - name: Verify bundled bun was downloaded (Windows)
         if: runner.os == 'Windows'
-        run: Test-Path "$env:USERPROFILE\.total-recall\bun\1.2.10\bun.exe"
+        run: |
+          if (-not (Test-Path "$env:USERPROFILE\.total-recall\bun\1.2.10\bun.exe")) {
+            Write-Error "Bundled bun not found at expected path"
+            exit 1
+          }
         shell: pwsh
       - run: bun run test
       - run: bun run build
