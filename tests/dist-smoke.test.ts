@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
+import { homedir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
@@ -17,8 +18,18 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 // This test exercises the BUILT dist so that any future bundler-layout
 // assumption of this kind fails loudly before publish.
 
+const BUN_VERSION = "1.2.10";
 const REPO_ROOT = resolve(__dirname, "..");
 const DIST_ENTRY = resolve(REPO_ROOT, "dist", "index.js");
+
+// dist/index.js uses bun:sqlite — must run under Bun, not Node.
+// Use the bundled Bun binary if available, fall back to system bun.
+function getBunExecutable(): string {
+  const ext = process.platform === "win32" ? ".exe" : "";
+  const bundled = resolve(homedir(), ".total-recall", "bun", BUN_VERSION, `bun${ext}`);
+  if (existsSync(bundled)) return bundled;
+  return "bun"; // fall back to system bun
+}
 
 describe("dist smoke test", () => {
   let client: Client;
@@ -37,7 +48,7 @@ describe("dist smoke test", () => {
     }
 
     const transport = new StdioClientTransport({
-      command: process.execPath,
+      command: getBunExecutable(),
       args: [DIST_ENTRY],
     });
 
