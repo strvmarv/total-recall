@@ -1,11 +1,26 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { Database } from "bun:sqlite";
 import type { HostImporter, ImportResult, EmbedFn } from "./importer.js";
 import { contentHash, isAlreadyImported, logImport, parseFrontmatter } from "./import-utils.js";
 import { insertEntry } from "../db/entries.js";
 import { insertEmbedding } from "../search/vector-search.js";
+
+/**
+ * Convert a file:// URL from workspace.json into a filesystem path. Returns
+ * null if the URL is malformed. Uses node:url's fileURLToPath so Windows
+ * drive-letter URLs (file:///C:/foo) are handled correctly — naive
+ * new URL(...).pathname gives "/C:/foo" on Windows, which existsSync rejects.
+ */
+function safeFileURLToPath(url: string): string | null {
+  try {
+    return fileURLToPath(url);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Cursor stores:
@@ -46,9 +61,9 @@ export class CursorImporter implements HostImporter {
         try {
           const ws = JSON.parse(readFileSync(wsJson, "utf8"));
           const projectPath = ws.folder
-            ? decodeURIComponent(new URL(ws.folder).pathname)
+            ? safeFileURLToPath(ws.folder)
             : ws.workspace
-              ? decodeURIComponent(new URL(ws.workspace).pathname)
+              ? safeFileURLToPath(ws.workspace)
               : null;
           if (!projectPath) continue;
 
@@ -147,9 +162,9 @@ export class CursorImporter implements HostImporter {
       try {
         const ws = JSON.parse(readFileSync(wsJson, "utf8"));
         const projectPath = ws.folder
-          ? new URL(ws.folder).pathname
+          ? safeFileURLToPath(ws.folder)
           : ws.workspace
-            ? new URL(ws.workspace).pathname
+            ? safeFileURLToPath(ws.workspace)
             : null;
         if (projectPath) projectPaths.add(projectPath);
       } catch {

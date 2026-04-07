@@ -1,17 +1,18 @@
 import { describe, it, expect } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { join, parse as parsePath } from "node:path";
+import { tmpdir, homedir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { detectProject } from "./project-detect.js";
 
 describe("detectProject", () => {
   it("returns null for home directory", () => {
-    expect(detectProject(process.env.HOME ?? "/home/user")).toBeNull();
+    expect(detectProject(homedir())).toBeNull();
   });
 
-  it("returns null for root", () => {
-    expect(detectProject("/")).toBeNull();
+  it("returns null for filesystem root", () => {
+    // "/" on POSIX, "C:\\" (or whatever drive is in use) on Windows.
+    expect(detectProject(parsePath(process.cwd()).root)).toBeNull();
   });
 
   it("returns basename for non-git directory", () => {

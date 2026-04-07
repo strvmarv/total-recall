@@ -25313,7 +25313,15 @@ var CopilotCliImporter = class {
 import { existsSync as existsSync7, readdirSync as readdirSync4, readFileSync as readFileSync8 } from "fs";
 import { join as join11 } from "path";
 import { homedir as homedir3 } from "os";
+import { fileURLToPath as fileURLToPath6 } from "url";
 import { Database as Database2 } from "bun:sqlite";
+function safeFileURLToPath(url2) {
+  try {
+    return fileURLToPath6(url2);
+  } catch {
+    return null;
+  }
+}
 var CursorImporter = class {
   name = "cursor";
   configPath;
@@ -25337,7 +25345,7 @@ var CursorImporter = class {
         if (!existsSync7(wsJson)) continue;
         try {
           const ws = JSON.parse(readFileSync8(wsJson, "utf8"));
-          const projectPath = ws.folder ? decodeURIComponent(new URL(ws.folder).pathname) : ws.workspace ? decodeURIComponent(new URL(ws.workspace).pathname) : null;
+          const projectPath = ws.folder ? safeFileURLToPath(ws.folder) : ws.workspace ? safeFileURLToPath(ws.workspace) : null;
           if (!projectPath) continue;
           if (existsSync7(join11(projectPath, ".cursorrules"))) knowledgeFiles++;
           const rulesDir = join11(projectPath, ".cursor", "rules");
@@ -25400,7 +25408,7 @@ var CursorImporter = class {
       if (!existsSync7(wsJson)) continue;
       try {
         const ws = JSON.parse(readFileSync8(wsJson, "utf8"));
-        const projectPath = ws.folder ? new URL(ws.folder).pathname : ws.workspace ? new URL(ws.workspace).pathname : null;
+        const projectPath = ws.folder ? safeFileURLToPath(ws.folder) : ws.workspace ? safeFileURLToPath(ws.workspace) : null;
         if (projectPath) projectPaths.add(projectPath);
       } catch {
       }
@@ -26108,10 +26116,11 @@ function collectMarkdownFiles(dirPath, files) {
 
 // src/utils/project-detect.ts
 import { execFileSync } from "child_process";
-import { basename as basename5 } from "path";
+import { basename as basename5, parse as parsePath } from "path";
+import { homedir as homedir7 } from "os";
 function detectProject(cwd) {
-  const home = process.env.HOME ?? "";
-  if (cwd === home || cwd === "/") return null;
+  if (cwd === homedir7()) return null;
+  if (cwd === parsePath(cwd).root) return null;
   try {
     const remote = execFileSync("git", ["remote", "get-url", "origin"], {
       cwd,
@@ -26130,8 +26139,8 @@ function detectProject(cwd) {
 // src/eval/smoke-test.ts
 import { resolve as resolve4, dirname as dirname6, basename as basename6 } from "path";
 import { readFileSync as readFileSync13 } from "fs";
-import { fileURLToPath as fileURLToPath6 } from "url";
-var __dirname3 = dirname6(fileURLToPath6(import.meta.url));
+import { fileURLToPath as fileURLToPath7 } from "url";
+var __dirname3 = dirname6(fileURLToPath7(import.meta.url));
 var PACKAGE_ROOT3 = basename6(__dirname3) === "dist" ? resolve4(__dirname3, "..") : resolve4(__dirname3, "..", "..");
 var SMOKE_PASS_THRESHOLD = 0.8;
 function getMetaValue(db, key) {

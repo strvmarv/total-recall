@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import { Database } from "bun:sqlite";
 import { createTestDb } from "../../tests/helpers/db.js";
@@ -55,7 +56,7 @@ describe("CursorImporter", () => {
     mkdirSync(wsDir, { recursive: true });
     writeFileSync(
       join(wsDir, "workspace.json"),
-      JSON.stringify({ folder: `file://${projectDir}` }),
+      JSON.stringify({ folder: pathToFileURL(projectDir).href }),
     );
 
     const importer = new CursorImporter(tmpConfig, tmpExt);
@@ -93,7 +94,7 @@ describe("CursorImporter", () => {
     mkdirSync(wsDir, { recursive: true });
     writeFileSync(
       join(wsDir, "workspace.json"),
-      JSON.stringify({ folder: `file://${projectDir}` }),
+      JSON.stringify({ folder: pathToFileURL(projectDir).href }),
     );
 
     const importer = new CursorImporter(tmpConfig, tmpExt);

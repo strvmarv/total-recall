@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.6.8-beta.5 - 2026-04-06
+
+### Fixed
+- **Cursor importer on Windows**: `CursorImporter.importKnowledge` silently skipped every workspace-discovered project on Windows. Root cause: `src/importers/cursor.ts` parsed the `folder` field from Cursor's `workspace.json` with `new URL(folder).pathname`, which returns `/C:/Users/...` on Windows — not a valid filesystem path, so the subsequent `existsSync(join(projectPath, ".cursorrules"))` always failed. Replaced with `fileURLToPath` from `node:url` (via a `safeFileURLToPath` helper that swallows malformed URLs), which produces the correct `C:\Users\...` on Windows and `/Users/...` on POSIX. Affects all Windows users who had Cursor rules to import since 0.6.0-ish.
+- **`detectProject` on Windows**: `src/utils/project-detect.ts` used `process.env.HOME` to recognize the home directory and hardcoded `"/"` as the filesystem root. Both are POSIX-only — `HOME` is undefined on Windows (Node uses `USERPROFILE`), and the root is `C:\` (or whatever drive). Switched to `os.homedir()` for the home check and `path.parse(cwd).root` for the root check. Previously, `detectProject(someWindowsHomeDir)` would return the home folder's basename instead of null.
+- **CI was failing on `test-bun (windows-latest)`** since 0.6.8-beta.1 because of the two bugs above plus one test bug (`cursor.test.ts` constructed `folder: \`file://\${projectDir}\`` which is malformed on Windows — two slashes, backslashes in the path; fixed to use `pathToFileURL(projectDir).href`). The NPM publish workflow is separate from the CI workflow, so beta.1 through beta.4 all published despite red CI. This beta is the first one where the full matrix (ubuntu/macos/windows × bun) is green.
+
 ## 0.6.8-beta.4 - 2026-04-06
 
 ### Fixed

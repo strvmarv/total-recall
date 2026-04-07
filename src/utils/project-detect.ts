@@ -1,13 +1,16 @@
 import { execFileSync } from "node:child_process";
-import { basename } from "node:path";
+import { basename, parse as parsePath } from "node:path";
+import { homedir } from "node:os";
 
 /**
  * Detect the current project name from git remote or cwd basename.
- * Returns null if cwd is HOME or root (not a project directory).
+ * Returns null if cwd is HOME or a filesystem root (not a project directory).
  */
 export function detectProject(cwd: string): string | null {
-  const home = process.env.HOME ?? "";
-  if (cwd === home || cwd === "/") return null;
+  if (cwd === homedir()) return null;
+  // path.parse(cwd).root is "/" on POSIX and "C:\\" (etc.) on Windows,
+  // so this handles both platforms without hardcoding "/".
+  if (cwd === parsePath(cwd).root) return null;
 
   try {
     const remote = execFileSync("git", ["remote", "get-url", "origin"], {
