@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import { Database } from "bun:sqlite";
 import { initSchema } from "../../src/db/schema.js";
 import * as sqliteVec from "sqlite-vec";
 

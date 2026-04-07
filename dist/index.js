@@ -22693,14 +22693,14 @@ function insertEntry(db, tier, type, opts) {
   const table = tableName(tier, type);
   const id = randomUUID2();
   const now = Date.now();
-  db.prepare(`
+  db.run(`
     INSERT INTO ${table}
       (id, content, summary, source, source_tool, project, tags,
        created_at, updated_at, last_accessed_at, access_count,
        decay_score, parent_id, collection_id, metadata)
     VALUES
       (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
+  `, [
     id,
     opts.content,
     opts.summary ?? null,
@@ -22716,12 +22716,12 @@ function insertEntry(db, tier, type, opts) {
     opts.parent_id ?? null,
     opts.collection_id ?? null,
     JSON.stringify(opts.metadata ?? {})
-  );
+  ]);
   return id;
 }
 function getEntry(db, tier, type, id) {
   const table = tableName(tier, type);
-  const row = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id);
+  const row = db.query(`SELECT * FROM ${table} WHERE id = ?`).get(id);
   if (!row) return null;
   return rowToEntry(row);
 }
@@ -22760,11 +22760,11 @@ function updateEntry(db, tier, type, id, opts) {
     values.push(now);
   }
   values.push(id);
-  db.prepare(`UPDATE ${table} SET ${setClauses.join(", ")} WHERE id = ?`).run(...values);
+  db.run(`UPDATE ${table} SET ${setClauses.join(", ")} WHERE id = ?`, values);
 }
 function deleteEntry(db, tier, type, id) {
   const table = tableName(tier, type);
-  db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(id);
+  db.run(`DELETE FROM ${table} WHERE id = ?`, [id]);
 }
 var ALLOWED_ORDER_COLUMNS = /* @__PURE__ */ new Set([
   "created_at",
@@ -22801,12 +22801,12 @@ function listEntries(db, tier, type, opts) {
     sql += " LIMIT ?";
     params.push(opts.limit);
   }
-  const rows = db.prepare(sql).all(...params);
+  const rows = db.query(sql).all(params);
   return rows.map(rowToEntry);
 }
 function countEntries(db, tier, type) {
   const table = tableName(tier, type);
-  const row = db.prepare(`SELECT COUNT(*) as count FROM ${table}`).get();
+  const row = db.query(`SELECT COUNT(*) as count FROM ${table}`).get();
   return row.count;
 }
 function listEntriesByMetadata(db, tier, type, metadataFilter, opts) {
@@ -22837,7 +22837,7 @@ function listEntriesByMetadata(db, tier, type, metadataFilter, opts) {
     sql += " LIMIT ?";
     params.push(opts.limit);
   }
-  const rows = db.prepare(sql).all(...params);
+  const rows = db.query(sql).all(params);
   return rows.map(rowToEntry);
 }
 function moveEntry(db, fromTier, fromType, toTier, toType, id) {
@@ -22848,14 +22848,14 @@ function moveEntry(db, fromTier, fromType, toTier, toType, id) {
     }
     const toTable = tableName(toTier, toType);
     const now = Date.now();
-    db.prepare(`
+    db.run(`
       INSERT INTO ${toTable}
         (id, content, summary, source, source_tool, project, tags,
          created_at, updated_at, last_accessed_at, access_count,
          decay_score, parent_id, collection_id, metadata)
       VALUES
         (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    `, [
       entry.id,
       entry.content,
       entry.summary,
@@ -22871,7 +22871,7 @@ function moveEntry(db, fromTier, fromType, toTier, toType, id) {
       entry.parent_id,
       entry.collection_id,
       JSON.stringify(entry.metadata)
-    );
+    ]);
     deleteEntry(db, fromTier, fromType, id);
   });
   doMove();
@@ -25338,7 +25338,7 @@ var CursorImporter = class {
     if (!existsSync7(dbPath)) return;
     let cursorDb = null;
     try {
-      const BetterSqlite3 = (await import("./lib-A53WET56.js")).default;
+      const BetterSqlite3 = (await import("./lib-WAON75QP.js")).default;
       cursorDb = new BetterSqlite3(dbPath, { readonly: true });
       const row = cursorDb.prepare("SELECT value FROM ItemTable WHERE key = 'aicontext.personalContext'").get();
       if (!row?.value) return;
@@ -25652,7 +25652,7 @@ var OpenCodeImporter = class {
     if (!existsSync9(dbPath)) return [];
     let ocDb = null;
     try {
-      const BetterSqlite3 = (await import("./lib-A53WET56.js")).default;
+      const BetterSqlite3 = (await import("./lib-WAON75QP.js")).default;
       ocDb = new BetterSqlite3(dbPath, { readonly: true });
       const rows = ocDb.prepare("SELECT worktree FROM project").all();
       return rows.map((r) => r.worktree).filter((p) => existsSync9(p));
