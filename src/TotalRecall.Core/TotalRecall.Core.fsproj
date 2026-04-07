@@ -10,7 +10,6 @@
     <Compile Include="Types.fs" />
     <Compile Include="Tokenizer.fs" />
     <Compile Include="Decay.fs" />
-    <Compile Include="TierTransitions.fs" />
     <Compile Include="Ranking.fs" />
     <Compile Include="Compaction.fs" />
     <Compile Include="Parsers.fs" />
