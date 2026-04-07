@@ -1,6 +1,6 @@
 import { resolve, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import type { ToolContext } from "./registry.js";
 import { runBenchmark } from "../eval/benchmark-runner.js";
 import { getRetrievalEvents } from "../eval/event-logger.js";
@@ -82,7 +82,7 @@ export const EVAL_TOOLS = [
 
 type ToolResult = { content: Array<{ type: "text"; text: string }>; isError?: true };
 
-function resolveSnapshotId(db: Database.Database, nameOrId: string): string | null {
+function resolveSnapshotId(db: Database, nameOrId: string): string | null {
   const byId = db.prepare("SELECT id FROM config_snapshots WHERE id = ?").get(nameOrId) as { id: string } | undefined;
   if (byId) return byId.id;
 

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { storeMemory } from "../memory/store.js";
 import { deleteMemory } from "../memory/delete.js";
 import { searchMemory } from "../memory/search.js";
@@ -48,7 +48,7 @@ export interface BenchmarkOptions {
 }
 
 export async function runBenchmark(
-  db: Database.Database,
+  db: Database,
   embed: EmbedFn,
   opts: BenchmarkOptions,
 ): Promise<BenchmarkResult> {

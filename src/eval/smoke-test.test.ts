@@ -2,10 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createTestDb } from "../../tests/helpers/db.js";
 import { mockEmbedSemantic } from "../../tests/helpers/embedding.js";
 import { runSmokeTest, getMetaValue, setMetaValue } from "./smoke-test.js";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 
 describe("smoke-test", () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();
@@ -50,7 +50,7 @@ describe("smoke-test", () => {
 });
 
 describe("_meta helpers", () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();

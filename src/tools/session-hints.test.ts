@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { createTestDb } from "../../tests/helpers/db.js";
 import { insertEntry, updateEntry } from "../db/entries.js";
 import { generateHints, getLastSessionAge } from "./session-tools.js";
 
 describe("generateHints", () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();
@@ -109,7 +109,7 @@ describe("generateHints", () => {
 });
 
 describe("getLastSessionAge", () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();

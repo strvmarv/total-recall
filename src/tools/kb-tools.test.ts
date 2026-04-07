@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { createTestDb } from "../../tests/helpers/db.js";
 import { mockEmbedSemantic } from "../../tests/helpers/embedding.js";
 import { handleKbTool } from "./kb-tools.js";
@@ -30,7 +30,7 @@ function makeMockEmbedder() {
   };
 }
 
-function makeCtx(db: Database.Database): ToolContext {
+function makeCtx(db: Database): ToolContext {
   return {
     db,
     config: TEST_CONFIG,
@@ -44,7 +44,7 @@ function makeCtx(db: Database.Database): ToolContext {
 }
 
 describe("kb_summarize", () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();
@@ -85,7 +85,7 @@ describe("kb_summarize", () => {
 });
 
 describe("kb_search needsSummary", () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();

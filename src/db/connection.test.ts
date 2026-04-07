@@ -1,9 +1,9 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { createTestDb } from "../../tests/helpers/db.js";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 
 describe("SQLite schema", () => {
-  let db: Database.Database;
+  let db: Database;
 
   afterEach(() => {
     db?.close();

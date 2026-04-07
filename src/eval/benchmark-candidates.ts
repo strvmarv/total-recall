@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import type { MissEntry } from "./metrics.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -29,7 +29,7 @@ export interface CandidateRow {
 }
 
 export function writeCandidates(
-  db: Database.Database,
+  db: Database,
   misses: MissEntry[],
   contexts: MissContext[],
 ): void {
@@ -59,7 +59,7 @@ export function writeCandidates(
   }
 }
 
-export function listCandidates(db: Database.Database): CandidateRow[] {
+export function listCandidates(db: Database): CandidateRow[] {
   return db.prepare(`
     SELECT * FROM benchmark_candidates
     WHERE status = 'pending'
@@ -68,7 +68,7 @@ export function listCandidates(db: Database.Database): CandidateRow[] {
 }
 
 export function resolveCandidates(
-  db: Database.Database,
+  db: Database,
   acceptIds: string[],
   rejectIds: string[],
 ): { accepted: number; rejected: number; corpusEntries: string[] } {

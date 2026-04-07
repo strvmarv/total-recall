@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { getEntry } from "../db/entries.js";
 import type { Tier, ContentType, Entry } from "../types.js";
 import { ALL_TABLE_PAIRS } from "../types.js";
@@ -9,7 +9,7 @@ export interface MemoryLocation {
   content_type: ContentType;
 }
 
-export function getMemory(db: Database.Database, id: string): MemoryLocation | null {
+export function getMemory(db: Database, id: string): MemoryLocation | null {
   for (const { tier, type } of ALL_TABLE_PAIRS) {
     const entry = getEntry(db, tier, type, id);
     if (entry) {

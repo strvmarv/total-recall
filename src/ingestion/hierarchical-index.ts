@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import type { Entry } from "../types.js";
 import { insertEntry } from "../db/entries.js";
 import { insertEmbedding } from "../search/vector-search.js";
@@ -62,7 +62,7 @@ export interface AddDocumentOpts {
 }
 
 export async function createCollection(
-  db: Database.Database,
+  db: Database,
   embed: EmbedFn,
   opts: CreateCollectionOpts,
 ): Promise<string> {
@@ -84,7 +84,7 @@ export async function createCollection(
 }
 
 export async function addDocumentToCollection(
-  db: Database.Database,
+  db: Database,
   embed: EmbedFn,
   opts: AddDocumentOpts,
 ): Promise<string> {
@@ -127,7 +127,7 @@ export async function addDocumentToCollection(
 }
 
 export function getCollection(
-  db: Database.Database,
+  db: Database,
   id: string,
 ): (Entry & { name: string }) | null {
   const row = db
@@ -143,7 +143,7 @@ export function getCollection(
   return { ...entry, name: metadata["name"] as string };
 }
 
-export function listCollections(db: Database.Database): Array<Entry & { name: string }> {
+export function listCollections(db: Database): Array<Entry & { name: string }> {
   const rows = db
     .prepare(`SELECT * FROM cold_knowledge WHERE json_extract(metadata, '$.type') = 'collection'`)
     .all() as RawRow[];
@@ -155,7 +155,7 @@ export function listCollections(db: Database.Database): Array<Entry & { name: st
   });
 }
 
-export function getDocumentChunks(db: Database.Database, docId: string): Entry[] {
+export function getDocumentChunks(db: Database, docId: string): Entry[] {
   const rows = db
     .prepare(`SELECT * FROM cold_knowledge WHERE parent_id = ?`)
     .all(docId) as RawRow[];

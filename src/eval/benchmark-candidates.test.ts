@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createTestDb } from "../../tests/helpers/db.js";
 import { writeCandidates, listCandidates, resolveCandidates } from "./benchmark-candidates.js";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 
 // Mock fs to prevent writing to the real retrieval.jsonl during tests
 vi.mock("node:fs", async (importOriginal) => {
@@ -14,7 +14,7 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 
 describe("benchmark-candidates", () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();

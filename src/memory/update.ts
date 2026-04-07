@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { updateEntry } from "../db/entries.js";
 import { deleteEmbedding, insertEmbedding } from "../search/vector-search.js";
 import type { UpdateEntryOpts } from "../db/entries.js";
@@ -7,7 +7,7 @@ import { getMemory } from "./get.js";
 type EmbedFn = (text: string) => Float32Array | Promise<Float32Array>;
 
 export async function updateMemory(
-  db: Database.Database,
+  db: Database,
   embed: EmbedFn | undefined,
   id: string,
   opts: UpdateEntryOpts,

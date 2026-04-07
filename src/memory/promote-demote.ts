@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { getEntry, moveEntry } from "../db/entries.js";
 import { deleteEmbedding, insertEmbedding } from "../search/vector-search.js";
 import type { Tier, ContentType } from "../types.js";
@@ -6,7 +6,7 @@ import type { Tier, ContentType } from "../types.js";
 type EmbedFn = (text: string) => Float32Array | Promise<Float32Array>;
 
 export async function promoteEntry(
-  db: Database.Database,
+  db: Database,
   embed: EmbedFn,
   id: string,
   fromTier: Tier,
@@ -26,7 +26,7 @@ export async function promoteEntry(
 }
 
 export async function demoteEntry(
-  db: Database.Database,
+  db: Database,
   embed: EmbedFn,
   id: string,
   fromTier: Tier,

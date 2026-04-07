@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import type { Tier, ContentType } from "../types.js";
 
 export interface Frontmatter {
@@ -33,7 +33,7 @@ function importLogId(sourceTool: string, sourcePath: string, hash: string): stri
   return createHash("md5").update(`${sourceTool}:${sourcePath}:${hash}`).digest("hex");
 }
 
-export function isAlreadyImported(db: Database.Database, hash: string): boolean {
+export function isAlreadyImported(db: Database, hash: string): boolean {
   const row = db
     .prepare("SELECT id FROM import_log WHERE content_hash = ?")
     .get(hash) as { id: string } | undefined;
@@ -41,7 +41,7 @@ export function isAlreadyImported(db: Database.Database, hash: string): boolean 
 }
 
 export function logImport(
-  db: Database.Database,
+  db: Database,
   sourceTool: string,
   sourcePath: string,
   hash: string,

@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import type { HostImporter, ImportResult, EmbedFn } from "./importer.js";
 import { contentHash, isAlreadyImported, logImport } from "./import-utils.js";
 import { insertEntry } from "../db/entries.js";
@@ -43,11 +43,11 @@ export class CopilotCliImporter implements HostImporter {
     return { memoryFiles: 0, knowledgeFiles, sessionFiles };
   }
 
-  async importMemories(_db: Database.Database, _embed: EmbedFn, _project?: string): Promise<ImportResult> {
+  async importMemories(_db: Database, _embed: EmbedFn, _project?: string): Promise<ImportResult> {
     return { imported: 0, skipped: 0, errors: [] };
   }
 
-  async importKnowledge(db: Database.Database, embed: EmbedFn): Promise<ImportResult> {
+  async importKnowledge(db: Database, embed: EmbedFn): Promise<ImportResult> {
     const result: ImportResult = { imported: 0, skipped: 0, errors: [] };
 
     const sessionStateDir = join(this.basePath, "session-state");

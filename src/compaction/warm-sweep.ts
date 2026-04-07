@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { listEntries } from "../db/entries.js";
 import { demoteEntry } from "../memory/promote-demote.js";
 
@@ -11,7 +11,7 @@ export interface SweepWarmTierResult {
 }
 
 export async function sweepWarmTier(
-  db: Database.Database,
+  db: Database,
   embed: EmbedFn,
   config: { coldDecayDays: number },
   sessionId: string,

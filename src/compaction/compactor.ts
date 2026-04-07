@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { listEntries, deleteEntry } from "../db/entries.js";
 import { deleteEmbedding } from "../search/vector-search.js";
 import { promoteEntry } from "../memory/promote-demote.js";
@@ -15,7 +15,7 @@ export interface CompactHotTierResult {
 }
 
 function logCompactionEvent(
-  db: Database.Database,
+  db: Database,
   opts: {
     sessionId: string;
     sourceTier: string;
@@ -54,7 +54,7 @@ function logCompactionEvent(
 }
 
 export async function compactHotTier(
-  db: Database.Database,
+  db: Database,
   embed: EmbedFn,
   config: TotalRecallConfig["compaction"],
   sessionId: string,

@@ -1,9 +1,9 @@
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { deleteEntry } from "../db/entries.js";
 import { deleteEmbedding } from "../search/vector-search.js";
 import { getMemory } from "./get.js";
 
-export function deleteMemory(db: Database.Database, id: string): boolean {
+export function deleteMemory(db: Database, id: string): boolean {
   const location = getMemory(db, id);
   if (!location) return false;
 

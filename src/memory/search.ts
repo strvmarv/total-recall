@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { getEntry, updateEntry } from "../db/entries.js";
 import { searchByVector } from "../search/vector-search.js";
 import { searchByFts } from "../search/fts-search.js";
@@ -16,7 +16,7 @@ export interface SearchOptions {
 const DEFAULT_FTS_WEIGHT = 0.3;
 
 export async function searchMemory(
-  db: Database.Database,
+  db: Database,
   embed: EmbedFn,
   query: string,
   opts: SearchOptions,

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import type { ToolContext, SessionInitResult } from "./registry.js";
 import { createConfigSnapshot } from "../config.js";
 import { ClaudeCodeImporter } from "../importers/claude-code.js";
@@ -25,7 +25,7 @@ function truncateHint(content: string, maxLen = 120): string {
 }
 
 export function generateHints(
-  db: Database.Database,
+  db: Database,
   warmPromotedIds: string[],
 ): string[] {
   const seen = new Set<string>();
@@ -73,7 +73,7 @@ export function generateHints(
   return hints.slice(0, 5);
 }
 
-export function getLastSessionAge(db: Database.Database): string | null {
+export function getLastSessionAge(db: Database): string | null {
   const row = db
     .prepare(`SELECT MAX(timestamp) as ts FROM compaction_log WHERE reason != 'warm_sweep_decay'`)
     .get() as { ts: number | null } | undefined;

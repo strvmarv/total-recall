@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createTestDb } from "../tests/helpers/db.js";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 
 describe("config persistence", () => {
   let tempDir: string;
@@ -62,7 +62,7 @@ describe("config persistence", () => {
 });
 
 describe("createConfigSnapshot", () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();

@@ -3,14 +3,14 @@ import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { createTestDb } from "../../tests/helpers/db.js";
 import { mockEmbedSemantic } from "../../tests/helpers/embedding.js";
 import { CopilotCliImporter } from "./copilot-cli.js";
 import { listEntries } from "../db/entries.js";
 
 describe("CopilotCliImporter", () => {
-  let db: Database.Database;
+  let db: Database;
   let tmpDir: string;
 
   beforeEach(() => {

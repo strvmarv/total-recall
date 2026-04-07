@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { ALL_TABLE_PAIRS, tableName, vecTableName } from "../types.js";
 
 const SCHEMA_VERSION = 1;
@@ -110,7 +110,7 @@ const SCHEMA_VERSION_DDL = `
 
 // Each migration runs once, in order. Add new migrations at the end.
 // Migration functions receive the db and run inside a transaction.
-const MIGRATIONS: Array<(db: Database.Database) => void> = [
+const MIGRATIONS: Array<(db: Database) => void> = [
   // Migration 1: Initial schema (v1)
   (db) => {
     for (const pair of ALL_TABLE_PAIRS) {
@@ -197,7 +197,7 @@ const MIGRATIONS: Array<(db: Database.Database) => void> = [
   },
 ];
 
-function getCurrentVersion(db: Database.Database): number {
+function getCurrentVersion(db: Database): number {
   const hasTable = db
     .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='_schema_version'")
     .get();
@@ -209,7 +209,7 @@ function getCurrentVersion(db: Database.Database): number {
   return row?.v ?? 0;
 }
 
-export function initSchema(db: Database.Database): void {
+export function initSchema(db: Database): void {
   // Enable WAL mode and foreign keys outside the transaction (SQLite requirement)
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");

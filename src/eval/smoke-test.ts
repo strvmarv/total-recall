@@ -1,7 +1,7 @@
 import { resolve, dirname, basename } from "node:path";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { runBenchmark, type BenchmarkResult } from "./benchmark-runner.js";
 
 type EmbedFn = (text: string) => Float32Array | Promise<Float32Array>;
@@ -20,14 +20,14 @@ export interface SmokeTestResult {
   avgLatencyMs: number;
 }
 
-export function getMetaValue(db: Database.Database, key: string): string | null {
+export function getMetaValue(db: Database, key: string): string | null {
   const row = db
     .prepare("SELECT value FROM _meta WHERE key = ?")
     .get(key) as { value: string } | undefined;
   return row?.value ?? null;
 }
 
-export function setMetaValue(db: Database.Database, key: string, value: string): void {
+export function setMetaValue(db: Database, key: string, value: string): void {
   db.prepare(
     "INSERT INTO _meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
   ).run(key, value);
@@ -40,7 +40,7 @@ export function getPackageVersion(): string {
 }
 
 export async function runSmokeTest(
-  db: Database.Database,
+  db: Database,
   embed: EmbedFn,
   currentVersion: string,
 ): Promise<SmokeTestResult | null> {

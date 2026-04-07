@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { getRetrievalEvents } from "./event-logger.js";
 import { computeMetrics } from "./metrics.js";
 
@@ -17,7 +17,7 @@ export interface RegressionAlert {
 }
 
 export function checkRegressions(
-  db: Database.Database,
+  db: Database,
   config: RegressionConfig,
   similarityThreshold: number,
 ): RegressionAlert[] | null {

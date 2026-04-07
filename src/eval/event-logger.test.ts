@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { createTestDb } from "../../tests/helpers/db.js";
 import { logRetrievalEvent, updateOutcome, getRetrievalEvents } from "./event-logger.js";
 
@@ -14,7 +14,7 @@ const minimalOpts = {
 };
 
 describe("event-logger", () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();

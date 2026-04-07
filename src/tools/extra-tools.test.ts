@@ -3,7 +3,7 @@ import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { createTestDb } from "../../tests/helpers/db.js";
 import { mockEmbedSemantic } from "../../tests/helpers/embedding.js";
 import { storeMemory } from "../memory/store.js";
@@ -35,7 +35,7 @@ function makeMockEmbedder() {
   };
 }
 
-function makeCtx(db: Database.Database): ToolContext {
+function makeCtx(db: Database): ToolContext {
   return {
     db,
     config: TEST_CONFIG,
@@ -53,7 +53,7 @@ function parseResult(result: { content: Array<{ type: string; text: string }> })
 }
 
 describe("extra-tools", () => {
-  let db: Database.Database;
+  let db: Database;
   let ctx: ToolContext;
 
   beforeEach(() => {

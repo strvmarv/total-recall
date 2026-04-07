@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import type { Tier, ContentType, Entry, EntryRow } from "../types.js";
 import { tableName } from "../types.js";
 
@@ -53,7 +53,7 @@ function rowToEntry(row: EntryRow): Entry {
 }
 
 export function insertEntry(
-  db: Database.Database,
+  db: Database,
   tier: Tier,
   type: ContentType,
   opts: InsertEntryOpts,
@@ -91,7 +91,7 @@ export function insertEntry(
 }
 
 export function getEntry(
-  db: Database.Database,
+  db: Database,
   tier: Tier,
   type: ContentType,
   id: string,
@@ -106,7 +106,7 @@ export function getEntry(
 }
 
 export function updateEntry(
-  db: Database.Database,
+  db: Database,
   tier: Tier,
   type: ContentType,
   id: string,
@@ -154,7 +154,7 @@ export function updateEntry(
 }
 
 export function deleteEntry(
-  db: Database.Database,
+  db: Database,
   tier: Tier,
   type: ContentType,
   id: string,
@@ -173,7 +173,7 @@ const ALLOWED_ORDER_COLUMNS = new Set([
 ]);
 
 export function listEntries(
-  db: Database.Database,
+  db: Database,
   tier: Tier,
   type: ContentType,
   opts?: ListEntriesOpts,
@@ -214,7 +214,7 @@ export function listEntries(
 }
 
 export function countEntries(
-  db: Database.Database,
+  db: Database,
   tier: Tier,
   type: ContentType,
 ): number {
@@ -226,7 +226,7 @@ export function countEntries(
 }
 
 export function listEntriesByMetadata(
-  db: Database.Database,
+  db: Database,
   tier: Tier,
   type: ContentType,
   metadataFilter: Record<string, string>,
@@ -272,7 +272,7 @@ export function listEntriesByMetadata(
 }
 
 export function moveEntry(
-  db: Database.Database,
+  db: Database,
   fromTier: Tier,
   fromType: ContentType,
   toTier: Tier,

@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import type { HostImporter, ImportResult, EmbedFn } from "./importer.js";
 import { contentHash, isAlreadyImported, logImport, parseFrontmatter } from "./import-utils.js";
 import { insertEntry } from "../db/entries.js";
@@ -69,12 +69,12 @@ export class CursorImporter implements HostImporter {
     return { memoryFiles: 0, knowledgeFiles, sessionFiles: 0 };
   }
 
-  async importMemories(_db: Database.Database, _embed: EmbedFn, _project?: string): Promise<ImportResult> {
+  async importMemories(_db: Database, _embed: EmbedFn, _project?: string): Promise<ImportResult> {
     // Cursor doesn't have a structured memory system
     return { imported: 0, skipped: 0, errors: [] };
   }
 
-  async importKnowledge(db: Database.Database, embed: EmbedFn): Promise<ImportResult> {
+  async importKnowledge(db: Database, embed: EmbedFn): Promise<ImportResult> {
     const result: ImportResult = { imported: 0, skipped: 0, errors: [] };
 
     // 1. Import global rules from SQLite
@@ -87,14 +87,14 @@ export class CursorImporter implements HostImporter {
   }
 
   private async importGlobalRules(
-    db: Database.Database,
+    db: Database,
     embed: EmbedFn,
     result: ImportResult,
   ): Promise<void> {
     const dbPath = join(this.configPath, "User", "globalStorage", "state.vscdb");
     if (!existsSync(dbPath)) return;
 
-    let cursorDb: Database.Database | null = null;
+    let cursorDb: Database | null = null;
     try {
       // Dynamic import to avoid hard dependency at module level
       const BetterSqlite3 = (await import("better-sqlite3")).default;
@@ -132,7 +132,7 @@ export class CursorImporter implements HostImporter {
   }
 
   private async importProjectRules(
-    db: Database.Database,
+    db: Database,
     embed: EmbedFn,
     result: ImportResult,
   ): Promise<void> {
@@ -178,7 +178,7 @@ export class CursorImporter implements HostImporter {
   }
 
   private async importRuleFile(
-    db: Database.Database,
+    db: Database,
     embed: EmbedFn,
     result: ImportResult,
     filePath: string,

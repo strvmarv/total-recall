@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { listEntries } from "../db/entries.js";
 import { insertEmbedding } from "../search/vector-search.js";
 import type { Entry } from "../types.js";
@@ -11,7 +11,7 @@ export interface CheckAndPromoteColdResult {
   promoted: string[];
 }
 
-async function copyEntryToWarm(db: Database.Database, embed: EmbedFn, entry: Entry): Promise<string> {
+async function copyEntryToWarm(db: Database, embed: EmbedFn, entry: Entry): Promise<string> {
   const newId = randomUUID();
   const now = Date.now();
   const toTable = tableName("warm", "memory");
@@ -48,7 +48,7 @@ async function copyEntryToWarm(db: Database.Database, embed: EmbedFn, entry: Ent
 }
 
 export async function checkAndPromoteCold(
-  db: Database.Database,
+  db: Database,
   embed: EmbedFn,
   config: { accessThreshold: number; windowDays: number },
 ): Promise<CheckAndPromoteColdResult> {
