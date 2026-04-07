@@ -3,8 +3,7 @@ import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import type { Database } from "bun:sqlite";
-import BetterSqlite3 from "better-sqlite3";
+import { Database } from "bun:sqlite";
 import { createTestDb } from "../../tests/helpers/db.js";
 import { mockEmbedSemantic } from "../../tests/helpers/embedding.js";
 import { CursorImporter } from "./cursor.js";
@@ -113,9 +112,9 @@ describe("CursorImporter", () => {
     const globalDir = join(tmpConfig, "User", "globalStorage");
     mkdirSync(globalDir, { recursive: true });
 
-    const vscdb = new BetterSqlite3(join(globalDir, "state.vscdb"));
-    vscdb.exec("CREATE TABLE IF NOT EXISTS ItemTable (key TEXT PRIMARY KEY, value TEXT)");
-    vscdb.prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)").run(
+    const vscdb = new Database(join(globalDir, "state.vscdb"));
+    vscdb.run("CREATE TABLE IF NOT EXISTS ItemTable (key TEXT PRIMARY KEY, value TEXT)");
+    vscdb.query("INSERT INTO ItemTable (key, value) VALUES (?, ?)").run(
       "aicontext.personalContext",
       "Always explain your reasoning step by step.",
     );
@@ -148,9 +147,9 @@ describe("CursorImporter", () => {
     const globalDir = join(tmpConfig, "User", "globalStorage");
     mkdirSync(globalDir, { recursive: true });
 
-    const vscdb = new BetterSqlite3(join(globalDir, "state.vscdb"));
-    vscdb.exec("CREATE TABLE IF NOT EXISTS ItemTable (key TEXT PRIMARY KEY, value TEXT)");
-    vscdb.prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)").run(
+    const vscdb = new Database(join(globalDir, "state.vscdb"));
+    vscdb.run("CREATE TABLE IF NOT EXISTS ItemTable (key TEXT PRIMARY KEY, value TEXT)");
+    vscdb.query("INSERT INTO ItemTable (key, value) VALUES (?, ?)").run(
       "aicontext.personalContext",
       "Be concise.",
     );
