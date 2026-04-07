@@ -5,12 +5,12 @@ export default defineConfig({
   resolve: {
     alias: {
       // bun:sqlite is a Bun built-in; shim it for Node/vitest runs
-      "bun:sqlite": resolve(__dirname, "tests/helpers/bun-sqlite-shim.ts"),
+      "bun:sqlite": resolve(__dirname, "tests-ts/helpers/bun-sqlite-shim.ts"),
     },
   },
   test: {
     globals: true,
-    include: ["src/**/*.test.ts"],
+    include: ["src-ts/**/*.test.ts"],
     testTimeout: 30000,
   },
 });

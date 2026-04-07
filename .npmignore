@@ -1,6 +1,6 @@
 # Source (dist/ is published instead)
-src/
-tests/
+src-ts/
+tests-ts/
 *.test.ts
 
 # Dev config

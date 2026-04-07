@@ -3,7 +3,7 @@ import { copyFileSync } from "node:fs";
 
 export default defineConfig([
   {
-    entry: ["src/index.ts"],
+    entry: ["src-ts/index.ts"],
     format: ["esm"],
     platform: "node",
     target: "node20",
@@ -14,11 +14,11 @@ export default defineConfig([
     },
     clean: true,
     onSuccess: async () => {
-      copyFileSync("src/defaults.toml", "dist/defaults.toml");
+      copyFileSync("src-ts/defaults.toml", "dist/defaults.toml");
     },
   },
   {
-    entry: ["src/eval/ci-smoke.ts"],
+    entry: ["src-ts/eval/ci-smoke.ts"],
     format: ["esm"],
     platform: "node",
     target: "node20",
@@ -27,7 +27,7 @@ export default defineConfig([
     outDir: "dist/eval",
     clean: false,
     onSuccess: async () => {
-      copyFileSync("src/defaults.toml", "dist/eval/defaults.toml");
+      copyFileSync("src-ts/defaults.toml", "dist/eval/defaults.toml");
     },
   },
 ]);
