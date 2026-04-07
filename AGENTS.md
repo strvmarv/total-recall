@@ -37,11 +37,13 @@ The marketplace repo (`strvmarv/total-recall-marketplace`) points Claude Code at
 
 ### .mcp.json uses the bash launcher
 
-`.mcp.json` invokes `bash bin/total-recall.sh` instead of `npx`. The launcher resolves the server in this order:
+`.mcp.json` invokes `bash bin/total-recall.sh` instead of `npx`. The launcher resolves the runtime in this order:
 
-1. `dist/index.js` relative to the script (works for git clones and npm installs)
-2. `total-recall` global binary in PATH (works for `npm install -g`)
-3. Entry point in global `node_modules` via `npm root -g` (edge case fallback)
+1. `~/.total-recall/bun/<version>/bun` — bundled Bun binary (downloaded by `postinstall`)
+2. System `bun` in PATH — warns if version differs
+3. System `node` via PATH, nvm, fnm, Homebrew, Volta — warns that native addon ABI issues may occur
+
+The entry point is always `dist/index.js` relative to the script.
 
 ### Removing a plugin install (for testing)
 
@@ -52,7 +54,11 @@ To fully uninstall for a clean reinstall test, remove all three:
 
 ### Node discovery
 
-The launcher (`bin/total-recall.sh`) finds `node` across common install methods: PATH, nvm, fnm, Homebrew (Linux and macOS), and Volta. If adding a new node version manager, add its lookup to the `find_node()` function.
+The launcher (`bin/total-recall.sh`) finds `node` as a fallback across common install methods: PATH, nvm, fnm, Homebrew (Linux and macOS), Volta, nvm4w (Windows), and MacPorts. If adding a new node version manager, add its lookup to the `find_node()` function.
+
+### Bundled Bun
+
+`npm install` runs `scripts/postinstall.js` which downloads a pinned Bun binary to `~/.total-recall/bun/<BUN_VERSION>/`. The pinned version is the `BUN_VERSION` constant in both `scripts/postinstall.js` and `bin/total-recall.sh` — keep them in sync when upgrading. To clear the cached binary: `rm -rf ~/.total-recall/bun/`.
 
 ## Session Lifecycle
 

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.6.8 - 2026-04-07
+
+### Changed
+
+- Replaced `better-sqlite3` native addon with `bun:sqlite` (built into Bun runtime). Eliminates native addon ABI mismatches when host tools (OpenCode, Claude Code) bundle their own Node.js version.
+- Plugin now downloads a pinned Bun binary (v1.2.10) to `~/.total-recall/bun/` on `npm install`. Requires internet access on first install (~60MB). Subsequent installs use the cached binary.
+- Launcher (`bin/total-recall.sh`, `bin/total-recall.cmd`) updated to prefer bundled Bun, fall back to system Bun, then system Node with a warning.
+- CI matrix expanded to test on ubuntu, macos, and windows with Bun.
+- `better-sqlite3` moved to devDependency only (used by vitest shim for Node-based testing).
+
 ## 0.6.7 - 2026-04-06
 
 ### Fixed
