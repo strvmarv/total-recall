@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import type { HostImporter, ImportResult, EmbedFn } from "./importer.js";
 import { contentHash, isAlreadyImported, logImport, parseFrontmatter } from "./import-utils.js";
 import { insertEntry } from "../db/entries.js";
@@ -54,7 +54,7 @@ export class ClaudeCodeImporter implements HostImporter {
     return { memoryFiles, knowledgeFiles, sessionFiles };
   }
 
-  async importMemories(db: Database.Database, embed: EmbedFn, project?: string): Promise<ImportResult> {
+  async importMemories(db: Database, embed: EmbedFn, project?: string): Promise<ImportResult> {
     const result: ImportResult = { imported: 0, skipped: 0, errors: [] };
 
     const projectsDir = join(this.basePath, "projects");
@@ -112,7 +112,7 @@ export class ClaudeCodeImporter implements HostImporter {
     return result;
   }
 
-  async importKnowledge(db: Database.Database, embed: EmbedFn): Promise<ImportResult> {
+  async importKnowledge(db: Database, embed: EmbedFn): Promise<ImportResult> {
     const result: ImportResult = { imported: 0, skipped: 0, errors: [] };
 
     const claudeMdPath = join(this.basePath, "CLAUDE.md");

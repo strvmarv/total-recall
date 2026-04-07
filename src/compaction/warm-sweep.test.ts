@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { createTestDb } from "../../tests/helpers/db.js";
 import { mockEmbedSemantic } from "../../tests/helpers/embedding.js";
 import { storeMemory } from "../memory/store.js";
@@ -7,7 +7,7 @@ import { countEntries } from "../db/entries.js";
 import { sweepWarmTier } from "./warm-sweep.js";
 
 describe("sweepWarmTier", () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();

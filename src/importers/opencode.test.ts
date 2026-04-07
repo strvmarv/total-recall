@@ -3,14 +3,14 @@ import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { createTestDb } from "../../tests/helpers/db.js";
 import { mockEmbedSemantic } from "../../tests/helpers/embedding.js";
 import { OpenCodeImporter } from "./opencode.js";
 import { listEntries } from "../db/entries.js";
 
 describe("OpenCodeImporter", () => {
-  let db: Database.Database;
+  let db: Database;
   let tmpData: string;
   let tmpConfig: string;
 

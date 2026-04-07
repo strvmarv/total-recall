@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { createTestDb } from "../../tests/helpers/db.js";
 import { checkRegressions, type RegressionConfig } from "./regression.js";
 import { logRetrievalEvent } from "./event-logger.js";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 
 const defaultRegressionConfig: RegressionConfig = {
   miss_rate_delta: 0.1,
@@ -17,7 +17,7 @@ let snapshotCounter = 0;
  * Insert a config snapshot directly, bypassing dedup logic in createConfigSnapshot.
  * Uses an incrementing timestamp offset to ensure distinct ordering.
  */
-function insertSnapshot(db: Database.Database, name: string): string {
+function insertSnapshot(db: Database, name: string): string {
   const id = randomUUID();
   const timestamp = Date.now() + snapshotCounter++;
   db.prepare(
@@ -27,7 +27,7 @@ function insertSnapshot(db: Database.Database, name: string): string {
 }
 
 function seedEvents(
-  db: Database.Database,
+  db: Database,
   snapshotId: string,
   count: number,
   opts: { topScore?: number; latencyMs?: number } = {},
@@ -46,7 +46,7 @@ function seedEvents(
 }
 
 describe("checkRegressions", () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();

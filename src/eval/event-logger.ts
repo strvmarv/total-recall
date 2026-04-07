@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import type { RetrievalEventRow, QuerySource } from "../types.js";
 
 export interface ResultItem {
@@ -23,7 +23,7 @@ export interface LogRetrievalEventOpts {
 }
 
 export function logRetrievalEvent(
-  db: Database.Database,
+  db: Database,
   opts: LogRetrievalEventOpts,
 ): string {
   const id = randomUUID();
@@ -67,7 +67,7 @@ export function logRetrievalEvent(
 }
 
 export function updateOutcome(
-  db: Database.Database,
+  db: Database,
   eventId: string,
   outcome: { used: boolean; signal?: string },
 ): void {
@@ -90,7 +90,7 @@ export interface GetRetrievalEventsOpts {
 }
 
 export function getRetrievalEvents(
-  db: Database.Database,
+  db: Database,
   opts: GetRetrievalEventsOpts = {},
 ): RetrievalEventRow[] {
   const conditions: string[] = [];

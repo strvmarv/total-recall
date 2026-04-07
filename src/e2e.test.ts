@@ -6,12 +6,12 @@ import { searchMemory } from "./memory/search.js";
 import { getMemory } from "./memory/get.js";
 import { promoteEntry } from "./memory/promote-demote.js";
 import { countEntries } from "./db/entries.js";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 
 const embed = mockEmbedSemantic;
 
 describe("total-recall e2e", () => {
-  let db: Database.Database;
+  let db: Database;
   beforeEach(() => {
     db = createTestDb();
   });

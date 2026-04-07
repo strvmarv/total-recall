@@ -1,13 +1,13 @@
-import Database from "better-sqlite3";
+import { Database } from "bun:sqlite";
 import { mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import * as sqliteVec from "sqlite-vec";
 import { getDataDir } from "../config.js";
 import { initSchema } from "./schema.js";
 
-let _db: Database.Database | null = null;
+let _db: Database | null = null;
 
-export function getDb(): Database.Database {
+export function getDb(): Database {
   if (_db) return _db;
   const dataDir = getDataDir();
   if (!existsSync(dataDir)) {

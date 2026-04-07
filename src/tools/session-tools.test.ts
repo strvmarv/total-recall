@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createTestDb } from "../../tests/helpers/db.js";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import type { ToolContext } from "./registry.js";
 import { loadConfig } from "../config.js";
 import { Embedder } from "../embedding/embedder.js";
 
 describe("session_start config snapshot", () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();

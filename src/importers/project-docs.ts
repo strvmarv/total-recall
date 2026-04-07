@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, basename } from "node:path";
 import { createHash } from "node:crypto";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { ingestFile } from "../ingestion/ingest.js";
 import { createCollection, listCollections } from "../ingestion/hierarchical-index.js";
 
@@ -20,14 +20,14 @@ function contentHash(content: string): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
-function isAlreadyIngested(db: Database.Database, hash: string): boolean {
+function isAlreadyIngested(db: Database, hash: string): boolean {
   const row = db
     .prepare("SELECT id FROM import_log WHERE content_hash = ? AND source_tool = 'project-docs'")
     .get(hash) as { id: string } | undefined;
   return row !== undefined;
 }
 
-function logIngest(db: Database.Database, sourcePath: string, hash: string, entryId: string): void {
+function logIngest(db: Database, sourcePath: string, hash: string, entryId: string): void {
   const id = createHash("md5").update(`project-docs:${sourcePath}:${hash}`).digest("hex");
   db.prepare(`
     INSERT OR IGNORE INTO import_log
@@ -37,7 +37,7 @@ function logIngest(db: Database.Database, sourcePath: string, hash: string, entr
 }
 
 export async function ingestProjectDocs(
-  db: Database.Database,
+  db: Database,
   embed: EmbedFn,
   cwd: string,
 ): Promise<ProjectDocsResult> {

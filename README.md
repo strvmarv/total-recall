@@ -61,6 +61,14 @@ Platform support is via MCP (Model Context Protocol), which means total-recall w
 
 ---
 
+## Prerequisites
+
+- **Node.js >=20.0.0** — Required to run `npm install`. The plugin runtime uses a bundled Bun binary downloaded automatically on install.
+- **Internet access on first install** — The postinstall script downloads a ~60MB Bun binary to `~/.total-recall/bun/` (Linux/macOS) or `%USERPROFILE%\.total-recall\bun\` (Windows). Subsequent installs are instant (cached). If download fails, the plugin falls back to system Node with a warning.
+- **Git LFS** — Required if cloning from source (`git lfs install` before clone). The embedding model is stored in LFS. Runtime auto-downloads from HuggingFace if LFS fetch fails.
+
+---
+
 ## Installation
 
 ### Self-Install (Paste Into Any AI Coding Assistant)
@@ -282,7 +290,7 @@ If you're building plugins for TUI coding assistants, start with [superpowers](h
 
 ### Core Technologies
 
-- [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) — Fast, synchronous SQLite bindings
+- [Bun](https://bun.sh) — JavaScript runtime with built-in SQLite (no native addons)
 - [sqlite-vec](https://github.com/asg017/sqlite-vec) — Vector similarity search in SQLite
 - [onnxruntime-node](https://github.com/microsoft/onnxruntime) — Local ML inference
 - [all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) — Sentence embeddings (384d)

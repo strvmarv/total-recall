@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type Database from "better-sqlite3";
+import { Database } from "bun:sqlite";
 import type { HostImporter, ImportResult, EmbedFn } from "./importer.js";
 import { contentHash, isAlreadyImported, logImport, parseFrontmatter } from "./import-utils.js";
 import { insertEntry } from "../db/entries.js";
@@ -52,11 +52,11 @@ export class OpenCodeImporter implements HostImporter {
     return { memoryFiles: 0, knowledgeFiles, sessionFiles };
   }
 
-  async importMemories(_db: Database.Database, _embed: EmbedFn, _project?: string): Promise<ImportResult> {
+  async importMemories(_db: Database, _embed: EmbedFn, _project?: string): Promise<ImportResult> {
     return { imported: 0, skipped: 0, errors: [] };
   }
 
-  async importKnowledge(db: Database.Database, embed: EmbedFn): Promise<ImportResult> {
+  async importKnowledge(db: Database, embed: EmbedFn): Promise<ImportResult> {
     const result: ImportResult = { imported: 0, skipped: 0, errors: [] };
 
     // 1. Global AGENTS.md
@@ -69,7 +69,7 @@ export class OpenCodeImporter implements HostImporter {
   }
 
   private async importAgentsMd(
-    db: Database.Database,
+    db: Database,
     embed: EmbedFn,
     result: ImportResult,
   ): Promise<void> {
@@ -103,7 +103,7 @@ export class OpenCodeImporter implements HostImporter {
   }
 
   private async importProjectContent(
-    db: Database.Database,
+    db: Database,
     embed: EmbedFn,
     result: ImportResult,
   ): Promise<void> {
@@ -138,11 +138,10 @@ export class OpenCodeImporter implements HostImporter {
     const dbPath = join(this.dataPath, "opencode.db");
     if (!existsSync(dbPath)) return [];
 
-    let ocDb: Database.Database | null = null;
+    let ocDb: Database | null = null;
     try {
-      const BetterSqlite3 = (await import("better-sqlite3")).default;
-      ocDb = new BetterSqlite3(dbPath, { readonly: true });
-      const rows = ocDb.prepare("SELECT worktree FROM project").all() as { worktree: string }[];
+      ocDb = new Database(dbPath, { readonly: true });
+      const rows = ocDb.query("SELECT worktree FROM project").all() as { worktree: string }[];
       return rows.map((r) => r.worktree).filter((p) => existsSync(p));
     } catch {
       return [];
@@ -152,7 +151,7 @@ export class OpenCodeImporter implements HostImporter {
   }
 
   private async importMdDir(
-    db: Database.Database,
+    db: Database,
     embed: EmbedFn,
     result: ImportResult,
     dir: string,
@@ -165,7 +164,7 @@ export class OpenCodeImporter implements HostImporter {
   }
 
   private async importSingleFile(
-    db: Database.Database,
+    db: Database,
     embed: EmbedFn,
     result: ImportResult,
     filePath: string,

@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import type { HostImporter, ImportResult, EmbedFn } from "./importer.js";
 import { contentHash, isAlreadyImported, logImport, parseFrontmatter } from "./import-utils.js";
 import { insertEntry } from "../db/entries.js";
@@ -66,7 +66,7 @@ export class HermesImporter implements HostImporter {
     return { memoryFiles, knowledgeFiles, sessionFiles };
   }
 
-  async importMemories(db: Database.Database, embed: EmbedFn, _project?: string): Promise<ImportResult> {
+  async importMemories(db: Database, embed: EmbedFn, _project?: string): Promise<ImportResult> {
     const result: ImportResult = { imported: 0, skipped: 0, errors: [] };
 
     // Import MEMORY.md entries (§-delimited)
@@ -86,7 +86,7 @@ export class HermesImporter implements HostImporter {
     return result;
   }
 
-  async importKnowledge(db: Database.Database, embed: EmbedFn): Promise<ImportResult> {
+  async importKnowledge(db: Database, embed: EmbedFn): Promise<ImportResult> {
     const result: ImportResult = { imported: 0, skipped: 0, errors: [] };
 
     // 1. Import SOUL.md
@@ -102,7 +102,7 @@ export class HermesImporter implements HostImporter {
   }
 
   private async importMemoryFile(
-    db: Database.Database,
+    db: Database,
     embed: EmbedFn,
     result: ImportResult,
     filePath: string,
@@ -142,7 +142,7 @@ export class HermesImporter implements HostImporter {
   }
 
   private async importSkills(
-    db: Database.Database,
+    db: Database,
     embed: EmbedFn,
     result: ImportResult,
   ): Promise<void> {
@@ -159,7 +159,7 @@ export class HermesImporter implements HostImporter {
   }
 
   private async importSingleFile(
-    db: Database.Database,
+    db: Database,
     embed: EmbedFn,
     result: ImportResult,
     filePath: string,

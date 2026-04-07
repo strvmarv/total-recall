@@ -1,6 +1,6 @@
 import { resolve, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
-import Database from "better-sqlite3";
+import { Database } from "bun:sqlite";
 import * as sqliteVec from "sqlite-vec";
 import { initSchema } from "../db/schema.js";
 import { loadConfig } from "../config.js";

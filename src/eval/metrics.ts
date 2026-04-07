@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import type { RetrievalEventRow, CompactionLogRow } from "../types.js";
 import { writeCandidates, type MissContext } from "./benchmark-candidates.js";
 
@@ -67,7 +67,7 @@ export function computeMetrics(
   events: RetrievalEventRow[],
   similarityThreshold: number,
   compactionRows: CompactionLogRow[] = [],
-  db?: Database.Database,
+  db?: Database,
 ): Metrics {
   if (events.length === 0) {
     return {

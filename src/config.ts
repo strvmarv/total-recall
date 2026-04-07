@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import type { TotalRecallConfig } from "./types.js";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 
 const DEFAULTS_PATH = new URL("./defaults.toml", import.meta.url);
 
@@ -89,7 +89,7 @@ function hashConfig(config: unknown): string {
 }
 
 export function createConfigSnapshot(
-  db: Database.Database,
+  db: Database,
   config: unknown,
   name?: string,
 ): string {

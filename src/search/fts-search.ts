@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import type { Tier, ContentType } from "../types.js";
 import { tableName, ftsTableName } from "../types.js";
 
@@ -26,7 +26,7 @@ function sanitizeFtsQuery(query: string): string {
 }
 
 export function searchByFts(
-  db: Database.Database,
+  db: Database,
   tier: Tier,
   type: ContentType,
   query: string,

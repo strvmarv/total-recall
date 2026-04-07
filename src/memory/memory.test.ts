@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { createTestDb } from "../../tests/helpers/db.js";
 import { mockEmbedSemantic } from "../../tests/helpers/embedding.js";
 import { storeMemory } from "./store.js";
@@ -10,7 +10,7 @@ import { deleteMemory } from "./delete.js";
 import { promoteEntry, demoteEntry } from "./promote-demote.js";
 
 describe("memory operations", () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();

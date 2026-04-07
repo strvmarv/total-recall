@@ -1,7 +1,7 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import type { TotalRecallConfig } from "../types.js";
 import type { Embedder } from "../embedding/embedder.js";
 import { MEMORY_TOOLS, handleMemoryTool } from "./memory-tools.js";
@@ -41,7 +41,7 @@ export interface SessionInitResult {
 }
 
 export interface ToolContext {
-  db: Database.Database;
+  db: Database;
   config: TotalRecallConfig;
   embedder: Embedder;
   sessionId: string;

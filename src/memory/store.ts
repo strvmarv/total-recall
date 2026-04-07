@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { insertEntry } from "../db/entries.js";
 import { insertEmbedding } from "../search/vector-search.js";
 import type { Tier, ContentType, EntryType, SourceTool } from "../types.js";
@@ -18,7 +18,7 @@ interface StoreOptions {
   collection_id?: string;
 }
 
-export async function storeMemory(db: Database.Database, embed: EmbedFn, opts: StoreOptions): Promise<string> {
+export async function storeMemory(db: Database, embed: EmbedFn, opts: StoreOptions): Promise<string> {
   const tier = opts.tier ?? "hot";
   const contentType = opts.contentType ?? "memory";
   const id = insertEntry(db, tier, contentType, {

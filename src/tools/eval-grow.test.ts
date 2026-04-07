@@ -4,7 +4,7 @@ import { writeCandidates } from "../eval/benchmark-candidates.js";
 import { handleEvalTool } from "./eval-tools.js";
 import { loadConfig } from "../config.js";
 import { Embedder } from "../embedding/embedder.js";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import type { ToolContext } from "./registry.js";
 
 // Mock fs to prevent writing to the real retrieval.jsonl during tests
@@ -17,7 +17,7 @@ vi.mock("node:fs", async (importOriginal) => {
   };
 });
 
-function makeCtx(db: Database.Database): ToolContext {
+function makeCtx(db: Database): ToolContext {
   const config = loadConfig();
   return {
     db,
@@ -32,7 +32,7 @@ function makeCtx(db: Database.Database): ToolContext {
 }
 
 describe("eval_grow tool", () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = createTestDb();

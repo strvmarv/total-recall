@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, dirname, basename, extname } from "node:path";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { chunkFile } from "./chunker.js";
 import {
   createCollection,
@@ -53,7 +53,7 @@ export interface IngestDirectoryResult {
 }
 
 export async function ingestFile(
-  db: Database.Database,
+  db: Database,
   embed: EmbedFn,
   filePath: string,
   collectionId?: string,
@@ -143,7 +143,7 @@ function walkDirectory(dirPath: string): string[] {
 }
 
 export async function ingestDirectory(
-  db: Database.Database,
+  db: Database,
   embed: EmbedFn,
   dirPath: string,
   glob?: string,

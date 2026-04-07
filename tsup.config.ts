@@ -7,7 +7,7 @@ export default defineConfig([
     format: ["esm"],
     platform: "node",
     target: "node20",
-    external: ["better-sqlite3", "onnxruntime-node"],
+    external: ["bun:sqlite", "onnxruntime-node"],
     noExternal: ["smol-toml", "sqlite-vec", "@modelcontextprotocol/sdk"],
     banner: {
       js: "#!/usr/bin/env node",
@@ -22,7 +22,7 @@ export default defineConfig([
     format: ["esm"],
     platform: "node",
     target: "node20",
-    external: ["better-sqlite3", "onnxruntime-node"],
+    external: ["bun:sqlite", "onnxruntime-node"],
     noExternal: ["smol-toml", "sqlite-vec", "@modelcontextprotocol/sdk"],
     outDir: "dist/eval",
     clean: false,

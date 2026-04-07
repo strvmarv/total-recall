@@ -1,9 +1,9 @@
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import type { Tier, ContentType } from "../types.js";
 import { tableName, vecTableName } from "../types.js";
 
 export function insertEmbedding(
-  db: Database.Database,
+  db: Database,
   tier: Tier,
   type: ContentType,
   entryId: string,
@@ -27,7 +27,7 @@ export function insertEmbedding(
 }
 
 export function deleteEmbedding(
-  db: Database.Database,
+  db: Database,
   tier: Tier,
   type: ContentType,
   entryId: string,
@@ -55,7 +55,7 @@ export interface VectorSearchOpts {
 }
 
 export function searchByVector(
-  db: Database.Database,
+  db: Database,
   tier: Tier,
   type: ContentType,
   queryVec: Float32Array,
@@ -88,7 +88,7 @@ export function searchByVector(
 }
 
 export function searchMultipleTiers(
-  db: Database.Database,
+  db: Database,
   tiers: Array<{ tier: Tier; type: ContentType }>,
   queryVec: Float32Array,
   opts: VectorSearchOpts,

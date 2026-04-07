@@ -1,7 +1,7 @@
 // src/eval/ci-smoke.ts
 import { resolve, dirname as dirname3, basename } from "path";
 import { fileURLToPath as fileURLToPath4 } from "url";
-import Database from "better-sqlite3";
+import { Database } from "bun:sqlite";
 
 // node_modules/sqlite-vec/index.mjs
 import { fileURLToPath } from "url";
@@ -160,30 +160,30 @@ var MIGRATIONS = [
     for (const pair of ALL_TABLE_PAIRS) {
       const tbl = tableName(pair.tier, pair.type);
       const vecTbl = vecTableName(pair.tier, pair.type);
-      db.prepare(contentTableDDL(tbl)).run();
-      db.prepare(
+      db.run(contentTableDDL(tbl));
+      db.run(
         `CREATE VIRTUAL TABLE IF NOT EXISTS ${vecTbl} USING vec0(embedding float[384])`
-      ).run();
+      );
       for (const idx of contentTableIndexes(tbl)) {
-        db.prepare(idx).run();
+        db.run(idx);
       }
     }
     for (const ddl of SYSTEM_TABLE_DDLS) {
-      db.prepare(ddl).run();
+      db.run(ddl);
     }
     for (const idx of SYSTEM_TABLE_INDEXES) {
-      db.prepare(idx).run();
+      db.run(idx);
     }
   },
   // Migration 2: _meta key-value store + benchmark_candidates
   (db) => {
-    db.prepare(`
+    db.run(`
       CREATE TABLE IF NOT EXISTS _meta (
         key   TEXT PRIMARY KEY,
         value TEXT NOT NULL
       )
-    `).run();
-    db.prepare(`
+    `);
+    db.run(`
       CREATE TABLE IF NOT EXISTS benchmark_candidates (
         id                  TEXT PRIMARY KEY,
         query_text          TEXT NOT NULL UNIQUE,
@@ -195,58 +195,58 @@ var MIGRATIONS = [
         times_seen          INTEGER DEFAULT 1,
         status              TEXT DEFAULT 'pending'
       )
-    `).run();
-    db.prepare(
+    `);
+    db.run(
       `CREATE INDEX IF NOT EXISTS idx_benchmark_candidates_status ON benchmark_candidates(status)`
-    ).run();
+    );
   },
   // Migration 3: FTS5 full-text indexes for hybrid search
   (db) => {
     for (const pair of ALL_TABLE_PAIRS) {
       const tbl = tableName(pair.tier, pair.type);
       const ftsTbl = `${tbl}_fts`;
-      db.prepare(
+      db.run(
         `CREATE VIRTUAL TABLE IF NOT EXISTS ${ftsTbl} USING fts5(content, tags, content=${tbl}, content_rowid=rowid)`
-      ).run();
-      db.prepare(`
+      );
+      db.run(`
         CREATE TRIGGER IF NOT EXISTS ${tbl}_fts_ai AFTER INSERT ON ${tbl} BEGIN
           INSERT INTO ${ftsTbl}(rowid, content, tags) VALUES (new.rowid, new.content, new.tags);
         END
-      `).run();
-      db.prepare(`
+      `);
+      db.run(`
         CREATE TRIGGER IF NOT EXISTS ${tbl}_fts_ad AFTER DELETE ON ${tbl} BEGIN
           INSERT INTO ${ftsTbl}(${ftsTbl}, rowid, content, tags) VALUES('delete', old.rowid, old.content, old.tags);
         END
-      `).run();
-      db.prepare(`
+      `);
+      db.run(`
         CREATE TRIGGER IF NOT EXISTS ${tbl}_fts_au AFTER UPDATE ON ${tbl} BEGIN
           INSERT INTO ${ftsTbl}(${ftsTbl}, rowid, content, tags) VALUES('delete', old.rowid, old.content, old.tags);
           INSERT INTO ${ftsTbl}(rowid, content, tags) VALUES (new.rowid, new.content, new.tags);
         END
-      `).run();
-      db.prepare(
+      `);
+      db.run(
         `INSERT INTO ${ftsTbl}(rowid, content, tags) SELECT rowid, content, tags FROM ${tbl}`
-      ).run();
+      );
     }
   }
 ];
 function getCurrentVersion(db) {
-  const hasTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='_schema_version'").get();
+  const hasTable = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='_schema_version'").get();
   if (!hasTable) return 0;
-  const row = db.prepare("SELECT MAX(version) as v FROM _schema_version").get();
+  const row = db.query("SELECT MAX(version) as v FROM _schema_version").get();
   return row?.v ?? 0;
 }
 function initSchema(db) {
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
+  db.run("PRAGMA journal_mode = WAL");
+  db.run("PRAGMA foreign_keys = ON");
   const migrate = db.transaction(() => {
-    db.prepare(SCHEMA_VERSION_DDL).run();
+    db.run(SCHEMA_VERSION_DDL);
     const currentVersion = getCurrentVersion(db);
     for (let i = currentVersion; i < MIGRATIONS.length; i++) {
       MIGRATIONS[i](db);
-      db.prepare("INSERT INTO _schema_version (version, applied_at) VALUES (?, ?)").run(
-        i + 1,
-        Date.now()
+      db.run(
+        "INSERT INTO _schema_version (version, applied_at) VALUES (?, ?)",
+        [i + 1, Date.now()]
       );
     }
   });
@@ -1663,14 +1663,14 @@ function insertEntry(db, tier, type, opts) {
   const table = tableName(tier, type);
   const id = randomUUID2();
   const now = Date.now();
-  db.prepare(`
+  db.run(`
     INSERT INTO ${table}
       (id, content, summary, source, source_tool, project, tags,
        created_at, updated_at, last_accessed_at, access_count,
        decay_score, parent_id, collection_id, metadata)
     VALUES
       (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
+  `, [
     id,
     opts.content,
     opts.summary ?? null,
@@ -1686,12 +1686,12 @@ function insertEntry(db, tier, type, opts) {
     opts.parent_id ?? null,
     opts.collection_id ?? null,
     JSON.stringify(opts.metadata ?? {})
-  );
+  ]);
   return id;
 }
 function getEntry(db, tier, type, id) {
   const table = tableName(tier, type);
-  const row = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id);
+  const row = db.query(`SELECT * FROM ${table} WHERE id = ?`).get(id);
   if (!row) return null;
   return rowToEntry(row);
 }
@@ -1730,11 +1730,11 @@ function updateEntry(db, tier, type, id, opts) {
     values.push(now);
   }
   values.push(id);
-  db.prepare(`UPDATE ${table} SET ${setClauses.join(", ")} WHERE id = ?`).run(...values);
+  db.run(`UPDATE ${table} SET ${setClauses.join(", ")} WHERE id = ?`, values);
 }
 function deleteEntry(db, tier, type, id) {
   const table = tableName(tier, type);
-  db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(id);
+  db.run(`DELETE FROM ${table} WHERE id = ?`, [id]);
 }
 
 // src/search/vector-search.ts

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import type { Tier, ContentType, Entry, EntryRow } from "../types.js";
 import { tableName } from "../types.js";
 
@@ -53,7 +53,7 @@ function rowToEntry(row: EntryRow): Entry {
 }
 
 export function insertEntry(
-  db: Database.Database,
+  db: Database,
   tier: Tier,
   type: ContentType,
   opts: InsertEntryOpts,
@@ -62,14 +62,14 @@ export function insertEntry(
   const id = randomUUID();
   const now = Date.now();
 
-  db.prepare(`
+  db.run(`
     INSERT INTO ${table}
       (id, content, summary, source, source_tool, project, tags,
        created_at, updated_at, last_accessed_at, access_count,
        decay_score, parent_id, collection_id, metadata)
     VALUES
       (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
+  `, [
     id,
     opts.content,
     opts.summary ?? null,
@@ -85,20 +85,20 @@ export function insertEntry(
     opts.parent_id ?? null,
     opts.collection_id ?? null,
     JSON.stringify(opts.metadata ?? {}),
-  );
+  ]);
 
   return id;
 }
 
 export function getEntry(
-  db: Database.Database,
+  db: Database,
   tier: Tier,
   type: ContentType,
   id: string,
 ): Entry | null {
   const table = tableName(tier, type);
   const row = db
-    .prepare(`SELECT * FROM ${table} WHERE id = ?`)
+    .query(`SELECT * FROM ${table} WHERE id = ?`)
     .get(id) as EntryRow | undefined;
 
   if (!row) return null;
@@ -106,7 +106,7 @@ export function getEntry(
 }
 
 export function updateEntry(
-  db: Database.Database,
+  db: Database,
   tier: Tier,
   type: ContentType,
   id: string,
@@ -150,17 +150,17 @@ export function updateEntry(
 
   values.push(id);
 
-  db.prepare(`UPDATE ${table} SET ${setClauses.join(", ")} WHERE id = ?`).run(...values);
+  db.run(`UPDATE ${table} SET ${setClauses.join(", ")} WHERE id = ?`, values as Parameters<typeof db.run>[1]);
 }
 
 export function deleteEntry(
-  db: Database.Database,
+  db: Database,
   tier: Tier,
   type: ContentType,
   id: string,
 ): void {
   const table = tableName(tier, type);
-  db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(id);
+  db.run(`DELETE FROM ${table} WHERE id = ?`, [id]);
 }
 
 const ALLOWED_ORDER_COLUMNS = new Set([
@@ -173,7 +173,7 @@ const ALLOWED_ORDER_COLUMNS = new Set([
 ]);
 
 export function listEntries(
-  db: Database.Database,
+  db: Database,
   tier: Tier,
   type: ContentType,
   opts?: ListEntriesOpts,
@@ -209,24 +209,25 @@ export function listEntries(
     params.push(opts.limit);
   }
 
-  const rows = db.prepare(sql).all(...params) as EntryRow[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows = db.query(sql).all(params as any) as EntryRow[];
   return rows.map(rowToEntry);
 }
 
 export function countEntries(
-  db: Database.Database,
+  db: Database,
   tier: Tier,
   type: ContentType,
 ): number {
   const table = tableName(tier, type);
-  const row = db.prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as {
+  const row = db.query(`SELECT COUNT(*) as count FROM ${table}`).get() as {
     count: number;
   };
   return row.count;
 }
 
 export function listEntriesByMetadata(
-  db: Database.Database,
+  db: Database,
   tier: Tier,
   type: ContentType,
   metadataFilter: Record<string, string>,
@@ -267,12 +268,13 @@ export function listEntriesByMetadata(
     params.push(opts.limit);
   }
 
-  const rows = db.prepare(sql).all(...params) as EntryRow[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows = db.query(sql).all(params as any) as EntryRow[];
   return rows.map(rowToEntry);
 }
 
 export function moveEntry(
-  db: Database.Database,
+  db: Database,
   fromTier: Tier,
   fromType: ContentType,
   toTier: Tier,
@@ -288,14 +290,14 @@ export function moveEntry(
     const toTable = tableName(toTier, toType);
     const now = Date.now();
 
-    db.prepare(`
+    db.run(`
       INSERT INTO ${toTable}
         (id, content, summary, source, source_tool, project, tags,
          created_at, updated_at, last_accessed_at, access_count,
          decay_score, parent_id, collection_id, metadata)
       VALUES
         (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    `, [
       entry.id,
       entry.content,
       entry.summary,
@@ -311,7 +313,7 @@ export function moveEntry(
       entry.parent_id,
       entry.collection_id,
       JSON.stringify(entry.metadata),
-    );
+    ]);
 
     deleteEntry(db, fromTier, fromType, id);
   });

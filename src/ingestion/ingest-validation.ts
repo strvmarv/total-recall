@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 import { searchByVector } from "../search/vector-search.js";
 
 type EmbedFn = (text: string) => Float32Array | Promise<Float32Array>;
@@ -29,7 +29,7 @@ export function selectProbeIndices(totalChunks: number): number[] {
 }
 
 export async function validateChunks(
-  db: Database.Database,
+  db: Database,
   embed: EmbedFn,
   chunks: Array<{ content: string }>,
   collectionId: string,
