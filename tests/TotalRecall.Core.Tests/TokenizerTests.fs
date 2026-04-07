@@ -5,14 +5,18 @@ open TotalRecall.Core
 
 // Behavioral tests for TotalRecall.Core.Tokenizer.
 //
-// The F# port must match Microsoft.ML.Tokenizers.BertTokenizer running on
-// the all-MiniLM-L6-v2 vocab, on every entry in tests/fixtures/embeddings/
-// tokenizer-reference.json (generated in Plan 2 Task 2.1).
+// Per the Plan 2 Option-A pivot (after Task 2.1's empirical findings showed
+// the spec's "Microsoft is more canonical" framing was wrong on inspection):
+// the F# Tokenizer port matches the EXISTING TS WordPieceTokenizer's output,
+// not Microsoft.ML.Tokenizers's. The fixture at
+// tests/fixtures/embeddings/tokenizer-reference.json is the spike's
+// 544-pair (input, tokenIds) record produced by running the TS tokenizer
+// (src-ts/embedding/tokenizer.ts) over a representative corpus.
 //
-// Empirical finding from Task 2.1: Microsoft.ML.Tokenizers produces multiple
-// WordPiece tokens for snake_case identifiers (NOT a single chain). The F#
-// port's job is to match that output byte-for-byte — the fixture is the
-// oracle, not the spec's aspirational framing.
+// The F# port must match those numbers byte-for-byte. The "tokenizer
+// correctness" question (whether TS or Microsoft is closer to the model's
+// training distribution) is deferred to a later plan when we can compare
+// embedding quality side by side, not just token IDs.
 //
 // Once Tokenizer.tokenize is implemented in Task 2.4, these tests go green.
 
@@ -51,28 +55,8 @@ let tokenizerTests =
                             entry.Input entry.TokenIds actual)
             if failures.Count > 0 then
                 let msg =
-                    sprintf "Tokenizer mismatch on %d/%d inputs:\n%s"
+                    sprintf "Tokenizer mismatch on %d/%d inputs (showing first 10):\n%s"
                         failures.Count fixture.Entries.Length
-                        (String.concat "\n" failures)
+                        (failures |> Seq.truncate 10 |> String.concat "\n")
                 failtest msg
-
-        testCase "snake_case_identifier matches fixture" <| fun _ ->
-            // Empirical finding from Task 2.1: Microsoft.ML.Tokenizers produces
-            // 8 content tokens for 'snake_case_identifier' (NOT a single chain).
-            // The F# port's job is to match that output byte-for-byte, whatever
-            // it is. The "canonical single chain" framing from the spec turned
-            // out to be aspirational; the fixture is the actual oracle.
-            let vocab = FixtureLoader.loadVocab()
-            let fixture = FixtureLoader.loadTokenizerFixtures()
-            let expected =
-                fixture.Entries
-                |> Array.tryFind (fun e -> e.Input = "snake_case_identifier")
-                |> Option.map (fun e -> e.TokenIds)
-            match expected with
-            | Some exp ->
-                let actual = Tokenizer.tokenize vocab "snake_case_identifier" |> List.toArray
-                Expect.equal actual exp
-                    "snake_case_identifier F# output should match fixture exactly"
-            | None ->
-                failtest "fixture missing 'snake_case_identifier' entry"
     ]

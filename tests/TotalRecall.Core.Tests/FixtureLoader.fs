@@ -33,14 +33,29 @@ type TokenizerFixtureFile = {
     Entries: TokenizerFixtureEntry array
 }
 
+// The fixture file uses the spike's schema:
+//   { generatedAt, tokenizer: { name, ... }, pairs: [{ input, tokenIds }] }
+//
+// We project that into our flat (Entries: TokenizerFixtureEntry array) shape
+// for the test code to consume. Reads the raw JSON with JsonDocument so we
+// don't have to declare the spike's full schema.
 let loadTokenizerFixtures () : TokenizerFixtureFile =
     let path = Path.Combine(fixturesDir(), "embeddings", "tokenizer-reference.json")
     if not (File.Exists path) then
-        failwithf "Fixture not found: %s (run 'dotnet run --project src/TotalRecall.Host -- generate-tokenizer-fixtures' first)" path
+        failwithf "Fixture not found: %s" path
     let json = File.ReadAllText(path)
-    let options = JsonSerializerOptions()
-    options.PropertyNameCaseInsensitive <- true
-    JsonSerializer.Deserialize<TokenizerFixtureFile>(json, options)
+    use doc = JsonDocument.Parse(json)
+    let pairs = doc.RootElement.GetProperty("pairs")
+    let entries = ResizeArray<TokenizerFixtureEntry>()
+    for pair in pairs.EnumerateArray() do
+        let input = pair.GetProperty("input").GetString()
+        let tokenIdsElement = pair.GetProperty("tokenIds")
+        let tokenIds =
+            tokenIdsElement.EnumerateArray()
+            |> Seq.map (fun e -> e.GetInt32())
+            |> Array.ofSeq
+        entries.Add({ Input = input; TokenIds = tokenIds })
+    { Entries = entries.ToArray() }
 
 let loadVocab () : Map<string, int> =
     // Read the vocab from tokenizer.json's model.vocab subtree (matches how
