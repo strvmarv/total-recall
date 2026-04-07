@@ -14,6 +14,7 @@
     <Compile Include="CompactionTests.fs" />
     <Compile Include="ParsersTests.fs" />
     <Compile Include="ChunkerTests.fs" />
+    <Compile Include="ConfigTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
