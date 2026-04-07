@@ -7,6 +7,14 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="Library.fs" />
+    <Compile Include="Types.fs" />
+    <Compile Include="Tokenizer.fs" />
+    <Compile Include="Decay.fs" />
+    <Compile Include="TierTransitions.fs" />
+    <Compile Include="Ranking.fs" />
+    <Compile Include="Compaction.fs" />
+    <Compile Include="Parsers.fs" />
+    <Compile Include="Chunker.fs" />
+    <Compile Include="Config.fs" />
   </ItemGroup>
 </Project>
