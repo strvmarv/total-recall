@@ -11,6 +11,7 @@
     <Compile Include="TokenizerTests.fs" />
     <Compile Include="DecayTests.fs" />
     <Compile Include="RankingTests.fs" />
+    <Compile Include="CompactionTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
