@@ -1,7 +1,8 @@
 @echo off
 SETLOCAL EnableDelayedExpansion
 :: total-recall MCP server launcher for Windows
-:: Prefers bundled Bun, falls back to system Bun, then system Node.
+:: Requires Bun — dist\index.js uses bun:sqlite, which node cannot resolve.
+:: Prefers bundled Bun (installed by scripts\postinstall.js), falls back to system Bun.
 
 SET BUN_VERSION=1.2.10
 SET BUNDLED_BUN=%USERPROFILE%\.total-recall\bun\%BUN_VERSION%\bun.exe
@@ -21,7 +22,7 @@ IF EXIST "%BUNDLED_BUN%" (
   exit /b %ERRORLEVEL%
 )
 
-:: Priority 2: system Bun (warn)
+:: Priority 2: system Bun (warn — version may not match)
 WHERE bun >nul 2>&1
 IF %ERRORLEVEL% EQU 0 (
   echo total-recall: warning: bundled bun v%BUN_VERSION% not found, using system bun. Version mismatch possible. 1>&2
@@ -30,15 +31,7 @@ IF %ERRORLEVEL% EQU 0 (
   exit /b !ERRORLEVEL!
 )
 
-:: Priority 3: system Node (warn)
-WHERE node >nul 2>&1
-IF %ERRORLEVEL% EQU 0 (
-  echo total-recall: warning: bun not found, falling back to node. ABI issues may occur. 1>&2
-  echo   Install bun (https://bun.sh/install) or re-run 'npm install' to fix this. 1>&2
-  node "%ENTRY%" %*
-  exit /b !ERRORLEVEL!
-)
-
-echo total-recall: error: neither bun nor node found. 1>&2
-echo   Install bun: https://bun.sh/install 1>&2
+echo total-recall: error: bun runtime not found. 1>&2
+echo   Expected bundled bun at %%USERPROFILE%%\.total-recall\bun\%BUN_VERSION%\bun.exe (installed by 'npm install'). 1>&2
+echo   Fix: run 'npm install' inside the plugin directory, or install bun manually (https://bun.sh/install). 1>&2
 exit /b 1

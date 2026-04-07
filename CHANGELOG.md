@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.6.8-beta.4 - 2026-04-06
+
+### Fixed
+- MCP server failed to start on Claude Code (and any host launching via `.mcp.json`) after the 0.6.8 migration to `bun:sqlite`. `bin/start.cjs` still re-exec'd `dist/index.js` under `node`, which cannot resolve the `bun:` URL scheme and crashed immediately with `ERR_UNSUPPORTED_ESM_URL_SCHEME`. The launcher now locates the bundled bun binary at `~/.total-recall/bun/<version>/bun` (installed by `scripts/postinstall.js`), falls back to system `bun` on PATH, and fails fast with a clear remediation message if neither is present.
+- `bin/start.cjs` no longer uses the stale `node_modules/better-sqlite3/lib` canary — that dependency was removed from production installs in 0.6.8, so every launch was triggering a spurious `npm install`. The bootstrap now trusts that `npm install` ran postinstall correctly and only checks for `dist/index.js` and a bun runtime.
+- `serverInfo.version` in the MCP `initialize` response is no longer hardcoded to `0.5.9` — it's read from `package.json` at startup via the existing `pkgPath` helper, so the value stays in sync with the actual release.
+- `bin/total-recall.sh` and `bin/total-recall.cmd` no longer fall back to `node` when bun is missing. That branch was dead code after the `bun:sqlite` migration — `dist/index.js` cannot be parsed by node's ESM loader (`ERR_UNSUPPORTED_ESM_URL_SCHEME`), so the "warning: falling back to node" path only produced a louder crash. Both launchers now fail fast with a clear remediation message pointing at `npm install`.
+
 ## 0.6.8 - 2026-04-07
 
 ### Changed

@@ -8664,6 +8664,9 @@ var Embedder = class {
   }
 };
 
+// src/tools/registry.ts
+import { readFileSync as readFileSync15 } from "fs";
+
 // node_modules/zod/v3/helpers/util.js
 var util;
 (function(util2) {
@@ -26875,9 +26878,13 @@ async function handleExtraTool(name, args, ctx) {
 }
 
 // src/tools/registry.ts
+function readPackageVersion() {
+  const pkg = JSON.parse(readFileSync15(pkgPath("package.json"), "utf-8"));
+  return pkg.version;
+}
 async function startServer(ctx) {
   const server = new Server(
-    { name: "total-recall", version: "0.5.9" },
+    { name: "total-recall", version: readPackageVersion() },
     { capabilities: { tools: {} } }
   );
   server.oninitialized = () => {

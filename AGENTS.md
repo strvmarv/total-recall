@@ -52,13 +52,17 @@ To fully uninstall for a clean reinstall test, remove all three:
 - `~/.claude/plugins/marketplaces/strvmarv-total-recall-marketplace/`
 - Entries in `~/.claude/settings.json`: `enabledPlugins["total-recall@..."]` and `extraKnownMarketplaces["strvmarv-..."]`
 
-### Node discovery
-
-The launcher (`bin/total-recall.sh`) finds `node` as a fallback across common install methods: PATH, nvm, fnm, Homebrew (Linux and macOS), Volta, nvm4w (Windows), and MacPorts. If adding a new node version manager, add its lookup to the `find_node()` function.
-
 ### Bundled Bun
 
-`npm install` runs `scripts/postinstall.js` which downloads a pinned Bun binary to `~/.total-recall/bun/<BUN_VERSION>/`. The pinned version is the `BUN_VERSION` constant in both `scripts/postinstall.js` and `bin/total-recall.sh` — keep them in sync when upgrading. To clear the cached binary: `rm -rf ~/.total-recall/bun/`.
+`npm install` runs `scripts/postinstall.js` which downloads a pinned Bun binary to `~/.total-recall/bun/<BUN_VERSION>/`. The pinned version is the `BUN_VERSION` constant in three places that must stay in sync when upgrading:
+
+- `scripts/postinstall.js`
+- `bin/total-recall.sh` and `bin/total-recall.cmd`
+- `bin/start.cjs`
+
+To clear the cached binary: `rm -rf ~/.total-recall/bun/`.
+
+Since 0.6.8, `dist/index.js` uses `bun:sqlite` and cannot run under node — the launchers intentionally do not fall back to node (it crashes with `ERR_UNSUPPORTED_ESM_URL_SCHEME`). If bun is missing, `npm install` is the only remediation. If you ever need node-version-manager discovery logic again (nvm/fnm/volta/homebrew/macports/nvm4w), resurrect `find_node()` from commit `9115a9b`.
 
 ## Session Lifecycle
 

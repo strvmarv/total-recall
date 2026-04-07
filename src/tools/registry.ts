@@ -1,9 +1,11 @@
+import { readFileSync } from "node:fs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { Database } from "bun:sqlite";
 import type { TotalRecallConfig } from "../types.js";
 import type { Embedder } from "../embedding/embedder.js";
+import { pkgPath } from "../pkg-root.js";
 import { MEMORY_TOOLS, handleMemoryTool } from "./memory-tools.js";
 import { SYSTEM_TOOLS, handleSystemTool } from "./system-tools.js";
 import { registerKbTools, handleKbTool } from "./kb-tools.js";
@@ -52,9 +54,14 @@ export interface ToolContext {
   sessionInitPromise: Promise<void> | null;
 }
 
+function readPackageVersion(): string {
+  const pkg = JSON.parse(readFileSync(pkgPath("package.json"), "utf-8")) as { version: string };
+  return pkg.version;
+}
+
 export async function startServer(ctx: ToolContext): Promise<void> {
   const server = new Server(
-    { name: "total-recall", version: "0.5.9" },
+    { name: "total-recall", version: readPackageVersion() },
     { capabilities: { tools: {} } },
   );
 
