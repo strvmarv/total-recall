@@ -6798,10 +6798,10 @@ var require_dist = __commonJS({
   }
 });
 
-// src/index.ts
+// src-ts/index.ts
 import { randomUUID as randomUUID8 } from "crypto";
 
-// src/config.ts
+// src-ts/config.ts
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
 import { createHash, randomUUID } from "crypto";
@@ -7637,7 +7637,7 @@ function stringify(obj, { maxDepth = 1e3, numbersAsFloat = false } = {}) {
   return str;
 }
 
-// src/config.ts
+// src-ts/config.ts
 var DEFAULTS_PATH = new URL("./defaults.toml", import.meta.url);
 function getDataDir() {
   return process.env.TOTAL_RECALL_HOME ?? join(process.env.HOME ?? "~", ".total-recall");
@@ -7733,7 +7733,7 @@ function deepMerge(target, source) {
   return result;
 }
 
-// src/db/connection.ts
+// src-ts/db/connection.ts
 import { Database } from "bun:sqlite";
 import { mkdirSync as mkdirSync2, existsSync as existsSync2 } from "fs";
 import { join as join2 } from "path";
@@ -7771,7 +7771,7 @@ function load(db) {
   db.loadExtension(getLoadablePath());
 }
 
-// src/types.ts
+// src-ts/types.ts
 function tableName(tier, type) {
   const typeStr = type === "memory" ? "memories" : "knowledge";
   return `${tier}_${typeStr}`;
@@ -7791,7 +7791,7 @@ var ALL_TABLE_PAIRS = [
   { tier: "cold", type: "knowledge" }
 ];
 
-// src/db/schema.ts
+// src-ts/db/schema.ts
 function contentTableDDL(name) {
   return `
     CREATE TABLE IF NOT EXISTS ${name} (
@@ -7988,7 +7988,7 @@ function initSchema(db) {
   migrate();
 }
 
-// src/db/connection.ts
+// src-ts/db/connection.ts
 var _db = null;
 function getDb() {
   if (_db) return _db;
@@ -8009,19 +8009,19 @@ function closeDb() {
   }
 }
 
-// src/embedding/embedder.ts
+// src-ts/embedding/embedder.ts
 import { readFile as readFile2 } from "fs/promises";
 import { join as join6 } from "path";
 import * as ort from "onnxruntime-node";
 
-// src/embedding/bootstrap.ts
+// src-ts/embedding/bootstrap.ts
 import { mkdirSync as mkdirSync4 } from "fs";
 import { join as join5 } from "path";
 
-// src/embedding/registry.ts
+// src-ts/embedding/registry.ts
 import { readFileSync as readFileSync2 } from "fs";
 
-// src/pkg-root.ts
+// src-ts/pkg-root.ts
 import { existsSync as existsSync3 } from "fs";
 import { dirname, join as join3 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
@@ -8046,7 +8046,7 @@ function pkgPath(...segments) {
   return join3(getPackageRoot(), ...segments);
 }
 
-// src/embedding/registry.ts
+// src-ts/embedding/registry.ts
 var cached2 = null;
 function findRegistryPath() {
   return pkgPath("models", "registry.json");
@@ -8088,7 +8088,7 @@ function expandUrl(template, revision) {
   return template.replace(/\{revision\}/g, revision);
 }
 
-// src/embedding/model-manager.ts
+// src-ts/embedding/model-manager.ts
 import { existsSync as existsSync4, mkdirSync as mkdirSync3 } from "fs";
 import { statSync, createReadStream } from "fs";
 import { writeFile, rename, unlink, readFile } from "fs/promises";
@@ -8290,7 +8290,7 @@ async function isModelChecksumValid(modelPath, spec) {
   return false;
 }
 
-// src/embedding/errors.ts
+// src-ts/embedding/errors.ts
 var ModelNotReadyError = class extends Error {
   modelName;
   reason;
@@ -8311,7 +8311,7 @@ function isModelNotReadyError(err) {
   return err instanceof ModelNotReadyError || typeof err === "object" && err !== null && err.name === "ModelNotReadyError";
 }
 
-// src/embedding/bootstrap.ts
+// src-ts/embedding/bootstrap.ts
 import * as lockfile from "proper-lockfile";
 var defaultAcquireLock = async (targetDir) => {
   mkdirSync4(targetDir, { recursive: true });
@@ -8444,7 +8444,7 @@ var ModelBootstrap = class {
   }
 };
 
-// src/embedding/tokenizer.ts
+// src-ts/embedding/tokenizer.ts
 var CLS_TOKEN_ID = 101;
 var SEP_TOKEN_ID = 102;
 var UNK_TOKEN_ID = 100;
@@ -8557,7 +8557,7 @@ function charCategory(cp) {
   return "Lo";
 }
 
-// src/embedding/embedder.ts
+// src-ts/embedding/embedder.ts
 var Embedder = class {
   options;
   session = null;
@@ -8664,7 +8664,7 @@ var Embedder = class {
   }
 };
 
-// src/tools/registry.ts
+// src-ts/tools/registry.ts
 import { readFileSync as readFileSync15 } from "fs";
 
 // node_modules/zod/v3/helpers/util.js
@@ -22695,7 +22695,7 @@ var StdioServerTransport = class {
   }
 };
 
-// src/db/entries.ts
+// src-ts/db/entries.ts
 import { randomUUID as randomUUID2 } from "crypto";
 function rowToEntry(row) {
   return {
@@ -22904,7 +22904,7 @@ function moveEntry(db, fromTier, fromType, toTier, toType, id) {
   doMove();
 }
 
-// src/search/vector-search.ts
+// src-ts/search/vector-search.ts
 function insertEmbedding(db, tier, type, entryId, embedding) {
   const contentTable = tableName(tier, type);
   const vecTable = vecTableName(tier, type);
@@ -22945,7 +22945,7 @@ function searchByVector(db, tier, type, queryVec, opts) {
   return results.slice(0, opts.topK);
 }
 
-// src/memory/store.ts
+// src-ts/memory/store.ts
 async function storeMemory(db, embed, opts) {
   const tier = opts.tier ?? "hot";
   const contentType = opts.contentType ?? "memory";
@@ -22964,7 +22964,7 @@ async function storeMemory(db, embed, opts) {
   return id;
 }
 
-// src/search/fts-search.ts
+// src-ts/search/fts-search.ts
 function sanitizeFtsQuery(query) {
   const words = query.split(/\s+/).filter(Boolean).map((w) => `"${w.replace(/"/g, '""')}"`).join(" ");
   return words;
@@ -22995,7 +22995,7 @@ function searchByFts(db, tier, type, query, opts) {
   }));
 }
 
-// src/memory/search.ts
+// src-ts/memory/search.ts
 var DEFAULT_FTS_WEIGHT = 0.3;
 async function searchMemory(db, embed, query, opts) {
   const queryVec = await embed(query);
@@ -23061,7 +23061,7 @@ async function searchMemory(db, embed, query, opts) {
   return merged;
 }
 
-// src/memory/get.ts
+// src-ts/memory/get.ts
 function getMemory(db, id) {
   for (const { tier, type } of ALL_TABLE_PAIRS) {
     const entry = getEntry(db, tier, type, id);
@@ -23072,7 +23072,7 @@ function getMemory(db, id) {
   return null;
 }
 
-// src/memory/update.ts
+// src-ts/memory/update.ts
 async function updateMemory(db, embed, id, opts) {
   const location = getMemory(db, id);
   if (!location) return false;
@@ -23086,7 +23086,7 @@ async function updateMemory(db, embed, id, opts) {
   return true;
 }
 
-// src/memory/delete.ts
+// src-ts/memory/delete.ts
 function deleteMemory(db, id) {
   const location = getMemory(db, id);
   if (!location) return false;
@@ -23095,7 +23095,7 @@ function deleteMemory(db, id) {
   return true;
 }
 
-// src/memory/promote-demote.ts
+// src-ts/memory/promote-demote.ts
 async function promoteEntry(db, embed, id, fromTier, fromType, toTier, toType) {
   const entry = getEntry(db, fromTier, fromType, id);
   if (!entry) {
@@ -23110,7 +23110,7 @@ async function demoteEntry(db, embed, id, fromTier, fromType, toTier, toType) {
   await promoteEntry(db, embed, id, fromTier, fromType, toTier, toType);
 }
 
-// src/eval/event-logger.ts
+// src-ts/eval/event-logger.ts
 import { randomUUID as randomUUID3 } from "crypto";
 function logRetrievalEvent(db, opts) {
   const id = randomUUID3();
@@ -23177,7 +23177,7 @@ function getRetrievalEvents(db, opts = {}) {
   return db.prepare(sql).all(...params);
 }
 
-// src/tools/validation.ts
+// src-ts/tools/validation.ts
 import { resolve } from "path";
 var VALID_TIERS = /* @__PURE__ */ new Set(["hot", "warm", "cold"]);
 var VALID_CONTENT_TYPES = /* @__PURE__ */ new Set(["memory", "knowledge"]);
@@ -23266,7 +23266,7 @@ function validatePath(value, name) {
   return resolved;
 }
 
-// src/tools/memory-tools.ts
+// src-ts/tools/memory-tools.ts
 var MEMORY_TOOLS = [
   {
     name: "memory_store",
@@ -23513,11 +23513,11 @@ async function handleMemoryTool(name, args, ctx) {
   return null;
 }
 
-// src/tools/system-tools.ts
+// src-ts/tools/system-tools.ts
 import { statSync as statSync2 } from "fs";
 import { join as join7 } from "path";
 
-// src/ingestion/hierarchical-index.ts
+// src-ts/ingestion/hierarchical-index.ts
 function rowToEntry2(row) {
   return {
     id: row.id,
@@ -23602,7 +23602,7 @@ function listCollections(db) {
   });
 }
 
-// src/tools/system-tools.ts
+// src-ts/tools/system-tools.ts
 var SYSTEM_TOOLS = [
   {
     name: "status",
@@ -23737,14 +23737,14 @@ function handleSystemTool(name, args, ctx) {
   return null;
 }
 
-// src/tools/kb-tools.ts
+// src-ts/tools/kb-tools.ts
 import { statSync as statSync4 } from "fs";
 
-// src/ingestion/ingest.ts
+// src-ts/ingestion/ingest.ts
 import { readFileSync as readFileSync3, readdirSync, statSync as statSync3 } from "fs";
 import { join as join8, dirname as dirname3, basename, extname } from "path";
 
-// src/ingestion/markdown-parser.ts
+// src-ts/ingestion/markdown-parser.ts
 function estimateTokens(text) {
   const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
   return Math.ceil(wordCount * 0.75);
@@ -23864,7 +23864,7 @@ function splitSection(section, maxTokens) {
   return chunks;
 }
 
-// src/ingestion/code-parser.ts
+// src-ts/ingestion/code-parser.ts
 function estimateTokens2(text) {
   const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
   return Math.ceil(wordCount * 0.75);
@@ -24055,7 +24055,7 @@ function splitAtBlankLines(lines, startIdx, name, kind, maxTokens) {
   }];
 }
 
-// src/ingestion/chunker.ts
+// src-ts/ingestion/chunker.ts
 var MARKDOWN_EXTENSIONS = /* @__PURE__ */ new Set([".md", ".mdx", ".markdown"]);
 var CODE_LANGUAGE_MAP = {
   ".ts": "typescript",
@@ -24143,7 +24143,7 @@ function chunkFile(content, filePath, opts) {
   return splitByParagraphs(content, opts.maxTokens);
 }
 
-// src/ingestion/ingest-validation.ts
+// src-ts/ingestion/ingest-validation.ts
 var PROBE_MIN_SCORE = 0.5;
 var PROBE_TOP_K = 3;
 function selectProbeIndices(totalChunks) {
@@ -24185,7 +24185,7 @@ async function validateChunks(db, embed, chunks, collectionId) {
   };
 }
 
-// src/ingestion/ingest.ts
+// src-ts/ingestion/ingest.ts
 var INGESTABLE_EXTENSIONS = /* @__PURE__ */ new Set([
   ".md",
   ".mdx",
@@ -24317,7 +24317,7 @@ async function ingestDirectory(db, embed, dirPath, glob) {
   };
 }
 
-// src/tools/kb-tools.ts
+// src-ts/tools/kb-tools.ts
 var KB_TOOLS = [
   {
     name: "kb_ingest_file",
@@ -24580,11 +24580,11 @@ function registerKbTools() {
   return KB_TOOLS;
 }
 
-// src/tools/eval-tools.ts
+// src-ts/tools/eval-tools.ts
 import { resolve as resolve3, dirname as dirname5, basename as basename3 } from "path";
 import { fileURLToPath as fileURLToPath5 } from "url";
 
-// src/eval/benchmark-runner.ts
+// src-ts/eval/benchmark-runner.ts
 import { readFileSync as readFileSync4 } from "fs";
 async function runBenchmark(db, embed, opts) {
   const corpusLines = readFileSync4(opts.corpusPath, "utf-8").split("\n").filter((line) => line.trim().length > 0);
@@ -24659,7 +24659,7 @@ async function runBenchmark(db, embed, opts) {
   };
 }
 
-// src/eval/benchmark-candidates.ts
+// src-ts/eval/benchmark-candidates.ts
 import { randomUUID as randomUUID4 } from "crypto";
 import { readFileSync as readFileSync5, writeFileSync as writeFileSync2 } from "fs";
 import { resolve as resolve2, dirname as dirname4, basename as basename2 } from "path";
@@ -24731,7 +24731,7 @@ function resolveCandidates(db, acceptIds, rejectIds) {
   };
 }
 
-// src/eval/metrics.ts
+// src-ts/eval/metrics.ts
 function computeGroupMetrics(events) {
   const withOutcome = events.filter((e) => e.outcome_used !== null);
   const used = withOutcome.filter((e) => e.outcome_used === 1);
@@ -24910,7 +24910,7 @@ function computeCompactionHealth(rows) {
   };
 }
 
-// src/tools/eval-tools.ts
+// src-ts/tools/eval-tools.ts
 var __dirname2 = dirname5(fileURLToPath5(import.meta.url));
 var PACKAGE_ROOT2 = basename3(__dirname2) === "dist" ? resolve3(__dirname2, "..") : resolve3(__dirname2, "..", "..");
 var EVAL_TOOLS = [
@@ -25097,12 +25097,12 @@ function registerEvalTools() {
   return EVAL_TOOLS;
 }
 
-// src/importers/claude-code.ts
+// src-ts/importers/claude-code.ts
 import { existsSync as existsSync5, readdirSync as readdirSync2, readFileSync as readFileSync6 } from "fs";
 import { join as join9 } from "path";
 import { homedir } from "os";
 
-// src/importers/import-utils.ts
+// src-ts/importers/import-utils.ts
 import { createHash as createHash3 } from "crypto";
 function parseFrontmatter(raw) {
   const normalised = raw.replace(/\r\n/g, "\n");
@@ -25137,7 +25137,7 @@ function logImport(db, sourceTool, sourcePath, hash2, entryId, tier, type) {
   `).run(id, Date.now(), sourceTool, sourcePath, hash2, entryId, tier, type);
 }
 
-// src/importers/claude-code.ts
+// src-ts/importers/claude-code.ts
 var ClaudeCodeImporter = class {
   name = "claude-code";
   basePath;
@@ -25245,7 +25245,7 @@ var ClaudeCodeImporter = class {
   }
 };
 
-// src/importers/copilot-cli.ts
+// src-ts/importers/copilot-cli.ts
 import { existsSync as existsSync6, readdirSync as readdirSync3, readFileSync as readFileSync7 } from "fs";
 import { join as join10 } from "path";
 import { homedir as homedir2 } from "os";
@@ -25309,7 +25309,7 @@ var CopilotCliImporter = class {
   }
 };
 
-// src/importers/cursor.ts
+// src-ts/importers/cursor.ts
 import { existsSync as existsSync7, readdirSync as readdirSync4, readFileSync as readFileSync8 } from "fs";
 import { join as join11 } from "path";
 import { homedir as homedir3 } from "os";
@@ -25452,7 +25452,7 @@ var CursorImporter = class {
   }
 };
 
-// src/importers/cline.ts
+// src-ts/importers/cline.ts
 import { existsSync as existsSync8, readdirSync as readdirSync5, readFileSync as readFileSync9 } from "fs";
 import { join as join12 } from "path";
 import { homedir as homedir4 } from "os";
@@ -25601,7 +25601,7 @@ function countFiles(dir, extensions) {
   return count;
 }
 
-// src/importers/opencode.ts
+// src-ts/importers/opencode.ts
 import { existsSync as existsSync9, readdirSync as readdirSync6, readFileSync as readFileSync10 } from "fs";
 import { join as join13 } from "path";
 import { homedir as homedir5 } from "os";
@@ -25728,7 +25728,7 @@ var OpenCodeImporter = class {
   }
 };
 
-// src/importers/hermes.ts
+// src-ts/importers/hermes.ts
 import { existsSync as existsSync10, readdirSync as readdirSync7, readFileSync as readFileSync11 } from "fs";
 import { join as join14 } from "path";
 import { homedir as homedir6 } from "os";
@@ -25850,7 +25850,7 @@ var HermesImporter = class {
   }
 };
 
-// src/tools/import-tools.ts
+// src-ts/tools/import-tools.ts
 var IMPORT_TOOLS = [
   {
     name: "import_host",
@@ -25904,13 +25904,13 @@ function registerImportTools() {
   return IMPORT_TOOLS;
 }
 
-// src/tools/session-tools.ts
+// src-ts/tools/session-tools.ts
 import { randomUUID as randomUUID7 } from "crypto";
 
-// src/compaction/compactor.ts
+// src-ts/compaction/compactor.ts
 import { randomUUID as randomUUID5 } from "crypto";
 
-// src/memory/decay.ts
+// src-ts/memory/decay.ts
 var MS_PER_HOUR = 60 * 60 * 1e3;
 var TYPE_WEIGHTS = {
   correction: 1.5,
@@ -25929,7 +25929,7 @@ function calculateDecayScore(entry, compactionConfig, now = Date.now()) {
   return timeFactor * freqFactor * typeWeight;
 }
 
-// src/compaction/compactor.ts
+// src-ts/compaction/compactor.ts
 function logCompactionEvent(db, opts) {
   const id = randomUUID5();
   const timestamp = Date.now();
@@ -26009,7 +26009,7 @@ async function compactHotTier(db, embed, config2, sessionId, configSnapshotId) {
   return { carryForward, promoted, discarded };
 }
 
-// src/compaction/warm-sweep.ts
+// src-ts/compaction/warm-sweep.ts
 import { randomUUID as randomUUID6 } from "crypto";
 async function sweepWarmTier(db, embed, config2, sessionId) {
   const entries = listEntries(db, "warm", "memory");
@@ -26046,7 +26046,7 @@ async function sweepWarmTier(db, embed, config2, sessionId) {
   return { demoted, kept };
 }
 
-// src/importers/project-docs.ts
+// src-ts/importers/project-docs.ts
 import { existsSync as existsSync11, readFileSync as readFileSync12, readdirSync as readdirSync8, statSync as statSync5 } from "fs";
 import { join as join15, basename as basename4 } from "path";
 import { createHash as createHash4 } from "crypto";
@@ -26114,7 +26114,7 @@ function collectMarkdownFiles(dirPath, files) {
   }
 }
 
-// src/utils/project-detect.ts
+// src-ts/utils/project-detect.ts
 import { execFileSync } from "child_process";
 import { basename as basename5, parse as parsePath } from "path";
 import { homedir as homedir7 } from "os";
@@ -26136,7 +26136,7 @@ function detectProject(cwd) {
   return basename5(cwd) || null;
 }
 
-// src/eval/smoke-test.ts
+// src-ts/eval/smoke-test.ts
 import { resolve as resolve4, dirname as dirname6, basename as basename6 } from "path";
 import { readFileSync as readFileSync13 } from "fs";
 import { fileURLToPath as fileURLToPath7 } from "url";
@@ -26175,7 +26175,7 @@ async function runSmokeTest(db, embed, currentVersion) {
   };
 }
 
-// src/eval/regression.ts
+// src-ts/eval/regression.ts
 function checkRegressions(db, config2, similarityThreshold) {
   const snapshots = db.prepare(
     "SELECT id FROM config_snapshots ORDER BY timestamp DESC LIMIT 2"
@@ -26216,7 +26216,7 @@ function checkRegressions(db, config2, similarityThreshold) {
   return alerts;
 }
 
-// src/tools/error-translate.ts
+// src-ts/tools/error-translate.ts
 function translateModelNotReadyError(err) {
   if (!isModelNotReadyError(err)) return null;
   const e = err;
@@ -26241,7 +26241,7 @@ function translateModelNotReadyError(err) {
   };
 }
 
-// src/tools/session-tools.ts
+// src-ts/tools/session-tools.ts
 function truncateHint(content, maxLen = 120) {
   if (content.length <= maxLen) return content;
   return content.slice(0, maxLen) + "...";
@@ -26536,7 +26536,7 @@ function registerSessionTools() {
   return SESSION_TOOLS;
 }
 
-// src/tools/extra-tools.ts
+// src-ts/tools/extra-tools.ts
 import { mkdirSync as mkdirSync5, writeFileSync as writeFileSync3, readFileSync as readFileSync14 } from "fs";
 import { join as join16 } from "path";
 function registerExtraTools() {
@@ -26886,7 +26886,7 @@ async function handleExtraTool(name, args, ctx) {
   return null;
 }
 
-// src/tools/registry.ts
+// src-ts/tools/registry.ts
 function readPackageVersion() {
   const pkg = JSON.parse(readFileSync15(pkgPath("package.json"), "utf-8"));
   return pkg.version;
@@ -26961,7 +26961,7 @@ async function startServer(ctx) {
   await server.connect(transport);
 }
 
-// src/index.ts
+// src-ts/index.ts
 async function main() {
   const config2 = loadConfig();
   const db = getDb();

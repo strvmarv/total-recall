@@ -1,4 +1,4 @@
-// src/eval/ci-smoke.ts
+// src-ts/eval/ci-smoke.ts
 import { resolve, dirname as dirname3, basename } from "path";
 import { fileURLToPath as fileURLToPath4 } from "url";
 import { Database } from "bun:sqlite";
@@ -36,7 +36,7 @@ function load(db) {
   db.loadExtension(getLoadablePath());
 }
 
-// src/types.ts
+// src-ts/types.ts
 function tableName(tier, type) {
   const typeStr = type === "memory" ? "memories" : "knowledge";
   return `${tier}_${typeStr}`;
@@ -56,7 +56,7 @@ var ALL_TABLE_PAIRS = [
   { tier: "cold", type: "knowledge" }
 ];
 
-// src/db/schema.ts
+// src-ts/db/schema.ts
 function contentTableDDL(name) {
   return `
     CREATE TABLE IF NOT EXISTS ${name} (
@@ -253,7 +253,7 @@ function initSchema(db) {
   migrate();
 }
 
-// src/config.ts
+// src-ts/config.ts
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
 import { createHash, randomUUID } from "crypto";
@@ -948,7 +948,7 @@ function parse(toml, { maxDepth = 1e3, integersAsBigInt } = {}) {
   return res;
 }
 
-// src/config.ts
+// src-ts/config.ts
 var DEFAULTS_PATH = new URL("./defaults.toml", import.meta.url);
 function getDataDir() {
   return process.env.TOTAL_RECALL_HOME ?? join(process.env.HOME ?? "~", ".total-recall");
@@ -983,19 +983,19 @@ function deepMerge(target, source) {
   return result;
 }
 
-// src/embedding/embedder.ts
+// src-ts/embedding/embedder.ts
 import { readFile as readFile2 } from "fs/promises";
 import { join as join5 } from "path";
 import * as ort from "onnxruntime-node";
 
-// src/embedding/bootstrap.ts
+// src-ts/embedding/bootstrap.ts
 import { mkdirSync as mkdirSync3 } from "fs";
 import { join as join4 } from "path";
 
-// src/embedding/registry.ts
+// src-ts/embedding/registry.ts
 import { readFileSync as readFileSync2 } from "fs";
 
-// src/pkg-root.ts
+// src-ts/pkg-root.ts
 import { existsSync as existsSync2 } from "fs";
 import { dirname, join as join2 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
@@ -1020,7 +1020,7 @@ function pkgPath(...segments) {
   return join2(getPackageRoot(), ...segments);
 }
 
-// src/embedding/registry.ts
+// src-ts/embedding/registry.ts
 var cached2 = null;
 function findRegistryPath() {
   return pkgPath("models", "registry.json");
@@ -1062,7 +1062,7 @@ function expandUrl(template, revision) {
   return template.replace(/\{revision\}/g, revision);
 }
 
-// src/embedding/model-manager.ts
+// src-ts/embedding/model-manager.ts
 import { existsSync as existsSync3, mkdirSync as mkdirSync2 } from "fs";
 import { statSync, createReadStream } from "fs";
 import { writeFile, rename, unlink, readFile } from "fs/promises";
@@ -1264,7 +1264,7 @@ async function isModelChecksumValid(modelPath, spec) {
   return false;
 }
 
-// src/embedding/errors.ts
+// src-ts/embedding/errors.ts
 var ModelNotReadyError = class extends Error {
   modelName;
   reason;
@@ -1282,7 +1282,7 @@ var ModelNotReadyError = class extends Error {
   }
 };
 
-// src/embedding/bootstrap.ts
+// src-ts/embedding/bootstrap.ts
 import * as lockfile from "proper-lockfile";
 var defaultAcquireLock = async (targetDir) => {
   mkdirSync3(targetDir, { recursive: true });
@@ -1415,7 +1415,7 @@ var ModelBootstrap = class {
   }
 };
 
-// src/embedding/tokenizer.ts
+// src-ts/embedding/tokenizer.ts
 var CLS_TOKEN_ID = 101;
 var SEP_TOKEN_ID = 102;
 var UNK_TOKEN_ID = 100;
@@ -1528,7 +1528,7 @@ function charCategory(cp) {
   return "Lo";
 }
 
-// src/embedding/embedder.ts
+// src-ts/embedding/embedder.ts
 var Embedder = class {
   options;
   session = null;
@@ -1635,10 +1635,10 @@ var Embedder = class {
   }
 };
 
-// src/eval/benchmark-runner.ts
+// src-ts/eval/benchmark-runner.ts
 import { readFileSync as readFileSync3 } from "fs";
 
-// src/db/entries.ts
+// src-ts/db/entries.ts
 import { randomUUID as randomUUID2 } from "crypto";
 function rowToEntry(row) {
   return {
@@ -1737,7 +1737,7 @@ function deleteEntry(db, tier, type, id) {
   db.run(`DELETE FROM ${table} WHERE id = ?`, [id]);
 }
 
-// src/search/vector-search.ts
+// src-ts/search/vector-search.ts
 function insertEmbedding(db, tier, type, entryId, embedding) {
   const contentTable = tableName(tier, type);
   const vecTable = vecTableName(tier, type);
@@ -1778,7 +1778,7 @@ function searchByVector(db, tier, type, queryVec, opts) {
   return results.slice(0, opts.topK);
 }
 
-// src/memory/store.ts
+// src-ts/memory/store.ts
 async function storeMemory(db, embed, opts) {
   const tier = opts.tier ?? "hot";
   const contentType = opts.contentType ?? "memory";
@@ -1797,7 +1797,7 @@ async function storeMemory(db, embed, opts) {
   return id;
 }
 
-// src/memory/get.ts
+// src-ts/memory/get.ts
 function getMemory(db, id) {
   for (const { tier, type } of ALL_TABLE_PAIRS) {
     const entry = getEntry(db, tier, type, id);
@@ -1808,7 +1808,7 @@ function getMemory(db, id) {
   return null;
 }
 
-// src/memory/delete.ts
+// src-ts/memory/delete.ts
 function deleteMemory(db, id) {
   const location = getMemory(db, id);
   if (!location) return false;
@@ -1817,7 +1817,7 @@ function deleteMemory(db, id) {
   return true;
 }
 
-// src/search/fts-search.ts
+// src-ts/search/fts-search.ts
 function sanitizeFtsQuery(query) {
   const words = query.split(/\s+/).filter(Boolean).map((w) => `"${w.replace(/"/g, '""')}"`).join(" ");
   return words;
@@ -1848,7 +1848,7 @@ function searchByFts(db, tier, type, query, opts) {
   }));
 }
 
-// src/memory/search.ts
+// src-ts/memory/search.ts
 var DEFAULT_FTS_WEIGHT = 0.3;
 async function searchMemory(db, embed, query, opts) {
   const queryVec = await embed(query);
@@ -1914,7 +1914,7 @@ async function searchMemory(db, embed, query, opts) {
   return merged;
 }
 
-// src/eval/benchmark-runner.ts
+// src-ts/eval/benchmark-runner.ts
 async function runBenchmark(db, embed, opts) {
   const corpusLines = readFileSync3(opts.corpusPath, "utf-8").split("\n").filter((line) => line.trim().length > 0);
   const seededIds = [];
@@ -1988,7 +1988,7 @@ async function runBenchmark(db, embed, opts) {
   };
 }
 
-// src/eval/ci-smoke.ts
+// src-ts/eval/ci-smoke.ts
 var SMOKE_PASS_THRESHOLD = 0.8;
 var __dirname = dirname3(fileURLToPath4(import.meta.url));
 var PACKAGE_ROOT = basename(__dirname) === "dist" ? resolve(__dirname, "..") : resolve(__dirname, "..", "..");
