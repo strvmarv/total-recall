@@ -15,6 +15,7 @@
     "test:dist": "vitest run --config vitest.dist.config.ts",
     "typecheck": "tsc --noEmit",
     "prepare": "git config core.hooksPath git-hooks || true",
+    "postinstall": "node scripts/postinstall.js",
     "prepublishOnly": "npm run build && npm run test:dist",
     "benchmark": "node dist/eval/ci-smoke.js"
   },
@@ -26,6 +27,7 @@
     "agents/",
     "hooks/",
     "eval/",
+    "scripts/",
     "src/defaults.toml",
     ".claude-plugin/",
     ".copilot-plugin/",
