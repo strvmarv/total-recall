@@ -2,7 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using Microsoft.Data.Sqlite;
+using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
 namespace TotalRecall.Infrastructure.Storage;
 
@@ -10,14 +10,11 @@ public sealed record SearchHit(long Id, string Content, float Score);
 
 public sealed class SqliteStore : IDisposable
 {
-    private readonly SqliteConnection _conn;
+    private readonly MsSqliteConnection _conn;
 
     public SqliteStore(string dbPath)
     {
-        _conn = new SqliteConnection($"Data Source={dbPath}");
-        _conn.Open();
-        _conn.EnableExtensions(true);
-        _conn.LoadExtension(ResolveVecExtensionPath());
+        _conn = SqliteConnection.Open(dbPath);
 
         var schema = LoadSchema();
         using var cmd = _conn.CreateCommand();
@@ -98,14 +95,4 @@ public sealed class SqliteStore : IDisposable
         return reader.ReadToEnd();
     }
 
-    private static string ResolveVecExtensionPath()
-    {
-        var dir = Path.Combine(AppContext.BaseDirectory, "runtimes");
-        var path = Path.Combine(dir, "vec0.so");
-        if (!File.Exists(path))
-            throw new FileNotFoundException(
-                $"sqlite-vec native library not found at {path}. Download from https://github.com/asg017/sqlite-vec/releases and place vec0.so there.",
-                path);
-        return path;
-    }
 }

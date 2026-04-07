@@ -20,4 +20,20 @@
   <ItemGroup>
     <EmbeddedResource Include="Storage/Schema.sql" />
   </ItemGroup>
+
+  <!--
+    Vendor the sqlite-vec native library into the output under runtimes/.
+    Source: node_modules/sqlite-vec-linux-x64/vec0.so (pulled in by the TS
+    reference implementation's npm install). Plan 6 (packaging) will
+    introduce a proper multi-RID story; for now we only target linux-x64.
+    If the file is missing the build still succeeds - SqliteConnection.Open
+    will surface a clear runtime error pointing at the expected location.
+  -->
+  <ItemGroup>
+    <Content Include="$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-linux-x64/vec0.so"
+             Condition="Exists('$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-linux-x64/vec0.so')"
+             Link="runtimes/vec0.so"
+             CopyToOutputDirectory="PreserveNewest"
+             Visible="false" />
+  </ItemGroup>
 </Project>
