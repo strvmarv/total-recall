@@ -1,0 +1,720 @@
+{
+  "Entries": [
+    {
+      "Input": "The quick brown fox jumps over the lazy dog.",
+      "TokenIds": [
+        101,
+        1996,
+        4248,
+        2829,
+        4419,
+        14523,
+        2058,
+        1996,
+        13971,
+        3899,
+        1012,
+        102
+      ]
+    },
+    {
+      "Input": "Hello, world!",
+      "TokenIds": [
+        101,
+        7592,
+        1010,
+        2088,
+        999,
+        102
+      ]
+    },
+    {
+      "Input": "Machine learning models predict outcomes.",
+      "TokenIds": [
+        101,
+        3698,
+        4083,
+        4275,
+        16014,
+        13105,
+        1012,
+        102
+      ]
+    },
+    {
+      "Input": "This is a simple sentence.",
+      "TokenIds": [
+        101,
+        2023,
+        2003,
+        1037,
+        3722,
+        6251,
+        1012,
+        102
+      ]
+    },
+    {
+      "Input": "Memory systems store information.",
+      "TokenIds": [
+        101,
+        3638,
+        3001,
+        3573,
+        2592,
+        1012,
+        102
+      ]
+    },
+    {
+      "Input": "Vectors represent text numerically.",
+      "TokenIds": [
+        101,
+        19019,
+        5050,
+        3793,
+        15973,
+        2135,
+        1012,
+        102
+      ]
+    },
+    {
+      "Input": "Embedding models map words to points.",
+      "TokenIds": [
+        101,
+        7861,
+        8270,
+        4667,
+        4275,
+        4949,
+        2616,
+        2000,
+        2685,
+        1012,
+        102
+      ]
+    },
+    {
+      "Input": "Retrieval augments generation.",
+      "TokenIds": [
+        101,
+        26384,
+        15476,
+        8163,
+        4245,
+        1012,
+        102
+      ]
+    },
+    {
+      "Input": "Transformers process sequences.",
+      "TokenIds": [
+        101,
+        19081,
+        2832,
+        10071,
+        1012,
+        102
+      ]
+    },
+    {
+      "Input": "Attention is all you need.",
+      "TokenIds": [
+        101,
+        3086,
+        2003,
+        2035,
+        2017,
+        2342,
+        1012,
+        102
+      ]
+    },
+    {
+      "Input": "snake_case_identifier",
+      "TokenIds": [
+        101,
+        7488,
+        29638,
+        18382,
+        29638,
+        5178,
+        16778,
+        8873,
+        2121,
+        102
+      ]
+    },
+    {
+      "Input": "camelCaseVariable",
+      "TokenIds": [
+        101,
+        19130,
+        18382,
+        10755,
+        19210,
+        102
+      ]
+    },
+    {
+      "Input": "PascalCaseClass",
+      "TokenIds": [
+        101,
+        17878,
+        18382,
+        26266,
+        102
+      ]
+    },
+    {
+      "Input": "kebab-case-name",
+      "TokenIds": [
+        101,
+        17710,
+        3676,
+        2497,
+        1011,
+        2553,
+        1011,
+        2171,
+        102
+      ]
+    },
+    {
+      "Input": "SCREAMING_SNAKE",
+      "TokenIds": [
+        101,
+        7491,
+        29638,
+        2015,
+        2532,
+        3489,
+        102
+      ]
+    },
+    {
+      "Input": "mixed_Case_123",
+      "TokenIds": [
+        101,
+        3816,
+        29638,
+        18382,
+        29638,
+        12521,
+        2509,
+        102
+      ]
+    },
+    {
+      "Input": "has_underscores_everywhere",
+      "TokenIds": [
+        101,
+        2038,
+        29638,
+        20824,
+        9363,
+        6072,
+        29638,
+        22507,
+        2100,
+        2860,
+        5886,
+        2063,
+        102
+      ]
+    },
+    {
+      "Input": "lowerCamelCase",
+      "TokenIds": [
+        101,
+        2896,
+        28727,
+        2884,
+        18382,
+        102
+      ]
+    },
+    {
+      "Input": "Class_With_Underscore",
+      "TokenIds": [
+        101,
+        2465,
+        29638,
+        24415,
+        29638,
+        20824,
+        9363,
+        2890,
+        102
+      ]
+    },
+    {
+      "Input": "trailing_",
+      "TokenIds": [
+        101,
+        12542,
+        29638,
+        102
+      ]
+    },
+    {
+      "Input": "/usr/local/bin/node",
+      "TokenIds": [
+        101,
+        1013,
+        2149,
+        2099,
+        1013,
+        2334,
+        1013,
+        8026,
+        1013,
+        13045,
+        102
+      ]
+    },
+    {
+      "Input": "/home/user/projects/my-app/src/index.ts",
+      "TokenIds": [
+        101,
+        1013,
+        2188,
+        1013,
+        5310,
+        1013,
+        3934,
+        1013,
+        2026,
+        1011,
+        10439,
+        1013,
+        5034,
+        2278,
+        1013,
+        5950,
+        1012,
+        24529,
+        102
+      ]
+    },
+    {
+      "Input": "C:\\Users\\Dev\\Documents\\code.cs",
+      "TokenIds": [
+        101,
+        1039,
+        1024,
+        1032,
+        5198,
+        1032,
+        16475,
+        1032,
+        5491,
+        1032,
+        3642,
+        1012,
+        20116,
+        102
+      ]
+    },
+    {
+      "Input": "./relative/path/file.md",
+      "TokenIds": [
+        101,
+        1012,
+        1013,
+        5816,
+        1013,
+        4130,
+        1013,
+        5371,
+        1012,
+        9108,
+        102
+      ]
+    },
+    {
+      "Input": "~/.config/app/settings.json",
+      "TokenIds": [
+        101,
+        1013,
+        1012,
+        9530,
+        8873,
+        2290,
+        1013,
+        10439,
+        1013,
+        10906,
+        1012,
+        1046,
+        3385,
+        102
+      ]
+    },
+    {
+      "Input": "https://example.com/path?query=value",
+      "TokenIds": [
+        101,
+        16770,
+        1024,
+        1013,
+        1013,
+        2742,
+        1012,
+        4012,
+        1013,
+        4130,
+        1029,
+        23032,
+        3643,
+        102
+      ]
+    },
+    {
+      "Input": "http://localhost:3000/api/search?q=test\u0026limit=10",
+      "TokenIds": [
+        101,
+        8299,
+        1024,
+        1013,
+        1013,
+        2334,
+        15006,
+        2102,
+        1024,
+        11910,
+        1013,
+        17928,
+        1013,
+        3945,
+        1029,
+        1053,
+        3231,
+        1004,
+        5787,
+        2184,
+        102
+      ]
+    },
+    {
+      "Input": "https://api.github.com/repos/owner/name/issues?state=open",
+      "TokenIds": [
+        101,
+        16770,
+        1024,
+        1013,
+        1013,
+        17928,
+        1012,
+        21025,
+        2705,
+        12083,
+        1012,
+        4012,
+        1013,
+        16360,
+        2891,
+        1013,
+        3954,
+        1013,
+        2171,
+        1013,
+        3314,
+        1029,
+        2110,
+        2330,
+        102
+      ]
+    },
+    {
+      "Input": "ftp://files.example.org/public/download.tar.gz",
+      "TokenIds": [
+        101,
+        3027,
+        2361,
+        1024,
+        1013,
+        1013,
+        6764,
+        1012,
+        2742,
+        1012,
+        8917,
+        1013,
+        2270,
+        1013,
+        8816,
+        1012,
+        16985,
+        1012,
+        1043,
+        2480,
+        102
+      ]
+    },
+    {
+      "Input": "https://example.com/page#section-1",
+      "TokenIds": [
+        101,
+        16770,
+        1024,
+        1013,
+        1013,
+        2742,
+        1012,
+        4012,
+        1013,
+        3931,
+        1001,
+        2930,
+        1011,
+        1015,
+        102
+      ]
+    },
+    {
+      "Input": "Hello \u4E16\u754C",
+      "TokenIds": [
+        101,
+        7592,
+        1745,
+        100,
+        102
+      ]
+    },
+    {
+      "Input": "\u65E5\u672C\u8A9E text mixed",
+      "TokenIds": [
+        101,
+        1864,
+        1876,
+        1950,
+        3793,
+        3816,
+        102
+      ]
+    },
+    {
+      "Input": "\u4E2D\u6587 characters",
+      "TokenIds": [
+        101,
+        1746,
+        1861,
+        3494,
+        102
+      ]
+    },
+    {
+      "Input": "\uD55C\uAD6D\uC5B4 Korean",
+      "TokenIds": [
+        101,
+        100,
+        4759,
+        102
+      ]
+    },
+    {
+      "Input": "\u6F22\u5B57 and kanji",
+      "TokenIds": [
+        101,
+        1904,
+        100,
+        1998,
+        22827,
+        4478,
+        102
+      ]
+    },
+    {
+      "Input": "key=value",
+      "TokenIds": [
+        101,
+        3145,
+        3643,
+        102
+      ]
+    },
+    {
+      "Input": "a \u003E b",
+      "TokenIds": [
+        101,
+        1037,
+        1038,
+        102
+      ]
+    },
+    {
+      "Input": "a \u002B b = c",
+      "TokenIds": [
+        101,
+        1037,
+        1038,
+        1039,
+        102
+      ]
+    },
+    {
+      "Input": "pointer-\u003Efield",
+      "TokenIds": [
+        101,
+        20884,
+        1011,
+        2492,
+        102
+      ]
+    },
+    {
+      "Input": "lambda =\u003E expr",
+      "TokenIds": [
+        101,
+        23375,
+        4654,
+        18098,
+        102
+      ]
+    },
+    {
+      "Input": "\u0060backticked\u0060",
+      "TokenIds": [
+        101,
+        2067,
+        26348,
+        2098,
+        102
+      ]
+    },
+    {
+      "Input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "TokenIds": [
+        101,
+        100,
+        102
+      ]
+    },
+    {
+      "Input": "supercalifragilisticexpialidociousxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "TokenIds": [
+        101,
+        3565,
+        9289,
+        10128,
+        29181,
+        24411,
+        4588,
+        10288,
+        19312,
+        21273,
+        10085,
+        6313,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        20348,
+        2595,
+        102
+      ]
+    },
+    {
+      "Input": "looooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooongword",
+      "TokenIds": [
+        101,
+        8840,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        9541,
+        7828,
+        2290,
+        18351,
+        102
+      ]
+    },
+    {
+      "Input": "",
+      "TokenIds": [
+        101,
+        102
+      ]
+    },
+    {
+      "Input": "   ",
+      "TokenIds": [
+        101,
+        102
+      ]
+    },
+    {
+      "Input": "\n\t",
+      "TokenIds": [
+        101,
+        102
+      ]
+    }
+  ]
+}
