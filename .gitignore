@@ -5,3 +5,10 @@ node_modules/
 .remember/
 docs/superpowers/
 .worktrees/
+
+# .NET build artifacts
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+.vs/

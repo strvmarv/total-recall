@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>TotalRecall.Cli.Tests</RootNamespace>
+    <AssemblyName>TotalRecall.Cli.Tests</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\TotalRecall.Core\TotalRecall.Core.fsproj" />
+    <ProjectReference Include="..\..\src\TotalRecall.Infrastructure\TotalRecall.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\TotalRecall.Cli\TotalRecall.Cli.csproj" />
+  </ItemGroup>
+</Project>

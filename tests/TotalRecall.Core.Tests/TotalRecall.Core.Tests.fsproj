@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>TotalRecall.Core.Tests</RootNamespace>
+    <AssemblyName>TotalRecall.Core.Tests</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <GenerateProgramFile>false</GenerateProgramFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Library.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\TotalRecall.Core\TotalRecall.Core.fsproj" />
+  </ItemGroup>
+</Project>
