@@ -75,14 +75,13 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "better-sqlite3": "^11.0.0",
     "onnxruntime-node": "^1.20.0",
     "proper-lockfile": "^4.1.2",
     "smol-toml": "^1.6.1",
     "sqlite-vec": "^0.1.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.0",
+    "@types/bun": "latest",
     "@types/node": "^22.0.0",
     "@types/proper-lockfile": "^4.1.4",
     "conventional-changelog-cli": "^5.0.0",
