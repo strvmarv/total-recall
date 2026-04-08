@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.7.0 - 2026-04-08
+
+### Breaking
+- **Skill rename: `total-recall` → `commands`.** The skill previously invoked as `/total-recall <subcommand>` is now `/total-recall:commands <subcommand>`. Rationale: the skill was named identically to the plugin, so the plugin:skill qualified form rendered as the awkward `total-recall:total-recall`. Renaming yields the cleaner `total-recall:commands` namespace and frees up the plain `total-recall` name for other meanings. The old shorthand `/total-recall` no longer resolves — update any scripts, aliases, or muscle memory accordingly. All README and INSTALL examples have been updated.
+
+### Fixed
+- **Cursor SessionStart hook resolved to an invalid path.** `hooks/hooks-cursor.json` referenced `$CLAUDE_PLUGIN_ROOT`, which is unset under Cursor; the hook command expanded to `/hooks/session-start/run.sh` and silently failed. Switched to `$CURSOR_PLUGIN_ROOT`, which the `run.sh` script already branches on for platform-aware JSON output.
+- **SessionEnd hook directive used `<IMPORTANT>` XML tags** that the companion SessionStart hook explicitly warns against ("some hosts strip XML-like tags from hook output"). Rewrote the payload as plain text framing matching the session-start style. The directive is already injected inside a `system-reminder` block by the host, so nested markup is redundant and cross-host inconsistent.
+- **MCP tool names were hardcoded with the `mcp__total-recall__*` prefix** throughout `skills/total-recall/SKILL.md`, `skills/using-total-recall/SKILL.md`, and `hooks/session-end/run.sh`. Claude Code exposes plugin MCP tools as `mcp__plugin_<plugin>_<server>__<tool>` (e.g. `mcp__plugin_total-recall_total-recall__session_start`), while Cursor / OpenCode / Copilot CLI use shorter forms. No single literal prefix works across hosts. Replaced with functional references (e.g. "call the total-recall `session_start` MCP tool") which the model resolves to whatever is on its toolbelt.
+
+### Changed
+- **Single source of truth for the SessionEnd directive.** Extracted the session-end instructions from the hardcoded bash string in `hooks/session-end/run.sh` into `skills/commands/session-end.md`. The hook now reads and injects this fragment at runtime, symmetric with how `session-start/run.sh` already injects the full SKILL.md. Eliminates the drift risk between the hook directive and the SKILL.md prose. `SKILL.md`'s Session End section is now a pointer to the fragment.
+- **Standardized the compactor agent reference** on the fully qualified `total-recall:compactor` form throughout SKILL.md, using-total-recall SKILL.md, and `hooks/session-end/run.sh`. Previously some references were qualified and others bare, which could fail to resolve under strict namespacing.
+- **Shortened the `commands` SKILL.md description frontmatter.** It previously enumerated all 18 subcommands inline (effectively a trigger list, not a when-to-use description). Replaced with a concise trigger phrase; the full command table remains in the body.
+- **Documented Cursor's lack of a SessionEnd hook** in the README Supported Platforms table. Cursor 1.7 only exposes a `stop` event that fires after every agent turn, not at actual session close, so auto-compaction is unavailable on Cursor — users must run `/total-recall:commands compact` manually.
+- **README now clarifies** that `/total-recall:commands` is implemented as a Claude Code skill (`skills/commands/SKILL.md`), not as a slash-command file under a `commands/` directory. The repo intentionally has no `commands/` dir.
+
 ## 0.6.8-beta.7 - 2026-04-08
 
 ### Added
