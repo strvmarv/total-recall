@@ -13,6 +13,7 @@
 namespace TotalRecall.Server.Tests;
 
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
 
@@ -24,6 +25,33 @@ public sealed class McpServerTests
     private static string[] Lines(string stdout) =>
         stdout.Replace("\r\n", "\n").TrimEnd('\n').Split('\n', System.StringSplitOptions.RemoveEmptyEntries);
 
+    private static JsonElement EmptyObjectSchema() =>
+        JsonDocument.Parse("{\"type\":\"object\"}").RootElement.Clone();
+
+    // Minimal in-test fake. Full-featured FakeToolHandler lives alongside
+    // ToolRegistryTests; this narrower one keeps McpServerTests focused on
+    // dispatch-layer concerns.
+    private sealed class InlineHandler : IToolHandler
+    {
+        private readonly System.Func<JsonElement?, ToolCallResult> _fn;
+        public InlineHandler(
+            string name,
+            string description,
+            JsonElement inputSchema,
+            System.Func<JsonElement?, ToolCallResult> fn)
+        {
+            Name = name;
+            Description = description;
+            InputSchema = inputSchema;
+            _fn = fn;
+        }
+        public string Name { get; }
+        public string Description { get; }
+        public JsonElement InputSchema { get; }
+        public Task<ToolCallResult> ExecuteAsync(JsonElement? arguments, CancellationToken ct) =>
+            Task.FromResult(_fn(arguments));
+    }
+
     [Fact]
     public async Task Initialize_ReturnsExpectedShape()
     {
@@ -32,7 +60,7 @@ public sealed class McpServerTests
             "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"shutdown\"}\n");
         var output = new System.IO.StringWriter();
 
-        var server = new McpServer(input, output);
+        var server = new McpServer(input, output, new ToolRegistry());
         var code = await server.RunAsync();
 
         Assert.Equal(0, code);
@@ -56,7 +84,7 @@ public sealed class McpServerTests
             "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\n");
         var output = new System.IO.StringWriter();
 
-        var server = new McpServer(input, output);
+        var server = new McpServer(input, output, new ToolRegistry());
         await server.RunAsync();
 
         var resp = ParseResponse(Lines(output.ToString())[0]);
@@ -74,12 +102,13 @@ public sealed class McpServerTests
 
         var schema = JsonDocument.Parse("{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\"}}}")
             .RootElement.Clone();
-        var server = new McpServer(input, output);
-        server.RegisterTool(new ToolRegistration(
-            Name: "echo",
-            Description: "Echoes input",
-            InputSchema: schema,
-            Handler: _ => new ToolCallResult { Content = new[] { new ToolContent { Text = "ok" } } }));
+        var registry = new ToolRegistry();
+        registry.Register(new InlineHandler(
+            name: "echo",
+            description: "Echoes input",
+            inputSchema: schema,
+            fn: _ => new ToolCallResult { Content = new[] { new ToolContent { Text = "ok" } } }));
+        var server = new McpServer(input, output, registry);
 
         await server.RunAsync();
 
@@ -100,15 +129,20 @@ public sealed class McpServerTests
         var output = new System.IO.StringWriter();
 
         JsonElement? capturedArgs = null;
-        var server = new McpServer(input, output);
-        server.RegisterTool("hello", args =>
-        {
-            capturedArgs = args;
-            return new ToolCallResult
+        var registry = new ToolRegistry();
+        registry.Register(new InlineHandler(
+            name: "hello",
+            description: "",
+            inputSchema: EmptyObjectSchema(),
+            fn: args =>
             {
-                Content = new[] { new ToolContent { Text = "hi world" } },
-            };
-        });
+                capturedArgs = args;
+                return new ToolCallResult
+                {
+                    Content = new[] { new ToolContent { Text = "hi world" } },
+                };
+            }));
+        var server = new McpServer(input, output, registry);
 
         await server.RunAsync();
 
@@ -129,7 +163,7 @@ public sealed class McpServerTests
             "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"does/not/exist\"}\n");
         var output = new System.IO.StringWriter();
 
-        await new McpServer(input, output).RunAsync();
+        await new McpServer(input, output, new ToolRegistry()).RunAsync();
 
         var resp = ParseResponse(Lines(output.ToString())[0]);
         Assert.Equal(-32601, resp.GetProperty("error").GetProperty("code").GetInt32());
@@ -144,7 +178,7 @@ public sealed class McpServerTests
             "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"initialize\"}\n");
         var output = new System.IO.StringWriter();
 
-        await new McpServer(input, output).RunAsync();
+        await new McpServer(input, output, new ToolRegistry()).RunAsync();
 
         var lines = Lines(output.ToString());
         Assert.Equal(2, lines.Length);
@@ -168,7 +202,7 @@ public sealed class McpServerTests
 
         var callbackCount = 0;
         var tcs = new TaskCompletionSource();
-        var server = new McpServer(input, output, onInitialized: () =>
+        var server = new McpServer(input, output, new ToolRegistry(), onInitialized: () =>
         {
             callbackCount++;
             tcs.TrySetResult();
@@ -193,7 +227,7 @@ public sealed class McpServerTests
             "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n");
         var output = new System.IO.StringWriter();
 
-        var code = await new McpServer(input, output).RunAsync();
+        var code = await new McpServer(input, output, new ToolRegistry()).RunAsync();
         Assert.Equal(0, code);
         Assert.Equal(string.Empty, output.ToString());
     }
@@ -207,7 +241,7 @@ public sealed class McpServerTests
             "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"initialize\"}\n");
         var output = new System.IO.StringWriter();
 
-        var code = await new McpServer(input, output).RunAsync();
+        var code = await new McpServer(input, output, new ToolRegistry()).RunAsync();
 
         Assert.Equal(0, code);
         var lines = Lines(output.ToString());
@@ -224,7 +258,7 @@ public sealed class McpServerTests
             "{\"jsonrpc\":\"2.0\",\"id\":42,\"method\":\"ping\"}\n");
         var output = new System.IO.StringWriter();
 
-        await new McpServer(input, output).RunAsync();
+        await new McpServer(input, output, new ToolRegistry()).RunAsync();
 
         var resp = ParseResponse(Lines(output.ToString())[0]);
         Assert.Equal(42, resp.GetProperty("id").GetInt32());

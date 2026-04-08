@@ -10,33 +10,20 @@
 // Serialization goes through the source-generated JsonContext (Task 4.0) so
 // the server stays AOT- and trim-safe. No JsonNode, no untyped reflection
 // serializers.
+//
+// Task 4.2 replaced the transitional ToolRegistration/delegate surface with
+// a ToolRegistry + IToolHandler abstraction. McpServer now holds a
+// ToolRegistry reference and delegates tools/list and tools/call dispatch to
+// it, letting real handlers (Tasks 4.6+) supply their own schemas and async
+// ExecuteAsync implementations.
 
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace TotalRecall.Server;
-
-/// <summary>
-/// Delegate invoked when the client calls <c>tools/call</c> for a registered
-/// tool. Receives the raw <c>arguments</c> JSON (or <c>null</c> if the client
-/// omitted it) and returns a populated <see cref="ToolCallResult"/>.
-/// </summary>
-public delegate ToolCallResult ToolHandler(JsonElement? arguments);
-
-/// <summary>
-/// Bundle of metadata + handler registered for a single MCP tool.
-/// Task 4.2 will replace this with a richer <c>IToolHandler</c>/<c>ToolRegistry</c>
-/// abstraction; for now this record is the minimum viable shape that lets
-/// <c>tools/list</c> emit real <see cref="ToolSpec"/> entries.
-/// </summary>
-public sealed record ToolRegistration(
-    string Name,
-    string Description,
-    JsonElement InputSchema,
-    ToolHandler Handler);
 
 public sealed class McpServer
 {
@@ -44,9 +31,8 @@ public sealed class McpServer
     private const string ServerName = "total-recall";
     private const string ServerVersion = "0.1.0";
 
-    // Pre-parsed empty JSON object ({}), used as the default input schema when
-    // a tool is registered via the (string, ToolHandler) overload and as the
-    // result payload for methods that return nothing meaningful (ping, shutdown).
+    // Pre-parsed empty JSON object ({}), used as the result payload for
+    // methods that return nothing meaningful (ping, shutdown).
     private static readonly JsonElement EmptyObject =
         JsonDocument.Parse("{}").RootElement.Clone();
 
@@ -59,29 +45,24 @@ public sealed class McpServer
 
     private readonly TextReader _stdin;
     private readonly TextWriter _stdout;
-    private readonly Dictionary<string, ToolRegistration> _tools = new(StringComparer.Ordinal);
+    private readonly ToolRegistry _registry;
     private Func<Task>? _onInitialized;
 
-    public McpServer(TextReader stdin, TextWriter stdout, Func<Task>? onInitialized = null)
+    public McpServer(
+        TextReader stdin,
+        TextWriter stdout,
+        ToolRegistry registry,
+        Func<Task>? onInitialized = null)
     {
         _stdin = stdin;
         _stdout = stdout;
+        _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _onInitialized = onInitialized;
     }
 
     /// <summary>Sets (or replaces) the session-init callback fired when the
     /// client sends <c>notifications/initialized</c>.</summary>
     public void SetOnInitialized(Func<Task>? onInitialized) => _onInitialized = onInitialized;
-
-    /// <summary>Register a tool with full metadata (preferred).</summary>
-    public void RegisterTool(ToolRegistration registration) =>
-        _tools[registration.Name] = registration;
-
-    /// <summary>Convenience overload: register a tool with empty description and
-    /// schema. Intended only for the transitional window until Task 4.2 lands
-    /// a real ToolRegistry.</summary>
-    public void RegisterTool(string name, ToolHandler handler) =>
-        _tools[name] = new ToolRegistration(name, "", EmptyObject, handler);
 
     public async Task<int> RunAsync()
     {
@@ -134,7 +115,13 @@ public sealed class McpServer
                         WriteResult(id, HandleToolsList());
                         break;
                     case "tools/call":
-                        WriteResult(id, HandleToolsCall(req.Params));
+                        // TODO(Task 4.12+): thread a real CancellationToken from
+                        // the dispatch loop so notifications/cancelled can unwind
+                        // in-flight handlers. For now handlers receive None and
+                        // run to completion.
+                        var toolResult = await HandleToolsCallAsync(req.Params, CancellationToken.None)
+                            .ConfigureAwait(false);
+                        WriteResult(id, toolResult);
                         break;
                     default:
                         WriteError(id, -32601, $"Method not found: {req.Method}");
@@ -186,21 +173,15 @@ public sealed class McpServer
 
     private ToolsListResult HandleToolsList()
     {
-        var specs = new ToolSpec[_tools.Count];
-        var i = 0;
-        foreach (var reg in _tools.Values)
-        {
-            specs[i++] = new ToolSpec
-            {
-                Name = reg.Name,
-                Description = reg.Description,
-                InputSchema = reg.InputSchema,
-            };
-        }
-        return new ToolsListResult { Tools = specs };
+        var specs = _registry.ListTools();
+        var arr = new ToolSpec[specs.Count];
+        for (var i = 0; i < specs.Count; i++) arr[i] = specs[i];
+        return new ToolsListResult { Tools = arr };
     }
 
-    private ToolCallResult HandleToolsCall(JsonElement? paramsElement)
+    private async Task<ToolCallResult> HandleToolsCallAsync(
+        JsonElement? paramsElement,
+        CancellationToken ct)
     {
         if (!paramsElement.HasValue)
             throw new InvalidOperationException("tools/call: missing params");
@@ -211,10 +192,10 @@ public sealed class McpServer
         if (callParams is null || string.IsNullOrEmpty(callParams.Name))
             throw new InvalidOperationException("tools/call: missing tool name");
 
-        if (!_tools.TryGetValue(callParams.Name, out var reg))
+        if (!_registry.TryGet(callParams.Name, out var handler) || handler is null)
             throw new InvalidOperationException($"Tool not found: {callParams.Name}");
 
-        return reg.Handler(callParams.Arguments);
+        return await handler.ExecuteAsync(callParams.Arguments, ct).ConfigureAwait(false);
     }
 
     // ----- wire output helpers -----
