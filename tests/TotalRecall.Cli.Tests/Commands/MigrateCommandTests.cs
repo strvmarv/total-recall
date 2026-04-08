@@ -8,6 +8,7 @@ using Xunit;
 
 namespace TotalRecall.Cli.Tests.Commands;
 
+[Collection("ConsoleCapture")]
 public sealed class MigrateCommandTests : IDisposable
 {
     private readonly string _tempDir;

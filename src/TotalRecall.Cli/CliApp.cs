@@ -146,11 +146,10 @@ public static class CliApp
         return new List<ICliCommand>
         {
             new Commands.MigrateCommand(),
-            // TODO(Plan 5.3+): register commands, e.g.:
-            //   new EvalBenchmarkCommand(),  // Group = "eval"
-            //   new MemoryPromoteCommand(),  // Group = "memory"
-            //   new KbListCommand(),         // Group = "kb"
-            //   new ConfigGetCommand(),      // Group = "config"
+            new Commands.Eval.BenchmarkCommand(),
+            new Commands.Eval.ReportCommand(),
+            // TODO(Plan 5.3b+): eval compare/snapshot/grow, memory verbs,
+            //   kb verbs, config verbs.
         };
     }
 

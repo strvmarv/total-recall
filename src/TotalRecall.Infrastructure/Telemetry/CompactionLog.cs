@@ -28,9 +28,20 @@ public sealed record CompactionLogEntry(
     double? PreservationRatio = null);
 
 /// <summary>
+/// Slim row used by Plan 5 Task 5.3a's eval metrics aggregator. Only the
+/// fields the metric pass touches are projected. Lives here (next to the
+/// reader interface) so the read seam stays self-contained.
+/// </summary>
+public sealed record CompactionAnalyticsRow(
+    string Id,
+    long Timestamp,
+    double? PreservationRatio,
+    double? SemanticDrift);
+
+/// <summary>
 /// Read seam over <c>compaction_log</c> used by SessionLifecycle (Plan 4
-/// Task 4.3) so unit tests can fake out the timestamp lookup without
-/// instantiating a real SQLite connection.
+/// Task 4.3) and the Plan 5 eval metrics aggregator. Unit tests can fake
+/// the read surface without instantiating a real SQLite connection.
 /// </summary>
 public interface ICompactionLogReader
 {
@@ -41,6 +52,13 @@ public interface ICompactionLogReader
     /// <c>session-tools.ts</c>'s <c>getLastSessionAge</c>.
     /// </summary>
     long? GetLastTimestampExcludingReason(string excludedReason);
+
+    /// <summary>
+    /// Returns every compaction_log row projected to the small analytics
+    /// shape. Optionally filtered to rows newer than <paramref name="sinceTimestamp"/>
+    /// (inclusive). Used by the Plan 5 eval metrics aggregator.
+    /// </summary>
+    IReadOnlyList<CompactionAnalyticsRow> GetAllForAnalytics(long? sinceTimestamp = null);
 }
 
 /// <summary>
@@ -68,6 +86,37 @@ public sealed class CompactionLog : ICompactionLogReader
         var result = cmd.ExecuteScalar();
         if (result is null || result is DBNull) return null;
         return result is long l ? l : Convert.ToInt64(result, CultureInfo.InvariantCulture);
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<CompactionAnalyticsRow> GetAllForAnalytics(long? sinceTimestamp = null)
+    {
+        using var cmd = _conn.CreateCommand();
+        if (sinceTimestamp.HasValue)
+        {
+            cmd.CommandText =
+                "SELECT id, timestamp, preservation_ratio, semantic_drift " +
+                "FROM compaction_log WHERE timestamp >= $cutoff ORDER BY timestamp DESC";
+            cmd.Parameters.AddWithValue("$cutoff", sinceTimestamp.Value);
+        }
+        else
+        {
+            cmd.CommandText =
+                "SELECT id, timestamp, preservation_ratio, semantic_drift " +
+                "FROM compaction_log ORDER BY timestamp DESC";
+        }
+
+        var rows = new List<CompactionAnalyticsRow>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            rows.Add(new CompactionAnalyticsRow(
+                Id: reader.GetString(0),
+                Timestamp: reader.GetInt64(1),
+                PreservationRatio: reader.IsDBNull(2) ? null : reader.GetDouble(2),
+                SemanticDrift: reader.IsDBNull(3) ? null : reader.GetDouble(3)));
+        }
+        return rows;
     }
 
     /// <summary>

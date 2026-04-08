@@ -187,6 +187,9 @@ public sealed class SessionLifecycleTests
             LastExcludedReason = excludedReason;
             return LastTimestamp;
         }
+
+        public IReadOnlyList<CompactionAnalyticsRow> GetAllForAnalytics(long? sinceTimestamp = null)
+            => System.Array.Empty<CompactionAnalyticsRow>();
     }
 
     private static SessionLifecycle BuildLifecycle(

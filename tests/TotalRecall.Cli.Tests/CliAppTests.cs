@@ -14,6 +14,7 @@ using Xunit;
 
 namespace TotalRecall.Cli.Tests;
 
+[Collection("ConsoleCapture")]
 public class CliAppTests
 {
     private sealed class CapturedRun
