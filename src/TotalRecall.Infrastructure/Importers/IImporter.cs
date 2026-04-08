@@ -1,7 +1,5 @@
 using System;
 using System.Collections.Generic;
-using TotalRecall.Infrastructure.Embedding;
-using TotalRecall.Infrastructure.Storage;
 
 namespace TotalRecall.Infrastructure.Importers;
 
@@ -36,9 +34,14 @@ public sealed record ImporterScanResult(
 /// CLI, Opencode, Cursor, Cline, Hermes, ProjectDocs). Mirrors the TS
 /// <c>HostImporter</c> shape from <c>src-ts/importers/importer.ts</c>.
 ///
-/// Calls are synchronous: <see cref="IEmbedder.Embed"/> and
-/// <see cref="ISqliteStore"/> are both sync in .NET, and file I/O goes
-/// through <c>File.ReadAllText</c>; no async ceremony is warranted.
+/// Concrete implementations take their dependencies (<c>ISqliteStore</c>,
+/// <c>IEmbedder</c>, <c>IVectorSearch</c>, <c>ImportLog</c>) via
+/// constructor injection. This matches the composition pattern used by
+/// <c>HybridSearch</c> and friends and keeps the interface narrow.
+///
+/// Calls are synchronous: <see cref="Embedding.IEmbedder.Embed"/> and
+/// <see cref="Storage.ISqliteStore"/> are both sync in .NET, and file I/O
+/// goes through <c>File.ReadAllText</c>; no async ceremony is warranted.
 /// </summary>
 public interface IImporter
 {
@@ -56,9 +59,9 @@ public interface IImporter
     /// (or the tool-specific default tier). The optional
     /// <paramref name="project"/> scopes the import to a single project
     /// key when the host tool supports project-scoped memories.</summary>
-    ImportResult ImportMemories(ISqliteStore store, IEmbedder embedder, string? project = null);
+    ImportResult ImportMemories(string? project = null);
 
     /// <summary>Imports the host tool's knowledge entries (documentation,
     /// reference material) into the cold knowledge tier.</summary>
-    ImportResult ImportKnowledge(ISqliteStore store, IEmbedder embedder);
+    ImportResult ImportKnowledge();
 }
