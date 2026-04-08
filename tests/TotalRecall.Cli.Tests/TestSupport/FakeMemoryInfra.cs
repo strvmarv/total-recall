@@ -21,6 +21,8 @@ internal sealed class FakeSqliteStore : ISqliteStore
 {
     private readonly Dictionary<(Tier, ContentType, string), Entry> _rows = new();
     public List<(Tier FromTier, ContentType FromType, Tier ToTier, ContentType ToType, string Id)> MoveCalls { get; } = new();
+    public List<(Tier Tier, ContentType Type, InsertEntryOpts Opts, string NewId)> InsertCalls { get; } = new();
+    private int _nextInsertId = 0;
 
     public void Seed(Tier tier, ContentType type, Entry e)
     {
@@ -41,11 +43,36 @@ internal sealed class FakeSqliteStore : ISqliteStore
         _rows[(toTier, toType, id)] = e;
     }
 
+    public IReadOnlyList<Entry> List(Tier tier, ContentType type, ListEntriesOpts? opts = null)
+    {
+        var results = new List<Entry>();
+        foreach (var kvp in _rows)
+        {
+            if (kvp.Key.Item1.Equals(tier) && kvp.Key.Item2.Equals(type))
+                results.Add(kvp.Value);
+        }
+        return results;
+    }
+
+    public string Insert(Tier tier, ContentType type, InsertEntryOpts opts)
+    {
+        var newId = $"new-{++_nextInsertId}";
+        InsertCalls.Add((tier, type, opts, newId));
+        var entry = EntryFactory.Make(
+            id: newId,
+            content: opts.Content,
+            summary: opts.Summary,
+            source: opts.Source,
+            project: opts.Project,
+            tags: opts.Tags,
+            metadataJson: opts.MetadataJson ?? "");
+        _rows[(tier, type, newId)] = entry;
+        return newId;
+    }
+
     // Unused surface — throw to catch accidental use.
-    public string Insert(Tier tier, ContentType type, InsertEntryOpts opts) => throw new NotImplementedException();
     public void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts) => throw new NotImplementedException();
     public void Delete(Tier tier, ContentType type, string id) => throw new NotImplementedException();
-    public IReadOnlyList<Entry> List(Tier tier, ContentType type, ListEntriesOpts? opts = null) => throw new NotImplementedException();
     public int Count(Tier tier, ContentType type) => throw new NotImplementedException();
     public int CountKnowledgeCollections() => throw new NotImplementedException();
     public IReadOnlyList<Entry> ListByMetadata(Tier tier, ContentType type, IReadOnlyDictionary<string, string> metadataFilter, ListEntriesOpts? opts = null) => throw new NotImplementedException();
