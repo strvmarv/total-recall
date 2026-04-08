@@ -21,8 +21,6 @@ using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.FSharp.Collections;
-using Microsoft.FSharp.Core;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Search;
@@ -113,8 +111,8 @@ public sealed class KbSearchHandler : IToolHandler
             var filtered = new List<SearchResult>(searchResults.Count);
             foreach (var r in searchResults)
             {
-                var collId = OptString(r.Entry.CollectionId);
-                var parentId = OptString(r.Entry.ParentId);
+                var collId = EntryMapping.OptString(r.Entry.CollectionId);
+                var parentId = EntryMapping.OptString(r.Entry.ParentId);
                 if (collId == collection || parentId == collection)
                     filtered.Add(r);
             }
@@ -132,10 +130,10 @@ public sealed class KbSearchHandler : IToolHandler
         {
             var r = searchResults[i];
             dtos[i] = new MemorySearchResultDto(
-                Entry: ToEntryDto(r.Entry),
+                Entry: EntryMapping.ToEntryDto(r.Entry),
                 Score: r.Score,
-                Tier: TierName(r.Tier),
-                ContentType: ContentTypeName(r.ContentType),
+                Tier: EntryMapping.TierName(r.Tier),
+                ContentType: EntryMapping.ContentTypeName(r.ContentType),
                 Rank: r.Rank);
         }
 
@@ -187,28 +185,4 @@ public sealed class KbSearchHandler : IToolHandler
         return (int)d;
     }
 
-    private static string TierName(Tier t) =>
-        t.IsHot ? "hot" : t.IsWarm ? "warm" : "cold";
-
-    private static string ContentTypeName(ContentType c) =>
-        c.IsMemory ? "memory" : "knowledge";
-
-    private static EntryDto ToEntryDto(Entry e)
-    {
-        return new EntryDto(
-            Id: e.Id,
-            Content: e.Content,
-            Summary: OptString(e.Summary),
-            Source: OptString(e.Source),
-            Project: OptString(e.Project),
-            Tags: ListModule.ToArray(e.Tags),
-            CreatedAt: e.CreatedAt,
-            UpdatedAt: e.UpdatedAt,
-            LastAccessedAt: e.LastAccessedAt,
-            AccessCount: e.AccessCount,
-            DecayScore: e.DecayScore);
-    }
-
-    private static string? OptString(FSharpOption<string> opt) =>
-        FSharpOption<string>.get_IsSome(opt) ? opt.Value : null;
 }

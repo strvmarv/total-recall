@@ -36,8 +36,6 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.FSharp.Collections;
-using Microsoft.FSharp.Core;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Search;
@@ -65,19 +63,6 @@ public sealed class MemorySearchHandler : IToolHandler
           "required": ["query"]
         }
         """).RootElement.Clone();
-
-    // Full set of (tier, type) tables the .NET schema creates. Mirrors
-    // TS ALL_TABLE_PAIRS. Inlined here because Infrastructure.Schema
-    // keeps the list internal.
-    private static readonly (Tier Tier, ContentType Type)[] AllTablePairs =
-    {
-        (Tier.Hot,  ContentType.Memory),
-        (Tier.Warm, ContentType.Memory),
-        (Tier.Cold, ContentType.Memory),
-        (Tier.Hot,  ContentType.Knowledge),
-        (Tier.Warm, ContentType.Knowledge),
-        (Tier.Cold, ContentType.Knowledge),
-    };
 
     private readonly IEmbedder _embedder;
     private readonly IHybridSearch _hybridSearch;
@@ -130,7 +115,7 @@ public sealed class MemorySearchHandler : IToolHandler
                 typeSet.Add(ParseContentType(ct2));
         }
 
-        var tiers = AllTablePairs
+        var tiers = EntryMapping.AllTablePairs
             .Where(p =>
                 (tierSet is null || tierSet.Contains(p.Tier)) &&
                 (typeSet is null || typeSet.Contains(p.Type)))
@@ -156,10 +141,10 @@ public sealed class MemorySearchHandler : IToolHandler
         {
             var r = results[i];
             dtos[i] = new MemorySearchResultDto(
-                Entry: ToEntryDto(r.Entry),
+                Entry: EntryMapping.ToEntryDto(r.Entry),
                 Score: r.Score,
-                Tier: TierName(r.Tier),
-                ContentType: ContentTypeName(r.ContentType),
+                Tier: EntryMapping.TierName(r.Tier),
+                ContentType: EntryMapping.ContentTypeName(r.ContentType),
                 Rank: r.Rank);
         }
 
@@ -238,30 +223,4 @@ public sealed class MemorySearchHandler : IToolHandler
         _ => throw new ArgumentException($"Invalid content type: {s}. Must be memory or knowledge"),
     };
 
-    private static string TierName(Tier t) =>
-        t.IsHot ? "hot" : t.IsWarm ? "warm" : "cold";
-
-    private static string ContentTypeName(ContentType c) =>
-        c.IsMemory ? "memory" : "knowledge";
-
-    // ---------- F# Entry → DTO ----------
-
-    private static EntryDto ToEntryDto(Entry e)
-    {
-        return new EntryDto(
-            Id: e.Id,
-            Content: e.Content,
-            Summary: OptString(e.Summary),
-            Source: OptString(e.Source),
-            Project: OptString(e.Project),
-            Tags: ListModule.ToArray(e.Tags),
-            CreatedAt: e.CreatedAt,
-            UpdatedAt: e.UpdatedAt,
-            LastAccessedAt: e.LastAccessedAt,
-            AccessCount: e.AccessCount,
-            DecayScore: e.DecayScore);
-    }
-
-    private static string? OptString(FSharpOption<string> opt) =>
-        FSharpOption<string>.get_IsSome(opt) ? opt.Value : null;
 }

@@ -56,16 +56,6 @@ public sealed class MemoryUpdateHandler : IToolHandler
 
     private const int MaxContentLength = 100_000;
 
-    private static readonly (Tier Tier, ContentType Type)[] AllTablePairs =
-    {
-        (Tier.Hot,  ContentType.Memory),
-        (Tier.Warm, ContentType.Memory),
-        (Tier.Cold, ContentType.Memory),
-        (Tier.Hot,  ContentType.Knowledge),
-        (Tier.Warm, ContentType.Knowledge),
-        (Tier.Cold, ContentType.Knowledge),
-    };
-
     private readonly ISqliteStore _store;
     private readonly IEmbedder _embedder;
     private readonly IVectorSearch _vectorSearch;
@@ -121,7 +111,7 @@ public sealed class MemoryUpdateHandler : IToolHandler
 
         // Locate the row across all 6 tables.
         (Tier Tier, ContentType Type)? located = null;
-        foreach (var pair in AllTablePairs)
+        foreach (var pair in EntryMapping.AllTablePairs)
         {
             var row = _store.Get(pair.Tier, pair.Type, id);
             if (row is not null)

@@ -20,8 +20,6 @@ using System;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.FSharp.Collections;
-using Microsoft.FSharp.Core;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Storage;
 
@@ -43,16 +41,6 @@ public sealed class MemoryGetHandler : IToolHandler
           "required": ["id"]
         }
         """).RootElement.Clone();
-
-    private static readonly (Tier Tier, ContentType Type)[] AllTablePairs =
-    {
-        (Tier.Hot,  ContentType.Memory),
-        (Tier.Warm, ContentType.Memory),
-        (Tier.Cold, ContentType.Memory),
-        (Tier.Hot,  ContentType.Knowledge),
-        (Tier.Warm, ContentType.Knowledge),
-        (Tier.Cold, ContentType.Knowledge),
-    };
 
     private readonly ISqliteStore _store;
 
@@ -83,15 +71,15 @@ public sealed class MemoryGetHandler : IToolHandler
         ct.ThrowIfCancellationRequested();
 
         string jsonText = "null";
-        foreach (var pair in AllTablePairs)
+        foreach (var pair in EntryMapping.AllTablePairs)
         {
             var entry = _store.Get(pair.Tier, pair.Type, id);
             if (entry is null) continue;
 
             var dto = new MemoryGetResultDto(
-                Tier: TierName(pair.Tier),
-                ContentType: ContentTypeName(pair.Type),
-                Entry: ToEntryDto(entry));
+                Tier: EntryMapping.TierName(pair.Tier),
+                ContentType: EntryMapping.ContentTypeName(pair.Type),
+                Entry: EntryMapping.ToEntryDto(entry));
             jsonText = JsonSerializer.Serialize(dto, JsonContext.Default.MemoryGetResultDto);
             break;
         }
@@ -112,28 +100,4 @@ public sealed class MemoryGetHandler : IToolHandler
         return prop.GetString() ?? throw new ArgumentException($"{name} must be a string");
     }
 
-    internal static string TierName(Tier t) =>
-        t.IsHot ? "hot" : t.IsWarm ? "warm" : "cold";
-
-    internal static string ContentTypeName(ContentType c) =>
-        c.IsMemory ? "memory" : "knowledge";
-
-    internal static EntryDto ToEntryDto(Entry e)
-    {
-        return new EntryDto(
-            Id: e.Id,
-            Content: e.Content,
-            Summary: OptString(e.Summary),
-            Source: OptString(e.Source),
-            Project: OptString(e.Project),
-            Tags: ListModule.ToArray(e.Tags),
-            CreatedAt: e.CreatedAt,
-            UpdatedAt: e.UpdatedAt,
-            LastAccessedAt: e.LastAccessedAt,
-            AccessCount: e.AccessCount,
-            DecayScore: e.DecayScore);
-    }
-
-    private static string? OptString(FSharpOption<string> opt) =>
-        FSharpOption<string>.get_IsSome(opt) ? opt.Value : null;
 }
