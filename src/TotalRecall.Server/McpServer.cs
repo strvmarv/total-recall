@@ -144,8 +144,19 @@ public sealed class McpServer
                 {
                     // Fire-and-forget: the SDK contract is that initialized is a
                     // notification, and the TS server kicks session init into the
-                    // background without blocking further RPCs.
-                    _ = cb();
+                    // background without blocking further RPCs. We attach a
+                    // ContinueWith on the OnlyOnFaulted path so an unobserved
+                    // exception in the callback gets surfaced to stderr instead of
+                    // crashing the process via the unhandled-task-exception finalizer
+                    // (Task 4.1 review fold-in).
+                    var task = cb();
+                    if (task is not null)
+                    {
+                        _ = task.ContinueWith(
+                            t => Console.Error.WriteLine(
+                                $"total-recall: onInitialized callback faulted: {t.Exception?.GetBaseException()}"),
+                            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+                    }
                 }
                 else
                 {

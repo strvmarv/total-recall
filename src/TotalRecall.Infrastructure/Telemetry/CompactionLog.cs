@@ -28,10 +28,26 @@ public sealed record CompactionLogEntry(
     double? PreservationRatio = null);
 
 /// <summary>
+/// Read seam over <c>compaction_log</c> used by SessionLifecycle (Plan 4
+/// Task 4.3) so unit tests can fake out the timestamp lookup without
+/// instantiating a real SQLite connection.
+/// </summary>
+public interface ICompactionLogReader
+{
+    /// <summary>
+    /// Returns the maximum <c>timestamp</c> across all <c>compaction_log</c>
+    /// rows whose <c>reason</c> is NOT equal to <paramref name="excludedReason"/>,
+    /// or <c>null</c> if no such rows exist. Mirrors the TS query in
+    /// <c>session-tools.ts</c>'s <c>getLastSessionAge</c>.
+    /// </summary>
+    long? GetLastTimestampExcludingReason(string excludedReason);
+}
+
+/// <summary>
 /// Append-only writer for the <c>compaction_log</c> table. Borrows a
 /// non-owning <see cref="MsSqliteConnection"/>.
 /// </summary>
-public sealed class CompactionLog
+public sealed class CompactionLog : ICompactionLogReader
 {
     private readonly MsSqliteConnection _conn;
 
@@ -39,6 +55,19 @@ public sealed class CompactionLog
     {
         ArgumentNullException.ThrowIfNull(conn);
         _conn = conn;
+    }
+
+    /// <inheritdoc />
+    public long? GetLastTimestampExcludingReason(string excludedReason)
+    {
+        ArgumentNullException.ThrowIfNull(excludedReason);
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT MAX(timestamp) FROM compaction_log WHERE reason != $reason";
+        cmd.Parameters.AddWithValue("$reason", excludedReason);
+        var result = cmd.ExecuteScalar();
+        if (result is null || result is DBNull) return null;
+        return result is long l ? l : Convert.ToInt64(result, CultureInfo.InvariantCulture);
     }
 
     /// <summary>

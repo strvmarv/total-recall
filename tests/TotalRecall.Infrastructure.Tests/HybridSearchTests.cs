@@ -98,6 +98,8 @@ public sealed class HybridSearchTests
             => throw new NotImplementedException();
         public int Count(Tier tier, ContentType type)
             => throw new NotImplementedException();
+        public int CountKnowledgeCollections()
+            => throw new NotImplementedException();
         public IReadOnlyList<Entry> ListByMetadata(
             Tier tier,
             ContentType type,

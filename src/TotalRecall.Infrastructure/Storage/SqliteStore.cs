@@ -206,6 +206,17 @@ VALUES
         return result is long l ? (int)l : 0;
     }
 
+    public int CountKnowledgeCollections()
+    {
+        // Mirrors src-ts/tools/session-tools.ts: collections live in
+        // cold_knowledge only, NULL collection_ids excluded.
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT COUNT(DISTINCT collection_id) FROM cold_knowledge WHERE collection_id IS NOT NULL";
+        var result = cmd.ExecuteScalar();
+        return result is long l ? (int)l : 0;
+    }
+
     public IReadOnlyList<Entry> ListByMetadata(
         Tier tier,
         ContentType type,

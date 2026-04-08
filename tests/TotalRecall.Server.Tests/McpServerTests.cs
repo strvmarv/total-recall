@@ -252,6 +252,54 @@ public sealed class McpServerTests
     }
 
     [Fact]
+    public async Task NotificationsInitialized_CallbackThrows_ErrorWrittenToStderr_LoopContinues()
+    {
+        // Two messages: a notification that triggers a faulting callback, then
+        // a regular initialize that must still get a response (proves the
+        // dispatch loop survived the callback fault).
+        var input = new System.IO.StringReader(
+            "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n" +
+            "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"initialize\"}\n");
+        var output = new System.IO.StringWriter();
+
+        var stderrBuffer = new System.IO.StringWriter();
+        var originalStderr = System.Console.Error;
+        System.Console.SetError(stderrBuffer);
+        try
+        {
+            var faultObservedTcs = new TaskCompletionSource();
+            var server = new McpServer(input, output, new ToolRegistry(), onInitialized: () =>
+            {
+                // Return a faulted Task so the ContinueWith path executes
+                // synchronously and the stderr write is observable before
+                // RunAsync returns.
+                var t = Task.Run((System.Action)(() => throw new System.InvalidOperationException("boom")));
+                _ = t.ContinueWith(_ => faultObservedTcs.TrySetResult());
+                return t;
+            });
+
+            var code = await server.RunAsync();
+            await faultObservedTcs.Task;
+            // Yield to give the OnlyOnFaulted continuation in McpServer a chance
+            // to run before we read stderr.
+            for (var attempt = 0; attempt < 50 && !stderrBuffer.ToString().Contains("faulted"); attempt++)
+                await Task.Delay(10);
+
+            Assert.Equal(0, code);
+            var lines = Lines(output.ToString());
+            Assert.Single(lines);
+            var resp = ParseResponse(lines[0]);
+            Assert.Equal(7, resp.GetProperty("id").GetInt32());
+            Assert.True(resp.TryGetProperty("result", out _));
+            Assert.Contains("faulted", stderrBuffer.ToString());
+        }
+        finally
+        {
+            System.Console.SetError(originalStderr);
+        }
+    }
+
+    [Fact]
     public async Task Ping_ReturnsEmptyResult()
     {
         var input = new System.IO.StringReader(

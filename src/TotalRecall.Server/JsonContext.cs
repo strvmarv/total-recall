@@ -183,6 +183,21 @@ public sealed record ToolContent
 [JsonSerializable(typeof(ToolCallResult))]
 [JsonSerializable(typeof(ToolContent))]
 [JsonSerializable(typeof(JsonElement))]
+// ---- Task 4.3: SessionLifecycle wire shapes ----
+// Source-gen needs each nested record AND each generic collection element
+// type registered explicitly so the AOT publisher does not have to walk
+// reflection metadata. The IReadOnlyList<T> properties on SessionInitResult
+// are covered by registering List<T> for each element type below.
+[JsonSerializable(typeof(SessionInitResult))]
+[JsonSerializable(typeof(ImportSummaryRow))]
+[JsonSerializable(typeof(TierSummary))]
+[JsonSerializable(typeof(WarmSweepResult))]
+[JsonSerializable(typeof(ProjectDocsResult))]
+[JsonSerializable(typeof(SmokeTestResult))]
+[JsonSerializable(typeof(RegressionAlert))]
+[JsonSerializable(typeof(System.Collections.Generic.List<ImportSummaryRow>))]
+[JsonSerializable(typeof(System.Collections.Generic.List<RegressionAlert>))]
+[JsonSerializable(typeof(System.Collections.Generic.List<string>))]
 public partial class JsonContext : JsonSerializerContext
 {
 }

@@ -30,6 +30,14 @@ public interface ISqliteStore
     int Count(Tier tier, ContentType type);
 
     /// <summary>
+    /// Count distinct non-null <c>collection_id</c> values across the
+    /// <c>cold_knowledge</c> table. Mirrors the TS query in
+    /// <c>src-ts/tools/session-tools.ts</c>'s tier-summary block, which only
+    /// inspects cold_knowledge (collections live in cold by convention).
+    /// </summary>
+    int CountKnowledgeCollections();
+
+    /// <summary>
     /// List entries whose <c>metadata</c> JSON has matching key/value pairs.
     /// Keys MUST match <c>^[a-zA-Z_][a-zA-Z0-9_]*$</c>; filter MUST be non-empty.
     /// </summary>

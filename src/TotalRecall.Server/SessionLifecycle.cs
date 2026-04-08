@@ -1,0 +1,355 @@
+// src/TotalRecall.Server/SessionLifecycle.cs
+//
+// Plan 4 Task 4.3 — port of src-ts/tools/session-tools.ts runSessionInit,
+// scoped to the Infrastructure pieces that exist in .NET as of Plan 4:
+// host importers, ISqliteStore, and a CompactionLog read seam. Everything
+// else (warm sweep, semantic promote, project docs ingest, smoke test,
+// regression detection, project detection, config snapshot) is stubbed
+// with `TODO(Plan 5+)` markers at each would-be call site.
+//
+// Wire shape returned by EnsureInitializedAsync is consumed by Task 4.10's
+// session_start handler. The shape is registered with JsonContext so the
+// source-generated serializer can render it AOT-safely.
+
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Text;
+using System.Text.Json.Serialization;
+using System.Threading;
+using System.Threading.Tasks;
+using TotalRecall.Core;
+using TotalRecall.Infrastructure.Importers;
+using TotalRecall.Infrastructure.Storage;
+using TotalRecall.Infrastructure.Telemetry;
+
+namespace TotalRecall.Server;
+
+/// <summary>
+/// Production <see cref="ISessionLifecycle"/>. Composes a list of host
+/// importers, an <see cref="ISqliteStore"/>, and a small
+/// <see cref="ICompactionLogReader"/> seam. Caches the first
+/// <see cref="EnsureInitializedAsync"/> result behind an async lock so
+/// concurrent callers (notification + first tool call racing) collapse to a
+/// single import sweep.
+/// </summary>
+public sealed class SessionLifecycle : ISessionLifecycle
+{
+    private readonly IReadOnlyList<IImporter> _importers;
+    private readonly ISqliteStore _store;
+    private readonly ICompactionLogReader _compactionLog;
+    private readonly Func<long> _nowMs;
+    private readonly string _sessionId;
+
+    private readonly SemaphoreSlim _initLock = new(1, 1);
+    private SessionInitResult? _cached;
+
+    public SessionLifecycle(
+        IReadOnlyList<IImporter> importers,
+        ISqliteStore store,
+        ICompactionLogReader compactionLog,
+        string? sessionId = null,
+        Func<long>? nowMs = null)
+    {
+        ArgumentNullException.ThrowIfNull(importers);
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(compactionLog);
+        _importers = importers;
+        _store = store;
+        _compactionLog = compactionLog;
+        _sessionId = sessionId ?? Guid.NewGuid().ToString();
+        _nowMs = nowMs ?? (() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+    }
+
+    /// <inheritdoc />
+    public bool IsInitialized => _cached is not null;
+
+    /// <inheritdoc />
+    public async Task<SessionInitResult> EnsureInitializedAsync(CancellationToken ct = default)
+    {
+        if (_cached is not null) return _cached;
+
+        await _initLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (_cached is not null) return _cached;
+            _cached = RunInit();
+            return _cached;
+        }
+        finally
+        {
+            _initLock.Release();
+        }
+    }
+
+    private SessionInitResult RunInit()
+    {
+        // 1. Host importer sweep — only invoke importers whose Detect() trips.
+        var importSummary = new List<ImportSummaryRow>();
+        foreach (var importer in _importers)
+        {
+            if (!importer.Detect()) continue;
+
+            // TODO(Plan 5+): pass detected project name once project detection
+            // lands. The Plan 4 stub passes null which matches the importer's
+            // own "global memories" path.
+            var memResult = importer.ImportMemories(project: null);
+            var kbResult = importer.ImportKnowledge();
+
+            importSummary.Add(new ImportSummaryRow(
+                importer.Name,
+                memResult.Imported,
+                kbResult.Imported));
+        }
+
+        // TODO(Plan 5+): warm sweep — sweepWarmTier from src-ts/compaction/warm-sweep.ts
+        // is not yet ported. Leave WarmSweep null.
+
+        // TODO(Plan 5+): project docs auto-ingest — ProjectDocsImporter exists
+        // in Infrastructure but Plan 4 explicitly excludes it from session init.
+
+        // TODO(Plan 5+): smoke test — eval/smoke-test.ts not yet ported.
+
+        // TODO(Plan 5+): semantic warm→hot promotion driven by detected project.
+        // Plan 4 leaves warmPromotedIds empty.
+        var warmPromotedIds = Array.Empty<string>();
+        var warmPromoted = 0;
+
+        // 2. Hot entries listing — used for both context and hot count.
+        // TODO(Plan 5+): token-budget eviction via decay_score is not yet
+        // ported. Plan 4 simply emits whatever the hot tier currently holds.
+        var hotEntries = _store.List(Tier.Hot, ContentType.Memory);
+
+        // 3. Tier summary.
+        var tierSummary = new TierSummary(
+            Hot: _store.Count(Tier.Hot, ContentType.Memory),
+            Warm: _store.Count(Tier.Warm, ContentType.Memory)
+                + _store.Count(Tier.Warm, ContentType.Knowledge),
+            Cold: _store.Count(Tier.Cold, ContentType.Memory)
+                + _store.Count(Tier.Cold, ContentType.Knowledge),
+            Kb: _store.Count(Tier.Hot, ContentType.Knowledge)
+                + _store.Count(Tier.Warm, ContentType.Knowledge)
+                + _store.Count(Tier.Cold, ContentType.Knowledge),
+            Collections: _store.CountKnowledgeCollections());
+
+        // 4. Context string assembly — matches TS session-tools.ts:260-264.
+        var context = BuildContext(hotEntries);
+
+        // 5. Hints.
+        var hints = GenerateHints(_store, warmPromotedIds);
+
+        // 6. Last session age (humanized).
+        var lastAgeMs = _compactionLog.GetLastTimestampExcludingReason("warm_sweep_decay");
+        var lastSessionAge = FormatLastSessionAge(lastAgeMs, _nowMs());
+
+        // TODO(Plan 5+): regression detection — checkRegressions from
+        // src-ts/eval/regression.ts not yet ported. Leave alerts null.
+
+        // TODO(Plan 5+): config snapshot creation — createConfigSnapshot
+        // from src-ts/config.ts not yet ported. Snapshot id stays null.
+
+        return new SessionInitResult(
+            SessionId: _sessionId,
+            Project: null, // TODO(Plan 5+): detectProject() not ported
+            ImportSummary: importSummary,
+            WarmSweep: null, // TODO(Plan 5+): warm sweep not ported
+            WarmPromoted: warmPromoted,
+            ProjectDocs: null, // TODO(Plan 5+): project docs auto-ingest not in scope
+            HotEntryCount: hotEntries.Count,
+            Context: context,
+            TierSummary: tierSummary,
+            Hints: hints,
+            LastSessionAge: lastSessionAge,
+            SmokeTest: null, // TODO(Plan 5+): smoke test not ported
+            RegressionAlerts: null); // TODO(Plan 5+): regression detection not ported
+    }
+
+    // -------- helpers (internal so tests can call them directly) --------
+
+    /// <summary>
+    /// Builds the hot-tier context block fed back to the host LLM. Each entry
+    /// renders as <c>"- {content}{tags_suffix}"</c> with
+    /// <c>tags_suffix</c> = <c>" [tag1, tag2]"</c> when tags are present, empty
+    /// otherwise. Lines joined with '\n'. Mirrors TS lines 260-264.
+    /// </summary>
+    public static string BuildContext(IReadOnlyList<Entry> hotEntries)
+    {
+        if (hotEntries.Count == 0) return string.Empty;
+        var sb = new StringBuilder();
+        for (var i = 0; i < hotEntries.Count; i++)
+        {
+            var e = hotEntries[i];
+            if (i > 0) sb.Append('\n');
+            sb.Append("- ");
+            sb.Append(e.Content);
+            // Entry.Tags is FSharpList<string>; iterate as IEnumerable<string>.
+            var tags = (IEnumerable<string>)e.Tags;
+            var tagList = tags as IList<string> ?? tags.ToList();
+            if (tagList.Count > 0)
+            {
+                sb.Append(" [");
+                sb.Append(string.Join(", ", tagList));
+                sb.Append(']');
+            }
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Truncate <paramref name="content"/> to <paramref name="maxLen"/>
+    /// characters, appending <c>"..."</c> when truncation occurs. Mirrors TS
+    /// <c>truncateHint</c>.
+    /// </summary>
+    public static string TruncateHint(string content, int maxLen = 120)
+    {
+        if (content.Length <= maxLen) return content;
+        return content.Substring(0, maxLen) + "...";
+    }
+
+    /// <summary>
+    /// Generates the actionable-hints list. Three priorities, capped at 5.
+    /// Mirrors TS <c>generateHints</c> in session-tools.ts:27-74.
+    /// </summary>
+    public static IReadOnlyList<string> GenerateHints(
+        ISqliteStore store,
+        IReadOnlyList<string> warmPromotedIds)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var hints = new List<string>();
+
+        // Priority 1: corrections + preferences (max 2).
+        var corrections = store.ListByMetadata(
+            Tier.Warm,
+            ContentType.Memory,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["entry_type"] = "correction" },
+            new ListEntriesOpts { OrderBy = "access_count DESC", Limit = 2 });
+
+        var preferences = store.ListByMetadata(
+            Tier.Warm,
+            ContentType.Memory,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["entry_type"] = "preference" },
+            new ListEntriesOpts { OrderBy = "access_count DESC", Limit = 2 });
+
+        var p1 = corrections.Concat(preferences)
+            .OrderByDescending(e => e.AccessCount)
+            .ThenBy(e => e.CreatedAt)
+            .Take(2);
+
+        foreach (var entry in p1)
+        {
+            if (seen.Add(entry.Id))
+                hints.Add(TruncateHint(entry.Content));
+        }
+
+        // Priority 2: frequently accessed (access_count >= 3, max 2).
+        var frequent = store.List(
+            Tier.Warm,
+            ContentType.Memory,
+            new ListEntriesOpts { OrderBy = "access_count DESC", Limit = 10 });
+
+        var taken = 0;
+        foreach (var entry in frequent)
+        {
+            if (taken >= 2) break;
+            if (entry.AccessCount < 3) continue;
+            if (seen.Contains(entry.Id)) continue;
+            seen.Add(entry.Id);
+            hints.Add(TruncateHint(entry.Content));
+            taken++;
+        }
+
+        // Priority 3: recently warm-promoted (max 1). Plan 4 passes [].
+        foreach (var id in warmPromotedIds.Take(1))
+        {
+            if (seen.Contains(id)) continue;
+            var entry = store.Get(Tier.Hot, ContentType.Memory, id);
+            if (entry is null) continue;
+            seen.Add(entry.Id);
+            hints.Add(TruncateHint(entry.Content));
+        }
+
+        if (hints.Count > 5) hints.RemoveRange(5, hints.Count - 5);
+        return hints;
+    }
+
+    /// <summary>
+    /// Format a last-session-age string from a timestamp + now (both unix ms).
+    /// Mirrors TS <c>getLastSessionAge</c> in session-tools.ts:76-99.
+    /// </summary>
+    public static string? FormatLastSessionAge(long? lastTimestampMs, long nowMs)
+    {
+        if (lastTimestampMs is null || lastTimestampMs.Value <= 0) return null;
+        var diffMs = nowMs - lastTimestampMs.Value;
+        if (diffMs < 0) diffMs = 0;
+        var minutes = (long)Math.Floor(diffMs / 60000.0);
+        var hours = (long)Math.Floor(diffMs / 3600000.0);
+        var days = (long)Math.Floor(diffMs / 86400000.0);
+        var weeks = days / 7;
+
+        if (minutes == 0) return "just now";
+        if (minutes == 1) return "1 minute ago";
+        if (minutes < 60) return minutes.ToString(CultureInfo.InvariantCulture) + " minutes ago";
+        if (hours == 1) return "1 hour ago";
+        if (hours < 24) return hours.ToString(CultureInfo.InvariantCulture) + " hours ago";
+        if (days == 1) return "1 day ago";
+        if (days < 7) return days.ToString(CultureInfo.InvariantCulture) + " days ago";
+        if (weeks == 1) return "1 week ago";
+        return weeks.ToString(CultureInfo.InvariantCulture) + " weeks ago";
+    }
+}
+
+// ---------- result records ----------
+
+/// <summary>
+/// Aggregate result of <see cref="ISessionLifecycle.EnsureInitializedAsync"/>.
+/// Plan 4 leaves several fields stubbed; see the field-level remarks for the
+/// <c>TODO(Plan 5+)</c> markers.
+/// </summary>
+public sealed record SessionInitResult(
+    [property: JsonPropertyName("sessionId")] string SessionId,
+    [property: JsonPropertyName("project")] string? Project,
+    [property: JsonPropertyName("importSummary")] IReadOnlyList<ImportSummaryRow> ImportSummary,
+    [property: JsonPropertyName("warmSweep")] WarmSweepResult? WarmSweep,
+    [property: JsonPropertyName("warmPromoted")] int WarmPromoted,
+    [property: JsonPropertyName("projectDocs")] ProjectDocsResult? ProjectDocs,
+    [property: JsonPropertyName("hotEntryCount")] int HotEntryCount,
+    [property: JsonPropertyName("context")] string Context,
+    [property: JsonPropertyName("tierSummary")] TierSummary TierSummary,
+    [property: JsonPropertyName("hints")] IReadOnlyList<string> Hints,
+    [property: JsonPropertyName("lastSessionAge")] string? LastSessionAge,
+    [property: JsonPropertyName("smokeTest")] SmokeTestResult? SmokeTest,
+    [property: JsonPropertyName("regressionAlerts")] IReadOnlyList<RegressionAlert>? RegressionAlerts);
+
+/// <summary>One row in the host-importer summary.</summary>
+public sealed record ImportSummaryRow(
+    [property: JsonPropertyName("tool")] string Tool,
+    [property: JsonPropertyName("memoriesImported")] int MemoriesImported,
+    [property: JsonPropertyName("knowledgeImported")] int KnowledgeImported);
+
+/// <summary>Tier-level row counts for the session-init summary block.</summary>
+public sealed record TierSummary(
+    [property: JsonPropertyName("hot")] int Hot,
+    [property: JsonPropertyName("warm")] int Warm,
+    [property: JsonPropertyName("cold")] int Cold,
+    [property: JsonPropertyName("kb")] int Kb,
+    [property: JsonPropertyName("collections")] int Collections);
+
+// TODO(Plan 5+): populate when warm sweep lands.
+public sealed record WarmSweepResult(
+    [property: JsonPropertyName("demoted")] int Demoted);
+
+// TODO(Plan 5+): populate when project docs auto-ingest lands.
+public sealed record ProjectDocsResult(
+    [property: JsonPropertyName("filesIngested")] int FilesIngested,
+    [property: JsonPropertyName("totalChunks")] int TotalChunks);
+
+// TODO(Plan 5+): populate when smoke test lands.
+public sealed record SmokeTestResult(
+    [property: JsonPropertyName("passed")] bool Passed,
+    [property: JsonPropertyName("notes")] string? Notes);
+
+// TODO(Plan 5+): populate when regression detection lands.
+public sealed record RegressionAlert(
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("message")] string Message);
