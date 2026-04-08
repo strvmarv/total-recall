@@ -20,6 +20,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Spectre.Console;
 
 namespace TotalRecall.Cli;
@@ -42,8 +43,12 @@ public interface ICliCommand
     /// <summary>One-line description shown in --help output.</summary>
     string Description { get; }
 
-    /// <summary>Runs the command with the residual args (after the verb).</summary>
-    int Run(string[] args);
+    /// <summary>
+    /// Runs the command with the residual args (after the verb). Returns
+    /// the process exit code. Async because some commands (e.g. migrate)
+    /// perform I/O and embedding generation that are naturally awaitable.
+    /// </summary>
+    Task<int> RunAsync(string[] args);
 }
 
 public static class CliApp
@@ -100,7 +105,7 @@ public static class CliApp
                 PrintCommandHelp(groupCmd);
                 return ExitOk;
             }
-            return groupCmd.Run(rest);
+            return groupCmd.RunAsync(rest).GetAwaiter().GetResult();
         }
 
         // Leaf dispatch: top-level verb.
@@ -119,7 +124,7 @@ public static class CliApp
             PrintCommandHelp(leaf);
             return ExitOk;
         }
-        return leaf.Run(leafRest);
+        return leaf.RunAsync(leafRest).GetAwaiter().GetResult();
     }
 
     /// <summary>
@@ -140,8 +145,8 @@ public static class CliApp
     {
         return new List<ICliCommand>
         {
-            // TODO(Plan 5.2+): register commands, e.g.:
-            //   new MigrateCommand(),
+            new Commands.MigrateCommand(),
+            // TODO(Plan 5.3+): register commands, e.g.:
             //   new EvalBenchmarkCommand(),  // Group = "eval"
             //   new MemoryPromoteCommand(),  // Group = "memory"
             //   new KbListCommand(),         // Group = "kb"

@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using TotalRecall.Infrastructure.Migration;
 
 namespace TotalRecall.Server;
 

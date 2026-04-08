@@ -9,6 +9,17 @@
     <PublishAot>true</PublishAot>
     <InvariantGlobalization>true</InvariantGlobalization>
     <StripSymbols>true</StripSymbols>
+    <!--
+      Plan 5.2: OnnxEmbedder (reachable from the CLI migrate command)
+      uses FSharpMap<string,int> from FSharp.Core. FSharp.Core is not
+      marked [assembly: AssemblyMetadata("IsTrimmable","True")] and emits
+      per-assembly-aggregated IL2104/IL3053 warnings at AOT publish time.
+      Rather than rooting the whole assembly, suppress the aggregated
+      warnings at the entry point: individual reachable methods still
+      surface their own warnings (none observed at 5.2 publish time).
+      See CliApp.cs header for the related Spectre.Console.Cli note.
+    -->
+    <NoWarn>$(NoWarn);IL2104;IL3053</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\TotalRecall.Core\TotalRecall.Core.fsproj" />

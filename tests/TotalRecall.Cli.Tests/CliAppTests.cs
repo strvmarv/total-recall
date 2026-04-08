@@ -8,6 +8,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading.Tasks;
 using TotalRecall.Cli;
 using Xunit;
 
@@ -66,9 +67,8 @@ public class CliAppTests
         var result = Capture(() => CliApp.Run(new[] { "--help" }));
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("total-recall", result.StdOut);
-        // With no commands registered yet, the dispatcher prints the
-        // "no subcommands registered" hint. Task 5.2+ will add real entries.
-        Assert.Contains("no subcommands registered", result.StdOut);
+        // Task 5.2 registered the `migrate` leaf command.
+        Assert.Contains("migrate", result.StdOut);
     }
 
     [Fact]
@@ -101,7 +101,7 @@ public class CliAppTests
         public string Name { get; }
         public string? Group { get; }
         public string Description { get; }
-        public int Run(string[] args) => _body(args);
+        public Task<int> RunAsync(string[] args) => Task.FromResult(_body(args));
     }
 
     [Fact]
