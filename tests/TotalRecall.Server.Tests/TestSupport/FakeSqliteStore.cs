@@ -151,6 +151,17 @@ public sealed class FakeSqliteStore : ISqliteStore
         return string.Join(";", parts);
     }
 
-    public void Move(Tier fromTier, ContentType fromType, Tier toTier, ContentType toType, string id) =>
-        throw new NotImplementedException();
+    public sealed record MoveCall(Tier FromTier, ContentType FromType, Tier ToTier, ContentType ToType, string Id);
+
+    public List<MoveCall> MoveCalls { get; } = new();
+
+    public void Move(Tier fromTier, ContentType fromType, Tier toTier, ContentType toType, string id)
+    {
+        MoveCalls.Add(new MoveCall(fromTier, fromType, toTier, toType, id));
+        if (Entries.TryGetValue((fromTier, fromType, id), out var e))
+        {
+            Entries.Remove((fromTier, fromType, id));
+            Entries[(toTier, toType, id)] = e;
+        }
+    }
 }

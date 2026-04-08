@@ -49,4 +49,22 @@ internal static class EntryMapping
 
     public static string? OptString(FSharpOption<string> opt) =>
         FSharpOption<string>.get_IsSome(opt) ? opt.Value : null;
+
+    /// <summary>
+    /// Returns the wire-format string for an optional <see cref="SourceTool"/>,
+    /// matching the CLI <c>memory inspect --json</c> output. Null when no
+    /// source tool is set.
+    /// </summary>
+    public static string? SourceToolName(FSharpOption<SourceTool> opt)
+    {
+        if (!FSharpOption<SourceTool>.get_IsSome(opt)) return null;
+        var t = opt.Value;
+        return t.IsClaudeCode ? "claude-code"
+             : t.IsCopilotCli ? "copilot-cli"
+             : t.IsOpencode ? "opencode"
+             : t.IsCursor ? "cursor"
+             : t.IsCline ? "cline"
+             : t.IsHermes ? "hermes"
+             : "manual";
+    }
 }

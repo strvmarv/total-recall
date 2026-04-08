@@ -21,6 +21,7 @@ using Spectre.Console;
 using TotalRecall.Cli.Internal;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Config;
+using TotalRecall.Infrastructure.Memory;
 using TotalRecall.Infrastructure.Storage;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 

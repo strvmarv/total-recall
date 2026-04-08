@@ -1,17 +1,17 @@
-// src/TotalRecall.Cli/Internal/TierNames.cs
+// src/TotalRecall.Infrastructure/Memory/TierNames.cs
 //
-// Plan 5 Task 5.4 — Cli-local equivalents of the Tier/ContentType string
-// formatters and the 6-pair sweep table. A deliberate duplicate of
-// Server/Handlers/EntryMapping.cs (which is internal to Server) because
-// TotalRecall.Cli does NOT reference TotalRecall.Server. If Plan 5.10's
-// output formatter refactor ever exposes a cross-host helper, this file
-// can collapse into it.
+// Plan 6 Task 6.0a — promoted from src/TotalRecall.Cli/Internal/TierNames.cs
+// so both the CLI and the MCP Server can share the same Tier/ContentType
+// parse + format helpers and the 6-pair sweep table without duplicating
+// code (closes Plan 5 carry-forward #8). The shape of the public surface
+// matches the old Cli-local version one-for-one; the only difference is
+// the namespace and the fact that it is now `public`.
 
 using TotalRecall.Core;
 
-namespace TotalRecall.Cli.Internal;
+namespace TotalRecall.Infrastructure.Memory;
 
-internal static class TierNames
+public static class TierNames
 {
     public static readonly (Tier Tier, ContentType Type)[] AllTablePairs =
     {

@@ -1,17 +1,17 @@
-// src/TotalRecall.Cli/Internal/SourceToolParser.cs
+// src/TotalRecall.Infrastructure/Memory/SourceToolParser.cs
 //
-// Plan 5 Task 5.10 — parses the wire-format `source_tool` string produced
-// by `memory export` back into the F# SourceTool DU. Cli-local because
-// the canonical mapping in TotalRecall.Infrastructure.Storage
-// (SourceToolMapping) is internal to Infrastructure. Keep this table in
-// sync with Infrastructure/Storage/SqliteStore.cs:SourceToolMapping.Parse
-// and the exporter serializer in Memory/ExportCommand.cs.
+// Plan 6 Task 6.0a — promoted from src/TotalRecall.Cli/Internal/SourceToolParser.cs
+// so the Server-side memory_import handler (which has no reference to the
+// CLI project) can parse the wire-format source_tool string back into the
+// F# SourceTool DU without duplicating the switch table. Keep in sync
+// with the Infrastructure.Storage SourceToolMapping table and the
+// ExportCommand/MemoryExportHandler serializers.
 
 using TotalRecall.Core;
 
-namespace TotalRecall.Cli.Internal;
+namespace TotalRecall.Infrastructure.Memory;
 
-internal static class SourceToolParser
+public static class SourceToolParser
 {
     /// <summary>
     /// Parses <paramref name="value"/> into a <see cref="SourceTool"/>.

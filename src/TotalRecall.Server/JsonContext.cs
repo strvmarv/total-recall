@@ -345,6 +345,109 @@ public sealed record LastCompactionDto(
     [property: JsonPropertyName("to")] string To,
     [property: JsonPropertyName("reason")] string Reason);
 
+// ---- Task 6.0a: memory admin DTOs ----
+//
+// Wire shapes for the 7 new MCP handlers added in Plan 6 Task 6.0a
+// (memory_promote, memory_demote, memory_inspect, memory_history,
+// memory_lineage, memory_export, memory_import). These mirror the CLI
+// command outputs but are serialized through source-gen JsonContext
+// instead of the CLI's hand-rolled JSON writers, so AOT publish stays
+// trim-clean.
+
+public sealed record MemoryMoveResultDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("from_tier")] string FromTier,
+    [property: JsonPropertyName("from_content_type")] string FromContentType,
+    [property: JsonPropertyName("to_tier")] string ToTier,
+    [property: JsonPropertyName("to_content_type")] string ToContentType,
+    [property: JsonPropertyName("success")] bool Success);
+
+// Full-fat entry detail for memory_inspect. Extends EntryDto with the
+// location (tier / content_type), source_tool / parent_id / collection_id /
+// metadata that CLI `memory inspect` also shows, and an optional
+// compaction_history entry sourced from CompactionLog.GetByTargetEntryId.
+public sealed record MemoryInspectResultDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("tier")] string Tier,
+    [property: JsonPropertyName("content_type")] string ContentType,
+    [property: JsonPropertyName("content")] string Content,
+    [property: JsonPropertyName("summary")] string? Summary,
+    [property: JsonPropertyName("source")] string? Source,
+    [property: JsonPropertyName("source_tool")] string? SourceTool,
+    [property: JsonPropertyName("project")] string? Project,
+    [property: JsonPropertyName("tags")] string[] Tags,
+    [property: JsonPropertyName("created_at")] long CreatedAt,
+    [property: JsonPropertyName("updated_at")] long UpdatedAt,
+    [property: JsonPropertyName("last_accessed_at")] long LastAccessedAt,
+    [property: JsonPropertyName("access_count")] int AccessCount,
+    [property: JsonPropertyName("decay_score")] double DecayScore,
+    [property: JsonPropertyName("parent_id")] string? ParentId,
+    [property: JsonPropertyName("collection_id")] string? CollectionId,
+    [property: JsonPropertyName("metadata")] string Metadata,
+    [property: JsonPropertyName("compaction_history")] CompactionMovementDto? CompactionHistory);
+
+// Wire projection of an Infrastructure.Telemetry.CompactionMovementRow.
+// Used by both memory_history (array) and memory_inspect (single, optional).
+public sealed record CompactionMovementDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("timestamp")] long Timestamp,
+    [property: JsonPropertyName("session_id")] string? SessionId,
+    [property: JsonPropertyName("source_tier")] string SourceTier,
+    [property: JsonPropertyName("target_tier")] string? TargetTier,
+    [property: JsonPropertyName("source_entry_ids")] string[] SourceEntryIds,
+    [property: JsonPropertyName("target_entry_id")] string? TargetEntryId,
+    [property: JsonPropertyName("reason")] string Reason);
+
+public sealed record MemoryHistoryResultDto(
+    [property: JsonPropertyName("movements")] CompactionMovementDto[] Movements,
+    [property: JsonPropertyName("count")] int Count);
+
+// Lineage tree node. Sources is null for leaf nodes so the field stays
+// consistent with the CLI hand-rolled shape (which omits empty sources on
+// leaves via conditional key emission).
+public sealed record LineageNodeDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("compaction_log_id")] string? CompactionLogId,
+    [property: JsonPropertyName("reason")] string? Reason,
+    [property: JsonPropertyName("timestamp")] long? Timestamp,
+    [property: JsonPropertyName("source_tier")] string? SourceTier,
+    [property: JsonPropertyName("target_tier")] string? TargetTier,
+    [property: JsonPropertyName("sources")] LineageNodeDto[]? Sources);
+
+// memory_export entry — mirrors the export envelope row. Kept separate
+// from EntryDto because the export shape carries (tier, content_type,
+// source_tool, parent_id, collection_id, metadata) alongside the core
+// Entry fields, and re-uses the same snake_case wire names the CLI's
+// hand-rolled writer emits.
+public sealed record ExportEntryDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("content")] string Content,
+    [property: JsonPropertyName("summary")] string? Summary,
+    [property: JsonPropertyName("source")] string? Source,
+    [property: JsonPropertyName("source_tool")] string? SourceTool,
+    [property: JsonPropertyName("project")] string? Project,
+    [property: JsonPropertyName("tags")] string[] Tags,
+    [property: JsonPropertyName("created_at")] long CreatedAt,
+    [property: JsonPropertyName("updated_at")] long UpdatedAt,
+    [property: JsonPropertyName("last_accessed_at")] long LastAccessedAt,
+    [property: JsonPropertyName("access_count")] int AccessCount,
+    [property: JsonPropertyName("decay_score")] double DecayScore,
+    [property: JsonPropertyName("parent_id")] string? ParentId,
+    [property: JsonPropertyName("collection_id")] string? CollectionId,
+    [property: JsonPropertyName("metadata")] string Metadata,
+    [property: JsonPropertyName("tier")] string Tier,
+    [property: JsonPropertyName("content_type")] string ContentType);
+
+public sealed record MemoryExportResultDto(
+    [property: JsonPropertyName("version")] int Version,
+    [property: JsonPropertyName("exported_at")] long ExportedAt,
+    [property: JsonPropertyName("entries")] ExportEntryDto[] Entries);
+
+public sealed record MemoryImportResultDto(
+    [property: JsonPropertyName("imported_count")] int ImportedCount,
+    [property: JsonPropertyName("skipped_count")] int SkippedCount,
+    [property: JsonPropertyName("errors")] string[] Errors);
+
 // ---------- source-gen context ----------
 
 [JsonSourceGenerationOptions(
@@ -403,6 +506,18 @@ public sealed record LastCompactionDto(
 [JsonSerializable(typeof(EmbeddingStatusDto))]
 [JsonSerializable(typeof(ActivityStatusDto))]
 [JsonSerializable(typeof(LastCompactionDto))]
+// ---- Task 6.0a: memory admin DTOs ----
+[JsonSerializable(typeof(MemoryMoveResultDto))]
+[JsonSerializable(typeof(MemoryInspectResultDto))]
+[JsonSerializable(typeof(CompactionMovementDto))]
+[JsonSerializable(typeof(CompactionMovementDto[]))]
+[JsonSerializable(typeof(MemoryHistoryResultDto))]
+[JsonSerializable(typeof(LineageNodeDto))]
+[JsonSerializable(typeof(LineageNodeDto[]))]
+[JsonSerializable(typeof(ExportEntryDto))]
+[JsonSerializable(typeof(ExportEntryDto[]))]
+[JsonSerializable(typeof(MemoryExportResultDto))]
+[JsonSerializable(typeof(MemoryImportResultDto))]
 public partial class JsonContext : JsonSerializerContext
 {
 }

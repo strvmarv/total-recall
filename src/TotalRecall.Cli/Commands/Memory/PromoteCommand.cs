@@ -12,6 +12,7 @@ using System.Threading.Tasks;
 using TotalRecall.Cli.Internal;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Embedding;
+using TotalRecall.Infrastructure.Memory;
 using TotalRecall.Infrastructure.Search;
 using TotalRecall.Infrastructure.Storage;
 
