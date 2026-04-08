@@ -1,0 +1,112 @@
+// tests/TotalRecall.Cli.Tests/TestSupport/FakeMemoryInfra.cs
+//
+// Plan 5 Task 5.4 — thin test doubles for ISqliteStore / IVectorSearch /
+// IEmbedder used by the memory admin CLI verb tests. Deliberately minimal:
+// only the methods actually invoked by promote/demote/inspect are
+// implemented; the rest throw NotImplementedException so accidental
+// surface expansion fails loudly.
+
+using System;
+using System.Collections.Generic;
+using Microsoft.FSharp.Collections;
+using Microsoft.FSharp.Core;
+using TotalRecall.Core;
+using TotalRecall.Infrastructure.Embedding;
+using TotalRecall.Infrastructure.Search;
+using TotalRecall.Infrastructure.Storage;
+
+namespace TotalRecall.Cli.Tests.TestSupport;
+
+internal sealed class FakeSqliteStore : ISqliteStore
+{
+    private readonly Dictionary<(Tier, ContentType, string), Entry> _rows = new();
+    public List<(Tier FromTier, ContentType FromType, Tier ToTier, ContentType ToType, string Id)> MoveCalls { get; } = new();
+
+    public void Seed(Tier tier, ContentType type, Entry e)
+    {
+        _rows[(tier, type, e.Id)] = e;
+    }
+
+    public Entry? Get(Tier tier, ContentType type, string id)
+    {
+        return _rows.TryGetValue((tier, type, id), out var e) ? e : null;
+    }
+
+    public void Move(Tier fromTier, ContentType fromType, Tier toTier, ContentType toType, string id)
+    {
+        MoveCalls.Add((fromTier, fromType, toTier, toType, id));
+        if (!_rows.TryGetValue((fromTier, fromType, id), out var e))
+            throw new InvalidOperationException($"no row at {fromTier}/{fromType}/{id}");
+        _rows.Remove((fromTier, fromType, id));
+        _rows[(toTier, toType, id)] = e;
+    }
+
+    // Unused surface — throw to catch accidental use.
+    public string Insert(Tier tier, ContentType type, InsertEntryOpts opts) => throw new NotImplementedException();
+    public void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts) => throw new NotImplementedException();
+    public void Delete(Tier tier, ContentType type, string id) => throw new NotImplementedException();
+    public IReadOnlyList<Entry> List(Tier tier, ContentType type, ListEntriesOpts? opts = null) => throw new NotImplementedException();
+    public int Count(Tier tier, ContentType type) => throw new NotImplementedException();
+    public int CountKnowledgeCollections() => throw new NotImplementedException();
+    public IReadOnlyList<Entry> ListByMetadata(Tier tier, ContentType type, IReadOnlyDictionary<string, string> metadataFilter, ListEntriesOpts? opts = null) => throw new NotImplementedException();
+}
+
+internal sealed class FakeVectorSearch : IVectorSearch
+{
+    public List<(Tier Tier, ContentType Type, string Id)> Deletes { get; } = new();
+    public List<(Tier Tier, ContentType Type, string Id, float[] Embedding)> Inserts { get; } = new();
+
+    public void InsertEmbedding(Tier tier, ContentType type, string entryId, ReadOnlyMemory<float> embedding)
+    {
+        Inserts.Add((tier, type, entryId, embedding.ToArray()));
+    }
+
+    public void DeleteEmbedding(Tier tier, ContentType type, string entryId)
+    {
+        Deletes.Add((tier, type, entryId));
+    }
+
+    public IReadOnlyList<VectorSearchResult> SearchByVector(Tier tier, ContentType type, ReadOnlyMemory<float> queryVec, VectorSearchOpts opts) => throw new NotImplementedException();
+    public IReadOnlyList<VectorSearchResult> SearchMultipleTiers(IReadOnlyList<(Tier Tier, ContentType Type)> targets, ReadOnlyMemory<float> queryVec, VectorSearchOpts opts) => throw new NotImplementedException();
+}
+
+internal sealed class RecordingEmbedder : IEmbedder
+{
+    public List<string> Calls { get; } = new();
+    public float[] Embed(string text)
+    {
+        Calls.Add(text);
+        return new float[384];
+    }
+}
+
+internal static class EntryFactory
+{
+    public static Entry Make(
+        string id,
+        string content = "hello world",
+        string? summary = null,
+        string? source = null,
+        string? project = null,
+        IEnumerable<string>? tags = null,
+        long createdAt = 1_700_000_000_000L,
+        long updatedAt = 1_700_000_000_000L,
+        long lastAccessedAt = 1_700_000_000_000L,
+        int accessCount = 0,
+        double decayScore = 1.0,
+        string metadataJson = "")
+    {
+        return new Entry(
+            id,
+            content,
+            summary is null ? FSharpOption<string>.None : FSharpOption<string>.Some(summary),
+            source is null ? FSharpOption<string>.None : FSharpOption<string>.Some(source),
+            FSharpOption<SourceTool>.None,
+            project is null ? FSharpOption<string>.None : FSharpOption<string>.Some(project),
+            ListModule.OfSeq(tags ?? Array.Empty<string>()),
+            createdAt, updatedAt, lastAccessedAt, accessCount, decayScore,
+            FSharpOption<string>.None,
+            FSharpOption<string>.None,
+            metadataJson);
+    }
+}
