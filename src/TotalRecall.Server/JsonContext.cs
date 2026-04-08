@@ -270,6 +270,58 @@ public sealed record SessionContextResultDto(
     [property: JsonPropertyName("entryCount")] int EntryCount,
     [property: JsonPropertyName("context")] string Context);
 
+// ---------- Task 4.11: status payload ----------
+//
+// Structured status shape returned by StatusHandler. Mirrors (a scoped
+// subset of) src-ts/tools/system-tools.ts:53-135. Plan 4 scope covers
+// tierSizes, knowledgeBase, db, embedding, activity (stub), and
+// lastCompaction (stub). Last-session-age lives in the session_start
+// domain and is intentionally NOT surfaced here.
+public sealed record StatusResultDto(
+    [property: JsonPropertyName("tierSizes")] TierSizesDto TierSizes,
+    [property: JsonPropertyName("knowledgeBase")] KbStatusDto KnowledgeBase,
+    [property: JsonPropertyName("db")] DbStatusDto Db,
+    [property: JsonPropertyName("embedding")] EmbeddingStatusDto Embedding,
+    [property: JsonPropertyName("activity")] ActivityStatusDto Activity,
+    [property: JsonPropertyName("lastCompaction")] LastCompactionDto? LastCompaction);
+
+public sealed record TierSizesDto(
+    [property: JsonPropertyName("hot_memories")] int HotMemories,
+    [property: JsonPropertyName("hot_knowledge")] int HotKnowledge,
+    [property: JsonPropertyName("warm_memories")] int WarmMemories,
+    [property: JsonPropertyName("warm_knowledge")] int WarmKnowledge,
+    [property: JsonPropertyName("cold_memories")] int ColdMemories,
+    [property: JsonPropertyName("cold_knowledge")] int ColdKnowledge);
+
+public sealed record KbStatusDto(
+    [property: JsonPropertyName("collections")] KbCollectionSummaryDto[] Collections,
+    [property: JsonPropertyName("totalChunks")] int TotalChunks);
+
+public sealed record KbCollectionSummaryDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("name")] string? Name);
+
+public sealed record DbStatusDto(
+    [property: JsonPropertyName("path")] string Path,
+    [property: JsonPropertyName("sizeBytes")] long? SizeBytes,
+    [property: JsonPropertyName("sessionId")] string SessionId);
+
+public sealed record EmbeddingStatusDto(
+    [property: JsonPropertyName("model")] string Model,
+    [property: JsonPropertyName("dimensions")] int Dimensions);
+
+public sealed record ActivityStatusDto(
+    [property: JsonPropertyName("retrievals7d")] int Retrievals7d,
+    [property: JsonPropertyName("avgTopScore7d")] double? AvgTopScore7d,
+    [property: JsonPropertyName("positiveOutcomes7d")] int PositiveOutcomes7d,
+    [property: JsonPropertyName("negativeOutcomes7d")] int NegativeOutcomes7d);
+
+public sealed record LastCompactionDto(
+    [property: JsonPropertyName("timestamp")] long Timestamp,
+    [property: JsonPropertyName("from")] string From,
+    [property: JsonPropertyName("to")] string To,
+    [property: JsonPropertyName("reason")] string Reason);
+
 // ---------- source-gen context ----------
 
 [JsonSourceGenerationOptions(
@@ -318,6 +370,16 @@ public sealed record SessionContextResultDto(
 // ---- Task 4.10: session_end / session_context DTOs ----
 [JsonSerializable(typeof(SessionEndResultDto))]
 [JsonSerializable(typeof(SessionContextResultDto))]
+// ---- Task 4.11: status DTOs ----
+[JsonSerializable(typeof(StatusResultDto))]
+[JsonSerializable(typeof(TierSizesDto))]
+[JsonSerializable(typeof(KbStatusDto))]
+[JsonSerializable(typeof(KbCollectionSummaryDto))]
+[JsonSerializable(typeof(KbCollectionSummaryDto[]))]
+[JsonSerializable(typeof(DbStatusDto))]
+[JsonSerializable(typeof(EmbeddingStatusDto))]
+[JsonSerializable(typeof(ActivityStatusDto))]
+[JsonSerializable(typeof(LastCompactionDto))]
 public partial class JsonContext : JsonSerializerContext
 {
 }

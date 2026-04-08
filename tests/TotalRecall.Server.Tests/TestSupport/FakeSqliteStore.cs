@@ -89,8 +89,42 @@ public sealed class FakeSqliteStore : ISqliteStore
         return src.ToList();
     }
 
+    /// <summary>
+    /// Pre-seeded counts per (tier, type). Consumed by <see cref="Count"/>.
+    /// Task 4.11 StatusHandler relies on this. Defaults to 0 when not seeded.
+    /// </summary>
+    public Dictionary<(Tier, ContentType), int> Counts { get; } = new();
+
+    /// <summary>
+    /// Pre-seeded metadata-filtered slots. Key includes a sorted-string
+    /// rendering of the filter so multiple filters on the same (tier, type)
+    /// can coexist. Task 4.11 StatusHandler uses a
+    /// <c>{"type":"collection"}</c> filter against cold_knowledge.
+    /// </summary>
+    public Dictionary<(Tier, ContentType, string), List<Entry>> ListByMetadataSlots { get; } = new();
+
+    public void SeedCount(Tier tier, ContentType type, int count)
+    {
+        Counts[(tier, type)] = count;
+    }
+
+    public void SeedListByMetadata(
+        Tier tier,
+        ContentType type,
+        IReadOnlyDictionary<string, string> metadataFilter,
+        params Entry[] entries)
+    {
+        var key = (tier, type, FilterKey(metadataFilter));
+        if (!ListByMetadataSlots.TryGetValue(key, out var slot))
+        {
+            slot = new List<Entry>();
+            ListByMetadataSlots[key] = slot;
+        }
+        slot.AddRange(entries);
+    }
+
     public int Count(Tier tier, ContentType type) =>
-        throw new NotImplementedException();
+        Counts.TryGetValue((tier, type), out var n) ? n : 0;
 
     public int CountKnowledgeCollections() =>
         throw new NotImplementedException();
@@ -99,8 +133,23 @@ public sealed class FakeSqliteStore : ISqliteStore
         Tier tier,
         ContentType type,
         IReadOnlyDictionary<string, string> metadataFilter,
-        ListEntriesOpts? opts = null) =>
-        throw new NotImplementedException();
+        ListEntriesOpts? opts = null)
+    {
+        var key = (tier, type, FilterKey(metadataFilter));
+        if (!ListByMetadataSlots.TryGetValue(key, out var slot))
+            return Array.Empty<Entry>();
+        IEnumerable<Entry> src = slot;
+        if (opts?.Limit is int lim) src = src.Take(lim);
+        return src.ToList();
+    }
+
+    private static string FilterKey(IReadOnlyDictionary<string, string> filter)
+    {
+        var parts = filter
+            .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+            .Select(kv => kv.Key + "=" + kv.Value);
+        return string.Join(";", parts);
+    }
 
     public void Move(Tier fromTier, ContentType fromType, Tier toTier, ContentType toType, string id) =>
         throw new NotImplementedException();
