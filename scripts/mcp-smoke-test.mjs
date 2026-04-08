@@ -289,10 +289,81 @@ async function runPass2CustomDbPath() {
   }
 }
 
+/**
+ * Pass 3: invalid TOTAL_RECALL_DB_PATH must fail fast at startup.
+ *
+ * This pass does NOT use the MCP client SDK — it spawns the server
+ * process directly and inspects exit code + stderr. The SDK would
+ * blow up during transport init when the child exits, masking the
+ * real assertion.
+ *
+ * Contract from the design spec:
+ *   - Server must exit with a non-zero code.
+ *   - Exit must happen BEFORE the 5-second watchdog.
+ *   - stderr must contain the SqliteDbPathError message.
+ *   - stderr must echo the raw bad value.
+ *   - No partial DB should be created anywhere.
+ */
+async function runPass3InvalidDbPath() {
+  process.stdout.write(`[smoke] pass 3: invalid TOTAL_RECALL_DB_PATH="./relative.db" (expecting fail-fast)\n`);
+
+  const child = spawn(process.execPath, [START_CJS], {
+    cwd: REPO_ROOT,
+    env: {
+      ...process.env,
+      TOTAL_RECALL_DB_PATH: "./relative.db",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  let stdoutBuf = "";
+  let stderrBuf = "";
+  child.stdout.on("data", (c) => { stdoutBuf += c.toString(); });
+  child.stderr.on("data", (c) => { stderrBuf += c.toString(); });
+
+  const WATCHDOG_MS = 5000;
+  let timedOut = false;
+  const watchdog = setTimeout(() => {
+    timedOut = true;
+    try { child.kill("SIGKILL"); } catch {}
+  }, WATCHDOG_MS);
+
+  const exitInfo = await new Promise((resolve) => {
+    child.on("exit", (code, signal) => {
+      clearTimeout(watchdog);
+      resolve({ code, signal });
+    });
+  });
+
+  if (timedOut) {
+    throw new Error(
+      `pass 3: server did not exit within ${WATCHDOG_MS}ms — fail-fast contract violated. stderr so far: ${stderrBuf}`,
+    );
+  }
+  if (exitInfo.code === 0) {
+    throw new Error(`pass 3: server exited with code 0 — expected non-zero. stderr: ${stderrBuf}`);
+  }
+  if (!stderrBuf.includes("TOTAL_RECALL_DB_PATH must be absolute or start with ~/")) {
+    throw new Error(
+      `pass 3: stderr missing expected error message. Got stderr: ${stderrBuf}`,
+    );
+  }
+  if (!stderrBuf.includes('"./relative.db"')) {
+    throw new Error(
+      `pass 3: stderr missing raw value echo. Got stderr: ${stderrBuf}`,
+    );
+  }
+  ok(`pass 3: server exited with code ${exitInfo.code} (signal ${exitInfo.signal ?? "none"}) before watchdog`);
+  ok(`pass 3: stderr contained the expected SqliteDbPathError message`);
+  // stdoutBuf is captured for potential future assertions (e.g. "did not
+  // write MCP handshake") but we don't assert on it right now.
+  void stdoutBuf;
+}
+
 async function runAllPasses() {
   await runPass1Default();
   await runPass2CustomDbPath();
-  // Pass 3 (invalid env var fail-fast) added in Task 6.
+  await runPass3InvalidDbPath();
 }
 
 try {
