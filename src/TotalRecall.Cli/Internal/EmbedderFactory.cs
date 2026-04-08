@@ -1,20 +1,22 @@
-// src/TotalRecall.Cli/Commands/Eval/EvalEmbedderFactory.cs
+// src/TotalRecall.Cli/Internal/EmbedderFactory.cs
 //
-// Plan 5 Task 5.3a — small shared helper that mirrors the model bootstrap
-// path used by MigrateCommand.BuildProductionMigrator. Both eval CLI verbs
-// (BenchmarkCommand + ReportCommand if it ever needs an embedder) and any
-// future Plan 5 leaf that needs an OnnxEmbedder reuse this rather than
-// re-inlining the AppContext.BaseDirectory walk.
+// Plan 5 Task 5.3b — shared helper for CLI commands that need a real
+// OnnxEmbedder in production. Extracted from the two duplicated copies
+// that landed in 5.2 (MigrateCommand.BuildProductionMigrator) and
+// 5.3a (EvalEmbedderFactory.Build). Walks AppContext.BaseDirectory
+// upward to find bundled models/, loads the registry, points the
+// user override dir at $HOME/.total-recall/models, and constructs
+// an OnnxEmbedder for "all-MiniLM-L6-v2".
 
 using System;
 using System.IO;
 using TotalRecall.Infrastructure.Embedding;
 
-namespace TotalRecall.Cli.Commands.Eval;
+namespace TotalRecall.Cli.Internal;
 
-internal static class EvalEmbedderFactory
+internal static class EmbedderFactory
 {
-    public static OnnxEmbedder Build()
+    public static OnnxEmbedder CreateProduction()
     {
         var bundledModelsDir = FindBundledModelsDir();
         var registryPath = Path.Combine(bundledModelsDir, "registry.json");

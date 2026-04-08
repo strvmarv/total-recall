@@ -21,6 +21,9 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Text;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
 namespace TotalRecall.Infrastructure.Eval;
@@ -43,6 +46,16 @@ public sealed record CandidateRow(
 /// surface what the retrieval surfaced for the miss query.
 /// </summary>
 public sealed record MissContext(string Query, string? TopContent, string? TopEntryId);
+
+/// <summary>
+/// Result of <see cref="BenchmarkCandidates.Resolve"/>. Counts mirror the
+/// number of accept/reject ids the caller passed in; <see cref="CorpusEntries"/>
+/// is the set of JSON lines appended to the benchmark corpus file.
+/// </summary>
+public sealed record CandidateResolveResult(
+    int Accepted,
+    int Rejected,
+    IReadOnlyList<string> CorpusEntries);
 
 /// <summary>
 /// Read/upsert helpers over <c>benchmark_candidates</c>. The 5.3a slice
@@ -140,5 +153,133 @@ ON CONFLICT(query_text) DO UPDATE SET
             pLast.Value = m.Timestamp;
             cmd.ExecuteNonQuery();
         }
+    }
+
+    /// <summary>
+    /// Flip <c>status</c> for accepted/rejected rows, build benchmark corpus
+    /// entries from the accepted rows, and append them to <paramref name="benchmarkFilePath"/>.
+    /// Ports <c>resolveCandidates</c> in <c>src-ts/eval/benchmark-candidates.ts</c>.
+    /// Missing accept ids are silently skipped (matches TS).
+    /// </summary>
+    public CandidateResolveResult Resolve(
+        IReadOnlyList<string> acceptIds,
+        IReadOnlyList<string> rejectIds,
+        string benchmarkFilePath)
+    {
+        ArgumentNullException.ThrowIfNull(acceptIds);
+        ArgumentNullException.ThrowIfNull(rejectIds);
+        ArgumentNullException.ThrowIfNull(benchmarkFilePath);
+
+        var corpusEntries = new List<string>();
+        var today = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+        using var selectCmd = _conn.CreateCommand();
+        selectCmd.CommandText =
+            "SELECT query_text, top_result_content FROM benchmark_candidates WHERE id = $id";
+        var pSelectId = selectCmd.Parameters.Add("$id", Microsoft.Data.Sqlite.SqliteType.Text);
+
+        using var acceptCmd = _conn.CreateCommand();
+        acceptCmd.CommandText = "UPDATE benchmark_candidates SET status = 'accepted' WHERE id = $id";
+        var pAcceptId = acceptCmd.Parameters.Add("$id", Microsoft.Data.Sqlite.SqliteType.Text);
+
+        using var rejectCmd = _conn.CreateCommand();
+        rejectCmd.CommandText = "UPDATE benchmark_candidates SET status = 'rejected' WHERE id = $id";
+        var pRejectId = rejectCmd.Parameters.Add("$id", Microsoft.Data.Sqlite.SqliteType.Text);
+
+        foreach (var id in acceptIds)
+        {
+            pSelectId.Value = id;
+            string? query = null;
+            string? topContent = null;
+            using (var reader = selectCmd.ExecuteReader())
+            {
+                if (reader.Read())
+                {
+                    query = reader.GetString(0);
+                    topContent = reader.IsDBNull(1) ? null : reader.GetString(1);
+                }
+            }
+            if (query is null) continue;
+
+            pAcceptId.Value = id;
+            acceptCmd.ExecuteNonQuery();
+
+            var expected = topContent is null
+                ? string.Empty
+                : (topContent.Length > 100 ? topContent.Substring(0, 100) : topContent);
+            corpusEntries.Add(BuildCorpusEntry(query, expected, today));
+        }
+
+        foreach (var id in rejectIds)
+        {
+            pRejectId.Value = id;
+            rejectCmd.ExecuteNonQuery();
+        }
+
+        if (corpusEntries.Count > 0)
+        {
+            var existing = File.Exists(benchmarkFilePath)
+                ? File.ReadAllText(benchmarkFilePath)
+                : string.Empty;
+            var trailing = existing.Length == 0 || existing.EndsWith("\n", StringComparison.Ordinal)
+                ? string.Empty
+                : "\n";
+            var sb = new StringBuilder();
+            sb.Append(existing);
+            sb.Append(trailing);
+            for (int i = 0; i < corpusEntries.Count; i++)
+            {
+                if (i > 0) sb.Append('\n');
+                sb.Append(corpusEntries[i]);
+            }
+            sb.Append('\n');
+            File.WriteAllText(benchmarkFilePath, sb.ToString());
+        }
+
+        return new CandidateResolveResult(
+            Accepted: acceptIds.Count,
+            Rejected: rejectIds.Count,
+            CorpusEntries: corpusEntries);
+    }
+
+    private static string BuildCorpusEntry(string query, string expectedContains, string addedDate)
+    {
+        var sb = new StringBuilder();
+        sb.Append('{');
+        sb.Append("\"query\":");
+        AppendJsonString(sb, query);
+        sb.Append(",\"expected_content_contains\":");
+        AppendJsonString(sb, expectedContains);
+        sb.Append(",\"expected_tier\":\"warm\"");
+        sb.Append(",\"source\":\"grow\"");
+        sb.Append(",\"added\":");
+        AppendJsonString(sb, addedDate);
+        sb.Append('}');
+        return sb.ToString();
+    }
+
+    private static void AppendJsonString(StringBuilder sb, string s)
+    {
+        sb.Append('"');
+        foreach (var c in s)
+        {
+            switch (c)
+            {
+                case '"': sb.Append("\\\""); break;
+                case '\\': sb.Append("\\\\"); break;
+                case '\n': sb.Append("\\n"); break;
+                case '\r': sb.Append("\\r"); break;
+                case '\t': sb.Append("\\t"); break;
+                case '\b': sb.Append("\\b"); break;
+                case '\f': sb.Append("\\f"); break;
+                default:
+                    if (c < 0x20)
+                        sb.Append("\\u").Append(((int)c).ToString("X4", CultureInfo.InvariantCulture));
+                    else
+                        sb.Append(c);
+                    break;
+            }
+        }
+        sb.Append('"');
     }
 }

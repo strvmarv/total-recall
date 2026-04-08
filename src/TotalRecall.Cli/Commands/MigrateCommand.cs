@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using TotalRecall.Infrastructure.Embedding;
+using TotalRecall.Cli.Internal;
 using TotalRecall.Infrastructure.Migration;
 
 namespace TotalRecall.Cli.Commands;
@@ -163,41 +163,10 @@ public sealed class MigrateCommand : ICliCommand
 
     private static IMigrateCommand BuildProductionMigrator()
     {
-        // Walk up from the binary's directory to find the bundled models/
-        // tree. Mirrors OnnxEmbedderIntegrationTests.FindRepoRoot — Plan 6
-        // will replace this with a proper composition-root resolve.
-        var bundledModelsDir = FindBundledModelsDir();
-        var registryPath = Path.Combine(bundledModelsDir, "registry.json");
-        var registry = ModelRegistry.LoadFromFile(registryPath);
-
-        // User override dir: $HOME/.total-recall/models (the TS reference
-        // uses this path too). Falls back to a temp path if HOME is unset.
-        var home = Environment.GetEnvironmentVariable("HOME")
-            ?? Environment.GetEnvironmentVariable("USERPROFILE")
-            ?? Path.GetTempPath();
-        var userModelsDir = Path.Combine(home, ".total-recall", "models");
-        Directory.CreateDirectory(userModelsDir);
-
-        var manager = new ModelManager(registry, bundledModelsDir, userModelsDir);
-        var embedder = new OnnxEmbedder(manager, "all-MiniLM-L6-v2");
+        // Embedder construction is shared with the eval CLI verbs via
+        // Cli/Internal/EmbedderFactory.cs — see Plan 5 Task 5.3b cleanup.
+        var embedder = EmbedderFactory.CreateProduction();
         return new TsDataMigrator(embedder, progress: Console.Out);
-    }
-
-    private static string FindBundledModelsDir()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null)
-        {
-            var candidate = Path.Combine(dir.FullName, "models", "registry.json");
-            if (File.Exists(candidate))
-            {
-                return Path.Combine(dir.FullName, "models");
-            }
-            dir = dir.Parent;
-        }
-        throw new InvalidOperationException(
-            "Could not locate bundled models/ directory (walked up from "
-            + AppContext.BaseDirectory + " looking for models/registry.json)");
     }
 
     private static void PrintUsage(TextWriter w)

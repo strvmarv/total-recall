@@ -156,6 +156,81 @@ public sealed class CompactionLogTests
     }
 
     [Fact]
+    public void GetAllForAnalytics_ReturnsProjectedRows_DescByTimestamp()
+    {
+        var (conn, log) = NewLog();
+        using (conn)
+        {
+            // Insert three entries with varying preservation / drift values.
+            log.LogEvent(new CompactionLogEntry(
+                SessionId: "s",
+                SourceTier: "hot",
+                TargetTier: "warm",
+                SourceEntryIds: new[] { "a" },
+                TargetEntryId: "t1",
+                DecayScores: new Dictionary<string, double>(),
+                Reason: "decay",
+                ConfigSnapshotId: "cfg",
+                SemanticDrift: 0.1,
+                PreservationRatio: 0.9));
+            System.Threading.Thread.Sleep(5);
+            log.LogEvent(new CompactionLogEntry(
+                SessionId: "s",
+                SourceTier: "hot",
+                TargetTier: "warm",
+                SourceEntryIds: new[] { "b" },
+                TargetEntryId: "t2",
+                DecayScores: new Dictionary<string, double>(),
+                Reason: "decay",
+                ConfigSnapshotId: "cfg",
+                SemanticDrift: null,
+                PreservationRatio: null));
+            System.Threading.Thread.Sleep(5);
+            log.LogEvent(new CompactionLogEntry(
+                SessionId: "s",
+                SourceTier: "hot",
+                TargetTier: "warm",
+                SourceEntryIds: new[] { "c" },
+                TargetEntryId: "t3",
+                DecayScores: new Dictionary<string, double>(),
+                Reason: "decay",
+                ConfigSnapshotId: "cfg",
+                SemanticDrift: 0.3,
+                PreservationRatio: 0.6));
+
+            var rows = log.GetAllForAnalytics();
+            Assert.Equal(3, rows.Count);
+            // DESC order: most recently inserted first.
+            Assert.Equal(0.6, rows[0].PreservationRatio);
+            Assert.Equal(0.3, rows[0].SemanticDrift);
+            Assert.Null(rows[1].PreservationRatio);
+            Assert.Null(rows[1].SemanticDrift);
+            Assert.Equal(0.9, rows[2].PreservationRatio);
+            Assert.Equal(0.1, rows[2].SemanticDrift);
+            // Timestamps strictly non-increasing.
+            Assert.True(rows[0].Timestamp >= rows[1].Timestamp);
+            Assert.True(rows[1].Timestamp >= rows[2].Timestamp);
+        }
+    }
+
+    [Fact]
+    public void GetAllForAnalytics_WithSinceCutoff_FiltersOlderRows()
+    {
+        var (conn, log) = NewLog();
+        using (conn)
+        {
+            log.LogEvent(SampleEntry());
+            System.Threading.Thread.Sleep(5);
+            var cutoff = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            System.Threading.Thread.Sleep(5);
+            log.LogEvent(SampleEntry());
+
+            var rows = log.GetAllForAnalytics(cutoff);
+            Assert.Single(rows);
+        }
+    }
+
+    [Fact]
     public void LogEvent_TimestampWithinReasonableRange()
     {
         var (conn, log) = NewLog();

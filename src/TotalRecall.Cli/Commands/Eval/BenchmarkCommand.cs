@@ -13,6 +13,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Spectre.Console;
+using TotalRecall.Cli.Internal;
 using TotalRecall.Infrastructure.Config;
 using TotalRecall.Infrastructure.Eval;
 using TotalRecall.Infrastructure.Search;
@@ -123,7 +124,7 @@ public sealed class BenchmarkCommand : ICliCommand
                 var vec = new VectorSearch(conn);
                 var fts = new FtsSearch(conn);
                 var hybrid = new HybridSearch(vec, fts, store);
-                var embedder = EvalEmbedderFactory.Build();
+                var embedder = EmbedderFactory.CreateProduction();
                 var runner = new BenchmarkRunner(store, vec, hybrid, embedder);
                 return await runner.RunAsync(opts, ct).ConfigureAwait(false);
             }

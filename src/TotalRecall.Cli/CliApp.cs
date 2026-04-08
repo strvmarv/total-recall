@@ -148,8 +148,10 @@ public static class CliApp
             new Commands.MigrateCommand(),
             new Commands.Eval.BenchmarkCommand(),
             new Commands.Eval.ReportCommand(),
-            // TODO(Plan 5.3b+): eval compare/snapshot/grow, memory verbs,
-            //   kb verbs, config verbs.
+            new Commands.Eval.CompareCommand(),
+            new Commands.Eval.SnapshotCommand(),
+            new Commands.Eval.GrowCommand(),
+            // TODO(Plan 5.4+): memory verbs, kb verbs, config verbs.
         };
     }
 

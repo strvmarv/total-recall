@@ -34,12 +34,12 @@ public sealed class ReportCommandTests : IDisposable
         Console.SetError(_origErr);
     }
 
-    private static RetrievalEventRow Event(double? topScore, bool? used, string? tier = "warm", string? ct = "memory", long? lat = 5)
+    private static RetrievalEventRow Event(double? topScore, bool? used, string? tier = "warm", string? ct = "memory", long? lat = 5, string query = "q")
         => new(
             Id: Guid.NewGuid().ToString(),
             Timestamp: 1000,
             SessionId: "s",
-            QueryText: "q",
+            QueryText: query,
             QuerySource: "test",
             QueryEmbedding: null,
             ResultsJson: "[]",
@@ -90,6 +90,42 @@ public sealed class ReportCommandTests : IDisposable
         Assert.True(root.TryGetProperty("byTier", out _));
         Assert.True(root.TryGetProperty("compactionHealth", out var ch));
         Assert.Equal(1, ch.GetProperty("totalCompactions").GetInt32());
+    }
+
+    [Fact]
+    public async Task JsonOutput_EscapesSpecialCharactersInQueryText()
+    {
+        // Plan 5.3b review cleanup: lock in the JSON escape correctness of
+        // ReportCommand.SerializeJson by forcing misses through topMisses
+        // with query strings containing quote, newline, and backslash.
+        var q1 = "has \"quote\"";
+        var q2 = "line1\nline2";
+        var q3 = "path\\to\\file";
+
+        var inputs = new ReportInputs(
+            Events: new List<RetrievalEventRow>
+            {
+                Event(0.1, false, query: q1),
+                Event(0.2, false, query: q2),
+                Event(0.3, false, query: q3),
+            },
+            CompactionRows: new List<CompactionAnalyticsRow>(),
+            SimilarityThreshold: 0.5);
+
+        var cmd = new ReportCommand(_ => inputs);
+        var code = await cmd.RunAsync(new[] { "--json" });
+        Assert.Equal(0, code);
+
+        using var doc = JsonDocument.Parse(_outWriter.ToString().Trim());
+        var misses = doc.RootElement.GetProperty("topMisses");
+        var decoded = new List<string>();
+        foreach (var m in misses.EnumerateArray())
+        {
+            decoded.Add(m.GetProperty("query").GetString()!);
+        }
+        Assert.Contains(q1, decoded);
+        Assert.Contains(q2, decoded);
+        Assert.Contains(q3, decoded);
     }
 
     [Fact]
