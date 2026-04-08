@@ -17,9 +17,6 @@
   <ItemGroup>
     <ProjectReference Include="..\TotalRecall.Core\TotalRecall.Core.fsproj" />
   </ItemGroup>
-  <ItemGroup>
-    <EmbeddedResource Include="Storage/Schema.sql" />
-  </ItemGroup>
 
   <!--
     Vendor the sqlite-vec native library into the output under runtimes/.

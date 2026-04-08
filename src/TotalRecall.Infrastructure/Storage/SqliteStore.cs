@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
 namespace TotalRecall.Infrastructure.Storage;
@@ -14,11 +13,7 @@ public sealed class SqliteStore : IDisposable
     public SqliteStore(string dbPath)
     {
         _conn = SqliteConnection.Open(dbPath);
-
-        var schema = LoadSchema();
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = schema;
-        cmd.ExecuteNonQuery();
+        MigrationRunner.RunMigrations(_conn);
     }
 
     public long Insert(string content, float[] embedding)
@@ -83,15 +78,4 @@ public sealed class SqliteStore : IDisposable
         Buffer.BlockCopy(floats, 0, bytes, 0, bytes.Length);
         return bytes;
     }
-
-    private static string LoadSchema()
-    {
-        var asm = typeof(SqliteStore).Assembly;
-        var name = $"{asm.GetName().Name}.Storage.Schema.sql";
-        using var stream = asm.GetManifestResourceStream(name)
-            ?? throw new InvalidOperationException($"Embedded schema not found: {name}");
-        using var reader = new StreamReader(stream);
-        return reader.ReadToEnd();
-    }
-
 }
