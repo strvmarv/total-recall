@@ -161,6 +161,44 @@ public sealed class LineageCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task Cycle_AB_BreaksBeforeDepthCap()
+    {
+        // Task 5.10 item 7: A <- [B] and B <- [A]. BuildLineage must
+        // short-circuit the second A via the visited set instead of
+        // exhausting the depth cap. We assert the walk is finite AND
+        // that we do NOT end up 10 levels deep.
+        var fake = new FakeCompactionLog();
+        fake.Add(FakeCompactionLog.Row(
+            id: "log-A",
+            timestamp: 200,
+            targetEntryId: "A",
+            sourceEntryIds: new[] { "B" }));
+        fake.Add(FakeCompactionLog.Row(
+            id: "log-B",
+            timestamp: 100,
+            targetEntryId: "B",
+            sourceEntryIds: new[] { "A" }));
+
+        var cmd = new LineageCommand(fake);
+        var code = await cmd.RunAsync(new[] { "A", "--json" });
+        Assert.Equal(0, code);
+
+        using var doc = JsonDocument.Parse(_outWriter.ToString());
+        var root = doc.RootElement;
+        Assert.Equal("A", root.GetProperty("id").GetString());
+        // Depth 1: B (compacted node).
+        var b = root.GetProperty("sources")[0];
+        Assert.Equal("B", b.GetProperty("id").GetString());
+        Assert.Equal("log-B", b.GetProperty("compaction_log_id").GetString());
+        // Depth 2: A again — cycle break should emit it as a leaf
+        // (id-only, no compaction_log_id, no sources).
+        var aAgain = b.GetProperty("sources")[0];
+        Assert.Equal("A", aAgain.GetProperty("id").GetString());
+        Assert.False(aAgain.TryGetProperty("compaction_log_id", out _));
+        Assert.False(aAgain.TryGetProperty("sources", out _));
+    }
+
+    [Fact]
     public async Task Json_SpecialCharsInReason_RoundTrips()
     {
         var fake = new FakeCompactionLog();

@@ -231,23 +231,32 @@ public static class CliApp
             return;
         }
 
-        // Top-level leaves first, then groups.
+        // Top-level leaves first (alphabetical), then groups (alphabetical).
         Console.WriteLine("Commands:");
+        var leaves = new List<ICliCommand>();
         foreach (var c in registry)
         {
-            if (c.Group is null)
-            {
-                Console.WriteLine($"  {c.Name,-16} {c.Description}");
-            }
+            if (c.Group is null) leaves.Add(c);
+        }
+        leaves.Sort(static (a, b) => string.CompareOrdinal(a.Name, b.Name));
+        foreach (var c in leaves)
+        {
+            Console.WriteLine($"  {c.Name,-16} {c.Description}");
         }
 
+        var groupNames = new List<string>();
         var seenGroups = new HashSet<string>(StringComparer.Ordinal);
         foreach (var c in registry)
         {
             if (c.Group is not null && seenGroups.Add(c.Group))
             {
-                Console.WriteLine($"  {c.Group,-16} <command> — use 'total-recall {c.Group} --help'");
+                groupNames.Add(c.Group);
             }
+        }
+        groupNames.Sort(StringComparer.Ordinal);
+        foreach (var g in groupNames)
+        {
+            Console.WriteLine($"  {g,-16} <command> — use 'total-recall {g} --help'");
         }
     }
 

@@ -376,25 +376,7 @@ public sealed class CompareCommand : ICliCommand
     private static void AppendStringField(StringBuilder sb, string name, string value)
     {
         sb.Append('"').Append(name).Append("\":");
-        sb.Append('"');
-        foreach (var c in value)
-        {
-            switch (c)
-            {
-                case '"': sb.Append("\\\""); break;
-                case '\\': sb.Append("\\\\"); break;
-                case '\n': sb.Append("\\n"); break;
-                case '\r': sb.Append("\\r"); break;
-                case '\t': sb.Append("\\t"); break;
-                default:
-                    if (c < 0x20)
-                        sb.Append("\\u").Append(((int)c).ToString("X4", CultureInfo.InvariantCulture));
-                    else
-                        sb.Append(c);
-                    break;
-            }
-        }
-        sb.Append('"');
+        TotalRecall.Infrastructure.Json.JsonWriter.AppendString(sb, value);
     }
 
     private static void PrintUsage(TextWriter w)

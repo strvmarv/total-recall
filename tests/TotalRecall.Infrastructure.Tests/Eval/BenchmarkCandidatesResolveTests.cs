@@ -91,6 +91,42 @@ public sealed class BenchmarkCandidatesResolveTests : IDisposable
     }
 
     [Fact]
+    public void Resolve_UnwritableFilePath_RollsBackStatusFlips()
+    {
+        // Task 5.10 item 6: if the corpus file write fails, the DB row
+        // status flips must roll back so the candidate stays 'pending'.
+        var (conn, bc) = NewBc();
+        using (conn)
+        {
+            bc.UpsertFromMisses(
+                new List<MissEntry> { new("q1", 0.1, 100) },
+                new List<MissContext> { new("q1", "content for q1", "e1") });
+
+            var pending = bc.ListPending();
+            Assert.Single(pending);
+            var acceptId = pending[0].Id;
+
+            // Point the corpus path into a non-existent parent directory
+            // so the temp-file write (<path>.tmp) throws
+            // DirectoryNotFoundException. Resolve must roll back the row
+            // flips so the candidate stays 'pending'.
+            var bogusPath = Path.Combine(_tempDir, "nope", "does-not-exist", "retrieval.jsonl");
+
+            Assert.ThrowsAny<Exception>(() =>
+                bc.Resolve(new[] { acceptId }, Array.Empty<string>(), bogusPath));
+
+            // Row status MUST still be 'pending'.
+            var still = bc.ListPending();
+            Assert.Single(still);
+            Assert.Equal(acceptId, still[0].Id);
+            Assert.Equal("pending", still[0].Status);
+
+            // And there should be no stray .tmp sibling left behind.
+            Assert.False(File.Exists(bogusPath + ".tmp"));
+        }
+    }
+
+    [Fact]
     public void Resolve_UnknownAcceptId_Skipped()
     {
         var (conn, bc) = NewBc();

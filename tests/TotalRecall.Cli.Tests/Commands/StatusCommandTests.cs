@@ -164,6 +164,47 @@ public sealed class StatusCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task Json_PerCollectionChunkCounts_AreDistinct()
+    {
+        // Task 5.10 item 5: each collection row in the JSON must carry
+        // its own chunk count, not the global coldKnow total.
+        var store = new FakeSqliteStore();
+        store.Seed(Tier.Cold, ContentType.Knowledge, EntryFactory.Make(
+            id: "coll-a",
+            metadataJson: "{\"type\":\"collection\",\"name\":\"Alpha\"}"));
+        store.Seed(Tier.Cold, ContentType.Knowledge, EntryFactory.Make(
+            id: "coll-b",
+            metadataJson: "{\"type\":\"collection\",\"name\":\"Beta\"}"));
+        // Alpha has 3 chunks, Beta has 1.
+        store.Seed(Tier.Cold, ContentType.Knowledge, EntryFactory.Make(id: "a-1", collectionId: "coll-a"));
+        store.Seed(Tier.Cold, ContentType.Knowledge, EntryFactory.Make(id: "a-2", collectionId: "coll-a"));
+        store.Seed(Tier.Cold, ContentType.Knowledge, EntryFactory.Make(id: "a-3", collectionId: "coll-a"));
+        store.Seed(Tier.Cold, ContentType.Knowledge, EntryFactory.Make(id: "b-1", collectionId: "coll-b"));
+
+        var loader = new FakeConfigLoader("mini", 384);
+        var injected = new StringWriter();
+        var cmd = new StatusCommand(store, loader, "/tmp/nonexistent-tr.db", injected);
+
+        var code = await cmd.RunAsync(new[] { "--json" });
+        Assert.Equal(0, code);
+
+        using var doc = JsonDocument.Parse(injected.ToString());
+        var collections = doc.RootElement.GetProperty("knowledgeBase").GetProperty("collections");
+        Assert.Equal(2, collections.GetArrayLength());
+
+        int aChunks = -1, bChunks = -1;
+        foreach (var c in collections.EnumerateArray())
+        {
+            var id = c.GetProperty("id").GetString();
+            var chunks = c.GetProperty("chunks").GetInt32();
+            if (id == "coll-a") aChunks = chunks;
+            else if (id == "coll-b") bChunks = chunks;
+        }
+        Assert.Equal(3, aChunks);
+        Assert.Equal(1, bChunks);
+    }
+
+    [Fact]
     public async Task Json_MissingDbFile_SizeNull()
     {
         var store = new FakeSqliteStore();

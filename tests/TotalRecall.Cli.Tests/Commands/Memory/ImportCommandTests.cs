@@ -210,6 +210,28 @@ public sealed class ImportCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task SourceTool_RoundTripsFromImportFile()
+    {
+        // Task 5.10 item 3: source_tool in the import envelope must be
+        // parsed and threaded through to InsertEntryOpts.
+        var (cmd, store, _, _, _) = MakeCmd();
+        var body = "{\"entries\":[" +
+            "{\"id\":\"a\",\"content\":\"alpha\",\"tier\":\"hot\",\"content_type\":\"memory\",\"source_tool\":\"claude-code\"}" +
+            "]}";
+        var p = WriteTempFile(body);
+        try
+        {
+            var code = await cmd.RunAsync(new[] { p });
+            Assert.Equal(0, code);
+            Assert.Single(store.InsertCalls);
+            var opts = store.InsertCalls[0].Opts;
+            Assert.NotNull(opts.SourceTool);
+            Assert.True(opts.SourceTool!.IsClaudeCode);
+        }
+        finally { File.Delete(p); }
+    }
+
+    [Fact]
     public async Task InvalidContentType_FallsBackToMemory()
     {
         var (cmd, store, _, _, _) = MakeCmd();

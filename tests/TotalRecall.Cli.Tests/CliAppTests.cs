@@ -130,6 +130,38 @@ public class CliAppTests
     }
 
     [Fact]
+    public void Run_Help_TopLevelLeaves_RenderAlphabetically()
+    {
+        // Task 5.10 item 4: PrintTopLevelHelp must sort standalone leaves
+        // by Name, not registry insertion order.
+        var registry = new List<ICliCommand>
+        {
+            new StubCommand("status", null, "show status", _ => 0),
+            new StubCommand("compact", null, "compact", _ => 0),
+            new StubCommand("migrate", null, "migrate", _ => 0),
+            new StubCommand("import-host", null, "import host", _ => 0),
+        };
+        try
+        {
+            CliApp.SetRegistryForTestsInternal(registry);
+            var result = Capture(() => CliApp.Run(new[] { "--help" }));
+            Assert.Equal(0, result.ExitCode);
+
+            var o = result.StdOut;
+            int iCompact = o.IndexOf("compact", StringComparison.Ordinal);
+            int iImport = o.IndexOf("import-host", StringComparison.Ordinal);
+            int iMigrate = o.IndexOf("migrate", StringComparison.Ordinal);
+            int iStatus = o.IndexOf("status", StringComparison.Ordinal);
+            Assert.True(iCompact >= 0 && iImport > iCompact && iMigrate > iImport && iStatus > iMigrate,
+                $"expected alphabetical order compact < import-host < migrate < status; got offsets {iCompact},{iImport},{iMigrate},{iStatus}\n---\n{o}");
+        }
+        finally
+        {
+            CliApp.SetRegistryForTestsInternal(null);
+        }
+    }
+
+    [Fact]
     public void Run_RegisteredGroupCommand_IsInvoked()
     {
         var cmd = new StubCommand("report", "eval", "stub group verb", _ => 7);

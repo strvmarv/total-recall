@@ -12,6 +12,7 @@
 using System.Globalization;
 using System.Text;
 using TotalRecall.Core;
+using TotalRecall.Infrastructure.Json;
 
 namespace TotalRecall.Infrastructure.Config;
 
@@ -113,25 +114,7 @@ public static class ConfigJsonSerializer
     private static void AppendString(StringBuilder sb, string name, string value)
     {
         AppendKey(sb, name);
-        sb.Append('"');
-        foreach (var c in value)
-        {
-            switch (c)
-            {
-                case '"': sb.Append("\\\""); break;
-                case '\\': sb.Append("\\\\"); break;
-                case '\n': sb.Append("\\n"); break;
-                case '\r': sb.Append("\\r"); break;
-                case '\t': sb.Append("\\t"); break;
-                default:
-                    if (c < 0x20)
-                        sb.Append("\\u").Append(((int)c).ToString("X4", CultureInfo.InvariantCulture));
-                    else
-                        sb.Append(c);
-                    break;
-            }
-        }
-        sb.Append('"');
+        JsonWriter.AppendString(sb, value);
     }
 
     private static void AppendKey(StringBuilder sb, string name)

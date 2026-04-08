@@ -26,6 +26,7 @@ using System.Threading.Tasks;
 using Spectre.Console;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Config;
+using TotalRecall.Infrastructure.Json;
 using TotalRecall.Infrastructure.Storage;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
@@ -147,7 +148,7 @@ public sealed class StatusCommand : ICliCommand
         string EmbeddingModel,
         int EmbeddingDimensions);
 
-    internal sealed record KbCollectionRow(string Id, string Name);
+    internal sealed record KbCollectionRow(string Id, string Name, int Chunks);
 
     private static StatusData Gather(ISqliteStore store, IConfigLoader configLoader, string dbPath)
     {
@@ -160,11 +161,27 @@ public sealed class StatusCommand : ICliCommand
 
         var collectionRows = store.ListByMetadata(
             Tier.Cold, ContentType.Knowledge, CollectionFilter, null);
+
+        // Per-collection chunk counts: sweep Cold/Knowledge once and
+        // group by collection_id. Matches the pattern in `kb list`.
+        var chunkCountByCollection = new Dictionary<string, int>(StringComparer.Ordinal);
+        var allColdKnow = store.List(Tier.Cold, ContentType.Knowledge, null);
+        foreach (var e in allColdKnow)
+        {
+            if (Microsoft.FSharp.Core.FSharpOption<string>.get_IsSome(e.CollectionId))
+            {
+                var cid = e.CollectionId.Value;
+                chunkCountByCollection.TryGetValue(cid, out var n);
+                chunkCountByCollection[cid] = n + 1;
+            }
+        }
+
         var collections = new List<KbCollectionRow>(collectionRows.Count);
         foreach (var e in collectionRows)
         {
             var name = ExtractCollectionName(e.MetadataJson) ?? "(unnamed)";
-            collections.Add(new KbCollectionRow(e.Id, name));
+            chunkCountByCollection.TryGetValue(e.Id, out var childCount);
+            collections.Add(new KbCollectionRow(e.Id, name, childCount));
         }
 
         int totalChunks = coldKnow - collectionRows.Count;
@@ -241,14 +258,14 @@ public sealed class StatusCommand : ICliCommand
             var kb = new Table().Title("[bold]Knowledge Base[/]");
             kb.AddColumn("Name");
             kb.AddColumn("ID");
-            kb.AddColumn(new TableColumn("Chunks (total)").RightAligned());
+            kb.AddColumn(new TableColumn("Chunks").RightAligned());
             foreach (var c in d.Collections)
             {
                 var shortId = c.Id.Length >= 8 ? c.Id.Substring(0, 8) : c.Id;
                 kb.AddRow(
                     Markup.Escape(c.Name),
                     Markup.Escape(shortId),
-                    d.TotalChunks.ToString(CultureInfo.InvariantCulture));
+                    c.Chunks.ToString(CultureInfo.InvariantCulture));
             }
             AnsiConsole.Write(kb);
         }
@@ -314,7 +331,8 @@ public sealed class StatusCommand : ICliCommand
             var c = d.Collections[i];
             sb.Append('{');
             AppendStringField(sb, "id", c.Id); sb.Append(',');
-            AppendStringField(sb, "name", c.Name);
+            AppendStringField(sb, "name", c.Name); sb.Append(',');
+            AppendIntField(sb, "chunks", c.Chunks);
             sb.Append('}');
         }
         sb.Append("],");
@@ -351,30 +369,7 @@ public sealed class StatusCommand : ICliCommand
         sb.Append(value.ToString(CultureInfo.InvariantCulture));
     }
 
-    private static void AppendString(StringBuilder sb, string s)
-    {
-        sb.Append('"');
-        foreach (var c in s)
-        {
-            switch (c)
-            {
-                case '"': sb.Append("\\\""); break;
-                case '\\': sb.Append("\\\\"); break;
-                case '\n': sb.Append("\\n"); break;
-                case '\r': sb.Append("\\r"); break;
-                case '\t': sb.Append("\\t"); break;
-                case '\b': sb.Append("\\b"); break;
-                case '\f': sb.Append("\\f"); break;
-                default:
-                    if (c < 0x20)
-                        sb.Append("\\u").Append(((int)c).ToString("X4", CultureInfo.InvariantCulture));
-                    else
-                        sb.Append(c);
-                    break;
-            }
-        }
-        sb.Append('"');
-    }
+    private static void AppendString(StringBuilder sb, string s) => JsonWriter.AppendString(sb, s);
 
     private static void PrintUsage(TextWriter w)
     {

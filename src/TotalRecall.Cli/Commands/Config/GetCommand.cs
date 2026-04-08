@@ -139,7 +139,7 @@ public sealed class GetCommand : ICliCommand
                 sb.Append(b ? "true" : "false");
                 break;
             case string s:
-                sb.Append('"').Append(s).Append('"');
+                sb.Append('"').Append(ConfigWriter.EscapeForTomlBasic(s)).Append('"');
                 break;
             case double d:
                 sb.Append(d.ToString("R", CultureInfo.InvariantCulture));

@@ -342,30 +342,8 @@ public sealed class ImportHostCommand : ICliCommand
         sb.Append(value.ToString(CultureInfo.InvariantCulture));
     }
 
-    private static void AppendString(StringBuilder sb, string s)
-    {
-        sb.Append('"');
-        foreach (var c in s)
-        {
-            switch (c)
-            {
-                case '"': sb.Append("\\\""); break;
-                case '\\': sb.Append("\\\\"); break;
-                case '\n': sb.Append("\\n"); break;
-                case '\r': sb.Append("\\r"); break;
-                case '\t': sb.Append("\\t"); break;
-                case '\b': sb.Append("\\b"); break;
-                case '\f': sb.Append("\\f"); break;
-                default:
-                    if (c < 0x20)
-                        sb.Append("\\u").Append(((int)c).ToString("X4", CultureInfo.InvariantCulture));
-                    else
-                        sb.Append(c);
-                    break;
-            }
-        }
-        sb.Append('"');
-    }
+    private static void AppendString(StringBuilder sb, string s) =>
+        TotalRecall.Infrastructure.Json.JsonWriter.AppendString(sb, s);
 
     private static void PrintUsage(TextWriter w)
     {

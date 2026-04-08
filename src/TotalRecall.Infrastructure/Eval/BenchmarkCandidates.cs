@@ -24,6 +24,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text;
+using TotalRecall.Infrastructure.Json;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
 namespace TotalRecall.Infrastructure.Eval;
@@ -173,67 +174,110 @@ ON CONFLICT(query_text) DO UPDATE SET
         var corpusEntries = new List<string>();
         var today = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
-        using var selectCmd = _conn.CreateCommand();
-        selectCmd.CommandText =
-            "SELECT query_text, top_result_content FROM benchmark_candidates WHERE id = $id";
-        var pSelectId = selectCmd.Parameters.Add("$id", Microsoft.Data.Sqlite.SqliteType.Text);
-
-        using var acceptCmd = _conn.CreateCommand();
-        acceptCmd.CommandText = "UPDATE benchmark_candidates SET status = 'accepted' WHERE id = $id";
-        var pAcceptId = acceptCmd.Parameters.Add("$id", Microsoft.Data.Sqlite.SqliteType.Text);
-
-        using var rejectCmd = _conn.CreateCommand();
-        rejectCmd.CommandText = "UPDATE benchmark_candidates SET status = 'rejected' WHERE id = $id";
-        var pRejectId = rejectCmd.Parameters.Add("$id", Microsoft.Data.Sqlite.SqliteType.Text);
-
-        foreach (var id in acceptIds)
+        // Plan 5 Task 5.10 — make accept/reject + file append atomic.
+        // Row flips run inside a SqliteTransaction. The benchmark corpus
+        // file is written to a sibling ".tmp" first and renamed into place
+        // only AFTER the DB commit succeeds. On any failure we rollback
+        // the transaction AND delete the temp file, so neither the DB
+        // nor the corpus file land partially.
+        var tempPath = benchmarkFilePath + ".tmp";
+        using var tx = _conn.BeginTransaction();
+        try
         {
-            pSelectId.Value = id;
-            string? query = null;
-            string? topContent = null;
-            using (var reader = selectCmd.ExecuteReader())
+            using var selectCmd = _conn.CreateCommand();
+            selectCmd.Transaction = tx;
+            selectCmd.CommandText =
+                "SELECT query_text, top_result_content FROM benchmark_candidates WHERE id = $id";
+            var pSelectId = selectCmd.Parameters.Add("$id", Microsoft.Data.Sqlite.SqliteType.Text);
+
+            using var acceptCmd = _conn.CreateCommand();
+            acceptCmd.Transaction = tx;
+            acceptCmd.CommandText = "UPDATE benchmark_candidates SET status = 'accepted' WHERE id = $id";
+            var pAcceptId = acceptCmd.Parameters.Add("$id", Microsoft.Data.Sqlite.SqliteType.Text);
+
+            using var rejectCmd = _conn.CreateCommand();
+            rejectCmd.Transaction = tx;
+            rejectCmd.CommandText = "UPDATE benchmark_candidates SET status = 'rejected' WHERE id = $id";
+            var pRejectId = rejectCmd.Parameters.Add("$id", Microsoft.Data.Sqlite.SqliteType.Text);
+
+            foreach (var id in acceptIds)
             {
-                if (reader.Read())
+                pSelectId.Value = id;
+                string? query = null;
+                string? topContent = null;
+                using (var reader = selectCmd.ExecuteReader())
                 {
-                    query = reader.GetString(0);
-                    topContent = reader.IsDBNull(1) ? null : reader.GetString(1);
+                    if (reader.Read())
+                    {
+                        query = reader.GetString(0);
+                        topContent = reader.IsDBNull(1) ? null : reader.GetString(1);
+                    }
                 }
+                if (query is null) continue;
+
+                pAcceptId.Value = id;
+                acceptCmd.ExecuteNonQuery();
+
+                var expected = topContent is null
+                    ? string.Empty
+                    : (topContent.Length > 100 ? topContent.Substring(0, 100) : topContent);
+                corpusEntries.Add(BuildCorpusEntry(query, expected, today));
             }
-            if (query is null) continue;
 
-            pAcceptId.Value = id;
-            acceptCmd.ExecuteNonQuery();
+            foreach (var id in rejectIds)
+            {
+                pRejectId.Value = id;
+                rejectCmd.ExecuteNonQuery();
+            }
 
-            var expected = topContent is null
-                ? string.Empty
-                : (topContent.Length > 100 ? topContent.Substring(0, 100) : topContent);
-            corpusEntries.Add(BuildCorpusEntry(query, expected, today));
+            // Build the new corpus bytes and stage them to <path>.tmp.
+            // File.WriteAllText on the temp path is what can throw here
+            // (unwritable parent directory, path-is-directory, etc.); if
+            // it does, we roll back the transaction and the on-disk
+            // corpus file is untouched.
+            if (corpusEntries.Count > 0)
+            {
+                var existing = File.Exists(benchmarkFilePath)
+                    ? File.ReadAllText(benchmarkFilePath)
+                    : string.Empty;
+                var trailing = existing.Length == 0 || existing.EndsWith("\n", StringComparison.Ordinal)
+                    ? string.Empty
+                    : "\n";
+                var sb = new StringBuilder();
+                sb.Append(existing);
+                sb.Append(trailing);
+                for (int i = 0; i < corpusEntries.Count; i++)
+                {
+                    if (i > 0) sb.Append('\n');
+                    sb.Append(corpusEntries[i]);
+                }
+                sb.Append('\n');
+                File.WriteAllText(tempPath, sb.ToString());
+            }
+
+            tx.Commit();
         }
-
-        foreach (var id in rejectIds)
+        catch
         {
-            pRejectId.Value = id;
-            rejectCmd.ExecuteNonQuery();
+            try { tx.Rollback(); } catch { /* best-effort */ }
+            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { /* best-effort */ }
+            throw;
         }
 
+        // DB is committed; now atomically swap the corpus file into place.
+        // A failure here is much less likely (same filesystem, rename),
+        // but if it happens we still try to clean up the temp file.
         if (corpusEntries.Count > 0)
         {
-            var existing = File.Exists(benchmarkFilePath)
-                ? File.ReadAllText(benchmarkFilePath)
-                : string.Empty;
-            var trailing = existing.Length == 0 || existing.EndsWith("\n", StringComparison.Ordinal)
-                ? string.Empty
-                : "\n";
-            var sb = new StringBuilder();
-            sb.Append(existing);
-            sb.Append(trailing);
-            for (int i = 0; i < corpusEntries.Count; i++)
+            try
             {
-                if (i > 0) sb.Append('\n');
-                sb.Append(corpusEntries[i]);
+                File.Move(tempPath, benchmarkFilePath, overwrite: true);
             }
-            sb.Append('\n');
-            File.WriteAllText(benchmarkFilePath, sb.ToString());
+            catch
+            {
+                try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { /* best-effort */ }
+                throw;
+            }
         }
 
         return new CandidateResolveResult(
@@ -247,39 +291,14 @@ ON CONFLICT(query_text) DO UPDATE SET
         var sb = new StringBuilder();
         sb.Append('{');
         sb.Append("\"query\":");
-        AppendJsonString(sb, query);
+        JsonWriter.AppendString(sb, query);
         sb.Append(",\"expected_content_contains\":");
-        AppendJsonString(sb, expectedContains);
+        JsonWriter.AppendString(sb, expectedContains);
         sb.Append(",\"expected_tier\":\"warm\"");
         sb.Append(",\"source\":\"grow\"");
         sb.Append(",\"added\":");
-        AppendJsonString(sb, addedDate);
+        JsonWriter.AppendString(sb, addedDate);
         sb.Append('}');
         return sb.ToString();
-    }
-
-    private static void AppendJsonString(StringBuilder sb, string s)
-    {
-        sb.Append('"');
-        foreach (var c in s)
-        {
-            switch (c)
-            {
-                case '"': sb.Append("\\\""); break;
-                case '\\': sb.Append("\\\\"); break;
-                case '\n': sb.Append("\\n"); break;
-                case '\r': sb.Append("\\r"); break;
-                case '\t': sb.Append("\\t"); break;
-                case '\b': sb.Append("\\b"); break;
-                case '\f': sb.Append("\\f"); break;
-                default:
-                    if (c < 0x20)
-                        sb.Append("\\u").Append(((int)c).ToString("X4", CultureInfo.InvariantCulture));
-                    else
-                        sb.Append(c);
-                    break;
-            }
-        }
-        sb.Append('"');
     }
 }

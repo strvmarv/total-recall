@@ -232,7 +232,7 @@ public sealed class ImportCommand : ICliCommand
                         Content: content,
                         Summary: ReadOptionalString(entryElem, "summary"),
                         Source: ReadOptionalString(entryElem, "source"),
-                        SourceTool: null,
+                        SourceTool: SourceToolParser.Parse(ReadOptionalString(entryElem, "source_tool")),
                         Project: ReadOptionalString(entryElem, "project"),
                         Tags: ReadStringArray(entryElem, "tags"),
                         ParentId: ReadOptionalString(entryElem, "parent_id"),

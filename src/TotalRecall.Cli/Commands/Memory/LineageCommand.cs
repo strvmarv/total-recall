@@ -118,7 +118,7 @@ public sealed class LineageCommand : ICliCommand
 
         try
         {
-            var tree = BuildLineage(reader, id, 0);
+            var tree = BuildLineage(reader, id, 0, new HashSet<string>(StringComparer.Ordinal));
             if (emitJson)
             {
                 Console.Out.WriteLine(SerializeJson(tree));
@@ -142,11 +142,27 @@ public sealed class LineageCommand : ICliCommand
 
     // ---------- tree building ----------
 
-    internal static LineageNode BuildLineage(ICompactionLogReader reader, string id, int depth)
+    // 3-arg overload preserved for tests that don't care about the
+    // visited-set plumbing. Forwards to the cycle-detecting core.
+    internal static LineageNode BuildLineage(ICompactionLogReader reader, string id, int depth) =>
+        BuildLineage(reader, id, depth, new HashSet<string>(StringComparer.Ordinal));
+
+    internal static LineageNode BuildLineage(
+        ICompactionLogReader reader,
+        string id,
+        int depth,
+        HashSet<string> visited)
     {
         if (depth >= MaxDepth)
         {
             return new LineageNode { Id = id, Sources = new List<LineageNode>() };
+        }
+
+        // Cycle break: if we've already expanded this id on the current
+        // walk, emit a leaf so we don't burn depth budget on a loop.
+        if (!visited.Add(id))
+        {
+            return new LineageNode { Id = id };
         }
 
         var row = reader.GetByTargetEntryId(id);
@@ -158,7 +174,7 @@ public sealed class LineageCommand : ICliCommand
         var sources = new List<LineageNode>(row.SourceEntryIds.Count);
         foreach (var srcId in row.SourceEntryIds)
         {
-            sources.Add(BuildLineage(reader, srcId, depth + 1));
+            sources.Add(BuildLineage(reader, srcId, depth + 1, visited));
         }
 
         return new LineageNode
@@ -274,30 +290,8 @@ public sealed class LineageCommand : ICliCommand
         sb.Append('}');
     }
 
-    private static void AppendString(StringBuilder sb, string s)
-    {
-        sb.Append('"');
-        foreach (var c in s)
-        {
-            switch (c)
-            {
-                case '"': sb.Append("\\\""); break;
-                case '\\': sb.Append("\\\\"); break;
-                case '\n': sb.Append("\\n"); break;
-                case '\r': sb.Append("\\r"); break;
-                case '\t': sb.Append("\\t"); break;
-                case '\b': sb.Append("\\b"); break;
-                case '\f': sb.Append("\\f"); break;
-                default:
-                    if (c < 0x20)
-                        sb.Append("\\u").Append(((int)c).ToString("X4", CultureInfo.InvariantCulture));
-                    else
-                        sb.Append(c);
-                    break;
-            }
-        }
-        sb.Append('"');
-    }
+    private static void AppendString(StringBuilder sb, string s) =>
+        TotalRecall.Infrastructure.Json.JsonWriter.AppendString(sb, s);
 
     private static void PrintUsage(TextWriter w)
     {

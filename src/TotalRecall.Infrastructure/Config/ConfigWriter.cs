@@ -289,6 +289,20 @@ public static class ConfigWriter
         }
     }
 
+    /// <summary>
+    /// Escape <paramref name="value"/> into a TOML basic-string literal
+    /// (without the surrounding quotes). Exposed for callers like
+    /// <c>config get</c> that need to render a user-facing string value
+    /// back into a form that round-trips through <see cref="Tomlyn.Toml.Parse(string, string, Tomlyn.TomlParserOptions?)"/>.
+    /// </summary>
+    public static string EscapeForTomlBasic(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        var sb = new StringBuilder();
+        AppendEscapedString(sb, value);
+        return sb.ToString();
+    }
+
     private static void AppendEscapedString(StringBuilder sb, string s)
     {
         foreach (var c in s)

@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
+using Tomlyn;
 using Tomlyn.Model;
 using TotalRecall.Cli.Commands.Config;
 using TotalRecall.Infrastructure.Config;
@@ -133,6 +134,40 @@ public sealed class GetCommandTests : IDisposable
         var text = sink.ToString();
         Assert.Contains("\"key\":\"embedding.dimensions\"", text);
         Assert.Contains("\"value\":384", text);
+    }
+
+    [Fact]
+    public async Task ValidStringKey_EscapesSpecialChars_TomlRoundTrips()
+    {
+        // Task 5.10 item 2: embedded quotes/newlines/backslashes must be
+        // emitted as TOML basic-string escape sequences so the printed
+        // line round-trips through Toml.Parse.
+        var table = new TomlTable();
+        var nasty = "hello \"world\"\nnext\\line";
+        ConfigWriter.SetNestedKey(table, "custom.label", nasty);
+
+        var sink = new StringWriter();
+        var cmd = new GetCommand(new FakeLoader(table), sink);
+
+        var code = await cmd.RunAsync(new[] { "custom.label" });
+        Assert.Equal(0, code);
+
+        var line = sink.ToString().TrimEnd('\r', '\n');
+        // Sanity: the raw string can't be present verbatim or it'd
+        // break the TOML grammar.
+        Assert.DoesNotContain("\"hello \"world\"", line);
+        // Escape sequences should appear in the emitted literal.
+        Assert.Contains("\\\"", line);
+        Assert.Contains("\\n", line);
+        Assert.Contains("\\\\", line);
+
+        // Strongest gate: what we printed parses back as TOML and the
+        // value matches exactly.
+        var doc = Toml.Parse(line);
+        Assert.False(doc.HasErrors, "Emitted line should be valid TOML: " + line);
+        var model = doc.ToModel();
+        var customTbl = (TomlTable)model["custom"];
+        Assert.Equal(nasty, (string)customTbl["label"]);
     }
 
     [Fact]
