@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import type { TotalRecallConfig } from "./types.js";
@@ -8,9 +9,13 @@ import type { Database } from "bun:sqlite";
 const DEFAULTS_PATH = new URL("./defaults.toml", import.meta.url);
 
 export function getDataDir(): string {
+  // os.homedir() is cross-platform: resolves to $HOME on POSIX and
+  // %USERPROFILE% on Windows. Using `process.env.HOME` here broke
+  // Windows — HOME is undefined and the literal fallback "~" was used
+  // as if it were a real path.
   return (
     process.env.TOTAL_RECALL_HOME ??
-    join(process.env.HOME ?? "~", ".total-recall")
+    join(homedir(), ".total-recall")
   );
 }
 

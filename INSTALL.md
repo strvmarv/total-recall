@@ -2,6 +2,24 @@
 
 This file is designed to be read by AI coding assistants. If you're an LLM helping a user install total-recall, follow the instructions for their platform below.
 
+## Prerequisites
+
+### macOS: Homebrew sqlite required
+
+total-recall uses [`sqlite-vec`](https://github.com/asg017/sqlite-vec) for vector search, which is loaded into SQLite as a runtime extension. On macOS, `bun:sqlite` dlopens the system `/usr/lib/libsqlite3.dylib`, which Apple ships **without** `SQLITE_ENABLE_LOAD_EXTENSION` — so `sqlite-vec` cannot attach and the MCP server fails at first use with:
+
+> This build of sqlite3 does not support dynamic extension loading
+
+Fix (one-time):
+
+```bash
+brew install sqlite
+```
+
+total-recall automatically picks up the keg-only brew sqlite from `/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib` (Apple Silicon) or `/usr/local/opt/sqlite/lib/libsqlite3.dylib` (Intel) via `Database.setCustomSQLite()` before any DB connection is opened. Nothing else to configure.
+
+Linux and Windows users can skip this step — their system SQLite builds support extension loading out of the box.
+
 ## Quick Install (Any Platform)
 
 The MCP server is available as an npm package:

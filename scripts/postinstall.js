@@ -9,6 +9,27 @@ import os from "node:os";
 
 const BUN_VERSION = "1.2.10";
 
+// Keep in sync with src/db/sqlite-bootstrap.ts DARWIN_SQLITE_CANDIDATES.
+const DARWIN_SQLITE_CANDIDATES = [
+  "/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib",
+  "/usr/local/opt/sqlite/lib/libsqlite3.dylib",
+];
+
+function checkDarwinSqlite() {
+  if (process.platform !== "darwin") return;
+  if (DARWIN_SQLITE_CANDIDATES.some((p) => fs.existsSync(p))) return;
+  warn("");
+  warn("macOS: no extension-capable libsqlite3 found.");
+  warn("total-recall uses sqlite-vec, which needs a libsqlite3 built with");
+  warn("SQLITE_ENABLE_LOAD_EXTENSION. The /usr/lib/libsqlite3.dylib shipped");
+  warn("with macOS does NOT have it. Install Homebrew sqlite to fix:");
+  warn("");
+  warn("  brew install sqlite");
+  warn("");
+  warn("The server will fail at first use with a clear error if this is");
+  warn("not resolved before starting total-recall.");
+}
+
 const PLATFORM_MAP = {
   "linux-x64": "bun-linux-x64",
   "linux-arm64": "bun-linux-aarch64",
@@ -90,6 +111,10 @@ async function extractZip(zipPath, destDir) {
 }
 
 async function main() {
+  // Always run the darwin sqlite check — independent of bun download state —
+  // so the warning fires on cached installs too.
+  checkDarwinSqlite();
+
   const platformKey = getPlatformKey();
   if (!platformKey || !PLATFORM_MAP[platformKey]) {
     warn(`unsupported platform ${process.platform}-${process.arch}. Supported: ${Object.keys(PLATFORM_MAP).join(", ")}`);

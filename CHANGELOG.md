@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.6.8-beta.6 - 2026-04-08
+
+### Fixed
+- **MCP server failed at first query on macOS** with `This build of sqlite3 does not support dynamic extension loading`. `bun:sqlite` on darwin dlopens `/usr/lib/libsqlite3.dylib`, which Apple ships without `SQLITE_ENABLE_LOAD_EXTENSION`, so `sqlite-vec.load()` at `src/db/connection.ts:18` aborted every request. Root cause is a long-standing bun quirk (oven-sh/bun#5756). Added `src/db/sqlite-bootstrap.ts` which calls `Database.setCustomSQLite()` before any Database construction, pointing at Homebrew's keg-only libsqlite3 at `/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib` (Apple Silicon) or `/usr/local/opt/sqlite/lib/libsqlite3.dylib` (Intel). If neither is present, throws a `SqliteExtensionError` with a clear `brew install sqlite` remediation instead of surfacing the cryptic bun error later. Idempotent; no-op on linux and windows (their system libsqlite3 supports extension loading natively). Wired into both `getDb()` and the vitest test helper.
+- **CI was green on macOS despite this bug** because `vitest.config.ts` aliases `bun:sqlite` to a `better-sqlite3` shim in `tests/helpers/bun-sqlite-shim.ts`, and better-sqlite3 bundles its own SQLite with extension loading enabled. Production paths running under real bun never touched the shim, so the darwin regression slipped past all three CI matrix legs. The shim now also exposes a static `setCustomSQLite` no-op so the bootstrap logic can be exercised by tests on any platform.
+- **`scripts/postinstall.js` now warns at install time** when running on darwin without an extension-capable libsqlite3, surfacing the same `brew install sqlite` instruction during `npm install` rather than at first MCP request. Non-fatal — install still succeeds.
+- **`INSTALL.md` documents the macOS prerequisite** under a new "Prerequisites" section at the top, so AI assistants walking users through setup won't hit the bug blind.
+- **`getDataDir()` on Windows**: `src/config.ts:13` fell back to `join(process.env.HOME ?? "~", ".total-recall")`. `HOME` is undefined on Windows (Node uses `USERPROFILE`), so every Windows install that didn't set `TOTAL_RECALL_HOME` resolved its data dir to the literal string `~/.total-recall` — stored under whatever the current working directory was. Replaced with `os.homedir()`, which resolves correctly on every platform. Same class of bug as the `detectProject` Windows fix in 0.6.8-beta.5.
+
+### Added
+- **`scripts/mcp-smoke-test.mjs` + `npm run smoke`**: end-to-end MCP smoke test that launches the built `dist/index.js` under real bun (via `bin/start.cjs`) and drives it over stdio using the `@modelcontextprotocol/sdk` client. Runs `tools/list`, `status`, `memory_store`, `memory_search` (critical vector-query path), and `memory_delete`, asserting every step. Uses `TOTAL_RECALL_HOME=<mkdtemp>` so runs never touch the user's real database. Wired into the `test-bun` CI job on all three matrix legs (ubuntu, macos, windows) right after `bun run build`. This is the gap that let the darwin extension-loading bug ship undetected: vitest aliases `bun:sqlite` to a `better-sqlite3` shim, so the 304 unit tests exercise better-sqlite3 — not the real runtime. Any future regression in the bun:sqlite → sqlite-vec → embeddings → vector-search pipeline will now fail CI before reaching users.
+
 ## 0.6.8-beta.5 - 2026-04-06
 
 ### Fixed

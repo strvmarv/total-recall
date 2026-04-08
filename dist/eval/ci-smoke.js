@@ -256,6 +256,7 @@ function initSchema(db) {
 // src/config.ts
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
+import { homedir } from "os";
 import { createHash, randomUUID } from "crypto";
 
 // node_modules/smol-toml/dist/error.js
@@ -951,7 +952,7 @@ function parse(toml, { maxDepth = 1e3, integersAsBigInt } = {}) {
 // src/config.ts
 var DEFAULTS_PATH = new URL("./defaults.toml", import.meta.url);
 function getDataDir() {
-  return process.env.TOTAL_RECALL_HOME ?? join(process.env.HOME ?? "~", ".total-recall");
+  return process.env.TOTAL_RECALL_HOME ?? join(homedir(), ".total-recall");
 }
 function loadConfig() {
   const defaultsText = readFileSync(DEFAULTS_PATH, "utf-8");

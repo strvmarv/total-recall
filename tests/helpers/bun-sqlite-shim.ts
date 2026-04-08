@@ -110,6 +110,18 @@ export class Database {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     this.db.loadExtension(path);
   }
+
+  /**
+   * Static no-op shim for bun:sqlite's Database.setCustomSQLite(path).
+   * Production code (src/db/sqlite-bootstrap.ts) calls this on darwin
+   * to point bun:sqlite at an extension-capable libsqlite3. Under the
+   * better-sqlite3 shim there is nothing to redirect — better-sqlite3
+   * ships its own SQLite build with extension loading enabled — so we
+   * just ignore the call.
+   */
+  static setCustomSQLite(_path: string): void {
+    // no-op
+  }
 }
 
 export default Database;

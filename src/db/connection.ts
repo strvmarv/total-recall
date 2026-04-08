@@ -4,11 +4,13 @@ import { join } from "node:path";
 import * as sqliteVec from "sqlite-vec";
 import { getDataDir } from "../config.js";
 import { initSchema } from "./schema.js";
+import { bootstrapSqlite } from "./sqlite-bootstrap.js";
 
 let _db: Database | null = null;
 
 export function getDb(): Database {
   if (_db) return _db;
+  bootstrapSqlite();
   const dataDir = getDataDir();
   if (!existsSync(dataDir)) {
     mkdirSync(dataDir, { recursive: true });

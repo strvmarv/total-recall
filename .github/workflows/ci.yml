@@ -55,6 +55,13 @@ jobs:
         shell: pwsh
       - run: bun run test
       - run: bun run build
+      - name: MCP end-to-end smoke test (real bun:sqlite)
+        # vitest aliases bun:sqlite → better-sqlite3 shim, so the test
+        # suite never actually exercises the production SQLite stack.
+        # This step launches dist/index.js under real bun and drives it
+        # via the MCP client SDK to catch platform-specific runtime
+        # regressions (extension loading, embeddings, vector search).
+        run: npm run smoke
       - name: Run retrieval benchmark
         if: matrix.os == 'ubuntu-latest'
         run: npm run benchmark

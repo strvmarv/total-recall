@@ -5,3 +5,4 @@ node_modules/
 .remember/
 docs/superpowers/
 .worktrees/
+models/**/.verified

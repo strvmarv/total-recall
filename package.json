@@ -1,6 +1,6 @@
 {
   "name": "@strvmarv/total-recall",
-  "version": "0.6.8-beta.5",
+  "version": "0.6.8-beta.6",
   "description": "Multi-tiered memory and knowledge base plugin for TUI coding assistants",
   "type": "module",
   "main": "dist/index.js",
@@ -17,7 +17,8 @@
     "prepare": "git config core.hooksPath git-hooks || true",
     "postinstall": "node scripts/postinstall.js",
     "prepublishOnly": "npm run build && npm run test:dist",
-    "benchmark": "bun dist/eval/ci-smoke.js"
+    "benchmark": "bun dist/eval/ci-smoke.js",
+    "smoke": "node scripts/mcp-smoke-test.mjs"
   },
   "files": [
     "dist/",
