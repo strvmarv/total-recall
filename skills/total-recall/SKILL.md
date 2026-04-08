@@ -46,14 +46,7 @@ On each user message that is a question or task request:
 
 ### Session End
 
-1. Call `session_context` to get current hot tier entries
-2. If there are 2+ hot entries, launch the `total-recall:compactor` agent with the entries as input
-3. Parse the agent's JSON decisions and execute them:
-   - `carry_forward`: leave in hot tier (no action needed)
-   - `promote` with `summary`: call `memory_store` with the summary in warm tier, then `memory_delete` the source entries
-   - `promote` without `summary`: call `memory_promote` for each entry to warm tier
-   - `discard`: call `memory_delete` with the reason
-4. Call `session_end` for final bookkeeping
+At session end, follow the directive in [`session-end.md`](session-end.md) — it is the single source of truth, injected verbatim by the SessionEnd hook (`hooks/session-end/run.sh`).
 
 ### Rules
 
