@@ -328,8 +328,17 @@ async function runPass3InvalidDbPath() {
     try { child.kill("SIGKILL"); } catch {}
   }, WATCHDOG_MS);
 
-  const exitInfo = await new Promise((resolve) => {
-    child.on("exit", (code, signal) => {
+  // Await `close` not `exit`: Node documents that exit can fire while stdio
+  // streams are still being drained. On a fast-failing child, we'd race
+  // the stderr `data` event and get false negatives on the substring
+  // assertions below. `close` is explicitly emitted after all stdio streams
+  // have closed.
+  const exitInfo = await new Promise((resolve, reject) => {
+    child.on("error", (err) => {
+      clearTimeout(watchdog);
+      reject(new Error(`pass 3: failed to spawn child: ${err.message}`));
+    });
+    child.on("close", (code, signal) => {
       clearTimeout(watchdog);
       resolve({ code, signal });
     });
@@ -343,6 +352,9 @@ async function runPass3InvalidDbPath() {
   if (exitInfo.code === 0) {
     throw new Error(`pass 3: server exited with code 0 — expected non-zero. stderr: ${stderrBuf}`);
   }
+  // Substring must match the SqliteDbPathError message produced by
+  // src/config.ts:getDbPath() for a non-absolute value. If the wording in
+  // config.ts changes, update this string in lockstep.
   if (!stderrBuf.includes("TOTAL_RECALL_DB_PATH must be absolute or start with ~/")) {
     throw new Error(
       `pass 3: stderr missing expected error message. Got stderr: ${stderrBuf}`,
