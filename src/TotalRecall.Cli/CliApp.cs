@@ -145,6 +145,9 @@ public static class CliApp
     {
         return new List<ICliCommand>
         {
+            new Commands.CompactCommand(),
+            new Commands.ImportHostCommand(),
+            new Commands.StatusCommand(),
             new Commands.MigrateCommand(),
             new Commands.Eval.BenchmarkCommand(),
             new Commands.Eval.ReportCommand(),

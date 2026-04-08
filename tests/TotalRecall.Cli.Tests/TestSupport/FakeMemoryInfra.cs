@@ -109,7 +109,20 @@ internal sealed class FakeSqliteStore : ISqliteStore
 
     // Unused surface — throw to catch accidental use.
     public void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts) => throw new NotImplementedException();
-    public int Count(Tier tier, ContentType type) => throw new NotImplementedException();
+
+    // Plan 5 Task 5.9 (status) — real Count so the CLI StatusCommand can
+    // be driven by a fake store without dragging in real Sqlite. Scans
+    // the in-memory row dictionary; O(N) is fine for test fixtures.
+    public int Count(Tier tier, ContentType type)
+    {
+        int n = 0;
+        foreach (var kvp in _rows)
+        {
+            if (kvp.Key.Item1.Equals(tier) && kvp.Key.Item2.Equals(type)) n++;
+        }
+        return n;
+    }
+
     public int CountKnowledgeCollections() => throw new NotImplementedException();
 }
 
