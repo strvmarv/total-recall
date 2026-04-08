@@ -214,7 +214,7 @@ Memory capture, retrieval, and compaction run automatically in the background â€
 | Copilot CLI | Full | Auto-import from existing Copilot memory files |
 | OpenCode | MCP | Configure MCP server in opencode config |
 | Cline | MCP | Configure MCP server in Cline settings |
-| Cursor | Full | MCP server + `.cursor-plugin/` wrapper |
+| Cursor | Full | MCP server + `.cursor-plugin/` wrapper (SessionStart only; run `/total-recall compact` manually â€” Cursor has no SessionEnd hook) |
 | Hermes | Full | Auto-import from Hermes memory files |
 
 ---
