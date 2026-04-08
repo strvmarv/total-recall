@@ -92,13 +92,17 @@ async function spawnMcpClient({ env, label }) {
  * memory_store, memory_search (critical vector path), memory_delete.
  */
 async function runPass1Default() {
-  const tempHome = mkdtempSync(join(tmpdir(), "total-recall-smoke-pass1-"));
-  process.stdout.write(`[smoke] pass 1: TOTAL_RECALL_HOME=${tempHome}\n`);
-  const { client, cleanup } = await spawnMcpClient({
-    env: { TOTAL_RECALL_HOME: tempHome, TOTAL_RECALL_DB_PATH: "" },
-    label: "pass 1 default",
-  });
+  let tempHome = "";
+  let cleanup = async () => {};
   try {
+    tempHome = mkdtempSync(join(tmpdir(), "total-recall-smoke-pass1-"));
+    process.stdout.write(`[smoke] pass 1: TOTAL_RECALL_HOME=${tempHome}\n`);
+    const spawned = await spawnMcpClient({
+      env: { TOTAL_RECALL_HOME: tempHome, TOTAL_RECALL_DB_PATH: "" },
+      label: "pass 1 default",
+    });
+    const { client } = spawned;
+    cleanup = spawned.cleanup;
     ok("pass 1: connected to MCP server");
 
     const { tools } = await client.listTools();
@@ -161,7 +165,9 @@ async function runPass1Default() {
     ok(`pass 1: memory_delete: deleted ${storedId}`);
   } finally {
     await cleanup();
-    try { rmSync(tempHome, { recursive: true, force: true }); } catch {}
+    if (tempHome) {
+      try { rmSync(tempHome, { recursive: true, force: true }); } catch {}
+    }
   }
 }
 
@@ -175,32 +181,43 @@ async function runPass1Default() {
  *     sqlite-vec + embeddings pipeline is unaffected by the path change).
  */
 async function runPass2CustomDbPath() {
-  const tempHome = mkdtempSync(join(tmpdir(), "total-recall-smoke-pass2-home-"));
-  const tempDbDir = mkdtempSync(join(tmpdir(), "total-recall-smoke-pass2-db-"));
-  // Deliberately deeper than the temp root: mkdirSync(dirname(dbPath)) in
-  // connection.ts should create the "nested/sub" segments on first run.
-  const customDbPath = join(tempDbDir, "nested", "sub", "custom.db");
-  process.stdout.write(`[smoke] pass 2: TOTAL_RECALL_HOME=${tempHome}\n`);
-  process.stdout.write(`[smoke] pass 2: TOTAL_RECALL_DB_PATH=${customDbPath}\n`);
-
-  // Sanity: parent dir must NOT exist before the server spawns.
-  if (existsSync(dirname(customDbPath))) {
-    throw new Error(`pass 2: precondition failed — parent dir already exists: ${dirname(customDbPath)}`);
-  }
-
-  const { client, cleanup } = await spawnMcpClient({
-    env: {
-      TOTAL_RECALL_HOME: tempHome,
-      TOTAL_RECALL_DB_PATH: customDbPath,
-    },
-    label: "pass 2 custom db path",
-  });
+  let tempHome = "";
+  let tempDbDir = "";
+  let cleanup = async () => {};
   try {
+    tempHome = mkdtempSync(join(tmpdir(), "total-recall-smoke-pass2-home-"));
+    tempDbDir = mkdtempSync(join(tmpdir(), "total-recall-smoke-pass2-db-"));
+    // Deliberately deeper than the temp root: mkdirSync(dirname(dbPath)) in
+    // connection.ts should create the "nested/sub" segments on first run.
+    const customDbPath = join(tempDbDir, "nested", "sub", "custom.db");
+    process.stdout.write(`[smoke] pass 2: TOTAL_RECALL_HOME=${tempHome}\n`);
+    process.stdout.write(`[smoke] pass 2: TOTAL_RECALL_DB_PATH=${customDbPath}\n`);
+
+    // Sanity: parent dir must NOT exist before the server spawns.
+    if (existsSync(dirname(customDbPath))) {
+      throw new Error(`pass 2: precondition failed — parent dir already exists: ${dirname(customDbPath)}`);
+    }
+
+    const spawned = await spawnMcpClient({
+      env: {
+        TOTAL_RECALL_HOME: tempHome,
+        TOTAL_RECALL_DB_PATH: customDbPath,
+      },
+      label: "pass 2 custom db path",
+    });
+    const { client } = spawned;
+    cleanup = spawned.cleanup;
     ok("pass 2: connected to MCP server");
 
     const statusResult = await parseToolResult(
       await client.callTool({ name: "status", arguments: {} }),
     );
+    // NOTE: This is strict equality against the raw env-var value. If
+    // getDbPath() or connection.ts ever starts resolving symlinks (e.g.
+    // realpathSync), this assertion will break on macOS where tmpdir()
+    // returns /var/folders/... which is a symlink to /private/var/.... The
+    // spec mandates passthrough of the literal value, so preserving this
+    // strict check also guards that contract.
     if (statusResult?.db?.path !== customDbPath) {
       throw new Error(
         `pass 2: status db.path mismatch — expected ${customDbPath}, got ${statusResult?.db?.path}`,
@@ -254,14 +271,21 @@ async function runPass2CustomDbPath() {
     }
     ok(`pass 2: vector search hit the relocated DB: score=${topMatch.score.toFixed(3)}`);
 
-    await parseToolResult(
+    const deleteResult = await parseToolResult(
       await client.callTool({ name: "memory_delete", arguments: { id: storedId } }),
     );
-    ok(`pass 2: cleanup delete: ${storedId}`);
+    if (deleteResult?.deleted !== true) {
+      throw new Error(`pass 2: memory_delete did not confirm deletion: ${JSON.stringify(deleteResult)}`);
+    }
+    ok(`pass 2: memory_delete: deleted ${storedId}`);
   } finally {
     await cleanup();
-    try { rmSync(tempHome, { recursive: true, force: true }); } catch {}
-    try { rmSync(tempDbDir, { recursive: true, force: true }); } catch {}
+    if (tempHome) {
+      try { rmSync(tempHome, { recursive: true, force: true }); } catch {}
+    }
+    if (tempDbDir) {
+      try { rmSync(tempDbDir, { recursive: true, force: true }); } catch {}
+    }
   }
 }
 
