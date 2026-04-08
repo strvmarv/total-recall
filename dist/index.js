@@ -27034,6 +27034,17 @@ async function startServer(ctx) {
 
 // src/index.ts
 async function main() {
+  let dbPath;
+  try {
+    dbPath = getDbPath();
+  } catch (e) {
+    if (e instanceof SqliteDbPathError) {
+      process.stderr.write(`total-recall: ${e.message}
+`);
+      process.exit(1);
+    }
+    throw e;
+  }
   const config2 = loadConfig();
   const db = getDb();
   const embedder = new Embedder({
@@ -27041,7 +27052,7 @@ async function main() {
     dimensions: config2.embedding.dimensions
   });
   const sessionId = randomUUID8();
-  process.stderr.write(`total-recall: MCP server starting (db: ${getDataDir()}/total-recall.db)
+  process.stderr.write(`total-recall: MCP server starting (db: ${dbPath})
 `);
   await startServer({ db, config: config2, embedder, sessionId, configSnapshotId: "default", sessionInitialized: false, sessionInitResult: null, sessionInitPromise: null });
   const cleanup = () => {
