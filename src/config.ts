@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { join, isAbsolute, sep as pathSep } from "node:path";
+import { join, isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
@@ -56,7 +56,7 @@ export function getDbPath(): string {
 
   // Reject trailing separator regardless of runtime platform — a Windows
   // path pasted on a POSIX host should still fail cleanly.
-  if (trimmed.endsWith("/") || trimmed.endsWith("\\") || trimmed.endsWith(pathSep)) {
+  if (trimmed.endsWith("/") || trimmed.endsWith("\\")) {
     throw new SqliteDbPathError(
       `TOTAL_RECALL_DB_PATH must be a file path, not a directory. Got: "${trimmed}"`,
     );
