@@ -158,7 +158,10 @@ public static class CliApp
             new Commands.Memory.InspectCommand(),
             new Commands.Memory.LineageCommand(),
             new Commands.Memory.PromoteCommand(),
-            // TODO(Plan 5.7+): kb verbs, config verbs.
+            new Commands.Kb.ListCommand(),
+            new Commands.Kb.RefreshCommand(),
+            new Commands.Kb.RemoveCommand(),
+            // TODO(Plan 5.8+): config verbs.
         };
     }
 

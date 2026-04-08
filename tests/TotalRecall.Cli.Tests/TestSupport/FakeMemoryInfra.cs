@@ -22,6 +22,7 @@ internal sealed class FakeSqliteStore : ISqliteStore
     private readonly Dictionary<(Tier, ContentType, string), Entry> _rows = new();
     public List<(Tier FromTier, ContentType FromType, Tier ToTier, ContentType ToType, string Id)> MoveCalls { get; } = new();
     public List<(Tier Tier, ContentType Type, InsertEntryOpts Opts, string NewId)> InsertCalls { get; } = new();
+    public List<(Tier Tier, ContentType Type, string Id)> DeleteCalls { get; } = new();
     private int _nextInsertId = 0;
 
     public void Seed(Tier tier, ContentType type, Entry e)
@@ -70,12 +71,46 @@ internal sealed class FakeSqliteStore : ISqliteStore
         return newId;
     }
 
+    public void Delete(Tier tier, ContentType type, string id)
+    {
+        DeleteCalls.Add((tier, type, id));
+        _rows.Remove((tier, type, id));
+    }
+
+    // Minimal substring-based metadata filter for test harness coverage.
+    // NOT production-grade json_extract — good enough to let kb list tests
+    // filter collections by {"type":"collection"} via string matching on
+    // the metadata JSON.
+    public IReadOnlyList<Entry> ListByMetadata(
+        Tier tier,
+        ContentType type,
+        IReadOnlyDictionary<string, string> metadataFilter,
+        ListEntriesOpts? opts = null)
+    {
+        var results = new List<Entry>();
+        foreach (var kvp in _rows)
+        {
+            if (!kvp.Key.Item1.Equals(tier) || !kvp.Key.Item2.Equals(type)) continue;
+            var meta = kvp.Value.MetadataJson ?? "";
+            var allMatch = true;
+            foreach (var f in metadataFilter)
+            {
+                var needle = "\"" + f.Key + "\":\"" + f.Value + "\"";
+                if (meta.IndexOf(needle, StringComparison.Ordinal) < 0)
+                {
+                    allMatch = false;
+                    break;
+                }
+            }
+            if (allMatch) results.Add(kvp.Value);
+        }
+        return results;
+    }
+
     // Unused surface — throw to catch accidental use.
     public void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts) => throw new NotImplementedException();
-    public void Delete(Tier tier, ContentType type, string id) => throw new NotImplementedException();
     public int Count(Tier tier, ContentType type) => throw new NotImplementedException();
     public int CountKnowledgeCollections() => throw new NotImplementedException();
-    public IReadOnlyList<Entry> ListByMetadata(Tier tier, ContentType type, IReadOnlyDictionary<string, string> metadataFilter, ListEntriesOpts? opts = null) => throw new NotImplementedException();
 }
 
 internal sealed class FakeVectorSearch : IVectorSearch
@@ -121,7 +156,9 @@ internal static class EntryFactory
         long lastAccessedAt = 1_700_000_000_000L,
         int accessCount = 0,
         double decayScore = 1.0,
-        string metadataJson = "")
+        string metadataJson = "",
+        string? parentId = null,
+        string? collectionId = null)
     {
         return new Entry(
             id,
@@ -132,8 +169,8 @@ internal static class EntryFactory
             project is null ? FSharpOption<string>.None : FSharpOption<string>.Some(project),
             ListModule.OfSeq(tags ?? Array.Empty<string>()),
             createdAt, updatedAt, lastAccessedAt, accessCount, decayScore,
-            FSharpOption<string>.None,
-            FSharpOption<string>.None,
+            parentId is null ? FSharpOption<string>.None : FSharpOption<string>.Some(parentId),
+            collectionId is null ? FSharpOption<string>.None : FSharpOption<string>.Some(collectionId),
             metadataJson);
     }
 }
