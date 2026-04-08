@@ -1,9 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.Data;
 using System.Globalization;
 using System.Text;
-using TotalRecall.Infrastructure.Storage;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
 namespace TotalRecall.Infrastructure.Telemetry;
@@ -67,7 +65,7 @@ VALUES
         cmd.Parameters.AddWithValue("$sid", (object?)entry.SessionId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$stier", entry.SourceTier);
         cmd.Parameters.AddWithValue("$ttier", (object?)entry.TargetTier ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$sids", EncodeStringArray(entry.SourceEntryIds));
+        cmd.Parameters.AddWithValue("$sids", JsonStringWriter.EncodeStringArray(entry.SourceEntryIds));
         cmd.Parameters.AddWithValue("$teid", (object?)entry.TargetEntryId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$drift", (object?)entry.SemanticDrift ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$fp", (object?)entry.FactsPreserved ?? DBNull.Value);
@@ -79,25 +77,6 @@ VALUES
         cmd.ExecuteNonQuery();
 
         return id;
-    }
-
-    /// <summary>
-    /// Encode a string list as a JSON array. We can't reuse
-    /// <c>SqliteStore.TagsJson</c> directly here because it lives in the
-    /// Storage namespace; the inline path keeps the dependency surface flat.
-    /// </summary>
-    internal static string EncodeStringArray(IReadOnlyList<string> items)
-    {
-        if (items is null || items.Count == 0) return "[]";
-        var sb = new StringBuilder();
-        sb.Append('[');
-        for (var i = 0; i < items.Count; i++)
-        {
-            if (i > 0) sb.Append(',');
-            JsonStringWriter.AppendEscaped(sb, items[i]);
-        }
-        sb.Append(']');
-        return sb.ToString();
     }
 
     /// <summary>

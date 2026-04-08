@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Data;
 using System.Globalization;
 using System.Text;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
@@ -117,7 +116,7 @@ VALUES
         cmd.Parameters.AddWithValue("$tct", top is null ? DBNull.Value : top.ContentType);
         cmd.Parameters.AddWithValue("$cfg", entry.ConfigSnapshotId);
         cmd.Parameters.AddWithValue("$lat", (object?)entry.LatencyMs ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$tiers", CompactionLog.EncodeStringArray(entry.TiersSearched));
+        cmd.Parameters.AddWithValue("$tiers", JsonStringWriter.EncodeStringArray(entry.TiersSearched));
         cmd.Parameters.AddWithValue("$tcs", (object?)entry.TotalCandidatesScanned ?? DBNull.Value);
         cmd.ExecuteNonQuery();
 

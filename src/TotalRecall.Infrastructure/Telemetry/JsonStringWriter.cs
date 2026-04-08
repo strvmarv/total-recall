@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text;
 
 namespace TotalRecall.Infrastructure.Telemetry;
@@ -11,6 +12,21 @@ namespace TotalRecall.Infrastructure.Telemetry;
 /// </summary>
 internal static class JsonStringWriter
 {
+    /// Encode a string list as a JSON array. Returns "[]" for null/empty.
+    public static string EncodeStringArray(IReadOnlyList<string>? items)
+    {
+        if (items is null || items.Count == 0) return "[]";
+        var sb = new StringBuilder();
+        sb.Append('[');
+        for (var i = 0; i < items.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            AppendEscaped(sb, items[i]);
+        }
+        sb.Append(']');
+        return sb.ToString();
+    }
+
     public static void AppendEscaped(StringBuilder sb, string s)
     {
         sb.Append('"');
