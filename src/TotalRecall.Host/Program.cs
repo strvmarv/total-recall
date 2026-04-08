@@ -8,6 +8,7 @@ internal static class Program
         // For now this just exits cleanly so the project compiles and AOT-publishes.
         if (args.Length == 0 || args[0] == "serve")
         {
+            // TODO(Plan 6): wire AutoMigrationGuard before McpServer.RunAsync
             // MCP serve mode — implemented in Plan 4.
             System.Console.Error.WriteLine("total-recall: MCP server not yet implemented (Plan 4)");
             return 0;
