@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
 namespace TotalRecall.Infrastructure.Telemetry;
@@ -39,6 +40,26 @@ public sealed record CompactionAnalyticsRow(
     double? SemanticDrift);
 
 /// <summary>
+/// Full-row projection of a <c>compaction_log</c> entry used by Plan 5
+/// Task 5.5's <c>memory history</c> and <c>memory lineage</c> CLI verbs.
+/// Mirrors the shape emitted by <c>memory_history</c> in
+/// <c>src-ts/tools/extra-tools.ts</c>. Parsed JSON columns
+/// (<c>source_entry_ids</c>, <c>decay_scores</c>) fall back to empty
+/// collections on malformed input, matching the TS
+/// <c>try { JSON.parse } catch { [] }</c> behavior.
+/// </summary>
+public sealed record CompactionMovementRow(
+    string Id,
+    long Timestamp,
+    string? SessionId,
+    string SourceTier,
+    string? TargetTier,
+    IReadOnlyList<string> SourceEntryIds,
+    string? TargetEntryId,
+    string Reason,
+    IReadOnlyDictionary<string, double> DecayScores);
+
+/// <summary>
 /// Read seam over <c>compaction_log</c> used by SessionLifecycle (Plan 4
 /// Task 4.3) and the Plan 5 eval metrics aggregator. Unit tests can fake
 /// the read surface without instantiating a real SQLite connection.
@@ -59,6 +80,19 @@ public interface ICompactionLogReader
     /// (inclusive). Used by the Plan 5 eval metrics aggregator.
     /// </summary>
     IReadOnlyList<CompactionAnalyticsRow> GetAllForAnalytics(long? sinceTimestamp = null);
+
+    /// <summary>
+    /// Returns up to <paramref name="limit"/> <c>compaction_log</c> rows
+    /// ordered by descending timestamp. Used by <c>memory history</c>.
+    /// </summary>
+    IReadOnlyList<CompactionMovementRow> GetRecentMovements(int limit);
+
+    /// <summary>
+    /// Returns the most recent <c>compaction_log</c> row whose
+    /// <c>target_entry_id</c> equals <paramref name="targetEntryId"/>, or
+    /// <c>null</c> if none. Used by <c>memory lineage</c>.
+    /// </summary>
+    CompactionMovementRow? GetByTargetEntryId(string targetEntryId);
 }
 
 /// <summary>
@@ -117,6 +151,115 @@ public sealed class CompactionLog : ICompactionLogReader
                 SemanticDrift: reader.IsDBNull(3) ? null : reader.GetDouble(3)));
         }
         return rows;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<CompactionMovementRow> GetRecentMovements(int limit)
+    {
+        if (limit <= 0) return Array.Empty<CompactionMovementRow>();
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT id, timestamp, session_id, source_tier, target_tier, " +
+            "       source_entry_ids, target_entry_id, reason, decay_scores " +
+            "FROM compaction_log ORDER BY timestamp DESC LIMIT $limit";
+        cmd.Parameters.AddWithValue("$limit", limit);
+
+        var rows = new List<CompactionMovementRow>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            rows.Add(ReadMovementRow(reader));
+        }
+        return rows;
+    }
+
+    /// <inheritdoc />
+    public CompactionMovementRow? GetByTargetEntryId(string targetEntryId)
+    {
+        ArgumentNullException.ThrowIfNull(targetEntryId);
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT id, timestamp, session_id, source_tier, target_tier, " +
+            "       source_entry_ids, target_entry_id, reason, decay_scores " +
+            "FROM compaction_log WHERE target_entry_id = $id " +
+            "ORDER BY timestamp DESC LIMIT 1";
+        cmd.Parameters.AddWithValue("$id", targetEntryId);
+        using var reader = cmd.ExecuteReader();
+        if (!reader.Read()) return null;
+        return ReadMovementRow(reader);
+    }
+
+    private static CompactionMovementRow ReadMovementRow(Microsoft.Data.Sqlite.SqliteDataReader reader)
+    {
+        return new CompactionMovementRow(
+            Id: reader.GetString(0),
+            Timestamp: reader.GetInt64(1),
+            SessionId: reader.IsDBNull(2) ? null : reader.GetString(2),
+            SourceTier: reader.GetString(3),
+            TargetTier: reader.IsDBNull(4) ? null : reader.GetString(4),
+            SourceEntryIds: ParseStringArray(reader.IsDBNull(5) ? null : reader.GetString(5)),
+            TargetEntryId: reader.IsDBNull(6) ? null : reader.GetString(6),
+            Reason: reader.GetString(7),
+            DecayScores: ParseDoubleMap(reader.IsDBNull(8) ? null : reader.GetString(8)));
+    }
+
+    /// <summary>
+    /// Parses a JSON string array (e.g. <c>["a","b"]</c>) into a list.
+    /// Returns an empty list on null/malformed input, matching the TS
+    /// <c>try { JSON.parse } catch { [] }</c> semantics at
+    /// <c>src-ts/tools/extra-tools.ts:247-250</c>.
+    /// </summary>
+    internal static IReadOnlyList<string> ParseStringArray(string? json)
+    {
+        if (string.IsNullOrEmpty(json)) return Array.Empty<string>();
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array) return Array.Empty<string>();
+            var list = new List<string>(doc.RootElement.GetArrayLength());
+            foreach (var el in doc.RootElement.EnumerateArray())
+            {
+                if (el.ValueKind == JsonValueKind.String)
+                {
+                    var s = el.GetString();
+                    if (s is not null) list.Add(s);
+                }
+            }
+            return list;
+        }
+        catch (JsonException)
+        {
+            return Array.Empty<string>();
+        }
+    }
+
+    /// <summary>
+    /// Parses a JSON object of <c>string -> number</c> pairs into a
+    /// dictionary. Returns an empty dictionary on null/malformed input.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, double> ParseDoubleMap(string? json)
+    {
+        if (string.IsNullOrEmpty(json)) return new Dictionary<string, double>();
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                return new Dictionary<string, double>();
+            var dict = new Dictionary<string, double>(StringComparer.Ordinal);
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                if (prop.Value.ValueKind == JsonValueKind.Number &&
+                    prop.Value.TryGetDouble(out var d))
+                {
+                    dict[prop.Name] = d;
+                }
+            }
+            return dict;
+        }
+        catch (JsonException)
+        {
+            return new Dictionary<string, double>();
+        }
     }
 
     /// <summary>

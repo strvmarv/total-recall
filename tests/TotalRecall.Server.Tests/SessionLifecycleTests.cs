@@ -190,6 +190,11 @@ public sealed class SessionLifecycleTests
 
         public IReadOnlyList<CompactionAnalyticsRow> GetAllForAnalytics(long? sinceTimestamp = null)
             => System.Array.Empty<CompactionAnalyticsRow>();
+
+        public IReadOnlyList<CompactionMovementRow> GetRecentMovements(int limit)
+            => System.Array.Empty<CompactionMovementRow>();
+
+        public CompactionMovementRow? GetByTargetEntryId(string targetEntryId) => null;
     }
 
     private static SessionLifecycle BuildLifecycle(

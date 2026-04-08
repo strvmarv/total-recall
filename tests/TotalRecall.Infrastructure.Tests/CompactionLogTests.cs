@@ -230,6 +230,126 @@ public sealed class CompactionLogTests
         }
     }
 
+    // Direct-INSERT helper: lets tests control timestamp + malformed JSON.
+    private static void InsertRow(
+        MsSqliteConnection conn,
+        string id,
+        long timestamp,
+        string sourceEntryIdsJson = "[]",
+        string? targetEntryId = null,
+        string? sessionId = "s",
+        string sourceTier = "hot",
+        string? targetTier = "warm",
+        string reason = "decay",
+        string decayScoresJson = "{}")
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+INSERT INTO compaction_log
+  (id, timestamp, session_id, source_tier, target_tier, source_entry_ids,
+   target_entry_id, decay_scores, reason, config_snapshot_id)
+VALUES
+  ($id, $ts, $sid, $stier, $ttier, $sids, $teid, $decay, $reason, 'cfg')";
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.Parameters.AddWithValue("$ts", timestamp);
+        cmd.Parameters.AddWithValue("$sid", (object?)sessionId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$stier", sourceTier);
+        cmd.Parameters.AddWithValue("$ttier", (object?)targetTier ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$sids", sourceEntryIdsJson);
+        cmd.Parameters.AddWithValue("$teid", (object?)targetEntryId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$decay", decayScoresJson);
+        cmd.Parameters.AddWithValue("$reason", reason);
+        cmd.ExecuteNonQuery();
+    }
+
+    [Fact]
+    public void GetRecentMovements_ReturnsRowsDescByTimestamp_RespectsLimit()
+    {
+        var (conn, log) = NewLog();
+        using (conn)
+        {
+            InsertRow(conn, id: "a", timestamp: 100, targetEntryId: "t-a");
+            InsertRow(conn, id: "b", timestamp: 300, targetEntryId: "t-b");
+            InsertRow(conn, id: "c", timestamp: 200, targetEntryId: "t-c");
+
+            var rows = log.GetRecentMovements(limit: 2);
+            Assert.Equal(2, rows.Count);
+            // DESC: b (300) then c (200).
+            Assert.Equal("b", rows[0].Id);
+            Assert.Equal(300, rows[0].Timestamp);
+            Assert.Equal("c", rows[1].Id);
+            Assert.Equal(200, rows[1].Timestamp);
+        }
+    }
+
+    [Fact]
+    public void GetRecentMovements_ParsesSourceEntryIdsAndDecayScores()
+    {
+        var (conn, log) = NewLog();
+        using (conn)
+        {
+            InsertRow(
+                conn,
+                id: "a",
+                timestamp: 100,
+                sourceEntryIdsJson: "[\"x\",\"y\",\"z\"]",
+                decayScoresJson: "{\"x\":0.25,\"y\":0.5}");
+
+            var rows = log.GetRecentMovements(limit: 10);
+            var row = Assert.Single(rows);
+            Assert.Equal(new[] { "x", "y", "z" }, row.SourceEntryIds);
+            Assert.Equal(2, row.DecayScores.Count);
+            Assert.Equal(0.25, row.DecayScores["x"]);
+            Assert.Equal(0.5, row.DecayScores["y"]);
+        }
+    }
+
+    [Fact]
+    public void GetRecentMovements_MalformedJsonFallsBackToEmpty()
+    {
+        var (conn, log) = NewLog();
+        using (conn)
+        {
+            InsertRow(
+                conn,
+                id: "a",
+                timestamp: 100,
+                sourceEntryIdsJson: "{bad json",
+                decayScoresJson: "not an object");
+
+            var rows = log.GetRecentMovements(limit: 10);
+            var row = Assert.Single(rows);
+            Assert.Empty(row.SourceEntryIds);
+            Assert.Empty(row.DecayScores);
+        }
+    }
+
+    [Fact]
+    public void GetByTargetEntryId_Found_ReturnsRow()
+    {
+        var (conn, log) = NewLog();
+        using (conn)
+        {
+            InsertRow(conn, id: "log-1", timestamp: 100, targetEntryId: "X");
+
+            var row = log.GetByTargetEntryId("X");
+            Assert.NotNull(row);
+            Assert.Equal("log-1", row!.Id);
+            Assert.Equal("X", row.TargetEntryId);
+        }
+    }
+
+    [Fact]
+    public void GetByTargetEntryId_NotFound_ReturnsNull()
+    {
+        var (conn, log) = NewLog();
+        using (conn)
+        {
+            InsertRow(conn, id: "log-1", timestamp: 100, targetEntryId: "X");
+            Assert.Null(log.GetByTargetEntryId("Y"));
+        }
+    }
+
     [Fact]
     public void LogEvent_TimestampWithinReasonableRange()
     {

@@ -152,9 +152,11 @@ public static class CliApp
             new Commands.Eval.SnapshotCommand(),
             new Commands.Eval.GrowCommand(),
             new Commands.Memory.DemoteCommand(),
+            new Commands.Memory.HistoryCommand(),
             new Commands.Memory.InspectCommand(),
+            new Commands.Memory.LineageCommand(),
             new Commands.Memory.PromoteCommand(),
-            // TODO(Plan 5.5+): memory history/lineage/export/import, kb verbs, config verbs.
+            // TODO(Plan 5.6+): memory export/import, kb verbs, config verbs.
         };
     }
 
