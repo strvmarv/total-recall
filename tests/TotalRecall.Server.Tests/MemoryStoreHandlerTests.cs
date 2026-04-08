@@ -1,41 +1,202 @@
-namespace TotalRecall.Server.Tests;
+// Plan 4 Task 4.6 — MemoryStoreHandler contract tests. The Plan 1 seed
+// test originally lived here as a single [Fact(Skip = ...)] placeholder;
+// that skip is removed now that the handler exists. These tests isolate
+// the handler from real SQLite / ONNX / vec0 by using the lightweight
+// fakes in TestSupport/.
 
+using System;
+using System.Linq;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using TotalRecall.Core;
+using TotalRecall.Server.Handlers;
+using TotalRecall.Server.Tests.TestSupport;
 using Xunit;
 
-// First handler-contract test for the memory_store MCP tool.
-//
-// This test is INTENTIONALLY RED in Plan 1. Plan 4 implements
-// TotalRecall.Server.Handlers.MemoryStoreHandler and turns it green.
-//
-// The test asserts the MCP response-shape contract that ANY
-// implementation must satisfy:
-//   1. A valid happy-path call returns a response with isError=false
-//      (or absent) and a content array containing the new entry's id.
-//   2. The handler does not throw on a valid input.
-//
-// This is a contract test, not an integration test — it uses a fake
-// SqliteStore and a fake Embedder to isolate the handler logic.
+namespace TotalRecall.Server.Tests;
+
 public class MemoryStoreHandlerTests
 {
-    [Fact(Skip = "TotalRecall.Server.Handlers.MemoryStoreHandler not yet implemented (Plan 4)")]
-    public void HappyPath_ReturnsSuccessResponseWithEntryId()
+    private static (MemoryStoreHandler handler, FakeSqliteStore store, RecordingFakeEmbedder embedder, FakeVectorSearch vector)
+        MakeHandler(string? id = null)
     {
-        // Pending: handler does not exist yet.
-        //
-        // When Plan 4 lands, the body becomes roughly:
-        //
-        //   var fakeStore = new FakeSqliteStore();
-        //   var fakeEmbedder = new FakeEmbedder();
-        //   var handler = new MemoryStoreHandler(fakeStore, fakeEmbedder);
-        //
-        //   var args = JsonNode.Parse("""{"content":"hello world","tier":"hot"}""");
-        //   var result = handler.Execute(args);
-        //
-        //   Assert.NotNull(result);
-        //   var isError = result["isError"]?.GetValue<bool>() ?? false;
-        //   Assert.False(isError);
-        //   var content = result["content"]?.AsArray();
-        //   Assert.NotNull(content);
-        //   Assert.NotEmpty(content);
+        var store = new FakeSqliteStore();
+        if (id is not null) store.NextInsertId = id;
+        var embedder = new RecordingFakeEmbedder();
+        var vector = new FakeVectorSearch();
+        var handler = new MemoryStoreHandler(store, embedder, vector);
+        return (handler, store, embedder, vector);
+    }
+
+    private static JsonElement ParseArgs(string json) =>
+        JsonDocument.Parse(json).RootElement.Clone();
+
+    [Fact]
+    public async Task HappyPath_ReturnsSuccessResponseWithEntryId()
+    {
+        var (handler, store, embedder, vector) = MakeHandler("entry-123");
+        var args = ParseArgs("""{"content":"hello world","tier":"hot"}""");
+
+        var result = await handler.ExecuteAsync(args, CancellationToken.None);
+
+        Assert.NotEqual(true, result.IsError);
+        Assert.NotNull(result.Content);
+        Assert.Single(result.Content);
+        Assert.Equal("text", result.Content[0].Type);
+        Assert.Contains("entry-123", result.Content[0].Text);
+        Assert.Equal("{\"id\":\"entry-123\"}", result.Content[0].Text);
+
+        Assert.Single(store.InsertCalls);
+        var call = store.InsertCalls[0];
+        Assert.Equal(Tier.Hot, call.Tier);
+        Assert.Equal(ContentType.Memory, call.Type);
+        Assert.Equal("hello world", call.Opts.Content);
+
+        Assert.Single(embedder.Calls);
+        Assert.Equal("hello world", embedder.Calls[0]);
+
+        Assert.Single(vector.InsertCalls);
+        Assert.Equal("entry-123", vector.InsertCalls[0].EntryId);
+        Assert.Equal(Tier.Hot, vector.InsertCalls[0].Tier);
+        Assert.Equal(ContentType.Memory, vector.InsertCalls[0].Type);
+        Assert.Equal(384, vector.InsertCalls[0].Embedding.Length);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithAllOptionalFields_PopulatesInsertOpts()
+    {
+        var (handler, store, _, _) = MakeHandler("entry-all");
+        var args = ParseArgs("""
+            {
+              "content": "full payload",
+              "tier": "warm",
+              "contentType": "knowledge",
+              "entryType": "correction",
+              "project": "foo",
+              "tags": ["a","b"],
+              "source": "manual"
+            }
+            """);
+
+        await handler.ExecuteAsync(args, CancellationToken.None);
+
+        var call = Assert.Single(store.InsertCalls);
+        Assert.Equal(Tier.Warm, call.Tier);
+        Assert.Equal(ContentType.Knowledge, call.Type);
+        Assert.Equal("full payload", call.Opts.Content);
+        Assert.Equal("foo", call.Opts.Project);
+        Assert.Equal("manual", call.Opts.Source);
+        Assert.NotNull(call.Opts.Tags);
+        Assert.Equal(new[] { "a", "b" }, call.Opts.Tags!.ToArray());
+        Assert.Equal("{\"entry_type\":\"correction\"}", call.Opts.MetadataJson);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DefaultsTierToHot_TypeToMemory()
+    {
+        var (handler, store, _, _) = MakeHandler();
+        var args = ParseArgs("""{"content":"no tier no type"}""");
+
+        await handler.ExecuteAsync(args, CancellationToken.None);
+
+        var call = Assert.Single(store.InsertCalls);
+        Assert.Equal(Tier.Hot, call.Tier);
+        Assert.Equal(ContentType.Memory, call.Type);
+        Assert.Null(call.Opts.MetadataJson);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NullArguments_Throws()
+    {
+        var (handler, _, _, _) = MakeHandler();
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => handler.ExecuteAsync(null, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_EmptyContent_Throws()
+    {
+        var (handler, _, _, _) = MakeHandler();
+        var args = ParseArgs("""{"content":""}""");
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => handler.ExecuteAsync(args, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_InvalidTier_Throws()
+    {
+        var (handler, _, _, _) = MakeHandler();
+        var args = ParseArgs("""{"content":"x","tier":"lukewarm"}""");
+        var ex = await Assert.ThrowsAsync<ArgumentException>(
+            () => handler.ExecuteAsync(args, CancellationToken.None));
+        Assert.Contains("lukewarm", ex.Message);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_InvalidContentType_Throws()
+    {
+        var (handler, _, _, _) = MakeHandler();
+        var args = ParseArgs("""{"content":"x","contentType":"knowledgebase"}""");
+        var ex = await Assert.ThrowsAsync<ArgumentException>(
+            () => handler.ExecuteAsync(args, CancellationToken.None));
+        Assert.Contains("knowledgebase", ex.Message);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_InvalidEntryType_Throws()
+    {
+        var (handler, _, _, _) = MakeHandler();
+        var args = ParseArgs("""{"content":"x","entryType":"opinion"}""");
+        var ex = await Assert.ThrowsAsync<ArgumentException>(
+            () => handler.ExecuteAsync(args, CancellationToken.None));
+        Assert.Contains("opinion", ex.Message);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_EmbedCalledWithContent()
+    {
+        var (handler, _, embedder, _) = MakeHandler();
+        var args = ParseArgs("""{"content":"exact content string"}""");
+
+        await handler.ExecuteAsync(args, CancellationToken.None);
+
+        var call = Assert.Single(embedder.Calls);
+        Assert.Equal("exact content string", call);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Cancellation_Propagates()
+    {
+        var (handler, store, _, _) = MakeHandler();
+        var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var args = ParseArgs("""{"content":"x"}""");
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => handler.ExecuteAsync(args, cts.Token));
+        Assert.Empty(store.InsertCalls);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ContentTooLong_Throws()
+    {
+        var (handler, _, _, _) = MakeHandler();
+        var huge = new string('x', 100_001);
+        var args = ParseArgs($$"""{"content":"{{huge}}"}""");
+        var ex = await Assert.ThrowsAsync<ArgumentException>(
+            () => handler.ExecuteAsync(args, CancellationToken.None));
+        Assert.Contains("100000", ex.Message);
+    }
+
+    [Fact]
+    public void Name_And_Schema_MatchWireContract()
+    {
+        var (handler, _, _, _) = MakeHandler();
+        Assert.Equal("memory_store", handler.Name);
+        Assert.Equal("Store a new memory or knowledge entry", handler.Description);
+        Assert.Equal(JsonValueKind.Object, handler.InputSchema.ValueKind);
+        Assert.True(handler.InputSchema.TryGetProperty("properties", out var props));
+        Assert.True(props.TryGetProperty("content", out _));
     }
 }
