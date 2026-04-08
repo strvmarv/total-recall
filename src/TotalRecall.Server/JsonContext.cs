@@ -176,6 +176,34 @@ public sealed record ModelNotReadyPayload(
     [property: JsonPropertyName("hint")] string? Hint,
     [property: JsonPropertyName("message")] string Message);
 
+// ---------- Task 4.7: memory_search result payload ----------
+//
+// DTOs serialized by MemorySearchHandler. Field names match the TS
+// reference (src-ts/memory/search.ts SearchResult shape) exactly so the
+// MCP wire output is byte-compatible: `entry`, `score`, `tier`,
+// `content_type`, `rank`. The `entry` object mirrors the fields TS
+// exposes on a memory/knowledge row.
+
+public sealed record MemorySearchResultDto(
+    [property: JsonPropertyName("entry")] EntryDto Entry,
+    [property: JsonPropertyName("score")] double Score,
+    [property: JsonPropertyName("tier")] string Tier,
+    [property: JsonPropertyName("content_type")] string ContentType,
+    [property: JsonPropertyName("rank")] int Rank);
+
+public sealed record EntryDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("content")] string Content,
+    [property: JsonPropertyName("summary")] string? Summary,
+    [property: JsonPropertyName("source")] string? Source,
+    [property: JsonPropertyName("project")] string? Project,
+    [property: JsonPropertyName("tags")] string[] Tags,
+    [property: JsonPropertyName("created_at")] long CreatedAt,
+    [property: JsonPropertyName("updated_at")] long UpdatedAt,
+    [property: JsonPropertyName("last_accessed_at")] long LastAccessedAt,
+    [property: JsonPropertyName("access_count")] int AccessCount,
+    [property: JsonPropertyName("decay_score")] double DecayScore);
+
 // ---------- source-gen context ----------
 
 [JsonSourceGenerationOptions(
@@ -197,6 +225,9 @@ public sealed record ModelNotReadyPayload(
 [JsonSerializable(typeof(ToolContent))]
 [JsonSerializable(typeof(ModelNotReadyPayload))]
 [JsonSerializable(typeof(JsonElement))]
+[JsonSerializable(typeof(MemorySearchResultDto))]
+[JsonSerializable(typeof(MemorySearchResultDto[]))]
+[JsonSerializable(typeof(EntryDto))]
 // ---- Task 4.3: SessionLifecycle wire shapes ----
 // Source-gen needs each nested record AND each generic collection element
 // type registered explicitly so the AOT publisher does not have to walk

@@ -45,12 +45,15 @@ public sealed record HybridSearchOpts(
 /// </para>
 ///
 /// <para>
-/// This class deliberately does not implement an interface. It is the
-/// orchestration composition root on top of the three search/storage seams
-/// and does not need a seam of its own.
+/// Implements <see cref="IHybridSearch"/> as a minimal seam so the MCP
+/// handler layer (see <c>TotalRecall.Server.Handlers.MemorySearchHandler</c>)
+/// can depend on an interface rather than this concrete orchestration
+/// class. The interface surface is deliberately tiny — just the single
+/// <see cref="Search"/> entry point — because HybridSearch remains the
+/// composition root for the vector/FTS/store trio.
 /// </para>
 /// </summary>
-public sealed class HybridSearch
+public sealed class HybridSearch : IHybridSearch
 {
     private const double DefaultFtsWeight = 0.3;
 
