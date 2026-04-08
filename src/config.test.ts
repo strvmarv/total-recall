@@ -106,3 +106,131 @@ describe("createConfigSnapshot", () => {
     expect(rows.length).toBe(2);
   });
 });
+
+describe("getDbPath", () => {
+  const ORIGINAL_DB_PATH = process.env.TOTAL_RECALL_DB_PATH;
+  const ORIGINAL_HOME = process.env.TOTAL_RECALL_HOME;
+  let fakeHomeDir: string;
+
+  beforeEach(() => {
+    // Pin TOTAL_RECALL_HOME so the "default" path is predictable.
+    fakeHomeDir = mkdtempSync(join(tmpdir(), "tr-getdbpath-home-"));
+    process.env.TOTAL_RECALL_HOME = fakeHomeDir;
+  });
+
+  afterEach(() => {
+    if (ORIGINAL_DB_PATH === undefined) delete process.env.TOTAL_RECALL_DB_PATH;
+    else process.env.TOTAL_RECALL_DB_PATH = ORIGINAL_DB_PATH;
+    if (ORIGINAL_HOME === undefined) delete process.env.TOTAL_RECALL_HOME;
+    else process.env.TOTAL_RECALL_HOME = ORIGINAL_HOME;
+    rmSync(fakeHomeDir, { recursive: true, force: true });
+  });
+
+  it("returns the default path when TOTAL_RECALL_DB_PATH is unset", async () => {
+    const { getDbPath } = await import("./config.js");
+    delete process.env.TOTAL_RECALL_DB_PATH;
+    expect(getDbPath()).toBe(join(fakeHomeDir, "total-recall.db"));
+  });
+
+  it("returns the default path when TOTAL_RECALL_DB_PATH is empty string", async () => {
+    const { getDbPath } = await import("./config.js");
+    process.env.TOTAL_RECALL_DB_PATH = "";
+    expect(getDbPath()).toBe(join(fakeHomeDir, "total-recall.db"));
+  });
+
+  it("returns the default path when TOTAL_RECALL_DB_PATH is whitespace only", async () => {
+    const { getDbPath } = await import("./config.js");
+    process.env.TOTAL_RECALL_DB_PATH = "   ";
+    expect(getDbPath()).toBe(join(fakeHomeDir, "total-recall.db"));
+  });
+
+  it("returns an absolute POSIX path unchanged", async () => {
+    const { getDbPath } = await import("./config.js");
+    process.env.TOTAL_RECALL_DB_PATH = "/tmp/custom.db";
+    expect(getDbPath()).toBe("/tmp/custom.db");
+  });
+
+  it("expands ~/ prefix to the user home directory", async () => {
+    const { getDbPath } = await import("./config.js");
+    const { homedir } = await import("node:os");
+    process.env.TOTAL_RECALL_DB_PATH = "~/custom.db";
+    expect(getDbPath()).toBe(join(homedir(), "custom.db"));
+  });
+
+  it("expands multi-segment ~/ paths", async () => {
+    const { getDbPath } = await import("./config.js");
+    const { homedir } = await import("node:os");
+    process.env.TOTAL_RECALL_DB_PATH = "~/a/b/c.db";
+    expect(getDbPath()).toBe(join(homedir(), "a/b/c.db"));
+  });
+
+  it("rejects bare ~ (no filename)", async () => {
+    const { getDbPath, SqliteDbPathError } = await import("./config.js");
+    process.env.TOTAL_RECALL_DB_PATH = "~";
+    expect(() => getDbPath()).toThrow(SqliteDbPathError);
+    expect(() => getDbPath()).toThrow(/must be a file path, not a directory/);
+    expect(() => getDbPath()).toThrow(/"~"/);
+  });
+
+  it("rejects a relative path starting with ./", async () => {
+    const { getDbPath, SqliteDbPathError } = await import("./config.js");
+    process.env.TOTAL_RECALL_DB_PATH = "./rel.db";
+    expect(() => getDbPath()).toThrow(SqliteDbPathError);
+    expect(() => getDbPath()).toThrow(/must be absolute or start with ~\//);
+    expect(() => getDbPath()).toThrow(/"\.\/rel\.db"/);
+  });
+
+  it("rejects a bare relative filename", async () => {
+    const { getDbPath, SqliteDbPathError } = await import("./config.js");
+    process.env.TOTAL_RECALL_DB_PATH = "rel.db";
+    expect(() => getDbPath()).toThrow(SqliteDbPathError);
+    expect(() => getDbPath()).toThrow(/must be absolute or start with ~\//);
+    expect(() => getDbPath()).toThrow(/"rel\.db"/);
+  });
+
+  it("rejects a POSIX trailing slash", async () => {
+    const { getDbPath, SqliteDbPathError } = await import("./config.js");
+    process.env.TOTAL_RECALL_DB_PATH = "/tmp/dir/";
+    expect(() => getDbPath()).toThrow(SqliteDbPathError);
+    expect(() => getDbPath()).toThrow(/must be a file path, not a directory/);
+    expect(() => getDbPath()).toThrow(/"\/tmp\/dir\/"/);
+  });
+
+  it("rejects a trailing backslash even on POSIX (Windows path pasted on Linux/Mac)", async () => {
+    const { getDbPath, SqliteDbPathError } = await import("./config.js");
+    process.env.TOTAL_RECALL_DB_PATH = "C:\\Data\\tr.db\\";
+    expect(() => getDbPath()).toThrow(SqliteDbPathError);
+    expect(() => getDbPath()).toThrow(/must be a file path, not a directory/);
+  });
+
+  it.runIf(process.platform === "win32")(
+    "accepts a Windows absolute path with drive letter",
+    async () => {
+      const { getDbPath } = await import("./config.js");
+      process.env.TOTAL_RECALL_DB_PATH = "C:\\Data\\tr.db";
+      expect(getDbPath()).toBe("C:\\Data\\tr.db");
+    },
+  );
+
+  it("is idempotent: repeat calls with env var unchanged return the same value", async () => {
+    const { getDbPath } = await import("./config.js");
+    process.env.TOTAL_RECALL_DB_PATH = "/tmp/stable.db";
+    const first = getDbPath();
+    const second = getDbPath();
+    const third = getDbPath();
+    expect(first).toBe("/tmp/stable.db");
+    expect(second).toBe(first);
+    expect(third).toBe(first);
+  });
+
+  it("error messages echo the raw env value for debuggability", async () => {
+    const { getDbPath } = await import("./config.js");
+    process.env.TOTAL_RECALL_DB_PATH = "not/absolute/path.db";
+    try {
+      getDbPath();
+      expect.fail("expected SqliteDbPathError");
+    } catch (e) {
+      expect((e as Error).message).toContain("not/absolute/path.db");
+    }
+  });
+});

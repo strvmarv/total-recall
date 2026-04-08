@@ -6803,7 +6803,7 @@ import { randomUUID as randomUUID8 } from "crypto";
 
 // src/config.ts
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
-import { join } from "path";
+import { join, isAbsolute, sep as pathSep } from "path";
 import { homedir } from "os";
 import { createHash, randomUUID } from "crypto";
 

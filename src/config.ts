@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, isAbsolute, sep as pathSep } from "node:path";
 import { homedir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
@@ -17,6 +17,72 @@ export function getDataDir(): string {
     process.env.TOTAL_RECALL_HOME ??
     join(homedir(), ".total-recall")
   );
+}
+
+/**
+ * Raised when TOTAL_RECALL_DB_PATH fails validation. Mirrors
+ * SqliteExtensionError in src/db/sqlite-bootstrap.ts so callers can
+ * distinguish config errors from runtime errors via instanceof.
+ */
+export class SqliteDbPathError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SqliteDbPathError";
+  }
+}
+
+/**
+ * Resolve the SQLite database file path.
+ *
+ * Precedence:
+ *   1. process.env.TOTAL_RECALL_DB_PATH (validated, ~/ expanded)
+ *   2. <TOTAL_RECALL_HOME or homedir()/.total-recall>/total-recall.db
+ *
+ * Rules:
+ *   - Must be an absolute file path, or start with "~/".
+ *   - Trailing "/" or "\" is rejected (file path required, not directory).
+ *   - Bare "~" is rejected (no filename).
+ *   - Empty / whitespace values are treated as unset.
+ *
+ * Throws SqliteDbPathError on any validation failure. Pure function:
+ * no filesystem probes; parent-dir creation happens at the call site.
+ */
+export function getDbPath(): string {
+  const raw = process.env.TOTAL_RECALL_DB_PATH;
+  if (raw === undefined || raw.trim() === "") {
+    return join(getDataDir(), "total-recall.db");
+  }
+  const trimmed = raw.trim();
+
+  // Reject trailing separator regardless of runtime platform — a Windows
+  // path pasted on a POSIX host should still fail cleanly.
+  if (trimmed.endsWith("/") || trimmed.endsWith("\\") || trimmed.endsWith(pathSep)) {
+    throw new SqliteDbPathError(
+      `TOTAL_RECALL_DB_PATH must be a file path, not a directory. Got: "${trimmed}"`,
+    );
+  }
+
+  // Bare "~" has no filename component.
+  if (trimmed === "~") {
+    throw new SqliteDbPathError(
+      `TOTAL_RECALL_DB_PATH must be a file path, not a directory. Got: "~"`,
+    );
+  }
+
+  // Expand leading ~/ to homedir(). .mcp.json env blocks don't shell-expand,
+  // so without this, users would have to hardcode absolute paths.
+  let expanded = trimmed;
+  if (trimmed.startsWith("~/")) {
+    expanded = join(homedir(), trimmed.slice(2));
+  }
+
+  if (!isAbsolute(expanded)) {
+    throw new SqliteDbPathError(
+      `TOTAL_RECALL_DB_PATH must be absolute or start with ~/. Got: "${trimmed}"`,
+    );
+  }
+
+  return expanded;
 }
 
 export function loadConfig(): TotalRecallConfig {
