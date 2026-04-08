@@ -191,6 +191,15 @@ public sealed record MemorySearchResultDto(
     [property: JsonPropertyName("content_type")] string ContentType,
     [property: JsonPropertyName("rank")] int Rank);
 
+// ---------- Task 4.8: memory_get result payload ----------
+//
+// Wire shape matches src-ts/memory/get.ts: `{tier, content_type, entry}`.
+// Handler returns JSON `null` if no row matches across the 6 tables.
+public sealed record MemoryGetResultDto(
+    [property: JsonPropertyName("tier")] string Tier,
+    [property: JsonPropertyName("content_type")] string ContentType,
+    [property: JsonPropertyName("entry")] EntryDto Entry);
+
 public sealed record EntryDto(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("content")] string Content,
@@ -228,6 +237,7 @@ public sealed record EntryDto(
 [JsonSerializable(typeof(MemorySearchResultDto))]
 [JsonSerializable(typeof(MemorySearchResultDto[]))]
 [JsonSerializable(typeof(EntryDto))]
+[JsonSerializable(typeof(MemoryGetResultDto))]
 // ---- Task 4.3: SessionLifecycle wire shapes ----
 // Source-gen needs each nested record AND each generic collection element
 // type registered explicitly so the AOT publisher does not have to walk
