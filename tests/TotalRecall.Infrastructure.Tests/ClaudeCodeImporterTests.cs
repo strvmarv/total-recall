@@ -8,6 +8,7 @@ using TotalRecall.Infrastructure.Importers;
 using TotalRecall.Infrastructure.Search;
 using TotalRecall.Infrastructure.Storage;
 using TotalRecall.Infrastructure.Telemetry;
+using TotalRecall.Infrastructure.Tests.TestSupport;
 using Xunit;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
@@ -33,27 +34,17 @@ public sealed class ClaudeCodeImporterTests : IDisposable
         }
     }
 
-    private sealed class FakeEmbedder : IEmbedder
+    private sealed class Fixture : IDisposable
     {
-        public float[] Embed(string text)
-        {
-            var v = new float[384];
-            var len = text?.Length ?? 0;
-            for (var i = 0; i < 384; i++)
-            {
-                v[i] = (float)Math.Sin(len * (i + 1) / 384.0);
-            }
-            return v;
-        }
-    }
+        public required MsSqliteConnection Conn { get; init; }
+        public required SqliteStore Store { get; init; }
+        public required VectorSearch Vec { get; init; }
+        public required ImportLog Log { get; init; }
+        public required FakeEmbedder Embedder { get; init; }
+        public required string BasePath { get; init; }
 
-    private sealed record Fixture(
-        MsSqliteConnection Conn,
-        SqliteStore Store,
-        VectorSearch Vec,
-        ImportLog Log,
-        FakeEmbedder Embedder,
-        string BasePath);
+        public void Dispose() => Conn.Dispose();
+    }
 
     private string NewTempDir(string tag)
     {
@@ -130,7 +121,15 @@ public sealed class ClaudeCodeImporterTests : IDisposable
         var log = new ImportLog(conn);
         var emb = new FakeEmbedder();
 
-        return new Fixture(conn, store, vec, log, emb, basePath);
+        return new Fixture
+        {
+            Conn = conn,
+            Store = store,
+            Vec = vec,
+            Log = log,
+            Embedder = emb,
+            BasePath = basePath,
+        };
     }
 
     private ClaudeCodeImporter NewImporter(Fixture f) =>

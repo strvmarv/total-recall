@@ -161,7 +161,7 @@ public sealed class ClaudeCodeImporter : IImporter
                     var embedding = _embedder.Embed(parsed.Content);
                     _vectorSearch.InsertEmbedding(tier, type, entryId, embedding);
                     _importLog.LogImport(
-                        "claude-code", filePath, hash, entryId, tier, type);
+                        Name, filePath, hash, entryId, tier, type);
                     imported++;
                 }
                 catch (Exception ex)
@@ -210,7 +210,7 @@ public sealed class ClaudeCodeImporter : IImporter
             var embedding = _embedder.Embed(parsed.Content);
             _vectorSearch.InsertEmbedding(tier, type, entryId, embedding);
             _importLog.LogImport(
-                "claude-code", claudeMdPath, hash, entryId, tier, type);
+                Name, claudeMdPath, hash, entryId, tier, type);
             imported++;
         }
         catch (Exception ex)

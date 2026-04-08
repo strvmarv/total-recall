@@ -55,13 +55,22 @@ public interface IImporter
     /// <summary>Counts importable files without performing the import.</summary>
     ImporterScanResult Scan();
 
-    /// <summary>Imports the host tool's memory entries into the warm tier
-    /// (or the tool-specific default tier). The optional
-    /// <paramref name="project"/> scopes the import to a single project
-    /// key when the host tool supports project-scoped memories.</summary>
+    /// <summary>
+    /// Imports the host tool's memory entries. The optional
+    /// <paramref name="project"/> is the value stamped on the
+    /// <c>Project</c> column of every imported entry — it does NOT scope
+    /// the file scan; concrete importers walk all projects in the host
+    /// tool's data directory regardless. Pass <c>null</c> for global
+    /// memories.
+    /// </summary>
     ImportResult ImportMemories(string? project = null);
 
-    /// <summary>Imports the host tool's knowledge entries (documentation,
-    /// reference material) into the cold knowledge tier.</summary>
+    /// <summary>
+    /// Imports the host tool's knowledge entries (documentation, plans,
+    /// reference material). The destination tier and content-type are
+    /// implementation-specific per host tool — see each concrete
+    /// <see cref="IImporter"/> implementation's XML doc for the routing
+    /// it uses.
+    /// </summary>
     ImportResult ImportKnowledge();
 }
