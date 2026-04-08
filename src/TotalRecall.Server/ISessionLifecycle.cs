@@ -40,4 +40,12 @@ public interface ISessionLifecycle
     /// once. Lets handlers branch on whether they hit the cached path.
     /// </summary>
     bool IsInitialized { get; }
+
+    /// <summary>
+    /// Stable session identifier generated at construction. Exposed so
+    /// handlers like <c>session_end</c> can return the session id without
+    /// having to round-trip through <see cref="EnsureInitializedAsync"/>.
+    /// Task 4.10 backfill.
+    /// </summary>
+    string SessionId { get; }
 }

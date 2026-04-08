@@ -251,6 +251,25 @@ public sealed record EntryDto(
     [property: JsonPropertyName("access_count")] int AccessCount,
     [property: JsonPropertyName("decay_score")] double DecayScore);
 
+// ---------- Task 4.10: session_end / session_context payloads ----------
+//
+// session_end currently returns a stub: compactHotTier has not been ported
+// to .NET Infrastructure (Plan 5+). The Details field from the TS shape is
+// intentionally omitted because source-gen cannot handle `object?` payloads
+// and the stub always has nothing to put there.
+public sealed record SessionEndResultDto(
+    [property: JsonPropertyName("sessionId")] string SessionId,
+    [property: JsonPropertyName("carryForward")] int CarryForward,
+    [property: JsonPropertyName("promoted")] int Promoted,
+    [property: JsonPropertyName("discarded")] int Discarded);
+
+// session_context wire shape. Mirrors TS session-tools.ts:390-393:
+// `{entryCount: int, context: string}`. The context string is the
+// formatted hot-tier listing assembled by SessionContextHandler.
+public sealed record SessionContextResultDto(
+    [property: JsonPropertyName("entryCount")] int EntryCount,
+    [property: JsonPropertyName("context")] string Context);
+
 // ---------- source-gen context ----------
 
 [JsonSourceGenerationOptions(
@@ -296,6 +315,9 @@ public sealed record EntryDto(
 [JsonSerializable(typeof(System.Collections.Generic.List<ImportSummaryRow>))]
 [JsonSerializable(typeof(System.Collections.Generic.List<RegressionAlert>))]
 [JsonSerializable(typeof(System.Collections.Generic.List<string>))]
+// ---- Task 4.10: session_end / session_context DTOs ----
+[JsonSerializable(typeof(SessionEndResultDto))]
+[JsonSerializable(typeof(SessionContextResultDto))]
 public partial class JsonContext : JsonSerializerContext
 {
 }

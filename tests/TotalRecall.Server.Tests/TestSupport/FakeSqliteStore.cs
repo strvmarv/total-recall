@@ -8,6 +8,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Storage;
 
@@ -33,9 +34,27 @@ public sealed class FakeSqliteStore : ISqliteStore
     /// </summary>
     public Dictionary<(Tier, ContentType, string), Entry> Entries { get; } = new();
 
+    /// <summary>
+    /// Ordered entry lists per (tier, type) slot. Populated via
+    /// <see cref="SeedList"/>; consumed by <see cref="List"/>. Kept separate
+    /// from the id-keyed <see cref="Entries"/> dictionary so tests that only
+    /// exercise Get/Insert/Delete are unaffected.
+    /// </summary>
+    public Dictionary<(Tier, ContentType), List<Entry>> ListSlots { get; } = new();
+
     public void Seed(Tier tier, ContentType type, Entry entry)
     {
         Entries[(tier, type, entry.Id)] = entry;
+    }
+
+    public void SeedList(Tier tier, ContentType type, params Entry[] entries)
+    {
+        if (!ListSlots.TryGetValue((tier, type), out var slot))
+        {
+            slot = new List<Entry>();
+            ListSlots[(tier, type)] = slot;
+        }
+        slot.AddRange(entries);
     }
 
     public string Insert(Tier tier, ContentType type, InsertEntryOpts opts)
@@ -61,8 +80,14 @@ public sealed class FakeSqliteStore : ISqliteStore
         Entries.Remove((tier, type, id));
     }
 
-    public IReadOnlyList<Entry> List(Tier tier, ContentType type, ListEntriesOpts? opts = null) =>
-        throw new NotImplementedException();
+    public IReadOnlyList<Entry> List(Tier tier, ContentType type, ListEntriesOpts? opts = null)
+    {
+        if (!ListSlots.TryGetValue((tier, type), out var slot))
+            return Array.Empty<Entry>();
+        IEnumerable<Entry> src = slot;
+        if (opts?.Limit is int lim) src = src.Take(lim);
+        return src.ToList();
+    }
 
     public int Count(Tier tier, ContentType type) =>
         throw new NotImplementedException();

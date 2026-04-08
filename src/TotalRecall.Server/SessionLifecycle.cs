@@ -66,6 +66,9 @@ public sealed class SessionLifecycle : ISessionLifecycle
     public bool IsInitialized => _cached is not null;
 
     /// <inheritdoc />
+    public string SessionId => _sessionId;
+
+    /// <inheritdoc />
     public async Task<SessionInitResult> EnsureInitializedAsync(CancellationToken ct = default)
     {
         if (_cached is not null) return _cached;
