@@ -163,6 +163,19 @@ public sealed record ToolContent
     public string Text { get; init; } = "";
 }
 
+// ---------- Task 4.5: ErrorTranslator payload ----------
+//
+// Wire shape for ModelNotReadyException → MCP tool error response. Mirrors
+// the TS `error-translate.ts` payload one-for-one (error / modelName /
+// reason / hint / message). `Hint` is omitted on the wire when null because
+// JsonContext sets DefaultIgnoreCondition = WhenWritingNull.
+public sealed record ModelNotReadyPayload(
+    [property: JsonPropertyName("error")] string Error,
+    [property: JsonPropertyName("modelName")] string ModelName,
+    [property: JsonPropertyName("reason")] string Reason,
+    [property: JsonPropertyName("hint")] string? Hint,
+    [property: JsonPropertyName("message")] string Message);
+
 // ---------- source-gen context ----------
 
 [JsonSourceGenerationOptions(
@@ -182,6 +195,7 @@ public sealed record ToolContent
 [JsonSerializable(typeof(ToolsCallParams))]
 [JsonSerializable(typeof(ToolCallResult))]
 [JsonSerializable(typeof(ToolContent))]
+[JsonSerializable(typeof(ModelNotReadyPayload))]
 [JsonSerializable(typeof(JsonElement))]
 // ---- Task 4.3: SessionLifecycle wire shapes ----
 // Source-gen needs each nested record AND each generic collection element
