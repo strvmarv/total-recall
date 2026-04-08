@@ -12,8 +12,16 @@
 //   - Tool arguments and input schemas are arbitrary JSON. JsonElement is
 //     AOT-friendly when reached through a source-gen context (unlike JsonNode,
 //     which drags reflection-based serializers along).
-//   - Optional fields are nullable reference types with DefaultIgnoreCondition
-//     = WhenWritingNull, so absent fields are simply omitted on the wire.
+//   - Task 4.12 flipped the context-wide DefaultIgnoreCondition from
+//     WhenWritingNull to Never. Rationale: TS JSON.stringify emits literal
+//     `null` for fields whose value is `null` (only `undefined` is omitted),
+//     and TR's TS handlers return `null` — not `undefined` — for stubbed
+//     optional fields (e.g. StatusHandler's lastCompaction, SessionInit's
+//     warmSweep/projectDocs/smokeTest/regressionAlerts). Emitting literal
+//     `null` keeps the .NET server byte-compatible with the TS wire shape.
+//     Fields that TS deliberately leaves `undefined` (e.g. ModelNotReadyPayload.hint)
+//     still need omission — they carry a per-field
+//     [JsonIgnore(Condition = WhenWritingNull)] override.
 //
 // Task 4.0 does NOT rewire McpServer.cs to use this context — that is Task 4.1.
 // This file only declares the types and the source-gen surface.
@@ -25,18 +33,25 @@ namespace TotalRecall.Server;
 
 // ---------- JSON-RPC envelope ----------
 
+// Per-field [JsonIgnore(WhenWritingNull)] on the envelope types preserves
+// JSON-RPC 2.0 conformance under the Task 4.12 context-wide flip to
+// DefaultIgnoreCondition = Never: a response must carry EITHER "result" OR
+// "error", never both. If we let the new Never default through, every
+// success response would emit "error":null and every error response would
+// emit "result":null — non-compliant. The field-level overrides keep the
+// envelope lean while allowing DTO payloads to emit literal nulls.
 public sealed record JsonRpcRequest
 {
     [JsonPropertyName("jsonrpc")]
     public string Jsonrpc { get; init; } = "2.0";
 
-    [JsonPropertyName("id")]
+    [JsonPropertyName("id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? Id { get; init; }
 
     [JsonPropertyName("method")]
     public string Method { get; init; } = "";
 
-    [JsonPropertyName("params")]
+    [JsonPropertyName("params"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? Params { get; init; }
 }
 
@@ -48,10 +63,10 @@ public sealed record JsonRpcResponse
     [JsonPropertyName("id")]
     public JsonElement? Id { get; init; }
 
-    [JsonPropertyName("result")]
+    [JsonPropertyName("result"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? Result { get; init; }
 
-    [JsonPropertyName("error")]
+    [JsonPropertyName("error"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonRpcError? Error { get; init; }
 }
 
@@ -63,7 +78,7 @@ public sealed record JsonRpcError
     [JsonPropertyName("message")]
     public string Message { get; init; } = "";
 
-    [JsonPropertyName("data")]
+    [JsonPropertyName("data"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? Data { get; init; }
 }
 
@@ -75,7 +90,7 @@ public sealed record NotificationMessage
     [JsonPropertyName("method")]
     public string Method { get; init; } = "";
 
-    [JsonPropertyName("params")]
+    [JsonPropertyName("params"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? Params { get; init; }
 }
 
@@ -110,7 +125,9 @@ public sealed record ServerCapabilities
 
 public sealed record ToolsCapability
 {
-    [JsonPropertyName("listChanged")]
+    // TS emits `tools: {}` without listChanged when not supported; retain
+    // omission under the Task 4.12 Never default via a per-field override.
+    [JsonPropertyName("listChanged"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? ListChanged { get; init; }
 }
 
@@ -150,7 +167,9 @@ public sealed record ToolCallResult
     [JsonPropertyName("content")]
     public ToolContent[] Content { get; init; } = System.Array.Empty<ToolContent>();
 
-    [JsonPropertyName("isError")]
+    // TS only sets isError when true; keep omission semantics under the
+    // Task 4.12 Never default.
+    [JsonPropertyName("isError"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? IsError { get; init; }
 }
 
@@ -167,13 +186,17 @@ public sealed record ToolContent
 //
 // Wire shape for ModelNotReadyException → MCP tool error response. Mirrors
 // the TS `error-translate.ts` payload one-for-one (error / modelName /
-// reason / hint / message). `Hint` is omitted on the wire when null because
-// JsonContext sets DefaultIgnoreCondition = WhenWritingNull.
+// reason / hint / message). TS builds the payload with `hint` assigned
+// `undefined` when unset; `JSON.stringify` then OMITS undefined fields. So
+// the .NET wire shape must also omit `hint` when null — which we achieve
+// with a per-field [JsonIgnore(WhenWritingNull)] override against the
+// context-wide DefaultIgnoreCondition = Never default (Task 4.12).
 public sealed record ModelNotReadyPayload(
     [property: JsonPropertyName("error")] string Error,
     [property: JsonPropertyName("modelName")] string ModelName,
     [property: JsonPropertyName("reason")] string Reason,
-    [property: JsonPropertyName("hint")] string? Hint,
+    [property: JsonPropertyName("hint")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Hint,
     [property: JsonPropertyName("message")] string Message);
 
 // ---------- Task 4.7: memory_search result payload ----------
@@ -327,7 +350,7 @@ public sealed record LastCompactionDto(
 [JsonSourceGenerationOptions(
     WriteIndented = false,
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
-    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+    DefaultIgnoreCondition = JsonIgnoreCondition.Never)]
 [JsonSerializable(typeof(JsonRpcRequest))]
 [JsonSerializable(typeof(JsonRpcResponse))]
 [JsonSerializable(typeof(JsonRpcError))]

@@ -81,10 +81,10 @@ public sealed class StatusHandlerTests
         Assert.Equal(JsonValueKind.Object, root.GetProperty("db").ValueKind);
         Assert.Equal(JsonValueKind.Object, root.GetProperty("embedding").ValueKind);
         Assert.Equal(JsonValueKind.Object, root.GetProperty("activity").ValueKind);
-        // lastCompaction is stubbed to null; JsonContext is configured with
-        // DefaultIgnoreCondition=WhenWritingNull, so the property is omitted
-        // from the wire rather than written as null. Assert on absence.
-        Assert.False(root.TryGetProperty("lastCompaction", out _));
+        // lastCompaction is stubbed to null; under Task 4.12's
+        // DefaultIgnoreCondition=Never the property is emitted as a literal
+        // JSON null (matching TS JSON.stringify on a null field).
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("lastCompaction").ValueKind);
     }
 
     [Fact]
@@ -164,8 +164,8 @@ public sealed class StatusHandlerTests
 
         var db = root.GetProperty("db");
         Assert.Equal(missing, db.GetProperty("path").GetString());
-        // sizeBytes is null -> omitted by WhenWritingNull.
-        Assert.False(db.TryGetProperty("sizeBytes", out _));
+        // sizeBytes is null -> emitted as literal JSON null (Task 4.12).
+        Assert.Equal(JsonValueKind.Null, db.GetProperty("sizeBytes").ValueKind);
     }
 
     [Fact]
@@ -235,8 +235,8 @@ public sealed class StatusHandlerTests
 
         var a = root.GetProperty("activity");
         Assert.Equal(0, a.GetProperty("retrievals7d").GetInt32());
-        // avgTopScore7d is null -> omitted.
-        Assert.False(a.TryGetProperty("avgTopScore7d", out _));
+        // avgTopScore7d is null -> emitted as literal JSON null (Task 4.12).
+        Assert.Equal(JsonValueKind.Null, a.GetProperty("avgTopScore7d").ValueKind);
         Assert.Equal(0, a.GetProperty("positiveOutcomes7d").GetInt32());
         Assert.Equal(0, a.GetProperty("negativeOutcomes7d").GetInt32());
     }
@@ -248,8 +248,8 @@ public sealed class StatusHandlerTests
 
         var root = await RunAsync(store, new FakeSessionLifecycle(), Options());
 
-        // Stubbed to null -> omitted by WhenWritingNull.
-        Assert.False(root.TryGetProperty("lastCompaction", out _));
+        // Stubbed to null -> emitted as literal JSON null (Task 4.12).
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("lastCompaction").ValueKind);
     }
 
     [Fact]
@@ -301,8 +301,8 @@ public sealed class StatusHandlerTests
         Assert.True(root.TryGetProperty("db", out _));
         Assert.True(root.TryGetProperty("embedding", out _));
         Assert.True(root.TryGetProperty("activity", out _));
-        // lastCompaction omitted when null (WhenWritingNull).
-        Assert.False(root.TryGetProperty("lastCompaction", out _));
+        // lastCompaction emitted as literal null (Task 4.12 Never default).
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("lastCompaction").ValueKind);
 
         // Spot-check nested shape.
         Assert.Equal(6, root.GetProperty("tierSizes").GetProperty("cold_knowledge").GetInt32());
