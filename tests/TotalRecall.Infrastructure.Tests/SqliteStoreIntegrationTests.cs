@@ -294,4 +294,28 @@ public sealed class SqliteStoreIntegrationTests
                     new ListEntriesOpts { OrderBy = "id ASC" }));
         }
     }
+
+    [Fact]
+    public void OrderBy_InvalidDirection_Throws()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            Assert.Throws<ArgumentException>(() =>
+                store.List(Tier.Hot, ContentType.Memory,
+                    new ListEntriesOpts { OrderBy = "created_at FOO" }));
+        }
+    }
+
+    [Fact]
+    public void OrderBy_TooManyParts_Throws()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            Assert.Throws<ArgumentException>(() =>
+                store.List(Tier.Hot, ContentType.Memory,
+                    new ListEntriesOpts { OrderBy = "created_at ASC extra" }));
+        }
+    }
 }

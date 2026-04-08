@@ -15,7 +15,7 @@ namespace TotalRecall.Infrastructure.Tests;
 /// allows the blur of unit/integration line here by using an in-memory DB.
 /// </summary>
 [Trait("Category", "Integration")]
-public sealed class SqliteStoreUnitTests
+public sealed class SqliteStoreRowMappingTests
 {
     private static MsSqliteConnection NewMigratedConnection()
     {

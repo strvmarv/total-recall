@@ -78,7 +78,7 @@ VALUES
         cmd.Parameters.AddWithValue(
             "$source_tool",
             opts.SourceTool is not null
-                ? SourceToolMapping.ToString(opts.SourceTool)
+                ? SourceToolMapping.ToDbValue(opts.SourceTool)
                 : (object)DBNull.Value);
         cmd.Parameters.AddWithValue("$project", (object?)opts.Project ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$tags", TagsJson.Encode(opts.Tags));
@@ -300,7 +300,7 @@ VALUES
                 insertCmd.Parameters.AddWithValue(
                     "$source_tool",
                     FSharpOption<SourceTool>.get_IsSome(entry.SourceTool)
-                        ? SourceToolMapping.ToString(entry.SourceTool.Value)
+                        ? SourceToolMapping.ToDbValue(entry.SourceTool.Value)
                         : (object)DBNull.Value);
                 insertCmd.Parameters.AddWithValue("$project", ToDbString(entry.Project));
                 insertCmd.Parameters.AddWithValue("$tags", TagsJson.EncodeFList(entry.Tags));
@@ -342,7 +342,7 @@ VALUES
         var summary = ReadNullableString(reader, "summary");
         var source = ReadNullableString(reader, "source");
         var sourceToolStr = ReadNullableStringRaw(reader, "source_tool");
-        var sourceTool = SourceToolMapping.FromString(sourceToolStr);
+        var sourceTool = SourceToolMapping.Parse(sourceToolStr);
         var project = ReadNullableString(reader, "project");
         var tagsStr = ReadNullableStringRaw(reader, "tags") ?? "[]";
         var tags = TagsJson.Decode(tagsStr);
@@ -422,9 +422,24 @@ VALUES
         if (!AllowedOrderColumns.Contains(column))
             throw new ArgumentException($"Invalid orderBy column: {column}", nameof(orderBy));
 
-        var direction = parts.Length > 1 && parts[1].Equals("ASC", StringComparison.OrdinalIgnoreCase)
-            ? "ASC"
-            : "DESC";
+        string direction;
+        if (parts.Length == 1)
+        {
+            direction = "DESC";
+        }
+        else if (parts.Length == 2)
+        {
+            if (parts[1].Equals("ASC", StringComparison.OrdinalIgnoreCase))
+                direction = "ASC";
+            else if (parts[1].Equals("DESC", StringComparison.OrdinalIgnoreCase))
+                direction = "DESC";
+            else
+                throw new ArgumentException($"Invalid orderBy direction: {parts[1]}", nameof(orderBy));
+        }
+        else
+        {
+            throw new ArgumentException($"Invalid orderBy format: {orderBy}", nameof(orderBy));
+        }
         return $"{column} {direction}";
     }
 
@@ -447,7 +462,7 @@ VALUES
 /// </summary>
 internal static class SourceToolMapping
 {
-    public static string ToString(SourceTool tool)
+    public static string ToDbValue(SourceTool tool)
     {
         if (tool.IsClaudeCode) return "claude-code";
         if (tool.IsCopilotCli) return "copilot-cli";
@@ -459,7 +474,7 @@ internal static class SourceToolMapping
         throw new ArgumentOutOfRangeException(nameof(tool), tool, "Unknown SourceTool");
     }
 
-    public static FSharpOption<SourceTool> FromString(string? value)
+    public static FSharpOption<SourceTool> Parse(string? value)
     {
         if (value is null) return FSharpOption<SourceTool>.None;
         SourceTool tool = value switch
@@ -523,60 +538,107 @@ internal static class TagsJson
         if (span.Length == 0 || span[0] != '[')
             throw new FormatException("Invalid tags JSON: expected array");
         var i = 1;
-        // skip whitespace
-        while (i < span.Length && char.IsWhiteSpace(span[i])) i++;
-        if (i < span.Length && span[i] == ']') return result;
 
-        while (i < span.Length)
+        // Outer state machine: after the opening '[', we expect either an
+        // element or ']'. After each element we expect either ',' or ']'.
+        // After a ',' we strictly expect an element (no trailing commas).
+        // Tracking this explicitly rejects malformed input like ["a""b"]
+        // and ["a",].
+        bool expectSeparator = false;
+        bool afterComma = false;
+        while (true)
         {
             while (i < span.Length && char.IsWhiteSpace(span[i])) i++;
-            if (i >= span.Length || span[i] != '"')
-                throw new FormatException("Invalid tags JSON: expected string");
-            i++; // consume opening quote
-            var sb = new StringBuilder();
-            while (i < span.Length && span[i] != '"')
-            {
-                if (span[i] == '\\' && i + 1 < span.Length)
-                {
-                    var esc = span[i + 1];
-                    switch (esc)
-                    {
-                        case '"': sb.Append('"'); break;
-                        case '\\': sb.Append('\\'); break;
-                        case '/': sb.Append('/'); break;
-                        case 'b': sb.Append('\b'); break;
-                        case 'f': sb.Append('\f'); break;
-                        case 'n': sb.Append('\n'); break;
-                        case 'r': sb.Append('\r'); break;
-                        case 't': sb.Append('\t'); break;
-                        case 'u':
-                            if (i + 5 >= span.Length)
-                                throw new FormatException("Invalid \\u escape");
-                            var hex = span.Slice(i + 2, 4);
-                            sb.Append((char)int.Parse(hex, System.Globalization.NumberStyles.HexNumber));
-                            i += 4;
-                            break;
-                        default:
-                            throw new FormatException($"Invalid escape \\{esc}");
-                    }
-                    i += 2;
-                }
-                else
-                {
-                    sb.Append(span[i]);
-                    i++;
-                }
-            }
             if (i >= span.Length)
-                throw new FormatException("Invalid tags JSON: unterminated string");
-            i++; // consume closing quote
-            result.Add(sb.ToString());
+                throw new FormatException("Invalid tags JSON: unterminated array");
 
-            while (i < span.Length && char.IsWhiteSpace(span[i])) i++;
-            if (i < span.Length && span[i] == ',') { i++; continue; }
-            if (i < span.Length && span[i] == ']') return result;
+            if (!expectSeparator)
+            {
+                if (span[i] == ']')
+                {
+                    if (afterComma)
+                        throw new FormatException("Invalid tags JSON: trailing comma");
+                    return result;
+                }
+                if (span[i] != '"')
+                    throw new FormatException("Invalid tags JSON: expected string");
+                i++; // consume opening quote
+                var sb = new StringBuilder();
+                while (i < span.Length && span[i] != '"')
+                {
+                    if (span[i] == '\\' && i + 1 < span.Length)
+                    {
+                        var esc = span[i + 1];
+                        switch (esc)
+                        {
+                            case '"': sb.Append('"'); break;
+                            case '\\': sb.Append('\\'); break;
+                            case '/': sb.Append('/'); break;
+                            case 'b': sb.Append('\b'); break;
+                            case 'f': sb.Append('\f'); break;
+                            case 'n': sb.Append('\n'); break;
+                            case 'r': sb.Append('\r'); break;
+                            case 't': sb.Append('\t'); break;
+                            case 'u':
+                                if (i + 5 >= span.Length)
+                                    throw new FormatException("Invalid \\u escape");
+                                var hex = span.Slice(i + 2, 4);
+                                var unit = (char)int.Parse(hex, System.Globalization.NumberStyles.HexNumber);
+                                if (char.IsHighSurrogate(unit))
+                                {
+                                    // Require immediately-following \uXXXX that is a low surrogate.
+                                    if (i + 11 >= span.Length ||
+                                        span[i + 6] != '\\' || span[i + 7] != 'u')
+                                        throw new FormatException("invalid \\u escape sequence: unpaired surrogate");
+                                    var hex2 = span.Slice(i + 8, 4);
+                                    var unit2 = (char)int.Parse(hex2, System.Globalization.NumberStyles.HexNumber);
+                                    if (!char.IsLowSurrogate(unit2))
+                                        throw new FormatException("invalid \\u escape sequence: unpaired surrogate");
+                                    sb.Append(unit);
+                                    sb.Append(unit2);
+                                    i += 10; // consume first \uXXXX body (4) + second \uXXXX (6)
+                                }
+                                else if (char.IsLowSurrogate(unit))
+                                {
+                                    throw new FormatException("invalid \\u escape sequence: unpaired surrogate");
+                                }
+                                else
+                                {
+                                    sb.Append(unit);
+                                    i += 4;
+                                }
+                                break;
+                            default:
+                                throw new FormatException($"Invalid escape \\{esc}");
+                        }
+                        i += 2;
+                    }
+                    else
+                    {
+                        sb.Append(span[i]);
+                        i++;
+                    }
+                }
+                if (i >= span.Length)
+                    throw new FormatException("Invalid tags JSON: unterminated string");
+                i++; // consume closing quote
+                result.Add(sb.ToString());
+                expectSeparator = true;
+                afterComma = false;
+            }
+            else
+            {
+                if (span[i] == ']') return result;
+                if (span[i] == ',')
+                {
+                    i++;
+                    expectSeparator = false;
+                    afterComma = true;
+                    continue;
+                }
+                throw new FormatException("Invalid tags JSON: expected ',' or ']'");
+            }
         }
-        throw new FormatException("Invalid tags JSON: unterminated array");
     }
 
     private static void AppendEscaped(StringBuilder sb, string s)
