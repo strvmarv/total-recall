@@ -95,6 +95,37 @@ public sealed class SchemaTests
     }
 
     [Fact]
+    public void RunMigrations_FreshDb_CreatesAllFtsSyncTriggers()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        var triggerNames = new HashSet<string>();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='trigger' ORDER BY name";
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read()) triggerNames.Add(reader.GetString(0));
+
+        // Each of the 6 base content tables has 3 FTS sync triggers:
+        //   <base>_fts_ai (after insert), <base>_fts_ad (after delete), <base>_fts_au (after update)
+        var expected = new HashSet<string>();
+        foreach (var (tier, type) in new[] {
+            ("hot", "memories"), ("hot", "knowledge"),
+            ("warm", "memories"), ("warm", "knowledge"),
+            ("cold", "memories"), ("cold", "knowledge"),
+        })
+        {
+            var b = $"{tier}_{type}";
+            expected.Add($"{b}_fts_ai");
+            expected.Add($"{b}_fts_ad");
+            expected.Add($"{b}_fts_au");
+        }
+
+        Assert.Equal(18, expected.Count);
+        Assert.Superset(expected, triggerNames);
+    }
+
+    [Fact]
     public void RunMigrations_RunTwice_Idempotent()
     {
         using var conn = SqliteConnection.Open(":memory:");

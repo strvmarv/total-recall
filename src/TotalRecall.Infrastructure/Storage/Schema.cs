@@ -213,6 +213,7 @@ public static class MigrationRunner
         tx.Commit();
     }
 
+    /// Caller MUST ensure <c>_schema_version</c> exists first (see <see cref="RunMigrations"/>).
     private static int GetCurrentVersion(
         MsSqliteConnection conn,
         Microsoft.Data.Sqlite.SqliteTransaction tx)

@@ -18,64 +18,13 @@ public sealed class SqliteStore : IDisposable
 
     public long Insert(string content, float[] embedding)
     {
-        if (embedding.Length != 384)
-            throw new ArgumentException("embedding must be 384 floats", nameof(embedding));
-
-        using var tx = _conn.BeginTransaction();
-        long id;
-        using (var cmd = _conn.CreateCommand())
-        {
-            cmd.Transaction = tx;
-            cmd.CommandText = "INSERT INTO entries (content, created) VALUES ($c, $ts) RETURNING id";
-            cmd.Parameters.AddWithValue("$c", content);
-            cmd.Parameters.AddWithValue("$ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-            id = (long)cmd.ExecuteScalar()!;
-        }
-
-        using (var cmd = _conn.CreateCommand())
-        {
-            cmd.Transaction = tx;
-            cmd.CommandText = "INSERT INTO vec_entries (id, embedding) VALUES ($id, $vec)";
-            cmd.Parameters.AddWithValue("$id", id);
-            cmd.Parameters.AddWithValue("$vec", FloatsToBytes(embedding));
-            cmd.ExecuteNonQuery();
-        }
-
-        tx.Commit();
-        return id;
+        throw new NotImplementedException("Replaced by tier-aware CRUD in Plan 3 Task 3.3.");
     }
 
     public IReadOnlyList<SearchHit> Search(float[] queryEmbedding, int topK)
     {
-        if (queryEmbedding.Length != 384)
-            throw new ArgumentException("queryEmbedding must be 384 floats", nameof(queryEmbedding));
-
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = @"
-            SELECT v.id, e.content, v.distance
-            FROM vec_entries v
-            JOIN entries e ON e.id = v.id
-            WHERE v.embedding MATCH $vec
-              AND k = $k
-            ORDER BY v.distance";
-        cmd.Parameters.AddWithValue("$vec", FloatsToBytes(queryEmbedding));
-        cmd.Parameters.AddWithValue("$k", topK);
-
-        var hits = new List<SearchHit>();
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
-        {
-            hits.Add(new SearchHit(reader.GetInt64(0), reader.GetString(1), (float)reader.GetDouble(2)));
-        }
-        return hits;
+        throw new NotImplementedException("Replaced by tier-aware CRUD in Plan 3 Task 3.3.");
     }
 
     public void Dispose() => _conn.Dispose();
-
-    private static byte[] FloatsToBytes(float[] floats)
-    {
-        var bytes = new byte[floats.Length * sizeof(float)];
-        Buffer.BlockCopy(floats, 0, bytes, 0, bytes.Length);
-        return bytes;
-    }
 }
