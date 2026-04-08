@@ -255,7 +255,7 @@ function initSchema(db) {
 
 // src/config.ts
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
-import { join } from "path";
+import { join, isAbsolute } from "path";
 import { homedir } from "os";
 import { createHash, randomUUID } from "crypto";
 

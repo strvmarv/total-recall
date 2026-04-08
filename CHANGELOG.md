@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.6.8-beta.7 - 2026-04-08
+
+### Added
+- **`TOTAL_RECALL_DB_PATH` env var for relocating only the SQLite database file.** Set to an absolute path (e.g. `/Users/you/Dropbox/memories.db`) or a `~/`-prefixed path to move `total-recall.db` out from under `<TOTAL_RECALL_HOME>`. `config.toml`, the embedding model cache, and export directories stay anchored to `TOTAL_RECALL_HOME`. Enables cloud-synced memories (Dropbox, iCloud) and shared-database workflows across multiple Claude Code workspaces — the existing `project` field on memories filters per-workspace views on top of a shared store. Validation runs once at MCP server startup: invalid values (relative paths, trailing separators, bare `~`) cause `src/index.ts` to print a single stderr line via `SqliteDbPathError` and `process.exit(1)` BEFORE loadConfig, bootstrapSqlite, the embedding model, or the MCP transport bind — no partial DB is ever created. `src/db/connection.ts` now calls `mkdirSync(dirname(dbPath), { recursive: true })` so deep custom paths whose parent directories don't exist yet get created on first run. `status` tool reports the resolved path (not the default literal) so "which DB am I actually talking to?" is always answerable. See INSTALL.md's new "Relocating the database" section for cloud-sync caveats (sqlite.org/howtocorrupt link, Dropbox WAL/SHM warnings), concurrent-writer semantics on shared workspaces, and a manual migration recipe.
+- **Smoke test passes 2 and 3.** `scripts/mcp-smoke-test.mjs` now runs three sequential passes under real bun on every CI matrix leg. Pass 2 spawns the MCP server with a `TOTAL_RECALL_DB_PATH` pointing at a nested path whose parent directory doesn't exist pre-spawn, and asserts that `status` reports the override, the DB file lands at exactly the configured location, the parent directory is auto-created, and vector search still hits the relocated DB. Pass 3 spawns the server with `TOTAL_RECALL_DB_PATH="./relative.db"` (invalid) and locks in the fail-fast contract: non-zero exit within a 5-second watchdog, expected `SqliteDbPathError` message on stderr including the raw bad value. Pass 3 uses `child_process.spawn` directly with a `close` event await and an `error` handler because the MCP SDK's transport init would crash during the child's early exit, masking the real assertion.
+
+### Changed
+- **Startup log line format.** `src/index.ts` now reports the resolved DB path via `getDbPath()` — previously it used `getDataDir()/total-recall.db`, which lied when `TOTAL_RECALL_DB_PATH` was set. The log line is otherwise unchanged: `total-recall: MCP server starting (db: <path>)`. If you have a log-scraping tool parsing the old literal format, it will still match the prefix but the tail will differ when a custom path is in use.
+
 ## 0.6.8-beta.6 - 2026-04-08
 
 ### Fixed
