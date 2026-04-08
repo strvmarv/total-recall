@@ -9,6 +9,10 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Spectre.Console" Version="0.55.0" />
+    <PackageReference Include="Spectre.Console.Cli" Version="0.55.0" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\TotalRecall.Core\TotalRecall.Core.fsproj" />
     <ProjectReference Include="..\TotalRecall.Infrastructure\TotalRecall.Infrastructure.csproj" />
   </ItemGroup>
