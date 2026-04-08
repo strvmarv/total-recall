@@ -22,6 +22,10 @@
     <InternalsVisibleTo Include="TotalRecall.Infrastructure.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Config/defaults.toml" />
+  </ItemGroup>
+
   <!--
     Vendor the sqlite-vec native library into the output under runtimes/.
     Source: node_modules/sqlite-vec-linux-x64/vec0.so (pulled in by the TS
