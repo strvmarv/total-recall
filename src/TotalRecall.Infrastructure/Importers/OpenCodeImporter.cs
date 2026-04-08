@@ -105,35 +105,16 @@ public sealed class OpenCodeImporter : IImporter
         var agentsMdPath = Path.Combine(_configPath, "AGENTS.md");
         if (!File.Exists(agentsMdPath)) return;
 
-        try
-        {
-            var raw = File.ReadAllText(agentsMdPath);
-            var hash = ImportLog.ContentHash(raw);
-
-            if (_importLog.IsAlreadyImported(hash))
-            {
-                skipped++;
-                return;
-            }
-
-            var parsed = ImportUtils.ParseFrontmatter(raw);
-
-            var entryId = _store.Insert(Tier.Warm, ContentType.Knowledge, new InsertEntryOpts(
-                Content: parsed.Content,
-                Source: agentsMdPath,
-                SourceTool: SourceTool.Opencode,
-                Tags: new[] { "agents-md", "global" }));
-
-            var embedding = _embedder.Embed(parsed.Content);
-            _vectorSearch.InsertEmbedding(Tier.Warm, ContentType.Knowledge, entryId, embedding);
-            _importLog.LogImport(
-                Name, agentsMdPath, hash, entryId, Tier.Warm, ContentType.Knowledge);
-            imported++;
-        }
-        catch (Exception ex)
-        {
-            errors.Add($"{agentsMdPath}: {ex.Message}");
-        }
+        // Global AGENTS.md uses fixed tags — frontmatter name is NOT prepended
+        // (matches TS: the global insert just passes ["agents-md", "global"]).
+        var outcome = ImportUtils.ImportMarkdownFile(
+            _store, _embedder, _vectorSearch, _importLog,
+            Name, SourceTool.Opencode,
+            agentsMdPath, Tier.Warm, ContentType.Knowledge,
+            baseTags: new[] { "agents-md", "global" },
+            prependFrontmatterName: false,
+            parseFrontmatter: true);
+        ImportUtils.Tally(outcome, ref imported, ref skipped, errors);
     }
 
     private void ImportProjectContent(ref int imported, ref int skipped, List<string> errors)
@@ -219,40 +200,13 @@ public sealed class OpenCodeImporter : IImporter
         ref int skipped,
         List<string> errors)
     {
-        try
-        {
-            var raw = File.ReadAllText(filePath);
-            var hash = ImportLog.ContentHash(raw);
-
-            if (_importLog.IsAlreadyImported(hash))
-            {
-                skipped++;
-                return;
-            }
-
-            var parsed = ImportUtils.ParseFrontmatter(raw);
-            var fm = parsed.Frontmatter;
-
-            string[] tags = !string.IsNullOrEmpty(fm?.Name)
-                ? new[] { fm!.Name! }.Concat(baseTags).ToArray()
-                : baseTags;
-
-            var entryId = _store.Insert(Tier.Cold, ContentType.Knowledge, new InsertEntryOpts(
-                Content: parsed.Content,
-                Summary: fm?.Description,
-                Source: filePath,
-                SourceTool: SourceTool.Opencode,
-                Tags: tags));
-
-            var embedding = _embedder.Embed(parsed.Content);
-            _vectorSearch.InsertEmbedding(Tier.Cold, ContentType.Knowledge, entryId, embedding);
-            _importLog.LogImport(
-                Name, filePath, hash, entryId, Tier.Cold, ContentType.Knowledge);
-            imported++;
-        }
-        catch (Exception ex)
-        {
-            errors.Add($"{filePath}: {ex.Message}");
-        }
+        var outcome = ImportUtils.ImportMarkdownFile(
+            _store, _embedder, _vectorSearch, _importLog,
+            Name, SourceTool.Opencode,
+            filePath, Tier.Cold, ContentType.Knowledge,
+            baseTags: baseTags,
+            prependFrontmatterName: true,
+            parseFrontmatter: true);
+        ImportUtils.Tally(outcome, ref imported, ref skipped, errors);
     }
 }

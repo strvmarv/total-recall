@@ -1,6 +1,33 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using TotalRecall.Core;
+using TotalRecall.Infrastructure.Embedding;
+using TotalRecall.Infrastructure.Search;
+using TotalRecall.Infrastructure.Storage;
+using TotalRecall.Infrastructure.Telemetry;
 
 namespace TotalRecall.Infrastructure.Importers;
+
+/// <summary>
+/// Outcome of a single <see cref="ImportUtils.ImportMarkdownFile"/> call.
+/// </summary>
+public enum ImportFileStatus
+{
+    Imported,
+    Skipped,
+    Errored,
+}
+
+/// <summary>
+/// Result of <see cref="ImportUtils.ImportMarkdownFile"/>. For
+/// <see cref="ImportFileStatus.Errored"/>, <see cref="Error"/> carries a
+/// human-readable message in the form <c>"{filePath}: {ex.Message}"</c>.
+/// </summary>
+public sealed record ImportFileOutcome(
+    ImportFileStatus Status,
+    string? Error = null);
 
 /// <summary>
 /// Parsed frontmatter block from a markdown file. Mirrors the TS
@@ -86,6 +113,132 @@ public static class ImportUtils
         }
 
         return new FrontmatterParseResult(new Frontmatter(name, description, type), content);
+    }
+
+    /// <summary>
+    /// Standard markdown-import pipeline shared across host importers:
+    /// read file → hash → dedupe check → (optionally) parse frontmatter →
+    /// insert entry → embed → insert vector → log import row.
+    ///
+    /// Returns one of:
+    /// <list type="bullet">
+    ///   <item><see cref="ImportFileStatus.Imported"/> on success.</item>
+    ///   <item><see cref="ImportFileStatus.Skipped"/> if the content hash
+    ///     already exists in <c>import_log</c>.</item>
+    ///   <item><see cref="ImportFileStatus.Errored"/> with an error message
+    ///     on any exception during read/parse/insert/embed/log.</item>
+    /// </list>
+    ///
+    /// Concrete importers compose this with their per-importer routing
+    /// logic (tier/type, base tag selection, source-tool DU).
+    ///
+    /// When <paramref name="parseFrontmatter"/> is false (Copilot CLI plan.md,
+    /// Cline global rules), the file content is inserted verbatim and
+    /// <paramref name="prependFrontmatterName"/> has no effect.
+    /// </summary>
+    public static ImportFileOutcome ImportMarkdownFile(
+        ISqliteStore store,
+        IEmbedder embedder,
+        IVectorSearch vectorSearch,
+        ImportLog importLog,
+        string sourceToolName,
+        SourceTool sourceToolDu,
+        string filePath,
+        Tier tier,
+        ContentType contentType,
+        IReadOnlyList<string> baseTags,
+        bool prependFrontmatterName,
+        bool parseFrontmatter = true,
+        string? project = null)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(embedder);
+        ArgumentNullException.ThrowIfNull(vectorSearch);
+        ArgumentNullException.ThrowIfNull(importLog);
+        ArgumentNullException.ThrowIfNull(filePath);
+        ArgumentNullException.ThrowIfNull(baseTags);
+
+        try
+        {
+            var raw = File.ReadAllText(filePath);
+            var hash = ImportLog.ContentHash(raw);
+
+            if (importLog.IsAlreadyImported(hash))
+            {
+                return new ImportFileOutcome(ImportFileStatus.Skipped);
+            }
+
+            string content;
+            string? summary;
+            IReadOnlyList<string> tags;
+
+            if (parseFrontmatter)
+            {
+                var parsed = ParseFrontmatter(raw);
+                content = parsed.Content;
+                // When prependFrontmatterName is false the caller has
+                // opted out of frontmatter-driven metadata entirely —
+                // fixed tags, no summary from description. This matches
+                // the TS "only destructure content" pattern used by
+                // ClaudeCode knowledge and OpenCode global AGENTS.md.
+                if (prependFrontmatterName)
+                {
+                    summary = parsed.Frontmatter?.Description;
+                    tags = !string.IsNullOrEmpty(parsed.Frontmatter?.Name)
+                        ? new[] { parsed.Frontmatter!.Name! }.Concat(baseTags).ToArray()
+                        : baseTags.ToArray();
+                }
+                else
+                {
+                    summary = null;
+                    tags = baseTags.ToArray();
+                }
+            }
+            else
+            {
+                content = raw;
+                summary = null;
+                tags = baseTags.ToArray();
+            }
+
+            var entryId = store.Insert(tier, contentType, new InsertEntryOpts(
+                Content: content,
+                Summary: summary,
+                Source: filePath,
+                SourceTool: sourceToolDu,
+                Project: project,
+                Tags: tags));
+
+            var embedding = embedder.Embed(content);
+            vectorSearch.InsertEmbedding(tier, contentType, entryId, embedding);
+            importLog.LogImport(sourceToolName, filePath, hash, entryId, tier, contentType);
+
+            return new ImportFileOutcome(ImportFileStatus.Imported);
+        }
+        catch (Exception ex)
+        {
+            return new ImportFileOutcome(
+                ImportFileStatus.Errored,
+                $"{filePath}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Updates the running import counters based on an <see cref="ImportFileOutcome"/>.
+    /// Small helper to DRY up the aggregation switch at call sites.
+    /// </summary>
+    public static void Tally(
+        ImportFileOutcome outcome,
+        ref int imported,
+        ref int skipped,
+        List<string> errors)
+    {
+        switch (outcome.Status)
+        {
+            case ImportFileStatus.Imported: imported++; break;
+            case ImportFileStatus.Skipped: skipped++; break;
+            case ImportFileStatus.Errored: errors.Add(outcome.Error!); break;
+        }
     }
 
     /// <summary>\w in JS regex: letters, digits, underscore.</summary>

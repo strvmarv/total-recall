@@ -221,41 +221,14 @@ public sealed class CursorImporter : IImporter
         ref int skipped,
         List<string> errors)
     {
-        try
-        {
-            var raw = File.ReadAllText(filePath);
-            var hash = ImportLog.ContentHash(raw);
-
-            if (_importLog.IsAlreadyImported(hash))
-            {
-                skipped++;
-                return;
-            }
-
-            var parsed = ImportUtils.ParseFrontmatter(raw);
-            var fm = parsed.Frontmatter;
-
-            string[] tags = !string.IsNullOrEmpty(fm?.Name)
-                ? new[] { fm!.Name! }.Concat(baseTags).ToArray()
-                : baseTags;
-
-            var entryId = _store.Insert(Tier.Cold, ContentType.Knowledge, new InsertEntryOpts(
-                Content: parsed.Content,
-                Summary: fm?.Description,
-                Source: filePath,
-                SourceTool: SourceTool.Cursor,
-                Tags: tags));
-
-            var embedding = _embedder.Embed(parsed.Content);
-            _vectorSearch.InsertEmbedding(Tier.Cold, ContentType.Knowledge, entryId, embedding);
-            _importLog.LogImport(
-                Name, filePath, hash, entryId, Tier.Cold, ContentType.Knowledge);
-            imported++;
-        }
-        catch (Exception ex)
-        {
-            errors.Add($"{filePath}: {ex.Message}");
-        }
+        var outcome = ImportUtils.ImportMarkdownFile(
+            _store, _embedder, _vectorSearch, _importLog,
+            Name, SourceTool.Cursor,
+            filePath, Tier.Cold, ContentType.Knowledge,
+            baseTags: baseTags,
+            prependFrontmatterName: true,
+            parseFrontmatter: true);
+        ImportUtils.Tally(outcome, ref imported, ref skipped, errors);
     }
 
     /// <summary>

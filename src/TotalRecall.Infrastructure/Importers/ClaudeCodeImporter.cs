@@ -123,51 +123,37 @@ public sealed class ClaudeCodeImporter : IImporter
                 if (Path.GetExtension(filePath) != ".md") continue;
                 if (Path.GetFileName(filePath) == "MEMORY.md") continue;
 
+                // Pre-read frontmatter to decide tier/type routing. We
+                // re-read inside ImportMarkdownFile; the TS reference does
+                // the same — the file is tiny and dedupe happens on the
+                // second read via the content hash.
+                var tier = Tier.Warm;
+                var type = ContentType.Memory;
                 try
                 {
-                    var raw = File.ReadAllText(filePath);
-                    var hash = ImportLog.ContentHash(raw);
-
-                    if (_importLog.IsAlreadyImported(hash))
-                    {
-                        skipped++;
-                        continue;
-                    }
-
-                    var parsed = ImportUtils.ParseFrontmatter(raw);
-                    var fm = parsed.Frontmatter;
-
-                    var tier = Tier.Warm;
-                    var type = ContentType.Memory;
-                    if (fm?.Type == "reference")
+                    var peek = File.ReadAllText(filePath);
+                    var parsed = ImportUtils.ParseFrontmatter(peek);
+                    if (parsed.Frontmatter?.Type == "reference")
                     {
                         tier = Tier.Cold;
                         type = ContentType.Knowledge;
                     }
-
-                    IReadOnlyList<string> tags =
-                        !string.IsNullOrEmpty(fm?.Name)
-                            ? new[] { fm!.Name! }
-                            : Array.Empty<string>();
-
-                    var entryId = _store.Insert(tier, type, new InsertEntryOpts(
-                        Content: parsed.Content,
-                        Summary: fm?.Description,
-                        Source: filePath,
-                        SourceTool: SourceTool.ClaudeCode,
-                        Project: project,
-                        Tags: tags));
-
-                    var embedding = _embedder.Embed(parsed.Content);
-                    _vectorSearch.InsertEmbedding(tier, type, entryId, embedding);
-                    _importLog.LogImport(
-                        Name, filePath, hash, entryId, tier, type);
-                    imported++;
                 }
                 catch (Exception ex)
                 {
                     errors.Add($"{filePath}: {ex.Message}");
+                    continue;
                 }
+
+                var outcome = ImportUtils.ImportMarkdownFile(
+                    _store, _embedder, _vectorSearch, _importLog,
+                    Name, SourceTool.ClaudeCode,
+                    filePath, tier, type,
+                    baseTags: Array.Empty<string>(),
+                    prependFrontmatterName: true,
+                    parseFrontmatter: true,
+                    project: project);
+                ImportUtils.Tally(outcome, ref imported, ref skipped, errors);
             }
         }
 
@@ -186,37 +172,14 @@ public sealed class ClaudeCodeImporter : IImporter
             return new ImportResult(imported, skipped, errors);
         }
 
-        try
-        {
-            var raw = File.ReadAllText(claudeMdPath);
-            var hash = ImportLog.ContentHash(raw);
-
-            if (_importLog.IsAlreadyImported(hash))
-            {
-                skipped++;
-                return new ImportResult(imported, skipped, errors);
-            }
-
-            var parsed = ImportUtils.ParseFrontmatter(raw);
-            var tier = Tier.Warm;
-            var type = ContentType.Knowledge;
-
-            var entryId = _store.Insert(tier, type, new InsertEntryOpts(
-                Content: parsed.Content,
-                Source: claudeMdPath,
-                SourceTool: SourceTool.ClaudeCode,
-                Tags: new[] { "pinned" }));
-
-            var embedding = _embedder.Embed(parsed.Content);
-            _vectorSearch.InsertEmbedding(tier, type, entryId, embedding);
-            _importLog.LogImport(
-                Name, claudeMdPath, hash, entryId, tier, type);
-            imported++;
-        }
-        catch (Exception ex)
-        {
-            errors.Add($"{claudeMdPath}: {ex.Message}");
-        }
+        var outcome = ImportUtils.ImportMarkdownFile(
+            _store, _embedder, _vectorSearch, _importLog,
+            Name, SourceTool.ClaudeCode,
+            claudeMdPath, Tier.Warm, ContentType.Knowledge,
+            baseTags: new[] { "pinned" },
+            prependFrontmatterName: false,
+            parseFrontmatter: true);
+        ImportUtils.Tally(outcome, ref imported, ref skipped, errors);
 
         return new ImportResult(imported, skipped, errors);
     }

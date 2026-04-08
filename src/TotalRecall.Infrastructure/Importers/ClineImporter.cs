@@ -155,34 +155,15 @@ public sealed class ClineImporter : IImporter
                 var ext = Path.GetExtension(filePath);
                 if (ext != ".md" && ext != ".txt") continue;
 
-                try
-                {
-                    var raw = File.ReadAllText(filePath);
-                    var hash = ImportLog.ContentHash(raw);
-
-                    if (_importLog.IsAlreadyImported(hash))
-                    {
-                        skipped++;
-                        continue;
-                    }
-
-                    // Cline rules are imported VERBATIM — no frontmatter parsing.
-                    var entryId = _store.Insert(Tier.Warm, ContentType.Knowledge, new InsertEntryOpts(
-                        Content: raw,
-                        Source: filePath,
-                        SourceTool: SourceTool.Cline,
-                        Tags: new[] { "cline-rule", "global" }));
-
-                    var embedding = _embedder.Embed(raw);
-                    _vectorSearch.InsertEmbedding(Tier.Warm, ContentType.Knowledge, entryId, embedding);
-                    _importLog.LogImport(
-                        Name, filePath, hash, entryId, Tier.Warm, ContentType.Knowledge);
-                    imported++;
-                }
-                catch (Exception ex)
-                {
-                    errors.Add($"{filePath}: {ex.Message}");
-                }
+                // Cline rules are imported VERBATIM — no frontmatter parsing.
+                var outcome = ImportUtils.ImportMarkdownFile(
+                    _store, _embedder, _vectorSearch, _importLog,
+                    Name, SourceTool.Cline,
+                    filePath, Tier.Warm, ContentType.Knowledge,
+                    baseTags: new[] { "cline-rule", "global" },
+                    prependFrontmatterName: false,
+                    parseFrontmatter: false);
+                ImportUtils.Tally(outcome, ref imported, ref skipped, errors);
             }
         }
     }

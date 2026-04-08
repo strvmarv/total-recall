@@ -108,32 +108,14 @@ public sealed class CopilotCliImporter : IImporter
             var planPath = Path.Combine(sessionDir, "plan.md");
             if (!File.Exists(planPath)) continue;
 
-            try
-            {
-                var raw = File.ReadAllText(planPath);
-                var hash = ImportLog.ContentHash(raw);
-
-                if (_importLog.IsAlreadyImported(hash))
-                {
-                    skipped++;
-                    continue;
-                }
-
-                var entryId = _store.Insert(Tier.Cold, ContentType.Knowledge, new InsertEntryOpts(
-                    Content: raw,
-                    Source: planPath,
-                    SourceTool: SourceTool.CopilotCli));
-
-                var embedding = _embedder.Embed(raw);
-                _vectorSearch.InsertEmbedding(Tier.Cold, ContentType.Knowledge, entryId, embedding);
-                _importLog.LogImport(
-                    Name, planPath, hash, entryId, Tier.Cold, ContentType.Knowledge);
-                imported++;
-            }
-            catch (Exception ex)
-            {
-                errors.Add($"{planPath}: {ex.Message}");
-            }
+            var outcome = ImportUtils.ImportMarkdownFile(
+                _store, _embedder, _vectorSearch, _importLog,
+                Name, SourceTool.CopilotCli,
+                planPath, Tier.Cold, ContentType.Knowledge,
+                baseTags: Array.Empty<string>(),
+                prependFrontmatterName: false,
+                parseFrontmatter: false);
+            ImportUtils.Tally(outcome, ref imported, ref skipped, errors);
         }
 
         return new ImportResult(imported, skipped, errors);
