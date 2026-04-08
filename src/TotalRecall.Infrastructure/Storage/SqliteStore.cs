@@ -335,7 +335,14 @@ VALUES
 
     // --- row deserialization ---------------------------------------------
 
-    private static Entry RowToEntry(SqliteDataReader reader)
+    /// <summary>
+    /// Internal so sibling Infrastructure classes (HierarchicalIndex, etc.)
+    /// can deserialize raw rows without going through the
+    /// <see cref="ISqliteStore"/> CRUD interface — needed for queries that
+    /// filter on <c>parent_id</c> or <c>json_extract(metadata, ...)</c>,
+    /// which are not part of the standard CRUD surface.
+    /// </summary>
+    internal static Entry RowToEntry(SqliteDataReader reader)
     {
         string id = reader.GetString(reader.GetOrdinal("id"));
         string content = reader.GetString(reader.GetOrdinal("content"));
