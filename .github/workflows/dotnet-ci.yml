@@ -23,6 +23,17 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install npm dependencies (provides sqlite-vec native lib)
+        # The Infrastructure project's MSBuild step copies vec0.so from
+        # node_modules/sqlite-vec-linux-x64/ into the test output directory.
+        # Plan 6 (packaging) will replace this with a proper multi-RID story.
+        run: npm ci
+
       - name: Restore
         run: dotnet restore src/TotalRecall.sln
 
