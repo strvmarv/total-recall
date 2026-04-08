@@ -28,6 +28,13 @@ public sealed class ModelManager
     }
 
     /// <summary>
+    /// The underlying <see cref="ModelRegistry"/>. Exposed so callers (e.g.
+    /// <see cref="OnnxEmbedder"/>) can look up the <see cref="ModelSpec"/>
+    /// for things like dimensions after ensuring the model is available.
+    /// </summary>
+    public ModelRegistry Registry => _registry;
+
+    /// <summary>
     /// Path to the bundled copy of the named model (may or may not exist).
     /// </summary>
     public string GetBundledModelPath(string modelName) =>
