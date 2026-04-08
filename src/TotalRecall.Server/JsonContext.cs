@@ -200,6 +200,44 @@ public sealed record MemoryGetResultDto(
     [property: JsonPropertyName("content_type")] string ContentType,
     [property: JsonPropertyName("entry")] EntryDto Entry);
 
+// ---------- Task 4.9: kb_search / kb_ingest_file / kb_ingest_dir payloads ----------
+//
+// kb_search wire shape mirrors src-ts/tools/kb-tools.ts:190 —
+// `{results, hierarchicalMatch, needsSummary}`. KbSearchHandler
+// hand-assembles this envelope (rather than using a source-gen DTO) so the
+// `hierarchicalMatch: null` sentinel survives JsonContext's
+// DefaultIgnoreCondition=WhenWritingNull and stays byte-compatible with
+// TS's JSON.stringify output. The `results` array is still source-gen'd
+// via MemorySearchResultDto[].
+
+// kb_ingest_file wire shape. Mirrors the .NET IngestFileResult record
+// (src/TotalRecall.Infrastructure/Ingestion/FileIngester.cs). Field names
+// are snake_case to line up with the TS ingest.ts output as closely as the
+// .NET record structure allows.
+public sealed record IngestFileResultDto(
+    [property: JsonPropertyName("document_id")] string DocumentId,
+    [property: JsonPropertyName("chunk_count")] int ChunkCount,
+    [property: JsonPropertyName("validation_passed")] bool ValidationPassed,
+    [property: JsonPropertyName("validation")] ValidationResultDto Validation);
+
+public sealed record ValidationResultDto(
+    [property: JsonPropertyName("passed")] bool Passed,
+    [property: JsonPropertyName("probes")] ProbeResultDto[] Probes);
+
+public sealed record ProbeResultDto(
+    [property: JsonPropertyName("chunk_index")] int ChunkIndex,
+    [property: JsonPropertyName("score")] double Score,
+    [property: JsonPropertyName("passed")] bool Passed);
+
+// kb_ingest_dir wire shape. Mirrors IngestDirectoryResult.
+public sealed record IngestDirectoryResultDto(
+    [property: JsonPropertyName("collection_id")] string CollectionId,
+    [property: JsonPropertyName("document_count")] int DocumentCount,
+    [property: JsonPropertyName("total_chunks")] int TotalChunks,
+    [property: JsonPropertyName("errors")] string[] Errors,
+    [property: JsonPropertyName("validation_passed")] bool ValidationPassed,
+    [property: JsonPropertyName("validation_failures")] string[] ValidationFailures);
+
 public sealed record EntryDto(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("content")] string Content,
@@ -238,6 +276,11 @@ public sealed record EntryDto(
 [JsonSerializable(typeof(MemorySearchResultDto[]))]
 [JsonSerializable(typeof(EntryDto))]
 [JsonSerializable(typeof(MemoryGetResultDto))]
+[JsonSerializable(typeof(IngestFileResultDto))]
+[JsonSerializable(typeof(ValidationResultDto))]
+[JsonSerializable(typeof(ProbeResultDto))]
+[JsonSerializable(typeof(ProbeResultDto[]))]
+[JsonSerializable(typeof(IngestDirectoryResultDto))]
 // ---- Task 4.3: SessionLifecycle wire shapes ----
 // Source-gen needs each nested record AND each generic collection element
 // type registered explicitly so the AOT publisher does not have to walk

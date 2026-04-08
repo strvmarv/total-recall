@@ -43,7 +43,7 @@ public sealed record IngestDirectoryResult(
 /// directory walker's hidden/node_modules skip logic, and the tiny glob
 /// matcher (<c>*.ext</c> or exact filename) all match the TS reference.
 /// </summary>
-public sealed class FileIngester
+public sealed class FileIngester : IFileIngester
 {
     private static readonly HashSet<string> IngestableExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
