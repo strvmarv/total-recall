@@ -140,11 +140,8 @@ public sealed class ClaudeCodeImporterTests : IDisposable
     [Fact]
     public void Detect_BasePathExists_ReturnsTrue()
     {
-        var f = NewFixture();
-        using (f.Conn)
-        {
-            Assert.True(NewImporter(f).Detect());
-        }
+        using var f = NewFixture();
+        Assert.True(NewImporter(f).Detect());
     }
 
     [Fact]
@@ -183,15 +180,12 @@ public sealed class ClaudeCodeImporterTests : IDisposable
     [Fact]
     public void Scan_ReportsCorrectFileCounts()
     {
-        var f = NewFixture();
-        using (f.Conn)
-        {
-            var result = NewImporter(f).Scan();
-            // user_role + feedback_testing + architecture = 3 (MEMORY.md excluded)
-            Assert.Equal(3, result.MemoryFiles);
-            Assert.Equal(1, result.KnowledgeFiles); // per-project CLAUDE.md
-            Assert.Equal(1, result.SessionFiles);
-        }
+        using var f = NewFixture();
+        var result = NewImporter(f).Scan();
+        // user_role + feedback_testing + architecture = 3 (MEMORY.md excluded)
+        Assert.Equal(3, result.MemoryFiles);
+        Assert.Equal(1, result.KnowledgeFiles); // per-project CLAUDE.md
+        Assert.Equal(1, result.SessionFiles);
     }
 
     [Fact]
@@ -217,157 +211,130 @@ public sealed class ClaudeCodeImporterTests : IDisposable
     [Fact]
     public void ImportMemories_PopulatesWarmMemoryAndColdKnowledge()
     {
-        var f = NewFixture();
-        using (f.Conn)
-        {
-            var result = NewImporter(f).ImportMemories(project: "myproj");
-            Assert.Equal(3, result.Imported);
-            Assert.Equal(0, result.Skipped);
-            Assert.Empty(result.Errors);
+        using var f = NewFixture();
+        var result = NewImporter(f).ImportMemories(project: "myproj");
+        Assert.Equal(3, result.Imported);
+        Assert.Equal(0, result.Skipped);
+        Assert.Empty(result.Errors);
 
-            // user_role + feedback_testing → warm/memory (2)
-            Assert.Equal(2, f.Store.Count(Tier.Warm, ContentType.Memory));
-            // architecture → cold/knowledge (1)
-            Assert.Equal(1, f.Store.Count(Tier.Cold, ContentType.Knowledge));
-        }
+        // user_role + feedback_testing → warm/memory (2)
+        Assert.Equal(2, f.Store.Count(Tier.Warm, ContentType.Memory));
+        // architecture → cold/knowledge (1)
+        Assert.Equal(1, f.Store.Count(Tier.Cold, ContentType.Knowledge));
     }
 
     [Fact]
     public void ImportMemories_FrontmatterTypeReference_RoutesToCold()
     {
-        var f = NewFixture();
-        using (f.Conn)
-        {
-            NewImporter(f).ImportMemories();
+        using var f = NewFixture();
+        NewImporter(f).ImportMemories();
 
-            var cold = f.Store.List(Tier.Cold, ContentType.Knowledge, null);
-            var e = Assert.Single(cold);
-            Assert.Contains("Architecture", e.Content);
-            Assert.True(e.SourceTool!.Value.IsClaudeCode);
-        }
+        var cold = f.Store.List(Tier.Cold, ContentType.Knowledge, null);
+        var e = Assert.Single(cold);
+        Assert.Contains("Architecture", e.Content);
+        Assert.True(e.SourceTool!.Value.IsClaudeCode);
     }
 
     [Fact]
     public void ImportMemories_NameInFrontmatter_BecomesTag()
     {
-        var f = NewFixture();
-        using (f.Conn)
-        {
-            NewImporter(f).ImportMemories();
-            var warm = f.Store.List(Tier.Warm, ContentType.Memory, null);
-            var userRole = warm.FirstOrDefault(e => e.Content.Contains("Go engineer"));
-            Assert.NotNull(userRole);
-            Assert.Equal(new[] { "user role" }, userRole!.Tags.ToArray());
-        }
+        using var f = NewFixture();
+        NewImporter(f).ImportMemories();
+        var warm = f.Store.List(Tier.Warm, ContentType.Memory, null);
+        var userRole = warm.FirstOrDefault(e => e.Content.Contains("Go engineer"));
+        Assert.NotNull(userRole);
+        Assert.Equal(new[] { "user role" }, userRole!.Tags.ToArray());
     }
 
     [Fact]
     public void ImportMemories_NoNameInFrontmatter_EmptyTags()
     {
-        var f = NewFixture(withMemoryFiles: false);
-        using (f.Conn)
-        {
-            // custom file without a name field
-            var memoryDir = Path.Combine(f.BasePath, "projects", "-home-user-myproj", "memory");
-            Directory.CreateDirectory(memoryDir);
-            File.WriteAllText(
-                Path.Combine(memoryDir, "unnamed.md"),
-                "---\ndescription: no name here\ntype: user\n---\nBody without a name tag.");
+        using var f = NewFixture(withMemoryFiles: false);
+        // custom file without a name field
+        var memoryDir = Path.Combine(f.BasePath, "projects", "-home-user-myproj", "memory");
+        Directory.CreateDirectory(memoryDir);
+        File.WriteAllText(
+            Path.Combine(memoryDir, "unnamed.md"),
+            "---\ndescription: no name here\ntype: user\n---\nBody without a name tag.");
 
-            NewImporter(f).ImportMemories();
-            var warm = f.Store.List(Tier.Warm, ContentType.Memory, null);
-            var entry = Assert.Single(warm);
-            Assert.Empty(entry.Tags);
-        }
+        NewImporter(f).ImportMemories();
+        var warm = f.Store.List(Tier.Warm, ContentType.Memory, null);
+        var entry = Assert.Single(warm);
+        Assert.Empty(entry.Tags);
     }
 
     [Fact]
     public void ImportMemories_DuplicateContent_Skipped()
     {
-        var f = NewFixture();
-        using (f.Conn)
-        {
-            var imp = NewImporter(f);
-            var first = imp.ImportMemories();
-            Assert.Equal(3, first.Imported);
+        using var f = NewFixture();
+        var imp = NewImporter(f);
+        var first = imp.ImportMemories();
+        Assert.Equal(3, first.Imported);
 
-            var warmBefore = f.Store.Count(Tier.Warm, ContentType.Memory);
-            var coldBefore = f.Store.Count(Tier.Cold, ContentType.Knowledge);
+        var warmBefore = f.Store.Count(Tier.Warm, ContentType.Memory);
+        var coldBefore = f.Store.Count(Tier.Cold, ContentType.Knowledge);
 
-            var second = imp.ImportMemories();
-            Assert.Equal(0, second.Imported);
-            Assert.Equal(3, second.Skipped);
-            Assert.Empty(second.Errors);
+        var second = imp.ImportMemories();
+        Assert.Equal(0, second.Imported);
+        Assert.Equal(3, second.Skipped);
+        Assert.Empty(second.Errors);
 
-            Assert.Equal(warmBefore, f.Store.Count(Tier.Warm, ContentType.Memory));
-            Assert.Equal(coldBefore, f.Store.Count(Tier.Cold, ContentType.Knowledge));
-        }
+        Assert.Equal(warmBefore, f.Store.Count(Tier.Warm, ContentType.Memory));
+        Assert.Equal(coldBefore, f.Store.Count(Tier.Cold, ContentType.Knowledge));
     }
 
     [Fact]
     public void ImportMemories_NonMarkdownFiles_Ignored()
     {
-        var f = NewFixture(withMemoryFiles: false);
-        using (f.Conn)
-        {
-            var memoryDir = Path.Combine(f.BasePath, "projects", "-home-user-myproj", "memory");
-            Directory.CreateDirectory(memoryDir);
-            File.WriteAllText(Path.Combine(memoryDir, "notes"), "no extension");
-            File.WriteAllText(Path.Combine(memoryDir, "notes.txt"), "wrong extension");
+        using var f = NewFixture(withMemoryFiles: false);
+        var memoryDir = Path.Combine(f.BasePath, "projects", "-home-user-myproj", "memory");
+        Directory.CreateDirectory(memoryDir);
+        File.WriteAllText(Path.Combine(memoryDir, "notes"), "no extension");
+        File.WriteAllText(Path.Combine(memoryDir, "notes.txt"), "wrong extension");
 
-            var result = NewImporter(f).ImportMemories();
-            Assert.Equal(0, result.Imported);
-            Assert.Equal(0, f.Store.Count(Tier.Warm, ContentType.Memory));
-            Assert.Equal(0, f.Store.Count(Tier.Cold, ContentType.Knowledge));
-        }
+        var result = NewImporter(f).ImportMemories();
+        Assert.Equal(0, result.Imported);
+        Assert.Equal(0, f.Store.Count(Tier.Warm, ContentType.Memory));
+        Assert.Equal(0, f.Store.Count(Tier.Cold, ContentType.Knowledge));
     }
 
     [Fact]
     public void ImportMemories_MEMORY_md_Excluded()
     {
-        var f = NewFixture();
-        using (f.Conn)
+        using var f = NewFixture();
+        NewImporter(f).ImportMemories();
+        var warm = f.Store.List(Tier.Warm, ContentType.Memory, null);
+        var cold = f.Store.List(Tier.Cold, ContentType.Knowledge, null);
+        foreach (var e in warm.Concat(cold))
         {
-            NewImporter(f).ImportMemories();
-            var warm = f.Store.List(Tier.Warm, ContentType.Memory, null);
-            var cold = f.Store.List(Tier.Cold, ContentType.Knowledge, null);
-            foreach (var e in warm.Concat(cold))
-            {
-                Assert.DoesNotContain("Index file", e.Content);
-                Assert.False(e.Source!.Value.EndsWith("MEMORY.md"));
-            }
+            Assert.DoesNotContain("Index file", e.Content);
+            Assert.False(e.Source!.Value.EndsWith("MEMORY.md"));
         }
     }
 
     [Fact]
     public void ImportMemories_ProjectArg_PopulatesProjectColumn()
     {
-        var f = NewFixture();
-        using (f.Conn)
+        using var f = NewFixture();
+        NewImporter(f).ImportMemories(project: "myproj");
+        var warm = f.Store.List(Tier.Warm, ContentType.Memory, null);
+        Assert.NotEmpty(warm);
+        foreach (var e in warm)
         {
-            NewImporter(f).ImportMemories(project: "myproj");
-            var warm = f.Store.List(Tier.Warm, ContentType.Memory, null);
-            Assert.NotEmpty(warm);
-            foreach (var e in warm)
-            {
-                Assert.Equal("myproj", e.Project!.Value);
-            }
+            Assert.Equal("myproj", e.Project!.Value);
         }
     }
 
     [Fact]
     public void ImportMemories_NoProjectArg_NullProject()
     {
-        var f = NewFixture();
-        using (f.Conn)
+        using var f = NewFixture();
+        NewImporter(f).ImportMemories();
+        var warm = f.Store.List(Tier.Warm, ContentType.Memory, null);
+        Assert.NotEmpty(warm);
+        foreach (var e in warm)
         {
-            NewImporter(f).ImportMemories();
-            var warm = f.Store.List(Tier.Warm, ContentType.Memory, null);
-            Assert.NotEmpty(warm);
-            foreach (var e in warm)
-            {
-                Assert.True(Microsoft.FSharp.Core.FSharpOption<string>.get_IsNone(e.Project));
-            }
+            Assert.True(Microsoft.FSharp.Core.FSharpOption<string>.get_IsNone(e.Project));
         }
     }
 
@@ -394,65 +361,53 @@ public sealed class ClaudeCodeImporterTests : IDisposable
     [Fact]
     public void ImportKnowledge_TopLevelClaudeMd_ImportsToWarmKnowledge()
     {
-        var f = NewFixture();
-        using (f.Conn)
-        {
-            var result = NewImporter(f).ImportKnowledge();
-            Assert.Equal(1, result.Imported);
-            Assert.Equal(0, result.Skipped);
-            Assert.Empty(result.Errors);
+        using var f = NewFixture();
+        var result = NewImporter(f).ImportKnowledge();
+        Assert.Equal(1, result.Imported);
+        Assert.Equal(0, result.Skipped);
+        Assert.Empty(result.Errors);
 
-            var warm = f.Store.List(Tier.Warm, ContentType.Knowledge, null);
-            var e = Assert.Single(warm);
-            Assert.Contains("Top-level", e.Content);
-            Assert.Equal(new[] { "pinned" }, e.Tags.ToArray());
-            Assert.True(e.SourceTool!.Value.IsClaudeCode);
-        }
+        var warm = f.Store.List(Tier.Warm, ContentType.Knowledge, null);
+        var e = Assert.Single(warm);
+        Assert.Contains("Top-level", e.Content);
+        Assert.Equal(new[] { "pinned" }, e.Tags.ToArray());
+        Assert.True(e.SourceTool!.Value.IsClaudeCode);
     }
 
     [Fact]
     public void ImportKnowledge_DuplicateContent_Skipped()
     {
-        var f = NewFixture();
-        using (f.Conn)
-        {
-            var imp = NewImporter(f);
-            var first = imp.ImportKnowledge();
-            Assert.Equal(1, first.Imported);
+        using var f = NewFixture();
+        var imp = NewImporter(f);
+        var first = imp.ImportKnowledge();
+        Assert.Equal(1, first.Imported);
 
-            var second = imp.ImportKnowledge();
-            Assert.Equal(0, second.Imported);
-            Assert.Equal(1, second.Skipped);
-            Assert.Equal(1, f.Store.Count(Tier.Warm, ContentType.Knowledge));
-        }
+        var second = imp.ImportKnowledge();
+        Assert.Equal(0, second.Imported);
+        Assert.Equal(1, second.Skipped);
+        Assert.Equal(1, f.Store.Count(Tier.Warm, ContentType.Knowledge));
     }
 
     [Fact]
     public void ImportKnowledge_NoTopLevelFile_ReturnsEmpty()
     {
-        var f = NewFixture(withTopLevelClaudeMd: false);
-        using (f.Conn)
-        {
-            var result = NewImporter(f).ImportKnowledge();
-            Assert.Equal(0, result.Imported);
-            Assert.Equal(0, result.Skipped);
-            Assert.Empty(result.Errors);
-            Assert.Equal(0, f.Store.Count(Tier.Warm, ContentType.Knowledge));
-        }
+        using var f = NewFixture(withTopLevelClaudeMd: false);
+        var result = NewImporter(f).ImportKnowledge();
+        Assert.Equal(0, result.Imported);
+        Assert.Equal(0, result.Skipped);
+        Assert.Empty(result.Errors);
+        Assert.Equal(0, f.Store.Count(Tier.Warm, ContentType.Knowledge));
     }
 
     [Fact]
     public void ImportKnowledge_PerProjectClaudeMd_NotImported()
     {
         // Only a per-project CLAUDE.md exists; top-level one does NOT.
-        var f = NewFixture(withTopLevelClaudeMd: false);
-        using (f.Conn)
-        {
-            var result = NewImporter(f).ImportKnowledge();
-            Assert.Equal(0, result.Imported);
-            // Nothing should have landed in warm/knowledge.
-            Assert.Equal(0, f.Store.Count(Tier.Warm, ContentType.Knowledge));
-        }
+        using var f = NewFixture(withTopLevelClaudeMd: false);
+        var result = NewImporter(f).ImportKnowledge();
+        Assert.Equal(0, result.Imported);
+        // Nothing should have landed in warm/knowledge.
+        Assert.Equal(0, f.Store.Count(Tier.Warm, ContentType.Knowledge));
     }
 
     // ---------- Import log rows ----------
@@ -460,17 +415,14 @@ public sealed class ClaudeCodeImporterTests : IDisposable
     [Fact]
     public void ImportLog_AfterSuccessfulImport_ContainsHashes()
     {
-        var f = NewFixture();
-        using (f.Conn)
-        {
-            NewImporter(f).ImportMemories();
-            NewImporter(f).ImportKnowledge();
+        using var f = NewFixture();
+        NewImporter(f).ImportMemories();
+        NewImporter(f).ImportKnowledge();
 
-            using var cmd = f.Conn.CreateCommand();
-            cmd.CommandText = "SELECT COUNT(*) FROM import_log WHERE source_tool = 'claude-code'";
-            var count = (long)cmd.ExecuteScalar()!;
-            // 3 memory files + 1 top-level CLAUDE.md = 4 rows.
-            Assert.Equal(4L, count);
-        }
+        using var cmd = f.Conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM import_log WHERE source_tool = 'claude-code'";
+        var count = (long)cmd.ExecuteScalar()!;
+        // 3 memory files + 1 top-level CLAUDE.md = 4 rows.
+        Assert.Equal(4L, count);
     }
 }
