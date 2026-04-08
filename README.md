@@ -253,6 +253,8 @@ model = "all-MiniLM-L6-v2"    # Embedding model name
 dimensions = 384               # Embedding dimensions
 ```
 
+**Relocating the database:** set `TOTAL_RECALL_DB_PATH` to an absolute path or `~/`-prefixed path. See [INSTALL.md](INSTALL.md#relocating-the-database) for cloud-sync and shared-workspace guidance.
+
 ---
 
 ## Extending
