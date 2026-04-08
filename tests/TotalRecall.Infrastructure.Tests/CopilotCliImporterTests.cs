@@ -45,24 +45,6 @@ public sealed class CopilotCliImporterTests : IDisposable
         public void Dispose() => Conn.Dispose();
     }
 
-    private sealed class ThrowingEmbedder : IEmbedder
-    {
-        private readonly int _throwOnCall;
-        private int _calls;
-        public ThrowingEmbedder(int throwOnCall = 2) { _throwOnCall = throwOnCall; }
-        public float[] Embed(string text)
-        {
-            _calls++;
-            if (_calls == _throwOnCall)
-                throw new InvalidOperationException("synthetic embed failure");
-            var v = new float[384];
-            var len = text?.Length ?? 0;
-            for (var i = 0; i < 384; i++)
-                v[i] = (float)Math.Sin(len * (i + 1) / 384.0);
-            return v;
-        }
-    }
-
     private string NewTempDir(string tag)
     {
         var root = Path.Combine(
