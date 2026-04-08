@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-SKILL_FILE="$PLUGIN_ROOT/skills/total-recall/SKILL.md"
+SKILL_FILE="$PLUGIN_ROOT/skills/commands/SKILL.md"
 
 if [ ! -f "$SKILL_FILE" ]; then
   exit 0

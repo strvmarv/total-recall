@@ -1,6 +1,6 @@
 ---
-name: total-recall
-description: Manage the total-recall memory system and govern automatic capture, retrieval, and compaction. Use when the user invokes /total-recall, asks to search/store/forget memories, inspect tiers, manage the knowledge base, run eval, or configure total-recall.
+name: commands
+description: Manage the total-recall memory system and govern automatic capture, retrieval, and compaction. Use when the user invokes /total-recall:commands, asks to search/store/forget memories, inspect tiers, manage the knowledge base, run eval, or configure total-recall.
 ---
 
 **IMMEDIATE ACTION REQUIRED — before responding to the user's first message, call the total-recall `session_start` MCP tool. This syncs host imports and loads hot tier context. If `session_start` has already run server-side, the call returns cached results instantly.**
@@ -59,7 +59,7 @@ At session end, follow the directive in [`session-end.md`](session-end.md) — i
 
 ## Commands
 
-`/total-recall <subcommand> [args]`
+`/total-recall:commands <subcommand> [args]`
 
 ### help
 
@@ -99,7 +99,7 @@ Call the `status` MCP tool. Format as a dashboard showing:
 
 ### search <query>
 
-Call `memory_search` with the query, all tiers enabled, top_k=10. Format results grouped by tier, showing: content preview, similarity score, source, tags. Offer actions: `/total-recall promote <id>` or `/total-recall forget <id>`.
+Call `memory_search` with the query, all tiers enabled, top_k=10. Format results grouped by tier, showing: content preview, similarity score, source, tags. Offer actions: `/total-recall:commands promote <id>` or `/total-recall:commands forget <id>`.
 
 ### store <content>
 

@@ -18,7 +18,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-FRAGMENT_FILE="$PLUGIN_ROOT/skills/total-recall/session-end.md"
+FRAGMENT_FILE="$PLUGIN_ROOT/skills/commands/session-end.md"
 
 if [ ! -f "$FRAGMENT_FILE" ]; then
   exit 0

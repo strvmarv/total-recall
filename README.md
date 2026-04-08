@@ -165,44 +165,46 @@ All state lives in `~/.total-recall/total-recall.db`. The embedding model is bun
 
 ## Commands
 
-All commands use `/total-recall <subcommand>`:
+All commands are routed through the `/total-recall:commands` skill:
 
 | Command | MCP Tool | Description |
 |---|---|---|
-| `/total-recall help` | — | Show command reference table |
-| `/total-recall status` | `status` | Dashboard overview |
-| `/total-recall search <query>` | `memory_search` | Semantic search across all tiers |
-| `/total-recall store <content>` | `memory_store` | Manually store a memory |
+| `/total-recall:commands help` | — | Show command reference table |
+| `/total-recall:commands status` | `status` | Dashboard overview |
+| `/total-recall:commands search <query>` | `memory_search` | Semantic search across all tiers |
+| `/total-recall:commands store <content>` | `memory_store` | Manually store a memory |
 | — | `memory_get` | Retrieve a specific entry by ID |
 | — | `memory_update` | Update an existing entry's content, tags, or project |
-| `/total-recall forget <query>` | `memory_search` + `memory_delete` | Find and delete entries |
-| `/total-recall inspect <id>` | `memory_inspect` | Deep dive on single entry with compaction history |
-| `/total-recall promote <id>` | `memory_promote` | Move entry to higher tier |
-| `/total-recall demote <id>` | `memory_demote` | Move entry to lower tier |
-| `/total-recall history` | `memory_history` | Show recent tier movements |
-| `/total-recall lineage <id>` | `memory_lineage` | Show compaction ancestry |
-| `/total-recall export` | `memory_export` | Export to portable JSON format |
-| `/total-recall import <file>` | `memory_import` | Import from export file |
-| `/total-recall ingest <path>` | `kb_ingest_file` / `kb_ingest_dir` | Add files/dirs to knowledge base |
-| `/total-recall kb search <query>` | `kb_search` | Search knowledge base |
-| `/total-recall kb list` | `kb_list_collections` | List KB collections |
-| `/total-recall kb refresh <id>` | `kb_refresh` | Re-ingest a collection |
-| `/total-recall kb remove <id>` | `kb_remove` | Remove KB entry |
+| `/total-recall:commands forget <query>` | `memory_search` + `memory_delete` | Find and delete entries |
+| `/total-recall:commands inspect <id>` | `memory_inspect` | Deep dive on single entry with compaction history |
+| `/total-recall:commands promote <id>` | `memory_promote` | Move entry to higher tier |
+| `/total-recall:commands demote <id>` | `memory_demote` | Move entry to lower tier |
+| `/total-recall:commands history` | `memory_history` | Show recent tier movements |
+| `/total-recall:commands lineage <id>` | `memory_lineage` | Show compaction ancestry |
+| `/total-recall:commands export` | `memory_export` | Export to portable JSON format |
+| `/total-recall:commands import <file>` | `memory_import` | Import from export file |
+| `/total-recall:commands ingest <path>` | `kb_ingest_file` / `kb_ingest_dir` | Add files/dirs to knowledge base |
+| `/total-recall:commands kb search <query>` | `kb_search` | Search knowledge base |
+| `/total-recall:commands kb list` | `kb_list_collections` | List KB collections |
+| `/total-recall:commands kb refresh <id>` | `kb_refresh` | Re-ingest a collection |
+| `/total-recall:commands kb remove <id>` | `kb_remove` | Remove KB entry |
 | — | `kb_summarize` | Generate summary for a KB collection |
-| `/total-recall compact` | `compact_now` | Force compaction |
+| `/total-recall:commands compact` | `compact_now` | Force compaction |
 | — | `session_start` | Initialize session: sync imports, assemble hot tier |
 | — | `session_end` | End session: run compaction |
 | — | `session_context` | Get current hot tier entries as context |
-| `/total-recall eval` | `eval_report` | Retrieval quality metrics (filterable by config snapshot) |
-| `/total-recall eval --benchmark` | `eval_benchmark` | Run synthetic benchmark |
-| `/total-recall eval --compare <name>` | `eval_compare` | Compare metrics between two config snapshots |
-| `/total-recall eval --snapshot <name>` | `eval_snapshot` | Manually create a named config snapshot |
-| `/total-recall eval --grow` | `eval_grow` | Review and accept/reject benchmark candidates from retrieval misses |
-| `/total-recall config get <key>` | `config_get` | Read config value |
-| `/total-recall config set <key> <val>` | `config_set` | Update config |
-| `/total-recall import-host` | `import_host` | Import from host tools |
+| `/total-recall:commands eval` | `eval_report` | Retrieval quality metrics (filterable by config snapshot) |
+| `/total-recall:commands eval --benchmark` | `eval_benchmark` | Run synthetic benchmark |
+| `/total-recall:commands eval --compare <name>` | `eval_compare` | Compare metrics between two config snapshots |
+| `/total-recall:commands eval --snapshot <name>` | `eval_snapshot` | Manually create a named config snapshot |
+| `/total-recall:commands eval --grow` | `eval_grow` | Review and accept/reject benchmark candidates from retrieval misses |
+| `/total-recall:commands config get <key>` | `config_get` | Read config value |
+| `/total-recall:commands config set <key> <val>` | `config_set` | Update config |
+| `/total-recall:commands import-host` | `import_host` | Import from host tools |
 
-Memory capture, retrieval, and compaction run automatically in the background — see the "Automatic Behavior" section of the `/total-recall` skill.
+Memory capture, retrieval, and compaction run automatically in the background — see the "Automatic Behavior" section of the `/total-recall:commands` skill.
+
+> **Note:** `/total-recall:commands` is implemented as a Claude Code skill (at `skills/commands/SKILL.md`), not as a slash-command file under `commands/`. The skill handles all `<subcommand>` arguments internally.
 
 ---
 
@@ -214,7 +216,7 @@ Memory capture, retrieval, and compaction run automatically in the background �
 | Copilot CLI | Full | Auto-import from existing Copilot memory files |
 | OpenCode | MCP | Configure MCP server in opencode config |
 | Cline | MCP | Configure MCP server in Cline settings |
-| Cursor | Full | MCP server + `.cursor-plugin/` wrapper (SessionStart only; run `/total-recall compact` manually — Cursor has no SessionEnd hook) |
+| Cursor | Full | MCP server + `.cursor-plugin/` wrapper (SessionStart only; run `/total-recall:commands compact` manually — Cursor has no SessionEnd hook) |
 | Hermes | Full | Auto-import from Hermes memory files |
 
 ---
