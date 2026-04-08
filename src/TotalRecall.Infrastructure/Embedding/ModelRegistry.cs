@@ -20,12 +20,13 @@ public sealed class ModelRegistry
 
     public int Version { get; }
 
-    public IReadOnlyCollection<string> ModelNames => (IReadOnlyCollection<string>)_models.Keys;
+    public IReadOnlyCollection<string> ModelNames { get; }
 
     private ModelRegistry(int version, IReadOnlyDictionary<string, ModelSpec> models)
     {
         Version = version;
         _models = models;
+        ModelNames = models.Keys.ToArray();
     }
 
     /// <summary>
