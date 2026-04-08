@@ -9,7 +9,7 @@ This skill ensures the total-recall memory system is active for this session.
 
 ## Immediate Action
 
-1. Call the `mcp__total-recall__session_start` MCP tool now (if it already ran server-side, it returns cached results instantly)
+1. Call the total-recall `session_start` MCP tool now (if it already ran server-side, it returns cached results instantly)
 2. **Announce startup** using the returned data:
    - Report tier summary: hot, warm, cold, KB counts from `tierSummary`
    - If `lastSessionAge` is present, mention when the last session was
@@ -56,7 +56,7 @@ On each user message that is a question or task request:
 ### Session End
 
 1. Call `session_context` to get current hot tier entries
-2. If there are 2+ hot entries, launch the `compactor` agent with the entries as input
+2. If there are 2+ hot entries, launch the `total-recall:compactor` agent with the entries as input
 3. Parse the agent's JSON decisions and execute them
 4. Call `session_end` for final bookkeeping
 
