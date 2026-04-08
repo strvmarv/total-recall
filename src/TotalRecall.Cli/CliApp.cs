@@ -161,7 +161,8 @@ public static class CliApp
             new Commands.Kb.ListCommand(),
             new Commands.Kb.RefreshCommand(),
             new Commands.Kb.RemoveCommand(),
-            // TODO(Plan 5.8+): config verbs.
+            new Commands.Config.GetCommand(),
+            new Commands.Config.SetCommand(),
         };
     }
 

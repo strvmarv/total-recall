@@ -20,14 +20,24 @@ namespace TotalRecall.Infrastructure.Config;
 /// reflection-based <c>Toml.ToModel&lt;T&gt;</c> overload is deliberately NOT
 /// used because it is not trim-safe.
 ///
-/// This class does NOT own snapshotting (<c>createConfigSnapshot</c>) or the
-/// <c>config set</c> CLI subcommand (<c>setNestedKey</c> / <c>saveUserConfig</c>);
-/// those land in Plans 3b/4.
+/// This class does NOT own snapshotting (<c>createConfigSnapshot</c>) — see
+/// <see cref="TotalRecall.Infrastructure.Eval.ConfigSnapshotStore"/> (Task 5.3b).
+/// <see cref="ConfigWriter"/> (Task 5.8) owns the set path
+/// (<c>setNestedKey</c> / <c>saveUserConfig</c>).
 /// </summary>
 public interface IConfigLoader
 {
     Core.Config.TotalRecallConfig LoadDefaults();
     Core.Config.TotalRecallConfig LoadEffectiveConfig(string? userConfigPath = null);
+
+    /// <summary>
+    /// Like <see cref="LoadEffectiveConfig"/>, but returns the raw merged
+    /// <see cref="TomlTable"/> instead of projecting through
+    /// <see cref="Core.Config.TotalRecallConfig"/>. Used by <c>config get</c>
+    /// to walk arbitrary dotted paths — the projected record can only
+    /// represent the statically known schema.
+    /// </summary>
+    TomlTable LoadEffectiveTable(string? userConfigPath = null);
 }
 
 /// <inheritdoc cref="IConfigLoader"/>
@@ -56,6 +66,12 @@ public sealed class ConfigLoader : IConfigLoader
     /// <inheritdoc/>
     public Core.Config.TotalRecallConfig LoadEffectiveConfig(string? userConfigPath = null)
     {
+        return Project(LoadEffectiveTable(userConfigPath));
+    }
+
+    /// <inheritdoc/>
+    public TomlTable LoadEffectiveTable(string? userConfigPath = null)
+    {
         var defaultsTable = ParseToml(LoadDefaultsToml(), "defaults.toml");
 
         var resolvedUserPath = userConfigPath ?? Path.Combine(GetDataDir(), "config.toml");
@@ -63,11 +79,10 @@ public sealed class ConfigLoader : IConfigLoader
         {
             var userText = File.ReadAllText(resolvedUserPath);
             var userTable = ParseToml(userText, resolvedUserPath);
-            var merged = MergeTables(defaultsTable, userTable);
-            return Project(merged);
+            return MergeTables(defaultsTable, userTable);
         }
 
-        return Project(defaultsTable);
+        return defaultsTable;
     }
 
     // --- parsing ----------------------------------------------------------

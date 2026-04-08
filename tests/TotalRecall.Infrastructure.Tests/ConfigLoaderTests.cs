@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using Microsoft.FSharp.Core;
+using Tomlyn.Model;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Config;
 using Xunit;
@@ -173,6 +174,37 @@ public sealed class ConfigLoaderTests : IDisposable
         // Must not throw, and the safe portion of the merge must still apply.
         var cfg = loader.LoadEffectiveConfig(userPath);
         Assert.Equal(123, cfg.Tiers.Hot.MaxEntries);
+    }
+
+    // --- LoadEffectiveTable -----------------------------------------------
+
+    [Fact]
+    public void LoadEffectiveTable_ReturnsMergedTable()
+    {
+        var userPath = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(userPath, """
+            [tiers.hot]
+            max_entries = 777
+
+            [custom]
+            unknown_key = "hello"
+            """);
+        var loader = new ConfigLoader();
+
+        var table = loader.LoadEffectiveTable(userPath);
+
+        // Defaults merged.
+        var tiers = Assert.IsType<TomlTable>(table["tiers"]);
+        var hot = Assert.IsType<TomlTable>(tiers["hot"]);
+        Assert.Equal(777L, Convert.ToInt64(hot["max_entries"]));
+        // Sibling from defaults preserved.
+        Assert.Equal(4000L, Convert.ToInt64(hot["token_budget"]));
+        var embedding = Assert.IsType<TomlTable>(table["embedding"]);
+        Assert.Equal("all-MiniLM-L6-v2", embedding["model"]);
+        // Custom (non-schema) keys survive — this is the main reason
+        // LoadEffectiveTable exists alongside LoadEffectiveConfig.
+        var custom = Assert.IsType<TomlTable>(table["custom"]);
+        Assert.Equal("hello", custom["unknown_key"]);
     }
 
     // --- GetDataDir -------------------------------------------------------
