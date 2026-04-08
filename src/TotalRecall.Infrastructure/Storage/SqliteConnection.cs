@@ -27,21 +27,29 @@ public static class SqliteConnection
     public static MsSqliteConnection Open(string dbPath)
     {
         var conn = new MsSqliteConnection($"Data Source={dbPath}");
-        conn.Open();
-        conn.EnableExtensions(true);
-        conn.LoadExtension(ResolveVecExtensionPath());
-
-        using (var cmd = conn.CreateCommand())
+        try
         {
-            // journal_mode is a no-op for :memory: but harmless.
-            cmd.CommandText =
-                "PRAGMA journal_mode=WAL;" +
-                "PRAGMA foreign_keys=ON;" +
-                "PRAGMA synchronous=NORMAL;";
-            cmd.ExecuteNonQuery();
-        }
+            conn.Open();
+            conn.EnableExtensions(true);
+            conn.LoadExtension(ResolveVecExtensionPath());
 
-        return conn;
+            using (var cmd = conn.CreateCommand())
+            {
+                // journal_mode is a no-op for :memory: but harmless.
+                cmd.CommandText =
+                    "PRAGMA journal_mode=WAL;" +
+                    "PRAGMA foreign_keys=ON;" +
+                    "PRAGMA synchronous=NORMAL;";
+                cmd.ExecuteNonQuery();
+            }
+
+            return conn;
+        }
+        catch
+        {
+            conn.Dispose();
+            throw;
+        }
     }
 
     /// <summary>

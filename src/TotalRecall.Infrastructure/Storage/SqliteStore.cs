@@ -1,4 +1,3 @@
-// spike/dotnet/src/TotalRecall.Spike/Storage/SqliteStore.cs
 using System;
 using System.Collections.Generic;
 using System.IO;
