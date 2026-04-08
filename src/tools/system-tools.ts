@@ -1,11 +1,9 @@
 import { statSync } from "node:fs";
-import { join } from "node:path";
 import type { ToolContext } from "./registry.js";
 import { countEntries } from "../db/entries.js";
 import { listCollections } from "../ingestion/hierarchical-index.js";
-import { setNestedKey, saveUserConfig, loadConfig, createConfigSnapshot } from "../config.js";
+import { setNestedKey, saveUserConfig, loadConfig, createConfigSnapshot, getDbPath } from "../config.js";
 import { getRetrievalEvents } from "../eval/event-logger.js";
-import { getDataDir } from "../config.js";
 import { ALL_TABLE_PAIRS } from "../types.js";
 
 export const SYSTEM_TOOLS = [
@@ -59,8 +57,7 @@ export function handleSystemTool(
     }
 
     // DB info
-    const dataDir = getDataDir();
-    const dbPath = join(dataDir, "total-recall.db");
+    const dbPath = getDbPath();
     let dbSizeBytes: number | null = null;
     try {
       dbSizeBytes = statSync(dbPath).size;
