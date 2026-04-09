@@ -77,8 +77,19 @@ public sealed class FakeSqliteStore : ISqliteStore
     public void Delete(Tier tier, ContentType type, string id)
     {
         DeleteCalls.Add(new DeleteCall(tier, type, id));
+        OrderLog?.Add("store.Delete");
         Entries.Remove((tier, type, id));
     }
+
+    /// <summary>
+    /// Opt-in cross-fake call-order log. When set (by a test), deletion
+    /// methods on this fake and any sibling <see cref="FakeVectorSearch"/>
+    /// sharing the same list append a tag each time they are invoked, so
+    /// the test can assert relative ordering of operations across the
+    /// store + vec boundary. Left null by default so existing tests see
+    /// no behavior change.
+    /// </summary>
+    public List<string>? OrderLog { get; set; }
 
     public IReadOnlyList<Entry> List(Tier tier, ContentType type, ListEntriesOpts? opts = null)
     {

@@ -105,6 +105,31 @@ public class MemoryDeleteHandlerTests
     }
 
     [Fact]
+    public async Task Delete_CallsVecDeleteBeforeStoreDelete()
+    {
+        // Regression for the orphan-vec-row bug (2026-04-08). The previous
+        // implementation called store.Delete first and then
+        // vec.DeleteEmbedding, but VectorSearch.DeleteEmbedding resolves
+        // the vec rowid via the *content* table — so by the time it runs,
+        // the content row is gone, ResolveRowid returns null, and the vec
+        // row is silently left behind as an orphan. Subsequent inserts
+        // that reuse the freed rowid then crash with a UNIQUE constraint
+        // violation on the vec table's primary key.
+        //
+        // The handler's contract is: vec.DeleteEmbedding MUST run before
+        // store.Delete so the rowid lookup still succeeds.
+        var (handler, store, vector) = MakeHandler();
+        var log = new System.Collections.Generic.List<string>();
+        store.OrderLog = log;
+        vector.OrderLog = log;
+        store.Seed(Tier.Hot, ContentType.Memory, MakeEntry("abc"));
+
+        await handler.ExecuteAsync(ParseArgs("""{"id":"abc"}"""), CancellationToken.None);
+
+        Assert.Equal(new[] { "vec.DeleteEmbedding", "store.Delete" }, log);
+    }
+
+    [Fact]
     public async Task CallsDeleteEmbedding_WhenFound()
     {
         var (handler, store, vector) = MakeHandler();

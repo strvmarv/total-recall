@@ -3,14 +3,22 @@
 // Plan 4 Task 4.8 — ports the `memory_delete` branch of
 // src-ts/tools/memory-tools.ts (plus src-ts/memory/delete.ts) to the
 // .NET Server. Locates the row via an AllTablePairs sweep, then deletes
-// the metadata row plus the corresponding vec0 embedding row.
+// the corresponding vec0 embedding row and the metadata row — in that
+// order.
 //
 // Design notes:
 //
 //   - Constructor takes (ISqliteStore, IVectorSearch) so we can clean up
-//     the embedding row too. IVectorSearch.DeleteEmbedding already exists
-//     on the interface and is a silent no-op when the vec0 row is missing,
-//     so this is safe regardless of whether the row was ever embedded.
+//     the embedding row too.
+//
+//   - Order of operations is load-bearing: vec.DeleteEmbedding MUST run
+//     before store.Delete. VectorSearch.DeleteEmbedding resolves the vec
+//     rowid by querying the content table, so if the content row has
+//     already been removed it returns null and silently leaves the vec
+//     row behind as an orphan. A later insert that reuses the freed
+//     content rowid then crashes with a UNIQUE constraint on the vec
+//     table PK. See MemoryDeleteHandlerTests.Delete_CallsVecDeleteBefore-
+//     StoreDelete for the regression.
 //
 //   - Response payload matches TS `{deleted: bool}`. Built by hand.
 
@@ -92,8 +100,9 @@ public sealed class MemoryDeleteHandler : IToolHandler
             });
         }
 
-        _store.Delete(located.Value.Tier, located.Value.Type, id);
+        // Order matters: see the header comment. vec first, content second.
         _vectorSearch.DeleteEmbedding(located.Value.Tier, located.Value.Type, id);
+        _store.Delete(located.Value.Tier, located.Value.Type, id);
 
         return Task.FromResult(new ToolCallResult
         {

@@ -25,7 +25,14 @@ public sealed class FakeVectorSearch : IVectorSearch
     public void DeleteEmbedding(Tier tier, ContentType type, string entryId)
     {
         DeleteCalls.Add(new DeleteCall(tier, type, entryId));
+        OrderLog?.Add("vec.DeleteEmbedding");
     }
+
+    /// <summary>
+    /// Opt-in cross-fake call-order log. See
+    /// <see cref="FakeSqliteStore.OrderLog"/>.
+    /// </summary>
+    public List<string>? OrderLog { get; set; }
 
     public IReadOnlyList<VectorSearchResult> SearchByVector(
         Tier tier,
