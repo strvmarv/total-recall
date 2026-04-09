@@ -24,6 +24,98 @@ public sealed class SqliteStoreIntegrationTests
         return (conn, new SqliteStore(conn));
     }
 
+    /// <summary>
+    /// Count vec rows whose rowid has no matching content row, plus
+    /// content rows whose rowid has no matching vec row, across every
+    /// (tier, type) pair. Returns the total number of orphans. Useful
+    /// as a post-test invariant assertion.
+    /// </summary>
+    private static long CountOrphans(MsSqliteConnection conn)
+    {
+        long total = 0;
+        foreach (var (tier, type) in MigrationRunner_AllPairs())
+        {
+            var contentTable = $"{tier}_{type}";
+            var vecTable = $"{tier}_{type}_vec";
+
+            using var vecCmd = conn.CreateCommand();
+            vecCmd.CommandText =
+                $"SELECT COUNT(*) FROM {vecTable} " +
+                $"WHERE rowid NOT IN (SELECT rowid FROM {contentTable})";
+            total += (long)vecCmd.ExecuteScalar()!;
+
+            using var contentCmd = conn.CreateCommand();
+            contentCmd.CommandText =
+                $"SELECT COUNT(*) FROM {contentTable} " +
+                $"WHERE rowid NOT IN (SELECT rowid FROM {vecTable})";
+            total += (long)contentCmd.ExecuteScalar()!;
+        }
+        return total;
+    }
+
+    private static IEnumerable<(string Tier, string Type)> MigrationRunner_AllPairs() =>
+        new[]
+        {
+            ("hot", "memories"),  ("warm", "memories"),  ("cold", "memories"),
+            ("hot", "knowledge"), ("warm", "knowledge"), ("cold", "knowledge"),
+        };
+
+    [Fact]
+    public void StoreDeleteStore_NoOrphansRemain()
+    {
+        // End-to-end regression for the 0.6.7 dogfood failure sequence:
+        //   1. memory_store → E1 at some rowid R
+        //   2. memory_delete E1
+        //   3. memory_store → E2, which collided with the orphan vec row
+        //      SQLite had left behind at R, causing a UNIQUE constraint
+        //      crash on hot_memories_vec PK.
+        //
+        // With the fixes applied (reordered delete, rowid-aware vec
+        // delete, and transactional insert), the exact same sequence
+        // must succeed and leave zero orphans in any of the six
+        // content/vec table pairs.
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            var search = new Search.VectorSearch(conn);
+            var e1 = new float[384];
+            e1[0] = 1f;
+            var e2 = new float[384];
+            e2[1] = 1f;
+
+            // Store E1.
+            var id1 = store.InsertWithEmbedding(
+                Tier.Hot, ContentType.Memory,
+                new InsertEntryOpts("first"),
+                e1);
+
+            // Delete E1 — vec row first (via resolved rowid), then content row.
+            var rowid1 = store.GetRowid(Tier.Hot, ContentType.Memory, id1);
+            Assert.NotNull(rowid1);
+            search.DeleteEmbedding(Tier.Hot, ContentType.Memory, rowid1!.Value);
+            store.Delete(Tier.Hot, ContentType.Memory, id1);
+
+            // Store E2 — this is the call that used to crash on the old
+            // code path.
+            var id2 = store.InsertWithEmbedding(
+                Tier.Hot, ContentType.Memory,
+                new InsertEntryOpts("second"),
+                e2);
+
+            // Both invariants must hold:
+            //   - E2 is retrievable via vector search
+            //   - No orphan rows exist anywhere
+            var results = search.SearchByVector(
+                Tier.Hot, ContentType.Memory,
+                e2,
+                new Search.VectorSearchOpts(TopK: 1));
+            Assert.Single(results);
+            Assert.Equal(id2, results[0].Id);
+
+            Assert.Equal(0L, CountOrphans(conn));
+        }
+    }
+
     [Fact]
     public void InsertWithEmbedding_HappyPath_InsertsBothRows()
     {
