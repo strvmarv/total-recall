@@ -9,6 +9,9 @@ docs/superpowers/
 # .NET build artifacts
 [Bb]in/
 [Oo]bj/
+# Exception: top-level bin/ holds the Node launcher (plan 6 task 6.3)
+!/bin/
+!/bin/**
 *.user
 *.suo
 .vs/
