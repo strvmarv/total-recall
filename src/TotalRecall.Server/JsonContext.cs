@@ -607,6 +607,42 @@ public sealed record EvalGrowResolveResultDto(
     [property: JsonPropertyName("corpusEntries")] string[] CorpusEntries,
     [property: JsonPropertyName("benchmarkPath")] string BenchmarkPath);
 
+// ---- Task 6.0d: Config + misc DTOs ----
+//
+// Wire shapes for the 4 final Plan 6 handlers: config_get, config_set,
+// import_host, compact_now. ConfigGetHandler does NOT use a source-gen
+// DTO for its return value — its result shape is a dynamic tree of
+// TomlTable/TomlArray/scalar values and is written directly via
+// Utf8JsonWriter. The other three handlers use the DTOs below.
+//
+// ConfigSetResultDto carries old_value/new_value as strings (not raw
+// JsonElement) because the values we surface round-trip through TOML
+// coercion (bool/long/double/string) and a uniform string representation
+// keeps the wire shape trivially source-gen-friendly. Clients that need
+// the typed value can call config_get after the set.
+
+public sealed record ConfigSetResultDto(
+    [property: JsonPropertyName("key")] string Key,
+    [property: JsonPropertyName("old_value")] string? OldValue,
+    [property: JsonPropertyName("new_value")] string? NewValue,
+    [property: JsonPropertyName("written")] bool Written);
+
+public sealed record ImportHostSourceDto(
+    [property: JsonPropertyName("source")] string Source,
+    [property: JsonPropertyName("detected")] bool Detected,
+    [property: JsonPropertyName("memories_imported")] int MemoriesImported,
+    [property: JsonPropertyName("knowledge_imported")] int KnowledgeImported,
+    [property: JsonPropertyName("skipped")] int Skipped,
+    [property: JsonPropertyName("errors")] string[] Errors);
+
+public sealed record ImportHostResultDto(
+    [property: JsonPropertyName("results")] ImportHostSourceDto[] Results,
+    [property: JsonPropertyName("count")] int Count);
+
+public sealed record CompactNowResultDto(
+    [property: JsonPropertyName("compacted")] int Compacted,
+    [property: JsonPropertyName("message")] string Message);
+
 // ---------- source-gen context ----------
 
 [JsonSourceGenerationOptions(
@@ -706,6 +742,12 @@ public sealed record EvalGrowResolveResultDto(
 [JsonSerializable(typeof(EvalGrowCandidateDto[]))]
 [JsonSerializable(typeof(EvalGrowListResultDto))]
 [JsonSerializable(typeof(EvalGrowResolveResultDto))]
+// ---- Task 6.0d: Config + misc DTOs ----
+[JsonSerializable(typeof(ConfigSetResultDto))]
+[JsonSerializable(typeof(ImportHostSourceDto))]
+[JsonSerializable(typeof(ImportHostSourceDto[]))]
+[JsonSerializable(typeof(ImportHostResultDto))]
+[JsonSerializable(typeof(CompactNowResultDto))]
 public partial class JsonContext : JsonSerializerContext
 {
 }
