@@ -42,10 +42,20 @@ public interface IVectorSearch
         ReadOnlyMemory<float> embedding);
 
     /// <summary>
-    /// Remove the embedding for <paramref name="entryId"/>. Silent no-op if
-    /// the entry (or its embedding row) does not exist.
+    /// Remove the vec0 row whose rowid matches <paramref name="rowid"/>
+    /// in the <c>(tier, type)</c> vec table. Silent no-op if no such row
+    /// exists.
+    ///
+    /// Callers must resolve the rowid *before* deleting the matching
+    /// content row — typically via
+    /// <see cref="ISqliteStore.GetRowid"/>. The older overload took an
+    /// entry id and resolved the rowid internally via the content table,
+    /// which silently leaked vec rows whenever a caller deleted content
+    /// before the vec embedding (see the 0.6.7 orphan-vec-row bug). The
+    /// new signature pushes rowid resolution to the caller so the
+    /// coupling is explicit.
     /// </summary>
-    void DeleteEmbedding(Tier tier, ContentType type, string entryId);
+    void DeleteEmbedding(Tier tier, ContentType type, long rowid);
 
     /// <summary>
     /// KNN query against a single (tier, type) vec0 table. Oversamples by

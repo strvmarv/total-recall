@@ -54,18 +54,13 @@ public sealed class VectorSearch : IVectorSearch
         cmd.ExecuteNonQuery();
     }
 
-    public void DeleteEmbedding(Tier tier, ContentType type, string entryId)
+    public void DeleteEmbedding(Tier tier, ContentType type, long rowid)
     {
-        ArgumentNullException.ThrowIfNull(entryId);
-        var contentTable = MigrationRunner.TableName(tier, type);
         var vecTable = MigrationRunner.VecTableName(tier, type);
-
-        var rowid = ResolveRowid(contentTable, entryId);
-        if (rowid is null) return;
 
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = $"DELETE FROM {vecTable} WHERE rowid = $rowid";
-        cmd.Parameters.AddWithValue("$rowid", rowid.Value);
+        cmd.Parameters.AddWithValue("$rowid", rowid);
         cmd.ExecuteNonQuery();
     }
 

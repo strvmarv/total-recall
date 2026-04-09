@@ -62,7 +62,8 @@ public class MemoryUpdateHandlerTests
         Assert.Equal("new", embedder.Calls[0]);
         Assert.Single(vector.DeleteCalls);
         Assert.Single(vector.InsertCalls);
-        Assert.Equal("abc", vector.DeleteCalls[0].EntryId);
+        // abc is seeded first → synthetic rowid 1.
+        Assert.Equal(1L, vector.DeleteCalls[0].Rowid);
         Assert.Equal("abc", vector.InsertCalls[0].EntryId);
     }
 

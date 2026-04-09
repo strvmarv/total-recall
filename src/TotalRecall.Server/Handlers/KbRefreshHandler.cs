@@ -90,12 +90,16 @@ public sealed class KbRefreshHandler : IToolHandler
         }
         foreach (var child in children)
         {
-            _vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, child.Id);
+            var childRowid = _store.GetRowid(Tier.Cold, ContentType.Knowledge, child.Id);
+            if (childRowid is not null)
+                _vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, childRowid.Value);
             _store.Delete(Tier.Cold, ContentType.Knowledge, child.Id);
         }
 
         // Delete the root.
-        _vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, collectionId);
+        var rootRowid = _store.GetRowid(Tier.Cold, ContentType.Knowledge, collectionId);
+        if (rootRowid is not null)
+            _vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, rootRowid.Value);
         _store.Delete(Tier.Cold, ContentType.Knowledge, collectionId);
 
         bool isDir;

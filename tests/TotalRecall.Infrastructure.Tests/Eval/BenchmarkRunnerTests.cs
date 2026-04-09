@@ -63,6 +63,9 @@ public sealed class BenchmarkRunnerTests : IDisposable
         public Entry? Get(Tier tier, ContentType type, string id)
             => Entries.TryGetValue(id, out var e) ? e : null;
 
+        public long? GetRowid(Tier tier, ContentType type, string id)
+            => Entries.ContainsKey(id) ? 1L : null;
+
         public void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts) { }
 
         public void Delete(Tier tier, ContentType type, string id)
@@ -86,7 +89,7 @@ public sealed class BenchmarkRunnerTests : IDisposable
         public int InsertCalls;
         public int DeleteCalls;
         public void InsertEmbedding(Tier tier, ContentType type, string entryId, ReadOnlyMemory<float> embedding) => InsertCalls++;
-        public void DeleteEmbedding(Tier tier, ContentType type, string entryId) => DeleteCalls++;
+        public void DeleteEmbedding(Tier tier, ContentType type, long rowid) => DeleteCalls++;
         public IReadOnlyList<VectorSearchResult> SearchByVector(Tier tier, ContentType type, ReadOnlyMemory<float> queryVec, VectorSearchOpts opts)
             => Array.Empty<VectorSearchResult>();
         public IReadOnlyList<VectorSearchResult> SearchMultipleTiers(IReadOnlyList<(Tier Tier, ContentType Type)> targets, ReadOnlyMemory<float> queryVec, VectorSearchOpts opts)

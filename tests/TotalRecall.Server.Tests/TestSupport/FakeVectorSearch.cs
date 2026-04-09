@@ -12,7 +12,7 @@ namespace TotalRecall.Server.Tests.TestSupport;
 public sealed class FakeVectorSearch : IVectorSearch
 {
     public sealed record InsertCall(Tier Tier, ContentType Type, string EntryId, float[] Embedding);
-    public sealed record DeleteCall(Tier Tier, ContentType Type, string EntryId);
+    public sealed record DeleteCall(Tier Tier, ContentType Type, long Rowid);
 
     public List<InsertCall> InsertCalls { get; } = new();
     public List<DeleteCall> DeleteCalls { get; } = new();
@@ -22,9 +22,9 @@ public sealed class FakeVectorSearch : IVectorSearch
         InsertCalls.Add(new InsertCall(tier, type, entryId, embedding.ToArray()));
     }
 
-    public void DeleteEmbedding(Tier tier, ContentType type, string entryId)
+    public void DeleteEmbedding(Tier tier, ContentType type, long rowid)
     {
-        DeleteCalls.Add(new DeleteCall(tier, type, entryId));
+        DeleteCalls.Add(new DeleteCall(tier, type, rowid));
         OrderLog?.Add("vec.DeleteEmbedding");
     }
 

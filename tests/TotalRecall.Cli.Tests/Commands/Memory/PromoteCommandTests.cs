@@ -66,7 +66,8 @@ public sealed class PromoteCommandTests : IDisposable
 
         Assert.Equal(0, code);
         Assert.Single(vec.Deletes);
-        Assert.Equal((Tier.Cold, ContentType.Memory, "abc"), vec.Deletes[0]);
+        // abc is seeded first → synthetic rowid 1 in FakeMemoryInfra.FakeSqliteStore.
+        Assert.Equal((Tier.Cold, ContentType.Memory, 1L), vec.Deletes[0]);
         Assert.Single(store.MoveCalls);
         Assert.Equal((Tier.Cold, ContentType.Memory, Tier.Warm, ContentType.Memory, "abc"), store.MoveCalls[0]);
         Assert.Single(emb.Calls);

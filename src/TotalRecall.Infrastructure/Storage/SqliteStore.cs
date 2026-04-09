@@ -106,6 +106,16 @@ VALUES
         return RowToEntry(reader);
     }
 
+    public long? GetRowid(Tier tier, ContentType type, string id)
+    {
+        var table = MigrationRunner.TableName(tier, type);
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = $"SELECT rowid FROM {table} WHERE id = $id";
+        cmd.Parameters.AddWithValue("$id", id);
+        var result = cmd.ExecuteScalar();
+        return result is long l ? l : null;
+    }
+
     public void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts)
     {
         ArgumentNullException.ThrowIfNull(opts);

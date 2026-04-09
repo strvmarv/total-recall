@@ -20,19 +20,28 @@ namespace TotalRecall.Cli.Tests.TestSupport;
 internal sealed class FakeSqliteStore : ISqliteStore
 {
     private readonly Dictionary<(Tier, ContentType, string), Entry> _rows = new();
+    private readonly Dictionary<(Tier, ContentType, string), long> _rowids = new();
     public List<(Tier FromTier, ContentType FromType, Tier ToTier, ContentType ToType, string Id)> MoveCalls { get; } = new();
     public List<(Tier Tier, ContentType Type, InsertEntryOpts Opts, string NewId)> InsertCalls { get; } = new();
     public List<(Tier Tier, ContentType Type, string Id)> DeleteCalls { get; } = new();
     private int _nextInsertId = 0;
+    private long _nextRowid = 1;
 
     public void Seed(Tier tier, ContentType type, Entry e)
     {
         _rows[(tier, type, e.Id)] = e;
+        if (!_rowids.ContainsKey((tier, type, e.Id)))
+            _rowids[(tier, type, e.Id)] = _nextRowid++;
     }
 
     public Entry? Get(Tier tier, ContentType type, string id)
     {
         return _rows.TryGetValue((tier, type, id), out var e) ? e : null;
+    }
+
+    public long? GetRowid(Tier tier, ContentType type, string id)
+    {
+        return _rowids.TryGetValue((tier, type, id), out var r) ? r : null;
     }
 
     public void Move(Tier fromTier, ContentType fromType, Tier toTier, ContentType toType, string id)
@@ -42,6 +51,8 @@ internal sealed class FakeSqliteStore : ISqliteStore
             throw new InvalidOperationException($"no row at {fromTier}/{fromType}/{id}");
         _rows.Remove((fromTier, fromType, id));
         _rows[(toTier, toType, id)] = e;
+        if (_rowids.Remove((fromTier, fromType, id)))
+            _rowids[(toTier, toType, id)] = _nextRowid++;
     }
 
     public IReadOnlyList<Entry> List(Tier tier, ContentType type, ListEntriesOpts? opts = null)
@@ -68,6 +79,7 @@ internal sealed class FakeSqliteStore : ISqliteStore
             tags: opts.Tags,
             metadataJson: opts.MetadataJson ?? "");
         _rows[(tier, type, newId)] = entry;
+        _rowids[(tier, type, newId)] = _nextRowid++;
         return newId;
     }
 
@@ -75,6 +87,7 @@ internal sealed class FakeSqliteStore : ISqliteStore
     {
         DeleteCalls.Add((tier, type, id));
         _rows.Remove((tier, type, id));
+        _rowids.Remove((tier, type, id));
     }
 
     // Minimal substring-based metadata filter for test harness coverage.
@@ -128,7 +141,7 @@ internal sealed class FakeSqliteStore : ISqliteStore
 
 internal sealed class FakeVectorSearch : IVectorSearch
 {
-    public List<(Tier Tier, ContentType Type, string Id)> Deletes { get; } = new();
+    public List<(Tier Tier, ContentType Type, long Rowid)> Deletes { get; } = new();
     public List<(Tier Tier, ContentType Type, string Id, float[] Embedding)> Inserts { get; } = new();
 
     public void InsertEmbedding(Tier tier, ContentType type, string entryId, ReadOnlyMemory<float> embedding)
@@ -136,9 +149,9 @@ internal sealed class FakeVectorSearch : IVectorSearch
         Inserts.Add((tier, type, entryId, embedding.ToArray()));
     }
 
-    public void DeleteEmbedding(Tier tier, ContentType type, string entryId)
+    public void DeleteEmbedding(Tier tier, ContentType type, long rowid)
     {
-        Deletes.Add((tier, type, entryId));
+        Deletes.Add((tier, type, rowid));
     }
 
     public IReadOnlyList<VectorSearchResult> SearchByVector(Tier tier, ContentType type, ReadOnlyMemory<float> queryVec, VectorSearchOpts opts) => throw new NotImplementedException();

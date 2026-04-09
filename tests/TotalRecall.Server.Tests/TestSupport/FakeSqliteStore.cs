@@ -35,6 +35,15 @@ public sealed class FakeSqliteStore : ISqliteStore
     public Dictionary<(Tier, ContentType, string), Entry> Entries { get; } = new();
 
     /// <summary>
+    /// Synthetic rowid assigned to each seeded or inserted entry so
+    /// <see cref="GetRowid"/> can return a stable value that behaves
+    /// like the SQLite-allocated rowid in production. Monotonic; reused
+    /// after deletion isn't modeled because no handler test needs it.
+    /// </summary>
+    public Dictionary<(Tier, ContentType, string), long> Rowids { get; } = new();
+    private long _nextRowid = 1;
+
+    /// <summary>
     /// Ordered entry lists per (tier, type) slot. Populated via
     /// <see cref="SeedList"/>; consumed by <see cref="List"/>. Kept separate
     /// from the id-keyed <see cref="Entries"/> dictionary so tests that only
@@ -45,6 +54,8 @@ public sealed class FakeSqliteStore : ISqliteStore
     public void Seed(Tier tier, ContentType type, Entry entry)
     {
         Entries[(tier, type, entry.Id)] = entry;
+        if (!Rowids.ContainsKey((tier, type, entry.Id)))
+            Rowids[(tier, type, entry.Id)] = _nextRowid++;
     }
 
     public void SeedList(Tier tier, ContentType type, params Entry[] entries)
@@ -55,11 +66,20 @@ public sealed class FakeSqliteStore : ISqliteStore
             ListSlots[(tier, type)] = slot;
         }
         slot.AddRange(entries);
+        // Assign synthetic rowids so GetRowid works for SeedList-only entries
+        // (KbRefreshHandlerTests and similar exercise children that are only
+        // populated via SeedList, not Seed).
+        foreach (var e in entries)
+        {
+            if (!Rowids.ContainsKey((tier, type, e.Id)))
+                Rowids[(tier, type, e.Id)] = _nextRowid++;
+        }
     }
 
     public string Insert(Tier tier, ContentType type, InsertEntryOpts opts)
     {
         InsertCalls.Add(new InsertCall(tier, type, opts));
+        Rowids[(tier, type, NextInsertId)] = _nextRowid++;
         return NextInsertId;
     }
 
@@ -67,6 +87,11 @@ public sealed class FakeSqliteStore : ISqliteStore
     {
         GetCalls.Add(new GetCall(tier, type, id));
         return Entries.TryGetValue((tier, type, id), out var e) ? e : null;
+    }
+
+    public long? GetRowid(Tier tier, ContentType type, string id)
+    {
+        return Rowids.TryGetValue((tier, type, id), out var r) ? r : null;
     }
 
     public void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts)
@@ -79,6 +104,7 @@ public sealed class FakeSqliteStore : ISqliteStore
         DeleteCalls.Add(new DeleteCall(tier, type, id));
         OrderLog?.Add("store.Delete");
         Entries.Remove((tier, type, id));
+        Rowids.Remove((tier, type, id));
     }
 
     /// <summary>
@@ -174,5 +200,11 @@ public sealed class FakeSqliteStore : ISqliteStore
             Entries.Remove((fromTier, fromType, id));
             Entries[(toTier, toType, id)] = e;
         }
+        // Mirror production store.Move: the row moves to a new table and
+        // therefore gets a new rowid in that table. Reuse the same
+        // monotonic counter so tests that compare rowids across moves
+        // observe distinct values.
+        if (Rowids.Remove((fromTier, fromType, id)))
+            Rowids[(toTier, toType, id)] = _nextRowid++;
     }
 }

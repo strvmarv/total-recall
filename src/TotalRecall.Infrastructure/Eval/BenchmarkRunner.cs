@@ -218,7 +218,9 @@ public sealed class BenchmarkRunner
             {
                 try
                 {
-                    _vectorSearch.DeleteEmbedding(Tier.Warm, ContentType.Memory, id);
+                    var rowid = _store.GetRowid(Tier.Warm, ContentType.Memory, id);
+                    if (rowid is not null)
+                        _vectorSearch.DeleteEmbedding(Tier.Warm, ContentType.Memory, rowid.Value);
                     _store.Delete(Tier.Warm, ContentType.Memory, id);
                 }
                 catch

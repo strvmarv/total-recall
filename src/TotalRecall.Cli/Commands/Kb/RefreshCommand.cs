@@ -145,12 +145,16 @@ public sealed class RefreshCommand : ICliCommand
             }
             foreach (var child in children)
             {
-                vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, child.Id);
+                var childRowid = store.GetRowid(Tier.Cold, ContentType.Knowledge, child.Id);
+                if (childRowid is not null)
+                    vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, childRowid.Value);
                 store.Delete(Tier.Cold, ContentType.Knowledge, child.Id);
             }
 
             // Delete the root.
-            vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, collectionId);
+            var rootRowid = store.GetRowid(Tier.Cold, ContentType.Knowledge, collectionId);
+            if (rootRowid is not null)
+                vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, rootRowid.Value);
             store.Delete(Tier.Cold, ContentType.Knowledge, collectionId);
 
             // Figure out if the source is a file or a directory.

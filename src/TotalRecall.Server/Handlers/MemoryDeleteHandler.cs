@@ -100,8 +100,11 @@ public sealed class MemoryDeleteHandler : IToolHandler
             });
         }
 
-        // Order matters: see the header comment. vec first, content second.
-        _vectorSearch.DeleteEmbedding(located.Value.Tier, located.Value.Type, id);
+        // Order matters: see the header comment. Resolve rowid and
+        // delete the vec row first; only then drop the content row.
+        var rowid = _store.GetRowid(located.Value.Tier, located.Value.Type, id);
+        if (rowid is not null)
+            _vectorSearch.DeleteEmbedding(located.Value.Tier, located.Value.Type, rowid.Value);
         _store.Delete(located.Value.Tier, located.Value.Type, id);
 
         return Task.FromResult(new ToolCallResult

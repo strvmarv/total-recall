@@ -17,6 +17,17 @@ public interface ISqliteStore
     /// <summary>Fetch an entry by id, or <c>null</c> if not found.</summary>
     Entry? Get(Tier tier, ContentType type, string id);
 
+    /// <summary>
+    /// Return the SQLite integer <c>rowid</c> of the content row for a
+    /// given id, or <c>null</c> if no such row exists. Exists so callers
+    /// can resolve the rowid of an entry before deleting it, and then
+    /// pass that rowid to <see cref="IVectorSearch.DeleteEmbedding"/> —
+    /// eliminating the footgun where the old id-based delete silently
+    /// leaked the vec row once the content row was gone. See
+    /// <c>MemoryDeleteHandlerTests.Delete_CallsVecDeleteBeforeStoreDelete</c>.
+    /// </summary>
+    long? GetRowid(Tier tier, ContentType type, string id);
+
     /// <summary>Update selected fields on an existing entry.</summary>
     void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts);
 

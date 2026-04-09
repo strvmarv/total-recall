@@ -81,6 +81,9 @@ public sealed class SessionLifecycleTests
         public Entry? Get(Tier tier, ContentType type, string id) =>
             Slot(tier, type).FirstOrDefault(e => e.Id == id);
 
+        public long? GetRowid(Tier tier, ContentType type, string id) =>
+            Slot(tier, type).Any(e => e.Id == id) ? 1L : null;
+
         public void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts) =>
             throw new NotSupportedException();
 

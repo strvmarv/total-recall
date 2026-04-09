@@ -67,7 +67,8 @@ public sealed class RemoveCommandTests : IDisposable
 
         Assert.Equal(0, code);
         Assert.Single(vec.Deletes);
-        Assert.Equal(("coll-a"), vec.Deletes[0].Id);
+        // coll-a is the first entry seeded → synthetic rowid 1 in FakeSqliteStore.
+        Assert.Equal(1L, vec.Deletes[0].Rowid);
         Assert.Single(store.DeleteCalls);
         Assert.Equal("coll-a", store.DeleteCalls[0].Id);
         Assert.Contains("removed coll-a", injected.ToString());

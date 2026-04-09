@@ -56,7 +56,13 @@ public static class MoveHelpers
         Tier fromTier, ContentType fromType,
         Tier toTier, ContentType toType)
     {
-        vec.DeleteEmbedding(fromTier, fromType, entry.Id);
+        // Resolve the source rowid BEFORE store.Move, while the content
+        // row still exists in the source table. After the move the old
+        // rowid is meaningless, so deleting the vec row first is the only
+        // way to keep the two sides aligned.
+        var sourceRowid = store.GetRowid(fromTier, fromType, entry.Id);
+        if (sourceRowid is not null)
+            vec.DeleteEmbedding(fromTier, fromType, sourceRowid.Value);
         store.Move(fromTier, fromType, toTier, toType, entry.Id);
         // TODO(Plan 5+): atomicity gap (carry-forward #9) — a crash between
         // store.Move and this re-embed leaves the target row without an

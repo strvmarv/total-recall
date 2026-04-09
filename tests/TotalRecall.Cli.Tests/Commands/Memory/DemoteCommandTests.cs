@@ -65,7 +65,8 @@ public sealed class DemoteCommandTests : IDisposable
 
         Assert.Equal(0, code);
         Assert.Single(vec.Deletes);
-        Assert.Equal((Tier.Hot, ContentType.Memory, "abc"), vec.Deletes[0]);
+        // abc is seeded first → synthetic rowid 1 in FakeMemoryInfra.FakeSqliteStore.
+        Assert.Equal((Tier.Hot, ContentType.Memory, 1L), vec.Deletes[0]);
         Assert.Equal((Tier.Hot, ContentType.Memory, Tier.Cold, ContentType.Memory, "abc"), store.MoveCalls[0]);
         Assert.Single(emb.Calls);
         Assert.Equal(Tier.Cold, vec.Inserts[0].Tier);

@@ -51,7 +51,8 @@ public class MemoryDeleteHandlerTests
         Assert.Equal("abc", store.DeleteCalls[0].Id);
 
         Assert.Single(vector.DeleteCalls);
-        Assert.Equal("abc", vector.DeleteCalls[0].EntryId);
+        // FakeSqliteStore assigns rowid 1 to the first Seed.
+        Assert.Equal(1L, vector.DeleteCalls[0].Rowid);
     }
 
     [Fact]

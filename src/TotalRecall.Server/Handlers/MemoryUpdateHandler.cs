@@ -142,13 +142,15 @@ public sealed class MemoryUpdateHandler : IToolHandler
 
         // Re-embed + replace vector row when content changed. vec0 INSERT
         // is not upsert (see VectorSearch.cs), so we delete the existing
-        // row first. DeleteEmbedding is a silent no-op if the row is
-        // missing, so this is safe when the prior embedding was absent.
+        // row first. store.Update does not change the content rowid, so
+        // the rowid we resolved before the update is still valid after.
         if (content is not null)
         {
             ct.ThrowIfCancellationRequested();
             var vector = _embedder.Embed(content);
-            _vectorSearch.DeleteEmbedding(located.Value.Tier, located.Value.Type, id);
+            var rowid = _store.GetRowid(located.Value.Tier, located.Value.Type, id);
+            if (rowid is not null)
+                _vectorSearch.DeleteEmbedding(located.Value.Tier, located.Value.Type, rowid.Value);
             _vectorSearch.InsertEmbedding(located.Value.Tier, located.Value.Type, id, vector);
         }
 

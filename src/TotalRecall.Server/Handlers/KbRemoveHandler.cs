@@ -75,12 +75,16 @@ public sealed class KbRemoveHandler : IToolHandler
         var cascadeCount = 0;
         foreach (var child in children)
         {
-            _vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, child.Id);
+            var childRowid = _store.GetRowid(Tier.Cold, ContentType.Knowledge, child.Id);
+            if (childRowid is not null)
+                _vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, childRowid.Value);
             _store.Delete(Tier.Cold, ContentType.Knowledge, child.Id);
             cascadeCount++;
         }
 
-        _vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, id);
+        var rootRowid = _store.GetRowid(Tier.Cold, ContentType.Knowledge, id);
+        if (rootRowid is not null)
+            _vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, rootRowid.Value);
         _store.Delete(Tier.Cold, ContentType.Knowledge, id);
 
         var dto = new KbRemoveResultDto(Id: id, Removed: true, CascadedCount: cascadeCount);

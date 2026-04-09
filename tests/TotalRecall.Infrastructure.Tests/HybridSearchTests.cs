@@ -45,7 +45,7 @@ public sealed class HybridSearchTests
 
         public void InsertEmbedding(Tier tier, ContentType type, string entryId, ReadOnlyMemory<float> embedding)
             => throw new NotImplementedException();
-        public void DeleteEmbedding(Tier tier, ContentType type, string entryId)
+        public void DeleteEmbedding(Tier tier, ContentType type, long rowid)
             => throw new NotImplementedException();
         public IReadOnlyList<VectorSearchResult> SearchMultipleTiers(
             IReadOnlyList<(Tier Tier, ContentType Type)> targets,
@@ -84,6 +84,9 @@ public sealed class HybridSearchTests
             GetCalls++;
             return Entries.TryGetValue(id, out var e) ? e : null;
         }
+
+        public long? GetRowid(Tier tier, ContentType type, string id)
+            => Entries.ContainsKey(id) ? 1L : null;
 
         public void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts)
         {

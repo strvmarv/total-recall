@@ -171,13 +171,17 @@ public sealed class RemoveCommand : ICliCommand
                 }
                 foreach (var child in children)
                 {
-                    vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, child.Id);
+                    var childRowid = store.GetRowid(Tier.Cold, ContentType.Knowledge, child.Id);
+                    if (childRowid is not null)
+                        vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, childRowid.Value);
                     store.Delete(Tier.Cold, ContentType.Knowledge, child.Id);
                     cascadeCount++;
                 }
             }
 
-            vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, id);
+            var rootRowid = store.GetRowid(Tier.Cold, ContentType.Knowledge, id);
+            if (rootRowid is not null)
+                vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, rootRowid.Value);
             store.Delete(Tier.Cold, ContentType.Knowledge, id);
 
             if (cascadeCount > 0)

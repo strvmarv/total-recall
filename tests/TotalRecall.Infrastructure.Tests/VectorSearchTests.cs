@@ -131,7 +131,7 @@ public sealed class VectorSearchTests
     }
 
     [Fact]
-    public void DeleteEmbedding_ExistingEntry_RemovesRow()
+    public void DeleteEmbedding_ExistingRowid_RemovesRow()
     {
         var (conn, store, search) = NewFixture();
         using (conn)
@@ -141,7 +141,9 @@ public sealed class VectorSearchTests
             search.InsertEmbedding(Tier.Hot, ContentType.Memory, id0, UnitE(0));
             search.InsertEmbedding(Tier.Hot, ContentType.Memory, id1, UnitE(1));
 
-            search.DeleteEmbedding(Tier.Hot, ContentType.Memory, id1);
+            var rowid1 = store.GetRowid(Tier.Hot, ContentType.Memory, id1);
+            Assert.NotNull(rowid1);
+            search.DeleteEmbedding(Tier.Hot, ContentType.Memory, rowid1!.Value);
 
             var results = search.SearchByVector(
                 Tier.Hot, ContentType.Memory,
@@ -154,13 +156,44 @@ public sealed class VectorSearchTests
     }
 
     [Fact]
-    public void DeleteEmbedding_UnknownEntry_NoOp()
+    public void DeleteEmbedding_UnknownRowid_NoOp()
     {
         var (conn, _, search) = NewFixture();
         using (conn)
         {
             // Must not throw.
-            search.DeleteEmbedding(Tier.Hot, ContentType.Memory, "nope");
+            search.DeleteEmbedding(Tier.Hot, ContentType.Memory, 9999L);
+        }
+    }
+
+    [Fact]
+    public void DeleteEmbedding_AfterContentRowDeleted_StillWorks()
+    {
+        // Regression for the 0.6.7 orphan-vec-row bug: the old id-based
+        // signature used the content table to resolve rowid and silently
+        // no-op'd when the content was already gone, leaving the vec row
+        // behind. Under the new rowid-based signature, a caller that
+        // resolves the rowid BEFORE deleting the content row can still
+        // remove the vec row afterward without crashing or corrupting
+        // state.
+        var (conn, store, search) = NewFixture();
+        using (conn)
+        {
+            var id = InsertContent(store, Tier.Hot, ContentType.Memory, "ephemeral");
+            search.InsertEmbedding(Tier.Hot, ContentType.Memory, id, UnitE(0));
+
+            var rowid = store.GetRowid(Tier.Hot, ContentType.Memory, id);
+            Assert.NotNull(rowid);
+            store.Delete(Tier.Hot, ContentType.Memory, id);
+            // Content row is gone. The vec row is orphaned. Delete it via rowid.
+            search.DeleteEmbedding(Tier.Hot, ContentType.Memory, rowid!.Value);
+
+            // Verify no orphan remains: searching returns nothing.
+            var results = search.SearchByVector(
+                Tier.Hot, ContentType.Memory,
+                UnitE(0),
+                new VectorSearchOpts(TopK: 5));
+            Assert.Empty(results);
         }
     }
 
