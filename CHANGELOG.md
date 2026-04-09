@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.7.2 - 2026-04-08
+
+### Fixed
+- **`SessionStart` hook missed `resume` source.** `hooks/hooks.json` and `hooks/hooks-cursor.json` matched only `startup|clear|compact`, so resuming a prior session never fired `session-start/run.sh` — hot context wasn't injected and the announce flow was skipped on resume. Added `resume` to both matchers.
+- **Cursor and Copilot CLI bundled manifests shipped a known-broken `npx` invocation.** `.cursor-plugin/plugin.json` and `.copilot-plugin/plugin.json` declared `"command": "npx", "args": ["-y", "@strvmarv/total-recall"]`, but `AGENTS.md` and `README.md` already document that `npx` cannot resolve scoped-package binaries for this package. Replaced with `"command": "total-recall"` to match the documented install path in `INSTALL.md`.
+- **Drifted version pins in host-specific manifests.** `.cursor-plugin/plugin.json` and `.copilot-plugin/plugin.json` were stuck at `0.1.0` while everything else was on the 0.7.x train. Synced both to the current release.
+- **`async: false` removed from hook entries.** Not part of the Claude Code hook schema (only `type`, `command`, `timeout` are recognized). Was silently ignored, but it's noise that could mask a real config error later. Cleared from both `hooks/hooks.json` and `hooks/hooks-cursor.json`.
+- **`package-lock.json` was stale at `0.6.8-beta.7`** even though `package.json` had moved through 0.7.0 and 0.7.1. Resynced as part of the 0.7.2 bump via `npm version`.
+
 ## 0.7.1 - 2026-04-08
 
 ### Fixed

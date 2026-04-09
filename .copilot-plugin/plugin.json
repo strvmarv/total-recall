@@ -1,12 +1,11 @@
 {
   "name": "total-recall",
   "description": "Multi-tiered memory and knowledge base for TUI coding assistants",
-  "version": "0.1.0",
+  "version": "0.7.2",
   "skills": "./skills/",
   "mcpServers": {
     "total-recall": {
-      "command": "npx",
-      "args": ["-y", "@strvmarv/total-recall"]
+      "command": "total-recall"
     }
   }
 }
