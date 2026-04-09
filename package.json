@@ -23,6 +23,7 @@
     "dist/",
     "bin/",
     "binaries/",
+    "models/",
     "bin-ts/",
     "skills/",
     "agents/",
