@@ -489,6 +489,124 @@ public sealed record KbSummarizeResultDto(
 public sealed record KbErrorDto(
     [property: JsonPropertyName("error")] string Error);
 
+// ---- Task 6.0c: Eval DTOs ----
+//
+// Wire shapes for the 5 new MCP handlers added in Plan 6 Task 6.0c
+// (eval_report, eval_benchmark, eval_compare, eval_snapshot, eval_grow).
+// These mirror the JSON emitted by the corresponding CLI commands
+// (`total-recall eval …`), but are routed through source-gen JsonContext
+// instead of the CLI's hand-rolled writers so the AOT publish path stays
+// reflection-free. camelCase wire names preserve byte compatibility with
+// the CLI's `--json` output where it exists.
+
+public sealed record EvalReportTierDto(
+    [property: JsonPropertyName("precision")] double Precision,
+    [property: JsonPropertyName("hitRate")] double HitRate,
+    [property: JsonPropertyName("avgScore")] double AvgScore,
+    [property: JsonPropertyName("count")] int Count);
+
+public sealed record EvalReportContentTypeDto(
+    [property: JsonPropertyName("precision")] double Precision,
+    [property: JsonPropertyName("hitRate")] double HitRate,
+    [property: JsonPropertyName("count")] int Count);
+
+public sealed record EvalReportMissDto(
+    [property: JsonPropertyName("query")] string Query,
+    [property: JsonPropertyName("topScore")] double? TopScore,
+    [property: JsonPropertyName("timestamp")] long Timestamp);
+
+public sealed record EvalReportCompactionHealthDto(
+    [property: JsonPropertyName("totalCompactions")] int TotalCompactions,
+    [property: JsonPropertyName("avgPreservationRatio")] double? AvgPreservationRatio,
+    [property: JsonPropertyName("entriesWithDrift")] int EntriesWithDrift);
+
+public sealed record EvalReportResultDto(
+    [property: JsonPropertyName("precision")] double Precision,
+    [property: JsonPropertyName("hitRate")] double HitRate,
+    [property: JsonPropertyName("missRate")] double MissRate,
+    [property: JsonPropertyName("mrr")] double Mrr,
+    [property: JsonPropertyName("avgLatencyMs")] double AvgLatencyMs,
+    [property: JsonPropertyName("totalEvents")] int TotalEvents,
+    [property: JsonPropertyName("byTier")] System.Collections.Generic.Dictionary<string, EvalReportTierDto> ByTier,
+    [property: JsonPropertyName("byContentType")] System.Collections.Generic.Dictionary<string, EvalReportContentTypeDto> ByContentType,
+    [property: JsonPropertyName("topMisses")] EvalReportMissDto[] TopMisses,
+    [property: JsonPropertyName("falsePositives")] EvalReportMissDto[] FalsePositives,
+    [property: JsonPropertyName("compactionHealth")] EvalReportCompactionHealthDto CompactionHealth);
+
+// Benchmark result wire shape mirrors BenchmarkResult (see
+// src/TotalRecall.Infrastructure/Eval/BenchmarkRunner.cs).
+public sealed record EvalBenchmarkDetailDto(
+    [property: JsonPropertyName("query")] string Query,
+    [property: JsonPropertyName("expectedContains")] string ExpectedContains,
+    [property: JsonPropertyName("topResult")] string? TopResult,
+    [property: JsonPropertyName("topScore")] double TopScore,
+    [property: JsonPropertyName("matched")] bool Matched,
+    [property: JsonPropertyName("fuzzyMatched")] bool FuzzyMatched,
+    [property: JsonPropertyName("hasNegativeAssertion")] bool HasNegativeAssertion,
+    [property: JsonPropertyName("negativePass")] bool NegativePass);
+
+public sealed record EvalBenchmarkResultDto(
+    [property: JsonPropertyName("totalQueries")] int TotalQueries,
+    [property: JsonPropertyName("exactMatchRate")] double ExactMatchRate,
+    [property: JsonPropertyName("fuzzyMatchRate")] double FuzzyMatchRate,
+    [property: JsonPropertyName("tierRoutingRate")] double TierRoutingRate,
+    [property: JsonPropertyName("negativePassRate")] double NegativePassRate,
+    [property: JsonPropertyName("avgLatencyMs")] double AvgLatencyMs,
+    [property: JsonPropertyName("details")] EvalBenchmarkDetailDto[] Details);
+
+// eval_compare — mirrors ComparisonResult plus the resolved before/after ids.
+public sealed record EvalCompareDeltasDto(
+    [property: JsonPropertyName("precision")] double Precision,
+    [property: JsonPropertyName("hitRate")] double HitRate,
+    [property: JsonPropertyName("mrr")] double Mrr,
+    [property: JsonPropertyName("missRate")] double MissRate,
+    [property: JsonPropertyName("avgLatencyMs")] double AvgLatencyMs);
+
+public sealed record EvalCompareQueryDiffDto(
+    [property: JsonPropertyName("queryText")] string QueryText,
+    [property: JsonPropertyName("beforeOutcome")] string BeforeOutcome,
+    [property: JsonPropertyName("afterOutcome")] string AfterOutcome,
+    [property: JsonPropertyName("beforeScore")] double? BeforeScore,
+    [property: JsonPropertyName("afterScore")] double? AfterScore);
+
+public sealed record EvalCompareResultDto(
+    [property: JsonPropertyName("beforeId")] string BeforeId,
+    [property: JsonPropertyName("afterId")] string AfterId,
+    [property: JsonPropertyName("deltas")] EvalCompareDeltasDto Deltas,
+    [property: JsonPropertyName("regressions")] EvalCompareQueryDiffDto[] Regressions,
+    [property: JsonPropertyName("improvements")] EvalCompareQueryDiffDto[] Improvements,
+    [property: JsonPropertyName("warning"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Warning);
+
+// eval_snapshot
+public sealed record EvalSnapshotResultDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("deduped")] bool Deduped);
+
+// eval_grow — single tool covers list + resolve actions (dispatched on `action` arg).
+public sealed record EvalGrowCandidateDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("queryText")] string QueryText,
+    [property: JsonPropertyName("topScore")] double TopScore,
+    [property: JsonPropertyName("topResultContent")] string? TopResultContent,
+    [property: JsonPropertyName("topResultEntryId")] string? TopResultEntryId,
+    [property: JsonPropertyName("firstSeen")] long FirstSeen,
+    [property: JsonPropertyName("lastSeen")] long LastSeen,
+    [property: JsonPropertyName("timesSeen")] int TimesSeen,
+    [property: JsonPropertyName("status")] string Status);
+
+public sealed record EvalGrowListResultDto(
+    [property: JsonPropertyName("action")] string Action,
+    [property: JsonPropertyName("candidates")] EvalGrowCandidateDto[] Candidates,
+    [property: JsonPropertyName("count")] int Count);
+
+public sealed record EvalGrowResolveResultDto(
+    [property: JsonPropertyName("action")] string Action,
+    [property: JsonPropertyName("accepted")] int Accepted,
+    [property: JsonPropertyName("rejected")] int Rejected,
+    [property: JsonPropertyName("corpusEntries")] string[] CorpusEntries,
+    [property: JsonPropertyName("benchmarkPath")] string BenchmarkPath);
+
 // ---------- source-gen context ----------
 
 [JsonSourceGenerationOptions(
@@ -567,6 +685,27 @@ public sealed record KbErrorDto(
 [JsonSerializable(typeof(KbRemoveResultDto))]
 [JsonSerializable(typeof(KbSummarizeResultDto))]
 [JsonSerializable(typeof(KbErrorDto))]
+// ---- Task 6.0c: Eval DTOs ----
+[JsonSerializable(typeof(EvalReportTierDto))]
+[JsonSerializable(typeof(EvalReportContentTypeDto))]
+[JsonSerializable(typeof(EvalReportMissDto))]
+[JsonSerializable(typeof(EvalReportMissDto[]))]
+[JsonSerializable(typeof(EvalReportCompactionHealthDto))]
+[JsonSerializable(typeof(EvalReportResultDto))]
+[JsonSerializable(typeof(System.Collections.Generic.Dictionary<string, EvalReportTierDto>))]
+[JsonSerializable(typeof(System.Collections.Generic.Dictionary<string, EvalReportContentTypeDto>))]
+[JsonSerializable(typeof(EvalBenchmarkDetailDto))]
+[JsonSerializable(typeof(EvalBenchmarkDetailDto[]))]
+[JsonSerializable(typeof(EvalBenchmarkResultDto))]
+[JsonSerializable(typeof(EvalCompareDeltasDto))]
+[JsonSerializable(typeof(EvalCompareQueryDiffDto))]
+[JsonSerializable(typeof(EvalCompareQueryDiffDto[]))]
+[JsonSerializable(typeof(EvalCompareResultDto))]
+[JsonSerializable(typeof(EvalSnapshotResultDto))]
+[JsonSerializable(typeof(EvalGrowCandidateDto))]
+[JsonSerializable(typeof(EvalGrowCandidateDto[]))]
+[JsonSerializable(typeof(EvalGrowListResultDto))]
+[JsonSerializable(typeof(EvalGrowResolveResultDto))]
 public partial class JsonContext : JsonSerializerContext
 {
 }

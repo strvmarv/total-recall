@@ -22,6 +22,7 @@ using System.Threading.Tasks;
 using Spectre.Console;
 using TotalRecall.Cli.Internal;
 using TotalRecall.Infrastructure.Config;
+using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Importers;
 using TotalRecall.Infrastructure.Ingestion;
 using TotalRecall.Infrastructure.Search;

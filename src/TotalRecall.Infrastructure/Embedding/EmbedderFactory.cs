@@ -1,20 +1,23 @@
-// src/TotalRecall.Cli/Internal/EmbedderFactory.cs
+// src/TotalRecall.Infrastructure/Embedding/EmbedderFactory.cs
 //
-// Plan 5 Task 5.3b — shared helper for CLI commands that need a real
-// OnnxEmbedder in production. Extracted from the two duplicated copies
-// that landed in 5.2 (MigrateCommand.BuildProductionMigrator) and
-// 5.3a (EvalEmbedderFactory.Build). Walks AppContext.BaseDirectory
-// upward to find bundled models/, loads the registry, points the
-// user override dir at $HOME/.total-recall/models, and constructs
-// an OnnxEmbedder for "all-MiniLM-L6-v2".
+// Plan 6 Task 6.0c — promoted from TotalRecall.Cli.Internal.EmbedderFactory
+// so that TotalRecall.Server can build an OnnxEmbedder without taking a
+// reference on Cli (Server must not reference Cli). The Cli-side shim now
+// forwards to this implementation — see src/TotalRecall.Cli/Internal/
+// EmbedderFactory.cs.
 
 using System;
 using System.IO;
-using TotalRecall.Infrastructure.Embedding;
 
-namespace TotalRecall.Cli.Internal;
+namespace TotalRecall.Infrastructure.Embedding;
 
-internal static class EmbedderFactory
+/// <summary>
+/// Walks AppContext.BaseDirectory upward to find bundled <c>models/</c>,
+/// loads the registry, points the user override dir at
+/// <c>$HOME/.total-recall/models</c>, and constructs an
+/// <see cref="OnnxEmbedder"/> for "all-MiniLM-L6-v2".
+/// </summary>
+public static class EmbedderFactory
 {
     public static OnnxEmbedder CreateProduction()
     {

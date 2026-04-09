@@ -4,6 +4,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using TotalRecall.Cli.Internal;
+using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Migration;
 
 namespace TotalRecall.Cli.Commands;
