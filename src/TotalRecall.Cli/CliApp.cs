@@ -61,7 +61,12 @@ public static class CliApp
     // Overrideable for tests. Null => use the real registry.
     private static IReadOnlyList<ICliCommand>? _overrideRegistry;
 
-    public static int Run(string[] args)
+    /// <summary>
+    /// Async dispatcher. Plan 6 Task 6.3a flipped the entry point async as
+    /// part of making Host.Program.Main <c>async Task&lt;int&gt;</c>; this
+    /// closes Plan 5 carry-forward #7 (sync-over-async at CliApp dispatch).
+    /// </summary>
+    public static async Task<int> RunAsync(string[] args)
     {
         if (args.Length == 0 || args[0] == "--help" || args[0] == "-h" || args[0] == "help")
         {
@@ -105,7 +110,7 @@ public static class CliApp
                 PrintCommandHelp(groupCmd);
                 return ExitOk;
             }
-            return groupCmd.RunAsync(rest).GetAwaiter().GetResult();
+            return await groupCmd.RunAsync(rest).ConfigureAwait(false);
         }
 
         // Leaf dispatch: top-level verb.
@@ -124,8 +129,18 @@ public static class CliApp
             PrintCommandHelp(leaf);
             return ExitOk;
         }
-        return leaf.RunAsync(leafRest).GetAwaiter().GetResult();
+        return await leaf.RunAsync(leafRest).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Sync shim over <see cref="RunAsync"/> for callers (and tests) that
+    /// predate the Plan 6 async flip. Prefer <see cref="RunAsync"/> in new
+    /// code. This shim is a straight GetAwaiter().GetResult() because the
+    /// async body never posts to a SynchronizationContext — console apps
+    /// run on the default context.
+    /// </summary>
+    public static int Run(string[] args) =>
+        RunAsync(args).GetAwaiter().GetResult();
 
     /// <summary>
     /// Test seam: swap in a synthetic registry for the duration of a test.
