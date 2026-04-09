@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > without changelog entries between 0.6.8-beta.5 and the 0.8.0 cutover. Backfill
 > from `git log v0.6.8-beta.5..v0.7.2` is tracked in `docs/TODO.md`.
 
+## 0.8.0-beta.6 - 2026-04-09
+
+### Fixed
+
+- **`sqlite-vec` native library missing from non-linux-x64 publish trees.** Beta tester on macOS reported `sqlite-vec native library not found at .../runtimes/vec0.dylib` on first DB open, even though the v0.8.0-beta.5 archive download and extraction (Fix A from beta.5) worked correctly. Root cause: `package-lock.json` was originally regenerated on a linux-x64 host (in the `0.8.0-beta.1` Task 3 strip commit `4394138`) using a plain `npm install` that only resolved `sqlite-vec`'s `optionalDependencies` for the host platform. The other four RID variants (`sqlite-vec-linux-arm64`, `sqlite-vec-darwin-x64`, `sqlite-vec-darwin-arm64`, `sqlite-vec-windows-x64`) appeared as bare names in the parent's `optionalDependencies` block but had no resolution / integrity entries of their own. Result: `npm ci` on any non-linux-x64 CI matrix leg never installed the matching variant, the Infrastructure csproj's `<Content Include="..." Condition="Exists(...)">` copy step silently no-op'd, and the publish tree shipped without `runtimes/vec0.<ext>`. This is the textbook **npm optional-dependency platform-locked lockfile** footgun and had been latent on every CI matrix leg other than linux-x64 since beta.1; it only became visible at runtime now that beta.5's archive download/extract path was working correctly enough to expose what was missing inside the archive.
+
+  Fix: regenerated `package-lock.json` with `npm install --package-lock-only --force --os=darwin --cpu=arm64`. The `--force` flag tells npm 11 to fully resolve every optional dep variant in one pass. The new lockfile contains per-RID entries for all 5 variants with correct os/cpu metadata, integrity hashes, and resolved URLs. `npm ci` on each platform still installs only the matching variant (verified locally on linux-x64: installs exactly `sqlite-vec` + `sqlite-vec-linux-x64`). Side effect: regeneration also pruned 299 orphan TypeScript-era lockfile entries (`@babel/*`, `@types/*`, `esbuild`, `vitest`, `@modelcontextprotocol/sdk`, etc.) that survived the original 0.8.0-beta.1 strip. Lockfile shrunk from 3995 lines to 107.
+
+- **Silent failures when sqlite-vec is missing from a publish tree.** New `<Target Name="VerifyVecExtensionPublished" AfterTargets="Publish">` in `src/TotalRecall.Host/TotalRecall.Host.csproj` checks for `runtimes/vec0.{so,dylib,dll}` after publish completes and emits an MSBuild `<Error>` if none are found. The error message names the active RuntimeIdentifier and includes explicit fix instructions (`run npm ci, verify package-lock.json contains a per-RID entry for your target`). Verified locally on linux-x64: happy-path publish with `vec0.so` present exits 0; negative-path publish with `node_modules/sqlite-vec-linux-x64` hidden exits 1 with the new diagnostic. If beta.5's CI run had this target in place, the build agent would have seen a clear failure at the publish step instead of shipping a tarball that crashed on first DB open.
+
+### Known limitations
+
+- Fix A regenerated the lockfile from the Mac agent's machine, which had npm 11.11.0 installed. Older npm versions may not honor `--force` the same way, and contributors regenerating the lockfile in the future need to either use npm 11+ or pass `--os` / `--cpu` flags to manually populate each RID entry. A `docs/TODO.md` follow-up should add a `scripts/regenerate-lockfile.sh` wrapper that captures the right invocation, plus a CI check that verifies the lockfile still has all 5 RID entries.
+- Fix B (an explicit `npm install --no-save sqlite-vec-<rid>` step in each release.yml matrix leg as a belt-and-suspenders safety net) was intentionally skipped — Fix A removes the root cause and Fix C catches any regression strictly more generally. If Fix A ever regresses (someone commits a single-platform lockfile), Fix C will fail the publish step with a clear error and the bisect points straight at the regressing commit.
+
+### Credits
+
+- Diagnosis and fixes delivered by the Mac dogfood agent (commit `0386443`). Build agent verified on linux-x64: `dotnet build` 0/0, `dotnet test` 938 passing, `dotnet publish -r linux-x64` happy-path produces `runtimes/vec0.so`, negative-path test (with `sqlite-vec-linux-x64` hidden from node_modules) correctly fails with exit code 1 and the new diagnostic message naming the missing RID. Lockfile structure verified: 5 sqlite-vec entries with correct os/cpu metadata, `npm ci` installs only the host-matching variant.
+
 ## 0.8.0-beta.5 - 2026-04-09
 
 ### Fixed
