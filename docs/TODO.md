@@ -46,43 +46,44 @@ Items below are not urgent. Revisit when real-world usage surfaces a need.
 
 ### True MRR Computation
 
-Replace simplified MRR (binary 1.0 if top result used, 0 otherwise) with rank-aware reciprocal rank. Current approach in `computeMetrics()` doesn't consider which result in the set was actually used.
+Replace simplified MRR (binary 1.0 if top result used, 0 otherwise) with rank-aware reciprocal rank. Current approach in `Metrics.cs` / `ComparisonMetrics.cs` doesn't consider which result in the set was actually used.
 
-**Files:** `src/eval/metrics.ts`, `src/eval/event-logger.ts`
-**Blocked by:** Per-result outcome tracking — needs `outcome_rank` column in `retrieval_events` schema and updated `updateOutcome()` to accept rank. Also depends on reliable rank reporting from host LLMs.
+**Files:** `src/TotalRecall.Infrastructure/Eval/Metrics.cs`, `src/TotalRecall.Infrastructure/Telemetry/RetrievalEventLog.cs`
+**Blocked by:** Per-result outcome tracking — needs `outcome_rank` column in `retrieval_events` schema and an updated `UpdateOutcome()` signature to accept rank. Also depends on reliable rank reporting from host LLMs.
 
 ### Compaction Health Fields
 
 Populate `semantic_drift`, `facts_preserved`, `facts_in_original`, `preservation_ratio` in `compaction_log`. Schema columns exist but are always NULL.
 
-**Files:** `src/compaction/compactor.ts`, `src/search/vector-search.ts`
-**Blocked by:** Content merging during compaction — fields are trivially 1.0 until entries are actually merged/summarized.
+**Files:** `src/TotalRecall.Core/Compaction.fs` (decision logic), `src/TotalRecall.Infrastructure/Search/VectorSearch.cs` (drift measurement), `src/TotalRecall.Infrastructure/Telemetry/CompactionLog.cs` (persistence)
+**Blocked by:** Content merging during compaction — fields are trivially 1.0 until entries are actually merged/summarized. Note that compaction is now host-orchestrated via the `session_end` flow (host subagent calls `memory_store` / `memory_delete` / `memory_promote` / `memory_demote`), so the "merging" that would populate these fields happens in the host's LLM judgment step, not in the .NET server.
 
 ### Automatic Outcome Detection
 
-Auto-detect user corrections, preferences, and acknowledgments in conversation flow to populate `outcome_signal` on retrieval events. Currently requires manual `updateOutcome()` calls.
+Auto-detect user corrections, preferences, and acknowledgments in conversation flow to populate `outcome_signal` on retrieval events. Currently requires manual outcome updates from the host tool.
 
-**Files:** `src/eval/event-logger.ts`, skill instructions
-**Complexity:** High — requires conversation pattern analysis or LLM classification of user responses relative to retrieved context.
+**Files:** `src/TotalRecall.Infrastructure/Telemetry/RetrievalEventLog.cs`, skill instructions in `skills/commands/SKILL.md`
+**Complexity:** High — requires conversation pattern analysis or LLM classification of user responses relative to retrieved context. Per the self-contained-binary principle, LLM judgment for this would live in the host tool's plugin layer, not in the .NET server.
 
 ### PreToolUse Hook (Optional Fallback)
 
 Belt-and-suspenders backup for session initialization. A PreToolUse hook that fires once per session (using a `/tmp` marker keyed on `session_id`) to inject a reminder to call `session_start` if the model hasn't already.
 
 **Files:** `hooks/hooks.json`, new `hooks/pre-tool-use/run.sh`
-**Depends on:** Evidence that the current three-layer approach (server-side init, hook directive, `/using-total-recall` skill) is still unreliable.
+**Depends on:** Evidence that the current three-layer approach (server-side init, hook directive, `/using-total-recall` skill) is still unreliable. No failure reports from the cutover betas suggest it's needed right now.
 
 ### PDF Parsing
 
-Not supported in the chunker. Would need a PDF-to-text library.
+Not supported in the chunker. Would need a PDF-to-text library callable from F#/C# — e.g., `PdfPig` (AOT-compatible? needs verification) or shell out to `pdftotext` at build/runtime.
 
-**Files:** `src/ingestion/chunker.ts`
+**Files:** `src/TotalRecall.Core/Chunker.fs`, `src/TotalRecall.Core/Parsers.fs`, possibly a new `src/TotalRecall.Infrastructure/Ingestion/PdfExtractor.cs` since PDF parsing needs I/O (not pure).
 
 ### Code Parser AST Analysis
 
-Current code parser uses basic regex splitting for function/class boundaries. Full AST parsing (via TypeScript compiler API, tree-sitter, etc.) would produce more accurate chunks.
+Current code parser in `Parsers.fs` uses regex splitting for function/class boundaries. Full AST parsing (via Roslyn for C#, FSharp.Compiler.Service for F#, tree-sitter for other languages) would produce more accurate chunks at language-aware boundaries.
 
-**Files:** `src/ingestion/code-parser.ts`
+**Files:** `src/TotalRecall.Core/Parsers.fs`
+**Complexity:** Per-language. Roslyn is the cleanest option for C# and the .NET team maintains an AOT-compatible subset. Tree-sitter bindings for .NET exist (`TreeSitter.Net`) but their AOT story is unverified. Regex is the pragmatic baseline.
 
 ## Post-cutover follow-ups (0.8.x .NET)
 
@@ -139,22 +140,31 @@ All workflows currently use `actions/checkout@v4`, `actions/setup-dotnet@v4`, `a
 
 ### Plugin Version Single Source of Truth
 
-Four files carry a `version` field and can drift silently: `package.json`, `.claude-plugin/plugin.json`, `.copilot-plugin/plugin.json`, `.cursor-plugin/plugin.json`. Multiple drift incidents were discovered during the 0.7.2 → 0.8.0 cutover:
+**Five** version locations can drift silently:
+
+1. `package.json` (`version` field)
+2. `package-lock.json` (top-level `version` field AND `packages[""].version` — npm keeps both in sync; the safest edit is a `replace_all` of the old version string)
+3. `.claude-plugin/plugin.json`
+4. `.copilot-plugin/plugin.json`
+5. `.cursor-plugin/plugin.json`
+
+Multiple drift incidents were discovered during the 0.7.2 → 0.8.0 cutover:
 
 - `.copilot-plugin/plugin.json` was stuck at `0.1.0` across many releases — Copilot CLI users saw `0.1.0` reported even when the npm package was at `0.7.2`.
 - `.claude-plugin/plugin.json` stayed stuck on `0.7.2` through the entire strip series while `package.json` advanced to `0.8.0-beta.3`.
 - `.cursor-plugin/plugin.json` was stale at `0.7.2` for the same reason.
+- `package-lock.json`'s top-level `version` field was drifting independently of `package.json` through beta.4 until the Mac agent's beta.6 lockfile regeneration synced them.
 
-All four were synced to `0.8.0-beta.4` in the beta.4 commit, and the standing rule is documented in `AGENTS.md` § "Version sync — four files, one version".
+All five were synced to `0.8.0-beta.4` in the beta.4 commit, and the standing rule is documented in `AGENTS.md` § "Version sync — five files, one version". The AGENTS.md entry was bumped from "four" to "five" in the 2026-04-09 doc audit when the build agent noticed `package-lock.json` had been drifting.
 
 Automate the enforcement with either:
 
-- A pre-commit hook that treats `package.json` as authoritative and derives the other three manifests' version fields from it (auto-sync).
-- A `dotnet-ci.yml` step that fails if the four versions disagree (safety-net check, no auto-fix).
+- A pre-commit hook that treats `package.json` as authoritative and derives the other manifests' version fields from it (auto-sync). Note `package-lock.json` is tricky to edit safely in a hook — consider running `npm install --package-lock-only --force --os=darwin --cpu=arm64` after the sync to regenerate the lockfile cross-platform (the `--force --os/--cpu` flags are required on npm 11+ to resolve all optional-dep RID variants; a plain `npm install` without them regenerates a single-platform lockfile and breaks every non-host CI matrix leg — this is exactly how beta.1 shipped a broken lockfile that didn't get caught until beta.6).
+- A `dotnet-ci.yml` step that fails if the five versions disagree (safety-net check, no auto-fix).
 
 The pre-commit sync eliminates human error at the source. The CI check catches it if the hook is bypassed or never installed. Ideally both.
 
-**Files:** `package.json`, `.claude-plugin/plugin.json`, `.copilot-plugin/plugin.json`, `.cursor-plugin/plugin.json`, `git-hooks/pre-commit` (new), `.github/workflows/dotnet-ci.yml`
+**Files:** `package.json`, `package-lock.json`, `.claude-plugin/plugin.json`, `.copilot-plugin/plugin.json`, `.cursor-plugin/plugin.json`, `git-hooks/pre-commit` (new), `.github/workflows/dotnet-ci.yml`
 
 ### CHANGELOG.md Backfill: 0.6.8 GA, 0.7.0, 0.7.1, 0.7.2
 
@@ -169,39 +179,57 @@ Backfill by reading `git log v0.6.8-beta.5..v0.7.2 --reverse` and grouping commi
 
 **Files:** `CHANGELOG.md`
 
-### Comprehensive AGENTS.md Rewrite
-
-`AGENTS.md` is a leftover from the TypeScript era and most of its content is stale post-cutover. Known wrong sections (verified 2026-04-09):
-
-- "dist/ is committed" — false, `dist/` was deleted in commit `73ec297`.
-- "A pre-commit hook in `git-hooks/pre-commit` auto-rebuilds and stages `dist/`" — stale, no more build step.
-- "CI will fail if `dist/` is stale after a clean build" — false, the check was in `ci.yml` which was deleted in commit `7a8c437`.
-- "`.mcp.json` uses the bash launcher" — false, it uses `node bin/start.js` now.
-- "The launcher resolves the runtime in this order: 1. `~/.total-recall/bun/<version>/bun`..." — entirely stale, bun is gone.
-- "The entry point is always `dist/index.js` relative to the script" — false, `dist/` doesn't exist.
-- "Bundled Bun" section — entirely stale.
-- "Since 0.6.8, `dist/index.js` uses `bun:sqlite` and cannot run under node..." — irrelevant to the .NET binary.
-- "Database Migrations... `src/db/schema.ts`" — wrong path, now `src/TotalRecall.Infrastructure/Storage/Schema.cs` and the migration framework lives in `MigrationRunner`.
-- The "Release flow" section was surgically fixed in the beta.4 commit but the rest of the file remains stale.
-
-Do a full audit and rewrite — delete bun, dist, TS-specific runtime sections; replace with .NET AOT, sqlite-vec native CDN flow, `release.yml` matrix, and the new `scripts/fetch-binary.js` install model. Keep only sections that still describe current behavior (session lifecycle, eval system, ToolContext — review these too, some may reference TS paths).
-
-**Files:** `AGENTS.md`
-
 ### Scrub Stale TS References in .NET Source Comments
 
-89 files under `src/TotalRecall.*/` carry comments like `// ported from src-ts/embedding/tokenizer.ts` or `// mirrors src-ts/db/entries.ts`. These are historical documentation that now point at paths deleted in commit `87975a7`. Not broken, just stale. Replace with a shorter note ("ported from the original TypeScript implementation — see git history before 87975a7 for archaeology") or delete the lineage references entirely.
+89 files under `src/TotalRecall.*/` carry comments like `// ported from src-ts/embedding/tokenizer.ts` or `// mirrors src-ts/db/entries.ts`. These are historical documentation that now point at paths deleted in commit `87975a7`. Not broken, just stale. Replace with a shorter note ("ported from the original TypeScript implementation — see git history before 87975a7 for archaeology") or delete the lineage references entirely. The same pass should also scrub the `bun:sqlite` reference in `src/TotalRecall.Infrastructure/Storage/SqliteConnection.cs:13–15`.
 
-**Files:** 89 `.cs` / `.fs` files across `src/TotalRecall.*/`.
+**Files:** 89 `.cs` / `.fs` files across `src/TotalRecall.*/`, plus `src/TotalRecall.Infrastructure/Storage/SqliteConnection.cs`.
 
-### Scrub bun / TypeScript References in Top-Level Docs
+### Windows install robustness: retry-on-EPERM upstream in Claude Code
 
-`README.md`, `INSTALL.md`, `AGENTS.md`, `CHANGELOG.md` all reference bun (the TS runtime) and the TypeScript implementation details that no longer apply. Update to describe the .NET AOT binary distribution model, remove bun install instructions, and describe the current install paths: `npm install @strvmarv/total-recall` or `claude /plugin update` from the marketplace.
+When Claude Code's plugin update path uses `source: npm`, it does `npm install` into a temp dir and then `fs.rename(temp, dest)`. On Windows this reliably trips `EPERM: operation not permitted, rename` when Windows Defender holds a handle on a freshly-extracted `.exe` (mid-scan window is typically 50–500ms). The rename has no retry logic.
 
-**Files:** `README.md`, `INSTALL.md`, `AGENTS.md`, `CHANGELOG.md`
+This is a one-line fix in Claude Code's plugin installer — wrap the rename in exponential backoff (100ms, 200ms, 400ms, …) on `EPERM` or `EBUSY` codes. Standard pattern used by `rimraf`, `fs-extra`, npm itself.
 
-### Scrub bun:sqlite Comment in SqliteConnection.cs
+**Action:** File a GitHub issue against Claude Code with a clean repro (see the beta.6 dogfood trace in this session's history for details). Benefits every npm-distributed plugin on Windows, not just total-recall. Zero cost to us.
 
-`src/TotalRecall.Infrastructure/Storage/SqliteConnection.cs:13–15` references `src-ts/db/connection.ts` and its `bun:sqlite` usage as a porting crib. Replace with the `Microsoft.Data.Sqlite` rationale or just delete the comment.
+**Workaround until fixed:** See `AGENTS.md` § "Windows EPERM workaround" (manual `mv` from WSL). Also documented in the beta dogfood mechanics section.
 
-**Files:** `src/TotalRecall.Infrastructure/Storage/SqliteConnection.cs`
+### Windows install robustness: Authenticode code signing for the AOT binary
+
+Defender skips full scans on binaries signed by trusted Authenticode publishers, which eliminates the mid-extract scan window that triggers the EPERM rename above. Signed binaries also make SmartScreen warnings disappear after a few hundred user installs.
+
+Requirements:
+- EV code-signing certificate (~$300–$500/year). EV certs are whitelisted faster than DV.
+- Signing infrastructure: HSM-bound key for EV, or hardware token for DV.
+- `signtool` + a signing step in `release.yml`'s win-x64 matrix leg before the archive staging.
+
+Deferred until the user count justifies the cost. A good milestone trigger would be "first reported Windows Defender false-positive from a real user on a stable release."
+
+**Files:** `.github/workflows/release.yml`
+
+### Windows install robustness: per-platform npm packages (esbuild model)
+
+Instead of shipping all four RID binaries in a single ~60 MB npm tarball, split into:
+
+- `@strvmarv/total-recall` (main package, ~5 MB: bin/start.js, scripts/, skills/, agents/, hooks/, models/, no platform binaries)
+- `@strvmarv/total-recall-linux-x64` (~15 MB: just the linux-x64 binary + siblings)
+- `@strvmarv/total-recall-linux-arm64`, `@strvmarv/total-recall-osx-arm64`, `@strvmarv/total-recall-win-x64`
+
+The main package lists the four platform packages as `optionalDependencies` with `os`/`cpu` filters. npm only installs the matching one per host. `bin/start.js` uses `require.resolve('@strvmarv/total-recall-' + rid)` to find the binary at runtime.
+
+This is the industry-standard pattern for npm-distributed native CLIs — used by esbuild, sharp, biome, swc. Benefits:
+
+- Each user install is ~15 MB (one platform) instead of ~60 MB (four platforms)
+- Defender only has one binary to scan per install, which reduces the lock window enough to probably avoid the EPERM rename
+- Windows install is substantially faster
+- The main package extracts cleanly in milliseconds because it has no large .exe files
+
+Tradeoffs:
+- Publish 5 npm packages instead of 1 per release; release.yml publish job gets a per-platform-package loop
+- Version lockstep across 5 packages instead of 1 (already a version-sync challenge we don't fully automate)
+- `bin/start.js` has to do require.resolve instead of direct relative path lookup
+
+Meaningful refactor — probably 1-2 days of work plus a beta cycle to validate. Worth tracking but not urgent until Windows user count grows.
+
+**Files:** `package.json`, `bin/start.js`, `.github/workflows/release.yml`, new per-platform package scaffolding
