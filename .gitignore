@@ -15,3 +15,6 @@ docs/superpowers/
 *.user
 *.suo
 .vs/
+
+# AOT-published native binaries staged for matrix release (populated by CI in Task 6.5)
+binaries/
