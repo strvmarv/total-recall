@@ -26,18 +26,23 @@ const { platform, arch } = process;
 function detectRid(platform, arch) {
   if (platform === 'linux' && arch === 'x64') return 'linux-x64';
   if (platform === 'linux' && arch === 'arm64') return 'linux-arm64';
-  if (platform === 'darwin' && arch === 'x64') return 'darwin-x64';
-  if (platform === 'darwin' && arch === 'arm64') return 'darwin-arm64';
+  if (platform === 'darwin' && arch === 'arm64') return 'osx-arm64';
   if (platform === 'win32' && arch === 'x64') return 'win-x64';
   return null;
 }
 
 const rid = detectRid(platform, arch);
 if (!rid) {
+  const isIntelMac = platform === 'darwin' && arch === 'x64';
   process.stderr.write(
     `[total-recall] Unsupported platform: ${platform}/${arch}\n` +
-      '  Supported: linux-x64, linux-arm64, darwin-x64, darwin-arm64, win-x64\n' +
-      '  Please file an issue at https://github.com/strvmarv/total-recall/issues\n'
+      '  Supported: linux-x64, linux-arm64, osx-arm64, win-x64\n' +
+      (isIntelMac
+        ? '  Note: Intel Macs (darwin-x64) are not shipped in this release.\n' +
+          '        All modern Apple hardware is Apple Silicon (arm64) since\n' +
+          '        Nov 2020. If you need Intel Mac support, file an issue at\n'
+        : '  Please file an issue at\n') +
+      '  https://github.com/strvmarv/total-recall/issues\n'
   );
   process.exit(1);
 }

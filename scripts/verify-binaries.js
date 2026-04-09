@@ -1,12 +1,15 @@
 #!/usr/bin/env node
-// Pre-publish verification: confirm all 5 platform binaries exist in
+// Pre-publish verification: confirm all 4 platform binaries exist in
 // binaries/<rid>/ before `npm publish` proceeds.
 //
-// Invoked by the `prepublishOnly` script in package.json (Task 6.6).
+// Invoked by the `prepublishOnly` script in package.json.
 // This protects manual `npm publish` invocations against accidentally
 // shipping a package that is missing prebuilts. The matrix CI workflow
-// at .github/workflows/release.yml (Task 6.5) already performs the same
-// check in its publish job — this script is the belt to CI's suspenders.
+// at .github/workflows/release.yml already performs the same check in
+// its publish job — this script is the belt to CI's suspenders.
+//
+// RIDs must match the release.yml matrix exactly. Intel Mac (osx-x64)
+// is NOT shipped.
 //
 // Zero dependencies — Node built-ins only.
 
@@ -21,8 +24,7 @@ const repoRoot = path.resolve(__dirname, '..');
 const expected = [
   { rid: 'linux-x64', exe: 'total-recall' },
   { rid: 'linux-arm64', exe: 'total-recall' },
-  { rid: 'darwin-x64', exe: 'total-recall' },
-  { rid: 'darwin-arm64', exe: 'total-recall' },
+  { rid: 'osx-arm64', exe: 'total-recall' },
   { rid: 'win-x64', exe: 'total-recall.exe' },
 ];
 
@@ -43,11 +45,11 @@ if (missing.length > 0) {
   }
   process.stderr.write(
     '\n  Run the matrix release workflow (.github/workflows/release.yml)\n' +
-      '  to produce all 5 RIDs, or stage them locally before publishing.\n'
+      '  to produce all 4 RIDs, or stage them locally before publishing.\n'
   );
   process.exit(1);
 }
 
 process.stdout.write(
-  '[verify-binaries] OK — all 5 platform binaries present.\n'
+  '[verify-binaries] OK — all 4 platform binaries present.\n'
 );
