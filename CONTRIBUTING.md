@@ -271,11 +271,11 @@ npx vitest run src/importers/my-tool.test.ts
 Once the MCP server is running and connected to your coding assistant, use the eval commands:
 
 ```
-/total-recall eval                      # Live retrieval metrics for current session
-/total-recall eval --benchmark          # Run synthetic benchmark suite
-/total-recall eval --snapshot baseline  # Save current config as a named baseline
-/total-recall eval --compare baseline   # Compare current config against saved baseline
-/total-recall eval --grow               # Add real query misses to benchmark suite
+/total-recall:commands eval                      # Live retrieval metrics for current session
+/total-recall:commands eval --benchmark          # Run synthetic benchmark suite
+/total-recall:commands eval --snapshot baseline  # Save current config as a named baseline
+/total-recall:commands eval --compare baseline   # Compare current config against saved baseline
+/total-recall:commands eval --grow               # Add real query misses to benchmark suite
 ```
 
 A PR that changes retrieval logic, scoring, or compaction thresholds must include a `--benchmark` run showing no regression against the `baseline` snapshot.
@@ -289,7 +289,7 @@ Before opening a pull request:
 1. **Tests pass** — `npm test` exits 0 with no failures
 2. **Type checker clean** — `npm run typecheck` exits 0
 3. **Build succeeds** — `npm run build` exits 0
-4. **Benchmark does not regress** — run `/total-recall eval --compare baseline` and include the output in your PR description if you changed retrieval, scoring, or compaction logic
+4. **Benchmark does not regress** — run `/total-recall:commands eval --compare baseline` and include the output in your PR description if you changed retrieval, scoring, or compaction logic
 5. **New behavior is tested** — new importers, parsers, and content types all require corresponding test files
 
 If you're adding a new host tool importer, include the `detect()` logic rationale in your PR description — false positives will silently corrupt imports for users who don't have the tool installed.

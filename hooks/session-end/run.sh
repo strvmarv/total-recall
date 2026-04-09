@@ -2,7 +2,7 @@
 # total-recall SessionEnd hook
 # Injects the session-end directive fragment as additionalContext.
 #
-# The directive lives in skills/total-recall/session-end.md so it stays
+# The directive lives in skills/commands/session-end.md so it stays
 # in one place — the same file can be referenced by the SKILL.md and is
 # not duplicated in this shell script. If the fragment is missing we
 # exit 0 silently rather than blocking session end.

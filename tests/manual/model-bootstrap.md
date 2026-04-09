@@ -33,7 +33,7 @@ These checks exercise the bootstrap state machine end-to-end against the real fi
 - [ ] Remove the user data dir model: `rm -rf ~/.total-recall/models/all-MiniLM-L6-v2`
 - [ ] Replace the bundled model with the LFS pointer (as in Scenario 2)
 - [ ] Open TWO Claude Code windows simultaneously, both with total-recall loaded
-- [ ] In both windows, ask: "Run /total-recall status"
+- [ ] In both windows, ask: "Run /total-recall:commands status"
 - [ ] Only ONE process should actually download (check `~/.total-recall/models/all-MiniLM-L6-v2/.bootstrap.lock` exists during download)
 - [ ] Both processes should eventually succeed and reach a healthy state
 - [ ] Restore the real bundled model
