@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.7.1 - 2026-04-08
+
+### Fixed
+- **CI was red on the 0.7.0 tag.** `src/e2e-phase3.test.ts` hardcoded `skills = ["total-recall"]` and asserted `skills/total-recall/SKILL.md` exists, which broke the moment the skill was renamed to `commands` in 0.7.0. Updated the test to cover both `commands` and `using-total-recall`. The `Publish to npm` workflow tied to `v0.7.0` never ran to completion because of this; 0.7.1 is cut from the fixed commit so the tarball actually lands on npm.
+
+### Docs
+- Finished the `/total-recall` → `/total-recall:commands` rename in the remaining docs that 0.7.0 missed:
+  - `CONTRIBUTING.md` eval workflow examples and the PR benchmark-regression checklist.
+  - `tests/manual/model-bootstrap.md` Scenario 3 manual-test script.
+  - `hooks/session-end/run.sh` header comment that still pointed at the old `skills/total-recall/session-end.md` path.
+
 ## 0.7.0 - 2026-04-08
 
 ### Breaking
