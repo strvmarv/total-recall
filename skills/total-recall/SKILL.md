@@ -182,14 +182,14 @@ Call `kb_remove` with the entry ID. Ask for confirmation first.
 
 ### compact
 
-Call `compact_now`. Show results: entries carried forward, promoted to warm, discarded.
+Call `compact_now`. Note: the response is **informational only** — real compaction is host-orchestrated via the Session End flow (`session_context` + `memory_promote`/`memory_demote`/`memory_store`/`memory_delete`). Surface the returned guidance and point the user at the Session End mechanism if they want to actually compact now.
 
 ### eval [--benchmark] [--compare <name>] [--snapshot <name>]
 
 - No flags: call `eval_report` for live retrieval quality metrics (7-day rolling)
 - `--benchmark`: call `eval_benchmark` for synthetic benchmark results
-- `--compare <name>`: compare against a saved baseline
-- `--snapshot <name>`: save current config as a named baseline
+- `--compare <name>`: call `eval_compare` to compare against a saved baseline
+- `--snapshot <name>`: call `eval_snapshot` to save current config as a named baseline
 
 ### config [get|set] <key> [value]
 
