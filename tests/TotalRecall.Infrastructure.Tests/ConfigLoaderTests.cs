@@ -29,8 +29,11 @@ public sealed class ConfigLoaderTests : IDisposable
     public void Dispose()
     {
         Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", _originalHome);
+        Environment.SetEnvironmentVariable("TOTAL_RECALL_DB_PATH", _originalDbPath);
         try { Directory.Delete(_tempDir, recursive: true); } catch { /* best effort */ }
     }
+
+    private readonly string? _originalDbPath = Environment.GetEnvironmentVariable("TOTAL_RECALL_DB_PATH");
 
     // --- LoadDefaults -----------------------------------------------------
 
@@ -228,5 +231,94 @@ public sealed class ConfigLoaderTests : IDisposable
         var result = ConfigLoader.GetDataDir();
 
         Assert.Equal(Path.Combine(home, ".total-recall"), result);
+    }
+
+    // --- GetDbPath --------------------------------------------------------
+
+    [Fact]
+    public void GetDbPath_Unset_DefaultsToDataDirTotalRecallDb()
+    {
+        Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", _tempDir);
+        Environment.SetEnvironmentVariable("TOTAL_RECALL_DB_PATH", null);
+
+        var result = ConfigLoader.GetDbPath();
+
+        Assert.Equal(Path.Combine(_tempDir, "total-recall.db"), result);
+    }
+
+    [Fact]
+    public void GetDbPath_Empty_DefaultsToDataDirTotalRecallDb()
+    {
+        Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", _tempDir);
+        Environment.SetEnvironmentVariable("TOTAL_RECALL_DB_PATH", "   ");
+
+        var result = ConfigLoader.GetDbPath();
+
+        Assert.Equal(Path.Combine(_tempDir, "total-recall.db"), result);
+    }
+
+    [Fact]
+    public void GetDbPath_AbsolutePath_ReturnsVerbatim()
+    {
+        var customPath = Path.Combine(_tempDir, "custom", "memories.db");
+        Environment.SetEnvironmentVariable("TOTAL_RECALL_DB_PATH", customPath);
+
+        var result = ConfigLoader.GetDbPath();
+
+        Assert.Equal(customPath, result);
+    }
+
+    [Fact]
+    public void GetDbPath_TildeSlashPrefix_Expanded()
+    {
+        var home = Environment.GetEnvironmentVariable("HOME")
+            ?? Environment.GetEnvironmentVariable("USERPROFILE")
+            ?? string.Empty;
+        if (string.IsNullOrEmpty(home))
+        {
+            return; // no HOME → skip; behavior unspecified
+        }
+
+        Environment.SetEnvironmentVariable("TOTAL_RECALL_DB_PATH", "~/tr-test/memories.db");
+
+        var result = ConfigLoader.GetDbPath();
+
+        Assert.Equal(Path.Combine(home, "tr-test", "memories.db"), result);
+    }
+
+    [Fact]
+    public void GetDbPath_BareTilde_Throws()
+    {
+        Environment.SetEnvironmentVariable("TOTAL_RECALL_DB_PATH", "~");
+
+        var ex = Assert.Throws<SqliteDbPathException>(() => ConfigLoader.GetDbPath());
+        Assert.Contains("\"~\"", ex.Message);
+    }
+
+    [Fact]
+    public void GetDbPath_TrailingForwardSlash_Throws()
+    {
+        Environment.SetEnvironmentVariable("TOTAL_RECALL_DB_PATH", "/some/dir/");
+
+        var ex = Assert.Throws<SqliteDbPathException>(() => ConfigLoader.GetDbPath());
+        Assert.Contains("file path, not a directory", ex.Message);
+    }
+
+    [Fact]
+    public void GetDbPath_TrailingBackslash_Throws()
+    {
+        Environment.SetEnvironmentVariable("TOTAL_RECALL_DB_PATH", "C:\\tmp\\");
+
+        var ex = Assert.Throws<SqliteDbPathException>(() => ConfigLoader.GetDbPath());
+        Assert.Contains("file path, not a directory", ex.Message);
+    }
+
+    [Fact]
+    public void GetDbPath_RelativePath_Throws()
+    {
+        Environment.SetEnvironmentVariable("TOTAL_RECALL_DB_PATH", "relative/path.db");
+
+        var ex = Assert.Throws<SqliteDbPathException>(() => ConfigLoader.GetDbPath());
+        Assert.Contains("absolute or start with ~/", ex.Message);
     }
 }

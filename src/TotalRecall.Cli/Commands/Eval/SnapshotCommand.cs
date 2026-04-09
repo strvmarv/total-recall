@@ -82,7 +82,7 @@ public sealed class SnapshotCommand : ICliCommand
             var cfg = loader.LoadEffectiveConfig();
             var configJson = ConfigJsonSerializer.Serialize(cfg);
 
-            var dbPath = Path.Combine(ConfigLoader.GetDataDir(), "total-recall.db");
+            var dbPath = ConfigLoader.GetDbPath();
             var conn = SqliteConnection.Open(dbPath);
             try
             {

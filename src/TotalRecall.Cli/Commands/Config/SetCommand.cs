@@ -112,7 +112,7 @@ public sealed class SetCommand : ICliCommand
                 }
                 else
                 {
-                    var dbPath = Path.Combine(ConfigLoader.GetDataDir(), "total-recall.db");
+                    var dbPath = ConfigLoader.GetDbPath();
                     if (!File.Exists(dbPath))
                     {
                         Console.Error.WriteLine(

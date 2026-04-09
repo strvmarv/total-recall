@@ -112,7 +112,7 @@ public sealed class ImportHostCommand : ICliCommand
             }
             else
             {
-                var dbPath = Path.Combine(ConfigLoader.GetDataDir(), "total-recall.db");
+                var dbPath = ConfigLoader.GetDbPath();
                 owned = SqliteConnection.Open(dbPath);
                 MigrationRunner.RunMigrations(owned);
                 var store = new SqliteStore(owned);

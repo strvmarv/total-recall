@@ -123,7 +123,7 @@ public sealed class EvalBenchmarkHandler : IToolHandler
     {
         return async (opts, ct) =>
         {
-            var dbPath = Path.Combine(ConfigLoader.GetDataDir(), "total-recall.db");
+            var dbPath = ConfigLoader.GetDbPath();
             var conn = SqliteConnection.Open(dbPath);
             try
             {

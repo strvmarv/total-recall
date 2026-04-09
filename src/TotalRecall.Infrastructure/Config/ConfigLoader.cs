@@ -10,6 +10,16 @@ using TotalRecall.Core;
 namespace TotalRecall.Infrastructure.Config;
 
 /// <summary>
+/// Raised when <c>TOTAL_RECALL_DB_PATH</c> fails validation. Mirrors the TS
+/// <c>SqliteDbPathError</c> — callers can distinguish config-time failures
+/// from runtime SQLite errors via type.
+/// </summary>
+public sealed class SqliteDbPathException : Exception
+{
+    public SqliteDbPathException(string message) : base(message) { }
+}
+
+/// <summary>
 /// Loads <see cref="Core.Config.TotalRecallConfig"/> from TOML sources. Ports
 /// <c>src-ts/config.ts</c> (<c>getDataDir</c>, <c>loadConfig</c>).
 ///
@@ -52,8 +62,72 @@ public sealed class ConfigLoader : IConfigLoader
     {
         var explicitHome = Environment.GetEnvironmentVariable("TOTAL_RECALL_HOME");
         if (!string.IsNullOrEmpty(explicitHome)) return explicitHome;
-        var home = Environment.GetEnvironmentVariable("HOME") ?? "~";
+        var home = Environment.GetEnvironmentVariable("HOME")
+            ?? Environment.GetEnvironmentVariable("USERPROFILE")
+            ?? "~";
         return Path.Combine(home, ".total-recall");
+    }
+
+    /// <summary>
+    /// Resolve the SQLite database file path. Port of <c>getDbPath()</c> in
+    /// <c>src-ts/config.ts</c>.
+    ///
+    /// Precedence:
+    /// <list type="number">
+    ///   <item><c>TOTAL_RECALL_DB_PATH</c> (validated, leading <c>~/</c> expanded)</item>
+    ///   <item><c>&lt;GetDataDir&gt;/total-recall.db</c></item>
+    /// </list>
+    ///
+    /// Rules:
+    /// <list type="bullet">
+    ///   <item>Must be an absolute file path, or start with <c>~/</c>.</item>
+    ///   <item>Trailing <c>/</c> or <c>\</c> is rejected (file path required).</item>
+    ///   <item>Bare <c>~</c> is rejected (no filename).</item>
+    ///   <item>Empty / whitespace values are treated as unset.</item>
+    /// </list>
+    ///
+    /// Throws <see cref="SqliteDbPathException"/> on any validation failure.
+    /// Pure function: no filesystem probes; parent-dir creation happens at
+    /// the call site.
+    /// </summary>
+    public static string GetDbPath()
+    {
+        var raw = Environment.GetEnvironmentVariable("TOTAL_RECALL_DB_PATH");
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return Path.Combine(GetDataDir(), "total-recall.db");
+        }
+
+        var trimmed = raw.Trim();
+
+        if (trimmed.EndsWith('/') || trimmed.EndsWith('\\'))
+        {
+            throw new SqliteDbPathException(
+                $"TOTAL_RECALL_DB_PATH must be a file path, not a directory. Got: \"{trimmed}\"");
+        }
+
+        if (trimmed == "~")
+        {
+            throw new SqliteDbPathException(
+                "TOTAL_RECALL_DB_PATH must be a file path, not a directory. Got: \"~\"");
+        }
+
+        var expanded = trimmed;
+        if (trimmed.StartsWith("~/", StringComparison.Ordinal))
+        {
+            var home = Environment.GetEnvironmentVariable("HOME")
+                ?? Environment.GetEnvironmentVariable("USERPROFILE")
+                ?? string.Empty;
+            expanded = Path.Combine(home, trimmed.Substring(2));
+        }
+
+        if (!Path.IsPathRooted(expanded))
+        {
+            throw new SqliteDbPathException(
+                $"TOTAL_RECALL_DB_PATH must be absolute or start with ~/. Got: \"{trimmed}\"");
+        }
+
+        return expanded;
     }
 
     /// <inheritdoc/>

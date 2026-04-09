@@ -84,7 +84,7 @@ public sealed class AutoMigrationGuardTests : IDisposable
         var stderr = new StringWriter();
         var guard = new AutoMigrationGuard(fake, stderr);
 
-        var result = await guard.CheckAndMigrateAsync(_tempDir, CancellationToken.None);
+        var result = await guard.CheckAndMigrateAsync(DbPath, CancellationToken.None);
 
         Assert.Equal(GuardResult.NoOldDbFound, result);
         Assert.Equal(0, fake.CallCount);
@@ -99,7 +99,7 @@ public sealed class AutoMigrationGuardTests : IDisposable
         var stderr = new StringWriter();
         var guard = new AutoMigrationGuard(fake, stderr);
 
-        var result = await guard.CheckAndMigrateAsync(_tempDir, CancellationToken.None);
+        var result = await guard.CheckAndMigrateAsync(DbPath, CancellationToken.None);
 
         Assert.Equal(GuardResult.AlreadyMigrated, result);
         Assert.Equal(0, fake.CallCount);
@@ -126,7 +126,7 @@ public sealed class AutoMigrationGuardTests : IDisposable
         var stderr = new StringWriter();
         var guard = new AutoMigrationGuard(fake, stderr);
 
-        var result = await guard.CheckAndMigrateAsync(_tempDir, CancellationToken.None);
+        var result = await guard.CheckAndMigrateAsync(DbPath, CancellationToken.None);
 
         Assert.Equal(GuardResult.Migrated, result);
         Assert.Equal(1, fake.CallCount);
@@ -152,7 +152,7 @@ public sealed class AutoMigrationGuardTests : IDisposable
         var stderr = new StringWriter();
         var guard = new AutoMigrationGuard(fake, stderr);
 
-        var result = await guard.CheckAndMigrateAsync(_tempDir, CancellationToken.None);
+        var result = await guard.CheckAndMigrateAsync(DbPath, CancellationToken.None);
 
         Assert.Equal(GuardResult.MigrationFailed, result);
         Assert.Equal(1, fake.CallCount);
@@ -179,7 +179,7 @@ public sealed class AutoMigrationGuardTests : IDisposable
         var stderr = new StringWriter();
         var guard = new AutoMigrationGuard(fake, stderr);
 
-        var result = await guard.CheckAndMigrateAsync(_tempDir, CancellationToken.None);
+        var result = await guard.CheckAndMigrateAsync(DbPath, CancellationToken.None);
 
         Assert.Equal(GuardResult.AlreadyMigrated, result);
         Assert.Equal(0, fake.CallCount);
@@ -206,8 +206,8 @@ public sealed class AutoMigrationGuardTests : IDisposable
         var stderr = new StringWriter();
         var guard = new AutoMigrationGuard(fake, stderr);
 
-        var first = await guard.CheckAndMigrateAsync(_tempDir, CancellationToken.None);
-        var second = await guard.CheckAndMigrateAsync(_tempDir, CancellationToken.None);
+        var first = await guard.CheckAndMigrateAsync(DbPath, CancellationToken.None);
+        var second = await guard.CheckAndMigrateAsync(DbPath, CancellationToken.None);
 
         Assert.Equal(GuardResult.Migrated, first);
         Assert.Equal(GuardResult.AlreadyMigrated, second);

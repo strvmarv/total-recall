@@ -97,7 +97,7 @@ public sealed class RefreshCommand : ICliCommand
                 // Production wiring: open connection, build store + vec,
                 // construct a FileIngester (which requires a HierarchicalIndex
                 // and IngestValidator, both of which take store/vec/embedder/conn).
-                var dbPath = Path.Combine(ConfigLoader.GetDataDir(), "total-recall.db");
+                var dbPath = ConfigLoader.GetDbPath();
                 owned = SqliteConnection.Open(dbPath);
                 MigrationRunner.RunMigrations(owned);
                 store = new SqliteStore(owned);

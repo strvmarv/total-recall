@@ -41,7 +41,7 @@ internal sealed class MemoryComponents : IDisposable
 
     public static MemoryComponents OpenProduction()
     {
-        var dbPath = StoragePath.Combine(ConfigLoader.GetDataDir(), "total-recall.db");
+        var dbPath = ConfigLoader.GetDbPath();
         var conn = SqliteConnection.Open(dbPath);
         try
         {

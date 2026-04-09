@@ -67,16 +67,47 @@ internal static class Program
             cts.Cancel();
         };
 
-        // Step 1: migration guard. Runs against the data dir, not an open
-        // connection — the guard renames the legacy DB out of the way BEFORE
-        // we open a handle on it, so this must execute first.
-        var dataDir = ConfigLoader.GetDataDir();
+        // Step 1: resolve DB path eagerly. Honors TOTAL_RECALL_DB_PATH; any
+        // validation failure must crash the server at startup with a clear
+        // stderr message — no partial DB will be created downstream.
+        string dbPath;
         try
         {
-            System.IO.Directory.CreateDirectory(dataDir);
+            dbPath = ConfigLoader.GetDbPath();
+        }
+        catch (SqliteDbPathException ex)
+        {
+            Console.Error.WriteLine($"total-recall: {ex.Message}");
+            return 1;
+        }
+
+        // Ensure the data dir AND the dbPath parent dir both exist. When
+        // TOTAL_RECALL_DB_PATH points outside TOTAL_RECALL_HOME, these are
+        // different directories — config.toml, model cache, and exports
+        // still live under the data dir; only the DB file relocates.
+        try
+        {
+            System.IO.Directory.CreateDirectory(ConfigLoader.GetDataDir());
+            var dbParent = System.IO.Path.GetDirectoryName(dbPath);
+            if (!string.IsNullOrEmpty(dbParent))
+            {
+                System.IO.Directory.CreateDirectory(dbParent);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"total-recall: failed to create data directories: {ex.Message}");
+            return 1;
+        }
+
+        // Step 2: migration guard. Runs against the resolved dbPath, not an
+        // open connection — the guard renames the legacy DB out of the way
+        // BEFORE we open a handle on it, so this must execute first.
+        try
+        {
             var migrator = new TsDataMigrator(EmbedderFactory.CreateProduction());
             var guard = new AutoMigrationGuard(migrator);
-            var guardResult = await guard.CheckAndMigrateAsync(dataDir, cts.Token)
+            var guardResult = await guard.CheckAndMigrateAsync(dbPath, cts.Token)
                 .ConfigureAwait(false);
             if (guardResult == GuardResult.MigrationFailed)
             {
@@ -90,12 +121,12 @@ internal static class Program
             return 1;
         }
 
-        // Step 2: open production composition (shared Sqlite connection +
+        // Step 3: open production composition (shared Sqlite connection +
         // all Infrastructure singletons + populated ToolRegistry).
         ServerCompositionHandles handles;
         try
         {
-            handles = ServerComposition.OpenProduction();
+            handles = ServerComposition.OpenProduction(dbPath);
         }
         catch (Exception ex)
         {
@@ -112,7 +143,7 @@ internal static class Program
             return 1;
         }
 
-        // Step 3: run the MCP server. Dispose handles on shutdown.
+        // Step 4: run the MCP server. Dispose handles on shutdown.
         try
         {
             var server = new McpServer(Console.In, Console.Out, handles.Registry);

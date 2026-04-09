@@ -95,7 +95,7 @@ public sealed class StatusCommand : ICliCommand
             }
             else
             {
-                dbPath = Path.Combine(ConfigLoader.GetDataDir(), "total-recall.db");
+                dbPath = ConfigLoader.GetDbPath();
                 owned = SqliteConnection.Open(dbPath);
                 MigrationRunner.RunMigrations(owned);
                 store = new SqliteStore(owned);

@@ -163,13 +163,17 @@ public static class ServerComposition
     /// this method, so the legacy TS-format DB (if any) is renamed out of
     /// the way before we open a handle.
     /// </remarks>
-    public static ServerCompositionHandles OpenProduction()
+    public static ServerCompositionHandles OpenProduction(string? dbPath = null)
     {
-        var dataDir = ConfigLoader.GetDataDir();
-        Directory.CreateDirectory(dataDir);
-        var dbPath = Path.Combine(dataDir, AutoMigrationGuard.DbFileName);
+        var resolvedDbPath = dbPath ?? ConfigLoader.GetDbPath();
+        Directory.CreateDirectory(ConfigLoader.GetDataDir());
+        var dbParent = Path.GetDirectoryName(resolvedDbPath);
+        if (!string.IsNullOrEmpty(dbParent))
+        {
+            Directory.CreateDirectory(dbParent);
+        }
 
-        var conn = SqliteConnection.Open(dbPath);
+        var conn = SqliteConnection.Open(resolvedDbPath);
         try
         {
             MigrationRunner.RunMigrations(conn);
@@ -203,7 +207,7 @@ public static class ServerComposition
 
             var cfg = new ConfigLoader().LoadEffectiveConfig();
             var statusOptions = new StatusOptions(
-                DbPath: dbPath,
+                DbPath: resolvedDbPath,
                 EmbeddingModel: cfg.Embedding.Model,
                 EmbeddingDimensions: cfg.Embedding.Dimensions);
 

@@ -42,11 +42,17 @@ public sealed class AutoMigrationGuard
         _moveFile = moveFile ?? File.Move;
     }
 
+    /// <summary>
+    /// Check the resolved DB path and, if present and unmarked, run the
+    /// TS→.NET migration. <paramref name="dbPath"/> is the fully resolved
+    /// file path (honoring <c>TOTAL_RECALL_DB_PATH</c>); the caller is
+    /// responsible for ensuring its parent directory exists.
+    /// </summary>
     public async Task<GuardResult> CheckAndMigrateAsync(
-        string totalRecallHomeDir,
+        string dbPath,
         CancellationToken ct)
     {
-        var dbPath = Path.Combine(totalRecallHomeDir, DbFileName);
+        ArgumentNullException.ThrowIfNull(dbPath);
         var backupPath = dbPath + BackupSuffix;
 
         if (!_fileExists(dbPath))

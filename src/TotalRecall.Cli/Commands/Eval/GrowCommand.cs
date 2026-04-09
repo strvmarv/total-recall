@@ -186,7 +186,7 @@ public sealed class GrowCommand : ICliCommand
     {
         public IReadOnlyList<CandidateRow> ListPending()
         {
-            var dbPath = Path.Combine(ConfigLoader.GetDataDir(), "total-recall.db");
+            var dbPath = ConfigLoader.GetDbPath();
             var conn = SqliteConnection.Open(dbPath);
             try
             {
@@ -201,7 +201,7 @@ public sealed class GrowCommand : ICliCommand
 
         public CandidateResolveResult Resolve(IReadOnlyList<string> accepts, IReadOnlyList<string> rejects, string benchmarkPath)
         {
-            var dbPath = Path.Combine(ConfigLoader.GetDataDir(), "total-recall.db");
+            var dbPath = ConfigLoader.GetDbPath();
             var conn = SqliteConnection.Open(dbPath);
             try
             {

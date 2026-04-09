@@ -149,7 +149,7 @@ public sealed class ImportHostHandler : IToolHandler
 
     private static IReadOnlyList<IImporter> BuildProductionImporters()
     {
-        var dbPath = Path.Combine(ConfigLoader.GetDataDir(), "total-recall.db");
+        var dbPath = ConfigLoader.GetDbPath();
         var conn = SqliteConnection.Open(dbPath);
         MigrationRunner.RunMigrations(conn);
         var store = new SqliteStore(conn);
