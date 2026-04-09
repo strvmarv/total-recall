@@ -83,6 +83,9 @@ internal sealed class FakeSqliteStore : ISqliteStore
         return newId;
     }
 
+    public string InsertWithEmbedding(Tier tier, ContentType type, InsertEntryOpts opts, ReadOnlyMemory<float> embedding)
+        => Insert(tier, type, opts);
+
     public void Delete(Tier tier, ContentType type, string id)
     {
         DeleteCalls.Add((tier, type, id));

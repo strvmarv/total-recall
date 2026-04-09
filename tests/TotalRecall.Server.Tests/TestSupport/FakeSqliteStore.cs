@@ -83,6 +83,21 @@ public sealed class FakeSqliteStore : ISqliteStore
         return NextInsertId;
     }
 
+    public sealed record InsertWithEmbeddingCall(Tier Tier, ContentType Type, InsertEntryOpts Opts, float[] Embedding);
+    public List<InsertWithEmbeddingCall> InsertWithEmbeddingCalls { get; } = new();
+
+    public string InsertWithEmbedding(
+        Tier tier, ContentType type, InsertEntryOpts opts, ReadOnlyMemory<float> embedding)
+    {
+        InsertWithEmbeddingCalls.Add(new InsertWithEmbeddingCall(tier, type, opts, embedding.ToArray()));
+        // Mirror the real store: allocate a rowid under the same monotonic
+        // counter so GetRowid works on the fresh id. Does NOT model
+        // transactional rollback — tests that need to exercise the rollback
+        // path use the real SqliteStore against :memory:.
+        Rowids[(tier, type, NextInsertId)] = _nextRowid++;
+        return NextInsertId;
+    }
+
     public Entry? Get(Tier tier, ContentType type, string id)
     {
         GetCalls.Add(new GetCall(tier, type, id));

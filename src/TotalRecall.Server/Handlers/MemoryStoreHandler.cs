@@ -3,17 +3,21 @@
 // Plan 4 Task 4.6 — first real IToolHandler. Ports the `memory_store` branch
 // of src-ts/tools/memory-tools.ts (plus src-ts/memory/store.ts) to the .NET
 // Server. The handler validates MCP arguments, invokes the embedder to warm
-// and produce a query vector, inserts the metadata row via ISqliteStore, and
-// then persists the embedding via IVectorSearch — the two-step "insert row,
-// then insert embedding" pattern already used by the .NET importers (see
-// src/TotalRecall.Infrastructure/Importers/ImportUtils.cs).
+// and produce a query vector, then calls ISqliteStore.InsertWithEmbedding to
+// persist the metadata row and the vec0 embedding row inside a single
+// transaction.
 //
 // Design notes:
 //
-//   - The plan's prose constructor shape is (ISqliteStore, IEmbedder). That
-//     omission would leave the computed embedding orphaned, so this handler
-//     takes a third dependency — IVectorSearch — to mirror the TS handler's
-//     insertEmbedding step. Documented explicitly rather than silently added.
+//   - The transactional insert closes the 0.6.7 window where a vec insert
+//     crash (e.g. rowid collision with an orphan) could leave a content row
+//     behind without an embedding. InsertWithEmbedding rolls back the
+//     content insert automatically when the vec insert throws.
+//
+//   - IVectorSearch is still a constructor dependency for now even though
+//     the handler itself no longer references it directly; the composition
+//     root still wires it and future handlers may need it. Removing the
+//     parameter is a follow-up cleanup.
 //
 //   - InputSchema is built once from a verbatim literal that mirrors the TS
 //     schema in memory-tools.ts:25-44, then cloned into a static field. The
@@ -136,14 +140,16 @@ public sealed class MemoryStoreHandler : IToolHandler
 
         ct.ThrowIfCancellationRequested();
 
-        var id = _store.Insert(tier, contentType, new InsertEntryOpts(
-            Content: content,
-            Source: source,
-            Project: project,
-            Tags: tags,
-            MetadataJson: metadataJson));
-
-        _vectorSearch.InsertEmbedding(tier, contentType, id, vector);
+        var id = _store.InsertWithEmbedding(
+            tier,
+            contentType,
+            new InsertEntryOpts(
+                Content: content,
+                Source: source,
+                Project: project,
+                Tags: tags,
+                MetadataJson: metadataJson),
+            vector);
 
         // Match TS wire: content[0].text == JSON.stringify({ id }).
         // Entry ids are ULIDs (or test-supplied strings) — no JSON-unsafe chars.

@@ -25,6 +25,71 @@ public sealed class SqliteStoreIntegrationTests
     }
 
     [Fact]
+    public void InsertWithEmbedding_HappyPath_InsertsBothRows()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            var embedding = new float[384];
+            embedding[0] = 1f;
+
+            var id = store.InsertWithEmbedding(
+                Tier.Hot, ContentType.Memory,
+                new InsertEntryOpts("hello"),
+                embedding);
+
+            var entry = store.Get(Tier.Hot, ContentType.Memory, id);
+            Assert.NotNull(entry);
+            Assert.Equal("hello", entry!.Content);
+
+            // The matching vec row must exist at the same rowid. We check
+            // by running a KNN search and confirming we get this entry back.
+            var search = new Search.VectorSearch(conn);
+            var results = search.SearchByVector(
+                Tier.Hot, ContentType.Memory,
+                embedding,
+                new Search.VectorSearchOpts(TopK: 1));
+            Assert.Single(results);
+            Assert.Equal(id, results[0].Id);
+        }
+    }
+
+    [Fact]
+    public void InsertWithEmbedding_OnVecInsertFailure_RollsBackContentRow()
+    {
+        // Belt-and-suspenders for the 0.6.7 orphan-content-row bug. If the
+        // vec insert crashes (e.g. rowid collision with a pre-existing
+        // orphan from an earlier buggy release), the transactionally-
+        // coupled content insert MUST also roll back so we do not leave a
+        // content row behind without an embedding.
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            // Plant an orphan vec row at the rowid the next content insert
+            // will get. SQLite allocates rowid = MAX(existing)+1, and the
+            // table is empty, so the next rowid is 1.
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText =
+                    "INSERT INTO hot_memories_vec (rowid, embedding) VALUES (1, zeroblob(1536))";
+                cmd.ExecuteNonQuery();
+            }
+
+            var embedding = new float[384];
+            Assert.Throws<Microsoft.Data.Sqlite.SqliteException>(() =>
+                store.InsertWithEmbedding(
+                    Tier.Hot, ContentType.Memory,
+                    new InsertEntryOpts("should roll back"),
+                    embedding));
+
+            // Content row must have been rolled back.
+            using var countCmd = conn.CreateCommand();
+            countCmd.CommandText = "SELECT COUNT(*) FROM hot_memories";
+            Assert.Equal(0L, (long)countCmd.ExecuteScalar()!);
+        }
+    }
+
+    [Fact]
     public void Insert_Get_RoundTrip()
     {
         var (conn, store) = NewStore();

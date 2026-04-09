@@ -95,6 +95,8 @@ public sealed class HybridSearchTests
 
         public string Insert(Tier tier, ContentType type, InsertEntryOpts opts)
             => throw new NotImplementedException();
+        public string InsertWithEmbedding(Tier tier, ContentType type, InsertEntryOpts opts, ReadOnlyMemory<float> embedding)
+            => throw new NotImplementedException();
         public void Delete(Tier tier, ContentType type, string id)
             => throw new NotImplementedException();
         public IReadOnlyList<Entry> List(Tier tier, ContentType type, ListEntriesOpts? opts = null)

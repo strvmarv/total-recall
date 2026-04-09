@@ -47,20 +47,21 @@ public class MemoryStoreHandlerTests
         Assert.Contains("entry-123", result.Content[0].Text);
         Assert.Equal("{\"id\":\"entry-123\"}", result.Content[0].Text);
 
-        Assert.Single(store.InsertCalls);
-        var call = store.InsertCalls[0];
+        Assert.Single(store.InsertWithEmbeddingCalls);
+        var call = store.InsertWithEmbeddingCalls[0];
         Assert.Equal(Tier.Hot, call.Tier);
         Assert.Equal(ContentType.Memory, call.Type);
         Assert.Equal("hello world", call.Opts.Content);
+        Assert.Equal(384, call.Embedding.Length);
 
         Assert.Single(embedder.Calls);
         Assert.Equal("hello world", embedder.Calls[0]);
 
-        Assert.Single(vector.InsertCalls);
-        Assert.Equal("entry-123", vector.InsertCalls[0].EntryId);
-        Assert.Equal(Tier.Hot, vector.InsertCalls[0].Tier);
-        Assert.Equal(ContentType.Memory, vector.InsertCalls[0].Type);
-        Assert.Equal(384, vector.InsertCalls[0].Embedding.Length);
+        // Transactional insert path: store.Insert is NOT called, and
+        // vec.InsertEmbedding is NOT called — both happen inside
+        // store.InsertWithEmbedding.
+        Assert.Empty(store.InsertCalls);
+        Assert.Empty(vector.InsertCalls);
     }
 
     [Fact]
@@ -81,7 +82,7 @@ public class MemoryStoreHandlerTests
 
         await handler.ExecuteAsync(args, CancellationToken.None);
 
-        var call = Assert.Single(store.InsertCalls);
+        var call = Assert.Single(store.InsertWithEmbeddingCalls);
         Assert.Equal(Tier.Warm, call.Tier);
         Assert.Equal(ContentType.Knowledge, call.Type);
         Assert.Equal("full payload", call.Opts.Content);
@@ -100,7 +101,7 @@ public class MemoryStoreHandlerTests
 
         await handler.ExecuteAsync(args, CancellationToken.None);
 
-        var call = Assert.Single(store.InsertCalls);
+        var call = Assert.Single(store.InsertWithEmbeddingCalls);
         Assert.Equal(Tier.Hot, call.Tier);
         Assert.Equal(ContentType.Memory, call.Type);
         Assert.Null(call.Opts.MetadataJson);
@@ -176,6 +177,7 @@ public class MemoryStoreHandlerTests
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => handler.ExecuteAsync(args, cts.Token));
         Assert.Empty(store.InsertCalls);
+        Assert.Empty(store.InsertWithEmbeddingCalls);
     }
 
     [Fact]

@@ -78,6 +78,9 @@ public sealed class SessionLifecycleTests
         public string Insert(Tier tier, ContentType type, InsertEntryOpts opts) =>
             throw new NotSupportedException();
 
+        public string InsertWithEmbedding(Tier tier, ContentType type, InsertEntryOpts opts, ReadOnlyMemory<float> embedding) =>
+            throw new NotSupportedException();
+
         public Entry? Get(Tier tier, ContentType type, string id) =>
             Slot(tier, type).FirstOrDefault(e => e.Id == id);
 

@@ -172,14 +172,15 @@ public sealed class EndToEndStdioTests
         Assert.False(enumerator.MoveNext());
 
         // ---- Recorded side effects ----
-        Assert.Single(store.InsertCalls);
-        var insert = store.InsertCalls[0];
+        // memory_store now goes through InsertWithEmbedding (transactional
+        // content + vec insert), so the split Insert/vec.InsertEmbedding
+        // path is no longer exercised.
+        Assert.Single(store.InsertWithEmbeddingCalls);
+        var insert = store.InsertWithEmbeddingCalls[0];
         Assert.True(insert.Tier.IsHot);
         Assert.True(insert.Type.IsMemory);
         Assert.Equal("hello world", insert.Opts.Content);
-
-        Assert.Single(vectors.InsertCalls);
-        Assert.Equal("entry-e2e", vectors.InsertCalls[0].EntryId);
+        Assert.Equal(384, insert.Embedding.Length);
 
         // Embedder called twice: once for memory_store, once for memory_search.
         Assert.Equal(2, embedder.Calls.Count);

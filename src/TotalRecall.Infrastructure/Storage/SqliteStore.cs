@@ -61,7 +61,66 @@ public sealed class SqliteStore : ISqliteStore, IDisposable
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
         using var cmd = _conn.CreateCommand();
-        cmd.CommandText = $@"
+        cmd.CommandText = BuildInsertSql(table);
+        BindInsertParameters(cmd, id, opts, now);
+        cmd.ExecuteNonQuery();
+        return id;
+    }
+
+    public string InsertWithEmbedding(
+        Tier tier,
+        ContentType type,
+        InsertEntryOpts opts,
+        ReadOnlyMemory<float> embedding)
+    {
+        ArgumentNullException.ThrowIfNull(opts);
+        var table = MigrationRunner.TableName(tier, type);
+        var vecTable = MigrationRunner.VecTableName(tier, type);
+        var id = Guid.NewGuid().ToString();
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+        using var tx = _conn.BeginTransaction();
+        try
+        {
+            using (var insertCmd = _conn.CreateCommand())
+            {
+                insertCmd.Transaction = tx;
+                insertCmd.CommandText = BuildInsertSql(table);
+                BindInsertParameters(insertCmd, id, opts, now);
+                insertCmd.ExecuteNonQuery();
+            }
+
+            long rowid;
+            using (var rowidCmd = _conn.CreateCommand())
+            {
+                rowidCmd.Transaction = tx;
+                rowidCmd.CommandText = "SELECT last_insert_rowid()";
+                rowid = (long)rowidCmd.ExecuteScalar()!;
+            }
+
+            using (var vecCmd = _conn.CreateCommand())
+            {
+                vecCmd.Transaction = tx;
+                vecCmd.CommandText =
+                    $"INSERT INTO {vecTable} (rowid, embedding) VALUES ($rowid, $embedding)";
+                vecCmd.Parameters.AddWithValue("$rowid", rowid);
+                vecCmd.Parameters.AddWithValue(
+                    "$embedding",
+                    System.Runtime.InteropServices.MemoryMarshal.AsBytes(embedding.Span).ToArray());
+                vecCmd.ExecuteNonQuery();
+            }
+
+            tx.Commit();
+            return id;
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
+    }
+
+    private static string BuildInsertSql(string table) => $@"
 INSERT INTO {table}
   (id, content, summary, source, source_tool, project, tags,
    created_at, updated_at, last_accessed_at, access_count,
@@ -71,6 +130,12 @@ VALUES
    $created_at, $updated_at, $last_accessed_at, $access_count,
    $decay_score, $parent_id, $collection_id, $metadata)";
 
+    private static void BindInsertParameters(
+        Microsoft.Data.Sqlite.SqliteCommand cmd,
+        string id,
+        InsertEntryOpts opts,
+        long now)
+    {
         cmd.Parameters.AddWithValue("$id", id);
         cmd.Parameters.AddWithValue("$content", opts.Content);
         cmd.Parameters.AddWithValue("$summary", (object?)opts.Summary ?? DBNull.Value);
@@ -90,9 +155,6 @@ VALUES
         cmd.Parameters.AddWithValue("$parent_id", (object?)opts.ParentId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$collection_id", (object?)opts.CollectionId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$metadata", opts.MetadataJson ?? "{}");
-
-        cmd.ExecuteNonQuery();
-        return id;
     }
 
     public Entry? Get(Tier tier, ContentType type, string id)

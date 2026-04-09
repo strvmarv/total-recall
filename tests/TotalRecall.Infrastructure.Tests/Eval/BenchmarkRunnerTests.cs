@@ -60,6 +60,9 @@ public sealed class BenchmarkRunnerTests : IDisposable
             return id;
         }
 
+        public string InsertWithEmbedding(Tier tier, ContentType type, InsertEntryOpts opts, ReadOnlyMemory<float> embedding)
+            => Insert(tier, type, opts);
+
         public Entry? Get(Tier tier, ContentType type, string id)
             => Entries.TryGetValue(id, out var e) ? e : null;
 

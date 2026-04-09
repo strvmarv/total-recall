@@ -14,6 +14,26 @@ public interface ISqliteStore
     /// <summary>Insert a new entry, returning the generated id.</summary>
     string Insert(Tier tier, ContentType type, InsertEntryOpts opts);
 
+    /// <summary>
+    /// Transactionally insert a new entry and its corresponding vec0
+    /// embedding row. If the vec insert fails for any reason (e.g. a
+    /// rowid collision with a pre-existing orphan), the content insert
+    /// is rolled back, so the caller never observes an orphan content
+    /// row without an embedding. Returns the generated entry id.
+    ///
+    /// This is the belt-and-suspenders companion to the 0.6.7
+    /// orphan-vec-row bug fix: even after <c>MemoryDeleteHandler</c> was
+    /// reordered to stop leaking vec orphans, an un-transacted content+
+    /// vec insert pair could still leave a content row behind if the vec
+    /// insert crashed for any unrelated reason. This method closes that
+    /// window by atomically coupling the two inserts.
+    /// </summary>
+    string InsertWithEmbedding(
+        Tier tier,
+        ContentType type,
+        InsertEntryOpts opts,
+        ReadOnlyMemory<float> embedding);
+
     /// <summary>Fetch an entry by id, or <c>null</c> if not found.</summary>
     Entry? Get(Tier tier, ContentType type, string id);
 
