@@ -1,18 +1,22 @@
 name: Release
 
-# Triggered on a git tag push (v*). Builds AOT-published binaries for five
-# platforms (linux-x64, linux-arm64, darwin-x64, darwin-arm64, win-x64),
-# stages each full publish tree into binaries/<rid>/, then publishes the
-# npm tarball from the ubuntu publish job.
+# Triggered on a git tag push (v*). Builds AOT-published binaries for four
+# platforms (linux-x64, linux-arm64, osx-arm64, win-x64), stages each full
+# publish tree into binaries/<rid>/, then publishes the npm tarball from
+# the ubuntu publish job.
 #
-# IMPORTANT: per Task 6.4, the AOT binary depends on sibling native libs
-# (libe_sqlite3, libonnxruntime, vec0, models/). The matrix job stages the
-# ENTIRE publish tree into binaries/<rid>/ — copying just the executable
-# would yield a DllNotFoundException at runtime.
+# Intel Mac (osx-x64) is NOT shipped — all modern Apple hardware is arm64.
+# If Intel Mac support is re-added later, either use a macos-14-large
+# Intel runner or cross-compile osx-x64 from macos-14 arm64.
 #
-# This workflow is NOT triggered by the commit that introduces it. A
-# maintainer will fire a draft tag during Plan 7 personal install
-# validation. Requires the NPM_TOKEN repository secret.
+# IMPORTANT: the AOT binary depends on sibling native libs (libe_sqlite3,
+# libonnxruntime, vec0, models/). The matrix job stages the ENTIRE publish
+# tree into binaries/<rid>/ — copying just the executable would yield a
+# DllNotFoundException at runtime.
+#
+# .NET SDK version is pinned by /global.json at the repo root so every
+# matrix leg uses the same SDK regardless of what's pre-installed on the
+# runner. Currently pinned to .NET 10 (see global.json).
 #
 # No untrusted github.event.* fields are interpolated into run: blocks;
 # only the static matrix values and secrets.NPM_TOKEN (via env:) are used.
@@ -37,16 +41,12 @@ jobs:
             artifact: total-recall-linux-x64
             exe: total-recall
           - rid: linux-arm64
-            os: ubuntu-latest
+            os: ubuntu-24.04-arm
             artifact: total-recall-linux-arm64
             exe: total-recall
-          - rid: darwin-x64
-            os: macos-13
-            artifact: total-recall-darwin-x64
-            exe: total-recall
-          - rid: darwin-arm64
+          - rid: osx-arm64
             os: macos-14
-            artifact: total-recall-darwin-arm64
+            artifact: total-recall-osx-arm64
             exe: total-recall
           - rid: win-x64
             os: windows-latest
@@ -70,48 +70,14 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          global-json-file: global.json
 
-      - name: Install clang for NativeAOT (Linux x64)
-        if: matrix.rid == 'linux-x64'
+      - name: Install clang for NativeAOT (Linux)
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
 
-      - name: Install clang + aarch64 cross toolchain (Linux arm64)
-        if: matrix.rid == 'linux-arm64'
-        run: |
-          sudo dpkg --add-architecture arm64
-          sudo sed -i 's/^deb /deb [arch=amd64] /' /etc/apt/sources.list
-          sudo tee /etc/apt/sources.list.d/arm64.list >/dev/null <<'EOF'
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ jammy main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ jammy-updates main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ jammy-security main restricted universe multiverse
-          EOF
-          sudo apt-get update
-          sudo apt-get install -y \
-            clang \
-            llvm \
-            lld \
-            zlib1g-dev \
-            gcc-aarch64-linux-gnu \
-            binutils-aarch64-linux-gnu \
-            zlib1g-dev:arm64
-
-      - name: Publish (Unix, linux-arm64 cross-compile)
-        if: runner.os != 'Windows' && matrix.rid == 'linux-arm64'
-        shell: bash
-        run: |
-          set -euo pipefail
-          dotnet publish src/TotalRecall.Host/TotalRecall.Host.csproj \
-            -c Release \
-            -r linux-arm64 \
-            -p:PublishAot=true \
-            -p:CppCompilerAndLinker=clang \
-            -p:SysRoot=/usr/aarch64-linux-gnu \
-            -p:LinkerFlavor=lld \
-            -p:ObjCopyName=aarch64-linux-gnu-objcopy
-
-      - name: Publish (Unix, native)
-        if: runner.os != 'Windows' && matrix.rid != 'linux-arm64'
+      - name: Publish (Unix)
+        if: runner.os != 'Windows'
         shell: bash
         env:
           RID: ${{ matrix.rid }}
@@ -197,17 +163,11 @@ jobs:
           name: total-recall-linux-arm64
           path: binaries/linux-arm64
 
-      - name: Download darwin-x64 artifact
+      - name: Download osx-arm64 artifact
         uses: actions/download-artifact@v4
         with:
-          name: total-recall-darwin-x64
-          path: binaries/darwin-x64
-
-      - name: Download darwin-arm64 artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: total-recall-darwin-arm64
-          path: binaries/darwin-arm64
+          name: total-recall-osx-arm64
+          path: binaries/osx-arm64
 
       - name: Download win-x64 artifact
         uses: actions/download-artifact@v4
@@ -215,7 +175,7 @@ jobs:
           name: total-recall-win-x64
           path: binaries/win-x64
 
-      - name: Verify all five RIDs staged
+      - name: Verify all four RIDs staged
         shell: bash
         run: |
           set -euo pipefail
@@ -223,8 +183,7 @@ jobs:
           for f in \
             binaries/linux-x64/total-recall \
             binaries/linux-arm64/total-recall \
-            binaries/darwin-x64/total-recall \
-            binaries/darwin-arm64/total-recall \
+            binaries/osx-arm64/total-recall \
             binaries/win-x64/total-recall.exe; do
             if [ ! -f "$f" ]; then
               echo "MISSING: $f" >&2
@@ -245,8 +204,7 @@ jobs:
         run: |
           chmod +x binaries/linux-x64/total-recall
           chmod +x binaries/linux-arm64/total-recall
-          chmod +x binaries/darwin-x64/total-recall
-          chmod +x binaries/darwin-arm64/total-recall
+          chmod +x binaries/osx-arm64/total-recall
 
       - name: npm publish
         env:
@@ -278,7 +236,6 @@ jobs:
           files: |
             binaries/linux-x64/total-recall
             binaries/linux-arm64/total-recall
-            binaries/darwin-x64/total-recall
-            binaries/darwin-arm64/total-recall
+            binaries/osx-arm64/total-recall
             binaries/win-x64/total-recall.exe
           fail_on_unmatched_files: false
