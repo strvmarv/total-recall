@@ -148,4 +148,44 @@ public sealed class SchemaTests
         Assert.Equal(3L, count);
         Assert.Equal(3L, maxVersion);
     }
+
+    [Fact]
+    public void RunMigrations_FreshInit_WritesMigrationCompleteMarker()
+    {
+        // Plan 7 Task 7.-1: a brand-new .NET DB must carry the marker so
+        // AutoMigrationGuard can distinguish it from an unmigrated TS DB.
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT value FROM _meta WHERE key = $k";
+        cmd.Parameters.AddWithValue("$k", MigrationRunner.MigrationCompleteMarkerKey);
+        var value = cmd.ExecuteScalar() as string;
+        Assert.False(string.IsNullOrEmpty(value));
+    }
+
+    [Fact]
+    public void RunMigrations_ReRun_DoesNotOverwriteExistingMarker()
+    {
+        // Calling RunMigrations twice on the same DB must not touch the marker
+        // that was stamped on the first (fresh-init) run. We prove this by
+        // pinning a sentinel value and asserting it survives a second call.
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        using (var setCmd = conn.CreateCommand())
+        {
+            setCmd.CommandText =
+                "UPDATE _meta SET value = 'sentinel' WHERE key = $k";
+            setCmd.Parameters.AddWithValue("$k", MigrationRunner.MigrationCompleteMarkerKey);
+            setCmd.ExecuteNonQuery();
+        }
+
+        MigrationRunner.RunMigrations(conn);
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT value FROM _meta WHERE key = $k";
+        cmd.Parameters.AddWithValue("$k", MigrationRunner.MigrationCompleteMarkerKey);
+        Assert.Equal("sentinel", cmd.ExecuteScalar() as string);
+    }
 }

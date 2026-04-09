@@ -24,6 +24,14 @@ namespace TotalRecall.Infrastructure.Storage;
 public static class MigrationRunner
 {
     /// <summary>
+    /// Fingerprint written to <c>_meta</c> on fresh-init schema migration so
+    /// <see cref="AutoMigrationGuard"/> can distinguish a brand-new .NET-native
+    /// DB from an unmigrated legacy TS DB (both have identical schemas — the
+    /// marker is the only positive signal). See Plan 7 Task 7.-1.
+    /// </summary>
+    public const string MigrationCompleteMarkerKey = "migration_from_ts_complete";
+
+    /// <summary>
     /// Returns the canonical content-table name for the given
     /// <see cref="Tier"/> / <see cref="ContentType"/> pair. Mirrors
     /// <c>tableName()</c> in <c>src-ts/types.ts</c>.
@@ -196,10 +204,10 @@ public static class MigrationRunner
         using var tx = conn.BeginTransaction();
 
         Exec(conn, tx, SchemaVersionDdl);
-        var current = GetCurrentVersion(conn, tx);
+        var startingVersion = GetCurrentVersion(conn, tx);
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-        for (var i = current; i < Migrations.Length; i++)
+        for (var i = startingVersion; i < Migrations.Length; i++)
         {
             Migrations[i](conn, tx);
             using var cmd = conn.CreateCommand();
@@ -207,6 +215,26 @@ public static class MigrationRunner
             cmd.CommandText = "INSERT INTO _schema_version (version, applied_at) VALUES ($v, $t)";
             cmd.Parameters.AddWithValue("$v", i + 1);
             cmd.Parameters.AddWithValue("$t", now);
+            cmd.ExecuteNonQuery();
+        }
+
+        // Fresh-init fingerprint. When this call created the schema from nothing
+        // (startingVersion == 0), stamp _meta with the migration-complete marker
+        // so AutoMigrationGuard can distinguish this brand-new .NET DB from an
+        // unmigrated TS DB on subsequent startups. Without this, the guard would
+        // false-positive on fresh .NET installs. DBs being upgraded from an
+        // earlier .NET schema version are left untouched.
+        if (startingVersion == 0)
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText =
+                "INSERT INTO _meta (key, value) VALUES ($k, $v) " +
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value";
+            cmd.Parameters.AddWithValue("$k", MigrationCompleteMarkerKey);
+            cmd.Parameters.AddWithValue(
+                "$v",
+                DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture));
             cmd.ExecuteNonQuery();
         }
 

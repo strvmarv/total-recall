@@ -17,7 +17,11 @@ namespace TotalRecall.Server;
 /// </remarks>
 public sealed class AutoMigrationGuard
 {
-    public const string MarkerKey = "migration_from_ts_complete";
+    /// <summary>
+    /// Single source of truth lives on <see cref="MigrationRunner"/> so both
+    /// the guard and the fresh-init schema path reference the same literal.
+    /// </summary>
+    public const string MarkerKey = TotalRecall.Infrastructure.Storage.MigrationRunner.MigrationCompleteMarkerKey;
     public const string DbFileName = "total-recall.db";
     public const string BackupSuffix = ".ts-backup";
 
@@ -50,19 +54,21 @@ public sealed class AutoMigrationGuard
             return GuardResult.NoOldDbFound;
         }
 
-        // Peek at _meta on whatever currently sits at dbPath. On first run this
-        // is the TS-format DB (no marker); on subsequent runs this is the new
-        // DB (marker present).
+        // Peek at _meta on whatever currently sits at dbPath. On first run
+        // against an unmigrated TS DB the marker is absent (migration runs);
+        // on subsequent runs the marker is present (no-op). Plan 7 Task 7.-1
+        // closed the prior false-positive on fresh .NET-native DBs by having
+        // MigrationRunner.RunMigrations stamp the marker inside the fresh-init
+        // schema transaction — so a brand-new .NET DB enters this guard already
+        // carrying the marker on every startup after its creation.
         //
-        // TODO(Plan 7): false-positive on fresh .NET-native DB. The "no marker"
-        // signal currently means "TS-format" by exclusion, but a brand-new
-        // .NET DB also has no marker until something writes one. The migrator
-        // then tries to read TS schema columns and fails with a confusing
-        // disk-I/O or schema-mismatch error. Fix options: (a) MigrationRunner
-        // writes a marker on fresh-init schema migration, OR (b) the guard
-        // sniffs for a positive TS-format signal (TS-specific table or column)
-        // before deciding to migrate. Discovered during 6.3a smoke testing.
-        // Must be fixed before Plan 7 personal install validation.
+        // NOTE: a .NET dev DB created BEFORE Task 7.-1 landed (Plan 3b–Plan 6
+        // maintainer tinkering) does not carry the marker. On such DBs this
+        // guard will still false-positive and the subsequent migrate attempt
+        // will fail. Those DBs must be repaired by the maintainer once —
+        // either by deleting the file or by running:
+        //   sqlite3 "$HOME/.total-recall/total-recall.db" \
+        //     "INSERT OR IGNORE INTO _meta(key,value) VALUES('migration_from_ts_complete',strftime('%s','now'))"
         if (TryReadMarker(dbPath))
         {
             return GuardResult.AlreadyMigrated;

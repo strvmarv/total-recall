@@ -162,6 +162,32 @@ public sealed class AutoMigrationGuardTests : IDisposable
     }
 
     [Fact]
+    public async Task FreshDotNetDb_InitializedByMigrationRunner_ReturnsAlreadyMigrated()
+    {
+        // Plan 7 Task 7.-1 regression guard. A DB produced by the real
+        // MigrationRunner.RunMigrations (i.e. a fresh .NET-native DB, the
+        // exact shape a brand-new install creates) must be recognised as
+        // already migrated — historically the guard false-positived on it
+        // and crashed the migrator with a disk-I/O error.
+        using (var seed = TotalRecall.Infrastructure.Storage.SqliteConnection.Open(DbPath))
+        {
+            TotalRecall.Infrastructure.Storage.MigrationRunner.RunMigrations(seed);
+        }
+        SqliteConnection.ClearAllPools();
+
+        var fake = new FakeMigrateCommand();
+        var stderr = new StringWriter();
+        var guard = new AutoMigrationGuard(fake, stderr);
+
+        var result = await guard.CheckAndMigrateAsync(_tempDir, CancellationToken.None);
+
+        Assert.Equal(GuardResult.AlreadyMigrated, result);
+        Assert.Equal(0, fake.CallCount);
+        Assert.False(File.Exists(BackupPath));
+        Assert.Equal(string.Empty, stderr.ToString());
+    }
+
+    [Fact]
     public async Task RunTwice_IsIdempotent()
     {
         SeedDb(DbPath, withMarker: false);
