@@ -191,6 +191,8 @@ public static class MigrationRunner
         Migration2_MetaAndBenchmark,
         // Migration 3: FTS5 virtual tables + triggers + backfill
         Migration3_Fts5,
+        // Migration 4: compaction_log.source column (history tagging)
+        Migration4_CompactionLogSource,
     };
 
     /// <summary>
@@ -343,6 +345,23 @@ public static class MigrationRunner
             Exec(conn, tx,
                 $"INSERT INTO {ftsTbl}(rowid, content, tags) SELECT rowid, content, tags FROM {tbl}");
         }
+    }
+
+    /// <summary>
+    /// Migration 4 — add a <c>source</c> column to <c>compaction_log</c> so
+    /// the history log can distinguish compaction-driven tier movements
+    /// (source = <c>'compaction'</c>) from manual ones (<c>'api'</c>,
+    /// <c>'import'</c>, etc.). The column is <c>NOT NULL DEFAULT
+    /// 'compaction'</c> so pre-v4 rows are backfilled to the semantically
+    /// correct value automatically and existing insert sites that haven't
+    /// been updated to pass a source keep producing valid rows.
+    /// </summary>
+    private static void Migration4_CompactionLogSource(
+        MsSqliteConnection conn,
+        Microsoft.Data.Sqlite.SqliteTransaction tx)
+    {
+        Exec(conn, tx,
+            "ALTER TABLE compaction_log ADD COLUMN source TEXT NOT NULL DEFAULT 'compaction'");
     }
 
     // --- helpers ----------------------------------------------------------

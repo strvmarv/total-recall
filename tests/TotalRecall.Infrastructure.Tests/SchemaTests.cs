@@ -145,8 +145,8 @@ public sealed class SchemaTests
         Assert.True(reader.Read());
         var count = reader.GetInt64(0);
         var maxVersion = reader.GetInt64(1);
-        Assert.Equal(3L, count);
-        Assert.Equal(3L, maxVersion);
+        Assert.Equal(4L, count);
+        Assert.Equal(4L, maxVersion);
     }
 
     [Fact]
@@ -162,6 +162,70 @@ public sealed class SchemaTests
         cmd.Parameters.AddWithValue("$k", MigrationRunner.MigrationCompleteMarkerKey);
         var value = cmd.ExecuteScalar() as string;
         Assert.False(string.IsNullOrEmpty(value));
+    }
+
+    [Fact]
+    public void RunMigrations_FreshDb_CompactionLogHasSourceColumn()
+    {
+        // Migration 4 adds a `source` column to compaction_log so history
+        // can distinguish compaction-driven movements from manual ones
+        // (API promote/demote, importers, etc.). The column is NOT NULL
+        // with DEFAULT 'compaction' to preserve existing semantics for
+        // pre-v4 rows on upgrade.
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "PRAGMA table_info(compaction_log)";
+        using var reader = cmd.ExecuteReader();
+
+        string? typeName = null;
+        int notNull = -1;
+        string? defaultValue = null;
+        bool found = false;
+        while (reader.Read())
+        {
+            var name = reader.GetString(1);
+            if (name == "source")
+            {
+                found = true;
+                typeName = reader.GetString(2);
+                notNull = reader.GetInt32(3);
+                defaultValue = reader.IsDBNull(4) ? null : reader.GetString(4);
+                break;
+            }
+        }
+
+        Assert.True(found, "compaction_log.source column is missing");
+        Assert.Equal("TEXT", typeName);
+        Assert.Equal(1, notNull);
+        Assert.Equal("'compaction'", defaultValue);
+    }
+
+    [Fact]
+    public void RunMigrations_CompactionLogSource_DefaultsToCompaction()
+    {
+        // An INSERT that omits the source column must fall back to the
+        // DEFAULT so existing call sites (which haven't been updated to
+        // pass source yet) continue to produce semantically-correct rows.
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        using (var insert = conn.CreateCommand())
+        {
+            insert.CommandText = """
+                INSERT INTO compaction_log
+                  (id, timestamp, source_tier, reason, config_snapshot_id)
+                VALUES
+                  ('abc', 1, 'hot', 'test', 'cfg-1')
+                """;
+            insert.ExecuteNonQuery();
+        }
+
+        using var select = conn.CreateCommand();
+        select.CommandText = "SELECT source FROM compaction_log WHERE id = 'abc'";
+        var value = select.ExecuteScalar() as string;
+        Assert.Equal("compaction", value);
     }
 
     [Fact]
