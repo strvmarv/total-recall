@@ -156,6 +156,19 @@ The pre-commit sync eliminates human error at the source. The CI check catches i
 
 **Files:** `package.json`, `.claude-plugin/plugin.json`, `.copilot-plugin/plugin.json`, `.cursor-plugin/plugin.json`, `git-hooks/pre-commit` (new), `.github/workflows/dotnet-ci.yml`
 
+### CHANGELOG.md Backfill: 0.6.8 GA, 0.7.0, 0.7.1, 0.7.2
+
+`CHANGELOG.md` has a gap between `0.6.8-beta.5` (documented 2026-04-06) and `0.8.0-beta.1` (documented 2026-04-08). Four TypeScript releases shipped to npm in between without changelog entries:
+
+- `0.6.8` GA (post-beta.5)
+- `0.7.0`
+- `0.7.1`
+- `0.7.2` (current `@latest` on npm)
+
+Backfill by reading `git log v0.6.8-beta.5..v0.7.2 --reverse` and grouping commits by tag. These are all pre-cutover TS commits — the CHANGELOG entries should describe what those releases changed, not be written from scratch. Archaeological work, not urgent, but worth doing before `0.8.0` GA so users looking at the full version history have continuity.
+
+**Files:** `CHANGELOG.md`
+
 ### Comprehensive AGENTS.md Rewrite
 
 `AGENTS.md` is a leftover from the TypeScript era and most of its content is stale post-cutover. Known wrong sections (verified 2026-04-09):

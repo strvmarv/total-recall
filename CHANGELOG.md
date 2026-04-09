@@ -5,6 +5,91 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+> **Gap: 0.6.8 (GA), 0.7.0, 0.7.1, 0.7.2.** These TypeScript releases shipped
+> without changelog entries between 0.6.8-beta.5 and the 0.8.0 cutover. Backfill
+> from `git log v0.6.8-beta.5..v0.7.2` is tracked in `docs/TODO.md`.
+
+## 0.8.0-beta.4 - 2026-04-09
+
+### Fixed
+
+- **Install-path gap for git-clone installs.** When a host tool fetches total-recall via `git clone` rather than `npm install` (e.g. Claude Code `/plugin update` against a marketplace entry whose `source` is `github`), the installed tree has no `binaries/` because prebuilt binaries are never committed to git. `bin/start.js` then failed with "Prebuilt binary not found for &lt;rid&gt;". Diagnosis confirmed against authoritative Claude Code docs.
+- **Per-RID GitHub Release asset naming.** `softprops/action-gh-release` attached files by basename, so four binaries all named `total-recall` collided down to ~2 assets on the GitHub Release (observed on v0.8.0-beta.3 — only 2 of 4 platforms attached). `release.yml` now stages copies into `release-assets/` with per-RID names (`total-recall-linux-x64`, `total-recall-linux-arm64`, `total-recall-osx-arm64`, `total-recall-win-x64.exe`) before attaching. `fail_on_unmatched_files: true` turns a missing asset into a hard error.
+- **Prerelease badge on GitHub Releases.** Previously every release was published with `prerelease: false`, so beta tags appeared as stable releases. `release.yml` now sets `prerelease: ${{ contains(github.ref_name, '-') }}` so any tag with a hyphen (e.g. `v0.8.0-beta.4`) is marked prerelease automatically.
+- **Stale `.opencode/INSTALL.md`.** The OpenCode install doc told users to invoke `node /path/to/total-recall/dist/index.js`, which stopped working the moment `dist/` was deleted in the 0.8.0 TypeScript strip. Rewritten to document three supported install options (global npm, `npx`, source checkout), all routing through `bin/start.js`.
+- **Multi-host plugin manifest version drift.** Four files carry a `version` field — `package.json`, `.claude-plugin/plugin.json`, `.copilot-plugin/plugin.json`, `.cursor-plugin/plugin.json` — and they were all out of sync: Copilot's was stuck at `0.1.0` since day one, Claude's and Cursor's were stuck at `0.7.2` through the entire TS strip series. All four synced to `0.8.0-beta.4`. `AGENTS.md` § "Version sync — four files, one version" now documents this as a standing rule.
+
+### Added
+
+- **`scripts/fetch-binary.js`** — shared zero-dep Node downloader. Detects host RID, reads version from `package.json`, fetches the matching per-RID GitHub Release asset, and writes to `binaries/&lt;rid&gt;/`. Used by both `scripts/postinstall.js` (fast path at npm install time) and `bin/start.js` (safety net at first launch for git-clone installs and `--ignore-scripts` users).
+- **`scripts/postinstall.js`** — resurrected with entirely new content. The old 0.6.8-era `postinstall.js` downloaded a ~150MB bun runtime (deleted as dead code in 0.8.0-beta.3). The new one is ~20 lines and calls `ensureBinary()` once at install time. Failures are intentionally non-fatal (exit 0) so `--ignore-scripts` / offline / corporate-firewall installs still succeed; `bin/start.js` retries on first launch.
+- **Per-RID GitHub Release assets** so `scripts/fetch-binary.js` has a stable download URL pattern: `https://github.com/strvmarv/total-recall/releases/download/v&lt;version&gt;/total-recall-&lt;rid&gt;[.exe]`.
+
+### Changed
+
+- **`bin/start.js` refactored to use `ensureBinary()` as the single entry.** Previously duplicated RID detection and the "binary not found" error path. Now imports from `scripts/fetch-binary.js` — single source of truth for RID detection, error messages, and the download fallback. Fast path (binary present) has no added overhead.
+- **`AGENTS.md` "Release flow" section rewritten** to enumerate all four version files as a standing rule and to remove references to the deleted `dist/`, `publish.yml`, and the bun launcher. The rest of `AGENTS.md` remains stale post-cutover; comprehensive rewrite tracked in `docs/TODO.md`.
+- **`docs/TODO.md`** backfilled with 13 post-cutover follow-ups: checksum verification, signed releases, shared binary cache location, Intel Mac support, `--provenance` on npm publish, `release.yml` dry-run step, multi-platform `dotnet-ci.yml`, Node 24 migration, plugin version single-source-of-truth automation, stale `src-ts/` comment scrub, top-level doc scrub, `SqliteConnection.cs` bun:sqlite comment scrub, and a comprehensive `AGENTS.md` rewrite.
+
+## 0.8.0-beta.3 - 2026-04-09
+
+### Fixed
+
+- **`scripts/verify-binaries.js` stuck on the old 5-RID layout.** The `prepublishOnly` safety-check script was still checking for `binaries/darwin-x64/` and `binaries/darwin-arm64/` directories that no longer existed (dropped and renamed in beta.2). It correctly refused to publish — working as designed — but the refusal blocked the npm publish step of the v0.8.0-beta.2 release. Updated to the new 4-RID list.
+- **`bin/start.js` `detectRid()` returned stale `darwin-x64` / `darwin-arm64` values.** Even if the beta.2 publish had succeeded, macOS users would have hit "Prebuilt binary not found for darwin-arm64" because the tarball stages `osx-arm64`. Fixed `detectRid()` to return `osx-arm64` for macOS arm64 and dropped the `darwin-x64` branch entirely. Error message now distinguishes Intel Mac as a "not shipped in this release" case.
+- **`tests-ts/` directory was never deleted in the original strip pass.** The plan's Task 0 verification only checked for `src-ts/`, `bin-ts/`, and the top-level TS tooling configs. `tests-ts/` held `dist-smoke.test.ts`, `helpers/{db,bun-sqlite-shim,embedding}.ts`, a `fixtures/` dir, and a `manual/` test doc — all pure dead weight post-cutover. Now deleted.
+- **`scripts/postinstall.js` was downloading a ~150MB bun runtime** on every user `npm install` and doing nothing else useful. The .NET AOT binary doesn't execute through bun; `bin/start.js` uses `child_process.spawn` to run the native binary directly. Deleted entirely. (The file name was resurrected in beta.4 with entirely new content — a binary downloader.)
+- **`.npmignore` was stale and redundant.** Listed `src-ts/`, `tests-ts/`, `tsconfig.json`, `tsup.config.ts`, `vitest.config.ts` — all already deleted. Also superseded by the explicit `files` allow-list in `package.json`. Removed.
+
+## 0.8.0-beta.2 - 2026-04-09
+
+### Fixed
+
+- **Invalid .NET RIDs in `release.yml` matrix.** The matrix used `darwin-arm64` and `darwin-x64`, which are not canonical .NET runtime identifiers — .NET uses `osx-arm64` / `osx-x64` for macOS. The bug was dormant since Plan 6 because `release.yml` had never actually run before v0.8.0-beta.1; the first firing on macos-14 errored out with `NETSDK1083: The specified RuntimeIdentifier 'darwin-arm64' is not recognized`. Renamed matrix-wide: cascades through matrix entries, artifact names, staging paths, publish-job download paths, verification script, chmod script, and the GitHub Release files list.
+- **Deprecated `macos-13` runner image.** GitHub retired `macos-13` runner images; the darwin-x64 matrix leg failed instantly with "macos-13-us-default is not supported". Dropped `osx-x64` from the matrix entirely. All modern Apple hardware is Apple Silicon since Nov 2020 and Intel Mac support is deferred (see `docs/TODO.md`).
+- **`linux-arm64` cross-compile apt sources hardcoded `jammy` (Ubuntu 22.04).** `ubuntu-latest` runners are now `noble` (24.04), so the `/etc/apt/sources.list.d/arm64.list` patch hit 404 on every arm64 package index fetch. Rewrote the entire leg to use GitHub's native `ubuntu-24.04-arm` runner instead — eliminates the cross-compile toolchain dance (apt sources patching, `gcc-aarch64-linux-gnu`, `-p:CppCompilerAndLinker=clang -p:SysRoot=... -p:LinkerFlavor=lld -p:ObjCopyName=...`). Single unified `Publish (Unix)` step now handles all three Unix RIDs.
+
+### Added
+
+- **`/global.json`** pinning .NET 10 SDK with `rollForward: latestFeature`. Prevents runner pre-install drift — macos-14 already has .NET 10.0.201 preinstalled, and pinning explicitly means every matrix leg uses the same SDK regardless of what each runner image happens to ship. .NET 10 SDK builds `net8.0` targets cleanly.
+- **`release.yml` npm publish step now handles prerelease dist-tags.** Logic ported from the deleted `publish.yml`: if `package.json` version contains a dash (e.g. `0.8.0-beta.N`), publish under the matching dist-tag (`beta`, `rc`, `alpha`) instead of clobbering `latest`. Only stable versions publish to `latest`. Implementation uses bash parameter expansion (no `sed`), reads `VERSION` from the committed `package.json` — no untrusted `github.event.*` input.
+
+### Changed
+
+- **`dotnet-ci.yml` Setup .NET step** now uses `global-json-file: global.json` instead of `dotnet-version: 8.0.x` for consistency with `release.yml`.
+- **Version bump to `0.8.0-beta.2`.** The `v0.8.0-beta.1` tag stays on origin as a historical marker of the first failed matrix attempt.
+
+### Known limitations
+
+- `release.yml` only grants `contents: write` at the workflow level, not `id-token: write`, so `--provenance` cannot be passed to `npm publish` without a follow-up commit. Tracked in `docs/TODO.md`.
+
+## 0.8.0-beta.1 - 2026-04-08
+
+### Removed
+
+- **All TypeScript source, tests, and build tooling.** The .NET rewrite on the `rewrite/dotnet` branch had been running in parallel to the TypeScript tree for weeks, with `src-ts/` and `bin-ts/` holding the parked TS implementation alongside the active `src/TotalRecall.{Cli,Core,Host,Infrastructure,Server}/` .NET tree. This release strips all remaining TS:
+  - `src-ts/` — the entire parked TS source tree (114 files)
+  - `bin-ts/` — the previous-generation launcher scripts (`start.cjs`, `total-recall.cmd`, `total-recall.sh`)
+  - `dist/` — committed `tsup` output (`index.js`, `defaults.toml`, `eval/ci-smoke.js`, `eval/defaults.toml`)
+  - `tsconfig.json`, `tsup.config.ts`, `vitest.config.ts`, `vitest.dist.config.ts` — top-level TS tooling
+  - `.github/workflows/ci.yml` — pure TS CI (vitest on node, bun matrix, tsup build, dist-committed check)
+  - `.github/workflows/publish.yml` — legacy TS npm publish workflow that triggered on the same `v*` tag as `release.yml` (latent double-publish bug)
+  - All TS dependencies and devDependencies from `package.json` except `sqlite-vec`, which is kept in `devDependencies` as a per-platform native-binary source via its npm optionalDependencies (`sqlite-vec-linux-x64`, etc.). `package-lock.json` regenerated from the stripped manifest.
+
+### Changed
+
+- **Distribution model.** `package.json` reduced to a minimal `bin`/`files`/`scripts` shell pointing at `bin/start.js` as the Node launcher. Prebuilt .NET AOT binaries are staged into `binaries/<rid>/` by the release matrix and shipped inside the npm tarball via the `files` allow-list. End users install with `npm install @strvmarv/total-recall` (or `@beta` for prerelease); the Node launcher dispatches to the per-platform binary via `child_process.spawn`.
+- **Version bump to `0.8.0-beta.1`.** Main branch stays at `0.7.2` (TypeScript) — beta tags ship via `release.yml` matrix to the `beta` dist-tag without touching `latest`.
+
+### Known issues (all fixed in later betas)
+
+- The `release.yml` matrix failed on three independent latent bugs that had never been exercised before this first tag push: invalid `darwin-*` RIDs (fixed in beta.2), stale `jammy` apt sources for linux-arm64 cross-compile (fixed in beta.2), and deprecated `macos-13` runner (fixed in beta.2).
+- `scripts/verify-binaries.js` and `bin/start.js` had the old 5-RID list baked in (fixed in beta.3).
+- `tests-ts/` was missed in the strip pass (fixed in beta.3).
+- `scripts/postinstall.js` was downloading a bun runtime that nothing used (fixed in beta.3).
+- The install-path gap for git-clone-sourced plugin installs was not recognized until beta.3 dogfood (fixed in beta.4 via the `scripts/fetch-binary.js` download bootstrap).
+- The `darwin-x64` RID was dropped in beta.2, so Intel Mac is not shipped in the 0.8.x line.
+
 ## 0.6.8-beta.5 - 2026-04-06
 
 ### Fixed
