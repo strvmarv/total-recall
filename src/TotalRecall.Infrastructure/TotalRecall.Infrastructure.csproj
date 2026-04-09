@@ -28,16 +28,45 @@
 
   <!--
     Vendor the sqlite-vec native library into the output under runtimes/.
-    Source: node_modules/sqlite-vec-linux-x64/vec0.so (pulled in by the TS
-    reference implementation's npm install). Plan 6 (packaging) will
-    introduce a proper multi-RID story; for now we only target linux-x64.
-    If the file is missing the build still succeeds - SqliteConnection.Open
-    will surface a clear runtime error pointing at the expected location.
+    The npm package 'sqlite-vec' lists one optionalDependency per RID
+    (sqlite-vec-linux-x64, sqlite-vec-linux-arm64, sqlite-vec-darwin-x64,
+    sqlite-vec-darwin-arm64, sqlite-vec-windows-x64). npm installs only
+    the matching platform's optional dep, so on any given machine exactly
+    one of these paths exists after `npm install`. Each Content item's
+    Exists() condition makes this a no-op for absent RIDs.
+
+    The *file extension* differs per RID (.so / .dylib / .dll);
+    SqliteConnection.ResolveVecExtensionPath picks the right one at
+    runtime via RuntimeInformation.
+
+    If NONE of the native libs are present the build still succeeds —
+    SqliteConnection.Open surfaces a clear runtime error pointing at the
+    expected location.
   -->
   <ItemGroup>
     <Content Include="$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-linux-x64/vec0.so"
              Condition="Exists('$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-linux-x64/vec0.so')"
              Link="runtimes/vec0.so"
+             CopyToOutputDirectory="PreserveNewest"
+             Visible="false" />
+    <Content Include="$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-linux-arm64/vec0.so"
+             Condition="Exists('$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-linux-arm64/vec0.so') And !Exists('$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-linux-x64/vec0.so')"
+             Link="runtimes/vec0.so"
+             CopyToOutputDirectory="PreserveNewest"
+             Visible="false" />
+    <Content Include="$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-darwin-x64/vec0.dylib"
+             Condition="Exists('$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-darwin-x64/vec0.dylib')"
+             Link="runtimes/vec0.dylib"
+             CopyToOutputDirectory="PreserveNewest"
+             Visible="false" />
+    <Content Include="$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-darwin-arm64/vec0.dylib"
+             Condition="Exists('$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-darwin-arm64/vec0.dylib') And !Exists('$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-darwin-x64/vec0.dylib')"
+             Link="runtimes/vec0.dylib"
+             CopyToOutputDirectory="PreserveNewest"
+             Visible="false" />
+    <Content Include="$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-windows-x64/vec0.dll"
+             Condition="Exists('$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-windows-x64/vec0.dll')"
+             Link="runtimes/vec0.dll"
              CopyToOutputDirectory="PreserveNewest"
              Visible="false" />
   </ItemGroup>

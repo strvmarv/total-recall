@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
 namespace TotalRecall.Infrastructure.Storage;
@@ -54,20 +55,41 @@ public static class SqliteConnection
 
     /// <summary>
     /// Resolve the sqlite-vec native library path. Convention: placed under
-    /// <c>{AppContext.BaseDirectory}/runtimes/vec0.so</c> by an MSBuild copy
-    /// step (see <c>TotalRecall.Infrastructure.csproj</c>).
+    /// <c>{AppContext.BaseDirectory}/runtimes/vec0.{so,dll,dylib}</c> by the
+    /// Infrastructure project's MSBuild step, which in turn sources from
+    /// <c>node_modules/sqlite-vec-&lt;rid&gt;/</c> (an optionalDependency of
+    /// the <c>sqlite-vec</c> npm package — one native lib per platform).
+    /// The file extension is platform-specific and picked here at runtime.
     /// </summary>
     private static string ResolveVecExtensionPath()
     {
         var dir = Path.Combine(AppContext.BaseDirectory, "runtimes");
-        var path = Path.Combine(dir, "vec0.so");
+        string fileName;
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            fileName = "vec0.dll";
+        }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            fileName = "vec0.dylib";
+        }
+        else
+        {
+            fileName = "vec0.so";
+        }
+
+        var path = Path.Combine(dir, fileName);
         if (!File.Exists(path))
         {
             throw new FileNotFoundException(
                 $"sqlite-vec native library not found at {path}. " +
                 "It should be copied to the output directory by the " +
-                "Infrastructure project's MSBuild step. Download from " +
-                "https://github.com/asg017/sqlite-vec/releases if missing.",
+                "Infrastructure project's MSBuild step, which pulls from " +
+                "node_modules/sqlite-vec-<rid>/. Run `npm install` at the " +
+                "repo root to populate node_modules for your platform. " +
+                "If the problem persists, download the lib from " +
+                "https://github.com/asg017/sqlite-vec/releases and place it " +
+                "at the expected path.",
                 path);
         }
         return path;
