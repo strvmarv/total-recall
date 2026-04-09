@@ -27,4 +27,28 @@
     <ProjectReference Include="..\TotalRecall.Server\TotalRecall.Server.csproj" />
     <ProjectReference Include="..\TotalRecall.Cli\TotalRecall.Cli.csproj" />
   </ItemGroup>
+
+  <!--
+    Fail the publish if the sqlite-vec native library is missing from the
+    output tree. The Content items in Infrastructure.csproj copy vec0.{so,
+    dylib,dll} from node_modules/sqlite-vec-<rid>/ into runtimes/, but they
+    use Condition="Exists(...)" so the copy silently skips when node_modules
+    is absent or the matching optional dep wasn't installed. Without this
+    guard a broken publish tree ships all the way to the GitHub Release and
+    only manifests at first-run SqliteConnection — exactly what 0.8.0-beta.5
+    shipped before this target landed.
+
+    Ordering: runs after the full Publish pipeline has copied everything
+    into $(PublishDir). RuntimeIdentifier is available in the error text so
+    the contributor knows which matrix leg failed.
+  -->
+  <Target Name="VerifyVecExtensionPublished" AfterTargets="Publish">
+    <PropertyGroup>
+      <_VecSoPath>$(PublishDir)runtimes/vec0.so</_VecSoPath>
+      <_VecDylibPath>$(PublishDir)runtimes/vec0.dylib</_VecDylibPath>
+      <_VecDllPath>$(PublishDir)runtimes/vec0.dll</_VecDllPath>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(_VecSoPath)') And !Exists('$(_VecDylibPath)') And !Exists('$(_VecDllPath)')"
+           Text="sqlite-vec native library missing from publish output at $(PublishDir)runtimes/ (looked for vec0.so / vec0.dylib / vec0.dll). The Infrastructure.csproj Content copy step pulls from node_modules/sqlite-vec-&lt;rid&gt;/ but found no matching variant for RuntimeIdentifier=$(RuntimeIdentifier). Fix: run `npm ci` at the repo root before `dotnet publish`, and verify package-lock.json contains a per-RID entry for your target (sqlite-vec-linux-x64 / -linux-arm64 / -darwin-x64 / -darwin-arm64 / -windows-x64)." />
+  </Target>
 </Project>
