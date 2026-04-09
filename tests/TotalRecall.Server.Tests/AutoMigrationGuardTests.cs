@@ -349,9 +349,9 @@ public sealed class AutoMigrationGuardTests : IDisposable
     public async Task Resume_PartialNetEmpty_NoBackup_BailsWithManualInstructions()
     {
         // Cell: dbPath = PartialNetEmpty (or Populated), backupPath absent
-        // Cannot auto-recover. Bail with the sqlite3-INSERT one-liner so
-        // the maintainer-tinkering case (pre-Plan-7-Task-7.-1 dev DB) has
-        // a documented manual repair path.
+        // AND the schema is truly partial (not all 6 content tables present).
+        // Cannot auto-recover. Bail with the sqlite3-INSERT one-liner so the
+        // maintainer-tinkering case has a documented manual repair path.
 
         SeedPartialNetDb(DbPath, withRowInContentTable: false);
 
@@ -369,6 +369,82 @@ public sealed class AutoMigrationGuardTests : IDisposable
         var log = stderr.ToString();
         Assert.Contains("partial .NET database", log);
         Assert.Contains("INSERT OR IGNORE INTO _meta", log);
+    }
+
+    /// <summary>
+    /// Builds a fully-migrated .NET DB via the real <c>MigrationRunner</c>,
+    /// then deletes the <c>migration_from_ts_complete</c> marker row to
+    /// mimic a DB created by a pre-Plan-7-Task-7.-1 build (0.6.7-era) that
+    /// shipped the schema but didn't stamp the fingerprint.
+    /// </summary>
+    private static void SeedCompleteNetDbMissingMarker(string path)
+    {
+        using (var seed = TotalRecall.Infrastructure.Storage.SqliteConnection.Open(path))
+        {
+            TotalRecall.Infrastructure.Storage.MigrationRunner.RunMigrations(seed);
+        }
+        SqliteConnection.ClearAllPools();
+
+        // Strip the marker row that RunMigrations just wrote.
+        using var conn = new SqliteConnection($"Data Source={path};Pooling=False");
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM _meta WHERE key = 'migration_from_ts_complete'";
+        cmd.ExecuteNonQuery();
+    }
+
+    [Fact]
+    public async Task Resume_CompleteNetMissingMarker_NoBackup_StampsMarker_AndReturnsAlreadyMigrated()
+    {
+        // Cell: dbPath = complete .NET schema, no marker, no backup
+        // This is the real-world shape hit on 2026-04-09: a user DB created
+        // by a 0.6.7-era .NET build that pre-dated the Plan 7 Task 7.-1
+        // marker-stamping. The DB has all 6 content tables, _schema_version
+        // populated, and real user data — it's a valid .NET DB that the
+        // guard must recognize and self-heal by stamping the marker in
+        // place. NO migration should be triggered. NO file should be moved.
+        SeedCompleteNetDbMissingMarker(DbPath);
+
+        var fake = new FakeMigrateCommand();
+        var stderr = new StringWriter();
+        var guard = new AutoMigrationGuard(fake, stderr);
+
+        var result = await guard.CheckAndMigrateAsync(DbPath, CancellationToken.None);
+
+        Assert.Equal(GuardResult.AlreadyMigrated, result);
+        Assert.Equal(0, fake.CallCount); // no migration
+        Assert.True(File.Exists(DbPath));
+        Assert.False(File.Exists(BackupPath));
+        Assert.Equal(0, FailedMigrationSidelineCount()); // nothing moved
+        Assert.True(DbHasMarker(DbPath)); // marker self-healed
+
+        var log = stderr.ToString();
+        Assert.Contains("missing the migration_from_ts_complete marker", log);
+        Assert.DoesNotContain("INSERT OR IGNORE INTO _meta", log); // no manual recipe
+    }
+
+    [Fact]
+    public async Task Resume_CompleteNetMissingMarker_NoBackup_SecondRun_IsIdempotent()
+    {
+        // After the first run stamps the marker, a subsequent run must
+        // short-circuit at the NetMigrated check — no new log output, no
+        // sideline files, no additional marker writes.
+        SeedCompleteNetDbMissingMarker(DbPath);
+
+        var fake = new FakeMigrateCommand();
+        var stderr = new StringWriter();
+        var guard = new AutoMigrationGuard(fake, stderr);
+
+        var first = await guard.CheckAndMigrateAsync(DbPath, CancellationToken.None);
+        var stderrAfterFirst = stderr.ToString();
+        var second = await guard.CheckAndMigrateAsync(DbPath, CancellationToken.None);
+        var stderrAfterSecond = stderr.ToString();
+
+        Assert.Equal(GuardResult.AlreadyMigrated, first);
+        Assert.Equal(GuardResult.AlreadyMigrated, second);
+        Assert.Equal(0, fake.CallCount);
+        Assert.Equal(stderrAfterFirst, stderrAfterSecond); // second call silent
+        Assert.Equal(0, FailedMigrationSidelineCount());
     }
 
     [Fact]

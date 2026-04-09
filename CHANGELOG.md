@@ -5,9 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> **Gap: 0.6.8 (GA), 0.7.0, 0.7.1, 0.7.2.** These TypeScript releases shipped
-> without changelog entries between 0.6.8-beta.5 and the 0.8.0 cutover. Backfill
-> from `git log v0.6.8-beta.5..v0.7.2` is tracked in `docs/TODO.md`.
+## 0.8.0 - 2026-04-09
+
+**General availability of the .NET-native rewrite.** 0.8.0 is the cutover from the TypeScript/bun runtime (0.7.x and earlier) to a single .NET 8 AOT binary per platform, distributed via the existing `@strvmarv/total-recall` npm package and the `strvmarv/total-recall-marketplace` plugin marketplace. The end-user install command is unchanged; the plugin manifest, MCP tool surface, skill, and hook contracts are preserved so upgrading is a drop-in replacement. The 9 beta cuts (`0.8.0-beta.1` through `0.8.0-beta.7`) document the full shape of the cutover — this GA entry summarizes the highlights and folds in one GA-blocking fix that was found during pre-release dogfood.
+
+### Changed
+
+- **Runtime: TypeScript on bun → .NET 8 AOT binary.** Every `src-ts/`, `bin-ts/`, `dist/`, and `tests-ts/` path was deleted in `0.8.0-beta.1`. The MCP server, CLI, embedding pipeline, sqlite-vec bridge, and migration tooling now live under `src/TotalRecall.{Cli,Core,Host,Infrastructure,Server}/` and ship as a pre-built single-file AOT executable per RID (`linux-x64`, `linux-arm64`, `osx-arm64`, `win-x64`). The `bun:sqlite` runtime dependency is gone; `Microsoft.Data.Sqlite` + a bundled `sqlite-vec` native per RID replaces it. `package.json` is reduced to a minimal `bin`/`files`/`scripts` shell whose `bin/start.js` launcher dispatches to the per-platform executable via `child_process.spawn`.
+
+- **Distribution: bun-runtime download → prebuilt binaries in the npm tarball.** The 0.6.8-era `scripts/postinstall.js` that downloaded a ~150MB bun runtime on every `npm install` is gone. The new `scripts/postinstall.js` (~20 lines) calls `ensureBinary()` once at install time, which resolves the host RID and either (a) extracts the matching pre-staged binary from the npm tarball or (b) downloads the matching per-RID GitHub Release asset (`total-recall-<rid>.tar.gz`) on first launch. Install and first-run work under `--ignore-scripts`, offline, and corporate-firewall conditions — the launcher's `ensureBinary()` retry at first spawn is the safety net.
+
+- **Release pipeline: `ci.yml` + `publish.yml` → `release.yml` matrix.** A single 5-leg matrix (`ubuntu-latest` x64, `ubuntu-24.04-arm`, `macos-14`, `windows-latest`) builds the AOT binary per RID, stages per-RID `.tar.gz` archives, attaches them to the GitHub Release, and publishes the npm tarball. Prerelease tags (`v<x>-beta.N`, `v<x>-rc.N`) publish to the matching npm dist-tag instead of `@latest`; stable tags publish to `@latest`. The workflow runs entirely on GitHub-hosted runners — no self-hosted toolchain, no cross-compile dance.
+
+- **Migration guard: stateless marker check → explicit 5-state machine.** `src/TotalRecall.Server/AutoMigrationGuard.cs` classifies the on-disk state into one of five DbFormats (`NotPresent`, `EmptyFile`, `TsFormat`, `PartialNet*`, `NetMigrated`), drives the TS→.NET migration from the `.ts-backup` source, and handles resume-from-partial-state scenarios without ever deleting user data. Every retried-failure path renames suspect files to `<dbPath>.failed-migration-<utc>` so unique data is always recoverable by hand even when the guard auto-resumes.
+
+### Fixed
+
+- **Guard self-heals fully-migrated .NET DBs missing the Plan 7 marker.** Pre-Plan-7-Task-7.-1 builds (0.6.7-era) produced real .NET DBs with `_schema_version` populated and all 6 content tables present but never stamped the `migration_from_ts_complete` marker in `_meta`. Every 0.8.0 beta through `beta.7` hard-failed on first open against these DBs, printing a manual `sqlite3 INSERT` recovery recipe. Two dogfood users hit this on two different machines. The guard now distinguishes "complete .NET schema missing only the marker" from "truly partial schema mid-migration" via a new `IsCompleteNetSchema` read-only check: when all 6 canonical content tables exist and `_schema_version` has at least one row, the guard stamps the marker in place and returns `AlreadyMigrated` instead of bailing. The manual-recipe bail still fires for the narrow "truly partial schema" case (some content tables missing, typically a rolled-back init from a build without the outer BEGIN wrapper). Two new `AutoMigrationGuardTests` cases exercise the self-heal path end-to-end using the real `MigrationRunner.RunMigrations` as the seed factory. Test count: 946 (up from 944 in beta.7).
+
+### Reference
+
+- Full per-beta detail in the `0.8.0-beta.1` through `0.8.0-beta.7` entries below — known-issue triage, state-machine transition table, `release.yml` matrix evolution, `sqlite-vec` per-RID lockfile fix, archive format unification (`.tar.gz` across all RIDs), and per-commit credit notes.
 
 ## 0.8.0-beta.7 - 2026-04-09
 
@@ -152,6 +170,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `scripts/postinstall.js` was downloading a bun runtime that nothing used (fixed in beta.3).
 - The install-path gap for git-clone-sourced plugin installs was not recognized until beta.3 dogfood (fixed in beta.4 via the `scripts/fetch-binary.js` download bootstrap).
 - The `darwin-x64` RID was dropped in beta.2, so Intel Mac is not shipped in the 0.8.x line.
+
+## 0.7.2 - 2026-04-08
+
+### Fixed
+- **`SessionStart` hook missed `resume` source.** `hooks/hooks.json` and `hooks/hooks-cursor.json` matched only `startup|clear|compact`, so resuming a prior session never fired `session-start/run.sh` — hot context wasn't injected and the announce flow was skipped on resume. Added `resume` to both matchers.
+- **Cursor and Copilot CLI bundled manifests shipped a known-broken `npx` invocation.** `.cursor-plugin/plugin.json` and `.copilot-plugin/plugin.json` declared `"command": "npx", "args": ["-y", "@strvmarv/total-recall"]`, but `AGENTS.md` and `README.md` already document that `npx` cannot resolve scoped-package binaries for this package. Replaced with `"command": "total-recall"` to match the documented install path in `INSTALL.md`.
+- **Drifted version pins in host-specific manifests.** `.cursor-plugin/plugin.json` and `.copilot-plugin/plugin.json` were stuck at `0.1.0` while everything else was on the 0.7.x train. Synced both to the current release.
+- **`async: false` removed from hook entries.** Not part of the Claude Code hook schema (only `type`, `command`, `timeout` are recognized). Was silently ignored, but it's noise that could mask a real config error later. Cleared from both `hooks/hooks.json` and `hooks/hooks-cursor.json`.
+- **`package-lock.json` was stale at `0.6.8-beta.7`** even though `package.json` had moved through 0.7.0 and 0.7.1. Resynced as part of the 0.7.2 bump via `npm version`.
+
+## 0.7.1 - 2026-04-08
+
+### Fixed
+- **CI was red on the 0.7.0 tag.** `src/e2e-phase3.test.ts` hardcoded `skills = ["total-recall"]` and asserted `skills/total-recall/SKILL.md` exists, which broke the moment the skill was renamed to `commands` in 0.7.0. Updated the test to cover both `commands` and `using-total-recall`. The `Publish to npm` workflow tied to `v0.7.0` never ran to completion because of this; 0.7.1 is cut from the fixed commit so the tarball actually lands on npm.
+
+### Docs
+- Finished the `/total-recall` → `/total-recall:commands` rename in the remaining docs that 0.7.0 missed:
+  - `CONTRIBUTING.md` eval workflow examples and the PR benchmark-regression checklist.
+  - `tests/manual/model-bootstrap.md` Scenario 3 manual-test script.
+  - `hooks/session-end/run.sh` header comment that still pointed at the old `skills/total-recall/session-end.md` path.
+
+## 0.7.0 - 2026-04-08
+
+### Breaking
+- **Skill rename: `total-recall` → `commands`.** The skill previously invoked as `/total-recall <subcommand>` is now `/total-recall:commands <subcommand>`. Rationale: the skill was named identically to the plugin, so the plugin:skill qualified form rendered as the awkward `total-recall:total-recall`. Renaming yields the cleaner `total-recall:commands` namespace and frees up the plain `total-recall` name for other meanings. The old shorthand `/total-recall` no longer resolves — update any scripts, aliases, or muscle memory accordingly. All README and INSTALL examples have been updated.
+
+### Fixed
+- **Cursor SessionStart hook resolved to an invalid path.** `hooks/hooks-cursor.json` referenced `$CLAUDE_PLUGIN_ROOT`, which is unset under Cursor; the hook command expanded to `/hooks/session-start/run.sh` and silently failed. Switched to `$CURSOR_PLUGIN_ROOT`, which the `run.sh` script already branches on for platform-aware JSON output.
+- **SessionEnd hook directive used `<IMPORTANT>` XML tags** that the companion SessionStart hook explicitly warns against ("some hosts strip XML-like tags from hook output"). Rewrote the payload as plain text framing matching the session-start style. The directive is already injected inside a `system-reminder` block by the host, so nested markup is redundant and cross-host inconsistent.
+- **MCP tool names were hardcoded with the `mcp__total-recall__*` prefix** throughout `skills/total-recall/SKILL.md`, `skills/using-total-recall/SKILL.md`, and `hooks/session-end/run.sh`. Claude Code exposes plugin MCP tools as `mcp__plugin_<plugin>_<server>__<tool>` (e.g. `mcp__plugin_total-recall_total-recall__session_start`), while Cursor / OpenCode / Copilot CLI use shorter forms. No single literal prefix works across hosts. Replaced with functional references (e.g. "call the total-recall `session_start` MCP tool") which the model resolves to whatever is on its toolbelt.
+
+### Changed
+- **Single source of truth for the SessionEnd directive.** Extracted the session-end instructions from the hardcoded bash string in `hooks/session-end/run.sh` into `skills/commands/session-end.md`. The hook now reads and injects this fragment at runtime, symmetric with how `session-start/run.sh` already injects the full SKILL.md. Eliminates the drift risk between the hook directive and the SKILL.md prose. `SKILL.md`'s Session End section is now a pointer to the fragment.
+- **Standardized the compactor agent reference** on the fully qualified `total-recall:compactor` form throughout SKILL.md, using-total-recall SKILL.md, and `hooks/session-end/run.sh`. Previously some references were qualified and others bare, which could fail to resolve under strict namespacing.
+- **Shortened the `commands` SKILL.md description frontmatter.** It previously enumerated all 18 subcommands inline (effectively a trigger list, not a when-to-use description). Replaced with a concise trigger phrase; the full command table remains in the body.
+- **Documented Cursor's lack of a SessionEnd hook** in the README Supported Platforms table. Cursor 1.7 only exposes a `stop` event that fires after every agent turn, not at actual session close, so auto-compaction is unavailable on Cursor — users must run `/total-recall:commands compact` manually.
+- **README now clarifies** that `/total-recall:commands` is implemented as a Claude Code skill (`skills/commands/SKILL.md`), not as a slash-command file under a `commands/` directory. The repo intentionally has no `commands/` dir.
+
+## 0.6.8-beta.7 - 2026-04-08
+
+### Added
+- **`TOTAL_RECALL_DB_PATH` env var for relocating only the SQLite database file.** Set to an absolute path (e.g. `/Users/you/Dropbox/memories.db`) or a `~/`-prefixed path to move `total-recall.db` out from under `<TOTAL_RECALL_HOME>`. `config.toml`, the embedding model cache, and export directories stay anchored to `TOTAL_RECALL_HOME`. Enables cloud-synced memories (Dropbox, iCloud) and shared-database workflows across multiple Claude Code workspaces — the existing `project` field on memories filters per-workspace views on top of a shared store. Validation runs once at MCP server startup: invalid values (relative paths, trailing separators, bare `~`) cause `src/index.ts` to print a single stderr line via `SqliteDbPathError` and `process.exit(1)` BEFORE loadConfig, bootstrapSqlite, the embedding model, or the MCP transport bind — no partial DB is ever created. `src/db/connection.ts` now calls `mkdirSync(dirname(dbPath), { recursive: true })` so deep custom paths whose parent directories don't exist yet get created on first run. `status` tool reports the resolved path (not the default literal) so "which DB am I actually talking to?" is always answerable. See INSTALL.md's new "Relocating the database" section for cloud-sync caveats (sqlite.org/howtocorrupt link, Dropbox WAL/SHM warnings), concurrent-writer semantics on shared workspaces, and a manual migration recipe.
+- **Smoke test passes 2 and 3.** `scripts/mcp-smoke-test.mjs` now runs three sequential passes under real bun on every CI matrix leg. Pass 2 spawns the MCP server with a `TOTAL_RECALL_DB_PATH` pointing at a nested path whose parent directory doesn't exist pre-spawn, and asserts that `status` reports the override, the DB file lands at exactly the configured location, the parent directory is auto-created, and vector search still hits the relocated DB. Pass 3 spawns the server with `TOTAL_RECALL_DB_PATH="./relative.db"` (invalid) and locks in the fail-fast contract: non-zero exit within a 5-second watchdog, expected `SqliteDbPathError` message on stderr including the raw bad value. Pass 3 uses `child_process.spawn` directly with a `close` event await and an `error` handler because the MCP SDK's transport init would crash during the child's early exit, masking the real assertion.
+
+### Changed
+- **Startup log line format.** `src/index.ts` now reports the resolved DB path via `getDbPath()` — previously it used `getDataDir()/total-recall.db`, which lied when `TOTAL_RECALL_DB_PATH` was set. The log line is otherwise unchanged: `total-recall: MCP server starting (db: <path>)`. If you have a log-scraping tool parsing the old literal format, it will still match the prefix but the tail will differ when a custom path is in use.
+
+## 0.6.8-beta.6 - 2026-04-08
+
+### Fixed
+- **MCP server failed at first query on macOS** with `This build of sqlite3 does not support dynamic extension loading`. `bun:sqlite` on darwin dlopens `/usr/lib/libsqlite3.dylib`, which Apple ships without `SQLITE_ENABLE_LOAD_EXTENSION`, so `sqlite-vec.load()` at `src/db/connection.ts:18` aborted every request. Root cause is a long-standing bun quirk (oven-sh/bun#5756). Added `src/db/sqlite-bootstrap.ts` which calls `Database.setCustomSQLite()` before any Database construction, pointing at Homebrew's keg-only libsqlite3 at `/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib` (Apple Silicon) or `/usr/local/opt/sqlite/lib/libsqlite3.dylib` (Intel). If neither is present, throws a `SqliteExtensionError` with a clear `brew install sqlite` remediation instead of surfacing the cryptic bun error later. Idempotent; no-op on linux and windows (their system libsqlite3 supports extension loading natively). Wired into both `getDb()` and the vitest test helper.
+- **CI was green on macOS despite this bug** because `vitest.config.ts` aliases `bun:sqlite` to a `better-sqlite3` shim in `tests/helpers/bun-sqlite-shim.ts`, and better-sqlite3 bundles its own SQLite with extension loading enabled. Production paths running under real bun never touched the shim, so the darwin regression slipped past all three CI matrix legs. The shim now also exposes a static `setCustomSQLite` no-op so the bootstrap logic can be exercised by tests on any platform.
+- **`scripts/postinstall.js` now warns at install time** when running on darwin without an extension-capable libsqlite3, surfacing the same `brew install sqlite` instruction during `npm install` rather than at first MCP request. Non-fatal — install still succeeds.
+- **`INSTALL.md` documents the macOS prerequisite** under a new "Prerequisites" section at the top, so AI assistants walking users through setup won't hit the bug blind.
+- **`getDataDir()` on Windows**: `src/config.ts:13` fell back to `join(process.env.HOME ?? "~", ".total-recall")`. `HOME` is undefined on Windows (Node uses `USERPROFILE`), so every Windows install that didn't set `TOTAL_RECALL_HOME` resolved its data dir to the literal string `~/.total-recall` — stored under whatever the current working directory was. Replaced with `os.homedir()`, which resolves correctly on every platform. Same class of bug as the `detectProject` Windows fix in 0.6.8-beta.5.
+
+### Added
+- **`scripts/mcp-smoke-test.mjs` + `npm run smoke`**: end-to-end MCP smoke test that launches the built `dist/index.js` under real bun (via `bin/start.cjs`) and drives it over stdio using the `@modelcontextprotocol/sdk` client. Runs `tools/list`, `status`, `memory_store`, `memory_search` (critical vector-query path), and `memory_delete`, asserting every step. Uses `TOTAL_RECALL_HOME=<mkdtemp>` so runs never touch the user's real database. Wired into the `test-bun` CI job on all three matrix legs (ubuntu, macos, windows) right after `bun run build`. This is the gap that let the darwin extension-loading bug ship undetected: vitest aliases `bun:sqlite` to a `better-sqlite3` shim, so the 304 unit tests exercise better-sqlite3 — not the real runtime. Any future regression in the bun:sqlite → sqlite-vec → embeddings → vector-search pipeline will now fail CI before reaching users.
 
 ## 0.6.8-beta.5 - 2026-04-06
 

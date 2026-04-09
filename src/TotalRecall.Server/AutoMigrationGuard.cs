@@ -23,8 +23,12 @@ namespace TotalRecall.Server;
 ///                          |                             |   left in place — harmless)
 ///   dbPath = TsFormat      | rename db→backup, migrate   | move db aside as .failed-migration-
 ///                          |                             |   &lt;ts&gt;, resume migrate from backup
+///   dbPath = PartialNet*   | if all 6 content tables     | move db aside as .failed-migration-
+///     (complete schema)    |   present: stamp marker,    |   &lt;ts&gt;, resume migrate from backup
+///                          |   return AlreadyMigrated    |
+///                          |   (self-heal pre-Plan-7 DB) |
 ///   dbPath = PartialNet*   | abort with manual-recovery  | move db aside as .failed-migration-
-///                          |   instructions              |   &lt;ts&gt;, resume migrate from backup
+///     (incomplete schema)  |   instructions              |   &lt;ts&gt;, resume migrate from backup
 ///   dbPath = EmptyFile     | NoOldDbFound (file is just  | resume migrate from backup
 ///                          |   a SQLite header w/ no     |
 ///                          |   tables — rolled-back init)|
@@ -175,22 +179,47 @@ public sealed class AutoMigrationGuard
         // (5) Partial .NET DB at dbPath (has _schema_version but no marker).
         //     Two sub-cases differing only in the log message — the action
         //     is identical: move the partial aside, resume from backup.
-        //     If no backup exists we can't auto-recover and bail with manual
-        //     instructions. This is the maintainer-tinkering case from the
-        //     pre-existing code comment (a fresh .NET dev DB created before
-        //     the marker-stamp landed in MigrationRunner).
+        //     If no backup exists, we split on schema completeness:
+        //       - Complete schema (all 6 canonical content tables present):
+        //         this is the pre-Plan-7-Task-7.-1 shape where an older .NET
+        //         build created a valid DB but never stamped the marker.
+        //         Self-heal by writing the marker in place — NEVER touch
+        //         user data. GA regression fix (2026-04-09).
+        //       - Truly partial schema (missing content tables, e.g. a
+        //         mid-transaction failure from a build without the outer
+        //         BEGIN wrapper): no safe recovery, bail with the manual
+        //         sqlite3 INSERT recipe.
         if (dbFormat == DbFormat.PartialNetEmpty || dbFormat == DbFormat.PartialNetPopulated)
         {
             if (!backupExists)
             {
+                if (IsCompleteNetSchema(dbPath))
+                {
+                    _stderr.WriteLine(
+                        $"total-recall: detected fully-migrated .NET database at " +
+                        $"{Path.GetFileName(dbPath)} missing the {MarkerKey} marker " +
+                        "(likely from a build that pre-dated MigrationRunner.RunMigrations " +
+                        "Plan 7 Task 7.-1) — self-healing by stamping the marker in place");
+                    try
+                    {
+                        WriteMarker(dbPath);
+                    }
+                    catch (Exception ex)
+                    {
+                        _stderr.WriteLine(
+                            $"total-recall: migration failed: could not stamp recovery marker: {ex.Message}");
+                        return GuardResult.MigrationFailed;
+                    }
+                    return GuardResult.AlreadyMigrated;
+                }
+
                 _stderr.WriteLine(
                     "total-recall: migration guard cannot proceed — " +
                     $"{Path.GetFileName(dbPath)} appears to be a partial .NET database " +
-                    "(has _schema_version but no migration_from_ts_complete marker), " +
-                    "and no .ts-backup exists to migrate from. If this is actually a " +
-                    "valid .NET DB created by a build that pre-dates the marker stamp " +
-                    "(MigrationRunner.RunMigrations Plan 7 Task 7.-1), repair it once " +
-                    "by running:");
+                    "(has _schema_version but no migration_from_ts_complete marker, and " +
+                    "the schema is incomplete — not all content tables exist). No " +
+                    ".ts-backup exists to migrate from. If this is actually a valid " +
+                    ".NET DB, repair it once by running:");
                 _stderr.WriteLine(
                     $"  sqlite3 \"{dbPath}\" \"INSERT OR IGNORE INTO _meta(key,value) " +
                     "VALUES('migration_from_ts_complete',strftime('%s','now'))\"");
@@ -337,6 +366,63 @@ public sealed class AutoMigrationGuard
             // (just a SQLite header from a rolled-back transaction), treat
             // as empty.
             return tables.Count > 0 ? DbFormat.TsFormat : DbFormat.EmptyFile;
+        }
+        finally
+        {
+            conn.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Read-only check: does the file at <paramref name="dbPath"/> contain
+    /// a fully-formed .NET schema? Returns true iff all 6 canonical content
+    /// tables exist AND <c>_schema_version</c> contains at least one row.
+    /// Used by the self-heal path in <see cref="CheckAndMigrateAsync"/> to
+    /// distinguish a valid-but-unmarked .NET DB from a truly partial one.
+    /// </summary>
+    private bool IsCompleteNetSchema(string dbPath)
+    {
+        SqliteConnection conn;
+        try
+        {
+            conn = new SqliteConnection($"Data Source={dbPath};Pooling=False;Mode=ReadOnly");
+            conn.Open();
+        }
+        catch
+        {
+            return false;
+        }
+
+        try
+        {
+            var tables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table'";
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    tables.Add(reader.GetString(0));
+                }
+            }
+
+            foreach (var name in ContentTableNames)
+            {
+                if (!tables.Contains(name)) return false;
+            }
+
+            if (!tables.Contains("_schema_version")) return false;
+
+            using var countCmd = conn.CreateCommand();
+            countCmd.CommandText = "SELECT COUNT(*) FROM _schema_version";
+            try
+            {
+                return countCmd.ExecuteScalar() is long l && l > 0;
+            }
+            catch
+            {
+                return false;
+            }
         }
         finally
         {
