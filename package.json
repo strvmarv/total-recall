@@ -1,36 +1,25 @@
 {
   "name": "@strvmarv/total-recall",
-  "version": "0.6.8-beta.5",
+  "version": "0.8.0",
   "description": "Multi-tiered memory and knowledge base plugin for TUI coding assistants",
   "type": "module",
-  "main": "dist/index.js",
   "bin": {
     "total-recall": "bin/start.js"
   },
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:dist": "vitest run --config vitest.dist.config.ts",
-    "typecheck": "tsc --noEmit",
     "prepare": "git config core.hooksPath git-hooks || true",
     "postinstall": "node scripts/postinstall.js",
-    "prepublishOnly": "npm run build && npm run test:dist && node scripts/verify-binaries.js",
-    "benchmark": "bun dist/eval/ci-smoke.js"
+    "prepublishOnly": "node scripts/verify-binaries.js"
   },
   "files": [
-    "dist/",
     "bin/",
     "binaries/",
     "models/",
-    "bin-ts/",
+    "scripts/",
+    "eval/",
     "skills/",
     "agents/",
     "hooks/",
-    "eval/",
-    "scripts/",
-    "src-ts/defaults.toml",
     ".claude-plugin/",
     ".copilot-plugin/",
     ".cursor-plugin/",
@@ -75,22 +64,7 @@
   "engines": {
     "node": ">=20.0.0"
   },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "onnxruntime-node": "^1.20.0",
-    "proper-lockfile": "^4.1.2",
-    "smol-toml": "^1.6.1",
-    "sqlite-vec": "^0.1.0"
-  },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/bun": "latest",
-    "@types/node": "^22.0.0",
-    "@types/proper-lockfile": "^4.1.4",
-    "better-sqlite3": "^12.8.0",
-    "conventional-changelog-cli": "^5.0.0",
-    "tsup": "^8.0.0",
-    "typescript": "^5.0.0",
-    "vitest": "^4.1.2"
+    "sqlite-vec": "^0.1.0"
   }
 }
