@@ -193,6 +193,8 @@ public static class MigrationRunner
         Migration3_Fts5,
         // Migration 4: compaction_log.source column (history tagging)
         Migration4_CompactionLogSource,
+        // Migration 5: orphan vec/content row cleanup (0.6.7 hot-fix)
+        Migration5_CleanupOrphans,
     };
 
     /// <summary>
@@ -362,6 +364,61 @@ public static class MigrationRunner
     {
         Exec(conn, tx,
             "ALTER TABLE compaction_log ADD COLUMN source TEXT NOT NULL DEFAULT 'compaction'");
+    }
+
+    /// <summary>
+    /// Migration 5 — delete orphan rows across all 6 content/vec table
+    /// pairs. One-time hot-fix for DBs built under 0.6.7 and earlier,
+    /// where <c>MemoryDeleteHandler</c> called <c>store.Delete</c> before
+    /// <c>vec.DeleteEmbedding</c>, producing orphan vec rows, and the
+    /// un-transacted <c>memory_store</c> path occasionally produced
+    /// orphan content rows when the follow-up vec insert failed. The
+    /// corresponding handler bug is fixed in the same release; this
+    /// migration cleans up the historical debris left behind.
+    /// </summary>
+    private static void Migration5_CleanupOrphans(
+        MsSqliteConnection conn,
+        Microsoft.Data.Sqlite.SqliteTransaction tx)
+    {
+        CleanupOrphanRowsInTransaction(conn, tx);
+    }
+
+    /// <summary>
+    /// Delete orphan rows from every <c>(tier, type)</c> content/vec
+    /// table pair. An orphan is a vec row whose rowid has no matching
+    /// content row, or a content row whose rowid has no matching vec
+    /// row. Both directions are cleaned in a single transaction. Safe
+    /// to call repeatedly; idempotent. Exposed publicly so maintenance
+    /// tooling (and tests) can invoke the sweep directly without
+    /// manipulating <c>_schema_version</c>.
+    /// </summary>
+    public static void CleanupOrphanRows(MsSqliteConnection conn)
+    {
+        ArgumentNullException.ThrowIfNull(conn);
+        using var tx = conn.BeginTransaction();
+        CleanupOrphanRowsInTransaction(conn, tx);
+        tx.Commit();
+    }
+
+    private static void CleanupOrphanRowsInTransaction(
+        MsSqliteConnection conn,
+        Microsoft.Data.Sqlite.SqliteTransaction tx)
+    {
+        foreach (var (tier, type) in AllTablePairs)
+        {
+            var contentTable = TableName(tier, type);
+            var vecTable = VecTableName(tier, type);
+
+            // Orphan vec rows: rowids present in vec but not in content.
+            Exec(conn, tx,
+                $"DELETE FROM {vecTable} " +
+                $"WHERE rowid NOT IN (SELECT rowid FROM {contentTable})");
+
+            // Orphan content rows: rowids present in content but not in vec.
+            Exec(conn, tx,
+                $"DELETE FROM {contentTable} " +
+                $"WHERE rowid NOT IN (SELECT rowid FROM {vecTable})");
+        }
     }
 
     // --- helpers ----------------------------------------------------------

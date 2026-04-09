@@ -145,8 +145,8 @@ public sealed class SchemaTests
         Assert.True(reader.Read());
         var count = reader.GetInt64(0);
         var maxVersion = reader.GetInt64(1);
-        Assert.Equal(4L, count);
-        Assert.Equal(4L, maxVersion);
+        Assert.Equal(5L, count);
+        Assert.Equal(5L, maxVersion);
     }
 
     [Fact]
@@ -162,6 +162,138 @@ public sealed class SchemaTests
         cmd.Parameters.AddWithValue("$k", MigrationRunner.MigrationCompleteMarkerKey);
         var value = cmd.ExecuteScalar() as string;
         Assert.False(string.IsNullOrEmpty(value));
+    }
+
+    // --- Migration 5 / orphan cleanup -------------------------------------
+
+    private static void InsertContentRow(
+        Microsoft.Data.Sqlite.SqliteConnection conn, string table, string id)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $@"
+INSERT INTO {table}
+  (id, content, source, source_tool, project, tags,
+   created_at, updated_at, last_accessed_at, access_count,
+   decay_score, parent_id, collection_id, metadata)
+VALUES
+  ($id, 'c', NULL, NULL, NULL, '[]',
+   1, 1, 1, 0,
+   1.0, NULL, NULL, '{{}}')";
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.ExecuteNonQuery();
+    }
+
+    private static void InsertVecRow(
+        Microsoft.Data.Sqlite.SqliteConnection conn, string vecTable, long rowid)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            $"INSERT INTO {vecTable} (rowid, embedding) VALUES ($rowid, zeroblob(1536))";
+        cmd.Parameters.AddWithValue("$rowid", rowid);
+        cmd.ExecuteNonQuery();
+    }
+
+    private static long CountContent(
+        Microsoft.Data.Sqlite.SqliteConnection conn, string table)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT COUNT(*) FROM {table}";
+        return (long)cmd.ExecuteScalar()!;
+    }
+
+    private static bool VecRowidExists(
+        Microsoft.Data.Sqlite.SqliteConnection conn, string vecTable, long rowid)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT EXISTS(SELECT 1 FROM {vecTable} WHERE rowid = $rowid)";
+        cmd.Parameters.AddWithValue("$rowid", rowid);
+        return (long)cmd.ExecuteScalar()! == 1;
+    }
+
+    [Fact]
+    public void CleanupOrphanRows_RemovesOrphanVecRow()
+    {
+        // Orphan type 1: a vec row whose rowid has no matching content
+        // row. Produced in 0.6.7 by the wrong delete order in
+        // MemoryDeleteHandler (content deleted before vec, so the vec
+        // rowid lookup returned null and left the vec row behind).
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        InsertContentRow(conn, "hot_memories", "valid");
+        InsertVecRow(conn, "hot_memories_vec", rowid: 1);
+        InsertVecRow(conn, "hot_memories_vec", rowid: 99);
+
+        MigrationRunner.CleanupOrphanRows(conn);
+
+        Assert.True(VecRowidExists(conn, "hot_memories_vec", 1));
+        Assert.False(VecRowidExists(conn, "hot_memories_vec", 99));
+    }
+
+    [Fact]
+    public void CleanupOrphanRows_RemovesOrphanContentRow()
+    {
+        // Orphan type 2: a content row with no matching vec row.
+        // Produced when a memory_store call's vec insert failed (e.g.
+        // colliding with a type-1 orphan) while the content insert had
+        // already committed, since the two were not wrapped in a
+        // transaction. Must also be cleaned up.
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        InsertContentRow(conn, "hot_memories", "valid");
+        InsertVecRow(conn, "hot_memories_vec", rowid: 1);
+        InsertContentRow(conn, "hot_memories", "orphan");
+
+        MigrationRunner.CleanupOrphanRows(conn);
+
+        Assert.Equal(1L, CountContent(conn, "hot_memories"));
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT id FROM hot_memories";
+        Assert.Equal("valid", cmd.ExecuteScalar() as string);
+    }
+
+    [Fact]
+    public void CleanupOrphanRows_CoversAllTierTypePairs()
+    {
+        // Pin the cleanup sweep to all 6 (tier, type) pairs so a future
+        // change can't silently skip one table.
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        var pairs = new[]
+        {
+            ("hot_memories",  "hot_memories_vec"),
+            ("warm_memories", "warm_memories_vec"),
+            ("cold_memories", "cold_memories_vec"),
+            ("hot_knowledge",  "hot_knowledge_vec"),
+            ("warm_knowledge", "warm_knowledge_vec"),
+            ("cold_knowledge", "cold_knowledge_vec"),
+        };
+        foreach (var (_, vec) in pairs)
+            InsertVecRow(conn, vec, rowid: 42);
+
+        MigrationRunner.CleanupOrphanRows(conn);
+
+        foreach (var (_, vec) in pairs)
+            Assert.False(VecRowidExists(conn, vec, 42), $"orphan at {vec}.rowid=42 not cleaned");
+    }
+
+    [Fact]
+    public void CleanupOrphanRows_PreservesAlignedRows()
+    {
+        // A fully-aligned row (content + matching vec) must survive
+        // cleanup unchanged.
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        InsertContentRow(conn, "hot_memories", "keep");
+        InsertVecRow(conn, "hot_memories_vec", rowid: 1);
+
+        MigrationRunner.CleanupOrphanRows(conn);
+
+        Assert.Equal(1L, CountContent(conn, "hot_memories"));
+        Assert.True(VecRowidExists(conn, "hot_memories_vec", 1));
     }
 
     [Fact]
