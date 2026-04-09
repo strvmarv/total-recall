@@ -448,6 +448,47 @@ public sealed record MemoryImportResultDto(
     [property: JsonPropertyName("skipped_count")] int SkippedCount,
     [property: JsonPropertyName("errors")] string[] Errors);
 
+// ---- Task 6.0b: KB admin DTOs ----
+//
+// Wire shapes for the 4 KB-admin MCP handlers added in Plan 6 Task 6.0b
+// (kb_list_collections, kb_refresh, kb_remove, kb_summarize). These mirror
+// the corresponding CLI command outputs (and src-ts/tools/kb-tools.ts for
+// kb_summarize, which is a parity port that never landed in Plan 5).
+
+public sealed record KbCollectionDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("document_count")] int DocumentCount,
+    [property: JsonPropertyName("chunk_count")] int ChunkCount,
+    [property: JsonPropertyName("created_at")] long CreatedAt,
+    [property: JsonPropertyName("summary")] string? Summary,
+    [property: JsonPropertyName("source_path")] string? SourcePath);
+
+public sealed record KbListCollectionsResultDto(
+    [property: JsonPropertyName("collections")] KbCollectionDto[] Collections,
+    [property: JsonPropertyName("count")] int Count);
+
+public sealed record KbRefreshResultDto(
+    [property: JsonPropertyName("collection_id")] string CollectionId,
+    [property: JsonPropertyName("files")] int Files,
+    [property: JsonPropertyName("chunks")] int Chunks,
+    [property: JsonPropertyName("refreshed")] bool Refreshed);
+
+public sealed record KbRemoveResultDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("removed")] bool Removed,
+    [property: JsonPropertyName("cascaded_count")] int CascadedCount);
+
+public sealed record KbSummarizeResultDto(
+    [property: JsonPropertyName("collection")] string Collection,
+    [property: JsonPropertyName("summarized")] bool Summarized);
+
+// kb_summarize not-found wire shape — matches the TS error string from
+// src-ts/tools/kb-tools.ts:298-309 exactly so MCP clients that key off
+// the error text keep working post-port.
+public sealed record KbErrorDto(
+    [property: JsonPropertyName("error")] string Error);
+
 // ---------- source-gen context ----------
 
 [JsonSourceGenerationOptions(
@@ -518,6 +559,14 @@ public sealed record MemoryImportResultDto(
 [JsonSerializable(typeof(ExportEntryDto[]))]
 [JsonSerializable(typeof(MemoryExportResultDto))]
 [JsonSerializable(typeof(MemoryImportResultDto))]
+// ---- Task 6.0b: KB admin DTOs ----
+[JsonSerializable(typeof(KbCollectionDto))]
+[JsonSerializable(typeof(KbCollectionDto[]))]
+[JsonSerializable(typeof(KbListCollectionsResultDto))]
+[JsonSerializable(typeof(KbRefreshResultDto))]
+[JsonSerializable(typeof(KbRemoveResultDto))]
+[JsonSerializable(typeof(KbSummarizeResultDto))]
+[JsonSerializable(typeof(KbErrorDto))]
 public partial class JsonContext : JsonSerializerContext
 {
 }
