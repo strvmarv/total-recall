@@ -226,7 +226,12 @@ public sealed class ConfigLoaderTests : IDisposable
     public void GetDataDir_TotalRecallHomeUnset_ReturnsHomeDotTotalRecall()
     {
         Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", null);
-        var home = Environment.GetEnvironmentVariable("HOME") ?? "~";
+        // Mirror the fallback chain in the impl: HOME, then USERPROFILE
+        // (Windows), then literal "~" as a last resort. Without this the
+        // test was Linux-only — Windows always falls through to USERPROFILE.
+        var home = Environment.GetEnvironmentVariable("HOME")
+            ?? Environment.GetEnvironmentVariable("USERPROFILE")
+            ?? "~";
 
         var result = ConfigLoader.GetDataDir();
 

@@ -118,7 +118,12 @@ public sealed class ConfigLoader : IConfigLoader
             var home = Environment.GetEnvironmentVariable("HOME")
                 ?? Environment.GetEnvironmentVariable("USERPROFILE")
                 ?? string.Empty;
-            expanded = Path.Combine(home, trimmed.Substring(2));
+            // Normalize the rest-of-path's separators to the platform's
+            // convention before combining — Path.Combine does NOT rewrite
+            // internal separators of its arguments, so a "~/tr/memories.db"
+            // on Windows would otherwise leave forward slashes mixed in.
+            var rest = trimmed.Substring(2).Replace('/', Path.DirectorySeparatorChar);
+            expanded = Path.Combine(home, rest);
         }
 
         if (!Path.IsPathRooted(expanded))
