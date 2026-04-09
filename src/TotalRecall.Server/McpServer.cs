@@ -64,6 +64,13 @@ public sealed class McpServer
     /// client sends <c>notifications/initialized</c>.</summary>
     public void SetOnInitialized(Func<Task>? onInitialized) => _onInitialized = onInitialized;
 
+    // TODO(Plan 6+): thread a CancellationToken through this dispatch loop so
+    // Ctrl+C / SIGTERM from Host/Program.cs can interrupt a blocking
+    // Console.In.ReadLineAsync() instead of waiting for the next message.
+    // Discovered during 6.3a review — Program.cs wires CancelKeyPress to a
+    // CTS but RunAsync's signature doesn't accept a CT. Disposal still runs
+    // via the Host's try/finally, so resources release correctly on signal;
+    // this is an in-flight-message responsiveness gap, not a correctness bug.
     public async Task<int> RunAsync()
     {
         while (true)

@@ -53,6 +53,16 @@ public sealed class AutoMigrationGuard
         // Peek at _meta on whatever currently sits at dbPath. On first run this
         // is the TS-format DB (no marker); on subsequent runs this is the new
         // DB (marker present).
+        //
+        // TODO(Plan 7): false-positive on fresh .NET-native DB. The "no marker"
+        // signal currently means "TS-format" by exclusion, but a brand-new
+        // .NET DB also has no marker until something writes one. The migrator
+        // then tries to read TS schema columns and fails with a confusing
+        // disk-I/O or schema-mismatch error. Fix options: (a) MigrationRunner
+        // writes a marker on fresh-init schema migration, OR (b) the guard
+        // sniffs for a positive TS-format signal (TS-specific table or column)
+        // before deciding to migrate. Discovered during 6.3a smoke testing.
+        // Must be fixed before Plan 7 personal install validation.
         if (TryReadMarker(dbPath))
         {
             return GuardResult.AlreadyMigrated;

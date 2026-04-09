@@ -6,7 +6,7 @@
 //
 //   1. BuildRegistry(...) — pure function that takes pre-built infrastructure
 //      singletons plus a SessionLifecycle and StatusOptions, constructs all
-//      33 handlers, and registers them in a ToolRegistry. Pure means no I/O
+//      32 handlers, and registers them in a ToolRegistry. Pure means no I/O
 //      and no disposal — all of that is the caller's job. This seam exists
 //      for testability: a unit test can inject fakes and assert the handler
 //      set is complete (count + expected names) without opening a real DB.
