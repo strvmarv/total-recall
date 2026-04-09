@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "total-recall": "dist/index.js"
+    "total-recall": "bin/start.js"
   },
   "scripts": {
     "build": "tsup",
@@ -16,11 +16,13 @@
     "typecheck": "tsc --noEmit",
     "prepare": "git config core.hooksPath git-hooks || true",
     "postinstall": "node scripts/postinstall.js",
-    "prepublishOnly": "npm run build && npm run test:dist",
+    "prepublishOnly": "npm run build && npm run test:dist && node scripts/verify-binaries.js",
     "benchmark": "bun dist/eval/ci-smoke.js"
   },
   "files": [
     "dist/",
+    "bin/",
+    "binaries/",
     "bin-ts/",
     "skills/",
     "agents/",
