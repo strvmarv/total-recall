@@ -76,28 +76,45 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
 
+      # The tag name drives -p:Version so the AOT binary reports the right
+      # string from `total-recall --version` (CliApp.ResolveAppVersion reads
+      # AssemblyInformationalVersionAttribute at runtime). Stripping the
+      # leading "v" matches the SemVer convention embedded in package.json.
+      # Pre-release suffixes (e.g. "0.8.0-beta.5") flow through unchanged
+      # because InformationalVersion accepts SemVer 2.0 strings.
+      #
+      # REF_NAME is passed via env: (never interpolated directly into run:)
+      # per GitHub Actions script-injection guidance.
       - name: Publish (Unix)
         if: runner.os != 'Windows'
         shell: bash
         env:
           RID: ${{ matrix.rid }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          VERSION="${REF_NAME#v}"
           dotnet publish src/TotalRecall.Host/TotalRecall.Host.csproj \
             -c Release \
             -r "$RID" \
-            -p:PublishAot=true
+            -p:PublishAot=true \
+            -p:Version="$VERSION" \
+            -p:InformationalVersion="$VERSION"
 
       - name: Publish (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           RID: ${{ matrix.rid }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
+          $version = $env:REF_NAME -replace '^v',''
           dotnet publish src/TotalRecall.Host/TotalRecall.Host.csproj `
             -c Release `
             -r "$env:RID" `
-            -p:PublishAot=true
+            -p:PublishAot=true `
+            -p:Version="$version" `
+            -p:InformationalVersion="$version"
 
       - name: Stage publish tree into binaries (Unix)
         if: runner.os != 'Windows'
@@ -232,28 +249,45 @@ jobs:
 
       - name: Stage per-RID release assets
         shell: bash
-        # softprops/action-gh-release attaches files by basename, so four
-        # binaries all named "total-recall" would collide down to one asset
-        # on the GitHub Release. Stage renamed copies into release-assets/
-        # so each RID gets its own distinct asset name. This lets
-        # scripts/fetch-binary.js download per-RID directly from the release
-        # via a stable URL pattern.
+        # The AOT binary alone is NOT runnable — it depends on sibling
+        # libonnxruntime.dylib, vec0.dylib (via sqlite-vec), the models/
+        # subtree, and any other native runtime assets staged into
+        # binaries/<rid>/ by the matrix publish step. Uploading just the
+        # executable (as 0.8.0-beta.4 did) produces a TypeInitializationException
+        # at first DB open because Microsoft.ML.OnnxRuntime cannot P/Invoke
+        # into the missing libonnxruntime.dylib.
+        #
+        # Ship the entire publish tree per RID as a compressed archive:
+        #   - Unix RIDs  -> .tar.gz (preserves executable bit + symlinks)
+        #   - Windows    -> .zip    (native Windows tooling)
+        #
+        # scripts/fetch-binary.js downloads the matching archive, extracts
+        # it into binaries/<rid>/, and re-asserts the executable bit.
         run: |
           set -euo pipefail
           mkdir -p release-assets
-          cp binaries/linux-x64/total-recall     release-assets/total-recall-linux-x64
-          cp binaries/linux-arm64/total-recall   release-assets/total-recall-linux-arm64
-          cp binaries/osx-arm64/total-recall     release-assets/total-recall-osx-arm64
-          cp binaries/win-x64/total-recall.exe   release-assets/total-recall-win-x64.exe
+          # tar -C <dir> -czf <out> . packs the contents of <dir> at the
+          # archive root so extraction with `tar -xzf archive -C dest`
+          # drops them straight into dest/ without a leading <rid>/ dir.
+          tar -C binaries/linux-x64   -czf release-assets/total-recall-linux-x64.tar.gz   .
+          tar -C binaries/linux-arm64 -czf release-assets/total-recall-linux-arm64.tar.gz .
+          tar -C binaries/osx-arm64   -czf release-assets/total-recall-osx-arm64.tar.gz   .
+          # Windows .zip uses bsdtar (shipped with GitHub-hosted runners and
+          # with Git for Windows) so we can keep this step on bash even on
+          # the ubuntu publish runner. bsdtar -a auto-detects the format
+          # from the extension, producing a standard .zip.
+          tar -C binaries/win-x64 -a -cf release-assets/total-recall-win-x64.zip .
           ls -la release-assets/
+          echo "--- archive contents preview ---"
+          tar -tzf release-assets/total-recall-osx-arm64.tar.gz | head -20
 
-      - name: Attach binaries to GitHub release
+      - name: Attach archives to GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release-assets/total-recall-linux-x64
-            release-assets/total-recall-linux-arm64
-            release-assets/total-recall-osx-arm64
-            release-assets/total-recall-win-x64.exe
+            release-assets/total-recall-linux-x64.tar.gz
+            release-assets/total-recall-linux-arm64.tar.gz
+            release-assets/total-recall-osx-arm64.tar.gz
+            release-assets/total-recall-win-x64.zip
           prerelease: ${{ contains(github.ref_name, '-') }}
           fail_on_unmatched_files: true

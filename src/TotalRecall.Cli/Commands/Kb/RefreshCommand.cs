@@ -15,6 +15,7 @@ using Microsoft.FSharp.Core;
 using TotalRecall.Cli.Internal;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Config;
+using TotalRecall.Infrastructure.Diagnostics;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Ingestion;
 using TotalRecall.Infrastructure.Search;
@@ -110,7 +111,7 @@ public sealed class RefreshCommand : ICliCommand
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"kb refresh: failed to open db: {ex.Message}");
+            ExceptionLogger.LogChain("kb refresh: failed to open db", ex);
             return 1;
         }
 

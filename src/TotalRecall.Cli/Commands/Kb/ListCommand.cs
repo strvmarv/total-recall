@@ -25,6 +25,7 @@ using Microsoft.FSharp.Core;
 using Spectre.Console;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Config;
+using TotalRecall.Infrastructure.Diagnostics;
 using TotalRecall.Infrastructure.Storage;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
@@ -86,7 +87,7 @@ public sealed class ListCommand : ICliCommand
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"kb list: failed to open db: {ex.Message}");
+            ExceptionLogger.LogChain("kb list: failed to open db", ex);
             return 1;
         }
 

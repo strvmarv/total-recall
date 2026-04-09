@@ -20,6 +20,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Threading.Tasks;
 using Spectre.Console;
 
@@ -54,9 +55,35 @@ public interface ICliCommand
 public static class CliApp
 {
     private const string AppName = "total-recall";
-    private const string AppVersion = "0.1.0";
+
+    // Read the version from the entry-point assembly's InformationalVersion
+    // attribute at runtime. This is set by `dotnet publish -p:Version=X` in
+    // the release workflow; local dev builds without an explicit Version
+    // fall back to the csproj default (1.0.0) which is fine for non-release
+    // use. Reflection over assembly attributes is AOT-safe — attributes are
+    // metadata, not IL, and are preserved through trimming.
+    //
+    // Prior implementation hardcoded "0.1.0" as a const; that stuck in every
+    // release binary including 0.8.0-beta.4, so `total-recall --version`
+    // always lied. See Fix C in the beta-native-deps PR for the wiring.
+    private static readonly string AppVersion = ResolveAppVersion();
+
     private const int ExitOk = 0;
     private const int ExitUsage = 2;
+
+    private static string ResolveAppVersion()
+    {
+        var asm = Assembly.GetEntryAssembly() ?? typeof(CliApp).Assembly;
+        var info = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (!string.IsNullOrEmpty(info))
+        {
+            // AssemblyInformationalVersion can carry a +<sha> suffix added by
+            // SourceLink; strip it for human-facing output.
+            var plus = info.IndexOf('+');
+            return plus >= 0 ? info[..plus] : info;
+        }
+        return asm.GetName().Version?.ToString(3) ?? "unknown";
+    }
 
     // Overrideable for tests. Null => use the real registry.
     private static IReadOnlyList<ICliCommand>? _overrideRegistry;

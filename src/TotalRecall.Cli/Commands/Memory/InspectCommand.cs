@@ -21,6 +21,7 @@ using Spectre.Console;
 using TotalRecall.Cli.Internal;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Config;
+using TotalRecall.Infrastructure.Diagnostics;
 using TotalRecall.Infrastructure.Memory;
 using TotalRecall.Infrastructure.Storage;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
@@ -104,7 +105,7 @@ public sealed class InspectCommand : ICliCommand
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"memory inspect: failed to open db: {ex.Message}");
+            ExceptionLogger.LogChain("memory inspect: failed to open db", ex);
             return 1;
         }
 

@@ -14,6 +14,7 @@ using System.Threading.Tasks;
 using Spectre.Console;
 using TotalRecall.Cli.Internal;
 using TotalRecall.Infrastructure.Config;
+using TotalRecall.Infrastructure.Diagnostics;
 using TotalRecall.Infrastructure.Storage;
 using TotalRecall.Infrastructure.Telemetry;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
@@ -112,7 +113,7 @@ public sealed class LineageCommand : ICliCommand
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"memory lineage: failed to open db: {ex.Message}");
+            ExceptionLogger.LogChain("memory lineage: failed to open db", ex);
             return 1;
         }
 

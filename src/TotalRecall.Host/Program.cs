@@ -35,6 +35,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using TotalRecall.Infrastructure.Config;
+using TotalRecall.Infrastructure.Diagnostics;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Migration;
 using TotalRecall.Server;
@@ -117,7 +118,12 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"total-recall: migration guard threw: {ex.Message}");
+            // Unwrap TypeInitializationException / DllNotFoundException chains
+            // so the real failure surfaces — a bare ex.Message here produced
+            // the "type initializer threw" mystery in 0.8.0-beta.4 when the
+            // GitHub Release asset shipped only the executable without its
+            // sibling libonnxruntime.dylib / vec0.dylib.
+            ExceptionLogger.LogChain("total-recall: migration guard threw", ex);
             return 1;
         }
 
@@ -130,16 +136,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"total-recall: failed to open composition: {ex.Message}");
-            // Unwrap TypeInitializationException / InnerException chains so the
-            // real failure surfaces in logs — otherwise serve-mode crashes are
-            // opaque ("type initializer threw" with no indication of which).
-            var inner = ex.InnerException;
-            while (inner is not null)
-            {
-                Console.Error.WriteLine($"  -> {inner.GetType().Name}: {inner.Message}");
-                inner = inner.InnerException;
-            }
+            ExceptionLogger.LogChain("total-recall: failed to open composition", ex);
             return 1;
         }
 

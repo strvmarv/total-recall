@@ -1,18 +1,32 @@
 #!/usr/bin/env node
 // Shared binary-fetching logic used by both scripts/postinstall.js and
-// bin/start.js. Downloads the correct .NET AOT binary for the host
-// platform from the matching GitHub Release asset and installs it under
-// ${repoRoot}/binaries/<rid>/.
+// bin/start.js. Downloads the correct .NET AOT publish archive for the
+// host platform from the matching GitHub Release asset, extracts it into
+// ${repoRoot}/binaries/<rid>/, and returns the path to the executable.
 //
-// Why this exists: the npm tarball ships binaries/<rid>/... for every
-// supported platform, but when Claude Code installs the plugin via git
-// clone (e.g. /plugin update from a marketplace that points at the git
-// repo), the tree has no binaries/ because they are never committed to
-// git. This module bridges that gap: postinstall downloads at install
-// time for npm users, and bin/start.js downloads at first launch as a
-// safety net for git-clone users and --ignore-scripts users.
+// Why an archive and not a bare executable: the AOT binary has sibling
+// native runtime dependencies (libonnxruntime.dylib, vec0.dylib, the
+// bundled models/ subtree, etc.) that must land next to it on disk.
+// 0.8.0-beta.4 shipped the bare executable as a GitHub Release asset
+// and every fresh install crashed at first DB open with a
+// TypeInitializationException because Microsoft.ML.OnnxRuntime could
+// not P/Invoke into the missing libonnxruntime.dylib. Fix: release.yml
+// now stages each per-RID publish tree into a .tar.gz (.zip on Windows)
+// and this module fetches + extracts the archive so the full tree
+// lands on disk before start.js exec's it.
 //
-// Zero dependencies — Node built-ins only.
+// Why this exists: the npm tarball ships binaries/<rid>/... with the
+// full publish tree already included, but when Claude Code installs
+// the plugin via git clone (e.g. /plugin update from a marketplace
+// that points at the git repo), the tree has no binaries/ because
+// they are never committed. This module bridges that gap: postinstall
+// downloads at install time for npm users, and bin/start.js downloads
+// at first launch as a safety net for git-clone users and
+// --ignore-scripts users.
+//
+// Zero dependencies — Node built-ins plus the `tar`/`unzip` binaries
+// that ship on every supported target (macOS + Linux have tar, Windows
+// 10+ ships bsdtar as `tar.exe` and PowerShell has Expand-Archive).
 //
 // Contract:
 //   import { ensureBinary } from './fetch-binary.js';
@@ -23,6 +37,8 @@
 import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -59,10 +75,14 @@ function getVersion() {
 
 // Release asset filenames are set by release.yml's "Stage per-RID release
 // assets" step. URL format:
-//   https://github.com/strvmarv/total-recall/releases/download/v<version>/total-recall-<rid>[.exe]
+//   https://github.com/strvmarv/total-recall/releases/download/v<version>/total-recall-<rid>.tar.gz
+//   (Windows: .zip)
+export function getArchiveName(rid) {
+  return rid === 'win-x64' ? `total-recall-${rid}.zip` : `total-recall-${rid}.tar.gz`;
+}
+
 export function getDownloadUrl(rid, version) {
-  const ext = rid === 'win-x64' ? '.exe' : '';
-  return `https://github.com/strvmarv/total-recall/releases/download/v${version}/total-recall-${rid}${ext}`;
+  return `https://github.com/strvmarv/total-recall/releases/download/v${version}/${getArchiveName(rid)}`;
 }
 
 function httpGetFollowRedirects(url, redirectsLeft = 5) {
@@ -113,6 +133,37 @@ async function streamToFile(res, destPath) {
   });
 }
 
+// Extract an archive into destDir. destDir must already exist. Uses
+// system `tar` for .tar.gz (ubiquitous on Unix, shipped as bsdtar on
+// Windows 10+ since build 17063) and falls back to PowerShell
+// Expand-Archive for .zip on Windows. Throws on failure — callers are
+// expected to wrap in try/catch and clean up the archive.
+function extractArchive(archivePath, destDir) {
+  const isZip = archivePath.endsWith('.zip');
+  if (isZip && process.platform === 'win32') {
+    // bsdtar/tar.exe on Windows 10+ understands .zip natively via
+    // libarchive, which avoids the PowerShell round-trip. Try tar
+    // first, then fall back to Expand-Archive.
+    try {
+      execFileSync('tar', ['-xf', archivePath, '-C', destDir], { stdio: 'inherit' });
+      return;
+    } catch {
+      // PowerShell fallback. Escape single quotes defensively.
+      const esc = (p) => p.replace(/'/g, "''");
+      execFileSync('powershell', [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `Expand-Archive -LiteralPath '${esc(archivePath)}' -DestinationPath '${esc(destDir)}' -Force`,
+      ], { stdio: 'inherit' });
+      return;
+    }
+  }
+  // Unix .tar.gz (and Windows .tar.gz via bsdtar): one invocation.
+  // -x extract, -z gunzip, -f file, -C target directory.
+  execFileSync('tar', ['-xzf', archivePath, '-C', destDir], { stdio: 'inherit' });
+}
+
 export async function ensureBinary({ logPrefix = '[total-recall]' } = {}) {
   const { platform, arch } = process;
   const rid = detectRid(platform, arch);
@@ -142,9 +193,15 @@ export async function ensureBinary({ logPrefix = '[total-recall]' } = {}) {
 
   const url = getDownloadUrl(rid, version);
   const destDir = path.dirname(binaryPath);
-  const tmpPath = binaryPath + '.tmp';
 
-  process.stderr.write(`${logPrefix} Downloading ${rid} binary for v${version}\n`);
+  // Stage archive download into a fresh tmp file alongside destDir so an
+  // abort (Ctrl+C, crash, network failure) cannot leave a partially
+  // extracted binaries/<rid>/ behind. We still clean up destDir-level
+  // staging files on error.
+  const archiveName = getArchiveName(rid);
+  const tmpArchivePath = path.join(os.tmpdir(), `total-recall-${process.pid}-${Date.now()}-${archiveName}`);
+
+  process.stderr.write(`${logPrefix} Downloading ${rid} archive for v${version}\n`);
   process.stderr.write(`${logPrefix}   ${url}\n`);
 
   try {
@@ -153,24 +210,55 @@ export async function ensureBinary({ logPrefix = '[total-recall]' } = {}) {
     return { ok: false, error: `could not create ${destDir}: ${e.message}`, url };
   }
 
-  // Clean up any stale tmp from a previous aborted attempt.
-  try { fs.rmSync(tmpPath, { force: true }); } catch {}
-
   try {
     const res = await httpGetFollowRedirects(url);
-    await streamToFile(res, tmpPath);
-    fs.renameSync(tmpPath, binaryPath);
-    if (platform !== 'win32') {
-      fs.chmodSync(binaryPath, 0o755);
-    }
-    process.stderr.write(`${logPrefix} Installed at ${binaryPath}\n`);
-    return { ok: true, path: binaryPath, rid, downloaded: true };
+    await streamToFile(res, tmpArchivePath);
   } catch (e) {
-    try { fs.rmSync(tmpPath, { force: true }); } catch {}
+    try { fs.rmSync(tmpArchivePath, { force: true }); } catch {}
     return {
       ok: false,
       error: `download failed: ${e.message}`,
       url,
     };
   }
+
+  try {
+    extractArchive(tmpArchivePath, destDir);
+  } catch (e) {
+    try { fs.rmSync(tmpArchivePath, { force: true }); } catch {}
+    return {
+      ok: false,
+      error: `extract failed: ${e.message}`,
+      url,
+    };
+  } finally {
+    try { fs.rmSync(tmpArchivePath, { force: true }); } catch {}
+  }
+
+  if (!fs.existsSync(binaryPath)) {
+    return {
+      ok: false,
+      error: `archive extracted but ${binaryPath} is missing — archive layout does not match expected binaries/<rid>/ contents`,
+      url,
+    };
+  }
+
+  // Restore executable bit. tar preserves modes but some CI runners
+  // strip them on upload/download round-trips, and unzip on Unix
+  // normalizes to 0644. Force 0755 on the main binary; siblings are
+  // libraries that don't need it.
+  if (platform !== 'win32') {
+    try {
+      fs.chmodSync(binaryPath, 0o755);
+    } catch (e) {
+      return {
+        ok: false,
+        error: `could not chmod +x ${binaryPath}: ${e.message}`,
+        url,
+      };
+    }
+  }
+
+  process.stderr.write(`${logPrefix} Installed at ${binaryPath}\n`);
+  return { ok: true, path: binaryPath, rid, downloaded: true };
 }

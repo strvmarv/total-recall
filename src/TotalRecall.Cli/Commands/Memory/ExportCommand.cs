@@ -18,6 +18,7 @@ using Microsoft.FSharp.Core;
 using TotalRecall.Cli.Internal;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Config;
+using TotalRecall.Infrastructure.Diagnostics;
 using TotalRecall.Infrastructure.Memory;
 using TotalRecall.Infrastructure.Storage;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
@@ -129,7 +130,7 @@ public sealed class ExportCommand : ICliCommand
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"memory export: failed to open db: {ex.Message}");
+            ExceptionLogger.LogChain("memory export: failed to open db", ex);
             return 1;
         }
 

@@ -1,13 +1,18 @@
 #!/bin/sh
-# Auto-rebuild dist/ when src/ files are staged.
-# Prevents stale dist/index.js from being committed.
-
-if git diff --cached --name-only | grep -q '^src/'; then
-  echo "pre-commit: src/ changed, rebuilding dist..."
-  npm run build --silent 2>&1
-  if [ $? -ne 0 ]; then
-    echo "pre-commit: build failed, aborting commit"
-    exit 1
-  fi
-  git add dist/index.js
-fi
+# No-op on the .NET rewrite branch.
+#
+# The previous implementation auto-ran `npm run build` when src/ files were
+# staged to keep dist/index.js in sync — that made sense when src/ was the
+# TypeScript tree compiled by tsup. On rewrite/dotnet the source tree is
+# entirely C#/F# (src/TotalRecall.*) and the build artifact path is
+# binaries/<rid>/ produced by `dotnet publish` in CI, not dist/.
+#
+# There is deliberately no local pre-commit build step because:
+#   * `dotnet build` requires the .NET 10 SDK pinned by global.json, which
+#     contributors may not have installed yet (preview SDK at time of writing).
+#   * CI runs the full matrix publish on every tag push, which is the
+#     authoritative correctness gate for release artifacts.
+#
+# If you want a local fast feedback loop, run `dotnet build src/TotalRecall.sln`
+# manually before committing.
+exit 0
