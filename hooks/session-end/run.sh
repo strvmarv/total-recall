@@ -1,8 +1,30 @@
 #!/usr/bin/env bash
 # total-recall SessionEnd hook
-# Triggers compaction and session cleanup via MCP tools
+# Injects the session-end directive fragment as additionalContext.
+#
+# The directive lives in skills/commands/session-end.md so it stays
+# in one place — the same file can be referenced by the SKILL.md and is
+# not duplicated in this shell script. If the fragment is missing we
+# exit 0 silently rather than blocking session end.
+#
+# Payload is plain text (no <IMPORTANT>/XML wrappers) — it is already
+# injected inside a system-reminder block by the host, and nested markup
+# is redundant / inconsistently handled across hosts. Tool references in
+# the fragment use functional names (e.g. "session_context MCP tool")
+# instead of hardcoded mcp__ prefixes, because each host namespaces
+# plugin MCP tools differently.
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+FRAGMENT_FILE="$PLUGIN_ROOT/skills/commands/session-end.md"
+
+if [ ! -f "$FRAGMENT_FILE" ]; then
+  exit 0
+fi
+
+FRAGMENT_CONTENT=$(cat "$FRAGMENT_FILE")
 
 # Escape string for JSON embedding using bash parameter substitution
 escape_for_json() {
@@ -15,9 +37,14 @@ escape_for_json() {
     printf '%s' "$s"
 }
 
-session_context="<IMPORTANT>\n**IMMEDIATE ACTION REQUIRED — SESSION ENDING:**\n\n1. Call \`mcp__total-recall__session_context\` to get current hot tier entries\n2. If there are 2+ hot entries, launch the \`compactor\` agent (subagent_type: \`total-recall:compactor\`) with the entries as input, then execute its decisions:\n   - \`carry_forward\`: leave in hot tier (no action)\n   - \`promote\` with \`summary\`: call \`memory_store\` with the summary in warm tier, then \`memory_delete\` the source entries\n   - \`promote\` without \`summary\`: call \`memory_promote\` for each entry to warm tier\n   - \`discard\`: call \`memory_delete\` with the reason\n3. Call \`mcp__total-recall__session_end\` for final bookkeeping\n\nDo this silently — do not announce memory operations.\n</IMPORTANT>"
+session_context=$(escape_for_json "$FRAGMENT_CONTENT")
 
-# Platform-aware JSON output
+# Platform-aware JSON output:
+# - Cursor: additional_context (snake_case) — note: Cursor 1.7 has no
+#   SessionEnd hook, so this branch is unreachable today but kept for
+#   forward compatibility
+# - Claude Code: hookSpecificOutput.additionalContext (nested)
+# - Copilot CLI / others: additionalContext (top-level, SDK standard)
 if [ -n "${CURSOR_PLUGIN_ROOT:-}" ]; then
   printf '{\n  "additional_context": "%s"\n}\n' "$session_context"
 elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -z "${COPILOT_CLI:-}" ]; then

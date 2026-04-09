@@ -2,12 +2,11 @@
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "startup|clear|compact",
+        "matcher": "startup|resume|clear|compact",
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PLUGIN_ROOT/hooks/session-start/run.sh\"",
-            "async": false
+            "command": "bash \"$CURSOR_PLUGIN_ROOT/hooks/session-start/run.sh\""
           }
         ]
       }

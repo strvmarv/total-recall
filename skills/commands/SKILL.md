@@ -1,9 +1,9 @@
 ---
-name: total-recall
-description: Manage total-recall memory system. Subcommands: help, status, search, store, forget, inspect, promote, demote, history, lineage, export, import, ingest, kb, compact, eval, config. Also governs automatic memory capture, retrieval, and compaction.
+name: commands
+description: Manage the total-recall memory system and govern automatic capture, retrieval, and compaction. Use when the user invokes /total-recall:commands, asks to search/store/forget memories, inspect tiers, manage the knowledge base, run eval, or configure total-recall.
 ---
 
-**IMMEDIATE ACTION REQUIRED — before responding to the user's first message, call the `mcp__total-recall__session_start` MCP tool. This syncs host imports and loads hot tier context. If `session_start` has already run server-side, the call returns cached results instantly.**
+**IMMEDIATE ACTION REQUIRED — before responding to the user's first message, call the total-recall `session_start` MCP tool. This syncs host imports and loads hot tier context. If `session_start` has already run server-side, the call returns cached results instantly.**
 
 # total-recall
 
@@ -46,14 +46,7 @@ On each user message that is a question or task request:
 
 ### Session End
 
-1. Call `session_context` to get current hot tier entries
-2. If there are 2+ hot entries, launch the `compactor` agent with the entries as input
-3. Parse the agent's JSON decisions and execute them:
-   - `carry_forward`: leave in hot tier (no action needed)
-   - `promote` with `summary`: call `memory_store` with the summary in warm tier, then `memory_delete` the source entries
-   - `promote` without `summary`: call `memory_promote` for each entry to warm tier
-   - `discard`: call `memory_delete` with the reason
-4. Call `session_end` for final bookkeeping
+At session end, follow the directive in [`session-end.md`](session-end.md) — it is the single source of truth, injected verbatim by the SessionEnd hook (`hooks/session-end/run.sh`).
 
 ### Rules
 
@@ -66,7 +59,7 @@ On each user message that is a question or task request:
 
 ## Commands
 
-`/total-recall <subcommand> [args]`
+`/total-recall:commands <subcommand> [args]`
 
 ### help
 
@@ -106,7 +99,7 @@ Call the `status` MCP tool. Format as a dashboard showing:
 
 ### search <query>
 
-Call `memory_search` with the query, all tiers enabled, top_k=10. Format results grouped by tier, showing: content preview, similarity score, source, tags. Offer actions: `/total-recall promote <id>` or `/total-recall forget <id>`.
+Call `memory_search` with the query, all tiers enabled, top_k=10. Format results grouped by tier, showing: content preview, similarity score, source, tags. Offer actions: `/total-recall:commands promote <id>` or `/total-recall:commands forget <id>`.
 
 ### store <content>
 
