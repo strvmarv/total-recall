@@ -1,6 +1,6 @@
 {
   "name": "@strvmarv/total-recall",
-  "version": "0.8.0",
+  "version": "0.8.0-beta.1",
   "description": "Multi-tiered memory and knowledge base plugin for TUI coding assistants",
   "type": "module",
   "bin": {

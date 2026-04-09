@@ -251,7 +251,26 @@ jobs:
       - name: npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish
+        # Prerelease-aware dist-tag routing. If package.json version contains
+        # a dash (e.g. 0.8.0-beta.1), publish under the matching dist-tag
+        # (beta, rc, alpha) so "latest" is NOT clobbered. Only stable versions
+        # publish to latest. No untrusted github.event.* input is read here;
+        # the version string comes from the committed package.json at the
+        # tagged SHA.
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          case "$VERSION" in
+            *-*)
+              PRERELEASE_TAG="${VERSION##*-}"
+              PRERELEASE_TAG="${PRERELEASE_TAG%%.*}"
+              echo "Publishing $VERSION under dist-tag $PRERELEASE_TAG"
+              npm publish --tag "$PRERELEASE_TAG"
+              ;;
+            *)
+              echo "Publishing $VERSION under dist-tag latest"
+              npm publish
+              ;;
+          esac
 
       - name: Attach binaries to GitHub release
         uses: softprops/action-gh-release@v2
