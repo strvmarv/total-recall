@@ -2,25 +2,17 @@
 
 This file is designed to be read by AI coding assistants. If you're an LLM helping a user install total-recall, follow the instructions for their platform below.
 
+## What total-recall ships as
+
+Since 0.8.0, total-recall is a **prebuilt .NET 8 NativeAOT binary** wrapped by a tiny Node launcher (`bin/start.js`) that detects the host platform and exec's the right per-RID binary. The npm package ships binaries for `linux-x64`, `linux-arm64`, `osx-arm64`, and `win-x64`. No `dotnet` runtime, no `bun`, and no system SQLite needed — the binary bundles its own `libe_sqlite3`, `libonnxruntime`, `vec0` (sqlite-vec extension), and the `all-MiniLM-L6-v2` ONNX embedding model.
+
 ## Prerequisites
 
-### macOS: Homebrew sqlite required
+- **Node.js >= 20.0.0** — required only for `npm install` and the `bin/start.js` launcher (~60 lines, zero runtime overhead). The actual MCP server is the prebuilt .NET binary.
+- **Internet access** — only needed if you install via Claude Code's `/plugin` flow with a `source: github` marketplace entry. In that case `bin/start.js` downloads the matching per-RID archive (~22 MB) from GitHub Releases on first launch. The npm install path ships all RIDs in the tarball and doesn't need a runtime download.
+- **Intel Mac (`darwin-x64`) is not currently shipped.** Apple Silicon (`osx-arm64`) is. All Apple hardware sold since November 2020 is arm64.
 
-total-recall uses [`sqlite-vec`](https://github.com/asg017/sqlite-vec) for vector search, which is loaded into SQLite as a runtime extension. On macOS, `bun:sqlite` dlopens the system `/usr/lib/libsqlite3.dylib`, which Apple ships **without** `SQLITE_ENABLE_LOAD_EXTENSION` — so `sqlite-vec` cannot attach and the MCP server fails at first use with:
-
-> This build of sqlite3 does not support dynamic extension loading
-
-Fix (one-time):
-
-```bash
-brew install sqlite
-```
-
-total-recall automatically picks up the keg-only brew sqlite from `/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib` (Apple Silicon) or `/usr/local/opt/sqlite/lib/libsqlite3.dylib` (Intel) via `Database.setCustomSQLite()` before any DB connection is opened. Nothing else to configure.
-
-Linux and Windows users can skip this step — their system SQLite builds support extension loading out of the box.
-
-### Relocating the database
+## Relocating the database
 
 By default, total-recall stores its SQLite database at `<TOTAL_RECALL_HOME>/total-recall.db` (typically `~/.total-recall/total-recall.db`). Set `TOTAL_RECALL_DB_PATH` to relocate **only** the database file — `config.toml`, the embedding model cache, and export directories stay anchored to `TOTAL_RECALL_HOME`.
 
@@ -44,7 +36,8 @@ Claude Code `.mcp.json` env block (per-host, survives shell sessions):
   "mcpServers": {
     "total-recall": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/start.cjs"],
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/start.js"],
+      "cwd": "${CLAUDE_PLUGIN_ROOT}",
       "env": {
         "TOTAL_RECALL_DB_PATH": "~/Dropbox/total-recall/memories.db"
       }
@@ -94,7 +87,7 @@ export TOTAL_RECALL_DB_PATH=~/Dropbox/total-recall/memories.db
 # 4. Restart Claude Code or your MCP host
 ```
 
-total-recall does **not** auto-migrate existing data — silent migration on partial failure invites corruption.
+total-recall does **not** auto-migrate this kind of relocation — silent migration on partial failure invites corruption. (This is distinct from the automatic 0.7.x → 0.8.x TS-to-.NET schema migration, which IS handled by `AutoMigrationGuard` on first launch with a non-destructive backup of the old TS database to `total-recall.db.ts-backup`.)
 
 ## Quick Install (Any Platform)
 
@@ -102,6 +95,12 @@ The MCP server is available as an npm package:
 
 ```bash
 npm install -g @strvmarv/total-recall
+```
+
+This installs the current stable version (`0.7.2` TypeScript at the time of this writing; will be `0.8.x` .NET after the cutover). To install the .NET beta:
+
+```bash
+npm install -g @strvmarv/total-recall@beta
 ```
 
 ## Claude Code
@@ -121,27 +120,10 @@ If the marketplace isn't registered yet:
 /plugin install total-recall@strvmarv-total-recall-marketplace
 ```
 
-### Option B: Manual Plugin Install
+### Option B: MCP Server Only (any tool)
 
-1. Clone the repo:
-```bash
-git clone https://github.com/strvmarv/total-recall.git ~/.claude/plugins/total-recall
-cd ~/.claude/plugins/total-recall
-npm install && npm run build
-```
+Add to your Claude Code MCP config (`~/.claude.json`):
 
-2. Add to your Claude Code settings (`~/.claude/settings.json`):
-```json
-{
-  "enabledPlugins": {
-    "total-recall": true
-  }
-}
-```
-
-### Option C: MCP Server Only
-
-Add to your Claude Code MCP config:
 ```json
 {
   "mcpServers": {
@@ -151,6 +133,8 @@ Add to your Claude Code MCP config:
   }
 }
 ```
+
+This requires `npm install -g @strvmarv/total-recall` (or `@beta`) so the `total-recall` command is on PATH.
 
 ## GitHub Copilot CLI
 
@@ -168,17 +152,7 @@ Add to your Copilot CLI MCP config (`~/.copilot/mcp-config.json`):
 
 ## OpenCode
 
-Add to your OpenCode config (`opencode.json` or `~/.config/opencode/config.json`):
-
-```json
-{
-  "mcpServers": {
-    "total-recall": {
-      "command": "total-recall"
-    }
-  }
-}
-```
+See `.opencode/INSTALL.md` for the full OpenCode-specific install guide. The short version: `npm install -g @strvmarv/total-recall` then add the same `mcpServers` block to your OpenCode config.
 
 ## Cline (VS Code)
 
@@ -218,7 +192,17 @@ git clone https://github.com/strvmarv/total-recall.git
 
 ## Verification
 
-After installation, the first session should output:
+After installation:
+
+```bash
+total-recall --version
+# Expected: total-recall 0.8.0 (or 0.7.2 if you're on stable)
+
+total-recall status
+# Expected: tier counts, KB info, embedding model "all-MiniLM-L6-v2", schema version
+```
+
+In a Claude Code (or other host) session, the first session output should include:
 
 ```
 total-recall: initialized · X memories imported · Y docs ingested · system verified
@@ -230,9 +214,16 @@ You can verify it's working with:
 
 ## What Happens on First Run
 
-1. Creates `~/.total-recall/` directory
-2. Creates SQLite database with schema
-3. Loads bundled embedding model (no download needed)
-4. Scans for existing memories from host tools (Claude Code, Copilot CLI)
-5. Auto-ingests project docs (README, docs/, etc.)
-6. Runs a quick smoke test to verify everything works
+1. Creates `~/.total-recall/` directory if missing
+2. Creates SQLite database with schema (`Schema.cs` MigrationRunner applies all migrations 1..5)
+3. Loads the bundled `all-MiniLM-L6-v2` ONNX embedding model from `models/` (no download needed)
+4. Scans for existing memories from host tools (Claude Code, Copilot CLI, Cursor, Cline, OpenCode, Hermes), deduplicates via content hash
+5. Auto-ingests project docs (README, docs/, etc.) into a `<project>-project-docs` KB collection
+6. Runs a quick smoke test (22-query benchmark) to verify retrieval quality
+
+If you're upgrading from 0.7.x (TypeScript) to 0.8.x (.NET), the `AutoMigrationGuard` runs on first launch:
+
+- Detects an existing TS-format database via the absence of the `.NET` schema marker
+- Renames the existing `total-recall.db` to `total-recall.db.ts-backup` (the original is **never deleted**)
+- Runs the .NET MigrationRunner against a fresh database, then re-imports the TS data with re-embedding (the .NET tokenizer is canonical BERT BasicTokenization, slightly more accurate than the prior hand-rolled WordPiece — see `docs/superpowers/specs/2026-04-07-rewrite-language-evaluation.md`).
+- If the migration is interrupted partway through and you end up with both `total-recall.db` and `total-recall.db.ts-backup` on disk, the next launch's guard handles all 5 partial-state cases automatically (since 0.8.0-beta.7).

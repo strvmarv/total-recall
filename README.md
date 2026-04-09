@@ -24,10 +24,9 @@
 ╚══════════════════════════════════════════════╝
 ```
 
-[![CI](https://github.com/strvmarv/total-recall/actions/workflows/ci.yml/badge.svg)](https://github.com/strvmarv/total-recall/actions/workflows/ci.yml)
+[![CI](https://github.com/strvmarv/total-recall/actions/workflows/dotnet-ci.yml/badge.svg)](https://github.com/strvmarv/total-recall/actions/workflows/dotnet-ci.yml)
 [![npm](https://img.shields.io/npm/v/@strvmarv/total-recall)](https://www.npmjs.com/package/@strvmarv/total-recall)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node](https://img.shields.io/node/v/@strvmarv/total-recall)](https://www.npmjs.com/package/@strvmarv/total-recall)
 
 # total-recall
 
@@ -63,9 +62,10 @@ Platform support is via MCP (Model Context Protocol), which means total-recall w
 
 ## Prerequisites
 
-- **Node.js >=20.0.0** — Required to run `npm install`. The plugin runtime uses a bundled Bun binary downloaded automatically on install.
-- **Internet access on first install** — The postinstall script downloads a ~60MB Bun binary to `~/.total-recall/bun/` (Linux/macOS) or `%USERPROFILE%\.total-recall\bun\` (Windows). Subsequent installs are instant (cached). If download fails, the plugin falls back to system Node with a warning.
-- **Git LFS** — Required if cloning from source (`git lfs install` before clone). The embedding model is stored in LFS. Runtime auto-downloads from HuggingFace if LFS fetch fails.
+- **Node.js >= 20.0.0** — required only for `npm install` and the `bin/start.js` launcher (~60 lines of zero-dep Node). The actual MCP server is a prebuilt **.NET 8 NativeAOT binary** that ships pre-compiled per platform.
+- **Internet access on first launch** — only needed if you install via Claude Code's `/plugin` flow with a `source: github` marketplace entry. In that case `bin/start.js` downloads the matching per-RID archive (~22 MB) from GitHub Releases on first run. The npm install path ships all RIDs in the tarball and doesn't need a runtime download.
+- **No bundled Bun, no system SQLite, no .NET runtime required.** The AOT binary ships its own `libonnxruntime`, `libe_sqlite3`, and `vec0` (sqlite-vec extension) as sibling files. The `all-MiniLM-L6-v2` ONNX embedding model is bundled in `models/`.
+- **Git LFS** — required only if cloning the repo from source (`git lfs install` before clone). The embedding model is stored in LFS. Runtime auto-downloads from HuggingFace if LFS fetch fails.
 
 ---
 
@@ -117,8 +117,14 @@ This works with **Copilot CLI**, **OpenCode**, **Cline**, **Cursor**, **Hermes**
 ```bash
 git clone https://github.com/strvmarv/total-recall.git
 cd total-recall
-npm install && npm run build
+npm install                                # pulls sqlite-vec native libs into node_modules/
+dotnet build src/TotalRecall.sln           # requires .NET 10 SDK (per global.json)
+dotnet test src/TotalRecall.sln            # 944 tests across Core (F#), Cli, Server, Infrastructure
+dotnet publish src/TotalRecall.Host/TotalRecall.Host.csproj -c Release -r linux-x64 -p:PublishAot=true
+# (swap linux-x64 for your RID: linux-arm64, osx-arm64, or win-x64)
 ```
+
+The AOT publish output lands in `src/TotalRecall.Host/bin/Release/net8.0/<rid>/publish/` with the binary plus all sibling native libs (`libonnxruntime.*`, `libe_sqlite3.*`, `runtimes/vec0.*`) ready to run.
 
 ### First Session
 
@@ -141,10 +147,12 @@ On first `session_start`, total-recall initializes `~/.total-recall/` with a SQL
 ## Architecture
 
 ```
-MCP Server (Node.js/TypeScript)
-├── Always Loaded: SQLite + vec, MCP Tools, Event Logger
-├── Lazy Loaded: ONNX Embedder, Compactor, Ingestor
-└── Host Importers: Claude Code, Copilot CLI, Cursor, Cline, OpenCode, Hermes
+MCP Server (.NET 8 NativeAOT — C# imperative shell + F# functional core)
+├── TotalRecall.Core (F#)        — pure functions: tokenizer, decay, ranking, parsers
+├── TotalRecall.Infrastructure   — SQLite + vec, ONNX embedder, importers, ingestion
+├── TotalRecall.Server           — MCP JSON-RPC server, 32 tool handlers, lifecycle
+├── TotalRecall.Cli              — CLI commands (status, eval, kb, memory, config)
+└── TotalRecall.Host             — composition root, AOT entry point, migration guard
 
 Tiers:
   Hot (50 entries)  → auto-injected every prompt
@@ -159,7 +167,7 @@ Tiers:
 3. `compact` — decay scores, promote hot→warm, demote warm→cold
 4. `ingest` — chunk files, embed chunks, store in cold tier with metadata
 
-All state lives in `~/.total-recall/total-recall.db`. The embedding model is bundled with the package. No network calls required.
+All state lives in `~/.total-recall/total-recall.db`. The embedding model and the sqlite-vec native extension are bundled with the binary. No network calls required at runtime once the platform binary is on disk.
 
 ---
 
@@ -263,15 +271,15 @@ dimensions = 384               # Embedding dimensions
 
 ### Adding a New Host Tool
 
-Implement the `HostImporter` interface. It requires four methods: `detect()` to check if the tool is present, `scan()` to report what's available, `importMemories()` to migrate existing memories, and `importKnowledge()` to migrate knowledge files. See [CONTRIBUTING.md](CONTRIBUTING.md) for a full example.
+Implement the `IImporter` interface defined in `src/TotalRecall.Infrastructure/Importers/IImporter.cs`. The contract: detect the host's presence, scan its memory directories, and import memories/knowledge with deduplication via `ImportLog`. See `src/TotalRecall.Infrastructure/Importers/ClaudeCodeImporter.cs` for a reference implementation, and [CONTRIBUTING.md](CONTRIBUTING.md) for a full walkthrough.
 
 ### Adding a New Content Type
 
-Content types (`"memory"` and `"knowledge"`) are defined in `src/types.ts` as the `ContentType` union. Each tier has separate tables per content type (e.g., `hot_memories`, `hot_knowledge`). To add a new content type, add it to the `ContentType` union, create the corresponding tier tables in `src/db/schema.ts`, and update `ALL_TABLE_PAIRS`.
+Content types (`"memory"` and `"knowledge"`) are defined as a discriminated union in `src/TotalRecall.Core/Types.fs`. Each tier has separate tables per content type (e.g., `hot_memories`, `hot_knowledge`). To add a new content type, extend the F# `ContentType` DU and add a migration step in `src/TotalRecall.Infrastructure/Storage/Schema.cs` (add a new function to the migrations array — the framework runs them sequentially based on `_schema_version`).
 
 ### Adding a New Chunking Parser
 
-Implement the `Chunk[]`-returning parser interface and register it in `src/ingestion/chunker.ts` alongside the existing Markdown and code parsers. See [CONTRIBUTING.md](CONTRIBUTING.md) for the interface definition.
+Chunking lives in `src/TotalRecall.Core/Chunker.fs` (F# pure functions) and per-language parsers in `src/TotalRecall.Core/Parsers.fs`. Add a new parser by extending the relevant union case and wiring it through the dispatch in `Chunker.chunk`. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full walkthrough.
 
 ---
 
@@ -294,11 +302,15 @@ If you're building plugins for TUI coding assistants, start with [superpowers](h
 
 ### Core Technologies
 
-- [Bun](https://bun.sh) — JavaScript runtime with built-in SQLite (no native addons)
-- [sqlite-vec](https://github.com/asg017/sqlite-vec) — Vector similarity search in SQLite
-- [onnxruntime-node](https://github.com/microsoft/onnxruntime) — Local ML inference
+- [.NET 8 / NativeAOT](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/) — single-binary deployment, no runtime dependency
+- [F# Core](https://learn.microsoft.com/en-us/dotnet/fsharp/) — pure functional core: tokenizer, parsers, decay, ranking
+- [Microsoft.Data.Sqlite](https://learn.microsoft.com/en-us/dotnet/standard/data/sqlite/) — embedded SQLite with extension loading
+- [sqlite-vec](https://github.com/asg017/sqlite-vec) — Vector similarity search in SQLite (loaded as a native extension via `LoadExtension`)
+- [Microsoft.ML.OnnxRuntime](https://onnxruntime.ai/docs/get-started/with-csharp.html) — Local ML inference, AOT-compatible
+- [Microsoft.ML.Tokenizers](https://learn.microsoft.com/en-us/dotnet/api/microsoft.ml.tokenizers) — canonical BERT BasicTokenization + WordPiece
 - [all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) — Sentence embeddings (384d)
-- [@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/sdk) — MCP server implementation
+- Hand-rolled JSON-RPC stdio MCP server in `TotalRecall.Server` (no SDK dependency)
+- [Spectre.Console](https://spectreconsole.net/) — CLI rendering for `total-recall status` / `eval` / `kb list`
 
 ---
 
