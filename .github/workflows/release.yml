@@ -230,12 +230,30 @@ jobs:
               ;;
           esac
 
+      - name: Stage per-RID release assets
+        shell: bash
+        # softprops/action-gh-release attaches files by basename, so four
+        # binaries all named "total-recall" would collide down to one asset
+        # on the GitHub Release. Stage renamed copies into release-assets/
+        # so each RID gets its own distinct asset name. This lets
+        # scripts/fetch-binary.js download per-RID directly from the release
+        # via a stable URL pattern.
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          cp binaries/linux-x64/total-recall     release-assets/total-recall-linux-x64
+          cp binaries/linux-arm64/total-recall   release-assets/total-recall-linux-arm64
+          cp binaries/osx-arm64/total-recall     release-assets/total-recall-osx-arm64
+          cp binaries/win-x64/total-recall.exe   release-assets/total-recall-win-x64.exe
+          ls -la release-assets/
+
       - name: Attach binaries to GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            binaries/linux-x64/total-recall
-            binaries/linux-arm64/total-recall
-            binaries/osx-arm64/total-recall
-            binaries/win-x64/total-recall.exe
-          fail_on_unmatched_files: false
+            release-assets/total-recall-linux-x64
+            release-assets/total-recall-linux-arm64
+            release-assets/total-recall-osx-arm64
+            release-assets/total-recall-win-x64.exe
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true

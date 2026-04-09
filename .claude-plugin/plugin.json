@@ -1,7 +1,7 @@
 {
   "name": "total-recall",
   "description": "Multi-tiered memory and knowledge base with semantic search, auto-compaction, and built-in evaluation. Works across Claude Code, Copilot CLI, OpenCode, Cline, and Cursor.",
-  "version": "0.7.2",
+  "version": "0.8.0-beta.4",
   "author": {
     "name": "strvmarv"
   },

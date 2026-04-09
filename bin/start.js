@@ -2,65 +2,44 @@
 // Launcher for the total-recall MCP server (.NET AOT build).
 //
 // Responsibilities:
-//   1. Detect the host platform/arch and map to a .NET RID.
-//   2. Resolve the matching prebuilt binary shipped in binaries/<rid>/.
-//   3. Exec it with full stdio passthrough so the MCP JSON-RPC channel
+//   1. Ensure the correct .NET AOT binary is present under
+//      binaries/<rid>/ — either because it was shipped in the npm
+//      tarball / committed by an earlier postinstall run, or by
+//      downloading it now from the matching GitHub Release.
+//   2. Exec it with full stdio passthrough so the MCP JSON-RPC channel
 //      (stdin/stdout) remains a raw byte stream.
-//   4. Forward SIGINT/SIGTERM and propagate the child's exit code.
+//   3. Forward SIGINT/SIGTERM and propagate the child's exit code.
 //
-// Zero dependencies — Node built-ins only. This file is pointed at by the
-// package.json "bin" field (Task 6.6) and runs directly from
-// node_modules/.bin/total-recall after `npm install @strvmarv/total-recall`.
+// The download-on-missing fallback exists because Claude Code's
+// /plugin update flow clones the git repo (which does NOT contain
+// binaries/) rather than installing the npm tarball. In that case
+// ensureBinary() pulls the right binary from GitHub Releases on first
+// launch. Users installing via npm get the same path as a no-op
+// because scripts/postinstall.js already downloaded the binary.
+//
+// Zero runtime dependencies — Node built-ins only. Reuses the shared
+// downloader at ../scripts/fetch-binary.js for RID detection and
+// HTTP(S) fetch logic.
 
-import path from 'node:path';
-import fs from 'node:fs';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { ensureBinary } from '../scripts/fetch-binary.js';
 
-const { platform, arch } = process;
+const result = await ensureBinary({ logPrefix: '[total-recall]' });
 
-function detectRid(platform, arch) {
-  if (platform === 'linux' && arch === 'x64') return 'linux-x64';
-  if (platform === 'linux' && arch === 'arm64') return 'linux-arm64';
-  if (platform === 'darwin' && arch === 'arm64') return 'osx-arm64';
-  if (platform === 'win32' && arch === 'x64') return 'win-x64';
-  return null;
-}
-
-const rid = detectRid(platform, arch);
-if (!rid) {
-  const isIntelMac = platform === 'darwin' && arch === 'x64';
+if (!result.ok) {
+  process.stderr.write(`[total-recall] ${result.error}\n`);
+  if (result.url) {
+    process.stderr.write(`[total-recall]   url: ${result.url}\n`);
+  }
   process.stderr.write(
-    `[total-recall] Unsupported platform: ${platform}/${arch}\n` +
-      '  Supported: linux-x64, linux-arm64, osx-arm64, win-x64\n' +
-      (isIntelMac
-        ? '  Note: Intel Macs (darwin-x64) are not shipped in this release.\n' +
-          '        All modern Apple hardware is Apple Silicon (arm64) since\n' +
-          '        Nov 2020. If you need Intel Mac support, file an issue at\n'
-        : '  Please file an issue at\n') +
-      '  https://github.com/strvmarv/total-recall/issues\n'
+    '[total-recall] File an issue: https://github.com/strvmarv/total-recall/issues\n'
   );
   process.exit(1);
 }
 
-const binaryName = platform === 'win32' ? 'total-recall.exe' : 'total-recall';
-const binaryPath = path.join(__dirname, '..', 'binaries', rid, binaryName);
-
-if (!fs.existsSync(binaryPath)) {
-  process.stderr.write(
-    `[total-recall] Prebuilt binary not found for ${rid}.\n` +
-      `  Expected: ${binaryPath}\n` +
-      '  This usually means the npm package is missing a prebuilt for this\n' +
-      '  platform/architecture. Please file an issue at\n' +
-      '  https://github.com/strvmarv/total-recall/issues or build from source\n' +
-      '  (see CONTRIBUTING.md).\n'
-  );
-  process.exit(1);
-}
+const binaryPath = result.path;
 
 // Spawn with inherited stdio — MCP requires a raw, unbuffered byte channel.
 const child = spawn(binaryPath, process.argv.slice(2), {

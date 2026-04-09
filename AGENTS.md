@@ -16,14 +16,54 @@ The embedding model (`models/**/*.onnx`) is stored with Git LFS. Contributors ne
 
 If the model is missing at runtime, the code auto-downloads from HuggingFace as a fallback (see `src/embedding/model-manager.ts`).
 
+### Version sync — four files, one version (STANDING RULE)
+
+total-recall is a multi-host plugin (Claude Code, Copilot CLI, Cursor,
+OpenCode, …). Each host reads its own plugin manifest, and every
+manifest carries its own `version` field. They MUST all match the
+`package.json` version on every release. Historical drift incidents
+(e.g., `.copilot-plugin/plugin.json` stuck on `0.1.0` for many releases;
+`.claude-plugin/plugin.json` stuck on `0.7.2` through the entire TS→.NET
+cutover) happened because the version rule was only documented for two
+of the four files.
+
+**On every release you MUST bump the version in ALL of these to the same value:**
+
+1. `package.json`
+2. `.claude-plugin/plugin.json`
+3. `.copilot-plugin/plugin.json`
+4. `.cursor-plugin/plugin.json`
+
+`.opencode/` uses `INSTALL.md` (no versioned manifest) so it is exempt,
+but any version references in that doc should still be reviewed.
+
+When agents dispatch subagents to bump versions or cut releases, this
+list MUST be included in the prompt. Never assume "I'll just bump
+package.json" — every release must sync all four.
+
+A follow-up in `docs/TODO.md` ("Plugin Version Single Source of Truth")
+tracks adding a pre-commit or CI check to enforce this automatically.
+
 ### Release flow
 
-1. Bump version in both `package.json` and `.claude-plugin/plugin.json` (keep them in sync)
-2. Run `npm run build` and commit the updated `dist/`
-3. Commit with message like `0.x.y`
-4. Tag with `git tag v0.x.y`
-5. Push both: `git push && git push origin v0.x.y`
-6. The `publish.yml` workflow triggers on `v*` tags — runs tests, builds, publishes to npm
+1. Bump version in all four files above to the same value
+2. Commit with message like `release: v0.x.y` or `release: v0.x.y-beta.N`
+3. Tag with `git tag -a vX.Y.Z -m "..."` (annotated tag with a release-note body)
+4. Push the branch first (`git push origin rewrite/dotnet`), wait for
+   `.github/workflows/dotnet-ci.yml` to go green
+5. Only then push the tag (`git push origin vX.Y.Z`), which fires
+   `.github/workflows/release.yml` — the 5-job matrix builds AOT
+   binaries for linux-x64, linux-arm64, osx-arm64, win-x64, stages
+   them in `binaries/<rid>/`, then the publish job downloads the four
+   artifacts, runs `prepublishOnly` (`scripts/verify-binaries.js`),
+   `npm publish`es with the right dist-tag (`beta`/`rc`/`latest`
+   resolved from the version string), and attaches per-RID binaries
+   to a GitHub Release.
+
+No `npm run build` step — there is no TypeScript to compile. No `dist/`
+to commit — `dist/` was deleted in the 0.8.0 strip (commit 73ec297).
+No `publish.yml` — that was the legacy TS workflow and was deleted in
+commit 7a8c437.
 
 ## Plugin System
 
