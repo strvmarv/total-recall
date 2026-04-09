@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > without changelog entries between 0.6.8-beta.5 and the 0.8.0 cutover. Backfill
 > from `git log v0.6.8-beta.5..v0.7.2` is tracked in `docs/TODO.md`.
 
+## 0.8.0-beta.5 - 2026-04-09
+
+### Fixed
+
+- **AOT publish tree shipped as compressed archive instead of bare executable.** v0.8.0-beta.4 attached only the executable to the GitHub Release per RID, but the .NET AOT binary P/Invokes into sibling native libraries (`libonnxruntime.{dylib,so,dll}` via `Microsoft.ML.OnnxRuntime` and `vec0.*` via sqlite-vec) that live next to it in the publish tree. Every fresh `claude /plugin update` install on a `source: github` marketplace entry crashed at first DB open with `TypeInitializationException` -> `DllNotFoundException: libonnxruntime.dylib`. The npm tarball install path was unaffected because the tarball already shipped the full tree. `release.yml` now stages each per-RID publish tree into `total-recall-<rid>.tar.gz` (Unix) or `total-recall-<rid>.zip` (Windows) and attaches the archives as Release assets. `scripts/fetch-binary.js` downloads the matching archive into `os.tmpdir()`, extracts it via system `tar` (or `tar.exe` / `Expand-Archive` on Windows), verifies the expected executable, and restores the +x bit.
+- **Opaque exception messages at boundary catches.** Beta tester sessions were blocked for ~30 minutes by `migration guard threw: A type initializer threw an exception` because Program.cs's migration-guard catch wrote only `ex.Message` — the real `DllNotFoundException` naming the missing library was buried in `ex.InnerException`. New `src/TotalRecall.Infrastructure/Diagnostics/ExceptionLogger.cs` provides `LogChain(prefix, ex)` that writes the outer exception type+message, walks the entire `InnerException` chain with indented `-> <Type>: <Message>` lines, then the outer stack trace. AOT-safe (uses the first-class `InnerException` property, not reflection). Retrofitted 10 boundary catches across `Program.cs` (migration guard + composition) and the CLI commands (`StatusCommand`, `Memory/{History,Inspect,Export,Lineage}Command`, `Kb/{List,Refresh,Remove}Command`).
+- **`total-recall --version` reported `0.1.0` regardless of build version.** `CliApp.cs` had `private const string AppVersion = "0.1.0"` baked in at compile time. New `ResolveAppVersion()` walks `Assembly.GetEntryAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()` at runtime, strips any SourceLink `+<sha>` suffix, falls back to `Assembly.Version.ToString(3)`, then `"unknown"`. AOT-safe — assembly attributes are metadata and survive trimming. `release.yml`'s `Publish (Unix/Windows)` steps now pass `-p:Version=${REF_NAME#v}` and `-p:InformationalVersion=${REF_NAME#v}` to `dotnet publish` so CI builds carry the tag string. `REF_NAME` is passed via `env:` and dereferenced as `"$REF_NAME"` per GitHub Actions script-injection guidance.
+- **Stale `git-hooks/pre-commit` ran `npm run build` on src/ commits.** Leftover from the TypeScript era when `tsup` built `dist/index.js` from `src/`. After the 0.8.0 strip, `npm run build` no longer exists in `package.json`, so any commit touching `src/TotalRecall.*.cs` would fail the hook. Replaced with a no-op + comment explaining why (and how to run `dotnet build` manually for a local fast-feedback loop).
+
+### Known limitations
+
+- `src/TotalRecall.Server/McpServer.cs` still has `private const string ServerVersion = "0.1.0"`, reported in the MCP `initialize` response (`serverInfo.version`). Moving it to the same dynamic lookup as `CliApp.AppVersion` requires updating `tests/TotalRecall.Server.Tests/McpServerTests.cs:76` which asserts the exact string. Deferred to a follow-up PR.
+- Five additional catch sites in `Memory/{Promote,Demote,Import}Command`, `MigrateCommand`, `ImportHostCommand` were not retrofitted with `ExceptionLogger.LogChain` because no concrete failure was observed there. Same pattern applies; can be propagated later if a real failure surfaces.
+
+### Credits
+
+- Diagnosis and fixes A/B/C delivered by the Mac dogfood agent. Build agent verified `dotnet build` (0/0), `dotnet test` (938 passing), `dotnet publish -r linux-x64 --aot` with the new `-p:Version` flag (binary reports correct version, sibling natives load), and the tar round-trip shape before tagging.
+
 ## 0.8.0-beta.4 - 2026-04-09
 
 ### Fixed
