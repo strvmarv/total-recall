@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > without changelog entries between 0.6.8-beta.5 and the 0.8.0 cutover. Backfill
 > from `git log v0.6.8-beta.5..v0.7.2` is tracked in `docs/TODO.md`.
 
+## 0.8.0-beta.7 - 2026-04-09
+
+### Fixed
+
+- **Migration guard cliff: `total-recall.db` and `total-recall.db.ts-backup` both present.** Beta tester upgrading through 0.8.0-beta.3..6 hit a hard dead-end on beta.6 startup: `migration failed: could not rename old database: The file '~/.total-recall/total-recall.db.ts-backup' already exists.` Reproduction: an earlier beta run (likely beta.3 or beta.4 before the AOT crash classes were fixed) made it past the rename phase, leaving a 5.4 MB `total-recall.db.ts-backup` with the user's real TS-era data. A subsequent step then created a fresh ~12 KB `total-recall.db` (either a partial init from a rolled-back transaction, or an empty SQLite shell from a failed `MigrationRunner.RunMigrations`). On the next startup the guard saw both files and the bare `File.Move(dbPath, backupPath)` threw `IOException` because the target already existed. The user was stuck — recovery required hand-editing files in `~/.total-recall/`.
+
+  Root cause: the previous `CheckAndMigrateAsync` state machine modeled only two pre-migration states (fresh-TS-needs-migration vs. already-migrated). The real state space is **five**: `NotPresent`, `EmptyFile`, `TsFormat`, `PartialNetEmpty`, `PartialNetPopulated`, plus the steady-state `NetMigrated`. The guard had no concept of "the previous attempt got partway and left both files behind" and treated any unrecognized state as a fatal collision.
+
+  Fix: refactor `AutoMigrationGuard.CheckAndMigrateAsync` into an explicit state machine driven by a new read-only `InspectDbFormat()` helper. The full transition table lives in the class xmldoc; key invariants:
+
+  - **Never delete anything.** Suspect files are renamed to `<dbPath>.failed-migration-<utc>` so unique data is recoverable by hand even after the guard auto-resumes.
+  - **The `.ts-backup` is treated as authoritative.** The guard never creates a backup except by renaming `dbPath`, so its existence is *proof* that `dbPath` was once renamed there. If a fresh `dbPath` shows up alongside an existing backup, the backup wins.
+  - **Inspection is read-only.** The previous `TryReadMarker` silently `CREATE TABLE IF NOT EXISTS _meta`-d on every peek, mutating TS-era DBs even on no-op runs. The new `InspectDbFormat` opens with `Mode=ReadOnly` so the file is never touched until the state machine decides to act.
+
+  6 new test cases extend the existing 6 to cover all 5 transitions (`Resume_TsAtDb_BackupExists_*`, `Resume_PartialNetEmpty_*`, `Resume_PartialNetPopulated_*`, `Resume_NoDb_BackupOnly_*`, `EmptyShellAtDb_BackupExists_*`). Each test asserts the right `GuardResult`, the right migrator invocation, the marker presence, and that any sidelined file is still on disk via a new `FailedMigrationSidelineCount()` helper. Total project test count: 944 (up from 938).
+
+- **`total-recall-win-x64.zip` was actually a POSIX tar archive.** Verified after the v0.8.0-beta.6 release pipeline went green: `file release-assets/total-recall-win-x64.zip` reported `POSIX tar archive (GNU)`. Root cause: `release.yml`'s win-x64 staging step used `tar -C binaries/win-x64 -a -cf release-assets/total-recall-win-x64.zip .` and asserted in a comment that `bsdtar -a auto-detects the format from the extension, producing a standard .zip`. That's true on macOS where `tar` is bsdtar/libarchive — but the publish job runs on `ubuntu-latest` where `tar` is **GNU tar**, whose `-a`/`--auto-compress` selects a *compression program* from the suffix (gzip/bzip2/xz), not an *archive format*. For `.zip` it falls through to plain uncompressed tar. Result: a tar file with a misleading `.zip` extension. Windows users using Explorer's built-in zip handling, 7-Zip without auto-detection, etc. would fail with "not a zip file"; only Windows tar.exe (bsdtar) handled the misnamed file successfully via libarchive's format auto-detect.
+
+  Fix: switch the win-x64 leg to `.tar.gz` like every other RID. `release.yml`'s `Stage per-RID release assets` step now produces `total-recall-win-x64.tar.gz` via `tar -C binaries/win-x64 -czf release-assets/total-recall-win-x64.tar.gz .`, and the `Attach archives to GitHub release` files list updated accordingly. `scripts/fetch-binary.js`'s `getArchiveName()` now always returns `.tar.gz` regardless of RID, and `extractArchive()` collapses to a single `tar -xzf` invocation — no more isZip branch, no more `Expand-Archive` PowerShell fallback. Windows 10+ ships `tar.exe` (bsdtar/libarchive) since build 17063 / 1803 (April 2018), which handles `.tar.gz` natively. Single archive format, single extraction code path, simpler than what we had.
+
+### Credits
+
+- Migration guard fix delivered by the Mac dogfood agent (commit `7ce54db`). The fix was triggered by the user's actual recovery experience — they had to manually `mv ~/.total-recall/total-recall.db ~/.total-recall/total-recall.db.failed-migration-cruft && mv ~/.total-recall/total-recall.db.ts-backup ~/.total-recall/total-recall.db` to unblock beta.6. This commit makes that recovery automatic.
+- `total-recall-win-x64.zip` archive bug discovered by the build agent during post-tag verification of v0.8.0-beta.6 (downloading and inspecting the live release asset via `file`). Mac agent's commit `b5564a3` introduced the bug; tested locally on macOS where bsdtar is the default `tar` and didn't surface the GNU tar / bsdtar divergence. Fixed in this commit by unifying on `.tar.gz` for all RIDs.
+- Build agent verified on linux-x64 before bumping: `dotnet build` 0/0, `dotnet test` 944 passing (up from 938 with the new guard tests), happy-path AOT publish produces `runtimes/vec0.so`, tar round-trip on the new win-x64 path produces real `gzip compressed data` (verified via `file`) that extracts cleanly with `runtimes/vec0.so` in place.
+
 ## 0.8.0-beta.6 - 2026-04-09
 
 ### Fixed

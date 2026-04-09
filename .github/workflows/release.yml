@@ -269,14 +269,22 @@ jobs:
           # tar -C <dir> -czf <out> . packs the contents of <dir> at the
           # archive root so extraction with `tar -xzf archive -C dest`
           # drops them straight into dest/ without a leading <rid>/ dir.
+          #
+          # All RIDs (including win-x64) use .tar.gz. The publish runner is
+          # ubuntu-latest where `tar` is GNU tar, NOT bsdtar — GNU tar's -a
+          # selects a compression program from the suffix and falls through
+          # to uncompressed for .zip, producing a tar file with a misleading
+          # extension. v0.8.0-beta.6's win-x64.zip was actually a POSIX tar
+          # archive that broke any Windows extraction tool requiring real
+          # PKZIP format. Switching the Windows leg to .tar.gz too keeps
+          # one archive format and one extraction code path. Windows 10+
+          # ships tar.exe (bsdtar/libarchive) which handles .tar.gz natively
+          # since 1803, and scripts/fetch-binary.js calls it directly on
+          # Windows installs.
           tar -C binaries/linux-x64   -czf release-assets/total-recall-linux-x64.tar.gz   .
           tar -C binaries/linux-arm64 -czf release-assets/total-recall-linux-arm64.tar.gz .
           tar -C binaries/osx-arm64   -czf release-assets/total-recall-osx-arm64.tar.gz   .
-          # Windows .zip uses bsdtar (shipped with GitHub-hosted runners and
-          # with Git for Windows) so we can keep this step on bash even on
-          # the ubuntu publish runner. bsdtar -a auto-detects the format
-          # from the extension, producing a standard .zip.
-          tar -C binaries/win-x64 -a -cf release-assets/total-recall-win-x64.zip .
+          tar -C binaries/win-x64     -czf release-assets/total-recall-win-x64.tar.gz     .
           ls -la release-assets/
           echo "--- archive contents preview ---"
           tar -tzf release-assets/total-recall-osx-arm64.tar.gz | head -20
@@ -288,6 +296,6 @@ jobs:
             release-assets/total-recall-linux-x64.tar.gz
             release-assets/total-recall-linux-arm64.tar.gz
             release-assets/total-recall-osx-arm64.tar.gz
-            release-assets/total-recall-win-x64.zip
+            release-assets/total-recall-win-x64.tar.gz
           prerelease: ${{ contains(github.ref_name, '-') }}
           fail_on_unmatched_files: true

@@ -74,11 +74,16 @@ function getVersion() {
 }
 
 // Release asset filenames are set by release.yml's "Stage per-RID release
-// assets" step. URL format:
+// assets" step. All RIDs (including win-x64) ship as .tar.gz — Windows 10+
+// has native tar.exe / bsdtar that handles .tar.gz fine, and using a single
+// archive format avoids the GNU-tar-vs-bsdtar gotcha that broke
+// v0.8.0-beta.6's win-x64.zip (it was actually a POSIX tar archive because
+// the publish runner is ubuntu-latest where `tar` is GNU tar, and GNU tar's
+// -a treats .zip as "no compression", producing a misnamed file). URL
+// format:
 //   https://github.com/strvmarv/total-recall/releases/download/v<version>/total-recall-<rid>.tar.gz
-//   (Windows: .zip)
 export function getArchiveName(rid) {
-  return rid === 'win-x64' ? `total-recall-${rid}.zip` : `total-recall-${rid}.tar.gz`;
+  return `total-recall-${rid}.tar.gz`;
 }
 
 export function getDownloadUrl(rid, version) {
@@ -133,34 +138,13 @@ async function streamToFile(res, destPath) {
   });
 }
 
-// Extract an archive into destDir. destDir must already exist. Uses
-// system `tar` for .tar.gz (ubiquitous on Unix, shipped as bsdtar on
-// Windows 10+ since build 17063) and falls back to PowerShell
-// Expand-Archive for .zip on Windows. Throws on failure — callers are
-// expected to wrap in try/catch and clean up the archive.
+// Extract a .tar.gz archive into destDir. destDir must already exist.
+// Uses system `tar` (GNU tar on Linux, BSD tar on macOS, bsdtar/libarchive
+// shipped as `tar.exe` on Windows 10+ since build 17063 / 1803). All
+// platforms accept the same `tar -xzf <archive> -C <dest>` invocation,
+// so there is no per-platform branch and no PowerShell fallback. Throws
+// on failure — callers wrap in try/catch and clean up the archive.
 function extractArchive(archivePath, destDir) {
-  const isZip = archivePath.endsWith('.zip');
-  if (isZip && process.platform === 'win32') {
-    // bsdtar/tar.exe on Windows 10+ understands .zip natively via
-    // libarchive, which avoids the PowerShell round-trip. Try tar
-    // first, then fall back to Expand-Archive.
-    try {
-      execFileSync('tar', ['-xf', archivePath, '-C', destDir], { stdio: 'inherit' });
-      return;
-    } catch {
-      // PowerShell fallback. Escape single quotes defensively.
-      const esc = (p) => p.replace(/'/g, "''");
-      execFileSync('powershell', [
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        `Expand-Archive -LiteralPath '${esc(archivePath)}' -DestinationPath '${esc(destDir)}' -Force`,
-      ], { stdio: 'inherit' });
-      return;
-    }
-  }
-  // Unix .tar.gz (and Windows .tar.gz via bsdtar): one invocation.
-  // -x extract, -z gunzip, -f file, -C target directory.
   execFileSync('tar', ['-xzf', archivePath, '-C', destDir], { stdio: 'inherit' });
 }
 
