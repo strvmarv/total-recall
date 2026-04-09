@@ -30,33 +30,35 @@
 
 # total-recall
 
-**Multi-tiered memory and knowledge base for TUI coding assistants.**
+**Persistent, cross-tool memory for AI coding assistants.**
 
-Your AI coding tool forgets everything. total-recall doesn't.
-
-A cross-platform plugin that gives Claude Code, GitHub Copilot CLI, OpenCode, Cline, Cursor, and Hermes persistent, semantically searchable memory with a hierarchical knowledge base — backed by local SQLite + vector embeddings, zero external dependencies.
+Your AI forgets everything when the session ends. Preferences, decisions, project context, corrections — gone. total-recall fixes that: a shared memory layer that persists across sessions, tools, and devices.
 
 ---
 
 ## The Problem
 
-Every TUI coding assistant has the same gap:
+Every TUI coding assistant has the same gaps:
 
-- **No tiering** — all memories treated equally, leading to context bloat or information loss
-- **Tool-locked** — switching between Claude Code and Copilot means starting from scratch
-- **No knowledge base** — can't ingest your docs and have them retrieved when relevant
-- **No semantic search** — memories retrieved by filename, not by meaning
-- **No observability** — no way to know if memory is helping or just noise
+- **No memory between sessions** — every new session starts from zero, repeating the same context
+- **Siloed by tool** — switching between Claude Code and Copilot CLI means starting from scratch
+- **Single-machine** — your context doesn't follow you across devices
+- **Context bloat** — stuffing everything into a `CLAUDE.md` wastes tokens every prompt
+- **No token visibility** — no way to know what your AI sessions are actually costing you
 
 ---
 
 ## The Solution
 
-total-recall introduces a three-tier memory model: **Hot** memories (up to 50 entries) are auto-injected into every prompt so your most important context is always present. **Warm** memories (up to 10K entries) are retrieved semantically — when you ask about authentication, relevant auth memories surface automatically. **Cold** storage is unlimited hierarchical knowledge base: ingest your docs, README files, API references, and architecture notes, and they're retrieved when relevant.
+- **Persistent memory** — corrections, preferences, decisions, and project context survive sessions automatically
+- **Cross-tool** — one memory store shared across Claude Code, Copilot CLI, Cursor, Cline, OpenCode, and Hermes; existing memories auto-import on first run
+- **Cross-device** — point `TOTAL_RECALL_DB_PATH` at a cloud-synced folder and your memory follows you everywhere
+- **Smarter context, lower token cost** — a three-tier model (Hot / Warm / Cold) enforces a 4000-token budget per prompt, so you get relevant context without carrying everything
+- **Token expenditure tracking** *(coming soon)* — see exactly what each session costs and verify the savings
+- **Knowledge base** — ingest your docs, READMEs, API references, and architecture notes; retrieved semantically when relevant
+- **Observability** — measure retrieval quality, run benchmarks, and compare config changes with the built-in eval framework
 
-The knowledge base ingests entire directories — source trees, documentation folders, design specs — and chunks them semantically with heading-aware Markdown parsing and regex-based code parsing. Every chunk is embedded with `all-MiniLM-L6-v2` (384 dimensions, runs locally via ONNX) so retrieval is purely semantic, no keyword matching required.
-
-Platform support is via MCP (Model Context Protocol), which means total-recall works with any MCP-compatible tool. Dedicated importers for Claude Code, Copilot CLI, Cursor, Cline, OpenCode, and Hermes mean your existing memories migrate automatically on first run. An eval framework lets you measure retrieval quality, run benchmarks, and compare configuration changes before committing them.
+All state is local: SQLite + vector embeddings, no external services, no API keys.
 
 ---
 
