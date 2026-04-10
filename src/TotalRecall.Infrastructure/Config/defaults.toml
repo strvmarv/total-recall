@@ -34,3 +34,21 @@ min_events = 10
 
 [search]
 fts_weight = 0.3
+
+# --- Remote storage (optional) ---
+# Uncomment to use Postgres/pgvector instead of SQLite.
+# [storage]
+# connection_string = "Host=localhost;Database=total_recall;Username=tr;Password=changeme"
+
+# --- Remote embedding (optional) ---
+# Set provider to use a remote embedder instead of the bundled ONNX model.
+# provider = "local"              # "local" | "openai" | "bedrock"
+# endpoint = "https://api.openai.com/v1"
+# model_name = "text-embedding-3-small"
+# bedrock_region = "us-east-1"
+# bedrock_model = "cohere.embed-v4:0"
+# api_key = ""                    # or set TOTAL_RECALL_EMBEDDING_API_KEY env var
+
+# --- User identity (optional, Postgres only) ---
+# [user]
+# user_id = "alice"               # or set TOTAL_RECALL_USER_ID env var
