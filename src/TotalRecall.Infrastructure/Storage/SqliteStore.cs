@@ -23,7 +23,7 @@ namespace TotalRecall.Infrastructure.Storage;
 /// already-opened connection and skips migrations. The borrowed-connection
 /// form does NOT own disposal.
 /// </summary>
-public sealed class SqliteStore : ISqliteStore, IDisposable
+public sealed class SqliteStore : IStore, IDisposable
 {
     private readonly MsSqliteConnection _conn;
     private readonly bool _ownsConnection;
@@ -51,7 +51,7 @@ public sealed class SqliteStore : ISqliteStore, IDisposable
         _ownsConnection = false;
     }
 
-    // --- ISqliteStore -----------------------------------------------------
+    // --- IStore -----------------------------------------------------
 
     public string Insert(Tier tier, ContentType type, InsertEntryOpts opts)
     {
@@ -168,7 +168,7 @@ VALUES
         return RowToEntry(reader);
     }
 
-    public long? GetRowid(Tier tier, ContentType type, string id)
+    public long? GetInternalKey(Tier tier, ContentType type, string id)
     {
         var table = MigrationRunner.TableName(tier, type);
         using var cmd = _conn.CreateCommand();
@@ -421,7 +421,7 @@ VALUES
     /// <summary>
     /// Internal so sibling Infrastructure classes (HierarchicalIndex, etc.)
     /// can deserialize raw rows without going through the
-    /// <see cref="ISqliteStore"/> CRUD interface — needed for queries that
+    /// <see cref="IStore"/> CRUD interface — needed for queries that
     /// filter on <c>parent_id</c> or <c>json_extract(metadata, ...)</c>,
     /// which are not part of the standard CRUD surface.
     /// </summary>

@@ -33,9 +33,9 @@ public sealed class KbSummarizeHandler : IToolHandler
         }
         """).RootElement.Clone();
 
-    private readonly ISqliteStore _store;
+    private readonly IStore _store;
 
-    public KbSummarizeHandler(ISqliteStore store)
+    public KbSummarizeHandler(IStore store)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
     }

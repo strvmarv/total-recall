@@ -3,7 +3,7 @@
 // Plan 4 Task 4.6 — first real IToolHandler. Ports the `memory_store` branch
 // of src-ts/tools/memory-tools.ts (plus src-ts/memory/store.ts) to the .NET
 // Server. The handler validates MCP arguments, invokes the embedder to warm
-// and produce a query vector, then calls ISqliteStore.InsertWithEmbedding to
+// and produce a query vector, then calls IStore.InsertWithEmbedding to
 // persist the metadata row and the vec0 embedding row inside a single
 // transaction.
 //
@@ -86,11 +86,11 @@ public sealed class MemoryStoreHandler : IToolHandler
         "imported", "compacted", "ingested",
     };
 
-    private readonly ISqliteStore _store;
+    private readonly IStore _store;
     private readonly IEmbedder _embedder;
     private readonly IVectorSearch _vectorSearch;
 
-    public MemoryStoreHandler(ISqliteStore store, IEmbedder embedder, IVectorSearch vectorSearch)
+    public MemoryStoreHandler(IStore store, IEmbedder embedder, IVectorSearch vectorSearch)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _embedder = embedder ?? throw new ArgumentNullException(nameof(embedder));

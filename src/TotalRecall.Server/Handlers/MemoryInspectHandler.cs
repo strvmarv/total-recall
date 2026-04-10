@@ -33,10 +33,10 @@ public sealed class MemoryInspectHandler : IToolHandler
         }
         """).RootElement.Clone();
 
-    private readonly ISqliteStore _store;
+    private readonly IStore _store;
     private readonly ICompactionLogReader _log;
 
-    public MemoryInspectHandler(ISqliteStore store, ICompactionLogReader log)
+    public MemoryInspectHandler(IStore store, ICompactionLogReader log)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _log = log ?? throw new ArgumentNullException(nameof(log));

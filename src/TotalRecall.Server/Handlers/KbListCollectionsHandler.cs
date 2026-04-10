@@ -3,7 +3,7 @@
 // Plan 6 Task 6.0b — ports `kb list` (Cli/Commands/Kb/ListCommand.cs) to MCP.
 // Also a parity port of src-ts/tools/kb-tools.ts:193-196 (kb_list_collections).
 //
-// Reads collection roots via ISqliteStore.ListByMetadata({type:"collection"})
+// Reads collection roots via IStore.ListByMetadata({type:"collection"})
 // from cold_knowledge, then computes per-collection document/chunk counts in
 // a single sweep of cold_knowledge to avoid O(N*M) per-collection rescan
 // (matches the CLI's optimization).
@@ -28,9 +28,9 @@ public sealed class KbListCollectionsHandler : IToolHandler
         }
         """).RootElement.Clone();
 
-    private readonly ISqliteStore _store;
+    private readonly IStore _store;
 
-    public KbListCollectionsHandler(ISqliteStore store)
+    public KbListCollectionsHandler(IStore store)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
     }

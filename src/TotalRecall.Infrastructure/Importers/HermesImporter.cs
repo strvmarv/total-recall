@@ -32,7 +32,7 @@ public sealed class HermesImporter : IImporter
     private static readonly Regex SectionDelimiter =
         new(@"\n§\n", RegexOptions.Compiled);
 
-    private readonly ISqliteStore _store;
+    private readonly IStore _store;
     private readonly IEmbedder _embedder;
     private readonly IVectorSearch _vectorSearch;
     private readonly ImportLog _importLog;
@@ -41,7 +41,7 @@ public sealed class HermesImporter : IImporter
     public string Name => "hermes";
 
     public HermesImporter(
-        ISqliteStore store,
+        IStore store,
         IEmbedder embedder,
         IVectorSearch vectorSearch,
         ImportLog importLog,

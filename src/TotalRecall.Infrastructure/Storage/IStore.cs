@@ -9,7 +9,7 @@ namespace TotalRecall.Infrastructure.Storage;
 /// exported by <c>src-ts/db/entries.ts</c>. Plan 4's handlers fake against
 /// this interface; production wiring uses <see cref="SqliteStore"/>.
 /// </summary>
-public interface ISqliteStore
+public interface IStore
 {
     /// <summary>Insert a new entry, returning the generated id.</summary>
     string Insert(Tier tier, ContentType type, InsertEntryOpts opts);
@@ -38,15 +38,15 @@ public interface ISqliteStore
     Entry? Get(Tier tier, ContentType type, string id);
 
     /// <summary>
-    /// Return the SQLite integer <c>rowid</c> of the content row for a
-    /// given id, or <c>null</c> if no such row exists. Exists so callers
-    /// can resolve the rowid of an entry before deleting it, and then
-    /// pass that rowid to <see cref="IVectorSearch.DeleteEmbedding"/> —
+    /// Return the internal storage key (e.g. integer rowid) of the content row
+    /// for a given id, or <c>null</c> if no such row exists. Exists so callers
+    /// can resolve the key of an entry before deleting it, and then
+    /// pass that key to <see cref="IVectorSearch.DeleteEmbedding"/> —
     /// eliminating the footgun where the old id-based delete silently
     /// leaked the vec row once the content row was gone. See
     /// <c>MemoryDeleteHandlerTests.Delete_CallsVecDeleteBeforeStoreDelete</c>.
     /// </summary>
-    long? GetRowid(Tier tier, ContentType type, string id);
+    long? GetInternalKey(Tier tier, ContentType type, string id);
 
     /// <summary>Update selected fields on an existing entry.</summary>
     void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts);
@@ -91,7 +91,7 @@ public interface ISqliteStore
 }
 
 /// <summary>
-/// Options for <see cref="ISqliteStore.Insert"/>. Mirrors <c>InsertEntryOpts</c>
+/// Options for <see cref="IStore.Insert"/>. Mirrors <c>InsertEntryOpts</c>
 /// in <c>src-ts/db/entries.ts</c>.
 /// </summary>
 public sealed record InsertEntryOpts(
@@ -106,7 +106,7 @@ public sealed record InsertEntryOpts(
     string? MetadataJson = null);
 
 /// <summary>
-/// Options for <see cref="ISqliteStore.Update"/>. Each non-null field becomes
+/// Options for <see cref="IStore.Update"/>. Each non-null field becomes
 /// a SET clause. <see cref="Touch"/> bumps <c>access_count</c> and
 /// <c>last_accessed_at</c>. Mirrors <c>UpdateEntryOpts</c> in TS.
 /// </summary>
@@ -129,7 +129,7 @@ public sealed record UpdateEntryOpts
 }
 
 /// <summary>
-/// Options for <see cref="ISqliteStore.List"/> and related queries.
+/// Options for <see cref="IStore.List"/> and related queries.
 /// </summary>
 public sealed record ListEntriesOpts
 {

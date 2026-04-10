@@ -50,7 +50,7 @@ public sealed class SessionLifecycleTests
             "{}");                              // metadataJson
     }
 
-    private sealed class FakeStore : ISqliteStore
+    private sealed class FakeStore : IStore
     {
         // Per-(tier, type) entry lists. Test fixtures populate the slots they
         // care about; everything else returns empty.
@@ -84,7 +84,7 @@ public sealed class SessionLifecycleTests
         public Entry? Get(Tier tier, ContentType type, string id) =>
             Slot(tier, type).FirstOrDefault(e => e.Id == id);
 
-        public long? GetRowid(Tier tier, ContentType type, string id) =>
+        public long? GetInternalKey(Tier tier, ContentType type, string id) =>
             Slot(tier, type).Any(e => e.Id == id) ? 1L : null;
 
         public void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts) =>

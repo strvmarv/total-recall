@@ -34,10 +34,10 @@ public sealed class KbRemoveHandler : IToolHandler
         }
         """).RootElement.Clone();
 
-    private readonly ISqliteStore _store;
+    private readonly IStore _store;
     private readonly IVectorSearch _vec;
 
-    public KbRemoveHandler(ISqliteStore store, IVectorSearch vec)
+    public KbRemoveHandler(IStore store, IVectorSearch vec)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _vec = vec ?? throw new ArgumentNullException(nameof(vec));
@@ -75,14 +75,14 @@ public sealed class KbRemoveHandler : IToolHandler
         var cascadeCount = 0;
         foreach (var child in children)
         {
-            var childRowid = _store.GetRowid(Tier.Cold, ContentType.Knowledge, child.Id);
+            var childRowid = _store.GetInternalKey(Tier.Cold, ContentType.Knowledge, child.Id);
             if (childRowid is not null)
                 _vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, childRowid.Value);
             _store.Delete(Tier.Cold, ContentType.Knowledge, child.Id);
             cascadeCount++;
         }
 
-        var rootRowid = _store.GetRowid(Tier.Cold, ContentType.Knowledge, id);
+        var rootRowid = _store.GetInternalKey(Tier.Cold, ContentType.Knowledge, id);
         if (rootRowid is not null)
             _vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, rootRowid.Value);
         _store.Delete(Tier.Cold, ContentType.Knowledge, id);

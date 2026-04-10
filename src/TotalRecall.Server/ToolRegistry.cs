@@ -12,7 +12,7 @@
 //     documented (but subtly-worded) insertion-order iteration guarantee.
 //   - The registry owns no lifecycle beyond the handlers it was handed:
 //     handlers that need disposal / warmup are managed by their constructors
-//     (e.g., Task 4.6+ handlers take IOnnxEmbedder / ISqliteStore instances).
+//     (e.g., Task 4.6+ handlers take IOnnxEmbedder / IStore instances).
 //   - ListTools() returns freshly-built ToolSpec[] rather than caching, on
 //     the assumption that registration happens once at startup and tools/list
 //     is called at most a handful of times per session.

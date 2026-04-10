@@ -1,6 +1,6 @@
 // tests/TotalRecall.Cli.Tests/TestSupport/FakeMemoryInfra.cs
 //
-// Plan 5 Task 5.4 — thin test doubles for ISqliteStore / IVectorSearch /
+// Plan 5 Task 5.4 — thin test doubles for IStore / IVectorSearch /
 // IEmbedder used by the memory admin CLI verb tests. Deliberately minimal:
 // only the methods actually invoked by promote/demote/inspect are
 // implemented; the rest throw NotImplementedException so accidental
@@ -17,7 +17,7 @@ using TotalRecall.Infrastructure.Storage;
 
 namespace TotalRecall.Cli.Tests.TestSupport;
 
-internal sealed class FakeSqliteStore : ISqliteStore
+internal sealed class FakeSqliteStore : IStore
 {
     private readonly Dictionary<(Tier, ContentType, string), Entry> _rows = new();
     private readonly Dictionary<(Tier, ContentType, string), long> _rowids = new();
@@ -39,7 +39,7 @@ internal sealed class FakeSqliteStore : ISqliteStore
         return _rows.TryGetValue((tier, type, id), out var e) ? e : null;
     }
 
-    public long? GetRowid(Tier tier, ContentType type, string id)
+    public long? GetInternalKey(Tier tier, ContentType type, string id)
     {
         return _rowids.TryGetValue((tier, type, id), out var r) ? r : null;
     }

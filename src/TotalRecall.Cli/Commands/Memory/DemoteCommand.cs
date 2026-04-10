@@ -18,14 +18,14 @@ namespace TotalRecall.Cli.Commands.Memory;
 
 public sealed class DemoteCommand : ICliCommand
 {
-    private readonly ISqliteStore? _store;
+    private readonly IStore? _store;
     private readonly IVectorSearch? _vec;
     private readonly IEmbedder? _embedder;
 
     public DemoteCommand() { }
 
     // Test/composition seam.
-    public DemoteCommand(ISqliteStore store, IVectorSearch vec, IEmbedder embedder)
+    public DemoteCommand(IStore store, IVectorSearch vec, IEmbedder embedder)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _vec = vec ?? throw new ArgumentNullException(nameof(vec));
@@ -117,7 +117,7 @@ public sealed class DemoteCommand : ICliCommand
             }
         }
 
-        ISqliteStore store;
+        IStore store;
         IVectorSearch vec;
         IEmbedder embedder;
         MemoryComponents? owned = null;

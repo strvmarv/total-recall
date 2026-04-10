@@ -36,7 +36,7 @@ namespace TotalRecall.Infrastructure.Importers;
 /// </summary>
 public sealed class CursorImporter : IImporter
 {
-    private readonly ISqliteStore _store;
+    private readonly IStore _store;
     private readonly IEmbedder _embedder;
     private readonly IVectorSearch _vectorSearch;
     private readonly ImportLog _importLog;
@@ -46,7 +46,7 @@ public sealed class CursorImporter : IImporter
     public string Name => "cursor";
 
     public CursorImporter(
-        ISqliteStore store,
+        IStore store,
         IEmbedder embedder,
         IVectorSearch vectorSearch,
         ImportLog importLog,

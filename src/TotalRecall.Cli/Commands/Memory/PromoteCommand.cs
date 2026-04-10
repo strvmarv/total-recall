@@ -22,14 +22,14 @@ public sealed class PromoteCommand : ICliCommand
 {
     // Test seam: all three dependencies are injected together so a unit test
     // can record calls against the fakes without hitting real SQLite or ONNX.
-    private readonly ISqliteStore? _store;
+    private readonly IStore? _store;
     private readonly IVectorSearch? _vec;
     private readonly IEmbedder? _embedder;
 
     public PromoteCommand() { }
 
     // Test/composition seam.
-    public PromoteCommand(ISqliteStore store, IVectorSearch vec, IEmbedder embedder)
+    public PromoteCommand(IStore store, IVectorSearch vec, IEmbedder embedder)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _vec = vec ?? throw new ArgumentNullException(nameof(vec));
@@ -122,7 +122,7 @@ public sealed class PromoteCommand : ICliCommand
             }
         }
 
-        ISqliteStore store;
+        IStore store;
         IVectorSearch vec;
         IEmbedder embedder;
         MemoryComponents? owned = null;

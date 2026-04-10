@@ -26,7 +26,7 @@ namespace TotalRecall.Cli.Commands.Kb;
 
 public sealed class RefreshCommand : ICliCommand
 {
-    private readonly ISqliteStore? _store;
+    private readonly IStore? _store;
     private readonly IVectorSearch? _vec;
     private readonly IFileIngester? _ingester;
     private readonly TextWriter? _out;
@@ -36,7 +36,7 @@ public sealed class RefreshCommand : ICliCommand
     // Test/composition seam. The IEmbedder dependency stays inside the
     // injected IFileIngester — test fakes can return canned results.
     public RefreshCommand(
-        ISqliteStore store,
+        IStore store,
         IVectorSearch vec,
         IFileIngester ingester,
         TextWriter output)
@@ -81,7 +81,7 @@ public sealed class RefreshCommand : ICliCommand
             return 2;
         }
 
-        ISqliteStore store;
+        IStore store;
         IVectorSearch vec;
         IFileIngester ingester;
         MsSqliteConnection? owned = null;
@@ -146,14 +146,14 @@ public sealed class RefreshCommand : ICliCommand
             }
             foreach (var child in children)
             {
-                var childRowid = store.GetRowid(Tier.Cold, ContentType.Knowledge, child.Id);
+                var childRowid = store.GetInternalKey(Tier.Cold, ContentType.Knowledge, child.Id);
                 if (childRowid is not null)
                     vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, childRowid.Value);
                 store.Delete(Tier.Cold, ContentType.Knowledge, child.Id);
             }
 
             // Delete the root.
-            var rootRowid = store.GetRowid(Tier.Cold, ContentType.Knowledge, collectionId);
+            var rootRowid = store.GetInternalKey(Tier.Cold, ContentType.Knowledge, collectionId);
             if (rootRowid is not null)
                 vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, rootRowid.Value);
             store.Delete(Tier.Cold, ContentType.Knowledge, collectionId);

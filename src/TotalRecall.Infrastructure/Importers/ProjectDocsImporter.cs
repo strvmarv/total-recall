@@ -16,7 +16,7 @@ namespace TotalRecall.Infrastructure.Importers;
 /// chunker + HierarchicalIndex pipeline.
 ///
 /// Differs from the other six importers: they write individual entries via
-/// <c>ISqliteStore.Insert</c>, whereas this one produces a collection ->
+/// <c>IStore.Insert</c>, whereas this one produces a collection ->
 /// document -> chunk tree in cold/knowledge. Mirrors
 /// <c>src-ts/importers/project-docs.ts</c>.
 ///

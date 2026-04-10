@@ -36,11 +36,11 @@ public sealed class KbRefreshHandler : IToolHandler
         }
         """).RootElement.Clone();
 
-    private readonly ISqliteStore _store;
+    private readonly IStore _store;
     private readonly IVectorSearch _vec;
     private readonly IFileIngester _ingester;
 
-    public KbRefreshHandler(ISqliteStore store, IVectorSearch vec, IFileIngester ingester)
+    public KbRefreshHandler(IStore store, IVectorSearch vec, IFileIngester ingester)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _vec = vec ?? throw new ArgumentNullException(nameof(vec));
@@ -90,14 +90,14 @@ public sealed class KbRefreshHandler : IToolHandler
         }
         foreach (var child in children)
         {
-            var childRowid = _store.GetRowid(Tier.Cold, ContentType.Knowledge, child.Id);
+            var childRowid = _store.GetInternalKey(Tier.Cold, ContentType.Knowledge, child.Id);
             if (childRowid is not null)
                 _vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, childRowid.Value);
             _store.Delete(Tier.Cold, ContentType.Knowledge, child.Id);
         }
 
         // Delete the root.
-        var rootRowid = _store.GetRowid(Tier.Cold, ContentType.Knowledge, collectionId);
+        var rootRowid = _store.GetInternalKey(Tier.Cold, ContentType.Knowledge, collectionId);
         if (rootRowid is not null)
             _vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, rootRowid.Value);
         _store.Delete(Tier.Cold, ContentType.Knowledge, collectionId);

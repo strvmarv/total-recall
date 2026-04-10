@@ -23,13 +23,13 @@ namespace TotalRecall.Cli.Internal;
 internal sealed class MemoryComponents : IDisposable
 {
     public MsSqliteConnection Connection { get; }
-    public ISqliteStore Store { get; }
+    public IStore Store { get; }
     public IVectorSearch Vec { get; }
     public IEmbedder Embedder { get; }
 
     private MemoryComponents(
         MsSqliteConnection conn,
-        ISqliteStore store,
+        IStore store,
         IVectorSearch vec,
         IEmbedder embedder)
     {

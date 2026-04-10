@@ -33,7 +33,7 @@ public sealed class BenchmarkRunnerTests : IDisposable
 
     // ----- fakes -----
 
-    private sealed class FakeStore : ISqliteStore
+    private sealed class FakeStore : IStore
     {
         public Dictionary<string, Entry> Entries { get; } = new(StringComparer.Ordinal);
         public int InsertCalls;
@@ -66,7 +66,7 @@ public sealed class BenchmarkRunnerTests : IDisposable
         public Entry? Get(Tier tier, ContentType type, string id)
             => Entries.TryGetValue(id, out var e) ? e : null;
 
-        public long? GetRowid(Tier tier, ContentType type, string id)
+        public long? GetInternalKey(Tier tier, ContentType type, string id)
             => Entries.ContainsKey(id) ? 1L : null;
 
         public void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts) { }

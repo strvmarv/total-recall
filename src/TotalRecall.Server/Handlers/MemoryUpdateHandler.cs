@@ -4,13 +4,13 @@
 // src-ts/tools/memory-tools.ts (plus src-ts/memory/update.ts) to the
 // .NET Server. Resolves the target row by iterating the 6 (tier, type)
 // pairs (same trick as MemoryGetHandler), then forwards the provided
-// fields to ISqliteStore.Update. If `content` is supplied the handler
+// fields to IStore.Update. If `content` is supplied the handler
 // re-embeds and replaces the vec0 row via Delete + Insert, matching
 // the TS semantics.
 //
 // Design notes:
 //
-//   - The plan prose specifies (ISqliteStore, IEmbedder, IVectorSearch)
+//   - The plan prose specifies (IStore, IEmbedder, IVectorSearch)
 //     because content changes require re-embedding AND replacing the
 //     vec0 row. IVectorSearch.InsertEmbedding is INSERT-only (see
 //     VectorSearch.cs:51) so the replace path is DeleteEmbedding +
@@ -56,11 +56,11 @@ public sealed class MemoryUpdateHandler : IToolHandler
 
     private const int MaxContentLength = 100_000;
 
-    private readonly ISqliteStore _store;
+    private readonly IStore _store;
     private readonly IEmbedder _embedder;
     private readonly IVectorSearch _vectorSearch;
 
-    public MemoryUpdateHandler(ISqliteStore store, IEmbedder embedder, IVectorSearch vectorSearch)
+    public MemoryUpdateHandler(IStore store, IEmbedder embedder, IVectorSearch vectorSearch)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _embedder = embedder ?? throw new ArgumentNullException(nameof(embedder));
@@ -148,7 +148,7 @@ public sealed class MemoryUpdateHandler : IToolHandler
         {
             ct.ThrowIfCancellationRequested();
             var vector = _embedder.Embed(content);
-            var rowid = _store.GetRowid(located.Value.Tier, located.Value.Type, id);
+            var rowid = _store.GetInternalKey(located.Value.Tier, located.Value.Type, id);
             if (rowid is not null)
                 _vectorSearch.DeleteEmbedding(located.Value.Tier, located.Value.Type, rowid.Value);
             _vectorSearch.InsertEmbedding(located.Value.Tier, located.Value.Type, id, vector);

@@ -1,4 +1,4 @@
-// Lightweight ISqliteStore fake for Plan 4 handler tests. Records calls to
+// Lightweight IStore fake for Plan 4 handler tests. Records calls to
 // Insert/Update/Delete and supports a pre-seeded Get lookup table keyed by
 // (tier, type, id). Methods that individual handler tests do not exercise
 // throw NotImplementedException so accidental dependencies show up loudly.
@@ -14,7 +14,7 @@ using TotalRecall.Infrastructure.Storage;
 
 namespace TotalRecall.Server.Tests.TestSupport;
 
-public sealed class FakeSqliteStore : ISqliteStore
+public sealed class FakeSqliteStore : IStore
 {
     public sealed record InsertCall(Tier Tier, ContentType Type, InsertEntryOpts Opts);
     public sealed record UpdateCall(Tier Tier, ContentType Type, string Id, UpdateEntryOpts Opts);
@@ -36,7 +36,7 @@ public sealed class FakeSqliteStore : ISqliteStore
 
     /// <summary>
     /// Synthetic rowid assigned to each seeded or inserted entry so
-    /// <see cref="GetRowid"/> can return a stable value that behaves
+    /// <see cref="GetInternalKey"/> can return a stable value that behaves
     /// like the SQLite-allocated rowid in production. Monotonic; reused
     /// after deletion isn't modeled because no handler test needs it.
     /// </summary>
@@ -66,7 +66,7 @@ public sealed class FakeSqliteStore : ISqliteStore
             ListSlots[(tier, type)] = slot;
         }
         slot.AddRange(entries);
-        // Assign synthetic rowids so GetRowid works for SeedList-only entries
+        // Assign synthetic rowids so GetInternalKey works for SeedList-only entries
         // (KbRefreshHandlerTests and similar exercise children that are only
         // populated via SeedList, not Seed).
         foreach (var e in entries)
@@ -91,7 +91,7 @@ public sealed class FakeSqliteStore : ISqliteStore
     {
         InsertWithEmbeddingCalls.Add(new InsertWithEmbeddingCall(tier, type, opts, embedding.ToArray()));
         // Mirror the real store: allocate a rowid under the same monotonic
-        // counter so GetRowid works on the fresh id. Does NOT model
+        // counter so GetInternalKey works on the fresh id. Does NOT model
         // transactional rollback — tests that need to exercise the rollback
         // path use the real SqliteStore against :memory:.
         Rowids[(tier, type, NextInsertId)] = _nextRowid++;
@@ -104,7 +104,7 @@ public sealed class FakeSqliteStore : ISqliteStore
         return Entries.TryGetValue((tier, type, id), out var e) ? e : null;
     }
 
-    public long? GetRowid(Tier tier, ContentType type, string id)
+    public long? GetInternalKey(Tier tier, ContentType type, string id)
     {
         return Rowids.TryGetValue((tier, type, id), out var r) ? r : null;
     }

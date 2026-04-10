@@ -30,12 +30,12 @@ namespace TotalRecall.Cli.Commands.Memory;
 
 public sealed class InspectCommand : ICliCommand
 {
-    private readonly ISqliteStore? _store;
+    private readonly IStore? _store;
 
     public InspectCommand() { }
 
     // Test/composition seam.
-    public InspectCommand(ISqliteStore store)
+    public InspectCommand(IStore store)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
     }
@@ -87,7 +87,7 @@ public sealed class InspectCommand : ICliCommand
             return 2;
         }
 
-        ISqliteStore store;
+        IStore store;
         MsSqliteConnection? owned = null;
         try
         {

@@ -4,7 +4,7 @@
 // `status` tool (TotalRecall.Server.Handlers.StatusHandler) but renders a
 // Spectre dashboard for interactive terminal use. The Cli project does
 // NOT reference Server, so the reads are duplicated inline here against
-// ISqliteStore / IConfigLoader primitives.
+// IStore / IConfigLoader primitives.
 //
 // Scope vs. StatusHandler:
 //   * tierSizes         — 6 Count() calls, one per (tier, content_type).
@@ -14,7 +14,7 @@
 //   * activity          — intentionally omitted (server stubs it to 0s).
 //   * lastCompaction    — intentionally omitted (server stubs to null).
 //
-// Test seam: public ctor (ISqliteStore, IConfigLoader, dbPath, TextWriter).
+// Test seam: public ctor (IStore, IConfigLoader, dbPath, TextWriter).
 
 using System;
 using System.Collections.Generic;
@@ -38,7 +38,7 @@ public sealed class StatusCommand : ICliCommand
     private static readonly IReadOnlyDictionary<string, string> CollectionFilter =
         new Dictionary<string, string>(StringComparer.Ordinal) { ["type"] = "collection" };
 
-    private readonly ISqliteStore? _store;
+    private readonly IStore? _store;
     private readonly IConfigLoader? _configLoader;
     private readonly string? _dbPath;
     private readonly TextWriter? _out;
@@ -47,7 +47,7 @@ public sealed class StatusCommand : ICliCommand
 
     // Test/composition seam.
     public StatusCommand(
-        ISqliteStore store,
+        IStore store,
         IConfigLoader configLoader,
         string dbPath,
         TextWriter output)
@@ -82,7 +82,7 @@ public sealed class StatusCommand : ICliCommand
             }
         }
 
-        ISqliteStore store;
+        IStore store;
         IConfigLoader configLoader;
         string dbPath;
         MsSqliteConnection? owned = null;
@@ -151,7 +151,7 @@ public sealed class StatusCommand : ICliCommand
 
     internal sealed record KbCollectionRow(string Id, string Name, int Chunks);
 
-    private static StatusData Gather(ISqliteStore store, IConfigLoader configLoader, string dbPath)
+    private static StatusData Gather(IStore store, IConfigLoader configLoader, string dbPath)
     {
         int hotMem = store.Count(Tier.Hot, ContentType.Memory);
         int hotKnow = store.Count(Tier.Hot, ContentType.Knowledge);

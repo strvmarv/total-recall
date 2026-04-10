@@ -26,7 +26,7 @@ namespace TotalRecall.Infrastructure.Importers;
 /// </summary>
 public sealed class CopilotCliImporter : IImporter
 {
-    private readonly ISqliteStore _store;
+    private readonly IStore _store;
     private readonly IEmbedder _embedder;
     private readonly IVectorSearch _vectorSearch;
     private readonly ImportLog _importLog;
@@ -35,7 +35,7 @@ public sealed class CopilotCliImporter : IImporter
     public string Name => "copilot-cli";
 
     public CopilotCliImporter(
-        ISqliteStore store,
+        IStore store,
         IEmbedder embedder,
         IVectorSearch vectorSearch,
         ImportLog importLog,

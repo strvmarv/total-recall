@@ -85,7 +85,7 @@ public static class ServerComposition
     /// Callable from both production (OpenProduction) and tests.
     /// </summary>
     public static ToolRegistry BuildRegistry(
-        ISqliteStore store,
+        IStore store,
         IVectorSearch vectors,
         IEmbedder embedder,
         IHybridSearch hybrid,

@@ -57,13 +57,13 @@ public sealed class HierarchicalIndex
 {
     private const string Table = "cold_knowledge";
 
-    private readonly ISqliteStore _store;
+    private readonly IStore _store;
     private readonly IEmbedder _embedder;
     private readonly IVectorSearch _vectorSearch;
     private readonly MsSqliteConnection _conn;
 
     public HierarchicalIndex(
-        ISqliteStore store,
+        IStore store,
         IEmbedder embedder,
         IVectorSearch vectorSearch,
         MsSqliteConnection conn)
@@ -197,7 +197,7 @@ public sealed class HierarchicalIndex
     /// <summary>
     /// List all rows in <c>cold_knowledge</c> whose metadata <c>type</c> is
     /// <c>"collection"</c>. Uses SQLite's <c>json_extract</c> filter, the
-    /// same one <see cref="ISqliteStore.ListByMetadata"/> uses internally.
+    /// same one <see cref="IStore.ListByMetadata"/> uses internally.
     /// </summary>
     public IReadOnlyList<CollectionEntry> ListCollections()
     {

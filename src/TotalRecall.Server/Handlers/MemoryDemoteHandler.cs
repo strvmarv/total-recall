@@ -30,11 +30,11 @@ public sealed class MemoryDemoteHandler : IToolHandler
         }
         """).RootElement.Clone();
 
-    private readonly ISqliteStore _store;
+    private readonly IStore _store;
     private readonly IVectorSearch _vec;
     private readonly IEmbedder _embedder;
 
-    public MemoryDemoteHandler(ISqliteStore store, IVectorSearch vec, IEmbedder embedder)
+    public MemoryDemoteHandler(IStore store, IVectorSearch vec, IEmbedder embedder)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _vec = vec ?? throw new ArgumentNullException(nameof(vec));

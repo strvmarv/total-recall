@@ -8,15 +8,15 @@
 //
 // Design notes:
 //
-//   - Ctor dependencies are (ISqliteStore, ISessionLifecycle, StatusOptions).
+//   - Ctor dependencies are (IStore, ISessionLifecycle, StatusOptions).
 //     StatusOptions carries DbPath, EmbeddingModel, EmbeddingDimensions —
 //     values that live outside the store/lifecycle seams and would
 //     otherwise have to be pulled from the process host configuration.
 //
-//   - tierSizes is 6 ISqliteStore.Count calls, one per (tier, type).
+//   - tierSizes is 6 IStore.Count calls, one per (tier, type).
 //
 //   - knowledgeBase enumerates cold_knowledge rows whose metadata.type ==
-//     "collection" via ISqliteStore.ListByMetadata (option b — collections
+//     "collection" via IStore.ListByMetadata (option b — collections
 //     are already marked with that discriminator by HierarchicalIndex.cs,
 //     see EncodeCollectionMetadata). totalChunks = Count(Cold, Knowledge) -
 //     collections.Count, matching the TS semantics that treats every
@@ -76,12 +76,12 @@ public sealed class StatusHandler : IToolHandler
     private static readonly IReadOnlyDictionary<string, string> _collectionFilter =
         new Dictionary<string, string>(StringComparer.Ordinal) { ["type"] = "collection" };
 
-    private readonly ISqliteStore _store;
+    private readonly IStore _store;
     private readonly ISessionLifecycle _sessionLifecycle;
     private readonly StatusOptions _options;
 
     public StatusHandler(
-        ISqliteStore store,
+        IStore store,
         ISessionLifecycle sessionLifecycle,
         StatusOptions options)
     {

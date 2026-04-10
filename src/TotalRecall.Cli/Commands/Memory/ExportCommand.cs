@@ -27,14 +27,14 @@ namespace TotalRecall.Cli.Commands.Memory;
 
 public sealed class ExportCommand : ICliCommand
 {
-    private readonly ISqliteStore? _store;
+    private readonly IStore? _store;
     private readonly TextWriter? _out;
 
     public ExportCommand() { }
 
     // Test/composition seam: inject a store and a writer to capture JSON
     // without touching real SQLite or the filesystem.
-    public ExportCommand(ISqliteStore store, TextWriter output)
+    public ExportCommand(IStore store, TextWriter output)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _out = output ?? throw new ArgumentNullException(nameof(output));
@@ -112,7 +112,7 @@ public sealed class ExportCommand : ICliCommand
             }
         }
 
-        ISqliteStore store;
+        IStore store;
         MsSqliteConnection? owned = null;
         try
         {

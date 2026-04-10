@@ -48,7 +48,7 @@ public interface IVectorSearch
     ///
     /// Callers must resolve the rowid *before* deleting the matching
     /// content row — typically via
-    /// <see cref="ISqliteStore.GetRowid"/>. The older overload took an
+    /// <see cref="IStore.GetInternalKey"/>. The older overload took an
     /// entry id and resolved the rowid internally via the content table,
     /// which silently leaked vec rows whenever a caller deleted content
     /// before the vec embedding (see the 0.6.7 orphan-vec-row bug). The
