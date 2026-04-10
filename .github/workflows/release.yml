@@ -28,6 +28,7 @@ on:
 
 permissions:
   contents: write
+  deployments: write
 
 jobs:
   build:
@@ -246,6 +247,22 @@ jobs:
               npm publish
               ;;
           esac
+
+      - name: Create GitHub deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          DEPLOY_ID=$(gh api repos/${{ github.repository }}/deployments \
+            -f ref="${{ github.sha }}" \
+            -f environment="npm-publish" \
+            -f description="v${VERSION} published to npm" \
+            -f auto_merge=false \
+            --jq '.id')
+          gh api "repos/${{ github.repository }}/deployments/${DEPLOY_ID}/statuses" \
+            -f state="success" \
+            -f description="v${VERSION} published to npm" \
+            -f environment_url="https://www.npmjs.com/package/@strvmarv/total-recall/v/${VERSION}"
 
       - name: Stage per-RID release assets
         shell: bash
