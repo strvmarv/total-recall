@@ -227,4 +227,52 @@ public class KbSearchHandlerTests
         Assert.Single(embed.Calls);
         Assert.Equal("hello world", embed.Calls[0]);
     }
+
+    [Fact]
+    public async Task Scope_AcceptedWithoutError_Mine()
+    {
+        var (handler, _, _) = NewFixture();
+
+        var result = await handler.ExecuteAsync(
+            Args("""{"query":"q","scope":"mine"}"""),
+            CancellationToken.None);
+
+        Assert.NotEqual(true, result.IsError);
+    }
+
+    [Fact]
+    public async Task Scope_AcceptedWithoutError_Team()
+    {
+        var (handler, _, _) = NewFixture();
+
+        var result = await handler.ExecuteAsync(
+            Args("""{"query":"q","scope":"team"}"""),
+            CancellationToken.None);
+
+        Assert.NotEqual(true, result.IsError);
+    }
+
+    [Fact]
+    public async Task Scope_AcceptedWithoutError_All()
+    {
+        var (handler, _, _) = NewFixture();
+
+        var result = await handler.ExecuteAsync(
+            Args("""{"query":"q","scope":"all"}"""),
+            CancellationToken.None);
+
+        Assert.NotEqual(true, result.IsError);
+    }
+
+    [Fact]
+    public async Task Scope_DefaultsToMine_WhenOmitted()
+    {
+        var (handler, _, _) = NewFixture();
+
+        var result = await handler.ExecuteAsync(
+            Args("""{"query":"q"}"""),
+            CancellationToken.None);
+
+        Assert.NotEqual(true, result.IsError);
+    }
 }

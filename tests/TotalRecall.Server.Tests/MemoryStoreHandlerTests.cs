@@ -201,4 +201,83 @@ public class MemoryStoreHandlerTests
         Assert.True(handler.InputSchema.TryGetProperty("properties", out var props));
         Assert.True(props.TryGetProperty("content", out _));
     }
+
+    [Fact]
+    public async Task Visibility_Private_NotStoredInMetadata()
+    {
+        var (handler, store, _, _) = MakeHandler();
+        var args = ParseArgs("""{"content":"x","visibility":"private"}""");
+
+        await handler.ExecuteAsync(args, CancellationToken.None);
+
+        var call = Assert.Single(store.InsertWithEmbeddingCalls);
+        // "private" is the default — omitted from metadata to keep it lean.
+        Assert.Null(call.Opts.MetadataJson);
+    }
+
+    [Fact]
+    public async Task Visibility_Team_AppearsInMetadata()
+    {
+        var (handler, store, _, _) = MakeHandler();
+        var args = ParseArgs("""{"content":"x","visibility":"team"}""");
+
+        await handler.ExecuteAsync(args, CancellationToken.None);
+
+        var call = Assert.Single(store.InsertWithEmbeddingCalls);
+        Assert.NotNull(call.Opts.MetadataJson);
+        using var doc = JsonDocument.Parse(call.Opts.MetadataJson!);
+        Assert.Equal("team", doc.RootElement.GetProperty("visibility").GetString());
+    }
+
+    [Fact]
+    public async Task Visibility_Public_AppearsInMetadata()
+    {
+        var (handler, store, _, _) = MakeHandler();
+        var args = ParseArgs("""{"content":"x","visibility":"public"}""");
+
+        await handler.ExecuteAsync(args, CancellationToken.None);
+
+        var call = Assert.Single(store.InsertWithEmbeddingCalls);
+        Assert.NotNull(call.Opts.MetadataJson);
+        using var doc = JsonDocument.Parse(call.Opts.MetadataJson!);
+        Assert.Equal("public", doc.RootElement.GetProperty("visibility").GetString());
+    }
+
+    [Fact]
+    public async Task Visibility_InvalidValue_Throws()
+    {
+        var (handler, _, _, _) = MakeHandler();
+        var args = ParseArgs("""{"content":"x","visibility":"secret"}""");
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(
+            () => handler.ExecuteAsync(args, CancellationToken.None));
+        Assert.Contains("secret", ex.Message);
+    }
+
+    [Fact]
+    public async Task Visibility_AndEntryType_BothStoredInMetadata()
+    {
+        var (handler, store, _, _) = MakeHandler();
+        var args = ParseArgs("""{"content":"x","entryType":"preference","visibility":"team"}""");
+
+        await handler.ExecuteAsync(args, CancellationToken.None);
+
+        var call = Assert.Single(store.InsertWithEmbeddingCalls);
+        Assert.NotNull(call.Opts.MetadataJson);
+        using var doc = JsonDocument.Parse(call.Opts.MetadataJson!);
+        Assert.Equal("preference", doc.RootElement.GetProperty("entry_type").GetString());
+        Assert.Equal("team", doc.RootElement.GetProperty("visibility").GetString());
+    }
+
+    [Fact]
+    public async Task Visibility_OmittedDefaults_MetadataNull_WhenNoEntryType()
+    {
+        var (handler, store, _, _) = MakeHandler();
+        var args = ParseArgs("""{"content":"x"}""");
+
+        await handler.ExecuteAsync(args, CancellationToken.None);
+
+        var call = Assert.Single(store.InsertWithEmbeddingCalls);
+        Assert.Null(call.Opts.MetadataJson);
+    }
 }
