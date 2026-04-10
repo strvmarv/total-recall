@@ -254,12 +254,11 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           DEPLOY_ID=$(gh api repos/${{ github.repository }}/deployments \
-            -f ref="${{ github.sha }}" \
-            -f environment="npm-publish" \
-            -f description="v${VERSION} published to npm" \
-            -F auto_merge=false \
-            -F 'required_contexts=[]' \
-            --jq '.id')
+            --input - \
+            --jq '.id' <<PAYLOAD
+          {"ref":"${{ github.sha }}","environment":"npm-publish","description":"v${VERSION} published to npm","auto_merge":false,"required_contexts":[]}
+          PAYLOAD
+          )
           gh api "repos/${{ github.repository }}/deployments/${DEPLOY_ID}/statuses" \
             -f state="success" \
             -f description="v${VERSION} published to npm" \
