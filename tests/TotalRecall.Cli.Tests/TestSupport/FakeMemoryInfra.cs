@@ -17,7 +17,7 @@ using TotalRecall.Infrastructure.Storage;
 
 namespace TotalRecall.Cli.Tests.TestSupport;
 
-internal sealed class FakeSqliteStore : IStore
+internal sealed class FakeStore : IStore
 {
     private readonly Dictionary<(Tier, ContentType, string), Entry> _rows = new();
     private readonly Dictionary<(Tier, ContentType, string), long> _rowids = new();

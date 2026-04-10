@@ -15,10 +15,10 @@ namespace TotalRecall.Server.Tests;
 
 public class MemoryUpdateHandlerTests
 {
-    private static (MemoryUpdateHandler handler, FakeSqliteStore store, RecordingFakeEmbedder embedder, FakeVectorSearch vector)
+    private static (MemoryUpdateHandler handler, FakeStore store, RecordingFakeEmbedder embedder, FakeVectorSearch vector)
         MakeHandler()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var embedder = new RecordingFakeEmbedder();
         var vector = new FakeVectorSearch();
         var handler = new MemoryUpdateHandler(store, embedder, vector);

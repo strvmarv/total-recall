@@ -14,7 +14,7 @@ using TotalRecall.Infrastructure.Storage;
 
 namespace TotalRecall.Server.Tests.TestSupport;
 
-public sealed class FakeSqliteStore : IStore
+public sealed class FakeStore : IStore
 {
     public sealed record InsertCall(Tier Tier, ContentType Type, InsertEntryOpts Opts);
     public sealed record UpdateCall(Tier Tier, ContentType Type, string Id, UpdateEntryOpts Opts);

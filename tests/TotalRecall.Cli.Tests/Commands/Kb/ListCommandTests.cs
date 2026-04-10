@@ -34,7 +34,7 @@ public sealed class ListCommandTests : IDisposable
     [Fact]
     public async Task Empty_PrintsSentinel_ReturnsZero()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var injected = new StringWriter();
         var cmd = new ListCommand(store, injected);
 
@@ -47,7 +47,7 @@ public sealed class ListCommandTests : IDisposable
     [Fact]
     public async Task UnknownArg_ReturnsExit2()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var cmd = new ListCommand(store, new StringWriter());
 
         var code = await cmd.RunAsync(new[] { "--bogus" });
@@ -58,7 +58,7 @@ public sealed class ListCommandTests : IDisposable
     [Fact]
     public async Task HappyPath_Json_RoundTripsCounts()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         // Two collections.
         store.Seed(Tier.Cold, ContentType.Knowledge, EntryFactory.Make(
             id: "coll-a",
@@ -113,7 +113,7 @@ public sealed class ListCommandTests : IDisposable
     {
         // Default rendering goes through Spectre.Console which doesn't honor
         // Console.SetOut — we only assert exit code here.
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         store.Seed(Tier.Cold, ContentType.Knowledge, EntryFactory.Make(
             id: "coll-a",
             metadataJson: "{\"type\":\"collection\",\"name\":\"Alpha\",\"source_path\":\"/tmp/a\"}"));

@@ -27,7 +27,7 @@
 //
 // Design notes:
 //
-//   - We reuse the Plan 4 fakes (FakeSqliteStore, FakeVectorSearch,
+//   - We reuse the Plan 4 fakes (FakeStore, FakeVectorSearch,
 //     RecordingFakeEmbedder, RecordingFakeHybridSearch) so no real I/O
 //     happens. MemorySearchHandler's NextResult defaults to an empty array.
 //
@@ -61,13 +61,13 @@ public sealed class EndToEndStdioTests
         JsonDocument.Parse(line).RootElement.Clone();
 
     private static (ToolRegistry registry,
-                    FakeSqliteStore store,
+                    FakeStore store,
                     FakeVectorSearch vectors,
                     RecordingFakeEmbedder embedder,
                     RecordingFakeHybridSearch hybrid)
         BuildTestRegistry()
     {
-        var store = new FakeSqliteStore { NextInsertId = "entry-e2e" };
+        var store = new FakeStore { NextInsertId = "entry-e2e" };
         var vectors = new FakeVectorSearch();
         var embedder = new RecordingFakeEmbedder();
         var hybrid = new RecordingFakeHybridSearch();

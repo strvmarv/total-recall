@@ -33,7 +33,7 @@ public sealed class RefreshCommandTests : IDisposable
     [Fact]
     public async Task MissingId_ReturnsExit2()
     {
-        var cmd = new RefreshCommand(new FakeSqliteStore(), new FakeVectorSearch(), new FakeFileIngester(), new StringWriter());
+        var cmd = new RefreshCommand(new FakeStore(), new FakeVectorSearch(), new FakeFileIngester(), new StringWriter());
         var code = await cmd.RunAsync(Array.Empty<string>());
         Assert.Equal(2, code);
     }
@@ -41,7 +41,7 @@ public sealed class RefreshCommandTests : IDisposable
     [Fact]
     public async Task NotFound_ReturnsExit1()
     {
-        var cmd = new RefreshCommand(new FakeSqliteStore(), new FakeVectorSearch(), new FakeFileIngester(), new StringWriter());
+        var cmd = new RefreshCommand(new FakeStore(), new FakeVectorSearch(), new FakeFileIngester(), new StringWriter());
         var code = await cmd.RunAsync(new[] { "nope" });
         Assert.Equal(1, code);
         Assert.Contains("not found", _errWriter.ToString());
@@ -50,7 +50,7 @@ public sealed class RefreshCommandTests : IDisposable
     [Fact]
     public async Task MissingSourcePath_ReturnsExit1()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         store.Seed(Tier.Cold, ContentType.Knowledge, EntryFactory.Make(
             id: "coll-a",
             metadataJson: "{\"type\":\"collection\",\"name\":\"Alpha\"}"));
@@ -65,7 +65,7 @@ public sealed class RefreshCommandTests : IDisposable
     [Fact]
     public async Task SourcePathMissing_ReturnsExit1()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var bogus = Path.Combine(Path.GetTempPath(), "totalrecall-refresh-missing-" + Guid.NewGuid().ToString("N"));
         store.Seed(Tier.Cold, ContentType.Knowledge, EntryFactory.Make(
             id: "coll-a",
@@ -85,7 +85,7 @@ public sealed class RefreshCommandTests : IDisposable
         File.WriteAllText(tempFile, "# test\n");
         try
         {
-            var store = new FakeSqliteStore();
+            var store = new FakeStore();
             var vec = new FakeVectorSearch();
             store.Seed(Tier.Cold, ContentType.Knowledge, EntryFactory.Make(
                 id: "coll-a",
@@ -124,7 +124,7 @@ public sealed class RefreshCommandTests : IDisposable
         Directory.CreateDirectory(tempDir);
         try
         {
-            var store = new FakeSqliteStore();
+            var store = new FakeStore();
             var vec = new FakeVectorSearch();
             store.Seed(Tier.Cold, ContentType.Knowledge, EntryFactory.Make(
                 id: "coll-a",

@@ -15,10 +15,10 @@ namespace TotalRecall.Server.Tests;
 
 public class MemoryPromoteHandlerTests
 {
-    private static (MemoryPromoteHandler handler, FakeSqliteStore store,
+    private static (MemoryPromoteHandler handler, FakeStore store,
             FakeVectorSearch vec, RecordingFakeEmbedder embedder) MakeHandler()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var vec = new FakeVectorSearch();
         var embedder = new RecordingFakeEmbedder();
         return (new MemoryPromoteHandler(store, vec, embedder), store, vec, embedder);

@@ -34,9 +34,9 @@ public sealed class ImportCommandTests : IDisposable
         Console.SetError(_origErr);
     }
 
-    private static (ImportCommand Cmd, FakeSqliteStore Store, FakeVectorSearch Vec, RecordingEmbedder Emb, StringWriter Out) MakeCmd()
+    private static (ImportCommand Cmd, FakeStore Store, FakeVectorSearch Vec, RecordingEmbedder Emb, StringWriter Out) MakeCmd()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var vec = new FakeVectorSearch();
         var emb = new RecordingEmbedder();
         var sw = new StringWriter();

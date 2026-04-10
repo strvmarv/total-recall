@@ -30,7 +30,7 @@ public sealed class FakeVectorSearch : IVectorSearch
 
     /// <summary>
     /// Opt-in cross-fake call-order log. See
-    /// <see cref="FakeSqliteStore.OrderLog"/>.
+    /// <see cref="FakeStore.OrderLog"/>.
     /// </summary>
     public List<string>? OrderLog { get; set; }
 

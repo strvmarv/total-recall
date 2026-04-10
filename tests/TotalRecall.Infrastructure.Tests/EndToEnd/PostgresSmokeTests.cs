@@ -51,11 +51,13 @@ public sealed class PostgresSmokeTests
     /// </summary>
     private static NpgsqlDataSource CreateDataSource(string connStr, string schema)
     {
-        var builder = new NpgsqlConnectionStringBuilder(connStr)
+        var connBuilder = new NpgsqlConnectionStringBuilder(connStr)
         {
-            SearchPath = schema,
+            SearchPath = $"{schema},public",
         };
-        return NpgsqlDataSource.Create(builder.ConnectionString);
+        var dsBuilder = new NpgsqlDataSourceBuilder(connBuilder.ConnectionString);
+        dsBuilder.UseVector();
+        return dsBuilder.Build();
     }
 
     /// <summary>

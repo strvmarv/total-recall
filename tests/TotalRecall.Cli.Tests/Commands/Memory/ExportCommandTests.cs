@@ -42,7 +42,7 @@ public sealed class ExportCommandTests : IDisposable
         // so instead we just make sure the command is a valid registered verb by
         // running it with an invalid tier arg (fast usage exit) and verifying
         // that the usage contract holds. True --help is covered by CliAppTests.
-        var cmd = new ExportCommand(new FakeSqliteStore(), new StringWriter());
+        var cmd = new ExportCommand(new FakeStore(), new StringWriter());
         // Spot-check: no args = empty-store happy path (== success).
         var code = await cmd.RunAsync(Array.Empty<string>());
         Assert.Equal(0, code);
@@ -51,7 +51,7 @@ public sealed class ExportCommandTests : IDisposable
     [Fact]
     public async Task InvalidTier_ReturnsExit2()
     {
-        var cmd = new ExportCommand(new FakeSqliteStore(), new StringWriter());
+        var cmd = new ExportCommand(new FakeStore(), new StringWriter());
         var code = await cmd.RunAsync(new[] { "--tiers", "bogus" });
         Assert.Equal(2, code);
         Assert.Contains("invalid tier", _errWriter.ToString());
@@ -60,7 +60,7 @@ public sealed class ExportCommandTests : IDisposable
     [Fact]
     public async Task InvalidType_ReturnsExit2()
     {
-        var cmd = new ExportCommand(new FakeSqliteStore(), new StringWriter());
+        var cmd = new ExportCommand(new FakeStore(), new StringWriter());
         var code = await cmd.RunAsync(new[] { "--types", "bogus" });
         Assert.Equal(2, code);
     }
@@ -69,7 +69,7 @@ public sealed class ExportCommandTests : IDisposable
     public async Task EmptyStore_EmitsEmptyEnvelope()
     {
         var sw = new StringWriter();
-        var cmd = new ExportCommand(new FakeSqliteStore(), sw);
+        var cmd = new ExportCommand(new FakeStore(), sw);
         var code = await cmd.RunAsync(Array.Empty<string>());
         Assert.Equal(0, code);
 
@@ -85,7 +85,7 @@ public sealed class ExportCommandTests : IDisposable
     [Fact]
     public async Task HappyPath_SeedsThreeEntries()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: "a", content: "alpha"));
         store.Seed(Tier.Warm, ContentType.Memory, EntryFactory.Make(id: "b", content: "beta"));
         store.Seed(Tier.Cold, ContentType.Knowledge, EntryFactory.Make(id: "c", content: "gamma"));
@@ -116,7 +116,7 @@ public sealed class ExportCommandTests : IDisposable
     [Fact]
     public async Task TierFilter_ColdOnly()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: "a", content: "hot1"));
         store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: "b", content: "hot2"));
         store.Seed(Tier.Cold, ContentType.Memory, EntryFactory.Make(id: "c", content: "cold1"));
@@ -135,7 +135,7 @@ public sealed class ExportCommandTests : IDisposable
     [Fact]
     public async Task TypeFilter_KnowledgeOnly()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: "m1", content: "mem1"));
         store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: "m2", content: "mem2"));
         store.Seed(Tier.Hot, ContentType.Knowledge, EntryFactory.Make(id: "k1", content: "know1"));
@@ -154,7 +154,7 @@ public sealed class ExportCommandTests : IDisposable
     [Fact]
     public async Task Pretty_EmitsMultilineJson()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: "a", content: "alpha"));
         var sw = new StringWriter();
         var cmd = new ExportCommand(store, sw);
@@ -171,7 +171,7 @@ public sealed class ExportCommandTests : IDisposable
     [Fact]
     public async Task OutFile_WritesToDiskAndPrintsSummary()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: "a", content: "alpha"));
         var tmp = Path.Combine(Path.GetTempPath(), $"tr-export-{Guid.NewGuid():N}.json");
         try
@@ -195,7 +195,7 @@ public sealed class ExportCommandTests : IDisposable
     public async Task SpecialChars_RoundTrip()
     {
         var special = "has \"quote\"\nnewline\\backslash";
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: "x", content: special));
 
         var sw = new StringWriter();

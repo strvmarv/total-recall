@@ -16,9 +16,9 @@ namespace TotalRecall.Server.Tests;
 
 public class KbRemoveHandlerTests
 {
-    private static (KbRemoveHandler handler, FakeSqliteStore store, FakeVectorSearch vec) MakeHandler()
+    private static (KbRemoveHandler handler, FakeStore store, FakeVectorSearch vec) MakeHandler()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var vec = new FakeVectorSearch();
         return (new KbRemoveHandler(store, vec), store, vec);
     }

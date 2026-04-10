@@ -15,10 +15,10 @@ namespace TotalRecall.Server.Tests;
 
 public class MemoryDeleteHandlerTests
 {
-    private static (MemoryDeleteHandler handler, FakeSqliteStore store, FakeVectorSearch vector)
+    private static (MemoryDeleteHandler handler, FakeStore store, FakeVectorSearch vector)
         MakeHandler()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var vector = new FakeVectorSearch();
         var handler = new MemoryDeleteHandler(store, vector);
         return (handler, store, vector);
@@ -51,7 +51,7 @@ public class MemoryDeleteHandlerTests
         Assert.Equal("abc", store.DeleteCalls[0].Id);
 
         Assert.Single(vector.DeleteCalls);
-        // FakeSqliteStore assigns rowid 1 to the first Seed.
+        // FakeStore assigns rowid 1 to the first Seed.
         Assert.Equal(1L, vector.DeleteCalls[0].Rowid);
     }
 

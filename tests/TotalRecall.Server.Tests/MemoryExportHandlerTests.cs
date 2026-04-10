@@ -15,9 +15,9 @@ namespace TotalRecall.Server.Tests;
 
 public class MemoryExportHandlerTests
 {
-    private static (MemoryExportHandler handler, FakeSqliteStore store) MakeHandler()
+    private static (MemoryExportHandler handler, FakeStore store) MakeHandler()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         return (new MemoryExportHandler(store), store);
     }
 

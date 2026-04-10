@@ -1,7 +1,7 @@
 // tests/TotalRecall.Server.Tests/SessionContextHandlerTests.cs
 //
 // Plan 4 Task 4.10 — unit tests for SessionContextHandler. Uses
-// FakeSqliteStore's ListSlots seeding (added alongside Task 4.10) to
+// FakeStore's ListSlots seeding (added alongside Task 4.10) to
 // drop pre-built F# Entry rows into the hot tier slots. Line-format
 // assertions mirror src-ts/tools/session-tools.ts:376-380.
 
@@ -41,7 +41,7 @@ public sealed class SessionContextHandlerTests
             "{}");
     }
 
-    private static async Task<JsonElement> RunAsync(FakeSqliteStore store)
+    private static async Task<JsonElement> RunAsync(FakeStore store)
     {
         var handler = new SessionContextHandler(store);
         var result = await handler.ExecuteAsync(null, CancellationToken.None);
@@ -51,7 +51,7 @@ public sealed class SessionContextHandlerTests
     [Fact]
     public async Task NoHotEntries_ReturnsEmptyContextSentinel()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
 
         var root = await RunAsync(store);
 
@@ -62,7 +62,7 @@ public sealed class SessionContextHandlerTests
     [Fact]
     public async Task HotMemoriesOnly_FormatsLines()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         store.SeedList(Tier.Hot, ContentType.Memory,
             MakeEntry("m1", "first memory"),
             MakeEntry("m2", "second memory"));
@@ -78,7 +78,7 @@ public sealed class SessionContextHandlerTests
     [Fact]
     public async Task HotMemoriesWithTags_IncludesTagSuffix()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         store.SeedList(Tier.Hot, ContentType.Memory,
             MakeEntry("m1", "tagged", tags: new[] { "a", "b" }));
 
@@ -90,7 +90,7 @@ public sealed class SessionContextHandlerTests
     [Fact]
     public async Task HotMemoriesWithProject_IncludesProjectSuffix()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         store.SeedList(Tier.Hot, ContentType.Memory,
             MakeEntry("m1", "in project", project: "foo"));
 
@@ -102,7 +102,7 @@ public sealed class SessionContextHandlerTests
     [Fact]
     public async Task HotMemoriesWithTagsAndProject_BothSuffixes()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         store.SeedList(Tier.Hot, ContentType.Memory,
             MakeEntry("m1", "full", tags: new[] { "x", "y" }, project: "bar"));
 
@@ -116,7 +116,7 @@ public sealed class SessionContextHandlerTests
     [Fact]
     public async Task HotMemoriesAndKnowledge_BothIncluded()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         store.SeedList(Tier.Hot, ContentType.Memory, MakeEntry("m1", "mem"));
         store.SeedList(Tier.Hot, ContentType.Knowledge, MakeEntry("k1", "kb"));
 
@@ -129,7 +129,7 @@ public sealed class SessionContextHandlerTests
     [Fact]
     public async Task EntryCount_MatchesTotalAcrossTables()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         store.SeedList(Tier.Hot, ContentType.Memory,
             MakeEntry("m1", "a"), MakeEntry("m2", "b"), MakeEntry("m3", "c"));
         store.SeedList(Tier.Hot, ContentType.Knowledge,
@@ -143,7 +143,7 @@ public sealed class SessionContextHandlerTests
     [Fact]
     public async Task NullArguments_DoesNotThrow()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var handler = new SessionContextHandler(store);
 
         var result = await handler.ExecuteAsync(null, CancellationToken.None);
@@ -154,7 +154,7 @@ public sealed class SessionContextHandlerTests
     [Fact]
     public void Metadata_NameAndDescription()
     {
-        var handler = new SessionContextHandler(new FakeSqliteStore());
+        var handler = new SessionContextHandler(new FakeStore());
 
         Assert.Equal("session_context", handler.Name);
         Assert.Contains("hot tier", handler.Description);

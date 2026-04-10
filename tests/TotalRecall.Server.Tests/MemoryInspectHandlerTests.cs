@@ -15,9 +15,9 @@ namespace TotalRecall.Server.Tests;
 
 public class MemoryInspectHandlerTests
 {
-    private static (MemoryInspectHandler handler, FakeSqliteStore store, FakeCompactionLog log) MakeHandler()
+    private static (MemoryInspectHandler handler, FakeStore store, FakeCompactionLog log) MakeHandler()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var log = new FakeCompactionLog();
         return (new MemoryInspectHandler(store, log), store, log);
     }

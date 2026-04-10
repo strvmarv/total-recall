@@ -25,7 +25,7 @@ public sealed class ServerCompositionTests
 {
     private static ToolRegistry BuildWithFakes()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var vectors = new FakeVectorSearch();
         var embedder = new RecordingFakeEmbedder();
         var hybrid = new RecordingFakeHybridSearch();

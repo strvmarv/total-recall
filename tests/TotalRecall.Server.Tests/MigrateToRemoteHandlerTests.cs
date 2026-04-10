@@ -4,7 +4,7 @@
 //
 // All three tests drive the handler through the internal constructor that
 // accepts pre-built fakes, so no real SQLite / ONNX / Postgres is needed.
-// Each test seeds FakeSqliteStore instances and asserts the handler's
+// Each test seeds FakeStore instances and asserts the handler's
 // observed side-effects and return payload.
 
 using System.Text.Json;
@@ -48,8 +48,8 @@ public sealed class MigrateToRemoteHandlerTests
     }
 
     private static MigrateToRemoteHandler MakeHandler(
-        FakeSqliteStore source,
-        FakeSqliteStore target,
+        FakeStore source,
+        FakeStore target,
         RecordingFakeEmbedder embedder,
         FakeVectorSearch vectors)
     {
@@ -66,8 +66,8 @@ public sealed class MigrateToRemoteHandlerTests
     [Fact]
     public async Task DryRun_ReportsCountsWithoutWriting()
     {
-        var source = new FakeSqliteStore();
-        var target = new FakeSqliteStore();
+        var source = new FakeStore();
+        var target = new FakeStore();
         var embedder = new RecordingFakeEmbedder();
         var vectors = new FakeVectorSearch();
 
@@ -102,8 +102,8 @@ public sealed class MigrateToRemoteHandlerTests
     [Fact]
     public async Task SkipsDuplicateIds()
     {
-        var source = new FakeSqliteStore();
-        var target = new FakeSqliteStore();
+        var source = new FakeStore();
+        var target = new FakeStore();
         var embedder = new RecordingFakeEmbedder();
         var vectors = new FakeVectorSearch();
 
@@ -138,8 +138,8 @@ public sealed class MigrateToRemoteHandlerTests
     [Fact]
     public async Task MigratesEntries_ReEmbedsAndInsertsInTarget()
     {
-        var source = new FakeSqliteStore();
-        var target = new FakeSqliteStore();
+        var source = new FakeStore();
+        var target = new FakeStore();
         var embedder = new RecordingFakeEmbedder();
         var vectors = new FakeVectorSearch();
 
@@ -188,8 +188,8 @@ public sealed class MigrateToRemoteHandlerTests
     [Fact]
     public async Task SkipsKnowledgeWhenNotIncluded()
     {
-        var source = new FakeSqliteStore();
-        var target = new FakeSqliteStore();
+        var source = new FakeStore();
+        var target = new FakeStore();
         var embedder = new RecordingFakeEmbedder();
         var vectors = new FakeVectorSearch();
 
