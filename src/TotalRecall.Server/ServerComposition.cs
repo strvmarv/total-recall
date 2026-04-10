@@ -213,7 +213,20 @@ public static class ServerComposition
                 new ProjectDocsImporter(fileIngester, index, importLog),
             };
 
-            var sessionLifecycle = new SessionLifecycle(importers, store, compactionLog);
+            // Usage tracking wiring — Phase 1 registers Claude Code only.
+            // Phase 2 adds Copilot CLI. See token-usage-tracking spec §5.
+            var usageEventLog = new TotalRecall.Infrastructure.Telemetry.UsageEventLog(conn);
+            var usageWatermarks = new TotalRecall.Infrastructure.Telemetry.UsageWatermarkStore(conn);
+            var usageImporters = new List<TotalRecall.Infrastructure.Usage.IUsageImporter>
+            {
+                new TotalRecall.Infrastructure.Usage.ClaudeCodeUsageImporter(),
+            };
+            var usageIndexer = new TotalRecall.Infrastructure.Usage.UsageIndexer(
+                usageImporters, usageEventLog, usageWatermarks);
+
+            var sessionLifecycle = new SessionLifecycle(
+                importers, store, compactionLog,
+                usageIndexer: usageIndexer);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,

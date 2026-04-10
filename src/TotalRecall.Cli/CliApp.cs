@@ -190,6 +190,7 @@ public static class CliApp
             new Commands.CompactCommand(),
             new Commands.ImportHostCommand(),
             new Commands.StatusCommand(),
+            new Commands.UsageCommand(),
             new Commands.MigrateCommand(),
             new Commands.Eval.BenchmarkCommand(),
             new Commands.Eval.ReportCommand(),

@@ -41,6 +41,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
     private readonly ICompactionLogReader _compactionLog;
     private readonly Func<long> _nowMs;
     private readonly string _sessionId;
+    private readonly TotalRecall.Infrastructure.Usage.UsageIndexer? _usageIndexer;
 
     private readonly SemaphoreSlim _initLock = new(1, 1);
     private SessionInitResult? _cached;
@@ -50,7 +51,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
         IStore store,
         ICompactionLogReader compactionLog,
         string? sessionId = null,
-        Func<long>? nowMs = null)
+        Func<long>? nowMs = null,
+        TotalRecall.Infrastructure.Usage.UsageIndexer? usageIndexer = null)
     {
         ArgumentNullException.ThrowIfNull(importers);
         ArgumentNullException.ThrowIfNull(store);
@@ -60,6 +62,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         _compactionLog = compactionLog;
         _sessionId = sessionId ?? Guid.NewGuid().ToString();
         _nowMs = nowMs ?? (() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        _usageIndexer = usageIndexer;
     }
 
     /// <inheritdoc />
@@ -88,6 +91,22 @@ public sealed class SessionLifecycle : ISessionLifecycle
 
     private SessionInitResult RunInit()
     {
+        // 0. Usage indexer — best-effort, failures never block session_start.
+        //    Runs before the existing importer sweep so quota nudges reflect
+        //    the latest data. See token-usage-tracking spec §5.4.
+        if (_usageIndexer is not null)
+        {
+            try
+            {
+                _usageIndexer.RunAsync(CancellationToken.None).GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                // Never propagate — usage tracking must not prevent server boot.
+                Console.Error.WriteLine($"total-recall: usage indexer failed: {ex.Message}");
+            }
+        }
+
         // 1. Host importer sweep — only invoke importers whose Detect() trips.
         var importSummary = new List<ImportSummaryRow>();
         foreach (var importer in _importers)
