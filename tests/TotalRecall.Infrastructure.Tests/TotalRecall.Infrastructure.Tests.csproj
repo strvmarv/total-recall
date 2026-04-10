@@ -24,4 +24,9 @@
     <ProjectReference Include="..\..\src\TotalRecall.Infrastructure\TotalRecall.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\TotalRecall.Server\TotalRecall.Server.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Update="Usage/Fixtures/claude-code-sample.jsonl">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 </Project>
