@@ -269,6 +269,12 @@ VALUES
             cmd.Parameters.AddWithValue("@project", opts.Project);
         }
 
+        if (opts?.ParentId is not null)
+        {
+            sql.Append(" AND parent_id = @parent_id");
+            cmd.Parameters.AddWithValue("@parent_id", opts.ParentId);
+        }
+
         sql.Append(" ORDER BY ").Append(orderBy);
 
         if (opts?.Limit is int limit)

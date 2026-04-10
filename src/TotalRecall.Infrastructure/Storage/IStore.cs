@@ -149,4 +149,10 @@ public sealed record ListEntriesOpts
     /// </summary>
     public string? OrderBy { get; init; }
     public int? Limit { get; init; }
+    /// <summary>
+    /// When set, only rows whose <c>parent_id</c> equals this value are returned.
+    /// Used by <see cref="HierarchicalIndex.GetDocumentChunks"/> to fetch all
+    /// chunks belonging to a specific document without a raw SQL dependency.
+    /// </summary>
+    public string? ParentId { get; init; }
 }

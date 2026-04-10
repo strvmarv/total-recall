@@ -156,8 +156,8 @@ public sealed class ImportHostHandler : IToolHandler
         var vec = new VectorSearch(conn);
         var embedder = EmbedderFactory.CreateProduction();
         var importLog = new ImportLog(conn);
-        var index = new HierarchicalIndex(store, embedder, vec, conn);
-        var validator = new IngestValidator(embedder, vec, conn);
+        var index = new HierarchicalIndex(store, embedder, vec);
+        var validator = new IngestValidator(embedder, vec, store);
         var fileIngester = new FileIngester(index, validator);
 
         return new List<IImporter>

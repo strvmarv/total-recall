@@ -137,6 +137,10 @@ public sealed class FakeSqliteStore : IStore
         if (!ListSlots.TryGetValue((tier, type), out var slot))
             return Array.Empty<Entry>();
         IEnumerable<Entry> src = slot;
+        if (opts?.ParentId is string pid)
+            src = src.Where(e =>
+                Microsoft.FSharp.Core.FSharpOption<string>.get_IsSome(e.ParentId)
+                && e.ParentId.Value == pid);
         if (opts?.Limit is int lim) src = src.Take(lim);
         return src.ToList();
     }

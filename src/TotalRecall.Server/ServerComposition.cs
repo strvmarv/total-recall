@@ -197,8 +197,8 @@ public static class ServerComposition
             var compactionLog = new CompactionLog(conn);
             var importLog = new ImportLog(conn);
 
-            var index = new HierarchicalIndex(store, embedder, vec, conn);
-            var validator = new IngestValidator(embedder, vec, conn);
+            var index = new HierarchicalIndex(store, embedder, vec);
+            var validator = new IngestValidator(embedder, vec, store);
             var fileIngester = new FileIngester(index, validator);
 
             // Host importer set — mirrors ImportHostCommand.Execute.
@@ -239,7 +239,9 @@ public static class ServerComposition
         var userId = ResolveUserId(cfg);
         var dims = cfg.Embedding.Dimensions;
 
-        var dataSource = NpgsqlDataSource.Create(connStr);
+        var dsBuilder = new NpgsqlDataSourceBuilder(connStr);
+        dsBuilder.UseVector();
+        var dataSource = dsBuilder.Build();
         try
         {
             PostgresMigrationRunner.RunMigrations(dataSource, dims);
@@ -253,16 +255,8 @@ public static class ServerComposition
             var compactionLog = new PostgresCompactionLog(dataSource);
             var importLog = new PostgresImportLog(dataSource);
 
-            // HierarchicalIndex and IngestValidator still require a SQLite
-            // connection for direct cold_knowledge queries (GetCollection,
-            // ListCollections, GetDocumentChunks, TryGetScope). These are not
-            // yet ported to Postgres; use a temp in-memory SQLite instance for
-            // the Postgres path until those reads are refactored to go through
-            // IStore / a Postgres equivalent. See Task 14 / follow-up work.
-            var tempConn = SqliteConnection.Open(":memory:");
-            MigrationRunner.RunMigrations(tempConn);
-            var index = new HierarchicalIndex(store, embedder, vec, tempConn);
-            var validator = new IngestValidator(embedder, vec, tempConn);
+            var index = new HierarchicalIndex(store, embedder, vec);
+            var validator = new IngestValidator(embedder, vec, store);
             var fileIngester = new FileIngester(index, validator);
 
             var importers = new List<IImporter>

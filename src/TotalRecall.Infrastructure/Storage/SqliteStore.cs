@@ -248,14 +248,25 @@ VALUES
         var sql = new StringBuilder();
         sql.Append("SELECT * FROM ").Append(table);
 
+        var whereClauses = new List<string>();
+
         if (opts?.Project is not null)
         {
             if (opts.IncludeGlobal)
-                sql.Append(" WHERE project = $project OR project IS NULL");
+                whereClauses.Add("(project = $project OR project IS NULL)");
             else
-                sql.Append(" WHERE project = $project");
+                whereClauses.Add("project = $project");
             cmd.Parameters.AddWithValue("$project", opts.Project);
         }
+
+        if (opts?.ParentId is not null)
+        {
+            whereClauses.Add("parent_id = $parent_id");
+            cmd.Parameters.AddWithValue("$parent_id", opts.ParentId);
+        }
+
+        if (whereClauses.Count > 0)
+            sql.Append(" WHERE ").Append(string.Join(" AND ", whereClauses));
 
         sql.Append(" ORDER BY ").Append(orderBy);
 

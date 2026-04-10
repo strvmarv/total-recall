@@ -104,8 +104,8 @@ public sealed class RefreshCommand : ICliCommand
                 store = new SqliteStore(owned);
                 vec = new VectorSearch(owned);
                 var embedder = EmbedderFactory.CreateProduction();
-                var index = new HierarchicalIndex(store, embedder, vec, owned);
-                var validator = new IngestValidator(embedder, vec, owned);
+                var index = new HierarchicalIndex(store, embedder, vec);
+                var validator = new IngestValidator(embedder, vec, store);
                 ingester = new FileIngester(index, validator);
             }
         }
