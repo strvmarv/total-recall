@@ -2,7 +2,7 @@
 //
 // Plan 4 Task 4.3 — port of src-ts/tools/session-tools.ts runSessionInit,
 // scoped to the Infrastructure pieces that exist in .NET as of Plan 4:
-// host importers, ISqliteStore, and a CompactionLog read seam. Everything
+// host importers, IStore, and a CompactionLog read seam. Everything
 // else (warm sweep, semantic promote, project docs ingest, smoke test,
 // regression detection, project detection, config snapshot) is stubbed
 // with `TODO(Plan 5+)` markers at each would-be call site.
@@ -28,7 +28,7 @@ namespace TotalRecall.Server;
 
 /// <summary>
 /// Production <see cref="ISessionLifecycle"/>. Composes a list of host
-/// importers, an <see cref="ISqliteStore"/>, and a small
+/// importers, an <see cref="IStore"/>, and a small
 /// <see cref="ICompactionLogReader"/> seam. Caches the first
 /// <see cref="EnsureInitializedAsync"/> result behind an async lock so
 /// concurrent callers (notification + first tool call racing) collapse to a
@@ -37,7 +37,7 @@ namespace TotalRecall.Server;
 public sealed class SessionLifecycle : ISessionLifecycle
 {
     private readonly IReadOnlyList<IImporter> _importers;
-    private readonly ISqliteStore _store;
+    private readonly IStore _store;
     private readonly ICompactionLogReader _compactionLog;
     private readonly Func<long> _nowMs;
     private readonly string _sessionId;
@@ -47,7 +47,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
 
     public SessionLifecycle(
         IReadOnlyList<IImporter> importers,
-        ISqliteStore store,
+        IStore store,
         ICompactionLogReader compactionLog,
         string? sessionId = null,
         Func<long>? nowMs = null)
@@ -215,7 +215,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
     /// Mirrors TS <c>generateHints</c> in session-tools.ts:27-74.
     /// </summary>
     public static IReadOnlyList<string> GenerateHints(
-        ISqliteStore store,
+        IStore store,
         IReadOnlyList<string> warmPromotedIds)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);

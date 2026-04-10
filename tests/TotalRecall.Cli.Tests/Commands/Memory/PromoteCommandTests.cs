@@ -30,9 +30,9 @@ public sealed class PromoteCommandTests : IDisposable
         Console.SetError(_origErr);
     }
 
-    private static (PromoteCommand cmd, FakeSqliteStore store, FakeVectorSearch vec, RecordingEmbedder emb) Build()
+    private static (PromoteCommand cmd, FakeStore store, FakeVectorSearch vec, RecordingEmbedder emb) Build()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var vec = new FakeVectorSearch();
         var emb = new RecordingEmbedder();
         return (new PromoteCommand(store, vec, emb), store, vec, emb);
@@ -66,7 +66,7 @@ public sealed class PromoteCommandTests : IDisposable
 
         Assert.Equal(0, code);
         Assert.Single(vec.Deletes);
-        // abc is seeded first → synthetic rowid 1 in FakeMemoryInfra.FakeSqliteStore.
+        // abc is seeded first → synthetic rowid 1 in FakeMemoryInfra.FakeStore.
         Assert.Equal((Tier.Cold, ContentType.Memory, 1L), vec.Deletes[0]);
         Assert.Single(store.MoveCalls);
         Assert.Equal((Tier.Cold, ContentType.Memory, Tier.Warm, ContentType.Memory, "abc"), store.MoveCalls[0]);

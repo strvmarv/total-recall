@@ -119,8 +119,8 @@ public sealed class ImportHostCommand : ICliCommand
                 var vec = new VectorSearch(owned);
                 var embedder = EmbedderFactory.CreateProduction();
                 var importLog = new ImportLog(owned);
-                var index = new HierarchicalIndex(store, embedder, vec, owned);
-                var validator = new IngestValidator(embedder, vec, owned);
+                var index = new HierarchicalIndex(store, embedder, vec);
+                var validator = new IngestValidator(embedder, vec, store);
                 var fileIngester = new FileIngester(index, validator);
 
                 importers = new List<IImporter>

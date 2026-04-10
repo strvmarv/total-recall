@@ -274,7 +274,13 @@ public sealed class ConfigLoader : IConfigLoader
         var embedding = GetTable(table, "embedding");
         var embeddingCfg = new Core.Config.EmbeddingConfig(
             GetString(embedding, "model"),
-            GetInt(embedding, "dimensions"));
+            GetInt(embedding, "dimensions"),
+            TryGetString(embedding, "provider"),
+            TryGetString(embedding, "endpoint"),
+            TryGetString(embedding, "bedrock_region"),
+            TryGetString(embedding, "bedrock_model"),
+            TryGetString(embedding, "model_name"),
+            TryGetString(embedding, "api_key"));
 
         FSharpOption<Core.Config.RegressionConfig> regression;
         if (table.TryGetValue("regression", out var regObj) && regObj is TomlTable regTable)
@@ -302,12 +308,38 @@ public sealed class ConfigLoader : IConfigLoader
             search = FSharpOption<Core.Config.SearchConfig>.None;
         }
 
+        FSharpOption<Core.Config.StorageConfig> storage;
+        if (table.TryGetValue("storage", out var storageObj) && storageObj is TomlTable storageTable)
+        {
+            var storageCfg = new Core.Config.StorageConfig(
+                TryGetString(storageTable, "connection_string"));
+            storage = FSharpOption<Core.Config.StorageConfig>.Some(storageCfg);
+        }
+        else
+        {
+            storage = FSharpOption<Core.Config.StorageConfig>.None;
+        }
+
+        FSharpOption<Core.Config.UserConfig> user;
+        if (table.TryGetValue("user", out var userObj) && userObj is TomlTable userTable)
+        {
+            var userCfg = new Core.Config.UserConfig(
+                TryGetString(userTable, "user_id"));
+            user = FSharpOption<Core.Config.UserConfig>.Some(userCfg);
+        }
+        else
+        {
+            user = FSharpOption<Core.Config.UserConfig>.None;
+        }
+
         return new Core.Config.TotalRecallConfig(
             tiersCfg,
             compactionCfg,
             embeddingCfg,
             regression,
-            search);
+            search,
+            storage,
+            user);
     }
 
     // --- walker helpers ---------------------------------------------------
@@ -352,4 +384,9 @@ public sealed class ConfigLoader : IConfigLoader
         table.TryGetValue(key, out var value)
             ? FSharpOption<int>.Some(Convert.ToInt32(value))
             : FSharpOption<int>.None;
+
+    private static FSharpOption<string> TryGetString(TomlTable table, string key) =>
+        table.TryGetValue(key, out var value) && value is string s
+            ? FSharpOption<string>.Some(s)
+            : FSharpOption<string>.None;
 }

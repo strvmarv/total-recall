@@ -3,7 +3,7 @@
 // Plan 4 Task 4.8 — ports the `memory_get` branch of
 // src-ts/tools/memory-tools.ts (plus src-ts/memory/get.ts) to the .NET
 // Server. TS exposes a single `id` argument and searches all tables for
-// the first row that matches. The .NET ISqliteStore API is tier-aware,
+// the first row that matches. The .NET IStore API is tier-aware,
 // so this handler iterates the 6 (tier, type) pairs and returns the
 // first hit.
 //
@@ -42,9 +42,9 @@ public sealed class MemoryGetHandler : IToolHandler
         }
         """).RootElement.Clone();
 
-    private readonly ISqliteStore _store;
+    private readonly IStore _store;
 
-    public MemoryGetHandler(ISqliteStore store)
+    public MemoryGetHandler(IStore store)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
     }

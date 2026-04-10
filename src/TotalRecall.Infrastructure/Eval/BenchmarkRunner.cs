@@ -61,13 +61,13 @@ public sealed record BenchmarkResult(
 /// </summary>
 public sealed class BenchmarkRunner
 {
-    private readonly ISqliteStore _store;
+    private readonly IStore _store;
     private readonly IVectorSearch _vectorSearch;
     private readonly IHybridSearch _hybridSearch;
     private readonly IEmbedder _embedder;
 
     public BenchmarkRunner(
-        ISqliteStore store,
+        IStore store,
         IVectorSearch vectorSearch,
         IHybridSearch hybridSearch,
         IEmbedder embedder)
@@ -218,7 +218,7 @@ public sealed class BenchmarkRunner
             {
                 try
                 {
-                    var rowid = _store.GetRowid(Tier.Warm, ContentType.Memory, id);
+                    var rowid = _store.GetInternalKey(Tier.Warm, ContentType.Memory, id);
                     if (rowid is not null)
                         _vectorSearch.DeleteEmbedding(Tier.Warm, ContentType.Memory, rowid.Value);
                     _store.Delete(Tier.Warm, ContentType.Memory, id);

@@ -23,7 +23,7 @@ namespace TotalRecall.Cli.Commands.Memory;
 
 public sealed class ImportCommand : ICliCommand
 {
-    private readonly ISqliteStore? _store;
+    private readonly IStore? _store;
     private readonly IVectorSearch? _vec;
     private readonly IEmbedder? _embedder;
     private readonly TextWriter? _out;
@@ -31,7 +31,7 @@ public sealed class ImportCommand : ICliCommand
     public ImportCommand() { }
 
     // Test/composition seam.
-    public ImportCommand(ISqliteStore store, IVectorSearch vec, IEmbedder embedder, TextWriter output)
+    public ImportCommand(IStore store, IVectorSearch vec, IEmbedder embedder, TextWriter output)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _vec = vec ?? throw new ArgumentNullException(nameof(vec));
@@ -115,7 +115,7 @@ public sealed class ImportCommand : ICliCommand
                 return 1;
             }
 
-            ISqliteStore store;
+            IStore store;
             IVectorSearch vec;
             IEmbedder? embedder;
             MemoryComponents? owned = null;

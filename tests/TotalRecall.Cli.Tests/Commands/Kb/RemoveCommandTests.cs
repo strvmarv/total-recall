@@ -33,7 +33,7 @@ public sealed class RemoveCommandTests : IDisposable
     [Fact]
     public async Task MissingId_ReturnsExit2()
     {
-        var cmd = new RemoveCommand(new FakeSqliteStore(), new FakeVectorSearch(), new StringWriter());
+        var cmd = new RemoveCommand(new FakeStore(), new FakeVectorSearch(), new StringWriter());
         var code = await cmd.RunAsync(Array.Empty<string>());
         Assert.Equal(2, code);
         Assert.Contains("<id>", _errWriter.ToString());
@@ -42,7 +42,7 @@ public sealed class RemoveCommandTests : IDisposable
     [Fact]
     public async Task NotFound_ReturnsExit1()
     {
-        var cmd = new RemoveCommand(new FakeSqliteStore(), new FakeVectorSearch(), new StringWriter(),
+        var cmd = new RemoveCommand(new FakeStore(), new FakeVectorSearch(), new StringWriter(),
             confirmDelegate: _ => true);
         var code = await cmd.RunAsync(new[] { "nope", "--yes" });
         Assert.Equal(1, code);
@@ -52,7 +52,7 @@ public sealed class RemoveCommandTests : IDisposable
     [Fact]
     public async Task HappyPath_NoCascade_DeletesRootOnly()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var vec = new FakeVectorSearch();
         store.Seed(Tier.Cold, ContentType.Knowledge, EntryFactory.Make(
             id: "coll-a",
@@ -67,7 +67,7 @@ public sealed class RemoveCommandTests : IDisposable
 
         Assert.Equal(0, code);
         Assert.Single(vec.Deletes);
-        // coll-a is the first entry seeded → synthetic rowid 1 in FakeSqliteStore.
+        // coll-a is the first entry seeded → synthetic rowid 1 in FakeStore.
         Assert.Equal(1L, vec.Deletes[0].Rowid);
         Assert.Single(store.DeleteCalls);
         Assert.Equal("coll-a", store.DeleteCalls[0].Id);
@@ -77,7 +77,7 @@ public sealed class RemoveCommandTests : IDisposable
     [Fact]
     public async Task HappyPath_Cascade_DeletesChildrenAndRoot()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var vec = new FakeVectorSearch();
         store.Seed(Tier.Cold, ContentType.Knowledge, EntryFactory.Make(
             id: "coll-a",
@@ -103,7 +103,7 @@ public sealed class RemoveCommandTests : IDisposable
     [Fact]
     public async Task ConfirmDelegate_Declines_PrintsAbortedExitZero()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var vec = new FakeVectorSearch();
         store.Seed(Tier.Cold, ContentType.Knowledge, EntryFactory.Make(
             id: "coll-a",
@@ -122,7 +122,7 @@ public sealed class RemoveCommandTests : IDisposable
     [Fact]
     public async Task ConfirmDelegate_Accepts_Deletes()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var vec = new FakeVectorSearch();
         store.Seed(Tier.Cold, ContentType.Knowledge, EntryFactory.Make(
             id: "coll-a",
@@ -140,7 +140,7 @@ public sealed class RemoveCommandTests : IDisposable
     [Fact]
     public async Task Yes_BypassesPrompt()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var vec = new FakeVectorSearch();
         store.Seed(Tier.Cold, ContentType.Knowledge, EntryFactory.Make(
             id: "coll-a",

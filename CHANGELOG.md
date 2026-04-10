@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.8.1 - 2026-04-10
+
+**Enterprise backend support.** The same binary now supports either local SQLite + bundled ONNX (default, unchanged) or remote Postgres/pgvector + remote HTTP embedder, selected by configuration. Adds multi-user ownership and visibility primitives, a one-time migration tool, and three embedding provider options.
+
+### Added
+
+- **Postgres/pgvector backend.** Set `[storage] connection_string` in `config.toml` to switch from SQLite to Postgres. Uses a two-table schema (`memories` + `knowledge`) with tier as a column, HNSW vector indexes for cosine similarity, generated `tsvector` columns with GIN indexes for full-text search, and `owner_id`/`visibility` columns for multi-user scoping. Schema migrations run automatically on first connection.
+
+- **Remote embedding providers.** Set `[embedding] provider` to `"openai"` or `"bedrock"` to use a remote text embedder instead of the bundled ONNX model. OpenAI-compatible endpoints (`/v1/embeddings` contract — covers OpenAI, Azure OpenAI, vLLM, TEI) and Amazon Bedrock (Cohere Embed v4 via raw HTTP, no AWS SDK) are supported. API key resolves from config or `TOTAL_RECALL_EMBEDDING_API_KEY` env var. Configurable `dimensions` field (default 384) controls vector size for all backends.
+
+- **Multi-user ownership and visibility.** Postgres entries carry `owner_id` (injected from `[user] user_id` config or `TOTAL_RECALL_USER_ID` env var) and `visibility` (`private`, `team`, `public`). New `scope` parameter on `memory_search` and `kb_search` (`mine`, `team`, `all`) controls query scoping. New `visibility` parameter on `memory_store` sets entry visibility. SQLite path is unaffected — single-user, all entries local.
+
+- **`migrate_to_remote` MCP tool.** One-time migration from local SQLite to a configured remote Postgres. Re-embeds every entry with the configured remote embedder (since dimensions/model typically differ). Supports `dry_run`, `include_knowledge` (skip KB chunks if team will re-ingest from source), and `visibility` (share entries on migration). Idempotent — skips entries whose id already exists in the target. Also available as `total-recall migrate` CLI command.
+
+- **`Pgvector` and `Npgsql` dependencies** added to `TotalRecall.Infrastructure` for the Postgres path.
+
+### Changed
+
+- **`ISqliteStore` renamed to `IStore`.** The storage interface is now backend-neutral. `GetRowid` renamed to `GetInternalKey`. All 33 MCP tool handlers compile against `IStore` — no handler changes required to switch backends. `SqliteStore` and the new `PostgresStore` both implement `IStore`.
+
+- **`EmbedderFactory` gains `CreateFromConfig`.** Selects `OnnxEmbedder` (local), `OpenAiEmbedder`, or `BedrockEmbedder` based on the `[embedding]` config section. The existing `CreateProduction()` method is unchanged and used as the local fallback.
+
+- **`ServerComposition.OpenProduction` now selects backend from config.** Connection string present → Postgres path. Absent → SQLite path (identical to 0.8.0 behavior). The composition root is the single decision point; all downstream code is backend-agnostic.
+
+- **`HierarchicalIndex` and `IngestValidator` no longer take `MsSqliteConnection`.** Both classes now work through `IStore` and `IVectorSearch`, making KB ingestion functional against both SQLite and Postgres backends. `ListEntriesOpts` gains a `ParentId` filter to support the `GetDocumentChunks` query without raw SQL.
+
+- **`FakeSqliteStore` test double renamed to `FakeStore`** to match the `IStore` interface rename.
+
+- **Config types extended.** `EmbeddingConfig` gains optional `Provider`, `Endpoint`, `BedrockRegion`, `BedrockModel`, `ModelName`, `ApiKey` fields. New `StorageConfig` (optional `ConnectionString`) and `UserConfig` (optional `UserId`) sections. All new fields are optional — existing configs work without changes.
+
+### New files
+
+| File | Purpose |
+|------|---------|
+| `PostgresMigrationRunner.cs` | Postgres schema migrations (two-table layout, pgvector, FTS) |
+| `PostgresStore.cs` | `IStore` implementation for Postgres |
+| `PgvectorSearch.cs` | `IVectorSearch` implementation using pgvector `<=>` operator |
+| `PostgresFtsSearch.cs` | `IFtsSearch` implementation using tsvector/tsquery |
+| `OpenAiEmbedder.cs` | `IEmbedder` for OpenAI-compatible `/v1/embeddings` APIs |
+| `BedrockEmbedder.cs` | `IEmbedder` for Amazon Bedrock (Cohere Embed) |
+| `PostgresCompactionLog.cs` | Compaction log backed by Postgres |
+| `PostgresImportLog.cs` | Import log backed by Postgres (with `IImportLog` interface) |
+| `MigrateToRemoteHandler.cs` | MCP tool for SQLite → Postgres migration |
+
 ## 0.8.0 - 2026-04-09
 
 **General availability of the .NET-native rewrite.** 0.8.0 is the cutover from the TypeScript/bun runtime (0.7.x and earlier) to a single .NET 8 AOT binary per platform, distributed via the existing `@strvmarv/total-recall` npm package and the `strvmarv/total-recall-marketplace` plugin marketplace. The end-user install command is unchanged; the plugin manifest, MCP tool surface, skill, and hook contracts are preserved so upgrading is a drop-in replacement. The 9 beta cuts (`0.8.0-beta.1` through `0.8.0-beta.7`) document the full shape of the cutover — this GA entry summarizes the highlights and folds in one GA-blocking fix that was found during pre-release dogfood.

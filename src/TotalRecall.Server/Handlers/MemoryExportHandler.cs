@@ -50,9 +50,9 @@ public sealed class MemoryExportHandler : IToolHandler
         }
         """).RootElement.Clone();
 
-    private readonly ISqliteStore _store;
+    private readonly IStore _store;
 
-    public MemoryExportHandler(ISqliteStore store)
+    public MemoryExportHandler(IStore store)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
     }

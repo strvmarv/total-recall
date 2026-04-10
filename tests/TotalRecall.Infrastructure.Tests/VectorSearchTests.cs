@@ -141,7 +141,7 @@ public sealed class VectorSearchTests
             search.InsertEmbedding(Tier.Hot, ContentType.Memory, id0, UnitE(0));
             search.InsertEmbedding(Tier.Hot, ContentType.Memory, id1, UnitE(1));
 
-            var rowid1 = store.GetRowid(Tier.Hot, ContentType.Memory, id1);
+            var rowid1 = store.GetInternalKey(Tier.Hot, ContentType.Memory, id1);
             Assert.NotNull(rowid1);
             search.DeleteEmbedding(Tier.Hot, ContentType.Memory, rowid1!.Value);
 
@@ -182,7 +182,7 @@ public sealed class VectorSearchTests
             var id = InsertContent(store, Tier.Hot, ContentType.Memory, "ephemeral");
             search.InsertEmbedding(Tier.Hot, ContentType.Memory, id, UnitE(0));
 
-            var rowid = store.GetRowid(Tier.Hot, ContentType.Memory, id);
+            var rowid = store.GetInternalKey(Tier.Hot, ContentType.Memory, id);
             Assert.NotNull(rowid);
             store.Delete(Tier.Hot, ContentType.Memory, id);
             // Content row is gone. The vec row is orphaned. Delete it via rowid.

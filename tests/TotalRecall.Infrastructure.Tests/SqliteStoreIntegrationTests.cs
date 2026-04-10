@@ -90,7 +90,7 @@ public sealed class SqliteStoreIntegrationTests
                 e1);
 
             // Delete E1 — vec row first (via resolved rowid), then content row.
-            var rowid1 = store.GetRowid(Tier.Hot, ContentType.Memory, id1);
+            var rowid1 = store.GetInternalKey(Tier.Hot, ContentType.Memory, id1);
             Assert.NotNull(rowid1);
             search.DeleteEmbedding(Tier.Hot, ContentType.Memory, rowid1!.Value);
             store.Delete(Tier.Hot, ContentType.Memory, id1);

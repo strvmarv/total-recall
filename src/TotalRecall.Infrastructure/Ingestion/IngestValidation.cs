@@ -4,7 +4,7 @@ using System.Linq;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Search;
-using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
+using TotalRecall.Infrastructure.Storage;
 
 namespace TotalRecall.Infrastructure.Ingestion;
 
@@ -37,16 +37,16 @@ public sealed class IngestValidator
 
     private readonly IEmbedder _embedder;
     private readonly IVectorSearch _vectorSearch;
-    private readonly MsSqliteConnection _conn;
+    private readonly IStore _store;
 
-    public IngestValidator(IEmbedder embedder, IVectorSearch vectorSearch, MsSqliteConnection conn)
+    public IngestValidator(IEmbedder embedder, IVectorSearch vectorSearch, IStore store)
     {
         ArgumentNullException.ThrowIfNull(embedder);
         ArgumentNullException.ThrowIfNull(vectorSearch);
-        ArgumentNullException.ThrowIfNull(conn);
+        ArgumentNullException.ThrowIfNull(store);
         _embedder = embedder;
         _vectorSearch = vectorSearch;
-        _conn = conn;
+        _store = store;
     }
 
     /// <summary>
@@ -111,18 +111,17 @@ public sealed class IngestValidator
 
     private bool TryGetScope(string id, out string? collectionId, out string? parentId)
     {
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "SELECT collection_id, parent_id FROM cold_knowledge WHERE id = $id";
-        cmd.Parameters.AddWithValue("$id", id);
-        using var reader = cmd.ExecuteReader();
-        if (!reader.Read())
+        var entry = _store.Get(Tier.Cold, ContentType.Knowledge, id);
+        if (entry is null)
         {
             collectionId = null;
             parentId = null;
             return false;
         }
-        collectionId = reader.IsDBNull(0) ? null : reader.GetString(0);
-        parentId = reader.IsDBNull(1) ? null : reader.GetString(1);
+        collectionId = Microsoft.FSharp.Core.FSharpOption<string>.get_IsSome(entry.CollectionId)
+            ? entry.CollectionId.Value : null;
+        parentId = Microsoft.FSharp.Core.FSharpOption<string>.get_IsSome(entry.ParentId)
+            ? entry.ParentId.Value : null;
         return true;
     }
 }

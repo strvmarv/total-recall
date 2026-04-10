@@ -27,7 +27,7 @@ namespace TotalRecall.Cli.Commands.Kb;
 
 public sealed class RemoveCommand : ICliCommand
 {
-    private readonly ISqliteStore? _store;
+    private readonly IStore? _store;
     private readonly IVectorSearch? _vec;
     private readonly TextWriter? _out;
     private readonly Func<string, bool>? _confirmDelegate;
@@ -36,7 +36,7 @@ public sealed class RemoveCommand : ICliCommand
 
     // Test/composition seam.
     public RemoveCommand(
-        ISqliteStore store,
+        IStore store,
         IVectorSearch vec,
         TextWriter output,
         Func<string, bool>? confirmDelegate = null)
@@ -95,7 +95,7 @@ public sealed class RemoveCommand : ICliCommand
             return 2;
         }
 
-        ISqliteStore store;
+        IStore store;
         IVectorSearch vec;
         MsSqliteConnection? owned = null;
         try
@@ -172,7 +172,7 @@ public sealed class RemoveCommand : ICliCommand
                 }
                 foreach (var child in children)
                 {
-                    var childRowid = store.GetRowid(Tier.Cold, ContentType.Knowledge, child.Id);
+                    var childRowid = store.GetInternalKey(Tier.Cold, ContentType.Knowledge, child.Id);
                     if (childRowid is not null)
                         vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, childRowid.Value);
                     store.Delete(Tier.Cold, ContentType.Knowledge, child.Id);
@@ -180,7 +180,7 @@ public sealed class RemoveCommand : ICliCommand
                 }
             }
 
-            var rootRowid = store.GetRowid(Tier.Cold, ContentType.Knowledge, id);
+            var rootRowid = store.GetInternalKey(Tier.Cold, ContentType.Knowledge, id);
             if (rootRowid is not null)
                 vec.DeleteEmbedding(Tier.Cold, ContentType.Knowledge, rootRowid.Value);
             store.Delete(Tier.Cold, ContentType.Knowledge, id);

@@ -34,13 +34,13 @@ public sealed record ImporterScanResult(
 /// CLI, Opencode, Cursor, Cline, Hermes, ProjectDocs). Mirrors the TS
 /// <c>HostImporter</c> shape from <c>src-ts/importers/importer.ts</c>.
 ///
-/// Concrete implementations take their dependencies (<c>ISqliteStore</c>,
+/// Concrete implementations take their dependencies (<c>IStore</c>,
 /// <c>IEmbedder</c>, <c>IVectorSearch</c>, <c>ImportLog</c>) via
 /// constructor injection. This matches the composition pattern used by
 /// <c>HybridSearch</c> and friends and keeps the interface narrow.
 ///
 /// Calls are synchronous: <see cref="Embedding.IEmbedder.Embed"/> and
-/// <see cref="Storage.ISqliteStore"/> are both sync in .NET, and file I/O
+/// <see cref="Storage.IStore"/> are both sync in .NET, and file I/O
 /// goes through <c>File.ReadAllText</c>; no async ceremony is warranted.
 /// </summary>
 public interface IImporter

@@ -13,7 +13,7 @@ namespace TotalRecall.Infrastructure.Tests;
 /// <summary>
 /// Unit tests for <see cref="HybridSearch"/> using hand-written fakes for
 /// the three collaborators (<see cref="IVectorSearch"/>,
-/// <see cref="IFtsSearch"/>, <see cref="ISqliteStore"/>). No database.
+/// <see cref="IFtsSearch"/>, <see cref="IStore"/>). No database.
 /// </summary>
 public sealed class HybridSearchTests
 {
@@ -73,7 +73,7 @@ public sealed class HybridSearchTests
         }
     }
 
-    private sealed class FakeStore : ISqliteStore
+    private sealed class FakeStore : IStore
     {
         public Dictionary<string, Entry> Entries { get; } = new();
         public HashSet<string> Touched { get; } = new();
@@ -85,7 +85,7 @@ public sealed class HybridSearchTests
             return Entries.TryGetValue(id, out var e) ? e : null;
         }
 
-        public long? GetRowid(Tier tier, ContentType type, string id)
+        public long? GetInternalKey(Tier tier, ContentType type, string id)
             => Entries.ContainsKey(id) ? 1L : null;
 
         public void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts)

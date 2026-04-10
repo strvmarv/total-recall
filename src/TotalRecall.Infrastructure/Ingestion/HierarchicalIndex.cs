@@ -1,13 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
-using Microsoft.Data.Sqlite;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Search;
 using TotalRecall.Infrastructure.Storage;
 using TotalRecall.Infrastructure.Telemetry;
-using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
 namespace TotalRecall.Infrastructure.Ingestion;
 
@@ -55,27 +53,21 @@ public sealed record CollectionEntry(Entry Entry, string Name);
 /// </summary>
 public sealed class HierarchicalIndex
 {
-    private const string Table = "cold_knowledge";
-
-    private readonly ISqliteStore _store;
+    private readonly IStore _store;
     private readonly IEmbedder _embedder;
     private readonly IVectorSearch _vectorSearch;
-    private readonly MsSqliteConnection _conn;
 
     public HierarchicalIndex(
-        ISqliteStore store,
+        IStore store,
         IEmbedder embedder,
-        IVectorSearch vectorSearch,
-        MsSqliteConnection conn)
+        IVectorSearch vectorSearch)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(embedder);
         ArgumentNullException.ThrowIfNull(vectorSearch);
-        ArgumentNullException.ThrowIfNull(conn);
         _store = store;
         _embedder = embedder;
         _vectorSearch = vectorSearch;
-        _conn = conn;
     }
 
     // --- writes -----------------------------------------------------------
@@ -184,32 +176,26 @@ public sealed class HierarchicalIndex
     public CollectionEntry? GetCollection(string id)
     {
         ArgumentNullException.ThrowIfNull(id);
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = $"SELECT * FROM {Table} WHERE id = $id";
-        cmd.Parameters.AddWithValue("$id", id);
-        using var reader = cmd.ExecuteReader();
-        if (!reader.Read()) return null;
-        var entry = SqliteStore.RowToEntry(reader);
+        var entry = _store.Get(Tier.Cold, ContentType.Knowledge, id);
+        if (entry is null) return null;
         var name = ExtractCollectionName(entry.MetadataJson);
         return name is null ? null : new CollectionEntry(entry, name);
     }
 
     /// <summary>
     /// List all rows in <c>cold_knowledge</c> whose metadata <c>type</c> is
-    /// <c>"collection"</c>. Uses SQLite's <c>json_extract</c> filter, the
-    /// same one <see cref="ISqliteStore.ListByMetadata"/> uses internally.
+    /// <c>"collection"</c>. Delegates to <see cref="IStore.ListByMetadata"/>
+    /// so the query is backend-agnostic.
     /// </summary>
     public IReadOnlyList<CollectionEntry> ListCollections()
     {
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText =
-            $"SELECT * FROM {Table} " +
-            "WHERE json_extract(metadata, '$.type') = 'collection'";
-        var results = new List<CollectionEntry>();
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
+        var entries = _store.ListByMetadata(
+            Tier.Cold,
+            ContentType.Knowledge,
+            new Dictionary<string, string> { ["type"] = "collection" });
+        var results = new List<CollectionEntry>(entries.Count);
+        foreach (var entry in entries)
         {
-            var entry = SqliteStore.RowToEntry(reader);
             var name = ExtractCollectionName(entry.MetadataJson) ?? "";
             results.Add(new CollectionEntry(entry, name));
         }
@@ -224,14 +210,10 @@ public sealed class HierarchicalIndex
     public IReadOnlyList<Entry> GetDocumentChunks(string docId)
     {
         ArgumentNullException.ThrowIfNull(docId);
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = $"SELECT * FROM {Table} WHERE parent_id = $pid";
-        cmd.Parameters.AddWithValue("$pid", docId);
-        var results = new List<Entry>();
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
-            results.Add(SqliteStore.RowToEntry(reader));
-        return results;
+        return _store.List(
+            Tier.Cold,
+            ContentType.Knowledge,
+            new ListEntriesOpts { ParentId = docId });
     }
 
     // --- metadata JSON encoding ------------------------------------------

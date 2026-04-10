@@ -15,9 +15,9 @@ namespace TotalRecall.Server.Tests;
 
 public class KbListCollectionsHandlerTests
 {
-    private static (KbListCollectionsHandler handler, FakeSqliteStore store) MakeHandler()
+    private static (KbListCollectionsHandler handler, FakeStore store) MakeHandler()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         return (new KbListCollectionsHandler(store), store);
     }
 

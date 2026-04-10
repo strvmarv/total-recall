@@ -30,7 +30,7 @@ public static class MoveHelpers
     /// Returns the first (tier, type, entry) hit, or null if none match.
     /// </summary>
     public static (Tier Tier, ContentType Type, Entry Entry)? Locate(
-        ISqliteStore store, string id)
+        IStore store, string id)
     {
         foreach (var pair in TierNames.AllTablePairs)
         {
@@ -49,7 +49,7 @@ public static class MoveHelpers
     /// promote/demote flow.
     /// </summary>
     public static void MoveAndReEmbed(
-        ISqliteStore store,
+        IStore store,
         IVectorSearch vec,
         IEmbedder embedder,
         Entry entry,
@@ -60,7 +60,7 @@ public static class MoveHelpers
         // row still exists in the source table. After the move the old
         // rowid is meaningless, so deleting the vec row first is the only
         // way to keep the two sides aligned.
-        var sourceRowid = store.GetRowid(fromTier, fromType, entry.Id);
+        var sourceRowid = store.GetInternalKey(fromTier, fromType, entry.Id);
         if (sourceRowid is not null)
             vec.DeleteEmbedding(fromTier, fromType, sourceRowid.Value);
         store.Move(fromTier, fromType, toTier, toType, entry.Id);

@@ -15,10 +15,10 @@ namespace TotalRecall.Server.Tests;
 
 public class MemoryDemoteHandlerTests
 {
-    private static (MemoryDemoteHandler handler, FakeSqliteStore store,
+    private static (MemoryDemoteHandler handler, FakeStore store,
             FakeVectorSearch vec, RecordingFakeEmbedder embedder) MakeHandler()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var vec = new FakeVectorSearch();
         var embedder = new RecordingFakeEmbedder();
         return (new MemoryDemoteHandler(store, vec, embedder), store, vec, embedder);

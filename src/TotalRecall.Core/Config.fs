@@ -43,6 +43,20 @@ type CompactionConfig = {
 type EmbeddingConfig = {
     Model: string
     Dimensions: int
+    Provider: string option
+    Endpoint: string option
+    BedrockRegion: string option
+    BedrockModel: string option
+    ModelName: string option
+    ApiKey: string option
+}
+
+type StorageConfig = {
+    ConnectionString: string option
+}
+
+type UserConfig = {
+    UserId: string option
 }
 
 type RegressionConfig = {
@@ -61,6 +75,8 @@ type TotalRecallConfig = {
     Embedding: EmbeddingConfig
     Regression: RegressionConfig option
     Search: SearchConfig option
+    Storage: StorageConfig option
+    User: UserConfig option
 }
 
 // --- pure helpers (mirrors src-ts/config.ts isSafeKey + deepMerge + setNestedKey) ---

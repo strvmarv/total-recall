@@ -3,7 +3,7 @@
 // Plan 4 Task 4.6 — first real IToolHandler. Ports the `memory_store` branch
 // of src-ts/tools/memory-tools.ts (plus src-ts/memory/store.ts) to the .NET
 // Server. The handler validates MCP arguments, invokes the embedder to warm
-// and produce a query vector, then calls ISqliteStore.InsertWithEmbedding to
+// and produce a query vector, then calls IStore.InsertWithEmbedding to
 // persist the metadata row and the vec0 embedding row inside a single
 // transaction.
 //
@@ -71,7 +71,8 @@ public sealed class MemoryStoreHandler : IToolHandler
             "entryType":   {"type":"string","enum":["correction","preference","decision","surfaced","imported","compacted","ingested"],"description":"Entry type"},
             "project":     {"type":"string","description":"Project scope"},
             "tags":        {"type":"array","items":{"type":"string"},"description":"Tags"},
-            "source":      {"type":"string","description":"Source identifier"}
+            "source":      {"type":"string","description":"Source identifier"},
+            "visibility":  {"type":"string","enum":["private","team","public"],"description":"Entry visibility: 'private' (default), 'team', or 'public'"}
           },
           "required": ["content"]
         }
@@ -86,11 +87,16 @@ public sealed class MemoryStoreHandler : IToolHandler
         "imported", "compacted", "ingested",
     };
 
-    private readonly ISqliteStore _store;
+    private static readonly HashSet<string> ValidVisibilities = new(StringComparer.Ordinal)
+    {
+        "private", "team", "public",
+    };
+
+    private readonly IStore _store;
     private readonly IEmbedder _embedder;
     private readonly IVectorSearch _vectorSearch;
 
-    public MemoryStoreHandler(ISqliteStore store, IEmbedder embedder, IVectorSearch vectorSearch)
+    public MemoryStoreHandler(IStore store, IEmbedder embedder, IVectorSearch vectorSearch)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _embedder = embedder ?? throw new ArgumentNullException(nameof(embedder));
@@ -125,12 +131,23 @@ public sealed class MemoryStoreHandler : IToolHandler
         var project = ReadOptionalString(args, "project");
         var source = ReadOptionalString(args, "source");
         var tags = ReadTags(args);
+        var visibility = ReadVisibility(args);
 
-        // Build the tiny one-key metadata payload by hand. Safe: entryType
-        // values are enum-constrained and cannot inject JSON.
-        string? metadataJson = entryType is null
-            ? null
-            : $"{{\"entry_type\":\"{entryType}\"}}";
+        // Build the metadata JSON object by hand. All values are drawn from
+        // closed enums and cannot contain characters requiring JSON escaping.
+        // We omit keys with default values to keep metadata lean: entryType
+        // is omitted when null, visibility is omitted when "private" (the
+        // default). This avoids a generic JsonSerializer.Serialize call that
+        // would trigger IL2026/IL3050 AOT warnings.
+        string? metadataJson;
+        if (entryType is not null && visibility != "private")
+            metadataJson = $"{{\"entry_type\":\"{entryType}\",\"visibility\":\"{visibility}\"}}";
+        else if (entryType is not null)
+            metadataJson = $"{{\"entry_type\":\"{entryType}\"}}";
+        else if (visibility != "private")
+            metadataJson = $"{{\"visibility\":\"{visibility}\"}}";
+        else
+            metadataJson = null;
 
         ct.ThrowIfCancellationRequested();
 
@@ -222,6 +239,18 @@ public sealed class MemoryStoreHandler : IToolHandler
         var v = prop.GetString();
         if (v is null || !ValidEntryTypes.Contains(v))
             throw new ArgumentException($"Invalid entry type: {v}");
+        return v;
+    }
+
+    private static string ReadVisibility(JsonElement args)
+    {
+        if (!args.TryGetProperty("visibility", out var prop) || prop.ValueKind == JsonValueKind.Null)
+            return "private";
+        if (prop.ValueKind != JsonValueKind.String)
+            throw new ArgumentException("visibility must be a string");
+        var v = prop.GetString();
+        if (v is null || !ValidVisibilities.Contains(v))
+            throw new ArgumentException($"Invalid visibility: {v}. Must be private, team, or public");
         return v;
     }
 

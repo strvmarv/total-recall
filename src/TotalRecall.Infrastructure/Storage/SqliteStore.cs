@@ -23,7 +23,7 @@ namespace TotalRecall.Infrastructure.Storage;
 /// already-opened connection and skips migrations. The borrowed-connection
 /// form does NOT own disposal.
 /// </summary>
-public sealed class SqliteStore : ISqliteStore, IDisposable
+public sealed class SqliteStore : IStore, IDisposable
 {
     private readonly MsSqliteConnection _conn;
     private readonly bool _ownsConnection;
@@ -51,13 +51,13 @@ public sealed class SqliteStore : ISqliteStore, IDisposable
         _ownsConnection = false;
     }
 
-    // --- ISqliteStore -----------------------------------------------------
+    // --- IStore -----------------------------------------------------
 
     public string Insert(Tier tier, ContentType type, InsertEntryOpts opts)
     {
         ArgumentNullException.ThrowIfNull(opts);
         var table = MigrationRunner.TableName(tier, type);
-        var id = Guid.NewGuid().ToString();
+        var id = opts.Id ?? Guid.NewGuid().ToString();
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
         using var cmd = _conn.CreateCommand();
@@ -76,7 +76,7 @@ public sealed class SqliteStore : ISqliteStore, IDisposable
         ArgumentNullException.ThrowIfNull(opts);
         var table = MigrationRunner.TableName(tier, type);
         var vecTable = MigrationRunner.VecTableName(tier, type);
-        var id = Guid.NewGuid().ToString();
+        var id = opts.Id ?? Guid.NewGuid().ToString();
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
         using var tx = _conn.BeginTransaction();
@@ -168,7 +168,7 @@ VALUES
         return RowToEntry(reader);
     }
 
-    public long? GetRowid(Tier tier, ContentType type, string id)
+    public long? GetInternalKey(Tier tier, ContentType type, string id)
     {
         var table = MigrationRunner.TableName(tier, type);
         using var cmd = _conn.CreateCommand();
@@ -248,14 +248,25 @@ VALUES
         var sql = new StringBuilder();
         sql.Append("SELECT * FROM ").Append(table);
 
+        var whereClauses = new List<string>();
+
         if (opts?.Project is not null)
         {
             if (opts.IncludeGlobal)
-                sql.Append(" WHERE project = $project OR project IS NULL");
+                whereClauses.Add("(project = $project OR project IS NULL)");
             else
-                sql.Append(" WHERE project = $project");
+                whereClauses.Add("project = $project");
             cmd.Parameters.AddWithValue("$project", opts.Project);
         }
+
+        if (opts?.ParentId is not null)
+        {
+            whereClauses.Add("parent_id = $parent_id");
+            cmd.Parameters.AddWithValue("$parent_id", opts.ParentId);
+        }
+
+        if (whereClauses.Count > 0)
+            sql.Append(" WHERE ").Append(string.Join(" AND ", whereClauses));
 
         sql.Append(" ORDER BY ").Append(orderBy);
 
@@ -421,7 +432,7 @@ VALUES
     /// <summary>
     /// Internal so sibling Infrastructure classes (HierarchicalIndex, etc.)
     /// can deserialize raw rows without going through the
-    /// <see cref="ISqliteStore"/> CRUD interface — needed for queries that
+    /// <see cref="IStore"/> CRUD interface — needed for queries that
     /// filter on <c>parent_id</c> or <c>json_extract(metadata, ...)</c>,
     /// which are not part of the standard CRUD surface.
     /// </summary>

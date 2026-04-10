@@ -7,7 +7,6 @@ using TotalRecall.Infrastructure.Search;
 using TotalRecall.Infrastructure.Storage;
 using TotalRecall.Infrastructure.Tests.TestSupport;
 using Xunit;
-using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
 namespace TotalRecall.Infrastructure.Tests;
 
@@ -20,7 +19,7 @@ namespace TotalRecall.Infrastructure.Tests;
 [Trait("Category", "Integration")]
 public sealed class HierarchicalIndexTests : IDisposable
 {
-    private readonly MsSqliteConnection _conn;
+    private readonly Microsoft.Data.Sqlite.SqliteConnection _conn;
     private readonly SqliteStore _store;
     private readonly VectorSearch _vectorSearch;
     private readonly FakeEmbedder _embedder;
@@ -33,7 +32,7 @@ public sealed class HierarchicalIndexTests : IDisposable
         _store = new SqliteStore(_conn);
         _vectorSearch = new VectorSearch(_conn);
         _embedder = new FakeEmbedder();
-        _index = new HierarchicalIndex(_store, _embedder, _vectorSearch, _conn);
+        _index = new HierarchicalIndex(_store, _embedder, _vectorSearch);
     }
 
     public void Dispose()

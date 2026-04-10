@@ -39,7 +39,7 @@ public sealed record HybridSearchOpts(
 ///
 /// <para>
 /// <b>Side effect:</b> every resolved entry is "touched"
-/// (<see cref="UpdateEntryOpts.Touch"/>) via <see cref="ISqliteStore.Update"/>,
+/// (<see cref="UpdateEntryOpts.Touch"/>) via <see cref="IStore.Update"/>,
 /// bumping <c>access_count</c> and <c>last_accessed_at</c>. This matches the
 /// TS behaviour where reads update LRU metadata.
 /// </para>
@@ -59,12 +59,12 @@ public sealed class HybridSearch : IHybridSearch
 
     private readonly IVectorSearch _vectorSearch;
     private readonly IFtsSearch _ftsSearch;
-    private readonly ISqliteStore _store;
+    private readonly IStore _store;
 
     public HybridSearch(
         IVectorSearch vectorSearch,
         IFtsSearch ftsSearch,
-        ISqliteStore store)
+        IStore store)
     {
         ArgumentNullException.ThrowIfNull(vectorSearch);
         ArgumentNullException.ThrowIfNull(ftsSearch);
@@ -79,7 +79,7 @@ public sealed class HybridSearch : IHybridSearch
     /// FTS seams are queried per tier/type pair with <c>topK * 2</c>; the
     /// resulting scores are fused via F# Core's <c>Ranking.hybridScore</c>,
     /// sorted descending, truncated to <see cref="HybridSearchOpts.TopK"/>,
-    /// resolved to <see cref="Entry"/> rows from <see cref="ISqliteStore"/>,
+    /// resolved to <see cref="Entry"/> rows from <see cref="IStore"/>,
     /// touched in the store, and returned with ranks <c>1..N</c>.
     /// </summary>
     public IReadOnlyList<SearchResult> Search(

@@ -326,4 +326,86 @@ public sealed class ConfigLoaderTests : IDisposable
         var ex = Assert.Throws<SqliteDbPathException>(() => ConfigLoader.GetDbPath());
         Assert.Contains("absolute or start with ~/", ex.Message);
     }
+
+    // --- New projection tests -----------------------------------------------
+
+    private const string MinimalValidToml = """
+        [tiers.hot]
+        max_entries = 50
+        token_budget = 4000
+        carry_forward_threshold = 0.7
+
+        [tiers.warm]
+        max_entries = 10000
+        retrieval_top_k = 5
+        similarity_threshold = 0.65
+        cold_decay_days = 30
+
+        [tiers.cold]
+        chunk_max_tokens = 512
+        chunk_overlap_tokens = 50
+        lazy_summary_threshold = 5
+
+        [compaction]
+        decay_half_life_hours = 168
+        warm_threshold = 0.3
+        promote_threshold = 0.7
+        warm_sweep_interval_days = 7
+
+        [embedding]
+        model = "all-MiniLM-L6-v2"
+        dimensions = 384
+        """;
+
+    [Fact]
+    public void LoadEffectiveConfig_WithStorageSection_ParsesConnectionString()
+    {
+        var userPath = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(userPath, """
+            [storage]
+            connection_string = "Server=localhost;Database=tr"
+            """);
+        var loader = new ConfigLoader();
+
+        var cfg = loader.LoadEffectiveConfig(userPath);
+
+        Assert.True(FSharpOption<Core.Config.StorageConfig>.get_IsSome(cfg.Storage));
+        var storage = cfg.Storage.Value;
+        Assert.True(FSharpOption<string>.get_IsSome(storage.ConnectionString));
+        Assert.Equal("Server=localhost;Database=tr", storage.ConnectionString.Value);
+    }
+
+    [Fact]
+    public void LoadEffectiveConfig_WithEmbeddingProvider_ParsesRemoteFields()
+    {
+        var userPath = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(userPath, """
+            [embedding]
+            provider = "bedrock"
+            bedrock_region = "us-east-1"
+            bedrock_model = "amazon.titan-embed-text-v2:0"
+            """);
+        var loader = new ConfigLoader();
+
+        var cfg = loader.LoadEffectiveConfig(userPath);
+
+        Assert.True(FSharpOption<string>.get_IsSome(cfg.Embedding.Provider));
+        Assert.Equal("bedrock", cfg.Embedding.Provider.Value);
+        Assert.True(FSharpOption<string>.get_IsSome(cfg.Embedding.BedrockRegion));
+        Assert.Equal("us-east-1", cfg.Embedding.BedrockRegion.Value);
+        Assert.True(FSharpOption<string>.get_IsSome(cfg.Embedding.BedrockModel));
+        Assert.Equal("amazon.titan-embed-text-v2:0", cfg.Embedding.BedrockModel.Value);
+    }
+
+    [Fact]
+    public void LoadDefaults_StorageAndUserAreNone()
+    {
+        var loader = new ConfigLoader();
+
+        var cfg = loader.LoadDefaults();
+
+        Assert.True(FSharpOption<Core.Config.StorageConfig>.get_IsNone(cfg.Storage));
+        Assert.True(FSharpOption<Core.Config.UserConfig>.get_IsNone(cfg.User));
+        Assert.True(FSharpOption<string>.get_IsNone(cfg.Embedding.Provider));
+    }
 }

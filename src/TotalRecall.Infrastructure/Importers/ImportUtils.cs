@@ -137,10 +137,10 @@ public static class ImportUtils
     /// <paramref name="prependFrontmatterName"/> has no effect.
     /// </summary>
     public static ImportFileOutcome ImportMarkdownFile(
-        ISqliteStore store,
+        IStore store,
         IEmbedder embedder,
         IVectorSearch vectorSearch,
-        ImportLog importLog,
+        IImportLog importLog,
         string sourceToolName,
         SourceTool sourceToolDu,
         string filePath,

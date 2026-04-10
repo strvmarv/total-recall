@@ -45,9 +45,17 @@ public sealed class StatusCommandTests : IDisposable
                     new Core.Config.WarmTierConfig(1000, 50, 0.3, 90),
                     new Core.Config.ColdTierConfig(500, 50, 1000)),
                 new Core.Config.CompactionConfig(168.0, 0.3, 0.7, 30),
-                new Core.Config.EmbeddingConfig(model, dims),
+                new Core.Config.EmbeddingConfig(model, dims,
+                    FSharpOption<string>.None,
+                    FSharpOption<string>.None,
+                    FSharpOption<string>.None,
+                    FSharpOption<string>.None,
+                    FSharpOption<string>.None,
+                    FSharpOption<string>.None),
                 FSharpOption<Core.Config.RegressionConfig>.None,
-                FSharpOption<Core.Config.SearchConfig>.None);
+                FSharpOption<Core.Config.SearchConfig>.None,
+                FSharpOption<Core.Config.StorageConfig>.None,
+                FSharpOption<Core.Config.UserConfig>.None);
         }
 
         public Core.Config.TotalRecallConfig LoadDefaults() => _cfg;
@@ -58,7 +66,7 @@ public sealed class StatusCommandTests : IDisposable
     [Fact]
     public async Task EmptyStore_ReturnsZero()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var loader = new FakeConfigLoader("all-MiniLM-L6-v2", 384);
         var cmd = new StatusCommand(store, loader, "/tmp/nonexistent-tr.db", new StringWriter());
 
@@ -70,7 +78,7 @@ public sealed class StatusCommandTests : IDisposable
     [Fact]
     public async Task UnknownArg_ReturnsExit2()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var loader = new FakeConfigLoader("all-MiniLM-L6-v2", 384);
         var cmd = new StatusCommand(store, loader, "/tmp/x.db", new StringWriter());
 
@@ -82,7 +90,7 @@ public sealed class StatusCommandTests : IDisposable
     [Fact]
     public async Task Json_EmptyStore_HasExpectedShape()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var loader = new FakeConfigLoader("test-model", 128);
         var injected = new StringWriter();
         var cmd = new StatusCommand(store, loader, "/tmp/nonexistent-tr.db", injected);
@@ -113,7 +121,7 @@ public sealed class StatusCommandTests : IDisposable
     [Fact]
     public async Task Json_Seeded_ReflectsCountsAndCollections()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         // 2 hot memories, 1 warm memory, 1 cold knowledge chunk + 2 collections.
         store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: "hm1"));
         store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: "hm2"));
@@ -168,7 +176,7 @@ public sealed class StatusCommandTests : IDisposable
     {
         // Task 5.10 item 5: each collection row in the JSON must carry
         // its own chunk count, not the global coldKnow total.
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         store.Seed(Tier.Cold, ContentType.Knowledge, EntryFactory.Make(
             id: "coll-a",
             metadataJson: "{\"type\":\"collection\",\"name\":\"Alpha\"}"));
@@ -207,7 +215,7 @@ public sealed class StatusCommandTests : IDisposable
     [Fact]
     public async Task Json_MissingDbFile_SizeNull()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var loader = new FakeConfigLoader("mini", 384);
         var injected = new StringWriter();
         var cmd = new StatusCommand(

@@ -43,7 +43,8 @@ public sealed class KbSearchHandler : IToolHandler
           "properties": {
             "query":      {"type":"string","description":"Search query"},
             "collection": {"type":"string","description":"Optional collection ID to restrict search"},
-            "top_k":      {"type":"number","description":"Number of results to return (default: 10)"}
+            "top_k":      {"type":"number","description":"Number of results to return (default: 10)"},
+            "scope":      {"type":"string","enum":["mine","team","all"],"description":"Query scope: 'mine' (default), 'team', or 'all'"}
           },
           "required": ["query"]
         }
@@ -84,6 +85,11 @@ public sealed class KbSearchHandler : IToolHandler
 
         var collection = ReadOptionalString(args, "collection");
         var topK = ReadOptionalInt(args, "top_k", 1, 1000) ?? 10;
+        // scope is a pass-through for now; Postgres implementations already
+        // filter by owner_id / visibility in their WHERE clauses. SQLite
+        // ignores it (all entries are local/private).
+        var scope = ReadOptionalString(args, "scope") ?? "mine";
+        _ = scope; // accepted; infrastructure-level filtering applied by store
 
         ct.ThrowIfCancellationRequested();
 

@@ -16,7 +16,7 @@
 //   - The handler walks only the hot tier. The compactor subagent is the
 //     only expected caller and it only ever needs the hot working set.
 //
-//   - Depends on ISqliteStore directly (no embedder, no search seam).
+//   - Depends on IStore directly (no embedder, no search seam).
 //     Iterates the F# Entry rows and unwraps FSharpOption<string> for
 //     the project field and FSharpList<string> for tags.
 
@@ -48,9 +48,9 @@ public sealed class SessionContextHandler : IToolHandler
 
     private const string NoEntriesSentinel = "(no hot tier entries)";
 
-    private readonly ISqliteStore _store;
+    private readonly IStore _store;
 
-    public SessionContextHandler(ISqliteStore store)
+    public SessionContextHandler(IStore store)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
     }

@@ -8,7 +8,7 @@
 //
 // Design notes:
 //
-//   - Constructor takes (ISqliteStore, IVectorSearch) so we can clean up
+//   - Constructor takes (IStore, IVectorSearch) so we can clean up
 //     the embedding row too.
 //
 //   - Order of operations is load-bearing: vec.DeleteEmbedding MUST run
@@ -50,10 +50,10 @@ public sealed class MemoryDeleteHandler : IToolHandler
         }
         """).RootElement.Clone();
 
-    private readonly ISqliteStore _store;
+    private readonly IStore _store;
     private readonly IVectorSearch _vectorSearch;
 
-    public MemoryDeleteHandler(ISqliteStore store, IVectorSearch vectorSearch)
+    public MemoryDeleteHandler(IStore store, IVectorSearch vectorSearch)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _vectorSearch = vectorSearch ?? throw new ArgumentNullException(nameof(vectorSearch));
@@ -102,7 +102,7 @@ public sealed class MemoryDeleteHandler : IToolHandler
 
         // Order matters: see the header comment. Resolve rowid and
         // delete the vec row first; only then drop the content row.
-        var rowid = _store.GetRowid(located.Value.Tier, located.Value.Type, id);
+        var rowid = _store.GetInternalKey(located.Value.Tier, located.Value.Type, id);
         if (rowid is not null)
             _vectorSearch.DeleteEmbedding(located.Value.Tier, located.Value.Type, rowid.Value);
         _store.Delete(located.Value.Tier, located.Value.Type, id);

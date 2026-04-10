@@ -1,5 +1,5 @@
 // Plan 4 Task 4.8 — MemoryGetHandler contract tests. Uses the
-// FakeSqliteStore's Seed/Get paths to place entries in specific
+// FakeStore's Seed/Get paths to place entries in specific
 // (tier, type) slots and asserts the handler finds them and returns
 // the TS wire shape.
 
@@ -19,9 +19,9 @@ namespace TotalRecall.Server.Tests;
 
 public class MemoryGetHandlerTests
 {
-    private static (MemoryGetHandler handler, FakeSqliteStore store) MakeHandler()
+    private static (MemoryGetHandler handler, FakeStore store) MakeHandler()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var handler = new MemoryGetHandler(store);
         return (handler, store);
     }

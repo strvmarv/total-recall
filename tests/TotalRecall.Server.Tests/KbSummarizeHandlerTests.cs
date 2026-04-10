@@ -16,9 +16,9 @@ namespace TotalRecall.Server.Tests;
 
 public class KbSummarizeHandlerTests
 {
-    private static (KbSummarizeHandler handler, FakeSqliteStore store) MakeHandler()
+    private static (KbSummarizeHandler handler, FakeStore store) MakeHandler()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         return (new KbSummarizeHandler(store), store);
     }
 

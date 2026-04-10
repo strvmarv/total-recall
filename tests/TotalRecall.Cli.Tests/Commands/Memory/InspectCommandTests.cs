@@ -34,7 +34,7 @@ public sealed class InspectCommandTests : IDisposable
     [Fact]
     public async Task MissingId_ReturnsExit2()
     {
-        var cmd = new InspectCommand(new FakeSqliteStore());
+        var cmd = new InspectCommand(new FakeStore());
         var code = await cmd.RunAsync(Array.Empty<string>());
         Assert.Equal(2, code);
         Assert.Contains("<id>", _errWriter.ToString());
@@ -43,7 +43,7 @@ public sealed class InspectCommandTests : IDisposable
     [Fact]
     public async Task NotFound_ReturnsExit1()
     {
-        var cmd = new InspectCommand(new FakeSqliteStore());
+        var cmd = new InspectCommand(new FakeStore());
         var code = await cmd.RunAsync(new[] { "nope" });
         Assert.Equal(1, code);
         Assert.Contains("not found", _errWriter.ToString());
@@ -56,7 +56,7 @@ public sealed class InspectCommandTests : IDisposable
         // does not honor Console.SetOut — see CliApp.cs comment. So we only
         // assert the exit code here; the --json path below exercises the
         // full field set via a parseable payload.
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         store.Seed(Tier.Warm, ContentType.Memory, EntryFactory.Make(
             id: "abc",
             content: "hello body",
@@ -73,7 +73,7 @@ public sealed class InspectCommandTests : IDisposable
     [Fact]
     public async Task JsonPath_RoundTripsAllFields()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(
             id: "abc",
             content: "hello body",
@@ -120,7 +120,7 @@ public sealed class InspectCommandTests : IDisposable
     [Fact]
     public async Task JsonPath_EscapesSpecialChars()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var nasty = "has \"quotes\"\nand \\ backslash\tand tab";
         store.Seed(Tier.Cold, ContentType.Memory, EntryFactory.Make(
             id: "abc",

@@ -1,6 +1,6 @@
 // tests/TotalRecall.Server.Tests/StatusHandlerTests.cs
 //
-// Plan 4 Task 4.11 — unit tests for StatusHandler. Uses FakeSqliteStore's
+// Plan 4 Task 4.11 — unit tests for StatusHandler. Uses FakeStore's
 // Counts and ListByMetadataSlots seeding (added alongside Task 4.11) to
 // drop pre-built tier sizes and collection rows. Exercises the JSON wire
 // shape described in src-ts/tools/system-tools.ts, scoped to the Plan 4
@@ -58,7 +58,7 @@ public sealed class StatusHandlerTests
     }
 
     private static async Task<JsonElement> RunAsync(
-        FakeSqliteStore store,
+        FakeStore store,
         FakeSessionLifecycle lifecycle,
         StatusOptions options)
     {
@@ -71,7 +71,7 @@ public sealed class StatusHandlerTests
     [Fact]
     public async Task HappyPath_ReturnsStatusShape()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var lifecycle = new FakeSessionLifecycle();
 
         var root = await RunAsync(store, lifecycle, Options());
@@ -90,7 +90,7 @@ public sealed class StatusHandlerTests
     [Fact]
     public async Task TierSizes_CountsFromStore()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         store.SeedCount(Tier.Hot, ContentType.Memory, 11);
         store.SeedCount(Tier.Hot, ContentType.Knowledge, 22);
         store.SeedCount(Tier.Warm, ContentType.Memory, 33);
@@ -112,7 +112,7 @@ public sealed class StatusHandlerTests
     [Fact]
     public async Task KnowledgeBase_TotalChunks_ExcludesCollections()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         // 10 total cold_knowledge rows, of which 2 are collections. The
         // remaining 8 are treated as chunks (documents + leaf chunks).
         store.SeedCount(Tier.Cold, ContentType.Knowledge, 10);
@@ -138,7 +138,7 @@ public sealed class StatusHandlerTests
     [Fact]
     public async Task KnowledgeBase_EmptyCollections_StillReturnsTotalChunks()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         store.SeedCount(Tier.Cold, ContentType.Knowledge, 5);
         // No ListByMetadata seeding -> empty collection list.
 
@@ -155,7 +155,7 @@ public sealed class StatusHandlerTests
         var missing = Path.Combine(
             Path.GetTempPath(),
             "total-recall-status-does-not-exist-" + Guid.NewGuid() + ".db");
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
 
         var root = await RunAsync(
             store,
@@ -178,7 +178,7 @@ public sealed class StatusHandlerTests
         {
             var bytes = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 };
             File.WriteAllBytes(tmp, bytes);
-            var store = new FakeSqliteStore();
+            var store = new FakeStore();
 
             var root = await RunAsync(
                 store,
@@ -198,7 +198,7 @@ public sealed class StatusHandlerTests
     [Fact]
     public async Task Db_SessionId_FromLifecycle()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var lifecycle = new FakeSessionLifecycle { SessionIdValue = "sess-status-xyz" };
 
         var root = await RunAsync(store, lifecycle, Options());
@@ -213,7 +213,7 @@ public sealed class StatusHandlerTests
     [Fact]
     public async Task Embedding_ModelAndDimensions_FromOptions()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var lifecycle = new FakeSessionLifecycle();
 
         var root = await RunAsync(
@@ -229,7 +229,7 @@ public sealed class StatusHandlerTests
     [Fact]
     public async Task Activity_Stubbed_ReturnsZeros()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
 
         var root = await RunAsync(store, new FakeSessionLifecycle(), Options());
 
@@ -244,7 +244,7 @@ public sealed class StatusHandlerTests
     [Fact]
     public async Task LastCompaction_Stubbed_ReturnsNull()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
 
         var root = await RunAsync(store, new FakeSessionLifecycle(), Options());
 
@@ -255,7 +255,7 @@ public sealed class StatusHandlerTests
     [Fact]
     public async Task NullArguments_DoesNotThrow()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var handler = new StatusHandler(store, new FakeSessionLifecycle(), Options());
 
         var result = await handler.ExecuteAsync(null, CancellationToken.None);
@@ -267,7 +267,7 @@ public sealed class StatusHandlerTests
     [Fact]
     public async Task EmptyObjectArguments_DoesNotThrow()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var handler = new StatusHandler(store, new FakeSessionLifecycle(), Options());
 
         using var doc = JsonDocument.Parse("{}");
@@ -279,7 +279,7 @@ public sealed class StatusHandlerTests
     [Fact]
     public async Task JsonShape_MatchesExpected()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         store.SeedCount(Tier.Hot, ContentType.Memory, 1);
         store.SeedCount(Tier.Hot, ContentType.Knowledge, 2);
         store.SeedCount(Tier.Warm, ContentType.Memory, 3);
@@ -317,7 +317,7 @@ public sealed class StatusHandlerTests
     public void Metadata_NameAndDescription()
     {
         var handler = new StatusHandler(
-            new FakeSqliteStore(),
+            new FakeStore(),
             new FakeSessionLifecycle(),
             Options());
 

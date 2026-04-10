@@ -5,7 +5,7 @@
 // The test uses the Plan 4 fakes under tests/TotalRecall.Server.Tests/
 // TestSupport/ so no real Sqlite / ONNX / FAISS is touched. The single
 // verification contract is that BuildRegistry returns a ToolRegistry
-// populated with the exact set of 32 production handlers, in the order
+// populated with the exact set of 33 production handlers, in the order
 // the composition root registers them, with the tool names matching the
 // wire protocol.
 //
@@ -25,7 +25,7 @@ public sealed class ServerCompositionTests
 {
     private static ToolRegistry BuildWithFakes()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var vectors = new FakeVectorSearch();
         var embedder = new RecordingFakeEmbedder();
         var hybrid = new RecordingFakeHybridSearch();
@@ -64,8 +64,8 @@ public sealed class ServerCompositionTests
             "eval_grow",
             // Config (2)
             "config_get", "config_set",
-            // Misc (3)
-            "status", "import_host", "compact_now",
+            // Misc (4)
+            "status", "import_host", "compact_now", "migrate_to_remote",
         };
 
         Assert.Equal(expected.Length, registry.Count);

@@ -11,18 +11,16 @@
 //      for testability: a unit test can inject fakes and assert the handler
 //      set is complete (count + expected names) without opening a real DB.
 //
-//   2. OpenProduction() — opens the real user DB at the standard path, runs
-//      schema migrations, constructs OnnxEmbedder + all Infrastructure
-//      singletons, and returns a ServerCompositionHandles that the Host can
-//      dispose on shutdown. The Host is responsible for running
+//   2. OpenProduction() — detects config and opens either a Postgres data
+//      source or a Sqlite connection, runs schema migrations, constructs
+//      OnnxEmbedder + all Infrastructure singletons, and returns a
+//      ServerCompositionHandles that the Host can dispose on shutdown.
+//      The Host is responsible for running
 //      AutoMigrationGuard.CheckAndMigrateAsync BEFORE calling this (so the
 //      migration path can rename the old DB before we open a handle on it).
 //
-// Handler budget: 12 memory + 7 KB + 3 session + 5 eval + 2 config + 3 misc
-// (status, import_host, compact_now) = 32 per the plan's "33 handlers" naming
-// (Plan 4's 12 + Plan 6's 20 + Status = 32 registered). The plan-text count
-// of 33 is off-by-one; this file registers what actually exists under
-// src/TotalRecall.Server/Handlers/.
+// Handler budget: 12 memory + 7 KB + 3 session + 5 eval + 2 config + 4 misc
+// (status, import_host, compact_now, migrate_to_remote) = 33.
 //
 // AOT: no reflection. Every handler is constructed via direct `new`. The
 // Eval/Config/ImportHost/CompactNow handlers have no-arg constructors that
@@ -35,6 +33,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Microsoft.FSharp.Core;
+using Npgsql;
 using TotalRecall.Infrastructure.Config;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Importers;
@@ -50,27 +50,23 @@ namespace TotalRecall.Server;
 /// <summary>
 /// Bundle of disposable resources owned by the production composition root.
 /// The Host disposes this on shutdown (Ctrl+C / SIGTERM / shutdown RPC) so
-/// the Sqlite connection and the ONNX session release cleanly.
+/// the underlying resource (Sqlite connection or Npgsql data source) releases
+/// cleanly.
 /// </summary>
 public sealed class ServerCompositionHandles : IDisposable
 {
-    public MsSqliteConnection Connection { get; }
+    private readonly IDisposable _resource;
     public ToolRegistry Registry { get; }
 
-    internal ServerCompositionHandles(MsSqliteConnection connection, ToolRegistry registry)
+    internal ServerCompositionHandles(IDisposable resource, ToolRegistry registry)
     {
-        Connection = connection;
+        _resource = resource;
         Registry = registry;
     }
 
     public void Dispose()
     {
-        // SqliteStore + VectorSearch + CompactionLog etc. all borrow the
-        // connection and do not dispose it, so disposing here is both safe
-        // and necessary. OnnxEmbedder owns its own ORT session which is
-        // released by the GC on process exit; there's no explicit dispose
-        // in the current EmbedderFactory surface.
-        try { Connection.Dispose(); } catch { /* best-effort */ }
+        try { _resource.Dispose(); } catch { /* best-effort */ }
     }
 }
 
@@ -85,7 +81,7 @@ public static class ServerComposition
     /// Callable from both production (OpenProduction) and tests.
     /// </summary>
     public static ToolRegistry BuildRegistry(
-        ISqliteStore store,
+        IStore store,
         IVectorSearch vectors,
         IEmbedder embedder,
         IHybridSearch hybrid,
@@ -144,18 +140,20 @@ public static class ServerComposition
         registry.Register(new ConfigGetHandler());
         registry.Register(new ConfigSetHandler());
 
-        // ---- Misc (3) ----
+        // ---- Misc (4) ----
         registry.Register(new StatusHandler(store, sessionLifecycle, statusOptions));
         registry.Register(new ImportHostHandler()); // self-bootstraps the 7 importers
         registry.Register(new CompactNowHandler());
+        registry.Register(new MigrateToRemoteHandler()); // self-bootstraps source+target stores
 
         return registry;
     }
 
     /// <summary>
-    /// Open the production Sqlite connection at the standard user path, run
-    /// schema migrations, construct Infrastructure singletons + all handlers,
-    /// and return the disposable handle bundle.
+    /// Detect config and open the appropriate backend (Postgres or SQLite).
+    /// When a Postgres connection string is configured, opens a
+    /// <see cref="NpgsqlDataSource"/>; otherwise opens a SQLite connection at
+    /// the standard user path.
     /// </summary>
     /// <remarks>
     /// The caller is responsible for running
@@ -164,6 +162,18 @@ public static class ServerComposition
     /// the way before we open a handle.
     /// </remarks>
     public static ServerCompositionHandles OpenProduction(string? dbPath = null)
+    {
+        var cfg = new ConfigLoader().LoadEffectiveConfig();
+        var hasPostgres = FSharpOption<Core.Config.StorageConfig>.get_IsSome(cfg.Storage)
+            && FSharpOption<string>.get_IsSome(cfg.Storage.Value.ConnectionString);
+
+        if (hasPostgres)
+            return OpenPostgres(cfg);
+        else
+            return OpenSqlite(cfg, dbPath);
+    }
+
+    private static ServerCompositionHandles OpenSqlite(Core.Config.TotalRecallConfig cfg, string? dbPath)
     {
         var resolvedDbPath = dbPath ?? ConfigLoader.GetDbPath();
         Directory.CreateDirectory(ConfigLoader.GetDataDir());
@@ -181,14 +191,14 @@ public static class ServerComposition
             var store = new SqliteStore(conn);
             var vec = new VectorSearch(conn);
             var fts = new FtsSearch(conn);
-            var embedder = EmbedderFactory.CreateProduction();
+            var embedder = EmbedderFactory.CreateFromConfig(cfg.Embedding);
             var hybrid = new HybridSearch(vec, fts, store);
 
             var compactionLog = new CompactionLog(conn);
             var importLog = new ImportLog(conn);
 
-            var index = new HierarchicalIndex(store, embedder, vec, conn);
-            var validator = new IngestValidator(embedder, vec, conn);
+            var index = new HierarchicalIndex(store, embedder, vec);
+            var validator = new IngestValidator(embedder, vec, store);
             var fileIngester = new FileIngester(index, validator);
 
             // Host importer set — mirrors ImportHostCommand.Execute.
@@ -205,7 +215,6 @@ public static class ServerComposition
 
             var sessionLifecycle = new SessionLifecycle(importers, store, compactionLog);
 
-            var cfg = new ConfigLoader().LoadEffectiveConfig();
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
                 EmbeddingModel: cfg.Embedding.Model,
@@ -222,5 +231,71 @@ public static class ServerComposition
             try { conn.Dispose(); } catch { /* best-effort */ }
             throw;
         }
+    }
+
+    private static ServerCompositionHandles OpenPostgres(Core.Config.TotalRecallConfig cfg)
+    {
+        var connStr = cfg.Storage.Value.ConnectionString.Value;
+        var userId = ResolveUserId(cfg);
+        var dims = cfg.Embedding.Dimensions;
+
+        var dsBuilder = new NpgsqlDataSourceBuilder(connStr);
+        dsBuilder.UseVector();
+        var dataSource = dsBuilder.Build();
+        try
+        {
+            PostgresMigrationRunner.RunMigrations(dataSource, dims);
+
+            var store = new PostgresStore(dataSource, userId);
+            var vec = new PgvectorSearch(dataSource, userId);
+            var fts = new PostgresFtsSearch(dataSource, userId);
+            var embedder = EmbedderFactory.CreateFromConfig(cfg.Embedding);
+            var hybrid = new HybridSearch(vec, fts, store);
+
+            var compactionLog = new PostgresCompactionLog(dataSource);
+            var importLog = new PostgresImportLog(dataSource);
+
+            var index = new HierarchicalIndex(store, embedder, vec);
+            var validator = new IngestValidator(embedder, vec, store);
+            var fileIngester = new FileIngester(index, validator);
+
+            var importers = new List<IImporter>
+            {
+                new ClaudeCodeImporter(store, embedder, vec, importLog),
+                new CopilotCliImporter(store, embedder, vec, importLog),
+                new CursorImporter(store, embedder, vec, importLog),
+                new ClineImporter(store, embedder, vec, importLog),
+                new OpenCodeImporter(store, embedder, vec, importLog),
+                new HermesImporter(store, embedder, vec, importLog),
+                new ProjectDocsImporter(fileIngester, index, importLog),
+            };
+
+            var sessionLifecycle = new SessionLifecycle(importers, store, compactionLog);
+
+            var statusOptions = new StatusOptions(
+                DbPath: connStr,
+                EmbeddingModel: cfg.Embedding.Model,
+                EmbeddingDimensions: dims);
+
+            var registry = BuildRegistry(
+                store, vec, embedder, hybrid,
+                fileIngester, compactionLog, sessionLifecycle, statusOptions);
+
+            return new ServerCompositionHandles(dataSource, registry);
+        }
+        catch
+        {
+            try { dataSource.Dispose(); } catch { }
+            throw;
+        }
+    }
+
+    private static string ResolveUserId(Core.Config.TotalRecallConfig cfg)
+    {
+        if (FSharpOption<Core.Config.UserConfig>.get_IsSome(cfg.User)
+            && FSharpOption<string>.get_IsSome(cfg.User.Value.UserId))
+            return cfg.User.Value.UserId.Value;
+        var envUserId = Environment.GetEnvironmentVariable("TOTAL_RECALL_USER_ID");
+        return envUserId ?? "local";
     }
 }

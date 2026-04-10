@@ -16,7 +16,7 @@ namespace TotalRecall.Infrastructure.Importers;
 /// chunker + HierarchicalIndex pipeline.
 ///
 /// Differs from the other six importers: they write individual entries via
-/// <c>ISqliteStore.Insert</c>, whereas this one produces a collection ->
+/// <c>IStore.Insert</c>, whereas this one produces a collection ->
 /// document -> chunk tree in cold/knowledge. Mirrors
 /// <c>src-ts/importers/project-docs.ts</c>.
 ///
@@ -33,7 +33,7 @@ public sealed class ProjectDocsImporter : IImporter
 
     private readonly FileIngester _ingester;
     private readonly HierarchicalIndex _index;
-    private readonly ImportLog _importLog;
+    private readonly IImportLog _importLog;
     private readonly string _cwd;
 
     public string Name => "project-docs";
@@ -41,7 +41,7 @@ public sealed class ProjectDocsImporter : IImporter
     public ProjectDocsImporter(
         FileIngester ingester,
         HierarchicalIndex index,
-        ImportLog importLog,
+        IImportLog importLog,
         string? cwd = null)
     {
         ArgumentNullException.ThrowIfNull(ingester);

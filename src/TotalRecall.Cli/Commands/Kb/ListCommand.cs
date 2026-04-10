@@ -2,7 +2,7 @@
 //
 // Plan 5 Task 5.7 — `total-recall kb list [--json]`. Ports
 // src-ts/tools/kb-tools.ts:193-196 (kb_list_collections), delegating to
-// ISqliteStore.ListByMetadata({type:"collection"}).
+// IStore.ListByMetadata({type:"collection"}).
 //
 // For each collection we compute document/chunk counts by doing ONE sweep
 // of (Cold, Knowledge) via List() and grouping by CollectionId — avoids
@@ -33,13 +33,13 @@ namespace TotalRecall.Cli.Commands.Kb;
 
 public sealed class ListCommand : ICliCommand
 {
-    private readonly ISqliteStore? _store;
+    private readonly IStore? _store;
     private readonly TextWriter? _out;
 
     public ListCommand() { }
 
     // Test/composition seam.
-    public ListCommand(ISqliteStore store, TextWriter output)
+    public ListCommand(IStore store, TextWriter output)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _out = output ?? throw new ArgumentNullException(nameof(output));
@@ -69,7 +69,7 @@ public sealed class ListCommand : ICliCommand
             }
         }
 
-        ISqliteStore store;
+        IStore store;
         MsSqliteConnection? owned = null;
         try
         {

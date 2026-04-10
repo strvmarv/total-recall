@@ -34,9 +34,9 @@ public class KbRefreshHandlerTests : IDisposable
         try { if (Directory.Exists(_tmpDir)) Directory.Delete(_tmpDir, recursive: true); } catch { }
     }
 
-    private static (KbRefreshHandler handler, FakeSqliteStore store, FakeVectorSearch vec, RecordingFakeFileIngester ingester) MakeHandler()
+    private static (KbRefreshHandler handler, FakeStore store, FakeVectorSearch vec, RecordingFakeFileIngester ingester) MakeHandler()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var vec = new FakeVectorSearch();
         var ingester = new RecordingFakeFileIngester();
         return (new KbRefreshHandler(store, vec, ingester), store, vec, ingester);

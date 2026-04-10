@@ -13,10 +13,10 @@ namespace TotalRecall.Server.Tests;
 
 public class MemoryImportHandlerTests
 {
-    private static (MemoryImportHandler handler, FakeSqliteStore store,
+    private static (MemoryImportHandler handler, FakeStore store,
             FakeVectorSearch vec, RecordingFakeEmbedder embedder) MakeHandler()
     {
-        var store = new FakeSqliteStore();
+        var store = new FakeStore();
         var vec = new FakeVectorSearch();
         var embedder = new RecordingFakeEmbedder();
         return (new MemoryImportHandler(store, vec, embedder), store, vec, embedder);
