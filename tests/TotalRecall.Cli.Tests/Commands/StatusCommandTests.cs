@@ -45,9 +45,17 @@ public sealed class StatusCommandTests : IDisposable
                     new Core.Config.WarmTierConfig(1000, 50, 0.3, 90),
                     new Core.Config.ColdTierConfig(500, 50, 1000)),
                 new Core.Config.CompactionConfig(168.0, 0.3, 0.7, 30),
-                new Core.Config.EmbeddingConfig(model, dims),
+                new Core.Config.EmbeddingConfig(model, dims,
+                    FSharpOption<string>.None,
+                    FSharpOption<string>.None,
+                    FSharpOption<string>.None,
+                    FSharpOption<string>.None,
+                    FSharpOption<string>.None,
+                    FSharpOption<string>.None),
                 FSharpOption<Core.Config.RegressionConfig>.None,
-                FSharpOption<Core.Config.SearchConfig>.None);
+                FSharpOption<Core.Config.SearchConfig>.None,
+                FSharpOption<Core.Config.StorageConfig>.None,
+                FSharpOption<Core.Config.UserConfig>.None);
         }
 
         public Core.Config.TotalRecallConfig LoadDefaults() => _cfg;

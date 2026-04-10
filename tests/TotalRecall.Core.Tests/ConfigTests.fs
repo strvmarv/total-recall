@@ -92,9 +92,11 @@ let configTests =
                     PromoteThreshold = 0.7
                     WarmSweepIntervalDays = 7
                 }
-                Embedding = { Model = "all-MiniLM-L6-v2"; Dimensions = 384 }
+                Embedding = { Model = "all-MiniLM-L6-v2"; Dimensions = 384; Provider = None; Endpoint = None; BedrockRegion = None; BedrockModel = None; ModelName = None; ApiKey = None }
                 Regression = None
                 Search = Some { FtsWeight = Some 0.3 }
+                Storage = None
+                User = None
             }
             Expect.equal cfg.Tiers.Hot.MaxEntries 50 "field access works"
             Expect.equal cfg.Embedding.Model "all-MiniLM-L6-v2" "nested field access works"
