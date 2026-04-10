@@ -76,10 +76,7 @@ public sealed class PostgresStore : IStore
             cmd.Transaction = tx;
             cmd.CommandText = BuildInsertWithEmbeddingSql(table);
             BindInsertParameters(cmd, id, tierStr, opts, now, _ownerId);
-            cmd.Parameters.Add(new NpgsqlParameter("$embedding", NpgsqlDbType.Unknown)
-            {
-                Value = new Vector(embedding.ToArray()),
-            });
+            cmd.Parameters.Add(new NpgsqlParameter { ParameterName = "@embedding", Value = new Vector(embedding.ToArray()) });
             cmd.ExecuteNonQuery();
 
             tx.Commit();
@@ -98,9 +95,9 @@ INSERT INTO {table}
    created_at, updated_at, last_accessed_at, access_count,
    decay_score, parent_id, collection_id, metadata, owner_id)
 VALUES
-  ($id, $tier, $content, $summary, $source, $source_tool, $project, $tags,
-   $created_at, $updated_at, $last_accessed_at, $access_count,
-   $decay_score, $parent_id, $collection_id, $metadata, $owner_id)";
+  (@id, @tier, @content, @summary, @source, @source_tool, @project, @tags,
+   @created_at, @updated_at, @last_accessed_at, @access_count,
+   @decay_score, @parent_id, @collection_id, @metadata, @owner_id)";
 
     private static string BuildInsertWithEmbeddingSql(string table) => $@"
 INSERT INTO {table}
@@ -108,9 +105,9 @@ INSERT INTO {table}
    created_at, updated_at, last_accessed_at, access_count,
    decay_score, parent_id, collection_id, metadata, owner_id, embedding)
 VALUES
-  ($id, $tier, $content, $summary, $source, $source_tool, $project, $tags,
-   $created_at, $updated_at, $last_accessed_at, $access_count,
-   $decay_score, $parent_id, $collection_id, $metadata, $owner_id, $embedding)";
+  (@id, @tier, @content, @summary, @source, @source_tool, @project, @tags,
+   @created_at, @updated_at, @last_accessed_at, @access_count,
+   @decay_score, @parent_id, @collection_id, @metadata, @owner_id, @embedding)";
 
     private static void BindInsertParameters(
         NpgsqlCommand cmd,
@@ -120,35 +117,35 @@ VALUES
         long now,
         string ownerId)
     {
-        cmd.Parameters.AddWithValue("$id", id);
-        cmd.Parameters.AddWithValue("$tier", tierStr);
-        cmd.Parameters.AddWithValue("$content", opts.Content);
-        cmd.Parameters.Add(new NpgsqlParameter("$summary", NpgsqlDbType.Text)
+        cmd.Parameters.AddWithValue("@id", id);
+        cmd.Parameters.AddWithValue("@tier", tierStr);
+        cmd.Parameters.AddWithValue("@content", opts.Content);
+        cmd.Parameters.Add(new NpgsqlParameter("@summary", NpgsqlDbType.Text)
             { Value = (object?)opts.Summary ?? DBNull.Value });
-        cmd.Parameters.Add(new NpgsqlParameter("$source", NpgsqlDbType.Text)
+        cmd.Parameters.Add(new NpgsqlParameter("@source", NpgsqlDbType.Text)
             { Value = (object?)opts.Source ?? DBNull.Value });
-        cmd.Parameters.Add(new NpgsqlParameter("$source_tool", NpgsqlDbType.Text)
+        cmd.Parameters.Add(new NpgsqlParameter("@source_tool", NpgsqlDbType.Text)
         {
             Value = opts.SourceTool is not null
                 ? SourceToolMapping.ToDbValue(opts.SourceTool)
                 : (object)DBNull.Value,
         });
-        cmd.Parameters.Add(new NpgsqlParameter("$project", NpgsqlDbType.Text)
+        cmd.Parameters.Add(new NpgsqlParameter("@project", NpgsqlDbType.Text)
             { Value = (object?)opts.Project ?? DBNull.Value });
-        cmd.Parameters.Add(new NpgsqlParameter("$tags", NpgsqlDbType.Jsonb)
+        cmd.Parameters.Add(new NpgsqlParameter("@tags", NpgsqlDbType.Jsonb)
             { Value = TagsJson.Encode(opts.Tags) });
-        cmd.Parameters.AddWithValue("$created_at", now);
-        cmd.Parameters.AddWithValue("$updated_at", now);
-        cmd.Parameters.AddWithValue("$last_accessed_at", now);
-        cmd.Parameters.AddWithValue("$access_count", 0);
-        cmd.Parameters.AddWithValue("$decay_score", 1.0);
-        cmd.Parameters.Add(new NpgsqlParameter("$parent_id", NpgsqlDbType.Text)
+        cmd.Parameters.AddWithValue("@created_at", now);
+        cmd.Parameters.AddWithValue("@updated_at", now);
+        cmd.Parameters.AddWithValue("@last_accessed_at", now);
+        cmd.Parameters.AddWithValue("@access_count", 0);
+        cmd.Parameters.AddWithValue("@decay_score", 1.0);
+        cmd.Parameters.Add(new NpgsqlParameter("@parent_id", NpgsqlDbType.Text)
             { Value = (object?)opts.ParentId ?? DBNull.Value });
-        cmd.Parameters.Add(new NpgsqlParameter("$collection_id", NpgsqlDbType.Text)
+        cmd.Parameters.Add(new NpgsqlParameter("@collection_id", NpgsqlDbType.Text)
             { Value = (object?)opts.CollectionId ?? DBNull.Value });
-        cmd.Parameters.Add(new NpgsqlParameter("$metadata", NpgsqlDbType.Jsonb)
+        cmd.Parameters.Add(new NpgsqlParameter("@metadata", NpgsqlDbType.Jsonb)
             { Value = opts.MetadataJson ?? "{}" });
-        cmd.Parameters.AddWithValue("$owner_id", ownerId);
+        cmd.Parameters.AddWithValue("@owner_id", ownerId);
     }
 
     public Entry? Get(Tier tier, ContentType type, string id)
@@ -157,9 +154,9 @@ VALUES
         var tierStr = TierString(tier);
         using var conn = _dataSource.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"SELECT * FROM {table} WHERE tier = $tier AND id = $id";
-        cmd.Parameters.AddWithValue("$tier", tierStr);
-        cmd.Parameters.AddWithValue("$id", id);
+        cmd.CommandText = $"SELECT * FROM {table} WHERE tier = @tier AND id = @id";
+        cmd.Parameters.AddWithValue("@tier", tierStr);
+        cmd.Parameters.AddWithValue("@id", id);
         using var reader = cmd.ExecuteReader();
         if (!reader.Read()) return null;
         return RowToEntry(reader);
@@ -171,9 +168,9 @@ VALUES
         var tierStr = TierString(tier);
         using var conn = _dataSource.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"SELECT internal_key FROM {table} WHERE tier = $tier AND id = $id";
-        cmd.Parameters.AddWithValue("$tier", tierStr);
-        cmd.Parameters.AddWithValue("$id", id);
+        cmd.CommandText = $"SELECT internal_key FROM {table} WHERE tier = @tier AND id = @id";
+        cmd.Parameters.AddWithValue("@tier", tierStr);
+        cmd.Parameters.AddWithValue("@id", id);
         var result = cmd.ExecuteScalar();
         return result is long l ? l : result is int i ? (long)i : null;
     }
@@ -185,56 +182,56 @@ VALUES
         var tierStr = TierString(tier);
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-        var setClauses = new List<string> { "updated_at = $updated_at" };
+        var setClauses = new List<string> { "updated_at = @updated_at" };
         using var conn = _dataSource.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.Parameters.AddWithValue("$updated_at", now);
+        cmd.Parameters.AddWithValue("@updated_at", now);
 
         if (opts.Content is not null)
         {
-            setClauses.Add("content = $content");
-            cmd.Parameters.AddWithValue("$content", opts.Content);
+            setClauses.Add("content = @content");
+            cmd.Parameters.AddWithValue("@content", opts.Content);
         }
         if (opts.Summary is not null || opts.ClearSummary)
         {
-            setClauses.Add("summary = $summary");
-            cmd.Parameters.Add(new NpgsqlParameter("$summary", NpgsqlDbType.Text)
+            setClauses.Add("summary = @summary");
+            cmd.Parameters.Add(new NpgsqlParameter("@summary", NpgsqlDbType.Text)
                 { Value = (object?)opts.Summary ?? DBNull.Value });
         }
         if (opts.Tags is not null)
         {
-            setClauses.Add("tags = $tags");
-            cmd.Parameters.Add(new NpgsqlParameter("$tags", NpgsqlDbType.Jsonb)
+            setClauses.Add("tags = @tags");
+            cmd.Parameters.Add(new NpgsqlParameter("@tags", NpgsqlDbType.Jsonb)
                 { Value = TagsJson.Encode(opts.Tags) });
         }
         if (opts.Project is not null || opts.ClearProject)
         {
-            setClauses.Add("project = $project");
-            cmd.Parameters.Add(new NpgsqlParameter("$project", NpgsqlDbType.Text)
+            setClauses.Add("project = @project");
+            cmd.Parameters.Add(new NpgsqlParameter("@project", NpgsqlDbType.Text)
                 { Value = (object?)opts.Project ?? DBNull.Value });
         }
         if (opts.DecayScore.HasValue)
         {
-            setClauses.Add("decay_score = $decay_score");
-            cmd.Parameters.AddWithValue("$decay_score", opts.DecayScore.Value);
+            setClauses.Add("decay_score = @decay_score");
+            cmd.Parameters.AddWithValue("@decay_score", opts.DecayScore.Value);
         }
         if (opts.MetadataJson is not null)
         {
-            setClauses.Add("metadata = $metadata");
-            cmd.Parameters.Add(new NpgsqlParameter("$metadata", NpgsqlDbType.Jsonb)
+            setClauses.Add("metadata = @metadata");
+            cmd.Parameters.Add(new NpgsqlParameter("@metadata", NpgsqlDbType.Jsonb)
                 { Value = opts.MetadataJson });
         }
         if (opts.Touch)
         {
             setClauses.Add("access_count = access_count + 1");
-            setClauses.Add("last_accessed_at = $last_accessed_at");
-            cmd.Parameters.AddWithValue("$last_accessed_at", now);
+            setClauses.Add("last_accessed_at = @last_accessed_at");
+            cmd.Parameters.AddWithValue("@last_accessed_at", now);
         }
 
-        cmd.Parameters.AddWithValue("$tier", tierStr);
-        cmd.Parameters.AddWithValue("$id", id);
+        cmd.Parameters.AddWithValue("@tier", tierStr);
+        cmd.Parameters.AddWithValue("@id", id);
         cmd.CommandText =
-            $"UPDATE {table} SET {string.Join(", ", setClauses)} WHERE tier = $tier AND id = $id";
+            $"UPDATE {table} SET {string.Join(", ", setClauses)} WHERE tier = @tier AND id = @id";
         cmd.ExecuteNonQuery();
     }
 
@@ -244,9 +241,9 @@ VALUES
         var tierStr = TierString(tier);
         using var conn = _dataSource.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"DELETE FROM {table} WHERE tier = $tier AND id = $id";
-        cmd.Parameters.AddWithValue("$tier", tierStr);
-        cmd.Parameters.AddWithValue("$id", id);
+        cmd.CommandText = $"DELETE FROM {table} WHERE tier = @tier AND id = @id";
+        cmd.Parameters.AddWithValue("@tier", tierStr);
+        cmd.Parameters.AddWithValue("@id", id);
         cmd.ExecuteNonQuery();
     }
 
@@ -260,24 +257,24 @@ VALUES
         using var cmd = conn.CreateCommand();
         var sql = new StringBuilder();
         sql.Append("SELECT * FROM ").Append(table)
-           .Append(" WHERE tier = $tier");
-        cmd.Parameters.AddWithValue("$tier", tierStr);
+           .Append(" WHERE tier = @tier");
+        cmd.Parameters.AddWithValue("@tier", tierStr);
 
         if (opts?.Project is not null)
         {
             if (opts.IncludeGlobal)
-                sql.Append(" AND (project = $project OR project IS NULL)");
+                sql.Append(" AND (project = @project OR project IS NULL)");
             else
-                sql.Append(" AND project = $project");
-            cmd.Parameters.AddWithValue("$project", opts.Project);
+                sql.Append(" AND project = @project");
+            cmd.Parameters.AddWithValue("@project", opts.Project);
         }
 
         sql.Append(" ORDER BY ").Append(orderBy);
 
         if (opts?.Limit is int limit)
         {
-            sql.Append(" LIMIT $limit");
-            cmd.Parameters.AddWithValue("$limit", limit);
+            sql.Append(" LIMIT @limit");
+            cmd.Parameters.AddWithValue("@limit", limit);
         }
 
         cmd.CommandText = sql.ToString();
@@ -290,8 +287,8 @@ VALUES
         var tierStr = TierString(tier);
         using var conn = _dataSource.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"SELECT COUNT(*) FROM {table} WHERE tier = $tier";
-        cmd.Parameters.AddWithValue("$tier", tierStr);
+        cmd.CommandText = $"SELECT COUNT(*) FROM {table} WHERE tier = @tier";
+        cmd.Parameters.AddWithValue("@tier", tierStr);
         var result = cmd.ExecuteScalar();
         return result is long l ? (int)l : result is int i ? i : 0;
     }
@@ -303,8 +300,8 @@ VALUES
         using var conn = _dataSource.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT COUNT(DISTINCT collection_id) FROM knowledge WHERE tier = $tier AND collection_id IS NOT NULL";
-        cmd.Parameters.AddWithValue("$tier", TierString(Tier.Cold));
+            "SELECT COUNT(DISTINCT collection_id) FROM knowledge WHERE tier = @tier AND collection_id IS NOT NULL";
+        cmd.Parameters.AddWithValue("@tier", TierString(Tier.Cold));
         var result = cmd.ExecuteScalar();
         return result is long l ? (int)l : result is int i ? i : 0;
     }
@@ -327,8 +324,8 @@ VALUES
 
         using var conn = _dataSource.OpenConnection();
         using var cmd = conn.CreateCommand();
-        var where = new List<string> { "tier = $tier" };
-        cmd.Parameters.AddWithValue("$tier", tierStr);
+        var where = new List<string> { "tier = @tier" };
+        cmd.Parameters.AddWithValue("@tier", tierStr);
 
         var i = 0;
         foreach (var kv in metadataFilter)
@@ -337,7 +334,7 @@ VALUES
                 throw new ArgumentException(
                     $"Invalid metadata key: {kv.Key}",
                     nameof(metadataFilter));
-            var paramName = $"$mv{i}";
+            var paramName = $"@mv{i}";
             // Use Postgres JSONB arrow operator to extract by key
             where.Add($"metadata->>${EscapeLiteral(kv.Key)} = {paramName}");
             cmd.Parameters.AddWithValue(paramName, kv.Value);
@@ -351,8 +348,8 @@ VALUES
 
         if (opts?.Limit is int limit)
         {
-            sql.Append(" LIMIT $limit");
-            cmd.Parameters.AddWithValue("$limit", limit);
+            sql.Append(" LIMIT @limit");
+            cmd.Parameters.AddWithValue("@limit", limit);
         }
 
         cmd.CommandText = sql.ToString();
@@ -385,11 +382,11 @@ VALUES
                 using var updateCmd = conn.CreateCommand();
                 updateCmd.Transaction = tx;
                 updateCmd.CommandText =
-                    $"UPDATE {fromTable} SET tier = $to_tier, updated_at = $updated_at WHERE tier = $from_tier AND id = $id";
-                updateCmd.Parameters.AddWithValue("$to_tier", toTierStr);
-                updateCmd.Parameters.AddWithValue("$updated_at", now);
-                updateCmd.Parameters.AddWithValue("$from_tier", fromTierStr);
-                updateCmd.Parameters.AddWithValue("$id", id);
+                    $"UPDATE {fromTable} SET tier = @to_tier, updated_at = @updated_at WHERE tier = @from_tier AND id = @id";
+                updateCmd.Parameters.AddWithValue("@to_tier", toTierStr);
+                updateCmd.Parameters.AddWithValue("@updated_at", now);
+                updateCmd.Parameters.AddWithValue("@from_tier", fromTierStr);
+                updateCmd.Parameters.AddWithValue("@id", id);
                 var affected = updateCmd.ExecuteNonQuery();
                 if (affected == 0)
                     throw new InvalidOperationException(
@@ -403,9 +400,9 @@ VALUES
                 {
                     readCmd.Transaction = tx;
                     readCmd.CommandText =
-                        $"SELECT * FROM {fromTable} WHERE tier = $tier AND id = $id";
-                    readCmd.Parameters.AddWithValue("$tier", fromTierStr);
-                    readCmd.Parameters.AddWithValue("$id", id);
+                        $"SELECT * FROM {fromTable} WHERE tier = @tier AND id = @id";
+                    readCmd.Parameters.AddWithValue("@tier", fromTierStr);
+                    readCmd.Parameters.AddWithValue("@id", id);
                     using var reader = readCmd.ExecuteReader();
                     entry = reader.Read() ? RowToEntry(reader) : null;
                 }
@@ -422,39 +419,39 @@ INSERT INTO {toTable}
    created_at, updated_at, last_accessed_at, access_count,
    decay_score, parent_id, collection_id, metadata, owner_id)
 VALUES
-  ($id, $tier, $content, $summary, $source, $source_tool, $project, $tags,
-   $created_at, $updated_at, $last_accessed_at, $access_count,
-   $decay_score, $parent_id, $collection_id, $metadata, $owner_id)";
+  (@id, @tier, @content, @summary, @source, @source_tool, @project, @tags,
+   @created_at, @updated_at, @last_accessed_at, @access_count,
+   @decay_score, @parent_id, @collection_id, @metadata, @owner_id)";
 
-                    insertCmd.Parameters.AddWithValue("$id", entry.Id);
-                    insertCmd.Parameters.AddWithValue("$tier", toTierStr);
-                    insertCmd.Parameters.AddWithValue("$content", entry.Content);
-                    insertCmd.Parameters.Add(new NpgsqlParameter("$summary", NpgsqlDbType.Text)
+                    insertCmd.Parameters.AddWithValue("@id", entry.Id);
+                    insertCmd.Parameters.AddWithValue("@tier", toTierStr);
+                    insertCmd.Parameters.AddWithValue("@content", entry.Content);
+                    insertCmd.Parameters.Add(new NpgsqlParameter("@summary", NpgsqlDbType.Text)
                         { Value = ToDbObject(entry.Summary) });
-                    insertCmd.Parameters.Add(new NpgsqlParameter("$source", NpgsqlDbType.Text)
+                    insertCmd.Parameters.Add(new NpgsqlParameter("@source", NpgsqlDbType.Text)
                         { Value = ToDbObject(entry.Source) });
-                    insertCmd.Parameters.Add(new NpgsqlParameter("$source_tool", NpgsqlDbType.Text)
+                    insertCmd.Parameters.Add(new NpgsqlParameter("@source_tool", NpgsqlDbType.Text)
                     {
                         Value = FSharpOption<SourceTool>.get_IsSome(entry.SourceTool)
                             ? SourceToolMapping.ToDbValue(entry.SourceTool.Value)
                             : (object)DBNull.Value,
                     });
-                    insertCmd.Parameters.Add(new NpgsqlParameter("$project", NpgsqlDbType.Text)
+                    insertCmd.Parameters.Add(new NpgsqlParameter("@project", NpgsqlDbType.Text)
                         { Value = ToDbObject(entry.Project) });
-                    insertCmd.Parameters.Add(new NpgsqlParameter("$tags", NpgsqlDbType.Jsonb)
+                    insertCmd.Parameters.Add(new NpgsqlParameter("@tags", NpgsqlDbType.Jsonb)
                         { Value = TagsJson.EncodeFList(entry.Tags) });
-                    insertCmd.Parameters.AddWithValue("$created_at", entry.CreatedAt);
-                    insertCmd.Parameters.AddWithValue("$updated_at", now);
-                    insertCmd.Parameters.AddWithValue("$last_accessed_at", entry.LastAccessedAt);
-                    insertCmd.Parameters.AddWithValue("$access_count", entry.AccessCount);
-                    insertCmd.Parameters.AddWithValue("$decay_score", entry.DecayScore);
-                    insertCmd.Parameters.Add(new NpgsqlParameter("$parent_id", NpgsqlDbType.Text)
+                    insertCmd.Parameters.AddWithValue("@created_at", entry.CreatedAt);
+                    insertCmd.Parameters.AddWithValue("@updated_at", now);
+                    insertCmd.Parameters.AddWithValue("@last_accessed_at", entry.LastAccessedAt);
+                    insertCmd.Parameters.AddWithValue("@access_count", entry.AccessCount);
+                    insertCmd.Parameters.AddWithValue("@decay_score", entry.DecayScore);
+                    insertCmd.Parameters.Add(new NpgsqlParameter("@parent_id", NpgsqlDbType.Text)
                         { Value = ToDbObject(entry.ParentId) });
-                    insertCmd.Parameters.Add(new NpgsqlParameter("$collection_id", NpgsqlDbType.Text)
+                    insertCmd.Parameters.Add(new NpgsqlParameter("@collection_id", NpgsqlDbType.Text)
                         { Value = ToDbObject(entry.CollectionId) });
-                    insertCmd.Parameters.Add(new NpgsqlParameter("$metadata", NpgsqlDbType.Jsonb)
+                    insertCmd.Parameters.Add(new NpgsqlParameter("@metadata", NpgsqlDbType.Jsonb)
                         { Value = entry.MetadataJson });
-                    insertCmd.Parameters.AddWithValue("$owner_id", _ownerId);
+                    insertCmd.Parameters.AddWithValue("@owner_id", _ownerId);
                     insertCmd.ExecuteNonQuery();
                 }
 
@@ -462,9 +459,9 @@ VALUES
                 {
                     delCmd.Transaction = tx;
                     delCmd.CommandText =
-                        $"DELETE FROM {fromTable} WHERE tier = $tier AND id = $id";
-                    delCmd.Parameters.AddWithValue("$tier", fromTierStr);
-                    delCmd.Parameters.AddWithValue("$id", id);
+                        $"DELETE FROM {fromTable} WHERE tier = @tier AND id = @id";
+                    delCmd.Parameters.AddWithValue("@tier", fromTierStr);
+                    delCmd.Parameters.AddWithValue("@id", id);
                     delCmd.ExecuteNonQuery();
                 }
             }
