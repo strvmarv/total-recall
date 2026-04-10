@@ -19,11 +19,8 @@
 //      AutoMigrationGuard.CheckAndMigrateAsync BEFORE calling this (so the
 //      migration path can rename the old DB before we open a handle on it).
 //
-// Handler budget: 12 memory + 7 KB + 3 session + 5 eval + 2 config + 3 misc
-// (status, import_host, compact_now) = 32 per the plan's "33 handlers" naming
-// (Plan 4's 12 + Plan 6's 20 + Status = 32 registered). The plan-text count
-// of 33 is off-by-one; this file registers what actually exists under
-// src/TotalRecall.Server/Handlers/.
+// Handler budget: 12 memory + 7 KB + 3 session + 5 eval + 2 config + 4 misc
+// (status, import_host, compact_now, migrate_to_remote) = 33.
 //
 // AOT: no reflection. Every handler is constructed via direct `new`. The
 // Eval/Config/ImportHost/CompactNow handlers have no-arg constructors that
@@ -143,10 +140,11 @@ public static class ServerComposition
         registry.Register(new ConfigGetHandler());
         registry.Register(new ConfigSetHandler());
 
-        // ---- Misc (3) ----
+        // ---- Misc (4) ----
         registry.Register(new StatusHandler(store, sessionLifecycle, statusOptions));
         registry.Register(new ImportHostHandler()); // self-bootstraps the 7 importers
         registry.Register(new CompactNowHandler());
+        registry.Register(new MigrateToRemoteHandler()); // self-bootstraps source+target stores
 
         return registry;
     }

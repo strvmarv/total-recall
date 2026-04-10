@@ -643,6 +643,14 @@ public sealed record CompactNowResultDto(
     [property: JsonPropertyName("compacted")] int Compacted,
     [property: JsonPropertyName("message")] string Message);
 
+// ---------- Task 15: migrate_to_remote ----------
+
+public sealed record MigrateToRemoteResultDto(
+    [property: JsonPropertyName("migrated")] int Migrated,
+    [property: JsonPropertyName("skipped")] int Skipped,
+    [property: JsonPropertyName("errors")] int Errors,
+    [property: JsonPropertyName("dry_run")] bool DryRun);
+
 // ---------- source-gen context ----------
 
 [JsonSourceGenerationOptions(
@@ -748,6 +756,8 @@ public sealed record CompactNowResultDto(
 [JsonSerializable(typeof(ImportHostSourceDto[]))]
 [JsonSerializable(typeof(ImportHostResultDto))]
 [JsonSerializable(typeof(CompactNowResultDto))]
+// ---- Task 15: migrate_to_remote ----
+[JsonSerializable(typeof(MigrateToRemoteResultDto))]
 public partial class JsonContext : JsonSerializerContext
 {
 }

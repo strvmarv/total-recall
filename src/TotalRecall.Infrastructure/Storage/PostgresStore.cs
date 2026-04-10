@@ -45,7 +45,7 @@ public sealed class PostgresStore : IStore
         ArgumentNullException.ThrowIfNull(opts);
         var table = TableName(type);
         var tierStr = TierString(tier);
-        var id = Guid.NewGuid().ToString();
+        var id = opts.Id ?? Guid.NewGuid().ToString();
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
         using var conn = _dataSource.OpenConnection();
@@ -65,7 +65,7 @@ public sealed class PostgresStore : IStore
         ArgumentNullException.ThrowIfNull(opts);
         var table = TableName(type);
         var tierStr = TierString(tier);
-        var id = Guid.NewGuid().ToString();
+        var id = opts.Id ?? Guid.NewGuid().ToString();
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
         using var conn = _dataSource.OpenConnection();

@@ -57,7 +57,7 @@ public sealed class SqliteStore : IStore, IDisposable
     {
         ArgumentNullException.ThrowIfNull(opts);
         var table = MigrationRunner.TableName(tier, type);
-        var id = Guid.NewGuid().ToString();
+        var id = opts.Id ?? Guid.NewGuid().ToString();
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
         using var cmd = _conn.CreateCommand();
@@ -76,7 +76,7 @@ public sealed class SqliteStore : IStore, IDisposable
         ArgumentNullException.ThrowIfNull(opts);
         var table = MigrationRunner.TableName(tier, type);
         var vecTable = MigrationRunner.VecTableName(tier, type);
-        var id = Guid.NewGuid().ToString();
+        var id = opts.Id ?? Guid.NewGuid().ToString();
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
         using var tx = _conn.BeginTransaction();

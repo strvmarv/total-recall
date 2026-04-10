@@ -103,7 +103,13 @@ public sealed record InsertEntryOpts(
     IReadOnlyList<string>? Tags = null,
     string? ParentId = null,
     string? CollectionId = null,
-    string? MetadataJson = null);
+    string? MetadataJson = null,
+    /// <summary>
+    /// Optional caller-supplied id. When set, the store uses this value
+    /// instead of generating a new one (e.g. Guid / ULID). Used by
+    /// <c>MigrateToRemoteHandler</c> to preserve original entry ids.
+    /// </summary>
+    string? Id = null);
 
 /// <summary>
 /// Options for <see cref="IStore.Update"/>. Each non-null field becomes
