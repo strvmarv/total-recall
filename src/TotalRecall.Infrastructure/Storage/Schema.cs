@@ -195,6 +195,8 @@ public static class MigrationRunner
         Migration4_CompactionLogSource,
         // Migration 5: orphan vec/content row cleanup (0.6.7 hot-fix)
         Migration5_CleanupOrphans,
+        // Migration 6: usage telemetry tables (usage_events, usage_daily, usage_watermarks)
+        Migration6_UsageTelemetry,
     };
 
     /// <summary>
@@ -419,6 +421,76 @@ public static class MigrationRunner
                 $"DELETE FROM {contentTable} " +
                 $"WHERE rowid NOT IN (SELECT rowid FROM {vecTable})");
         }
+    }
+
+    private static void Migration6_UsageTelemetry(
+        MsSqliteConnection conn,
+        Microsoft.Data.Sqlite.SqliteTransaction tx)
+    {
+        // Raw event log — one row per assistant turn. 30-day retention
+        // enforced by UsageDailyRollup. See spec §4.1.
+        Exec(conn, tx, """
+            CREATE TABLE IF NOT EXISTS usage_events (
+                id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                host                    TEXT NOT NULL,
+                host_event_id           TEXT NOT NULL,
+                session_id              TEXT NOT NULL,
+                interaction_id          TEXT,
+                turn_index              INTEGER,
+                ts                      INTEGER NOT NULL,
+                project_path            TEXT,
+                project_repo            TEXT,
+                project_branch          TEXT,
+                project_commit          TEXT,
+                model                   TEXT,
+                input_tokens            INTEGER,
+                cache_creation_5m       INTEGER,
+                cache_creation_1h       INTEGER,
+                cache_read              INTEGER,
+                output_tokens           INTEGER,
+                service_tier            TEXT,
+                server_tool_use_json    TEXT,
+                host_request_id         TEXT,
+                UNIQUE (host, host_event_id)
+            )
+            """);
+
+        Exec(conn, tx, "CREATE INDEX IF NOT EXISTS idx_usage_events_host_ts ON usage_events (host, ts)");
+        Exec(conn, tx, "CREATE INDEX IF NOT EXISTS idx_usage_events_ts      ON usage_events (ts)");
+        Exec(conn, tx, "CREATE INDEX IF NOT EXISTS idx_usage_events_session ON usage_events (host, session_id, turn_index)");
+        Exec(conn, tx, "CREATE INDEX IF NOT EXISTS idx_usage_events_project ON usage_events (project_repo, project_path)");
+
+        // Daily rollup — forever retention, bounded cardinality (~7k rows/year
+        // for a heavy user with 5 projects × 2 hosts × 2 models × 365 days).
+        Exec(conn, tx, """
+            CREATE TABLE IF NOT EXISTS usage_daily (
+                day_utc               INTEGER NOT NULL,
+                host                  TEXT NOT NULL,
+                model                 TEXT,
+                project               TEXT,                       -- denormalized COALESCE(project_repo, project_path) from usage_events
+                session_count         INTEGER NOT NULL,
+                turn_count            INTEGER NOT NULL,
+                input_tokens          INTEGER,
+                cache_creation_tokens INTEGER,
+                cache_read_tokens     INTEGER,
+                output_tokens         INTEGER,
+                PRIMARY KEY (day_utc, host, model, project)
+            )
+            """);
+
+        Exec(conn, tx, "CREATE INDEX IF NOT EXISTS idx_usage_daily_host_day ON usage_daily (host, day_utc)");
+        Exec(conn, tx, "CREATE INDEX IF NOT EXISTS idx_usage_daily_day      ON usage_daily (day_utc)");
+
+        // Per-host watermarks — used by UsageIndexer to skip already-scanned
+        // events on repeated session_start passes. See spec §4.3.
+        Exec(conn, tx, """
+            CREATE TABLE IF NOT EXISTS usage_watermarks (
+                host                      TEXT PRIMARY KEY,
+                last_indexed_ts           INTEGER NOT NULL,
+                last_scan_at              INTEGER NOT NULL,
+                last_rollup_at            INTEGER                 -- NULL until the first rollup pass runs for this host
+            )
+            """);
     }
 
     // --- helpers ----------------------------------------------------------

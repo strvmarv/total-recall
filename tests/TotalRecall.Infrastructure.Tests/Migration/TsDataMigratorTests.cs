@@ -57,7 +57,7 @@ public sealed class TsDataMigratorTests : IDisposable
         IReadOnlyList<(Tier Tier, ContentType Type, string Content)> entries,
         bool seedTelemetry)
     {
-        using var conn = Storage.SqliteConnection.Open(path);
+        using var conn = TotalRecall.Infrastructure.Storage.SqliteConnection.Open(path);
         MigrationRunner.RunMigrations(conn);
 
         var store = new SqliteStore(conn);
@@ -196,7 +196,7 @@ VALUES
         Assert.True(result.Success, result.ErrorMessage);
         Assert.Equal(4, result.EntriesMigrated);
 
-        using var tconn = Storage.SqliteConnection.Open(target);
+        using var tconn = TotalRecall.Infrastructure.Storage.SqliteConnection.Open(target);
         Assert.Equal(2, CountRows(tconn, "hot_memories"));
         Assert.Equal(1, CountRows(tconn, "warm_memories"));
         Assert.Equal(0, CountRows(tconn, "cold_memories"));
@@ -238,7 +238,7 @@ VALUES
         var result = await migrator.MigrateAsync(source, target, CancellationToken.None);
         Assert.True(result.Success, result.ErrorMessage);
 
-        using var tconn = Storage.SqliteConnection.Open(target);
+        using var tconn = TotalRecall.Infrastructure.Storage.SqliteConnection.Open(target);
         Assert.Equal(2, CountRows(tconn, "retrieval_events"));
         Assert.Equal(1, CountRows(tconn, "compaction_log"));
         Assert.Equal(1, CountRows(tconn, "import_log"));
@@ -290,7 +290,7 @@ VALUES
         Assert.True(result.Success, result.ErrorMessage);
         Assert.Equal(3, result.EntriesMigrated);
 
-        using var tconn = Storage.SqliteConnection.Open(target);
+        using var tconn = TotalRecall.Infrastructure.Storage.SqliteConnection.Open(target);
         Assert.Equal(2, CountRows(tconn, "hot_memories_vec"));
         Assert.Equal(1, CountRows(tconn, "cold_knowledge_vec"));
 
