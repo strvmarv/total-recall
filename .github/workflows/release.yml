@@ -257,7 +257,7 @@ jobs:
             -f ref="${{ github.sha }}" \
             -f environment="npm-publish" \
             -f description="v${VERSION} published to npm" \
-            -f auto_merge=false \
+            -F auto_merge=false \
             --jq '.id')
           gh api "repos/${{ github.repository }}/deployments/${DEPLOY_ID}/statuses" \
             -f state="success" \
