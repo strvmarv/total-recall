@@ -12,6 +12,8 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.5" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.24.4" />
     <PackageReference Include="Microsoft.ML.Tokenizers" Version="2.0.0" />
+    <PackageReference Include="Npgsql" Version="10.0.2" />
+    <PackageReference Include="Pgvector" Version="0.3.2" />
     <PackageReference Include="Tomlyn" Version="0.19.0" />
   </ItemGroup>
   <ItemGroup>
@@ -44,30 +46,10 @@
     expected location.
   -->
   <ItemGroup>
-    <Content Include="$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-linux-x64/vec0.so"
-             Condition="Exists('$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-linux-x64/vec0.so')"
-             Link="runtimes/vec0.so"
-             CopyToOutputDirectory="PreserveNewest"
-             Visible="false" />
-    <Content Include="$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-linux-arm64/vec0.so"
-             Condition="Exists('$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-linux-arm64/vec0.so') And !Exists('$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-linux-x64/vec0.so')"
-             Link="runtimes/vec0.so"
-             CopyToOutputDirectory="PreserveNewest"
-             Visible="false" />
-    <Content Include="$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-darwin-x64/vec0.dylib"
-             Condition="Exists('$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-darwin-x64/vec0.dylib')"
-             Link="runtimes/vec0.dylib"
-             CopyToOutputDirectory="PreserveNewest"
-             Visible="false" />
-    <Content Include="$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-darwin-arm64/vec0.dylib"
-             Condition="Exists('$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-darwin-arm64/vec0.dylib') And !Exists('$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-darwin-x64/vec0.dylib')"
-             Link="runtimes/vec0.dylib"
-             CopyToOutputDirectory="PreserveNewest"
-             Visible="false" />
-    <Content Include="$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-windows-x64/vec0.dll"
-             Condition="Exists('$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-windows-x64/vec0.dll')"
-             Link="runtimes/vec0.dll"
-             CopyToOutputDirectory="PreserveNewest"
-             Visible="false" />
+    <Content Include="$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-linux-x64/vec0.so" Condition="Exists('$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-linux-x64/vec0.so')" Link="runtimes/vec0.so" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <Content Include="$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-linux-arm64/vec0.so" Condition="Exists('$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-linux-arm64/vec0.so') And !Exists('$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-linux-x64/vec0.so')" Link="runtimes/vec0.so" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <Content Include="$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-darwin-x64/vec0.dylib" Condition="Exists('$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-darwin-x64/vec0.dylib')" Link="runtimes/vec0.dylib" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <Content Include="$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-darwin-arm64/vec0.dylib" Condition="Exists('$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-darwin-arm64/vec0.dylib') And !Exists('$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-darwin-x64/vec0.dylib')" Link="runtimes/vec0.dylib" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <Content Include="$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-windows-x64/vec0.dll" Condition="Exists('$(MSBuildThisFileDirectory)../../node_modules/sqlite-vec-windows-x64/vec0.dll')" Link="runtimes/vec0.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
   </ItemGroup>
 </Project>
