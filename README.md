@@ -58,7 +58,15 @@ Every TUI coding assistant has the same gaps:
 - **Knowledge base** — ingest your docs, READMEs, API references, and architecture notes; retrieved semantically when relevant
 - **Observability** — measure retrieval quality, run benchmarks, and compare config changes with the built-in eval framework
 
-All state is local: SQLite + vector embeddings, no external services, no API keys.
+By default, all state is local: SQLite + vector embeddings, no external services, no API keys. For teams, configure a shared Postgres/pgvector backend and remote embedder — same binary, just config.
+
+### How It Works
+
+total-recall uses a three-tier memory model: **Hot** memories (up to 50 entries) are auto-injected into every prompt so your most important context is always present. **Warm** memories (up to 10K entries) are retrieved semantically — when you ask about authentication, relevant auth memories surface automatically. **Cold** storage is an unlimited hierarchical knowledge base: ingest your docs, README files, API references, and architecture notes, and they're retrieved when relevant.
+
+The knowledge base ingests entire directories — source trees, documentation folders, design specs — and chunks them semantically with heading-aware Markdown parsing and regex-based code parsing. Every chunk is embedded with all-MiniLM-L6-v2 (384 dimensions, runs locally via ONNX) so retrieval is purely semantic, no keyword matching required. For enterprise deployments, swap in a remote embedder (OpenAI, Amazon Bedrock) with higher dimensions for finer-grained retrieval across larger corpora.
+
+Platform support is via MCP (Model Context Protocol), which means total-recall works with any MCP-compatible tool. Dedicated importers for Claude Code, Copilot CLI, Cursor, Cline, OpenCode, and Hermes mean your existing memories migrate automatically on first run. An eval framework lets you measure retrieval quality, run benchmarks, and compare configuration changes before committing them.
 
 ---
 
@@ -151,15 +159,19 @@ On first `session_start`, total-recall initializes `~/.total-recall/` with a SQL
 ```
 MCP Server (.NET 8 NativeAOT — C# imperative shell + F# functional core)
 ├── TotalRecall.Core (F#)        — pure functions: tokenizer, decay, ranking, parsers
-├── TotalRecall.Infrastructure   — SQLite + vec, ONNX embedder, importers, ingestion
-├── TotalRecall.Server           — MCP JSON-RPC server, 32 tool handlers, lifecycle
-├── TotalRecall.Cli              — CLI commands (status, eval, kb, memory, config)
+├── TotalRecall.Infrastructure   — SQLite/Postgres storage, ONNX/remote embedder, importers, ingestion
+├── TotalRecall.Server           — MCP JSON-RPC server, 33 tool handlers, lifecycle
+├── TotalRecall.Cli              — CLI commands (status, eval, kb, memory, config, migrate)
 └── TotalRecall.Host             — composition root, AOT entry point, migration guard
 
 Tiers:
   Hot (50 entries)  → auto-injected every prompt
   Warm (10K entries) → semantic search per query
   Cold (unlimited)   → hierarchical KB retrieval
+
+Backends (selected by config):
+  Local:      SQLite + sqlite-vec + bundled ONNX embedder (default, zero config)
+  Enterprise: Postgres/pgvector + remote embedder (OpenAI, Bedrock) + multi-user
 ```
 
 **Data flow:**
@@ -169,7 +181,9 @@ Tiers:
 3. `compact` — decay scores, promote hot→warm, demote warm→cold
 4. `ingest` — chunk files, embed chunks, store in cold tier with metadata
 
-All state lives in `~/.total-recall/total-recall.db`. The embedding model and the sqlite-vec native extension are bundled with the binary. No network calls required at runtime once the platform binary is on disk.
+**Local mode:** all state lives in `~/.total-recall/total-recall.db`. The embedding model and the sqlite-vec native extension are bundled with the binary. No network calls required at runtime.
+
+**Enterprise mode:** set a Postgres connection string in config and the same binary switches to Postgres/pgvector with HNSW indexes, tsvector FTS, and per-user ownership/visibility scoping. Pair with a remote embedder for higher-dimensional vectors across shared team knowledge.
 
 ---
 
@@ -263,9 +277,24 @@ warm_sweep_interval_days = 7   # How often to run warm sweep
 [embedding]
 model = "all-MiniLM-L6-v2"    # Embedding model name
 dimensions = 384               # Embedding dimensions
+# provider = "local"           # "local" (default) | "openai" | "bedrock"
+# endpoint = "https://api.openai.com/v1"  # OpenAI-compatible base URL
+# bedrock_region = "us-east-1"            # Bedrock only
+# bedrock_model = "cohere.embed-v4:0"     # Bedrock model ID
+# api_key = ""                            # or set TOTAL_RECALL_EMBEDDING_API_KEY env var
+
+# --- Remote storage (optional) ---
+# [storage]
+# connection_string = "Host=localhost;Database=total_recall;Username=tr;Password=changeme"
+
+# --- User identity (optional, Postgres only) ---
+# [user]
+# user_id = "alice"               # or set TOTAL_RECALL_USER_ID env var
 ```
 
 **Relocating the database:** set `TOTAL_RECALL_DB_PATH` to an absolute path or `~/`-prefixed path. See [INSTALL.md](INSTALL.md#relocating-the-database) for cloud-sync and shared-workspace guidance.
+
+**Switching to Postgres:** uncomment the `[storage]` section with your connection string. The binary auto-detects the backend — no code changes, no flag. Pair with `[embedding] provider = "bedrock"` or `"openai"` for remote embeddings. Run `migrate_to_remote` to copy local memories to the shared database with re-embedding.
 
 ---
 
