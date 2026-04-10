@@ -252,16 +252,17 @@ public static class ServerComposition
             var embedder = EmbedderFactory.CreateFromConfig(cfg.Embedding);
             var hybrid = new HybridSearch(vec, fts, store);
 
-            // CompactionLog and ImportLog currently require a SQLite connection.
-            // For now, use a temporary in-memory SQLite connection for these two.
-            // Task 13 will replace them with Postgres-backed versions.
+            var compactionLog = new PostgresCompactionLog(dataSource);
+            var importLog = new PostgresImportLog(dataSource);
+
+            // HierarchicalIndex and IngestValidator still require a SQLite
+            // connection for direct cold_knowledge queries (GetCollection,
+            // ListCollections, GetDocumentChunks, TryGetScope). These are not
+            // yet ported to Postgres; use a temp in-memory SQLite instance for
+            // the Postgres path until those reads are refactored to go through
+            // IStore / a Postgres equivalent. See Task 14 / follow-up work.
             var tempConn = SqliteConnection.Open(":memory:");
             MigrationRunner.RunMigrations(tempConn);
-            var compactionLog = new CompactionLog(tempConn);
-            var importLog = new ImportLog(tempConn);
-
-            // HierarchicalIndex and IngestValidator also take MsSqliteConnection.
-            // Pass the temp connection for now; Task 13 will address this properly.
             var index = new HierarchicalIndex(store, embedder, vec, tempConn);
             var validator = new IngestValidator(embedder, vec, tempConn);
             var fileIngester = new FileIngester(index, validator);

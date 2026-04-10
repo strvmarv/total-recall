@@ -28,7 +28,7 @@ public sealed class ClaudeCodeImporter : IImporter
     private readonly IStore _store;
     private readonly IEmbedder _embedder;
     private readonly IVectorSearch _vectorSearch;
-    private readonly ImportLog _importLog;
+    private readonly IImportLog _importLog;
     private readonly string _basePath;
 
     public string Name => "claude-code";
@@ -37,7 +37,7 @@ public sealed class ClaudeCodeImporter : IImporter
         IStore store,
         IEmbedder embedder,
         IVectorSearch vectorSearch,
-        ImportLog importLog,
+        IImportLog importLog,
         string? basePath = null)
     {
         ArgumentNullException.ThrowIfNull(store);

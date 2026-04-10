@@ -34,7 +34,7 @@ public sealed class ClineImporter : IImporter
     private readonly IStore _store;
     private readonly IEmbedder _embedder;
     private readonly IVectorSearch _vectorSearch;
-    private readonly ImportLog _importLog;
+    private readonly IImportLog _importLog;
     private readonly string _dataPath;
     private readonly string _legacyPath;
     private readonly string _globalRulesPath;
@@ -46,7 +46,7 @@ public sealed class ClineImporter : IImporter
         IStore store,
         IEmbedder embedder,
         IVectorSearch vectorSearch,
-        ImportLog importLog,
+        IImportLog importLog,
         string? dataPath = null,
         string? legacyPath = null,
         string? globalRulesPath = null,

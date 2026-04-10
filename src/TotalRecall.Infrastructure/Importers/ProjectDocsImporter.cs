@@ -33,7 +33,7 @@ public sealed class ProjectDocsImporter : IImporter
 
     private readonly FileIngester _ingester;
     private readonly HierarchicalIndex _index;
-    private readonly ImportLog _importLog;
+    private readonly IImportLog _importLog;
     private readonly string _cwd;
 
     public string Name => "project-docs";
@@ -41,7 +41,7 @@ public sealed class ProjectDocsImporter : IImporter
     public ProjectDocsImporter(
         FileIngester ingester,
         HierarchicalIndex index,
-        ImportLog importLog,
+        IImportLog importLog,
         string? cwd = null)
     {
         ArgumentNullException.ThrowIfNull(ingester);

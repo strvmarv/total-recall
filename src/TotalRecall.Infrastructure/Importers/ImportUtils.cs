@@ -140,7 +140,7 @@ public static class ImportUtils
         IStore store,
         IEmbedder embedder,
         IVectorSearch vectorSearch,
-        ImportLog importLog,
+        IImportLog importLog,
         string sourceToolName,
         SourceTool sourceToolDu,
         string filePath,

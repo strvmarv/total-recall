@@ -7,6 +7,31 @@ using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 namespace TotalRecall.Infrastructure.Telemetry;
 
 /// <summary>
+/// Read/write seam over <c>import_log</c>. Allows Postgres and SQLite
+/// implementations to be used interchangeably by importers.
+/// </summary>
+public interface IImportLog
+{
+    /// <summary>
+    /// Returns true if any row in <c>import_log</c> already has the given
+    /// <paramref name="contentHash"/>.
+    /// </summary>
+    bool IsAlreadyImported(string contentHash);
+
+    /// <summary>
+    /// INSERT a new import_log row. Idempotent on
+    /// (sourceTool, sourcePath, contentHash).
+    /// </summary>
+    void LogImport(
+        string sourceTool,
+        string sourcePath,
+        string contentHash,
+        string targetEntryId,
+        Tier targetTier,
+        ContentType targetType);
+}
+
+/// <summary>
 /// Append-only writer for the <c>import_log</c> table. Ports
 /// <c>src-ts/importers/import-utils.ts</c>: provides a content-hash helper, a
 /// dedupe lookup, and an INSERT-OR-IGNORE writer keyed on a stable
@@ -15,7 +40,7 @@ namespace TotalRecall.Infrastructure.Telemetry;
 /// Borrows a non-owning <see cref="MsSqliteConnection"/> the same way
 /// <see cref="Storage.SqliteStore"/> does. Caller owns disposal.
 /// </summary>
-public sealed class ImportLog
+public sealed class ImportLog : IImportLog
 {
     private readonly MsSqliteConnection _conn;
 

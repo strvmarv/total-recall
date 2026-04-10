@@ -39,7 +39,7 @@ public sealed class CursorImporter : IImporter
     private readonly IStore _store;
     private readonly IEmbedder _embedder;
     private readonly IVectorSearch _vectorSearch;
-    private readonly ImportLog _importLog;
+    private readonly IImportLog _importLog;
     private readonly string _configPath;
     private readonly string _extensionPath;
 
@@ -49,7 +49,7 @@ public sealed class CursorImporter : IImporter
         IStore store,
         IEmbedder embedder,
         IVectorSearch vectorSearch,
-        ImportLog importLog,
+        IImportLog importLog,
         string? configPath = null,
         string? extensionPath = null)
     {
