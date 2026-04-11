@@ -159,6 +159,10 @@ jobs:
     name: Publish npm package
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      deployments: write
+      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -240,11 +244,11 @@ jobs:
               PRERELEASE_TAG="${VERSION##*-}"
               PRERELEASE_TAG="${PRERELEASE_TAG%%.*}"
               echo "Publishing $VERSION under dist-tag $PRERELEASE_TAG"
-              npm publish --tag "$PRERELEASE_TAG"
+              npm publish --provenance --tag "$PRERELEASE_TAG"
               ;;
             *)
               echo "Publishing $VERSION under dist-tag latest"
-              npm publish
+              npm publish --provenance
               ;;
           esac
 
