@@ -41,6 +41,7 @@ using TotalRecall.Infrastructure.Importers;
 using TotalRecall.Infrastructure.Ingestion;
 using TotalRecall.Infrastructure.Search;
 using TotalRecall.Infrastructure.Storage;
+using TotalRecall.Infrastructure.Sync;
 using TotalRecall.Infrastructure.Telemetry;
 using TotalRecall.Server.Handlers;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
@@ -58,10 +59,17 @@ public sealed class ServerCompositionHandles : IDisposable
     private readonly IDisposable _resource;
     public ToolRegistry Registry { get; }
 
-    internal ServerCompositionHandles(IDisposable resource, ToolRegistry registry)
+    /// <summary>
+    /// The <see cref="IStore"/> backing this composition (SqliteStore, PostgresStore,
+    /// or RoutingStore in cortex mode). Exposed for test assertions.
+    /// </summary>
+    public IStore Store { get; }
+
+    internal ServerCompositionHandles(IDisposable resource, ToolRegistry registry, IStore store)
     {
         _resource = resource;
         Registry = registry;
+        Store = store;
     }
 
     public void Dispose()
@@ -164,13 +172,25 @@ public static class ServerComposition
     public static ServerCompositionHandles OpenProduction(string? dbPath = null)
     {
         var cfg = new ConfigLoader().LoadEffectiveConfig();
-        var hasPostgres = FSharpOption<Core.Config.StorageConfig>.get_IsSome(cfg.Storage)
-            && FSharpOption<string>.get_IsSome(cfg.Storage.Value.ConnectionString);
 
-        if (hasPostgres)
-            return OpenPostgres(cfg);
-        else
-            return OpenSqlite(cfg, dbPath);
+        var mode = "local";
+        if (FSharpOption<Core.Config.StorageConfig>.get_IsSome(cfg.Storage)
+            && FSharpOption<string>.get_IsSome(cfg.Storage.Value.Mode))
+        {
+            mode = cfg.Storage.Value.Mode.Value;
+        }
+        else if (FSharpOption<Core.Config.StorageConfig>.get_IsSome(cfg.Storage)
+            && FSharpOption<string>.get_IsSome(cfg.Storage.Value.ConnectionString))
+        {
+            mode = "postgres";
+        }
+
+        return mode switch
+        {
+            "cortex" => OpenCortex(cfg, dbPath),
+            "postgres" => OpenPostgres(cfg),
+            _ => OpenSqlite(cfg, dbPath)
+        };
     }
 
     private static ServerCompositionHandles OpenSqlite(Core.Config.TotalRecallConfig cfg, string? dbPath)
@@ -245,7 +265,7 @@ public static class ServerComposition
             var usageQuery = new TotalRecall.Infrastructure.Usage.UsageQueryService(conn);
             registry.Register(new UsageStatusHandler(usageQuery));
 
-            return new ServerCompositionHandles(conn, registry);
+            return new ServerCompositionHandles(conn, registry, store);
         }
         catch
         {
@@ -302,11 +322,113 @@ public static class ServerComposition
                 store, vec, embedder, hybrid,
                 fileIngester, compactionLog, sessionLifecycle, statusOptions);
 
-            return new ServerCompositionHandles(dataSource, registry);
+            return new ServerCompositionHandles(dataSource, registry, store);
         }
         catch
         {
             try { dataSource.Dispose(); } catch { }
+            throw;
+        }
+    }
+
+    private static ServerCompositionHandles OpenCortex(Core.Config.TotalRecallConfig cfg, string? dbPath)
+    {
+        // Cortex mode uses SQLite locally, plus a RoutingStore that enqueues
+        // writes for eventual push to the remote Cortex backend.
+        var resolvedDbPath = dbPath ?? ConfigLoader.GetDbPath();
+        Directory.CreateDirectory(ConfigLoader.GetDataDir());
+        var dbParent = Path.GetDirectoryName(resolvedDbPath);
+        if (!string.IsNullOrEmpty(dbParent))
+        {
+            Directory.CreateDirectory(dbParent);
+        }
+
+        var cortexUrl = cfg.Cortex.Value.Url;
+        var cortexPat = cfg.Cortex.Value.Pat;
+
+        return OpenCortexCore(cfg, resolvedDbPath, cortexUrl, cortexPat);
+    }
+
+    /// <summary>
+    /// Test-friendly entry point for cortex mode that takes explicit parameters
+    /// instead of requiring config files.
+    /// </summary>
+    public static ServerCompositionHandles OpenCortexForTest(
+        string sqliteDbPath, string cortexUrl, string cortexPat)
+    {
+        var cfg = new ConfigLoader().LoadEffectiveConfig();
+        return OpenCortexCore(cfg, sqliteDbPath, cortexUrl, cortexPat);
+    }
+
+    private static ServerCompositionHandles OpenCortexCore(
+        Core.Config.TotalRecallConfig cfg, string resolvedDbPath,
+        string cortexUrl, string cortexPat)
+    {
+        var conn = SqliteConnection.Open(resolvedDbPath);
+        try
+        {
+            MigrationRunner.RunMigrations(conn);
+
+            var localStore = new SqliteStore(conn);
+            var vec = new VectorSearch(conn);
+            var fts = new FtsSearch(conn);
+            var embedder = EmbedderFactory.CreateFromConfig(cfg.Embedding);
+            var hybrid = new HybridSearch(vec, fts, localStore);
+
+            var cortexClient = CortexClient.Create(cortexUrl, cortexPat);
+            var syncQueue = new SyncQueue(conn);
+            var routingStore = new RoutingStore(localStore, cortexClient, syncQueue);
+
+            var compactionLog = new CompactionLog(conn);
+            var importLog = new ImportLog(conn);
+
+            var index = new HierarchicalIndex(routingStore, embedder, vec);
+            var validator = new IngestValidator(embedder, vec, routingStore);
+            var fileIngester = new FileIngester(index, validator);
+
+            var importers = new List<IImporter>
+            {
+                new ClaudeCodeImporter(routingStore, embedder, vec, importLog),
+                new CopilotCliImporter(routingStore, embedder, vec, importLog),
+                new CursorImporter(routingStore, embedder, vec, importLog),
+                new ClineImporter(routingStore, embedder, vec, importLog),
+                new OpenCodeImporter(routingStore, embedder, vec, importLog),
+                new HermesImporter(routingStore, embedder, vec, importLog),
+                new ProjectDocsImporter(fileIngester, index, importLog),
+            };
+
+            var usageEventLog = new TotalRecall.Infrastructure.Telemetry.UsageEventLog(conn);
+            var usageWatermarks = new TotalRecall.Infrastructure.Telemetry.UsageWatermarkStore(conn);
+            var usageImporters = new List<TotalRecall.Infrastructure.Usage.IUsageImporter>
+            {
+                new TotalRecall.Infrastructure.Usage.ClaudeCodeUsageImporter(),
+                new TotalRecall.Infrastructure.Usage.CopilotCliUsageImporter(),
+            };
+            var usageRollup = new TotalRecall.Infrastructure.Telemetry.UsageDailyRollup(conn);
+            var usageIndexer = new TotalRecall.Infrastructure.Usage.UsageIndexer(
+                usageImporters, usageEventLog, usageWatermarks, rollup: usageRollup);
+
+            var sessionLifecycle = new SessionLifecycle(
+                importers, routingStore, compactionLog,
+                usageIndexer: usageIndexer);
+
+            var statusOptions = new StatusOptions(
+                DbPath: resolvedDbPath,
+                EmbeddingModel: cfg.Embedding.Model,
+                EmbeddingDimensions: cfg.Embedding.Dimensions);
+
+            var registry = BuildRegistry(
+                routingStore, vec, embedder, hybrid,
+                fileIngester, compactionLog, sessionLifecycle, statusOptions);
+
+            var usageQuery = new TotalRecall.Infrastructure.Usage.UsageQueryService(conn);
+            registry.Register(new UsageStatusHandler(usageQuery));
+
+            return new ServerCompositionHandles(conn, registry, routingStore);
+        }
+        catch
+        {
+            try { conn.Dispose(); } catch { /* best-effort */ }
             throw;
         }
     }

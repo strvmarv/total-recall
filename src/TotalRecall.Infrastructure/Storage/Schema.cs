@@ -197,6 +197,8 @@ public static class MigrationRunner
         Migration5_CleanupOrphans,
         // Migration 6: usage telemetry tables (usage_events, usage_daily, usage_watermarks)
         Migration6_UsageTelemetry,
+        // Migration 7: persistent sync queue for outbound Cortex buffering
+        Migration7_SyncQueue,
     };
 
     /// <summary>
@@ -489,6 +491,30 @@ public static class MigrationRunner
                 last_indexed_ts           INTEGER NOT NULL,
                 last_scan_at              INTEGER NOT NULL,
                 last_rollup_at            INTEGER                 -- NULL until the first rollup pass runs for this host
+            )
+            """);
+    }
+
+    /// <summary>
+    /// Migration 7 — persistent outbound sync queue. Items are enqueued
+    /// when RoutingStore writes a local memory and drained by SyncService
+    /// to push to Cortex. Survives process crashes so pending items are
+    /// retried on next session start. See Task 11.
+    /// </summary>
+    private static void Migration7_SyncQueue(
+        MsSqliteConnection conn,
+        Microsoft.Data.Sqlite.SqliteTransaction tx)
+    {
+        Exec(conn, tx, """
+            CREATE TABLE IF NOT EXISTS sync_queue (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                entity_type TEXT NOT NULL,
+                operation   TEXT NOT NULL,
+                entity_id   TEXT,
+                payload     TEXT NOT NULL,
+                created_at  TEXT NOT NULL,
+                attempts    INTEGER DEFAULT 0,
+                last_error  TEXT
             )
             """);
     }
