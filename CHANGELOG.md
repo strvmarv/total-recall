@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.9.0 - 2026-04-11
+
+**Token usage tracking (Phase 1).** Host-neutral telemetry pipeline that ingests Claude Code transcripts, records per-turn token usage, and exposes an aggregated `usage` CLI verb. Additive-only: usage ingestion is best-effort and never blocks `session_start`. Token columns are nullable to preserve fidelity differences between hosts (Claude Code full vs. Copilot CLI output-only).
+
+### Added
+
+- **Migration #6 — usage telemetry schema.** New tables `usage_events` (raw per-turn events, 30-day retention via future rollup), `usage_daily` (forever-aggregated rollups), and `usage_watermarks` (per-host scan state). All token columns nullable — `null` means "we don't know," distinct from `0`.
+
+- **`UsageEvent` record + `IUsageImporter` interface.** Host-neutral event shape and pure streaming adapter contract. Host-specific importers translate transcripts into the common shape; writer path is centralized in `UsageEventLog`.
+
+- **`UsageEventLog` writer/reader.** `INSERT OR IGNORE` on `(host, host_event_id)` UNIQUE key for idempotent re-scans. Mirrors the existing `RetrievalEventLog` / `CompactionLog` pattern.
+
+- **`UsageWatermarkStore`.** Per-host `(last_indexed_ts, last_rollup_at)` watermark tracking for incremental scans. Unknown hosts return 0; the indexer then applies the config-driven `initial_backfill_days` bound.
+
+- **`ClaudeCodeUsageImporter`.** Pure streaming parser for `~/.claude/projects` transcripts. Emits only assistant turns with `message.usage` present; skips user messages, malformed lines, and tool-only records. Populates all Anthropic usage fields including the 5-minute / 1-hour cache-creation split.
+
+- **`UsageIndexer` orchestrator.** Iterates registered `IUsageImporter`s, streams events to `UsageEventLog`, advances watermarks on success. Per-host failure isolation: a failing importer is logged via `ExceptionLogger.LogChain` and skipped without blocking other hosts or advancing its own watermark. Matches the existing `SessionLifecycle` resilience policy.
+
+- **`UsageQueryService` read layer.** Single read path for CLI, MCP tools, and future quota-nudge composer. Supports group-by `host` / `project` / `day` / `model` / `session`, host and project filters, `TopN`, and coverage counts (full vs. partial token data). Null handling honors "we don't know" ≠ "zero."
+
+- **`total-recall usage` CLI verb.** `usage [--last 5h|1d|7d|30d|90d|all] [--by host|project|day|model|session] [--host H] [--project P] [--top N]`. Fixed-width table output (no Spectre.Console dependency for testability), em-dash for null token columns, `tracked at token granularity` footer. Text-only in Phase 1; JSON output lands in Phase 2.
+
+### Changed
+
+- **`SessionLifecycle.RunInit` runs the usage indexer before the existing importer sweep.** Failures are caught and logged but never block `session_start` — usage tracking is additive and must not appear in the critical path.
+
+- **`ServerComposition.OpenProduction` constructs the indexer** with `ClaudeCodeUsageImporter` and passes it to `SessionLifecycle`. `CliApp` registers `UsageCommand` so `total-recall usage` is reachable from the CLI entry point.
+
+### Notes
+
+- Phase 1 queries `usage_events` only. Phase 2 will extend `UsageQueryService` to `UNION` with `usage_daily` once the rollup job lands, and will add JSON output to the CLI verb.
+- Historical (pre-installation) transcripts are picked up on the first `session_start` after upgrade, bounded by `initial_backfill_days`.
+
 ## 0.8.1 - 2026-04-10
 
 **Enterprise backend support.** The same binary now supports either local SQLite + bundled ONNX (default, unchanged) or remote Postgres/pgvector + remote HTTP embedder, selected by configuration. Adds multi-user ownership and visibility primitives, a one-time migration tool, and three embedding provider options.
