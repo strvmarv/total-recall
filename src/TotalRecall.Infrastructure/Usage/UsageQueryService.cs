@@ -39,8 +39,8 @@ public sealed class UsageQueryService
         {
             GroupBy.None    => "'_total_'",
             GroupBy.Host    => "host",
-            GroupBy.Project => "COALESCE(project_repo, project_path, '(none)')",
-            GroupBy.Day     => "strftime('%Y-%m-%d', ts/1000, 'unixepoch')",
+            GroupBy.Project => "project",
+            GroupBy.Day     => "day_str",
             GroupBy.Model   => "COALESCE(model, '(unknown)')",
             GroupBy.Session => "session_id",
             _ => "host",
@@ -48,16 +48,45 @@ public sealed class UsageQueryService
 
         var sql = new StringBuilder();
         sql.Append($@"
+WITH unioned AS (
+    SELECT
+        host, model,
+        COALESCE(project_repo, project_path, '(none)') AS project,
+        session_id,
+        strftime('%Y-%m-%d', ts/1000, 'unixepoch') AS day_str,
+        ts,
+        1 AS turn_count,
+        input_tokens,
+        COALESCE(cache_creation_5m, 0) + COALESCE(cache_creation_1h, 0) AS cache_creation_tokens,
+        cache_read AS cache_read_tokens,
+        output_tokens
+    FROM usage_events
+    WHERE ts BETWEEN $start AND $end
+    UNION ALL
+    SELECT
+        host, model,
+        COALESCE(project, '(none)') AS project,
+        NULL AS session_id,
+        strftime('%Y-%m-%d', day_utc, 'unixepoch') AS day_str,
+        day_utc * 1000 AS ts,
+        turn_count,
+        input_tokens,
+        cache_creation_tokens,
+        cache_read_tokens,
+        output_tokens
+    FROM usage_daily
+    WHERE day_utc * 1000 BETWEEN $start AND $end
+)
 SELECT
     {keyExpr} AS bucket_key,
     COUNT(DISTINCT session_id) AS session_count,
-    COUNT(*)                   AS turn_count,
+    SUM(turn_count)            AS turn_count,
     SUM(input_tokens)          AS input_tokens,
-    SUM(COALESCE(cache_creation_5m,0) + COALESCE(cache_creation_1h,0)) AS cache_creation_tokens,
-    SUM(cache_read)            AS cache_read_tokens,
+    SUM(cache_creation_tokens) AS cache_creation_tokens,
+    SUM(cache_read_tokens)     AS cache_read_tokens,
     SUM(output_tokens)         AS output_tokens
-FROM usage_events
-WHERE ts BETWEEN $start AND $end");
+FROM unioned
+WHERE 1=1");
 
         if (query.HostFilter is { Count: > 0 })
         {
@@ -72,7 +101,7 @@ WHERE ts BETWEEN $start AND $end");
 
         if (query.ProjectFilter is { Count: > 0 })
         {
-            sql.Append(" AND COALESCE(project_repo, project_path) IN (");
+            sql.Append(" AND project IN (");
             for (var i = 0; i < query.ProjectFilter.Count; i++)
             {
                 if (i > 0) sql.Append(", ");
@@ -106,7 +135,7 @@ WHERE ts BETWEEN $start AND $end");
             {
                 var totals = new UsageTotals(
                     SessionCount: r.GetInt32(1),
-                    TurnCount: r.GetInt64(2),
+                    TurnCount: r.IsDBNull(2) ? 0L : r.GetInt64(2),
                     InputTokens: r.IsDBNull(3) ? null : r.GetInt64(3),
                     CacheCreationTokens: r.IsDBNull(4) ? null : r.GetInt64(4),
                     CacheReadTokens: r.IsDBNull(5) ? null : r.GetInt64(5),
@@ -133,16 +162,41 @@ WHERE ts BETWEEN $start AND $end");
     {
         var sql = new StringBuilder();
         sql.Append(@"
+WITH unioned AS (
+    SELECT
+        host,
+        COALESCE(project_repo, project_path, '(none)') AS project,
+        session_id,
+        1 AS turn_count,
+        input_tokens,
+        COALESCE(cache_creation_5m, 0) + COALESCE(cache_creation_1h, 0) AS cache_creation_tokens,
+        cache_read AS cache_read_tokens,
+        output_tokens
+    FROM usage_events
+    WHERE ts BETWEEN $start AND $end
+    UNION ALL
+    SELECT
+        host,
+        COALESCE(project, '(none)') AS project,
+        NULL AS session_id,
+        turn_count,
+        input_tokens,
+        cache_creation_tokens,
+        cache_read_tokens,
+        output_tokens
+    FROM usage_daily
+    WHERE day_utc * 1000 BETWEEN $start AND $end
+)
 SELECT
     COUNT(DISTINCT session_id),
-    COUNT(*),
+    SUM(turn_count),
     SUM(input_tokens),
-    SUM(COALESCE(cache_creation_5m,0) + COALESCE(cache_creation_1h,0)),
-    SUM(cache_read),
+    SUM(cache_creation_tokens),
+    SUM(cache_read_tokens),
     SUM(output_tokens)
-FROM usage_events
-WHERE ts BETWEEN $start AND $end");
-        AppendFilters(sql, query);
+FROM unioned
+WHERE 1=1");
+        AppendUnionFilters(sql, query);
 
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = sql.ToString();
@@ -154,7 +208,7 @@ WHERE ts BETWEEN $start AND $end");
             return new UsageTotals(0, 0, null, null, null, null);
         return new UsageTotals(
             SessionCount: r.GetInt32(0),
-            TurnCount: r.GetInt64(1),
+            TurnCount: r.IsDBNull(1) ? 0L : r.GetInt64(1),
             InputTokens: r.IsDBNull(2) ? null : r.GetInt64(2),
             CacheCreationTokens: r.IsDBNull(3) ? null : r.GetInt64(3),
             CacheReadTokens: r.IsDBNull(4) ? null : r.GetInt64(4),
@@ -165,6 +219,13 @@ WHERE ts BETWEEN $start AND $end");
     {
         // A "full" session has at least one event with input_tokens NOT NULL.
         // A "partial" session has NO events with input_tokens but at least one with output_tokens.
+        //
+        // NOTE: coverage counts (full vs partial token data) are computed
+        // from usage_events only — rolled-up daily rows do not preserve
+        // per-session granularity. For queries that span the rollup boundary,
+        // the coverage indicator reflects only the raw-event portion of the
+        // window. Older data still contributes to token totals via the
+        // union. Documented as a known limitation of tiered storage.
         var sql = new StringBuilder();
         sql.Append(@"
 WITH per_session AS (
@@ -193,6 +254,30 @@ FROM per_session");
         var full = r.IsDBNull(0) ? 0 : (int)r.GetInt64(0);
         var partial = r.IsDBNull(1) ? 0 : (int)r.GetInt64(1);
         return (full, partial);
+    }
+
+    private static void AppendUnionFilters(StringBuilder sql, UsageQuery query)
+    {
+        if (query.HostFilter is { Count: > 0 } hf)
+        {
+            sql.Append(" AND host IN (");
+            for (var i = 0; i < hf.Count; i++)
+            {
+                if (i > 0) sql.Append(", ");
+                sql.Append($"$h{i}");
+            }
+            sql.Append(")");
+        }
+        if (query.ProjectFilter is { Count: > 0 } pf)
+        {
+            sql.Append(" AND project IN (");
+            for (var i = 0; i < pf.Count; i++)
+            {
+                if (i > 0) sql.Append(", ");
+                sql.Append($"$p{i}");
+            }
+            sql.Append(")");
+        }
     }
 
     private static void AppendFilters(StringBuilder sql, UsageQuery query)

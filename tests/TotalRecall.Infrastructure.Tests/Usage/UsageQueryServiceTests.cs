@@ -136,6 +136,45 @@ public sealed class UsageQueryServiceTests
     }
 
     [Fact]
+    public void Query_WindowSpanningRollupBoundary_UnionsRawAndDaily()
+    {
+        using var conn = TotalRecall.Infrastructure.Storage.SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        // Seed a usage_daily row representing 60 days ago
+        using (var cmd = conn.CreateCommand())
+        {
+            var oldDay = DateTimeOffset.UtcNow.AddDays(-60).ToUnixTimeSeconds();
+            var dayFloor = (oldDay / 86400) * 86400;
+            cmd.CommandText = @"
+INSERT INTO usage_daily
+  (day_utc, host, model, project,
+   session_count, turn_count,
+   input_tokens, cache_creation_tokens, cache_read_tokens, output_tokens)
+VALUES ($day, 'claude-code', 'opus', '/p', 3, 10, 1000, 0, 0, 200)";
+            cmd.Parameters.AddWithValue("$day", dayFloor);
+            cmd.ExecuteNonQuery();
+        }
+
+        // Seed a raw event representing yesterday
+        var log = new UsageEventLog(conn);
+        var yesterday = DateTimeOffset.UtcNow.AddDays(-1).ToUnixTimeMilliseconds();
+        log.InsertOrIgnore(E("claude-code", "recent", "s-recent", yesterday, input: 500, output: 50));
+
+        var svc = new UsageQueryService(conn);
+        var report = svc.Query(new UsageQuery(
+            Start: DateTimeOffset.UtcNow.AddDays(-90),
+            End: DateTimeOffset.UtcNow,
+            HostFilter: null, ProjectFilter: null,
+            GroupBy: GroupBy.Host, TopN: 0));
+
+        // Grand total should include BOTH the raw event AND the rolled-up day
+        Assert.Equal(1500L, report.GrandTotal.InputTokens);  // 500 recent + 1000 rolled
+        Assert.Equal(250L, report.GrandTotal.OutputTokens);  // 50 recent + 200 rolled
+        Assert.Equal(11L, report.GrandTotal.TurnCount);      // 1 recent + 10 rolled
+    }
+
+    [Fact]
     public void Query_WindowBeforeAnyEvents_ReturnsEmpty()
     {
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();

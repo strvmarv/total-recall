@@ -222,8 +222,9 @@ public static class ServerComposition
                 new TotalRecall.Infrastructure.Usage.ClaudeCodeUsageImporter(),
                 new TotalRecall.Infrastructure.Usage.CopilotCliUsageImporter(),
             };
+            var usageRollup = new TotalRecall.Infrastructure.Telemetry.UsageDailyRollup(conn);
             var usageIndexer = new TotalRecall.Infrastructure.Usage.UsageIndexer(
-                usageImporters, usageEventLog, usageWatermarks);
+                usageImporters, usageEventLog, usageWatermarks, rollup: usageRollup);
 
             var sessionLifecycle = new SessionLifecycle(
                 importers, store, compactionLog,

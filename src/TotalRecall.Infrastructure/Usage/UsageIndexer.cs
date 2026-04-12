@@ -26,12 +26,20 @@ public sealed class UsageIndexer
     private readonly UsageEventLog _eventLog;
     private readonly UsageWatermarkStore _watermarks;
     private readonly TextWriter _stderr;
+    private readonly UsageDailyRollup? _rollup;
+    private readonly int _retentionDays;
+
+    // Sentinel host used to store the global rollup watermark in the
+    // usage_watermarks table — avoids adding a separate singleton table.
+    private const string RollupHostKey = "__rollup__";
 
     public UsageIndexer(
         IReadOnlyList<IUsageImporter> importers,
         UsageEventLog eventLog,
         UsageWatermarkStore watermarks,
-        TextWriter? stderr = null)
+        TextWriter? stderr = null,
+        UsageDailyRollup? rollup = null,
+        int retentionDays = 30)
     {
         ArgumentNullException.ThrowIfNull(importers);
         ArgumentNullException.ThrowIfNull(eventLog);
@@ -40,6 +48,8 @@ public sealed class UsageIndexer
         _eventLog = eventLog;
         _watermarks = watermarks;
         _stderr = stderr ?? Console.Error;
+        _rollup = rollup;
+        _retentionDays = retentionDays;
     }
 
     public async Task RunAsync(CancellationToken ct)
@@ -86,6 +96,36 @@ public sealed class UsageIndexer
             {
                 _stderr.WriteLine(
                     $"total-recall: usage indexer: scanned {inserted} new events from {importer.HostName}");
+            }
+        }
+
+        // Daily rollup — at most once per 24h. Watermark stored against
+        // the sentinel "__rollup__" host key in usage_watermarks.
+        if (_rollup is not null)
+        {
+            var lastRollup = _watermarks.GetLastRollupAt(RollupHostKey);
+            var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var cadenceMs = 24L * 60 * 60 * 1000;
+            if (lastRollup == 0 || nowMs - lastRollup >= cadenceMs)
+            {
+                try
+                {
+                    var cutoff = DateTimeOffset.UtcNow
+                        .AddDays(-_retentionDays).ToUnixTimeMilliseconds();
+                    var result = _rollup.RollupOlderThan(cutoff);
+                    _watermarks.SetLastRollupAt(RollupHostKey, nowMs);
+                    if (result.EventsAggregated > 0)
+                    {
+                        _stderr.WriteLine(
+                            $"total-recall: usage rollup: {result.EventsAggregated} raw events " +
+                            $"aged past cutoff, consolidated into {result.DailyRowsWritten} daily rows");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ExceptionLogger.LogChain(
+                        _stderr, "total-recall: usage rollup failed", ex);
+                }
             }
         }
     }
