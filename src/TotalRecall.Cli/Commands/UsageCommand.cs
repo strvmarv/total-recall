@@ -50,7 +50,7 @@ public sealed class UsageCommand : ICliCommand
 
     public async Task<int> RunAsync(string[] args)
     {
-        if (!TryParseArgs(args, out var window, out var groupBy, out var hostFilter, out var projectFilter, out var topN, out var error))
+        if (!TryParseArgs(args, out var window, out var groupBy, out var hostFilter, out var projectFilter, out var topN, out var emitJson, out var error))
         {
             _err.WriteLine(error);
             return 2;
@@ -93,7 +93,10 @@ public sealed class UsageCommand : ICliCommand
                 TopN: topN);
 
             var report = svc.Query(query);
-            RenderTable(report, window, groupBy);
+            if (emitJson)
+                RenderJson(report, query);
+            else
+                RenderTable(report, window, groupBy);
         }
         finally
         {
@@ -113,6 +116,7 @@ public sealed class UsageCommand : ICliCommand
         out IReadOnlyList<string>? hostFilter,
         out IReadOnlyList<string>? projectFilter,
         out int topN,
+        out bool emitJson,
         out string? error)
     {
         window = TimeSpan.FromDays(7);
@@ -120,6 +124,7 @@ public sealed class UsageCommand : ICliCommand
         hostFilter = null;
         projectFilter = null;
         topN = 0;
+        emitJson = false;
         error = null;
 
         for (var i = 0; i < args.Length; i++)
@@ -149,6 +154,9 @@ public sealed class UsageCommand : ICliCommand
                     break;
                 case "--detail":
                     // Phase 1 placeholder — parse but do not implement detail rendering.
+                    break;
+                case "--json":
+                    emitJson = true;
                     break;
                 default:
                     error = $"unknown argument: {a}";
@@ -301,5 +309,115 @@ public sealed class UsageCommand : ICliCommand
         for (var i = 0; i < rows.Count - 1; i++) Row(rows[i]);
         Divider();
         Row(rows[rows.Count - 1]); // grand total
+    }
+
+    // -------- JSON rendering --------
+    //
+    // Hand-rolled emitter to mirror Memory/ExportCommand's approach and
+    // avoid JsonContext source-gen overhead in the AOT-compiled CLI. The
+    // top-level shape {query, buckets[], grand_total, coverage} is the
+    // user-facing contract — see spec §6.3.
+
+    private void RenderJson(UsageReport report, UsageQuery query)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append('{');
+
+        // query block
+        sb.Append("\"query\":{");
+        sb.Append($"\"start_ms\":{query.Start.ToUnixTimeMilliseconds()},");
+        sb.Append($"\"end_ms\":{query.End.ToUnixTimeMilliseconds()},");
+        sb.Append($"\"group_by\":\"{query.GroupBy.ToString().ToLowerInvariant()}\",");
+        sb.Append($"\"host_filter\":{JsonStringArrayOrNull(query.HostFilter)},");
+        sb.Append($"\"project_filter\":{JsonStringArrayOrNull(query.ProjectFilter)}");
+        sb.Append('}');
+
+        // buckets array
+        sb.Append(",\"buckets\":[");
+        for (var i = 0; i < report.Buckets.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            AppendBucket(sb, report.Buckets[i]);
+        }
+        sb.Append(']');
+
+        // grand_total
+        sb.Append(",\"grand_total\":");
+        AppendTotals(sb, report.GrandTotal);
+
+        // coverage
+        var full = report.SessionsWithFullTokenData;
+        var partial = report.SessionsWithPartialTokenData;
+        var totalSessions = full + partial;
+        var pct = totalSessions == 0 ? 0.0 : 100.0 * full / totalSessions;
+        sb.Append($",\"coverage\":{{\"sessions_with_full_token_data\":{full},");
+        sb.Append($"\"sessions_with_partial_token_data\":{partial},");
+        sb.Append($"\"fidelity_percent\":{pct.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)}}}");
+
+        sb.Append('}');
+        _out.WriteLine(sb.ToString());
+    }
+
+    private static void AppendBucket(System.Text.StringBuilder sb, UsageBucket b)
+    {
+        sb.Append('{');
+        sb.Append($"\"key\":{JsonEscape(b.Key)},");
+        AppendTotalsBody(sb, b.Totals);
+        sb.Append('}');
+    }
+
+    private static void AppendTotals(System.Text.StringBuilder sb, UsageTotals t)
+    {
+        sb.Append('{');
+        AppendTotalsBody(sb, t);
+        sb.Append('}');
+    }
+
+    private static void AppendTotalsBody(System.Text.StringBuilder sb, UsageTotals t)
+    {
+        sb.Append($"\"session_count\":{t.SessionCount},");
+        sb.Append($"\"turn_count\":{t.TurnCount},");
+        sb.Append($"\"input_tokens\":{JsonNullableLong(t.InputTokens)},");
+        sb.Append($"\"cache_creation_tokens\":{JsonNullableLong(t.CacheCreationTokens)},");
+        sb.Append($"\"cache_read_tokens\":{JsonNullableLong(t.CacheReadTokens)},");
+        sb.Append($"\"output_tokens\":{JsonNullableLong(t.OutputTokens)}");
+    }
+
+    private static string JsonNullableLong(long? v) =>
+        v is null ? "null" : v.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string JsonStringArrayOrNull(IReadOnlyList<string>? list)
+    {
+        if (list is null) return "null";
+        var sb = new System.Text.StringBuilder("[");
+        for (var i = 0; i < list.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            sb.Append(JsonEscape(list[i]));
+        }
+        sb.Append(']');
+        return sb.ToString();
+    }
+
+    private static string JsonEscape(string s)
+    {
+        var sb = new System.Text.StringBuilder("\"");
+        foreach (var c in s)
+        {
+            switch (c)
+            {
+                case '"':  sb.Append("\\\""); break;
+                case '\\': sb.Append("\\\\"); break;
+                case '\n': sb.Append("\\n"); break;
+                case '\r': sb.Append("\\r"); break;
+                case '\t': sb.Append("\\t"); break;
+                default:
+                    if (c < 0x20) sb.Append($"\\u{(int)c:X4}");
+                    else sb.Append(c);
+                    break;
+            }
+        }
+        sb.Append('"');
+        return sb.ToString();
     }
 }

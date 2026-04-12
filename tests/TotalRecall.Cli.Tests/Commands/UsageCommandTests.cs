@@ -113,4 +113,54 @@ public sealed class UsageCommandTests
         Assert.Equal(0, exit);
         Assert.Contains("no usage events", output.ToString(), StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task RunAsync_JsonFlag_EmitsStableJsonShape()
+    {
+        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        using var conn = Seed(log =>
+        {
+            log.InsertOrIgnore(E("claude-code", "a", nowMs - 1000, input: 100, output: 20));
+            log.InsertOrIgnore(E("copilot-cli", "b", nowMs - 1000, input: null, output: 10));
+        });
+        var svc = new UsageQueryService(conn);
+        var output = new StringWriter();
+        var cmd = new UsageCommand(svc, output);
+
+        var exit = await cmd.RunAsync(new[] { "--json" });
+        Assert.Equal(0, exit);
+
+        var json = output.ToString();
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        Assert.Equal(System.Text.Json.JsonValueKind.Object, root.ValueKind);
+        Assert.True(root.TryGetProperty("query", out _));
+        Assert.True(root.TryGetProperty("buckets", out var buckets));
+        Assert.Equal(System.Text.Json.JsonValueKind.Array, buckets.ValueKind);
+        Assert.Equal(2, buckets.GetArrayLength());
+        Assert.True(root.TryGetProperty("grand_total", out _));
+        Assert.True(root.TryGetProperty("coverage", out var cov));
+        Assert.True(cov.TryGetProperty("fidelity_percent", out _));
+    }
+
+    [Fact]
+    public async Task RunAsync_JsonFlag_NullTokensBecomeJsonNull()
+    {
+        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        using var conn = Seed(log =>
+        {
+            log.InsertOrIgnore(E("copilot-cli", "b", nowMs - 1000, input: null, output: 10));
+        });
+        var svc = new UsageQueryService(conn);
+        var output = new StringWriter();
+        var cmd = new UsageCommand(svc, output);
+
+        await cmd.RunAsync(new[] { "--json" });
+
+        using var doc = System.Text.Json.JsonDocument.Parse(output.ToString());
+        var bucket = doc.RootElement.GetProperty("buckets")[0];
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, bucket.GetProperty("input_tokens").ValueKind);
+        Assert.Equal(10, bucket.GetProperty("output_tokens").GetInt32());
+    }
 }
