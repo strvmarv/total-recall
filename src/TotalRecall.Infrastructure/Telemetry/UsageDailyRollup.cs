@@ -35,7 +35,10 @@ public sealed class UsageDailyRollup
     /// </summary>
     public UsageRollupResult RollupOlderThan(long cutoffMs)
     {
-        using var tx = _conn.BeginTransaction();
+        // IMMEDIATE tx so the reserved lock is taken before the count SELECT.
+        // DEFERRED would allow a concurrent writer to slip an event between the
+        // count and the INSERT, which the trailing DELETE would then wipe.
+        using var tx = _conn.BeginTransaction(System.Data.IsolationLevel.Serializable);
 
         int eventCount;
         using (var countCmd = _conn.CreateCommand())
