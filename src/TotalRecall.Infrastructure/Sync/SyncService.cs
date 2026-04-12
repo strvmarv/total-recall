@@ -183,7 +183,7 @@ public sealed class SyncService
             try
             {
                 var events = usageItems
-                    .SelectMany(i => JsonSerializer.Deserialize<SyncUsageEvent[]>(i.Payload) ?? Array.Empty<SyncUsageEvent>())
+                    .SelectMany(i => JsonSerializer.Deserialize(i.Payload, SyncJsonContext.Default.SyncUsageEventArray) ?? Array.Empty<SyncUsageEvent>())
                     .ToArray();
                 await _remote.PushUsageEventsAsync(events, ct).ConfigureAwait(false);
                 foreach (var item in usageItems)
@@ -202,7 +202,7 @@ public sealed class SyncService
             try
             {
                 var events = retrievalItems
-                    .SelectMany(i => JsonSerializer.Deserialize<SyncRetrievalEvent[]>(i.Payload) ?? Array.Empty<SyncRetrievalEvent>())
+                    .SelectMany(i => JsonSerializer.Deserialize(i.Payload, SyncJsonContext.Default.SyncRetrievalEventArray) ?? Array.Empty<SyncRetrievalEvent>())
                     .ToArray();
                 await _remote.PushRetrievalEventsAsync(events, ct).ConfigureAwait(false);
                 foreach (var item in retrievalItems)
@@ -221,7 +221,7 @@ public sealed class SyncService
             try
             {
                 var events = compactionItems
-                    .SelectMany(i => JsonSerializer.Deserialize<SyncCompactionEntry[]>(i.Payload) ?? Array.Empty<SyncCompactionEntry>())
+                    .SelectMany(i => JsonSerializer.Deserialize(i.Payload, SyncJsonContext.Default.SyncCompactionEntryArray) ?? Array.Empty<SyncCompactionEntry>())
                     .ToArray();
                 await _remote.PushCompactionEntriesAsync(events, ct).ConfigureAwait(false);
                 foreach (var item in compactionItems)

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Text.Json;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Storage;
 
@@ -60,7 +59,7 @@ public sealed class RoutingStore : IStore
     {
         _local.Delete(tier, type, id);
         _syncQueue.Enqueue("memory", "delete", id,
-            JsonSerializer.Serialize(new { id }));
+            SyncPayload.Delete(id));
     }
 
     public IReadOnlyList<Entry> List(Tier tier, ContentType type, ListEntriesOpts? opts = null)
@@ -92,6 +91,6 @@ public sealed class RoutingStore : IStore
     private void EnqueueUpsert(string id, string content)
     {
         _syncQueue.Enqueue("memory", "upsert", id,
-            JsonSerializer.Serialize(new { id, content }));
+            SyncPayload.Upsert(id, content));
     }
 }
