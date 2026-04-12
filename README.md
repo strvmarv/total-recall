@@ -296,6 +296,37 @@ dimensions = 384               # Embedding dimensions
 
 **Switching to Postgres:** uncomment the `[storage]` section with your connection string. The binary auto-detects the backend — no code changes, no flag. Pair with `[embedding] provider = "bedrock"` or `"openai"` for remote embeddings. Run `migrate_to_remote` to copy local memories to the shared database with re-embedding.
 
+### Connecting to Cortex
+
+[Total Recall Cortex](https://github.com/radancy-pe/total-recall-cortex) is the shared backend platform that adds team knowledge bases, connectors (Jira, Confluence, GitHub), chat/RAG, and a React UI on top of the plugin's memory layer.
+
+In Cortex mode, the plugin operates as a hybrid:
+- **User memories** are stored locally (fast reads/writes) and synced bidirectionally to Cortex
+- **Global knowledge** (team KB, connector-ingested data) is queried remotely from Cortex
+- **Telemetry** (usage, retrieval events, compaction log) is pushed to Cortex for unified dashboards
+
+Configure in your `config.toml`:
+
+```toml
+[storage]
+mode = "cortex"
+
+[cortex]
+url = "https://your-cortex-instance.example.com"
+pat = "tr_your_personal_access_token"
+```
+
+Or via environment variables:
+
+```bash
+export TOTAL_RECALL_CORTEX_URL="https://your-cortex-instance.example.com"
+export TOTAL_RECALL_CORTEX_PAT="tr_your_personal_access_token"
+```
+
+Generate a PAT from the Cortex web UI under Settings → Personal Access Tokens.
+
+**Offline resilience:** If Cortex is unreachable, the plugin continues working locally. A persistent sync queue buffers outbound changes and flushes automatically when connectivity is restored.
+
 ---
 
 ## Extending

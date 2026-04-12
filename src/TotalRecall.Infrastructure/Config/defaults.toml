@@ -35,10 +35,27 @@ min_events = 10
 [search]
 fts_weight = 0.3
 
+# --- Storage mode ---
+# Controls how the plugin stores and retrieves data.
+# "local"   - SQLite + ONNX embeddings, fully self-contained (default)
+# "postgres" - Direct PostgreSQL/pgvector connection (see connection_string below)
+# "cortex"  - Hybrid: local SQLite for user memories + remote Cortex API for
+#              global knowledge. Requires [cortex] section below.
+# [storage]
+# mode = "local"
+
 # --- Remote storage (optional) ---
 # Uncomment to use Postgres/pgvector instead of SQLite.
 # [storage]
 # connection_string = "Host=localhost;Database=total_recall;Username=tr;Password=changeme"
+
+# --- Cortex connection (required when mode = "cortex") ---
+# URL: Base URL of your Total Recall Cortex instance (no trailing slash)
+# PAT: Personal Access Token generated from Cortex web UI (starts with "tr_")
+# Can also be set via TOTAL_RECALL_CORTEX_URL and TOTAL_RECALL_CORTEX_PAT env vars.
+# [cortex]
+# url = "https://cortex.example.com"
+# pat = "tr_..."
 
 # --- Remote embedding (optional) ---
 # Set provider to use a remote embedder instead of the bundled ONNX model.

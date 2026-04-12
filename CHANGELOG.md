@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.9.1 - 2026-04-12
+
+**Cortex Connection.** Hybrid local+remote storage mode connecting the plugin to Total Recall Cortex. Three storage modes (`local`, `postgres`, `cortex`) selected via `[storage] mode` config.
+
+### Added
+
+- **`RoutingStore` — local-first `IStore` wrapper** that syncs user memories to Cortex. Reads and writes hit local SQLite for speed; mutations are enqueued for background push to Cortex and periodic pulls merge remote changes back.
+
+- **`CortexClient` — HTTP client for Cortex REST API** with PAT authentication. Handles memory CRUD, global knowledge queries, telemetry push, and health checks against the Cortex backend.
+
+- **`SyncQueue` — persistent SQLite-backed outbound queue** surviving crashes. Outbound mutations (store, update, delete) are written to a local `sync_queue` table and drained in order by `SyncService`. Guarantees at-least-once delivery even across unclean shutdowns.
+
+- **`SyncService` — orchestrates pull (session start), periodic flush, and telemetry push.** Pulls remote changes on `session_start`, flushes the outbound queue on a configurable interval, and pushes usage events, retrieval events, and compaction log entries to Cortex for unified dashboards.
+
+- **Content-only sync — no vectors cross the wire.** Each side re-embeds independently: the plugin uses the bundled ONNX model (all-MiniLM-L6-v2, 384 dimensions) while Cortex uses Cohere Embed v4 (1024 dimensions). Only text content and metadata are synced.
+
+- **Graceful degradation — Cortex unavailable = local-only.** If the Cortex endpoint is unreachable, the plugin continues working against local SQLite with no user-visible impact. The `SyncQueue` buffers outbound changes and `SyncService` catches up automatically when connectivity is restored.
+
+- **Sync payload: user memories (bidirectional), usage events, retrieval events, compaction log (push-only).** User memories sync both ways for seamless multi-device and team sharing. Telemetry data flows one-way to Cortex for centralized analytics.
+
+- **New `[cortex]` config section** with `url` and `pat` fields. Environment variable overrides: `TOTAL_RECALL_CORTEX_URL` and `TOTAL_RECALL_CORTEX_PAT`.
+
+- **Migration #7 — `sync_queue` table.** New SQLite table `sync_queue` with columns for operation type, payload, status, retry count, and timestamps. Supports the persistent outbound queue for crash-resilient sync.
+
 ## 0.9.0 - 2026-04-12
 
 **Token usage tracking (Phases 1 + 2).** Host-neutral telemetry pipeline that ingests coding-assistant transcripts, records per-turn token usage, aggregates old data into a daily rollup, and exposes the result via a `usage` CLI verb and a `usage_status` MCP tool. Supports Claude Code and Copilot CLI. Additive-only: usage ingestion is best-effort and never blocks `session_start`. Token columns are nullable end-to-end to preserve fidelity differences between hosts (Claude Code full vs. Copilot CLI output-only).
