@@ -47,11 +47,15 @@ public sealed class SessionEndHandler : IToolHandler
         """).RootElement.Clone();
 
     private readonly ISessionLifecycle _sessionLifecycle;
+    private readonly TotalRecall.Infrastructure.Sync.SyncService? _syncService;
 
-    public SessionEndHandler(ISessionLifecycle sessionLifecycle)
+    public SessionEndHandler(
+        ISessionLifecycle sessionLifecycle,
+        TotalRecall.Infrastructure.Sync.SyncService? syncService = null)
     {
         _sessionLifecycle = sessionLifecycle
             ?? throw new ArgumentNullException(nameof(sessionLifecycle));
+        _syncService = syncService;
     }
 
     public string Name => "session_end";
@@ -61,11 +65,17 @@ public sealed class SessionEndHandler : IToolHandler
 
     public JsonElement InputSchema => _inputSchema;
 
-    public Task<ToolCallResult> ExecuteAsync(JsonElement? arguments, CancellationToken ct)
+    public async Task<ToolCallResult> ExecuteAsync(JsonElement? arguments, CancellationToken ct)
     {
         _ = arguments; // session_end takes no inputs.
 
         ct.ThrowIfCancellationRequested();
+
+        // In cortex mode, flush pending sync queue to Cortex
+        if (_syncService is not null)
+        {
+            await _syncService.FlushAsync(ct).ConfigureAwait(false);
+        }
 
         // TODO(Plan 5+): replace with real compactHotTier(...) result.
         var dto = new SessionEndResultDto(
@@ -76,10 +86,10 @@ public sealed class SessionEndHandler : IToolHandler
 
         var jsonText = JsonSerializer.Serialize(dto, JsonContext.Default.SessionEndResultDto);
 
-        return Task.FromResult(new ToolCallResult
+        return new ToolCallResult
         {
             Content = new[] { new ToolContent { Type = "text", Text = jsonText } },
             IsError = false,
-        });
+        };
     }
 }

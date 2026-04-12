@@ -96,7 +96,9 @@ public static class ServerComposition
         IFileIngester fileIngester,
         ICompactionLogReader compactionLog,
         ISessionLifecycle sessionLifecycle,
-        StatusOptions statusOptions)
+        StatusOptions statusOptions,
+        Infrastructure.Sync.SyncService? syncService = null,
+        Infrastructure.Sync.IRemoteBackend? remoteBackend = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(vectors);
@@ -124,7 +126,7 @@ public static class ServerComposition
         registry.Register(new MemoryImportHandler(store, vectors, embedder));
 
         // ---- KB (7) ----
-        registry.Register(new KbSearchHandler(embedder, hybrid));
+        registry.Register(new KbSearchHandler(embedder, hybrid, remoteBackend));
         registry.Register(new KbIngestFileHandler(fileIngester));
         registry.Register(new KbIngestDirHandler(fileIngester));
         registry.Register(new KbListCollectionsHandler(store));
@@ -133,8 +135,8 @@ public static class ServerComposition
         registry.Register(new KbSummarizeHandler(store));
 
         // ---- Session (3) ----
-        registry.Register(new SessionStartHandler(sessionLifecycle));
-        registry.Register(new SessionEndHandler(sessionLifecycle));
+        registry.Register(new SessionStartHandler(sessionLifecycle, syncService));
+        registry.Register(new SessionEndHandler(sessionLifecycle, syncService));
         registry.Register(new SessionContextHandler(store));
 
         // ---- Eval (5) — self-bootstrap production executors ----
@@ -378,6 +380,8 @@ public static class ServerComposition
             var cortexClient = CortexClient.Create(cortexUrl, cortexPat);
             var syncQueue = new SyncQueue(conn);
             var routingStore = new RoutingStore(localStore, cortexClient, syncQueue);
+            var syncService = new Infrastructure.Sync.SyncService(
+                localStore, cortexClient, syncQueue, conn);
 
             var compactionLog = new CompactionLog(conn);
             var importLog = new ImportLog(conn);
@@ -419,7 +423,8 @@ public static class ServerComposition
 
             var registry = BuildRegistry(
                 routingStore, vec, embedder, hybrid,
-                fileIngester, compactionLog, sessionLifecycle, statusOptions);
+                fileIngester, compactionLog, sessionLifecycle, statusOptions,
+                syncService: syncService, remoteBackend: cortexClient);
 
             var usageQuery = new TotalRecall.Infrastructure.Usage.UsageQueryService(conn);
             registry.Register(new UsageStatusHandler(usageQuery));

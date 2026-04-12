@@ -57,11 +57,16 @@ public sealed class KbSearchHandler : IToolHandler
 
     private readonly IEmbedder _embedder;
     private readonly IHybridSearch _hybridSearch;
+    private readonly TotalRecall.Infrastructure.Sync.IRemoteBackend? _remote;
 
-    public KbSearchHandler(IEmbedder embedder, IHybridSearch hybridSearch)
+    public KbSearchHandler(
+        IEmbedder embedder,
+        IHybridSearch hybridSearch,
+        TotalRecall.Infrastructure.Sync.IRemoteBackend? remote = null)
     {
         _embedder = embedder ?? throw new ArgumentNullException(nameof(embedder));
         _hybridSearch = hybridSearch ?? throw new ArgumentNullException(nameof(hybridSearch));
+        _remote = remote;
     }
 
     public string Name => "kb_search";
@@ -70,7 +75,7 @@ public sealed class KbSearchHandler : IToolHandler
 
     public JsonElement InputSchema => _inputSchema;
 
-    public Task<ToolCallResult> ExecuteAsync(JsonElement? arguments, CancellationToken ct)
+    public async Task<ToolCallResult> ExecuteAsync(JsonElement? arguments, CancellationToken ct)
     {
         if (!arguments.HasValue)
             throw new ArgumentException("kb_search requires arguments", nameof(arguments));
@@ -85,13 +90,17 @@ public sealed class KbSearchHandler : IToolHandler
 
         var collection = ReadOptionalString(args, "collection");
         var topK = ReadOptionalInt(args, "top_k", 1, 1000) ?? 10;
-        // scope is a pass-through for now; Postgres implementations already
-        // filter by owner_id / visibility in their WHERE clauses. SQLite
-        // ignores it (all entries are local/private).
         var scope = ReadOptionalString(args, "scope") ?? "mine";
         _ = scope; // accepted; infrastructure-level filtering applied by store
 
         ct.ThrowIfCancellationRequested();
+
+        // In cortex mode, delegate KB search to the remote Cortex backend
+        // which has the global knowledge base with Cohere v4 embeddings.
+        if (_remote is not null)
+        {
+            return await SearchRemoteAsync(query, topK, ct).ConfigureAwait(false);
+        }
 
         var vector = _embedder.Embed(query);
 
@@ -150,11 +159,75 @@ public sealed class KbSearchHandler : IToolHandler
         var resultsJson = JsonSerializer.Serialize(dtos, JsonContext.Default.MemorySearchResultDtoArray);
         var jsonText = $"{{\"results\":{resultsJson},\"hierarchicalMatch\":null,\"needsSummary\":false}}";
 
-        return Task.FromResult(new ToolCallResult
+        return new ToolCallResult
         {
             Content = new[] { new ToolContent { Type = "text", Text = jsonText } },
             IsError = false,
-        });
+        };
+    }
+
+    /// <summary>
+    /// Search Cortex's knowledge base remotely. Returns results formatted
+    /// identically to the local search path.
+    /// </summary>
+    private async Task<ToolCallResult> SearchRemoteAsync(string query, int topK, CancellationToken ct)
+    {
+        TotalRecall.Infrastructure.Sync.SyncSearchResult[] results;
+        try
+        {
+            results = await _remote!.SearchKnowledgeAsync(query, topK, ct).ConfigureAwait(false);
+        }
+        catch (TotalRecall.Infrastructure.Sync.CortexUnreachableException)
+        {
+            return new ToolCallResult
+            {
+                Content = new[] { new ToolContent { Type = "text", Text = "Cortex is unreachable. Knowledge base search unavailable in offline mode." } },
+                IsError = false,
+            };
+        }
+
+        if (results.Length == 0)
+        {
+            var emptyJson = "{\"results\":[],\"hierarchicalMatch\":null,\"needsSummary\":false}";
+            return new ToolCallResult
+            {
+                Content = new[] { new ToolContent { Type = "text", Text = emptyJson } },
+                IsError = false,
+            };
+        }
+
+        // Convert remote results to the same DTO shape as local search
+        var dtos = new MemorySearchResultDto[results.Length];
+        for (var i = 0; i < results.Length; i++)
+        {
+            var r = results[i];
+            dtos[i] = new MemorySearchResultDto(
+                Entry: new EntryDto(
+                    Id: r.Id,
+                    Content: r.Content,
+                    Summary: null,
+                    Source: r.Source,
+                    Project: null,
+                    Tags: r.Tags ?? Array.Empty<string>(),
+                    CreatedAt: 0,
+                    UpdatedAt: 0,
+                    LastAccessedAt: 0,
+                    AccessCount: 0,
+                    DecayScore: 1.0),
+                Score: r.Score,
+                Tier: "cold",
+                ContentType: "knowledge",
+                Rank: i + 1);
+        }
+
+        var resultsJson = JsonSerializer.Serialize(dtos, JsonContext.Default.MemorySearchResultDtoArray);
+        var jsonText = $"{{\"results\":{resultsJson},\"hierarchicalMatch\":null,\"needsSummary\":false}}";
+
+        return new ToolCallResult
+        {
+            Content = new[] { new ToolContent { Type = "text", Text = jsonText } },
+            IsError = false,
+        };
     }
 
     // ---------- argument parsing helpers ----------

@@ -47,11 +47,15 @@ public sealed class SessionStartHandler : IToolHandler
         """).RootElement.Clone();
 
     private readonly ISessionLifecycle _sessionLifecycle;
+    private readonly TotalRecall.Infrastructure.Sync.SyncService? _syncService;
 
-    public SessionStartHandler(ISessionLifecycle sessionLifecycle)
+    public SessionStartHandler(
+        ISessionLifecycle sessionLifecycle,
+        TotalRecall.Infrastructure.Sync.SyncService? syncService = null)
     {
         _sessionLifecycle = sessionLifecycle
             ?? throw new ArgumentNullException(nameof(sessionLifecycle));
+        _syncService = syncService;
     }
 
     public string Name => "session_start";
@@ -66,6 +70,13 @@ public sealed class SessionStartHandler : IToolHandler
         // session_start accepts no arguments; `arguments` may legitimately
         // be null or an empty object. Ignore either form.
         _ = arguments;
+
+        // In cortex mode, pull newer user memories from Cortex before init
+        if (_syncService is not null)
+        {
+            await _syncService.PullAsync(ct).ConfigureAwait(false);
+            await _syncService.FlushAsync(ct).ConfigureAwait(false); // drain any pending from prior crash
+        }
 
         var result = await _sessionLifecycle.EnsureInitializedAsync(ct).ConfigureAwait(false);
 
