@@ -220,6 +220,7 @@ public static class ServerComposition
             var usageImporters = new List<TotalRecall.Infrastructure.Usage.IUsageImporter>
             {
                 new TotalRecall.Infrastructure.Usage.ClaudeCodeUsageImporter(),
+                new TotalRecall.Infrastructure.Usage.CopilotCliUsageImporter(),
             };
             var usageIndexer = new TotalRecall.Infrastructure.Usage.UsageIndexer(
                 usageImporters, usageEventLog, usageWatermarks);

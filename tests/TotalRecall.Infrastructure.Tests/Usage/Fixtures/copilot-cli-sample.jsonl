@@ -1,0 +1,10 @@
+{"type":"session.start","data":{"sessionId":"s-copilot-1","version":1,"producer":"copilot-agent","copilotVersion":"1.0.22","startTime":"2026-04-09T22:00:00.000Z","context":{"cwd":"/Users/test/proj","gitRoot":"/Users/test/proj","branch":"main","headCommit":"abc123","repository":"test/proj","hostType":"github"},"alreadyInUse":false,"remoteSteerable":false},"id":"evt-start","timestamp":"2026-04-09T22:00:00.100Z","parentId":null}
+{"type":"user.message","data":{"content":"hello","interactionId":"i-1"},"id":"evt-user-1","timestamp":"2026-04-09T22:00:05.000Z","parentId":"evt-start"}
+{"type":"assistant.turn_start","data":{"turnId":"0","interactionId":"i-1"},"id":"evt-ts-1","timestamp":"2026-04-09T22:00:05.100Z","parentId":"evt-user-1"}
+{"type":"tool.execution_complete","data":{"toolCallId":"tc-1","model":"claude-sonnet-4.6","interactionId":"i-1","success":true,"result":{}},"id":"evt-tc-1","timestamp":"2026-04-09T22:00:05.200Z","parentId":"evt-ts-1"}
+{"type":"assistant.message","data":{"messageId":"m-1","content":"","interactionId":"i-1","outputTokens":146,"requestId":"REQ-1"},"id":"evt-am-1","timestamp":"2026-04-09T22:00:05.300Z","parentId":"evt-tc-1"}
+{"type":"session.context_changed","data":{"cwd":"/Users/test/proj","gitRoot":"/Users/test/proj","branch":"feature/xyz","headCommit":"def456","repository":"test/proj","hostType":"github"},"id":"evt-ctx","timestamp":"2026-04-09T22:01:00.000Z","parentId":"evt-am-1"}
+not valid json at all
+{"type":"assistant.message","data":{"messageId":"m-2","content":"","interactionId":"i-2","outputTokens":88,"requestId":"REQ-2"},"id":"evt-am-2","timestamp":"2026-04-09T22:01:30.000Z","parentId":"evt-ctx"}
+{"type":"hook.end","data":{"hookInvocationId":"h1","hookType":"sessionStart","success":true},"id":"evt-hook-end","timestamp":"2026-04-09T22:01:35.000Z","parentId":null}
+{"type":"assistant.message","data":{"messageId":"m-3","content":"","interactionId":"i-3"},"id":"evt-am-3","timestamp":"2026-04-09T22:01:40.000Z","parentId":null}
