@@ -74,6 +74,14 @@ public sealed class ClaudeCodeUsageImporter : IUsageImporter
         var sessionId = Path.GetFileNameWithoutExtension(jsonlPath);
         int turnIndex = 0;
 
+        // Authoritative project context comes from top-level cwd/gitBranch
+        // fields carried on most record types in the transcript. The
+        // constructor-supplied decoded directory name is only a fallback
+        // for transcripts that somehow surface no cwd before the first
+        // assistant turn.
+        string lastKnownCwd = cwd;
+        string? lastKnownGitBranch = null;
+
         await using var stream = File.OpenRead(jsonlPath);
         using var reader = new StreamReader(stream);
 
@@ -89,10 +97,25 @@ public sealed class ClaudeCodeUsageImporter : IUsageImporter
             using (doc)
             {
                 var root = doc.RootElement;
+
+                // Update running project context from every record that
+                // carries it, regardless of whether this record will emit
+                // a UsageEvent.
+                var recCwd = GetStringOrNull(root, "cwd");
+                if (!string.IsNullOrEmpty(recCwd)) lastKnownCwd = recCwd!;
+                var recBranch = GetStringOrNull(root, "gitBranch");
+                if (!string.IsNullOrEmpty(recBranch)) lastKnownGitBranch = recBranch;
+
                 if (!root.TryGetProperty("message", out var msg)) continue;
                 if (msg.ValueKind != JsonValueKind.Object) continue;
                 if (!msg.TryGetProperty("usage", out var usage)) continue;
                 if (usage.ValueKind != JsonValueKind.Object) continue;
+
+                // Skip Claude Code "synthetic" marker records — these are
+                // internal protocol events (compaction boundaries, session
+                // metadata) that pollute usage aggregates with ghost buckets.
+                var model = GetStringOrNull(msg, "model");
+                if (model == "<synthetic>") continue;
 
                 var tsMs = ParseTimestampMs(root);
                 if (tsMs <= sinceMs) continue;
@@ -107,10 +130,10 @@ public sealed class ClaudeCodeUsageImporter : IUsageImporter
                     SessionId: sessionId,
                     TimestampMs: tsMs,
                     TurnIndex: turnIndex++,
-                    Model: GetStringOrNull(msg, "model"),
-                    ProjectPath: cwd,
+                    Model: model,
+                    ProjectPath: lastKnownCwd,
                     ProjectRepo: null,
-                    ProjectBranch: null,
+                    ProjectBranch: lastKnownGitBranch,
                     ProjectCommit: null,
                     InteractionId: null,
                     InputTokens: GetIntOrNull(usage, "input_tokens"),
