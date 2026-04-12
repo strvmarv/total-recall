@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.9.4 - 2026-04-12
+
+### Fixed
+
+- **AOT-safe `CortexClient`.** Replaced reflection-based `System.Net.Http.Json` calls with source-generated `SyncJsonContext` serialization, fixing NativeAOT publish.
+
+### Added
+
+- **`SyncService` wired into session lifecycle.** `session_start` pulls from Cortex and flushes the pending sync queue; `session_end` flushes remaining queued items.
+- **KB search routes to Cortex remote backend** in cortex mode, with graceful degradation when the Cortex endpoint is offline.
+- **Knowledge search and status endpoints** added to the Cortex plugin sync controller.
+- **Cortex ingest job retries failed items** with a 24-hour stale threshold; tags returned as array in KB search results.
+
+## 0.9.3 - 2026-04-12
+
+### Fixed
+
+- **AOT serialization crash in `RoutingStore`.** Replaced `JsonSerializer.Serialize(new { ... })` with manual JSON builders (`SyncPayload`) and source-generated `SyncJsonContext`, eliminating reflection at runtime.
+
+### Changed
+
+- **Version synced across all 5 manifest files** (`package.json`, `package-lock.json`, `.claude-plugin/plugin.json`, `.copilot-plugin/plugin.json`, `.cursor-plugin/plugin.json`).
+
+## 0.9.2 - 2026-04-12
+
+### Fixed
+
+- **`.mcp.json` MCP server registration.** Restored the server entry that was emptied in `b933ed1`, which broke plugin MCP server discovery for all users.
+
 ## 0.9.1 - 2026-04-12
 
 **Cortex Connection.** Hybrid local+remote storage mode connecting the plugin to Total Recall Cortex. Three storage modes (`local`, `postgres`, `cortex`) selected via `[storage] mode` config.

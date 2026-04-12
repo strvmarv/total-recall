@@ -40,6 +40,10 @@ Snapshots auto-created on `session_start` and before `config_set`. Deduplication
 
 CI smoke test added — runs 22-query smoke benchmark with real ONNX embedder after build, fails the pipeline if exact match rate drops below 80%. Entry point: `src/eval/ci-smoke.ts`, built as second tsup entry to `dist/eval/ci-smoke.js`, invoked via `npm run benchmark`. First-install validation covered by existing `runSmokeTest()` at session_start. Config tuning covered by `eval_compare` tool.
 
+### ~~Cortex Connection~~
+
+Hybrid local+remote mode connecting the plugin to Total Recall Cortex. Local SQLite for user memories with bidirectional sync to Cortex API, remote queries for global KB. Async ingest on Cortex side via staging table + Hangfire. Content-only sync (no vectors) — each side re-embeds independently (ONNX 384-dim vs. Cohere v4 1024-dim). Implemented across 0.9.1-0.9.4.
+
 ## Backlog
 
 Items below are not urgent. Revisit when real-world usage surfaces a need.
@@ -84,12 +88,6 @@ Current code parser in `Parsers.fs` uses regex splitting for function/class boun
 
 **Files:** `src/TotalRecall.Core/Parsers.fs`
 **Complexity:** Per-language. Roslyn is the cleanest option for C# and the .NET team maintains an AOT-compatible subset. Tree-sitter bindings for .NET exist (`TreeSitter.Net`) but their AOT story is unverified. Regex is the pragmatic baseline.
-
-### Cortex Connection
-
-Hybrid local+remote mode connecting the plugin to Total Recall Cortex. Local SQLite for user memories with bidirectional sync to Cortex API, remote queries for global KB. Async ingest on Cortex side via staging table + Hangfire. Content-only sync (no vectors) — each side re-embeds independently (ONNX 384-dim vs. Cohere v4 1024-dim).
-
-**Spec:** `docs/superpowers/specs/2026-04-12-cortex-connection-design.md`
 
 ### Reranker (Cortex-Side)
 

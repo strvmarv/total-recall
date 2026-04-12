@@ -2,7 +2,7 @@
 
 This file is the operational handbook for AI agents and human contributors working in this repo. For end-user docs see `README.md`; for the contributor onboarding flow see `CONTRIBUTING.md`. This file documents project-wide rules, the release flow, the plugin system, the session lifecycle, the schema migration framework, and the beta dogfood mechanics.
 
-> **State as of 0.8.x:** total-recall is a .NET 8 NativeAOT plugin (C# imperative shell + F# functional core). The TypeScript implementation that lived in `src/` through 0.7.x was stripped during the 0.7.2 → 0.8.0 cutover. Anything in this file that mentions `dist/`, `bun`, `tsup`, `vitest`, `publish.yml`, `bin/start.cjs`, or `src/db/schema.ts` is either gone or renamed — see the strip series in `CHANGELOG.md` (commits `87975a7` → `7a8c437`).
+> **State as of 0.9.x:** total-recall is a .NET 8 NativeAOT plugin (C# imperative shell + F# functional core). The TypeScript implementation that lived in `src/` through 0.7.x was stripped during the 0.7.2 → 0.8.0 cutover. Anything in this file that mentions `dist/`, `bun`, `tsup`, `vitest`, `publish.yml`, `bin/start.cjs`, or `src/db/schema.ts` is either gone or renamed — see the strip series in `CHANGELOG.md` (commits `87975a7` → `7a8c437`).
 
 ---
 
@@ -243,6 +243,8 @@ Current migrations (as of 0.8.0-beta.7):
 3. **Migration 3** — retrieval event log + import log.
 4. **Migration 4** — `compaction_log.source TEXT NOT NULL DEFAULT 'compaction'` for distinguishing compactor-originated movements from manual `promote`/`demote`.
 5. **Migration 5** — sweeps all 6 content/vec table pairs and deletes orphan rows (added in 0.8.0-beta.6 to clean up state from the parallel-store concurrency bug fixed in the same release).
+6. **Migration 6** — usage telemetry schema (`usage_events`, `usage_daily`, `usage_watermarks` tables).
+7. **Migration 7** — `sync_queue` table for cortex connection.
 
 To add a schema change:
 
