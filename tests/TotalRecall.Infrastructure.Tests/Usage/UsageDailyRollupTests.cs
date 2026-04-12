@@ -96,6 +96,31 @@ public sealed class UsageDailyRollupTests
     }
 
     [Fact]
+    public void Rollup_AllNullCacheFields_PreservesNullInDailyRow()
+    {
+        // Bug 1 regression: rollup SQL must preserve NULL in
+        // usage_daily.cache_creation_tokens when every source row has both
+        // cache_creation_5m and cache_creation_1h = NULL. Per-row COALESCE
+        // to 0 would erase the "we don't know" signal forever.
+        using var conn = OpenMigrated();
+        var log = new UsageEventLog(conn);
+        var rollup = new UsageDailyRollup(conn);
+
+        var oldDay = DateTimeOffset.UtcNow.AddDays(-31).ToUnixTimeMilliseconds();
+        log.InsertOrIgnore(E("copilot-cli", "a1", oldDay, input: null, output: 20));
+        log.InsertOrIgnore(E("copilot-cli", "a2", oldDay + 1000, input: null, output: 10));
+
+        var cutoff = DateTimeOffset.UtcNow.AddDays(-30).ToUnixTimeMilliseconds();
+        rollup.RollupOlderThan(cutoff);
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT cache_creation_tokens FROM usage_daily";
+        using var r = cmd.ExecuteReader();
+        Assert.True(r.Read());
+        Assert.True(r.IsDBNull(0));
+    }
+
+    [Fact]
     public void Rollup_GroupsByDayHostModelProject()
     {
         using var conn = OpenMigrated();

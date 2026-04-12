@@ -175,6 +175,27 @@ VALUES ($day, 'claude-code', 'opus', '/p', 3, 10, 1000, 0, 0, 200)";
     }
 
     [Fact]
+    public void Query_BucketWithAllNullCacheFields_PreservesNull()
+    {
+        // Bug 1 regression: a bucket containing only events with
+        // both cache_creation_5m and cache_creation_1h = NULL (e.g. copilot-cli
+        // sourced events) must expose cache_creation_tokens = null, not 0.
+        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        using var conn = OpenSeeded(log =>
+        {
+            log.InsertOrIgnore(E("copilot-cli", "b1", "s1", nowMs - 1000, input: null, output: 20));
+            log.InsertOrIgnore(E("copilot-cli", "b2", "s1", nowMs - 2000, input: null, output: 15));
+        });
+
+        var svc = new UsageQueryService(conn);
+        var report = svc.Query(Last(GroupBy.Host, TimeSpan.FromHours(1)));
+
+        var bucket = report.Buckets.First(b => b.Key == "copilot-cli");
+        Assert.Null(bucket.Totals.CacheCreationTokens);
+        Assert.Null(report.GrandTotal.CacheCreationTokens);
+    }
+
+    [Fact]
     public void Query_WindowBeforeAnyEvents_ReturnsEmpty()
     {
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();

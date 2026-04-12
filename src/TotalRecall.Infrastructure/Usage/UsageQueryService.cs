@@ -57,7 +57,10 @@ WITH unioned AS (
         ts,
         1 AS turn_count,
         input_tokens,
-        COALESCE(cache_creation_5m, 0) + COALESCE(cache_creation_1h, 0) AS cache_creation_tokens,
+        CASE
+            WHEN cache_creation_5m IS NULL AND cache_creation_1h IS NULL THEN NULL
+            ELSE COALESCE(cache_creation_5m, 0) + COALESCE(cache_creation_1h, 0)
+        END AS cache_creation_tokens,
         cache_read AS cache_read_tokens,
         output_tokens
     FROM usage_events
@@ -169,7 +172,10 @@ WITH unioned AS (
         session_id,
         1 AS turn_count,
         input_tokens,
-        COALESCE(cache_creation_5m, 0) + COALESCE(cache_creation_1h, 0) AS cache_creation_tokens,
+        CASE
+            WHEN cache_creation_5m IS NULL AND cache_creation_1h IS NULL THEN NULL
+            ELSE COALESCE(cache_creation_5m, 0) + COALESCE(cache_creation_1h, 0)
+        END AS cache_creation_tokens,
         cache_read AS cache_read_tokens,
         output_tokens
     FROM usage_events

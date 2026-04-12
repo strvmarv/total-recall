@@ -75,7 +75,12 @@ SELECT
   COUNT(DISTINCT session_id),
   COUNT(*),
   SUM(input_tokens),
-  SUM(COALESCE(cache_creation_5m, 0) + COALESCE(cache_creation_1h, 0)),
+  SUM(
+    CASE
+      WHEN cache_creation_5m IS NULL AND cache_creation_1h IS NULL THEN NULL
+      ELSE COALESCE(cache_creation_5m, 0) + COALESCE(cache_creation_1h, 0)
+    END
+  ),
   SUM(cache_read),
   SUM(output_tokens)
 FROM usage_events
