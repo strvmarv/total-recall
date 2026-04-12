@@ -1,4 +1,5 @@
-using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
 
 namespace TotalRecall.Infrastructure.Sync;
 
@@ -31,27 +32,27 @@ public sealed class CortexClient : IRemoteBackend
     public async Task<SyncSearchResult[]> SearchKnowledgeAsync(string query, int topK, CancellationToken ct)
     {
         var url = $"/api/plugin/sync/knowledge?query={Uri.EscapeDataString(query)}&top_k={topK}";
-        return await GetJsonAsync<SyncSearchResult[]>(url, ct).ConfigureAwait(false)
+        return await GetAsync(url, SyncJsonContext.Default.SyncSearchResultArray, ct).ConfigureAwait(false)
                ?? Array.Empty<SyncSearchResult>();
     }
 
     public async Task<SyncSearchResult[]> SearchMemoriesAsync(string query, string scope, int topK, CancellationToken ct)
     {
         var url = $"/api/plugin/sync/memories/search?query={Uri.EscapeDataString(query)}&scope={Uri.EscapeDataString(scope)}&top_k={topK}";
-        return await GetJsonAsync<SyncSearchResult[]>(url, ct).ConfigureAwait(false)
+        return await GetAsync(url, SyncJsonContext.Default.SyncSearchResultArray, ct).ConfigureAwait(false)
                ?? Array.Empty<SyncSearchResult>();
     }
 
     public async Task<SyncStatusResult> GetStatusAsync(CancellationToken ct)
     {
         var url = "/api/plugin/sync/status";
-        return await GetJsonAsync<SyncStatusResult>(url, ct).ConfigureAwait(false)
+        return await GetAsync(url, SyncJsonContext.Default.SyncStatusResult, ct).ConfigureAwait(false)
                ?? new SyncStatusResult(0, 0, 0, 0);
     }
 
     public async Task UpsertMemoriesAsync(SyncEntry[] entries, CancellationToken ct)
     {
-        await PostJsonAsync("/api/plugin/sync/memories", entries, ct).ConfigureAwait(false);
+        await PostAsync("/api/plugin/sync/memories", entries, SyncJsonContext.Default.SyncEntryArray, ct).ConfigureAwait(false);
     }
 
     public async Task DeleteMemoryAsync(string id, CancellationToken ct)
@@ -63,34 +64,35 @@ public sealed class CortexClient : IRemoteBackend
     {
         var iso = since.UtcDateTime.ToString("o");
         var url = $"/api/plugin/sync/memories?since={Uri.EscapeDataString(iso)}";
-        return await GetJsonAsync<SyncPullResult>(url, ct).ConfigureAwait(false)
+        return await GetAsync(url, SyncJsonContext.Default.SyncPullResult, ct).ConfigureAwait(false)
                ?? new SyncPullResult(Array.Empty<SyncEntry>(), null);
     }
 
     public async Task PushUsageEventsAsync(SyncUsageEvent[] events, CancellationToken ct)
     {
-        await PostJsonAsync("/api/plugin/sync/usage", events, ct).ConfigureAwait(false);
+        await PostAsync("/api/plugin/sync/usage", events, SyncJsonContext.Default.SyncUsageEventArray, ct).ConfigureAwait(false);
     }
 
     public async Task PushRetrievalEventsAsync(SyncRetrievalEvent[] events, CancellationToken ct)
     {
-        await PostJsonAsync("/api/plugin/sync/retrieval", events, ct).ConfigureAwait(false);
+        await PostAsync("/api/plugin/sync/retrieval", events, SyncJsonContext.Default.SyncRetrievalEventArray, ct).ConfigureAwait(false);
     }
 
     public async Task PushCompactionEntriesAsync(SyncCompactionEntry[] entries, CancellationToken ct)
     {
-        await PostJsonAsync("/api/plugin/sync/compaction", entries, ct).ConfigureAwait(false);
+        await PostAsync("/api/plugin/sync/compaction", entries, SyncJsonContext.Default.SyncCompactionEntryArray, ct).ConfigureAwait(false);
     }
 
     // ── helpers ───────────────────────────────────────────────────────
 
-    private async Task<T?> GetJsonAsync<T>(string url, CancellationToken ct)
+    private async Task<T?> GetAsync<T>(string url, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo, CancellationToken ct)
     {
         try
         {
             var response = await _http.GetAsync(url, ct).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
-            return await response.Content.ReadFromJsonAsync<T>(ct).ConfigureAwait(false);
+            var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            return await JsonSerializer.DeserializeAsync(stream, typeInfo, ct).ConfigureAwait(false);
         }
         catch (HttpRequestException ex)
         {
@@ -102,11 +104,13 @@ public sealed class CortexClient : IRemoteBackend
         }
     }
 
-    private async Task PostJsonAsync<T>(string url, T body, CancellationToken ct)
+    private async Task PostAsync<T>(string url, T body, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo, CancellationToken ct)
     {
         try
         {
-            var response = await _http.PostAsJsonAsync(url, body, ct).ConfigureAwait(false);
+            var json = JsonSerializer.Serialize(body, typeInfo);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var response = await _http.PostAsync(url, content, ct).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
         }
         catch (HttpRequestException ex)
