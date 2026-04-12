@@ -5,9 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## 0.9.0 - 2026-04-11
+## 0.9.0 - 2026-04-12
 
-**Token usage tracking (Phase 1).** Host-neutral telemetry pipeline that ingests Claude Code transcripts, records per-turn token usage, and exposes an aggregated `usage` CLI verb. Additive-only: usage ingestion is best-effort and never blocks `session_start`. Token columns are nullable to preserve fidelity differences between hosts (Claude Code full vs. Copilot CLI output-only).
+**Token usage tracking (Phases 1 + 2).** Host-neutral telemetry pipeline that ingests coding-assistant transcripts, records per-turn token usage, aggregates old data into a daily rollup, and exposes the result via a `usage` CLI verb and a `usage_status` MCP tool. Supports Claude Code and Copilot CLI. Additive-only: usage ingestion is best-effort and never blocks `session_start`. Token columns are nullable end-to-end to preserve fidelity differences between hosts (Claude Code full vs. Copilot CLI output-only).
 
 ### Added
 
@@ -25,18 +25,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`UsageQueryService` read layer.** Single read path for CLI, MCP tools, and future quota-nudge composer. Supports group-by `host` / `project` / `day` / `model` / `session`, host and project filters, `TopN`, and coverage counts (full vs. partial token data). Null handling honors "we don't know" ≠ "zero."
 
-- **`total-recall usage` CLI verb.** `usage [--last 5h|1d|7d|30d|90d|all] [--by host|project|day|model|session] [--host H] [--project P] [--top N]`. Fixed-width table output (no Spectre.Console dependency for testability), em-dash for null token columns, `tracked at token granularity` footer. Text-only in Phase 1; JSON output lands in Phase 2.
+- **`total-recall usage` CLI verb.** `usage [--last 5h|1d|7d|30d|90d|all] [--by host|project|day|model|session] [--host H] [--project P] [--top N] [--json]`. Fixed-width table output (no Spectre.Console dependency for testability), em-dash for null token columns, `tracked at token granularity` footer. `--json` emits a stable machine-readable shape `{query, buckets, grand_total, coverage}` via the shared `JsonWriter` emitter — null token fields serialize as JSON `null`, never `0`.
+
+- **`CopilotCliUsageImporter`.** Streaming parser for `~/.copilot/session-state/<session>/events.jsonl`. Emits one `UsageEvent` per `assistant.message`. Handles mid-session repo / branch switches via `session.context_changed`. Model attribution comes from the most recent `tool.execution_complete`. Copilot CLI does not expose Anthropic-style input or cache tokens, so those fields stay null per the unified-schema / optional-fields design.
+
+- **`UsageDailyRollup`.** Rolling aggregation that, once per 24h, compacts `usage_events` older than the retention cutoff (default 30 days) into `usage_daily` and deletes the source rows. The full operation runs inside a single `IMMEDIATE` transaction so the reserved lock is taken before the initial `SELECT COUNT(*)` — concurrent writers cannot slip an event past the aggregation window and get wiped by the trailing `DELETE`. Idempotent via `INSERT OR REPLACE` on the composite primary key `(day_utc, host, model, project)`.
+
+- **`UsageQueryService` raw + daily union.** The read layer now queries a `WITH unioned AS (...)` CTE that UNION ALLs `usage_events` with `usage_daily`, so long-window queries (e.g., `--last 90d`) see the full history across the rollup boundary. Grand total and per-bucket aggregates read from the union. Coverage counts intentionally stay on raw events only, with a documented caveat: `usage_daily` rows have `session_id = NULL` so `COUNT(DISTINCT session_id)` would undercount for rolled-up periods.
+
+- **`usage_status` MCP tool.** Agents can now query their own token burn mid-session. Input schema mirrors the CLI flags (`window`, `group_by`, `host`, `project`, `top`) so LLM and human usage stay consistent. Emits the same JSON shape as `total-recall usage --json` via a shared `UsageJsonRenderer` used by both code paths.
+
+- **`UsageJsonRenderer`.** New shared JSON emitter in `TotalRecall.Infrastructure.Usage` used by both `UsageCommand` and `UsageStatusHandler`. Delegates escaping and number formatting to the existing `TotalRecall.Infrastructure.Json.JsonWriter` helper (matches the pattern used by ~10 other CLI commands), so the JSON output is byte-identical across the CLI and MCP paths.
 
 ### Changed
 
 - **`SessionLifecycle.RunInit` runs the usage indexer before the existing importer sweep.** Failures are caught and logged but never block `session_start` — usage tracking is additive and must not appear in the critical path.
 
-- **`ServerComposition.OpenProduction` constructs the indexer** with `ClaudeCodeUsageImporter` and passes it to `SessionLifecycle`. `CliApp` registers `UsageCommand` so `total-recall usage` is reachable from the CLI entry point.
+- **`ServerComposition.OpenProduction` constructs the indexer, rollup, and query service** with `ClaudeCodeUsageImporter` + `CopilotCliUsageImporter` and passes them to `SessionLifecycle`. Registers the `usage_status` MCP tool handler. `CliApp` registers `UsageCommand` so `total-recall usage` is reachable from the CLI entry point.
+
+- **`ClaudeCodeUsageImporter` uses per-record `cwd` / `gitBranch` for project attribution.** Previously derived the project path from the encoded directory name (`-Users-strvmarv-source-total-recall`) via a reverse `-` → `/` map, which destroyed real hyphens in folder names (`total-recall` decoded to `total/recall`). The JSONL records themselves carry authoritative `cwd` and `gitBranch` fields on nearly every line type — the importer now maintains a running `lastKnownCwd` / `lastKnownGitBranch` updated from every record that carries them. `DecodeProjectDirName` stays as the fallback when no cwd-carrying record appears before the first assistant turn.
+
+- **`ClaudeCodeUsageImporter` skips `model == "<synthetic>"` records.** Claude Code emits synthetic marker messages for internal protocol events (compaction boundaries, session metadata). These are not real LLM usage and were polluting the `--by model` report with a ghost bucket of 0 / 0 / 0 tokens. Filtered out alongside the existing missing-usage check. Real events with unknown model attribution (null `model`) are still counted — they represent genuine usage with missing metadata, not synthetic markers.
+
+- **`UsageQueryService` and `UsageDailyRollup` preserve null `cache_creation_tokens`.** Both previously ran `COALESCE(cache_creation_5m, 0) + COALESCE(cache_creation_1h, 0)` at the per-row level, which erased the "we don't know" signal when an entire bucket came from a host that never populates those fields. Both now use a `CASE WHEN cache_creation_5m IS NULL AND cache_creation_1h IS NULL THEN NULL ELSE ... END` wrapper so the outer `SUM` correctly returns null for all-null buckets.
 
 ### Notes
 
-- Phase 1 queries `usage_events` only. Phase 2 will extend `UsageQueryService` to `UNION` with `usage_daily` once the rollup job lands, and will add JSON output to the CLI verb.
 - Historical (pre-installation) transcripts are picked up on the first `session_start` after upgrade, bounded by `initial_backfill_days`.
+- Phase 3 of the spec (quota nudging — plan registry, evaluator, and `session_start` two-line nudge composer) is designed but not yet implemented.
 
 ## 0.8.1 - 2026-04-10
 
