@@ -312,12 +312,54 @@ public sealed class ConfigLoader : IConfigLoader
         if (table.TryGetValue("storage", out var storageObj) && storageObj is TomlTable storageTable)
         {
             var storageCfg = new Core.Config.StorageConfig(
-                TryGetString(storageTable, "connection_string"));
+                TryGetString(storageTable, "connection_string"),
+                TryGetString(storageTable, "mode"));
             storage = FSharpOption<Core.Config.StorageConfig>.Some(storageCfg);
         }
         else
         {
             storage = FSharpOption<Core.Config.StorageConfig>.None;
+        }
+
+        FSharpOption<Core.Config.CortexConfig> cortex;
+        if (table.TryGetValue("cortex", out var cortexObj) && cortexObj is TomlTable cortexTable)
+        {
+            var url = TryGetString(cortexTable, "url");
+            var pat = TryGetString(cortexTable, "pat");
+
+            // Env var overrides
+            var envUrl = Environment.GetEnvironmentVariable("TOTAL_RECALL_CORTEX_URL");
+            if (!string.IsNullOrEmpty(envUrl))
+                url = FSharpOption<string>.Some(envUrl);
+
+            var envPat = Environment.GetEnvironmentVariable("TOTAL_RECALL_CORTEX_PAT");
+            if (!string.IsNullOrEmpty(envPat))
+                pat = FSharpOption<string>.Some(envPat);
+
+            if (FSharpOption<string>.get_IsSome(url) && FSharpOption<string>.get_IsSome(pat))
+            {
+                var cortexCfg = new Core.Config.CortexConfig(url.Value, pat.Value);
+                cortex = FSharpOption<Core.Config.CortexConfig>.Some(cortexCfg);
+            }
+            else
+            {
+                cortex = FSharpOption<Core.Config.CortexConfig>.None;
+            }
+        }
+        else
+        {
+            // Check env vars even without [cortex] section
+            var envUrl = Environment.GetEnvironmentVariable("TOTAL_RECALL_CORTEX_URL");
+            var envPat = Environment.GetEnvironmentVariable("TOTAL_RECALL_CORTEX_PAT");
+            if (!string.IsNullOrEmpty(envUrl) && !string.IsNullOrEmpty(envPat))
+            {
+                var cortexCfg = new Core.Config.CortexConfig(envUrl, envPat);
+                cortex = FSharpOption<Core.Config.CortexConfig>.Some(cortexCfg);
+            }
+            else
+            {
+                cortex = FSharpOption<Core.Config.CortexConfig>.None;
+            }
         }
 
         FSharpOption<Core.Config.UserConfig> user;
@@ -339,7 +381,8 @@ public sealed class ConfigLoader : IConfigLoader
             regression,
             search,
             storage,
-            user);
+            user,
+            cortex);
     }
 
     // --- walker helpers ---------------------------------------------------

@@ -55,7 +55,8 @@ public sealed class StatusCommandTests : IDisposable
                 FSharpOption<Core.Config.RegressionConfig>.None,
                 FSharpOption<Core.Config.SearchConfig>.None,
                 FSharpOption<Core.Config.StorageConfig>.None,
-                FSharpOption<Core.Config.UserConfig>.None);
+                FSharpOption<Core.Config.UserConfig>.None,
+                FSharpOption<Core.Config.CortexConfig>.None);
         }
 
         public Core.Config.TotalRecallConfig LoadDefaults() => _cfg;

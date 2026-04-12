@@ -85,6 +85,16 @@ Current code parser in `Parsers.fs` uses regex splitting for function/class boun
 **Files:** `src/TotalRecall.Core/Parsers.fs`
 **Complexity:** Per-language. Roslyn is the cleanest option for C# and the .NET team maintains an AOT-compatible subset. Tree-sitter bindings for .NET exist (`TreeSitter.Net`) but their AOT story is unverified. Regex is the pragmatic baseline.
 
+### Cortex Connection
+
+Hybrid local+remote mode connecting the plugin to Total Recall Cortex. Local SQLite for user memories with bidirectional sync to Cortex API, remote queries for global KB. Async ingest on Cortex side via staging table + Hangfire. Content-only sync (no vectors) — each side re-embeds independently (ONNX 384-dim vs. Cohere v4 1024-dim).
+
+**Spec:** `docs/superpowers/specs/2026-04-12-cortex-connection-design.md`
+
+### Reranker (Cortex-Side)
+
+Cross-encoder or Cohere Rerank API pass after pgvector retrieval on the Cortex side, improving KB search quality for plugin queries. Plugin-side reranking (bundled ONNX cross-encoder) is a separate future consideration. Address when retrieval eval metrics show top-K precision is a bottleneck.
+
 ## Post-cutover follow-ups (0.8.x .NET)
 
 Items identified during the 0.7.2 TS → 0.8.0 .NET cutover but deferred out of the beta window. Revisit once `main` is on `0.8.x` and the beta has baked cleanly.

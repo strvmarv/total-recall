@@ -53,6 +53,12 @@ type EmbeddingConfig = {
 
 type StorageConfig = {
     ConnectionString: string option
+    Mode: string option
+}
+
+type CortexConfig = {
+    Url: string
+    Pat: string
 }
 
 type UserConfig = {
@@ -77,6 +83,7 @@ type TotalRecallConfig = {
     Search: SearchConfig option
     Storage: StorageConfig option
     User: UserConfig option
+    Cortex: CortexConfig option
 }
 
 // --- pure helpers (mirrors src-ts/config.ts isSafeKey + deepMerge + setNestedKey) ---
