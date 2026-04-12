@@ -1,9 +1,3 @@
 {
-  "mcpServers": {
-    "total-recall": {
-      "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/start.js"],
-      "cwd": "${CLAUDE_PLUGIN_ROOT}"
-    }
-  }
+  "mcpServers": {}
 }
