@@ -239,6 +239,12 @@ public static class ServerComposition
                 store, vec, embedder, hybrid,
                 fileIngester, compactionLog, sessionLifecycle, statusOptions);
 
+            // Task 13 — `usage_status` MCP tool. SQLite-only for now: the
+            // Postgres composition path has no usage indexer wired (Phase 2
+            // out-of-scope), so it correspondingly exposes no read tool.
+            var usageQuery = new TotalRecall.Infrastructure.Usage.UsageQueryService(conn);
+            registry.Register(new UsageStatusHandler(usageQuery));
+
             return new ServerCompositionHandles(conn, registry);
         }
         catch

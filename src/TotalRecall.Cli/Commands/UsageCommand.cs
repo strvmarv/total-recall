@@ -20,7 +20,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using TotalRecall.Infrastructure.Config;
-using TotalRecall.Infrastructure.Json;
 using TotalRecall.Infrastructure.Storage;
 using TotalRecall.Infrastructure.Usage;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
@@ -314,112 +313,13 @@ public sealed class UsageCommand : ICliCommand
 
     // -------- JSON rendering --------
     //
-    // Hand-rolled emitter to mirror Memory/ExportCommand's approach and
-    // avoid JsonContext source-gen overhead in the AOT-compiled CLI. The
-    // top-level shape {query, buckets[], grand_total, coverage} is the
-    // user-facing contract — see spec §6.3.
+    // Delegates to UsageJsonRenderer (Infrastructure) so the `usage_status`
+    // MCP tool handler produces byte-identical output. The top-level shape
+    // {query, buckets[], grand_total, coverage} is the user-facing contract —
+    // see spec §6.3.
 
     private void RenderJson(UsageReport report, UsageQuery query)
     {
-        var sb = new System.Text.StringBuilder();
-        sb.Append('{');
-
-        // query block
-        sb.Append("\"query\":{");
-        sb.Append("\"start_ms\":");
-        JsonWriter.AppendNumber(sb, query.Start.ToUnixTimeMilliseconds());
-        sb.Append(",\"end_ms\":");
-        JsonWriter.AppendNumber(sb, query.End.ToUnixTimeMilliseconds());
-        sb.Append(",\"group_by\":");
-        JsonWriter.AppendString(sb, query.GroupBy.ToString().ToLowerInvariant());
-        sb.Append(",\"host_filter\":");
-        AppendStringArrayOrNull(sb, query.HostFilter);
-        sb.Append(",\"project_filter\":");
-        AppendStringArrayOrNull(sb, query.ProjectFilter);
-        sb.Append('}');
-
-        // buckets array
-        sb.Append(",\"buckets\":[");
-        for (var i = 0; i < report.Buckets.Count; i++)
-        {
-            if (i > 0) sb.Append(',');
-            AppendBucket(sb, report.Buckets[i]);
-        }
-        sb.Append(']');
-
-        // grand_total
-        sb.Append(",\"grand_total\":");
-        AppendTotals(sb, report.GrandTotal);
-
-        // coverage
-        var full = report.SessionsWithFullTokenData;
-        var partial = report.SessionsWithPartialTokenData;
-        var totalSessions = full + partial;
-        var pct = totalSessions == 0 ? 0.0 : 100.0 * full / totalSessions;
-        sb.Append(",\"coverage\":{\"sessions_with_full_token_data\":");
-        JsonWriter.AppendNumber(sb, full);
-        sb.Append(",\"sessions_with_partial_token_data\":");
-        JsonWriter.AppendNumber(sb, partial);
-        sb.Append(",\"fidelity_percent\":");
-        sb.Append(pct.ToString("F2", System.Globalization.CultureInfo.InvariantCulture));
-        sb.Append('}');
-
-        sb.Append('}');
-        _out.WriteLine(sb.ToString());
-    }
-
-    private static void AppendStringArrayOrNull(System.Text.StringBuilder sb, IReadOnlyList<string>? list)
-    {
-        if (list is null)
-        {
-            JsonWriter.AppendNull(sb);
-            return;
-        }
-        sb.Append('[');
-        for (var i = 0; i < list.Count; i++)
-        {
-            if (i > 0) sb.Append(',');
-            JsonWriter.AppendString(sb, list[i]);
-        }
-        sb.Append(']');
-    }
-
-    private static void AppendBucket(System.Text.StringBuilder sb, UsageBucket b)
-    {
-        sb.Append('{');
-        sb.Append("\"key\":");
-        JsonWriter.AppendString(sb, b.Key);
-        sb.Append(',');
-        AppendTotalsBody(sb, b.Totals);
-        sb.Append('}');
-    }
-
-    private static void AppendTotals(System.Text.StringBuilder sb, UsageTotals t)
-    {
-        sb.Append('{');
-        AppendTotalsBody(sb, t);
-        sb.Append('}');
-    }
-
-    private static void AppendTotalsBody(System.Text.StringBuilder sb, UsageTotals t)
-    {
-        sb.Append("\"session_count\":");
-        JsonWriter.AppendNumber(sb, t.SessionCount);
-        sb.Append(",\"turn_count\":");
-        JsonWriter.AppendNumber(sb, t.TurnCount);
-        sb.Append(",\"input_tokens\":");
-        AppendNullableLong(sb, t.InputTokens);
-        sb.Append(",\"cache_creation_tokens\":");
-        AppendNullableLong(sb, t.CacheCreationTokens);
-        sb.Append(",\"cache_read_tokens\":");
-        AppendNullableLong(sb, t.CacheReadTokens);
-        sb.Append(",\"output_tokens\":");
-        AppendNullableLong(sb, t.OutputTokens);
-    }
-
-    private static void AppendNullableLong(System.Text.StringBuilder sb, long? v)
-    {
-        if (v is long n) JsonWriter.AppendNumber(sb, n);
-        else JsonWriter.AppendNull(sb);
+        _out.WriteLine(UsageJsonRenderer.Render(report, query));
     }
 }
