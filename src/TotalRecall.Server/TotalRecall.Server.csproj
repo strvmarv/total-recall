@@ -9,6 +9,9 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="TotalRecall.Server.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\TotalRecall.Core\TotalRecall.Core.fsproj" />
     <ProjectReference Include="..\TotalRecall.Infrastructure\TotalRecall.Infrastructure.csproj" />
   </ItemGroup>

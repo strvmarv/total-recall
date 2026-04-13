@@ -47,7 +47,7 @@ public sealed class MemoryUpdateHandler : IToolHandler
             "id":      {"type":"string","description":"Entry ID"},
             "content": {"type":"string","description":"New content"},
             "summary": {"type":"string","description":"New summary"},
-            "tags":    {"type":"array","items":{"type":"string"},"description":"New tags"},
+            "tags":    {"type":["array","string"],"items":{"type":"string"},"description":"New tags (array, JSON-encoded array string, or comma-separated string)"},
             "project": {"type":"string","description":"New project"}
           },
           "required": ["id"]
@@ -180,20 +180,5 @@ public sealed class MemoryUpdateHandler : IToolHandler
     }
 
     private static IReadOnlyList<string>? ReadTags(JsonElement args)
-    {
-        if (!args.TryGetProperty("tags", out var prop) || prop.ValueKind == JsonValueKind.Null)
-            return null;
-        if (prop.ValueKind != JsonValueKind.Array)
-            throw new ArgumentException("tags must be an array");
-        var list = new List<string>(prop.GetArrayLength());
-        var i = 0;
-        foreach (var el in prop.EnumerateArray())
-        {
-            if (el.ValueKind != JsonValueKind.String)
-                throw new ArgumentException($"tags[{i}] must be a string");
-            list.Add(el.GetString() ?? throw new ArgumentException($"tags[{i}] must be a string"));
-            i++;
-        }
-        return list;
-    }
+        => ArgumentParsing.ReadTags(args);
 }

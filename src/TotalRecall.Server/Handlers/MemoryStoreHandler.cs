@@ -70,7 +70,7 @@ public sealed class MemoryStoreHandler : IToolHandler
             "contentType": {"type":"string","enum":["memory","knowledge"],"description":"Content type (default: memory)"},
             "entryType":   {"type":"string","enum":["correction","preference","decision","surfaced","imported","compacted","ingested"],"description":"Entry type"},
             "project":     {"type":"string","description":"Project scope"},
-            "tags":        {"type":"array","items":{"type":"string"},"description":"Tags"},
+            "tags":        {"type":["array","string"],"items":{"type":"string"},"description":"Tags (array, JSON-encoded array string, or comma-separated string)"},
             "source":      {"type":"string","description":"Source identifier"},
             "visibility":  {"type":"string","enum":["private","team","public"],"description":"Entry visibility: 'private' (default), 'team', or 'public'"}
           },
@@ -255,20 +255,5 @@ public sealed class MemoryStoreHandler : IToolHandler
     }
 
     private static IReadOnlyList<string>? ReadTags(JsonElement args)
-    {
-        if (!args.TryGetProperty("tags", out var prop) || prop.ValueKind == JsonValueKind.Null)
-            return null;
-        if (prop.ValueKind != JsonValueKind.Array)
-            throw new ArgumentException("tags must be an array");
-        var list = new List<string>(prop.GetArrayLength());
-        var i = 0;
-        foreach (var el in prop.EnumerateArray())
-        {
-            if (el.ValueKind != JsonValueKind.String)
-                throw new ArgumentException($"tags[{i}] must be a string");
-            list.Add(el.GetString() ?? throw new ArgumentException($"tags[{i}] must be a string"));
-            i++;
-        }
-        return list;
-    }
+        => ArgumentParsing.ReadTags(args);
 }
