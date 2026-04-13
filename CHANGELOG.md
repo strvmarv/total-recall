@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.9.7 - 2026-04-13
+
+### Added
+
+- **Periodic background sync in cortex mode.** Pull + flush runs every 300 seconds between `session_start` and `session_end`, keeping multi-device memories fresh mid-session. Configurable via `sync_interval_seconds` in `[cortex]` config; set to `0` to disable.
+- **Storage mode in `session_start` response.** New `storage` field reports the effective backend (`sqlite`, `postgres`, `cortex`) and flags fallbacks (e.g. `sqlite (cortex failed)`).
+
+### Fixed
+
+- **Cortex/Postgres startup crash on bad config.** `OpenCortex` and `OpenPostgres` now validate config before accessing F# option values, throwing a clear `InvalidOperationException` instead of `NullReferenceException`. Cortex/Postgres failures fall back to SQLite gracefully.
+- **Flaky `OverlappingTicks_AreSkipped` test.** Widened timing tolerances and switched to `Interlocked` counter.
+
+### Changed
+
+- Skill prompts (`using-total-recall`, `commands`) updated to display storage mode in the session status line.
+
 ## 0.9.6 - 2026-04-13
 
 ### Fixed
