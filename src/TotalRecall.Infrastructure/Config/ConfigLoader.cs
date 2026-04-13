@@ -338,7 +338,8 @@ public sealed class ConfigLoader : IConfigLoader
 
             if (FSharpOption<string>.get_IsSome(url) && FSharpOption<string>.get_IsSome(pat))
             {
-                var cortexCfg = new Core.Config.CortexConfig(url.Value, pat.Value);
+                var syncInterval = TryGetInt(cortexTable, "sync_interval_seconds");
+                var cortexCfg = new Core.Config.CortexConfig(url.Value, pat.Value, syncInterval);
                 cortex = FSharpOption<Core.Config.CortexConfig>.Some(cortexCfg);
             }
             else
@@ -353,7 +354,7 @@ public sealed class ConfigLoader : IConfigLoader
             var envPat = Environment.GetEnvironmentVariable("TOTAL_RECALL_CORTEX_PAT");
             if (!string.IsNullOrEmpty(envUrl) && !string.IsNullOrEmpty(envPat))
             {
-                var cortexCfg = new Core.Config.CortexConfig(envUrl, envPat);
+                var cortexCfg = new Core.Config.CortexConfig(envUrl, envPat, FSharpOption<int>.None);
                 cortex = FSharpOption<Core.Config.CortexConfig>.Some(cortexCfg);
             }
             else

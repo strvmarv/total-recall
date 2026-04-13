@@ -59,6 +59,7 @@ type StorageConfig = {
 type CortexConfig = {
     Url: string
     Pat: string
+    SyncIntervalSeconds: int option
 }
 
 type UserConfig = {
