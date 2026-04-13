@@ -298,7 +298,7 @@ dimensions = 384               # Embedding dimensions
 
 ### Connecting to Cortex
 
-[Total Recall Cortex](https://github.com/radancy-pe/total-recall-cortex) is the shared backend platform that adds team knowledge bases, connectors (Jira, Confluence, GitHub), chat/RAG, and a React UI on top of the plugin's memory layer.
+Total Recall Cortex is the shared backend platform that adds team knowledge bases, connectors (Jira, Confluence, GitHub), chat/RAG, and a React UI on top of the plugin's memory layer.
 
 In Cortex mode, the plugin operates as a hybrid:
 - **User memories** are stored locally (fast reads/writes) and synced bidirectionally to Cortex
