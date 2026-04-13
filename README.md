@@ -44,7 +44,7 @@ Every TUI coding assistant has the same gaps:
 - **Siloed by tool** — switching between Claude Code and Copilot CLI means starting from scratch
 - **Single-machine** — your context doesn't follow you across devices
 - **Context bloat** — stuffing everything into a `CLAUDE.md` wastes tokens every prompt
-- **No token visibility** — no way to know what your AI sessions are actually costing you
+- **No token visibility** — no way to know what your AI sessions actually cost
 
 ---
 
@@ -54,7 +54,7 @@ Every TUI coding assistant has the same gaps:
 - **Cross-tool** — one memory store shared across Claude Code, Copilot CLI, Cursor, Cline, OpenCode, and Hermes; existing memories auto-import on first run
 - **Cross-device** — point `TOTAL_RECALL_DB_PATH` at a cloud-synced folder and your memory follows you everywhere
 - **Smarter context, lower token cost** — a three-tier model (Hot / Warm / Cold) enforces a 4000-token budget per prompt, so you get relevant context without carrying everything
-- **Token expenditure tracking** *(coming soon)* — see exactly what each session costs and verify the savings
+- **Token expenditure tracking** — see exactly what each session costs, broken down by host, project, and time window
 - **Knowledge base** — ingest your docs, READMEs, API references, and architecture notes; retrieved semantically when relevant
 - **Observability** — measure retrieval quality, run benchmarks, and compare config changes with the built-in eval framework
 
@@ -128,8 +128,8 @@ This works with **Copilot CLI**, **OpenCode**, **Cline**, **Cursor**, **Hermes**
 git clone https://github.com/strvmarv/total-recall.git
 cd total-recall
 npm install                                # pulls sqlite-vec native libs into node_modules/
-dotnet build src/TotalRecall.sln           # requires .NET 10 SDK (per global.json)
-dotnet test src/TotalRecall.sln            # 944 tests across Core (F#), Cli, Server, Infrastructure
+dotnet build src/TotalRecall.sln           # requires .NET 10 SDK (per global.json); targets net8.0 for AOT
+dotnet test src/TotalRecall.sln            # ~1000 tests across Core (F#), Cli, Server, Infrastructure
 dotnet publish src/TotalRecall.Host/TotalRecall.Host.csproj -c Release -r linux-x64 -p:PublishAot=true
 # (swap linux-x64 for your RID: linux-arm64, osx-arm64, or win-x64)
 ```
@@ -143,14 +143,14 @@ On first `session_start`, total-recall initializes `~/.total-recall/` with a SQL
 1. **Import sync** — scans Claude Code, Copilot CLI, Cursor, Cline, OpenCode, and Hermes memory directories, deduplicates and imports new entries
 2. **Warm sweep** — if overdue, demotes stale warm entries to cold based on decay
 3. **Project docs ingest** — detects README.md, CONTRIBUTING.md, CLAUDE.md, AGENTS.md, and docs/ in cwd and ingests into a project-scoped KB collection
-4. **Smoke test** — on version change, runs a 22-query benchmark to validate retrieval quality
+4. **Smoke test** *(planned)* — on version change, run a benchmark to validate retrieval quality
 5. **Warm-to-hot promotion** — semantically searches warm tier for entries relevant to the current project and promotes them to hot
 6. **Hot tier assembly** — enforces token budget, evicts lowest-decay entries, returns hot tier as injectable context
 7. **Config snapshot** — captures current config for retrieval quality tracking
 8. **Tier summary** — counts entries across all tiers and KB collections for the startup announcement.
 9. **Hint generation** — surfaces high-value warm memories (corrections, preferences, frequently accessed) as actionable one-liners for the agent.
 10. **Session continuity** — computes time since last session for contextual framing.
-11. **Regression detection** — compares retrieval metrics against previous config snapshot and alerts if quality has dropped.
+11. **Regression detection** *(planned)* — compare retrieval metrics against previous config snapshot and alert if quality has dropped.
 
 ---
 
@@ -160,7 +160,7 @@ On first `session_start`, total-recall initializes `~/.total-recall/` with a SQL
 MCP Server (.NET 8 NativeAOT — C# imperative shell + F# functional core)
 ├── TotalRecall.Core (F#)        — pure functions: tokenizer, decay, ranking, parsers
 ├── TotalRecall.Infrastructure   — SQLite/Postgres storage, ONNX/remote embedder, importers, ingestion
-├── TotalRecall.Server           — MCP JSON-RPC server, 33 tool handlers, lifecycle
+├── TotalRecall.Server           — MCP JSON-RPC server, 34 tool handlers, lifecycle
 ├── TotalRecall.Cli              — CLI commands (status, eval, kb, memory, config, migrate)
 └── TotalRecall.Host             — composition root, AOT entry point, migration guard
 
@@ -225,6 +225,7 @@ All commands are routed through the `/total-recall:commands` skill:
 | `/total-recall:commands config get <key>` | `config_get` | Read config value |
 | `/total-recall:commands config set <key> <val>` | `config_set` | Update config |
 | `/total-recall:commands import-host` | `import_host` | Import from host tools |
+| — | `usage_status` | Token usage summary (by window, host, project) |
 
 Memory capture, retrieval, and compaction run automatically in the background — see the "Automatic Behavior" section of the `/total-recall:commands` skill.
 
