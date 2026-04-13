@@ -430,7 +430,8 @@ public static class ServerComposition
             var syncService = new Infrastructure.Sync.SyncService(
                 localStore, cortexClient, syncQueue, conn);
 
-            var syncIntervalSeconds = FSharpOption<int>.get_IsSome(cfg.Cortex.Value.SyncIntervalSeconds)
+            var syncIntervalSeconds = FSharpOption<Core.Config.CortexConfig>.get_IsSome(cfg.Cortex)
+                && FSharpOption<int>.get_IsSome(cfg.Cortex.Value.SyncIntervalSeconds)
                 ? cfg.Cortex.Value.SyncIntervalSeconds.Value
                 : 300;
 
