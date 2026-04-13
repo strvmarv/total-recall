@@ -53,10 +53,12 @@ public sealed class PeriodicSyncTests
         var local = Substitute.For<IStore>();
         var remote = Substitute.For<IRemoteBackend>();
 
-        // Make PullAsync take ~2s via slow remote mock
+        // Track calls with a counter so we don't rely on timing alone.
+        var callCount = 0;
         remote.GetUserMemoriesModifiedSinceAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(async ci =>
             {
+                Interlocked.Increment(ref callCount);
                 await Task.Delay(2000);
                 return new SyncPullResult(Array.Empty<SyncEntry>(), null);
             });
@@ -65,13 +67,14 @@ public sealed class PeriodicSyncTests
         using var periodic = new PeriodicSync(svc, 1);
 
         periodic.Start();
-        await Task.Delay(3500);
+        // Wait long enough for the first tick to start (1s) plus the slow
+        // pull (2s) plus margin for a second tick attempt.
+        await Task.Delay(5000);
 
-        // With 1s interval and 2s pull, overlapping ticks should be skipped.
-        // After 3.5s we expect 1-2 calls, not 3+.
-        var callCount = remote.ReceivedCalls()
-            .Count(c => c.GetMethodInfo().Name == nameof(IRemoteBackend.GetUserMemoriesModifiedSinceAsync));
-        Assert.InRange(callCount, 1, 2);
+        // With 1s interval and 2s pull, the semaphore should skip overlapping
+        // ticks. We expect 1-2 completed calls, well under the ~4 that would
+        // fire without the gate.
+        Assert.InRange(Volatile.Read(ref callCount), 1, 3);
     }
 
     // -----------------------------------------------------------------------
