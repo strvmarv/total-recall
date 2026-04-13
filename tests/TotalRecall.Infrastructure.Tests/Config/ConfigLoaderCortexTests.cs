@@ -130,4 +130,64 @@ public sealed class ConfigLoaderCortexTests : IDisposable
         Assert.Equal("https://env.example.com", cortex.Url);
         Assert.Equal("tr_env", cortex.Pat);
     }
+
+    // --- sync_interval_seconds --------------------------------------------
+
+    [Fact]
+    public void SyncIntervalSeconds_IsParsedFromToml()
+    {
+        var toml = """
+            [cortex]
+            url = "https://cortex.example.com"
+            pat = "tr_test123"
+            sync_interval_seconds = 60
+            """;
+        File.WriteAllText(_configPath, toml);
+
+        var loader = new ConfigLoader();
+        var cfg = loader.LoadEffectiveConfig(_configPath);
+
+        Assert.True(FSharpOption<Core.Config.CortexConfig>.get_IsSome(cfg.Cortex));
+        var cortex = cfg.Cortex.Value;
+        Assert.True(FSharpOption<int>.get_IsSome(cortex.SyncIntervalSeconds));
+        Assert.Equal(60, cortex.SyncIntervalSeconds.Value);
+    }
+
+    [Fact]
+    public void SyncIntervalSeconds_MissingFromToml_IsNone()
+    {
+        var toml = """
+            [cortex]
+            url = "https://cortex.example.com"
+            pat = "tr_test123"
+            """;
+        File.WriteAllText(_configPath, toml);
+
+        var loader = new ConfigLoader();
+        var cfg = loader.LoadEffectiveConfig(_configPath);
+
+        Assert.True(FSharpOption<Core.Config.CortexConfig>.get_IsSome(cfg.Cortex));
+        var cortex = cfg.Cortex.Value;
+        Assert.True(FSharpOption<int>.get_IsNone(cortex.SyncIntervalSeconds));
+    }
+
+    [Fact]
+    public void SyncIntervalSeconds_Zero_IsParsedAsSomeZero()
+    {
+        var toml = """
+            [cortex]
+            url = "https://cortex.example.com"
+            pat = "tr_test123"
+            sync_interval_seconds = 0
+            """;
+        File.WriteAllText(_configPath, toml);
+
+        var loader = new ConfigLoader();
+        var cfg = loader.LoadEffectiveConfig(_configPath);
+
+        Assert.True(FSharpOption<Core.Config.CortexConfig>.get_IsSome(cfg.Cortex));
+        var cortex = cfg.Cortex.Value;
+        Assert.True(FSharpOption<int>.get_IsSome(cortex.SyncIntervalSeconds));
+        Assert.Equal(0, cortex.SyncIntervalSeconds.Value);
+    }
 }
