@@ -49,7 +49,10 @@ public sealed class PeriodicSync : IDisposable
         }
         finally
         {
-            _gate.Release();
+            if (Volatile.Read(ref _disposed) == 0)
+            {
+                try { _gate.Release(); } catch (ObjectDisposedException) { }
+            }
         }
     }
 

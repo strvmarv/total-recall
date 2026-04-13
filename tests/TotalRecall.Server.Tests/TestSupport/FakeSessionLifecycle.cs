@@ -43,5 +43,6 @@ public sealed class FakeSessionLifecycle : ISessionLifecycle
         Hints: new List<string>(),
         LastSessionAge: null,
         SmokeTest: null,
-        RegressionAlerts: null);
+        RegressionAlerts: null,
+        Storage: "sqlite");
 }

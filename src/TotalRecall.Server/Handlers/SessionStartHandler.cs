@@ -48,14 +48,17 @@ public sealed class SessionStartHandler : IToolHandler
 
     private readonly ISessionLifecycle _sessionLifecycle;
     private readonly TotalRecall.Infrastructure.Sync.SyncService? _syncService;
+    private readonly TotalRecall.Infrastructure.Sync.PeriodicSync? _periodicSync;
 
     public SessionStartHandler(
         ISessionLifecycle sessionLifecycle,
-        TotalRecall.Infrastructure.Sync.SyncService? syncService = null)
+        TotalRecall.Infrastructure.Sync.SyncService? syncService = null,
+        TotalRecall.Infrastructure.Sync.PeriodicSync? periodicSync = null)
     {
         _sessionLifecycle = sessionLifecycle
             ?? throw new ArgumentNullException(nameof(sessionLifecycle));
         _syncService = syncService;
+        _periodicSync = periodicSync;
     }
 
     public string Name => "session_start";
@@ -79,6 +82,8 @@ public sealed class SessionStartHandler : IToolHandler
         }
 
         var result = await _sessionLifecycle.EnsureInitializedAsync(ct).ConfigureAwait(false);
+
+        _periodicSync?.Start();
 
         var jsonText = JsonSerializer.Serialize(result, JsonContext.Default.SessionInitResult);
 

@@ -18,10 +18,11 @@ These behaviors run automatically throughout the session. Tool calls will be vis
 1. Call the `session_start` MCP tool to sync imports and assemble hot tier context (this may already be cached — call it regardless to receive the context)
 2. **Announce startup** using the returned data:
    - Report tier summary: hot, warm, cold, KB counts from `tierSummary`
+   - Report storage backend from `storage` (e.g. "sqlite", "cortex", "postgres"). If it shows a fallback like "sqlite (cortex failed)", flag this prominently.
    - If `lastSessionAge` is present, mention when the last session was
    - If `hints` are present, briefly surface the most relevant ones
    - Keep it to 2-3 lines max. Example:
-     > total-recall loaded — 3 hot, 12 warm, 5 cold, 2 KB collections. Last session: 2 hours ago.
+     > total-recall loaded — 3 hot, 12 warm, 5 cold, 2 KB collections. Storage: cortex. Last session: 2 hours ago.
      > Context: TODO list at docs/TODO.md; user prefers bundled PRs for refactors.
 3. Use `hints` to inform your behavior throughout the session — they represent high-value memories like user corrections, preferences, and frequently accessed project context
 4. Incorporate the full `context` field to inform your responses

@@ -32,7 +32,8 @@ public sealed class SessionStartHandlerTests
         Hints: new List<string> { "hint1", "hint2" },
         LastSessionAge: "5 minutes ago",
         SmokeTest: null,
-        RegressionAlerts: null);
+        RegressionAlerts: null,
+        Storage: "sqlite");
 
     [Fact]
     public async Task HappyPath_ReturnsSessionInitResult()

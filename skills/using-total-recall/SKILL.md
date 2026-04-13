@@ -12,6 +12,7 @@ This skill ensures the total-recall memory system is active for this session.
 1. Call the total-recall `session_start` MCP tool now (if it already ran server-side, it returns cached results instantly)
 2. **Announce startup** using the returned data:
    - Report tier summary: hot, warm, cold, KB counts from `tierSummary`
+   - Report storage backend from `storage` (e.g. "sqlite", "cortex", "postgres"). If it shows a fallback like "sqlite (cortex failed)", flag this prominently.
    - If `lastSessionAge` is present, mention when the last session was
    - If `hints` are present, briefly surface the most relevant ones
    - Keep it to 2-3 lines max

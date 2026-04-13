@@ -57,6 +57,7 @@ namespace TotalRecall.Server;
 public sealed class ServerCompositionHandles : IDisposable
 {
     private readonly IDisposable _resource;
+    private readonly Infrastructure.Sync.PeriodicSync? _periodicSync;
     public ToolRegistry Registry { get; }
 
     /// <summary>
@@ -65,15 +66,24 @@ public sealed class ServerCompositionHandles : IDisposable
     /// </summary>
     public IStore Store { get; }
 
-    internal ServerCompositionHandles(IDisposable resource, ToolRegistry registry, IStore store)
+    /// <summary>
+    /// Human-friendly label for the effective storage backend, e.g. "sqlite",
+    /// "postgres", "cortex", or "sqlite (cortex failed)" when a fallback occurred.
+    /// </summary>
+    public string StorageMode { get; }
+
+    internal ServerCompositionHandles(IDisposable resource, ToolRegistry registry, IStore store, string storageMode = "sqlite", Infrastructure.Sync.PeriodicSync? periodicSync = null)
     {
         _resource = resource;
         Registry = registry;
         Store = store;
+        StorageMode = storageMode;
+        _periodicSync = periodicSync;
     }
 
     public void Dispose()
     {
+        try { _periodicSync?.Dispose(); } catch { /* best-effort */ }
         try { _resource.Dispose(); } catch { /* best-effort */ }
     }
 }
@@ -98,7 +108,8 @@ public static class ServerComposition
         ISessionLifecycle sessionLifecycle,
         StatusOptions statusOptions,
         Infrastructure.Sync.SyncService? syncService = null,
-        Infrastructure.Sync.IRemoteBackend? remoteBackend = null)
+        Infrastructure.Sync.IRemoteBackend? remoteBackend = null,
+        Infrastructure.Sync.PeriodicSync? periodicSync = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(vectors);
@@ -135,7 +146,7 @@ public static class ServerComposition
         registry.Register(new KbSummarizeHandler(store));
 
         // ---- Session (3) ----
-        registry.Register(new SessionStartHandler(sessionLifecycle, syncService));
+        registry.Register(new SessionStartHandler(sessionLifecycle, syncService, periodicSync));
         registry.Register(new SessionEndHandler(sessionLifecycle, syncService));
         registry.Register(new SessionContextHandler(store));
 
@@ -175,27 +186,46 @@ public static class ServerComposition
     {
         var cfg = new ConfigLoader().LoadEffectiveConfig();
 
-        var mode = "local";
+        var configuredMode = "local";
         if (FSharpOption<Core.Config.StorageConfig>.get_IsSome(cfg.Storage)
             && FSharpOption<string>.get_IsSome(cfg.Storage.Value.Mode))
         {
-            mode = cfg.Storage.Value.Mode.Value;
+            configuredMode = cfg.Storage.Value.Mode.Value;
         }
         else if (FSharpOption<Core.Config.StorageConfig>.get_IsSome(cfg.Storage)
             && FSharpOption<string>.get_IsSome(cfg.Storage.Value.ConnectionString))
         {
-            mode = "postgres";
+            configuredMode = "postgres";
         }
 
-        return mode switch
+        // Map config values to friendly display names.
+        static string FriendlyName(string mode) => mode switch
         {
-            "cortex" => OpenCortex(cfg, dbPath),
-            "postgres" => OpenPostgres(cfg),
-            _ => OpenSqlite(cfg, dbPath)
+            "local" => "sqlite",
+            _ => mode
         };
+
+        try
+        {
+            return configuredMode switch
+            {
+                "cortex" => OpenCortex(cfg, dbPath, FriendlyName(configuredMode)),
+                "postgres" => OpenPostgres(cfg, FriendlyName(configuredMode)),
+                _ => OpenSqlite(cfg, dbPath, FriendlyName(configuredMode))
+            };
+        }
+        catch (Exception ex) when (configuredMode is "cortex" or "postgres")
+        {
+            // Non-local backend failed — fall back to SQLite so the session
+            // is still usable, and surface what happened in the storage label.
+            var friendly = FriendlyName(configuredMode);
+            Console.Error.WriteLine(
+                $"[total-recall] {friendly} storage failed, falling back to sqlite: {ex.Message}");
+            return OpenSqlite(cfg, dbPath, $"sqlite ({friendly} failed)");
+        }
     }
 
-    private static ServerCompositionHandles OpenSqlite(Core.Config.TotalRecallConfig cfg, string? dbPath)
+    private static ServerCompositionHandles OpenSqlite(Core.Config.TotalRecallConfig cfg, string? dbPath, string storageMode = "sqlite")
     {
         var resolvedDbPath = dbPath ?? ConfigLoader.GetDbPath();
         Directory.CreateDirectory(ConfigLoader.GetDataDir());
@@ -250,7 +280,8 @@ public static class ServerComposition
 
             var sessionLifecycle = new SessionLifecycle(
                 importers, store, compactionLog,
-                usageIndexer: usageIndexer);
+                usageIndexer: usageIndexer,
+                storageMode: storageMode);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
@@ -267,7 +298,7 @@ public static class ServerComposition
             var usageQuery = new TotalRecall.Infrastructure.Usage.UsageQueryService(conn);
             registry.Register(new UsageStatusHandler(usageQuery));
 
-            return new ServerCompositionHandles(conn, registry, store);
+            return new ServerCompositionHandles(conn, registry, store, storageMode);
         }
         catch
         {
@@ -276,8 +307,16 @@ public static class ServerComposition
         }
     }
 
-    private static ServerCompositionHandles OpenPostgres(Core.Config.TotalRecallConfig cfg)
+    private static ServerCompositionHandles OpenPostgres(Core.Config.TotalRecallConfig cfg, string storageMode = "postgres")
     {
+        if (!FSharpOption<Core.Config.StorageConfig>.get_IsSome(cfg.Storage)
+            || !FSharpOption<string>.get_IsSome(cfg.Storage.Value.ConnectionString))
+        {
+            throw new InvalidOperationException(
+                "Storage mode is \"postgres\" but no connection string is configured. " +
+                "Set 'connection_string' in [storage], or set TOTAL_RECALL_PG_CONNECTION_STRING.");
+        }
+
         var connStr = cfg.Storage.Value.ConnectionString.Value;
         var userId = ResolveUserId(cfg);
         var dims = cfg.Embedding.Dimensions;
@@ -313,7 +352,8 @@ public static class ServerComposition
                 new ProjectDocsImporter(fileIngester, index, importLog),
             };
 
-            var sessionLifecycle = new SessionLifecycle(importers, store, compactionLog);
+            var sessionLifecycle = new SessionLifecycle(importers, store, compactionLog,
+                storageMode: storageMode);
 
             var statusOptions = new StatusOptions(
                 DbPath: connStr,
@@ -324,7 +364,7 @@ public static class ServerComposition
                 store, vec, embedder, hybrid,
                 fileIngester, compactionLog, sessionLifecycle, statusOptions);
 
-            return new ServerCompositionHandles(dataSource, registry, store);
+            return new ServerCompositionHandles(dataSource, registry, store, storageMode);
         }
         catch
         {
@@ -333,7 +373,7 @@ public static class ServerComposition
         }
     }
 
-    private static ServerCompositionHandles OpenCortex(Core.Config.TotalRecallConfig cfg, string? dbPath)
+    private static ServerCompositionHandles OpenCortex(Core.Config.TotalRecallConfig cfg, string? dbPath, string storageMode = "cortex")
     {
         // Cortex mode uses SQLite locally, plus a RoutingStore that enqueues
         // writes for eventual push to the remote Cortex backend.
@@ -345,10 +385,17 @@ public static class ServerComposition
             Directory.CreateDirectory(dbParent);
         }
 
+        if (!FSharpOption<Core.Config.CortexConfig>.get_IsSome(cfg.Cortex))
+        {
+            throw new InvalidOperationException(
+                "Storage mode is \"cortex\" but the [cortex] config section is missing or incomplete. " +
+                "Provide both 'url' and 'pat' in [cortex], or set TOTAL_RECALL_CORTEX_URL and TOTAL_RECALL_CORTEX_PAT.");
+        }
+
         var cortexUrl = cfg.Cortex.Value.Url;
         var cortexPat = cfg.Cortex.Value.Pat;
 
-        return OpenCortexCore(cfg, resolvedDbPath, cortexUrl, cortexPat);
+        return OpenCortexCore(cfg, resolvedDbPath, cortexUrl, cortexPat, storageMode);
     }
 
     /// <summary>
@@ -359,12 +406,12 @@ public static class ServerComposition
         string sqliteDbPath, string cortexUrl, string cortexPat)
     {
         var cfg = new ConfigLoader().LoadEffectiveConfig();
-        return OpenCortexCore(cfg, sqliteDbPath, cortexUrl, cortexPat);
+        return OpenCortexCore(cfg, sqliteDbPath, cortexUrl, cortexPat, "cortex");
     }
 
     private static ServerCompositionHandles OpenCortexCore(
         Core.Config.TotalRecallConfig cfg, string resolvedDbPath,
-        string cortexUrl, string cortexPat)
+        string cortexUrl, string cortexPat, string storageMode = "cortex")
     {
         var conn = SqliteConnection.Open(resolvedDbPath);
         try
@@ -382,6 +429,14 @@ public static class ServerComposition
             var routingStore = new RoutingStore(localStore, cortexClient, syncQueue);
             var syncService = new Infrastructure.Sync.SyncService(
                 localStore, cortexClient, syncQueue, conn);
+
+            var syncIntervalSeconds = FSharpOption<int>.get_IsSome(cfg.Cortex.Value.SyncIntervalSeconds)
+                ? cfg.Cortex.Value.SyncIntervalSeconds.Value
+                : 300;
+
+            Infrastructure.Sync.PeriodicSync? periodicSync = syncIntervalSeconds > 0
+                ? new Infrastructure.Sync.PeriodicSync(syncService, syncIntervalSeconds)
+                : null;
 
             var compactionLog = new CompactionLog(conn);
             var importLog = new ImportLog(conn);
@@ -414,7 +469,8 @@ public static class ServerComposition
 
             var sessionLifecycle = new SessionLifecycle(
                 importers, routingStore, compactionLog,
-                usageIndexer: usageIndexer);
+                usageIndexer: usageIndexer,
+                storageMode: storageMode);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
@@ -424,12 +480,13 @@ public static class ServerComposition
             var registry = BuildRegistry(
                 routingStore, vec, embedder, hybrid,
                 fileIngester, compactionLog, sessionLifecycle, statusOptions,
-                syncService: syncService, remoteBackend: cortexClient);
+                syncService: syncService, remoteBackend: cortexClient,
+                periodicSync: periodicSync);
 
             var usageQuery = new TotalRecall.Infrastructure.Usage.UsageQueryService(conn);
             registry.Register(new UsageStatusHandler(usageQuery));
 
-            return new ServerCompositionHandles(conn, registry, routingStore);
+            return new ServerCompositionHandles(conn, registry, routingStore, storageMode, periodicSync);
         }
         catch
         {

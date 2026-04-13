@@ -41,6 +41,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
     private readonly ICompactionLogReader _compactionLog;
     private readonly Func<long> _nowMs;
     private readonly string _sessionId;
+    private readonly string _storageMode;
     private readonly TotalRecall.Infrastructure.Usage.UsageIndexer? _usageIndexer;
 
     private readonly SemaphoreSlim _initLock = new(1, 1);
@@ -52,7 +53,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
         ICompactionLogReader compactionLog,
         string? sessionId = null,
         Func<long>? nowMs = null,
-        TotalRecall.Infrastructure.Usage.UsageIndexer? usageIndexer = null)
+        TotalRecall.Infrastructure.Usage.UsageIndexer? usageIndexer = null,
+        string storageMode = "sqlite")
     {
         ArgumentNullException.ThrowIfNull(importers);
         ArgumentNullException.ThrowIfNull(store);
@@ -63,6 +65,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         _sessionId = sessionId ?? Guid.NewGuid().ToString();
         _nowMs = nowMs ?? (() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         _usageIndexer = usageIndexer;
+        _storageMode = storageMode;
     }
 
     /// <inheritdoc />
@@ -184,7 +187,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
             Hints: hints,
             LastSessionAge: lastSessionAge,
             SmokeTest: null, // TODO(Plan 5+): smoke test not ported
-            RegressionAlerts: null); // TODO(Plan 5+): regression detection not ported
+            RegressionAlerts: null, // TODO(Plan 5+): regression detection not ported
+            Storage: _storageMode);
     }
 
     // -------- helpers (internal so tests can call them directly) --------
@@ -341,7 +345,8 @@ public sealed record SessionInitResult(
     [property: JsonPropertyName("hints")] IReadOnlyList<string> Hints,
     [property: JsonPropertyName("lastSessionAge")] string? LastSessionAge,
     [property: JsonPropertyName("smokeTest")] SmokeTestResult? SmokeTest,
-    [property: JsonPropertyName("regressionAlerts")] IReadOnlyList<RegressionAlert>? RegressionAlerts);
+    [property: JsonPropertyName("regressionAlerts")] IReadOnlyList<RegressionAlert>? RegressionAlerts,
+    [property: JsonPropertyName("storage")] string Storage);
 
 /// <summary>One row in the host-importer summary.</summary>
 public sealed record ImportSummaryRow(
