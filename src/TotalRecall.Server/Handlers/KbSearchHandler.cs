@@ -18,6 +18,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -44,7 +45,7 @@ public sealed class KbSearchHandler : IToolHandler
             "query":      {"type":"string","description":"Search query"},
             "collection": {"type":"string","description":"Optional collection ID to restrict search"},
             "top_k":      {"type":"number","description":"Number of results to return (default: 10)"},
-            "scope":      {"type":"string","enum":["mine","team","all"],"description":"Query scope: 'mine' (default), 'team', or 'all'"}
+            "scopes":     {"type":"array","items":{"type":"string"},"description":"Scope(s) to search. Defaults to configured default scope. Pass multiple to broaden (e.g. [\"user:paul\",\"global:jira\"])."}
           },
           "required": ["query"]
         }
@@ -90,8 +91,15 @@ public sealed class KbSearchHandler : IToolHandler
 
         var collection = ReadOptionalString(args, "collection");
         var topK = ReadOptionalInt(args, "top_k", 1, 1000) ?? 10;
-        var scope = ReadOptionalString(args, "scope") ?? "mine";
-        _ = scope; // accepted; infrastructure-level filtering applied by store
+
+        IReadOnlyList<string>? scopes = null;
+        if (args.TryGetProperty("scopes", out var scopesEl) && scopesEl.ValueKind == JsonValueKind.Array)
+        {
+            scopes = scopesEl.EnumerateArray()
+                .Where(e => e.ValueKind == JsonValueKind.String)
+                .Select(e => e.GetString()!)
+                .ToArray();
+        }
 
         ct.ThrowIfCancellationRequested();
 
@@ -113,7 +121,8 @@ public sealed class KbSearchHandler : IToolHandler
         var opts = new HybridSearchOpts(
             TopK: requestTopK,
             MinScore: null,
-            FtsWeight: null);
+            FtsWeight: null,
+            Scopes: scopes);
 
         var searchResults = _hybridSearch.Search(ColdKnowledgeOnly, query, vector, opts);
 

@@ -230,50 +230,60 @@ public class KbSearchHandlerTests
     }
 
     [Fact]
-    public async Task Scope_AcceptedWithoutError_Mine()
+    public async Task Scopes_SingleValue_PassedToHybridOpts()
     {
-        var (handler, _, _) = NewFixture();
+        var (handler, _, hybrid) = NewFixture();
 
-        var result = await handler.ExecuteAsync(
-            Args("""{"query":"q","scope":"mine"}"""),
+        await handler.ExecuteAsync(
+            Args("""{"query":"q","scopes":["user:paul"]}"""),
             CancellationToken.None);
 
-        Assert.NotEqual(true, result.IsError);
+        var scopes = hybrid.Calls[0].Opts.Scopes;
+        Assert.NotNull(scopes);
+        Assert.Single(scopes);
+        Assert.Equal("user:paul", scopes[0]);
     }
 
     [Fact]
-    public async Task Scope_AcceptedWithoutError_Team()
+    public async Task Scopes_MultipleValues_PassedToHybridOpts()
     {
-        var (handler, _, _) = NewFixture();
+        var (handler, _, hybrid) = NewFixture();
 
-        var result = await handler.ExecuteAsync(
-            Args("""{"query":"q","scope":"team"}"""),
+        await handler.ExecuteAsync(
+            Args("""{"query":"q","scopes":["user:paul","global:jira"]}"""),
             CancellationToken.None);
 
-        Assert.NotEqual(true, result.IsError);
+        var scopes = hybrid.Calls[0].Opts.Scopes;
+        Assert.NotNull(scopes);
+        Assert.Equal(2, scopes!.Count);
+        Assert.Equal("user:paul", scopes[0]);
+        Assert.Equal("global:jira", scopes[1]);
     }
 
     [Fact]
-    public async Task Scope_AcceptedWithoutError_All()
+    public async Task Scopes_WhenOmitted_NullPassedToHybridOpts()
     {
-        var (handler, _, _) = NewFixture();
+        var (handler, _, hybrid) = NewFixture();
 
-        var result = await handler.ExecuteAsync(
-            Args("""{"query":"q","scope":"all"}"""),
-            CancellationToken.None);
-
-        Assert.NotEqual(true, result.IsError);
-    }
-
-    [Fact]
-    public async Task Scope_DefaultsToMine_WhenOmitted()
-    {
-        var (handler, _, _) = NewFixture();
-
-        var result = await handler.ExecuteAsync(
+        await handler.ExecuteAsync(
             Args("""{"query":"q"}"""),
             CancellationToken.None);
 
-        Assert.NotEqual(true, result.IsError);
+        Assert.Null(hybrid.Calls[0].Opts.Scopes);
+    }
+
+    [Fact]
+    public async Task Scopes_EmptyArray_PassedAsEmptyToHybridOpts()
+    {
+        var (handler, _, hybrid) = NewFixture();
+
+        await handler.ExecuteAsync(
+            Args("""{"query":"q","scopes":[]}"""),
+            CancellationToken.None);
+
+        // Empty array is parsed; handler passes the empty list through (not null).
+        var scopes = hybrid.Calls[0].Opts.Scopes;
+        Assert.NotNull(scopes);
+        Assert.Empty(scopes!);
     }
 }

@@ -59,7 +59,7 @@ public sealed class MemorySearchHandler : IToolHandler
             "minScore":     {"type":"number","description":"Minimum similarity score (0-1)"},
             "tiers":        {"type":"array","items":{"type":"string","enum":["hot","warm","cold"]},"description":"Tiers to search (default: all)"},
             "contentTypes": {"type":"array","items":{"type":"string","enum":["memory","knowledge"]},"description":"Content types to search (default: all)"},
-            "scope":        {"type":"string","enum":["mine","team","all"],"description":"Query scope: 'mine' (default), 'team', or 'all'"}
+            "scopes":       {"type":"array","items":{"type":"string"},"description":"Scope(s) to search. Defaults to configured default scope. Pass multiple to broaden (e.g. [\"user:paul\",\"global:jira\"])."}
           },
           "required": ["query"]
         }
@@ -96,11 +96,14 @@ public sealed class MemorySearchHandler : IToolHandler
         var topK = ReadOptionalInt(args, "topK", 1, 1000) ?? 10;
         var minScore = ReadOptionalDouble(args, "minScore", 0.0, 1.0);
 
-        // scope is a pass-through for now; Postgres implementations already
-        // filter by owner_id / visibility in their WHERE clauses. SQLite
-        // ignores it (all entries are local/private).
-        var scope = ReadOptionalString(args, "scope") ?? "mine";
-        _ = scope; // accepted; infrastructure-level filtering applied by store
+        IReadOnlyList<string>? scopes = null;
+        if (args.TryGetProperty("scopes", out var scopesEl) && scopesEl.ValueKind == JsonValueKind.Array)
+        {
+            scopes = scopesEl.EnumerateArray()
+                .Where(e => e.ValueKind == JsonValueKind.String)
+                .Select(e => e.GetString()!)
+                .ToArray();
+        }
 
         var tierFilter = ReadStringArray(args, "tiers");
         var typeFilter = ReadStringArray(args, "contentTypes");
@@ -139,7 +142,8 @@ public sealed class MemorySearchHandler : IToolHandler
         var opts = new HybridSearchOpts(
             TopK: topK,
             MinScore: minScore,
-            FtsWeight: null);
+            FtsWeight: null,
+            Scopes: scopes);
 
         var results = _hybridSearch.Search(tiers, query, vector, opts);
 
@@ -173,16 +177,6 @@ public sealed class MemorySearchHandler : IToolHandler
         if (prop.ValueKind != JsonValueKind.String)
             throw new ArgumentException($"{name} must be a string");
         return prop.GetString() ?? throw new ArgumentException($"{name} must be a string");
-    }
-
-    private static string? ReadOptionalString(JsonElement args, string name)
-    {
-        if (!args.TryGetProperty(name, out var prop) || prop.ValueKind == JsonValueKind.Null)
-            return null;
-        if (prop.ValueKind != JsonValueKind.String)
-            throw new ArgumentException($"{name} must be a string");
-        var s = prop.GetString();
-        return string.IsNullOrEmpty(s) ? null : s;
     }
 
     // Mirrors TS validateOptionalNumber in src-ts/tools/validation.ts. Two

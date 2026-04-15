@@ -21,7 +21,8 @@ namespace TotalRecall.Infrastructure.Search;
 public sealed record HybridSearchOpts(
     int TopK,
     double? MinScore = null,
-    double? FtsWeight = null);
+    double? FtsWeight = null,
+    IReadOnlyList<string>? Scopes = null);
 
 /// <summary>
 /// Orchestration layer that fuses vector and FTS5 search across one or more
@@ -171,12 +172,23 @@ public sealed class HybridSearch : IHybridSearch
             .Take(opts.TopK)
             .ToList();
 
+        // Build a scope filter set if the caller specified scopes.
+        HashSet<string>? scopeSet = null;
+        if (opts.Scopes is { Count: > 0 } scopeList)
+        {
+            scopeSet = new HashSet<string>(scopeList, StringComparer.Ordinal);
+        }
+
         var merged = new List<SearchResult>(candidates.Count);
         var rank = 1;
         foreach (var c in candidates)
         {
             var entry = _store.Get(c.Tier, c.Type, c.Id);
             if (entry is null) continue;
+
+            // Post-filter by scope when the caller supplied a scopes list.
+            if (scopeSet is not null && !scopeSet.Contains(entry.Scope))
+                continue;
 
             _store.Update(
                 c.Tier,
