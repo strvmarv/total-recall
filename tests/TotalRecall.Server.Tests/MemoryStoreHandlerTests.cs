@@ -280,4 +280,28 @@ public class MemoryStoreHandlerTests
         var call = Assert.Single(store.InsertWithEmbeddingCalls);
         Assert.Null(call.Opts.MetadataJson);
     }
+
+    [Fact]
+    public async Task ExecuteAsync_WithScope_PassesScopeToInsertOpts()
+    {
+        var (handler, store, _, _) = MakeHandler("entry-scoped");
+        var args = ParseArgs("""{"content":"scoped","tier":"hot","scope":"service:bot"}""");
+
+        await handler.ExecuteAsync(args, CancellationToken.None);
+
+        var call = store.InsertWithEmbeddingCalls.Single();
+        Assert.Equal("service:bot", call.Opts.Scope);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithoutScope_ScopeIsNull()
+    {
+        var (handler, store, _, _) = MakeHandler("entry-default");
+        var args = ParseArgs("""{"content":"no scope","tier":"hot"}""");
+
+        await handler.ExecuteAsync(args, CancellationToken.None);
+
+        var call = store.InsertWithEmbeddingCalls.Single();
+        Assert.Null(call.Opts.Scope);
+    }
 }

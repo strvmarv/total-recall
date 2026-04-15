@@ -18,8 +18,8 @@ namespace TotalRecall.Infrastructure.Ingestion;
 public interface IFileIngester
 {
     /// <summary>Ingest a single file. See <see cref="FileIngester.IngestFile"/>.</summary>
-    IngestFileResult IngestFile(string filePath, string? collectionId = null);
+    IngestFileResult IngestFile(string filePath, string? collectionId = null, string? scope = null);
 
     /// <summary>Ingest an entire directory. See <see cref="FileIngester.IngestDirectory"/>.</summary>
-    IngestDirectoryResult IngestDirectory(string dirPath, string? glob = null);
+    IngestDirectoryResult IngestDirectory(string dirPath, string? glob = null, string? scope = null);
 }

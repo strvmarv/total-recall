@@ -29,7 +29,8 @@ public sealed class KbIngestFileHandler : IToolHandler
           "type": "object",
           "properties": {
             "path":       {"type":"string","description":"Path to the file to ingest"},
-            "collection": {"type":"string","description":"Optional collection ID to add to"}
+            "collection": {"type":"string","description":"Optional collection ID to add to"},
+            "scope":      {"type":"string","description":"Scope for ingested entries (e.g. user:paul, team:eng, service:bot). Uses configured default if omitted."}
           },
           "required": ["path"]
         }
@@ -64,10 +65,13 @@ public sealed class KbIngestFileHandler : IToolHandler
             throw new ArgumentException($"path does not exist: {path}");
 
         var collection = ReadOptionalString(args, "collection");
+        var scope = args.TryGetProperty("scope", out var scopeEl) && scopeEl.ValueKind == JsonValueKind.String
+            ? scopeEl.GetString()
+            : null;
 
         ct.ThrowIfCancellationRequested();
 
-        var result = _fileIngester.IngestFile(path, collection);
+        var result = _fileIngester.IngestFile(path, collection, scope);
 
         var probes = new ProbeResultDto[result.Validation.Probes.Count];
         for (var i = 0; i < probes.Length; i++)

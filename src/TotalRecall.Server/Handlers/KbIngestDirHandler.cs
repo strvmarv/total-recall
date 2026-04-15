@@ -33,7 +33,8 @@ public sealed class KbIngestDirHandler : IToolHandler
           "properties": {
             "path":       {"type":"string","description":"Path to the directory to ingest"},
             "glob":       {"type":"string","description":"Optional glob pattern to filter files"},
-            "collection": {"type":"string","description":"Optional collection name override"}
+            "collection": {"type":"string","description":"Optional collection name override"},
+            "scope":      {"type":"string","description":"Scope for ingested entries (e.g. user:paul, team:eng, service:bot). Uses configured default if omitted."}
           },
           "required": ["path"]
         }
@@ -68,6 +69,9 @@ public sealed class KbIngestDirHandler : IToolHandler
             throw new ArgumentException($"path does not exist or is not a directory: {path}");
 
         var glob = ReadOptionalString(args, "glob");
+        var scope = args.TryGetProperty("scope", out var scopeEl) && scopeEl.ValueKind == JsonValueKind.String
+            ? scopeEl.GetString()
+            : null;
         // TODO(Plan 5+): the schema declares a `collection` field for parity
         // with TS, but the TS implementation at src-ts/tools/kb-tools.ts:111-117
         // does not thread it through ingestDirectory either, so we ignore it
@@ -75,7 +79,7 @@ public sealed class KbIngestDirHandler : IToolHandler
 
         ct.ThrowIfCancellationRequested();
 
-        var result = _fileIngester.IngestDirectory(path, glob);
+        var result = _fileIngester.IngestDirectory(path, glob, scope);
 
         var dto = new IngestDirectoryResultDto(
             CollectionId: result.CollectionId,

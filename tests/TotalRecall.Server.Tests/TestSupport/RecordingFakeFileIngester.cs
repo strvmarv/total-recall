@@ -12,8 +12,8 @@ namespace TotalRecall.Server.Tests.TestSupport;
 
 public sealed class RecordingFakeFileIngester : IFileIngester
 {
-    public sealed record IngestFileCall(string FilePath, string? CollectionId);
-    public sealed record IngestDirCall(string DirPath, string? Glob);
+    public sealed record IngestFileCall(string FilePath, string? CollectionId, string? Scope = null);
+    public sealed record IngestDirCall(string DirPath, string? Glob, string? Scope = null);
 
     public List<IngestFileCall> FileCalls { get; } = new();
     public List<IngestDirCall> DirCalls { get; } = new();
@@ -40,16 +40,16 @@ public sealed class RecordingFakeFileIngester : IFileIngester
     /// <summary>When set, IngestFile throws this exception instead of returning the stub result.</summary>
     public Exception? FileThrow { get; set; }
 
-    public IngestFileResult IngestFile(string filePath, string? collectionId = null)
+    public IngestFileResult IngestFile(string filePath, string? collectionId = null, string? scope = null)
     {
-        FileCalls.Add(new IngestFileCall(filePath, collectionId));
+        FileCalls.Add(new IngestFileCall(filePath, collectionId, scope));
         if (FileThrow is not null) throw FileThrow;
         return NextFileResult;
     }
 
-    public IngestDirectoryResult IngestDirectory(string dirPath, string? glob = null)
+    public IngestDirectoryResult IngestDirectory(string dirPath, string? glob = null, string? scope = null)
     {
-        DirCalls.Add(new IngestDirCall(dirPath, glob));
+        DirCalls.Add(new IngestDirCall(dirPath, glob, scope));
         return NextDirResult;
     }
 }

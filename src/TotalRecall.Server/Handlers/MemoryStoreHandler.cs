@@ -72,7 +72,8 @@ public sealed class MemoryStoreHandler : IToolHandler
             "project":     {"type":"string","description":"Project scope"},
             "tags":        {"type":["array","string"],"items":{"type":"string"},"description":"Tags (array, JSON-encoded array string, or comma-separated string)"},
             "source":      {"type":"string","description":"Source identifier"},
-            "visibility":  {"type":"string","enum":["private","team","public"],"description":"Entry visibility: 'private' (default), 'team', or 'public'"}
+            "visibility":  {"type":"string","enum":["private","team","public"],"description":"Entry visibility: 'private' (default), 'team', or 'public'"},
+            "scope":       {"type":"string","description":"Scope for this entry (e.g. user:paul, team:eng, service:bot). Uses configured default if omitted."}
           },
           "required": ["content"]
         }
@@ -132,6 +133,9 @@ public sealed class MemoryStoreHandler : IToolHandler
         var source = ReadOptionalString(args, "source");
         var tags = ReadTags(args);
         var visibility = ReadVisibility(args);
+        var scope = args.TryGetProperty("scope", out var scopeEl) && scopeEl.ValueKind == JsonValueKind.String
+            ? scopeEl.GetString()
+            : null;
 
         // Build the metadata JSON object by hand. All values are drawn from
         // closed enums and cannot contain characters requiring JSON escaping.
@@ -165,7 +169,8 @@ public sealed class MemoryStoreHandler : IToolHandler
                 Source: source,
                 Project: project,
                 Tags: tags,
-                MetadataJson: metadataJson),
+                MetadataJson: metadataJson,
+                Scope: scope),
             vector);
 
         // Match TS wire: content[0].text == JSON.stringify({ id }).

@@ -73,9 +73,11 @@ public sealed class FileIngester : IFileIngester
     /// derived from the parent directory name if null), and return the
     /// document id along with a validation probe result.
     /// </summary>
-    public IngestFileResult IngestFile(string filePath, string? collectionId = null)
+    public IngestFileResult IngestFile(string filePath, string? collectionId = null, string? scope = null)
     {
         ArgumentNullException.ThrowIfNull(filePath);
+        // scope is accepted for interface parity and future wiring; HierarchicalIndex
+        // will honour it once Task 13 threads scope through the ingestion chain.
 
         var content = File.ReadAllText(filePath);
         var chunks = Chunker.chunkFile(content, filePath, DefaultChunkerOpts);
@@ -116,9 +118,10 @@ public sealed class FileIngester : IFileIngester
     /// errors + validation failures. A trailing <paramref name="glob"/>
     /// filter applies to the file basename.
     /// </summary>
-    public IngestDirectoryResult IngestDirectory(string dirPath, string? glob = null)
+    public IngestDirectoryResult IngestDirectory(string dirPath, string? glob = null, string? scope = null)
     {
         ArgumentNullException.ThrowIfNull(dirPath);
+        // scope is accepted for interface parity and future wiring; see IngestFile.
 
         var trimmed = dirPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var dirName = Path.GetFileName(trimmed);
@@ -142,7 +145,7 @@ public sealed class FileIngester : IFileIngester
 
             try
             {
-                var result = IngestFile(filePath, collectionId);
+                var result = IngestFile(filePath, collectionId, scope);
                 documentCount++;
                 totalChunks += result.ChunkCount;
                 if (!result.ValidationPassed)
