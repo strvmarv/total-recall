@@ -96,12 +96,14 @@ public sealed class MemoryStoreHandler : IToolHandler
     private readonly IStore _store;
     private readonly IEmbedder _embedder;
     private readonly IVectorSearch _vectorSearch;
+    private readonly string? _scopeDefault;
 
-    public MemoryStoreHandler(IStore store, IEmbedder embedder, IVectorSearch vectorSearch)
+    public MemoryStoreHandler(IStore store, IEmbedder embedder, IVectorSearch vectorSearch, string? scopeDefault = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _embedder = embedder ?? throw new ArgumentNullException(nameof(embedder));
         _vectorSearch = vectorSearch ?? throw new ArgumentNullException(nameof(vectorSearch));
+        _scopeDefault = scopeDefault;
     }
 
     public string Name => "memory_store";
@@ -135,7 +137,7 @@ public sealed class MemoryStoreHandler : IToolHandler
         var visibility = ReadVisibility(args);
         var scope = args.TryGetProperty("scope", out var scopeEl) && scopeEl.ValueKind == JsonValueKind.String
             ? scopeEl.GetString()
-            : null;
+            : _scopeDefault;
 
         // Build the metadata JSON object by hand. All values are drawn from
         // closed enums and cannot contain characters requiring JSON escaping.

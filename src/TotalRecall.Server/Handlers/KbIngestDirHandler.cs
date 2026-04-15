@@ -41,10 +41,12 @@ public sealed class KbIngestDirHandler : IToolHandler
         """).RootElement.Clone();
 
     private readonly IFileIngester _fileIngester;
+    private readonly string? _scopeDefault;
 
-    public KbIngestDirHandler(IFileIngester fileIngester)
+    public KbIngestDirHandler(IFileIngester fileIngester, string? scopeDefault = null)
     {
         _fileIngester = fileIngester ?? throw new ArgumentNullException(nameof(fileIngester));
+        _scopeDefault = scopeDefault;
     }
 
     public string Name => "kb_ingest_dir";
@@ -71,7 +73,7 @@ public sealed class KbIngestDirHandler : IToolHandler
         var glob = ReadOptionalString(args, "glob");
         var scope = args.TryGetProperty("scope", out var scopeEl) && scopeEl.ValueKind == JsonValueKind.String
             ? scopeEl.GetString()
-            : null;
+            : _scopeDefault;
         // TODO(Plan 5+): the schema declares a `collection` field for parity
         // with TS, but the TS implementation at src-ts/tools/kb-tools.ts:111-117
         // does not thread it through ingestDirectory either, so we ignore it

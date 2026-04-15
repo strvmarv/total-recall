@@ -321,7 +321,7 @@ public class MemorySearchHandlerTests
     }
 
     [Fact]
-    public async Task Scopes_EmptyArray_PassedAsEmptyToHybridOpts()
+    public async Task Scopes_EmptyArray_NoDefault_PassesNullToHybridOpts()
     {
         var (handler, _, hybrid) = NewFixture();
 
@@ -329,9 +329,39 @@ public class MemorySearchHandlerTests
             Args("""{"query":"q","scopes":[]}"""),
             CancellationToken.None);
 
-        // Empty array is parsed; handler passes the empty list through (not null).
+        // Empty array with no configured default resolves to null (no scope filter).
+        Assert.Null(hybrid.Calls[0].Opts.Scopes);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithoutScopes_UsesConfiguredDefault()
+    {
+        var embed = new RecordingFakeEmbedder();
+        var hybrid = new RecordingFakeHybridSearch();
+        var handler = new MemorySearchHandler(embed, hybrid, scopeDefault: "user:configured");
+
+        await handler.ExecuteAsync(Args("""{"query":"q"}"""), CancellationToken.None);
+
         var scopes = hybrid.Calls[0].Opts.Scopes;
         Assert.NotNull(scopes);
-        Assert.Empty(scopes!);
+        Assert.Single(scopes!);
+        Assert.Equal("user:configured", scopes![0]);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ExplicitScopesOverrideConfiguredDefault()
+    {
+        var embed = new RecordingFakeEmbedder();
+        var hybrid = new RecordingFakeHybridSearch();
+        var handler = new MemorySearchHandler(embed, hybrid, scopeDefault: "user:configured");
+
+        await handler.ExecuteAsync(
+            Args("""{"query":"q","scopes":["team:eng"]}"""),
+            CancellationToken.None);
+
+        var scopes = hybrid.Calls[0].Opts.Scopes;
+        Assert.NotNull(scopes);
+        Assert.Single(scopes!);
+        Assert.Equal("team:eng", scopes![0]);
     }
 }

@@ -109,7 +109,8 @@ public static class ServerComposition
         StatusOptions statusOptions,
         Infrastructure.Sync.SyncService? syncService = null,
         Infrastructure.Sync.IRemoteBackend? remoteBackend = null,
-        Infrastructure.Sync.PeriodicSync? periodicSync = null)
+        Infrastructure.Sync.PeriodicSync? periodicSync = null,
+        string? scopeDefault = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(vectors);
@@ -123,8 +124,8 @@ public static class ServerComposition
         var registry = new ToolRegistry();
 
         // ---- Memory (12) ----
-        registry.Register(new MemoryStoreHandler(store, embedder, vectors));
-        registry.Register(new MemorySearchHandler(embedder, hybrid));
+        registry.Register(new MemoryStoreHandler(store, embedder, vectors, scopeDefault));
+        registry.Register(new MemorySearchHandler(embedder, hybrid, scopeDefault));
         registry.Register(new MemoryGetHandler(store));
         registry.Register(new MemoryUpdateHandler(store, embedder, vectors));
         registry.Register(new MemoryDeleteHandler(store, vectors));
@@ -137,9 +138,9 @@ public static class ServerComposition
         registry.Register(new MemoryImportHandler(store, vectors, embedder));
 
         // ---- KB (7) ----
-        registry.Register(new KbSearchHandler(embedder, hybrid, remoteBackend));
-        registry.Register(new KbIngestFileHandler(fileIngester));
-        registry.Register(new KbIngestDirHandler(fileIngester));
+        registry.Register(new KbSearchHandler(embedder, hybrid, remoteBackend, scopeDefault));
+        registry.Register(new KbIngestFileHandler(fileIngester, scopeDefault));
+        registry.Register(new KbIngestDirHandler(fileIngester, scopeDefault));
         registry.Register(new KbListCollectionsHandler(store));
         registry.Register(new KbRefreshHandler(store, vectors, fileIngester));
         registry.Register(new KbRemoveHandler(store, vectors));
@@ -290,7 +291,8 @@ public static class ServerComposition
 
             var registry = BuildRegistry(
                 store, vec, embedder, hybrid,
-                fileIngester, compactionLog, sessionLifecycle, statusOptions);
+                fileIngester, compactionLog, sessionLifecycle, statusOptions,
+                scopeDefault: ResolveScopeDefault(cfg));
 
             // Task 13 — `usage_status` MCP tool. SQLite-only for now: the
             // Postgres composition path has no usage indexer wired (Phase 2
@@ -362,7 +364,8 @@ public static class ServerComposition
 
             var registry = BuildRegistry(
                 store, vec, embedder, hybrid,
-                fileIngester, compactionLog, sessionLifecycle, statusOptions);
+                fileIngester, compactionLog, sessionLifecycle, statusOptions,
+                scopeDefault: ResolveScopeDefault(cfg));
 
             return new ServerCompositionHandles(dataSource, registry, store, storageMode);
         }
@@ -482,7 +485,8 @@ public static class ServerComposition
                 routingStore, vec, embedder, hybrid,
                 fileIngester, compactionLog, sessionLifecycle, statusOptions,
                 syncService: syncService, remoteBackend: cortexClient,
-                periodicSync: periodicSync);
+                periodicSync: periodicSync,
+                scopeDefault: ResolveScopeDefault(cfg));
 
             var usageQuery = new TotalRecall.Infrastructure.Usage.UsageQueryService(conn);
             registry.Register(new UsageStatusHandler(usageQuery));
@@ -503,5 +507,19 @@ public static class ServerComposition
             return cfg.User.Value.UserId.Value;
         var envUserId = Environment.GetEnvironmentVariable("TOTAL_RECALL_USER_ID");
         return envUserId ?? "local";
+    }
+
+    /// <summary>
+    /// Resolves the configured scope default from <c>[scope] default</c> in
+    /// the TOML config. Returns <c>null</c> when the section or key is absent.
+    /// </summary>
+    private static string? ResolveScopeDefault(Core.Config.TotalRecallConfig cfg)
+    {
+        if (!FSharpOption<Core.Config.ScopeConfig>.get_IsSome(cfg.Scope))
+            return null;
+        var scopeCfg = cfg.Scope.Value;
+        if (!FSharpOption<string>.get_IsSome(scopeCfg.Default))
+            return null;
+        return scopeCfg.Default.Value;
     }
 }

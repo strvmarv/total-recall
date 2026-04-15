@@ -304,4 +304,35 @@ public class MemoryStoreHandlerTests
         var call = store.InsertWithEmbeddingCalls.Single();
         Assert.Null(call.Opts.Scope);
     }
+
+    [Fact]
+    public async Task ExecuteAsync_WithoutScope_UsesConfiguredDefault()
+    {
+        var store = new FakeStore();
+        store.NextInsertId = "entry-configured";
+        var embedder = new RecordingFakeEmbedder();
+        var vector = new FakeVectorSearch();
+        var handler = new MemoryStoreHandler(store, embedder, vector, scopeDefault: "user:configured");
+
+        var args = ParseArgs("""{"content":"uses default scope","tier":"hot"}""");
+        await handler.ExecuteAsync(args, CancellationToken.None);
+
+        var call = store.InsertWithEmbeddingCalls.Single();
+        Assert.Equal("user:configured", call.Opts.Scope);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ExplicitScopeOverridesConfiguredDefault()
+    {
+        var store = new FakeStore();
+        var embedder = new RecordingFakeEmbedder();
+        var vector = new FakeVectorSearch();
+        var handler = new MemoryStoreHandler(store, embedder, vector, scopeDefault: "user:configured");
+
+        var args = ParseArgs("""{"content":"explicit scope","tier":"hot","scope":"team:eng"}""");
+        await handler.ExecuteAsync(args, CancellationToken.None);
+
+        var call = store.InsertWithEmbeddingCalls.Single();
+        Assert.Equal("team:eng", call.Opts.Scope);
+    }
 }

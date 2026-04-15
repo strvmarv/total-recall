@@ -37,10 +37,12 @@ public sealed class KbIngestFileHandler : IToolHandler
         """).RootElement.Clone();
 
     private readonly IFileIngester _fileIngester;
+    private readonly string? _scopeDefault;
 
-    public KbIngestFileHandler(IFileIngester fileIngester)
+    public KbIngestFileHandler(IFileIngester fileIngester, string? scopeDefault = null)
     {
         _fileIngester = fileIngester ?? throw new ArgumentNullException(nameof(fileIngester));
+        _scopeDefault = scopeDefault;
     }
 
     public string Name => "kb_ingest_file";
@@ -67,7 +69,7 @@ public sealed class KbIngestFileHandler : IToolHandler
         var collection = ReadOptionalString(args, "collection");
         var scope = args.TryGetProperty("scope", out var scopeEl) && scopeEl.ValueKind == JsonValueKind.String
             ? scopeEl.GetString()
-            : null;
+            : _scopeDefault;
 
         ct.ThrowIfCancellationRequested();
 

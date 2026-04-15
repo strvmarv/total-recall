@@ -59,15 +59,18 @@ public sealed class KbSearchHandler : IToolHandler
     private readonly IEmbedder _embedder;
     private readonly IHybridSearch _hybridSearch;
     private readonly TotalRecall.Infrastructure.Sync.IRemoteBackend? _remote;
+    private readonly string? _scopeDefault;
 
     public KbSearchHandler(
         IEmbedder embedder,
         IHybridSearch hybridSearch,
-        TotalRecall.Infrastructure.Sync.IRemoteBackend? remote = null)
+        TotalRecall.Infrastructure.Sync.IRemoteBackend? remote = null,
+        string? scopeDefault = null)
     {
         _embedder = embedder ?? throw new ArgumentNullException(nameof(embedder));
         _hybridSearch = hybridSearch ?? throw new ArgumentNullException(nameof(hybridSearch));
         _remote = remote;
+        _scopeDefault = scopeDefault;
     }
 
     public string Name => "kb_search";
@@ -99,6 +102,10 @@ public sealed class KbSearchHandler : IToolHandler
                 .Where(e => e.ValueKind == JsonValueKind.String)
                 .Select(e => e.GetString()!)
                 .ToArray();
+        }
+        if (scopes is null or { Count: 0 })
+        {
+            scopes = _scopeDefault is not null ? new[] { _scopeDefault } : null;
         }
 
         ct.ThrowIfCancellationRequested();

@@ -155,4 +155,32 @@ public class KbIngestDirHandlerTests : IDisposable
         Assert.Single(fake.DirCalls);
         // No assertion on a collection field since IngestDirectory doesn't take one.
     }
+
+    [Fact]
+    public async Task ExecuteAsync_WithoutScope_UsesConfiguredDefault()
+    {
+        var fake = new RecordingFakeFileIngester();
+        var handler = new KbIngestDirHandler(fake, scopeDefault: "user:configured");
+
+        await handler.ExecuteAsync(
+            Args($$"""{"path":"{{PathJson}}"}"""),
+            CancellationToken.None);
+
+        Assert.Single(fake.DirCalls);
+        Assert.Equal("user:configured", fake.DirCalls[0].Scope);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ExplicitScopeOverridesConfiguredDefault()
+    {
+        var fake = new RecordingFakeFileIngester();
+        var handler = new KbIngestDirHandler(fake, scopeDefault: "user:configured");
+
+        await handler.ExecuteAsync(
+            Args($$"""{"path":"{{PathJson}}","scope":"team:docs"}"""),
+            CancellationToken.None);
+
+        Assert.Single(fake.DirCalls);
+        Assert.Equal("team:docs", fake.DirCalls[0].Scope);
+    }
 }

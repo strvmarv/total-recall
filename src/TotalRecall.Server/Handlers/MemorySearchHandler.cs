@@ -67,11 +67,13 @@ public sealed class MemorySearchHandler : IToolHandler
 
     private readonly IEmbedder _embedder;
     private readonly IHybridSearch _hybridSearch;
+    private readonly string? _scopeDefault;
 
-    public MemorySearchHandler(IEmbedder embedder, IHybridSearch hybridSearch)
+    public MemorySearchHandler(IEmbedder embedder, IHybridSearch hybridSearch, string? scopeDefault = null)
     {
         _embedder = embedder ?? throw new ArgumentNullException(nameof(embedder));
         _hybridSearch = hybridSearch ?? throw new ArgumentNullException(nameof(hybridSearch));
+        _scopeDefault = scopeDefault;
     }
 
     public string Name => "memory_search";
@@ -103,6 +105,10 @@ public sealed class MemorySearchHandler : IToolHandler
                 .Where(e => e.ValueKind == JsonValueKind.String)
                 .Select(e => e.GetString()!)
                 .ToArray();
+        }
+        if (scopes is null or { Count: 0 })
+        {
+            scopes = _scopeDefault is not null ? new[] { _scopeDefault } : null;
         }
 
         var tierFilter = ReadStringArray(args, "tiers");

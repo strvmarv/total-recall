@@ -143,4 +143,32 @@ public class KbIngestFileHandlerTests : IDisposable
         Assert.Equal(0, probes[0].GetProperty("chunk_index").GetInt32());
         Assert.Equal(0.87, probes[0].GetProperty("score").GetDouble(), 10);
     }
+
+    [Fact]
+    public async Task ExecuteAsync_WithoutScope_UsesConfiguredDefault()
+    {
+        var fake = new RecordingFakeFileIngester();
+        var handler = new KbIngestFileHandler(fake, scopeDefault: "user:configured");
+
+        await handler.ExecuteAsync(
+            Args($$"""{"path":"{{_tmpFile.Replace("\\", "\\\\")}}"}"""),
+            CancellationToken.None);
+
+        Assert.Single(fake.FileCalls);
+        Assert.Equal("user:configured", fake.FileCalls[0].Scope);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ExplicitScopeOverridesConfiguredDefault()
+    {
+        var fake = new RecordingFakeFileIngester();
+        var handler = new KbIngestFileHandler(fake, scopeDefault: "user:configured");
+
+        await handler.ExecuteAsync(
+            Args($$"""{"path":"{{_tmpFile.Replace("\\", "\\\\")}}","scope":"team:docs"}"""),
+            CancellationToken.None);
+
+        Assert.Single(fake.FileCalls);
+        Assert.Equal("team:docs", fake.FileCalls[0].Scope);
+    }
 }
