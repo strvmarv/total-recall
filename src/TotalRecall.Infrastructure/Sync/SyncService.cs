@@ -89,7 +89,8 @@ public sealed class SyncService
                         Content: entry.Content,
                         Source: entry.Source,
                         Tags: entry.Tags,
-                        Id: entry.Id);
+                        Id: entry.Id,
+                        Scope: entry.Scope);
                     _localStore.Insert(Tier.Hot, ContentType.Memory, opts);
                 }
                 else
@@ -139,6 +140,9 @@ public sealed class SyncService
                 {
                     var doc = JsonDocument.Parse(i.Payload);
                     var root = doc.RootElement;
+                    var scope = root.TryGetProperty("scope", out var scopeProp)
+                        ? scopeProp.GetString()
+                        : null;
                     return new SyncEntry(
                         Id: root.GetProperty("id").GetString()!,
                         Content: root.GetProperty("content").GetString()!,
@@ -149,7 +153,8 @@ public sealed class SyncService
                         AccessCount: 0,
                         DecayScore: 1.0,
                         CreatedAt: DateTime.UtcNow,
-                        UpdatedAt: DateTime.UtcNow);
+                        UpdatedAt: DateTime.UtcNow,
+                        Scope: string.IsNullOrEmpty(scope) ? null : scope);
                 }).ToArray();
 
                 await _remote.UpsertMemoriesAsync(entries, ct).ConfigureAwait(false);

@@ -6,8 +6,12 @@ namespace TotalRecall.Infrastructure.Sync;
 /// </summary>
 internal static class SyncPayload
 {
-    public static string Upsert(string id, string content)
-        => $$"""{"id":"{{Escape(id)}}","content":"{{Escape(content)}}"}""";
+    public static string Upsert(string id, string content, string? scope = null)
+    {
+        if (scope is null)
+            return $$"""{"id":"{{Escape(id)}}","content":"{{Escape(content)}}"}""";
+        return $$"""{"id":"{{Escape(id)}}","content":"{{Escape(content)}}","scope":"{{Escape(scope)}}"}""";
+    }
 
     public static string Delete(string id)
         => $$"""{"id":"{{Escape(id)}}"}""";

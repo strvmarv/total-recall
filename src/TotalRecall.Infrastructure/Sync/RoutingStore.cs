@@ -29,7 +29,7 @@ public sealed class RoutingStore : IStore
     public string Insert(Tier tier, ContentType type, InsertEntryOpts opts)
     {
         var id = _local.Insert(tier, type, opts);
-        EnqueueUpsert(id, opts.Content);
+        EnqueueUpsert(id, opts.Content, opts.Scope);
         return id;
     }
 
@@ -37,7 +37,7 @@ public sealed class RoutingStore : IStore
         Tier tier, ContentType type, InsertEntryOpts opts, ReadOnlyMemory<float> embedding)
     {
         var id = _local.InsertWithEmbedding(tier, type, opts, embedding);
-        EnqueueUpsert(id, opts.Content);
+        EnqueueUpsert(id, opts.Content, opts.Scope);
         return id;
     }
 
@@ -52,7 +52,7 @@ public sealed class RoutingStore : IStore
         _local.Update(tier, type, id, opts);
         var entry = _local.Get(tier, type, id);
         if (entry is not null)
-            EnqueueUpsert(id, entry.Content);
+            EnqueueUpsert(id, entry.Content, entry.Scope);
     }
 
     public void Delete(Tier tier, ContentType type, string id)
@@ -85,12 +85,12 @@ public sealed class RoutingStore : IStore
         _local.Move(fromTier, fromType, toTier, toType, id);
         var entry = _local.Get(toTier, toType, id);
         if (entry is not null)
-            EnqueueUpsert(id, entry.Content);
+            EnqueueUpsert(id, entry.Content, entry.Scope);
     }
 
-    private void EnqueueUpsert(string id, string content)
+    private void EnqueueUpsert(string id, string content, string? scope = null)
     {
         _syncQueue.Enqueue("memory", "upsert", id,
-            SyncPayload.Upsert(id, content));
+            SyncPayload.Upsert(id, content, scope));
     }
 }

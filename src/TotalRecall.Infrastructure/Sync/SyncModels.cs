@@ -14,7 +14,8 @@ public sealed record SyncEntry(
     [property: JsonPropertyName("decay_score")] double DecayScore,
     [property: JsonPropertyName("created_at")] DateTime CreatedAt,
     [property: JsonPropertyName("updated_at")] DateTime UpdatedAt,
-    [property: JsonPropertyName("deleted_at")] DateTime? DeletedAt = null);
+    [property: JsonPropertyName("deleted_at")] DateTime? DeletedAt = null,
+    [property: JsonPropertyName("scope")] string? Scope = null);
 
 /// <summary>Result of pulling memories modified since a given watermark.</summary>
 public sealed record SyncPullResult(
