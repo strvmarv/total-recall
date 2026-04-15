@@ -8,8 +8,8 @@ namespace TotalRecall.Infrastructure.Sync;
 /// </summary>
 public interface IRemoteBackend
 {
-    /// <summary>Search the remote knowledge base.</summary>
-    Task<SyncSearchResult[]> SearchKnowledgeAsync(string query, int topK, CancellationToken ct);
+    /// <summary>Search the remote knowledge base, optionally restricted to the given scopes.</summary>
+    Task<SyncSearchResult[]> SearchKnowledgeAsync(string query, int topK, IReadOnlyList<string>? scopes, CancellationToken ct);
 
     /// <summary>Search remote memories within a given scope.</summary>
     Task<SyncSearchResult[]> SearchMemoriesAsync(string query, string scope, int topK, CancellationToken ct);

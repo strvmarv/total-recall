@@ -70,16 +70,32 @@ public class CortexClientTests
         };
         handler.ResponseBody = JsonSerializer.Serialize(results);
 
-        var actual = await client.SearchKnowledgeAsync("test query", 5, CancellationToken.None);
+        var actual = await client.SearchKnowledgeAsync("test query", 5, null, CancellationToken.None);
 
         Assert.NotNull(handler.LastRequest);
         Assert.Equal(HttpMethod.Get, handler.LastRequest!.Method);
         Assert.StartsWith("/api/plugin/sync/knowledge", handler.LastRequest.RequestUri!.AbsolutePath);
         Assert.Contains("query=test%20query", handler.LastRequest.RequestUri.Query);
         Assert.Contains("top_k=5", handler.LastRequest.RequestUri.Query);
+        Assert.DoesNotContain("scopes=", handler.LastRequest.RequestUri.Query);
         Assert.Equal(2, actual.Length);
         Assert.Equal("id-1", actual[0].Id);
         Assert.Equal(0.95, actual[0].Score);
+    }
+
+    [Fact]
+    public async Task SearchKnowledgeAsync_Forwards_Scopes_As_Comma_Separated_Query_Param()
+    {
+        var (client, handler) = CreateClient();
+        handler.ResponseBody = JsonSerializer.Serialize(Array.Empty<SyncSearchResult>());
+
+        await client.SearchKnowledgeAsync(
+            "q", 10,
+            new[] { "user:paul", "global:jira" },
+            CancellationToken.None);
+
+        Assert.NotNull(handler.LastRequest);
+        Assert.Contains("scopes=user%3Apaul%2Cglobal%3Ajira", handler.LastRequest!.RequestUri!.Query);
     }
 
     [Fact]

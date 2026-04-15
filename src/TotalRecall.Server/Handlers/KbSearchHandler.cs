@@ -114,7 +114,7 @@ public sealed class KbSearchHandler : IToolHandler
         // which has the global knowledge base with Cohere v4 embeddings.
         if (_remote is not null)
         {
-            return await SearchRemoteAsync(query, topK, ct).ConfigureAwait(false);
+            return await SearchRemoteAsync(query, topK, scopes, ct).ConfigureAwait(false);
         }
 
         var vector = _embedder.Embed(query);
@@ -186,12 +186,12 @@ public sealed class KbSearchHandler : IToolHandler
     /// Search Cortex's knowledge base remotely. Returns results formatted
     /// identically to the local search path.
     /// </summary>
-    private async Task<ToolCallResult> SearchRemoteAsync(string query, int topK, CancellationToken ct)
+    private async Task<ToolCallResult> SearchRemoteAsync(string query, int topK, IReadOnlyList<string>? scopes, CancellationToken ct)
     {
         TotalRecall.Infrastructure.Sync.SyncSearchResult[] results;
         try
         {
-            results = await _remote!.SearchKnowledgeAsync(query, topK, ct).ConfigureAwait(false);
+            results = await _remote!.SearchKnowledgeAsync(query, topK, scopes, ct).ConfigureAwait(false);
         }
         catch (TotalRecall.Infrastructure.Sync.CortexUnreachableException)
         {

@@ -29,9 +29,13 @@ public sealed class CortexClient : IRemoteBackend
         return new CortexClient(http);
     }
 
-    public async Task<SyncSearchResult[]> SearchKnowledgeAsync(string query, int topK, CancellationToken ct)
+    public async Task<SyncSearchResult[]> SearchKnowledgeAsync(string query, int topK, IReadOnlyList<string>? scopes, CancellationToken ct)
     {
         var url = $"/api/plugin/sync/knowledge?query={Uri.EscapeDataString(query)}&top_k={topK}";
+        if (scopes is { Count: > 0 })
+        {
+            url += $"&scopes={Uri.EscapeDataString(string.Join(",", scopes))}";
+        }
         return await GetAsync(url, SyncJsonContext.Default.SyncSearchResultArray, ct).ConfigureAwait(false)
                ?? Array.Empty<SyncSearchResult>();
     }
