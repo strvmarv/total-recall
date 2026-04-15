@@ -34,7 +34,7 @@ public class MemoryDeleteHandlerTests
             FSharpOption<SourceTool>.None, FSharpOption<string>.None,
             ListModule.OfSeq(Array.Empty<string>()),
             1L, 2L, 3L, 4, 0.5,
-            FSharpOption<string>.None, FSharpOption<string>.None, "{}");
+            FSharpOption<string>.None, FSharpOption<string>.None, "", "{}");
 
     [Fact]
     public async Task HappyPath_Found_ReturnsDeletedTrue()

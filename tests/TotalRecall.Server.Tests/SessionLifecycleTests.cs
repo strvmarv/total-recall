@@ -47,6 +47,7 @@ public sealed class SessionLifecycleTests
             0.0,                                // decayScore
             FSharpOption<string>.None,          // parentId
             FSharpOption<string>.None,          // collectionId
+            "",                                 // scope
             "{}");                              // metadataJson
     }
 

@@ -200,6 +200,7 @@ internal static class EntryFactory
             createdAt, updatedAt, lastAccessedAt, accessCount, decayScore,
             parentId is null ? FSharpOption<string>.None : FSharpOption<string>.Some(parentId),
             collectionId is null ? FSharpOption<string>.None : FSharpOption<string>.Some(collectionId),
+            "",
             metadataJson);
     }
 }

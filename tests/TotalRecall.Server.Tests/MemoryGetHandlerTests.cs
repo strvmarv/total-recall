@@ -41,6 +41,7 @@ public class MemoryGetHandlerTests
             1L, 2L, 3L, 4, 0.5,
             FSharpOption<string>.None,
             FSharpOption<string>.None,
+            "",
             "{}");
 
     [Fact]

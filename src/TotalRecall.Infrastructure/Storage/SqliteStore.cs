@@ -471,6 +471,7 @@ VALUES
             decayScore,
             parentId,
             collectionId,
+            "",
             metadataJson);
     }
 

@@ -38,6 +38,7 @@ public class KbRemoveHandlerTests
             100L, 200L, 300L, 0, 0.5,
             parentId is null ? FSharpOption<string>.None : FSharpOption<string>.Some(parentId),
             collectionId is null ? FSharpOption<string>.None : FSharpOption<string>.Some(collectionId),
+            "",
             "{}");
 
     [Fact]

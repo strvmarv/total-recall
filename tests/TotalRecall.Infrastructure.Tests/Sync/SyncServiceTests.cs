@@ -30,7 +30,7 @@ public sealed class SyncServiceTests
             FSharpOption<SourceTool>.None, FSharpOption<string>.None,
             ListModule.OfSeq(Array.Empty<string>()),
             0L, updatedAt, 0L, 0, 1.0,
-            FSharpOption<string>.None, FSharpOption<string>.None, "{}");
+            FSharpOption<string>.None, FSharpOption<string>.None, "", "{}");
 
     // -----------------------------------------------------------------------
     // Test 1: PullAsync inserts new memories locally

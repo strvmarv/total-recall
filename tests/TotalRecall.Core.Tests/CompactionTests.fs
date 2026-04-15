@@ -31,6 +31,7 @@ let private sampleEntry : Entry = {
     DecayScore = 1.0
     ParentId = None
     CollectionId = None
+    Scope = ""
     MetadataJson = "{}"
 }
 

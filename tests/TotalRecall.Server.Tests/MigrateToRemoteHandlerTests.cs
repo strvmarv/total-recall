@@ -44,6 +44,7 @@ public sealed class MigrateToRemoteHandlerTests
             1.0,
             FSharpOption<string>.None,
             FSharpOption<string>.None,
+            "",
             "{}");
     }
 

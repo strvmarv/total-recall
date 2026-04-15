@@ -34,7 +34,7 @@ public class MemoryPromoteHandlerTests
             FSharpOption<SourceTool>.None, FSharpOption<string>.None,
             ListModule.OfSeq(Array.Empty<string>()),
             1L, 2L, 3L, 4, 0.5,
-            FSharpOption<string>.None, FSharpOption<string>.None, "{}");
+            FSharpOption<string>.None, FSharpOption<string>.None, "", "{}");
 
     [Fact]
     public async Task HappyPath_WarmToHot_MovesAndReEmbeds()

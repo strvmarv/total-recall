@@ -98,6 +98,7 @@ let configTests =
                 Storage = None
                 User = None
                 Cortex = None
+                Scope = None
             }
             Expect.equal cfg.Tiers.Hot.MaxEntries 50 "field access works"
             Expect.equal cfg.Embedding.Model "all-MiniLM-L6-v2" "nested field access works"
