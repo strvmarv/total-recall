@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.9.9 - 2026-04-15
+
+### Added
+
+- **Multi-scope memory and knowledge entries.** New `[scope]` config section with a configurable `default` (defaults to `user:local`). All content tables gained a `scope` column (migration 8) indexed for fast lookup. `memory_store` and `kb_ingest_*` accept an optional `scope` parameter; `memory_search` and `kb_search` accept a `scopes` array to broaden the query (e.g. `["user:paul","global:jira"]`). Scope flows end-to-end through MCP handlers, the SQLite/Postgres stores, the `EntryDto` wire format, sync push/pull, and the CortexClient so plugin-mode and cortex-mode both honor it. The remote `kb_search` path forwards scopes to Cortex as a comma-separated query param.
+
 ## 0.9.7 - 2026-04-13
 
 ### Added
