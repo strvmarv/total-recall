@@ -45,7 +45,8 @@ internal static class EntryMapping
             UpdatedAt: e.UpdatedAt,
             LastAccessedAt: e.LastAccessedAt,
             AccessCount: e.AccessCount,
-            DecayScore: e.DecayScore);
+            DecayScore: e.DecayScore,
+            Scope: e.Scope);
 
     public static string? OptString(FSharpOption<string> opt) =>
         FSharpOption<string>.get_IsSome(opt) ? opt.Value : null;

@@ -22,13 +22,13 @@ internal sealed class FakeFileIngester : IFileIngester
     public IngestDirectoryResult DirResult { get; set; } =
         new IngestDirectoryResult("coll-1", 2, 5, Array.Empty<string>(), true, Array.Empty<string>());
 
-    public IngestFileResult IngestFile(string filePath, string? collectionId = null)
+    public IngestFileResult IngestFile(string filePath, string? collectionId = null, string? scope = null)
     {
         FileCalls.Add((filePath, collectionId));
         return FileResult;
     }
 
-    public IngestDirectoryResult IngestDirectory(string dirPath, string? glob = null)
+    public IngestDirectoryResult IngestDirectory(string dirPath, string? glob = null, string? scope = null)
     {
         DirCalls.Add((dirPath, glob));
         return DirResult;

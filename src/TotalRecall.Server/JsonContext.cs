@@ -272,7 +272,8 @@ public sealed record EntryDto(
     [property: JsonPropertyName("updated_at")] long UpdatedAt,
     [property: JsonPropertyName("last_accessed_at")] long LastAccessedAt,
     [property: JsonPropertyName("access_count")] int AccessCount,
-    [property: JsonPropertyName("decay_score")] double DecayScore);
+    [property: JsonPropertyName("decay_score")] double DecayScore,
+    [property: JsonPropertyName("scope")] string Scope);
 
 // ---------- Task 4.10: session_end / session_context payloads ----------
 //
