@@ -93,21 +93,21 @@ public sealed class PostgresStore : IStore
 INSERT INTO {table}
   (id, tier, content, summary, source, source_tool, project, tags,
    created_at, updated_at, last_accessed_at, access_count,
-   decay_score, parent_id, collection_id, metadata, owner_id)
+   decay_score, parent_id, collection_id, metadata, owner_id, scope)
 VALUES
   (@id, @tier, @content, @summary, @source, @source_tool, @project, @tags,
    @created_at, @updated_at, @last_accessed_at, @access_count,
-   @decay_score, @parent_id, @collection_id, @metadata, @owner_id)";
+   @decay_score, @parent_id, @collection_id, @metadata, @owner_id, @scope)";
 
     private static string BuildInsertWithEmbeddingSql(string table) => $@"
 INSERT INTO {table}
   (id, tier, content, summary, source, source_tool, project, tags,
    created_at, updated_at, last_accessed_at, access_count,
-   decay_score, parent_id, collection_id, metadata, owner_id, embedding)
+   decay_score, parent_id, collection_id, metadata, owner_id, scope, embedding)
 VALUES
   (@id, @tier, @content, @summary, @source, @source_tool, @project, @tags,
    @created_at, @updated_at, @last_accessed_at, @access_count,
-   @decay_score, @parent_id, @collection_id, @metadata, @owner_id, @embedding)";
+   @decay_score, @parent_id, @collection_id, @metadata, @owner_id, @scope, @embedding)";
 
     private static void BindInsertParameters(
         NpgsqlCommand cmd,
@@ -146,6 +146,7 @@ VALUES
         cmd.Parameters.Add(new NpgsqlParameter("@metadata", NpgsqlDbType.Jsonb)
             { Value = opts.MetadataJson ?? "{}" });
         cmd.Parameters.AddWithValue("@owner_id", ownerId);
+        cmd.Parameters.AddWithValue("@scope", opts.Scope ?? "");
     }
 
     public Entry? Get(Tier tier, ContentType type, string id)
@@ -273,6 +274,18 @@ VALUES
         {
             sql.Append(" AND parent_id = @parent_id");
             cmd.Parameters.AddWithValue("@parent_id", opts.ParentId);
+        }
+
+        if (opts?.Scopes is { Count: > 0 } scopes)
+        {
+            var scopeParams = new List<string>();
+            for (var i = 0; i < scopes.Count; i++)
+            {
+                var paramName = $"@scope{i}";
+                scopeParams.Add(paramName);
+                cmd.Parameters.AddWithValue(paramName, scopes[i]);
+            }
+            sql.Append($" AND scope IN ({string.Join(", ", scopeParams)})");
         }
 
         sql.Append(" ORDER BY ").Append(orderBy);
@@ -423,11 +436,11 @@ VALUES
 INSERT INTO {toTable}
   (id, tier, content, summary, source, source_tool, project, tags,
    created_at, updated_at, last_accessed_at, access_count,
-   decay_score, parent_id, collection_id, metadata, owner_id)
+   decay_score, parent_id, collection_id, metadata, owner_id, scope)
 VALUES
   (@id, @tier, @content, @summary, @source, @source_tool, @project, @tags,
    @created_at, @updated_at, @last_accessed_at, @access_count,
-   @decay_score, @parent_id, @collection_id, @metadata, @owner_id)";
+   @decay_score, @parent_id, @collection_id, @metadata, @owner_id, @scope)";
 
                     insertCmd.Parameters.AddWithValue("@id", entry.Id);
                     insertCmd.Parameters.AddWithValue("@tier", toTierStr);
@@ -458,6 +471,7 @@ VALUES
                     insertCmd.Parameters.Add(new NpgsqlParameter("@metadata", NpgsqlDbType.Jsonb)
                         { Value = entry.MetadataJson });
                     insertCmd.Parameters.AddWithValue("@owner_id", _ownerId);
+                    insertCmd.Parameters.AddWithValue("@scope", entry.Scope);
                     insertCmd.ExecuteNonQuery();
                 }
 
@@ -502,6 +516,7 @@ VALUES
         double decayScore = reader.GetDouble(reader.GetOrdinal("decay_score"));
         var parentId = ReadNullableString(reader, "parent_id");
         var collectionId = ReadNullableString(reader, "collection_id");
+        var scope = ReadNullableStringRaw(reader, "scope") ?? "";
         var metadataJson = ReadNullableStringRaw(reader, "metadata") ?? "{}";
 
         return new Entry(
@@ -519,7 +534,7 @@ VALUES
             decayScore,
             parentId,
             collectionId,
-            "",
+            scope,
             metadataJson);
     }
 

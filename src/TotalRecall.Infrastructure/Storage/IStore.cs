@@ -109,7 +109,8 @@ public sealed record InsertEntryOpts(
     /// instead of generating a new one (e.g. Guid / ULID). Used by
     /// <c>MigrateToRemoteHandler</c> to preserve original entry ids.
     /// </summary>
-    string? Id = null);
+    string? Id = null,
+    string? Scope = null);
 
 /// <summary>
 /// Options for <see cref="IStore.Update"/>. Each non-null field becomes
@@ -155,4 +156,10 @@ public sealed record ListEntriesOpts
     /// chunks belonging to a specific document without a raw SQL dependency.
     /// </summary>
     public string? ParentId { get; init; }
+    /// <summary>
+    /// When set, only rows whose <c>scope</c> column matches one of the
+    /// provided values are returned. An empty or null list means no scope
+    /// filter is applied.
+    /// </summary>
+    public IReadOnlyList<string>? Scopes { get; init; }
 }

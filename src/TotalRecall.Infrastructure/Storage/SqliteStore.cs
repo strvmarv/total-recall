@@ -124,11 +124,11 @@ public sealed class SqliteStore : IStore, IDisposable
 INSERT INTO {table}
   (id, content, summary, source, source_tool, project, tags,
    created_at, updated_at, last_accessed_at, access_count,
-   decay_score, parent_id, collection_id, metadata)
+   decay_score, parent_id, collection_id, metadata, scope)
 VALUES
   ($id, $content, $summary, $source, $source_tool, $project, $tags,
    $created_at, $updated_at, $last_accessed_at, $access_count,
-   $decay_score, $parent_id, $collection_id, $metadata)";
+   $decay_score, $parent_id, $collection_id, $metadata, $scope)";
 
     private static void BindInsertParameters(
         Microsoft.Data.Sqlite.SqliteCommand cmd,
@@ -155,6 +155,7 @@ VALUES
         cmd.Parameters.AddWithValue("$parent_id", (object?)opts.ParentId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$collection_id", (object?)opts.CollectionId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$metadata", opts.MetadataJson ?? "{}");
+        cmd.Parameters.AddWithValue("$scope", opts.Scope ?? "");
     }
 
     public Entry? Get(Tier tier, ContentType type, string id)
@@ -263,6 +264,18 @@ VALUES
         {
             whereClauses.Add("parent_id = $parent_id");
             cmd.Parameters.AddWithValue("$parent_id", opts.ParentId);
+        }
+
+        if (opts?.Scopes is { Count: > 0 } scopes)
+        {
+            var scopeParams = new List<string>();
+            for (var i = 0; i < scopes.Count; i++)
+            {
+                var paramName = $"$scope{i}";
+                scopeParams.Add(paramName);
+                cmd.Parameters.AddWithValue(paramName, scopes[i]);
+            }
+            whereClauses.Add($"scope IN ({string.Join(", ", scopeParams)})");
         }
 
         if (whereClauses.Count > 0)
@@ -381,11 +394,11 @@ VALUES
 INSERT INTO {toTable}
   (id, content, summary, source, source_tool, project, tags,
    created_at, updated_at, last_accessed_at, access_count,
-   decay_score, parent_id, collection_id, metadata)
+   decay_score, parent_id, collection_id, metadata, scope)
 VALUES
   ($id, $content, $summary, $source, $source_tool, $project, $tags,
    $created_at, $updated_at, $last_accessed_at, $access_count,
-   $decay_score, $parent_id, $collection_id, $metadata)";
+   $decay_score, $parent_id, $collection_id, $metadata, $scope)";
 
                 insertCmd.Parameters.AddWithValue("$id", entry.Id);
                 insertCmd.Parameters.AddWithValue("$content", entry.Content);
@@ -406,6 +419,7 @@ VALUES
                 insertCmd.Parameters.AddWithValue("$parent_id", ToDbString(entry.ParentId));
                 insertCmd.Parameters.AddWithValue("$collection_id", ToDbString(entry.CollectionId));
                 insertCmd.Parameters.AddWithValue("$metadata", entry.MetadataJson);
+                insertCmd.Parameters.AddWithValue("$scope", entry.Scope);
 
                 insertCmd.ExecuteNonQuery();
             }
@@ -454,6 +468,7 @@ VALUES
         double decayScore = reader.GetDouble(reader.GetOrdinal("decay_score"));
         var parentId = ReadNullableString(reader, "parent_id");
         var collectionId = ReadNullableString(reader, "collection_id");
+        var scope = ReadNullableStringRaw(reader, "scope") ?? "";
         var metadataJson = ReadNullableStringRaw(reader, "metadata") ?? "{}";
 
         return new Entry(
@@ -471,7 +486,7 @@ VALUES
             decayScore,
             parentId,
             collectionId,
-            "",
+            scope,
             metadataJson);
     }
 

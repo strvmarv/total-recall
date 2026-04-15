@@ -495,4 +495,60 @@ public sealed class SqliteStoreIntegrationTests
             }
         }
     }
+
+    [Fact]
+    public void Insert_WithScope_RoundTripsCorrectly()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            var id = store.Insert(
+                Tier.Hot, ContentType.Memory,
+                new InsertEntryOpts("scoped content", Scope: "user:paul"));
+
+            var entries = store.List(Tier.Hot, ContentType.Memory);
+            var entry = entries.Single(e => e.Id == id);
+            Assert.Equal("user:paul", entry.Scope);
+        }
+    }
+
+    [Fact]
+    public void Insert_WithoutScope_DefaultsToEmptyString()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            var id = store.Insert(
+                Tier.Hot, ContentType.Memory,
+                new InsertEntryOpts("no scope"));
+
+            var entries = store.List(Tier.Hot, ContentType.Memory);
+            var entry = entries.Single(e => e.Id == id);
+            Assert.Equal("", entry.Scope);
+        }
+    }
+
+    [Fact]
+    public void List_WithScopeFilter_ReturnsOnlyMatchingEntries()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            store.Insert(Tier.Hot, ContentType.Memory,
+                new InsertEntryOpts("alice entry", Scope: "user:alice"));
+            store.Insert(Tier.Hot, ContentType.Memory,
+                new InsertEntryOpts("bob entry", Scope: "user:bob"));
+            store.Insert(Tier.Hot, ContentType.Memory,
+                new InsertEntryOpts("shared entry", Scope: "global:shared"));
+
+            var alice = store.List(Tier.Hot, ContentType.Memory,
+                new ListEntriesOpts { Scopes = new[] { "user:alice" } });
+            Assert.Single(alice);
+            Assert.Equal("alice entry", alice[0].Content);
+
+            var multi = store.List(Tier.Hot, ContentType.Memory,
+                new ListEntriesOpts { Scopes = new[] { "user:alice", "global:shared" } });
+            Assert.Equal(2, multi.Count);
+        }
+    }
 }
