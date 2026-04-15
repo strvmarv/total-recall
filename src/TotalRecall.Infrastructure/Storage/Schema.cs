@@ -199,6 +199,8 @@ public static class MigrationRunner
         Migration6_UsageTelemetry,
         // Migration 7: persistent sync queue for outbound Cortex buffering
         Migration7_SyncQueue,
+        // Migration 8: first-class scope column on all content tables
+        Migration8_Scope,
     };
 
     /// <summary>
@@ -517,6 +519,23 @@ public static class MigrationRunner
                 last_error  TEXT
             )
             """);
+    }
+
+    private static void Migration8_Scope(MsSqliteConnection conn, Microsoft.Data.Sqlite.SqliteTransaction tx)
+    {
+        foreach (var (tier, type) in AllTablePairs)
+        {
+            var table = TableName(tier, type);
+            using var alter = conn.CreateCommand();
+            alter.Transaction = tx;
+            alter.CommandText = $"ALTER TABLE {table} ADD COLUMN scope TEXT NOT NULL DEFAULT ''";
+            alter.ExecuteNonQuery();
+
+            using var idx = conn.CreateCommand();
+            idx.Transaction = tx;
+            idx.CommandText = $"CREATE INDEX IF NOT EXISTS idx_{table}_scope ON {table}(scope)";
+            idx.ExecuteNonQuery();
+        }
     }
 
     // --- helpers ----------------------------------------------------------

@@ -475,4 +475,24 @@ public sealed class SqliteStoreIntegrationTests
                     new ListEntriesOpts { OrderBy = "created_at ASC extra" }));
         }
     }
+
+    [Fact]
+    public void Migration8_AddsScope_ColumnExistsOnAllContentTables()
+    {
+        var (conn, _) = NewStore();
+        using (conn)
+        {
+            foreach (var (tier, type) in MigrationRunner_AllPairs())
+            {
+                var table = $"{tier}_{type}";
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = $"PRAGMA table_info({table})";
+                using var reader = cmd.ExecuteReader();
+                var columns = new List<string>();
+                while (reader.Read())
+                    columns.Add(reader.GetString(1));
+                Assert.Contains("scope", columns);
+            }
+        }
+    }
 }
