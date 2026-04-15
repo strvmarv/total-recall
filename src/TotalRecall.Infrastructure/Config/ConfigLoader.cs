@@ -375,6 +375,18 @@ public sealed class ConfigLoader : IConfigLoader
             user = FSharpOption<Core.Config.UserConfig>.None;
         }
 
+        FSharpOption<Core.Config.ScopeConfig> scope;
+        if (table.TryGetValue("scope", out var scopeObj) && scopeObj is TomlTable scopeTable)
+        {
+            var scopeCfg = new Core.Config.ScopeConfig(
+                TryGetString(scopeTable, "default"));
+            scope = FSharpOption<Core.Config.ScopeConfig>.Some(scopeCfg);
+        }
+        else
+        {
+            scope = FSharpOption<Core.Config.ScopeConfig>.None;
+        }
+
         return new Core.Config.TotalRecallConfig(
             tiersCfg,
             compactionCfg,
@@ -383,7 +395,8 @@ public sealed class ConfigLoader : IConfigLoader
             search,
             storage,
             user,
-            cortex);
+            cortex,
+            scope);
     }
 
     // --- walker helpers ---------------------------------------------------

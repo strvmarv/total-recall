@@ -76,6 +76,10 @@ type SearchConfig = {
     FtsWeight: float option
 }
 
+type ScopeConfig = {
+    Default: string option
+}
+
 type TotalRecallConfig = {
     Tiers: TiersConfig
     Compaction: CompactionConfig
@@ -85,6 +89,7 @@ type TotalRecallConfig = {
     Storage: StorageConfig option
     User: UserConfig option
     Cortex: CortexConfig option
+    Scope: ScopeConfig option
 }
 
 // --- pure helpers (mirrors src-ts/config.ts isSafeKey + deepMerge + setNestedKey) ---

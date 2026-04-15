@@ -35,6 +35,9 @@ min_events = 10
 [search]
 fts_weight = 0.3
 
+[scope]
+default = "user:local"
+
 # --- Storage mode ---
 # Controls how the plugin stores and retrieves data.
 # "local"   - SQLite + ONNX embeddings, fully self-contained (default)
