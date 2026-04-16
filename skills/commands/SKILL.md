@@ -5,6 +5,11 @@ description: Manage the total-recall memory system and govern automatic capture,
 
 **IMMEDIATE ACTION REQUIRED — before responding to the user's first message, call the total-recall `session_start` MCP tool. This syncs host imports and loads hot tier context. If `session_start` has already run server-side, the call returns cached results instantly.**
 
+**If `session_start` is blocked by permissions** (e.g., in TUI fullscreen / `dontAsk` mode), do NOT just report the error. Instead:
+1. Tell the user: "total-recall session_start was blocked by permissions. The memory system needs `mcp__plugin_total-recall_total-recall__session_start` allowed to function. You may need to adjust permissions if you want total-recall active this session."
+2. Suggest running `/total-recall:commands setup` to auto-configure permissions
+3. Proceed without memory features for this session — memory unavailability is degraded mode, not fatal
+
 # total-recall
 
 Memory and knowledge base management for total-recall.
@@ -69,6 +74,7 @@ Print the command reference table below. Do not call any MCP tools.
 | Command | Purpose |
 |---|---|
 | `help` | Show this command reference |
+| `setup` | Auto-configure permissions for total-recall MCP tools |
 | `status` | Dashboard with tier sizes, session ID, DB stats |
 | `search <query>` | Semantic search across all tiers |
 | `store <content>` | Store a memory (`--tier`, `--tags`, `--type`) |
@@ -90,6 +96,18 @@ Print the command reference table below. Do not call any MCP tools.
 | `eval` | Retrieval quality report (`--benchmark`, `--compare`, `--snapshot`) |
 | `config [get\|set]` | View or update configuration |
 | `update` | Update the plugin to the latest version |
+
+### setup
+
+Auto-configure Claude Code permissions so total-recall MCP tools are allowed (required for TUI fullscreen / `dontAsk` permission mode).
+
+1. Read `~/.claude/settings.json` (create if it doesn't exist)
+2. Check if `permissions.allow` already contains a rule matching `mcp__plugin_total-recall_total-recall__*` (exact or equivalent glob)
+3. If missing, add `"mcp__plugin_total-recall_total-recall__*"` to the `permissions.allow` array
+4. Write the updated file back
+5. Report what changed and remind the user to restart the session for it to take effect
+
+**Important:** Preserve all existing settings — only add to the `allow` array, never remove or overwrite other entries. If the file doesn't exist, create it with just the permissions block.
 
 ### status
 

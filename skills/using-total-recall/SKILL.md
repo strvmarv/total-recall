@@ -10,14 +10,18 @@ This skill ensures the total-recall memory system is active for this session.
 ## Immediate Action
 
 1. Call the total-recall `session_start` MCP tool now (if it already ran server-side, it returns cached results instantly)
-2. **Announce startup** using the returned data:
+2. **If `session_start` is blocked by permissions** (e.g., in TUI fullscreen / `dontAsk` mode):
+   - Tell the user: "total-recall session_start was blocked by permissions. The memory system needs `mcp__plugin_total-recall_total-recall__session_start` allowed to function. You may need to adjust permissions if you want total-recall active this session."
+   - Suggest running `/total-recall:commands setup` to auto-configure permissions for future sessions
+   - Proceed without memory features — this is degraded mode, not fatal
+3. **Announce startup** using the returned data:
    - Report tier summary: hot, warm, cold, KB counts from `tierSummary`
    - Report storage backend from `storage` (e.g. "sqlite", "cortex", "postgres"). If it shows a fallback like "sqlite (cortex failed)", flag this prominently.
    - If `lastSessionAge` is present, mention when the last session was
    - If `hints` are present, briefly surface the most relevant ones
    - Keep it to 2-3 lines max
-3. Use `hints` to inform your behavior throughout the session
-4. Incorporate the returned context to inform your responses
+4. Use `hints` to inform your behavior throughout the session
+5. Incorporate the returned context to inform your responses
 
 ## Ongoing Behaviors
 
