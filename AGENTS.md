@@ -2,7 +2,74 @@
 
 This file is the operational handbook for AI agents and human contributors working in this repo. For end-user docs see `README.md`; for the contributor onboarding flow see `CONTRIBUTING.md`. This file documents project-wide rules, the release flow, the plugin system, the session lifecycle, the schema migration framework, and the beta dogfood mechanics.
 
-> **State as of 0.9.x:** total-recall is a .NET 8 NativeAOT plugin (C# imperative shell + F# functional core). The TypeScript implementation that lived in `src/` through 0.7.x was stripped during the 0.7.2 → 0.8.0 cutover. Anything in this file that mentions `dist/`, `bun`, `tsup`, `vitest`, `publish.yml`, `bin/start.cjs`, or `src/db/schema.ts` is either gone or renamed — see the strip series in `CHANGELOG.md` (commits `87975a7` → `7a8c437`).
+> **State as of 0.9.x:** total-recall is a .NET 8 NativeAOT plugin (C# imperative shell + F# functional core). **Shell: PowerShell (win32) — use PowerShell syntax for all bash commands.** The TypeScript implementation that lived in `src/` through 0.7.x was stripped during the 0.7.2 → 0.8.0 cutover. Anything in this file that mentions `dist/`, `bun`, `tsup`, `vitest`, `publish.yml`, `bin/start.cjs`, or `src/db/schema.ts` is either gone or renamed — see the strip series in `CHANGELOG.md` (commits `87975a7` → `7a8c437`).
+
+---
+
+## Quick Reference
+
+### Project Overview
+.NET 8 NativeAOT MCP server plugin (C# imperative shell + F# functional core) with npm packaging for Claude Code / Copilot CLI / Cursor / OpenCode marketplace distribution. Three-tier memory (Hot/Warm/Cold) + hierarchical KB, all local by default (SQLite + sqlite-vec + bundled ONNX), optionally synced to Cortex.
+
+### Layer Diagram
+```
+TotalRecall.Host (C#)          ← AOT entry point + composition root
+├── TotalRecall.Server (C#)    ← MCP JSON-RPC over stdio; 34 handlers (one file each)
+├── TotalRecall.Cli (C#)       ← CLI commands (Spectre.Console)
+├── TotalRecall.Infrastructure (C#) ← SQLite/Postgres, ONNX embedder, importers, migrations
+└── TotalRecall.Core (F#)      ← Pure functions: tokenizer, decay, ranking, parsers, chunker
+
+npm wrapper layer (zero-dep Node):
+  bin/start.js ← MCP launcher; ensures binary present, spawns with stdio passthrough
+  scripts/fetch-binary.js ← download from GitHub Releases (shared by postinstall + launcher)
+  scripts/postinstall.js, scripts/verify-binaries.js
+```
+
+### WHERE TO LOOK
+
+| Task | Location |
+|------|----------|
+| Add/modify MCP tool | `src/TotalRecall.Server/Handlers/<ToolName>Handler.cs` |
+| Handler wiring | `src/TotalRecall.Server/ServerComposition.cs` → `BuildRegistry()` |
+| Handler interface | `src/TotalRecall.Server/IToolHandler.cs` |
+| Wire-format DTOs | `src/TotalRecall.Server/JsonContext.cs` |
+| Schema migration | `src/TotalRecall.Infrastructure/Storage/Schema.cs` → migrations array |
+| Storage interfaces | `src/TotalRecall.Infrastructure/Storage/` (`IStore`, `IVectorSearch`, etc.) |
+| Embedding (ONNX) | `src/TotalRecall.Infrastructure/Embedding/` |
+| Importers (host tools) | `src/TotalRecall.Infrastructure/Importers/` |
+| Cortex sync | `src/TotalRecall.Infrastructure/Sync/` |
+| Core domain types | `src/TotalRecall.Core/Types.fs` |
+| Pure logic (decay, ranking) | `src/TotalRecall.Core/*.fs` |
+| Migration guard | `src/TotalRecall.Server/AutoMigrationGuard.cs` |
+| Error handling | `src/TotalRecall.Server/ErrorTranslator.cs` |
+| Exception logging | `src/TotalRecall.Infrastructure/Diagnostics/ExceptionLogger.cs` |
+| AOT entry point | `src/TotalRecall.Host/Program.cs` |
+| Benchmark queries | `eval/benchmarks/smoke.jsonl` (22), `eval/benchmarks/retrieval.jsonl` (139) |
+| Plugin manifests | `.claude-plugin/plugin.json`, `.copilot-plugin/plugin.json`, `.cursor-plugin/plugin.json` |
+
+### Key Commands (PowerShell — this repo runs on win32)
+```powershell
+# Build
+dotnet build src/TotalRecall.sln
+
+# Test (all, skip integration)
+dotnet test src/TotalRecall.sln --filter "Category!=Integration"
+
+# Test (single project)
+dotnet test tests/TotalRecall.Server.Tests/TotalRecall.Server.Tests.csproj
+
+# AOT publish (local RID)
+dotnet publish src/TotalRecall.Host/TotalRecall.Host.csproj -c Release -r win-x64 -p:PublishAot=true
+
+# npm (pulls sqlite-vec native libs needed by csproj copy targets)
+npm ci
+
+# Verify binary present
+total-recall status
+```
+
+### Supported RIDs
+`linux-x64`, `linux-arm64`, `osx-arm64`, `win-x64` — Intel Mac (`osx-x64`) not shipped.
 
 ---
 
