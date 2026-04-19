@@ -112,7 +112,8 @@ public static class ServerComposition
         Infrastructure.Sync.PeriodicSync? periodicSync = null,
         string? scopeDefault = null,
         RetrievalEventLog? retrievalLog = null,
-        Infrastructure.Sync.SyncQueue? syncQueue = null)
+        Infrastructure.Sync.SyncQueue? syncQueue = null,
+        CompactionLog? compactionLogWriter = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(vectors);
@@ -131,8 +132,8 @@ public static class ServerComposition
         registry.Register(new MemoryGetHandler(store));
         registry.Register(new MemoryUpdateHandler(store, embedder, vectors));
         registry.Register(new MemoryDeleteHandler(store, vectors));
-        registry.Register(new MemoryPromoteHandler(store, vectors, embedder));
-        registry.Register(new MemoryDemoteHandler(store, vectors, embedder));
+        registry.Register(new MemoryPromoteHandler(store, vectors, embedder, compactionLogWriter, syncQueue));
+        registry.Register(new MemoryDemoteHandler(store, vectors, embedder, compactionLogWriter, syncQueue));
         registry.Register(new MemoryInspectHandler(store, compactionLog));
         registry.Register(new MemoryHistoryHandler(compactionLog));
         registry.Register(new MemoryLineageHandler(compactionLog));
@@ -299,7 +300,8 @@ public static class ServerComposition
                 store, vec, embedder, hybrid,
                 fileIngester, compactionLog, sessionLifecycle, statusOptions,
                 scopeDefault: ResolveScopeDefault(cfg),
-                retrievalLog: retrievalLog);
+                retrievalLog: retrievalLog,
+                compactionLogWriter: compactionLog);
 
             // Task 13 — `usage_status` MCP tool. SQLite-only for now: the
             // Postgres composition path has no usage indexer wired (Phase 2
@@ -501,7 +503,8 @@ public static class ServerComposition
                 periodicSync: periodicSync,
                 scopeDefault: ResolveScopeDefault(cfg),
                 retrievalLog: retrievalLog,
-                syncQueue: syncQueue);
+                syncQueue: syncQueue,
+                compactionLogWriter: compactionLog);
 
             var usageQuery = new TotalRecall.Infrastructure.Usage.UsageQueryService(conn);
             registry.Register(new UsageStatusHandler(usageQuery));

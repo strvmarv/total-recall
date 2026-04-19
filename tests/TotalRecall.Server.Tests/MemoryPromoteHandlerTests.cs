@@ -7,6 +7,9 @@ using System.Threading.Tasks;
 using Microsoft.FSharp.Collections;
 using Microsoft.FSharp.Core;
 using TotalRecall.Core;
+using TotalRecall.Infrastructure.Storage;
+using TotalRecall.Infrastructure.Sync;
+using TotalRecall.Infrastructure.Telemetry;
 using TotalRecall.Server.Handlers;
 using TotalRecall.Server.Tests.TestSupport;
 using Xunit;
@@ -123,6 +126,70 @@ public class MemoryPromoteHandlerTests
         Assert.NotNull(dto);
         Assert.Equal("w1", dto!.Id);
         Assert.True(dto.Success);
+    }
+
+    // ---------------- Phase 6: compaction telemetry ----------------
+
+    [Fact]
+    public async Task Phase6_LogsCompactionEventAndEnqueuesSyncPayload()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        var store = new FakeStore();
+        var vec = new FakeVectorSearch();
+        var embedder = new RecordingFakeEmbedder();
+        var compactionLog = new CompactionLog(conn);
+        var syncQueue = new SyncQueue(conn);
+
+        store.Seed(Tier.Warm, ContentType.Memory, MakeEntry("w1", "body"));
+
+        var handler = new MemoryPromoteHandler(store, vec, embedder, compactionLog, syncQueue);
+
+        await handler.ExecuteAsync(ParseArgs("""{"id":"w1"}"""), CancellationToken.None);
+
+        // --- assert local compaction_log row ---
+        var movements = compactionLog.GetRecentMovements(limit: 10);
+        Assert.Single(movements);
+        var row = movements[0];
+        Assert.Equal("warm", row.SourceTier);
+        Assert.Equal("hot", row.TargetTier);
+        Assert.Equal("w1", row.TargetEntryId);
+        Assert.Contains("w1", row.SourceEntryIds);
+        Assert.Equal("manual_promote", row.Reason);
+        Assert.True(row.DecayScores.ContainsKey("w1"));
+        Assert.Equal(0.5, row.DecayScores["w1"], 6);
+
+        // --- assert sync queue payload ---
+        var items = syncQueue.Drain(limit: 10);
+        Assert.Single(items);
+        var item = items[0];
+        Assert.Equal("compaction", item.EntityType);
+        Assert.Equal("push", item.Operation);
+
+        using var doc = JsonDocument.Parse(item.Payload);
+        Assert.Equal(JsonValueKind.Array, doc.RootElement.ValueKind);
+        Assert.Equal(1, doc.RootElement.GetArrayLength());
+        var evt = doc.RootElement[0];
+        Assert.Equal("w1", evt.GetProperty("entry_id").GetString());
+        Assert.Equal("warm", evt.GetProperty("from_tier").GetString());
+        Assert.Equal("hot", evt.GetProperty("to_tier").GetString());
+        Assert.Equal("promote", evt.GetProperty("action").GetString());
+        Assert.Equal(JsonValueKind.Null, evt.GetProperty("semantic_drift").ValueKind);
+        Assert.Equal(0.5, evt.GetProperty("decay_score").GetDouble(), 6);
+        Assert.False(string.IsNullOrEmpty(evt.GetProperty("timestamp").GetString()));
+    }
+
+    [Fact]
+    public async Task Phase6_WithoutSinks_DoesNotThrow()
+    {
+        // Default ctor — both sinks null. Must not throw.
+        var (handler, store, _, _) = MakeHandler();
+        store.Seed(Tier.Warm, ContentType.Memory, MakeEntry("w1"));
+
+        var result = await handler.ExecuteAsync(ParseArgs("""{"id":"w1"}"""), CancellationToken.None);
+
+        Assert.NotEqual(true, result.IsError);
     }
 
     [Fact]

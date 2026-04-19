@@ -16,6 +16,7 @@
 // here (Plan 4 convention).
 
 using System;
+using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -24,6 +25,8 @@ using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Memory;
 using TotalRecall.Infrastructure.Search;
 using TotalRecall.Infrastructure.Storage;
+using TotalRecall.Infrastructure.Sync;
+using TotalRecall.Infrastructure.Telemetry;
 
 namespace TotalRecall.Server.Handlers;
 
@@ -44,12 +47,21 @@ public sealed class MemoryPromoteHandler : IToolHandler
     private readonly IStore _store;
     private readonly IVectorSearch _vec;
     private readonly IEmbedder _embedder;
+    private readonly CompactionLog? _compactionLog;
+    private readonly SyncQueue? _syncQueue;
 
-    public MemoryPromoteHandler(IStore store, IVectorSearch vec, IEmbedder embedder)
+    public MemoryPromoteHandler(
+        IStore store,
+        IVectorSearch vec,
+        IEmbedder embedder,
+        CompactionLog? compactionLog = null,
+        SyncQueue? syncQueue = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _vec = vec ?? throw new ArgumentNullException(nameof(vec));
         _embedder = embedder ?? throw new ArgumentNullException(nameof(embedder));
+        _compactionLog = compactionLog;
+        _syncQueue = syncQueue;
     }
 
     public string Name => "memory_promote";
@@ -95,6 +107,36 @@ public sealed class MemoryPromoteHandler : IToolHandler
                 $"cannot promote {TierNames.TierName(fromTier)} -> {TierNames.TierName(toTier)} (target must be warmer)");
 
         MoveHelpers.MoveAndReEmbed(_store, _vec, _embedder, entry, fromTier, fromType, toTier, targetType);
+
+        // Phase 6: compaction telemetry. Log locally and enqueue for cortex
+        // push. Both sinks are optional — compositions that do not wire
+        // them leave both null and skip this block entirely.
+        if (_compactionLog is not null || _syncQueue is not null)
+        {
+            var fromTierName = TierNames.TierName(fromTier);
+            var toTierName = TierNames.TierName(toTier);
+            var nowUtc = DateTime.UtcNow;
+
+            _compactionLog?.LogEvent(new CompactionLogEntry(
+                SessionId: "unknown",
+                SourceTier: fromTierName,
+                TargetTier: toTierName,
+                SourceEntryIds: new[] { id },
+                TargetEntryId: id,
+                DecayScores: new Dictionary<string, double> { [id] = entry.DecayScore },
+                Reason: "manual_promote",
+                ConfigSnapshotId: "default"));
+
+            _syncQueue?.Enqueue("compaction", "push", null,
+                CompactionSyncPayload.Event(
+                    entryId: id,
+                    fromTier: fromTierName,
+                    toTier: toTierName,
+                    action: "promote",
+                    semanticDrift: null,
+                    decayScore: entry.DecayScore,
+                    timestampUtc: nowUtc));
+        }
 
         var dto = new MemoryMoveResultDto(
             Id: id,
