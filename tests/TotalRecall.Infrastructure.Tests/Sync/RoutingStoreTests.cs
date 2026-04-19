@@ -36,6 +36,9 @@ public sealed class RoutingStoreTests
 
         var opts = new InsertEntryOpts("hello world");
         local.Insert(Tier.Hot, ContentType.Memory, opts).Returns("id-1");
+        // EnqueueUpsert re-reads the entry to serialize the full payload.
+        local.Get(Tier.Hot, ContentType.Memory, "id-1")
+            .Returns(MakeEntry("id-1", "hello world"));
 
         var store = new RoutingStore(local, remote, syncQueue);
         var id = store.Insert(Tier.Hot, ContentType.Memory, opts);

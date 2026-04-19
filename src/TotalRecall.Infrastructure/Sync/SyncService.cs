@@ -141,21 +141,36 @@ public sealed class SyncService
                 {
                     var doc = JsonDocument.Parse(i.Payload);
                     var root = doc.RootElement;
-                    var scope = root.TryGetProperty("scope", out var scopeProp)
-                        ? scopeProp.GetString()
-                        : null;
                     return new SyncEntry(
                         Id: root.GetProperty("id").GetString()!,
                         Content: root.GetProperty("content").GetString()!,
-                        EntryType: "memory",
-                        ContentType: "memory",
-                        Tags: Array.Empty<string>(),
-                        Source: null,
-                        AccessCount: 0,
-                        DecayScore: 1.0,
-                        CreatedAt: DateTime.UtcNow,
-                        UpdatedAt: DateTime.UtcNow,
-                        Scope: string.IsNullOrEmpty(scope) ? null : scope);
+                        EntryType: root.TryGetProperty("entry_type", out var et) && et.ValueKind == JsonValueKind.String
+                            ? et.GetString()!
+                            : "Preference",
+                        ContentType: root.TryGetProperty("content_type", out var ct) && ct.ValueKind == JsonValueKind.String
+                            ? ct.GetString()!
+                            : "Memory",
+                        Tags: root.TryGetProperty("tags", out var tagsEl) && tagsEl.ValueKind == JsonValueKind.Array
+                            ? tagsEl.EnumerateArray().Select(t => t.GetString()!).ToArray()
+                            : Array.Empty<string>(),
+                        Source: root.TryGetProperty("source", out var srcEl) && srcEl.ValueKind == JsonValueKind.String
+                            ? srcEl.GetString()
+                            : null,
+                        AccessCount: root.TryGetProperty("access_count", out var acEl) && acEl.ValueKind == JsonValueKind.Number
+                            ? acEl.GetInt32()
+                            : 0,
+                        DecayScore: root.TryGetProperty("decay_score", out var dsEl) && dsEl.ValueKind == JsonValueKind.Number
+                            ? dsEl.GetDouble()
+                            : 1.0,
+                        CreatedAt: root.TryGetProperty("created_at", out var caEl) && caEl.ValueKind == JsonValueKind.String
+                            ? caEl.GetDateTime()
+                            : DateTime.UtcNow,
+                        UpdatedAt: root.TryGetProperty("updated_at", out var uaEl) && uaEl.ValueKind == JsonValueKind.String
+                            ? uaEl.GetDateTime()
+                            : DateTime.UtcNow,
+                        Scope: root.TryGetProperty("scope", out var scEl) && scEl.ValueKind == JsonValueKind.String
+                            ? scEl.GetString()
+                            : null);
                 }).ToArray();
 
                 await _remote.UpsertMemoriesAsync(entries, ct).ConfigureAwait(false);

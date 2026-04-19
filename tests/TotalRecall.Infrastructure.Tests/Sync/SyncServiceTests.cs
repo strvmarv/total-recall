@@ -169,6 +169,64 @@ public sealed class SyncServiceTests
     }
 
     // -----------------------------------------------------------------------
+    // Test: Enqueue via RoutingStore → Flush via SyncService round-trips all fields
+    // -----------------------------------------------------------------------
+    [Fact]
+    public async Task FlushAsync_EnqueuedFullEntry_BuildsSyncEntryWithAllFields()
+    {
+        using var conn = OpenAndMigrate();
+        var syncQueue = new SyncQueue(conn);
+        var local = Substitute.For<IStore>();
+        var remote = Substitute.For<IRemoteBackend>();
+
+        // Rich entry: tags, source, access_count, decay_score, created/updated epoch ms.
+        var createdMs = new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero).ToUnixTimeMilliseconds();
+        var updatedMs = new DateTimeOffset(2026, 2, 3, 4, 5, 6, TimeSpan.Zero).ToUnixTimeMilliseconds();
+        var entry = new Entry(
+            "id-rich", "rich content",
+            FSharpOption<string>.None,
+            FSharpOption<string>.Some("test-source"),
+            FSharpOption<SourceTool>.None,
+            FSharpOption<string>.None,
+            ListModule.OfSeq(new[] { "alpha", "beta" }),
+            createdMs, updatedMs, 0L,
+            7, 0.42,
+            FSharpOption<string>.None, FSharpOption<string>.None,
+            "work", EntryType.Decision, "{}");
+
+        // Route an insert through RoutingStore so it enqueues via SyncPayload.Upsert
+        var opts = new InsertEntryOpts("rich content");
+        local.Insert(Tier.Hot, ContentType.Memory, opts).Returns("id-rich");
+        local.Get(Tier.Hot, ContentType.Memory, "id-rich").Returns(entry);
+
+        var routing = new RoutingStore(local, remote, syncQueue);
+        routing.Insert(Tier.Hot, ContentType.Memory, opts);
+
+        // Flush
+        var svc = new SyncService(local, remote, syncQueue, conn);
+        await svc.FlushAsync(CancellationToken.None);
+
+        // Verify remote.UpsertMemoriesAsync saw a SyncEntry populated from the payload
+        await remote.Received(1).UpsertMemoriesAsync(
+            Arg.Is<SyncEntry[]>(arr =>
+                arr.Length == 1 &&
+                arr[0].Id == "id-rich" &&
+                arr[0].Content == "rich content" &&
+                arr[0].EntryType == "Decision" &&
+                arr[0].ContentType == "Memory" &&
+                arr[0].Tags.Length == 2 &&
+                arr[0].Tags[0] == "alpha" &&
+                arr[0].Tags[1] == "beta" &&
+                arr[0].Source == "test-source" &&
+                arr[0].AccessCount == 7 &&
+                arr[0].DecayScore == 0.42 &&
+                arr[0].Scope == "work" &&
+                arr[0].CreatedAt == DateTimeOffset.FromUnixTimeMilliseconds(createdMs).UtcDateTime &&
+                arr[0].UpdatedAt == DateTimeOffset.FromUnixTimeMilliseconds(updatedMs).UtcDateTime),
+            Arg.Any<CancellationToken>());
+    }
+
+    // -----------------------------------------------------------------------
     // Test 5: FlushAsync pushes telemetry (usage, retrieval, compaction)
     // -----------------------------------------------------------------------
     [Fact]
