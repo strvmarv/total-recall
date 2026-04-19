@@ -23,9 +23,12 @@
 //     object plus `score`, `tier`, `content_type`, and `rank`. Field names
 //     match the TS wire-format exactly.
 //
-//   - NOTE: the TS handler additionally calls logRetrievalEvent(...) for
-//     eval telemetry. That is deferred to Plan 5+ — this handler does not
-//     log retrieval events. See TS memory-tools.ts:189-204.
+//   - Phase 5: if a RetrievalEventLog and/or SyncQueue are injected, the
+//     handler now logs a local retrieval event and enqueues a matching
+//     SyncRetrievalEvent for cortex push after each search. Both sinks are
+//     optional, preserving the sqlite-only composition path. SessionId and
+//     ConfigSnapshotId remain placeholders until a future phase plumbs real
+//     session context. See TS memory-tools.ts:189-204.
 //
 //   - Validation throws ArgumentException, matching MemoryStoreHandler, so
 //     ErrorTranslator (Task 4.5) can wrap failures into MCP tool-error shape.
@@ -39,6 +42,8 @@ using System.Threading.Tasks;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Search;
+using TotalRecall.Infrastructure.Sync;
+using TotalRecall.Infrastructure.Telemetry;
 
 namespace TotalRecall.Server.Handlers;
 
@@ -68,12 +73,21 @@ public sealed class MemorySearchHandler : IToolHandler
     private readonly IEmbedder _embedder;
     private readonly IHybridSearch _hybridSearch;
     private readonly string? _scopeDefault;
+    private readonly RetrievalEventLog? _retrievalLog;
+    private readonly SyncQueue? _syncQueue;
 
-    public MemorySearchHandler(IEmbedder embedder, IHybridSearch hybridSearch, string? scopeDefault = null)
+    public MemorySearchHandler(
+        IEmbedder embedder,
+        IHybridSearch hybridSearch,
+        string? scopeDefault = null,
+        RetrievalEventLog? retrievalLog = null,
+        SyncQueue? syncQueue = null)
     {
         _embedder = embedder ?? throw new ArgumentNullException(nameof(embedder));
         _hybridSearch = hybridSearch ?? throw new ArgumentNullException(nameof(hybridSearch));
         _scopeDefault = scopeDefault;
+        _retrievalLog = retrievalLog;
+        _syncQueue = syncQueue;
     }
 
     public string Name => "memory_search";
@@ -151,7 +165,9 @@ public sealed class MemorySearchHandler : IToolHandler
             FtsWeight: null,
             Scopes: scopes);
 
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var results = _hybridSearch.Search(tiers, query, vector, opts);
+        stopwatch.Stop();
 
         var dtos = new MemorySearchResultDto[results.Count];
         for (var i = 0; i < results.Count; i++)
@@ -163,6 +179,53 @@ public sealed class MemorySearchHandler : IToolHandler
                 Tier: EntryMapping.TierName(r.Tier),
                 ContentType: EntryMapping.ContentTypeName(r.ContentType),
                 Rank: r.Rank);
+        }
+
+        // Phase 5: retrieval telemetry. Log locally and enqueue for cortex
+        // push. Both sinks are optional — sqlite-only compositions leave
+        // both null and skip this block entirely.
+        if (_retrievalLog is not null || _syncQueue is not null)
+        {
+            var tiersSearched = tiers
+                .Select(p => $"{EntryMapping.TierName(p.Tier)}_{EntryMapping.ContentTypeName(p.Type)}")
+                .ToArray();
+            var topScore = results.Count > 0 ? results[0].Score : 0.0;
+            var latencyMs = stopwatch.Elapsed.TotalMilliseconds;
+            var nowUtc = DateTime.UtcNow;
+
+            if (_retrievalLog is not null)
+            {
+                var resultItems = new List<RetrievalResultItem>(results.Count);
+                for (var i = 0; i < results.Count; i++)
+                {
+                    var r = results[i];
+                    resultItems.Add(new RetrievalResultItem(
+                        EntryId: r.Entry.Id,
+                        Tier: EntryMapping.TierName(r.Tier),
+                        ContentType: EntryMapping.ContentTypeName(r.ContentType),
+                        Score: r.Score,
+                        Rank: r.Rank));
+                }
+                _retrievalLog.LogEvent(new RetrievalEventEntry(
+                    SessionId: "unknown",          // Phase 5 MVT: no session context yet.
+                    QueryText: query,
+                    QuerySource: "memory_search",
+                    Results: resultItems,
+                    TiersSearched: tiersSearched,
+                    ConfigSnapshotId: "default",  // Phase 5 MVT: placeholder.
+                    LatencyMs: (long)latencyMs));
+            }
+
+            _syncQueue?.Enqueue("retrieval", "push", null,
+                RetrievalSyncPayload.Event(
+                    query: query,
+                    tiersSearched: tiersSearched,
+                    topK: topK,
+                    topScore: topScore,
+                    resultCount: results.Count,
+                    latencyMs: latencyMs,
+                    outcomeSignal: null,
+                    timestampUtc: nowUtc));
         }
 
         var jsonText = JsonSerializer.Serialize(dtos, JsonContext.Default.MemorySearchResultDtoArray);

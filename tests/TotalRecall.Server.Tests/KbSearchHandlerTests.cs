@@ -7,6 +7,7 @@
 namespace TotalRecall.Server.Tests;
 
 using System;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,6 +15,9 @@ using Microsoft.FSharp.Collections;
 using Microsoft.FSharp.Core;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Search;
+using TotalRecall.Infrastructure.Storage;
+using TotalRecall.Infrastructure.Sync;
+using TotalRecall.Infrastructure.Telemetry;
 using TotalRecall.Server.Handlers;
 using TotalRecall.Server.Tests.TestSupport;
 using Xunit;
@@ -316,5 +320,80 @@ public class KbSearchHandlerTests
         Assert.NotNull(scopes);
         Assert.Single(scopes!);
         Assert.Equal("team:eng", scopes![0]);
+    }
+
+    // ---------------- Phase 5: retrieval telemetry ----------------
+
+    [Fact]
+    public async Task Phase5_LogsRetrievalEventAndEnqueuesSyncPayload()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        var embed = new RecordingFakeEmbedder();
+        var hybrid = new RecordingFakeHybridSearch
+        {
+            NextResult = new[]
+            {
+                MakeResult("kb-1", score: 0.88, rank: 1),
+                MakeResult("kb-2", score: 0.55, rank: 2),
+            },
+        };
+        var retrievalLog = new RetrievalEventLog(conn);
+        var syncQueue = new SyncQueue(conn);
+
+        var handler = new KbSearchHandler(
+            embed, hybrid,
+            remote: null,
+            scopeDefault: null,
+            retrievalLog: retrievalLog,
+            syncQueue: syncQueue);
+
+        await handler.ExecuteAsync(
+            Args("""{"query":"kb hello","top_k":4}"""),
+            CancellationToken.None);
+
+        // --- local row ---
+        var rows = retrievalLog.GetEvents(new RetrievalEventQuery());
+        Assert.Single(rows);
+        var row = rows[0];
+        Assert.Equal("kb hello", row.QueryText);
+        Assert.Equal("kb_search", row.QuerySource);
+        Assert.Equal(2, row.ResultCount);
+
+        using (var tiersDoc = JsonDocument.Parse(row.TiersSearchedJson))
+        {
+            // kb_search is scoped to exactly one (cold, knowledge) pair.
+            Assert.Equal(1, tiersDoc.RootElement.GetArrayLength());
+            Assert.Equal("cold_knowledge", tiersDoc.RootElement[0].GetString());
+        }
+
+        // --- sync queue payload ---
+        var items = syncQueue.Drain(limit: 10);
+        Assert.Single(items);
+        var item = items[0];
+        Assert.Equal("retrieval", item.EntityType);
+
+        using var doc = JsonDocument.Parse(item.Payload);
+        var evt = doc.RootElement[0];
+        Assert.Equal("kb hello", evt.GetProperty("query").GetString());
+        Assert.Equal(4, evt.GetProperty("top_k").GetInt32());
+        Assert.Equal(2, evt.GetProperty("result_count").GetInt32());
+        Assert.Equal(0.88, evt.GetProperty("top_score").GetDouble(), 6);
+        Assert.Equal(1, evt.GetProperty("tiers_searched").GetArrayLength());
+        Assert.Equal("cold_knowledge", evt.GetProperty("tiers_searched")[0].GetString());
+    }
+
+    [Fact]
+    public async Task Phase5_WithoutSinks_DoesNotThrow()
+    {
+        // Sqlite-only composition path — both sinks null. Must not throw.
+        var (handler, _, _) = NewFixture();
+
+        var result = await handler.ExecuteAsync(
+            Args("""{"query":"q"}"""),
+            CancellationToken.None);
+
+        Assert.NotEqual(true, result.IsError);
     }
 }

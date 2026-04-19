@@ -110,7 +110,9 @@ public static class ServerComposition
         Infrastructure.Sync.SyncService? syncService = null,
         Infrastructure.Sync.IRemoteBackend? remoteBackend = null,
         Infrastructure.Sync.PeriodicSync? periodicSync = null,
-        string? scopeDefault = null)
+        string? scopeDefault = null,
+        RetrievalEventLog? retrievalLog = null,
+        Infrastructure.Sync.SyncQueue? syncQueue = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(vectors);
@@ -125,7 +127,7 @@ public static class ServerComposition
 
         // ---- Memory (12) ----
         registry.Register(new MemoryStoreHandler(store, embedder, vectors, scopeDefault));
-        registry.Register(new MemorySearchHandler(embedder, hybrid, scopeDefault));
+        registry.Register(new MemorySearchHandler(embedder, hybrid, scopeDefault, retrievalLog, syncQueue));
         registry.Register(new MemoryGetHandler(store));
         registry.Register(new MemoryUpdateHandler(store, embedder, vectors));
         registry.Register(new MemoryDeleteHandler(store, vectors));
@@ -138,7 +140,7 @@ public static class ServerComposition
         registry.Register(new MemoryImportHandler(store, vectors, embedder));
 
         // ---- KB (7) ----
-        registry.Register(new KbSearchHandler(embedder, hybrid, remoteBackend, scopeDefault));
+        registry.Register(new KbSearchHandler(embedder, hybrid, remoteBackend, scopeDefault, retrievalLog, syncQueue));
         registry.Register(new KbIngestFileHandler(fileIngester, scopeDefault));
         registry.Register(new KbIngestDirHandler(fileIngester, scopeDefault));
         registry.Register(new KbListCollectionsHandler(store));
@@ -289,10 +291,15 @@ public static class ServerComposition
                 EmbeddingModel: cfg.Embedding.Model,
                 EmbeddingDimensions: cfg.Embedding.Dimensions);
 
+            // Phase 5: retrieval telemetry — log locally in sqlite-only mode.
+            // syncQueue stays null because there is no cortex to push to.
+            var retrievalLog = new RetrievalEventLog(conn);
+
             var registry = BuildRegistry(
                 store, vec, embedder, hybrid,
                 fileIngester, compactionLog, sessionLifecycle, statusOptions,
-                scopeDefault: ResolveScopeDefault(cfg));
+                scopeDefault: ResolveScopeDefault(cfg),
+                retrievalLog: retrievalLog);
 
             // Task 13 — `usage_status` MCP tool. SQLite-only for now: the
             // Postgres composition path has no usage indexer wired (Phase 2
@@ -483,12 +490,18 @@ public static class ServerComposition
                 EmbeddingModel: cfg.Embedding.Model,
                 EmbeddingDimensions: cfg.Embedding.Dimensions);
 
+            // Phase 5: retrieval telemetry — log locally AND enqueue for
+            // push in cortex mode so SyncService.FlushAsync picks it up.
+            var retrievalLog = new RetrievalEventLog(conn);
+
             var registry = BuildRegistry(
                 routingStore, vec, embedder, hybrid,
                 fileIngester, compactionLog, sessionLifecycle, statusOptions,
                 syncService: syncService, remoteBackend: cortexClient,
                 periodicSync: periodicSync,
-                scopeDefault: ResolveScopeDefault(cfg));
+                scopeDefault: ResolveScopeDefault(cfg),
+                retrievalLog: retrievalLog,
+                syncQueue: syncQueue);
 
             var usageQuery = new TotalRecall.Infrastructure.Usage.UsageQueryService(conn);
             registry.Register(new UsageStatusHandler(usageQuery));

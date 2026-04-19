@@ -12,6 +12,12 @@
 //     (TS kb-tools.ts:169-188) — Plan 5+. We always return needsSummary=false
 //     and hierarchicalMatch=null to preserve the TS wire shape.
 //
+// Phase 5: retrieval telemetry. If a RetrievalEventLog and/or SyncQueue are
+// injected, the handler logs a local retrieval event and enqueues a matching
+// SyncRetrievalEvent after every local search. Both sinks are optional,
+// preserving the sqlite-only composition path. The remote (cortex) path
+// does not double-log — cortex is already the push destination.
+//
 // Constructor takes (IEmbedder, IHybridSearch). No store dependency is
 // needed because we post-filter against Entry.CollectionId / Entry.ParentId
 // already carried on the SearchResult.Entry payload.
@@ -25,6 +31,8 @@ using System.Threading.Tasks;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Search;
+using TotalRecall.Infrastructure.Sync;
+using TotalRecall.Infrastructure.Telemetry;
 
 namespace TotalRecall.Server.Handlers;
 
@@ -60,17 +68,23 @@ public sealed class KbSearchHandler : IToolHandler
     private readonly IHybridSearch _hybridSearch;
     private readonly TotalRecall.Infrastructure.Sync.IRemoteBackend? _remote;
     private readonly string? _scopeDefault;
+    private readonly RetrievalEventLog? _retrievalLog;
+    private readonly SyncQueue? _syncQueue;
 
     public KbSearchHandler(
         IEmbedder embedder,
         IHybridSearch hybridSearch,
         TotalRecall.Infrastructure.Sync.IRemoteBackend? remote = null,
-        string? scopeDefault = null)
+        string? scopeDefault = null,
+        RetrievalEventLog? retrievalLog = null,
+        SyncQueue? syncQueue = null)
     {
         _embedder = embedder ?? throw new ArgumentNullException(nameof(embedder));
         _hybridSearch = hybridSearch ?? throw new ArgumentNullException(nameof(hybridSearch));
         _remote = remote;
         _scopeDefault = scopeDefault;
+        _retrievalLog = retrievalLog;
+        _syncQueue = syncQueue;
     }
 
     public string Name => "kb_search";
@@ -131,7 +145,9 @@ public sealed class KbSearchHandler : IToolHandler
             FtsWeight: null,
             Scopes: scopes);
 
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var searchResults = _hybridSearch.Search(ColdKnowledgeOnly, query, vector, opts);
+        stopwatch.Stop();
 
         // TODO(Plan 5+): hierarchical collection matching
         // (port src-ts/tools/kb-tools.ts:128-154). We currently never
@@ -150,6 +166,53 @@ public sealed class KbSearchHandler : IToolHandler
             if (filtered.Count > topK)
                 filtered.RemoveRange(topK, filtered.Count - topK);
             searchResults = filtered;
+        }
+
+        // Phase 5: retrieval telemetry. Log locally and enqueue for cortex
+        // push. Both sinks are optional — sqlite-only compositions leave
+        // both null and skip this block entirely.
+        if (_retrievalLog is not null || _syncQueue is not null)
+        {
+            var tiersSearched = ColdKnowledgeOnly
+                .Select(p => $"{EntryMapping.TierName(p.Tier)}_{EntryMapping.ContentTypeName(p.Type)}")
+                .ToArray();
+            var topScore = searchResults.Count > 0 ? searchResults[0].Score : 0.0;
+            var latencyMs = stopwatch.Elapsed.TotalMilliseconds;
+            var nowUtc = DateTime.UtcNow;
+
+            if (_retrievalLog is not null)
+            {
+                var resultItems = new List<RetrievalResultItem>(searchResults.Count);
+                for (var i = 0; i < searchResults.Count; i++)
+                {
+                    var r = searchResults[i];
+                    resultItems.Add(new RetrievalResultItem(
+                        EntryId: r.Entry.Id,
+                        Tier: EntryMapping.TierName(r.Tier),
+                        ContentType: EntryMapping.ContentTypeName(r.ContentType),
+                        Score: r.Score,
+                        Rank: r.Rank));
+                }
+                _retrievalLog.LogEvent(new RetrievalEventEntry(
+                    SessionId: "unknown",          // Phase 5 MVT: no session context yet.
+                    QueryText: query,
+                    QuerySource: "kb_search",
+                    Results: resultItems,
+                    TiersSearched: tiersSearched,
+                    ConfigSnapshotId: "default",  // Phase 5 MVT: placeholder.
+                    LatencyMs: (long)latencyMs));
+            }
+
+            _syncQueue?.Enqueue("retrieval", "push", null,
+                RetrievalSyncPayload.Event(
+                    query: query,
+                    tiersSearched: tiersSearched,
+                    topK: topK,
+                    topScore: topScore,
+                    resultCount: searchResults.Count,
+                    latencyMs: latencyMs,
+                    outcomeSignal: null,
+                    timestampUtc: nowUtc));
         }
 
         // TODO(Plan 5+): collection access-count tracking + needsSummary

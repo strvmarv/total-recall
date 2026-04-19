@@ -16,6 +16,9 @@ using Microsoft.FSharp.Collections;
 using Microsoft.FSharp.Core;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Search;
+using TotalRecall.Infrastructure.Storage;
+using TotalRecall.Infrastructure.Sync;
+using TotalRecall.Infrastructure.Telemetry;
 using TotalRecall.Server.Handlers;
 using TotalRecall.Server.Tests.TestSupport;
 using Xunit;
@@ -364,5 +367,111 @@ public class MemorySearchHandlerTests
         Assert.NotNull(scopes);
         Assert.Single(scopes!);
         Assert.Equal("team:eng", scopes![0]);
+    }
+
+    // ---------------- Phase 5: retrieval telemetry ----------------
+
+    [Fact]
+    public async Task Phase5_LogsRetrievalEventAndEnqueuesSyncPayload()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        var embed = new RecordingFakeEmbedder();
+        var hybrid = new RecordingFakeHybridSearch
+        {
+            NextResult = new[]
+            {
+                MakeResult("id-a", Tier.Hot, ContentType.Memory, 0.91, 1),
+                MakeResult("id-b", Tier.Warm, ContentType.Knowledge, 0.42, 2),
+            },
+        };
+        var retrievalLog = new RetrievalEventLog(conn);
+        var syncQueue = new SyncQueue(conn);
+
+        var handler = new MemorySearchHandler(
+            embed, hybrid,
+            scopeDefault: null,
+            retrievalLog: retrievalLog,
+            syncQueue: syncQueue);
+
+        await handler.ExecuteAsync(
+            Args("""{"query":"hello phase5","topK":7}"""),
+            CancellationToken.None);
+
+        // --- assert local retrieval_events row ---
+        var rows = retrievalLog.GetEvents(new RetrievalEventQuery());
+        Assert.Single(rows);
+        var row = rows[0];
+        Assert.Equal("hello phase5", row.QueryText);
+        Assert.Equal("memory_search", row.QuerySource);
+        Assert.Equal(2, row.ResultCount);
+        Assert.Equal("unknown", row.SessionId);
+        Assert.Equal("default", row.ConfigSnapshotId);
+
+        // tiers_searched is the 6 pair names (default: all six table pairs).
+        using (var tiersDoc = JsonDocument.Parse(row.TiersSearchedJson))
+        {
+            Assert.Equal(JsonValueKind.Array, tiersDoc.RootElement.ValueKind);
+            Assert.Equal(6, tiersDoc.RootElement.GetArrayLength());
+            var names = tiersDoc.RootElement.EnumerateArray()
+                .Select(e => e.GetString()).ToArray();
+            Assert.Contains("hot_memory", names);
+            Assert.Contains("cold_knowledge", names);
+        }
+
+        // --- assert sync queue payload ---
+        var items = syncQueue.Drain(limit: 10);
+        Assert.Single(items);
+        var item = items[0];
+        Assert.Equal("retrieval", item.EntityType);
+        Assert.Equal("push", item.Operation);
+
+        using var doc = JsonDocument.Parse(item.Payload);
+        Assert.Equal(JsonValueKind.Array, doc.RootElement.ValueKind);
+        Assert.Equal(1, doc.RootElement.GetArrayLength());
+        var evt = doc.RootElement[0];
+        Assert.Equal("hello phase5", evt.GetProperty("query").GetString());
+        Assert.Equal(7, evt.GetProperty("top_k").GetInt32());
+        Assert.Equal(2, evt.GetProperty("result_count").GetInt32());
+        Assert.Equal(0.91, evt.GetProperty("top_score").GetDouble(), 6);
+        Assert.Equal(6, evt.GetProperty("tiers_searched").GetArrayLength());
+        Assert.Equal(JsonValueKind.Null, evt.GetProperty("outcome_signal").ValueKind);
+        Assert.True(evt.GetProperty("latency_ms").GetDouble() >= 0.0);
+        Assert.False(string.IsNullOrEmpty(evt.GetProperty("timestamp").GetString()));
+    }
+
+    [Fact]
+    public async Task Phase5_WithoutSinks_DoesNotThrow()
+    {
+        // Sqlite-only composition path — both sinks null. Must not throw.
+        var (handler, _, _) = NewFixture();
+
+        var result = await handler.ExecuteAsync(
+            Args("""{"query":"q"}"""),
+            CancellationToken.None);
+
+        Assert.NotEqual(true, result.IsError);
+    }
+
+    [Fact]
+    public async Task Phase5_LogOnly_EnqueueSkipped()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        var embed = new RecordingFakeEmbedder();
+        var hybrid = new RecordingFakeHybridSearch();
+        var retrievalLog = new RetrievalEventLog(conn);
+        var syncQueue = new SyncQueue(conn);
+
+        var handler = new MemorySearchHandler(
+            embed, hybrid, scopeDefault: null,
+            retrievalLog: retrievalLog, syncQueue: null);
+
+        await handler.ExecuteAsync(Args("""{"query":"q"}"""), CancellationToken.None);
+
+        Assert.Single(retrievalLog.GetEvents(new RetrievalEventQuery()));
+        Assert.Equal(0, syncQueue.PendingCount());
     }
 }
