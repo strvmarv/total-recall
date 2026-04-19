@@ -759,6 +759,20 @@ public sealed record MigrateToRemoteResultDto(
 [JsonSerializable(typeof(CompactNowResultDto))]
 // ---- Task 15: migrate_to_remote ----
 [JsonSerializable(typeof(MigrateToRemoteResultDto))]
+// ---- Plan 2 Task 5: Skills DTOs (live in TotalRecall.Infrastructure.Skills) ----
+[JsonSerializable(typeof(TotalRecall.Infrastructure.Skills.ImportedSkill))]
+[JsonSerializable(typeof(TotalRecall.Infrastructure.Skills.ImportedSkill[]))]
+[JsonSerializable(typeof(TotalRecall.Infrastructure.Skills.ImportedSkillFile))]
+[JsonSerializable(typeof(TotalRecall.Infrastructure.Skills.SkillDto))]
+[JsonSerializable(typeof(TotalRecall.Infrastructure.Skills.SkillDto[]))]
+[JsonSerializable(typeof(TotalRecall.Infrastructure.Skills.SkillBundleDto))]
+[JsonSerializable(typeof(TotalRecall.Infrastructure.Skills.SkillFileDto))]
+[JsonSerializable(typeof(TotalRecall.Infrastructure.Skills.SkillSearchHitDto))]
+[JsonSerializable(typeof(TotalRecall.Infrastructure.Skills.SkillSearchHitDto[]))]
+[JsonSerializable(typeof(TotalRecall.Infrastructure.Skills.SkillImportSummaryDto))]
+[JsonSerializable(typeof(TotalRecall.Infrastructure.Skills.SkillImportSummaryDto[]))]
+[JsonSerializable(typeof(TotalRecall.Infrastructure.Skills.SkillListResponseDto))]
+[JsonSerializable(typeof(TotalRecall.Infrastructure.Skills.SkillImportRequestDto))]
 public partial class JsonContext : JsonSerializerContext
 {
 }
