@@ -90,7 +90,8 @@ public sealed class SyncService
                         Source: entry.Source,
                         Tags: entry.Tags,
                         Id: entry.Id,
-                        Scope: entry.Scope);
+                        Scope: entry.Scope,
+                        EntryType: EntryType.Imported);
                     _localStore.Insert(Tier.Hot, ContentType.Memory, opts);
                 }
                 else

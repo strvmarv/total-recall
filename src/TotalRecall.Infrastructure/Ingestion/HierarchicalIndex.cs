@@ -89,7 +89,8 @@ public sealed class HierarchicalIndex
             new InsertEntryOpts(
                 Content: content,
                 Source: opts.SourcePath,
-                MetadataJson: metadataJson));
+                MetadataJson: metadataJson,
+                EntryType: EntryType.Ingested));
 
         var embedding = _embedder.Embed(content);
         _vectorSearch.InsertEmbedding(
@@ -127,7 +128,8 @@ public sealed class HierarchicalIndex
                 Content: docContent,
                 Source: opts.SourcePath,
                 CollectionId: opts.CollectionId,
-                MetadataJson: docMetadata));
+                MetadataJson: docMetadata,
+                EntryType: EntryType.Ingested));
 
         var docEmbedding = _embedder.Embed(docContent);
         _vectorSearch.InsertEmbedding(
@@ -147,7 +149,8 @@ public sealed class HierarchicalIndex
                     Source: opts.SourcePath,
                     ParentId: docId,
                     CollectionId: opts.CollectionId,
-                    MetadataJson: chunkMetadata));
+                    MetadataJson: chunkMetadata,
+                    EntryType: EntryType.Ingested));
 
             var chunkEmbedding = _embedder.Embed(chunk.Content);
             _vectorSearch.InsertEmbedding(

@@ -172,7 +172,8 @@ public sealed class MemoryStoreHandler : IToolHandler
                 Project: project,
                 Tags: tags,
                 MetadataJson: metadataJson,
-                Scope: scope),
+                Scope: scope,
+                EntryType: EntryType.Preference),
             vector);
 
         // Match TS wire: content[0].text == JSON.stringify({ id }).

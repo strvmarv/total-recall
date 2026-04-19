@@ -204,7 +204,8 @@ public sealed class HermesImporter : IImporter
                     Source: filePath,
                     SourceTool: SourceTool.Hermes,
                     Project: project,
-                    Tags: tags));
+                    Tags: tags,
+                    EntryType: EntryType.Imported));
 
                 var embedding = _embedder.Embed(piece);
                 _vectorSearch.InsertEmbedding(Tier.Warm, ContentType.Memory, entryId, embedding);

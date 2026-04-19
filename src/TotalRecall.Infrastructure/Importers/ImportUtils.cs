@@ -207,7 +207,8 @@ public static class ImportUtils
                 Source: filePath,
                 SourceTool: sourceToolDu,
                 Project: project,
-                Tags: tags));
+                Tags: tags,
+                EntryType: EntryType.Imported));
 
             var embedding = embedder.Embed(content);
             vectorSearch.InsertEmbedding(tier, contentType, entryId, embedding);

@@ -296,7 +296,8 @@ public sealed class MigrateToRemoteHandler : IToolHandler
                         ParentId: FSharpOption<string>.get_IsSome(entry.ParentId) ? entry.ParentId.Value : null,
                         CollectionId: FSharpOption<string>.get_IsSome(entry.CollectionId) ? entry.CollectionId.Value : null,
                         MetadataJson: metadataJson,
-                        Id: entry.Id);
+                        Id: entry.Id,
+                        EntryType: entry.EntryType);
 
                     var embedding = targetEmbedder.Embed(entry.Content);
                     target.InsertWithEmbedding(tier, type, opts, embedding);

@@ -224,7 +224,8 @@ public sealed class ClineImporter : IImporter
                     Summary: summary,
                     Source: $"cline:task:{item.Id}",
                     SourceTool: SourceTool.Cline,
-                    Tags: new[] { "cline-task" }));
+                    Tags: new[] { "cline-task" },
+                    EntryType: EntryType.Imported));
 
                 var embedding = _embedder.Embed(content);
                 _vectorSearch.InsertEmbedding(Tier.Cold, ContentType.Knowledge, entryId, embedding);

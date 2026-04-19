@@ -159,7 +159,8 @@ public sealed class CursorImporter : IImporter
                 Content: content,
                 Source: dbPath,
                 SourceTool: SourceTool.Cursor,
-                Tags: new[] { "global-rules" }));
+                Tags: new[] { "global-rules" },
+                EntryType: EntryType.Imported));
 
             var embedding = _embedder.Embed(content);
             _vectorSearch.InsertEmbedding(Tier.Warm, ContentType.Knowledge, entryId, embedding);

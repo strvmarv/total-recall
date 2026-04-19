@@ -110,7 +110,8 @@ public sealed class BenchmarkRunner
                     new InsertEntryOpts(
                         Content: entry.Content,
                         Tags: entry.Tags,
-                        MetadataJson: metadataJson));
+                        MetadataJson: metadataJson,
+                        EntryType: EntryType.Imported));
                 _vectorSearch.InsertEmbedding(Tier.Warm, ContentType.Memory, id, vector);
                 seeded.Add(id);
             }

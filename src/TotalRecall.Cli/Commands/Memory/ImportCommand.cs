@@ -238,7 +238,8 @@ public sealed class ImportCommand : ICliCommand
                         Tags: ReadStringArray(entryElem, "tags"),
                         ParentId: ReadOptionalString(entryElem, "parent_id"),
                         CollectionId: ReadOptionalString(entryElem, "collection_id"),
-                        MetadataJson: ReadMetadataJson(entryElem));
+                        MetadataJson: ReadMetadataJson(entryElem),
+                        EntryType: EntryType.Imported);
 
                     var newId = store.Insert(tier, ctype, opts);
                     // TODO(Plan 5+): atomicity gap (carry-forward #2).
