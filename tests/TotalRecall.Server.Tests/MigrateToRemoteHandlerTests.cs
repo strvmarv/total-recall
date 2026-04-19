@@ -45,6 +45,7 @@ public sealed class MigrateToRemoteHandlerTests
             FSharpOption<string>.None,
             FSharpOption<string>.None,
             "",
+            EntryType.Preference,
             "{}");
     }
 

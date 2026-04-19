@@ -56,6 +56,7 @@ public sealed class BenchmarkRunnerTests : IDisposable
                 FSharpOption<string>.None,
                 FSharpOption<string>.None,
                 "",
+                opts.EntryType ?? EntryType.Preference,
                 opts.MetadataJson ?? "{}");
             Entries[id] = entry;
             return id;

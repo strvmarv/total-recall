@@ -529,6 +529,74 @@ public sealed class SqliteStoreIntegrationTests
     }
 
     [Fact]
+    public void Migration9_AddsEntryType_ColumnExistsOnAllContentTables()
+    {
+        var (conn, _) = NewStore();
+        using (conn)
+        {
+            foreach (var (tier, type) in MigrationRunner_AllPairs())
+            {
+                var table = $"{tier}_{type}";
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = $"PRAGMA table_info({table})";
+                using var reader = cmd.ExecuteReader();
+                var columns = new List<string>();
+                while (reader.Read())
+                    columns.Add(reader.GetString(1));
+                Assert.Contains("entry_type", columns);
+            }
+        }
+    }
+
+    [Fact]
+    public void Insert_WithEntryType_RoundTripsCorrectly()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            var id = store.Insert(
+                Tier.Hot, ContentType.Memory,
+                new InsertEntryOpts("typed content", EntryType: EntryType.Preference));
+
+            var entry = store.Get(Tier.Hot, ContentType.Memory, id);
+            Assert.NotNull(entry);
+            Assert.True(entry!.EntryType.IsPreference);
+        }
+    }
+
+    [Fact]
+    public void Insert_WithoutEntryType_DefaultsToPreference()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            var id = store.Insert(
+                Tier.Hot, ContentType.Memory,
+                new InsertEntryOpts("untyped content"));
+
+            var entry = store.Get(Tier.Hot, ContentType.Memory, id);
+            Assert.NotNull(entry);
+            Assert.True(entry!.EntryType.IsPreference);
+        }
+    }
+
+    [Fact]
+    public void Insert_WithNonDefaultEntryType_RoundTripsCorrectly()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            var id = store.Insert(
+                Tier.Hot, ContentType.Memory,
+                new InsertEntryOpts("corrective content", EntryType: EntryType.Correction));
+
+            var entry = store.Get(Tier.Hot, ContentType.Memory, id);
+            Assert.NotNull(entry);
+            Assert.True(entry!.EntryType.IsCorrection);
+        }
+    }
+
+    [Fact]
     public void List_WithScopeFilter_ReturnsOnlyMatchingEntries()
     {
         var (conn, store) = NewStore();

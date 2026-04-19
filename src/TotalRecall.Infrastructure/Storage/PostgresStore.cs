@@ -93,21 +93,21 @@ public sealed class PostgresStore : IStore
 INSERT INTO {table}
   (id, tier, content, summary, source, source_tool, project, tags,
    created_at, updated_at, last_accessed_at, access_count,
-   decay_score, parent_id, collection_id, metadata, owner_id, scope)
+   decay_score, parent_id, collection_id, metadata, owner_id, scope, entry_type)
 VALUES
   (@id, @tier, @content, @summary, @source, @source_tool, @project, @tags,
    @created_at, @updated_at, @last_accessed_at, @access_count,
-   @decay_score, @parent_id, @collection_id, @metadata, @owner_id, @scope)";
+   @decay_score, @parent_id, @collection_id, @metadata, @owner_id, @scope, @entry_type)";
 
     private static string BuildInsertWithEmbeddingSql(string table) => $@"
 INSERT INTO {table}
   (id, tier, content, summary, source, source_tool, project, tags,
    created_at, updated_at, last_accessed_at, access_count,
-   decay_score, parent_id, collection_id, metadata, owner_id, scope, embedding)
+   decay_score, parent_id, collection_id, metadata, owner_id, scope, entry_type, embedding)
 VALUES
   (@id, @tier, @content, @summary, @source, @source_tool, @project, @tags,
    @created_at, @updated_at, @last_accessed_at, @access_count,
-   @decay_score, @parent_id, @collection_id, @metadata, @owner_id, @scope, @embedding)";
+   @decay_score, @parent_id, @collection_id, @metadata, @owner_id, @scope, @entry_type, @embedding)";
 
     private static void BindInsertParameters(
         NpgsqlCommand cmd,
@@ -147,6 +147,9 @@ VALUES
             { Value = opts.MetadataJson ?? "{}" });
         cmd.Parameters.AddWithValue("@owner_id", ownerId);
         cmd.Parameters.AddWithValue("@scope", opts.Scope ?? "");
+        cmd.Parameters.AddWithValue(
+            "@entry_type",
+            EntryTypeMapping.ToDbValue(opts.EntryType ?? EntryType.Preference));
     }
 
     public Entry? Get(Tier tier, ContentType type, string id)
@@ -436,11 +439,11 @@ VALUES
 INSERT INTO {toTable}
   (id, tier, content, summary, source, source_tool, project, tags,
    created_at, updated_at, last_accessed_at, access_count,
-   decay_score, parent_id, collection_id, metadata, owner_id, scope)
+   decay_score, parent_id, collection_id, metadata, owner_id, scope, entry_type)
 VALUES
   (@id, @tier, @content, @summary, @source, @source_tool, @project, @tags,
    @created_at, @updated_at, @last_accessed_at, @access_count,
-   @decay_score, @parent_id, @collection_id, @metadata, @owner_id, @scope)";
+   @decay_score, @parent_id, @collection_id, @metadata, @owner_id, @scope, @entry_type)";
 
                     insertCmd.Parameters.AddWithValue("@id", entry.Id);
                     insertCmd.Parameters.AddWithValue("@tier", toTierStr);
@@ -472,6 +475,8 @@ VALUES
                         { Value = entry.MetadataJson });
                     insertCmd.Parameters.AddWithValue("@owner_id", _ownerId);
                     insertCmd.Parameters.AddWithValue("@scope", entry.Scope);
+                    insertCmd.Parameters.AddWithValue(
+                        "@entry_type", EntryTypeMapping.ToDbValue(entry.EntryType));
                     insertCmd.ExecuteNonQuery();
                 }
 
@@ -517,6 +522,8 @@ VALUES
         var parentId = ReadNullableString(reader, "parent_id");
         var collectionId = ReadNullableString(reader, "collection_id");
         var scope = ReadNullableStringRaw(reader, "scope") ?? "";
+        var entryTypeStr = ReadNullableStringRaw(reader, "entry_type");
+        var entryType = EntryTypeMapping.ParseOrDefault(entryTypeStr);
         var metadataJson = ReadNullableStringRaw(reader, "metadata") ?? "{}";
 
         return new Entry(
@@ -535,6 +542,7 @@ VALUES
             parentId,
             collectionId,
             scope,
+            entryType,
             metadataJson);
     }
 

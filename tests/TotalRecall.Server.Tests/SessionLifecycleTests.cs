@@ -48,6 +48,7 @@ public sealed class SessionLifecycleTests
             FSharpOption<string>.None,          // parentId
             FSharpOption<string>.None,          // collectionId
             "",                                 // scope
+            EntryType.Preference,               // entryType
             "{}");                              // metadataJson
     }
 

@@ -32,7 +32,7 @@ public class MemoryInspectHandlerTests
             FSharpOption<SourceTool>.Some(SourceTool.ClaudeCode), FSharpOption<string>.Some("proj"),
             ListModule.OfSeq(new[] { "a", "b" }),
             100L, 200L, 300L, 4, 0.75,
-            FSharpOption<string>.None, FSharpOption<string>.None, "", "{\"key\":\"val\"}");
+            FSharpOption<string>.None, FSharpOption<string>.None, "", EntryType.Preference, "{\"key\":\"val\"}");
 
     [Fact]
     public async Task HappyPath_Found_ReturnsFullDetails()

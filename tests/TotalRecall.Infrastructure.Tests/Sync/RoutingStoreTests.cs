@@ -24,7 +24,7 @@ public sealed class RoutingStoreTests
             FSharpOption<SourceTool>.None, FSharpOption<string>.None,
             ListModule.OfSeq(Array.Empty<string>()),
             0L, 0L, 0L, 0, 1.0,
-            FSharpOption<string>.None, FSharpOption<string>.None, "", "{}");
+            FSharpOption<string>.None, FSharpOption<string>.None, "", EntryType.Preference, "{}");
 
     [Fact]
     public void Insert_WritesLocallyAndEnqueues()

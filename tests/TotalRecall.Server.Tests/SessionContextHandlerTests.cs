@@ -39,6 +39,7 @@ public sealed class SessionContextHandlerTests
             FSharpOption<string>.None,
             FSharpOption<string>.None,
             "",
+            EntryType.Preference,
             "{}");
     }
 

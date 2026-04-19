@@ -50,6 +50,7 @@ type Entry = {
     ParentId: string option
     CollectionId: string option
     Scope: string
+    EntryType: EntryType
     /// JSON metadata stored as the raw string. Core does not interpret it;
     /// consumers do their own deserialization when needed.
     MetadataJson: string

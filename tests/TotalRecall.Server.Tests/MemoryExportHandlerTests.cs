@@ -31,7 +31,7 @@ public class MemoryExportHandlerTests
             FSharpOption<SourceTool>.None, FSharpOption<string>.None,
             ListModule.OfSeq(Array.Empty<string>()),
             1L, 2L, 3L, 0, 0.5,
-            FSharpOption<string>.None, FSharpOption<string>.None, "", "{}");
+            FSharpOption<string>.None, FSharpOption<string>.None, "", EntryType.Preference, "{}");
 
     [Fact]
     public async Task HappyPath_ExportsAllEntries()

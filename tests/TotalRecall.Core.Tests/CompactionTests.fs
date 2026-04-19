@@ -32,6 +32,7 @@ let private sampleEntry : Entry = {
     ParentId = None
     CollectionId = None
     Scope = ""
+    EntryType = Preference
     MetadataJson = "{}"
 }
 

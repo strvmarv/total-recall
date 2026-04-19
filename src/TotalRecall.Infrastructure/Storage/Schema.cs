@@ -201,6 +201,8 @@ public static class MigrationRunner
         Migration7_SyncQueue,
         // Migration 8: first-class scope column on all content tables
         Migration8_Scope,
+        // Migration 9: entry_type column on all content tables
+        Migration9_EntryType,
     };
 
     /// <summary>
@@ -535,6 +537,33 @@ public static class MigrationRunner
             idx.Transaction = tx;
             idx.CommandText = $"CREATE INDEX IF NOT EXISTS idx_{table}_scope ON {table}(scope)";
             idx.ExecuteNonQuery();
+        }
+    }
+
+    /// <summary>
+    /// Migration 9 — add an <c>entry_type</c> column to all six content
+    /// tables. Categorises each entry as one of the <see cref="EntryType"/>
+    /// DU cases ("Correction" / "Preference" / "Decision" / "Surfaced" /
+    /// "Imported" / "Compacted" / "Ingested"). Pre-v9 rows default to
+    /// <c>'Preference'</c> so historical data keeps a valid value and the
+    /// Decay module, which pattern-matches on EntryType, can score them
+    /// without a migration fallback. The column is required because the
+    /// outbound Cortex sync DTO expects a non-null entry_type — dropping it
+    /// at the plugin layer was the root cause of garbage values landing
+    /// server-side (Phase 1 of the cortex-sync bug hunt).
+    /// </summary>
+    private static void Migration9_EntryType(
+        MsSqliteConnection conn,
+        Microsoft.Data.Sqlite.SqliteTransaction tx)
+    {
+        foreach (var (tier, type) in AllTablePairs)
+        {
+            var table = TableName(tier, type);
+            using var alter = conn.CreateCommand();
+            alter.Transaction = tx;
+            alter.CommandText =
+                $"ALTER TABLE {table} ADD COLUMN entry_type TEXT NOT NULL DEFAULT 'Preference'";
+            alter.ExecuteNonQuery();
         }
     }
 

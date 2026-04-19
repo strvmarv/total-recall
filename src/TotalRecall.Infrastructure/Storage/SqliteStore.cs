@@ -124,11 +124,11 @@ public sealed class SqliteStore : IStore, IDisposable
 INSERT INTO {table}
   (id, content, summary, source, source_tool, project, tags,
    created_at, updated_at, last_accessed_at, access_count,
-   decay_score, parent_id, collection_id, metadata, scope)
+   decay_score, parent_id, collection_id, metadata, scope, entry_type)
 VALUES
   ($id, $content, $summary, $source, $source_tool, $project, $tags,
    $created_at, $updated_at, $last_accessed_at, $access_count,
-   $decay_score, $parent_id, $collection_id, $metadata, $scope)";
+   $decay_score, $parent_id, $collection_id, $metadata, $scope, $entry_type)";
 
     private static void BindInsertParameters(
         Microsoft.Data.Sqlite.SqliteCommand cmd,
@@ -156,6 +156,9 @@ VALUES
         cmd.Parameters.AddWithValue("$collection_id", (object?)opts.CollectionId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$metadata", opts.MetadataJson ?? "{}");
         cmd.Parameters.AddWithValue("$scope", opts.Scope ?? "");
+        cmd.Parameters.AddWithValue(
+            "$entry_type",
+            EntryTypeMapping.ToDbValue(opts.EntryType ?? EntryType.Preference));
     }
 
     public Entry? Get(Tier tier, ContentType type, string id)
@@ -394,11 +397,11 @@ VALUES
 INSERT INTO {toTable}
   (id, content, summary, source, source_tool, project, tags,
    created_at, updated_at, last_accessed_at, access_count,
-   decay_score, parent_id, collection_id, metadata, scope)
+   decay_score, parent_id, collection_id, metadata, scope, entry_type)
 VALUES
   ($id, $content, $summary, $source, $source_tool, $project, $tags,
    $created_at, $updated_at, $last_accessed_at, $access_count,
-   $decay_score, $parent_id, $collection_id, $metadata, $scope)";
+   $decay_score, $parent_id, $collection_id, $metadata, $scope, $entry_type)";
 
                 insertCmd.Parameters.AddWithValue("$id", entry.Id);
                 insertCmd.Parameters.AddWithValue("$content", entry.Content);
@@ -420,6 +423,8 @@ VALUES
                 insertCmd.Parameters.AddWithValue("$collection_id", ToDbString(entry.CollectionId));
                 insertCmd.Parameters.AddWithValue("$metadata", entry.MetadataJson);
                 insertCmd.Parameters.AddWithValue("$scope", entry.Scope);
+                insertCmd.Parameters.AddWithValue(
+                    "$entry_type", EntryTypeMapping.ToDbValue(entry.EntryType));
 
                 insertCmd.ExecuteNonQuery();
             }
@@ -469,6 +474,8 @@ VALUES
         var parentId = ReadNullableString(reader, "parent_id");
         var collectionId = ReadNullableString(reader, "collection_id");
         var scope = ReadNullableStringRaw(reader, "scope") ?? "";
+        var entryTypeStr = ReadNullableStringRaw(reader, "entry_type");
+        var entryType = EntryTypeMapping.ParseOrDefault(entryTypeStr);
         var metadataJson = ReadNullableStringRaw(reader, "metadata") ?? "{}";
 
         return new Entry(
@@ -487,6 +494,7 @@ VALUES
             parentId,
             collectionId,
             scope,
+            entryType,
             metadataJson);
     }
 
@@ -608,6 +616,47 @@ internal static class SourceToolMapping
         };
         return FSharpOption<SourceTool>.Some(tool);
     }
+}
+
+/// <summary>
+/// Bidirectional mapping between the F# <see cref="EntryType"/> DU and the
+/// string values stored in the <c>entry_type</c> column. We store the DU
+/// case name verbatim ("Correction", "Preference", etc.) so rows remain
+/// human-readable and forward-compatible with any future DU cases.
+///
+/// Parse is fail-safe: unknown or null values fall back to
+/// <see cref="EntryType.Preference"/>. This matches the column default and
+/// prevents a single malformed row from failing a wider <c>List</c> query —
+/// a silent default is acceptable here because <c>entry_type</c> is
+/// metadata, not load-bearing identity, and any future tightening can add
+/// validation at the insert path without changing the read path.
+/// </summary>
+internal static class EntryTypeMapping
+{
+    public static string ToDbValue(EntryType type)
+    {
+        if (type.IsCorrection) return "Correction";
+        if (type.IsPreference) return "Preference";
+        if (type.IsDecision) return "Decision";
+        if (type.IsSurfaced) return "Surfaced";
+        if (type.IsImported) return "Imported";
+        if (type.IsCompacted) return "Compacted";
+        if (type.IsIngested) return "Ingested";
+        throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown EntryType");
+    }
+
+    public static EntryType ParseOrDefault(string? value) =>
+        value switch
+        {
+            "Correction" => EntryType.Correction,
+            "Preference" => EntryType.Preference,
+            "Decision" => EntryType.Decision,
+            "Surfaced" => EntryType.Surfaced,
+            "Imported" => EntryType.Imported,
+            "Compacted" => EntryType.Compacted,
+            "Ingested" => EntryType.Ingested,
+            _ => EntryType.Preference,
+        };
 }
 
 /// <summary>

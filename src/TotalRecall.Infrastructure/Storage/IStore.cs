@@ -110,7 +110,8 @@ public sealed record InsertEntryOpts(
     /// <c>MigrateToRemoteHandler</c> to preserve original entry ids.
     /// </summary>
     string? Id = null,
-    string? Scope = null);
+    string? Scope = null,
+    EntryType? EntryType = null);
 
 /// <summary>
 /// Options for <see cref="IStore.Update"/>. Each non-null field becomes

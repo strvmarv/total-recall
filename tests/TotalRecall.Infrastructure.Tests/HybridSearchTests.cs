@@ -134,6 +134,7 @@ public sealed class HybridSearchTests
             FSharpOption<string>.None,
             FSharpOption<string>.None,
             "",
+            EntryType.Preference,
             "{}");
 
     private static (HybridSearch search, FakeVectorSearch v, FakeFtsSearch f, FakeStore s) NewFixture()

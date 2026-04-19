@@ -55,6 +55,7 @@ public sealed class StatusHandlerTests
             FSharpOption<string>.None,
             FSharpOption<string>.None,
             "",
+            EntryType.Preference,
             metadata);
     }
 

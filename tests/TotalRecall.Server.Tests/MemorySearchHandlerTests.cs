@@ -41,6 +41,7 @@ public class MemorySearchHandlerTests
             FSharpOption<string>.None,
             FSharpOption<string>.None,
             "",
+            EntryType.Preference,
             "{}");
 
     private static SearchResult MakeResult(string id, Tier tier, ContentType ct, double score, int rank) =>

@@ -42,6 +42,7 @@ public class MemoryGetHandlerTests
             FSharpOption<string>.None,
             FSharpOption<string>.None,
             "",
+            EntryType.Preference,
             "{}");
 
     [Fact]

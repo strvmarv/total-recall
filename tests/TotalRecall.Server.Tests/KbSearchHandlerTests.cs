@@ -40,6 +40,7 @@ public class KbSearchHandlerTests
             parentId is null ? FSharpOption<string>.None : FSharpOption<string>.Some(parentId),
             collectionId is null ? FSharpOption<string>.None : FSharpOption<string>.Some(collectionId),
             "",
+            EntryType.Preference,
             "{}");
 
     private static SearchResult MakeResult(

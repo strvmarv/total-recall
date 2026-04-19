@@ -20,7 +20,7 @@ namespace TotalRecall.Infrastructure.Storage;
 /// </summary>
 public static class PostgresMigrationRunner
 {
-    private const int SchemaVersion = 1;
+    private const int SchemaVersion = 2;
 
     private const string SchemaVersionDdl = """
         CREATE TABLE IF NOT EXISTS _schema_version (
@@ -52,11 +52,23 @@ public static class PostgresMigrationRunner
             parent_id         TEXT,
             collection_id     TEXT,
             metadata          JSONB   NOT NULL DEFAULT '{}'::jsonb,
+            entry_type        TEXT    NOT NULL DEFAULT 'Preference',
             owner_id          TEXT    NOT NULL DEFAULT 'local',
             visibility        TEXT    NOT NULL DEFAULT 'private',
             internal_key      BIGSERIAL NOT NULL UNIQUE,
             embedding         vector({{dimensions}})
         )
+        """;
+
+    /// <summary>
+    /// ALTER-column DDL for existing tables upgraded from SchemaVersion 1 to 2.
+    /// Adds the <c>entry_type</c> column required by the outbound Cortex sync
+    /// DTO (Phase 1 of the cortex-sync bug hunt). Pre-v2 rows default to
+    /// <c>'Preference'</c> so historical data keeps a valid value.
+    /// </summary>
+    private static string EntryTypeColumnDdl(string name) => $$"""
+        ALTER TABLE {{name}}
+            ADD COLUMN IF NOT EXISTS entry_type TEXT NOT NULL DEFAULT 'Preference'
         """;
 
     private static string FtsColumnDdl(string name) => $$"""
@@ -201,41 +213,61 @@ public static class PostgresMigrationRunner
             return;
 
         using var tx = conn.BeginTransaction();
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-        // 1. Enable pgvector extension.
-        Exec(conn, tx, "CREATE EXTENSION IF NOT EXISTS vector");
-
-        // 2 & 3. Create content tables + FTS column + indexes.
-        foreach (var name in ContentTableNames)
+        if (currentVersion < 1)
         {
-            Exec(conn, tx, ContentTableDdl(name, dimensions));
-            Exec(conn, tx, FtsColumnDdl(name));
+            // 1. Enable pgvector extension.
+            Exec(conn, tx, "CREATE EXTENSION IF NOT EXISTS vector");
 
-            foreach (var idx in ContentTableIndexes(name))
+            // 2 & 3. Create content tables + FTS column + indexes.
+            foreach (var name in ContentTableNames)
+            {
+                Exec(conn, tx, ContentTableDdl(name, dimensions));
+                Exec(conn, tx, FtsColumnDdl(name));
+
+                foreach (var idx in ContentTableIndexes(name))
+                    Exec(conn, tx, idx);
+            }
+
+            // 4. Create system tables.
+            foreach (var ddl in SystemTableDdls)
+                Exec(conn, tx, ddl);
+
+            // 5. Create system table indexes.
+            foreach (var idx in SystemTableIndexes)
                 Exec(conn, tx, idx);
+
+            RecordSchemaVersion(conn, tx, 1, now);
         }
 
-        // 4. Create system tables.
-        foreach (var ddl in SystemTableDdls)
-            Exec(conn, tx, ddl);
-
-        // 5. Create system table indexes.
-        foreach (var idx in SystemTableIndexes)
-            Exec(conn, tx, idx);
-
-        // 6. Record migration version.
-        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        using (var cmd = conn.CreateCommand())
+        if (currentVersion < 2)
         {
-            cmd.Transaction = tx;
-            cmd.CommandText =
-                "INSERT INTO _schema_version (version, applied_at) VALUES ($v, $t)";
-            cmd.Parameters.AddWithValue("$v", SchemaVersion);
-            cmd.Parameters.AddWithValue("$t", now);
-            cmd.ExecuteNonQuery();
+            // v2: add entry_type column to content tables. Guarded with IF NOT
+            // EXISTS so a v1→v2 upgrade AND a fresh install (where the CREATE
+            // TABLE in the v1 block already included the column) both work.
+            foreach (var name in ContentTableNames)
+                Exec(conn, tx, EntryTypeColumnDdl(name));
+
+            RecordSchemaVersion(conn, tx, 2, now);
         }
 
         tx.Commit();
+    }
+
+    private static void RecordSchemaVersion(
+        NpgsqlConnection conn,
+        NpgsqlTransaction tx,
+        int version,
+        long appliedAt)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText =
+            "INSERT INTO _schema_version (version, applied_at) VALUES ($v, $t)";
+        cmd.Parameters.AddWithValue("$v", version);
+        cmd.Parameters.AddWithValue("$t", appliedAt);
+        cmd.ExecuteNonQuery();
     }
 
     // -------------------------------------------------------------------------
