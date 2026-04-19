@@ -16,6 +16,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using TotalRecall.Infrastructure.Diagnostics;
+using TotalRecall.Infrastructure.Sync;
 using TotalRecall.Infrastructure.Telemetry;
 
 namespace TotalRecall.Infrastructure.Usage;
@@ -28,6 +29,7 @@ public sealed class UsageIndexer
     private readonly TextWriter _stderr;
     private readonly UsageDailyRollup? _rollup;
     private readonly int _retentionDays;
+    private readonly SyncQueue? _syncQueue;
 
     // Sentinel host used to store the global rollup watermark in the
     // usage_watermarks table — avoids adding a separate singleton table.
@@ -39,7 +41,8 @@ public sealed class UsageIndexer
         UsageWatermarkStore watermarks,
         TextWriter? stderr = null,
         UsageDailyRollup? rollup = null,
-        int retentionDays = 30)
+        int retentionDays = 30,
+        SyncQueue? syncQueue = null)
     {
         ArgumentNullException.ThrowIfNull(importers);
         ArgumentNullException.ThrowIfNull(eventLog);
@@ -50,6 +53,7 @@ public sealed class UsageIndexer
         _stderr = stderr ?? Console.Error;
         _rollup = rollup;
         _retentionDays = retentionDays;
+        _syncQueue = syncQueue;
     }
 
     public async Task RunAsync(CancellationToken ct)
@@ -66,7 +70,18 @@ public sealed class UsageIndexer
             {
                 await foreach (var evt in importer.ScanAsync(since, ct).ConfigureAwait(false))
                 {
-                    _eventLog.InsertOrIgnore(evt);
+                    var inserted1 = _eventLog.InsertOrIgnore(evt);
+                    if (inserted1 == 1 && _syncQueue is not null)
+                    {
+                        // Side-channel: push the event upstream to cortex. Only
+                        // newly-inserted rows (not dedup hits) are enqueued so
+                        // cortex never sees duplicates from a replayed scan.
+                        _syncQueue.Enqueue(
+                            entityType: "usage",
+                            operation: "push",
+                            entityId: null,
+                            payload: UsageSyncPayload.Event(evt));
+                    }
                     if (evt.TimestampMs > newMax) newMax = evt.TimestampMs;
                     inserted++;
                 }

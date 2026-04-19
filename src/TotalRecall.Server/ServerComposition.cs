@@ -469,7 +469,9 @@ public static class ServerComposition
             };
             var usageRollup = new TotalRecall.Infrastructure.Telemetry.UsageDailyRollup(conn);
             var usageIndexer = new TotalRecall.Infrastructure.Usage.UsageIndexer(
-                usageImporters, usageEventLog, usageWatermarks, rollup: usageRollup);
+                usageImporters, usageEventLog, usageWatermarks,
+                rollup: usageRollup,
+                syncQueue: syncQueue);
 
             var sessionLifecycle = new SessionLifecycle(
                 importers, routingStore, compactionLog,
