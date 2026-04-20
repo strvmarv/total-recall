@@ -773,6 +773,30 @@ public sealed record MigrateToRemoteResultDto(
 [JsonSerializable(typeof(TotalRecall.Infrastructure.Skills.SkillImportSummaryDto[]))]
 [JsonSerializable(typeof(TotalRecall.Infrastructure.Skills.SkillListResponseDto))]
 [JsonSerializable(typeof(TotalRecall.Infrastructure.Skills.SkillImportRequestDto))]
+// ---- Plan 2 Tasks 11/12: skill_list + skill_delete wire envelopes ----
+// MCP-facing wire shapes local to the Server. These are NOT shared with
+// cortex or the underlying ISkillClient — the handlers assemble them on
+// the way out so the MCP payload carries the paging cursor (Task 11) and
+// the {"deleted":true} acknowledgement (Task 12).
+[JsonSerializable(typeof(SkillListWireResponse))]
+[JsonSerializable(typeof(SkillDeleteWireResponse))]
 public partial class JsonContext : JsonSerializerContext
 {
 }
+
+// ---------- Plan 2 Task 11: skill_list wire envelope ----------
+//
+// Wire shape for the `skill_list` MCP handler. Wraps the cortex list
+// response items with a base64-encoded `nextCursor` (decoded to a skip
+// integer in the handler) so clients can paginate without knowing the
+// cursor format. `NextCursor` is omitted when the last page is reached.
+public sealed record SkillListWireResponse(
+    [property: JsonPropertyName("items")] IReadOnlyList<TotalRecall.Infrastructure.Skills.SkillDto> Items,
+    [property: JsonPropertyName("nextCursor"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? NextCursor);
+
+// ---------- Plan 2 Task 12: skill_delete wire envelope ----------
+//
+// Trivial acknowledgement record so `skill_delete` can emit `{"deleted":true}`
+// through source-gen rather than a hand-rolled writer.
+public sealed record SkillDeleteWireResponse(
+    [property: JsonPropertyName("deleted")] bool Deleted);
