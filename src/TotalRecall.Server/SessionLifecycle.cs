@@ -292,7 +292,10 @@ public sealed class SessionLifecycle : ISessionLifecycle
                 new ListEntriesOpts { OrderBy = "decay_score ASC", Limit = excess });
 
             foreach (var entry in toEvict)
-                _store.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, entry.Id);
+            {
+                try { _store.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, entry.Id); }
+                catch (InvalidOperationException) { } // entry deleted by concurrent write — skip
+            }
         }
         catch (Exception ex)
         {
