@@ -15,6 +15,7 @@
     <PackageReference Include="Npgsql" Version="10.0.2" />
     <PackageReference Include="Pgvector" Version="0.3.2" />
     <PackageReference Include="Tomlyn" Version="0.19.0" />
+    <PackageReference Include="YamlDotNet" Version="16.2.1" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\TotalRecall.Core\TotalRecall.Core.fsproj" />
