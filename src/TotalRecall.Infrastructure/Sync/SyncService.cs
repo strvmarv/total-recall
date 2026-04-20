@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using TotalRecall.Core;
+using TotalRecall.Infrastructure.Memory;
 using TotalRecall.Infrastructure.Storage;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
@@ -84,7 +85,9 @@ public sealed class SyncService
 
                 if (localEntry == null)
                 {
-                    // New memory: insert into hot tier with preserved ID
+                    var pullTier = entry.Tier is not null
+                        ? TierNames.ParseTier(entry.Tier) ?? Tier.Hot
+                        : Tier.Hot;
                     var opts = new InsertEntryOpts(
                         Content: entry.Content,
                         Source: entry.Source,
@@ -92,7 +95,7 @@ public sealed class SyncService
                         Id: entry.Id,
                         Scope: entry.Scope,
                         EntryType: EntryType.Imported);
-                    _localStore.Insert(Tier.Hot, ContentType.Memory, opts);
+                    _localStore.Insert(pullTier, ContentType.Memory, opts);
                 }
                 else
                 {
