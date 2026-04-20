@@ -40,6 +40,7 @@ using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Importers;
 using TotalRecall.Infrastructure.Ingestion;
 using TotalRecall.Infrastructure.Search;
+using TotalRecall.Infrastructure.Skills;
 using TotalRecall.Infrastructure.Storage;
 using TotalRecall.Infrastructure.Sync;
 using TotalRecall.Infrastructure.Telemetry;
@@ -482,10 +483,21 @@ public static class ServerComposition
                 rollup: usageRollup,
                 syncQueue: syncQueue);
 
+            // Plan 2: skill infrastructure — cortex-mode only. Scanner walks
+            // local ~/.claude/skills and {project}/.claude/skills; client POSTs
+            // bundles to the cortex /api/me/skills/import endpoint; the import
+            // service orchestrates both and is injected into SessionLifecycle
+            // so session_start folds skill counts into importSummary.
+            var skillClient = CortexSkillClient.Create(cortexUrl, cortexPat);
+            var skillScanner = new ClaudeCodeSkillScanner();
+            var skillUserIds = new JwtCurrentUserId(cortexPat);
+            var skillImportService = new SkillImportService(skillScanner, skillClient, skillUserIds);
+
             var sessionLifecycle = new SessionLifecycle(
                 importers, routingStore, compactionLog,
                 usageIndexer: usageIndexer,
-                storageMode: storageMode);
+                storageMode: storageMode,
+                skillImportService: skillImportService);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
@@ -508,6 +520,14 @@ public static class ServerComposition
 
             var usageQuery = new TotalRecall.Infrastructure.Usage.UsageQueryService(conn);
             registry.Register(new UsageStatusHandler(usageQuery));
+
+            // Plan 2: skill_* MCP handlers — cortex-mode only (skills live in cortex).
+            registry.Register(new SkillSearchHandler(skillClient));
+            registry.Register(new SkillGetHandler(skillClient));
+            registry.Register(new SkillListHandler(skillClient));
+            registry.Register(new SkillDeleteHandler(skillClient));
+            registry.Register(new SkillImportHostHandler(
+                skillImportService, () => Environment.CurrentDirectory));
 
             return new ServerCompositionHandles(conn, registry, routingStore, storageMode, periodicSync);
         }
