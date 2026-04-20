@@ -21,6 +21,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Importers;
+using TotalRecall.Infrastructure.Skills;
 using TotalRecall.Infrastructure.Storage;
 using TotalRecall.Infrastructure.Telemetry;
 
@@ -43,6 +44,10 @@ public sealed class SessionLifecycle : ISessionLifecycle
     private readonly string _sessionId;
     private readonly string _storageMode;
     private readonly TotalRecall.Infrastructure.Usage.UsageIndexer? _usageIndexer;
+    private readonly ISkillImportService? _skillImportService;
+    // Soft timeout for the skill import sweep — session_start must never block
+    // on a slow cortex push. Kept as a field so tests can override via ctor.
+    private readonly TimeSpan _skillImportTimeout;
 
     private readonly SemaphoreSlim _initLock = new(1, 1);
     private SessionInitResult? _cached;
@@ -54,7 +59,9 @@ public sealed class SessionLifecycle : ISessionLifecycle
         string? sessionId = null,
         Func<long>? nowMs = null,
         TotalRecall.Infrastructure.Usage.UsageIndexer? usageIndexer = null,
-        string storageMode = "sqlite")
+        string storageMode = "sqlite",
+        ISkillImportService? skillImportService = null,
+        TimeSpan? skillImportTimeout = null)
     {
         ArgumentNullException.ThrowIfNull(importers);
         ArgumentNullException.ThrowIfNull(store);
@@ -66,6 +73,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
         _nowMs = nowMs ?? (() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         _usageIndexer = usageIndexer;
         _storageMode = storageMode;
+        _skillImportService = skillImportService;
+        _skillImportTimeout = skillImportTimeout ?? TimeSpan.FromSeconds(5);
     }
 
     /// <inheritdoc />
@@ -125,7 +134,78 @@ public sealed class SessionLifecycle : ISessionLifecycle
             importSummary.Add(new ImportSummaryRow(
                 importer.Name,
                 memResult.Imported,
-                kbResult.Imported));
+                kbResult.Imported,
+                SkillsImported: 0,
+                SkillsUpdated: 0,
+                SkillsUnchanged: 0,
+                SkillsOrphaned: 0,
+                SkillsErrors: Array.Empty<string>()));
+        }
+
+        // 1b. Skill import sweep — best-effort, never blocks session_start beyond
+        //     the configured soft timeout (default 5s). On timeout or failure we
+        //     emit a synthetic error row so callers always get an actionable
+        //     summary. Never propagates — a broken skill sync must not block
+        //     session init.
+        if (_skillImportService is not null)
+        {
+            SkillImportSummaryDto[] skillSummaries;
+            try
+            {
+                using var timeoutCts = new CancellationTokenSource(_skillImportTimeout);
+                skillSummaries = _skillImportService
+                    .ImportAsync(Environment.CurrentDirectory, timeoutCts.Token)
+                    .GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException)
+            {
+                skillSummaries = new[]
+                {
+                    new SkillImportSummaryDto(
+                        Adapter: "claude-code",
+                        Scanned: 0, Imported: 0, Updated: 0, Unchanged: 0, Orphaned: 0,
+                        Errors: new[] { "skill_import_timeout_5s" }),
+                };
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"total-recall: skill import failed: {ex.Message}");
+                skillSummaries = new[]
+                {
+                    new SkillImportSummaryDto(
+                        Adapter: "claude-code",
+                        Scanned: 0, Imported: 0, Updated: 0, Unchanged: 0, Orphaned: 0,
+                        Errors: new[] { $"skill_import_failed: {ex.Message}" }),
+                };
+            }
+
+            foreach (var s in skillSummaries)
+            {
+                var idx = importSummary.FindIndex(r => r.Tool == s.Adapter);
+                if (idx >= 0)
+                {
+                    importSummary[idx] = importSummary[idx] with
+                    {
+                        SkillsImported = s.Imported,
+                        SkillsUpdated = s.Updated,
+                        SkillsUnchanged = s.Unchanged,
+                        SkillsOrphaned = s.Orphaned,
+                        SkillsErrors = s.Errors,
+                    };
+                }
+                else
+                {
+                    importSummary.Add(new ImportSummaryRow(
+                        Tool: s.Adapter,
+                        MemoriesImported: 0,
+                        KnowledgeImported: 0,
+                        SkillsImported: s.Imported,
+                        SkillsUpdated: s.Updated,
+                        SkillsUnchanged: s.Unchanged,
+                        SkillsOrphaned: s.Orphaned,
+                        SkillsErrors: s.Errors));
+                }
+            }
         }
 
         // TODO(Plan 5+): warm sweep — sweepWarmTier from src-ts/compaction/warm-sweep.ts
@@ -348,11 +428,19 @@ public sealed record SessionInitResult(
     [property: JsonPropertyName("regressionAlerts")] IReadOnlyList<RegressionAlert>? RegressionAlerts,
     [property: JsonPropertyName("storage")] string Storage);
 
-/// <summary>One row in the host-importer summary.</summary>
+/// <summary>One row in the host-importer summary. Skill fields default to
+/// zero / empty for legacy memory-only importers; the skill import sweep
+/// merges by tool name and populates them in place (see
+/// <see cref="SessionLifecycle"/>).</summary>
 public sealed record ImportSummaryRow(
     [property: JsonPropertyName("tool")] string Tool,
     [property: JsonPropertyName("memoriesImported")] int MemoriesImported,
-    [property: JsonPropertyName("knowledgeImported")] int KnowledgeImported);
+    [property: JsonPropertyName("knowledgeImported")] int KnowledgeImported,
+    [property: JsonPropertyName("skillsImported")] int SkillsImported,
+    [property: JsonPropertyName("skillsUpdated")] int SkillsUpdated,
+    [property: JsonPropertyName("skillsUnchanged")] int SkillsUnchanged,
+    [property: JsonPropertyName("skillsOrphaned")] int SkillsOrphaned,
+    [property: JsonPropertyName("skillsErrors")] IReadOnlyList<string> SkillsErrors);
 
 /// <summary>Tier-level row counts for the session-init summary block.</summary>
 public sealed record TierSummary(

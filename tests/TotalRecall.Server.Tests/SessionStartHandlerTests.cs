@@ -21,7 +21,7 @@ public sealed class SessionStartHandlerTests
         Project: "demo",
         ImportSummary: new List<ImportSummaryRow>
         {
-            new("claude-code", 2, 1),
+            new("claude-code", 2, 1, 0, 0, 0, 0, System.Array.Empty<string>()),
         },
         WarmSweep: null,
         WarmPromoted: 0,

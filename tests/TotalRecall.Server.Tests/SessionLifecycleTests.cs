@@ -17,6 +17,7 @@ using Microsoft.FSharp.Collections;
 using Microsoft.FSharp.Core;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Importers;
+using TotalRecall.Infrastructure.Skills;
 using TotalRecall.Infrastructure.Storage;
 using TotalRecall.Infrastructure.Telemetry;
 using Xunit;
@@ -210,14 +211,47 @@ public sealed class SessionLifecycleTests
         IEnumerable<IImporter>? importers = null,
         ICompactionLogReader? compaction = null,
         long now = 1_000_000_000_000L,
-        string sessionId = "sess-test")
+        string sessionId = "sess-test",
+        ISkillImportService? skillImportService = null,
+        TimeSpan? skillImportTimeout = null)
     {
         return new SessionLifecycle(
             (importers ?? Array.Empty<IImporter>()).ToList(),
             store,
             compaction ?? new FakeCompactionLog(),
             sessionId,
-            () => now);
+            () => now,
+            usageIndexer: null,
+            storageMode: "sqlite",
+            skillImportService: skillImportService,
+            skillImportTimeout: skillImportTimeout);
+    }
+
+    private sealed class FakeSkillImportService : ISkillImportService
+    {
+        private readonly SkillImportSummaryDto[]? _summaries;
+        private readonly Exception? _exception;
+        private readonly Func<CancellationToken, Task<SkillImportSummaryDto[]>>? _async;
+
+        public int ImportCalls { get; private set; }
+
+        public FakeSkillImportService(
+            SkillImportSummaryDto[]? summaries = null,
+            Exception? exception = null,
+            Func<CancellationToken, Task<SkillImportSummaryDto[]>>? asyncImpl = null)
+        {
+            _summaries = summaries;
+            _exception = exception;
+            _async = asyncImpl;
+        }
+
+        public Task<SkillImportSummaryDto[]> ImportAsync(string? projectPath, CancellationToken ct)
+        {
+            ImportCalls++;
+            if (_exception is not null) throw _exception;
+            if (_async is not null) return _async(ct);
+            return Task.FromResult(_summaries ?? Array.Empty<SkillImportSummaryDto>());
+        }
     }
 
     // ---------- 1. idempotency ----------
@@ -515,5 +549,125 @@ public sealed class SessionLifecycleTests
     {
         Assert.Null(SessionLifecycle.FormatLastSessionAge(null, 1_000));
         Assert.Null(SessionLifecycle.FormatLastSessionAge(0L, 1_000));
+    }
+
+    // ---------- 12. skill import integration ----------
+
+    [Fact]
+    public async Task EnsureInitializedAsync_WithSkillService_IncludesSkillCountsInSummary()
+    {
+        var svc = new FakeSkillImportService(
+            summaries: new[]
+            {
+                new SkillImportSummaryDto(
+                    Adapter: "claude-code",
+                    Scanned: 3, Imported: 2, Updated: 1,
+                    Unchanged: 0, Orphaned: 0,
+                    Errors: Array.Empty<string>()),
+            });
+        var lifecycle = BuildLifecycle(new FakeStore(), skillImportService: svc);
+
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        var row = Assert.Single(result.ImportSummary, r => r.Tool == "claude-code");
+        Assert.Equal(2, row.SkillsImported);
+        Assert.Equal(1, row.SkillsUpdated);
+        Assert.Empty(row.SkillsErrors);
+        Assert.Equal(1, svc.ImportCalls);
+    }
+
+    [Fact]
+    public async Task EnsureInitializedAsync_WithSkillServiceMergesIntoExistingImporterRow()
+    {
+        // Memory importer contributes a "claude-code" row first; the skill
+        // sweep must merge into it rather than append a duplicate.
+        var importer = new FakeImporter("claude-code")
+        {
+            MemResult = new ImportResult(4, 0, Array.Empty<string>()),
+            KbResult = new ImportResult(2, 0, Array.Empty<string>()),
+        };
+        var svc = new FakeSkillImportService(
+            summaries: new[]
+            {
+                new SkillImportSummaryDto(
+                    Adapter: "claude-code",
+                    Scanned: 5, Imported: 3, Updated: 2,
+                    Unchanged: 1, Orphaned: 1,
+                    Errors: Array.Empty<string>()),
+            });
+        var lifecycle = BuildLifecycle(
+            new FakeStore(),
+            importers: new[] { importer },
+            skillImportService: svc);
+
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        var row = Assert.Single(result.ImportSummary, r => r.Tool == "claude-code");
+        Assert.Equal(4, row.MemoriesImported);
+        Assert.Equal(2, row.KnowledgeImported);
+        Assert.Equal(3, row.SkillsImported);
+        Assert.Equal(2, row.SkillsUpdated);
+        Assert.Equal(1, row.SkillsUnchanged);
+        Assert.Equal(1, row.SkillsOrphaned);
+    }
+
+    [Fact]
+    public async Task EnsureInitializedAsync_SkillServiceThrows_EmitsErrorRowNotFailure()
+    {
+        var svc = new FakeSkillImportService(
+            exception: new InvalidOperationException("boom"));
+        var lifecycle = BuildLifecycle(new FakeStore(), skillImportService: svc);
+
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        var row = Assert.Single(result.ImportSummary, r => r.Tool == "claude-code");
+        Assert.Equal(0, row.SkillsImported);
+        Assert.Single(row.SkillsErrors);
+        Assert.Contains("skill_import_failed", row.SkillsErrors[0]);
+        Assert.Contains("boom", row.SkillsErrors[0]);
+    }
+
+    [Fact]
+    public async Task EnsureInitializedAsync_WithoutSkillService_OmitsSkillRowAndLeavesMemoryRowsUntouched()
+    {
+        var importer = new FakeImporter("claude-code")
+        {
+            MemResult = new ImportResult(1, 0, Array.Empty<string>()),
+            KbResult = new ImportResult(0, 0, Array.Empty<string>()),
+        };
+        var lifecycle = BuildLifecycle(
+            new FakeStore(),
+            importers: new[] { importer },
+            skillImportService: null);
+
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        Assert.DoesNotContain(result.ImportSummary, r => r.Tool == "claude-code" && r.SkillsImported > 0);
+        // Existing memory-importer rows should have SkillsImported == 0 (default for legacy rows).
+        Assert.All(result.ImportSummary, r => Assert.Equal(0, r.SkillsImported));
+        Assert.All(result.ImportSummary, r => Assert.Empty(r.SkillsErrors));
+    }
+
+    [Fact]
+    public async Task EnsureInitializedAsync_SkillImportTimeout_EmitsTimeoutErrorRow()
+    {
+        // Configurable short timeout lets us exercise the OperationCanceledException
+        // branch without actually waiting 5 seconds.
+        var svc = new FakeSkillImportService(
+            asyncImpl: async ct =>
+            {
+                await Task.Delay(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
+                return Array.Empty<SkillImportSummaryDto>();
+            });
+        var lifecycle = BuildLifecycle(
+            new FakeStore(),
+            skillImportService: svc,
+            skillImportTimeout: TimeSpan.FromMilliseconds(50));
+
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        var row = Assert.Single(result.ImportSummary, r => r.Tool == "claude-code");
+        Assert.Single(row.SkillsErrors);
+        Assert.Equal("skill_import_timeout_5s", row.SkillsErrors[0]);
     }
 }
