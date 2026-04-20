@@ -30,7 +30,7 @@ public sealed class PeriodicSync : IDisposable
         if (_timer is not null) return;
 
         var interval = TimeSpan.FromSeconds(_intervalSeconds);
-        _timer = new Timer(OnTick, null, interval, interval);
+        _timer = new Timer(OnTick, null, TimeSpan.Zero, interval);
     }
 
     private async void OnTick(object? state)

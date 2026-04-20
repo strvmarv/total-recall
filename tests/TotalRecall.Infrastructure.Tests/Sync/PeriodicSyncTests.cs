@@ -38,7 +38,32 @@ public sealed class PeriodicSyncTests
         periodic.Start();
         await Task.Delay(1500);
 
-        await remote.Received(1).GetUserMemoriesModifiedSinceAsync(
+        await remote.Received().GetUserMemoriesModifiedSinceAsync(
+            Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 1b: Start fires immediately (dueTime = 0)
+    // -----------------------------------------------------------------------
+    [Fact]
+    public async Task Start_FiresImmediatelyBeforeInterval()
+    {
+        using var conn = OpenAndMigrate();
+        var syncQueue = new SyncQueue(conn);
+        var local = Substitute.For<IStore>();
+        var remote = Substitute.For<IRemoteBackend>();
+
+        remote.GetUserMemoriesModifiedSinceAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(new SyncPullResult(Array.Empty<SyncEntry>(), null));
+
+        var svc = new SyncService(local, remote, syncQueue, conn);
+        using var periodic = new PeriodicSync(svc, intervalSeconds: 60); // long interval
+
+        periodic.Start();
+        await Task.Delay(500); // well under 60s interval
+
+        // First tick should have fired immediately, before any interval elapses.
+        await remote.Received().GetUserMemoriesModifiedSinceAsync(
             Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
     }
 
@@ -87,19 +112,25 @@ public sealed class PeriodicSyncTests
         var syncQueue = new SyncQueue(conn);
         var local = Substitute.For<IStore>();
         var remote = Substitute.For<IRemoteBackend>();
+        var callCount = 0;
 
         remote.GetUserMemoriesModifiedSinceAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-            .Returns(new SyncPullResult(Array.Empty<SyncEntry>(), null));
+            .Returns(ci =>
+            {
+                Interlocked.Increment(ref callCount);
+                return new SyncPullResult(Array.Empty<SyncEntry>(), null);
+            });
 
         var svc = new SyncService(local, remote, syncQueue, conn);
-        var periodic = new PeriodicSync(svc, 1);
+        var periodic = new PeriodicSync(svc, intervalSeconds: 1);
 
         periodic.Start();
+        await Task.Delay(200); // let the immediate tick complete
         periodic.Dispose();
-        await Task.Delay(1500);
+        var countAtDispose = Volatile.Read(ref callCount);
+        await Task.Delay(1500); // would allow 1+ more ticks if timer kept running
 
-        await remote.DidNotReceive().GetUserMemoriesModifiedSinceAsync(
-            Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+        Assert.Equal(countAtDispose, Volatile.Read(ref callCount));
     }
 
     // -----------------------------------------------------------------------
