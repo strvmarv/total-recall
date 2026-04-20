@@ -100,12 +100,14 @@ public sealed class SessionLifecycleTests
         public IReadOnlyList<Entry> List(Tier tier, ContentType type, ListEntriesOpts? opts = null)
         {
             var src = Slot(tier, type).AsEnumerable();
-            // SessionLifecycle.GenerateHints passes OrderBy = "access_count DESC".
-            // Faithfully honor that one ordering; everything else preserves
-            // insertion order.
-            if (opts?.OrderBy is not null && opts.OrderBy.StartsWith("access_count DESC", StringComparison.Ordinal))
+            if (opts?.OrderBy is not null)
             {
-                src = src.OrderByDescending(e => e.AccessCount);
+                if (opts.OrderBy.StartsWith("access_count DESC", StringComparison.Ordinal))
+                    src = src.OrderByDescending(e => e.AccessCount);
+                else if (opts.OrderBy.StartsWith("decay_score ASC", StringComparison.Ordinal))
+                    src = src.OrderBy(e => e.DecayScore);
+                else if (opts.OrderBy.StartsWith("decay_score DESC", StringComparison.Ordinal))
+                    src = src.OrderByDescending(e => e.DecayScore);
             }
             if (opts?.Limit is int lim) src = src.Take(lim);
             return src.ToList();
@@ -136,8 +138,14 @@ public sealed class SessionLifecycleTests
             return src.ToList();
         }
 
-        public void Move(Tier fromTier, ContentType fromType, Tier toTier, ContentType toType, string id) =>
-            throw new NotSupportedException();
+        public void Move(Tier fromTier, ContentType fromType, Tier toTier, ContentType toType, string id)
+        {
+            var src = Slot(fromTier, fromType);
+            var entry = src.FirstOrDefault(e => e.Id == id);
+            if (entry is null) return;
+            src.Remove(entry);
+            Slot(toTier, toType).Add(entry);
+        }
 
         public static string MetaKey(Tier tier, ContentType type, IReadOnlyDictionary<string, string> filter)
         {
@@ -347,6 +355,75 @@ public sealed class SessionLifecycleTests
         var result = await lifecycle.EnsureInitializedAsync();
 
         Assert.True(result.HotContextTruncated);
+    }
+
+    // ---------- background warm sweep ----------
+
+    [Fact]
+    public async Task BackgroundWarmSweep_DemotesExcessEntriesToWarm()
+    {
+        var store = new FakeStore();
+        // 60 hot entries, maxEntries=50 → sweep should move 10 lowest-decay to warm.
+        for (var i = 0; i < 60; i++)
+            store.Entries[(Tier.Hot, ContentType.Memory)] =
+                store.Entries.GetValueOrDefault((Tier.Hot, ContentType.Memory), new List<Entry>());
+        store.Entries[(Tier.Hot, ContentType.Memory)] = Enumerable.Range(0, 60)
+            .Select(i => MakeEntry($"id{i}", $"content{i}", decayScore: (i + 1) / 60.0))
+            .ToList();
+
+        var lifecycle = BuildLifecycle(store, maxEntries: 50);
+        await lifecycle.EnsureInitializedAsync();
+
+        // Give background task time to complete.
+        await Task.Delay(300);
+
+        Assert.Equal(50, store.Count(Tier.Hot, ContentType.Memory));
+        Assert.Equal(10, store.Count(Tier.Warm, ContentType.Memory));
+    }
+
+    [Fact]
+    public async Task BackgroundWarmSweep_SweepsLowestDecayFirst()
+    {
+        var store = new FakeStore();
+        store.Entries[(Tier.Hot, ContentType.Memory)] = new List<Entry>
+        {
+            MakeEntry("low1",  "low1",  decayScore: 0.1),
+            MakeEntry("low2",  "low2",  decayScore: 0.2),
+            MakeEntry("high1", "high1", decayScore: 0.9),
+            MakeEntry("high2", "high2", decayScore: 0.8),
+            MakeEntry("mid",   "mid",   decayScore: 0.5),
+        };
+
+        // maxEntries=3 → 2 lowest should be swept
+        var lifecycle = BuildLifecycle(store, maxEntries: 3);
+        await lifecycle.EnsureInitializedAsync();
+        await Task.Delay(300);
+
+        var hot = store.Entries[(Tier.Hot, ContentType.Memory)].Select(e => e.Id).ToHashSet();
+        var warm = store.Entries.GetValueOrDefault((Tier.Warm, ContentType.Memory), new List<Entry>())
+            .Select(e => e.Id).ToHashSet();
+
+        Assert.Contains("high1", hot);
+        Assert.Contains("high2", hot);
+        Assert.Contains("mid", hot);
+        Assert.Contains("low1", warm);
+        Assert.Contains("low2", warm);
+    }
+
+    [Fact]
+    public async Task BackgroundWarmSweep_NoOp_WhenUnderLimit()
+    {
+        var store = new FakeStore();
+        store.Entries[(Tier.Hot, ContentType.Memory)] = Enumerable.Range(0, 30)
+            .Select(i => MakeEntry($"id{i}", $"content{i}", decayScore: (i + 1) / 30.0))
+            .ToList();
+
+        var lifecycle = BuildLifecycle(store, maxEntries: 50);
+        await lifecycle.EnsureInitializedAsync();
+        await Task.Delay(300);
+
+        Assert.Equal(30, store.Count(Tier.Hot, ContentType.Memory));
+        Assert.Equal(0, store.Count(Tier.Warm, ContentType.Memory));
     }
 
     // ---------- 1. idempotency ----------

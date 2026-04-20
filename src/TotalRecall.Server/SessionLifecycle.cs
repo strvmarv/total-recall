@@ -228,8 +228,6 @@ public sealed class SessionLifecycle : ISessionLifecycle
         var warmPromoted = 0;
 
         // 2. Hot entries listing — used for both context and hot count.
-        // TODO(Plan 5+): token-budget eviction via decay_score is not yet
-        // ported. Plan 4 simply emits whatever the hot tier currently holds.
         var hotEntries = _store.List(Tier.Hot, ContentType.Memory);
 
         // 3. Tier summary.
@@ -260,6 +258,10 @@ public sealed class SessionLifecycle : ISessionLifecycle
         // TODO(Plan 5+): config snapshot creation — createConfigSnapshot
         // from src-ts/config.ts not yet ported. Snapshot id stays null.
 
+        // Fire background warm sweep to drain excess hot entries after context
+        // is already assembled. Failures are logged but never propagate.
+        _ = Task.Run(RunBackgroundWarmSweep, CancellationToken.None);
+
         return new SessionInitResult(
             SessionId: _sessionId,
             Project: null, // TODO(Plan 5+): detectProject() not ported
@@ -276,6 +278,26 @@ public sealed class SessionLifecycle : ISessionLifecycle
             RegressionAlerts: null, // TODO(Plan 5+): regression detection not ported
             Storage: _storageMode,
             HotContextTruncated: hotContextTruncated);
+    }
+
+    private void RunBackgroundWarmSweep()
+    {
+        try
+        {
+            var count = _store.Count(Tier.Hot, ContentType.Memory);
+            if (count <= _maxEntries) return;
+
+            var excess = count - _maxEntries;
+            var toEvict = _store.List(Tier.Hot, ContentType.Memory,
+                new ListEntriesOpts { OrderBy = "decay_score ASC", Limit = excess });
+
+            foreach (var entry in toEvict)
+                _store.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, entry.Id);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"total-recall: background warm sweep failed: {ex.Message}");
+        }
     }
 
     // -------- helpers (internal so tests can call them directly) --------
