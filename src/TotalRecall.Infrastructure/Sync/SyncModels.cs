@@ -15,7 +15,8 @@ public sealed record SyncEntry(
     [property: JsonPropertyName("created_at")] DateTime CreatedAt,
     [property: JsonPropertyName("updated_at")] DateTime UpdatedAt,
     [property: JsonPropertyName("deleted_at")] DateTime? DeletedAt = null,
-    [property: JsonPropertyName("scope")] string? Scope = null);
+    [property: JsonPropertyName("scope")] string? Scope = null,
+    [property: JsonPropertyName("tier")] string? Tier = null);
 
 /// <summary>Result of pulling memories modified since a given watermark.</summary>
 public sealed record SyncPullResult(

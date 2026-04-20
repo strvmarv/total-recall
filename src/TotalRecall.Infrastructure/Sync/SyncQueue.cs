@@ -52,7 +52,7 @@ public sealed class SyncQueue
             SELECT id, entity_type, operation, entity_id, payload, created_at, attempts, last_error
             FROM sync_queue
             WHERE attempts < $maxAttempts
-            ORDER BY id ASC
+            ORDER BY CASE entity_type WHEN 'memory' THEN 0 ELSE 1 END ASC, id ASC
             LIMIT $limit
             """;
         cmd.Parameters.AddWithValue("$maxAttempts", MaxAttempts);

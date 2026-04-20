@@ -99,7 +99,7 @@ public sealed class RoutingStore : IStore
         {
             var entry = _local.Get(tier, type, id);
             if (entry is null) return; // defensive: shouldn't happen right after write
-            _syncQueue.Enqueue("memory", "upsert", id, SyncPayload.Upsert(entry, type));
+            _syncQueue.Enqueue("memory", "upsert", id, SyncPayload.Upsert(entry, type, tier));
         }
         catch (Exception ex)
         {

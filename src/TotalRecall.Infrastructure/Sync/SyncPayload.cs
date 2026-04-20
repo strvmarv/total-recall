@@ -2,6 +2,7 @@ using System;
 using System.Text;
 using Microsoft.FSharp.Core;
 using TotalRecall.Core;
+using TotalRecall.Infrastructure.Memory;
 
 namespace TotalRecall.Infrastructure.Sync;
 
@@ -17,7 +18,7 @@ internal static class SyncPayload
     /// every sync-relevant field so SyncService.FlushAsync can hydrate a full
     /// SyncEntry without dropping to placeholders.
     /// </summary>
-    public static string Upsert(Entry entry, ContentType contentType)
+    public static string Upsert(Entry entry, ContentType contentType, Tier tier)
     {
         var sb = new StringBuilder(256);
         sb.Append('{');
@@ -29,6 +30,8 @@ internal static class SyncPayload
         AppendStringField(sb, "entry_type", entry.EntryType.ToString());
         sb.Append(',');
         AppendStringField(sb, "content_type", contentType.IsMemory ? "Memory" : "Kb");
+        sb.Append(',');
+        AppendStringField(sb, "tier", TierNames.TierName(tier));
         sb.Append(',');
 
         // tags: string list → JSON array

@@ -170,6 +170,9 @@ public sealed class SyncService
                             : DateTime.UtcNow,
                         Scope: root.TryGetProperty("scope", out var scEl) && scEl.ValueKind == JsonValueKind.String
                             ? scEl.GetString()
+                            : null,
+                        Tier: root.TryGetProperty("tier", out var tierEl) && tierEl.ValueKind == JsonValueKind.String
+                            ? tierEl.GetString()
                             : null);
                 }).ToArray();
 
