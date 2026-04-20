@@ -217,6 +217,11 @@ All commands are routed through the `/total-recall:commands` skill:
 | — | `session_start` | Initialize session: sync imports, assemble hot tier |
 | — | `session_end` | End session: run compaction |
 | — | `session_context` | Get current hot tier entries as context |
+| — | `skill_search` | Search skills across caller-visible scopes (cortex mode) |
+| — | `skill_get` | Fetch a skill bundle by id or natural key (cortex mode) |
+| — | `skill_list` | List skills with base64 skip cursor (cortex mode) |
+| — | `skill_delete` | Delete an owner-scoped skill (cortex mode) |
+| — | `skill_import_host` | Scan local `.claude/skills/` and push to cortex (cortex mode) |
 | `/total-recall:commands eval` | `eval_report` | Retrieval quality metrics (filterable by config snapshot) |
 | `/total-recall:commands eval --benchmark` | `eval_benchmark` | Run synthetic benchmark |
 | `/total-recall:commands eval --compare <name>` | `eval_compare` | Compare metrics between two config snapshots |

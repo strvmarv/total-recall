@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- **Skills as a first-class Cortex resource.** Five new MCP tools wired in cortex mode: `skill_search`, `skill_get` (by id or natural key), `skill_list` (with base64 skip cursor), `skill_delete` (owner-scoped), and `skill_import_host` (scans local `~/.claude/skills/` and `<project>/.claude/skills/`, POSTs bundles to cortex). `session_start` now folds per-adapter skill counts (`skillsImported`, `skillsUpdated`, `skillsUnchanged`, `skillsOrphaned`, `skillsErrors`) into the returned `importSummary`, with a 5-second soft timeout and a synthetic error row on failure so session init is never blocked. Plugin-cache paths are intentionally not scanned.
+
 ## 1.0.0 - 2026-04-16
 
 ### Added
