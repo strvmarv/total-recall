@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.0.10 - 2026-04-20
+
+### Fixed
+
+- **Warm sweep now runs synchronously before hot-entry counting in `session_start`.** Previously `RunBackgroundWarmSweep` was dispatched via `Task.Run` *after* assembling context, so the reported hot count always reflected the pre-sweep state and the sweep raced with `PeriodicSync` on the shared SQLite connection — causing it to silently crash and never demote entries. The sweep now runs inline within the `_initLock` section before hot entries are listed, eliminating the thread-race and ensuring the post-sweep count is what the host sees.
+- **`session_end` now performs real heuristic compaction.** Previously the handler returned zeroed stub counts. It now recalculates a fresh decay score for every hot-memory entry (using the `Decay.fs` formula), persists the updated score via `IStore.Update`, and promotes any entry whose score falls below `tiers.hot.carry_forward_threshold` (default 0.3) to the warm tier via `IStore.Move`. Each movement is recorded in `CompactionLog` with reason `session_end_decay`. When no store is injected (legacy or test construction) the stub behaviour is preserved.
+
 ## 1.0.9 - 2026-04-20
 
 ### Fixed

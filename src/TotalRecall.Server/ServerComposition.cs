@@ -152,7 +152,7 @@ public static class ServerComposition
 
         // ---- Session (3) ----
         registry.Register(new SessionStartHandler(sessionLifecycle, periodicSync));
-        registry.Register(new SessionEndHandler(sessionLifecycle, syncService));
+        registry.Register(new SessionEndHandler(sessionLifecycle, store, compactionLogWriter, syncService: syncService));
         registry.Register(new SessionContextHandler(store));
 
         // ---- Eval (5) — self-bootstrap production executors ----

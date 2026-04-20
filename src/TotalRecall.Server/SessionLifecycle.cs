@@ -214,9 +214,6 @@ public sealed class SessionLifecycle : ISessionLifecycle
             }
         }
 
-        // TODO(Plan 5+): warm sweep — sweepWarmTier from src-ts/compaction/warm-sweep.ts
-        // is not yet ported. Leave WarmSweep null.
-
         // TODO(Plan 5+): project docs auto-ingest — ProjectDocsImporter exists
         // in Infrastructure but Plan 4 explicitly excludes it from session init.
 
@@ -227,10 +224,15 @@ public sealed class SessionLifecycle : ISessionLifecycle
         var warmPromotedIds = Array.Empty<string>();
         var warmPromoted = 0;
 
-        // 2. Hot entries listing — used for both context and hot count.
+        // 2. Warm sweep — synchronous, runs before hot entry listing so the
+        // reported count reflects post-sweep state. Eliminates the Task.Run
+        // thread-race against PeriodicSync on the shared SQLite connection.
+        RunWarmSweep();
+
+        // 3. Hot entries listing — used for both context and hot count.
         var hotEntries = _store.List(Tier.Hot, ContentType.Memory);
 
-        // 3. Tier summary.
+        // 4. Tier summary.
         var tierSummary = new TierSummary(
             Hot: _store.Count(Tier.Hot, ContentType.Memory),
             Warm: _store.Count(Tier.Warm, ContentType.Memory)
@@ -242,13 +244,13 @@ public sealed class SessionLifecycle : ISessionLifecycle
                 + _store.Count(Tier.Cold, ContentType.Knowledge),
             Collections: _store.CountKnowledgeCollections());
 
-        // 4. Context string assembly — matches TS session-tools.ts:260-264.
+        // 5. Context string assembly — matches TS session-tools.ts:260-264.
         var (context, hotContextTruncated) = BuildContext(hotEntries, _tokenBudget);
 
-        // 5. Hints.
+        // 6. Hints.
         var hints = GenerateHints(_store, warmPromotedIds);
 
-        // 6. Last session age (humanized).
+        // 7. Last session age (humanized).
         var lastAgeMs = _compactionLog.GetLastTimestampExcludingReason("warm_sweep_decay");
         var lastSessionAge = FormatLastSessionAge(lastAgeMs, _nowMs());
 
@@ -257,10 +259,6 @@ public sealed class SessionLifecycle : ISessionLifecycle
 
         // TODO(Plan 5+): config snapshot creation — createConfigSnapshot
         // from src-ts/config.ts not yet ported. Snapshot id stays null.
-
-        // Fire background warm sweep to drain excess hot entries after context
-        // is already assembled. Failures are logged but never propagate.
-        _ = Task.Run(RunBackgroundWarmSweep, CancellationToken.None);
 
         return new SessionInitResult(
             SessionId: _sessionId,
@@ -280,7 +278,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
             HotContextTruncated: hotContextTruncated);
     }
 
-    private void RunBackgroundWarmSweep()
+    private void RunWarmSweep()
     {
         try
         {
@@ -299,7 +297,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"total-recall: background warm sweep failed: {ex.Message}");
+            Console.Error.WriteLine($"total-recall: warm sweep failed: {ex.Message}");
         }
     }
 

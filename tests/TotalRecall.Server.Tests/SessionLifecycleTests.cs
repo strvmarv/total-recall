@@ -357,16 +357,13 @@ public sealed class SessionLifecycleTests
         Assert.True(result.HotContextTruncated);
     }
 
-    // ---------- background warm sweep ----------
+    // ---------- warm sweep (synchronous) ----------
 
     [Fact]
-    public async Task BackgroundWarmSweep_DemotesExcessEntriesToWarm()
+    public async Task WarmSweep_DemotesExcessEntriesToWarm()
     {
         var store = new FakeStore();
         // 60 hot entries, maxEntries=50 → sweep should move 10 lowest-decay to warm.
-        for (var i = 0; i < 60; i++)
-            store.Entries[(Tier.Hot, ContentType.Memory)] =
-                store.Entries.GetValueOrDefault((Tier.Hot, ContentType.Memory), new List<Entry>());
         store.Entries[(Tier.Hot, ContentType.Memory)] = Enumerable.Range(0, 60)
             .Select(i => MakeEntry($"id{i}", $"content{i}", decayScore: (i + 1) / 60.0))
             .ToList();
@@ -374,15 +371,12 @@ public sealed class SessionLifecycleTests
         var lifecycle = BuildLifecycle(store, maxEntries: 50);
         await lifecycle.EnsureInitializedAsync();
 
-        // Give background task time to complete.
-        await Task.Delay(300);
-
         Assert.Equal(50, store.Count(Tier.Hot, ContentType.Memory));
         Assert.Equal(10, store.Count(Tier.Warm, ContentType.Memory));
     }
 
     [Fact]
-    public async Task BackgroundWarmSweep_SweepsLowestDecayFirst()
+    public async Task WarmSweep_SweepsLowestDecayFirst()
     {
         var store = new FakeStore();
         store.Entries[(Tier.Hot, ContentType.Memory)] = new List<Entry>
@@ -397,7 +391,6 @@ public sealed class SessionLifecycleTests
         // maxEntries=3 → 2 lowest should be swept
         var lifecycle = BuildLifecycle(store, maxEntries: 3);
         await lifecycle.EnsureInitializedAsync();
-        await Task.Delay(300);
 
         var hot = store.Entries[(Tier.Hot, ContentType.Memory)].Select(e => e.Id).ToHashSet();
         var warm = store.Entries.GetValueOrDefault((Tier.Warm, ContentType.Memory), new List<Entry>())
@@ -411,7 +404,7 @@ public sealed class SessionLifecycleTests
     }
 
     [Fact]
-    public async Task BackgroundWarmSweep_NoOp_WhenUnderLimit()
+    public async Task WarmSweep_NoOp_WhenUnderLimit()
     {
         var store = new FakeStore();
         store.Entries[(Tier.Hot, ContentType.Memory)] = Enumerable.Range(0, 30)
@@ -420,7 +413,6 @@ public sealed class SessionLifecycleTests
 
         var lifecycle = BuildLifecycle(store, maxEntries: 50);
         await lifecycle.EnsureInitializedAsync();
-        await Task.Delay(300);
 
         Assert.Equal(30, store.Count(Tier.Hot, ContentType.Memory));
         Assert.Equal(0, store.Count(Tier.Warm, ContentType.Memory));
