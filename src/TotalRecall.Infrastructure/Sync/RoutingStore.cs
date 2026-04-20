@@ -86,8 +86,26 @@ public sealed class RoutingStore : IStore
 
     private void EnqueueUpsert(Tier tier, ContentType type, string id)
     {
-        var entry = _local.Get(tier, type, id);
-        if (entry is null) return; // defensive: shouldn't happen right after write
-        _syncQueue.Enqueue("memory", "upsert", id, SyncPayload.Upsert(entry, type));
+        // Best-effort: the caller's local write has already committed by the
+        // time we reach this method. A failure to enqueue the cortex-sync
+        // payload must NOT surface as a user-visible write error — the
+        // memory IS stored locally; only its eventual push to cortex is at
+        // risk. Log to stderr so the drift is diagnosable. The next
+        // successful write for this user will produce a fresh queue entry,
+        // and PeriodicSync will still push unrelated queued items on its
+        // timer.
+        try
+        {
+            var entry = _local.Get(tier, type, id);
+            if (entry is null) return; // defensive: shouldn't happen right after write
+            _syncQueue.Enqueue("memory", "upsert", id, SyncPayload.Upsert(entry, type));
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"[total-recall] EnqueueUpsert failed for tier={tier} type={type} id={id}: " +
+                $"{ex.GetType().Name}: {ex.Message}");
+            Console.Error.WriteLine(ex.StackTrace);
+        }
     }
 }

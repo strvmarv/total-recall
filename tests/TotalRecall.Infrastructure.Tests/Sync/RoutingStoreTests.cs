@@ -76,6 +76,54 @@ public sealed class RoutingStoreTests
     }
 
     [Fact]
+    public void InsertWithEmbedding_WhenLocalGetThrowsInEnqueueUpsert_DoesNotBubble()
+    {
+        using var conn = OpenAndMigrate();
+        var syncQueue = new SyncQueue(conn);
+        var local = Substitute.For<IStore>();
+        var remote = Substitute.For<IRemoteBackend>();
+
+        var opts = new InsertEntryOpts("diag");
+        local.InsertWithEmbedding(Tier.Hot, ContentType.Memory, opts, Arg.Any<ReadOnlyMemory<float>>())
+            .Returns("id-post-commit");
+        // Simulate the scenario observed 2026-04-20: local write commits,
+        // but the post-write Get (inside EnqueueUpsert) throws. The caller's
+        // InsertWithEmbedding must still return the committed id — not
+        // surface the enqueue failure as a write error.
+        local.Get(Tier.Hot, ContentType.Memory, "id-post-commit")
+            .Returns(_ => throw new KeyNotFoundException(
+                "An index satisfying the predicate was not found in the collection."));
+
+        var store = new RoutingStore(local, remote, syncQueue);
+        var id = store.InsertWithEmbedding(
+            Tier.Hot, ContentType.Memory, opts, new ReadOnlyMemory<float>(new float[384]));
+
+        Assert.Equal("id-post-commit", id);
+        // Enqueue was skipped because Get threw before we reached Enqueue.
+        Assert.Empty(syncQueue.Drain(10));
+    }
+
+    [Fact]
+    public void Insert_WhenLocalGetThrowsInEnqueueUpsert_DoesNotBubble()
+    {
+        using var conn = OpenAndMigrate();
+        var syncQueue = new SyncQueue(conn);
+        var local = Substitute.For<IStore>();
+        var remote = Substitute.For<IRemoteBackend>();
+
+        var opts = new InsertEntryOpts("diag2");
+        local.Insert(Tier.Warm, ContentType.Memory, opts).Returns("id-warm");
+        local.Get(Tier.Warm, ContentType.Memory, "id-warm")
+            .Returns(_ => throw new InvalidOperationException("downstream failure"));
+
+        var store = new RoutingStore(local, remote, syncQueue);
+        var id = store.Insert(Tier.Warm, ContentType.Memory, opts);
+
+        Assert.Equal("id-warm", id);
+        Assert.Empty(syncQueue.Drain(10));
+    }
+
+    [Fact]
     public void Get_DelegatesToLocalStoreOnly()
     {
         using var conn = OpenAndMigrate();
