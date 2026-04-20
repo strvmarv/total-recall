@@ -245,7 +245,7 @@ public static class ServerComposition
         {
             MigrationRunner.RunMigrations(conn);
 
-            var store = new SqliteStore(conn);
+            var store = new SqliteStore(conn, cfg.Tiers.Hot.MaxEntries);
             var vec = new VectorSearch(conn);
             var fts = new FtsSearch(conn);
             var embedder = EmbedderFactory.CreateFromConfig(cfg.Embedding);
@@ -287,7 +287,8 @@ public static class ServerComposition
                 importers, store, compactionLog,
                 usageIndexer: usageIndexer,
                 storageMode: storageMode,
-                tokenBudget: cfg.Tiers.Hot.TokenBudget);
+                tokenBudget: cfg.Tiers.Hot.TokenBudget,
+                maxEntries: cfg.Tiers.Hot.MaxEntries);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
@@ -341,7 +342,7 @@ public static class ServerComposition
         {
             PostgresMigrationRunner.RunMigrations(dataSource, dims);
 
-            var store = new PostgresStore(dataSource, userId);
+            var store = new PostgresStore(dataSource, userId, cfg.Tiers.Hot.MaxEntries);
             var vec = new PgvectorSearch(dataSource, userId);
             var fts = new PostgresFtsSearch(dataSource, userId);
             var embedder = EmbedderFactory.CreateFromConfig(cfg.Embedding);
@@ -367,7 +368,8 @@ public static class ServerComposition
 
             var sessionLifecycle = new SessionLifecycle(importers, store, compactionLog,
                 storageMode: storageMode,
-                tokenBudget: cfg.Tiers.Hot.TokenBudget);
+                tokenBudget: cfg.Tiers.Hot.TokenBudget,
+                maxEntries: cfg.Tiers.Hot.MaxEntries);
 
             var statusOptions = new StatusOptions(
                 DbPath: connStr,
@@ -433,7 +435,7 @@ public static class ServerComposition
         {
             MigrationRunner.RunMigrations(conn);
 
-            var localStore = new SqliteStore(conn);
+            var localStore = new SqliteStore(conn, cfg.Tiers.Hot.MaxEntries);
             var vec = new VectorSearch(conn);
             var fts = new FtsSearch(conn);
             var embedder = EmbedderFactory.CreateFromConfig(cfg.Embedding);
@@ -499,7 +501,8 @@ public static class ServerComposition
                 usageIndexer: usageIndexer,
                 storageMode: storageMode,
                 skillImportService: skillImportService,
-                tokenBudget: cfg.Tiers.Hot.TokenBudget);
+                tokenBudget: cfg.Tiers.Hot.TokenBudget,
+                maxEntries: cfg.Tiers.Hot.MaxEntries);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
