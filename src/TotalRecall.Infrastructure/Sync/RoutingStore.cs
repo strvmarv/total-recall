@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using TotalRecall.Core;
+using TotalRecall.Infrastructure.Memory;
 using TotalRecall.Infrastructure.Storage;
 
 namespace TotalRecall.Infrastructure.Sync;
@@ -102,10 +103,19 @@ public sealed class RoutingStore : IStore
         }
         catch (Exception ex)
         {
+            // AOT-safe: format tier/type via TierNames helpers. String-
+            // interpolating the raw F# DU values triggers F# reflection
+            // (StructuredPrintfImpl) which fails under AOT trimming with
+            // a KeyNotFoundException of its own — defeating the whole
+            // "best-effort log and continue" contract.
+            var tierName = TierNames.TierName(tier);
+            var typeName = TierNames.ContentTypeName(type);
             Console.Error.WriteLine(
-                $"[total-recall] EnqueueUpsert failed for tier={tier} type={type} id={id}: " +
-                $"{ex.GetType().Name}: {ex.Message}");
-            Console.Error.WriteLine(ex.StackTrace);
+                "[total-recall] EnqueueUpsert failed for tier=" + tierName +
+                " type=" + typeName + " id=" + id + ": " +
+                ex.GetType().Name + ": " + ex.Message);
+            if (ex.StackTrace is not null)
+                Console.Error.WriteLine(ex.StackTrace);
         }
     }
 }
