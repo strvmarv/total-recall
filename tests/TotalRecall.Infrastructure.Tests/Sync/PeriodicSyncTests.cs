@@ -92,7 +92,7 @@ public sealed class PeriodicSyncTests
         using var periodic = new PeriodicSync(svc, 1);
 
         periodic.Start();
-        // Wait long enough for the first tick to start (1s) plus the slow
+        // Wait long enough for the immediate tick (0ms) plus the slow
         // pull (2s) plus margin for a second tick attempt.
         await Task.Delay(5000);
 
@@ -125,9 +125,9 @@ public sealed class PeriodicSyncTests
         var periodic = new PeriodicSync(svc, intervalSeconds: 1);
 
         periodic.Start();
-        await Task.Delay(200); // let the immediate tick complete
-        periodic.Dispose();
+        await Task.Delay(400); // let the immediate tick complete
         var countAtDispose = Volatile.Read(ref callCount);
+        periodic.Dispose();
         await Task.Delay(1500); // would allow 1+ more ticks if timer kept running
 
         Assert.Equal(countAtDispose, Volatile.Read(ref callCount));
