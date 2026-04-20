@@ -137,6 +137,11 @@ public sealed class McpServer
             }
             catch (Exception ex)
             {
+                // Full exception (type, message, stack, inner) logged to stderr
+                // so operators can diagnose the throw site. Wire-level error
+                // stays terse so the MCP response isn't bloated for clients.
+                Console.Error.WriteLine($"[total-recall] tool dispatch threw on method={req.Method}:");
+                Console.Error.WriteLine(ex.ToString());
                 WriteError(id, -32603, $"Internal error: {ex.GetType().Name}: {ex.Message}");
             }
         }
