@@ -26,12 +26,9 @@ public sealed class OpenAiEmbedder : IEmbedder
 
     public float[] Embed(string text)
     {
-        var body = JsonSerializer.Serialize(new
-        {
-            input = text,
-            model = _modelName,
-            dimensions = _dimensions
-        });
+        // Source-gen serialization — AOT-safe, no IL2026/IL3050 warnings.
+        var payload = new OpenAiEmbedRequest(Input: text, Model: _modelName, Dimensions: _dimensions);
+        var body = JsonSerializer.Serialize(payload, EmbeddingJsonContext.Default.OpenAiEmbedRequest);
 
         var request = new HttpRequestMessage(HttpMethod.Post, $"{_endpoint}/embeddings")
         {
