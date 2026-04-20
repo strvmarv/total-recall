@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.0.3 - 2026-04-20
+
+### Fixed
+
+- **`memory_store` no longer fails with `KeyNotFoundException` on every call in cortex mode.** The 1.0.2 "best-effort" catch block in `RoutingStore.EnqueueUpsert` logged its own diagnostic via `$"...tier={tier} type={type}..."`, which triggers F# reflection-based DU formatting (`StructuredPrintfImpl`) that isn't AOT-safe and throws its own `KeyNotFoundException` on top of whatever it was trying to log. Swapped the interpolation for the AOT-safe `TierNames.TierName` / `ContentTypeName` helpers. Memory writes now succeed cleanly; any underlying sync-enqueue failure is logged to stderr without re-throwing.
+- **AOT-unsafe JSON in remote embedders.** `BedrockEmbedder` and `OpenAiEmbedder` used `JsonSerializer.Serialize`/`Deserialize` with reflection-based options, which emit IL2026/IL3050 warnings and fail at runtime under AOT trimming in the exact same way the sync enqueue did. Routed both through a new `EmbeddingJsonContext` source-gen partial with explicit DTOs (`BedrockEmbedRequest`/`Response`, `OpenAiEmbedRequest`). Build warnings drop from 6 to 0.
+
 ## 1.0.2 - 2026-04-20
 
 ### Added
