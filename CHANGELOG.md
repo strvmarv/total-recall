@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.0.5 - 2026-04-20
+
+### Fixed
+
+- **Pulled memories now land in the correct local tier.** `SyncService.PullAsync` previously always inserted new memories from Cortex into the local hot tier. It now reads the `tier` field from the pull response and inserts into hot/warm/cold accordingly, so a warm entry on Cortex arrives as warm locally rather than inflating hot. Falls back to hot when the server omits tier (old server compatibility).
+
 ## 1.0.4 - 2026-04-20
 
 ### Fixed
