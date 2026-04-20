@@ -33,7 +33,8 @@ public sealed class SessionStartHandlerTests
         LastSessionAge: "5 minutes ago",
         SmokeTest: null,
         RegressionAlerts: null,
-        Storage: "sqlite");
+        Storage: "sqlite",
+        HotContextTruncated: false);
 
     [Fact]
     public async Task HappyPath_ReturnsSessionInitResult()

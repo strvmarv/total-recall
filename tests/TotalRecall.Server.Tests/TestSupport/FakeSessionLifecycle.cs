@@ -44,5 +44,6 @@ public sealed class FakeSessionLifecycle : ISessionLifecycle
         LastSessionAge: null,
         SmokeTest: null,
         RegressionAlerts: null,
-        Storage: "sqlite");
+        Storage: "sqlite",
+        HotContextTruncated: false);
 }

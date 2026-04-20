@@ -31,7 +31,8 @@ public sealed class SessionLifecycleTests
         string content,
         IEnumerable<string>? tags = null,
         int accessCount = 0,
-        long createdAt = 0)
+        long createdAt = 0,
+        double decayScore = 1.0)   // ← new param
     {
         return new Entry(
             id,
@@ -45,7 +46,7 @@ public sealed class SessionLifecycleTests
             createdAt,                          // updatedAt
             createdAt,                          // lastAccessedAt
             accessCount,
-            0.0,                                // decayScore
+            decayScore,                         // decayScore
             FSharpOption<string>.None,          // parentId
             FSharpOption<string>.None,          // collectionId
             "",                                 // scope
@@ -213,7 +214,9 @@ public sealed class SessionLifecycleTests
         long now = 1_000_000_000_000L,
         string sessionId = "sess-test",
         ISkillImportService? skillImportService = null,
-        TimeSpan? skillImportTimeout = null)
+        TimeSpan? skillImportTimeout = null,
+        int tokenBudget = 4000,
+        int maxEntries = 50)
     {
         return new SessionLifecycle(
             (importers ?? Array.Empty<IImporter>()).ToList(),
@@ -224,7 +227,9 @@ public sealed class SessionLifecycleTests
             usageIndexer: null,
             storageMode: "sqlite",
             skillImportService: skillImportService,
-            skillImportTimeout: skillImportTimeout);
+            skillImportTimeout: skillImportTimeout,
+            tokenBudget: tokenBudget,
+            maxEntries: maxEntries);
     }
 
     private sealed class FakeSkillImportService : ISkillImportService
@@ -252,6 +257,67 @@ public sealed class SessionLifecycleTests
             if (_async is not null) return _async(ct);
             return Task.FromResult(_summaries ?? Array.Empty<SkillImportSummaryDto>());
         }
+    }
+
+    // ---------- BuildContext: sort + budget ----------
+
+    [Fact]
+    public void BuildContext_SortsByDecayScoreDescending()
+    {
+        var entries = new[]
+        {
+            MakeEntry("a", "low",  decayScore: 0.2),
+            MakeEntry("b", "high", decayScore: 0.9),
+            MakeEntry("c", "mid",  decayScore: 0.5),
+        };
+        var (context, _) = SessionLifecycle.BuildContext(entries, tokenBudget: 4000);
+        var lines = context.Split('\n');
+        Assert.Equal("- high", lines[0]);
+        Assert.Equal("- mid",  lines[1]);
+        Assert.Equal("- low",  lines[2]);
+    }
+
+    [Fact]
+    public void BuildContext_RespectsTokenBudget()
+    {
+        // Each line is "- " + 10 chars = 12 chars.
+        // Two lines with '\n' separator = 25 chars.
+        // tokenBudget=7 → maxChars=28. First=12, second=12+1=13 → total 25 ≤ 28.
+        // Third would add 13 more → 38 > 28 → truncated.
+        var entries = new[]
+        {
+            MakeEntry("a", "aaaaaaaaaa", decayScore: 0.9),
+            MakeEntry("b", "bbbbbbbbbb", decayScore: 0.8),
+            MakeEntry("c", "cccccccccc", decayScore: 0.7),
+        };
+        var (context, truncated) = SessionLifecycle.BuildContext(entries, tokenBudget: 7);
+        Assert.True(truncated);
+        var lines = context.Split('\n');
+        Assert.Equal(2, lines.Length);
+        Assert.Contains("aaaaaaaaaa", lines[0]);
+        Assert.Contains("bbbbbbbbbb", lines[1]);
+    }
+
+    [Fact]
+    public void BuildContext_AllFit_NotTruncated()
+    {
+        var entries = new[]
+        {
+            MakeEntry("a", "hello", decayScore: 0.9),
+            MakeEntry("b", "world", decayScore: 0.5),
+        };
+        var (context, truncated) = SessionLifecycle.BuildContext(entries, tokenBudget: 4000);
+        Assert.False(truncated);
+        Assert.Equal("- hello\n- world", context);
+    }
+
+    [Fact]
+    public void BuildContext_Empty_ReturnsFalseAndEmptyString()
+    {
+        var (context, truncated) = SessionLifecycle.BuildContext(
+            Array.Empty<Entry>(), tokenBudget: 4000);
+        Assert.Equal(string.Empty, context);
+        Assert.False(truncated);
     }
 
     // ---------- 1. idempotency ----------
@@ -330,7 +396,8 @@ public sealed class SessionLifecycleTests
     [Fact]
     public void BuildContext_EmptyHotTier_ReturnsEmptyString()
     {
-        Assert.Equal(string.Empty, SessionLifecycle.BuildContext(Array.Empty<Entry>()));
+        var (context, _) = SessionLifecycle.BuildContext(Array.Empty<Entry>());
+        Assert.Equal(string.Empty, context);
     }
 
     // ---------- 4. P1 hints (corrections + preferences) ----------

@@ -48,6 +48,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
     // Soft timeout for the skill import sweep — session_start must never block
     // on a slow cortex push. Kept as a field so tests can override via ctor.
     private readonly TimeSpan _skillImportTimeout;
+    private readonly int _tokenBudget;
+    private readonly int _maxEntries;
 
     private readonly SemaphoreSlim _initLock = new(1, 1);
     private SessionInitResult? _cached;
@@ -61,7 +63,9 @@ public sealed class SessionLifecycle : ISessionLifecycle
         TotalRecall.Infrastructure.Usage.UsageIndexer? usageIndexer = null,
         string storageMode = "sqlite",
         ISkillImportService? skillImportService = null,
-        TimeSpan? skillImportTimeout = null)
+        TimeSpan? skillImportTimeout = null,
+        int tokenBudget = 4000,
+        int maxEntries = 50)
     {
         ArgumentNullException.ThrowIfNull(importers);
         ArgumentNullException.ThrowIfNull(store);
@@ -75,6 +79,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
         _storageMode = storageMode;
         _skillImportService = skillImportService;
         _skillImportTimeout = skillImportTimeout ?? TimeSpan.FromSeconds(5);
+        _tokenBudget = tokenBudget > 0 ? tokenBudget : 4000;
+        _maxEntries = maxEntries > 0 ? maxEntries : 50;
     }
 
     /// <inheritdoc />
@@ -239,7 +245,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
             Collections: _store.CountKnowledgeCollections());
 
         // 4. Context string assembly — matches TS session-tools.ts:260-264.
-        var context = BuildContext(hotEntries);
+        var (context, hotContextTruncated) = BuildContext(hotEntries, _tokenBudget);
 
         // 5. Hints.
         var hints = GenerateHints(_store, warmPromotedIds);
@@ -268,36 +274,66 @@ public sealed class SessionLifecycle : ISessionLifecycle
             LastSessionAge: lastSessionAge,
             SmokeTest: null, // TODO(Plan 5+): smoke test not ported
             RegressionAlerts: null, // TODO(Plan 5+): regression detection not ported
-            Storage: _storageMode);
+            Storage: _storageMode,
+            HotContextTruncated: hotContextTruncated);
     }
 
     // -------- helpers (internal so tests can call them directly) --------
 
     /// <summary>
-    /// Builds the hot-tier context block fed back to the host LLM. Each entry
-    /// renders as <c>"- {content}{tags_suffix}"</c> with
+    /// Builds the hot-tier context block fed back to the host LLM. Entries are
+    /// sorted by <see cref="Entry.DecayScore"/> descending and then rendered as
+    /// <c>"- {content}{tags_suffix}"</c> with
     /// <c>tags_suffix</c> = <c>" [tag1, tag2]"</c> when tags are present, empty
-    /// otherwise. Lines joined with '\n'. Mirrors TS lines 260-264.
+    /// otherwise. Lines joined with '\n'. Enforces a token budget (1 token ≈ 4 chars).
+    /// Returns a tuple of the context string and a boolean indicating whether the
+    /// output was truncated due to the budget. Mirrors TS lines 260-264.
     /// </summary>
-    public static string BuildContext(IReadOnlyList<Entry> hotEntries)
+    public static (string Context, bool Truncated) BuildContext(
+        IReadOnlyList<Entry> hotEntries,
+        int tokenBudget = 4000)
     {
-        if (hotEntries.Count == 0) return string.Empty;
-        var sb = new StringBuilder();
-        for (var i = 0; i < hotEntries.Count; i++)
+        if (hotEntries.Count == 0) return (string.Empty, false);
+
+        var maxChars = tokenBudget * 4;
+        var sorted = hotEntries.OrderByDescending(e => e.DecayScore);
+        var result = new StringBuilder();
+        var charsUsed = 0;
+        var first = true;
+        var truncated = false;
+
+        foreach (var e in sorted)
         {
-            var e = hotEntries[i];
-            if (i > 0) sb.Append('\n');
-            sb.Append("- ");
-            sb.Append(e.Content);
-            // Entry.Tags is FSharpList<string>; iterate as IEnumerable<string>.
-            var tags = (IEnumerable<string>)e.Tags;
-            var tagList = tags as IList<string> ?? tags.ToList();
-            if (tagList.Count > 0)
+            var line = BuildContextLine(e);
+            var needed = (first ? 0 : 1) + line.Length; // '\n' separator between entries
+
+            if (charsUsed + needed > maxChars)
             {
-                sb.Append(" [");
-                sb.Append(string.Join(", ", tagList));
-                sb.Append(']');
+                truncated = true;
+                break;
             }
+
+            if (!first) result.Append('\n');
+            result.Append(line);
+            charsUsed += needed;
+            first = false;
+        }
+
+        return (result.ToString(), truncated);
+    }
+
+    private static string BuildContextLine(Entry e)
+    {
+        var sb = new StringBuilder("- ");
+        sb.Append(e.Content);
+        // Entry.Tags is FSharpList<string>; iterate as IEnumerable<string>.
+        var tags = (IEnumerable<string>)e.Tags;
+        var tagList = tags as IList<string> ?? tags.ToList();
+        if (tagList.Count > 0)
+        {
+            sb.Append(" [");
+            sb.Append(string.Join(", ", tagList));
+            sb.Append(']');
         }
         return sb.ToString();
     }
@@ -426,7 +462,8 @@ public sealed record SessionInitResult(
     [property: JsonPropertyName("lastSessionAge")] string? LastSessionAge,
     [property: JsonPropertyName("smokeTest")] SmokeTestResult? SmokeTest,
     [property: JsonPropertyName("regressionAlerts")] IReadOnlyList<RegressionAlert>? RegressionAlerts,
-    [property: JsonPropertyName("storage")] string Storage);
+    [property: JsonPropertyName("storage")] string Storage,
+    [property: JsonPropertyName("hotContextTruncated")] bool HotContextTruncated);
 
 /// <summary>One row in the host-importer summary. Skill fields default to
 /// zero / empty for legacy memory-only importers; the skill import sweep
