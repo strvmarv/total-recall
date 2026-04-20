@@ -12,7 +12,7 @@ public class SkillImportServiceTests
         var scanner = new FakeScanner(skills: new[] { BuildSkill("foo") });
         var client = new FakeClient(
             importResponse: new[] { Summary("claude-code", imported: 1) });
-        var svc = new SkillImportService(scanner, client, new FixedUserId("u1"));
+        var svc = new SkillImportService(scanner, client);
 
         var result = await svc.ImportAsync(projectPath: null, CancellationToken.None);
 
@@ -20,7 +20,6 @@ public class SkillImportServiceTests
         Assert.Equal(1, result[0].Imported);
         Assert.Empty(result[0].Errors);
         Assert.Equal("claude-code", client.LastAdapter);
-        Assert.Equal("u1", scanner.LastUserId);
     }
 
     [Fact]
@@ -31,7 +30,7 @@ public class SkillImportServiceTests
             errors: new[] { new ScanError("/path/bad.md", "malformed yaml") });
         var client = new FakeClient(
             importResponse: new[] { Summary("claude-code", imported: 1) });
-        var svc = new SkillImportService(scanner, client, new FixedUserId("u1"));
+        var svc = new SkillImportService(scanner, client);
 
         var result = await svc.ImportAsync(projectPath: null, CancellationToken.None);
 
@@ -47,7 +46,7 @@ public class SkillImportServiceTests
         var scanner = new FakeScanner(skills: new[] { BuildSkill("foo"), BuildSkill("bar") });
         var client = new FakeClient(
             importException: new CortexUnreachableException("connection refused"));
-        var svc = new SkillImportService(scanner, client, new FixedUserId("u1"));
+        var svc = new SkillImportService(scanner, client);
 
         var result = await svc.ImportAsync(projectPath: null, CancellationToken.None);
 
@@ -76,17 +75,10 @@ public class SkillImportServiceTests
         IReadOnlyList<ImportedSkill>? skills = null,
         IReadOnlyList<ScanError>? errors = null) : IClaudeCodeSkillScanner
     {
-        public string? LastUserId { get; private set; }
-        public string? LastProjectPath { get; private set; }
-
-        public Task<ClaudeCodeScanResult> ScanAsync(string userId, string? projectPath, CancellationToken ct)
-        {
-            LastUserId = userId;
-            LastProjectPath = projectPath;
-            return Task.FromResult(new ClaudeCodeScanResult(
+        public Task<ClaudeCodeScanResult> ScanAsync(string? projectPath, CancellationToken ct)
+            => Task.FromResult(new ClaudeCodeScanResult(
                 skills ?? Array.Empty<ImportedSkill>(),
                 errors ?? Array.Empty<ScanError>()));
-        }
     }
 
     private sealed class FakeClient : ISkillClient
@@ -120,8 +112,4 @@ public class SkillImportServiceTests
         public Task DeleteAsync(Guid id, CancellationToken ct) => throw new NotImplementedException();
     }
 
-    private sealed class FixedUserId(string userId) : ICurrentUserId
-    {
-        public string GetUserId() => userId;
-    }
 }

@@ -222,38 +222,3 @@ public class CortexSkillClientTests
     }
 }
 
-public class JwtCurrentUserIdTests
-{
-    [Fact]
-    public void ValidToken_ReturnsSub()
-    {
-        // payload: {"sub":"user-abc","exp":9999999999}
-        var payload = "eyJzdWIiOiJ1c2VyLWFiYyIsImV4cCI6OTk5OTk5OTk5OX0";
-        var token = $"header.{payload}.sig";
-        var ids = new JwtCurrentUserId(token);
-        Assert.Equal("user-abc", ids.GetUserId());
-    }
-
-    [Fact]
-    public void MissingSub_Throws()
-    {
-        // payload: {"exp":9999999999}
-        var payload = "eyJleHAiOjk5OTk5OTk5OTl9";
-        var token = $"header.{payload}.sig";
-        var ids = new JwtCurrentUserId(token);
-        Assert.Throws<InvalidOperationException>(() => ids.GetUserId());
-    }
-
-    [Fact]
-    public void MissingPayloadSegment_Throws()
-    {
-        var ids = new JwtCurrentUserId("only-one-segment");
-        Assert.Throws<InvalidOperationException>(() => ids.GetUserId());
-    }
-
-    [Fact]
-    public void NullToken_ThrowsArgumentNull()
-    {
-        Assert.Throws<ArgumentNullException>(() => new JwtCurrentUserId(null!));
-    }
-}

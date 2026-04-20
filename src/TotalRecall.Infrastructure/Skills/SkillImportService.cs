@@ -4,14 +4,12 @@ namespace TotalRecall.Infrastructure.Skills;
 
 public sealed class SkillImportService(
     IClaudeCodeSkillScanner scanner,
-    ISkillClient client,
-    ICurrentUserId userIds) : ISkillImportService
+    ISkillClient client) : ISkillImportService
 {
     public async Task<SkillImportSummaryDto[]> ImportAsync(
         string? projectPath, CancellationToken ct)
     {
-        var userId = userIds.GetUserId();
-        var scan = await scanner.ScanAsync(userId, projectPath, ct);
+        var scan = await scanner.ScanAsync(projectPath, ct);
 
         try
         {

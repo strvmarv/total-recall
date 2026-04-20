@@ -490,8 +490,7 @@ public static class ServerComposition
             // so session_start folds skill counts into importSummary.
             var skillClient = CortexSkillClient.Create(cortexUrl, cortexPat);
             var skillScanner = new ClaudeCodeSkillScanner();
-            var skillUserIds = new JwtCurrentUserId(cortexPat);
-            var skillImportService = new SkillImportService(skillScanner, skillClient, skillUserIds);
+            var skillImportService = new SkillImportService(skillScanner, skillClient);
 
             var sessionLifecycle = new SessionLifecycle(
                 importers, routingStore, compactionLog,

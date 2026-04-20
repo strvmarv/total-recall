@@ -54,8 +54,7 @@ Skill body for {uniqueName}. Contains a distinctive keyword: haystackneedle.
 
         var scanner = new ClaudeCodeSkillScanner();
         var client = CortexSkillClient.Create(_cortexUrl, _cortexPat, TimeSpan.FromSeconds(30));
-        var userIds = new JwtCurrentUserId(_cortexPat);
-        var service = new SkillImportService(scanner, client, userIds);
+        var service = new SkillImportService(scanner, client);
 
         // Act 1 — scan + push
         var summaries = await service.ImportAsync(projectPath: _tempRoot, CancellationToken.None);
@@ -96,8 +95,7 @@ Skill body for {uniqueName}. Contains a distinctive keyword: haystackneedle.
 
         var scanner = new ClaudeCodeSkillScanner();
         var client = CortexSkillClient.Create(_cortexUrl, _cortexPat, TimeSpan.FromSeconds(30));
-        var userIds = new JwtCurrentUserId(_cortexPat);
-        var service = new SkillImportService(scanner, client, userIds);
+        var service = new SkillImportService(scanner, client);
 
         try
         {

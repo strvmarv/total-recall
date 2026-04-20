@@ -26,7 +26,7 @@ public class ClaudeCodeSkillScannerTests : IDisposable
     public async Task ScanAsync_BundleWithSupportingFiles_ReturnsCompleteBundle()
     {
         var (scanner, projectRoot) = BuildScannerOver("bundle-skill");
-        var result = await scanner.ScanAsync("u1", projectRoot, CancellationToken.None);
+        var result = await scanner.ScanAsync(projectRoot, CancellationToken.None);
         Assert.Empty(result.Errors);
         var skill = Assert.Single(result.Skills);
         Assert.Equal("bundle-skill", skill.Name);
@@ -34,7 +34,7 @@ public class ClaudeCodeSkillScannerTests : IDisposable
         Assert.Contains(skill.Files, f => f.RelativePath == "references/tools.md");
         Assert.Contains(skill.Files, f => f.RelativePath == "scripts/setup.sh");
         Assert.Equal("user", skill.SuggestedScope);
-        Assert.Equal("user:u1", skill.SuggestedScopeId);
+        Assert.Equal("", skill.SuggestedScopeId);
     }
 
     [Fact]
@@ -53,7 +53,7 @@ public class ClaudeCodeSkillScannerTests : IDisposable
 
         var scanner = new ClaudeCodeSkillScanner(homeOverride: Path.Combine(temp, "home"));
         var projectRoot = Path.Combine(temp, "project-root");
-        var result = await scanner.ScanAsync("u1", projectRoot, CancellationToken.None);
+        var result = await scanner.ScanAsync(projectRoot, CancellationToken.None);
 
         var skill = Assert.Single(result.Skills);
         var big = Assert.Single(skill.Files, f => f.RelativePath == "big.bin");
@@ -68,7 +68,7 @@ public class ClaudeCodeSkillScannerTests : IDisposable
         // Compose a scan root with BOTH malformed-skill AND bundle-skill so we
         // assert the scanner keeps going after a failure.
         var (scanner, projectRoot) = BuildScannerOver("bundle-skill", "malformed-skill");
-        var result = await scanner.ScanAsync("u1", projectRoot, CancellationToken.None);
+        var result = await scanner.ScanAsync(projectRoot, CancellationToken.None);
 
         Assert.Single(result.Skills, s => s.Name == "bundle-skill");
         Assert.DoesNotContain(result.Skills, s => s.Name == "malformed-skill");
@@ -79,7 +79,7 @@ public class ClaudeCodeSkillScannerTests : IDisposable
     public async Task ScanAsync_SkillIgnore_HonoursPatterns()
     {
         var (scanner, projectRoot) = BuildScannerOver("ignored-skill");
-        var result = await scanner.ScanAsync("u1", projectRoot, CancellationToken.None);
+        var result = await scanner.ScanAsync(projectRoot, CancellationToken.None);
         var skill = Assert.Single(result.Skills);
         Assert.Equal("ignored-skill", skill.Name);
         Assert.DoesNotContain(skill.Files, f => f.RelativePath == "secret.txt");
@@ -97,7 +97,7 @@ public class ClaudeCodeSkillScannerTests : IDisposable
         CopyDirectory(Path.Combine(FixturesRoot(), "bundle-skill"), target);
 
         var scanner = new ClaudeCodeSkillScanner(homeOverride: Path.Combine(temp, "home"));
-        var result = await scanner.ScanAsync("u1", projectRoot, CancellationToken.None);
+        var result = await scanner.ScanAsync(projectRoot, CancellationToken.None);
 
         var skill = Assert.Single(result.Skills);
         Assert.Contains("project:my-project", skill.SuggestedTags);
@@ -114,7 +114,7 @@ public class ClaudeCodeSkillScannerTests : IDisposable
         CopyDirectory(Path.Combine(FixturesRoot(), "bundle-skill"), target);
 
         var scanner = new ClaudeCodeSkillScanner(homeOverride: homeRoot);
-        var result = await scanner.ScanAsync("u1", projectPath: null, CancellationToken.None);
+        var result = await scanner.ScanAsync(projectPath: null, CancellationToken.None);
 
         var skill = Assert.Single(result.Skills);
         Assert.Empty(skill.SuggestedTags);

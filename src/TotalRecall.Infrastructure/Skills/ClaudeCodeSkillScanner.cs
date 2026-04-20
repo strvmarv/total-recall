@@ -12,9 +12,8 @@ namespace TotalRecall.Infrastructure.Skills;
 /// </summary>
 public interface IClaudeCodeSkillScanner
 {
-    /// <param name="userId">Cortex user id; used for scope-id derivation.</param>
     /// <param name="projectPath">Optional project root for {project}/.claude/skills/.</param>
-    Task<ClaudeCodeScanResult> ScanAsync(string userId, string? projectPath, CancellationToken ct);
+    Task<ClaudeCodeScanResult> ScanAsync(string? projectPath, CancellationToken ct);
 }
 
 public sealed record ClaudeCodeScanResult(
@@ -44,14 +43,14 @@ public sealed class ClaudeCodeSkillScanner : IClaudeCodeSkillScanner
         _homeOverride = homeOverride;
     }
 
-    public Task<ClaudeCodeScanResult> ScanAsync(string userId, string? projectPath, CancellationToken ct)
+    public Task<ClaudeCodeScanResult> ScanAsync(string? projectPath, CancellationToken ct)
     {
         var skills = new List<ImportedSkill>();
         var errors = new List<ScanError>();
 
         var home = _homeOverride ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var userSkills = Path.Combine(home, ".claude", "skills");
-        ScanRoot(userSkills, userId, tagProject: null, skills, errors, ct);
+        ScanRoot(userSkills, tagProject: null, skills, errors, ct);
 
         if (!string.IsNullOrEmpty(projectPath))
         {
@@ -59,7 +58,7 @@ public sealed class ClaudeCodeSkillScanner : IClaudeCodeSkillScanner
             if (Directory.Exists(projectSkills))
             {
                 var projectName = new DirectoryInfo(projectPath!).Name;
-                ScanRoot(projectSkills, userId, tagProject: projectName, skills, errors, ct);
+                ScanRoot(projectSkills, tagProject: projectName, skills, errors, ct);
             }
         }
 
@@ -67,13 +66,14 @@ public sealed class ClaudeCodeSkillScanner : IClaudeCodeSkillScanner
     }
 
     private static void ScanRoot(
-        string root, string userId, string? tagProject,
+        string root, string? tagProject,
         List<ImportedSkill> skills, List<ScanError> errors, CancellationToken ct)
     {
         if (!Directory.Exists(root)) return;
 
+        // Scope id is left empty — cortex stamps the authenticated user's id at ingestion.
         var scope = "user";
-        var scopeId = $"user:{userId}";
+        var scopeId = "";
 
         // Single top-level *.md files = single-file bundles.
         foreach (var file in Directory.EnumerateFiles(root, "*.md", SearchOption.TopDirectoryOnly))
