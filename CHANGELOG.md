@@ -5,11 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 1.0.2 - 2026-04-20
 
 ### Added
 
 - **Skills as a first-class Cortex resource.** Five new MCP tools wired in cortex mode: `skill_search`, `skill_get` (by id or natural key), `skill_list` (with base64 skip cursor), `skill_delete` (owner-scoped), and `skill_import_host` (scans local `~/.claude/skills/` and `<project>/.claude/skills/`, POSTs bundles to cortex). `session_start` now folds per-adapter skill counts (`skillsImported`, `skillsUpdated`, `skillsUnchanged`, `skillsOrphaned`, `skillsErrors`) into the returned `importSummary`, with a 5-second soft timeout and a synthetic error row on failure so session init is never blocked. Plugin-cache paths are intentionally not scanned.
+- **Full exception stack traces on tool dispatch failure.** `McpServer` now logs the entire exception chain (type, message, stack, inner) to stderr whenever a tool throws. The wire-level MCP error stays terse, so clients are unaffected, but operators can diagnose throw sites from server logs.
+
+### Fixed
+
+- **`memory_store` no longer reports a write error when the local commit succeeded.** `RoutingStore.EnqueueUpsert` now catches any exception after the local write has committed, logs it to stderr, and returns the committed id to the caller. Previously, a failure in the post-commit sync-queue path (re-reading the row, building the payload, or queuing it) would surface as an MCP error even though the memory was safely persisted locally. The enqueue failure only means the memory won't be pushed to cortex until the next successful write touches the queue.
 
 ## 1.0.0 - 2026-04-16
 
