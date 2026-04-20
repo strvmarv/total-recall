@@ -14,15 +14,11 @@ public sealed class SkillGetHandler : IToolHandler
     private static readonly JsonElement _inputSchema = JsonDocument.Parse("""
         {
           "type": "object",
-          "oneOf": [
-            { "required": ["id"] },
-            { "required": ["name","scope","scopeId"] }
-          ],
           "properties": {
-            "id":      {"type":"string","description":"Skill GUID"},
-            "name":    {"type":"string"},
-            "scope":   {"type":"string"},
-            "scopeId": {"type":"string"}
+            "id":      {"type":"string","description":"Skill GUID. Supply either id OR the name+scope+scopeId triple, not both."},
+            "name":    {"type":"string","description":"Skill name (required when using natural-key lookup)"},
+            "scope":   {"type":"string","description":"Skill scope (required when using natural-key lookup)"},
+            "scopeId": {"type":"string","description":"Skill scope ID (required when using natural-key lookup)"}
           }
         }
         """).RootElement.Clone();
