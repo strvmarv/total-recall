@@ -11,6 +11,8 @@ namespace TotalRecall.Infrastructure.Tests.TestSupport;
 /// </summary>
 public sealed class FakeEmbedder : IEmbedder
 {
+        public EmbedderDescriptor Descriptor { get; } = new("test", "fake", "", 384);
+
     public float[] Embed(string text)
     {
         var v = new float[384];

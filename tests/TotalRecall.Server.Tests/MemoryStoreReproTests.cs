@@ -75,7 +75,9 @@ public sealed class MemoryStoreReproTests
 
     private sealed class InlineFakeEmbedder : IEmbedder
     {
-        public float[] Embed(string text)
+            public EmbedderDescriptor Descriptor { get; } = new("test", "fake", "", 384);
+
+    public float[] Embed(string text)
         {
             var v = new float[384];
             var len = text?.Length ?? 0;

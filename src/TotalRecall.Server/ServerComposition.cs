@@ -249,6 +249,7 @@ public static class ServerComposition
             var vec = new VectorSearch(conn);
             var fts = new FtsSearch(conn);
             var embedder = EmbedderFactory.CreateFromConfig(cfg.Embedding);
+            EmbedderFingerprint.EnsureMatches(store, embedder);
             var hybrid = new HybridSearch(vec, fts, store);
 
             var compactionLog = new CompactionLog(conn);
@@ -346,6 +347,7 @@ public static class ServerComposition
             var vec = new PgvectorSearch(dataSource, userId);
             var fts = new PostgresFtsSearch(dataSource, userId);
             var embedder = EmbedderFactory.CreateFromConfig(cfg.Embedding);
+            EmbedderFingerprint.EnsureMatches(store, embedder);
             var hybrid = new HybridSearch(vec, fts, store);
 
             var compactionLog = new PostgresCompactionLog(dataSource);
