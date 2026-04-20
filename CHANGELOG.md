@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.0.4 - 2026-04-20
+
+### Fixed
+
+- **Warm-tier memories no longer silently land in hot on Cortex.** `SyncPayload.Upsert` now includes a `tier` field in the push payload, `SyncEntry` carries it across the wire, and `PluginSyncIngestJob` (cortex-side) routes new entries to the correct tier table and migrates existing entries when their tier has changed. Previously every synced memory—whether created directly in warm or moved there by the local compactor—was ingested into the hot tier on Cortex, defeating compaction and inflating hot counts.
+- **Memory upserts no longer starve behind a telemetry backlog.** `SyncQueue.Drain` now orders `memory` items before `usage`, `retrieval`, and `compaction` rows. With a large pre-existing telemetry backlog (e.g. 331 rows observed in the wild), memory writes would wait up to ~35 minutes for the backlog to drain under the old FIFO ordering.
+
 ## 1.0.3 - 2026-04-20
 
 ### Fixed
