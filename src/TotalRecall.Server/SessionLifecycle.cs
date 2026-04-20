@@ -49,7 +49,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
     // on a slow cortex push. Kept as a field so tests can override via ctor.
     private readonly TimeSpan _skillImportTimeout;
     private readonly int _tokenBudget;
-    private readonly int _maxEntries;
+    private readonly int _maxEntries; // unused until Task 7 write-time eviction
 
     private readonly SemaphoreSlim _initLock = new(1, 1);
     private SessionInitResult? _cached;

@@ -320,6 +320,35 @@ public sealed class SessionLifecycleTests
         Assert.False(truncated);
     }
 
+    [Fact]
+    public void BuildContext_FirstEntryExceedsBudget_ReturnsEmptyWithTruncated()
+    {
+        // tokenBudget=1 → maxChars=4. "- hello" = 7 chars, which exceeds 4.
+        // Contract: return ("", true) rather than a partial entry.
+        var entries = new[] { MakeEntry("a", "hello", decayScore: 1.0) };
+        var (context, truncated) = SessionLifecycle.BuildContext(entries, tokenBudget: 1);
+        Assert.Equal(string.Empty, context);
+        Assert.True(truncated);
+    }
+
+    [Fact]
+    public async Task EnsureInitializedAsync_HotContextTruncated_WhenBudgetSmall()
+    {
+        var store = new FakeStore();
+        // Three entries, each "- " + 10 chars = 12 chars. tokenBudget=2 → maxChars=8.
+        // Even the first entry (12 chars) exceeds the budget → Truncated=true.
+        store.Entries[(Tier.Hot, ContentType.Memory)] = new List<Entry>
+        {
+            MakeEntry("a", "aaaaaaaaaa", decayScore: 0.9),
+            MakeEntry("b", "bbbbbbbbbb", decayScore: 0.8),
+        };
+        var lifecycle = BuildLifecycle(store, tokenBudget: 2);
+
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        Assert.True(result.HotContextTruncated);
+    }
+
     // ---------- 1. idempotency ----------
 
     [Fact]

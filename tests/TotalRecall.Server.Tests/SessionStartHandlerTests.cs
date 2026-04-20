@@ -134,6 +134,7 @@ public sealed class SessionStartHandlerTests
         Assert.Contains("\"hotEntryCount\"", text);
         Assert.Contains("\"tierSummary\"", text);
         Assert.Contains("\"lastSessionAge\"", text);
+        Assert.Contains("\"hotContextTruncated\"", text);
     }
 
     [Fact]
