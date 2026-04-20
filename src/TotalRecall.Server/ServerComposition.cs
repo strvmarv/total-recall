@@ -151,7 +151,7 @@ public static class ServerComposition
         registry.Register(new KbSummarizeHandler(store));
 
         // ---- Session (3) ----
-        registry.Register(new SessionStartHandler(sessionLifecycle, syncService, periodicSync));
+        registry.Register(new SessionStartHandler(sessionLifecycle, periodicSync));
         registry.Register(new SessionEndHandler(sessionLifecycle, syncService));
         registry.Register(new SessionContextHandler(store));
 

@@ -145,4 +145,12 @@ public sealed class SessionStartHandlerTests
         Assert.Contains("Initialize", handler.Description);
         Assert.Equal(JsonValueKind.Object, handler.InputSchema.ValueKind);
     }
+
+    [Fact]
+    public void Constructor_DoesNotRequireSyncService()
+    {
+        var lifecycle = new FakeSessionLifecycle();
+        var handler = new SessionStartHandler(lifecycle); // no SyncService arg
+        Assert.NotNull(handler);
+    }
 }
