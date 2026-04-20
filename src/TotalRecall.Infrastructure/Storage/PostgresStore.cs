@@ -23,6 +23,7 @@ public sealed class PostgresStore : IStore
 {
     private readonly NpgsqlDataSource _dataSource;
     private readonly string _ownerId;
+    private readonly int _hotMaxEntries;
 
     /// <summary>
     /// Constructs a <see cref="PostgresStore"/> that writes <paramref name="ownerId"/>
@@ -30,12 +31,14 @@ public sealed class PostgresStore : IStore
     /// </summary>
     /// <param name="dataSource">Configured Npgsql data source.</param>
     /// <param name="ownerId">Owner identifier stamped on every inserted row.</param>
-    public PostgresStore(NpgsqlDataSource dataSource, string ownerId)
+    /// <param name="hotMaxEntries">Maximum hot memory entries before write-time eviction.</param>
+    public PostgresStore(NpgsqlDataSource dataSource, string ownerId, int hotMaxEntries = 50)
     {
         ArgumentNullException.ThrowIfNull(dataSource);
         ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
         _dataSource = dataSource;
         _ownerId = ownerId;
+        _hotMaxEntries = hotMaxEntries > 0 ? hotMaxEntries : 50;
     }
 
     // --- IStore -----------------------------------------------------
@@ -53,6 +56,10 @@ public sealed class PostgresStore : IStore
         cmd.CommandText = BuildInsertSql(table);
         BindInsertParameters(cmd, id, tierStr, opts, now, _ownerId);
         cmd.ExecuteNonQuery();
+
+        if (tier == Tier.Hot && type == ContentType.Memory)
+            EvictHotIfOverLimit(type);
+
         return id;
     }
 
@@ -80,13 +87,17 @@ public sealed class PostgresStore : IStore
             cmd.ExecuteNonQuery();
 
             tx.Commit();
-            return id;
         }
         catch
         {
             tx.Rollback();
             throw;
         }
+
+        if (tier == Tier.Hot && type == ContentType.Memory)
+            EvictHotIfOverLimit(type);
+
+        return id;
     }
 
     private static string BuildInsertSql(string table) => $@"
@@ -497,6 +508,34 @@ VALUES
         {
             tx.Rollback();
             throw;
+        }
+    }
+
+    // --- write-time hot eviction -----------------------------------------
+
+    private void EvictHotIfOverLimit(ContentType type)
+    {
+        if (Count(Tier.Hot, type) <= _hotMaxEntries) return;
+
+        var table = TableName(type);
+        var tierStr = TierString(Tier.Hot);
+        string? lowestId;
+        using (var conn = _dataSource.OpenConnection())
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = $"SELECT id FROM {table} WHERE tier = @tier ORDER BY decay_score ASC LIMIT 1";
+            cmd.Parameters.AddWithValue("@tier", tierStr);
+            lowestId = cmd.ExecuteScalar() as string;
+        }
+        if (lowestId is null) return;
+
+        try
+        {
+            Move(Tier.Hot, type, Tier.Warm, type, lowestId);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"total-recall: hot eviction failed for {lowestId}: {ex.Message}");
         }
     }
 
