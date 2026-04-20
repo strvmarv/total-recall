@@ -286,7 +286,8 @@ public static class ServerComposition
             var sessionLifecycle = new SessionLifecycle(
                 importers, store, compactionLog,
                 usageIndexer: usageIndexer,
-                storageMode: storageMode);
+                storageMode: storageMode,
+                tokenBudget: cfg.Tiers.Hot.TokenBudget);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
@@ -365,7 +366,8 @@ public static class ServerComposition
             };
 
             var sessionLifecycle = new SessionLifecycle(importers, store, compactionLog,
-                storageMode: storageMode);
+                storageMode: storageMode,
+                tokenBudget: cfg.Tiers.Hot.TokenBudget);
 
             var statusOptions = new StatusOptions(
                 DbPath: connStr,
@@ -496,7 +498,8 @@ public static class ServerComposition
                 importers, routingStore, compactionLog,
                 usageIndexer: usageIndexer,
                 storageMode: storageMode,
-                skillImportService: skillImportService);
+                skillImportService: skillImportService,
+                tokenBudget: cfg.Tiers.Hot.TokenBudget);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
