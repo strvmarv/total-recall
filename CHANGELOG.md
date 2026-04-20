@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.0.9 - 2026-04-20
+
+### Fixed
+
+- **`session_start` no longer blocks for ~40s on cortex mode cold start.** `PeriodicSync.Start()` now fires the first tick immediately (`dueTime = TimeSpan.Zero`) instead of waiting a full sync interval, so the periodic sync path handles cortex pull/flush without blocking session init. The two awaited `PullAsync` + `FlushAsync` calls have been removed from `SessionStartHandler` entirely.
+- **`session_start` hot context is now bounded to the documented 4,000-token budget.** `BuildContext` sorts hot entries by `decay_score` descending and stops accumulating once the next entry would exceed `tokenBudget × 4` characters (≈4 chars/token). A `hotContextTruncated` flag in the response indicates when entries were dropped. The `token_budget` value from config (`tiers.hot.token_budget`) is now wired through `ServerComposition` to all storage paths; previously the config field was serialized and advertised but never enforced.
+- **Hot tier is now bounded and self-healing.** Two complementary mechanisms cap the hot tier at `tiers.hot.max_entries` (default 50): a background warm sweep fires after `session_start` assembles context to demote the lowest-`decay_score` entries from hot to warm (drains existing backlogs), and write-time eviction in `SqliteStore`/`PostgresStore` moves the lowest-scoring entry to warm after each hot insert that would exceed the limit. The `max_entries` config value is now wired to all construction sites; previously it was serialized but never enforced.
+
 ## 1.0.8 - 2026-04-20
 
 ### Fixed
