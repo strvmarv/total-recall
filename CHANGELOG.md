@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.0.6 - 2026-04-20
+
+### Fixed
+
+- **`skill_get` no longer rejected by OpenCode and strict MCP clients.** The input schema used a top-level `oneOf` to express the id-vs-natural-key mutual exclusivity, which violates the MCP schema constraint that disallows `oneOf`/`anyOf`/`allOf`/`enum`/`not` at the root level. The handler already validates the combination at runtime, so the schema was simplified to plain optional properties with descriptive text.
+
 ## 1.0.5 - 2026-04-20
 
 ### Fixed
