@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.1.0 - 2026-04-21
+
+### Added
+
+- **`extra_dirs` config for skill scanning.** A new `[skill]` section in `~/.total-recall/config.toml` accepts an `extra_dirs` array of directories to scan for skills on every `session_start`. This lets Cursor users (and anyone who keeps skills outside `~/.claude/skills/`) point total-recall at their custom skill directories: `extra_dirs = ["~/my-skills"]`. Paths use `~/` tilde-slash syntax; each directory is scanned with the same bundle-aware logic as the Claude Code scanner. Skills from extra dirs are imported to Cortex with user scope alongside the standard Claude Code skills.
+- **Available skills surfaced in `session_start` context.** After skill import, all skills visible to the current user are fetched and appended to the session context as an `## Available Skills` block (`- name: description` per skill). The agent no longer needs a separate tool call to discover what skills exist at startup.
+
 ## 1.0.13 - 2026-04-20
 
 ### Fixed
