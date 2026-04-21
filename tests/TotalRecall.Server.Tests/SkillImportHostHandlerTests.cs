@@ -24,6 +24,10 @@ public class SkillImportHostHandlerTests
 
         public Task<SkillListResponseDto> ListVisibleAsync(CancellationToken ct) =>
             Task.FromResult(new SkillListResponseDto(0, 0, 0, Array.Empty<SkillDto>()));
+
+        public Task<ClaudeCodeScanResult> ScanExtraDirsAsync(CancellationToken ct) =>
+            Task.FromResult(new ClaudeCodeScanResult(
+                Array.Empty<ImportedSkill>(), Array.Empty<ScanError>()));
     }
 
     [Fact]

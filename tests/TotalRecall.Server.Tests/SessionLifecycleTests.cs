@@ -283,6 +283,10 @@ public sealed class SessionLifecycleTests
             return Task.FromResult(_listResponse
                 ?? new SkillListResponseDto(0, 0, 0, Array.Empty<SkillDto>()));
         }
+
+        public Task<ClaudeCodeScanResult> ScanExtraDirsAsync(CancellationToken ct) =>
+            Task.FromResult(new ClaudeCodeScanResult(
+                Array.Empty<ImportedSkill>(), Array.Empty<ScanError>()));
     }
 
     // ---------- BuildContext: sort + budget ----------
