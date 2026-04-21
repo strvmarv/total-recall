@@ -57,7 +57,8 @@ public sealed class StatusCommandTests : IDisposable
                 FSharpOption<Core.Config.StorageConfig>.None,
                 FSharpOption<Core.Config.UserConfig>.None,
                 FSharpOption<Core.Config.CortexConfig>.None,
-                FSharpOption<Core.Config.ScopeConfig>.None);
+                FSharpOption<Core.Config.ScopeConfig>.None,
+                FSharpOption<Core.Config.SkillConfig>.None);
         }
 
         public Core.Config.TotalRecallConfig LoadDefaults() => _cfg;
