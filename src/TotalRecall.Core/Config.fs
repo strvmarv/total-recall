@@ -80,6 +80,10 @@ type ScopeConfig = {
     Default: string option
 }
 
+type SkillConfig = {
+    ExtraDirs: string [] option
+}
+
 type TotalRecallConfig = {
     Tiers: TiersConfig
     Compaction: CompactionConfig
@@ -90,6 +94,7 @@ type TotalRecallConfig = {
     User: UserConfig option
     Cortex: CortexConfig option
     Scope: ScopeConfig option
+    Skill: SkillConfig option
 }
 
 // --- pure helpers (mirrors src-ts/config.ts isSafeKey + deepMerge + setNestedKey) ---

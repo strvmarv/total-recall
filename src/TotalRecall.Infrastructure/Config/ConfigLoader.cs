@@ -387,6 +387,18 @@ public sealed class ConfigLoader : IConfigLoader
             scope = FSharpOption<Core.Config.ScopeConfig>.None;
         }
 
+        FSharpOption<Core.Config.SkillConfig> skill;
+        if (table.TryGetValue("skill", out var skillObj) && skillObj is TomlTable skillTable)
+        {
+            var extraDirs = TryGetStringArray(skillTable, "extra_dirs");
+            var skillCfg = new Core.Config.SkillConfig(extraDirs);
+            skill = FSharpOption<Core.Config.SkillConfig>.Some(skillCfg);
+        }
+        else
+        {
+            skill = FSharpOption<Core.Config.SkillConfig>.None;
+        }
+
         return new Core.Config.TotalRecallConfig(
             tiersCfg,
             compactionCfg,
@@ -396,7 +408,8 @@ public sealed class ConfigLoader : IConfigLoader
             storage,
             user,
             cortex,
-            scope);
+            scope,
+            skill);
     }
 
     // --- walker helpers ---------------------------------------------------
@@ -446,4 +459,24 @@ public sealed class ConfigLoader : IConfigLoader
         table.TryGetValue(key, out var value) && value is string s
             ? FSharpOption<string>.Some(s)
             : FSharpOption<string>.None;
+
+    private static FSharpOption<string[]> TryGetStringArray(TomlTable table, string key)
+    {
+        if (!table.TryGetValue(key, out var value))
+            return FSharpOption<string[]>.None;
+
+        if (value is System.Collections.IList list)
+        {
+            var arr = new string[list.Count];
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (list[i] is not string s)
+                    throw new InvalidDataException($"Expected all elements in {key} array to be strings");
+                arr[i] = s;
+            }
+            return FSharpOption<string[]>.Some(arr);
+        }
+
+        return FSharpOption<string[]>.None;
+    }
 }
