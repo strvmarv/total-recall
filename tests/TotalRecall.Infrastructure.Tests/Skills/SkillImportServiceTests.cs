@@ -86,6 +86,7 @@ public class SkillImportServiceTests
         private readonly SkillImportSummaryDto[]? _importResponse;
         private readonly Exception? _importException;
         public string? LastAdapter { get; private set; }
+        public int LastSkillCount { get; private set; }
 
         public FakeClient(
             SkillImportSummaryDto[]? importResponse = null,
@@ -99,6 +100,7 @@ public class SkillImportServiceTests
             string adapter, IReadOnlyList<ImportedSkill> skills, CancellationToken ct)
         {
             LastAdapter = adapter;
+            LastSkillCount = skills.Count;
             if (_importException is not null) throw _importException;
             return Task.FromResult(_importResponse ?? Array.Empty<SkillImportSummaryDto>());
         }
@@ -110,6 +112,63 @@ public class SkillImportServiceTests
         public Task<SkillBundleDto?> GetByNaturalKeyAsync(string name, string scope, string scopeId, CancellationToken ct) => throw new NotImplementedException();
         public Task<SkillListResponseDto> ListAsync(string? scope, IReadOnlyList<string>? tags, int skip, int take, CancellationToken ct) => throw new NotImplementedException();
         public Task DeleteAsync(Guid id, CancellationToken ct) => throw new NotImplementedException();
+    }
+
+    private sealed class FakeCustomDirsScanner(
+        IReadOnlyList<ImportedSkill>? skills = null,
+        IReadOnlyList<ScanError>? errors = null) : ICustomDirsSkillScanner
+    {
+        public Task<ClaudeCodeScanResult> ScanAsync(CancellationToken ct)
+            => Task.FromResult(new ClaudeCodeScanResult(
+                skills ?? Array.Empty<ImportedSkill>(),
+                errors ?? Array.Empty<ScanError>()));
+    }
+
+    [Fact]
+    public async Task ImportAsync_CustomDirsScanner_MergesSkillsBeforePush()
+    {
+        var scanner = new FakeScanner(skills: new[] { BuildSkill("from-claude") });
+        var customScanner = new FakeCustomDirsScanner(skills: new[] { BuildSkill("from-custom") });
+        var client = new FakeClient(
+            importResponse: new[] { Summary("claude-code", imported: 2) });
+        var svc = new SkillImportService(scanner, client, customScanner);
+
+        var result = await svc.ImportAsync(projectPath: null, CancellationToken.None);
+
+        Assert.Single(result);
+        Assert.Equal(2, result[0].Imported);
+        // Both skills were sent in one batch
+        Assert.Equal(2, client.LastSkillCount);
+    }
+
+    [Fact]
+    public async Task ImportAsync_CustomDirsScannerErrors_MergedIntoSummary()
+    {
+        var scanner = new FakeScanner(skills: Array.Empty<ImportedSkill>());
+        var customScanner = new FakeCustomDirsScanner(
+            skills: Array.Empty<ImportedSkill>(),
+            errors: new[] { new ScanError("/custom/bad.md", "parse error") });
+        var client = new FakeClient(
+            importResponse: new[] { Summary("claude-code", imported: 0) });
+        var svc = new SkillImportService(scanner, client, customScanner);
+
+        var result = await svc.ImportAsync(projectPath: null, CancellationToken.None);
+
+        Assert.Single(result[0].Errors);
+        Assert.Contains("/custom/bad.md", result[0].Errors[0]);
+    }
+
+    [Fact]
+    public async Task ImportAsync_NoCustomDirsScanner_BehavesAsBeforeForExistingTests()
+    {
+        var scanner = new FakeScanner(skills: new[] { BuildSkill("solo") });
+        var client = new FakeClient(
+            importResponse: new[] { Summary("claude-code", imported: 1) });
+        var svc = new SkillImportService(scanner, client); // no custom scanner
+
+        var result = await svc.ImportAsync(projectPath: null, CancellationToken.None);
+
+        Assert.Equal(1, result[0].Imported);
     }
 
 }
