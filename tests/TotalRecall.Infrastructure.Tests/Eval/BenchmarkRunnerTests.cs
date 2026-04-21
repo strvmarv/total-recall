@@ -87,6 +87,7 @@ public sealed class BenchmarkRunnerTests : IDisposable
         public IReadOnlyList<Entry> ListByMetadata(Tier tier, ContentType type, IReadOnlyDictionary<string, string> metadataFilter, ListEntriesOpts? opts = null)
             => Array.Empty<Entry>();
         public void Move(Tier fromTier, ContentType fromType, Tier toTier, ContentType toType, string id) { }
+        public string? FindByContent(Tier tier, ContentType type, string content) => null;
     }
 
     private sealed class FakeVectorSearch : IVectorSearch

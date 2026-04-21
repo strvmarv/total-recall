@@ -113,6 +113,8 @@ public sealed class HybridSearchTests
             => throw new NotImplementedException();
         public void Move(Tier fromTier, ContentType fromType, Tier toTier, ContentType toType, string id)
             => throw new NotImplementedException();
+        public string? FindByContent(Tier tier, ContentType type, string content)
+            => throw new NotImplementedException();
     }
 
     // --- helpers ----------------------------------------------------------
