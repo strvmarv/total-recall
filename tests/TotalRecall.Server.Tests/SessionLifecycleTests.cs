@@ -248,17 +248,24 @@ public sealed class SessionLifecycleTests
         private readonly SkillImportSummaryDto[]? _summaries;
         private readonly Exception? _exception;
         private readonly Func<CancellationToken, Task<SkillImportSummaryDto[]>>? _async;
+        private readonly SkillListResponseDto? _listResponse;
+        private readonly Exception? _listException;
 
         public int ImportCalls { get; private set; }
+        public int ListCalls { get; private set; }
 
         public FakeSkillImportService(
             SkillImportSummaryDto[]? summaries = null,
             Exception? exception = null,
-            Func<CancellationToken, Task<SkillImportSummaryDto[]>>? asyncImpl = null)
+            Func<CancellationToken, Task<SkillImportSummaryDto[]>>? asyncImpl = null,
+            SkillListResponseDto? listResponse = null,
+            Exception? listException = null)
         {
             _summaries = summaries;
             _exception = exception;
             _async = asyncImpl;
+            _listResponse = listResponse;
+            _listException = listException;
         }
 
         public Task<SkillImportSummaryDto[]> ImportAsync(string? projectPath, CancellationToken ct)
@@ -267,6 +274,14 @@ public sealed class SessionLifecycleTests
             if (_exception is not null) throw _exception;
             if (_async is not null) return _async(ct);
             return Task.FromResult(_summaries ?? Array.Empty<SkillImportSummaryDto>());
+        }
+
+        public Task<SkillListResponseDto> ListVisibleAsync(int limit, CancellationToken ct)
+        {
+            ListCalls++;
+            if (_listException is not null) throw _listException;
+            return Task.FromResult(_listResponse
+                ?? new SkillListResponseDto(0, 0, limit, Array.Empty<SkillDto>()));
         }
     }
 
@@ -837,5 +852,199 @@ public sealed class SessionLifecycleTests
         var row = Assert.Single(result.ImportSummary, r => r.Tool == "claude-code");
         Assert.Single(row.SkillsErrors);
         Assert.Equal("skill_import_timeout_5s", row.SkillsErrors[0]);
+    }
+
+    // ---------- 13. BuildSkillsBlock unit tests ----------
+
+    private static SkillDto MakeSkillDto(string name, string? description = null) =>
+        new SkillDto(
+            Id: Guid.NewGuid(),
+            Name: name,
+            Description: description,
+            Scope: "user",
+            ScopeId: "u1",
+            Tags: Array.Empty<string>(),
+            Version: 1,
+            Source: null,
+            UpdatedAt: DateTimeOffset.UtcNow,
+            CreatedAt: DateTimeOffset.UtcNow);
+
+    [Fact]
+    public void BuildSkillsBlock_NoSkills_ReturnsEmpty()
+    {
+        var response = new SkillListResponseDto(0, 0, 50, Array.Empty<SkillDto>());
+        var block = SessionLifecycle.BuildSkillsBlock(response);
+        Assert.Equal(string.Empty, block);
+    }
+
+    [Fact]
+    public void BuildSkillsBlock_WithSkills_ContainsHeader()
+    {
+        var response = new SkillListResponseDto(
+            Total: 2, Skip: 0, Take: 50,
+            Items: new[]
+            {
+                MakeSkillDto("deploy-app", "Deploys the application"),
+                MakeSkillDto("run-tests", "Runs the test suite"),
+            });
+
+        var block = SessionLifecycle.BuildSkillsBlock(response);
+
+        Assert.Contains("## Available Skills", block);
+        Assert.Contains("skill_get", block);
+        Assert.Contains("skill_search", block);
+    }
+
+    [Fact]
+    public void BuildSkillsBlock_WithSkills_ContainsSkillNamesAndDescriptions()
+    {
+        var response = new SkillListResponseDto(
+            Total: 2, Skip: 0, Take: 50,
+            Items: new[]
+            {
+                MakeSkillDto("deploy-app", "Deploys the application"),
+                MakeSkillDto("run-tests", "Runs the test suite"),
+            });
+
+        var block = SessionLifecycle.BuildSkillsBlock(response);
+
+        Assert.Contains("- deploy-app: Deploys the application", block);
+        Assert.Contains("- run-tests: Runs the test suite", block);
+    }
+
+    [Fact]
+    public void BuildSkillsBlock_NullDescription_UsesNoDescriptionPlaceholder()
+    {
+        var response = new SkillListResponseDto(
+            Total: 1, Skip: 0, Take: 50,
+            Items: new[] { MakeSkillDto("my-skill", description: null) });
+
+        var block = SessionLifecycle.BuildSkillsBlock(response);
+
+        Assert.Contains("- my-skill: (no description)", block);
+    }
+
+    [Fact]
+    public void BuildSkillsBlock_EmptyDescription_UsesNoDescriptionPlaceholder()
+    {
+        var response = new SkillListResponseDto(
+            Total: 1, Skip: 0, Take: 50,
+            Items: new[] { MakeSkillDto("my-skill", description: "   ") });
+
+        var block = SessionLifecycle.BuildSkillsBlock(response);
+
+        Assert.Contains("- my-skill: (no description)", block);
+    }
+
+    [Fact]
+    public void BuildSkillsBlock_TotalOver50_AppendsTailLine()
+    {
+        var items = Enumerable.Range(1, 50)
+            .Select(i => MakeSkillDto($"skill-{i:D2}", $"Description {i}"))
+            .ToArray();
+        var response = new SkillListResponseDto(Total: 73, Skip: 0, Take: 50, Items: items);
+
+        var block = SessionLifecycle.BuildSkillsBlock(response);
+
+        Assert.Contains("[and 23 more — use skill_search to find others]", block);
+    }
+
+    [Fact]
+    public void BuildSkillsBlock_TotalExactly50_NoTailLine()
+    {
+        var items = Enumerable.Range(1, 50)
+            .Select(i => MakeSkillDto($"skill-{i:D2}", $"Description {i}"))
+            .ToArray();
+        var response = new SkillListResponseDto(Total: 50, Skip: 0, Take: 50, Items: items);
+
+        var block = SessionLifecycle.BuildSkillsBlock(response);
+
+        Assert.DoesNotContain("and", block.Split('\n').Last());
+    }
+
+    // ---------- 14. skill listing integration in EnsureInitializedAsync ----------
+
+    [Fact]
+    public async Task EnsureInitializedAsync_SkillsPresent_ContextContainsSkillsBlock()
+    {
+        var listResponse = new SkillListResponseDto(
+            Total: 2, Skip: 0, Take: 50,
+            Items: new[]
+            {
+                MakeSkillDto("deploy-app", "Deploys the application"),
+                MakeSkillDto("run-tests", null),
+            });
+        var svc = new FakeSkillImportService(listResponse: listResponse);
+        var lifecycle = BuildLifecycle(new FakeStore(), skillImportService: svc);
+
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        Assert.Contains("## Available Skills", result.Context);
+        Assert.Contains("- deploy-app: Deploys the application", result.Context);
+        Assert.Contains("- run-tests: (no description)", result.Context);
+    }
+
+    [Fact]
+    public async Task EnsureInitializedAsync_ZeroSkills_ContextOmitsSkillsBlock()
+    {
+        var listResponse = new SkillListResponseDto(0, 0, 50, Array.Empty<SkillDto>());
+        var svc = new FakeSkillImportService(listResponse: listResponse);
+        var lifecycle = BuildLifecycle(new FakeStore(), skillImportService: svc);
+
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        Assert.DoesNotContain("## Available Skills", result.Context);
+    }
+
+    [Fact]
+    public async Task EnsureInitializedAsync_MoreThan50Total_TailLineAppears()
+    {
+        var items = Enumerable.Range(1, 50)
+            .Select(i => MakeSkillDto($"skill-{i:D2}"))
+            .ToArray();
+        var listResponse = new SkillListResponseDto(Total: 62, Skip: 0, Take: 50, Items: items);
+        var svc = new FakeSkillImportService(listResponse: listResponse);
+        var lifecycle = BuildLifecycle(new FakeStore(), skillImportService: svc);
+
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        Assert.Contains("[and 12 more — use skill_search to find others]", result.Context);
+    }
+
+    [Fact]
+    public async Task EnsureInitializedAsync_ListVisibleThrows_ContextOmitsBlockNoException()
+    {
+        var svc = new FakeSkillImportService(
+            listException: new InvalidOperationException("cortex down"));
+        var lifecycle = BuildLifecycle(new FakeStore(), skillImportService: svc);
+
+        // Must not throw.
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        Assert.DoesNotContain("## Available Skills", result.Context);
+    }
+
+    [Fact]
+    public async Task EnsureInitializedAsync_SkillsAndHotEntries_BothAppearedInContext()
+    {
+        var store = new FakeStore();
+        store.Entries[(Tier.Hot, ContentType.Memory)] = new List<Entry>
+        {
+            MakeEntry("m1", "important memory"),
+        };
+        var listResponse = new SkillListResponseDto(
+            Total: 1, Skip: 0, Take: 50,
+            Items: new[] { MakeSkillDto("my-skill", "Does something useful") });
+        var svc = new FakeSkillImportService(listResponse: listResponse);
+        var lifecycle = BuildLifecycle(store, skillImportService: svc);
+
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        Assert.Contains("- important memory", result.Context);
+        Assert.Contains("## Available Skills", result.Context);
+        // Skills block comes after hot memories with a blank line between.
+        var memIdx = result.Context.IndexOf("- important memory", StringComparison.Ordinal);
+        var skillsIdx = result.Context.IndexOf("## Available Skills", StringComparison.Ordinal);
+        Assert.True(memIdx < skillsIdx, "Hot memories should appear before skills block");
     }
 }

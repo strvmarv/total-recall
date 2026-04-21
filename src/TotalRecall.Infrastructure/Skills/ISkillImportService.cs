@@ -9,4 +9,10 @@ public interface ISkillImportService
 {
     /// <param name="projectPath">Optional project root; null skips project-scope scan.</param>
     Task<SkillImportSummaryDto[]> ImportAsync(string? projectPath, CancellationToken ct);
+
+    /// <summary>
+    /// Returns the first <paramref name="limit"/> skills visible to the current user
+    /// (scope: null = all visible). Delegates to the underlying skill client.
+    /// </summary>
+    Task<SkillListResponseDto> ListVisibleAsync(int limit, CancellationToken ct);
 }

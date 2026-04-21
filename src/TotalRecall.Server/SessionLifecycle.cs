@@ -224,6 +224,25 @@ public sealed class SessionLifecycle : ISessionLifecycle
         var warmPromotedIds = Array.Empty<string>();
         var warmPromoted = 0;
 
+        // 1c. Skill listing — best-effort, never propagates. Lists the first 50
+        //     visible skills to surface in the session context block.
+        string skillsBlock = string.Empty;
+        if (_skillImportService is not null)
+        {
+            try
+            {
+                using var listCts = new CancellationTokenSource(_skillImportTimeout);
+                var listResponse = _skillImportService
+                    .ListVisibleAsync(50, listCts.Token)
+                    .GetAwaiter().GetResult();
+                skillsBlock = BuildSkillsBlock(listResponse);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"total-recall: skill listing failed: {ex.Message}");
+            }
+        }
+
         // 2. Warm sweep — synchronous, runs before hot entry listing so the
         // reported count reflects post-sweep state. Eliminates the Task.Run
         // thread-race against PeriodicSync on the shared SQLite connection.
@@ -245,7 +264,16 @@ public sealed class SessionLifecycle : ISessionLifecycle
             Collections: _store.CountKnowledgeCollections());
 
         // 5. Context string assembly — matches TS session-tools.ts:260-264.
-        var (context, hotContextTruncated) = BuildContext(hotEntries, _tokenBudget);
+        var (baseContext, hotContextTruncated) = BuildContext(hotEntries, _tokenBudget);
+
+        // Append skills block after a blank-line separator when both parts are non-empty.
+        string context;
+        if (baseContext.Length > 0 && skillsBlock.Length > 0)
+            context = baseContext + "\n\n" + skillsBlock;
+        else if (skillsBlock.Length > 0)
+            context = skillsBlock;
+        else
+            context = baseContext;
 
         // 6. Hints.
         var hints = GenerateHints(_store, warmPromotedIds);
@@ -302,6 +330,53 @@ public sealed class SessionLifecycle : ISessionLifecycle
     }
 
     // -------- helpers (internal so tests can call them directly) --------
+
+    /// <summary>
+    /// Builds the <c>## Available Skills</c> context block from a list response.
+    /// Returns an empty string when there are no skills. The block includes a
+    /// tail line when <see cref="TotalRecall.Infrastructure.Skills.SkillListResponseDto.Total"/>
+    /// exceeds 50 (the listing page size).
+    /// </summary>
+    public static string BuildSkillsBlock(
+        TotalRecall.Infrastructure.Skills.SkillListResponseDto response)
+    {
+        if (response.Items.Count == 0) return string.Empty;
+
+        var sb = new StringBuilder();
+        sb.AppendLine("## Available Skills");
+        sb.AppendLine("Use skill_get(name: \"...\") to retrieve full content, or skill_search(query: \"...\") to find others.");
+        sb.AppendLine();
+
+        foreach (var skill in response.Items)
+        {
+            var desc = string.IsNullOrWhiteSpace(skill.Description)
+                ? "(no description)"
+                : skill.Description.Trim();
+            sb.Append("- ");
+            sb.Append(skill.Name);
+            sb.Append(": ");
+            sb.AppendLine(desc);
+        }
+
+        if (response.Total > 50)
+        {
+            var remaining = response.Total - 50;
+            sb.Append($"[and {remaining} more — use skill_search to find others]");
+        }
+        else
+        {
+            // Remove trailing newline from the last skill line so the block
+            // doesn't end with an extra blank line.
+            if (sb.Length > 0 && sb[sb.Length - 1] == '\n')
+            {
+                sb.Remove(sb.Length - 1, 1);
+                if (sb.Length > 0 && sb[sb.Length - 1] == '\r')
+                    sb.Remove(sb.Length - 1, 1);
+            }
+        }
+
+        return sb.ToString();
+    }
 
     /// <summary>
     /// Builds the hot-tier context block fed back to the host LLM. Entries are

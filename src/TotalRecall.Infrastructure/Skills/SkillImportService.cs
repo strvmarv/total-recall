@@ -52,4 +52,8 @@ public sealed class SkillImportService(
             ];
         }
     }
+
+    /// <inheritdoc />
+    public Task<SkillListResponseDto> ListVisibleAsync(int limit, CancellationToken ct) =>
+        client.ListAsync(scope: null, tags: null, skip: 0, take: limit, ct);
 }

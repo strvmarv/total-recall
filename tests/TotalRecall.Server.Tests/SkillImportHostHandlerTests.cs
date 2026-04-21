@@ -21,6 +21,9 @@ public class SkillImportHostHandlerTests
             Calls++;
             return Task.FromResult(Result);
         }
+
+        public Task<SkillListResponseDto> ListVisibleAsync(int limit, CancellationToken ct) =>
+            Task.FromResult(new SkillListResponseDto(0, 0, limit, Array.Empty<SkillDto>()));
     }
 
     [Fact]
