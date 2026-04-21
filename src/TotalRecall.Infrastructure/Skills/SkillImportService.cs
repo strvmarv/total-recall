@@ -54,6 +54,7 @@ public sealed class SkillImportService(
     }
 
     /// <inheritdoc />
-    public Task<SkillListResponseDto> ListVisibleAsync(int limit, CancellationToken ct) =>
-        client.ListAsync(scope: null, tags: null, skip: 0, take: limit, ct);
+    public Task<SkillListResponseDto> ListVisibleAsync(CancellationToken ct) =>
+        // skip: 0, take: int.MaxValue — single-page fetch to get all visible skills.
+        client.ListAsync(scope: null, tags: null, skip: 0, take: int.MaxValue, ct);
 }

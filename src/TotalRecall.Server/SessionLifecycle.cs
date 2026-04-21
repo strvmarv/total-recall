@@ -233,7 +233,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
             {
                 using var listCts = new CancellationTokenSource(_skillImportTimeout);
                 var listResponse = _skillImportService
-                    .ListVisibleAsync(int.MaxValue, listCts.Token)
+                    .ListVisibleAsync(listCts.Token)
                     .GetAwaiter().GetResult();
                 skillsBlock = BuildSkillsBlock(listResponse);
             }

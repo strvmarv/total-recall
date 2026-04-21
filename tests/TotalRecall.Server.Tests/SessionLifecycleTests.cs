@@ -276,12 +276,12 @@ public sealed class SessionLifecycleTests
             return Task.FromResult(_summaries ?? Array.Empty<SkillImportSummaryDto>());
         }
 
-        public Task<SkillListResponseDto> ListVisibleAsync(int limit, CancellationToken ct)
+        public Task<SkillListResponseDto> ListVisibleAsync(CancellationToken ct)
         {
             ListCalls++;
             if (_listException is not null) throw _listException;
             return Task.FromResult(_listResponse
-                ?? new SkillListResponseDto(0, 0, limit, Array.Empty<SkillDto>()));
+                ?? new SkillListResponseDto(0, 0, 0, Array.Empty<SkillDto>()));
         }
     }
 
@@ -937,7 +937,7 @@ public sealed class SessionLifecycleTests
     }
 
     [Fact]
-    public void BuildSkillsBlock_ManySkills_NoTailLine()
+    public void BuildSkillsBlock_ManySkills_AllItemsAppear()
     {
         var items = Enumerable.Range(1, 100)
             .Select(i => MakeSkillDto($"skill-{i:D3}", $"Description {i}"))
@@ -946,22 +946,10 @@ public sealed class SessionLifecycleTests
 
         var block = SessionLifecycle.BuildSkillsBlock(response);
 
-        Assert.DoesNotContain("[and", block);
+        Assert.Contains("- skill-001: Description 1", block);
         Assert.Contains("- skill-100: Description 100", block);
-    }
-
-    [Fact]
-    public void BuildSkillsBlock_AllItemsListed_NoTruncation()
-    {
-        var items = Enumerable.Range(1, 50)
-            .Select(i => MakeSkillDto($"skill-{i:D2}", $"Description {i}"))
-            .ToArray();
-        var response = new SkillListResponseDto(Total: 50, Skip: 0, Take: int.MaxValue, Items: items);
-
-        var block = SessionLifecycle.BuildSkillsBlock(response);
-
-        Assert.DoesNotContain("[and", block);
-        Assert.Contains("- skill-50: Description 50", block);
+        var lineCount = block.Split('\n').Count(l => l.StartsWith("- "));
+        Assert.Equal(100, lineCount);
     }
 
     // ---------- 14. skill listing integration in EnsureInitializedAsync ----------
@@ -999,7 +987,7 @@ public sealed class SessionLifecycleTests
     }
 
     [Fact]
-    public async Task EnsureInitializedAsync_ManySkills_AllListedNoTailLine()
+    public async Task EnsureInitializedAsync_ManySkills_AllAppearedInContext()
     {
         var items = Enumerable.Range(1, 100)
             .Select(i => MakeSkillDto($"skill-{i:D3}"))

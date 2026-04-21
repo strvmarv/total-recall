@@ -11,8 +11,8 @@ public interface ISkillImportService
     Task<SkillImportSummaryDto[]> ImportAsync(string? projectPath, CancellationToken ct);
 
     /// <summary>
-    /// Returns the first <paramref name="limit"/> skills visible to the current user
-    /// (scope: null = all visible). Delegates to the underlying skill client.
+    /// Returns all skills visible to the current user (scope: null = all visible).
+    /// Delegates to the underlying skill client.
     /// </summary>
-    Task<SkillListResponseDto> ListVisibleAsync(int limit, CancellationToken ct);
+    Task<SkillListResponseDto> ListVisibleAsync(CancellationToken ct);
 }
