@@ -89,6 +89,25 @@ Current code parser in `Parsers.fs` uses regex splitting for function/class boun
 **Files:** `src/TotalRecall.Core/Parsers.fs`
 **Complexity:** Per-language. Roslyn is the cleanest option for C# and the .NET team maintains an AOT-compatible subset. Tree-sitter bindings for .NET exist (`TreeSitter.Net`) but their AOT story is unverified. Regex is the pragmatic baseline.
 
+### `kb_search` Collection Filter in Cortex Mode
+
+The `collection` parameter passed to `kb_search` is silently ignored when running in cortex mode. `KbSearchHandler` short-circuits to `SearchRemoteAsync` at line 129 before the collection post-filter runs, and `KnowledgeChunk` in cortex has no `CollectionId`/`ParentId` fields anyway.
+
+Fix requires changes in both repos:
+
+**total-recall-cortex:**
+1. Add `CollectionId`/`ParentId` columns to `KnowledgeChunk` entity + migration
+2. Populate during KB ingestion
+3. `PluginSyncController.SearchKnowledge` — add `[FromQuery] string? collection`, filter `dbQuery` by it, include `collection_id` in the projection
+
+**total-recall (plugin):**
+4. `IRemoteBackend.SearchKnowledgeAsync` + `CortexClient` — add `string? collection` param, append to URL
+5. `KbSearchHandler.SearchRemoteAsync` — accept and pass `collection`; remove the early return at line 129 that bypasses it
+
+Before committing to the schema migration, verify whether `KnowledgeChunk.Label` already encodes collection identity — if so, filtering by `Label` may be sufficient with only changes 4–5 plus a `WHERE` clause in the controller.
+
+**Files:** `src/TotalRecall.Server/Handlers/KbSearchHandler.cs`, `src/TotalRecall.Infrastructure/Sync/IRemoteBackend.cs`, `src/TotalRecall.Infrastructure/Sync/CortexClient.cs` (plugin); `TotalRecall.Cortex.Core/Entities/KnowledgeChunk.cs`, `TotalRecall.Cortex.Api/Controllers/PluginSyncController.cs` (cortex)
+
 ### Reranker (Cortex-Side)
 
 Cross-encoder or Cohere Rerank API pass after pgvector retrieval on the Cortex side, improving KB search quality for plugin queries. Plugin-side reranking (bundled ONNX cross-encoder) is a separate future consideration. Address when retrieval eval metrics show top-K precision is a bottleneck.
