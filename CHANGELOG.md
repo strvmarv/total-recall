@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.0.11 - 2026-04-20
+
+### Fixed
+
+- **Newly stored memories are now reliably synced to cortex.** `SqliteStore` previously enforced the hot-tier cap via write-time eviction (`EvictHotIfOverLimit`), which called `SqliteStore.Move` directly and bypassed `RoutingStore`. This caused two silent failures: evicted entries were never enqueued for cortex sync, and when the freshly inserted entry itself had the lowest decay score it was immediately moved out of hot, causing `RoutingStore.EnqueueUpsert` to find it gone and bail without queuing it either. Write-time eviction has been removed; hot-tier cap enforcement is now owned exclusively by the session_start warm sweep, which runs through `RoutingStore.Move` and enqueues each moved entry correctly.
+
 ## 1.0.10 - 2026-04-20
 
 ### Fixed
