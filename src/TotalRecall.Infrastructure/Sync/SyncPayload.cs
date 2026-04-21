@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.FSharp.Core;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Memory;
+using TotalRecall.Infrastructure.Storage;
 
 namespace TotalRecall.Infrastructure.Sync;
 
@@ -27,7 +28,7 @@ internal static class SyncPayload
         sb.Append(',');
         AppendStringField(sb, "content", entry.Content);
         sb.Append(',');
-        AppendStringField(sb, "entry_type", entry.EntryType.ToString());
+        AppendStringField(sb, "entry_type", EntryTypeMapping.ToDbValue(entry.EntryType));
         sb.Append(',');
         AppendStringField(sb, "content_type", contentType.IsMemory ? "Memory" : "Kb");
         sb.Append(',');
