@@ -198,9 +198,10 @@ public sealed class FileIngester : IFileIngester
         if (kind.IsFunction) return "function";
         if (kind.IsClass) return "class";
         if (kind.IsBlock) return "block";
-        // Defensive: if the DU ever grows, fall back to the case name
-        // lowercased rather than throwing mid-ingest.
-        return kind.ToString().ToLowerInvariant();
+        // AOT-safe: F# DU ToString() uses StructuredPrintfImpl reflection
+        // which is trimmed. Throw explicitly so a new DU case surfaces at
+        // dev/test time rather than silently corrupt data in production.
+        throw new ArgumentOutOfRangeException(nameof(kind), "Unknown CodeChunkKind — update CodeChunkKindToString");
     }
 
     // --- directory walker ------------------------------------------------
