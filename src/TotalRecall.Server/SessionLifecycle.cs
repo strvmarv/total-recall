@@ -148,19 +148,22 @@ public sealed class SessionLifecycle : ISessionLifecycle
                 SkillsErrors: Array.Empty<string>()));
         }
 
-        // 1b. Skill import sweep — best-effort, never blocks session_start beyond
-        //     the configured soft timeout (default 5s). On timeout or failure we
-        //     emit a synthetic error row so callers always get an actionable
-        //     summary. Never propagates — a broken skill sync must not block
-        //     session init.
+        // 1b+1c. Skill import sweep + listing — both share a single combined
+        //     timeout budget (2× _skillImportTimeout, default 10s total). The
+        //     shared CancellationToken is passed to import first, then listing,
+        //     so a slow import eats into the time available for listing. Both
+        //     steps are best-effort: timeout or failure produces a synthetic
+        //     error row / empty skills block and never blocks session init.
+        string skillsBlock = string.Empty;
         if (_skillImportService is not null)
         {
+            using var skillCts = new CancellationTokenSource(_skillImportTimeout + _skillImportTimeout);
+
             SkillImportSummaryDto[] skillSummaries;
             try
             {
-                using var timeoutCts = new CancellationTokenSource(_skillImportTimeout);
                 skillSummaries = _skillImportService
-                    .ImportAsync(Environment.CurrentDirectory, timeoutCts.Token)
+                    .ImportAsync(Environment.CurrentDirectory, skillCts.Token)
                     .GetAwaiter().GetResult();
             }
             catch (OperationCanceledException)
@@ -170,7 +173,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
                     new SkillImportSummaryDto(
                         Adapter: "claude-code",
                         Scanned: 0, Imported: 0, Updated: 0, Unchanged: 0, Orphaned: 0,
-                        Errors: new[] { "skill_import_timeout_5s" }),
+                        Errors: new[] { $"skill_import_timeout_{(int)_skillImportTimeout.TotalSeconds}s" }),
                 };
             }
             catch (Exception ex)
@@ -212,6 +215,21 @@ public sealed class SessionLifecycle : ISessionLifecycle
                         SkillsErrors: s.Errors));
                 }
             }
+
+            try
+            {
+                if (!skillCts.IsCancellationRequested)
+                {
+                    var listResponse = _skillImportService
+                        .ListVisibleAsync(skillCts.Token)
+                        .GetAwaiter().GetResult();
+                    skillsBlock = BuildSkillsBlock(listResponse);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"total-recall: skill listing failed: {ex.Message}");
+            }
         }
 
         // TODO(Plan 5+): project docs auto-ingest — ProjectDocsImporter exists
@@ -223,25 +241,6 @@ public sealed class SessionLifecycle : ISessionLifecycle
         // Plan 4 leaves warmPromotedIds empty.
         var warmPromotedIds = Array.Empty<string>();
         var warmPromoted = 0;
-
-        // 1c. Skill listing — best-effort, never propagates. Lists all visible
-        //     skills to surface in the session context block.
-        string skillsBlock = string.Empty;
-        if (_skillImportService is not null)
-        {
-            try
-            {
-                using var listCts = new CancellationTokenSource(_skillImportTimeout);
-                var listResponse = _skillImportService
-                    .ListVisibleAsync(listCts.Token)
-                    .GetAwaiter().GetResult();
-                skillsBlock = BuildSkillsBlock(listResponse);
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"total-recall: skill listing failed: {ex.Message}");
-            }
-        }
 
         // 2. Warm sweep — synchronous, runs before hot entry listing so the
         // reported count reflects post-sweep state. Eliminates the Task.Run

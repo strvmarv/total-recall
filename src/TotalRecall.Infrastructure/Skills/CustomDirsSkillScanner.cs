@@ -24,6 +24,13 @@ public sealed class CustomDirsSkillScanner : ICustomDirsSkillScanner
         foreach (var raw in _dirs)
         {
             ct.ThrowIfCancellationRequested();
+
+            if (raw.StartsWith('~') && !raw.StartsWith("~/", StringComparison.Ordinal))
+            {
+                errors.Add(new ScanError(raw, "path starting with '~' must use '~/' (tilde-slash) syntax, e.g. ~/my-skills"));
+                continue;
+            }
+
             var expanded = raw.StartsWith("~/", StringComparison.Ordinal)
                 ? Path.Combine(_home, raw[2..])
                 : raw;

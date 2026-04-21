@@ -12,7 +12,10 @@ public interface ISkillImportService
 
     /// <summary>
     /// Returns all skills visible to the current user (scope: null = all visible).
-    /// Delegates to the underlying skill client.
+    /// Fetches with <c>take: int.MaxValue</c> — a single unbounded page. If the
+    /// Cortex server enforces its own page cap the response <c>Total</c> may exceed
+    /// <c>Items.Count</c>; callers should surface all returned items and treat the
+    /// result as best-effort.
     /// </summary>
     Task<SkillListResponseDto> ListVisibleAsync(CancellationToken ct);
 }

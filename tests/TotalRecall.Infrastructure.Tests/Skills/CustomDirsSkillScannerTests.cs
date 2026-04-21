@@ -71,6 +71,18 @@ public class CustomDirsSkillScannerTests : IDisposable
     }
 
     [Fact]
+    public async Task ScanAsync_BareTilde_ReturnsError()
+    {
+        var scanner = new CustomDirsSkillScanner(dirs: ["~"]);
+        var result = await scanner.ScanAsync(CancellationToken.None);
+
+        Assert.Empty(result.Skills);
+        var error = Assert.Single(result.Errors);
+        Assert.Equal("~", error.SourcePath);
+        Assert.Contains("tilde-slash", error.Error);
+    }
+
+    [Fact]
     public async Task ScanAsync_MultipleDirs_SkillsFromAllReturned()
     {
         var temp = MakeTempDir();

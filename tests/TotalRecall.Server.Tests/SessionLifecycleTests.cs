@@ -851,7 +851,8 @@ public sealed class SessionLifecycleTests
 
         var row = Assert.Single(result.ImportSummary, r => r.Tool == "claude-code");
         Assert.Single(row.SkillsErrors);
-        Assert.Equal("skill_import_timeout_5s", row.SkillsErrors[0]);
+        // Timeout uses 50ms above, so TotalSeconds truncates to 0.
+        Assert.StartsWith("skill_import_timeout_", row.SkillsErrors[0]);
     }
 
     // ---------- 13. BuildSkillsBlock unit tests ----------
