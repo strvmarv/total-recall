@@ -123,6 +123,17 @@ internal sealed class FakeStore : IStore
         return results;
     }
 
+    public string? FindByContent(Tier tier, ContentType type, string content)
+    {
+        foreach (var kv in _rows)
+        {
+            if (kv.Key.Item1.Equals(tier) && kv.Key.Item2.Equals(type) &&
+                kv.Value.Content == content)
+                return kv.Value.Id;
+        }
+        return null;
+    }
+
     // Unused surface — throw to catch accidental use.
     public void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts) => throw new NotImplementedException();
 

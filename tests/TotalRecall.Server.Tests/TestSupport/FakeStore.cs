@@ -207,6 +207,17 @@ public sealed class FakeStore : IStore
         return string.Join(";", parts);
     }
 
+    public string? FindByContent(Tier tier, ContentType type, string content)
+    {
+        foreach (var kv in Entries)
+        {
+            if (kv.Key.Item1.Equals(tier) && kv.Key.Item2.Equals(type) &&
+                kv.Value.Content == content)
+                return kv.Value.Id;
+        }
+        return null;
+    }
+
     public sealed record MoveCall(Tier FromTier, ContentType FromType, Tier ToTier, ContentType ToType, string Id);
 
     public List<MoveCall> MoveCalls { get; } = new();

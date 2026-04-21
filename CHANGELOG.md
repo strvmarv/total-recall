@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.0.13 - 2026-04-20
+
+### Fixed
+
+- **Windows MCP stdio no longer garbles non-ASCII characters.** `RunServeAsync` now sets `Console.InputEncoding` and `Console.OutputEncoding` to `Encoding.UTF8` before constructing `McpServer`. On Windows the default OEM code page (CP437/850) was applied to the JSON-RPC stream, corrupting em dashes, arrows, curly quotes, and other Unicode above U+007F in memory content before `JsonSerializer` ever saw them.
+- **`memory_store` with duplicate content no longer throws a vec constraint error.** Three complementary fixes: (1) `SqliteStore`'s production constructor now calls `MigrationRunner.CleanupOrphanRows` on every startup (previously only ran once during Migration 5), clearing orphan vec rows left by historical eviction bugs before they collide on the next insert. (2) `InsertWithEmbedding` defensively deletes any orphan vec row at the about-to-be-used rowid inside the insert transaction — a no-op when the DB is clean, self-healing otherwise. (3) `MemoryStoreHandler` checks `IStore.FindByContent` before embedding; identical content in the same tier returns the existing id without re-inserting.
+- **AOT crash in `CodeChunkKindToString` (ingestion path).** `FileIngester` called `.ToString()` on an F# discriminated union value (`CodeChunkKind`). Under AOT trimming, F# DU `ToString()` invokes `StructuredPrintfImpl` reflection which is stripped at publish time, causing a `KeyNotFoundException` during code-chunk ingestion. Fixed by replacing the `ToString()` call with an explicit match expression.
+
 ## 1.0.12 - 2026-04-21
 
 ### Fixed

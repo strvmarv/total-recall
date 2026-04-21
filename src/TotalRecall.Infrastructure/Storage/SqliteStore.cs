@@ -37,6 +37,11 @@ public sealed class SqliteStore : IStore, IDisposable
         _conn = SqliteConnection.Open(dbPath);
         _ownsConnection = true;
         MigrationRunner.RunMigrations(_conn);
+        // Sweep any orphan vec/content rows left by prior crashes or eviction
+        // bugs. CleanupOrphanRows is idempotent and fast on clean DBs; running
+        // it at every startup is cheaper than letting orphan rowids accumulate
+        // and collide on the next InsertWithEmbedding.
+        MigrationRunner.CleanupOrphanRows(_conn);
     }
 
     /// <summary>
@@ -97,6 +102,20 @@ public sealed class SqliteStore : IStore, IDisposable
                 rowidCmd.Transaction = tx;
                 rowidCmd.CommandText = "SELECT last_insert_rowid()";
                 rowid = (long)rowidCmd.ExecuteScalar()!;
+            }
+
+            // Remove any orphan vec row at this rowid before inserting.
+            // An orphan exists when a previous content row was deleted without
+            // cleaning its vec counterpart (e.g. via the pre-fix write-time
+            // eviction path). Safe inside the transaction: the only legitimate
+            // occupant of this rowid in the vec table at this point is an orphan
+            // because we just acquired rowid by inserting the new content row.
+            using (var orphanCmd = _conn.CreateCommand())
+            {
+                orphanCmd.Transaction = tx;
+                orphanCmd.CommandText = $"DELETE FROM {vecTable} WHERE rowid = $rowid";
+                orphanCmd.Parameters.AddWithValue("$rowid", rowid);
+                orphanCmd.ExecuteNonQuery();
             }
 
             using (var vecCmd = _conn.CreateCommand())
@@ -243,6 +262,15 @@ VALUES
         cmd.CommandText = $"DELETE FROM {table} WHERE id = $id";
         cmd.Parameters.AddWithValue("$id", id);
         cmd.ExecuteNonQuery();
+    }
+
+    public string? FindByContent(Tier tier, ContentType type, string content)
+    {
+        var table = MigrationRunner.TableName(tier, type);
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = $"SELECT id FROM {table} WHERE content = $content LIMIT 1";
+        cmd.Parameters.AddWithValue("$content", content);
+        return cmd.ExecuteScalar() as string;
     }
 
     public IReadOnlyList<Entry> List(Tier tier, ContentType type, ListEntriesOpts? opts = null)

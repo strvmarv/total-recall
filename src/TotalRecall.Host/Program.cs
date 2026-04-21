@@ -32,6 +32,7 @@
 //        flip below plus CliApp.RunAsync.
 
 using System;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using TotalRecall.Infrastructure.Config;
@@ -56,6 +57,11 @@ internal static class Program
 
     private static async Task<int> RunServeAsync()
     {
+        // MCP stdio protocol is UTF-8. Force both streams before any I/O so
+        // Windows OEM code page (CP437/850) never touches the wire.
+        Console.InputEncoding = Encoding.UTF8;
+        Console.OutputEncoding = Encoding.UTF8;
+
         // Graceful Ctrl+C / SIGTERM — flip a CancellationTokenSource and let
         // McpServer's next ReadLine unwind naturally. McpServer.RunAsync does
         // not currently thread a CT through the dispatch loop (see its TODO);

@@ -147,6 +147,9 @@ public sealed class SessionLifecycleTests
             Slot(toTier, toType).Add(entry);
         }
 
+        public string? FindByContent(Tier tier, ContentType type, string content)
+            => Slot(tier, type).FirstOrDefault(e => e.Content == content)?.Id;
+
         public static string MetaKey(Tier tier, ContentType type, IReadOnlyDictionary<string, string> filter)
         {
             var parts = filter.OrderBy(kv => kv.Key, StringComparer.Ordinal)

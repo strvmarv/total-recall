@@ -155,6 +155,18 @@ public sealed class MemoryStoreHandler : IToolHandler
         else
             metadataJson = null;
 
+        // Idempotent: if the same content already exists in the target tier,
+        // return its id without re-embedding or inserting a duplicate.
+        var existingId = _store.FindByContent(tier, contentType, content);
+        if (existingId is not null)
+        {
+            return Task.FromResult(new ToolCallResult
+            {
+                Content = new[] { new ToolContent { Type = "text", Text = $"{{\"id\":\"{existingId}\"}}" } },
+                IsError = false,
+            });
+        }
+
         ct.ThrowIfCancellationRequested();
 
         // Ensures the ONNX embedder's lazy singleton is loaded on first call

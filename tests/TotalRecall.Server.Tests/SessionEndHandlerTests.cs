@@ -106,6 +106,9 @@ public sealed class SessionEndHandlerTests
             src.Remove(entry);
             Slot(toT, toCt).Add(entry);
         }
+
+        public string? FindByContent(Tier tier, ContentType type, string content)
+            => Slot(tier, type).FirstOrDefault(e => e.Content == content)?.Id;
     }
 
     // ---- stub shape (no store) ----

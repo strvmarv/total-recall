@@ -262,6 +262,18 @@ VALUES
         cmd.ExecuteNonQuery();
     }
 
+    public string? FindByContent(Tier tier, ContentType type, string content)
+    {
+        var table = TableName(type);
+        var tierStr = TierString(tier);
+        using var conn = _dataSource.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT id FROM {table} WHERE tier = @tier AND content = @content LIMIT 1";
+        cmd.Parameters.AddWithValue("@tier", tierStr);
+        cmd.Parameters.AddWithValue("@content", content);
+        return cmd.ExecuteScalar() as string;
+    }
+
     public IReadOnlyList<Entry> List(Tier tier, ContentType type, ListEntriesOpts? opts = null)
     {
         var table = TableName(type);

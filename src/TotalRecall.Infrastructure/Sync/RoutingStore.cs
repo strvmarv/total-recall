@@ -85,6 +85,9 @@ public sealed class RoutingStore : IStore
         EnqueueUpsert(toTier, toType, id);
     }
 
+    public string? FindByContent(Tier tier, ContentType type, string content)
+        => _local.FindByContent(tier, type, content);
+
     private void EnqueueUpsert(Tier tier, ContentType type, string id)
     {
         // Best-effort: the caller's local write has already committed by the

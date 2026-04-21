@@ -88,6 +88,16 @@ public interface IStore
         Tier toTier,
         ContentType toType,
         string id);
+
+    /// <summary>
+    /// Return the id of the first entry whose content exactly matches
+    /// <paramref name="content"/> in the given tier/type table, or
+    /// <c>null</c> if no such entry exists. Used by
+    /// <see cref="TotalRecall.Server.Handlers.MemoryStoreHandler"/> to make
+    /// <c>memory_store</c> idempotent: identical content in the same tier
+    /// returns the existing id instead of inserting a duplicate.
+    /// </summary>
+    string? FindByContent(Tier tier, ContentType type, string content);
 }
 
 /// <summary>
