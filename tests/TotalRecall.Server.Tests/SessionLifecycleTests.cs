@@ -937,29 +937,31 @@ public sealed class SessionLifecycleTests
     }
 
     [Fact]
-    public void BuildSkillsBlock_TotalOver50_AppendsTailLine()
+    public void BuildSkillsBlock_ManySkills_NoTailLine()
     {
-        var items = Enumerable.Range(1, 50)
-            .Select(i => MakeSkillDto($"skill-{i:D2}", $"Description {i}"))
+        var items = Enumerable.Range(1, 100)
+            .Select(i => MakeSkillDto($"skill-{i:D3}", $"Description {i}"))
             .ToArray();
-        var response = new SkillListResponseDto(Total: 73, Skip: 0, Take: 50, Items: items);
+        var response = new SkillListResponseDto(Total: 100, Skip: 0, Take: int.MaxValue, Items: items);
 
         var block = SessionLifecycle.BuildSkillsBlock(response);
 
-        Assert.Contains("[and 23 more — use skill_search to find others]", block);
+        Assert.DoesNotContain("[and", block);
+        Assert.Contains("- skill-100: Description 100", block);
     }
 
     [Fact]
-    public void BuildSkillsBlock_TotalExactly50_NoTailLine()
+    public void BuildSkillsBlock_AllItemsListed_NoTruncation()
     {
         var items = Enumerable.Range(1, 50)
             .Select(i => MakeSkillDto($"skill-{i:D2}", $"Description {i}"))
             .ToArray();
-        var response = new SkillListResponseDto(Total: 50, Skip: 0, Take: 50, Items: items);
+        var response = new SkillListResponseDto(Total: 50, Skip: 0, Take: int.MaxValue, Items: items);
 
         var block = SessionLifecycle.BuildSkillsBlock(response);
 
-        Assert.DoesNotContain("and", block.Split('\n').Last());
+        Assert.DoesNotContain("[and", block);
+        Assert.Contains("- skill-50: Description 50", block);
     }
 
     // ---------- 14. skill listing integration in EnsureInitializedAsync ----------
@@ -997,18 +999,19 @@ public sealed class SessionLifecycleTests
     }
 
     [Fact]
-    public async Task EnsureInitializedAsync_MoreThan50Total_TailLineAppears()
+    public async Task EnsureInitializedAsync_ManySkills_AllListedNoTailLine()
     {
-        var items = Enumerable.Range(1, 50)
-            .Select(i => MakeSkillDto($"skill-{i:D2}"))
+        var items = Enumerable.Range(1, 100)
+            .Select(i => MakeSkillDto($"skill-{i:D3}"))
             .ToArray();
-        var listResponse = new SkillListResponseDto(Total: 62, Skip: 0, Take: 50, Items: items);
+        var listResponse = new SkillListResponseDto(Total: 100, Skip: 0, Take: int.MaxValue, Items: items);
         var svc = new FakeSkillImportService(listResponse: listResponse);
         var lifecycle = BuildLifecycle(new FakeStore(), skillImportService: svc);
 
         var result = await lifecycle.EnsureInitializedAsync();
 
-        Assert.Contains("[and 12 more — use skill_search to find others]", result.Context);
+        Assert.Contains("- skill-100: (no description)", result.Context);
+        Assert.DoesNotContain("[and", result.Context);
     }
 
     [Fact]

@@ -224,8 +224,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
         var warmPromotedIds = Array.Empty<string>();
         var warmPromoted = 0;
 
-        // 1c. Skill listing — best-effort, never propagates. Lists the first 50
-        //     visible skills to surface in the session context block.
+        // 1c. Skill listing — best-effort, never propagates. Lists all visible
+        //     skills to surface in the session context block.
         string skillsBlock = string.Empty;
         if (_skillImportService is not null)
         {
@@ -233,7 +233,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
             {
                 using var listCts = new CancellationTokenSource(_skillImportTimeout);
                 var listResponse = _skillImportService
-                    .ListVisibleAsync(50, listCts.Token)
+                    .ListVisibleAsync(int.MaxValue, listCts.Token)
                     .GetAwaiter().GetResult();
                 skillsBlock = BuildSkillsBlock(listResponse);
             }
@@ -333,9 +333,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
 
     /// <summary>
     /// Builds the <c>## Available Skills</c> context block from a list response.
-    /// Returns an empty string when there are no skills. The block includes a
-    /// tail line when <see cref="TotalRecall.Infrastructure.Skills.SkillListResponseDto.Total"/>
-    /// exceeds 50 (the listing page size).
+    /// Returns an empty string when there are no skills.
     /// </summary>
     public static string BuildSkillsBlock(
         TotalRecall.Infrastructure.Skills.SkillListResponseDto response)
@@ -358,21 +356,12 @@ public sealed class SessionLifecycle : ISessionLifecycle
             sb.AppendLine(desc);
         }
 
-        if (response.Total > 50)
+        // Remove trailing newline from the last skill line.
+        if (sb.Length > 0 && sb[sb.Length - 1] == '\n')
         {
-            var remaining = response.Total - 50;
-            sb.Append($"[and {remaining} more — use skill_search to find others]");
-        }
-        else
-        {
-            // Remove trailing newline from the last skill line so the block
-            // doesn't end with an extra blank line.
-            if (sb.Length > 0 && sb[sb.Length - 1] == '\n')
-            {
+            sb.Remove(sb.Length - 1, 1);
+            if (sb.Length > 0 && sb[sb.Length - 1] == '\r')
                 sb.Remove(sb.Length - 1, 1);
-                if (sb.Length > 0 && sb[sb.Length - 1] == '\r')
-                    sb.Remove(sb.Length - 1, 1);
-            }
         }
 
         return sb.ToString();
