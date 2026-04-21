@@ -17,11 +17,11 @@ namespace TotalRecall.Infrastructure.Tests;
 [Trait("Category", "Integration")]
 public sealed class SqliteStoreIntegrationTests
 {
-    private static (MsSqliteConnection conn, SqliteStore store) NewStore(int hotMaxEntries = 50)
+    private static (MsSqliteConnection conn, SqliteStore store) NewStore()
     {
         var conn = SqliteConnection.Open(":memory:");
         MigrationRunner.RunMigrations(conn);
-        return (conn, new SqliteStore(conn, hotMaxEntries));
+        return (conn, new SqliteStore(conn));
     }
 
     /// <summary>
@@ -620,63 +620,4 @@ public sealed class SqliteStoreIntegrationTests
         }
     }
 
-    // --- write-time hot eviction -----------------------------------------
-
-    [Fact]
-    public void Insert_Hot_EvictsLowestDecayWhenOverLimit()
-    {
-        var (conn, store) = NewStore(hotMaxEntries: 2);
-        using (conn)
-        {
-            var lowId = store.Insert(Tier.Hot, ContentType.Memory, new InsertEntryOpts("low"));
-            store.Update(Tier.Hot, ContentType.Memory, lowId, new UpdateEntryOpts { DecayScore = 0.1 });
-
-            var highId = store.Insert(Tier.Hot, ContentType.Memory, new InsertEntryOpts("high"));
-            store.Update(Tier.Hot, ContentType.Memory, highId, new UpdateEntryOpts { DecayScore = 0.9 });
-
-            Assert.Equal(2, store.Count(Tier.Hot, ContentType.Memory));
-            Assert.Equal(0, store.Count(Tier.Warm, ContentType.Memory));
-
-            // 3rd insert pushes count to 3 → evict lowest (0.1 = "low")
-            store.Insert(Tier.Hot, ContentType.Memory, new InsertEntryOpts("newest"));
-
-            Assert.Equal(2, store.Count(Tier.Hot, ContentType.Memory));
-            Assert.Equal(1, store.Count(Tier.Warm, ContentType.Memory));
-
-            var warm = store.List(Tier.Warm, ContentType.Memory);
-            Assert.Single(warm);
-            Assert.Equal("low", warm[0].Content);
-
-            var hot = store.List(Tier.Hot, ContentType.Memory);
-            Assert.DoesNotContain(hot, e => e.Content == "low");
-        }
-    }
-
-    [Fact]
-    public void Insert_Hot_NoEviction_WhenUnderLimit()
-    {
-        var (conn, store) = NewStore(hotMaxEntries: 5);
-        using (conn)
-        {
-            for (var i = 0; i < 5; i++)
-                store.Insert(Tier.Hot, ContentType.Memory, new InsertEntryOpts($"entry{i}"));
-
-            Assert.Equal(5, store.Count(Tier.Hot, ContentType.Memory));
-            Assert.Equal(0, store.Count(Tier.Warm, ContentType.Memory));
-        }
-    }
-
-    [Fact]
-    public void Insert_NonHot_NoEviction()
-    {
-        var (conn, store) = NewStore(hotMaxEntries: 2);
-        using (conn)
-        {
-            for (var i = 0; i < 5; i++)
-                store.Insert(Tier.Warm, ContentType.Memory, new InsertEntryOpts($"entry{i}"));
-
-            Assert.Equal(5, store.Count(Tier.Warm, ContentType.Memory));
-            Assert.Equal(0, store.Count(Tier.Hot, ContentType.Memory));
-        }
-    }
 }

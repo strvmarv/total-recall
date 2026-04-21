@@ -245,7 +245,7 @@ public static class ServerComposition
         {
             MigrationRunner.RunMigrations(conn);
 
-            var store = new SqliteStore(conn, cfg.Tiers.Hot.MaxEntries);
+            var store = new SqliteStore(conn);
             var vec = new VectorSearch(conn);
             var fts = new FtsSearch(conn);
             var embedder = EmbedderFactory.CreateFromConfig(cfg.Embedding);
@@ -435,7 +435,7 @@ public static class ServerComposition
         {
             MigrationRunner.RunMigrations(conn);
 
-            var localStore = new SqliteStore(conn, cfg.Tiers.Hot.MaxEntries);
+            var localStore = new SqliteStore(conn);
             var vec = new VectorSearch(conn);
             var fts = new FtsSearch(conn);
             var embedder = EmbedderFactory.CreateFromConfig(cfg.Embedding);

@@ -27,17 +27,15 @@ public sealed class SqliteStore : IStore, IDisposable
 {
     private readonly MsSqliteConnection _conn;
     private readonly bool _ownsConnection;
-    private readonly int _hotMaxEntries;
 
     /// <summary>
     /// Production constructor. Opens a new connection at <paramref name="dbPath"/>,
     /// loads sqlite-vec, applies pragmas, and runs all pending migrations.
     /// </summary>
-    public SqliteStore(string dbPath, int hotMaxEntries = 50)
+    public SqliteStore(string dbPath)
     {
         _conn = SqliteConnection.Open(dbPath);
         _ownsConnection = true;
-        _hotMaxEntries = hotMaxEntries > 0 ? hotMaxEntries : 50;
         MigrationRunner.RunMigrations(_conn);
     }
 
@@ -46,12 +44,11 @@ public sealed class SqliteStore : IStore, IDisposable
     /// the caller owns. Does NOT run migrations — the caller is expected to
     /// have already done so. Disposal is the caller's responsibility.
     /// </summary>
-    public SqliteStore(MsSqliteConnection connection, int hotMaxEntries = 50)
+    public SqliteStore(MsSqliteConnection connection)
     {
         ArgumentNullException.ThrowIfNull(connection);
         _conn = connection;
         _ownsConnection = false;
-        _hotMaxEntries = hotMaxEntries > 0 ? hotMaxEntries : 50;
     }
 
     // --- IStore -----------------------------------------------------
@@ -67,9 +64,6 @@ public sealed class SqliteStore : IStore, IDisposable
         cmd.CommandText = BuildInsertSql(table);
         BindInsertParameters(cmd, id, opts, now);
         cmd.ExecuteNonQuery();
-
-        if (tier == Tier.Hot && type == ContentType.Memory)
-            EvictHotIfOverLimit(type);
 
         return id;
     }
@@ -124,9 +118,6 @@ public sealed class SqliteStore : IStore, IDisposable
             tx.Rollback();
             throw;
         }
-
-        if (tier == Tier.Hot && type == ContentType.Memory)
-            EvictHotIfOverLimit(type);
 
         return id;
     }
@@ -454,31 +445,6 @@ VALUES
         {
             tx.Rollback();
             throw;
-        }
-    }
-
-    // --- write-time hot eviction -----------------------------------------
-
-    private void EvictHotIfOverLimit(ContentType type)
-    {
-        if (Count(Tier.Hot, type) <= _hotMaxEntries) return;
-
-        var table = MigrationRunner.TableName(Tier.Hot, type);
-        string? lowestId;
-        using (var cmd = _conn.CreateCommand())
-        {
-            cmd.CommandText = $"SELECT id FROM {table} ORDER BY decay_score ASC LIMIT 1";
-            lowestId = cmd.ExecuteScalar() as string;
-        }
-        if (lowestId is null) return;
-
-        try
-        {
-            Move(Tier.Hot, type, Tier.Warm, type, lowestId);
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"total-recall: hot eviction failed for {lowestId}: {ex.Message}");
         }
     }
 
