@@ -465,12 +465,12 @@ public sealed class ConfigLoader : IConfigLoader
         if (!table.TryGetValue(key, out var value))
             return FSharpOption<string[]>.None;
 
-        if (value is System.Collections.IList list)
+        if (value is TomlArray tomlArray)
         {
-            var arr = new string[list.Count];
-            for (int i = 0; i < list.Count; i++)
+            var arr = new string[tomlArray.Count];
+            for (int i = 0; i < tomlArray.Count; i++)
             {
-                if (list[i] is not string s)
+                if (tomlArray[i] is not string s)
                     throw new InvalidDataException($"Expected all elements in {key} array to be strings");
                 arr[i] = s;
             }

@@ -72,3 +72,9 @@ default = "user:local"
 # --- User identity (optional, Postgres only) ---
 # [user]
 # user_id = "alice"               # or set TOTAL_RECALL_USER_ID env var
+
+# --- Skill scan directories (optional) ---
+# Additional directories to scan for skills, in addition to ~/.claude/skills/.
+# Useful for non-Claude-Code hosts (e.g. Cursor) that don't have a native skills directory.
+# [skill]
+# extra_dirs = ["~/my-skills"]

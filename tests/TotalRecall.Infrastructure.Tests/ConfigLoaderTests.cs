@@ -408,4 +408,57 @@ public sealed class ConfigLoaderTests : IDisposable
         Assert.True(FSharpOption<Core.Config.UserConfig>.get_IsNone(cfg.User));
         Assert.True(FSharpOption<string>.get_IsNone(cfg.Embedding.Provider));
     }
+
+    // --- Skill section tests -----------------------------------------------
+
+    [Fact]
+    public void LoadEffectiveConfig_SkillSection_ParsesExtraDirs()
+    {
+        var cfgPath = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(cfgPath, """
+            [skill]
+            extra_dirs = ["~/my-skills", "/absolute/skills"]
+            """);
+        Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", _tempDir);
+
+        var loader = new ConfigLoader();
+        var cfg = loader.LoadEffectiveConfig(cfgPath);
+
+        Assert.True(Microsoft.FSharp.Core.FSharpOption<TotalRecall.Core.Config.SkillConfig>.get_IsSome(cfg.Skill));
+        var dirs = cfg.Skill.Value.ExtraDirs;
+        Assert.True(Microsoft.FSharp.Core.FSharpOption<string[]>.get_IsSome(dirs));
+        Assert.Equal(2, dirs.Value.Length);
+        Assert.Equal("~/my-skills", dirs.Value[0]);
+        Assert.Equal("/absolute/skills", dirs.Value[1]);
+    }
+
+    [Fact]
+    public void LoadEffectiveConfig_NoSkillSection_SkillIsNone()
+    {
+        var cfgPath = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(cfgPath, "# no skill section\n");
+        Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", _tempDir);
+
+        var loader = new ConfigLoader();
+        var cfg = loader.LoadEffectiveConfig(cfgPath);
+
+        Assert.True(Microsoft.FSharp.Core.FSharpOption<TotalRecall.Core.Config.SkillConfig>.get_IsNone(cfg.Skill));
+    }
+
+    [Fact]
+    public void LoadEffectiveConfig_SkillSection_NoExtraDirs_ExtraDirsIsNone()
+    {
+        var cfgPath = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(cfgPath, """
+            [skill]
+            # extra_dirs not set
+            """);
+        Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", _tempDir);
+
+        var loader = new ConfigLoader();
+        var cfg = loader.LoadEffectiveConfig(cfgPath);
+
+        Assert.True(Microsoft.FSharp.Core.FSharpOption<TotalRecall.Core.Config.SkillConfig>.get_IsSome(cfg.Skill));
+        Assert.True(Microsoft.FSharp.Core.FSharpOption<string[]>.get_IsNone(cfg.Skill.Value.ExtraDirs));
+    }
 }
