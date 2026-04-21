@@ -57,4 +57,13 @@ public sealed class SkillImportService(
     public Task<SkillListResponseDto> ListVisibleAsync(CancellationToken ct) =>
         // skip: 0, take: int.MaxValue — single-page fetch to get all visible skills.
         client.ListAsync(scope: null, tags: null, skip: 0, take: int.MaxValue, ct);
+
+    /// <inheritdoc />
+    public Task<ClaudeCodeScanResult> ScanExtraDirsAsync(CancellationToken ct)
+    {
+        if (customDirsScanner is null)
+            return Task.FromResult(new ClaudeCodeScanResult(
+                Array.Empty<ImportedSkill>(), Array.Empty<ScanError>()));
+        return customDirsScanner.ScanAsync(ct);
+    }
 }

@@ -18,4 +18,10 @@ public interface ISkillImportService
     /// result as best-effort.
     /// </summary>
     Task<SkillListResponseDto> ListVisibleAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Scans extra_dirs from config and returns the discovered skills without
+    /// pushing to cortex. Returns an empty result if no extra dirs are configured.
+    /// </summary>
+    Task<ClaudeCodeScanResult> ScanExtraDirsAsync(CancellationToken ct);
 }

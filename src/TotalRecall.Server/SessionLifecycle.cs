@@ -159,6 +159,20 @@ public sealed class SessionLifecycle : ISessionLifecycle
         {
             using var skillCts = new CancellationTokenSource(_skillImportTimeout + _skillImportTimeout);
 
+            // Scan extra_dirs locally — always, independent of cortex availability.
+            IReadOnlyList<ImportedSkill> localExtraSkills = Array.Empty<ImportedSkill>();
+            try
+            {
+                var localScan = _skillImportService
+                    .ScanExtraDirsAsync(skillCts.Token)
+                    .GetAwaiter().GetResult();
+                localExtraSkills = localScan.Skills;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"total-recall: extra_dirs scan failed: {ex.Message}");
+            }
+
             SkillImportSummaryDto[] skillSummaries;
             try
             {
@@ -216,20 +230,24 @@ public sealed class SessionLifecycle : ISessionLifecycle
                 }
             }
 
+            // Cortex list is best-effort; local extra_dirs skills fill the gap when
+            // cortex is unavailable or returns nothing. Both are merged by BuildSkillsBlock.
+            SkillListResponseDto? cortexList = null;
             try
             {
                 if (!skillCts.IsCancellationRequested)
                 {
-                    var listResponse = _skillImportService
+                    cortexList = _skillImportService
                         .ListVisibleAsync(skillCts.Token)
                         .GetAwaiter().GetResult();
-                    skillsBlock = BuildSkillsBlock(listResponse);
                 }
             }
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"total-recall: skill listing failed: {ex.Message}");
             }
+
+            skillsBlock = BuildSkillsBlock(cortexList, localExtraSkills);
         }
 
         // TODO(Plan 5+): project docs auto-ingest — ProjectDocsImporter exists
@@ -335,24 +353,41 @@ public sealed class SessionLifecycle : ISessionLifecycle
     /// Returns an empty string when there are no skills.
     /// </summary>
     public static string BuildSkillsBlock(
-        TotalRecall.Infrastructure.Skills.SkillListResponseDto response)
+        TotalRecall.Infrastructure.Skills.SkillListResponseDto? cortexList,
+        IReadOnlyList<TotalRecall.Infrastructure.Skills.ImportedSkill>? localExtraSkills = null)
     {
-        if (response.Items.Count == 0) return string.Empty;
+        var cortexItems = cortexList?.Items
+            ?? Array.Empty<TotalRecall.Infrastructure.Skills.SkillDto>();
+
+        // Local extra_dirs skills not already present in the cortex list (dedup by name).
+        var cortexNames = new HashSet<string>(
+            cortexItems.Select(s => s.Name), StringComparer.OrdinalIgnoreCase);
+        var localOnly = (localExtraSkills
+            ?? Array.Empty<TotalRecall.Infrastructure.Skills.ImportedSkill>())
+            .Where(s => !cortexNames.Contains(s.Name))
+            .ToList();
+
+        if (cortexItems.Count == 0 && localOnly.Count == 0) return string.Empty;
 
         var sb = new StringBuilder();
         sb.AppendLine("## Available Skills");
         sb.AppendLine("Use skill_get(name: \"...\") to retrieve full content, or skill_search(query: \"...\") to find others.");
         sb.AppendLine();
 
-        foreach (var skill in response.Items)
+        foreach (var skill in cortexItems)
         {
             var desc = string.IsNullOrWhiteSpace(skill.Description)
                 ? "(no description)"
                 : skill.Description.Trim();
-            sb.Append("- ");
-            sb.Append(skill.Name);
-            sb.Append(": ");
-            sb.AppendLine(desc);
+            sb.Append("- ").Append(skill.Name).Append(": ").AppendLine(desc);
+        }
+
+        foreach (var skill in localOnly)
+        {
+            var desc = string.IsNullOrWhiteSpace(skill.Description)
+                ? "(no description)"
+                : skill.Description.Trim();
+            sb.Append("- ").Append(skill.Name).Append(": ").AppendLine(desc);
         }
 
         // Remove trailing newline from the last skill line.
