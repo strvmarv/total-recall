@@ -494,7 +494,19 @@ public static class ServerComposition
             // so session_start folds skill counts into importSummary.
             var skillClient = CortexSkillClient.Create(cortexUrl, cortexPat);
             var skillScanner = new ClaudeCodeSkillScanner();
-            var skillImportService = new SkillImportService(skillScanner, skillClient);
+            var extraSkillDirs = Array.Empty<string>();
+            if (FSharpOption<Core.Config.SkillConfig>.get_IsSome(cfg.Skill))
+            {
+                var skillCfg = cfg.Skill.Value;
+                if (FSharpOption<string[]>.get_IsSome(skillCfg.ExtraDirs))
+                {
+                    extraSkillDirs = skillCfg.ExtraDirs.Value;
+                }
+            }
+            ICustomDirsSkillScanner? customDirsScanner = extraSkillDirs.Length > 0
+                ? new CustomDirsSkillScanner(extraSkillDirs)
+                : null;
+            var skillImportService = new SkillImportService(skillScanner, skillClient, customDirsScanner);
 
             var sessionLifecycle = new SessionLifecycle(
                 importers, routingStore, compactionLog,
