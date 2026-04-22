@@ -14,4 +14,5 @@ namespace TotalRecall.Infrastructure.Sync;
 [JsonSerializable(typeof(SyncRetrievalEvent[]))]
 [JsonSerializable(typeof(SyncCompactionEntry[]))]
 [JsonSerializable(typeof(PluginSyncSkillDto[]))]
+[JsonSerializable(typeof(string[]))]
 internal partial class SyncJsonContext : JsonSerializerContext;
