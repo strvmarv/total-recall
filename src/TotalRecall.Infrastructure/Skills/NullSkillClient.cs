@@ -5,7 +5,7 @@ namespace TotalRecall.Infrastructure.Skills;
 /// Cortex endpoint. Import and list calls return empty results so that the
 /// local extra_dirs scan still populates the session skills block.
 /// </summary>
-internal sealed class NullSkillClient : ISkillClient
+public sealed class NullSkillClient : ISkillClient
 {
     public static readonly NullSkillClient Instance = new();
 
