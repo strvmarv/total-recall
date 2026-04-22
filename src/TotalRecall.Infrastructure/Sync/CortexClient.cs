@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using TotalRecall.Infrastructure.Skills;
 
 namespace TotalRecall.Infrastructure.Sync;
 
@@ -10,8 +11,13 @@ namespace TotalRecall.Infrastructure.Sync;
 public sealed class CortexClient : IRemoteBackend
 {
     private readonly HttpClient _http;
+    private readonly ISkillClient _skillClient;
 
-    public CortexClient(HttpClient http) => _http = http;
+    public CortexClient(HttpClient http, ISkillClient? skillClient = null)
+    {
+        _http = http;
+        _skillClient = skillClient ?? NullSkillClient.Instance;
+    }
 
     /// <summary>
     /// Factory that creates a <see cref="CortexClient"/> with a pre-configured
@@ -86,6 +92,9 @@ public sealed class CortexClient : IRemoteBackend
     {
         await PostAsync("/api/plugin/sync/compaction", entries, SyncJsonContext.Default.SyncCompactionEntryArray, ct).ConfigureAwait(false);
     }
+
+    public Task<PluginSyncSkillDto[]> GetSkillsModifiedSinceAsync(DateTime? since, CancellationToken ct)
+        => _skillClient.GetModifiedSinceAsync(since, ct);
 
     // ── helpers ───────────────────────────────────────────────────────
 

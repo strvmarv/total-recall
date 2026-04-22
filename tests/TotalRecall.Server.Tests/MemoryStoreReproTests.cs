@@ -102,5 +102,7 @@ public sealed class MemoryStoreReproTests
         public Task PushUsageEventsAsync(SyncUsageEvent[] events, CancellationToken ct) => Task.CompletedTask;
         public Task PushRetrievalEventsAsync(SyncRetrievalEvent[] events, CancellationToken ct) => Task.CompletedTask;
         public Task PushCompactionEntriesAsync(SyncCompactionEntry[] entries, CancellationToken ct) => Task.CompletedTask;
+        public Task<PluginSyncSkillDto[]> GetSkillsModifiedSinceAsync(DateTime? since, CancellationToken ct)
+            => Task.FromResult(Array.Empty<PluginSyncSkillDto>());
     }
 }
