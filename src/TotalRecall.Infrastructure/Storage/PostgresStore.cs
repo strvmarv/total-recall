@@ -19,7 +19,7 @@ namespace TotalRecall.Infrastructure.Storage;
 /// All inserts stamp <c>owner_id</c> from the value supplied at construction.
 /// Tags are stored as JSONB; embeddings use the pgvector <c>vector</c> type.
 /// </summary>
-public sealed class PostgresStore : IStore
+public sealed class PostgresStore : IStore, IMetaStore
 {
     private readonly NpgsqlDataSource _dataSource;
     private readonly string _ownerId;
@@ -697,4 +697,33 @@ VALUES
     /// proper SQL syntax.
     /// </summary>
     private static string EscapeLiteral(string key) => $"'{key}'";
+
+    // --- IMetaStore -----------------------------------------------------
+
+    /// <inheritdoc />
+    public string? GetMeta(string key)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        using var conn = _dataSource.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT value FROM _meta WHERE key = @k";
+        cmd.Parameters.AddWithValue("@k", key);
+        var result = cmd.ExecuteScalar();
+        return result is string s ? s : null;
+    }
+
+    /// <inheritdoc />
+    public void SetMeta(string key, string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentNullException.ThrowIfNull(value);
+        using var conn = _dataSource.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "INSERT INTO _meta (key, value) VALUES (@k, @v) " +
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value";
+        cmd.Parameters.AddWithValue("@k", key);
+        cmd.Parameters.AddWithValue("@v", value);
+        cmd.ExecuteNonQuery();
+    }
 }

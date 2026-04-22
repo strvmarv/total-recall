@@ -50,6 +50,29 @@ public sealed class OnnxEmbedder : IEmbedder, IDisposable
     public bool IsLoaded => _session is not null && _vocab is not null;
 
     /// <inheritdoc />
+    public EmbedderDescriptor Descriptor
+    {
+        get
+        {
+            // Resolve dimensions/revision from the registry without loading
+            // the ONNX session. If the model isn't in the registry we fall
+            // back to a zero-dim descriptor; the fingerprint guard will
+            // treat that as a mismatch against any previously-stamped
+            // fingerprint and fail loudly rather than silently.
+            var registry = _modelManager.Registry;
+            if (registry.TryGetSpec(_modelName, out var spec) && spec is not null)
+            {
+                return new EmbedderDescriptor(
+                    Provider: "local",
+                    Model: _modelName,
+                    Revision: spec.Revision ?? string.Empty,
+                    Dimensions: spec.Dimensions);
+            }
+            return new EmbedderDescriptor("local", _modelName, string.Empty, 0);
+        }
+    }
+
+    /// <inheritdoc />
     public float[] Embed(string text)
     {
         ArgumentNullException.ThrowIfNull(text);

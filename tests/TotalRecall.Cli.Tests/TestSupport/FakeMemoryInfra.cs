@@ -175,6 +175,8 @@ internal sealed class FakeVectorSearch : IVectorSearch
 internal sealed class RecordingEmbedder : IEmbedder
 {
     public List<string> Calls { get; } = new();
+        public EmbedderDescriptor Descriptor { get; } = new("test", "fake", "", 384);
+
     public float[] Embed(string text)
     {
         Calls.Add(text);

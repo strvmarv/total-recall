@@ -10,6 +10,7 @@ public sealed class BedrockEmbedder : IEmbedder
     private readonly string _invokeUrl;
     private readonly string _apiKey;
     private readonly int _dimensions;
+    private readonly string _model;
     private readonly HttpClient _http;
 
     public BedrockEmbedder(
@@ -19,8 +20,13 @@ public sealed class BedrockEmbedder : IEmbedder
         _invokeUrl = $"https://bedrock-runtime.{region}.amazonaws.com/model/{model}/invoke";
         _apiKey = apiKey;
         _dimensions = dimensions;
+        _model = model;
         _http = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
     }
+
+    /// <inheritdoc />
+    public EmbedderDescriptor Descriptor =>
+        new(Provider: "bedrock", Model: _model, Revision: string.Empty, Dimensions: _dimensions);
 
     public float[] Embed(string text)
     {

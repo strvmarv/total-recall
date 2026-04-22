@@ -23,7 +23,7 @@ namespace TotalRecall.Infrastructure.Storage;
 /// already-opened connection and skips migrations. The borrowed-connection
 /// form does NOT own disposal.
 /// </summary>
-public sealed class SqliteStore : IStore, IDisposable
+public sealed class SqliteStore : IStore, IMetaStore, IDisposable
 {
     private readonly MsSqliteConnection _conn;
     private readonly bool _ownsConnection;
@@ -608,6 +608,33 @@ VALUES
         if (_ownsConnection)
             _conn.Dispose();
     }
+
+    // --- IMetaStore -----------------------------------------------------
+
+    /// <inheritdoc />
+    public string? GetMeta(string key)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "SELECT value FROM _meta WHERE key = $k";
+        cmd.Parameters.AddWithValue("$k", key);
+        var result = cmd.ExecuteScalar();
+        return result is string s ? s : null;
+    }
+
+    /// <inheritdoc />
+    public void SetMeta(string key, string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentNullException.ThrowIfNull(value);
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText =
+            "INSERT INTO _meta (key, value) VALUES ($k, $v) " +
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value";
+        cmd.Parameters.AddWithValue("$k", key);
+        cmd.Parameters.AddWithValue("$v", value);
+        cmd.ExecuteNonQuery();
+    }
 }
 
 /// <summary>
@@ -859,6 +886,6 @@ internal static class TagsJson
                     break;
             }
         }
-        sb.Append('"');
+                sb.Append('"');
     }
 }

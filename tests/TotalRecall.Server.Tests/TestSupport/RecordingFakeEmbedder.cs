@@ -12,6 +12,8 @@ public sealed class RecordingFakeEmbedder : IEmbedder
 {
     public List<string> Calls { get; } = new();
 
+        public EmbedderDescriptor Descriptor { get; } = new("test", "fake", "", 384);
+
     public float[] Embed(string text)
     {
         Calls.Add(text);
