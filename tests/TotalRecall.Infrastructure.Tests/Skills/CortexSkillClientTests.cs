@@ -184,10 +184,11 @@ public class CortexSkillClientTests
     }
 
     [Fact]
-    public async Task ImportAsync_PostsExpectedBody_ReturnsSummaries()
+    public async Task ImportAsync_PostsToPluginSyncEndpoint_NoBodyRequired()
     {
+        // New endpoint: POST /api/plugin/sync/skills, 202 Accepted, no response body.
         var handler = new RecordingHandler(
-            content: """[{"adapter":"claude-code","scanned":1,"imported":1,"updated":0,"unchanged":0,"orphaned":0,"errors":[]}]""");
+            content: "", status: System.Net.HttpStatusCode.Accepted);
         var (client, _) = Create(handler);
 
         var imported = new ImportedSkill(
@@ -196,16 +197,15 @@ public class CortexSkillClientTests
             SourcePath: "/virt/demo.md", SuggestedScope: "user",
             SuggestedScopeId: "user:u1", SuggestedTags: Array.Empty<string>());
 
-        var summaries = await client.ImportAsync(
+        await client.ImportAsync(
             "claude-code",
             new[] { imported },
             CancellationToken.None);
 
-        Assert.Single(summaries);
-        Assert.Equal(1, summaries[0].Imported);
         Assert.Equal("POST", handler.LastMethod);
         Assert.NotNull(handler.LastUrl);
-        Assert.Contains("/api/me/skills/import", handler.LastUrl);
+        Assert.Contains("/api/plugin/sync/skills", handler.LastUrl);
+        Assert.DoesNotContain("/api/me/skills/import", handler.LastUrl);
         Assert.NotNull(handler.LastBody);
         Assert.Contains("\"adapter\":\"claude-code\"", handler.LastBody);
         Assert.Contains("\"name\":\"demo\"", handler.LastBody);

@@ -2,6 +2,7 @@
 
 using System.Text.Json;
 using TotalRecall.Infrastructure.Skills;
+using TotalRecall.Infrastructure.Sync;
 using TotalRecall.Server.Handlers;
 using Xunit;
 
@@ -34,7 +35,8 @@ public class SkillGetHandlerTests
 
         public Task<SkillListResponseDto> ListAsync(string? scope, IReadOnlyList<string>? tags, int skip, int take, CancellationToken ct) => throw new NotImplementedException();
         public Task DeleteAsync(Guid id, CancellationToken ct) => throw new NotImplementedException();
-        public Task<SkillImportSummaryDto[]> ImportAsync(string adapter, IReadOnlyList<ImportedSkill> skills, CancellationToken ct) => throw new NotImplementedException();
+        public Task ImportAsync(string adapter, IReadOnlyList<ImportedSkill> skills, CancellationToken ct) => throw new NotImplementedException();
+        public Task<PluginSyncSkillDto[]> GetModifiedSinceAsync(DateTime? since, CancellationToken ct) => throw new NotImplementedException();
     }
 
     private static SkillBundleDto SampleBundle(Guid id) => new(

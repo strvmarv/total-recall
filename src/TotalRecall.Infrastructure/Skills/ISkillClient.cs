@@ -1,3 +1,5 @@
+using TotalRecall.Infrastructure.Sync;
+
 namespace TotalRecall.Infrastructure.Skills;
 
 /// <summary>
@@ -18,6 +20,7 @@ public interface ISkillClient
 
     Task DeleteAsync(Guid id, CancellationToken ct);
 
-    Task<SkillImportSummaryDto[]> ImportAsync(
-        string adapter, IReadOnlyList<ImportedSkill> skills, CancellationToken ct);
+    Task ImportAsync(string adapter, IReadOnlyList<ImportedSkill> skills, CancellationToken ct);
+
+    Task<PluginSyncSkillDto[]> GetModifiedSinceAsync(DateTime? since, CancellationToken ct);
 }

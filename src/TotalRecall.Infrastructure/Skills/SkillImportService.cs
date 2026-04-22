@@ -24,21 +24,19 @@ public sealed class SkillImportService(
 
         try
         {
-            var summaries = await client.ImportAsync("claude-code", allSkills, ct);
+            await client.ImportAsync("claude-code", allSkills, ct);
 
-            // Merge scanner-side errors into the first (and only) summary row.
-            // Cortex returns one SkillImportSummary per adapter run; we only use
-            // the "claude-code" adapter, so there will be at most one row.
-            if (allErrors.Count > 0 && summaries.Length > 0)
-            {
-                var first = summaries[0];
-                var mergedErrors = first.Errors
-                    .Concat(allErrors.Select(e => $"{e.SourcePath}: {e.Error}"))
-                    .ToArray();
-                summaries[0] = first with { Errors = mergedErrors };
-            }
-
-            return summaries;
+            // The new endpoint returns 202 with no body — build an optimistic
+            // summary locally. Scanner-side errors are merged in here.
+            var errors = allErrors.Select(e => $"{e.SourcePath}: {e.Error}").ToArray();
+            return
+            [
+                new SkillImportSummaryDto(
+                    Adapter: "claude-code",
+                    Scanned: allSkills.Count,
+                    Imported: 0, Updated: 0, Unchanged: 0, Orphaned: 0,
+                    Errors: errors)
+            ];
         }
         catch (CortexUnreachableException ex)
         {

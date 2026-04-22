@@ -96,17 +96,35 @@ public sealed class CortexSkillClient : ISkillClient
         return SendAsync(HttpMethod.Delete, $"/api/me/skills/{id}", ct);
     }
 
-    public async Task<SkillImportSummaryDto[]> ImportAsync(
+    public async Task ImportAsync(
         string adapter, IReadOnlyList<ImportedSkill> skills, CancellationToken ct)
     {
         var body = new SkillImportRequestDto(adapter, skills);
-        return await PostAsync(
-            "/api/me/skills/import",
-            body,
-            SkillJsonContext.Default.SkillImportRequestDto,
-            SkillJsonContext.Default.SkillImportSummaryDtoArray,
-            ct).ConfigureAwait(false)
-            ?? Array.Empty<SkillImportSummaryDto>();
+        var json = JsonSerializer.Serialize(body, SkillJsonContext.Default.SkillImportRequestDto);
+        var content = new StringContent(json, Encoding.UTF8, "application/json");
+        try
+        {
+            var response = await _http.PostAsync("/api/plugin/sync/skills", content, ct)
+                .ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new CortexUnreachableException($"Cortex API request failed: {ex.Message}", ex);
+        }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            throw new CortexUnreachableException("Cortex API request timed out.", ex);
+        }
+    }
+
+    public async Task<PluginSyncSkillDto[]> GetModifiedSinceAsync(DateTime? since, CancellationToken ct)
+    {
+        var url = since.HasValue
+            ? $"/api/plugin/sync/skills?since={Uri.EscapeDataString(since.Value.ToString("O"))}"
+            : "/api/plugin/sync/skills";
+        return await GetAsync(url, SyncJsonContext.Default.PluginSyncSkillDtoArray, ct).ConfigureAwait(false)
+               ?? Array.Empty<PluginSyncSkillDto>();
     }
 
     // ── helpers ───────────────────────────────────────────────────────

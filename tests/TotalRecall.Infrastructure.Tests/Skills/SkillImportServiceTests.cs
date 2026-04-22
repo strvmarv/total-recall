@@ -7,29 +7,32 @@ namespace TotalRecall.Infrastructure.Tests.Skills;
 public class SkillImportServiceTests
 {
     [Fact]
-    public async Task ImportAsync_HappyPath_ReturnsCortexSummaryUnmodified()
+    public async Task ImportAsync_HappyPath_ReturnsOptimisticSummary()
     {
+        // The new endpoint returns 202 with no body. The service builds an
+        // optimistic summary locally — Imported is always 0, Scanned reflects
+        // the number of skills sent.
         var scanner = new FakeScanner(skills: new[] { BuildSkill("foo") });
-        var client = new FakeClient(
-            importResponse: new[] { Summary("claude-code", imported: 1) });
+        var client = new FakeClient();
         var svc = new SkillImportService(scanner, client);
 
         var result = await svc.ImportAsync(projectPath: null, CancellationToken.None);
 
         Assert.Single(result);
-        Assert.Equal(1, result[0].Imported);
+        Assert.Equal("claude-code", result[0].Adapter);
+        Assert.Equal(1, result[0].Scanned);
+        Assert.Equal(0, result[0].Imported);
         Assert.Empty(result[0].Errors);
         Assert.Equal("claude-code", client.LastAdapter);
     }
 
     [Fact]
-    public async Task ImportAsync_MergesScanErrorsIntoFirstSummary()
+    public async Task ImportAsync_MergesScanErrorsIntoSummary()
     {
         var scanner = new FakeScanner(
             skills: new[] { BuildSkill("foo") },
             errors: new[] { new ScanError("/path/bad.md", "malformed yaml") });
-        var client = new FakeClient(
-            importResponse: new[] { Summary("claude-code", imported: 1) });
+        var client = new FakeClient();
         var svc = new SkillImportService(scanner, client);
 
         var result = await svc.ImportAsync(projectPath: null, CancellationToken.None);
@@ -67,10 +70,6 @@ public class SkillImportServiceTests
         SourcePath: $"/virt/{name}.md", SuggestedScope: "user",
         SuggestedScopeId: "user:u1", SuggestedTags: Array.Empty<string>());
 
-    private static SkillImportSummaryDto Summary(string adapter, int imported = 0) =>
-        new(adapter, Scanned: imported, Imported: imported,
-            Updated: 0, Unchanged: 0, Orphaned: 0, Errors: Array.Empty<string>());
-
     private sealed class FakeScanner(
         IReadOnlyList<ImportedSkill>? skills = null,
         IReadOnlyList<ScanError>? errors = null) : IClaudeCodeSkillScanner
@@ -83,26 +82,22 @@ public class SkillImportServiceTests
 
     private sealed class FakeClient : ISkillClient
     {
-        private readonly SkillImportSummaryDto[]? _importResponse;
         private readonly Exception? _importException;
         public string? LastAdapter { get; private set; }
         public int LastSkillCount { get; private set; }
 
-        public FakeClient(
-            SkillImportSummaryDto[]? importResponse = null,
-            Exception? importException = null)
+        public FakeClient(Exception? importException = null)
         {
-            _importResponse = importResponse;
             _importException = importException;
         }
 
-        public Task<SkillImportSummaryDto[]> ImportAsync(
+        public Task ImportAsync(
             string adapter, IReadOnlyList<ImportedSkill> skills, CancellationToken ct)
         {
             LastAdapter = adapter;
             LastSkillCount = skills.Count;
             if (_importException is not null) throw _importException;
-            return Task.FromResult(_importResponse ?? Array.Empty<SkillImportSummaryDto>());
+            return Task.CompletedTask;
         }
 
         // Unused ISkillClient methods — throw NotImplementedException. Tests
@@ -112,6 +107,7 @@ public class SkillImportServiceTests
         public Task<SkillBundleDto?> GetByNaturalKeyAsync(string name, string scope, string scopeId, CancellationToken ct) => throw new NotImplementedException();
         public Task<SkillListResponseDto> ListAsync(string? scope, IReadOnlyList<string>? tags, int skip, int take, CancellationToken ct) => throw new NotImplementedException();
         public Task DeleteAsync(Guid id, CancellationToken ct) => throw new NotImplementedException();
+        public Task<PluginSyncSkillDto[]> GetModifiedSinceAsync(DateTime? since, CancellationToken ct) => throw new NotImplementedException();
     }
 
     private sealed class FakeCustomDirsScanner(
@@ -129,14 +125,13 @@ public class SkillImportServiceTests
     {
         var scanner = new FakeScanner(skills: new[] { BuildSkill("from-claude") });
         var customScanner = new FakeCustomDirsScanner(skills: new[] { BuildSkill("from-custom") });
-        var client = new FakeClient(
-            importResponse: new[] { Summary("claude-code", imported: 2) });
+        var client = new FakeClient();
         var svc = new SkillImportService(scanner, client, customScanner);
 
         var result = await svc.ImportAsync(projectPath: null, CancellationToken.None);
 
         Assert.Single(result);
-        Assert.Equal(2, result[0].Imported);
+        Assert.Equal(2, result[0].Scanned);
         // Both skills were sent in one batch
         Assert.Equal(2, client.LastSkillCount);
     }
@@ -148,8 +143,7 @@ public class SkillImportServiceTests
         var customScanner = new FakeCustomDirsScanner(
             skills: Array.Empty<ImportedSkill>(),
             errors: new[] { new ScanError("/custom/bad.md", "parse error") });
-        var client = new FakeClient(
-            importResponse: new[] { Summary("claude-code", imported: 0) });
+        var client = new FakeClient();
         var svc = new SkillImportService(scanner, client, customScanner);
 
         var result = await svc.ImportAsync(projectPath: null, CancellationToken.None);
@@ -159,16 +153,16 @@ public class SkillImportServiceTests
     }
 
     [Fact]
-    public async Task ImportAsync_NoCustomDirsScanner_BehavesAsBeforeForExistingTests()
+    public async Task ImportAsync_NoCustomDirsScanner_ReturnsOptimisticSummary()
     {
         var scanner = new FakeScanner(skills: new[] { BuildSkill("solo") });
-        var client = new FakeClient(
-            importResponse: new[] { Summary("claude-code", imported: 1) });
+        var client = new FakeClient();
         var svc = new SkillImportService(scanner, client); // no custom scanner
 
         var result = await svc.ImportAsync(projectPath: null, CancellationToken.None);
 
-        Assert.Equal(1, result[0].Imported);
+        Assert.Equal(1, result[0].Scanned);
+        Assert.Equal(0, result[0].Imported);
     }
 
 }
