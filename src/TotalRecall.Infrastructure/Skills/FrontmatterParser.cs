@@ -1,6 +1,4 @@
-using System.Diagnostics.CodeAnalysis;
-using YamlDotNet.Serialization;
-using YamlDotNet.Serialization.NamingConventions;
+using System.Text;
 
 namespace TotalRecall.Infrastructure.Skills;
 
@@ -12,36 +10,20 @@ public sealed record ParsedFrontmatter(string? Name, string? Description, string
 /// frontmatter block and returns it as JSON plus the body below the fence.
 /// Fails closed on malformed YAML: the exception propagates so callers can
 /// log-and-skip the offending skill.
+///
+/// AOT-safe: uses a hand-rolled key:value parser rather than YamlDotNet reflection
+/// (Dictionary&lt;string, object?&gt; deserialization is trimmed away in NativeAOT builds).
+/// Supports the flat key:value format used by skill frontmatter; YAML block scalars
+/// and anchors are not needed here.
 /// </summary>
 public static class FrontmatterParser
 {
-    // YamlDotNet's reflection-based builders trip IL3050 under AOT analysis. The
-    // plugin host isn't AOT-published (Infrastructure just sets IsAotCompatible for
-    // consumers that might be); frontmatter parsing is reflection-bound by design
-    // and the input shapes are tiny dictionaries. Suppress locally rather than
-    // weakening the project-wide AOT posture.
-    [UnconditionalSuppressMessage("AOT", "IL3050:Requires dynamic code",
-        Justification = "Plugin Infrastructure does not publish AOT; YamlDotNet reflection is acceptable here.")]
-    private static IDeserializer BuildYaml() => new DeserializerBuilder()
-        .WithNamingConvention(CamelCaseNamingConvention.Instance)
-        .IgnoreUnmatchedProperties()
-        .Build();
-
-    [UnconditionalSuppressMessage("AOT", "IL3050:Requires dynamic code",
-        Justification = "Plugin Infrastructure does not publish AOT; YamlDotNet reflection is acceptable here.")]
-    private static ISerializer BuildJsonSerializer() => new SerializerBuilder()
-        .JsonCompatible()
-        .Build();
-
-    private static readonly IDeserializer _yaml = BuildYaml();
-    private static readonly ISerializer _jsonSerializer = BuildJsonSerializer();
-
     public static (ParsedFrontmatter? Frontmatter, string Body) Parse(string raw)
     {
         if (string.IsNullOrEmpty(raw)) return (null, raw);
 
         // Strip UTF-8 BOM if present — common on Windows-authored skill files.
-        if (raw[0] == '\uFEFF') raw = raw.Substring(1);
+        if (raw[0] == '﻿') raw = raw.Substring(1);
         if (string.IsNullOrEmpty(raw)) return (null, raw);
 
         // Must start with exactly "---" followed by newline.
@@ -65,15 +47,132 @@ public static class FrontmatterParser
         if (bodyStart < raw.Length && raw[bodyStart] == '\n') bodyStart++;
         var body = bodyStart >= raw.Length ? string.Empty : raw.Substring(bodyStart);
 
-        // Deliberately NOT catching here — malformed YAML between `---` fences is a
-        // caller-observable error. The scanner turns the exception into a ScanError
-        // and drops the skill. A totally absent frontmatter (no fence) returns above
-        // with (null, raw) and is treated as "no frontmatter present", not an error.
-        var obj = _yaml.Deserialize<Dictionary<string, object?>>(yamlText) ?? new();
-        var json = _jsonSerializer.Serialize(obj);
-        string? name = obj.TryGetValue("name", out var n) ? n?.ToString() : null;
-        string? desc = obj.TryGetValue("description", out var d) ? d?.ToString() : null;
+        // Reflection-free flat YAML parse — handles the key: value format used by
+        // skill frontmatter. Malformed input throws InvalidDataException which the
+        // scanner catches and records as a ScanError.
+        var obj = ParseFlatYaml(yamlText);
+        var json = BuildJson(obj);
+        string? name = obj.TryGetValue("name", out var n) ? n : null;
+        string? desc = obj.TryGetValue("description", out var d) ? d : null;
         return (new ParsedFrontmatter(name, desc, json), body);
+    }
+
+    private static Dictionary<string, string> ParseFlatYaml(string yaml)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var lines = yaml.Split('\n');
+        int i = 0;
+        while (i < lines.Length)
+        {
+            var line = lines[i].TrimEnd('\r');
+            i++;
+
+            if (string.IsNullOrWhiteSpace(line) || line.TrimStart().StartsWith("#"))
+                continue;
+
+            var colonIdx = line.IndexOf(':');
+            if (colonIdx < 1) continue;
+
+            var key = line.Substring(0, colonIdx).Trim();
+            if (string.IsNullOrEmpty(key)) continue;
+
+            var valuePart = line.Substring(colonIdx + 1).Trim();
+
+            // Block scalar indicator (| or >) — collect continuation lines.
+            if (valuePart == "|" || valuePart == ">")
+            {
+                var sb = new StringBuilder();
+                while (i < lines.Length)
+                {
+                    var cont = lines[i].TrimEnd('\r');
+                    // Block scalar ends when a non-indented, non-empty line appears.
+                    if (cont.Length > 0 && !char.IsWhiteSpace(cont[0])) break;
+                    if (sb.Length > 0) sb.Append('\n');
+                    sb.Append(cont.TrimStart());
+                    i++;
+                }
+                result[key] = sb.ToString().Trim();
+                continue;
+            }
+
+            // Strip surrounding quotes (single or double).
+            var value = UnquoteScalar(valuePart);
+            result[key] = value;
+        }
+        return result;
+    }
+
+    private static string UnquoteScalar(string s)
+    {
+        if (s.Length >= 2)
+        {
+            if (s[0] == '\'' && s[s.Length - 1] == '\'')
+                return s.Substring(1, s.Length - 2).Replace("''", "'");
+            if (s[0] == '"' && s[s.Length - 1] == '"')
+                return UnescapeDoubleQuoted(s.Substring(1, s.Length - 2));
+        }
+        return s;
+    }
+
+    private static string UnescapeDoubleQuoted(string s)
+    {
+        if (!s.Contains('\\')) return s;
+        var sb = new StringBuilder(s.Length);
+        int i = 0;
+        while (i < s.Length)
+        {
+            if (s[i] == '\\' && i + 1 < s.Length)
+            {
+                sb.Append(s[i + 1] switch
+                {
+                    'n' => '\n',
+                    'r' => '\r',
+                    't' => '\t',
+                    '"' => '"',
+                    '\\' => '\\',
+                    _ => s[i + 1]
+                });
+                i += 2;
+            }
+            else
+            {
+                sb.Append(s[i++]);
+            }
+        }
+        return sb.ToString();
+    }
+
+    private static string BuildJson(Dictionary<string, string> obj)
+    {
+        var sb = new StringBuilder("{");
+        bool first = true;
+        foreach (var kv in obj)
+        {
+            if (!first) sb.Append(',');
+            sb.Append('"').Append(JsonEscape(kv.Key)).Append("\":\"").Append(JsonEscape(kv.Value)).Append('"');
+            first = false;
+        }
+        sb.Append('}');
+        return sb.ToString();
+    }
+
+    private static string JsonEscape(string s)
+    {
+        if (s.IndexOfAny(new[] { '"', '\\', '\n', '\r', '\t' }) < 0) return s;
+        var sb = new StringBuilder(s.Length + 4);
+        foreach (var c in s)
+        {
+            switch (c)
+            {
+                case '"': sb.Append("\\\""); break;
+                case '\\': sb.Append("\\\\"); break;
+                case '\n': sb.Append("\\n"); break;
+                case '\r': sb.Append("\\r"); break;
+                case '\t': sb.Append("\\t"); break;
+                default: sb.Append(c); break;
+            }
+        }
+        return sb.ToString();
     }
 
     private static int FindClosingFence(string raw, int from)
