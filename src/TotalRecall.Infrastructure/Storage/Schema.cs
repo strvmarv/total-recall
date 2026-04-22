@@ -203,6 +203,8 @@ public static class MigrationRunner
         Migration8_Scope,
         // Migration 9: entry_type column on all content tables
         Migration9_EntryType,
+        // Migration 10: skill_cache table for local skill metadata sync
+        Migration10_SkillCache,
     };
 
     /// <summary>
@@ -565,6 +567,36 @@ public static class MigrationRunner
                 $"ALTER TABLE {table} ADD COLUMN entry_type TEXT NOT NULL DEFAULT 'Preference'";
             alter.ExecuteNonQuery();
         }
+    }
+
+    /// <summary>
+    /// Migration 10 — local skill metadata cache. Stores a lightweight copy
+    /// of skills pulled from Cortex so the plugin can answer
+    /// <c>skill_list</c> / <c>skill_search</c> tool calls without a network
+    /// round-trip. <c>is_orphaned</c> flags skills no longer returned by the
+    /// server so they can be cleaned up on the next pull cycle.
+    /// </summary>
+    private static void Migration10_SkillCache(
+        MsSqliteConnection conn,
+        Microsoft.Data.Sqlite.SqliteTransaction tx)
+    {
+        Exec(conn, tx, """
+            CREATE TABLE IF NOT EXISTS skill_cache (
+                id          TEXT PRIMARY KEY,
+                name        TEXT NOT NULL,
+                description TEXT,
+                scope       TEXT NOT NULL,
+                scope_id    TEXT NOT NULL,
+                tags        TEXT NOT NULL,
+                source      TEXT,
+                version     INTEGER NOT NULL DEFAULT 1,
+                is_orphaned INTEGER NOT NULL DEFAULT 0,
+                updated_at  TEXT NOT NULL
+            )
+            """);
+
+        Exec(conn, tx,
+            "CREATE INDEX IF NOT EXISTS ix_skill_cache_scope ON skill_cache(scope, scope_id)");
     }
 
     // --- helpers ----------------------------------------------------------
