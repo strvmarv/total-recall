@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Memory;
+using TotalRecall.Infrastructure.Skills;
 using TotalRecall.Infrastructure.Storage;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
@@ -22,17 +23,20 @@ public sealed class SyncService
     private readonly IRemoteBackend _remote;
     private readonly SyncQueue _syncQueue;
     private readonly MsSqliteConnection _conn;
+    private readonly ISkillCache? _skillCache;
     private const string WatermarkKey = "cortex_last_pull_at";
+    private const string SkillsWatermarkKey = "cortex_skills_last_pull_at";
 
     /// <summary>Memory tiers to search when looking up entries locally.</summary>
     private static readonly Tier[] AllMemoryTiers = { Tier.Hot, Tier.Warm, Tier.Cold };
 
-    public SyncService(IStore localStore, IRemoteBackend remote, SyncQueue syncQueue, MsSqliteConnection conn)
+    public SyncService(IStore localStore, IRemoteBackend remote, SyncQueue syncQueue, MsSqliteConnection conn, ISkillCache? skillCache = null)
     {
         _localStore = localStore ?? throw new ArgumentNullException(nameof(localStore));
         _remote = remote ?? throw new ArgumentNullException(nameof(remote));
         _syncQueue = syncQueue ?? throw new ArgumentNullException(nameof(syncQueue));
         _conn = conn ?? throw new ArgumentNullException(nameof(conn));
+        _skillCache = skillCache;
     }
 
     /// <summary>
@@ -260,6 +264,40 @@ public sealed class SyncService
                     _syncQueue.MarkFailed(item.Id, ex.Message);
             }
         }
+    }
+
+    /// <summary>
+    /// Pull skills modified since the last watermark and reconcile with the
+    /// local skill cache. Silently returns if Cortex is unreachable or if
+    /// no skill cache is configured.
+    /// </summary>
+    public async Task PullSkillsAsync(CancellationToken ct)
+    {
+        if (_skillCache is null)
+            return;
+
+        var watermark = GetWatermark(SkillsWatermarkKey);
+        DateTime? since = watermark == DateTimeOffset.MinValue ? null : watermark.UtcDateTime;
+
+        PluginSyncSkillDto[] skills;
+        try
+        {
+            skills = await _remote.GetSkillsModifiedSinceAsync(since, ct).ConfigureAwait(false);
+        }
+        catch (CortexUnreachableException)
+        {
+            return; // graceful degradation
+        }
+
+        foreach (var skill in skills)
+        {
+            if (skill.IsOrphaned)
+                await _skillCache.RemoveAsync(skill.Id, ct).ConfigureAwait(false);
+            else
+                await _skillCache.UpsertAsync(skill, ct).ConfigureAwait(false);
+        }
+
+        SetWatermark(SkillsWatermarkKey, DateTimeOffset.UtcNow);
     }
 
     // --- Watermark helpers ---------------------------------------------------

@@ -459,8 +459,9 @@ public static class ServerComposition
             var cortexClient = CortexClient.Create(cortexUrl, cortexPat);
             var syncQueue = new SyncQueue(conn);
             var routingStore = new RoutingStore(localStore, cortexClient, syncQueue);
+            var skillCache = new SqliteSkillCache(conn);
             var syncService = new Infrastructure.Sync.SyncService(
-                localStore, cortexClient, syncQueue, conn);
+                localStore, cortexClient, syncQueue, conn, skillCache);
 
             var syncIntervalSeconds = FSharpOption<Core.Config.CortexConfig>.get_IsSome(cfg.Cortex)
                 && FSharpOption<int>.get_IsSome(cfg.Cortex.Value.SyncIntervalSeconds)
