@@ -1,5 +1,6 @@
 using System;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace TotalRecall.Infrastructure.Sync;
 
@@ -40,12 +41,7 @@ public sealed class PeriodicSync : IDisposable
 
         try
         {
-            await _syncService.PullAsync(CancellationToken.None).ConfigureAwait(false);
-            await _syncService.FlushAsync(CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[total-recall] periodic sync failed: {ex.Message}");
+            await OnTickAsync(CancellationToken.None).ConfigureAwait(false);
         }
         finally
         {
@@ -54,6 +50,23 @@ public sealed class PeriodicSync : IDisposable
                 try { _gate.Release(); } catch (ObjectDisposedException) { }
             }
         }
+    }
+
+    /// <summary>
+    /// Runs one sync tick: pull memories, pull skills, flush queue.
+    /// Each phase is isolated so a failure in one does not prevent the others.
+    /// Internal for test access via InternalsVisibleTo.
+    /// </summary>
+    internal async Task OnTickAsync(CancellationToken ct)
+    {
+        try { await _syncService.PullAsync(ct).ConfigureAwait(false); }
+        catch (Exception ex) { Console.Error.WriteLine($"[total-recall] PullAsync failed: {ex.Message}"); }
+
+        try { await _syncService.PullSkillsAsync(ct).ConfigureAwait(false); }
+        catch (Exception ex) { Console.Error.WriteLine($"[total-recall] PullSkillsAsync failed: {ex.Message}"); }
+
+        try { await _syncService.FlushAsync(ct).ConfigureAwait(false); }
+        catch (Exception ex) { Console.Error.WriteLine($"[total-recall] FlushAsync failed: {ex.Message}"); }
     }
 
     public void Dispose()
