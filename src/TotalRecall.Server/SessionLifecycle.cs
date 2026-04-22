@@ -45,9 +45,6 @@ public sealed class SessionLifecycle : ISessionLifecycle
     private readonly string _storageMode;
     private readonly TotalRecall.Infrastructure.Usage.UsageIndexer? _usageIndexer;
     private readonly ISkillImportService? _skillImportService;
-    // Soft timeout for the skill import sweep — session_start must never block
-    // on a slow cortex push. Kept as a field so tests can override via ctor.
-    private readonly TimeSpan _skillImportTimeout;
     private readonly int _tokenBudget;
     private readonly int _maxEntries;
 
@@ -63,7 +60,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         TotalRecall.Infrastructure.Usage.UsageIndexer? usageIndexer = null,
         string storageMode = "sqlite",
         ISkillImportService? skillImportService = null,
-        TimeSpan? skillImportTimeout = null,
+        TimeSpan? skillImportTimeout = null, // kept for source compat; ignored — import is fire-and-forget
         int tokenBudget = 4000,
         int maxEntries = 50)
     {
@@ -78,7 +75,6 @@ public sealed class SessionLifecycle : ISessionLifecycle
         _usageIndexer = usageIndexer;
         _storageMode = storageMode;
         _skillImportService = skillImportService;
-        _skillImportTimeout = skillImportTimeout ?? TimeSpan.FromSeconds(5);
         _tokenBudget = tokenBudget > 0 ? tokenBudget : 4000;
         _maxEntries = maxEntries > 0 ? maxEntries : 50;
     }
@@ -148,23 +144,50 @@ public sealed class SessionLifecycle : ISessionLifecycle
                 SkillsErrors: Array.Empty<string>()));
         }
 
-        // 1b+1c. Skill import sweep + listing — both share a single combined
-        //     timeout budget (2× _skillImportTimeout, default 10s total). The
-        //     shared CancellationToken is passed to import first, then listing,
-        //     so a slow import eats into the time available for listing. Both
-        //     steps are best-effort: timeout or failure produces a synthetic
-        //     error row / empty skills block and never blocks session init.
+        // 1b+1c. Skill import sweep + listing.
+        //
+        // Import push (1b) — detached from the critical path. Fire and forget so
+        // session_start is never delayed by a slow or unreachable cortex server.
+        // CancellationToken.None is intentional: the HTTP call must complete even
+        // if the MCP session token is cancelled.
+        //
+        // Listing (1c) — still synchronous so the skills block in the session
+        // context is populated on the first call. Best-effort; failures produce
+        // an empty block, never an exception.
         string skillsBlock = string.Empty;
         if (_skillImportService is not null)
         {
-            using var skillCts = new CancellationTokenSource(_skillImportTimeout + _skillImportTimeout);
+            // 1b. Fire-and-forget import push.
+            // CancellationToken.None is intentional — the push must complete even if
+            // the MCP session token is cancelled. The try/catch around ImportAsync
+            // guards against synchronous throws (e.g. configuration errors) so they
+            // don't surface through the unobserved-task path.
+            Task importTask;
+            try
+            {
+                importTask = _skillImportService.ImportAsync(Environment.CurrentDirectory, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"total-recall: background skill import failed: {ex.Message}");
+                importTask = Task.CompletedTask;
+            }
+            _ = importTask.ContinueWith(
+                t => Console.Error.WriteLine($"total-recall: background skill import failed: {t.Exception?.GetBaseException().Message}"),
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
 
-            // Scan extra_dirs locally — always, independent of cortex availability.
+            // The import runs in the background; session_start always reports zero
+            // skill counts on this call. The next PeriodicSync or explicit
+            // skill_import_host tool invocation will reflect real numbers.
+
+            // 1b-extra. Scan extra_dirs locally — always, independent of cortex availability.
             IReadOnlyList<ImportedSkill> localExtraSkills = Array.Empty<ImportedSkill>();
             try
             {
                 var localScan = _skillImportService
-                    .ScanExtraDirsAsync(skillCts.Token)
+                    .ScanExtraDirsAsync(CancellationToken.None)
                     .GetAwaiter().GetResult();
                 localExtraSkills = localScan.Skills;
             }
@@ -173,74 +196,14 @@ public sealed class SessionLifecycle : ISessionLifecycle
                 Console.Error.WriteLine($"total-recall: extra_dirs scan failed: {ex.Message}");
             }
 
-            SkillImportSummaryDto[] skillSummaries;
-            try
-            {
-                skillSummaries = _skillImportService
-                    .ImportAsync(Environment.CurrentDirectory, skillCts.Token)
-                    .GetAwaiter().GetResult();
-            }
-            catch (OperationCanceledException)
-            {
-                skillSummaries = new[]
-                {
-                    new SkillImportSummaryDto(
-                        Adapter: "claude-code",
-                        Scanned: 0, Imported: 0, Updated: 0, Unchanged: 0, Orphaned: 0,
-                        Errors: new[] { $"skill_import_timeout_{(int)_skillImportTimeout.TotalSeconds}s" }),
-                };
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"total-recall: skill import failed: {ex.Message}");
-                skillSummaries = new[]
-                {
-                    new SkillImportSummaryDto(
-                        Adapter: "claude-code",
-                        Scanned: 0, Imported: 0, Updated: 0, Unchanged: 0, Orphaned: 0,
-                        Errors: new[] { $"skill_import_failed: {ex.Message}" }),
-                };
-            }
-
-            foreach (var s in skillSummaries)
-            {
-                var idx = importSummary.FindIndex(r => r.Tool == s.Adapter);
-                if (idx >= 0)
-                {
-                    importSummary[idx] = importSummary[idx] with
-                    {
-                        SkillsImported = s.Imported,
-                        SkillsUpdated = s.Updated,
-                        SkillsUnchanged = s.Unchanged,
-                        SkillsOrphaned = s.Orphaned,
-                        SkillsErrors = s.Errors,
-                    };
-                }
-                else
-                {
-                    importSummary.Add(new ImportSummaryRow(
-                        Tool: s.Adapter,
-                        MemoriesImported: 0,
-                        KnowledgeImported: 0,
-                        SkillsImported: s.Imported,
-                        SkillsUpdated: s.Updated,
-                        SkillsUnchanged: s.Unchanged,
-                        SkillsOrphaned: s.Orphaned,
-                        SkillsErrors: s.Errors));
-                }
-            }
-
-            // Cortex list is best-effort; local extra_dirs skills fill the gap when
-            // cortex is unavailable or returns nothing. Both are merged by BuildSkillsBlock.
+            // 1c. Cortex list — best-effort; local extra_dirs skills fill the gap when
+            // cortex is unavailable or returns nothing. Both merged by BuildSkillsBlock.
             SkillListResponseDto? cortexList = null;
             try
             {
-                if (!skillCts.IsCancellationRequested)
-                {
-                    cortexList = _skillImportService
-                        .ListVisibleAsync(skillCts.Token)
-                        .GetAwaiter().GetResult();
-                }
+                cortexList = _skillImportService
+                    .ListVisibleAsync(CancellationToken.None)
+                    .GetAwaiter().GetResult();
             }
             catch (Exception ex)
             {

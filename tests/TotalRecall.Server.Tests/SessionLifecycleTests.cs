@@ -10,6 +10,7 @@ namespace TotalRecall.Server.Tests;
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -741,8 +742,11 @@ public sealed class SessionLifecycleTests
     // ---------- 12. skill import integration ----------
 
     [Fact]
-    public async Task EnsureInitializedAsync_WithSkillService_IncludesSkillCountsInSummary()
+    public async Task EnsureInitializedAsync_WithSkillService_ImportIsFireAndForget_SummaryHasZeroCounts()
     {
+        // Import runs in the background — session_start returns immediately with
+        // zero skill counts in the import summary. The ImportAsync call is still
+        // made (fire-and-forget), but the summary row is never populated from it.
         var svc = new FakeSkillImportService(
             summaries: new[]
             {
@@ -756,18 +760,15 @@ public sealed class SessionLifecycleTests
 
         var result = await lifecycle.EnsureInitializedAsync();
 
-        var row = Assert.Single(result.ImportSummary, r => r.Tool == "claude-code");
-        Assert.Equal(2, row.SkillsImported);
-        Assert.Equal(1, row.SkillsUpdated);
-        Assert.Empty(row.SkillsErrors);
-        Assert.Equal(1, svc.ImportCalls);
+        // No skill-import row is added to the summary (import is background).
+        Assert.DoesNotContain(result.ImportSummary, r => r.Tool == "claude-code");
     }
 
     [Fact]
-    public async Task EnsureInitializedAsync_WithSkillServiceMergesIntoExistingImporterRow()
+    public async Task EnsureInitializedAsync_WithSkillService_MemoryRowsPreserved_SkillCountsZero()
     {
-        // Memory importer contributes a "claude-code" row first; the skill
-        // sweep must merge into it rather than append a duplicate.
+        // Memory importer contributes a "claude-code" row; the skill import is
+        // fire-and-forget so it does not merge skill counts into the row.
         var importer = new FakeImporter("claude-code")
         {
             MemResult = new ImportResult(4, 0, Array.Empty<string>()),
@@ -789,29 +790,34 @@ public sealed class SessionLifecycleTests
 
         var result = await lifecycle.EnsureInitializedAsync();
 
+        // Memory/KB counts from the host importer are preserved.
         var row = Assert.Single(result.ImportSummary, r => r.Tool == "claude-code");
         Assert.Equal(4, row.MemoriesImported);
         Assert.Equal(2, row.KnowledgeImported);
-        Assert.Equal(3, row.SkillsImported);
-        Assert.Equal(2, row.SkillsUpdated);
-        Assert.Equal(1, row.SkillsUnchanged);
-        Assert.Equal(1, row.SkillsOrphaned);
+        // Skill counts stay at zero — import runs in the background.
+        Assert.Equal(0, row.SkillsImported);
+        Assert.Equal(0, row.SkillsUpdated);
+        Assert.Equal(0, row.SkillsUnchanged);
+        Assert.Equal(0, row.SkillsOrphaned);
+        Assert.Empty(row.SkillsErrors);
     }
 
     [Fact]
-    public async Task EnsureInitializedAsync_SkillServiceThrows_EmitsErrorRowNotFailure()
+    public async Task EnsureInitializedAsync_SkillServiceThrows_DoesNotPropagateException()
     {
+        // Import runs in the background. A synchronous throw from ImportAsync is
+        // swallowed by the try/catch around the fire-and-forget launch; it must
+        // never surface to the caller. No error row is added to the import summary.
         var svc = new FakeSkillImportService(
             exception: new InvalidOperationException("boom"));
         var lifecycle = BuildLifecycle(new FakeStore(), skillImportService: svc);
 
+        // Must not throw.
         var result = await lifecycle.EnsureInitializedAsync();
 
-        var row = Assert.Single(result.ImportSummary, r => r.Tool == "claude-code");
-        Assert.Equal(0, row.SkillsImported);
-        Assert.Single(row.SkillsErrors);
-        Assert.Contains("skill_import_failed", row.SkillsErrors[0]);
-        Assert.Contains("boom", row.SkillsErrors[0]);
+        Assert.NotNull(result);
+        // No skill-import error row should appear.
+        Assert.DoesNotContain(result.ImportSummary, r => r.SkillsErrors.Count > 0);
     }
 
     [Fact]
@@ -836,10 +842,10 @@ public sealed class SessionLifecycleTests
     }
 
     [Fact]
-    public async Task EnsureInitializedAsync_SkillImportTimeout_EmitsTimeoutErrorRow()
+    public async Task EnsureInitializedAsync_SlowSkillImport_DoesNotBlockSessionInit()
     {
-        // Configurable short timeout lets us exercise the OperationCanceledException
-        // branch without actually waiting 5 seconds.
+        // Import runs in the background — a slow import must never block session_start.
+        // The skillImportTimeout parameter is now ignored (kept for source compat).
         var svc = new FakeSkillImportService(
             asyncImpl: async ct =>
             {
@@ -849,14 +855,18 @@ public sealed class SessionLifecycleTests
         var lifecycle = BuildLifecycle(
             new FakeStore(),
             skillImportService: svc,
-            skillImportTimeout: TimeSpan.FromMilliseconds(50));
+            skillImportTimeout: TimeSpan.FromMilliseconds(50)); // ignored — kept for compat
 
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         var result = await lifecycle.EnsureInitializedAsync();
+        sw.Stop();
 
-        var row = Assert.Single(result.ImportSummary, r => r.Tool == "claude-code");
-        Assert.Single(row.SkillsErrors);
-        // Timeout uses 50ms above, so TotalSeconds truncates to 0.
-        Assert.StartsWith("skill_import_timeout_", row.SkillsErrors[0]);
+        // Must complete well under the 10-second delay the import would impose.
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(3),
+            $"EnsureInitializedAsync took {sw.Elapsed.TotalSeconds:F2}s — import must be fire-and-forget.");
+        Assert.NotNull(result);
+        // No timeout error rows.
+        Assert.DoesNotContain(result.ImportSummary, r => r.SkillsErrors.Any(e => e.StartsWith("skill_import_timeout_")));
     }
 
     // ---------- 13. BuildSkillsBlock unit tests ----------
