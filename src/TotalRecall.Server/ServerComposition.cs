@@ -283,10 +283,25 @@ public static class ServerComposition
             var usageIndexer = new TotalRecall.Infrastructure.Usage.UsageIndexer(
                 usageImporters, usageEventLog, usageWatermarks, rollup: usageRollup);
 
+            // Skill scanner — local extra_dirs only (no cortex client in SQLite mode).
+            ISkillImportService? sqliteSkillService = null;
+            {
+                var extraDirs = Array.Empty<string>();
+                if (FSharpOption<Core.Config.SkillConfig>.get_IsSome(cfg.Skill)
+                    && FSharpOption<string[]>.get_IsSome(cfg.Skill.Value.ExtraDirs))
+                    extraDirs = cfg.Skill.Value.ExtraDirs.Value;
+                if (extraDirs.Length > 0)
+                    sqliteSkillService = new SkillImportService(
+                        new ClaudeCodeSkillScanner(),
+                        NullSkillClient.Instance,
+                        new CustomDirsSkillScanner(extraDirs));
+            }
+
             var sessionLifecycle = new SessionLifecycle(
                 importers, store, compactionLog,
                 usageIndexer: usageIndexer,
                 storageMode: storageMode,
+                skillImportService: sqliteSkillService,
                 tokenBudget: cfg.Tiers.Hot.TokenBudget,
                 maxEntries: cfg.Tiers.Hot.MaxEntries);
 

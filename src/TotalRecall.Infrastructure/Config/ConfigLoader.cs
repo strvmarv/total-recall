@@ -388,7 +388,9 @@ public sealed class ConfigLoader : IConfigLoader
         }
 
         FSharpOption<Core.Config.SkillConfig> skill;
-        if (table.TryGetValue("skill", out var skillObj) && skillObj is TomlTable skillTable)
+        // Accept both [skills] (documented) and [skill] (legacy singular) for robustness.
+        if ((table.TryGetValue("skills", out var skillObj) || table.TryGetValue("skill", out skillObj))
+            && skillObj is TomlTable skillTable)
         {
             var extraDirs = TryGetStringArray(skillTable, "extra_dirs");
             var skillCfg = new Core.Config.SkillConfig(extraDirs);

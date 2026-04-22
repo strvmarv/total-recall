@@ -433,6 +433,28 @@ public sealed class ConfigLoaderTests : IDisposable
     }
 
     [Fact]
+    public void LoadEffectiveConfig_SkillsSectionPlural_ParsesExtraDirs()
+    {
+        // README and docs use [skills] (plural); parser must accept both forms.
+        var cfgPath = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(cfgPath, """
+            [skills]
+            extra_dirs = ["~/my-skills", "/absolute/skills"]
+            """);
+        Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", _tempDir);
+
+        var loader = new ConfigLoader();
+        var cfg = loader.LoadEffectiveConfig(cfgPath);
+
+        Assert.True(Microsoft.FSharp.Core.FSharpOption<TotalRecall.Core.Config.SkillConfig>.get_IsSome(cfg.Skill));
+        var dirs = cfg.Skill.Value.ExtraDirs;
+        Assert.True(Microsoft.FSharp.Core.FSharpOption<string[]>.get_IsSome(dirs));
+        Assert.Equal(2, dirs.Value.Length);
+        Assert.Equal("~/my-skills", dirs.Value[0]);
+        Assert.Equal("/absolute/skills", dirs.Value[1]);
+    }
+
+    [Fact]
     public void LoadEffectiveConfig_NoSkillSection_SkillIsNone()
     {
         var cfgPath = Path.Combine(_tempDir, "config.toml");

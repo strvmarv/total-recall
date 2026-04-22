@@ -76,5 +76,5 @@ default = "user:local"
 # --- Skill scan directories (optional) ---
 # Additional directories to scan for skills, in addition to ~/.claude/skills/.
 # Useful for non-Claude-Code hosts (e.g. Cursor) that don't have a native skills directory.
-# [skill]
+# [skills]
 # extra_dirs = ["~/my-skills"]

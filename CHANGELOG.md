@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.1.2 - 2026-04-21
+
+### Fixed
+
+- **`[skills]` config section now works as documented.** The README documented the skill scan directory as `[skills]` (plural), but the config parser only recognised `[skill]` (singular), silently ignoring `extra_dirs` for any user who followed the docs. The parser now accepts both forms. Added a regression test to prevent recurrence.
+
+## 1.1.1 - 2026-04-21
+
+### Fixed
+
+- **`extra_dirs` skill scan now works without Cortex.** Skills from `extra_dirs` were previously only advertised via the Cortex list response. In SQLite mode (or when Cortex is unavailable), `ScanExtraDirsAsync` now runs locally first and the results are merged into `BuildSkillsBlock` directly — so the `## Available Skills` block appears regardless of Cortex connectivity.
+
 ## 1.1.0 - 2026-04-21
 
 ### Added
