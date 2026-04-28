@@ -24,6 +24,10 @@ public sealed class OpenAiEmbedder : IEmbedder
         _http = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
     }
 
+    /// <inheritdoc />
+    public EmbedderDescriptor Descriptor =>
+        new(Provider: "openai", Model: _modelName, Revision: string.Empty, Dimensions: _dimensions);
+
     public float[] Embed(string text)
     {
         // Source-gen serialization — AOT-safe, no IL2026/IL3050 warnings.

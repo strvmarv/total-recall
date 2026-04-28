@@ -18,6 +18,8 @@ public sealed class ThrowingEmbedder : IEmbedder
         _throwOnCall = throwOnCall;
     }
 
+        public EmbedderDescriptor Descriptor { get; } = new("test", "fake", "", 384);
+
     public float[] Embed(string text)
     {
         _calls++;

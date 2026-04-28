@@ -14,4 +14,13 @@ public interface IEmbedder
     /// callers can treat dot-products as cosine similarities.
     /// </summary>
     float[] Embed(string text);
+
+    /// <summary>
+    /// Identity of the model this embedder produces vectors for. Used by
+    /// <see cref="EmbedderFingerprint"/> to detect silent model swaps on
+    /// existing databases. Implementations MUST return a stable value that
+    /// does not require loading heavy resources — callers may invoke this
+    /// at startup before any <see cref="Embed"/> call.
+    /// </summary>
+    EmbedderDescriptor Descriptor { get; }
 }
