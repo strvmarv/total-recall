@@ -298,13 +298,21 @@ public static class ServerComposition
                         new CustomDirsSkillScanner(extraDirs));
             }
 
+            // Task 13 — `usage_status` MCP tool. SQLite-only for now: the
+            // Postgres composition path has no usage indexer wired (Phase 2
+            // out-of-scope), so it correspondingly exposes no read tool.
+            // Constructed before SessionLifecycle so it can power
+            // lastSessionAge in session_start.
+            var usageQuery = new TotalRecall.Infrastructure.Usage.UsageQueryService(conn);
+
             var sessionLifecycle = new SessionLifecycle(
                 importers, store, compactionLog,
                 usageIndexer: usageIndexer,
                 storageMode: storageMode,
                 skillImportService: sqliteSkillService,
                 tokenBudget: cfg.Tiers.Hot.TokenBudget,
-                maxEntries: cfg.Tiers.Hot.MaxEntries);
+                maxEntries: cfg.Tiers.Hot.MaxEntries,
+                usageQuery: usageQuery);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
@@ -322,10 +330,6 @@ public static class ServerComposition
                 retrievalLog: retrievalLog,
                 compactionLogWriter: compactionLog);
 
-            // Task 13 — `usage_status` MCP tool. SQLite-only for now: the
-            // Postgres composition path has no usage indexer wired (Phase 2
-            // out-of-scope), so it correspondingly exposes no read tool.
-            var usageQuery = new TotalRecall.Infrastructure.Usage.UsageQueryService(conn);
             registry.Register(new UsageStatusHandler(usageQuery));
 
             return new ServerCompositionHandles(conn, registry, store, storageMode);
@@ -526,13 +530,16 @@ public static class ServerComposition
                 : null;
             var skillImportService = new SkillImportService(skillScanner, skillClient, customDirsScanner);
 
+            var usageQuery = new TotalRecall.Infrastructure.Usage.UsageQueryService(conn);
+
             var sessionLifecycle = new SessionLifecycle(
                 importers, routingStore, compactionLog,
                 usageIndexer: usageIndexer,
                 storageMode: storageMode,
                 skillImportService: skillImportService,
                 tokenBudget: cfg.Tiers.Hot.TokenBudget,
-                maxEntries: cfg.Tiers.Hot.MaxEntries);
+                maxEntries: cfg.Tiers.Hot.MaxEntries,
+                usageQuery: usageQuery);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
@@ -553,7 +560,6 @@ public static class ServerComposition
                 syncQueue: syncQueue,
                 compactionLogWriter: compactionLog);
 
-            var usageQuery = new TotalRecall.Infrastructure.Usage.UsageQueryService(conn);
             registry.Register(new UsageStatusHandler(usageQuery));
 
             // Plan 2: skill_* MCP handlers — cortex-mode only (skills live in cortex).

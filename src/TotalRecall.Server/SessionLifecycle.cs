@@ -44,6 +44,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
     private readonly string _sessionId;
     private readonly string _storageMode;
     private readonly TotalRecall.Infrastructure.Usage.UsageIndexer? _usageIndexer;
+    private readonly TotalRecall.Infrastructure.Usage.UsageQueryService? _usageQuery;
     private readonly ISkillImportService? _skillImportService;
     private readonly int _tokenBudget;
     private readonly int _maxEntries;
@@ -62,7 +63,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
         ISkillImportService? skillImportService = null,
         TimeSpan? skillImportTimeout = null, // kept for source compat; ignored — import is fire-and-forget
         int tokenBudget = 4000,
-        int maxEntries = 50)
+        int maxEntries = 50,
+        TotalRecall.Infrastructure.Usage.UsageQueryService? usageQuery = null)
     {
         ArgumentNullException.ThrowIfNull(importers);
         ArgumentNullException.ThrowIfNull(store);
@@ -73,6 +75,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         _sessionId = sessionId ?? Guid.NewGuid().ToString();
         _nowMs = nowMs ?? (() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         _usageIndexer = usageIndexer;
+        _usageQuery = usageQuery;
         _storageMode = storageMode;
         _skillImportService = skillImportService;
         _tokenBudget = tokenBudget > 0 ? tokenBudget : 4000;
@@ -258,8 +261,12 @@ public sealed class SessionLifecycle : ISessionLifecycle
         // 6. Hints.
         var hints = GenerateHints(_store, warmPromotedIds);
 
-        // 7. Last session age (humanized).
-        var lastAgeMs = _compactionLog.GetLastTimestampExcludingReason("warm_sweep_decay");
+        // 7. Last session age (humanized). Prefer usage_events MAX(ts) — that
+        //    actually tracks session activity per host. Fall back to the
+        //    compaction log (last tier movement excl. warm sweep) when no
+        //    usage reader is wired (e.g. pure-postgres composition).
+        var lastAgeMs = _usageQuery?.GetLastEventTimestampMs()
+                        ?? _compactionLog.GetLastTimestampExcludingReason("warm_sweep_decay");
         var lastSessionAge = FormatLastSessionAge(lastAgeMs, _nowMs());
 
         // TODO(Plan 5+): regression detection — checkRegressions from

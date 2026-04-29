@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.1.4 - 2026-04-29
+
+### Added
+
+- **Embedder fingerprint guard (#6, PR #7).** Each store now stamps an embedder descriptor (provider + model + dimensions) into a `_meta` row on first write and verifies it on open. Switching the configured embedder against an existing DB without a deliberate migration now fails fast with a clear error instead of silently producing dimension-mismatched vectors. New `EmbedderDescriptor` / `EmbedderFingerprint` types and an `IMetaStore` interface back this; SQLite and Postgres stores both implement it. Bedrock, ONNX, and OpenAI embedders all advertise their descriptor.
+
+### Changed
+
+- **`session_start.lastSessionAge` now reflects real session activity.** Previously this value was sourced from `compaction_log.GetLastTimestampExcludingReason("warm_sweep_decay")`, which only updates when an entry actually moves tiers (hot→warm decay, manual promote/demote). On installs where hot entries stay above the warm threshold and no manual movements occur, the timestamp would freeze and the startup banner would report a stale "X days ago" even when sessions ran daily. `SessionLifecycle` now prefers `MAX(ts)` from `usage_events` (populated on every `session_start` by the usage indexer for Claude Code and Copilot CLI) and falls back to the compaction-log query only when no `UsageQueryService` is wired (pure-Postgres composition path). New `UsageQueryService.GetLastEventTimestampMs()` method backs this. No schema changes.
+
 ## 1.1.3 - 2026-04-22
 
 ### Fixed

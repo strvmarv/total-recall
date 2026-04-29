@@ -28,6 +28,20 @@ public sealed class UsageQueryService
         _conn = conn;
     }
 
+    /// <summary>
+    /// Returns MAX(ts) across <c>usage_events</c>, or null if the table is empty.
+    /// Used by SessionLifecycle to humanize "last session age" from real session
+    /// activity rather than the compaction log (which only writes on tier moves).
+    /// </summary>
+    public long? GetLastEventTimestampMs()
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "SELECT MAX(ts) FROM usage_events";
+        var result = cmd.ExecuteScalar();
+        if (result is null || result is DBNull) return null;
+        return Convert.ToInt64(result);
+    }
+
     public UsageReport Query(UsageQuery query)
     {
         ArgumentNullException.ThrowIfNull(query);
