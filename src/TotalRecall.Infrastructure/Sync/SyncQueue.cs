@@ -13,15 +13,38 @@ public sealed record SyncQueueItem(
 /// Persistent SQLite-backed outbound queue for Cortex sync. Items are
 /// enqueued when RoutingStore writes a local memory and drained by
 /// SyncService to push upstream. If Cortex is unreachable, items stay
-/// in the queue with incremented attempt counts. Survives process
-/// crashes because it lives in the same SQLite database.
+/// in the queue with incremented attempt counts and a backoff window
+/// (<c>next_attempt_at</c>); they keep retrying forever, just spaced
+/// further apart. Survives process crashes because it lives in the same
+/// SQLite database.
 /// </summary>
 public sealed class SyncQueue
 {
     private readonly MsSqliteConnection _conn;
-    private const int MaxAttempts = 10;
+    private readonly Func<DateTime> _utcNow;
 
-    public SyncQueue(MsSqliteConnection conn) => _conn = conn;
+    // Exponential backoff: 60s * 2^(attempts-1), capped at 1h.
+    // attempts=1 → 60s, 2 → 120s, 3 → 240s, ..., 7+ → 3600s.
+    private const int BaseBackoffSeconds = 60;
+    private const int MaxBackoffSeconds = 3600;
+
+    public SyncQueue(MsSqliteConnection conn) : this(conn, () => DateTime.UtcNow) { }
+
+    // Test seam: inject clock for deterministic backoff assertions.
+    internal SyncQueue(MsSqliteConnection conn, Func<DateTime> utcNow)
+    {
+        _conn = conn;
+        _utcNow = utcNow;
+    }
+
+    internal static int ComputeBackoffSeconds(int attempts)
+    {
+        if (attempts <= 0) return 0;
+        // 2^(attempts-1) overflows int around attempts=32; cap the shift.
+        var shift = Math.Min(attempts - 1, 20);
+        long seconds = (long)BaseBackoffSeconds << shift;
+        return (int)Math.Min(seconds, MaxBackoffSeconds);
+    }
 
     /// <summary>Enqueue a new item for sync.</summary>
     public void Enqueue(string entityType, string operation, string? entityId, string payload)
@@ -40,22 +63,24 @@ public sealed class SyncQueue
     }
 
     /// <summary>
-    /// Drain up to <paramref name="limit"/> items from the queue, excluding
-    /// items that have reached <see cref="MaxAttempts"/> (poison pill).
-    /// Items are returned in FIFO order.
+    /// Drain up to <paramref name="limit"/> items from the queue. Items in a
+    /// backoff window (<c>next_attempt_at &gt; now</c>) are skipped; they
+    /// re-enter the candidate set once their wait expires. Memory entries
+    /// are prioritized over usage/retrieval/compaction.
     /// </summary>
     public IReadOnlyList<SyncQueueItem> Drain(int limit)
     {
         var items = new List<SyncQueueItem>();
+        var nowIso = _utcNow().ToString("o");
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = """
             SELECT id, entity_type, operation, entity_id, payload, created_at, attempts, last_error
             FROM sync_queue
-            WHERE attempts < $maxAttempts
+            WHERE next_attempt_at IS NULL OR next_attempt_at <= $now
             ORDER BY CASE entity_type WHEN 'memory' THEN 0 ELSE 1 END ASC, id ASC
             LIMIT $limit
             """;
-        cmd.Parameters.AddWithValue("$maxAttempts", MaxAttempts);
+        cmd.Parameters.AddWithValue("$now", nowIso);
         cmd.Parameters.AddWithValue("$limit", limit);
 
         using var reader = cmd.ExecuteReader();
@@ -84,26 +109,47 @@ public sealed class SyncQueue
         cmd.ExecuteNonQuery();
     }
 
-    /// <summary>Increment attempts and record the error for a failed sync item.</summary>
+    /// <summary>
+    /// Increment attempts, record the error, and set a backoff window so the
+    /// item is excluded from <see cref="Drain"/> until the window expires.
+    /// </summary>
     public void MarkFailed(long id, string error)
     {
+        // Read current attempts so we compute the backoff against the
+        // post-increment value without round-tripping twice.
+        int currentAttempts;
+        using (var read = _conn.CreateCommand())
+        {
+            read.CommandText = "SELECT attempts FROM sync_queue WHERE id = $id";
+            read.Parameters.AddWithValue("$id", id);
+            var raw = read.ExecuteScalar();
+            currentAttempts = raw is long l ? (int)l : 0;
+        }
+        var nextAttempt = _utcNow().AddSeconds(ComputeBackoffSeconds(currentAttempts + 1)).ToString("o");
+
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = """
             UPDATE sync_queue
-            SET attempts = attempts + 1, last_error = $error
+            SET attempts = attempts + 1,
+                last_error = $error,
+                next_attempt_at = $next
             WHERE id = $id
             """;
         cmd.Parameters.AddWithValue("$id", id);
         cmd.Parameters.AddWithValue("$error", error);
+        cmd.Parameters.AddWithValue("$next", nextAttempt);
         cmd.ExecuteNonQuery();
     }
 
-    /// <summary>Count items still eligible for sync (attempts &lt; MaxAttempts).</summary>
+    /// <summary>
+    /// Count of all items not yet successfully synced (regardless of backoff
+    /// state). Items in a backoff window still count as pending — they will
+    /// eventually retry.
+    /// </summary>
     public int PendingCount()
     {
         using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "SELECT COUNT(*) FROM sync_queue WHERE attempts < $maxAttempts";
-        cmd.Parameters.AddWithValue("$maxAttempts", MaxAttempts);
+        cmd.CommandText = "SELECT COUNT(*) FROM sync_queue";
         var result = cmd.ExecuteScalar();
         return result is long l ? (int)l : 0;
     }

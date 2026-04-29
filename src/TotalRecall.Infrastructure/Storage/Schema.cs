@@ -205,6 +205,8 @@ public static class MigrationRunner
         Migration9_EntryType,
         // Migration 10: skill_cache table for local skill metadata sync
         Migration10_SkillCache,
+        // Migration 11: sync_queue.next_attempt_at column for exponential backoff retry
+        Migration11_SyncQueueBackoff,
     };
 
     /// <summary>
@@ -597,6 +599,25 @@ public static class MigrationRunner
 
         Exec(conn, tx,
             "CREATE INDEX IF NOT EXISTS ix_skill_cache_scope ON skill_cache(scope, scope_id)");
+    }
+
+    /// <summary>
+    /// Migration 11 — adds <c>sync_queue.next_attempt_at</c> for exponential
+    /// backoff retry. Replaces the old hard <c>attempts &lt; 10</c> drop policy:
+    /// failed items are now eligible to retry forever, but spaced out by an
+    /// exponentially growing window (60s, 120s, 240s, ..., capped at 1h).
+    /// NULL means immediately eligible (the default for fresh enqueues).
+    /// </summary>
+    private static void Migration11_SyncQueueBackoff(
+        MsSqliteConnection conn,
+        Microsoft.Data.Sqlite.SqliteTransaction tx)
+    {
+        Exec(conn, tx,
+            "ALTER TABLE sync_queue ADD COLUMN next_attempt_at TEXT");
+
+        // Existing rows that previously hit the attempts cap stay where they
+        // are; the new Drain query will pick them up immediately because
+        // next_attempt_at is NULL (= "ready now").
     }
 
     // --- helpers ----------------------------------------------------------

@@ -145,7 +145,11 @@ public sealed class SyncServiceTests
     public async Task FlushAsync_OnUnreachable_MarksItemsAsFailed()
     {
         using var conn = OpenAndMigrate();
-        var syncQueue = new SyncQueue(conn);
+        // Inject a clock so we can advance past the post-failure backoff window
+        // and observe the marked attempts/error via Drain.
+        var t0 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var now = t0;
+        var syncQueue = new SyncQueue(conn, () => now);
         var local = Substitute.For<IStore>();
         var remote = Substitute.For<IRemoteBackend>();
 
@@ -161,7 +165,9 @@ public sealed class SyncServiceTests
         // Queue should still have the item (not completed)
         Assert.Equal(1, syncQueue.PendingCount());
 
-        // Item should have incremented attempts
+        // Advance past the 60s first-failure backoff so Drain resurfaces it.
+        now = t0.AddSeconds(61);
+
         var items = syncQueue.Drain(10);
         Assert.Single(items);
         Assert.Equal(1, items[0].Attempts);

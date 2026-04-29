@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.1.5 - 2026-04-29
+
+### Changed
+
+- **Sync queue retries forever with exponential backoff instead of dropping items at 10 attempts.** Previously `SyncQueue.Drain` filtered out anything with `attempts >= 10` (a hard "poison pill" cap), so a single extended cortex outage would permanently strand any usage/memory/retrieval/compaction events queued during the window — they sat in `sync_queue` forever, never retried, never delivered. The cap has been replaced with a `next_attempt_at` backoff column (Migration 11). On each failure, the next eligible retry time is set to `now + min(60 * 2^(attempts-1), 3600)` seconds — so a stuck item retries at 60s, 120s, 240s, 480s, 16min, 32min, then every hour thereafter. Items are no longer dropped; they keep retrying until cortex is reachable again. `PendingCount()` now reflects all not-yet-completed items (including those in a backoff window) rather than only "eligible-now" items.
+
 ## 1.1.4 - 2026-04-29
 
 ### Added
