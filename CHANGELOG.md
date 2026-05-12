@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.2.0 - 2026-05-12
+
+### Added
+
+- **Skills are now invokable locally without Cortex.** Previously the `skill_get` and `skill_search` MCP tools were only registered in cortex mode, and `NullSkillClient` silently returned empty results — so users without a configured cortex had no working skill subsystem. `SqliteSkillCache` is now the primary skill store. Scanners (Claude Code + `extra_dirs`) write directly to it with content + hash + a locally-computed embedding. `skill_get`/`skill_search`/`skill_list`/`skill_import_host` handlers are registered in sqlite mode and resolve from the cache; cortex remains a fallback when configured. Local search is hybrid (semantic + keyword) using the same `IEmbedder` the memory store already uses. Migration 12 adds `content`, `frontmatter_json`, `content_hash`, `content_embedding`, `embedder_fingerprint` columns to `skill_cache` plus a `(name, scope, scope_id)` natural-key unique index.
+
+- **Skill usage tracking with decay-weighted ranking.** Each `skill_get` cache hit records an invocation event and bumps a usage counter on the cache row. `LocalSkillSearch` ranking now factors `0.10 * NormalizeDecay(usage_count, last_used_at)` alongside semantic + keyword — frequently-used skills win ties. 30-day half-life, log-saturated at 20 invocations. Migration 13 adds `usage_count`, `last_used_at`, `decay_score` columns plus a new `skill_usage_events` append-only table for telemetry.
+
+- **Cortex add-on (Phase 3, optional).** When Cortex is configured, `SyncService.FlushAsync` drains unsynced `skill_usage_events` rows to a new `POST /api/plugin/sync/skill-usage` endpoint, marking them synced on success. `PullSkillsAsync` widens to user + team + global visible scopes, transports full content + frontmatter + hash + usage fields, and merges with `max(local, cortex)` semantics so multi-machine rollup never drops local edits. On the first round-trip a locally-issued skill GUID is rewritten to cortex's GUID in a single transaction (FK references in `skill_usage_events` are updated too). Cortex-side `SkillSearch` adds a parallel decay term so ranking is consistent on both sides of the wire.
+
+### Fixed
+
+- **MCP `skill_*` tools are now registered in sqlite mode.** They had previously been wired only in cortex mode. Combined with the new local cache this means agents always have a working `skill_search`/`skill_get` regardless of cortex availability.
+
 ## 1.1.5 - 2026-04-29
 
 ### Changed
