@@ -76,6 +76,62 @@ public class SqliteSkillCacheTests : IDisposable
         Assert.False(hit.IsOrphaned);
     }
 
+    [Fact]
+    public async Task MarkOrphansAsync_KeepsListedNaturalKeys_OrphansOthers()
+    {
+        await SeedAsync(_cache, "alpha");
+        await SeedAsync(_cache, "beta");
+        await SeedAsync(_cache, "gamma");
+
+        await _cache.MarkOrphansAsync(
+            new List<(string, string, string)>
+            {
+                ("alpha", "user", "u1"),
+                ("beta",  "user", "u1"),
+            },
+            CancellationToken.None);
+
+        var a = await _cache.GetByNaturalKeyAsync("alpha", "user", "u1", CancellationToken.None);
+        var b = await _cache.GetByNaturalKeyAsync("beta",  "user", "u1", CancellationToken.None);
+        var g = await _cache.GetByNaturalKeyAsync("gamma", "user", "u1", CancellationToken.None);
+        Assert.False(a!.IsOrphaned);
+        Assert.False(b!.IsOrphaned);
+        Assert.True(g!.IsOrphaned);
+    }
+
+    [Fact]
+    public async Task MarkOrphansAsync_EmptyKeep_OrphansAllRows()
+    {
+        await SeedAsync(_cache, "alpha");
+        await SeedAsync(_cache, "beta");
+
+        await _cache.MarkOrphansAsync(
+            new List<(string, string, string)>(),
+            CancellationToken.None);
+
+        var a = await _cache.GetByNaturalKeyAsync("alpha", "user", "u1", CancellationToken.None);
+        var b = await _cache.GetByNaturalKeyAsync("beta",  "user", "u1", CancellationToken.None);
+        Assert.True(a!.IsOrphaned);
+        Assert.True(b!.IsOrphaned);
+    }
+
+    private static Task SeedAsync(SqliteSkillCache cache, string name) =>
+        cache.UpsertScannedAsync(
+            new ImportedSkill(
+                Name: name,
+                Description: "desc",
+                Content: "body",
+                FrontmatterJson: "{}",
+                Files: Array.Empty<ImportedSkillFile>(),
+                SourcePath: $"fixtures/{name}.md",
+                SuggestedScope: "user",
+                SuggestedScopeId: "u1",
+                SuggestedTags: Array.Empty<string>()),
+            contentHash: "h",
+            embedding: null,
+            embedderFingerprint: null,
+            CancellationToken.None);
+
     private static PluginSyncSkillDto MakeDto(Guid id, string name) => new(
         Id: id, Name: name, Description: "d", Content: "body",
         Scope: "user", ScopeId: "u-1",

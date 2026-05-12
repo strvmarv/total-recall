@@ -196,6 +196,9 @@ public sealed class SqliteSkillCache : ISkillCache
         if (!r.IsDBNull(12))
         {
             var blob = (byte[])r["content_embedding"];
+            if (blob.Length % 4 != 0)
+                throw new InvalidOperationException(
+                    $"content_embedding blob length {blob.Length} is not a multiple of 4.");
             embedding = new float[blob.Length / 4];
             Buffer.BlockCopy(blob, 0, embedding, 0, blob.Length);
         }
