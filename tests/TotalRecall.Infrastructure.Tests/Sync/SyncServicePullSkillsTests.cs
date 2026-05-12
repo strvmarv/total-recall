@@ -26,12 +26,16 @@ public sealed class SyncServicePullSkillsTests
             Name: "Test Skill",
             Description: "A test skill",
             Content: "skill content",
+            FrontmatterJson: null,
+            ContentHash: null,
             Scope: "user",
             ScopeId: "user-1",
             Tags: Array.Empty<string>(),
             Source: null,
             IsOrphaned: isOrphaned,
             Version: 1,
+            UsageCount: 0,
+            LastUsedAt: null,
             CreatedAt: DateTime.UtcNow,
             UpdatedAt: DateTime.UtcNow);
 

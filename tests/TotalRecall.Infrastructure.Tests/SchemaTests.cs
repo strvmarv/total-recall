@@ -145,8 +145,8 @@ public sealed class SchemaTests
         Assert.True(reader.Read());
         var count = reader.GetInt64(0);
         var maxVersion = reader.GetInt64(1);
-        Assert.Equal(11L, count);
-        Assert.Equal(11L, maxVersion);
+        Assert.Equal(13L, count);
+        Assert.Equal(13L, maxVersion);
     }
 
     [Fact]

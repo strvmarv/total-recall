@@ -14,12 +14,16 @@ public class PluginSyncSkillDtoTests
             Name: "test",
             Description: "desc",
             Content: "body",
+            FrontmatterJson: null,
+            ContentHash: null,
             Scope: "user",
             ScopeId: "u-1",
             Tags: new[] { "tag1", "tag2" },
             Source: "claude-code",
             IsOrphaned: false,
             Version: 2,
+            UsageCount: 0,
+            LastUsedAt: null,
             CreatedAt: new DateTime(2026, 4, 22, 12, 0, 0, DateTimeKind.Utc),
             UpdatedAt: new DateTime(2026, 4, 22, 13, 0, 0, DateTimeKind.Utc));
 

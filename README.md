@@ -155,7 +155,7 @@ Every `session_start` call runs the same sequence:
 4. **Tier summary** — counts entries across hot, warm, cold, and all KB collections.
 5. **Session continuity** — reports human-readable time since the last compaction event (proxy for last active session).
 
-Every `session_start` also runs a skill scan: it reads `~/.claude/skills/` plus any directories listed in `[skills] extra_dirs`, and advertises discovered skills as an `## Available Skills` block in the session context. In Cortex mode the scanned skills are also pushed to Cortex and the block is merged with any skills already stored there.
+Every `session_start` also runs a skill scan: it reads `~/.claude/skills/` plus any directories listed in `[skills] extra_dirs`, persists the content + a locally-computed embedding to a SQLite skill cache, and advertises discovered skills as an `## Available Skills` block in the session context. Scanned skills are invokable on demand via the `skill_get` MCP tool and discoverable via `skill_search` (hybrid semantic + keyword ranking with a usage-decay tie-breaker) — both work entirely offline with no Cortex required. In Cortex mode the scanned skills are also pushed to Cortex, usage events sync back as a multi-machine rollup, and pulled skills from other machines merge into the same local cache.
 
 ---
 

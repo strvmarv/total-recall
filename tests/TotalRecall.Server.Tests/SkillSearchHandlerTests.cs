@@ -1,7 +1,9 @@
 // Plan 2 Task 9 — SkillSearchHandler contract tests.
 
 using System.Text.Json;
+using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Skills;
+using TotalRecall.Infrastructure.Storage;
 using TotalRecall.Infrastructure.Sync;
 using TotalRecall.Server.Handlers;
 using Xunit;
@@ -116,5 +118,46 @@ public class SkillSearchHandlerTests
         var handler = new SkillSearchHandler(new FakeSkillClient());
         await Assert.ThrowsAsync<ArgumentException>(
             () => handler.ExecuteAsync(null, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ReturnsLocalHitsWhenCacheHasMatches()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+        var cache = new SqliteSkillCache(conn);
+        var imported = new ImportedSkill(
+            Name: "deploy-checklist", Description: null, Content: "deploy safely",
+            FrontmatterJson: "{}", Files: Array.Empty<ImportedSkillFile>(),
+            SourcePath: "/virt/d.md", SuggestedScope: "user", SuggestedScopeId: "u1",
+            SuggestedTags: new[] { "ops" });
+        await cache.UpsertScannedAsync(imported,
+            SkillContentHash.Compute("deploy safely"),
+            embedding: null, embedderFingerprint: null, CancellationToken.None);
+
+        var embedder = new ConstantEmbedder(new float[] { 0.1f });
+        var local = new LocalSkillSearch(cache, embedder);
+        var fakeClient = new FakeSkillClient(); // must NOT be hit
+        var handler = new SkillSearchHandler(local, fakeClient);
+
+        var result = await handler.ExecuteAsync(
+            Args("""{"query":"deploy","limit":5}"""),
+            CancellationToken.None);
+
+        Assert.False(result.IsError);
+        using var doc = JsonDocument.Parse(result.Content[0].Text!);
+        Assert.Equal(JsonValueKind.Array, doc.RootElement.ValueKind);
+        Assert.True(doc.RootElement.GetArrayLength() >= 1);
+        Assert.Equal("deploy-checklist", doc.RootElement[0].GetProperty("name").GetString());
+        Assert.Null(fakeClient.LastQuery); // cortex not consulted on cache hit
+    }
+
+    private sealed class ConstantEmbedder : IEmbedder
+    {
+        private readonly float[] _vec;
+        public ConstantEmbedder(float[] v) { _vec = v; }
+        public float[] Embed(string text) => _vec;
+        public EmbedderDescriptor Descriptor =>
+            new("test", "constant", "1", _vec.Length);
     }
 }
