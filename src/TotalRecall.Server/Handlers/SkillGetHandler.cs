@@ -69,7 +69,11 @@ public sealed class SkillGetHandler : IToolHandler
             if (_cache is not null)
             {
                 var cached = await _cache.GetByIdAsync(id, ct).ConfigureAwait(false);
-                if (cached is not null) bundle = ToBundle(cached);
+                if (cached is not null)
+                {
+                    bundle = ToBundle(cached);
+                    await TryRecordAsync(cached.Id, ct).ConfigureAwait(false);
+                }
             }
             if (bundle is null)
             {
@@ -82,7 +86,11 @@ public sealed class SkillGetHandler : IToolHandler
             if (_cache is not null)
             {
                 var cached = await _cache.GetByNaturalKeyAsync(name, scope, scopeId, ct).ConfigureAwait(false);
-                if (cached is not null) bundle = ToBundle(cached);
+                if (cached is not null)
+                {
+                    bundle = ToBundle(cached);
+                    await TryRecordAsync(cached.Id, ct).ConfigureAwait(false);
+                }
             }
             if (bundle is null)
             {
@@ -105,6 +113,19 @@ public sealed class SkillGetHandler : IToolHandler
             Content = new[] { new ToolContent { Type = "text", Text = text } },
             IsError = false,
         };
+    }
+
+    private async Task TryRecordAsync(Guid id, CancellationToken ct)
+    {
+        if (_cache is null) return;
+        try
+        {
+            await _cache.RecordInvocationAsync(
+                id, host: null, sessionId: null,
+                occurredAt: DateTime.UtcNow, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { /* best-effort — must not block the agent */ }
     }
 
     private static SkillBundleDto ToBundle(CachedSkill s) =>

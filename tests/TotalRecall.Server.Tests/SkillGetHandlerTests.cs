@@ -179,4 +179,28 @@ public class SkillGetHandlerTests
         Assert.Equal("body", doc.RootElement.GetProperty("content").GetString());
         Assert.Null(fakeClient.LastNaturalKey); // cortex not consulted on cache hit
     }
+
+    [Fact]
+    public async Task ExecuteAsync_RecordsInvocationOnCacheHit()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+        var cache = new SqliteSkillCache(conn);
+        var imported = new ImportedSkill(
+            Name: "s", Description: null, Content: "body",
+            FrontmatterJson: "{}", Files: Array.Empty<ImportedSkillFile>(),
+            SourcePath: "/v/s.md", SuggestedScope: "user", SuggestedScopeId: "u1",
+            SuggestedTags: Array.Empty<string>());
+        await cache.UpsertScannedAsync(imported,
+            SkillContentHash.Compute("body"), null, null, CancellationToken.None);
+
+        var handler = new SkillGetHandler(cache, new FakeSkillClient());
+
+        await handler.ExecuteAsync(
+            Args("""{"name":"s","scope":"user","scopeId":"u1"}"""),
+            CancellationToken.None);
+
+        var after = await cache.GetByNaturalKeyAsync("s", "user", "u1", CancellationToken.None);
+        Assert.Equal(1, after!.UsageCount);
+    }
 }
