@@ -15,7 +15,8 @@ public sealed class SqliteSkillCache : ISkillCache
     private const string SelectColumns = """
         SELECT id, name, description, content, frontmatter_json, content_hash,
                scope, scope_id, tags, source, version, is_orphaned,
-               content_embedding, embedder_fingerprint, updated_at
+               content_embedding, embedder_fingerprint, updated_at,
+               usage_count, last_used_at, decay_score
         FROM skill_cache
         """;
 
@@ -186,6 +187,62 @@ public sealed class SqliteSkillCache : ISkillCache
         return Task.CompletedTask;
     }
 
+    public Task RecordInvocationAsync(Guid skillId, string? host, string? sessionId,
+        DateTime occurredAt, CancellationToken ct)
+    {
+        using var tx = _conn.BeginTransaction();
+
+        using (var ev = _conn.CreateCommand())
+        {
+            ev.Transaction = tx;
+            ev.CommandText = """
+                INSERT INTO skill_usage_events (id, skill_id, occurred_at, host, session_id, synced_at)
+                VALUES ($id, $skill_id, $occurred_at, $host, $session_id, NULL)
+                """;
+            ev.Parameters.AddWithValue("$id", Guid.NewGuid().ToString());
+            ev.Parameters.AddWithValue("$skill_id", skillId.ToString());
+            ev.Parameters.AddWithValue("$occurred_at", occurredAt.ToString("O"));
+            ev.Parameters.AddWithValue("$host", (object?)host ?? DBNull.Value);
+            ev.Parameters.AddWithValue("$session_id", (object?)sessionId ?? DBNull.Value);
+            ev.ExecuteNonQuery();
+        }
+
+        // Read the new count, then write decay_score in the same tx.
+        int newCount;
+        using (var q = _conn.CreateCommand())
+        {
+            q.Transaction = tx;
+            q.CommandText = "SELECT usage_count FROM skill_cache WHERE id = $id";
+            q.Parameters.AddWithValue("$id", skillId.ToString());
+            var v = q.ExecuteScalar();
+            newCount = (v is long l ? (int)l : 0) + 1;
+        }
+
+        // Initial decay at write time (age = 0). Half-life of 30 days = 720 hours;
+        // at record time age = 0, so decay_score = newCount * exp(0) = newCount.
+        // Search-time ranking (Task 2.4) recomputes with real age.
+        var decay = (double)newCount;
+
+        using (var upd = _conn.CreateCommand())
+        {
+            upd.Transaction = tx;
+            upd.CommandText = """
+                UPDATE skill_cache
+                   SET usage_count = usage_count + 1,
+                       last_used_at = $now,
+                       decay_score = $decay
+                 WHERE id = $id
+                """;
+            upd.Parameters.AddWithValue("$id", skillId.ToString());
+            upd.Parameters.AddWithValue("$now", occurredAt.ToString("O"));
+            upd.Parameters.AddWithValue("$decay", decay);
+            upd.ExecuteNonQuery();
+        }
+
+        tx.Commit();
+        return Task.CompletedTask;
+    }
+
     private static CachedSkill ReadCachedSkill(SqliteDataReader r)
     {
         var tagsJson = r.GetString(8);
@@ -202,6 +259,12 @@ public sealed class SqliteSkillCache : ISkillCache
             embedding = new float[blob.Length / 4];
             Buffer.BlockCopy(blob, 0, embedding, 0, blob.Length);
         }
+        var usageCount = r.GetInt32(15);
+        DateTime? lastUsedAt = r.IsDBNull(16)
+            ? null
+            : DateTime.Parse(r.GetString(16)).ToUniversalTime();
+        var decayScore = r.GetDouble(17);
+
         return new CachedSkill(
             Id: Guid.Parse(r.GetString(0)),
             Name: r.GetString(1),
@@ -217,6 +280,9 @@ public sealed class SqliteSkillCache : ISkillCache
             IsOrphaned: r.GetInt32(11) != 0,
             ContentEmbedding: embedding,
             EmbedderFingerprint: r.IsDBNull(13) ? null : r.GetString(13),
-            UpdatedAt: updatedAt);
+            UpdatedAt: updatedAt,
+            UsageCount: usageCount,
+            LastUsedAt: lastUsedAt,
+            DecayScore: decayScore);
     }
 }

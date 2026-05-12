@@ -132,6 +132,37 @@ public class SqliteSkillCacheTests : IDisposable
             embedderFingerprint: null,
             CancellationToken.None);
 
+    [Fact]
+    public async Task RecordInvocationAsync_BumpsCountAndWritesEvent()
+    {
+        using var conn = TotalRecall.Infrastructure.Storage.SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+        var cache = new SqliteSkillCache(conn);
+
+        var imported = new ImportedSkill(
+            Name: "s", Description: "d", Content: "c",
+            FrontmatterJson: "{}", Files: Array.Empty<ImportedSkillFile>(),
+            SourcePath: "/v/s.md", SuggestedScope: "user", SuggestedScopeId: "u1",
+            SuggestedTags: Array.Empty<string>());
+        await cache.UpsertScannedAsync(imported, "h", null, null, CancellationToken.None);
+        var seeded = await cache.GetByNaturalKeyAsync("s", "user", "u1", CancellationToken.None);
+
+        await cache.RecordInvocationAsync(seeded!.Id, host: "claude-code",
+            sessionId: "sess-1", occurredAt: DateTime.UtcNow, CancellationToken.None);
+        await cache.RecordInvocationAsync(seeded.Id, host: "claude-code",
+            sessionId: "sess-1", occurredAt: DateTime.UtcNow, CancellationToken.None);
+
+        var after = await cache.GetByNaturalKeyAsync("s", "user", "u1", CancellationToken.None);
+        Assert.Equal(2, after!.UsageCount);
+        Assert.NotNull(after.LastUsedAt);
+        Assert.True(after.DecayScore > 0);
+
+        using var ev = conn.CreateCommand();
+        ev.CommandText = "SELECT COUNT(*) FROM skill_usage_events WHERE skill_id=$id";
+        ev.Parameters.AddWithValue("$id", seeded.Id.ToString());
+        Assert.Equal(2L, (long)ev.ExecuteScalar()!);
+    }
+
     private static PluginSyncSkillDto MakeDto(Guid id, string name) => new(
         Id: id, Name: name, Description: "d", Content: "body",
         Scope: "user", ScopeId: "u-1",

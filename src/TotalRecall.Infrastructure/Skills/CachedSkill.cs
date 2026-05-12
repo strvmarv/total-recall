@@ -20,4 +20,7 @@ public sealed record CachedSkill(
     bool IsOrphaned,
     float[]? ContentEmbedding,
     string? EmbedderFingerprint,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt,
+    int UsageCount,
+    DateTime? LastUsedAt,
+    double DecayScore);

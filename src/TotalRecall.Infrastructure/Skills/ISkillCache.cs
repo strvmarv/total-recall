@@ -28,4 +28,8 @@ public interface ISkillCache
     Task<CachedSkill?> GetByIdAsync(Guid id, CancellationToken ct);
     Task<CachedSkill?> GetByNaturalKeyAsync(string name, string scope, string scopeId, CancellationToken ct);
     Task<IReadOnlyList<CachedSkill>> ListAllForSearchAsync(CancellationToken ct);
+
+    // New: usage tracking.
+    Task RecordInvocationAsync(Guid skillId, string? host, string? sessionId,
+        DateTime occurredAt, CancellationToken ct);
 }
