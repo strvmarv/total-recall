@@ -284,19 +284,26 @@ public static class ServerComposition
             var usageIndexer = new TotalRecall.Infrastructure.Usage.UsageIndexer(
                 usageImporters, usageEventLog, usageWatermarks, rollup: usageRollup);
 
-            // Skill scanner — local extra_dirs only (no cortex client in SQLite mode).
-            ISkillImportService? sqliteSkillService = null;
+            // Skill infrastructure — always wire in sqlite mode so locally-scanned
+            // skills are invokable via skill_get / skill_search without cortex.
+            var skillCache = new SqliteSkillCache(conn);
+            var localSkillSearch = new LocalSkillSearch(skillCache, embedder);
+            var skillScanner = new ClaudeCodeSkillScanner();
+            ICustomDirsSkillScanner? customDirsSkillScanner = null;
             {
                 var extraDirs = Array.Empty<string>();
                 if (FSharpOption<Core.Config.SkillConfig>.get_IsSome(cfg.Skill)
                     && FSharpOption<string[]>.get_IsSome(cfg.Skill.Value.ExtraDirs))
                     extraDirs = cfg.Skill.Value.ExtraDirs.Value;
                 if (extraDirs.Length > 0)
-                    sqliteSkillService = new SkillImportService(
-                        new ClaudeCodeSkillScanner(),
-                        NullSkillClient.Instance,
-                        new CustomDirsSkillScanner(extraDirs));
+                    customDirsSkillScanner = new CustomDirsSkillScanner(extraDirs);
             }
+            ISkillImportService sqliteSkillService = new SkillImportService(
+                skillScanner,
+                NullSkillClient.Instance,
+                customDirsScanner: customDirsSkillScanner,
+                cache: skillCache,
+                embedder: embedder);
 
             // Task 13 — `usage_status` MCP tool. SQLite-only for now: the
             // Postgres composition path has no usage indexer wired (Phase 2
@@ -331,6 +338,15 @@ public static class ServerComposition
                 compactionLogWriter: compactionLog);
 
             registry.Register(new UsageStatusHandler(usageQuery));
+
+            // Skill MCP handlers — sqlite mode: cache-backed, no cortex client.
+            // Use NullSkillClient as the fallback so any cache miss returns null
+            // / empty (instead of throwing) without a network roundtrip.
+            registry.Register(new SkillSearchHandler(localSkillSearch, NullSkillClient.Instance));
+            registry.Register(new SkillGetHandler(skillCache, NullSkillClient.Instance));
+            registry.Register(new SkillListHandler(NullSkillClient.Instance));
+            registry.Register(new SkillImportHostHandler(
+                sqliteSkillService, () => Environment.CurrentDirectory));
 
             return new ServerCompositionHandles(conn, registry, store, storageMode);
         }
@@ -466,6 +482,7 @@ public static class ServerComposition
             var syncQueue = new SyncQueue(conn);
             var routingStore = new RoutingStore(localStore, cortexClient, syncQueue);
             var skillCache = new SqliteSkillCache(conn);
+            var localSkillSearch = new LocalSkillSearch(skillCache, embedder);
             var syncService = new Infrastructure.Sync.SyncService(
                 localStore, cortexClient, syncQueue, conn, skillCache);
 
@@ -528,7 +545,11 @@ public static class ServerComposition
             ICustomDirsSkillScanner? customDirsScanner = extraSkillDirs.Length > 0
                 ? new CustomDirsSkillScanner(extraSkillDirs)
                 : null;
-            var skillImportService = new SkillImportService(skillScanner, skillClient, customDirsScanner);
+            var skillImportService = new SkillImportService(
+                skillScanner, skillClient,
+                customDirsScanner: customDirsScanner,
+                cache: skillCache,
+                embedder: embedder);
 
             var usageQuery = new TotalRecall.Infrastructure.Usage.UsageQueryService(conn);
 
@@ -562,9 +583,9 @@ public static class ServerComposition
 
             registry.Register(new UsageStatusHandler(usageQuery));
 
-            // Plan 2: skill_* MCP handlers — cortex-mode only (skills live in cortex).
-            registry.Register(new SkillSearchHandler(skillClient));
-            registry.Register(new SkillGetHandler(skillClient));
+            // Plan 2: skill_* MCP handlers — cortex-mode: cache-first, cortex fallback.
+            registry.Register(new SkillSearchHandler(localSkillSearch, skillClient));
+            registry.Register(new SkillGetHandler(skillCache, skillClient));
             registry.Register(new SkillListHandler(skillClient));
             registry.Register(new SkillDeleteHandler(skillClient));
             registry.Register(new SkillImportHostHandler(
