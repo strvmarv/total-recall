@@ -2,6 +2,7 @@
 
 using System.Text.Json;
 using TotalRecall.Infrastructure.Skills;
+using TotalRecall.Infrastructure.Storage;
 using TotalRecall.Infrastructure.Sync;
 using TotalRecall.Server.Handlers;
 using Xunit;
@@ -148,5 +149,34 @@ public class SkillGetHandlerTests
             CancellationToken.None);
 
         Assert.Equal("null", result.Content[0].Text);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ReturnsBundleFromLocalCacheByNaturalKey()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+        var cache = new SqliteSkillCache(conn);
+        var imported = new ImportedSkill(
+            Name: "local-only", Description: "desc", Content: "body",
+            FrontmatterJson: "{}", Files: Array.Empty<ImportedSkillFile>(),
+            SourcePath: "/virt/local-only.md", SuggestedScope: "user",
+            SuggestedScopeId: "u1", SuggestedTags: Array.Empty<string>());
+        await cache.UpsertScannedAsync(imported,
+            SkillContentHash.Compute("body"), embedding: null, embedderFingerprint: null,
+            CancellationToken.None);
+
+        var fakeClient = new FakeSkillClient(); // cortex client should NOT be hit
+        var handler = new SkillGetHandler(cache, fakeClient);
+        var args = JsonDocument.Parse(
+            """{"name":"local-only","scope":"user","scopeId":"u1"}""").RootElement;
+
+        var result = await handler.ExecuteAsync(args, CancellationToken.None);
+
+        Assert.False(result.IsError);
+        using var doc = JsonDocument.Parse(result.Content[0].Text!);
+        Assert.Equal("local-only", doc.RootElement.GetProperty("skill").GetProperty("name").GetString());
+        Assert.Equal("body", doc.RootElement.GetProperty("content").GetString());
+        Assert.Null(fakeClient.LastNaturalKey); // cortex not consulted on cache hit
     }
 }
