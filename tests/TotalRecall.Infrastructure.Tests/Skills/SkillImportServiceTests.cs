@@ -1,4 +1,6 @@
+using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Skills;
+using TotalRecall.Infrastructure.Storage;
 using TotalRecall.Infrastructure.Sync;
 using Xunit;
 
@@ -118,6 +120,63 @@ public class SkillImportServiceTests
             => Task.FromResult(new ClaudeCodeScanResult(
                 skills ?? Array.Empty<ImportedSkill>(),
                 errors ?? Array.Empty<ScanError>()));
+    }
+
+    private sealed class ConstantEmbedder : IEmbedder
+    {
+        private readonly float[] _vec;
+        public ConstantEmbedder(float[] vec) { _vec = vec; }
+        public float[] Embed(string text) => _vec;
+        public EmbedderDescriptor Descriptor => new("test", "constant", "1", _vec.Length);
+    }
+
+    [Fact]
+    public async Task ImportAsync_WritesScannedSkillsToCache_EvenWithNullClient()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+        var cache = new SqliteSkillCache(conn);
+
+        var scanner = new FakeScanner(new[] { BuildSkill("alpha"), BuildSkill("beta") });
+        var embedder = new ConstantEmbedder(new float[] { 0.1f, 0.2f, 0.3f });
+
+        var svc = new SkillImportService(
+            scanner, NullSkillClient.Instance, customDirsScanner: null,
+            cache: cache, embedder: embedder);
+
+        var summary = await svc.ImportAsync(projectPath: null, CancellationToken.None);
+
+        Assert.Equal(2, summary[0].Scanned);
+        var alpha = await cache.GetByNaturalKeyAsync("alpha", "user", "user:u1", CancellationToken.None);
+        Assert.NotNull(alpha);
+        Assert.Equal("body", alpha!.Content);
+        Assert.Equal(SkillContentHash.Compute("body"), alpha.ContentHash);
+    }
+
+    [Fact]
+    public async Task ImportAsync_OrphansCacheRowsForRemovedSkills()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+        var cache = new SqliteSkillCache(conn);
+        var embedder = new ConstantEmbedder(new float[] { 0.1f });
+
+        // First scan: alpha + beta
+        var svc1 = new SkillImportService(
+            new FakeScanner(new[] { BuildSkill("alpha"), BuildSkill("beta") }),
+            NullSkillClient.Instance, customDirsScanner: null, cache: cache, embedder: embedder);
+        await svc1.ImportAsync(projectPath: null, CancellationToken.None);
+
+        // Second scan: only alpha — beta should be orphaned
+        var svc2 = new SkillImportService(
+            new FakeScanner(new[] { BuildSkill("alpha") }),
+            NullSkillClient.Instance, customDirsScanner: null, cache: cache, embedder: embedder);
+        await svc2.ImportAsync(projectPath: null, CancellationToken.None);
+
+        var alpha = await cache.GetByNaturalKeyAsync("alpha", "user", "user:u1", CancellationToken.None);
+        var beta = await cache.GetByNaturalKeyAsync("beta",   "user", "user:u1", CancellationToken.None);
+        Assert.False(alpha!.IsOrphaned);
+        Assert.True(beta!.IsOrphaned);
     }
 
     [Fact]
