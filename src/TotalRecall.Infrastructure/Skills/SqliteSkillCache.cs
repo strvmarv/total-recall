@@ -22,28 +22,147 @@ public sealed class SqliteSkillCache : ISkillCache
 
     public Task UpsertAsync(PluginSyncSkillDto skill, CancellationToken ct)
     {
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO skill_cache (id, name, description, scope, scope_id, tags, source, version, is_orphaned, updated_at)
-            VALUES ($id, $name, $description, $scope, $scope_id, $tags, $source, $version, $is_orphaned, $updated_at)
-            ON CONFLICT(id) DO UPDATE SET
-                name=excluded.name, description=excluded.description,
-                scope=excluded.scope, scope_id=excluded.scope_id,
-                tags=excluded.tags, source=excluded.source,
-                version=excluded.version, is_orphaned=excluded.is_orphaned,
-                updated_at=excluded.updated_at;
-            """;
-        cmd.Parameters.AddWithValue("$id", skill.Id.ToString());
-        cmd.Parameters.AddWithValue("$name", skill.Name);
-        cmd.Parameters.AddWithValue("$description", (object?)skill.Description ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$scope", skill.Scope);
-        cmd.Parameters.AddWithValue("$scope_id", skill.ScopeId);
-        cmd.Parameters.AddWithValue("$tags", JsonSerializer.Serialize(skill.Tags, SyncJsonContext.Default.StringArray));
-        cmd.Parameters.AddWithValue("$source", (object?)skill.Source ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$version", skill.Version);
-        cmd.Parameters.AddWithValue("$is_orphaned", skill.IsOrphaned ? 1 : 0);
-        cmd.Parameters.AddWithValue("$updated_at", skill.UpdatedAt.ToString("O"));
-        cmd.ExecuteNonQuery();
+        using var tx = _conn.BeginTransaction();
+
+        // Look up by natural key to learn if a local row exists (possibly with a
+        // different id from a previous local-only scan).
+        Guid? existingId = null;
+        int existingCount = 0;
+        DateTime? existingLastUsed = null;
+        using (var q = _conn.CreateCommand())
+        {
+            q.Transaction = tx;
+            q.CommandText = """
+                SELECT id, usage_count, last_used_at
+                  FROM skill_cache
+                 WHERE name = $n AND scope = $s AND scope_id = $sid
+                """;
+            q.Parameters.AddWithValue("$n", skill.Name);
+            q.Parameters.AddWithValue("$s", skill.Scope);
+            q.Parameters.AddWithValue("$sid", skill.ScopeId);
+            using var r = q.ExecuteReader();
+            if (r.Read())
+            {
+                existingId = Guid.Parse(r.GetString(0));
+                existingCount = r.GetInt32(1);
+                existingLastUsed = r.IsDBNull(2)
+                    ? null
+                    : DateTime.Parse(r.GetString(2)).ToUniversalTime();
+            }
+        }
+
+        // Identity rewrite: a local row exists with a different id (created from a
+        // local scan before any cortex round-trip). Point its usage events at
+        // cortex's id, then delete the old row so the upsert below inserts cleanly.
+        if (existingId is { } eid && eid != skill.Id)
+        {
+            using (var rewrite = _conn.CreateCommand())
+            {
+                rewrite.Transaction = tx;
+                rewrite.CommandText = "UPDATE skill_usage_events SET skill_id = $new WHERE skill_id = $old";
+                rewrite.Parameters.AddWithValue("$new", skill.Id.ToString());
+                rewrite.Parameters.AddWithValue("$old", eid.ToString());
+                rewrite.ExecuteNonQuery();
+            }
+            using (var del = _conn.CreateCommand())
+            {
+                del.Transaction = tx;
+                del.CommandText = "DELETE FROM skill_cache WHERE id = $old";
+                del.Parameters.AddWithValue("$old", eid.ToString());
+                del.ExecuteNonQuery();
+            }
+        }
+
+        // Rename scenario: the same cortex id already exists under a different
+        // natural key (e.g. skill was renamed). Delete the old row so the insert
+        // below can place it under the new name without a PK collision.
+        if (existingId != skill.Id)
+        {
+            using var chkId = _conn.CreateCommand();
+            chkId.Transaction = tx;
+            chkId.CommandText = """
+                SELECT usage_count, last_used_at FROM skill_cache WHERE id = $id
+                """;
+            chkId.Parameters.AddWithValue("$id", skill.Id.ToString());
+            using var ri = chkId.ExecuteReader();
+            if (ri.Read())
+            {
+                // Carry forward usage from the id-matched row if it's higher.
+                var idCount = ri.GetInt32(0);
+                if (idCount > existingCount) existingCount = idCount;
+                if (!ri.IsDBNull(1))
+                {
+                    var idLastUsed = DateTime.Parse(ri.GetString(1)).ToUniversalTime();
+                    if (existingLastUsed is null || idLastUsed > existingLastUsed)
+                        existingLastUsed = idLastUsed;
+                }
+                ri.Close();
+                using var delId = _conn.CreateCommand();
+                delId.Transaction = tx;
+                delId.CommandText = "DELETE FROM skill_cache WHERE id = $id";
+                delId.Parameters.AddWithValue("$id", skill.Id.ToString());
+                delId.ExecuteNonQuery();
+            }
+        }
+
+        // Merge usage_count and last_used_at: max-wins. Cortex's count is the
+        // cross-machine aggregate; local count may include events flushed since
+        // cortex's snapshot, so picking the max never loses recent local activity.
+        var mergedCount = Math.Max(existingCount, skill.UsageCount);
+        DateTime? mergedLastUsed = (existingLastUsed, skill.LastUsedAt) switch
+        {
+            (null, var x)  => x,
+            (var x, null)  => x,
+            (var a, var b) => a > b ? a : b
+        };
+
+        using (var up = _conn.CreateCommand())
+        {
+            up.Transaction = tx;
+            up.CommandText = """
+                INSERT INTO skill_cache (
+                    id, name, description, content, frontmatter_json, content_hash,
+                    scope, scope_id, tags, source, version, is_orphaned,
+                    updated_at, usage_count, last_used_at, decay_score)
+                VALUES (
+                    $id, $name, $description, $content, $fm, $hash,
+                    $scope, $scope_id, $tags, $source, $version, $is_orphaned,
+                    $updated_at, $count, $last_used, 0)
+                ON CONFLICT(name, scope, scope_id) DO UPDATE SET
+                    id               = excluded.id,
+                    description      = excluded.description,
+                    content          = excluded.content,
+                    frontmatter_json = excluded.frontmatter_json,
+                    content_hash     = excluded.content_hash,
+                    tags             = excluded.tags,
+                    source           = excluded.source,
+                    version          = excluded.version,
+                    is_orphaned      = excluded.is_orphaned,
+                    updated_at       = excluded.updated_at,
+                    usage_count      = $count,
+                    last_used_at     = $last_used;
+                """;
+            up.Parameters.AddWithValue("$id", skill.Id.ToString());
+            up.Parameters.AddWithValue("$name", skill.Name);
+            up.Parameters.AddWithValue("$description", (object?)skill.Description ?? DBNull.Value);
+            up.Parameters.AddWithValue("$content", skill.Content);
+            up.Parameters.AddWithValue("$fm", (object?)skill.FrontmatterJson ?? DBNull.Value);
+            up.Parameters.AddWithValue("$hash", (object?)skill.ContentHash ?? DBNull.Value);
+            up.Parameters.AddWithValue("$scope", skill.Scope);
+            up.Parameters.AddWithValue("$scope_id", skill.ScopeId);
+            up.Parameters.AddWithValue("$tags",
+                JsonSerializer.Serialize(skill.Tags, SyncJsonContext.Default.StringArray));
+            up.Parameters.AddWithValue("$source", (object?)skill.Source ?? DBNull.Value);
+            up.Parameters.AddWithValue("$version", skill.Version);
+            up.Parameters.AddWithValue("$is_orphaned", skill.IsOrphaned ? 1 : 0);
+            up.Parameters.AddWithValue("$updated_at", skill.UpdatedAt.ToString("O"));
+            up.Parameters.AddWithValue("$count", mergedCount);
+            up.Parameters.AddWithValue("$last_used",
+                mergedLastUsed.HasValue ? (object)mergedLastUsed.Value.ToString("O") : DBNull.Value);
+            up.ExecuteNonQuery();
+        }
+
+        tx.Commit();
         return Task.CompletedTask;
     }
 
