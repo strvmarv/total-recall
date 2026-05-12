@@ -209,6 +209,8 @@ public static class MigrationRunner
         Migration11_SyncQueueBackoff,
         // Migration 12: skill_cache content + frontmatter + content_hash + content_embedding + embedder_fingerprint + natural-key unique index
         Migration12_SkillCacheContentAndEmbedding,
+        // Migration 13: skill usage counter columns + skill_usage_events table
+        Migration13_SkillUsage,
     };
 
     /// <summary>
@@ -638,6 +640,34 @@ public static class MigrationRunner
         Exec(conn, tx, "ALTER TABLE skill_cache ADD COLUMN embedder_fingerprint TEXT");
         Exec(conn, tx,
             "CREATE UNIQUE INDEX IF NOT EXISTS ux_skill_cache_natural_key ON skill_cache(name, scope, scope_id)");
+    }
+
+    /// <summary>
+    /// Migration 13 — adds skill usage counter columns and skill_usage_events table.
+    /// Columns added to skill_cache: usage_count, last_used_at, decay_score.
+    /// New table skill_usage_events tracks per-host/session usage with sync status.
+    /// </summary>
+    private static void Migration13_SkillUsage(
+        MsSqliteConnection conn,
+        Microsoft.Data.Sqlite.SqliteTransaction tx)
+    {
+        Exec(conn, tx, "ALTER TABLE skill_cache ADD COLUMN usage_count INTEGER NOT NULL DEFAULT 0");
+        Exec(conn, tx, "ALTER TABLE skill_cache ADD COLUMN last_used_at TEXT");
+        Exec(conn, tx, "ALTER TABLE skill_cache ADD COLUMN decay_score REAL NOT NULL DEFAULT 0");
+        Exec(conn, tx, """
+            CREATE TABLE IF NOT EXISTS skill_usage_events (
+                id           TEXT PRIMARY KEY,
+                skill_id     TEXT NOT NULL,
+                occurred_at  TEXT NOT NULL,
+                host         TEXT,
+                session_id   TEXT,
+                synced_at    TEXT
+            )
+            """);
+        Exec(conn, tx,
+            "CREATE INDEX IF NOT EXISTS ix_skill_usage_events_skill_id ON skill_usage_events(skill_id)");
+        Exec(conn, tx,
+            "CREATE INDEX IF NOT EXISTS ix_skill_usage_events_unsynced ON skill_usage_events(synced_at) WHERE synced_at IS NULL");
     }
 
     // --- helpers ----------------------------------------------------------
