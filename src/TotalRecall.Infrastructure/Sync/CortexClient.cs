@@ -93,6 +93,12 @@ public sealed class CortexClient : IRemoteBackend
         await PostAsync("/api/plugin/sync/compaction", entries, SyncJsonContext.Default.SyncCompactionEntryArray, ct).ConfigureAwait(false);
     }
 
+    public async Task PushSkillUsageAsync(PluginSyncSkillUsageEvent[] events, CancellationToken ct)
+    {
+        await PostAsync("/api/plugin/sync/skill-usage", events,
+            SyncJsonContext.Default.PluginSyncSkillUsageEventArray, ct).ConfigureAwait(false);
+    }
+
     public Task<PluginSyncSkillDto[]> GetSkillsModifiedSinceAsync(DateTime? since, CancellationToken ct)
         => _skillClient.GetModifiedSinceAsync(since, ct);
 

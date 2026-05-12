@@ -129,8 +129,6 @@ public sealed class SyncService
     public async Task FlushAsync(CancellationToken ct)
     {
         var items = _syncQueue.Drain(50);
-        if (items.Count == 0)
-            return;
 
         // Group by entity type and operation
         var memoryUpserts = items.Where(i => i.EntityType == "memory" && i.Operation == "upsert").ToList();
@@ -264,6 +262,23 @@ public sealed class SyncService
                     _syncQueue.MarkFailed(item.Id, ex.Message);
             }
         }
+
+        // Drain unsynced skill_usage_events in chunks of 100. Each chunk is pushed
+        // as a single batch; failure stops the loop and leaves remaining rows queued.
+        while (true)
+        {
+            var batch = ReadUnsyncedSkillUsage(limit: 100);
+            if (batch.Count == 0) break;
+            try
+            {
+                await _remote.PushSkillUsageAsync(batch.Select(b => b.Event).ToArray(), ct).ConfigureAwait(false);
+                MarkSkillUsageSynced(batch.Select(b => b.Id).ToList());
+            }
+            catch (CortexUnreachableException)
+            {
+                return;
+            }
+        }
     }
 
     /// <summary>
@@ -298,6 +313,52 @@ public sealed class SyncService
         }
 
         SetWatermark(SkillsWatermarkKey, DateTimeOffset.UtcNow);
+    }
+
+    // --- Skill usage helpers -------------------------------------------------
+
+    private List<(string Id, PluginSyncSkillUsageEvent Event)> ReadUnsyncedSkillUsage(int limit)
+    {
+        var rows = new List<(string, PluginSyncSkillUsageEvent)>();
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, skill_id, occurred_at, host, session_id
+              FROM skill_usage_events
+             WHERE synced_at IS NULL
+             ORDER BY occurred_at
+             LIMIT $limit
+            """;
+        cmd.Parameters.AddWithValue("$limit", limit);
+        using var r = cmd.ExecuteReader();
+        while (r.Read())
+        {
+            rows.Add((
+                r.GetString(0),
+                new PluginSyncSkillUsageEvent(
+                    SkillId: Guid.Parse(r.GetString(1)),
+                    OccurredAt: DateTime.Parse(r.GetString(2)).ToUniversalTime(),
+                    Host: r.IsDBNull(3) ? null : r.GetString(3),
+                    SessionId: r.IsDBNull(4) ? null : r.GetString(4))));
+        }
+        return rows;
+    }
+
+    private void MarkSkillUsageSynced(IReadOnlyList<string> ids)
+    {
+        if (ids.Count == 0) return;
+        using var tx = _conn.BeginTransaction();
+        using var cmd = _conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "UPDATE skill_usage_events SET synced_at = $now WHERE id = $id";
+        var pn = cmd.Parameters.Add("$now", Microsoft.Data.Sqlite.SqliteType.Text);
+        var pi = cmd.Parameters.Add("$id",  Microsoft.Data.Sqlite.SqliteType.Text);
+        pn.Value = DateTime.UtcNow.ToString("O");
+        foreach (var id in ids)
+        {
+            pi.Value = id;
+            cmd.ExecuteNonQuery();
+        }
+        tx.Commit();
     }
 
     // --- Watermark helpers ---------------------------------------------------

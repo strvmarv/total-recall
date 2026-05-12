@@ -35,6 +35,9 @@ public interface IRemoteBackend
     /// <summary>Push compaction log entries to the remote.</summary>
     Task PushCompactionEntriesAsync(SyncCompactionEntry[] entries, CancellationToken ct);
 
+    /// <summary>Push skill invocation telemetry to the remote.</summary>
+    Task PushSkillUsageAsync(PluginSyncSkillUsageEvent[] events, CancellationToken ct);
+
     /// <summary>Pull all skills modified after the given watermark (or all skills when <paramref name="since"/> is null).</summary>
     Task<PluginSyncSkillDto[]> GetSkillsModifiedSinceAsync(DateTime? since, CancellationToken ct);
 }
