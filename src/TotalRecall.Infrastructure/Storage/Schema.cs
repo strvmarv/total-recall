@@ -207,6 +207,8 @@ public static class MigrationRunner
         Migration10_SkillCache,
         // Migration 11: sync_queue.next_attempt_at column for exponential backoff retry
         Migration11_SyncQueueBackoff,
+        // Migration 12: skill_cache content + frontmatter + content_hash + content_embedding + embedder_fingerprint + natural-key unique index
+        Migration12_SkillCacheContentAndEmbedding,
     };
 
     /// <summary>
@@ -618,6 +620,24 @@ public static class MigrationRunner
         // Existing rows that previously hit the attempts cap stay where they
         // are; the new Drain query will pick them up immediately because
         // next_attempt_at is NULL (= "ready now").
+    }
+
+    /// <summary>
+    /// Migration 12 — adds content, frontmatter_json, content_hash,
+    /// content_embedding, and embedder_fingerprint columns to skill_cache,
+    /// plus a unique index on (name, scope, scope_id) for natural-key lookups.
+    /// </summary>
+    private static void Migration12_SkillCacheContentAndEmbedding(
+        MsSqliteConnection conn,
+        Microsoft.Data.Sqlite.SqliteTransaction tx)
+    {
+        Exec(conn, tx, "ALTER TABLE skill_cache ADD COLUMN content TEXT NOT NULL DEFAULT ''");
+        Exec(conn, tx, "ALTER TABLE skill_cache ADD COLUMN frontmatter_json TEXT");
+        Exec(conn, tx, "ALTER TABLE skill_cache ADD COLUMN content_hash TEXT");
+        Exec(conn, tx, "ALTER TABLE skill_cache ADD COLUMN content_embedding BLOB");
+        Exec(conn, tx, "ALTER TABLE skill_cache ADD COLUMN embedder_fingerprint TEXT");
+        Exec(conn, tx,
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_skill_cache_natural_key ON skill_cache(name, scope, scope_id)");
     }
 
     // --- helpers ----------------------------------------------------------
