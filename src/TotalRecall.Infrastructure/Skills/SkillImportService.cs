@@ -31,6 +31,7 @@ public sealed class SkillImportService(
             var fingerprint = FormatFingerprint(embedder.Descriptor);
             foreach (var s in allSkills)
             {
+                ct.ThrowIfCancellationRequested();
                 var hash = SkillContentHash.Compute(s.Content ?? string.Empty);
                 byte[]? embBytes = null;
                 try
@@ -39,6 +40,7 @@ public sealed class SkillImportService(
                     embBytes = new byte[vec.Length * 4];
                     Buffer.BlockCopy(vec, 0, embBytes, 0, embBytes.Length);
                 }
+                catch (OperationCanceledException) { throw; }
                 catch { /* keep embBytes null — keyword-only ranking until next pass */ }
 
                 await cache.UpsertScannedAsync(s, hash, embBytes, fingerprint, ct).ConfigureAwait(false);
