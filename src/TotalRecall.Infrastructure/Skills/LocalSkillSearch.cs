@@ -4,8 +4,12 @@ namespace TotalRecall.Infrastructure.Skills;
 
 public sealed class LocalSkillSearch(ISkillCache cache, IEmbedder embedder) : ILocalSkillSearch
 {
-    private const double SemanticWeight = 0.7;
-    private const double KeywordWeight  = 0.3;
+    private const double SemanticWeight = 0.65;
+    private const double KeywordWeight  = 0.25;
+    private const double DecayWeight    = 0.10;
+
+    // Half-life of 30 days (720 hours) for the time component of decay.
+    private const double DecayHalfLifeHours = 720.0;
 
     public async Task<IReadOnlyList<SkillSearchHitDto>> SearchAsync(
         string query, IReadOnlyList<string>? tags, int limit, CancellationToken ct)
@@ -28,7 +32,9 @@ public sealed class LocalSkillSearch(ISkillCache cache, IEmbedder embedder) : IL
             var sem = (qv is not null && s.ContentEmbedding is not null)
                 ? Cosine(qv, s.ContentEmbedding) : 0.0;
             var kw  = KeywordScore(s, tokens);
-            var score = SemanticWeight * sem + KeywordWeight * kw;
+            var score = SemanticWeight * sem
+                      + KeywordWeight * kw
+                      + DecayWeight * NormalizeDecay(s.UsageCount, s.LastUsedAt);
             return new SkillSearchHitDto(
                 Id: s.Id, Name: s.Name, Description: s.Description,
                 Scope: s.Scope, ScopeId: s.ScopeId, Tags: s.Tags,
@@ -77,5 +83,18 @@ public sealed class LocalSkillSearch(ISkillCache cache, IEmbedder embedder) : IL
             }
         }
         return body.Length > 160 ? body[..160] + "..." : body;
+    }
+
+    private static double NormalizeDecay(int usageCount, DateTime? lastUsedAt)
+    {
+        if (usageCount <= 0) return 0;
+        var ageHours = lastUsedAt is null
+            ? 0
+            : (DateTime.UtcNow - lastUsedAt.Value).TotalHours;
+        var decayed = usageCount * Math.Exp(-Math.Log(2) * ageHours / DecayHalfLifeHours);
+        // Squash via log so a single heavily-used skill doesn't dominate over
+        // many moderately-used ones. log(1+20) is the saturation point; above
+        // that the contribution is ~1.0.
+        return Math.Min(1.0, Math.Log(1 + decayed) / Math.Log(1 + 20.0));
     }
 }
