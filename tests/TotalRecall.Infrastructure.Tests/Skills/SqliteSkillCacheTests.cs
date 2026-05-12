@@ -165,8 +165,10 @@ public class SqliteSkillCacheTests : IDisposable
 
     private static PluginSyncSkillDto MakeDto(Guid id, string name) => new(
         Id: id, Name: name, Description: "d", Content: "body",
+        FrontmatterJson: null, ContentHash: null,
         Scope: "user", ScopeId: "u-1",
         Tags: new[] { "t" }, Source: "claude-code",
         IsOrphaned: false, Version: 1,
+        UsageCount: 0, LastUsedAt: null,
         CreatedAt: DateTime.UtcNow, UpdatedAt: DateTime.UtcNow);
 }

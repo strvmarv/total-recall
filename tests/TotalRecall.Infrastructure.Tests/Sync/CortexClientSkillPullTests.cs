@@ -110,12 +110,16 @@ public class CortexClientSkillPullTests
             Name: "test-skill",
             Description: null,
             Content: "# body",
+            FrontmatterJson: null,
+            ContentHash: null,
             Scope: "global",
             ScopeId: "",
             Tags: Array.Empty<string>(),
             Source: "claude-code",
             IsOrphaned: false,
             Version: 1,
+            UsageCount: 0,
+            LastUsedAt: null,
             CreatedAt: new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             UpdatedAt: new DateTime(2025, 6, 1, 0, 0, 0, DateTimeKind.Utc));
 

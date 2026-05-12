@@ -72,12 +72,16 @@ public sealed class SqliteSkillCache : ISkillCache
                 Name: reader.GetString(1),
                 Description: reader.IsDBNull(2) ? null : reader.GetString(2),
                 Content: string.Empty,
+                FrontmatterJson: null,
+                ContentHash: null,
                 Scope: reader.GetString(3),
                 ScopeId: reader.GetString(4),
                 Tags: tags,
                 Source: reader.IsDBNull(6) ? null : reader.GetString(6),
-                Version: reader.GetInt32(7),
                 IsOrphaned: reader.GetInt32(8) != 0,
+                Version: reader.GetInt32(7),
+                UsageCount: 0,
+                LastUsedAt: null,
                 CreatedAt: updatedAt,
                 UpdatedAt: updatedAt));
         }
