@@ -50,6 +50,32 @@ public class SqliteSkillCacheTests : IDisposable
         Assert.Empty(rows);
     }
 
+    [Fact]
+    public async Task UpsertScannedAsync_RoundtripsContentAndFrontmatter()
+    {
+        var imported = new ImportedSkill(
+            Name: "test-skill",
+            Description: "desc",
+            Content: "body",
+            FrontmatterJson: "{\"x\":1}",
+            Files: Array.Empty<ImportedSkillFile>(),
+            SourcePath: "fixtures/test.md",
+            SuggestedScope: "user",
+            SuggestedScopeId: "u1",
+            SuggestedTags: new[] { "a", "b" });
+
+        await _cache.UpsertScannedAsync(imported, contentHash: "abc",
+            embedding: null, embedderFingerprint: null, CancellationToken.None);
+
+        var hit = await _cache.GetByNaturalKeyAsync("test-skill", "user", "u1", CancellationToken.None);
+        Assert.NotNull(hit);
+        Assert.Equal("body", hit!.Content);
+        Assert.Equal("desc", hit.Description);
+        Assert.Equal("{\"x\":1}", hit.FrontmatterJson);
+        Assert.Equal("abc", hit.ContentHash);
+        Assert.False(hit.IsOrphaned);
+    }
+
     private static PluginSyncSkillDto MakeDto(Guid id, string name) => new(
         Id: id, Name: name, Description: "d", Content: "body",
         Scope: "user", ScopeId: "u-1",
