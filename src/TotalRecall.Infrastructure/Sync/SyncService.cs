@@ -126,16 +126,21 @@ public sealed class SyncService
     /// <see cref="CortexUnreachableException"/>, items are marked as failed
     /// (not removed from the queue).
     /// </summary>
+    // Per-type drain quotas. Each type gets a guaranteed slot per flush so a
+    // backlog of one type can't starve the others (see Bug A regression test).
+    private const int MemoryDrainLimit = 25;
+    private const int UsageDrainLimit = 10;
+    private const int RetrievalDrainLimit = 10;
+    private const int CompactionDrainLimit = 5;
+
     public async Task FlushAsync(CancellationToken ct)
     {
-        var items = _syncQueue.Drain(50);
-
-        // Group by entity type and operation
-        var memoryUpserts = items.Where(i => i.EntityType == "memory" && i.Operation == "upsert").ToList();
-        var memoryDeletes = items.Where(i => i.EntityType == "memory" && i.Operation == "delete").ToList();
-        var usageItems = items.Where(i => i.EntityType == "usage").ToList();
-        var retrievalItems = items.Where(i => i.EntityType == "retrieval").ToList();
-        var compactionItems = items.Where(i => i.EntityType == "compaction").ToList();
+        var memoryItems = _syncQueue.Drain("memory", MemoryDrainLimit);
+        var memoryUpserts = memoryItems.Where(i => i.Operation == "upsert").ToList();
+        var memoryDeletes = memoryItems.Where(i => i.Operation == "delete").ToList();
+        var usageItems = _syncQueue.Drain("usage", UsageDrainLimit);
+        var retrievalItems = _syncQueue.Drain("retrieval", RetrievalDrainLimit);
+        var compactionItems = _syncQueue.Drain("compaction", CompactionDrainLimit);
 
         // Memory upserts — batch
         if (memoryUpserts.Count > 0)

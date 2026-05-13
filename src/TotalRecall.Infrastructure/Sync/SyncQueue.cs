@@ -63,25 +63,50 @@ public sealed class SyncQueue
     }
 
     /// <summary>
-    /// Drain up to <paramref name="limit"/> items from the queue. Items in a
-    /// backoff window (<c>next_attempt_at &gt; now</c>) are skipped; they
-    /// re-enter the candidate set once their wait expires. Memory entries
-    /// are prioritized over usage/retrieval/compaction.
+    /// Drain up to <paramref name="limit"/> items from the queue, across all
+    /// entity types. Items in a backoff window (<c>next_attempt_at &gt; now</c>)
+    /// are skipped. Memory entries are surfaced before other types so a
+    /// single all-type drain still favors user-visible state — but production
+    /// code paths should prefer <see cref="Drain(string, int)"/> with explicit
+    /// per-type quotas to avoid starvation when one type dominates the queue.
     /// </summary>
-    public IReadOnlyList<SyncQueueItem> Drain(int limit)
+    public IReadOnlyList<SyncQueueItem> Drain(int limit) =>
+        DrainCore(entityType: null, limit);
+
+    /// <summary>
+    /// Drain up to <paramref name="limit"/> items of a specific
+    /// <paramref name="entityType"/>. Use this to give each type a guaranteed
+    /// slot per flush so a heavy backlog of one type (e.g. memory churn)
+    /// can't starve the others.
+    /// </summary>
+    public IReadOnlyList<SyncQueueItem> Drain(string entityType, int limit) =>
+        DrainCore(entityType ?? throw new ArgumentNullException(nameof(entityType)), limit);
+
+    private IReadOnlyList<SyncQueueItem> DrainCore(string? entityType, int limit)
     {
         var items = new List<SyncQueueItem>();
         var nowIso = _utcNow().ToString("o");
         using var cmd = _conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT id, entity_type, operation, entity_id, payload, created_at, attempts, last_error
-            FROM sync_queue
-            WHERE next_attempt_at IS NULL OR next_attempt_at <= $now
-            ORDER BY CASE entity_type WHEN 'memory' THEN 0 ELSE 1 END ASC, id ASC
-            LIMIT $limit
-            """;
+        cmd.CommandText = entityType is null
+            ? """
+                SELECT id, entity_type, operation, entity_id, payload, created_at, attempts, last_error
+                FROM sync_queue
+                WHERE next_attempt_at IS NULL OR next_attempt_at <= $now
+                ORDER BY CASE entity_type WHEN 'memory' THEN 0 ELSE 1 END ASC, id ASC
+                LIMIT $limit
+                """
+            : """
+                SELECT id, entity_type, operation, entity_id, payload, created_at, attempts, last_error
+                FROM sync_queue
+                WHERE entity_type = $entityType
+                  AND (next_attempt_at IS NULL OR next_attempt_at <= $now)
+                ORDER BY id ASC
+                LIMIT $limit
+                """;
         cmd.Parameters.AddWithValue("$now", nowIso);
         cmd.Parameters.AddWithValue("$limit", limit);
+        if (entityType is not null)
+            cmd.Parameters.AddWithValue("$entityType", entityType);
 
         using var reader = cmd.ExecuteReader();
         while (reader.Read())

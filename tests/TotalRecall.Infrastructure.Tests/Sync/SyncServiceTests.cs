@@ -233,6 +233,50 @@ public sealed class SyncServiceTests
     }
 
     // -----------------------------------------------------------------------
+    // Test: Heavy memory backlog must not starve telemetry pushes (Bug A regression)
+    // -----------------------------------------------------------------------
+    [Fact]
+    public async Task FlushAsync_HeavyMemoryBacklog_StillPushesTelemetry()
+    {
+        using var conn = OpenAndMigrate();
+        var syncQueue = new SyncQueue(conn);
+        var local = Substitute.For<IStore>();
+        var remote = Substitute.For<IRemoteBackend>();
+
+        // 60 memory upserts queued before any telemetry — under a single
+        // 50-item Drain that prioritized memory, the telemetry rows would
+        // never surface until memory cleared.
+        for (int i = 0; i < 60; i++)
+        {
+            syncQueue.Enqueue("memory", "upsert", $"id-{i}",
+                JsonSerializer.Serialize(new { id = $"id-{i}", content = "hello" }));
+        }
+
+        syncQueue.Enqueue("usage", "push", null, JsonSerializer.Serialize(new[]
+        {
+            new SyncUsageEvent("sess-1", "host", "model", "proj", 100, 50, null, null, DateTime.UtcNow)
+        }));
+        syncQueue.Enqueue("retrieval", "push", null, JsonSerializer.Serialize(new[]
+        {
+            new SyncRetrievalEvent("query", new[] { "hot" }, 10, 0.9, 5, 42.0, null, DateTime.UtcNow)
+        }));
+        syncQueue.Enqueue("compaction", "push", null, JsonSerializer.Serialize(new[]
+        {
+            new SyncCompactionEntry("e-1", "hot", "warm", "demote", 0.1, 0.5, DateTime.UtcNow)
+        }));
+
+        var svc = new SyncService(local, remote, syncQueue, conn);
+        await svc.FlushAsync(CancellationToken.None);
+
+        await remote.Received(1).PushUsageEventsAsync(
+            Arg.Any<SyncUsageEvent[]>(), Arg.Any<CancellationToken>());
+        await remote.Received(1).PushRetrievalEventsAsync(
+            Arg.Any<SyncRetrievalEvent[]>(), Arg.Any<CancellationToken>());
+        await remote.Received(1).PushCompactionEntriesAsync(
+            Arg.Any<SyncCompactionEntry[]>(), Arg.Any<CancellationToken>());
+    }
+
+    // -----------------------------------------------------------------------
     // Test 5: FlushAsync pushes telemetry (usage, retrieval, compaction)
     // -----------------------------------------------------------------------
     [Fact]
