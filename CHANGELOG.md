@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.2.2 - 2026-05-13
+
+### Fixed
+
+- **`skill_get` now records invocations on every successful resolution and warms the local cache from remote fetches.** The recording call had been guarded inside the cache-hit-only branch, and the remote-fetch path never wrote the returned bundle back to `skill_cache`. Combined, this meant first fetches (or any fetch against an empty cache) were invisible to usage tracking AND the cache stayed empty forever — so `usage_count` had no row to accumulate against. Recording now fires whenever a bundle is resolved (cache OR remote) and remote bundles are written back via `ISkillCache.UpsertAsync` so subsequent calls hit cache.
+- **Telemetry backlog now drains fully each flush instead of being capped at the per-type quota.** The per-type drain quotas introduced in 1.2.1 were an anti-starvation floor implemented as a ceiling — each flush drained at most `UsageDrainLimit=10` usage rows regardless of backlog. A real backlog (e.g. 300+ rows queued during a cortex outage) needed 30+ flushes to clear and ongoing inflow ≥10/flush could grow the queue indefinitely. `FlushAsync` now runs a Phase 2 catch-up loop per telemetry type after the fair-share Phase 1 drain, draining 100 rows at a time until empty (with a safety ceiling of 100 batches per type per flush) and bailing cleanly on `CortexUnreachableException`. Regression test: `FlushAsync_HeavyTelemetryBacklog_DrainsFully`.
+
+### Added
+
+- **Startup flush on `session_start`.** Drains any backlog that survived a prior process (crash, kill -9, network drop during `session_end`). Combined with the new Phase 2 catch-up, one cold start clears any reasonable backlog. Best-effort — `session_start` never fails because of a sync problem.
+- **`status` MCP tool now returns a `syncBacklog` field.** Per-type unsynced counts (memory, usage, retrieval, compaction), `skill_usage_events` unsynced count, `retrying` count (rows that have failed at least once — proxy for cortex-reachability problems), and `oldestUnsyncedAt`. Powered by a new `SyncBacklogReader` in `Infrastructure.Sync`. Null when the handler doesn't have a SQLite connection (tests, cortex-only modes).
+
+### Changed
+
+- **Integration test defaults match the standard `total-recall-cortex` docker-compose stack.** Previously defaulted to `http://localhost:5000` with the nonsense PAT `tr_test`. New defaults: `http://localhost:5188` + the auto-seeded dev PAT from `TotalRecall.Cortex.Api/Program.cs:78`. `CORTEX_URL` / `CORTEX_PAT` env vars still override. CI is unaffected — `Category=Integration` is already excluded.
+
 ## 1.2.1 - 2026-05-13
 
 ### Fixed
