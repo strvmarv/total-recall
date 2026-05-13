@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.2.1 - 2026-05-13
+
+### Fixed
+
+- **Sync queue no longer starves telemetry under heavy memory churn.** `SyncQueue.Drain` returned the next 50 unsynced items in a single ordering pass with memory entries prioritized, so during a memory-heavy session all 50 slots filled with memory upserts and usage/retrieval/compaction events sat in the queue indefinitely. `SyncService.FlushAsync` now drains each entity type independently with explicit per-tick quotas (memory 25, usage 10, retrieval 10, compaction 5), so every type makes guaranteed progress on every flush. New `SyncQueue.Drain(string entityType, int limit)` overload backs this; the existing `Drain(int)` overload is preserved for inspection callers. Regression test: `FlushAsync_HeavyMemoryBacklog_StillPushesTelemetry`.
+
 ## 1.2.0 - 2026-05-12
 
 ### Added
