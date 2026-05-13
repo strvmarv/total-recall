@@ -12,9 +12,15 @@ namespace TotalRecall.Integration.Tests;
 [Trait("Category", "Integration")]
 public class CortexSyncIntegrationTests : IDisposable
 {
-    // Configure via env vars
-    private readonly string _cortexUrl = Environment.GetEnvironmentVariable("CORTEX_URL") ?? "http://localhost:5000";
-    private readonly string _cortexPat = Environment.GetEnvironmentVariable("CORTEX_PAT") ?? "tr_test";
+    // Defaults match the standard docker-compose stack in
+    // total-recall-cortex (api on host port 5188, auto-seeded dev PAT via
+    // Program.cs:78). Override via CORTEX_URL / CORTEX_PAT env vars when
+    // pointing at a non-default cortex instance. Tests skip via xUnit's
+    // [Trait("Category","Integration")] in CI by default.
+    private readonly string _cortexUrl = Environment.GetEnvironmentVariable("CORTEX_URL")
+        ?? "http://localhost:5188";
+    private readonly string _cortexPat = Environment.GetEnvironmentVariable("CORTEX_PAT")
+        ?? "tr_devtesttoken1234567890abcdef1234567890abcdef1234567890abcdef";
 
     // In-memory SQLite for local store
     private readonly MsSqliteConnection _conn;
