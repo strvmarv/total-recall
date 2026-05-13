@@ -277,6 +277,47 @@ public sealed class SyncServiceTests
     }
 
     // -----------------------------------------------------------------------
+    // Test: Heavy telemetry backlog must fully drain in a single flush.
+    // Regression for the bug where per-type drain quotas (10/flush for usage)
+    // were a cap rather than an anti-starvation floor — leaving e.g. 332
+    // queued usage rows requiring 33+ flushes to clear.
+    // -----------------------------------------------------------------------
+    [Fact]
+    public async Task FlushAsync_HeavyTelemetryBacklog_DrainsFully()
+    {
+        using var conn = OpenAndMigrate();
+        var syncQueue = new SyncQueue(conn);
+        var local = Substitute.For<IStore>();
+        var remote = Substitute.For<IRemoteBackend>();
+
+        // Enqueue 250 usage rows — well above the 10/flush Phase 1 quota and
+        // also above CatchUpBatchSize (100), so we exercise multiple Phase 2
+        // catch-up batches.
+        for (int i = 0; i < 250; i++)
+        {
+            syncQueue.Enqueue("usage", "push", null, JsonSerializer.Serialize(new[]
+            {
+                new SyncUsageEvent($"sess-{i}", "host", "model", "proj", 100, 50, null, null, DateTime.UtcNow)
+            }));
+        }
+
+        var svc = new SyncService(local, remote, syncQueue, conn);
+        await svc.FlushAsync(CancellationToken.None);
+
+        // After one flush, the queue should be empty.
+        var leftover = syncQueue.Drain("usage", 1000);
+        Assert.Empty(leftover);
+
+        // Verify the remote saw all 250 events across the calls it received.
+        var allEvents = remote.ReceivedCalls()
+            .Where(c => c.GetMethodInfo().Name == nameof(IRemoteBackend.PushUsageEventsAsync))
+            .Select(c => (SyncUsageEvent[])c.GetArguments()[0]!)
+            .SelectMany(a => a)
+            .ToList();
+        Assert.Equal(250, allEvents.Count);
+    }
+
+    // -----------------------------------------------------------------------
     // Test 5: FlushAsync pushes telemetry (usage, retrieval, compaction)
     // -----------------------------------------------------------------------
     [Fact]

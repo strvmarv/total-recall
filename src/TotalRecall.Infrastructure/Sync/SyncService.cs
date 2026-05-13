@@ -126,12 +126,21 @@ public sealed class SyncService
     /// <see cref="CortexUnreachableException"/>, items are marked as failed
     /// (not removed from the queue).
     /// </summary>
-    // Per-type drain quotas. Each type gets a guaranteed slot per flush so a
-    // backlog of one type can't starve the others (see Bug A regression test).
+    // Per-type Phase 1 drain quotas. Each type gets a guaranteed slot per flush
+    // so a backlog of one type can't starve the others (see Bug A regression test).
+    // These are an anti-starvation floor, NOT a per-flush cap — a Phase 2
+    // catch-up below keeps draining each telemetry type until empty so a
+    // backlog isn't bounded to {Limit} rows per flush.
     private const int MemoryDrainLimit = 25;
     private const int UsageDrainLimit = 10;
     private const int RetrievalDrainLimit = 10;
     private const int CompactionDrainLimit = 5;
+
+    // Phase 2 catch-up batch parameters. Larger batches than Phase 1 because
+    // telemetry payloads are small and the goal is to clear backlogs quickly.
+    // MaxCatchUpBatches is a runaway-protection ceiling.
+    private const int CatchUpBatchSize = 100;
+    private const int MaxCatchUpBatches = 100;
 
     public async Task FlushAsync(CancellationToken ct)
     {
@@ -268,6 +277,26 @@ public sealed class SyncService
             }
         }
 
+        // Phase 2: catch-up drain for the three telemetry queues. Phase 1's
+        // small fair-share quotas protected against starvation; this loop
+        // ensures a backlog isn't capped at {Limit} rows per flush.
+        //
+        // Memory upserts/deletes intentionally not in catch-up — payloads are
+        // larger and per-flush bounding is acceptable until a memory backlog
+        // becomes a real problem.
+        if (!await CatchUpTelemetryAsync(
+                "usage",
+                batch => PushUsageBatchAsync(batch, ct), ct).ConfigureAwait(false))
+            return;
+        if (!await CatchUpTelemetryAsync(
+                "retrieval",
+                batch => PushRetrievalBatchAsync(batch, ct), ct).ConfigureAwait(false))
+            return;
+        if (!await CatchUpTelemetryAsync(
+                "compaction",
+                batch => PushCompactionBatchAsync(batch, ct), ct).ConfigureAwait(false))
+            return;
+
         // Drain unsynced skill_usage_events in chunks of 100. Each chunk is pushed
         // as a single batch; failure stops the loop and leaves remaining rows queued.
         while (true)
@@ -284,6 +313,58 @@ public sealed class SyncService
                 return;
             }
         }
+    }
+
+    // Phase 2 catch-up helper. Returns true on normal completion (empty queue
+    // or hit safety cap), false if CortexUnreachableException terminated the
+    // loop — caller bails on false so we don't keep hammering a dead remote.
+    private async Task<bool> CatchUpTelemetryAsync(
+        string entityType,
+        Func<IReadOnlyList<SyncQueueItem>, Task> pushBatchAsync,
+        CancellationToken ct)
+    {
+        for (int i = 0; i < MaxCatchUpBatches; i++)
+        {
+            var batch = _syncQueue.Drain(entityType, CatchUpBatchSize);
+            if (batch.Count == 0) return true;
+            try
+            {
+                await pushBatchAsync(batch).ConfigureAwait(false);
+                foreach (var item in batch)
+                    _syncQueue.MarkCompleted(item.Id);
+            }
+            catch (CortexUnreachableException ex)
+            {
+                foreach (var item in batch)
+                    _syncQueue.MarkFailed(item.Id, ex.Message);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private Task PushUsageBatchAsync(IReadOnlyList<SyncQueueItem> batch, CancellationToken ct)
+    {
+        var events = batch
+            .SelectMany(i => JsonSerializer.Deserialize(i.Payload, SyncJsonContext.Default.SyncUsageEventArray) ?? Array.Empty<SyncUsageEvent>())
+            .ToArray();
+        return _remote.PushUsageEventsAsync(events, ct);
+    }
+
+    private Task PushRetrievalBatchAsync(IReadOnlyList<SyncQueueItem> batch, CancellationToken ct)
+    {
+        var events = batch
+            .SelectMany(i => JsonSerializer.Deserialize(i.Payload, SyncJsonContext.Default.SyncRetrievalEventArray) ?? Array.Empty<SyncRetrievalEvent>())
+            .ToArray();
+        return _remote.PushRetrievalEventsAsync(events, ct);
+    }
+
+    private Task PushCompactionBatchAsync(IReadOnlyList<SyncQueueItem> batch, CancellationToken ct)
+    {
+        var entries = batch
+            .SelectMany(i => JsonSerializer.Deserialize(i.Payload, SyncJsonContext.Default.SyncCompactionEntryArray) ?? Array.Empty<SyncCompactionEntry>())
+            .ToArray();
+        return _remote.PushCompactionEntriesAsync(entries, ct);
     }
 
     /// <summary>
