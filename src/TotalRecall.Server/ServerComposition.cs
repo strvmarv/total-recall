@@ -114,7 +114,8 @@ public static class ServerComposition
         string? scopeDefault = null,
         RetrievalEventLog? retrievalLog = null,
         Infrastructure.Sync.SyncQueue? syncQueue = null,
-        CompactionLog? compactionLogWriter = null)
+        CompactionLog? compactionLogWriter = null,
+        Infrastructure.Sync.SyncBacklogReader? syncBacklog = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(vectors);
@@ -151,7 +152,7 @@ public static class ServerComposition
         registry.Register(new KbSummarizeHandler(store));
 
         // ---- Session (3) ----
-        registry.Register(new SessionStartHandler(sessionLifecycle, periodicSync));
+        registry.Register(new SessionStartHandler(sessionLifecycle, periodicSync, syncService));
         registry.Register(new SessionEndHandler(sessionLifecycle, store, compactionLogWriter, syncService: syncService));
         registry.Register(new SessionContextHandler(store));
 
@@ -167,7 +168,7 @@ public static class ServerComposition
         registry.Register(new ConfigSetHandler());
 
         // ---- Misc (4) ----
-        registry.Register(new StatusHandler(store, sessionLifecycle, statusOptions));
+        registry.Register(new StatusHandler(store, sessionLifecycle, statusOptions, syncBacklog));
         registry.Register(new ImportHostHandler()); // self-bootstraps the 7 importers
         registry.Register(new CompactNowHandler());
         registry.Register(new MigrateToRemoteHandler()); // self-bootstraps source+target stores
@@ -335,7 +336,8 @@ public static class ServerComposition
                 fileIngester, compactionLog, sessionLifecycle, statusOptions,
                 scopeDefault: ResolveScopeDefault(cfg),
                 retrievalLog: retrievalLog,
-                compactionLogWriter: compactionLog);
+                compactionLogWriter: compactionLog,
+                syncBacklog: new Infrastructure.Sync.SyncBacklogReader(conn));
 
             registry.Register(new UsageStatusHandler(usageQuery));
 
@@ -579,7 +581,8 @@ public static class ServerComposition
                 scopeDefault: ResolveScopeDefault(cfg),
                 retrievalLog: retrievalLog,
                 syncQueue: syncQueue,
-                compactionLogWriter: compactionLog);
+                compactionLogWriter: compactionLog,
+                syncBacklog: new Infrastructure.Sync.SyncBacklogReader(conn));
 
             registry.Register(new UsageStatusHandler(usageQuery));
 

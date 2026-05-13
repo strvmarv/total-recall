@@ -307,7 +307,22 @@ public sealed record StatusResultDto(
     [property: JsonPropertyName("db")] DbStatusDto Db,
     [property: JsonPropertyName("embedding")] EmbeddingStatusDto Embedding,
     [property: JsonPropertyName("activity")] ActivityStatusDto Activity,
-    [property: JsonPropertyName("lastCompaction")] LastCompactionDto? LastCompaction);
+    [property: JsonPropertyName("lastCompaction")] LastCompactionDto? LastCompaction,
+    [property: JsonPropertyName("syncBacklog")] SyncBacklogDto? SyncBacklog);
+
+// Outbound sync queue + skill_usage_events backlog visibility. Null when the
+// handler doesn't have a SQLite connection (e.g. tests, cortex-only modes).
+// SyncQueue has no hard dead-letter gate — items back off exponentially
+// (capped at 1h) but always retry. Non-zero `retrying` indicates items have
+// failed at least once and may signal cortex-reachability problems.
+public sealed record SyncBacklogDto(
+    [property: JsonPropertyName("memoryUnsynced")] int MemoryUnsynced,
+    [property: JsonPropertyName("usageUnsynced")] int UsageUnsynced,
+    [property: JsonPropertyName("retrievalUnsynced")] int RetrievalUnsynced,
+    [property: JsonPropertyName("compactionUnsynced")] int CompactionUnsynced,
+    [property: JsonPropertyName("skillUsageUnsynced")] int SkillUsageUnsynced,
+    [property: JsonPropertyName("retrying")] int Retrying,
+    [property: JsonPropertyName("oldestUnsyncedAt")] DateTime? OldestUnsyncedAt);
 
 public sealed record TierSizesDto(
     [property: JsonPropertyName("hot_memories")] int HotMemories,
@@ -702,6 +717,7 @@ public sealed record MigrateToRemoteResultDto(
 [JsonSerializable(typeof(SessionContextResultDto))]
 // ---- Task 4.11: status DTOs ----
 [JsonSerializable(typeof(StatusResultDto))]
+[JsonSerializable(typeof(SyncBacklogDto))]
 [JsonSerializable(typeof(TierSizesDto))]
 [JsonSerializable(typeof(KbStatusDto))]
 [JsonSerializable(typeof(KbCollectionSummaryDto))]

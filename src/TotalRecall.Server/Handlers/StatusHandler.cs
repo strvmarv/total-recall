@@ -46,6 +46,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Storage;
+using TotalRecall.Infrastructure.Sync;
 
 namespace TotalRecall.Server.Handlers;
 
@@ -79,16 +80,19 @@ public sealed class StatusHandler : IToolHandler
     private readonly IStore _store;
     private readonly ISessionLifecycle _sessionLifecycle;
     private readonly StatusOptions _options;
+    private readonly SyncBacklogReader? _syncBacklog;
 
     public StatusHandler(
         IStore store,
         ISessionLifecycle sessionLifecycle,
-        StatusOptions options)
+        StatusOptions options,
+        SyncBacklogReader? syncBacklog = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _sessionLifecycle = sessionLifecycle
             ?? throw new ArgumentNullException(nameof(sessionLifecycle));
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _syncBacklog = syncBacklog;
     }
 
     public string Name => "status";
@@ -179,13 +183,38 @@ public sealed class StatusHandler : IToolHandler
         // compaction pipeline. null = "no compactions recorded".
         LastCompactionDto? lastCompaction = null;
 
+        // Sync backlog visibility. Best-effort: any read failure (locked DB,
+        // missing tables in non-standard schemas) yields null rather than
+        // taking the whole status call down.
+        SyncBacklogDto? syncBacklog = null;
+        if (_syncBacklog is not null)
+        {
+            try
+            {
+                var snap = _syncBacklog.Read();
+                syncBacklog = new SyncBacklogDto(
+                    MemoryUnsynced: snap.MemoryUnsynced,
+                    UsageUnsynced: snap.UsageUnsynced,
+                    RetrievalUnsynced: snap.RetrievalUnsynced,
+                    CompactionUnsynced: snap.CompactionUnsynced,
+                    SkillUsageUnsynced: snap.SkillUsageUnsynced,
+                    Retrying: snap.Retrying,
+                    OldestUnsyncedAt: snap.OldestUnsyncedAt);
+            }
+            catch
+            {
+                syncBacklog = null;
+            }
+        }
+
         var dto = new StatusResultDto(
             TierSizes: tierSizes,
             KnowledgeBase: kb,
             Db: db,
             Embedding: embedding,
             Activity: activity,
-            LastCompaction: lastCompaction);
+            LastCompaction: lastCompaction,
+            SyncBacklog: syncBacklog);
 
         var jsonText = JsonSerializer.Serialize(dto, JsonContext.Default.StatusResultDto);
 
