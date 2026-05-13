@@ -7,7 +7,14 @@
 // Read path: local SqliteSkillCache first; on miss, fall through to cortex
 // via ISkillClient. Cortex errors are swallowed so a stale local cache
 // returns null gracefully when cortex is unreachable.
+//
+// Write paths (best-effort, non-blocking):
+//   - On remote-fetch success: write the bundle back to the local cache so
+//     subsequent calls hit the cache and so usage_count can accumulate.
+//   - On any successful resolution (cache OR remote): record an invocation
+//     event in skill_usage_events for later sync to cortex.
 
+using System.Linq;
 using System.Text.Json;
 using TotalRecall.Infrastructure.Skills;
 using TotalRecall.Infrastructure.Sync;
@@ -58,6 +65,7 @@ public sealed class SkillGetHandler : IToolHandler
         var haveNaturalKey = name is not null || scope is not null || scopeId is not null;
 
         SkillBundleDto? bundle = null;
+        bool fetchedRemotely = false;
         if (idStr is not null)
         {
             if (haveNaturalKey)
@@ -70,15 +78,13 @@ public sealed class SkillGetHandler : IToolHandler
             {
                 var cached = await _cache.GetByIdAsync(id, ct).ConfigureAwait(false);
                 if (cached is not null)
-                {
                     bundle = ToBundle(cached);
-                    await TryRecordAsync(cached.Id, ct).ConfigureAwait(false);
-                }
             }
             if (bundle is null)
             {
                 try { bundle = await _client.GetByIdAsync(id, ct).ConfigureAwait(false); }
                 catch (CortexUnreachableException) { /* swallow */ }
+                if (bundle is not null) fetchedRemotely = true;
             }
         }
         else if (name is not null && scope is not null && scopeId is not null)
@@ -87,21 +93,26 @@ public sealed class SkillGetHandler : IToolHandler
             {
                 var cached = await _cache.GetByNaturalKeyAsync(name, scope, scopeId, ct).ConfigureAwait(false);
                 if (cached is not null)
-                {
                     bundle = ToBundle(cached);
-                    await TryRecordAsync(cached.Id, ct).ConfigureAwait(false);
-                }
             }
             if (bundle is null)
             {
                 try { bundle = await _client.GetByNaturalKeyAsync(name, scope, scopeId, ct).ConfigureAwait(false); }
                 catch (CortexUnreachableException) { /* swallow */ }
+                if (bundle is not null) fetchedRemotely = true;
             }
         }
         else
         {
             throw new ArgumentException(
                 "skill_get: supply either id or the full name+scope+scopeId triple");
+        }
+
+        if (bundle is not null)
+        {
+            if (fetchedRemotely)
+                await TryCacheBundleAsync(bundle, ct).ConfigureAwait(false);
+            await TryRecordAsync(bundle.Skill.Id, ct).ConfigureAwait(false);
         }
 
         // When bundle is null STJ emits the literal JSON "null" via the
@@ -123,6 +134,37 @@ public sealed class SkillGetHandler : IToolHandler
             await _cache.RecordInvocationAsync(
                 id, host: null, sessionId: null,
                 occurredAt: DateTime.UtcNow, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { /* best-effort — must not block the agent */ }
+    }
+
+    // Best-effort cache write-back after a successful remote fetch. Without
+    // this, every skill_get is a cache miss forever and RecordInvocationAsync
+    // has no row to increment a usage counter against.
+    private async Task TryCacheBundleAsync(SkillBundleDto b, CancellationToken ct)
+    {
+        if (_cache is null) return;
+        try
+        {
+            var dto = new PluginSyncSkillDto(
+                Id: b.Skill.Id,
+                Name: b.Skill.Name,
+                Description: b.Skill.Description,
+                Content: b.Content,
+                FrontmatterJson: b.FrontmatterJson,
+                ContentHash: null,
+                Scope: b.Skill.Scope,
+                ScopeId: b.Skill.ScopeId,
+                Tags: b.Skill.Tags.ToArray(),
+                Source: b.Skill.Source,
+                IsOrphaned: false,
+                Version: b.Skill.Version,
+                UsageCount: 0,
+                LastUsedAt: null,
+                CreatedAt: b.Skill.CreatedAt.UtcDateTime,
+                UpdatedAt: b.Skill.UpdatedAt.UtcDateTime);
+            await _cache.UpsertAsync(dto, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { throw; }
         catch { /* best-effort — must not block the agent */ }
