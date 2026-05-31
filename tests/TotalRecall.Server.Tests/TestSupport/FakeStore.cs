@@ -141,6 +141,8 @@ public sealed class FakeStore : IStore
             src = src.Where(e =>
                 Microsoft.FSharp.Core.FSharpOption<string>.get_IsSome(e.ParentId)
                 && e.ParentId.Value == pid);
+        if (opts?.EntryType is { } et)
+            src = src.Where(e => e.EntryType.Equals(et));
         if (opts?.Limit is int lim) src = src.Take(lim);
         return src.ToList();
     }
