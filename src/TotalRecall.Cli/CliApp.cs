@@ -201,6 +201,7 @@ public static class CliApp
             new Commands.Memory.ExportCommand(),
             new Commands.Memory.HistoryCommand(),
             new Commands.Memory.ImportCommand(),
+            new Commands.Memory.RecentCommand(),
             new Commands.Memory.InspectCommand(),
             new Commands.Memory.LineageCommand(),
             new Commands.Memory.PromoteCommand(),

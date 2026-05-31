@@ -63,6 +63,10 @@ internal sealed class FakeStore : IStore
             if (kvp.Key.Item1.Equals(tier) && kvp.Key.Item2.Equals(type))
                 results.Add(kvp.Value);
         }
+        // Honor EntryType filter so commands that push down entry-type
+        // predicates (e.g. RecentQuery) get correctly filtered results.
+        if (opts?.EntryType is { } et)
+            results.RemoveAll(e => !e.EntryType.Equals(et));
         return results;
     }
 
