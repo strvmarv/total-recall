@@ -51,6 +51,36 @@ public static class TierNames
     };
 
     /// <summary>
+    /// Parse a case-insensitive entry-type name → <see cref="EntryType"/>.
+    /// Returns null for unknown values. Accepts the seven DU case names.
+    /// </summary>
+    public static EntryType? ParseEntryType(string s) => s?.ToLowerInvariant() switch
+    {
+        "correction" => EntryType.Correction,
+        "preference" => EntryType.Preference,
+        "decision" => EntryType.Decision,
+        "surfaced" => EntryType.Surfaced,
+        "imported" => EntryType.Imported,
+        "compacted" => EntryType.Compacted,
+        "ingested" => EntryType.Ingested,
+        _ => null,
+    };
+
+    /// <summary>
+    /// Format an <see cref="EntryType"/> as its DB/wire case name
+    /// ("Correction", "Preference", ...). Matches the value stored in the
+    /// <c>entry_type</c> column.
+    /// </summary>
+    public static string EntryTypeName(EntryType t) =>
+        t.IsCorrection ? "Correction"
+        : t.IsPreference ? "Preference"
+        : t.IsDecision ? "Decision"
+        : t.IsSurfaced ? "Surfaced"
+        : t.IsImported ? "Imported"
+        : t.IsCompacted ? "Compacted"
+        : "Ingested";
+
+    /// <summary>
     /// Tier warmth rank: hot=2, warm=1, cold=0. Used by promote/demote
     /// direction gates (promote must increase rank, demote must decrease).
     /// </summary>
