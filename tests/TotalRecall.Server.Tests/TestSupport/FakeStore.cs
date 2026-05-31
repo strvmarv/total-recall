@@ -143,6 +143,28 @@ public sealed class FakeStore : IStore
                 && e.ParentId.Value == pid);
         if (opts?.EntryType is { } et)
             src = src.Where(e => e.EntryType.Equals(et));
+        // Honor the OrderBy hint before applying Limit so top-N results are
+        // globally correct (mirrors what the real SqliteStore does in SQL).
+        // Supports the three columns used by RecentQuery: created_at, updated_at,
+        // last_accessed_at — all DESC. Unrecognized patterns preserve insertion order.
+        if (opts?.OrderBy is string orderBy)
+        {
+            var col = orderBy.Split(' ')[0];
+            var desc = !orderBy.EndsWith("ASC", StringComparison.OrdinalIgnoreCase);
+            IOrderedEnumerable<Entry> ordered = col switch
+            {
+                "updated_at" => desc
+                    ? src.OrderByDescending(e => e.UpdatedAt)
+                    : src.OrderBy(e => e.UpdatedAt),
+                "last_accessed_at" => desc
+                    ? src.OrderByDescending(e => e.LastAccessedAt)
+                    : src.OrderBy(e => e.LastAccessedAt),
+                _ => desc
+                    ? src.OrderByDescending(e => e.CreatedAt)
+                    : src.OrderBy(e => e.CreatedAt),
+            };
+            src = ordered;
+        }
         if (opts?.Limit is int lim) src = src.Take(lim);
         return src.ToList();
     }

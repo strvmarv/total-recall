@@ -418,6 +418,29 @@ public sealed record MemoryHistoryResultDto(
     [property: JsonPropertyName("movements")] CompactionMovementDto[] Movements,
     [property: JsonPropertyName("count")] int Count);
 
+// ---- recent command: memory_recent ----
+//
+// Compact, newest-first listing of memory entries across tiers. Preview is a
+// whitespace-collapsed, length-capped slice of content (full text via
+// memory_inspect). The result envelope echoes the applied order/filters.
+public sealed record RecentEntryDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("tier")] string Tier,
+    [property: JsonPropertyName("entry_type")] string EntryType,
+    [property: JsonPropertyName("project")] string? Project,
+    [property: JsonPropertyName("created_at")] long CreatedAt,
+    [property: JsonPropertyName("updated_at")] long UpdatedAt,
+    [property: JsonPropertyName("last_accessed_at")] long LastAccessedAt,
+    [property: JsonPropertyName("preview")] string Preview);
+
+public sealed record MemoryRecentResultDto(
+    [property: JsonPropertyName("entries")] RecentEntryDto[] Entries,
+    [property: JsonPropertyName("count")] int Count,
+    [property: JsonPropertyName("order")] string Order,
+    [property: JsonPropertyName("tier")] string? Tier,
+    [property: JsonPropertyName("type")] string? Type,
+    [property: JsonPropertyName("project")] string? Project);
+
 // Lineage tree node. Sources is null for leaf nodes so the field stays
 // consistent with the CLI hand-rolled shape (which omits empty sources on
 // leaves via conditional key emission).
@@ -732,6 +755,9 @@ public sealed record MigrateToRemoteResultDto(
 [JsonSerializable(typeof(CompactionMovementDto))]
 [JsonSerializable(typeof(CompactionMovementDto[]))]
 [JsonSerializable(typeof(MemoryHistoryResultDto))]
+[JsonSerializable(typeof(RecentEntryDto))]
+[JsonSerializable(typeof(RecentEntryDto[]))]
+[JsonSerializable(typeof(MemoryRecentResultDto))]
 [JsonSerializable(typeof(LineageNodeDto))]
 [JsonSerializable(typeof(LineageNodeDto[]))]
 [JsonSerializable(typeof(ExportEntryDto))]
