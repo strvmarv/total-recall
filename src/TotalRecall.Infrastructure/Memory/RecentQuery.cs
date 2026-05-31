@@ -29,23 +29,21 @@ public static class RecentQuery
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(o);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(o.Limit);
 
-        var column = o.Order switch
+        // Map the order keyword to BOTH the SQL order-by column and the matching
+        // in-memory selector in ONE switch, so the two can never drift apart.
+        // Unrecognized values canonicalize to "created" (callers validate first).
+        var (orderBy, selector) = o.Order switch
         {
-            "updated" => "updated_at",
-            "accessed" => "last_accessed_at",
-            _ => "created_at",
-        };
-        Func<Entry, long> selector = o.Order switch
-        {
-            "updated" => e => e.UpdatedAt,
-            "accessed" => e => e.LastAccessedAt,
-            _ => e => e.CreatedAt,
+            "updated" => ("updated_at DESC", (Func<Entry, long>)(e => e.UpdatedAt)),
+            "accessed" => ("last_accessed_at DESC", (Func<Entry, long>)(e => e.LastAccessedAt)),
+            _ => ("created_at DESC", (Func<Entry, long>)(e => e.CreatedAt)),
         };
 
         var opts = new ListEntriesOpts
         {
-            OrderBy = column + " DESC",
+            OrderBy = orderBy,
             Limit = o.Limit,
             Project = o.Project,
             Scopes = o.Scopes,
@@ -61,6 +59,8 @@ public static class RecentQuery
             foreach (var e in store.List(tier, ContentType.Memory, opts))
                 merged.Add((tier, e));
 
+        // Sort by the chosen timestamp DESC; break ties on the globally-unique Id
+        // (ordinal) so the order is total and deterministic regardless of tier.
         return merged
             .OrderByDescending(x => selector(x.Entry))
             .ThenBy(x => x.Entry.Id, StringComparer.Ordinal)
