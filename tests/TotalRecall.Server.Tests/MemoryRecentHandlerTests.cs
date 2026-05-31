@@ -31,6 +31,15 @@ public class MemoryRecentHandlerTests
             ts, ts + 1, ts + 2, 0, 0.5,
             FSharpOption<string>.None, FSharpOption<string>.None, "user:local", type, "{}");
 
+    private static Entry MakeEntryTs(string id, long created, long updated, long lastAccessed, EntryType type) =>
+        new(
+            id, "content for " + id,
+            FSharpOption<string>.None, FSharpOption<string>.None,
+            FSharpOption<SourceTool>.None, FSharpOption<string>.None,
+            ListModule.OfSeq(Array.Empty<string>()),
+            created, updated, lastAccessed, 0, 0.5,
+            FSharpOption<string>.None, FSharpOption<string>.None, "user:local", type, "{}");
+
     [Fact]
     public void Name_IsWireContract()
     {
@@ -112,14 +121,20 @@ public class MemoryRecentHandlerTests
     public async Task OrderAccessed_SortsByLastAccessed()
     {
         var store = new FakeStore();
+        // a: newest by created (300) but OLDEST by accessed (102).
+        // b: oldest by created (100) but NEWEST by accessed (202).
         store.SeedList(Tier.Hot, ContentType.Memory,
-            MakeEntry("a", 300, EntryType.Preference),
-            MakeEntry("b", 100, EntryType.Preference));
+            MakeEntryTs("a", created: 300, updated: 301, lastAccessed: 102, EntryType.Preference),
+            MakeEntryTs("b", created: 100, updated: 101, lastAccessed: 202, EntryType.Preference));
+
         var result = await MakeHandler(store).ExecuteAsync(
             ParseArgs("""{"order":"accessed"}"""), CancellationToken.None);
+
         using var doc = JsonDocument.Parse(result.Content[0].Text);
         Assert.Equal("accessed", doc.RootElement.GetProperty("order").GetString());
-        Assert.Equal("a", doc.RootElement.GetProperty("entries")[0].GetProperty("id").GetString());
+        // last_accessed_at DESC → b (202) before a (102): proves NOT created-order.
+        Assert.Equal("b", doc.RootElement.GetProperty("entries")[0].GetProperty("id").GetString());
+        Assert.Equal("a", doc.RootElement.GetProperty("entries")[1].GetProperty("id").GetString());
     }
 
     [Fact]
@@ -131,7 +146,7 @@ public class MemoryRecentHandlerTests
         using var doc = JsonDocument.Parse(result.Content[0].Text);
         var preview = doc.RootElement.GetProperty("entries")[0].GetProperty("preview").GetString();
         Assert.DoesNotContain("\n", preview);
-        Assert.StartsWith("content for a with whitespace", preview);
+        Assert.Equal("content for a with whitespace", preview);
     }
 
     [Fact]
@@ -140,7 +155,7 @@ public class MemoryRecentHandlerTests
         var result = await MakeHandler(new FakeStore()).ExecuteAsync(null, CancellationToken.None);
         using var doc = JsonDocument.Parse(result.Content[0].Text);
         Assert.Equal(0, doc.RootElement.GetProperty("count").GetInt32());
-        Assert.Null(result.IsError);
+        Assert.False(result.IsError);
     }
 
     [Theory]

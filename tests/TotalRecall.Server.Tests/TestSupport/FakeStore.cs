@@ -149,8 +149,9 @@ public sealed class FakeStore : IStore
         // last_accessed_at — all DESC. Unrecognized patterns preserve insertion order.
         if (opts?.OrderBy is string orderBy)
         {
-            var col = orderBy.Split(' ')[0];
-            var desc = !orderBy.EndsWith("ASC", StringComparison.OrdinalIgnoreCase);
+            var parts = orderBy.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var col = parts[0];
+            var desc = parts.Length < 2 || !parts[1].Equals("ASC", StringComparison.OrdinalIgnoreCase);
             IOrderedEnumerable<Entry> ordered = col switch
             {
                 "updated_at" => desc

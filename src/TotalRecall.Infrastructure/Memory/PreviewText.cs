@@ -12,6 +12,12 @@ namespace TotalRecall.Infrastructure.Memory;
 public static class PreviewText
 {
     /// <summary>
+    /// Default max preview length shared by the memory_recent MCP handler and
+    /// the `memory recent` CLI command, so both surfaces truncate identically.
+    /// </summary>
+    public const int DefaultMaxLength = 150;
+
+    /// <summary>
     /// Collapse internal whitespace to single spaces, trim ends, and truncate
     /// to <paramref name="max"/> characters (appending U+2026 when cut).
     /// Returns "" for null/empty input.

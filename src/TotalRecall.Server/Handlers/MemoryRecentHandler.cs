@@ -104,7 +104,7 @@ public sealed class MemoryRecentHandler : IToolHandler
             CreatedAt: r.Entry.CreatedAt,
             UpdatedAt: r.Entry.UpdatedAt,
             LastAccessedAt: r.Entry.LastAccessedAt,
-            Preview: PreviewText.Collapse(r.Entry.Content, 150))).ToArray();
+            Preview: PreviewText.Collapse(r.Entry.Content, PreviewText.DefaultMaxLength))).ToArray();
 
         var dto = new MemoryRecentResultDto(
             Entries: entries,
@@ -119,6 +119,7 @@ public sealed class MemoryRecentHandler : IToolHandler
         return Task.FromResult(new ToolCallResult
         {
             Content = new[] { new ToolContent { Type = "text", Text = jsonText } },
+            IsError = false,
         });
     }
 }
