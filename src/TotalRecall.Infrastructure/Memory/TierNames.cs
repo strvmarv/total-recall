@@ -52,9 +52,10 @@ public static class TierNames
 
     /// <summary>
     /// Parse a case-insensitive entry-type name → <see cref="EntryType"/>.
-    /// Returns null for unknown values. Accepts the seven DU case names.
+    /// Returns null for an unknown value or null/empty input. Accepts the
+    /// seven DU case names.
     /// </summary>
-    public static EntryType? ParseEntryType(string s) => s?.ToLowerInvariant() switch
+    public static EntryType? ParseEntryType(string? s) => s?.ToLowerInvariant() switch
     {
         "correction" => EntryType.Correction,
         "preference" => EntryType.Preference,

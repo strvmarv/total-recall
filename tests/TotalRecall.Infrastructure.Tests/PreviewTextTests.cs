@@ -30,4 +30,26 @@ public sealed class PreviewTextTests
         Assert.Equal("", PreviewText.Collapse("", 50));
         Assert.Equal("", PreviewText.Collapse(null, 50));
     }
+
+    [Fact]
+    public void Collapse_Truncates_AtSpaceBoundary_TrimsBeforeEllipsis()
+    {
+        // Without TrimEnd() before the ellipsis this would be "hello …".
+        Assert.Equal("hello…", PreviewText.Collapse("hello world extra", 6));
+    }
+
+    [Fact]
+    public void Collapse_MaxZero_ReturnsEmpty()
+    {
+        Assert.Equal("", PreviewText.Collapse("not empty", 0));
+    }
+
+    [Fact]
+    public void Collapse_DoesNotSplitSurrogatePair()
+    {
+        // "😀😀😀" — each emoji is 2 UTF-16 code units. max=3 would land mid-pair;
+        // the orphaned high surrogate must be dropped, leaving one whole emoji + ellipsis.
+        var result = PreviewText.Collapse("😀😀😀", 3);
+        Assert.Equal("😀…", result);
+    }
 }

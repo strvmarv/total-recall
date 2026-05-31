@@ -19,6 +19,7 @@ public static class PreviewText
     public static string Collapse(string? content, int max)
     {
         if (string.IsNullOrEmpty(content)) return "";
+        if (max <= 0) return "";
 
         var sb = new StringBuilder(content.Length);
         var pendingSpace = false;
@@ -35,6 +36,9 @@ public static class PreviewText
 
         var collapsed = sb.ToString();
         if (collapsed.Length <= max) return collapsed;
-        return collapsed.Substring(0, max).TrimEnd() + "…";
+        var cut = collapsed.Substring(0, max);
+        if (cut.Length > 0 && char.IsHighSurrogate(cut[^1]))
+            cut = cut[..^1]; // drop an orphaned high surrogate so we never emit broken UTF-16
+        return cut.TrimEnd() + "…";
     }
 }
