@@ -80,7 +80,7 @@ public sealed class RecentCommand : ICliCommand
                         return Fail("--type requires a value");
                     type = TierNames.ParseEntryType(args[++i]);
                     if (type is null)
-                        return Fail("--type must be one of correction, preference, decision, surfaced, imported, compacted, ingested");
+                        return Fail("--type must be correction, preference, decision, surfaced, imported, compacted, ingested");
                     break;
                 case "--project":
                     if (i + 1 >= args.Length)
@@ -188,6 +188,7 @@ public sealed class RecentCommand : ICliCommand
         AnsiConsole.Write(table);
     }
 
+    // Listing view: ISO-8601 only (InspectCommand appends the raw-ms suffix; omitted here on purpose).
     private static string FormatTimestamp(long unixMs) =>
         DateTimeOffset.FromUnixTimeMilliseconds(unixMs).UtcDateTime
             .ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
@@ -201,6 +202,9 @@ public sealed class RecentCommand : ICliCommand
         IReadOnlyList<(Tier Tier, Entry Entry)> rows,
         string order, Tier? tier, EntryType? type, string? project)
     {
+        // JSON shape MUST match MemoryRecentResultDto / RecentEntryDto in
+        // TotalRecall.Server.JsonContext. Hand-rolled here (not source-gen) because
+        // the AOT-published CLI does not reference TotalRecall.Server.
         var sb = new StringBuilder();
         sb.Append("{\"entries\":[");
         for (int i = 0; i < rows.Count; i++)
@@ -208,7 +212,7 @@ public sealed class RecentCommand : ICliCommand
             if (i > 0) sb.Append(',');
             AppendEntry(sb, rows[i].Tier, rows[i].Entry);
         }
-        sb.Append("],\"count\":").Append(rows.Count.ToString(CultureInfo.InvariantCulture));
+        sb.Append("],\"count\":"); AppendNumber(sb, rows.Count);
         sb.Append(",\"order\":"); AppendString(sb, order);
         sb.Append(",\"tier\":"); AppendNullableString(sb, tier is { } tf ? TierNames.TierName(tf) : null);
         sb.Append(",\"type\":"); AppendNullableString(sb, type is { } et ? TierNames.EntryTypeName(et) : null);
@@ -224,9 +228,9 @@ public sealed class RecentCommand : ICliCommand
         sb.Append(",\"tier\":"); AppendString(sb, TierNames.TierName(tier));
         sb.Append(",\"entry_type\":"); AppendString(sb, TierNames.EntryTypeName(e.EntryType));
         sb.Append(",\"project\":"); AppendNullableString(sb, OptString(e.Project));
-        sb.Append(",\"created_at\":").Append(e.CreatedAt.ToString(CultureInfo.InvariantCulture));
-        sb.Append(",\"updated_at\":").Append(e.UpdatedAt.ToString(CultureInfo.InvariantCulture));
-        sb.Append(",\"last_accessed_at\":").Append(e.LastAccessedAt.ToString(CultureInfo.InvariantCulture));
+        sb.Append(",\"created_at\":"); AppendNumber(sb, e.CreatedAt);
+        sb.Append(",\"updated_at\":"); AppendNumber(sb, e.UpdatedAt);
+        sb.Append(",\"last_accessed_at\":"); AppendNumber(sb, e.LastAccessedAt);
         sb.Append(",\"preview\":"); AppendString(sb, PreviewText.Collapse(e.Content, PreviewText.DefaultMaxLength));
         sb.Append('}');
     }
@@ -236,6 +240,9 @@ public sealed class RecentCommand : ICliCommand
         if (value is null) sb.Append("null");
         else AppendString(sb, value);
     }
+
+    private static void AppendNumber(StringBuilder sb, long v) =>
+        TotalRecall.Infrastructure.Json.JsonWriter.AppendNumber(sb, v);
 
     private static void AppendString(StringBuilder sb, string s) =>
         TotalRecall.Infrastructure.Json.JsonWriter.AppendString(sb, s);

@@ -99,4 +99,26 @@ public sealed class RecentCommandTests : IDisposable
         var code = await cmd.RunAsync(new[] { "--type", "bogus" });
         Assert.Equal(2, code);
     }
+
+    [Fact]
+    public async Task NonJson_Empty_PrintsNoMemories()
+    {
+        var cmd = new RecentCommand(new FakeStore());
+        var code = await cmd.RunAsync(Array.Empty<string>());
+        Assert.Equal(0, code);
+        Assert.Contains("(no memories yet)", _outWriter.ToString());
+    }
+
+    [Fact]
+    public async Task NonJson_Render_DoesNotThrow()
+    {
+        var store = new FakeStore();
+        store.Seed(Tier.Hot, ContentType.Memory, MakeEntry("h", 100, EntryType.Preference));
+        var cmd = new RecentCommand(store);
+        // Default (non-JSON) render goes through the Spectre table path. Spectre may
+        // write to its own cached console rather than the redirected Console.Out, so we
+        // only assert the path executes successfully (exit 0), not its captured text.
+        var code = await cmd.RunAsync(Array.Empty<string>());
+        Assert.Equal(0, code);
+    }
 }
