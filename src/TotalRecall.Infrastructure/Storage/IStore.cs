@@ -173,4 +173,9 @@ public sealed record ListEntriesOpts
     /// filter is applied.
     /// </summary>
     public IReadOnlyList<string>? Scopes { get; init; }
+    /// <summary>
+    /// When set, only rows whose <c>entry_type</c> column matches the given
+    /// <see cref="EntryType"/> are returned. Null means no entry-type filter.
+    /// </summary>
+    public EntryType? EntryType { get; init; }
 }

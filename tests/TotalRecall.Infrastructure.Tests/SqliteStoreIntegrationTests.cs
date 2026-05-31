@@ -635,4 +635,30 @@ public sealed class SqliteStoreIntegrationTests
         }
     }
 
+    [Fact]
+    public void List_EntryTypeFilter_ReturnsOnlyMatchingRows()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            store.Insert(Tier.Hot, ContentType.Memory,
+                new InsertEntryOpts("a-correction", EntryType: EntryType.Correction));
+            store.Insert(Tier.Hot, ContentType.Memory,
+                new InsertEntryOpts("b-preference", EntryType: EntryType.Preference));
+            store.Insert(Tier.Hot, ContentType.Memory,
+                new InsertEntryOpts("c-decision", EntryType: EntryType.Decision));
+
+            var onlyDecisions = store.List(Tier.Hot, ContentType.Memory,
+                new ListEntriesOpts { EntryType = EntryType.Decision });
+
+            Assert.Single(onlyDecisions);
+            Assert.Equal("c-decision", onlyDecisions[0].Content);
+
+            // Composes with Limit + OrderBy without throwing.
+            var all = store.List(Tier.Hot, ContentType.Memory,
+                new ListEntriesOpts { OrderBy = "created_at DESC", Limit = 10 });
+            Assert.Equal(3, all.Count);
+        }
+    }
+
 }

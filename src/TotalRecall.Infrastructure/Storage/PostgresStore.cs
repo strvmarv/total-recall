@@ -314,6 +314,12 @@ VALUES
             sql.Append($" AND scope IN ({string.Join(", ", scopeParams)})");
         }
 
+        if (opts?.EntryType is { } entryType)
+        {
+            sql.Append(" AND entry_type = @entry_type");
+            cmd.Parameters.AddWithValue("@entry_type", EntryTypeMapping.ToDbValue(entryType));
+        }
+
         sql.Append(" ORDER BY ").Append(orderBy);
 
         if (opts?.Limit is int limit)

@@ -311,6 +311,12 @@ VALUES
             whereClauses.Add($"scope IN ({string.Join(", ", scopeParams)})");
         }
 
+        if (opts?.EntryType is { } entryType)
+        {
+            whereClauses.Add("entry_type = $entry_type");
+            cmd.Parameters.AddWithValue("$entry_type", EntryTypeMapping.ToDbValue(entryType));
+        }
+
         if (whereClauses.Count > 0)
             sql.Append(" WHERE ").Append(string.Join(" AND ", whereClauses));
 
