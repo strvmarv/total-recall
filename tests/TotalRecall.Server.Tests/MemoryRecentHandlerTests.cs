@@ -158,6 +158,41 @@ public class MemoryRecentHandlerTests
         Assert.False(result.IsError);
     }
 
+    [Fact]
+    public async Task OmittedScopes_DefaultToScopeDefault()
+    {
+        var store = new FakeStore();
+        store.SeedList(Tier.Hot, ContentType.Memory, MakeEntry("a", 100, EntryType.Preference));
+        await MakeHandler(store).ExecuteAsync(null, CancellationToken.None);
+        Assert.NotNull(store.LastListOpts?.Scopes);
+        Assert.Single(store.LastListOpts!.Scopes!);
+        Assert.Equal("user:local", store.LastListOpts!.Scopes![0]);
+    }
+
+    [Fact]
+    public async Task EmptyScopesArray_DefaultsToScopeDefault()
+    {
+        var store = new FakeStore();
+        store.SeedList(Tier.Hot, ContentType.Memory, MakeEntry("a", 100, EntryType.Preference));
+        await MakeHandler(store).ExecuteAsync(ParseArgs("""{"scopes":[]}"""), CancellationToken.None);
+        Assert.NotNull(store.LastListOpts?.Scopes);
+        Assert.Single(store.LastListOpts!.Scopes!);
+        Assert.Equal("user:local", store.LastListOpts!.Scopes![0]);
+    }
+
+    [Fact]
+    public async Task ExplicitScopes_PassThroughUnchanged()
+    {
+        var store = new FakeStore();
+        store.SeedList(Tier.Hot, ContentType.Memory, MakeEntry("a", 100, EntryType.Preference));
+        await MakeHandler(store).ExecuteAsync(
+            ParseArgs("""{"scopes":["team:x","user:local"]}"""), CancellationToken.None);
+        Assert.NotNull(store.LastListOpts?.Scopes);
+        Assert.Equal(2, store.LastListOpts!.Scopes!.Count);
+        Assert.Equal("team:x", store.LastListOpts!.Scopes![0]);
+        Assert.Equal("user:local", store.LastListOpts!.Scopes![1]);
+    }
+
     [Theory]
     [InlineData("""{"limit":0}""")]
     [InlineData("""{"limit":201}""")]

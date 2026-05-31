@@ -86,7 +86,9 @@ public sealed class MemoryRecentHandler : IToolHandler
 
         ct.ThrowIfCancellationRequested();
 
-        var effectiveScopes = scopes ?? (_scopeDefault is null ? null : new[] { _scopeDefault });
+        if (scopes is null or { Count: 0 })
+            scopes = _scopeDefault is null ? null : new[] { _scopeDefault };
+        var effectiveScopes = scopes;
 
         var rows = RecentQuery.Run(_store, new RecentOptions(
             Limit: limit,

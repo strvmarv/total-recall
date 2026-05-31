@@ -132,8 +132,11 @@ public sealed class FakeStore : IStore
     /// </summary>
     public List<string>? OrderLog { get; set; }
 
+    public ListEntriesOpts? LastListOpts { get; private set; }
+
     public IReadOnlyList<Entry> List(Tier tier, ContentType type, ListEntriesOpts? opts = null)
     {
+        LastListOpts = opts;
         if (!ListSlots.TryGetValue((tier, type), out var slot))
             return Array.Empty<Entry>();
         IEnumerable<Entry> src = slot;
