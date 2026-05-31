@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.3.0 - 2026-05-31
+
+### Added
+
+- **`recent` — browse memories newest-first by timestamp.** New `memory_recent` MCP tool, `total-recall memory recent` CLI command, and `/total-recall:commands recent` skill subcommand. Lists memories merged across hot/warm/cold ordered by a selectable timestamp (`--order created|updated|accessed`, default `created`), with optional `--tier`, `--type` (entry type), `--project`, and `--limit` (default 20, max 200) filters. Compact-preview output; full text via `inspect`. Backed by a new `entry_type` filter on the storage `List` seam and a shared `RecentQuery` helper.
+
 ## 1.2.2 - 2026-05-13
 
 ### Fixed
