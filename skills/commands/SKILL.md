@@ -83,6 +83,7 @@ Print the command reference table below. Do not call any MCP tools.
 | `promote <id>` | Move an entry up one tier |
 | `demote <id>` | Move an entry down one tier |
 | `history` | Timeline of recent tier movements |
+| `recent` | List newest memories by timestamp (`--limit`, `--tier`, `--type`, `--project`, `--order`) |
 | `lineage <id>` | Compaction ancestry tree for an entry |
 | `export` | Export memories to JSON (`--tiers`, `--types`) |
 | `import <path>` | Import memories from a JSON file |
@@ -153,6 +154,14 @@ Call `memory_demote` with the entry ID and target tier/type. Default target: one
 ### history
 
 Call `memory_history`. Show recent tier movements from the compaction log as a timeline.
+
+### recent [--limit N] [--tier hot|warm|cold] [--type <entryType>] [--project <name>] [--order created|updated|accessed]
+
+Call `memory_recent` with the parsed flags (defaults: limit 20, all tiers, order `created`). Render the returned `entries` as a numbered list, newest first:
+
+`N. [<timestamp>] <tier> · <entry_type> · <project> — <preview>`
+
+The `order` field echoes which timestamp was used. Note that `updated`/`accessed` reflect activity (compaction bumps `updated_at`, retrieval bumps `last_accessed_at`), while `created` reflects authoring time. For full text of any entry, suggest `/total-recall:commands inspect <id>`; also offer `promote <id>` / `forget <id>` as follow-ups.
 
 ### lineage <id>
 
