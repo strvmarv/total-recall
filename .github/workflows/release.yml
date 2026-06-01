@@ -18,8 +18,9 @@ name: Release
 # matrix leg uses the same SDK regardless of what's pre-installed on the
 # runner. Currently pinned to .NET 10 (see global.json).
 #
-# No untrusted github.event.* fields are interpolated into run: blocks;
-# only the static matrix values and secrets.NPM_TOKEN (via env:) are used.
+# No untrusted github.event.* fields are interpolated into run: blocks.
+# npm publish authenticates via OIDC trusted publishing (id-token: write on
+# the publish job) — there is no NPM_TOKEN secret to leak or revoke.
 
 on:
   push:
@@ -173,6 +174,10 @@ jobs:
           node-version: 20
           registry-url: 'https://registry.npmjs.org'
 
+      # OIDC trusted publishing requires npm >= 11.5.1; Node 20 ships npm 10.x.
+      - name: Upgrade npm for trusted publishing
+        run: npm install -g npm@latest
+
       - name: Download linux-x64 artifact
         uses: actions/download-artifact@v4
         with:
@@ -229,8 +234,12 @@ jobs:
           chmod +x binaries/osx-arm64/total-recall
 
       - name: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # Auth via OIDC trusted publishing — NO token. Requires the package's
+        # Trusted Publisher on npmjs.com to point at this repo + workflow
+        # (release.yml), id-token: write on this job (set above), and
+        # npm >= 11.5.1 (installed above). --provenance is implicit under
+        # trusted publishing but kept explicit below.
+        #
         # Prerelease-aware dist-tag routing. If package.json version contains
         # a dash (e.g. 0.8.0-beta.1), publish under the matching dist-tag
         # (beta, rc, alpha) so "latest" is NOT clobbered. Only stable versions
