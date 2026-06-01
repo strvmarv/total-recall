@@ -168,11 +168,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # No registry-url on setup-node below: when registry-url is set, setup-node
+      # writes an .npmrc with a dummy _authToken (XXXXX-XXXXX-XXXXX-XXXXX), and a
+      # configured token (even a bogus one) makes npm SKIP OIDC trusted publishing
+      # and attempt token auth -> unauthenticated 404 on publish. With no token
+      # configured, npm >= 11.5.1 performs the OIDC token exchange. The default
+      # registry is registry.npmjs.org and package.json publishConfig pins
+      # access:public, so the publish target is unchanged.
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          registry-url: 'https://registry.npmjs.org'
 
       # OIDC trusted publishing requires npm >= 11.5.1; Node 20 ships npm 10.x.
       - name: Upgrade npm for trusted publishing
