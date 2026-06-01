@@ -57,12 +57,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout (with LFS for ONNX model files)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           lfs: true
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 20
 
@@ -70,7 +70,7 @@ jobs:
         run: npm ci
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
 
@@ -149,7 +149,7 @@ jobs:
           }
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact }}
           path: binaries/${{ matrix.rid }}
@@ -166,7 +166,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # No registry-url on setup-node below: when registry-url is set, setup-node
       # writes an .npmrc with a dummy _authToken (XXXXX-XXXXX-XXXXX-XXXXX), and a
@@ -176,7 +176,7 @@ jobs:
       # registry is registry.npmjs.org and package.json publishConfig pins
       # access:public, so the publish target is unchanged.
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 20
 
@@ -185,25 +185,25 @@ jobs:
         run: npm install -g npm@latest
 
       - name: Download linux-x64 artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: total-recall-linux-x64
           path: binaries/linux-x64
 
       - name: Download linux-arm64 artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: total-recall-linux-arm64
           path: binaries/linux-arm64
 
       - name: Download osx-arm64 artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: total-recall-osx-arm64
           path: binaries/osx-arm64
 
       - name: Download win-x64 artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: total-recall-win-x64
           path: binaries/win-x64
@@ -326,7 +326,7 @@ jobs:
           tar -tzf release-assets/total-recall-osx-arm64.tar.gz | head -20
 
       - name: Attach archives to GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             release-assets/total-recall-linux-x64.tar.gz
