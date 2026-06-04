@@ -1,6 +1,6 @@
 # Handlers — Agent Guide
 
-This directory contains **one file per MCP tool handler** (38 total). Each handler is a `sealed class` implementing `IToolHandler`.
+This directory contains **one file per MCP tool handler** (46 total). Each handler is a `sealed class` implementing `IToolHandler`.
 
 ---
 

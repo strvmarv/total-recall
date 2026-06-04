@@ -60,15 +60,17 @@ public sealed class KbResolveHandlerTests
         var (handler, store) = MakeHandler();
 
         // Seed: one collection row (no collectionId, no parentId), one document,
-        // two chunks hanging off the document.
+        // two chunks hanging off the document. Reverse order (chunk2 before chunk1)
+        // so the handler's OrderBy = "created_at ASC" is verified — older chunk1 (1001)
+        // must come before newer chunk2 (1002) in the result.
         var col = MakeEntry("col1", source: "/repo");
         var doc = MakeEntry("doc1", source: "/repo/notes.md", collectionId: "col1");
-        var chunk1 = MakeEntry("chunk1", content: "first chunk content",
-            source: "/repo/notes.md", parentId: "doc1", collectionId: "col1", createdAt: 1001L);
         var chunk2 = MakeEntry("chunk2", content: "second chunk content",
             source: "/repo/notes.md", parentId: "doc1", collectionId: "col1", createdAt: 1002L);
+        var chunk1 = MakeEntry("chunk1", content: "first chunk content",
+            source: "/repo/notes.md", parentId: "doc1", collectionId: "col1", createdAt: 1001L);
 
-        store.SeedList(Tier.Cold, ContentType.Knowledge, col, doc, chunk1, chunk2);
+        store.SeedList(Tier.Cold, ContentType.Knowledge, col, doc, chunk2, chunk1);
 
         var result = await handler.ExecuteAsync(
             Args("""{"path":"/repo/notes.md"}"""),
@@ -83,6 +85,8 @@ public sealed class KbResolveHandlerTests
         Assert.Equal("col1", root.GetProperty("collectionId").GetString());
         Assert.Equal(2, root.GetProperty("chunkCount").GetInt32());
         Assert.Equal("first chunk content", root.GetProperty("chunks")[0].GetProperty("content").GetString());
+        Assert.Equal("second chunk content",
+            root.GetProperty("chunks")[1].GetProperty("content").GetString());
         Assert.True(root.GetProperty("tokenEstimate").GetInt32() > 0);
     }
 

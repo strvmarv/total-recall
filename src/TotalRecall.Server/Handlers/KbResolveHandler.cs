@@ -55,6 +55,8 @@ public sealed class KbResolveHandler : IToolHandler
         if (path.Length == 0)
             throw new ArgumentException("path must be a non-empty string");
 
+        ct.ThrowIfCancellationRequested();
+
         // Try the path as given, then the normalized absolute form. Ingest
         // stored whatever the caller passed to kb_ingest_file, so both
         // spellings are legitimate lookups.
@@ -92,6 +94,8 @@ public sealed class KbResolveHandler : IToolHandler
         int? savings = null;
         try
         {
+            // Best-effort raw-file comparison. Sync I/O is intentional: this
+            // handler is entirely synchronous (Task.FromResult), not a forgotten await.
             if (File.Exists(resolvedPath))
             {
                 rawFileTokens = SessionLifecycle.HeuristicEstimateTokens(
@@ -126,6 +130,12 @@ public sealed class KbResolveHandler : IToolHandler
     /// </summary>
     private Entry? FindDocument(string path)
     {
+        // NOTE: Source matches the document AND all its chunks, so this
+        // materializes chunk content just to find the doc id; the chunks are
+        // then re-fetched by ParentId. Acceptable: kb_resolve is not a hot
+        // path and IStore has no ParentId-IS-NULL projection. Don't "optimize"
+        // this by filtering chunks from THIS result set — ordering and the
+        // newest-document tiebreak depend on the second query.
         var rows = _store.List(Tier.Cold, ContentType.Knowledge,
             new ListEntriesOpts { Source = path });
         return rows
