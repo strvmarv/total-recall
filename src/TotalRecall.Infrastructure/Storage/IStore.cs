@@ -187,4 +187,10 @@ public sealed record ListEntriesOpts
     /// <see cref="EntryType"/> are returned. Null means no entry-type filter.
     /// </summary>
     public EntryType? EntryType { get; init; }
+    /// <summary>
+    /// When set, only rows whose <c>source</c> column equals this value are
+    /// returned. Used by <c>kb_resolve</c> to find the ingested document for
+    /// a file path. Null means no source filter.
+    /// </summary>
+    public string? Source { get; init; }
 }

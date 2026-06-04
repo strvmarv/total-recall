@@ -146,6 +146,10 @@ public sealed class FakeStore : IStore
                 && e.ParentId.Value == pid);
         if (opts?.EntryType is { } et)
             src = src.Where(e => e.EntryType.Equals(et));
+        if (opts?.Source is string sourceFilter)
+            src = src.Where(e =>
+                Microsoft.FSharp.Core.FSharpOption<string>.get_IsSome(e.Source)
+                && e.Source.Value == sourceFilter);
         // Honor the OrderBy hint before applying Limit so top-N results are
         // globally correct (mirrors what the real SqliteStore does in SQL).
         // Supports the three columns used by RecentQuery: created_at, updated_at,

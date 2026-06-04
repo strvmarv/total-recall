@@ -320,6 +320,12 @@ VALUES
             cmd.Parameters.AddWithValue("$entry_type", EntryTypeMapping.ToDbValue(entryType));
         }
 
+        if (opts?.Source is not null)
+        {
+            whereClauses.Add("source = $source");
+            cmd.Parameters.AddWithValue("$source", opts.Source);
+        }
+
         if (whereClauses.Count > 0)
             sql.Append(" WHERE ").Append(string.Join(" AND ", whereClauses));
 

@@ -325,6 +325,12 @@ VALUES
             cmd.Parameters.AddWithValue("@entry_type", EntryTypeMapping.ToDbValue(entryType));
         }
 
+        if (opts?.Source is not null)
+        {
+            sql.Append(" AND source = @source");
+            cmd.Parameters.AddWithValue("@source", opts.Source);
+        }
+
         sql.Append(" ORDER BY ").Append(orderBy);
 
         if (opts?.Limit is int limit)
