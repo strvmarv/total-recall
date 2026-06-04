@@ -7,6 +7,8 @@
 // Surfaced). Dedup matches memory_store: identical content in the target
 // tier is skipped and counted. All facts are validated BEFORE any write so
 // a bad item mid-array cannot leave a partial batch behind.
+// Infrastructure failures mid-batch leave partial writes: each fact is an
+// independent insert transaction (matches memory_import semantics).
 
 using System;
 using System.Collections.Generic;
@@ -103,25 +105,15 @@ public sealed class MemoryExtractHandler : IToolHandler
                 throw new ArgumentException(
                     $"fact.content exceeds maximum length of {MaxContentLength} characters");
 
-            IReadOnlyList<string>? tags = null;
-            if (factEl.TryGetProperty("tags", out var tagsEl)
-                && tagsEl.ValueKind == JsonValueKind.Array)
-            {
-                var list = new List<string>();
-                foreach (var t in tagsEl.EnumerateArray())
-                {
-                    if (t.ValueKind != JsonValueKind.String)
-                        throw new ArgumentException("fact.tags must be an array of strings");
-                    list.Add(t.GetString()!);
-                }
-                tags = list;
-            }
+            var tags = ArgumentParsing.ReadTags(factEl);
 
             parsed.Add((factType, content, tags));
         }
 
         var entries = new List<MemoryExtractEntryDto>();
         var duplicates = 0;
+
+        ct.ThrowIfCancellationRequested();
 
         foreach (var (factType, content, tags) in parsed)
         {

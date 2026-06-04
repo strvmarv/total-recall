@@ -3,6 +3,7 @@
 // Phase 3 idea 2e — contract tests for MemoryExtractHandler.
 
 using System;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -19,9 +20,9 @@ namespace TotalRecall.Server.Tests.Handlers;
 public sealed class MemoryExtractHandlerTests
 {
     private static (MemoryExtractHandler handler, FakeStore store, RecordingFakeEmbedder embedder)
-        MakeHandler(string? scopeDefault = null)
+        MakeHandler(string? scopeDefault = null, bool autoIncrementIds = false)
     {
-        var store = new FakeStore();
+        var store = new FakeStore { AutoIncrementInsertIds = autoIncrementIds };
         var embedder = new RecordingFakeEmbedder();
         return (new MemoryExtractHandler(store, embedder, scopeDefault), store, embedder);
     }
@@ -35,7 +36,7 @@ public sealed class MemoryExtractHandlerTests
     [Fact]
     public async Task Extract_StoresEachFactWithMappedEntryType()
     {
-        var (handler, store, embedder) = MakeHandler();
+        var (handler, store, embedder) = MakeHandler(autoIncrementIds: true);
 
         var result = await handler.ExecuteAsync(ParseArgs("""
             {
@@ -62,6 +63,7 @@ public sealed class MemoryExtractHandlerTests
         // First entry is "decision"
         Assert.Equal("decision", dto.Entries[0].Type);
         Assert.All(dto.Entries, e => Assert.NotEmpty(e.Id));
+        Assert.Equal(3, dto.Entries.Select(e => e.Id).Distinct().Count());
 
         // Three InsertWithEmbedding calls, all Hot/Memory
         Assert.Equal(3, store.InsertWithEmbeddingCalls.Count);
