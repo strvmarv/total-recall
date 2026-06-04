@@ -144,6 +144,24 @@ UPDATE retrieval_events
     }
 
     /// <summary>
+    /// Phase 3 idea 2a — count + average latency of retrieval events at or
+    /// after <paramref name="sinceMs"/>. Used by session_refresh efficiency
+    /// stats. Filters by timestamp (not session_id) because the search
+    /// handlers log session_id as "unknown" pre-session-context.
+    /// </summary>
+    public (int Count, double AvgLatencyMs) GetStatsSince(long sinceMs)
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT COUNT(*), COALESCE(AVG(latency_ms), 0) " +
+            "FROM retrieval_events WHERE timestamp >= $since";
+        cmd.Parameters.AddWithValue("$since", sinceMs);
+        using var reader = cmd.ExecuteReader();
+        reader.Read();
+        return ((int)reader.GetInt64(0), reader.GetDouble(1));
+    }
+
+    /// <summary>
     /// SELECT events with optional filters, ordered by <c>timestamp DESC</c>.
     /// </summary>
     public IReadOnlyList<RetrievalEventRow> GetEvents(RetrievalEventQuery query)
