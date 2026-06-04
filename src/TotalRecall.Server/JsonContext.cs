@@ -781,6 +781,25 @@ public sealed record KbResolveResultDto
     public int? Savings { get; init; }
 }
 
+// ---------- Phase 3 idea 2e: memory_extract DTOs ----------
+
+public sealed record MemoryExtractEntryDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("content")] string Content);
+
+public sealed record MemoryExtractResultDto
+{
+    [JsonPropertyName("stored")]
+    public int Stored { get; init; }
+
+    [JsonPropertyName("entries")]
+    public MemoryExtractEntryDto[] Entries { get; init; } = System.Array.Empty<MemoryExtractEntryDto>();
+
+    [JsonPropertyName("duplicatesSkipped")]
+    public int DuplicatesSkipped { get; init; }
+}
+
 // ---------- Task 15: migrate_to_remote ----------
 
 public sealed record MigrateToRemoteResultDto(
@@ -910,6 +929,10 @@ public sealed record MigrateToRemoteResultDto(
 [JsonSerializable(typeof(CompactNowResultDto))]
 // ---- Task 15: migrate_to_remote ----
 [JsonSerializable(typeof(MigrateToRemoteResultDto))]
+// ---- Phase 3 idea 2e: memory_extract ----
+[JsonSerializable(typeof(MemoryExtractResultDto))]
+[JsonSerializable(typeof(MemoryExtractEntryDto))]
+[JsonSerializable(typeof(MemoryExtractEntryDto[]))]
 // ---- Phase 3 idea 2c: tool cache ----
 [JsonSerializable(typeof(CacheCheckResultDto))]
 [JsonSerializable(typeof(CacheStoreResultDto))]
