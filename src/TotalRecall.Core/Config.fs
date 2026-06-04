@@ -12,6 +12,7 @@ type HotTierConfig = {
     MaxEntries: int
     TokenBudget: int
     CarryForwardThreshold: float
+    TaskWeight: float
 }
 
 type WarmTierConfig = {
@@ -38,6 +39,13 @@ type CompactionConfig = {
     WarmThreshold: float
     PromoteThreshold: float
     WarmSweepIntervalDays: int
+    /// Phase 2 idea 1c — per-type decay half-lives (hours).
+    /// Falls back to DecayHalfLifeHours when not set for a given type.
+    DecayHalfLifeCorrection: float option
+    DecayHalfLifePreference: float option
+    DecayHalfLifeSurfaced: float option
+    DecayHalfLifeDecision: float option
+    AutoDemoteMinInjections: int
 }
 
 type EmbeddingConfig = {

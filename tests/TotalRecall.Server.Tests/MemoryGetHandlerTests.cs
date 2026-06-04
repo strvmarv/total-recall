@@ -43,7 +43,7 @@ public class MemoryGetHandlerTests
             FSharpOption<string>.None,
             "",
             EntryType.Preference,
-            "{}");
+            "{}", 0);
 
     [Fact]
     public async Task HappyPath_Found_ReturnsEntryWithLocation()

@@ -20,7 +20,7 @@ namespace TotalRecall.Infrastructure.Storage;
 /// </summary>
 public static class PostgresMigrationRunner
 {
-    private const int SchemaVersion = 2;
+    private const int SchemaVersion = 3;
 
     private const string SchemaVersionDdl = """
         CREATE TABLE IF NOT EXISTS _schema_version (
@@ -53,6 +53,7 @@ public static class PostgresMigrationRunner
             collection_id     TEXT,
             metadata          JSONB   NOT NULL DEFAULT '{}'::jsonb,
             entry_type        TEXT    NOT NULL DEFAULT 'Preference',
+            times_injected    INTEGER NOT NULL DEFAULT 0,
             owner_id          TEXT    NOT NULL DEFAULT 'local',
             visibility        TEXT    NOT NULL DEFAULT 'private',
             internal_key      BIGSERIAL NOT NULL UNIQUE,
@@ -250,6 +251,20 @@ public static class PostgresMigrationRunner
                 Exec(conn, tx, EntryTypeColumnDdl(name));
 
             RecordSchemaVersion(conn, tx, 2, now);
+        }
+
+        if (currentVersion < 3)
+        {
+            // v3: add times_injected column (Phase 2 idea 1c).
+            var timesInjectedDdl = $$"""
+                ALTER TABLE {{"{"}}{{"{"}}name{{"}"}}{{"}"}}
+                    ADD COLUMN IF NOT EXISTS times_injected INTEGER NOT NULL DEFAULT 0
+                """;
+            foreach (var name in ContentTableNames)
+                Exec(conn, tx,
+                    $"ALTER TABLE {name} ADD COLUMN IF NOT EXISTS times_injected INTEGER NOT NULL DEFAULT 0");
+
+            RecordSchemaVersion(conn, tx, 3, now);
         }
 
         tx.Commit();

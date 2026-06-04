@@ -40,7 +40,7 @@ public class KbRemoveHandlerTests
             collectionId is null ? FSharpOption<string>.None : FSharpOption<string>.Some(collectionId),
             "",
             EntryType.Preference,
-            "{}");
+            "{}", 0);
 
     [Fact]
     public async Task HappyPath_Cascade_DeletesChildrenAndRoot()

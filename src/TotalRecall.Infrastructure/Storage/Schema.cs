@@ -211,6 +211,8 @@ public static class MigrationRunner
         Migration12_SkillCacheContentAndEmbedding,
         // Migration 13: skill usage counter columns + skill_usage_events table
         Migration13_SkillUsage,
+        // Migration 14: times_injected column on all 6 content tables (Phase 2 idea 1c)
+        Migration14_TimesInjected,
     };
 
     /// <summary>
@@ -668,6 +670,27 @@ public static class MigrationRunner
             "CREATE INDEX IF NOT EXISTS ix_skill_usage_events_skill_id ON skill_usage_events(skill_id)");
         Exec(conn, tx,
             "CREATE INDEX IF NOT EXISTS ix_skill_usage_events_unsynced ON skill_usage_events(synced_at) WHERE synced_at IS NULL");
+    }
+
+    /// <summary>
+    /// Migration 14 — adds <c>times_injected</c> column to all six content
+    /// tables. Tracks how many times each entry has been fed to the host LLM
+    /// via BuildContext. Powers per-type decay enhancements and auto-demotion
+    /// of dead-weight entries (Phase 2 idea 1c).
+    /// </summary>
+    private static void Migration14_TimesInjected(
+        MsSqliteConnection conn,
+        Microsoft.Data.Sqlite.SqliteTransaction tx)
+    {
+        foreach (var (tier, type) in AllTablePairs)
+        {
+            var table = TableName(tier, type);
+            using var alter = conn.CreateCommand();
+            alter.Transaction = tx;
+            alter.CommandText =
+                $"ALTER TABLE {table} ADD COLUMN times_injected INTEGER NOT NULL DEFAULT 0";
+            alter.ExecuteNonQuery();
+        }
     }
 
     // --- helpers ----------------------------------------------------------

@@ -1,6 +1,7 @@
 module TotalRecall.Core.Decay
 
 open TotalRecall.Core
+open TotalRecall.Core.Config
 
 // Decay score calculation. Pure function over entry metadata.
 //
@@ -32,6 +33,38 @@ let typeWeight (entryType: EntryType) : float =
     | Imported -> 1.1
     | Compacted -> 1.0
     | Ingested -> 0.9
+
+/// Phase 2 idea 1c — resolve the per-type decay half-life from config.
+/// Falls back to the generic decay_half_life_hours when a per-type
+/// override is not set. Values are in hours (e.g. Correction = 720 = 30 days).
+///
+/// Defaults (from spec §6):
+///   Correction: 720h (30d)
+///   Preference: 336h (14d)
+///   Surfaced:    72h  (3d)
+///   Decision:   168h  (7d)
+///   All others: fall back to config.Compaction.DecayHalfLifeHours
+let decayConstantHours (entryType: EntryType) (config: Config.CompactionConfig) : float =
+    match entryType with
+    | Correction ->
+        match config.DecayHalfLifeCorrection with
+        | Some v -> v
+        | None -> config.DecayHalfLifeHours
+    | Preference ->
+        match config.DecayHalfLifePreference with
+        | Some v -> v
+        | None -> config.DecayHalfLifeHours
+    | Decision ->
+        match config.DecayHalfLifeDecision with
+        | Some v -> v
+        | None -> config.DecayHalfLifeHours
+    | Surfaced ->
+        match config.DecayHalfLifeSurfaced with
+        | Some v -> v
+        | None -> config.DecayHalfLifeHours
+    | Imported
+    | Compacted
+    | Ingested -> config.DecayHalfLifeHours
 
 /// Calculate a decay score for an entry given its access metadata, type,
 /// the current time, and the decay-constant (named "half life" in the

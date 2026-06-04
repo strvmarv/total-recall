@@ -29,7 +29,7 @@ public class MemoryRecentHandlerTests
             FSharpOption<SourceTool>.None, FSharpOption<string>.None,
             ListModule.OfSeq(Array.Empty<string>()),
             ts, ts + 1, ts + 2, 0, 0.5,
-            FSharpOption<string>.None, FSharpOption<string>.None, "user:local", type, "{}");
+            FSharpOption<string>.None, FSharpOption<string>.None, "user:local", type, "{}", 0);
 
     private static Entry MakeEntryTs(string id, long created, long updated, long lastAccessed, EntryType type) =>
         new(
@@ -38,7 +38,7 @@ public class MemoryRecentHandlerTests
             FSharpOption<SourceTool>.None, FSharpOption<string>.None,
             ListModule.OfSeq(Array.Empty<string>()),
             created, updated, lastAccessed, 0, 0.5,
-            FSharpOption<string>.None, FSharpOption<string>.None, "user:local", type, "{}");
+            FSharpOption<string>.None, FSharpOption<string>.None, "user:local", type, "{}", 0);
 
     [Fact]
     public void Name_IsWireContract()

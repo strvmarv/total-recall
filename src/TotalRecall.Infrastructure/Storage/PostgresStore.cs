@@ -104,21 +104,25 @@ public sealed class PostgresStore : IStore, IMetaStore
 INSERT INTO {table}
   (id, tier, content, summary, source, source_tool, project, tags,
    created_at, updated_at, last_accessed_at, access_count,
-   decay_score, parent_id, collection_id, metadata, owner_id, scope, entry_type)
+   decay_score, parent_id, collection_id, metadata, owner_id, scope, entry_type,
+   times_injected)
 VALUES
   (@id, @tier, @content, @summary, @source, @source_tool, @project, @tags,
    @created_at, @updated_at, @last_accessed_at, @access_count,
-   @decay_score, @parent_id, @collection_id, @metadata, @owner_id, @scope, @entry_type)";
+   @decay_score, @parent_id, @collection_id, @metadata, @owner_id, @scope, @entry_type,
+   @times_injected)";
 
     private static string BuildInsertWithEmbeddingSql(string table) => $@"
 INSERT INTO {table}
   (id, tier, content, summary, source, source_tool, project, tags,
    created_at, updated_at, last_accessed_at, access_count,
-   decay_score, parent_id, collection_id, metadata, owner_id, scope, entry_type, embedding)
+   decay_score, parent_id, collection_id, metadata, owner_id, scope, entry_type,
+   times_injected, embedding)
 VALUES
   (@id, @tier, @content, @summary, @source, @source_tool, @project, @tags,
    @created_at, @updated_at, @last_accessed_at, @access_count,
-   @decay_score, @parent_id, @collection_id, @metadata, @owner_id, @scope, @entry_type, @embedding)";
+   @decay_score, @parent_id, @collection_id, @metadata, @owner_id, @scope, @entry_type,
+   @times_injected, @embedding)";
 
     private static void BindInsertParameters(
         NpgsqlCommand cmd,
@@ -161,6 +165,7 @@ VALUES
         cmd.Parameters.AddWithValue(
             "@entry_type",
             EntryTypeMapping.ToDbValue(opts.EntryType ?? EntryType.Preference));
+        cmd.Parameters.AddWithValue("@times_injected", 0);
     }
 
     public Entry? Get(Tier tier, ContentType type, string id)
@@ -468,11 +473,13 @@ VALUES
 INSERT INTO {toTable}
   (id, tier, content, summary, source, source_tool, project, tags,
    created_at, updated_at, last_accessed_at, access_count,
-   decay_score, parent_id, collection_id, metadata, owner_id, scope, entry_type)
+   decay_score, parent_id, collection_id, metadata, owner_id, scope, entry_type,
+   times_injected)
 VALUES
   (@id, @tier, @content, @summary, @source, @source_tool, @project, @tags,
    @created_at, @updated_at, @last_accessed_at, @access_count,
-   @decay_score, @parent_id, @collection_id, @metadata, @owner_id, @scope, @entry_type)";
+   @decay_score, @parent_id, @collection_id, @metadata, @owner_id, @scope, @entry_type,
+   @times_injected)";
 
                     insertCmd.Parameters.AddWithValue("@id", entry.Id);
                     insertCmd.Parameters.AddWithValue("@tier", toTierStr);
@@ -506,6 +513,7 @@ VALUES
                     insertCmd.Parameters.AddWithValue("@scope", entry.Scope);
                     insertCmd.Parameters.AddWithValue(
                         "@entry_type", EntryTypeMapping.ToDbValue(entry.EntryType));
+                    insertCmd.Parameters.AddWithValue("@times_injected", entry.TimesInjected);
                     insertCmd.ExecuteNonQuery();
                 }
 
@@ -582,6 +590,8 @@ VALUES
         var entryTypeStr = ReadNullableStringRaw(reader, "entry_type");
         var entryType = EntryTypeMapping.ParseOrDefault(entryTypeStr);
         var metadataJson = ReadNullableStringRaw(reader, "metadata") ?? "{}";
+        var timesInjected = reader.IsDBNull(reader.GetOrdinal("times_injected"))
+            ? 0 : reader.GetInt32(reader.GetOrdinal("times_injected"));
 
         return new Entry(
             id,
@@ -600,7 +610,8 @@ VALUES
             collectionId,
             scope,
             entryType,
-            metadataJson);
+            metadataJson,
+            timesInjected);
     }
 
     private static FSharpOption<string> ReadNullableString(NpgsqlDataReader reader, string name)
@@ -703,6 +714,30 @@ VALUES
     /// proper SQL syntax.
     /// </summary>
     private static string EscapeLiteral(string key) => $"'{key}'";
+
+    /// <summary>
+    /// Phase 2 idea 1c — batch-increments times_injected for each entry.
+    /// Groups by tier+type and issues one UPDATE per table using ANY(@ids).
+    /// </summary>
+    public void UpdateInjectionCounts(IReadOnlyList<(Tier tier, ContentType type, string id)> entries)
+    {
+        if (entries is null || entries.Count == 0) return;
+
+        foreach (var group in entries.GroupBy(x => (x.tier, x.type)))
+        {
+            var table = TableName(group.Key.type);
+            var tierStr = TierString(group.Key.tier);
+            var ids = group.Select(x => x.id).ToArray();
+
+            using var conn = _dataSource.OpenConnection();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                $"UPDATE {table} SET times_injected = times_injected + 1 WHERE tier = @tier AND id = ANY(@ids)";
+            cmd.Parameters.AddWithValue("@tier", tierStr);
+            cmd.Parameters.Add(new NpgsqlParameter("@ids", ids));
+            cmd.ExecuteNonQuery();
+        }
+    }
 
     // --- IMetaStore -----------------------------------------------------
 

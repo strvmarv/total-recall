@@ -33,7 +33,7 @@ public class KbSummarizeHandlerTests
             FSharpOption<SourceTool>.None, FSharpOption<string>.None,
             ListModule.OfSeq(Array.Empty<string>()),
             100L, 200L, 300L, 0, 0.5,
-            FSharpOption<string>.None, FSharpOption<string>.None, "", EntryType.Preference, "{}");
+            FSharpOption<string>.None, FSharpOption<string>.None, "", EntryType.Preference, "{}", 0);
 
     [Fact]
     public async Task HappyPath_NoPriorSummary_SetsIt()

@@ -57,7 +57,7 @@ public sealed class BenchmarkRunnerTests : IDisposable
                 FSharpOption<string>.None,
                 "",
                 opts.EntryType ?? EntryType.Preference,
-                opts.MetadataJson ?? "{}");
+                opts.MetadataJson ?? "{}", 0);
             Entries[id] = entry;
             return id;
         }
@@ -88,6 +88,7 @@ public sealed class BenchmarkRunnerTests : IDisposable
             => Array.Empty<Entry>();
         public void Move(Tier fromTier, ContentType fromType, Tier toTier, ContentType toType, string id) { }
         public string? FindByContent(Tier tier, ContentType type, string content) => null;
+        public void UpdateInjectionCounts(IReadOnlyList<(Tier tier, ContentType type, string id)> entries) { }
     }
 
     private sealed class FakeVectorSearch : IVectorSearch

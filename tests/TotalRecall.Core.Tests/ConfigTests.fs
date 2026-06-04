@@ -82,7 +82,7 @@ let configTests =
         testCase "TotalRecallConfig record can be constructed" <| fun _ ->
             let cfg : TotalRecallConfig = {
                 Tiers = {
-                    Hot = { MaxEntries = 50; TokenBudget = 8000; CarryForwardThreshold = 0.5 }
+                    Hot = { MaxEntries = 50; TokenBudget = 8000; CarryForwardThreshold = 0.5; TaskWeight = 0.0 }
                     Warm = { MaxEntries = 200; RetrievalTopK = 10; SimilarityThreshold = 0.5; ColdDecayDays = 30 }
                     Cold = { ChunkMaxTokens = 500; ChunkOverlapTokens = 50; LazySummaryThreshold = 100 }
                 }
@@ -91,6 +91,11 @@ let configTests =
                     WarmThreshold = 0.5
                     PromoteThreshold = 0.7
                     WarmSweepIntervalDays = 7
+                    DecayHalfLifeCorrection = None
+                    DecayHalfLifePreference = None
+                    DecayHalfLifeSurfaced = None
+                    DecayHalfLifeDecision = None
+                    AutoDemoteMinInjections = 10
                 }
                 Embedding = { Model = "all-MiniLM-L6-v2"; Dimensions = 384; Provider = None; Endpoint = None; BedrockRegion = None; BedrockModel = None; ModelName = None; ApiKey = None }
                 Regression = None

@@ -115,6 +115,7 @@ public sealed class HybridSearchTests
             => throw new NotImplementedException();
         public string? FindByContent(Tier tier, ContentType type, string content)
             => throw new NotImplementedException();
+        public void UpdateInjectionCounts(IReadOnlyList<(Tier tier, ContentType type, string id)> entries) => throw new NotImplementedException();
     }
 
     // --- helpers ----------------------------------------------------------
@@ -137,7 +138,7 @@ public sealed class HybridSearchTests
             FSharpOption<string>.None,
             "",
             EntryType.Preference,
-            "{}");
+            "{}", 0);
 
     private static (HybridSearch search, FakeVectorSearch v, FakeFtsSearch f, FakeStore s) NewFixture()
     {

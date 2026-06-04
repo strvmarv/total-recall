@@ -249,7 +249,10 @@ public sealed class ConfigLoader : IConfigLoader
         var hotCfg = new Core.Config.HotTierConfig(
             GetInt(hot, "max_entries"),
             GetInt(hot, "token_budget"),
-            GetDouble(hot, "carry_forward_threshold"));
+            GetDouble(hot, "carry_forward_threshold"),
+            hot.TryGetValue("task_weight", out var tw)
+                ? Convert.ToDouble(tw)
+                : 0.0);
 
         var warmCfg = new Core.Config.WarmTierConfig(
             GetInt(warm, "max_entries"),
@@ -269,7 +272,14 @@ public sealed class ConfigLoader : IConfigLoader
             GetDouble(compaction, "decay_half_life_hours"),
             GetDouble(compaction, "warm_threshold"),
             GetDouble(compaction, "promote_threshold"),
-            GetInt(compaction, "warm_sweep_interval_days"));
+            GetInt(compaction, "warm_sweep_interval_days"),
+            TryGetDouble(compaction, "decay_half_life_correction"),
+            TryGetDouble(compaction, "decay_half_life_preference"),
+            TryGetDouble(compaction, "decay_half_life_surfaced"),
+            TryGetDouble(compaction, "decay_half_life_decision"),
+            compaction.TryGetValue("auto_demote_min_injections", out var admi)
+                ? Convert.ToInt32(admi)
+                : 10);
 
         var embedding = GetTable(table, "embedding");
         var embeddingCfg = new Core.Config.EmbeddingConfig(

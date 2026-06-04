@@ -1,6 +1,6 @@
 # Handlers — Agent Guide
 
-This directory contains **one file per MCP tool handler** (38 total). Each handler is a `sealed class` implementing `IToolHandler`.
+This directory contains **one file per MCP tool handler** (39 total). Each handler is a `sealed class` implementing `IToolHandler`.
 
 ---
 
@@ -122,7 +122,7 @@ Never use `JsonSerializer.Serialize(obj)` with the reflection-based overload.
 |-------|-------|----------|
 | Memory | 15 | store, search, get, update, delete, promote, demote, inspect, history, recent, list, get_all, lineage, export, import |
 | KB | 7 | search, ingest_file, ingest_dir, list_collections, refresh, remove, summarize |
-| Session | 3 | start, end, context |
+| Session | 4 | start, end, context, refresh |
 | Eval | 5 | report, benchmark, compare, snapshot, grow |
 | Config | 2 | get, set |
 | Misc | 5 | status, import_host, compact_now, migrate_to_remote, usage_status |

@@ -265,4 +265,6 @@ public sealed class FakeStore : IStore
         if (Rowids.Remove((fromTier, fromType, id)))
             Rowids[(toTier, toType, id)] = _nextRowid++;
     }
+
+    public void UpdateInjectionCounts(IReadOnlyList<(Tier tier, ContentType type, string id)> entries) { }
 }

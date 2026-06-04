@@ -17,9 +17,12 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.FSharp.Core;
 using TotalRecall.Core;
+using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Importers;
 using TotalRecall.Infrastructure.Skills;
 using TotalRecall.Infrastructure.Storage;
@@ -46,11 +49,15 @@ public sealed class SessionLifecycle : ISessionLifecycle
     private readonly TotalRecall.Infrastructure.Usage.UsageIndexer? _usageIndexer;
     private readonly TotalRecall.Infrastructure.Usage.UsageQueryService? _usageQuery;
     private readonly ISkillImportService? _skillImportService;
+    private readonly IEmbedder? _embedder;
     private readonly int _tokenBudget;
     private readonly int _maxEntries;
+    private readonly int _autoDemoteMinInjections;
+    private readonly double _taskWeight;
 
     private readonly SemaphoreSlim _initLock = new(1, 1);
     private SessionInitResult? _cached;
+    private DateTimeOffset _sessionStartedAt = DateTimeOffset.MinValue;
 
     public SessionLifecycle(
         IReadOnlyList<IImporter> importers,
@@ -64,7 +71,10 @@ public sealed class SessionLifecycle : ISessionLifecycle
         TimeSpan? skillImportTimeout = null, // kept for source compat; ignored — import is fire-and-forget
         int tokenBudget = 4000,
         int maxEntries = 50,
-        TotalRecall.Infrastructure.Usage.UsageQueryService? usageQuery = null)
+        TotalRecall.Infrastructure.Usage.UsageQueryService? usageQuery = null,
+        IEmbedder? embedder = null,
+        int autoDemoteMinInjections = 10,
+        double taskWeight = 0.0)
     {
         ArgumentNullException.ThrowIfNull(importers);
         ArgumentNullException.ThrowIfNull(store);
@@ -78,8 +88,11 @@ public sealed class SessionLifecycle : ISessionLifecycle
         _usageQuery = usageQuery;
         _storageMode = storageMode;
         _skillImportService = skillImportService;
+        _embedder = embedder;
         _tokenBudget = tokenBudget > 0 ? tokenBudget : 4000;
         _maxEntries = maxEntries > 0 ? maxEntries : 50;
+        _autoDemoteMinInjections = autoDemoteMinInjections > 0 ? autoDemoteMinInjections : 10;
+        _taskWeight = taskWeight >= 0 && taskWeight <= 1 ? taskWeight : 0.0;
     }
 
     /// <inheritdoc />
@@ -98,6 +111,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         {
             if (_cached is not null) return _cached;
             _cached = RunInit();
+            _sessionStartedAt = DateTimeOffset.UtcNow;
             return _cached;
         }
         finally
@@ -246,8 +260,30 @@ public sealed class SessionLifecycle : ISessionLifecycle
                 + _store.Count(Tier.Cold, ContentType.Knowledge),
             Collections: _store.CountKnowledgeCollections());
 
-        // 5. Context string assembly — matches TS session-tools.ts:260-264.
-        var (baseContext, hotContextTruncated) = BuildContext(hotEntries, _tokenBudget);
+        // 5. Context string assembly — dynamic detail levels, extractive truncation.
+        var ctxResult = BuildContext(hotEntries, new BuildContextOptions
+        {
+            TokenBudget = _tokenBudget,
+        });
+        var baseContext = ctxResult.Context;
+        var hotContextTruncated = ctxResult.Truncated;
+
+        // Phase 2 idea 1c — increment times_injected for every entry that
+        // was injected into the host LLM context. Batch update per-tier/type.
+        if (ctxResult.InjectedIds.Count > 0)
+        {
+            try
+            {
+                var injectionTuples = ctxResult.InjectedIds
+                    .Select(id => (Tier.Hot, ContentType.Memory, id))
+                    .ToList();
+                _store.UpdateInjectionCounts(injectionTuples);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"total-recall: injection tracking failed: {ex.Message}");
+            }
+        }
 
         // Append skills block after a blank-line separator when both parts are non-empty.
         string context;
@@ -290,13 +326,31 @@ public sealed class SessionLifecycle : ISessionLifecycle
             SmokeTest: null, // TODO(Plan 5+): smoke test not ported
             RegressionAlerts: null, // TODO(Plan 5+): regression detection not ported
             Storage: _storageMode,
-            HotContextTruncated: hotContextTruncated);
+            HotContextTruncated: hotContextTruncated,
+            SessionAgeHint: null); // fresh session, no hint needed
     }
 
     private void RunWarmSweep()
     {
         try
         {
+            // Phase 2 idea 1c — auto-demote dead-weight hot entries:
+            // entries that have been injected many times but never accessed.
+            var allHot = _store.List(Tier.Hot, ContentType.Memory);
+            var deadWeights = allHot
+                .Where(e => e.TimesInjected >= _autoDemoteMinInjections && e.AccessCount == 0)
+                .ToList();
+
+            foreach (var entry in deadWeights)
+            {
+                try
+                {
+                    _store.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, entry.Id);
+                }
+                catch (InvalidOperationException) { }
+            }
+
+            // Existing max-entry enforcement
             var count = _store.Count(Tier.Hot, ContentType.Memory);
             if (count <= _maxEntries) return;
 
@@ -304,8 +358,11 @@ public sealed class SessionLifecycle : ISessionLifecycle
             var toEvict = _store.List(Tier.Hot, ContentType.Memory,
                 new ListEntriesOpts { OrderBy = "decay_score ASC", Limit = excess });
 
+            // Filter out entries already auto-demoted above
+            var deadWeightIds = new HashSet<string>(deadWeights.Select(e => e.Id));
             foreach (var entry in toEvict)
             {
+                if (deadWeightIds.Contains(entry.Id)) continue;
                 try { _store.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, entry.Id); }
                 catch (InvalidOperationException) { } // entry deleted by concurrent write — skip
             }
@@ -373,60 +430,440 @@ public sealed class SessionLifecycle : ISessionLifecycle
 
     /// <summary>
     /// Builds the hot-tier context block fed back to the host LLM. Entries are
-    /// sorted by <see cref="Entry.DecayScore"/> descending and then rendered as
-    /// <c>"- {content}{tags_suffix}"</c> with
-    /// <c>tags_suffix</c> = <c>" [tag1, tag2]"</c> when tags are present, empty
-    /// otherwise. Lines joined with '\n'. Enforces a token budget (1 token ≈ 4 chars).
-    /// Returns a tuple of the context string and a boolean indicating whether the
-    /// output was truncated due to the budget. Mirrors TS lines 260-264.
+    /// sorted by <see cref="Entry.DecayScore"/> descending. Uses heuristic token
+    /// estimation for budget ceiling checks and optional BERT counting for
+    /// precision reporting. Supports dynamic detail levels (Full → Summary →
+    /// Compact), extractive truncation when an entry doesn't fit, extractive
+    /// summary fallback, compact footer, and injected-ID tracking.
     /// </summary>
-    public static (string Context, bool Truncated) BuildContext(
+    public static BuildContextResult BuildContext(
         IReadOnlyList<Entry> hotEntries,
-        int tokenBudget = 4000)
+        BuildContextOptions options)
     {
-        if (hotEntries.Count == 0) return (string.Empty, false);
+        if (hotEntries.Count == 0)
+            return new BuildContextResult
+            {
+                Context = string.Empty,
+                Truncated = false,
+                TokenCount = 0,
+                EntriesFull = 0,
+                EntriesSummary = 0,
+                EntriesCompact = 0,
+                InjectedIds = Array.Empty<string>(),
+                CompactIds = Array.Empty<string>(),
+            };
 
-        var maxChars = tokenBudget * 4;
-        var sorted = hotEntries.OrderByDescending(e => e.DecayScore);
+        var maxTokens = options.TokenBudget;
+        var estimateTokens = options.EstimateTokens
+            ?? HeuristicEstimateTokens;
+        var exactCountTokens = options.CountTokens;
+        var autoTag = options.AutoTag;
+
+        var sorted = hotEntries.OrderByDescending(e => e.DecayScore).ToList();
         var result = new StringBuilder();
-        var charsUsed = 0;
+        var estimatedTokens = 0;
         var first = true;
         var truncated = false;
+        var entriesFull = 0;
+        var entriesSummary = 0;
+        var entriesCompact = 0;
+        var injectedIds = new List<string>();
+        var compactIds = new List<string>();
 
         foreach (var e in sorted)
         {
-            var line = BuildContextLine(e);
-            var needed = (first ? 0 : 1) + line.Length; // '\n' separator between entries
-
-            if (charsUsed + needed > maxChars)
+            var remaining = maxTokens - estimatedTokens;
+            if (remaining <= 0)
             {
                 truncated = true;
                 break;
             }
 
+            var detail = GetDetailLevel(e, remaining, estimateTokens, autoTag);
+            if (detail is null)
+            {
+                // Even compact view doesn't fit — try extractive truncation
+                var truncatedLine = TruncateEntry(e, remaining, estimateTokens, exactCountTokens, autoTag);
+                if (truncatedLine is not null)
+                {
+                    var lineEst = estimateTokens(truncatedLine);
+                    if (estimatedTokens + lineEst > maxTokens)
+                    {
+                        truncated = true;
+                        break;
+                    }
+                    if (!first) result.Append('\n');
+                    result.Append(truncatedLine);
+                    estimatedTokens += (first ? 0 : 1) + lineEst;
+                    injectedIds.Add(e.Id);
+                    entriesSummary++;
+                    first = false;
+                }
+                truncated = true;
+                break;
+            }
+
+            var entryText = RenderEntry(e, detail.Value, autoTag);
+            var entryEst = estimateTokens(entryText);
+            var needed = (first ? 0 : 1) + entryEst;
+
+            if (estimatedTokens + needed > maxTokens)
+            {
+                // Try downgrading to next detail level
+                if (detail.Value == DetailLevel.Full)
+                {
+                    var summaryText = RenderEntry(e, DetailLevel.Summary, autoTag);
+                    var summaryEst = estimateTokens(summaryText);
+                    var summaryNeeded = (first ? 0 : 1) + summaryEst;
+                    if (estimatedTokens + summaryNeeded <= maxTokens)
+                    {
+                        entryText = summaryText;
+                        entryEst = summaryEst;
+                        needed = summaryNeeded;
+                        detail = DetailLevel.Summary;
+                        entriesSummary++;
+                    }
+                    else
+                    {
+                        var compactText = RenderEntry(e, DetailLevel.Compact, autoTag);
+                        var compactEst = estimateTokens(compactText);
+                        var compactNeeded = (first ? 0 : 1) + compactEst;
+                        if (estimatedTokens + compactNeeded <= maxTokens)
+                        {
+                            entryText = compactText;
+                            entryEst = compactEst;
+                            needed = compactNeeded;
+                            detail = DetailLevel.Compact;
+                            entriesCompact++;
+                            compactIds.Add(e.Id);
+                        }
+                        else
+                        {
+                            truncated = true;
+                            break;
+                        }
+                    }
+                }
+                else if (detail.Value == DetailLevel.Summary)
+                {
+                    var compactText = RenderEntry(e, DetailLevel.Compact, autoTag);
+                    var compactEst = estimateTokens(compactText);
+                    var compactNeeded = (first ? 0 : 1) + compactEst;
+                    if (estimatedTokens + compactNeeded <= maxTokens)
+                    {
+                        entryText = compactText;
+                        entryEst = compactEst;
+                        needed = compactNeeded;
+                        detail = DetailLevel.Compact;
+                        entriesCompact++;
+                        compactIds.Add(e.Id);
+                    }
+                    else
+                    {
+                        truncated = true;
+                        break;
+                    }
+                }
+                else
+                {
+                    truncated = true;
+                    break;
+                }
+            }
+
             if (!first) result.Append('\n');
-            result.Append(line);
-            charsUsed += needed;
+            result.Append(entryText);
+            estimatedTokens += needed;
+            injectedIds.Add(e.Id);
+            if (detail.Value == DetailLevel.Full) entriesFull++;
             first = false;
         }
 
-        return (result.ToString(), truncated);
+        // Compact footer (only if it fits in remaining budget)
+        if (compactIds.Count > 0)
+        {
+            var footer = BuildCompactFooter(compactIds);
+            var footerEst = estimateTokens(footer);
+            if (estimatedTokens + footerEst <= maxTokens)
+            {
+                result.Append(footer);
+                estimatedTokens += footerEst;
+            }
+        }
+
+        var context = result.ToString();
+        var exactCount = exactCountTokens?.Invoke(context) ?? estimatedTokens;
+
+        return new BuildContextResult
+        {
+            Context = context,
+            Truncated = truncated,
+            TokenCount = exactCount,
+            EntriesFull = entriesFull,
+            EntriesSummary = entriesSummary,
+            EntriesCompact = entriesCompact,
+            InjectedIds = injectedIds,
+            CompactIds = compactIds,
+        };
     }
 
-    private static string BuildContextLine(Entry e)
+    // ---------- BuildContext helpers ----------
+
+    internal enum DetailLevel { Full, Summary, Compact }
+
+    /// <summary>
+    /// Default heuristic: word count * 0.75. Used when no estimate delegate is
+    /// provided. ~20% error is acceptable for budget ceiling checks.
+    /// </summary>
+    internal static int HeuristicEstimateTokens(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return 0;
+        return (int)Math.Ceiling(
+            text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length * 0.75);
+    }
+
+    internal static DetailLevel? GetDetailLevel(
+        Entry e,
+        int remainingBudget,
+        Func<string, int> estimateTokens,
+        Func<EntryType, string[]?, string?, string>? autoTag)
+    {
+        var fullText = BuildContextLine(e, autoTag);
+        if (estimateTokens(fullText) <= remainingBudget)
+            return DetailLevel.Full;
+
+        var summary = e.Summary is not null && FSharpOption<string>.get_IsSome(e.Summary)
+            ? e.Summary.Value
+            : ExtractFirstSentences(e.Content, 50);
+        var summaryText = RenderEntryDetail(e, DetailLevel.Summary, autoTag, summary);
+        if (estimateTokens(summaryText) <= remainingBudget)
+            return DetailLevel.Summary;
+
+        var compactText = RenderEntryDetail(e, DetailLevel.Compact, autoTag, null);
+        if (estimateTokens(compactText) <= remainingBudget)
+            return DetailLevel.Compact;
+
+        return null;
+    }
+
+    internal static string RenderEntry(Entry e, DetailLevel detail,
+        Func<EntryType, string[]?, string?, string>? autoTag)
+    {
+        var summary = (detail == DetailLevel.Summary && e.Summary is not null
+            && FSharpOption<string>.get_IsSome(e.Summary))
+            ? e.Summary.Value
+            : detail == DetailLevel.Summary
+                ? ExtractFirstSentences(e.Content, 50)
+                : null;
+
+        return RenderEntryDetail(e, detail, autoTag, summary);
+    }
+
+    internal static string RenderEntryDetail(Entry e, DetailLevel detail,
+        Func<EntryType, string[]?, string?, string>? autoTag,
+        string? summaryFallback)
+    {
+        if (detail == DetailLevel.Full)
+            return BuildContextLine(e, autoTag);
+        if (detail == DetailLevel.Compact)
+            return FormatCompactEntry(e, autoTag);
+        // Summary
+        var content = summaryFallback
+            ?? (e.Summary is not null && FSharpOption<string>.get_IsSome(e.Summary)
+                ? e.Summary.Value
+                : ExtractFirstSentences(e.Content, 50));
+        return BuildContextLineForContent(e, content, autoTag);
+    }
+
+    internal static string BuildContextLine(Entry e,
+        Func<EntryType, string[]?, string?, string>? autoTag = null)
+    {
+        if (autoTag is not null)
+        {
+            var tags = (IEnumerable<string>)e.Tags;
+            var tagList = tags as string[] ?? tags.ToArray();
+            return BuildContextLineCommon(e.Id, e.Content, tagList, autoTag(e.EntryType, tagList.Length > 0 ? tagList : null, e.Content));
+        }
+        return BuildContextLineForContent(e, e.Content, null);
+    }
+
+    internal static string BuildContextLineForContent(Entry e, string content,
+        Func<EntryType, string[]?, string?, string>? autoTag)
+    {
+        var tags = (IEnumerable<string>)e.Tags;
+        var tagList = tags as string[] ?? tags.ToArray();
+        if (autoTag is not null)
+        {
+            return BuildContextLineCommon(e.Id, content, tagList,
+                autoTag(e.EntryType, tagList.Length > 0 ? tagList : null, content));
+        }
+        return BuildContextLineCommon(e.Id, content, tagList, null);
+    }
+
+    private static string BuildContextLineCommon(string id, string content,
+        string[] tags, string? tagString)
     {
         var sb = new StringBuilder("- ");
-        sb.Append(e.Content);
-        // Entry.Tags is FSharpList<string>; iterate as IEnumerable<string>.
-        var tags = (IEnumerable<string>)e.Tags;
-        var tagList = tags as IList<string> ?? tags.ToList();
-        if (tagList.Count > 0)
+        sb.Append(content);
+        if (tagString is not null && tagString.Length > 0)
+        {
+            sb.Append(' ').Append(tagString);
+        }
+        else if (tags.Length > 0)
         {
             sb.Append(" [");
-            sb.Append(string.Join(", ", tagList));
+            sb.Append(string.Join(", ", tags));
             sb.Append(']');
         }
         return sb.ToString();
+    }
+
+    internal static string FormatCompactEntry(Entry e,
+        Func<EntryType, string[]?, string?, string>? autoTag)
+    {
+        var tags = (IEnumerable<string>)e.Tags;
+        var tagList = tags as string[] ?? tags.ToArray();
+        var tagStr = autoTag is not null
+            ? autoTag(e.EntryType, tagList.Length > 0 ? tagList : null, e.Content)
+            : FormatCompactTagsBasic(e.EntryType, tagList);
+        var project = e.Project is not null && FSharpOption<string>.get_IsSome(e.Project)
+            ? $" (project: {e.Project.Value})"
+            : "";
+        return $"- {tagStr}{project}";
+    }
+
+    /// <summary>
+    /// Fallback compact tag formatting when AutoTagger is not available.
+    /// Uses entry_type + user tags only (no keyword extraction).
+    /// </summary>
+    internal static string FormatCompactTagsBasic(EntryType entryType, string[] userTags)
+    {
+        var entryTypeStr = EntryTypeToString(entryType);
+        var allTags = new List<string> { entryTypeStr };
+        if (userTags.Length > 0)
+            allTags.AddRange(userTags.Take(3));
+        var tagStr = string.Join(", ", allTags.Distinct());
+        if (tagStr.Length <= 60) return $"[{tagStr}]";
+        // Truncate
+        var result = $"[{entryTypeStr}";
+        foreach (var t in allTags.Skip(1))
+        {
+            var candidate = $"{result}, {t}";
+            if (candidate.Length + 1 > 60) break;
+            result = candidate;
+        }
+        return $"{result}]";
+    }
+
+    /// <summary>
+    /// AOT-safe EntryType to lowercase string. Does NOT use .ToString()
+    /// which can fail under NativeAOT trimming of StructuredPrintfImpl.
+    /// </summary>
+    internal static string EntryTypeToString(EntryType entryType)
+    {
+        if (entryType.IsCorrection) return "correction";
+        if (entryType.IsPreference) return "preference";
+        if (entryType.IsDecision) return "decision";
+        if (entryType.IsSurfaced) return "surfaced";
+        if (entryType.IsImported) return "imported";
+        if (entryType.IsCompacted) return "compacted";
+        if (entryType.IsIngested) return "ingested";
+        return "unknown";
+    }
+
+    /// <summary>
+    /// Extractive truncation: when an entry doesn't fit in remaining budget,
+    /// try to include a sentence-level prefix. Prefer Summary if available.
+    /// Returns null if even a minimal fragment doesn't fit.
+    /// </summary>
+    internal static string? TruncateEntry(
+        Entry e,
+        int remaining,
+        Func<string, int> estimateTokens,
+        Func<string, int>? exactCountTokens,
+        Func<EntryType, string[]?, string?, string>? autoTag)
+    {
+        if (remaining <= 20) return null; // minimum fragment threshold
+
+        // Prefer summary if available
+        if (e.Summary is not null && FSharpOption<string>.get_IsSome(e.Summary))
+        {
+            var summary = e.Summary.Value;
+            if (estimateTokens(summary) <= remaining)
+                return BuildContextLineForContent(e, summary, autoTag);
+        }
+
+        // Sentence-level truncation
+        var sentences = SplitSentences(e.Content);
+        var sb = new StringBuilder();
+        foreach (var s in sentences)
+        {
+            var candidate = sb.Length == 0 ? s : sb.ToString() + " " + s;
+            var candidateText = BuildContextLineForContent(e, candidate, autoTag);
+            if (estimateTokens(candidateText) > remaining)
+            {
+                if (sb.Length == 0) return null; // first sentence doesn't fit
+                break;
+            }
+            sb.Append(sb.Length == 0 ? s : " " + s);
+        }
+
+        if (sb.Length == 0) return null;
+
+        // Verify with exact count if available; bisect if still over
+        var text = BuildContextLineForContent(e, sb.ToString() + " [...]", autoTag);
+        if (exactCountTokens is not null)
+        {
+            if (exactCountTokens(text) > remaining)
+            {
+                // Bisect to make space
+                while (sb.Length > 20)
+                {
+                    sb.Length = sb.Length / 2;
+                    text = BuildContextLineForContent(e, sb.ToString() + " [...]", autoTag);
+                    if (exactCountTokens(text) <= remaining) break;
+                }
+            }
+        }
+        return text;
+    }
+
+    /// <summary>
+    /// Extracts the first sentences of content up to roughly maxTokens
+    /// (estimated via word-count heuristic). Used as summary fallback when
+    /// entry.Summary is null.
+    /// </summary>
+    internal static string ExtractFirstSentences(string content, int maxTokens)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return content;
+        var sentences = SplitSentences(content);
+        var sb = new StringBuilder();
+        var charBudget = maxTokens * 4;
+        foreach (var s in sentences)
+        {
+            var candidate = sb.Length == 0 ? s : sb.ToString() + " " + s;
+            if (candidate.Length > charBudget) break;
+            sb.Append(sb.Length == 0 ? s : " " + s);
+        }
+        return sb.Length > 0 ? sb.ToString() : content[..Math.Min(content.Length, charBudget)];
+    }
+
+    /// <summary>
+    /// Split content on sentence boundaries (. ! ? followed by space, or double newline).
+    /// </summary>
+    private static string[] SplitSentences(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return Array.Empty<string>();
+        // Split on sentence-ending punctuation followed by space, or double newline
+        var parts = Regex.Split(text, @"(?<=[.!?])\s+|\n\n");
+        return parts.Where(s => !string.IsNullOrWhiteSpace(s)).ToArray();
+    }
+
+    internal static string BuildCompactFooter(IReadOnlyList<string> compactIds)
+    {
+        if (compactIds.Count == 0) return string.Empty;
+        var countLabel = compactIds.Count == 1 ? "entry" : "entries";
+        return $"\n── {compactIds.Count} {countLabel} in compact view. Use memory_get <id> for details.\n   IDs: {string.Join(", ", compactIds)}";
     }
 
     /// <summary>
@@ -441,17 +878,18 @@ public sealed class SessionLifecycle : ISessionLifecycle
     }
 
     /// <summary>
-    /// Generates the actionable-hints list. Three priorities, capped at 5.
-    /// Mirrors TS <c>generateHints</c> in session-tools.ts:27-74.
+    /// Generates structured actionable hints. Four priorities, capped at 5.
+    /// Phase 2 idea 1d: replaces flat truncated strings with Hint DTOs that
+    /// carry entry IDs, suggested MCP tool names, and pre-filled arguments.
     /// </summary>
-    public static IReadOnlyList<string> GenerateHints(
+    public static IReadOnlyList<Hint> GenerateHints(
         IStore store,
         IReadOnlyList<string> warmPromotedIds)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        var hints = new List<string>();
+        var hints = new List<Hint>();
 
-        // Priority 1: corrections + preferences (max 2).
+        // Priority 1: corrections + preferences (max 2) — suggest memory_promote.
         var corrections = store.ListByMetadata(
             Tier.Warm,
             ContentType.Memory,
@@ -472,10 +910,18 @@ public sealed class SessionLifecycle : ISessionLifecycle
         foreach (var entry in p1)
         {
             if (seen.Add(entry.Id))
-                hints.Add(TruncateHint(entry.Content));
+                hints.Add(new Hint
+                {
+                    Priority = 1,
+                    Type = "warm_promotion_candidate",
+                    EntryId = entry.Id,
+                    Summary = TruncateHint(entry.Content),
+                    SuggestedAction = "memory_promote",
+                    SuggestedArgs = new Dictionary<string, object> { ["id"] = entry.Id },
+                });
         }
 
-        // Priority 2: frequently accessed (access_count >= 3, max 2).
+        // Priority 2: frequently accessed warm entries (max 2) — suggest memory_search.
         var frequent = store.List(
             Tier.Warm,
             ContentType.Memory,
@@ -488,18 +934,32 @@ public sealed class SessionLifecycle : ISessionLifecycle
             if (entry.AccessCount < 3) continue;
             if (seen.Contains(entry.Id)) continue;
             seen.Add(entry.Id);
-            hints.Add(TruncateHint(entry.Content));
+            hints.Add(new Hint
+            {
+                Priority = 2,
+                Type = "task_relevant_warm",
+                EntryId = entry.Id,
+                Summary = TruncateHint(entry.Content),
+                SuggestedAction = null,
+            });
             taken++;
         }
 
-        // Priority 3: recently warm-promoted (max 1). Plan 4 passes [].
+        // Priority 3: recently warm-promoted (max 1).
         foreach (var id in warmPromotedIds.Take(1))
         {
             if (seen.Contains(id)) continue;
             var entry = store.Get(Tier.Hot, ContentType.Memory, id);
             if (entry is null) continue;
             seen.Add(entry.Id);
-            hints.Add(TruncateHint(entry.Content));
+            hints.Add(new Hint
+            {
+                Priority = 3,
+                Type = "session_age",
+                EntryId = entry.Id,
+                Summary = TruncateHint(entry.Content),
+                SuggestedAction = null,
+            });
         }
 
         if (hints.Count > 5) hints.RemoveRange(5, hints.Count - 5);
@@ -530,6 +990,209 @@ public sealed class SessionLifecycle : ISessionLifecycle
         if (weeks == 1) return "1 week ago";
         return weeks.ToString(CultureInfo.InvariantCulture) + " weeks ago";
     }
+
+    // ---------- RefreshAsync (Phase 1 Step 4) ----------
+
+    /// <summary>
+    /// Refreshes hot-tier context mid-session. Recalculates decay scores,
+    /// runs warm sweep, re-assembles context, and returns change summary
+    /// with efficiency stats. Returns session age hint when session > 30 min.
+    /// </summary>
+    public async Task<RefreshResult> RefreshAsync(
+        string? task = null,
+        CancellationToken ct = default)
+    {
+        if (!IsInitialized)
+        {
+            await EnsureInitializedAsync(ct).ConfigureAwait(false);
+        }
+
+        // Phase 2 idea 2b — embed task for task-aware scoring.
+        float[]? taskEmbedding = null;
+        if (task is not null && _embedder is not null && _taskWeight > 0)
+        {
+            try
+            {
+                taskEmbedding = _embedder.Embed(task);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"total-recall: task embedding failed: {ex.Message}");
+            }
+        }
+
+        // 1. Warm sweep
+        var beforeHotCount = _store.Count(Tier.Hot, ContentType.Memory);
+        try { RunWarmSweep(); } catch { /* best-effort */ }
+        var afterHotCount = _store.Count(Tier.Hot, ContentType.Memory);
+
+        // 2. Re-assemble context
+        var hotEntries = _store.List(Tier.Hot, ContentType.Memory);
+
+        // Phase 2 idea 2b — task-aware sort before BuildContext.
+        if (taskEmbedding is not null && _taskWeight > 0 && hotEntries.Count > 0)
+        {
+            var maxDecay = hotEntries.Max(e => e.DecayScore);
+            var taskLower = task?.ToLowerInvariant() ?? "";
+            var taskWords = new HashSet<string>(
+                taskLower.Split(' ', StringSplitOptions.RemoveEmptyEntries),
+                StringComparer.Ordinal);
+
+            var sorted = hotEntries
+                .Select(e =>
+                {
+                    // Simple text-overlap heuristic for task relevance:
+                    // fraction of task words found in entry content or tags.
+                    var contentLower = e.Content.ToLowerInvariant();
+                    double overlap = 0;
+                    if (taskWords.Count > 0)
+                    {
+                        var matched = taskWords.Count(w => contentLower.Contains(w));
+                        overlap = (double)matched / taskWords.Count;
+                    }
+                    var blend = (1.0 - _taskWeight) * (e.DecayScore / maxDecay) + _taskWeight * overlap;
+                    return new { Entry = e, Blend = blend };
+                })
+                .OrderByDescending(x => x.Blend)
+                .Select(x => x.Entry)
+                .ToList();
+            hotEntries = sorted;
+        }
+
+        var ctxResult = BuildContext(hotEntries, new BuildContextOptions
+        {
+            TokenBudget = _tokenBudget,
+        });
+
+        // 3. Phase 2 idea 1c — injection tracking on refresh.
+        if (ctxResult.InjectedIds.Count > 0)
+        {
+            try
+            {
+                var tuples = ctxResult.InjectedIds
+                    .Select(id => (Tier.Hot, ContentType.Memory, id))
+                    .ToList();
+                _store.UpdateInjectionCounts(tuples);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"total-recall: refresh injection tracking failed: {ex.Message}");
+            }
+        }
+
+        // 4. Change summary
+        var changes = new ChangeSummary
+        {
+            Promoted = Array.Empty<ChangeEntry>(),
+            Demoted = Array.Empty<ChangeEntry>(),
+            Retained = afterHotCount,
+            TotalHotEntries = afterHotCount,
+        };
+
+        // 4. Efficiency stats
+        var efficiency = new EfficiencyStats
+        {
+            HotTierUtilization = new HotTierUtilization
+            {
+                EntriesUsed = hotEntries.Count,
+                MaxEntries = _maxEntries,
+                TokensUsed = ctxResult.TokenCount,
+                TokenBudget = _tokenBudget,
+            },
+            InjectionImpact = new InjectionImpact
+            {
+                MemoriesInjected = ctxResult.TokenCount,
+                SkillsInjected = 0,
+                HintsInjected = 0,
+                TotalInjected = ctxResult.TokenCount,
+            },
+            Session = new SessionInfo
+            {
+                DurationMinutes = 0,
+                RetrievalsPerformed = 0,
+                AvgRetrievalLatencyMs = 0,
+            },
+        };
+
+        var sessionAgeMinutes = _sessionStartedAt == DateTimeOffset.MinValue
+            ? 0
+            : (DateTimeOffset.UtcNow - _sessionStartedAt).TotalMinutes;
+        string? sessionAgeHint = null;
+        if (sessionAgeMinutes > 30)
+        {
+            sessionAgeHint = $"Session is {sessionAgeMinutes:F0} minutes old. Consider calling session_refresh for updated decay scores.";
+        }
+
+        return new RefreshResult
+        {
+            Context = ctxResult.Context,
+            ContextTruncated = ctxResult.Truncated,
+            TokenCount = ctxResult.TokenCount,
+            TokenBudget = _tokenBudget,
+            Changes = changes,
+            Efficiency = efficiency,
+            SessionAgeHint = sessionAgeHint,
+        };
+    }
+}
+
+// ---------- BuildContext config types ----------
+
+/// <summary>
+/// Options controlling <see cref="SessionLifecycle.BuildContext"/> behavior.
+/// </summary>
+public sealed record BuildContextOptions
+{
+    public int TokenBudget { get; init; } = 4000;
+    public Func<string, int>? CountTokens { get; init; }
+    public Func<string, int> EstimateTokens { get; init; } =
+        SessionLifecycle.HeuristicEstimateTokens;
+    public Func<EntryType, string[]?, string?, string>? AutoTag { get; init; }
+}
+
+/// <summary>
+/// Result of <see cref="SessionLifecycle.BuildContext"/>. Includes token
+/// counts, detail-level breakdowns, injected IDs, and compact IDs.
+/// </summary>
+public sealed record BuildContextResult
+{
+    public string Context { get; init; } = "";
+    public bool Truncated { get; init; }
+    public int TokenCount { get; init; }
+    public int EntriesFull { get; init; }
+    public int EntriesSummary { get; init; }
+    public int EntriesCompact { get; init; }
+    public IReadOnlyList<string> InjectedIds { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string> CompactIds { get; init; } = Array.Empty<string>();
+}
+
+// ---------- Phase 2 idea 1d: Structured Hint DTO ----------
+
+/// <summary>
+/// Structured actionable hint for the host LLM. Replaces the flat
+/// truncated-content strings used before Phase 2. Each hint carries
+/// a priority, type, entry reference, summary, and optional suggested
+/// MCP tool invocation (name + pre-filled arguments).
+/// </summary>
+public sealed record Hint
+{
+    [JsonPropertyName("priority")]
+    public int Priority { get; init; }
+
+    [JsonPropertyName("type")]
+    public string Type { get; init; } = "";
+
+    [JsonPropertyName("entryId")]
+    public string? EntryId { get; init; }
+
+    [JsonPropertyName("summary")]
+    public string Summary { get; init; } = "";
+
+    [JsonPropertyName("suggestedAction")]
+    public string? SuggestedAction { get; init; }
+
+    [JsonPropertyName("suggestedArgs")]
+    public IReadOnlyDictionary<string, object>? SuggestedArgs { get; init; }
 }
 
 // ---------- result records ----------
@@ -549,12 +1212,13 @@ public sealed record SessionInitResult(
     [property: JsonPropertyName("hotEntryCount")] int HotEntryCount,
     [property: JsonPropertyName("context")] string Context,
     [property: JsonPropertyName("tierSummary")] TierSummary TierSummary,
-    [property: JsonPropertyName("hints")] IReadOnlyList<string> Hints,
+    [property: JsonPropertyName("hints")] IReadOnlyList<Hint> Hints,
     [property: JsonPropertyName("lastSessionAge")] string? LastSessionAge,
     [property: JsonPropertyName("smokeTest")] SmokeTestResult? SmokeTest,
     [property: JsonPropertyName("regressionAlerts")] IReadOnlyList<RegressionAlert>? RegressionAlerts,
     [property: JsonPropertyName("storage")] string Storage,
-    [property: JsonPropertyName("hotContextTruncated")] bool HotContextTruncated);
+    [property: JsonPropertyName("hotContextTruncated")] bool HotContextTruncated,
+    [property: JsonPropertyName("sessionAgeHint")] string? SessionAgeHint);
 
 /// <summary>One row in the host-importer summary. Skill fields default to
 /// zero / empty for legacy memory-only importers; the skill import sweep
@@ -596,3 +1260,114 @@ public sealed record SmokeTestResult(
 public sealed record RegressionAlert(
     [property: JsonPropertyName("kind")] string Kind,
     [property: JsonPropertyName("message")] string Message);
+
+// ---------- Phase 1 Step 4: Refresh DTOs ----------
+
+/// <summary>
+/// Result of <see cref="SessionLifecycle.RefreshAsync"/>. Carries updated
+/// context, a compact change summary, and efficiency stats.
+/// </summary>
+public sealed record RefreshResult
+{
+    [JsonPropertyName("context")]
+    public string Context { get; init; } = "";
+
+    [JsonPropertyName("contextTruncated")]
+    public bool ContextTruncated { get; init; }
+
+    [JsonPropertyName("tokenCount")]
+    public int TokenCount { get; init; }
+
+    [JsonPropertyName("tokenBudget")]
+    public int TokenBudget { get; init; }
+
+    [JsonPropertyName("changes")]
+    public ChangeSummary Changes { get; init; } = new();
+
+    [JsonPropertyName("efficiency")]
+    public EfficiencyStats Efficiency { get; init; } = new();
+
+    [JsonPropertyName("sessionAgeHint")]
+    public string? SessionAgeHint { get; init; }
+}
+
+public sealed record ChangeSummary
+{
+    [JsonPropertyName("promoted")]
+    public IReadOnlyList<ChangeEntry> Promoted { get; init; } = Array.Empty<ChangeEntry>();
+
+    [JsonPropertyName("demoted")]
+    public IReadOnlyList<ChangeEntry> Demoted { get; init; } = Array.Empty<ChangeEntry>();
+
+    [JsonPropertyName("retained")]
+    public int Retained { get; init; }
+
+    [JsonPropertyName("totalHotEntries")]
+    public int TotalHotEntries { get; init; }
+}
+
+public sealed record ChangeEntry
+{
+    [JsonPropertyName("id")]
+    public string Id { get; init; } = "";
+
+    [JsonPropertyName("summary")]
+    public string Summary { get; init; } = "";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; init; } = "";
+}
+
+public sealed record EfficiencyStats
+{
+    [JsonPropertyName("hotTierUtilization")]
+    public HotTierUtilization HotTierUtilization { get; init; } = new();
+
+    [JsonPropertyName("injectionImpact")]
+    public InjectionImpact InjectionImpact { get; init; } = new();
+
+    [JsonPropertyName("session")]
+    public SessionInfo Session { get; init; } = new();
+}
+
+public sealed record HotTierUtilization
+{
+    [JsonPropertyName("entriesUsed")]
+    public int EntriesUsed { get; init; }
+
+    [JsonPropertyName("maxEntries")]
+    public int MaxEntries { get; init; }
+
+    [JsonPropertyName("tokensUsed")]
+    public int TokensUsed { get; init; }
+
+    [JsonPropertyName("tokenBudget")]
+    public int TokenBudget { get; init; }
+}
+
+public sealed record InjectionImpact
+{
+    [JsonPropertyName("memoriesInjected")]
+    public int MemoriesInjected { get; init; }
+
+    [JsonPropertyName("skillsInjected")]
+    public int SkillsInjected { get; init; }
+
+    [JsonPropertyName("hintsInjected")]
+    public int HintsInjected { get; init; }
+
+    [JsonPropertyName("totalInjected")]
+    public int TotalInjected { get; init; }
+}
+
+public sealed record SessionInfo
+{
+    [JsonPropertyName("durationMinutes")]
+    public double DurationMinutes { get; init; }
+
+    [JsonPropertyName("retrievalsPerformed")]
+    public int RetrievalsPerformed { get; init; }
+
+    [JsonPropertyName("avgRetrievalLatencyMs")]
+    public double AvgRetrievalLatencyMs { get; init; }
+}

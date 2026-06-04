@@ -145,11 +145,13 @@ public sealed class SqliteStore : IStore, IMetaStore, IDisposable
 INSERT INTO {table}
   (id, content, summary, source, source_tool, project, tags,
    created_at, updated_at, last_accessed_at, access_count,
-   decay_score, parent_id, collection_id, metadata, scope, entry_type)
+   decay_score, parent_id, collection_id, metadata, scope, entry_type,
+   times_injected)
 VALUES
   ($id, $content, $summary, $source, $source_tool, $project, $tags,
    $created_at, $updated_at, $last_accessed_at, $access_count,
-   $decay_score, $parent_id, $collection_id, $metadata, $scope, $entry_type)";
+   $decay_score, $parent_id, $collection_id, $metadata, $scope, $entry_type,
+   $times_injected)";
 
     private static void BindInsertParameters(
         Microsoft.Data.Sqlite.SqliteCommand cmd,
@@ -180,6 +182,7 @@ VALUES
         cmd.Parameters.AddWithValue(
             "$entry_type",
             EntryTypeMapping.ToDbValue(opts.EntryType ?? EntryType.Preference));
+        cmd.Parameters.AddWithValue("$times_injected", 0);
     }
 
     public Entry? Get(Tier tier, ContentType type, string id)
@@ -433,11 +436,13 @@ VALUES
 INSERT INTO {toTable}
   (id, content, summary, source, source_tool, project, tags,
    created_at, updated_at, last_accessed_at, access_count,
-   decay_score, parent_id, collection_id, metadata, scope, entry_type)
+   decay_score, parent_id, collection_id, metadata, scope, entry_type,
+   times_injected)
 VALUES
   ($id, $content, $summary, $source, $source_tool, $project, $tags,
    $created_at, $updated_at, $last_accessed_at, $access_count,
-   $decay_score, $parent_id, $collection_id, $metadata, $scope, $entry_type)";
+   $decay_score, $parent_id, $collection_id, $metadata, $scope, $entry_type,
+   $times_injected)";
 
                 insertCmd.Parameters.AddWithValue("$id", entry.Id);
                 insertCmd.Parameters.AddWithValue("$content", entry.Content);
@@ -461,6 +466,7 @@ VALUES
                 insertCmd.Parameters.AddWithValue("$scope", entry.Scope);
                 insertCmd.Parameters.AddWithValue(
                     "$entry_type", EntryTypeMapping.ToDbValue(entry.EntryType));
+                insertCmd.Parameters.AddWithValue("$times_injected", entry.TimesInjected);
 
                 insertCmd.ExecuteNonQuery();
             }
@@ -513,6 +519,8 @@ VALUES
         var entryTypeStr = ReadNullableStringRaw(reader, "entry_type");
         var entryType = EntryTypeMapping.ParseOrDefault(entryTypeStr);
         var metadataJson = ReadNullableStringRaw(reader, "metadata") ?? "{}";
+        var timesInjected = reader.IsDBNull(reader.GetOrdinal("times_injected"))
+            ? 0 : reader.GetInt32(reader.GetOrdinal("times_injected"));
 
         return new Entry(
             id,
@@ -531,7 +539,8 @@ VALUES
             collectionId,
             scope,
             entryType,
-            metadataJson);
+            metadataJson,
+            timesInjected);
     }
 
     private static FSharpOption<string> ReadNullableString(SqliteDataReader reader, string name)
@@ -608,6 +617,40 @@ VALUES
         new(@"^[a-zA-Z_][a-zA-Z0-9_]*$", RegexOptions.Compiled);
 
     // --- disposal ---------------------------------------------------------
+
+    /// <summary>
+    /// Phase 2 idea 1c — batch-increments times_injected for each entry.
+    /// Uses a single UPDATE per unique (tier, type) pair with an IN clause
+    /// to avoid N individual round-trips. Non-existent ids are silently ignored.
+    /// </summary>
+    public void UpdateInjectionCounts(IReadOnlyList<(Tier tier, ContentType type, string id)> entries)
+    {
+        if (entries is null || entries.Count == 0) return;
+
+        // Group by (tier, type) so we issue one UPDATE per table.
+        foreach (var group in entries.GroupBy(x => (x.tier, x.type)))
+        {
+            var table = MigrationRunner.TableName(group.Key.tier, group.Key.type);
+            var ids = group.Select(x => x.id).ToList();
+
+            using var cmd = _conn.CreateCommand();
+            var sql = new StringBuilder();
+            sql.Append("UPDATE ").Append(table)
+               .Append(" SET times_injected = times_injected + 1 WHERE id IN (");
+
+            for (var i = 0; i < ids.Count; i++)
+            {
+                if (i > 0) sql.Append(", ");
+                var paramName = $"$id{i}";
+                sql.Append(paramName);
+                cmd.Parameters.AddWithValue(paramName, ids[i]);
+            }
+            sql.Append(')');
+
+            cmd.CommandText = sql.ToString();
+            cmd.ExecuteNonQuery();
+        }
+    }
 
     public void Dispose()
     {

@@ -40,7 +40,7 @@ public sealed class SessionContextHandlerTests
             FSharpOption<string>.None,
             "",
             EntryType.Preference,
-            "{}");
+            "{}", 0);
     }
 
     private static async Task<JsonElement> RunAsync(FakeStore store)

@@ -19,8 +19,7 @@
 //      AutoMigrationGuard.CheckAndMigrateAsync BEFORE calling this (so the
 //      migration path can rename the old DB before we open a handle on it).
 //
-// Handler budget: 14 memory + 7 KB + 3 session + 5 eval + 2 config + 4 misc = 35.
-// (status, import_host, compact_now, migrate_to_remote) = 35.
+// Handler budget: Memory (15) + KB (7) + Session (4) + Eval (5) + Config (2) + Misc (5) = 38.
 //
 // AOT: no reflection. Every handler is constructed via direct `new`. The
 // Eval/Config/ImportHost/CompactNow handlers have no-arg constructors that
@@ -154,10 +153,11 @@ public static class ServerComposition
         registry.Register(new KbRemoveHandler(store, vectors));
         registry.Register(new KbSummarizeHandler(store));
 
-        // ---- Session (3) ----
+        // ---- Session (4) ----
         registry.Register(new SessionStartHandler(sessionLifecycle, periodicSync, syncService));
         registry.Register(new SessionEndHandler(sessionLifecycle, store, compactionLogWriter, syncService: syncService));
         registry.Register(new SessionContextHandler(store));
+        registry.Register(new SessionRefreshHandler(sessionLifecycle));
 
         // ---- Eval (5) — self-bootstrap production executors ----
         registry.Register(new EvalReportHandler());
@@ -323,7 +323,10 @@ public static class ServerComposition
                 skillImportService: sqliteSkillService,
                 tokenBudget: cfg.Tiers.Hot.TokenBudget,
                 maxEntries: cfg.Tiers.Hot.MaxEntries,
-                usageQuery: usageQuery);
+                usageQuery: usageQuery,
+                embedder: embedder,
+                autoDemoteMinInjections: cfg.Compaction.AutoDemoteMinInjections,
+                taskWeight: cfg.Tiers.Hot.TaskWeight);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
@@ -411,7 +414,10 @@ public static class ServerComposition
             var sessionLifecycle = new SessionLifecycle(importers, store, compactionLog,
                 storageMode: storageMode,
                 tokenBudget: cfg.Tiers.Hot.TokenBudget,
-                maxEntries: cfg.Tiers.Hot.MaxEntries);
+                maxEntries: cfg.Tiers.Hot.MaxEntries,
+                embedder: embedder,
+                autoDemoteMinInjections: cfg.Compaction.AutoDemoteMinInjections,
+                taskWeight: cfg.Tiers.Hot.TaskWeight);
 
             var statusOptions = new StatusOptions(
                 DbPath: connStr,
@@ -565,7 +571,10 @@ public static class ServerComposition
                 skillImportService: skillImportService,
                 tokenBudget: cfg.Tiers.Hot.TokenBudget,
                 maxEntries: cfg.Tiers.Hot.MaxEntries,
-                usageQuery: usageQuery);
+                usageQuery: usageQuery,
+                embedder: embedder,
+                autoDemoteMinInjections: cfg.Compaction.AutoDemoteMinInjections,
+                taskWeight: cfg.Tiers.Hot.TaskWeight);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,

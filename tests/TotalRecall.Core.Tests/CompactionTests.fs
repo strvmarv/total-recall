@@ -34,6 +34,7 @@ let private sampleEntry : Entry = {
     Scope = ""
     EntryType = Preference
     MetadataJson = "{}"
+    TimesInjected = 0
 }
 
 [<Tests>]

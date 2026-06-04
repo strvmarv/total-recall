@@ -59,4 +59,52 @@ let tokenizerTests =
                         failures.Count fixture.Entries.Length
                         (failures |> Seq.truncate 10 |> String.concat "\n")
                 failtest msg
+
+        testCase "countTokens returns correct token count for simple text" <| fun _ ->
+            let vocab = FixtureLoader.loadVocab()
+            let count = Tokenizer.countTokens vocab "hello world"
+            Expect.isGreaterThanOrEqual count 3 "should be at least CLS + tokens + SEP"
+            Expect.isLessThanOrEqual count 10 "should be reasonable for short text"
+
+        testCase "countTokens returns 0 for empty string" <| fun _ ->
+            let vocab = FixtureLoader.loadVocab()
+            let count = Tokenizer.countTokens vocab ""
+            Expect.equal count 0 "empty string should have 0 tokens"
+
+        testCase "countTokens returns 0 for whitespace only" <| fun _ ->
+            let vocab = FixtureLoader.loadVocab()
+            let count = Tokenizer.countTokens vocab "   "
+            Expect.equal count 0 "whitespace should have 0 tokens"
+
+        testCase "countTokens grows with longer text" <| fun _ ->
+            let vocab = FixtureLoader.loadVocab()
+            let short = Tokenizer.countTokens vocab "hello"
+            let long = Tokenizer.countTokens vocab "hello world this is a longer piece of text"
+            Expect.isGreaterThan long short "longer text should have more tokens"
+
+        testCase "truncateToTokens respects max token budget" <| fun _ ->
+            let vocab = FixtureLoader.loadVocab()
+            let text = "hello world hello world hello world hello world hello world hello world"
+            let truncated = Tokenizer.truncateToTokens vocab 6 text
+            let count = Tokenizer.countTokens vocab truncated
+            Expect.isLessThanOrEqual count 6 "truncated text should be within token budget"
+            Expect.isGreaterThanOrEqual count 2 "should have at least some tokens"
+
+        testCase "truncateToTokens returns empty string for zero maxTokens" <| fun _ ->
+            let vocab = FixtureLoader.loadVocab()
+            let result = Tokenizer.truncateToTokens vocab 0 "hello world"
+            Expect.equal result "" "zero maxTokens should return empty string"
+
+        testCase "truncateToTokens returns original text when maxTokens >= MaxSeqLen" <| fun _ ->
+            let vocab = FixtureLoader.loadVocab()
+            let text = "short text"
+            let result = Tokenizer.truncateToTokens vocab 600 text
+            Expect.equal result text "oversized maxTokens should return original text"
+
+        testCase "truncateToTokens produces valid text fragments" <| fun _ ->
+            let vocab = FixtureLoader.loadVocab()
+            let text = "The quick brown fox. Jumps over the lazy dog. Another sentence here."
+            let truncated = Tokenizer.truncateToTokens vocab 10 text
+            Expect.isTrue (truncated.Length > 0) "should produce non-empty result"
+            Expect.isTrue (text.StartsWith(truncated.Trim())) "truncated should be a prefix of original"
     ]

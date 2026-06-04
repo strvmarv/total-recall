@@ -98,6 +98,15 @@ public interface IStore
     /// returns the existing id instead of inserting a duplicate.
     /// </summary>
     string? FindByContent(Tier tier, ContentType type, string content);
+
+    /// <summary>
+    /// Phase 2 idea 1c — batch-increments <c>times_injected</c> for every
+    /// entry in <paramref name="entries"/>. Each element is a (tier, type, id)
+    /// triple; the store increments <c>times_injected</c> by 1 for each
+    /// matching row. No-op for ids that don't exist. Implementations should
+    /// batch the updates, not loop per-row.
+    /// </summary>
+    void UpdateInjectionCounts(IReadOnlyList<(Tier tier, ContentType type, string id)> entries);
 }
 
 /// <summary>

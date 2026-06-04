@@ -770,6 +770,10 @@ public sealed record MigrateToRemoteResultDto(
 [JsonSerializable(typeof(System.Collections.Generic.List<ImportSummaryRow>))]
 [JsonSerializable(typeof(System.Collections.Generic.List<RegressionAlert>))]
 [JsonSerializable(typeof(System.Collections.Generic.List<string>))]
+// ---- Phase 2 idea 1d: Hint DTO ----
+[JsonSerializable(typeof(Hint))]
+[JsonSerializable(typeof(System.Collections.Generic.List<Hint>))]
+[JsonSerializable(typeof(System.Collections.Generic.Dictionary<string, object>))]
 // ---- Task 4.10: session_end / session_context DTOs ----
 [JsonSerializable(typeof(SessionEndResultDto))]
 [JsonSerializable(typeof(SessionContextResultDto))]
@@ -861,6 +865,16 @@ public sealed record MigrateToRemoteResultDto(
 // the {"deleted":true} acknowledgement (Task 12).
 [JsonSerializable(typeof(SkillListWireResponse))]
 [JsonSerializable(typeof(SkillDeleteWireResponse))]
+// ---- Phase 1 Step 4: session_refresh DTOs ----
+[JsonSerializable(typeof(RefreshResult))]
+[JsonSerializable(typeof(ChangeSummary))]
+[JsonSerializable(typeof(ChangeEntry))]
+[JsonSerializable(typeof(ChangeEntry[]))]
+[JsonSerializable(typeof(System.Collections.Generic.List<ChangeEntry>))]
+[JsonSerializable(typeof(EfficiencyStats))]
+[JsonSerializable(typeof(HotTierUtilization))]
+[JsonSerializable(typeof(InjectionImpact))]
+[JsonSerializable(typeof(SessionInfo))]
 public partial class JsonContext : JsonSerializerContext
 {
 }

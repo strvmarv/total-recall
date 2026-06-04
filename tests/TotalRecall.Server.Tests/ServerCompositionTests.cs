@@ -58,8 +58,8 @@ public sealed class ServerCompositionTests
             // KB (7)
             "kb_search", "kb_ingest_file", "kb_ingest_dir", "kb_list_collections",
             "kb_refresh", "kb_remove", "kb_summarize",
-            // Session (3)
-            "session_start", "session_end", "session_context",
+            // Session (4)
+            "session_start", "session_end", "session_context", "session_refresh",
             // Eval (5)
             "eval_report", "eval_benchmark", "eval_compare", "eval_snapshot",
             "eval_grow",

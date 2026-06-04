@@ -37,7 +37,7 @@ public class MemoryDemoteHandlerTests
             FSharpOption<SourceTool>.None, FSharpOption<string>.None,
             ListModule.OfSeq(Array.Empty<string>()),
             1L, 2L, 3L, 4, 0.5,
-            FSharpOption<string>.None, FSharpOption<string>.None, "", EntryType.Preference, "{}");
+            FSharpOption<string>.None, FSharpOption<string>.None, "", EntryType.Preference, "{}", 0);
 
     [Fact]
     public async Task HappyPath_HotToCold_DefaultTier()

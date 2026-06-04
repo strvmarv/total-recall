@@ -155,6 +155,8 @@ internal sealed class FakeStore : IStore
     }
 
     public int CountKnowledgeCollections() => throw new NotImplementedException();
+
+    public void UpdateInjectionCounts(IReadOnlyList<(Tier tier, ContentType type, string id)> entries) { }
 }
 
 internal sealed class FakeVectorSearch : IVectorSearch
@@ -219,6 +221,6 @@ internal static class EntryFactory
             collectionId is null ? FSharpOption<string>.None : FSharpOption<string>.Some(collectionId),
             "",
             EntryType.Preference,
-            metadataJson);
+            metadataJson, 0);
     }
 }
