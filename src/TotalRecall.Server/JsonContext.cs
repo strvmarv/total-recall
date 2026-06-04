@@ -971,6 +971,11 @@ public sealed record MigrateToRemoteResultDto(
 [JsonSerializable(typeof(HotTierUtilization))]
 [JsonSerializable(typeof(InjectionImpact))]
 [JsonSerializable(typeof(SessionInfo))]
+// ---- Phase 3 idea 2a: efficiency stats fold-in ----
+[JsonSerializable(typeof(CacheStats))]
+[JsonSerializable(typeof(Recommendation))]
+[JsonSerializable(typeof(Recommendation[]))]
+[JsonSerializable(typeof(System.Collections.Generic.List<Recommendation>))]
 public partial class JsonContext : JsonSerializerContext
 {
 }

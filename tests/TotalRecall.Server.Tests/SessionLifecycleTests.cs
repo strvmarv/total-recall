@@ -222,7 +222,7 @@ public sealed class SessionLifecycleTests
     }
 
     private static SessionLifecycle BuildLifecycle(
-        FakeStore store,
+        FakeStore? store = null,
         IEnumerable<IImporter>? importers = null,
         ICompactionLogReader? compaction = null,
         long now = 1_000_000_000_000L,
@@ -230,11 +230,13 @@ public sealed class SessionLifecycleTests
         ISkillImportService? skillImportService = null,
         TimeSpan? skillImportTimeout = null,
         int tokenBudget = 4000,
-        int maxEntries = 50)
+        int maxEntries = 50,
+        Func<long, (int Count, double AvgLatencyMs)>? retrievalStatsSince = null,
+        Func<(long Hits, long Misses, long TokensSaved)>? cacheStats = null)
     {
         return new SessionLifecycle(
             (importers ?? Array.Empty<IImporter>()).ToList(),
-            store,
+            store ?? new FakeStore(),
             compaction ?? new FakeCompactionLog(),
             sessionId,
             () => now,
@@ -243,7 +245,9 @@ public sealed class SessionLifecycleTests
             skillImportService: skillImportService,
             skillImportTimeout: skillImportTimeout,
             tokenBudget: tokenBudget,
-            maxEntries: maxEntries);
+            maxEntries: maxEntries,
+            retrievalStatsSince: retrievalStatsSince,
+            cacheStats: cacheStats);
     }
 
     private sealed class FakeSkillImportService : ISkillImportService
@@ -1056,5 +1060,79 @@ public sealed class SessionLifecycleTests
         var memIdx = result.Context.IndexOf("- important memory", StringComparison.Ordinal);
         var skillsIdx = result.Context.IndexOf("## Available Skills", StringComparison.Ordinal);
         Assert.True(memIdx < skillsIdx, "Hot memories should appear before skills block");
+    }
+
+    // ---------- Phase 3 idea 2a: efficiency stats fold-in ----------
+
+    [Fact]
+    public async Task Refresh_ReportsCacheStats_WhenDelegateWired()
+    {
+        var lifecycle = BuildLifecycle(cacheStats: () => (3L, 1L, 8500L));
+        await lifecycle.EnsureInitializedAsync();
+
+        var result = await lifecycle.RefreshAsync();
+
+        Assert.NotNull(result.Efficiency.Cache);
+        Assert.Equal(3L, result.Efficiency.Cache!.Hits);
+        Assert.Equal(1L, result.Efficiency.Cache.Misses);
+        Assert.Equal(8500L, result.Efficiency.Cache.TokensSaved);
+        Assert.Equal(0.75, result.Efficiency.Cache.HitRate);
+    }
+
+    [Fact]
+    public async Task Refresh_OmitsCacheStats_WhenNoDelegate()
+    {
+        var lifecycle = BuildLifecycle();
+        await lifecycle.EnsureInitializedAsync();
+
+        var result = await lifecycle.RefreshAsync();
+
+        Assert.Null(result.Efficiency.Cache);
+    }
+
+    [Fact]
+    public async Task Refresh_ReportsRetrievalStats_AndDuration()
+    {
+        var lifecycle = BuildLifecycle(retrievalStatsSince: _ => (8, 12.5));
+        await lifecycle.EnsureInitializedAsync();
+
+        var result = await lifecycle.RefreshAsync();
+
+        Assert.Equal(8, result.Efficiency.Session.RetrievalsPerformed);
+        Assert.Equal(12.5, result.Efficiency.Session.AvgRetrievalLatencyMs);
+        Assert.True(result.Efficiency.Session.DurationMinutes >= 0);
+    }
+
+    [Fact]
+    public async Task Refresh_RecommendsMemoryExtract_WhenManyRetrievals()
+    {
+        var lifecycle = BuildLifecycle(retrievalStatsSince: _ => (8, 5.0));
+        await lifecycle.EnsureInitializedAsync();
+
+        var result = await lifecycle.RefreshAsync();
+
+        Assert.Contains(result.Recommendations, r => r.Action == "memory_extract");
+    }
+
+    [Fact]
+    public async Task Refresh_NoRecommendations_OnQuietYoungSession()
+    {
+        var lifecycle = BuildLifecycle(retrievalStatsSince: _ => (0, 0.0));
+        await lifecycle.EnsureInitializedAsync();
+
+        var result = await lifecycle.RefreshAsync();
+
+        Assert.Empty(result.Recommendations);
+    }
+
+    [Fact]
+    public async Task Refresh_CacheStatsDelegateThrows_DegradesToNull()
+    {
+        var lifecycle = BuildLifecycle(cacheStats: () => throw new InvalidOperationException("boom"));
+        await lifecycle.EnsureInitializedAsync();
+
+        var result = await lifecycle.RefreshAsync();
+
+        Assert.Null(result.Efficiency.Cache); // failure degrades, never propagates
     }
 }

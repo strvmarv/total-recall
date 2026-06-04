@@ -54,6 +54,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
     private readonly int _maxEntries;
     private readonly int _autoDemoteMinInjections;
     private readonly double _taskWeight;
+    private readonly Func<long, (int Count, double AvgLatencyMs)>? _retrievalStatsSince;
+    private readonly Func<(long Hits, long Misses, long TokensSaved)>? _cacheStats;
 
     private readonly SemaphoreSlim _initLock = new(1, 1);
     private SessionInitResult? _cached;
@@ -74,7 +76,9 @@ public sealed class SessionLifecycle : ISessionLifecycle
         TotalRecall.Infrastructure.Usage.UsageQueryService? usageQuery = null,
         IEmbedder? embedder = null,
         int autoDemoteMinInjections = 10,
-        double taskWeight = 0.0)
+        double taskWeight = 0.0,
+        Func<long, (int Count, double AvgLatencyMs)>? retrievalStatsSince = null,
+        Func<(long Hits, long Misses, long TokensSaved)>? cacheStats = null)
     {
         ArgumentNullException.ThrowIfNull(importers);
         ArgumentNullException.ThrowIfNull(store);
@@ -93,6 +97,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
         _maxEntries = maxEntries > 0 ? maxEntries : 50;
         _autoDemoteMinInjections = autoDemoteMinInjections > 0 ? autoDemoteMinInjections : 10;
         _taskWeight = taskWeight >= 0 && taskWeight <= 1 ? taskWeight : 0.0;
+        _retrievalStatsSince = retrievalStatsSince;
+        _cacheStats = cacheStats;
     }
 
     /// <inheritdoc />
@@ -1089,7 +1095,50 @@ public sealed class SessionLifecycle : ISessionLifecycle
             TotalHotEntries = afterHotCount,
         };
 
-        // 4. Efficiency stats
+        // Hoist sessionAgeMinutes so it is available to both the efficiency
+        // block and the sessionAgeHint computation below.
+        var sessionAgeMinutes = _sessionStartedAt == DateTimeOffset.MinValue
+            ? 0
+            : (DateTimeOffset.UtcNow - _sessionStartedAt).TotalMinutes;
+
+        // Phase 3 idea 2a — real session stats (best-effort: failures degrade
+        // to zeros/null, never propagate).
+        var retrievalCount = 0;
+        var avgRetrievalLatencyMs = 0.0;
+        if (_retrievalStatsSince is not null && _sessionStartedAt != DateTimeOffset.MinValue)
+        {
+            try
+            {
+                (retrievalCount, avgRetrievalLatencyMs) =
+                    _retrievalStatsSince(_sessionStartedAt.ToUnixTimeMilliseconds());
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"total-recall: retrieval stats failed: {ex.Message}");
+            }
+        }
+
+        CacheStats? cacheBlock = null;
+        if (_cacheStats is not null)
+        {
+            try
+            {
+                var (hits, misses, saved) = _cacheStats();
+                var total = hits + misses;
+                cacheBlock = new CacheStats
+                {
+                    Hits = hits,
+                    Misses = misses,
+                    TokensSaved = saved,
+                    HitRate = total > 0 ? (double)hits / total : 0.0,
+                };
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"total-recall: cache stats failed: {ex.Message}");
+            }
+        }
+
         var efficiency = new EfficiencyStats
         {
             HotTierUtilization = new HotTierUtilization
@@ -1106,17 +1155,31 @@ public sealed class SessionLifecycle : ISessionLifecycle
                 HintsInjected = 0,
                 TotalInjected = ctxResult.TokenCount,
             },
+            Cache = cacheBlock,
             Session = new SessionInfo
             {
-                DurationMinutes = 0,
-                RetrievalsPerformed = 0,
-                AvgRetrievalLatencyMs = 0,
+                DurationMinutes = sessionAgeMinutes,
+                RetrievalsPerformed = retrievalCount,
+                AvgRetrievalLatencyMs = avgRetrievalLatencyMs,
             },
         };
 
-        var sessionAgeMinutes = _sessionStartedAt == DateTimeOffset.MinValue
-            ? 0
-            : (DateTimeOffset.UtcNow - _sessionStartedAt).TotalMinutes;
+        // Phase 3 idea 2a — advisory recommendations (spec rules out
+        // auto-adaptation; the agent decides).
+        var recommendations = new List<Recommendation>();
+        if (sessionAgeMinutes > 30)
+            recommendations.Add(new Recommendation
+            {
+                Action = "session_refresh",
+                Reason = $"Session is {sessionAgeMinutes:F0} minutes old — decay scores have shifted",
+            });
+        if (retrievalCount >= 8)
+            recommendations.Add(new Recommendation
+            {
+                Action = "memory_extract",
+                Reason = $"Session has {retrievalCount} retrievals — consider extracting key findings",
+            });
+
         string? sessionAgeHint = null;
         if (sessionAgeMinutes > 30)
         {
@@ -1132,6 +1195,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
             Changes = changes,
             Efficiency = efficiency,
             SessionAgeHint = sessionAgeHint,
+            Recommendations = recommendations,
         };
     }
 }
@@ -1289,6 +1353,9 @@ public sealed record RefreshResult
 
     [JsonPropertyName("sessionAgeHint")]
     public string? SessionAgeHint { get; init; }
+
+    [JsonPropertyName("recommendations")]
+    public IReadOnlyList<Recommendation> Recommendations { get; init; } = Array.Empty<Recommendation>();
 }
 
 public sealed record ChangeSummary
@@ -1325,6 +1392,9 @@ public sealed record EfficiencyStats
 
     [JsonPropertyName("injectionImpact")]
     public InjectionImpact InjectionImpact { get; init; } = new();
+
+    [JsonPropertyName("cache"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public CacheStats? Cache { get; init; }
 
     [JsonPropertyName("session")]
     public SessionInfo Session { get; init; } = new();
@@ -1370,4 +1440,30 @@ public sealed record SessionInfo
 
     [JsonPropertyName("avgRetrievalLatencyMs")]
     public double AvgRetrievalLatencyMs { get; init; }
+}
+
+/// <summary>Phase 3 idea 2a — per-session tool-cache economics.</summary>
+public sealed record CacheStats
+{
+    [JsonPropertyName("hits")]
+    public long Hits { get; init; }
+
+    [JsonPropertyName("misses")]
+    public long Misses { get; init; }
+
+    [JsonPropertyName("tokensSaved")]
+    public long TokensSaved { get; init; }
+
+    [JsonPropertyName("hitRate")]
+    public double HitRate { get; init; }
+}
+
+/// <summary>Phase 3 idea 2a — advisory next-action suggestion.</summary>
+public sealed record Recommendation
+{
+    [JsonPropertyName("action")]
+    public string Action { get; init; } = "";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; init; } = "";
 }

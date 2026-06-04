@@ -326,6 +326,11 @@ public static class ServerComposition
             // lastSessionAge in session_start.
             var usageQuery = new TotalRecall.Infrastructure.Usage.UsageQueryService(conn);
 
+            // Phase 5: retrieval telemetry — log locally in sqlite-only mode.
+            // syncQueue stays null because there is no cortex to push to.
+            // Constructed before SessionLifecycle so the delegate can be passed in.
+            var retrievalLog = new RetrievalEventLog(conn);
+
             var sessionLifecycle = new SessionLifecycle(
                 importers, store, compactionLog,
                 usageIndexer: usageIndexer,
@@ -336,16 +341,14 @@ public static class ServerComposition
                 usageQuery: usageQuery,
                 embedder: embedder,
                 autoDemoteMinInjections: cfg.Compaction.AutoDemoteMinInjections,
-                taskWeight: cfg.Tiers.Hot.TaskWeight);
+                taskWeight: cfg.Tiers.Hot.TaskWeight,
+                retrievalStatsSince: retrievalLog.GetStatsSince,
+                cacheStats: toolCacheStore.GetSessionStats);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
                 EmbeddingModel: cfg.Embedding.Model,
                 EmbeddingDimensions: cfg.Embedding.Dimensions);
-
-            // Phase 5: retrieval telemetry — log locally in sqlite-only mode.
-            // syncQueue stays null because there is no cortex to push to.
-            var retrievalLog = new RetrievalEventLog(conn);
 
             var registry = BuildRegistry(
                 store, vec, embedder, hybrid,
@@ -587,6 +590,11 @@ public static class ServerComposition
 
             var usageQuery = new TotalRecall.Infrastructure.Usage.UsageQueryService(conn);
 
+            // Phase 5: retrieval telemetry — log locally AND enqueue for
+            // push in cortex mode so SyncService.FlushAsync picks it up.
+            // Constructed before SessionLifecycle so the delegate can be passed in.
+            var retrievalLog = new RetrievalEventLog(conn);
+
             var sessionLifecycle = new SessionLifecycle(
                 importers, routingStore, compactionLog,
                 usageIndexer: usageIndexer,
@@ -597,16 +605,14 @@ public static class ServerComposition
                 usageQuery: usageQuery,
                 embedder: embedder,
                 autoDemoteMinInjections: cfg.Compaction.AutoDemoteMinInjections,
-                taskWeight: cfg.Tiers.Hot.TaskWeight);
+                taskWeight: cfg.Tiers.Hot.TaskWeight,
+                retrievalStatsSince: retrievalLog.GetStatsSince,
+                cacheStats: toolCacheStore.GetSessionStats);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
                 EmbeddingModel: cfg.Embedding.Model,
                 EmbeddingDimensions: cfg.Embedding.Dimensions);
-
-            // Phase 5: retrieval telemetry — log locally AND enqueue for
-            // push in cortex mode so SyncService.FlushAsync picks it up.
-            var retrievalLog = new RetrievalEventLog(conn);
 
             var registry = BuildRegistry(
                 routingStore, vec, embedder, hybrid,
