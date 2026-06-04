@@ -391,17 +391,42 @@ VALUES
         using var conn = SqliteConnection.Open(":memory:");
         MigrationRunner.RunMigrations(conn);
 
-        var cols = new HashSet<string>();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT name FROM pragma_table_info('tool_cache')";
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read()) cols.Add(reader.GetString(0));
-
-        foreach (var expected in new[]
+        // name -> (type, notNull, defaultValue)
+        var cols = new Dictionary<string, (string Type, bool NotNull, string? Default)>();
+        using (var cmd = conn.CreateCommand())
         {
-            "tool", "args_hash", "content", "content_hash", "stored_at_ms",
-            "ttl_seconds", "hit_count", "last_hit_at_ms", "token_estimate",
-        })
-            Assert.Contains(expected, cols);
+            cmd.CommandText = "PRAGMA table_info(tool_cache)";
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                cols[reader.GetString(1)] = (
+                    reader.GetString(2),
+                    reader.GetInt64(3) != 0,
+                    reader.IsDBNull(4) ? null : reader.GetString(4));
+            }
+        }
+
+        Assert.Equal(9, cols.Count);
+        Assert.Equal(("TEXT", true, (string?)null), cols["tool"]);
+        Assert.Equal(("TEXT", true, (string?)null), cols["args_hash"]);
+        Assert.Equal(("TEXT", true, (string?)null), cols["content"]);
+        Assert.Equal(("TEXT", true, (string?)null), cols["content_hash"]);
+        Assert.Equal(("INTEGER", true, (string?)null), cols["stored_at_ms"]);
+        Assert.Equal(("INTEGER", true, (string?)"600"), cols["ttl_seconds"]);
+        Assert.Equal(("INTEGER", true, (string?)"0"), cols["hit_count"]);
+        Assert.Equal(("INTEGER", false, (string?)null), cols["last_hit_at_ms"]);
+        Assert.Equal(("INTEGER", true, (string?)"0"), cols["token_estimate"]);
+    }
+
+    [Fact]
+    public void RunMigrations_FreshDb_ToolCacheHasStoredAtIndex()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_tool_cache_stored_at'";
+        Assert.Equal(1L, (long)cmd.ExecuteScalar()!);
     }
 }

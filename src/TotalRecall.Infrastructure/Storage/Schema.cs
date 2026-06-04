@@ -719,6 +719,12 @@ public static class MigrationRunner
                 PRIMARY KEY (tool, args_hash)
             )
             """);
+
+        // TTL purge scans filter on stored_at_ms; the LRU eviction path
+        // sorts by COALESCE(last_hit_at_ms, stored_at_ms) over a table
+        // capped at ~200 rows, so only the purge column gets an index.
+        Exec(conn, tx,
+            "CREATE INDEX IF NOT EXISTS idx_tool_cache_stored_at ON tool_cache(stored_at_ms)");
     }
 
     // --- helpers ----------------------------------------------------------
