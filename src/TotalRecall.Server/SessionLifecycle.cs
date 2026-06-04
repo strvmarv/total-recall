@@ -1155,6 +1155,10 @@ public sealed class SessionLifecycle : ISessionLifecycle
                 TokensUsed = ctxResult.TokenCount,
                 TokenBudget = _tokenBudget,
             },
+            // All InjectionImpact fields are TOKEN counts, not entry counts —
+            // spec §7.3.1: memoriesInjected + skillsInjected + hintsInjected
+            // sum to totalInjected. (The name reads like an entry count; it
+            // is not. Entry counts live in HotTierUtilization.EntriesUsed.)
             InjectionImpact = new InjectionImpact
             {
                 MemoriesInjected = ctxResult.TokenCount,
@@ -1426,6 +1430,8 @@ public sealed record HotTierUtilization
     public int TokenBudget { get; init; }
 }
 
+/// <summary>Token-denominated injection breakdown (spec §7.3.1): each field
+/// counts TOKENS contributed by that source; they sum to TotalInjected.</summary>
 public sealed record InjectionImpact
 {
     [JsonPropertyName("memoriesInjected")]
