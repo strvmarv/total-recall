@@ -46,6 +46,10 @@ fts_weight = 0.3
 [scope]
 default = "user:local"
 
+[tool_cache]
+max_entries = 200
+default_ttl_seconds = 600
+
 # --- Storage mode ---
 # Controls how the plugin stores and retrieves data.
 # "local"   - SQLite + ONNX embeddings, fully self-contained (default)

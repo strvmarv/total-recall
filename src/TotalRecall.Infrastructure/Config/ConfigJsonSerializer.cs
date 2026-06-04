@@ -97,6 +97,16 @@ public static class ConfigJsonSerializer
             sb.Append('}');
         }
 
+        // tool_cache (optional)
+        if (Microsoft.FSharp.Core.FSharpOption<Core.Config.ToolCacheConfig>.get_IsSome(config.ToolCache))
+        {
+            var tc = config.ToolCache.Value;
+            sb.Append(",\"tool_cache\":{");
+            AppendInt(sb, "max_entries", tc.MaxEntries); sb.Append(',');
+            AppendInt(sb, "default_ttl_seconds", tc.DefaultTtlSeconds);
+            sb.Append('}');
+        }
+
         sb.Append('}');
         return sb.ToString();
     }

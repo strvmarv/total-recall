@@ -483,4 +483,16 @@ public sealed class ConfigLoaderTests : IDisposable
         Assert.True(Microsoft.FSharp.Core.FSharpOption<TotalRecall.Core.Config.SkillConfig>.get_IsSome(cfg.Skill));
         Assert.True(Microsoft.FSharp.Core.FSharpOption<string[]>.get_IsNone(cfg.Skill.Value.ExtraDirs));
     }
+
+    // --- tool_cache section tests -----------------------------------------
+
+    [Fact]
+    public void LoadDefaults_ProjectsToolCacheSection()
+    {
+        var cfg = new ConfigLoader().LoadDefaults();
+        Assert.True(Microsoft.FSharp.Core.FSharpOption<TotalRecall.Core.Config.ToolCacheConfig>
+            .get_IsSome(cfg.ToolCache));
+        Assert.Equal(200, cfg.ToolCache.Value.MaxEntries);
+        Assert.Equal(600, cfg.ToolCache.Value.DefaultTtlSeconds);
+    }
 }

@@ -411,6 +411,21 @@ public sealed class ConfigLoader : IConfigLoader
             skill = FSharpOption<Core.Config.SkillConfig>.None;
         }
 
+        FSharpOption<Core.Config.ToolCacheConfig> toolCache;
+        if (table.TryGetValue("tool_cache", out var tcObj) && tcObj is TomlTable tcTable)
+        {
+            var tcCfg = new Core.Config.ToolCacheConfig(
+                tcTable.TryGetValue("max_entries", out var tcMax)
+                    ? Convert.ToInt32(tcMax) : 200,
+                tcTable.TryGetValue("default_ttl_seconds", out var tcTtl)
+                    ? Convert.ToInt32(tcTtl) : 600);
+            toolCache = FSharpOption<Core.Config.ToolCacheConfig>.Some(tcCfg);
+        }
+        else
+        {
+            toolCache = FSharpOption<Core.Config.ToolCacheConfig>.None;
+        }
+
         return new Core.Config.TotalRecallConfig(
             tiersCfg,
             compactionCfg,
@@ -421,7 +436,8 @@ public sealed class ConfigLoader : IConfigLoader
             user,
             cortex,
             scope,
-            skill);
+            skill,
+            toolCache);
     }
 
     // --- walker helpers ---------------------------------------------------

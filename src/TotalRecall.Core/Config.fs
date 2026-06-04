@@ -92,6 +92,12 @@ type SkillConfig = {
     ExtraDirs: string [] option
 }
 
+/// Phase 3 idea 2c — tool-result cache settings.
+type ToolCacheConfig = {
+    MaxEntries: int
+    DefaultTtlSeconds: int
+}
+
 type TotalRecallConfig = {
     Tiers: TiersConfig
     Compaction: CompactionConfig
@@ -103,6 +109,7 @@ type TotalRecallConfig = {
     Cortex: CortexConfig option
     Scope: ScopeConfig option
     Skill: SkillConfig option
+    ToolCache: ToolCacheConfig option
 }
 
 // --- pure helpers (mirrors src-ts/config.ts isSafeKey + deepMerge + setNestedKey) ---
