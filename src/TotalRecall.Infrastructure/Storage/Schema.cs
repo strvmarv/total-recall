@@ -213,6 +213,8 @@ public static class MigrationRunner
         Migration13_SkillUsage,
         // Migration 14: times_injected column on all 6 content tables (Phase 2 idea 1c)
         Migration14_TimesInjected,
+        // Migration 15: tool_cache table (Phase 3 idea 2c)
+        Migration15_ToolCache,
     };
 
     /// <summary>
@@ -691,6 +693,32 @@ public static class MigrationRunner
                 $"ALTER TABLE {table} ADD COLUMN times_injected INTEGER NOT NULL DEFAULT 0";
             alter.ExecuteNonQuery();
         }
+    }
+
+    /// <summary>
+    /// Migration 15 — <c>tool_cache</c> table for tool-result caching
+    /// (Phase 3 idea 2c). Stores host tool results keyed by
+    /// (tool, args_hash). TTL governs freshness at read time;
+    /// ToolCacheStore enforces LRU capacity on write.
+    /// </summary>
+    private static void Migration15_ToolCache(
+        MsSqliteConnection conn,
+        Microsoft.Data.Sqlite.SqliteTransaction tx)
+    {
+        Exec(conn, tx, """
+            CREATE TABLE IF NOT EXISTS tool_cache (
+                tool           TEXT NOT NULL,
+                args_hash      TEXT NOT NULL,
+                content        TEXT NOT NULL,
+                content_hash   TEXT NOT NULL,
+                stored_at_ms   INTEGER NOT NULL,
+                ttl_seconds    INTEGER NOT NULL DEFAULT 600,
+                hit_count      INTEGER NOT NULL DEFAULT 0,
+                last_hit_at_ms INTEGER,
+                token_estimate INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (tool, args_hash)
+            )
+            """);
     }
 
     // --- helpers ----------------------------------------------------------

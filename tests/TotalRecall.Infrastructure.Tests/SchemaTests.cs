@@ -34,7 +34,7 @@ public sealed class SchemaTests
     private static readonly string[] ExpectedSystemTables =
     {
         "retrieval_events", "compaction_log", "config_snapshots", "import_log",
-        "_meta", "benchmark_candidates", "_schema_version",
+        "_meta", "benchmark_candidates", "_schema_version", "tool_cache",
     };
 
     private static HashSet<string> ListTables(Microsoft.Data.Sqlite.SqliteConnection conn)
@@ -145,8 +145,8 @@ public sealed class SchemaTests
         Assert.True(reader.Read());
         var count = reader.GetInt64(0);
         var maxVersion = reader.GetInt64(1);
-        Assert.Equal(13L, count);
-        Assert.Equal(13L, maxVersion);
+        Assert.Equal(15L, count);
+        Assert.Equal(15L, maxVersion);
     }
 
     [Fact]
@@ -383,5 +383,25 @@ VALUES
         cmd.CommandText = "SELECT value FROM _meta WHERE key = $k";
         cmd.Parameters.AddWithValue("$k", MigrationRunner.MigrationCompleteMarkerKey);
         Assert.Equal("sentinel", cmd.ExecuteScalar() as string);
+    }
+
+    [Fact]
+    public void RunMigrations_FreshDb_ToolCacheHasExpectedColumns()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        var cols = new HashSet<string>();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT name FROM pragma_table_info('tool_cache')";
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read()) cols.Add(reader.GetString(0));
+
+        foreach (var expected in new[]
+        {
+            "tool", "args_hash", "content", "content_hash", "stored_at_ms",
+            "ttl_seconds", "hit_count", "last_hit_at_ms", "token_estimate",
+        })
+            Assert.Contains(expected, cols);
     }
 }
