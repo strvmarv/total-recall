@@ -57,6 +57,10 @@ public sealed class SessionLifecycle : ISessionLifecycle
     private readonly Func<long, (int Count, double AvgLatencyMs)>? _retrievalStatsSince;
     private readonly Func<(long Hits, long Misses, long TokensSaved)>? _cacheStats;
 
+    /// <summary>Phase 3 idea 2a — advisory thresholds for RefreshAsync recommendations.</summary>
+    private const double SessionRefreshThresholdMinutes = 30;
+    private const int RetrievalExtractThreshold = 8;
+
     private readonly SemaphoreSlim _initLock = new(1, 1);
     private SessionInitResult? _cached;
     private DateTimeOffset _sessionStartedAt = DateTimeOffset.MinValue;
@@ -1118,6 +1122,9 @@ public sealed class SessionLifecycle : ISessionLifecycle
             }
         }
 
+        // No _sessionStartedAt guard here (unlike retrieval stats): RefreshAsync
+        // always runs EnsureInitializedAsync first, and ToolCacheStore counters
+        // are per-process == per-session for a stdio MCP server.
         CacheStats? cacheBlock = null;
         if (_cacheStats is not null)
         {
@@ -1164,16 +1171,20 @@ public sealed class SessionLifecycle : ISessionLifecycle
             },
         };
 
+        // NOTE: the session_refresh advisory intentionally appears in BOTH
+        // Recommendations and the legacy SessionAgeHint field — both are
+        // spec-defined wire fields (§7.3.1 / §5.3.3); hint is the pre-Phase-3
+        // channel kept for consumers that don't read recommendations yet.
         // Phase 3 idea 2a — advisory recommendations (spec rules out
         // auto-adaptation; the agent decides).
         var recommendations = new List<Recommendation>();
-        if (sessionAgeMinutes > 30)
+        if (sessionAgeMinutes > SessionRefreshThresholdMinutes)
             recommendations.Add(new Recommendation
             {
                 Action = "session_refresh",
                 Reason = $"Session is {sessionAgeMinutes:F0} minutes old — decay scores have shifted",
             });
-        if (retrievalCount >= 8)
+        if (retrievalCount >= RetrievalExtractThreshold)
             recommendations.Add(new Recommendation
             {
                 Action = "memory_extract",

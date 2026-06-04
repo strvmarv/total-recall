@@ -1135,4 +1135,17 @@ public sealed class SessionLifecycleTests
 
         Assert.Null(result.Efficiency.Cache); // failure degrades, never propagates
     }
+
+    [Fact]
+    public async Task Refresh_RetrievalStatsDelegateThrows_DegradesToZeros()
+    {
+        var lifecycle = BuildLifecycle(retrievalStatsSince: _ => throw new InvalidOperationException("boom"));
+        await lifecycle.EnsureInitializedAsync();
+
+        var result = await lifecycle.RefreshAsync();
+
+        Assert.Equal(0, result.Efficiency.Session.RetrievalsPerformed);
+        Assert.Equal(0.0, result.Efficiency.Session.AvgRetrievalLatencyMs);
+        Assert.Empty(result.Recommendations);
+    }
 }

@@ -976,6 +976,7 @@ public sealed record MigrateToRemoteResultDto(
 [JsonSerializable(typeof(Recommendation))]
 [JsonSerializable(typeof(Recommendation[]))]
 [JsonSerializable(typeof(System.Collections.Generic.List<Recommendation>))]
+[JsonSerializable(typeof(System.Collections.Generic.IReadOnlyList<Recommendation>))]
 public partial class JsonContext : JsonSerializerContext
 {
 }
