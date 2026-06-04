@@ -73,7 +73,14 @@ public sealed class McpServerTests
         var result = init.GetProperty("result");
         Assert.Equal("2024-11-05", result.GetProperty("protocolVersion").GetString());
         Assert.Equal("total-recall", result.GetProperty("serverInfo").GetProperty("name").GetString());
-        Assert.Equal("0.1.0", result.GetProperty("serverInfo").GetProperty("version").GetString());
+        // serverInfo.version is resolved from the Server assembly's
+        // InformationalVersion at runtime (stamped by -p:Version at release).
+        // Assert it matches that resolution — and is no longer the historic
+        // hardcoded "0.1.0" — without pinning a literal that drifts per build.
+        var reportedVersion = result.GetProperty("serverInfo").GetProperty("version").GetString();
+        Assert.Equal(McpServer.ResolveServerVersion(), reportedVersion);
+        Assert.False(string.IsNullOrEmpty(reportedVersion));
+        Assert.NotEqual("0.1.0", reportedVersion);
         Assert.True(result.GetProperty("capabilities").TryGetProperty("tools", out _));
     }
 

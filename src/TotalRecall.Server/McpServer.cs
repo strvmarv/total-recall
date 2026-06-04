@@ -19,6 +19,7 @@
 
 using System;
 using System.IO;
+using System.Reflection;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -29,7 +30,32 @@ public sealed class McpServer
 {
     private const string ProtocolVersion = "2024-11-05";
     private const string ServerName = "total-recall";
-    private const string ServerVersion = "0.1.0";
+
+    // Resolved from the Server assembly's InformationalVersion at runtime so
+    // the MCP initialize handshake reports the real release version. The
+    // release workflow stamps it via `dotnet publish -p:Version=X`, which
+    // flows to every project in the publish graph; local dev builds fall
+    // back to the csproj default. Mirrors CliApp.ResolveAppVersion — a prior
+    // hardcoded "0.1.0" const here stuck in every release binary, the same
+    // bug the CLI fixed in the beta-native-deps PR. Attribute reflection is
+    // AOT-safe (metadata, preserved through trimming). Anchored on
+    // typeof(McpServer).Assembly rather than the entry assembly so unit
+    // tests don't resolve the test host's version.
+    private static readonly string ServerVersion = ResolveServerVersion();
+
+    internal static string ResolveServerVersion()
+    {
+        var asm = typeof(McpServer).Assembly;
+        var info = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (!string.IsNullOrEmpty(info))
+        {
+            // AssemblyInformationalVersion can carry a +<sha> suffix added by
+            // SourceLink; strip it for the wire-facing handshake field.
+            var plus = info.IndexOf('+');
+            return plus >= 0 ? info[..plus] : info;
+        }
+        return asm.GetName().Version?.ToString(3) ?? "unknown";
+    }
 
     // Pre-parsed empty JSON object ({}), used as the result payload for
     // methods that return nothing meaningful (ping, shutdown).
