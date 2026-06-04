@@ -50,10 +50,11 @@ public sealed class ServerCompositionTests
         // Expected handler set — must stay in sync with ServerComposition.
         var expected = new[]
         {
-            // Memory (13)
-            "memory_store", "memory_search", "memory_get", "memory_update",
-            "memory_delete", "memory_promote", "memory_demote", "memory_inspect",
-            "memory_history", "memory_recent", "memory_lineage", "memory_export", "memory_import",
+            // Memory (15)
+            "memory_store", "memory_search", "memory_get", "memory_get_all",
+            "memory_update", "memory_delete", "memory_promote", "memory_demote",
+            "memory_inspect", "memory_history", "memory_recent", "memory_list",
+            "memory_lineage", "memory_export", "memory_import",
             // KB (7)
             "kb_search", "kb_ingest_file", "kb_ingest_dir", "kb_list_collections",
             "kb_refresh", "kb_remove", "kb_summarize",

@@ -223,6 +223,18 @@ public sealed record MemoryGetResultDto(
     [property: JsonPropertyName("content_type")] string ContentType,
     [property: JsonPropertyName("entry")] EntryDto Entry);
 
+// ---------- memory_get_all dump payload ----------
+//
+// Convenience tool that dumps all entries matching the requested tier
+// (default warm) across both Memory and Knowledge content types, with
+// optional source_tool / tags metadata filters. No pagination — full dump.
+public sealed record MemoryGetAllResultDto(
+    [property: JsonPropertyName("tier")] string Tier,
+    [property: JsonPropertyName("entries")] EntryDto[] Entries,
+    [property: JsonPropertyName("count")] int Count,
+    [property: JsonPropertyName("truncated")] bool Truncated,
+    [property: JsonPropertyName("max_results")] int MaxResults);
+
 // ---------- Task 4.9: kb_search / kb_ingest_file / kb_ingest_dir payloads ----------
 //
 // kb_search wire shape mirrors src-ts/tools/kb-tools.ts:190 —
@@ -487,6 +499,27 @@ public sealed record MemoryImportResultDto(
     [property: JsonPropertyName("skipped_count")] int SkippedCount,
     [property: JsonPropertyName("errors")] string[] Errors);
 
+// ---- memory_list: paginated listing with filters ----
+public sealed record MemoryListEntryDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("tier")] string Tier,
+    [property: JsonPropertyName("content_type")] string ContentType,
+    [property: JsonPropertyName("content")] string Content,
+    [property: JsonPropertyName("summary")] string? Summary,
+    [property: JsonPropertyName("source_tool")] string? SourceTool,
+    [property: JsonPropertyName("project")] string? Project,
+    [property: JsonPropertyName("tags")] string[] Tags,
+    [property: JsonPropertyName("created_at")] long CreatedAt,
+    [property: JsonPropertyName("updated_at")] long UpdatedAt,
+    [property: JsonPropertyName("scope")] string Scope);
+
+public sealed record MemoryListResultDto(
+    [property: JsonPropertyName("entries")] MemoryListEntryDto[] Entries,
+    [property: JsonPropertyName("count")] int Count,
+    [property: JsonPropertyName("total")] int Total,
+    [property: JsonPropertyName("limit")] int Limit,
+    [property: JsonPropertyName("offset")] int Offset);
+
 // ---- Task 6.0b: KB admin DTOs ----
 //
 // Wire shapes for the 4 KB-admin MCP handlers added in Plan 6 Task 6.0b
@@ -715,6 +748,8 @@ public sealed record MigrateToRemoteResultDto(
 [JsonSerializable(typeof(MemorySearchResultDto[]))]
 [JsonSerializable(typeof(EntryDto))]
 [JsonSerializable(typeof(MemoryGetResultDto))]
+[JsonSerializable(typeof(MemoryGetAllResultDto))]
+[JsonSerializable(typeof(EntryDto[]))]
 [JsonSerializable(typeof(IngestFileResultDto))]
 [JsonSerializable(typeof(ValidationResultDto))]
 [JsonSerializable(typeof(ProbeResultDto))]
@@ -764,6 +799,10 @@ public sealed record MigrateToRemoteResultDto(
 [JsonSerializable(typeof(ExportEntryDto[]))]
 [JsonSerializable(typeof(MemoryExportResultDto))]
 [JsonSerializable(typeof(MemoryImportResultDto))]
+// ---- memory_list ----
+[JsonSerializable(typeof(MemoryListEntryDto))]
+[JsonSerializable(typeof(MemoryListEntryDto[]))]
+[JsonSerializable(typeof(MemoryListResultDto))]
 // ---- Task 6.0b: KB admin DTOs ----
 [JsonSerializable(typeof(KbCollectionDto))]
 [JsonSerializable(typeof(KbCollectionDto[]))]

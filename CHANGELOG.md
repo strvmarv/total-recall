@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.4.0 - 2026-06-03
+
+### Added
+
+- **Hermes Agent MemoryProvider plugin.** total-recall now ships a Python plugin (`hermes-plugin/`) that implements Hermes's `MemoryProvider` ABC, giving Hermes Agent deep automatic memory integration:
+  - **Hot tier injection** — session context is injected directly into the system prompt at session start (no tool call needed)
+  - **Per-turn prefetch** — semantic search fires before each turn, providing relevant memories as fenced context
+  - **Per-turn sync** — every exchange is automatically written back to total-recall as a surfaced memory entry
+  - **Session lifecycle** — `session_start` runs on agent init (auto-import from Hermes), `session_end` compacts on session close
+  - **Built-in memory mirroring** — writes to Hermes's built-in `memory` tool are mirrored into total-recall as corrections and preferences
+  - **Drop-in memory tool replacement** — the Hermes `memory` tool schema is preserved but routed through total-recall's warm tier, so the agent's workflow doesn't change
+  - **Auto-install on `npm install`** — plugin is deployed to `~/.hermes/plugins/total-recall/` and config is flipped automatically when Hermes is detected
+- **`memory_list` MCP tool.** Paginated listing of memory entries with optional filters: `tier` (hot/warm/cold), `content_type` (memory/knowledge), `tags`, `project`, `source_tool`, `limit` (default 50, max 200), `offset`. Returns combined results across all tiers sorted by `created_at DESC`.
+- **`memory_get_all` MCP tool.** Full dump of all entries matching filters with no pagination. Capped at 10,000 entries per content type to prevent memory exhaustion. Filters: `tier` (default warm), `source_tool`, `tags`.
+
+### Changed
+
+- **package.json** — `hermes-plugin/` directory added to npm `files` array for inclusion in published tarball.
+- **postinstall** — now calls `installHermesPlugin()` to auto-deploy the Hermes plugin when Hermes is detected on the system.
+
 ## 1.3.0 - 2026-05-31
 
 ### Added
