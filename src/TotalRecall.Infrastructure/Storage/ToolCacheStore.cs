@@ -142,6 +142,9 @@ public sealed class ToolCacheStore
         var contentHash = Convert.ToHexString(
             SHA256.HashData(Encoding.UTF8.GetBytes(content)));
 
+        // ON CONFLICT deliberately resets hit_count/last_hit_at_ms: freshly
+        // stored content starts a new hit cycle (it is a different result,
+        // not a continuation of the old one).
         using (var cmd = _conn.CreateCommand())
         {
             cmd.CommandText = """
@@ -178,6 +181,8 @@ public sealed class ToolCacheStore
         }
 
         // LRU cap: keep the maxEntries most-recently-used rows.
+        // SQLite-only: `LIMIT -1` (no upper bound) is a SQLite extension,
+        // not ANSI SQL — this store has no Postgres counterpart.
         using (var lru = _conn.CreateCommand())
         {
             lru.CommandText = """
@@ -211,6 +216,8 @@ public sealed class ToolCacheStore
     /// Word-count heuristic (words × 0.75). Duplicated from
     /// SessionLifecycle.HeuristicEstimateTokens because Infrastructure
     /// cannot reference Server; ±20% error is fine for savings reporting.
+    /// If the multiplier changes, update SessionLifecycle.HeuristicEstimateTokens
+    /// in TotalRecall.Server to match.
     /// </summary>
     internal static int EstimateTokens(string text)
     {

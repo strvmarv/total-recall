@@ -128,6 +128,12 @@ public sealed class ToolCacheStoreTests : IDisposable
         var hit = store.Check("t", "h1");
         Assert.Equal("new content here", hit!.Content);
         Assert.Equal(_nowMs, hit.StoredAtMs);
+
+        // Upsert starts a new hit cycle: hit_count reset to 0 (the Check
+        // above then bumped it to 1), last_hit_at_ms set by that Check.
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "SELECT hit_count FROM tool_cache WHERE tool='t' AND args_hash='h1'";
+        Assert.Equal(1L, (long)cmd.ExecuteScalar()!);
     }
 
     [Fact]
