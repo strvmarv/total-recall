@@ -247,3 +247,9 @@ Tradeoffs:
 Meaningful refactor — probably 1-2 days of work plus a beta cycle to validate. Worth tracking but not urgent until Windows user count grows.
 
 **Files:** `package.json`, `bin/start.js`, `.github/workflows/release.yml`, new per-platform package scaffolding
+
+### MemoryStoreHandler ignores caller entryType for the column
+
+`memory_store` parses and validates the `entryType` argument into metadata JSON but hardcodes `EntryType.Preference` for the `entry_type` column in the `InsertWithEmbedding` call. `memory_extract` (Phase 3) maps the validated string to the correct `EntryType` discriminated union value and writes it to the column — the two siblings diverge. Fix `MemoryStoreHandler` to map the validated string to the `EntryType` DU (consider per-type decay accuracy impact on existing rows that were silently written as Preference). Found during Phase 3 code review.
+
+**Files:** `src/TotalRecall.Server/Handlers/MemoryStoreHandler.cs` (`InsertWithEmbedding` call), `src/TotalRecall.Server/Handlers/MemoryExtractHandler.cs` (reference implementation)

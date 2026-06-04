@@ -1,6 +1,6 @@
 # Handlers — Agent Guide
 
-This directory contains **one file per MCP tool handler** (46 total). Each handler is a `sealed class` implementing `IToolHandler`.
+This directory contains **one file per MCP tool handler** (47 total). Each handler is a `sealed class` implementing `IToolHandler`.
 
 ---
 
@@ -108,7 +108,7 @@ Never use `JsonSerializer.Serialize(obj)` with the reflection-based overload.
 1. Create `<ToolName>Handler.cs` in this directory — `sealed class`, `IToolHandler`.
 2. Add the DTO(s) to `../JsonContext.cs` if the response shape is new.
 3. Register in `../ServerComposition.cs` → `BuildRegistry()` in the appropriate group:
-   - Memory (15), KB (8), Session (4), Eval (5), Config (2), Misc (4)
+   - Memory (16), KB (8), Session (4), Eval (5), Config (2), Misc (4)
 4. Update the handler count in the `BuildRegistry` comment.
 5. Add a test in `../../../../tests/TotalRecall.Server.Tests/Handlers/`.
 
@@ -120,14 +120,22 @@ Never use `JsonSerializer.Serialize(obj)` with the reflection-based overload.
 
 | Group | Count | Handlers |
 |-------|-------|----------|
-| Memory | 15 | store, search, get, update, delete, promote, demote, inspect, history, recent, list, get_all, lineage, export, import |
+| Memory | 16 | store, search, get, update, delete, promote, demote, inspect, history, recent, list, get_all, lineage, export, import, extract |
 | KB | 8 | search, ingest_file, ingest_dir, list_collections, refresh, remove, summarize, resolve |
 | Session | 4 | start, end, context, refresh |
 | Eval | 5 | report, benchmark, compare, snapshot, grow |
 | Config | 2 | get, set |
-| Misc | 5 | status, import_host, compact_now, migrate_to_remote, usage_status |
+| Misc | 4 | status, import_host, compact_now, migrate_to_remote |
 
-`usage_status` is registered after `BuildRegistry` returns (SQLite-only path in `OpenSqlite`).
+**Post-BuildRegistry registrations** (wired directly in `OpenSqlite` / `OpenCortex` after `BuildRegistry` returns):
+
+| Group | Count | Handlers | Mode |
+|-------|-------|----------|------|
+| Usage | 1 | usage_status | sqlite + cortex |
+| Cache | 2 | cache_check, cache_store | sqlite + cortex |
+| Skill | 4–5 | search, get, list, import_host (sqlite); + delete (cortex) | mode-dependent |
+
+**Reconciliation:** `BuildRegistry` sum = 16 + 8 + 4 + 5 + 2 + 4 = **39**. Post-BuildRegistry = 1 (usage_status) + 2 (cache) + 4–5 (skill). Directory file count = **47** (39 + 1 + 2 + 5 skill files).
 
 ---
 
