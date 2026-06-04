@@ -16,6 +16,7 @@
 // fallback at first launch, so the failure here is recoverable later.
 
 import { ensureBinary } from './fetch-binary.js';
+import { installHermesPlugin } from './install-hermes-plugin.js';
 
 const result = await ensureBinary({ logPrefix: '[total-recall:postinstall]' });
 
@@ -28,5 +29,8 @@ if (!result.ok) {
     '[total-recall:postinstall] The binary will be downloaded on first launch instead.\n'
   );
 }
+
+// Install Hermes MemoryProvider plugin if Hermes is detected
+await installHermesPlugin();
 
 process.exit(0);

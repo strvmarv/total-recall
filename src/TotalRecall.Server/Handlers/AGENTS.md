@@ -120,7 +120,7 @@ Never use `JsonSerializer.Serialize(obj)` with the reflection-based overload.
 
 | Group | Count | Handlers |
 |-------|-------|----------|
-| Memory | 13 | store, search, get, update, delete, promote, demote, inspect, history, recent, lineage, export, import |
+|| Memory | 14 | store, search, get, update, delete, promote, demote, inspect, history, recent, list, lineage, export, import |
 | KB | 7 | search, ingest_file, ingest_dir, list_collections, refresh, remove, summarize |
 | Session | 3 | start, end, context |
 | Eval | 5 | report, benchmark, compare, snapshot, grow |
