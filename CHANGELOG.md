@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Drop-in memory tool replacement** — the Hermes `memory` tool schema is preserved but routed through total-recall's warm tier, so the agent's workflow doesn't change
   - **Auto-install on `npm install`** — plugin is deployed to `~/.hermes/plugins/total-recall/` and config is flipped automatically when Hermes is detected
 - **`memory_list` MCP tool.** Paginated listing of memory entries with optional filters: `tier` (hot/warm/cold), `content_type` (memory/knowledge), `tags`, `project`, `source_tool`, `limit` (default 50, max 200), `offset`. Returns combined results across all tiers sorted by `created_at DESC`.
-- **`memory_get_all` MCP tool.** Full dump of all entries matching filters with no pagination. Convenience wrapper: `memory_list` with no limit. Filters: `tier` (default warm), `source_tool`, `tags`.
+- **`memory_get_all` MCP tool.** Full dump of all entries matching filters with no pagination. Capped at 10,000 entries per content type to prevent memory exhaustion. Filters: `tier` (default warm), `source_tool`, `tags`.
 
 ### Changed
 

@@ -231,7 +231,9 @@ public sealed record MemoryGetResultDto(
 public sealed record MemoryGetAllResultDto(
     [property: JsonPropertyName("tier")] string Tier,
     [property: JsonPropertyName("entries")] EntryDto[] Entries,
-    [property: JsonPropertyName("count")] int Count);
+    [property: JsonPropertyName("count")] int Count,
+    [property: JsonPropertyName("truncated")] bool Truncated,
+    [property: JsonPropertyName("max_results")] int MaxResults);
 
 // ---------- Task 4.9: kb_search / kb_ingest_file / kb_ingest_dir payloads ----------
 //

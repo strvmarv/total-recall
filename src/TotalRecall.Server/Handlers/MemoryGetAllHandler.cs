@@ -3,9 +3,8 @@
 // memory_get_all — convenience MCP tool that returns ALL entries matching
 // filters (no pagination — full dump using a high limit). Sweeps both
 // ContentType.Memory and ContentType.Knowledge for the requested tier
-// and returns a flat list of entries. When source_tool or tags are
-// provided, delegates to IStore.ListByMetadata for metadata-level
-// filtering.
+// and returns a flat list of entries. Capped at 10,000 per content type
+// with a `truncated` flag when the cap is hit.
 
 using System;
 using System.Collections.Generic;
@@ -71,6 +70,10 @@ public sealed class MemoryGetAllHandler : IToolHandler
         var memoryEntries = _store.List(tier, ContentType.Memory, opts);
         var knowledgeEntries = _store.List(tier, ContentType.Knowledge, opts);
 
+        // Capture raw counts before in-memory filtering so truncation
+        // detection reflects the actual per-type cap, not the post-filter count.
+        var truncated = memoryEntries.Count >= maxGetAll || knowledgeEntries.Count >= maxGetAll;
+
         // C1: In-memory filtering on Entry properties.
         // C2: OR semantics for tags (iterate individual tags, NOT comma-joined).
         if (sourceTool is not null || tags is { Count: > 0 })
@@ -90,7 +93,9 @@ public sealed class MemoryGetAllHandler : IToolHandler
         var dto = new MemoryGetAllResultDto(
             Tier: TierNames.TierName(tier),
             Entries: allDtos.ToArray(),
-            Count: allDtos.Count);
+            Count: allDtos.Count,
+            Truncated: truncated,
+            MaxResults: maxGetAll);
 
         var jsonText = JsonSerializer.Serialize(dto, JsonContext.Default.MemoryGetAllResultDto);
 

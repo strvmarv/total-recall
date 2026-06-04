@@ -202,6 +202,12 @@ class McpClient:
             return {"success": False, "error": str(err)}
 
         result = resp.get("result", {})
+        # Check MCP-level isError flag before processing content
+        if result.get("isError"):
+            content = result.get("content", [])
+            error_text = content[0].get("text", "unknown error") if content else "unknown error"
+            return {"success": False, "error": error_text}
+
         content = result.get("content", [])
         if not content:
             return {"success": True, "text": ""}

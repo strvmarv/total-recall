@@ -87,6 +87,7 @@ class TotalRecallProvider(MemoryProvider):
 
         # Clean up any prior client to avoid subprocess leaks.
         self.shutdown()
+        self._session_ended = False  # reset for the new session
 
         try:
             self._client = McpClient()
