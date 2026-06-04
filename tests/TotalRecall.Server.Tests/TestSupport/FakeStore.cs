@@ -29,6 +29,16 @@ public sealed class FakeStore : IStore
     public string NextInsertId { get; set; } = "entry-123";
 
     /// <summary>
+    /// When true, each call to <see cref="Insert"/> or
+    /// <see cref="InsertWithEmbedding"/> returns
+    /// <c>"{NextInsertId}-{counter}"</c> so callers receive distinguishable
+    /// ids without the test needing to update <see cref="NextInsertId"/>
+    /// between calls. Defaults to false so existing tests are unaffected.
+    /// </summary>
+    public bool AutoIncrementInsertIds { get; set; }
+    private int _insertCounter;
+
+    /// <summary>
     /// Pre-seeded entries keyed by (tier, type, id). Tests call Seed(...)
     /// to place rows before invoking a handler.
     /// </summary>
@@ -79,8 +89,9 @@ public sealed class FakeStore : IStore
     public string Insert(Tier tier, ContentType type, InsertEntryOpts opts)
     {
         InsertCalls.Add(new InsertCall(tier, type, opts));
-        Rowids[(tier, type, NextInsertId)] = _nextRowid++;
-        return NextInsertId;
+        var id = AutoIncrementInsertIds ? $"{NextInsertId}-{++_insertCounter}" : NextInsertId;
+        Rowids[(tier, type, id)] = _nextRowid++;
+        return id;
     }
 
     public sealed record InsertWithEmbeddingCall(Tier Tier, ContentType Type, InsertEntryOpts Opts, float[] Embedding);
@@ -94,8 +105,9 @@ public sealed class FakeStore : IStore
         // counter so GetInternalKey works on the fresh id. Does NOT model
         // transactional rollback — tests that need to exercise the rollback
         // path use the real SqliteStore against :memory:.
-        Rowids[(tier, type, NextInsertId)] = _nextRowid++;
-        return NextInsertId;
+        var id = AutoIncrementInsertIds ? $"{NextInsertId}-{++_insertCounter}" : NextInsertId;
+        Rowids[(tier, type, id)] = _nextRowid++;
+        return id;
     }
 
     public Entry? Get(Tier tier, ContentType type, string id)
@@ -146,6 +158,10 @@ public sealed class FakeStore : IStore
                 && e.ParentId.Value == pid);
         if (opts?.EntryType is { } et)
             src = src.Where(e => e.EntryType.Equals(et));
+        if (opts?.Source is string sourceFilter)
+            src = src.Where(e =>
+                Microsoft.FSharp.Core.FSharpOption<string>.get_IsSome(e.Source)
+                && e.Source.Value == sourceFilter);
         // Honor the OrderBy hint before applying Limit so top-N results are
         // globally correct (mirrors what the real SqliteStore does in SQL).
         // Supports the three columns used by RecentQuery: created_at, updated_at,
@@ -265,4 +281,6 @@ public sealed class FakeStore : IStore
         if (Rowids.Remove((fromTier, fromType, id)))
             Rowids[(toTier, toType, id)] = _nextRowid++;
     }
+
+    public void UpdateInjectionCounts(IReadOnlyList<(Tier tier, ContentType type, string id)> entries) { }
 }

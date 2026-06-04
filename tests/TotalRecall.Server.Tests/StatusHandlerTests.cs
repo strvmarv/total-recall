@@ -56,7 +56,7 @@ public sealed class StatusHandlerTests
             FSharpOption<string>.None,
             "",
             EntryType.Preference,
-            metadata);
+            metadata, 0);
     }
 
     private static async Task<JsonElement> RunAsync(

@@ -59,6 +59,25 @@ public static class ErrorTranslator
             };
         }
 
+        // Caller input validation — handlers throw ArgumentException with
+        // deliberately user-facing messages ("argsHash is required"). Echo
+        // the message so the calling LLM can read it and self-correct; no
+        // stderr noise (it's the caller's input, not an internal fault).
+        // ArgumentNullException is excluded: in this codebase it marks
+        // programming errors (null DI args), which belong on the sanitized
+        // internal-error path below.
+        if (ex is ArgumentException && ex is not ArgumentNullException)
+        {
+            return new ToolCallResult
+            {
+                Content = new[]
+                {
+                    new ToolContent { Type = "text", Text = $"Invalid arguments: {ex.Message}" },
+                },
+                IsError = true,
+            };
+        }
+
         if (ex is OperationCanceledException)
         {
             return new ToolCallResult

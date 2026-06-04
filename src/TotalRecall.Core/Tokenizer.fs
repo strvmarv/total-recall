@@ -180,3 +180,46 @@ let tokenize (vocab: Vocab) (text: string) : int list =
                         stop <- true
     ids.Add(SepTokenId)
     ids |> List.ofSeq
+
+// --- countTokens ---
+
+let countTokens (vocab: Vocab) (text: string) : int =
+    if System.String.IsNullOrWhiteSpace text then 0
+    else
+        tokenize vocab text |> List.length
+
+// --- truncateToTokens ---
+
+let truncateToTokens (vocab: Vocab) (maxTokens: int) (text: string) : string =
+    if maxTokens <= 0 then ""
+    elif maxTokens >= MaxSeqLen then text
+    else
+        let charsPerTokenEstimate = 4
+
+        let rec binaryTruncate (text: string) (lo: int) (hi: int) : string =
+            if lo >= hi then
+                if lo > 0 then text.Substring(0, lo)
+                else ""
+            else
+                let mid = (lo + hi + 1) / 2
+                let candidate = text.Substring(0, min mid text.Length)
+                let cnt = countTokens vocab candidate
+                if cnt <= maxTokens then binaryTruncate text mid hi
+                else binaryTruncate text lo (mid - 1)
+
+        let atSentenceBoundary (s: string) (pos: int) : int =
+            if pos <= 0 then pos
+            else
+                let mutable p = pos
+                while p > 0 && p - 1 < s.Length && s.[p - 1] <> '.' && s.[p - 1] <> '!' && s.[p - 1] <> '?' && s.[p - 1] <> '\n' do
+                    p <- p - 1
+                if p < pos && p > 0 then p
+                else pos
+
+        let estimatedHi = min (maxTokens * charsPerTokenEstimate) text.Length
+        let boundaryHi = atSentenceBoundary text estimatedHi
+        let tokensAtBoundary = countTokens vocab (text.Substring(0, boundaryHi))
+        if tokensAtBoundary <= maxTokens then
+            binaryTruncate text boundaryHi estimatedHi
+        else
+            binaryTruncate text 0 boundaryHi

@@ -34,7 +34,7 @@ public sealed class SchemaTests
     private static readonly string[] ExpectedSystemTables =
     {
         "retrieval_events", "compaction_log", "config_snapshots", "import_log",
-        "_meta", "benchmark_candidates", "_schema_version",
+        "_meta", "benchmark_candidates", "_schema_version", "tool_cache",
     };
 
     private static HashSet<string> ListTables(Microsoft.Data.Sqlite.SqliteConnection conn)
@@ -145,8 +145,8 @@ public sealed class SchemaTests
         Assert.True(reader.Read());
         var count = reader.GetInt64(0);
         var maxVersion = reader.GetInt64(1);
-        Assert.Equal(13L, count);
-        Assert.Equal(13L, maxVersion);
+        Assert.Equal(15L, count);
+        Assert.Equal(15L, maxVersion);
     }
 
     [Fact]
@@ -383,5 +383,50 @@ VALUES
         cmd.CommandText = "SELECT value FROM _meta WHERE key = $k";
         cmd.Parameters.AddWithValue("$k", MigrationRunner.MigrationCompleteMarkerKey);
         Assert.Equal("sentinel", cmd.ExecuteScalar() as string);
+    }
+
+    [Fact]
+    public void RunMigrations_FreshDb_ToolCacheHasExpectedColumns()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        // name -> (type, notNull, defaultValue)
+        var cols = new Dictionary<string, (string Type, bool NotNull, string? Default)>();
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "PRAGMA table_info(tool_cache)";
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                cols[reader.GetString(1)] = (
+                    reader.GetString(2),
+                    reader.GetInt64(3) != 0,
+                    reader.IsDBNull(4) ? null : reader.GetString(4));
+            }
+        }
+
+        Assert.Equal(9, cols.Count);
+        Assert.Equal(("TEXT", true, (string?)null), cols["tool"]);
+        Assert.Equal(("TEXT", true, (string?)null), cols["args_hash"]);
+        Assert.Equal(("TEXT", true, (string?)null), cols["content"]);
+        Assert.Equal(("TEXT", true, (string?)null), cols["content_hash"]);
+        Assert.Equal(("INTEGER", true, (string?)null), cols["stored_at_ms"]);
+        Assert.Equal(("INTEGER", true, (string?)"600"), cols["ttl_seconds"]);
+        Assert.Equal(("INTEGER", true, (string?)"0"), cols["hit_count"]);
+        Assert.Equal(("INTEGER", false, (string?)null), cols["last_hit_at_ms"]);
+        Assert.Equal(("INTEGER", true, (string?)"0"), cols["token_estimate"]);
+    }
+
+    [Fact]
+    public void RunMigrations_FreshDb_ToolCacheHasStoredAtIndex()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_tool_cache_stored_at'";
+        Assert.Equal(1L, (long)cmd.ExecuteScalar()!);
     }
 }

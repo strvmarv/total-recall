@@ -99,6 +99,51 @@ public sealed class ErrorTranslatorTests
         Assert.Equal(string.Empty, stderr.ToString());
     }
 
+    // ---------- ArgumentException (caller input validation) ----------
+
+    [Fact]
+    public void Translate_ArgumentException_EchoesValidationMessage()
+    {
+        var ex = new ArgumentException("argsHash is required");
+        var stderr = new StringWriter();
+
+        var result = ErrorTranslator.Translate(ex, stderr);
+
+        Assert.True(result.IsError);
+        Assert.Single(result.Content);
+        Assert.Equal("text", result.Content[0].Type);
+        Assert.Equal("Invalid arguments: argsHash is required", result.Content[0].Text);
+    }
+
+    [Fact]
+    public void Translate_ArgumentException_DoesNotWriteStderr()
+    {
+        // Validation failures are the caller's input fault, not an internal
+        // error — no stack-trace noise on stderr.
+        var ex = new ArgumentException("path must be a non-empty string");
+        var stderr = new StringWriter();
+
+        ErrorTranslator.Translate(ex, stderr);
+
+        Assert.Equal(string.Empty, stderr.ToString());
+    }
+
+    [Fact]
+    public void Translate_ArgumentNullException_TreatedAsInternal()
+    {
+        // ArgumentNullException derives from ArgumentException but in this
+        // codebase it marks programming errors (null DI args), not caller
+        // input — it stays on the sanitized internal-error path.
+        var ex = new ArgumentNullException("store");
+        var stderr = new StringWriter();
+
+        var result = ErrorTranslator.Translate(ex, stderr);
+
+        Assert.True(result.IsError);
+        Assert.StartsWith("Internal error:", result.Content[0].Text);
+        Assert.NotEqual(string.Empty, stderr.ToString());
+    }
+
     // ---------- generic exception ----------
 
     [Fact]

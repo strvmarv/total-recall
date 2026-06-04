@@ -30,7 +30,7 @@ public sealed class SyncServiceTests
             FSharpOption<SourceTool>.None, FSharpOption<string>.None,
             ListModule.OfSeq(Array.Empty<string>()),
             0L, updatedAt, 0L, 0, 1.0,
-            FSharpOption<string>.None, FSharpOption<string>.None, "", EntryType.Preference, "{}");
+            FSharpOption<string>.None, FSharpOption<string>.None, "", EntryType.Preference, "{}", 0);
 
     // -----------------------------------------------------------------------
     // Test 1: PullAsync inserts new memories locally
@@ -198,7 +198,7 @@ public sealed class SyncServiceTests
             createdMs, updatedMs, 0L,
             7, 0.42,
             FSharpOption<string>.None, FSharpOption<string>.None,
-            "work", EntryType.Decision, "{}");
+            "work", EntryType.Decision, "{}", 0);
 
         // Route an insert through RoutingStore so it enqueues via SyncPayload.Upsert
         var opts = new InsertEntryOpts("rich content");

@@ -33,7 +33,8 @@ public static class ConfigJsonSerializer
         sb.Append("\"hot\":{");
         AppendInt(sb, "max_entries", config.Tiers.Hot.MaxEntries); sb.Append(',');
         AppendInt(sb, "token_budget", config.Tiers.Hot.TokenBudget); sb.Append(',');
-        AppendDouble(sb, "carry_forward_threshold", config.Tiers.Hot.CarryForwardThreshold);
+        AppendDouble(sb, "carry_forward_threshold", config.Tiers.Hot.CarryForwardThreshold); sb.Append(',');
+        AppendDouble(sb, "task_weight", config.Tiers.Hot.TaskWeight);
         sb.Append("},\"warm\":{");
         AppendInt(sb, "max_entries", config.Tiers.Warm.MaxEntries); sb.Append(',');
         AppendInt(sb, "retrieval_top_k", config.Tiers.Warm.RetrievalTopK); sb.Append(',');
@@ -50,7 +51,8 @@ public static class ConfigJsonSerializer
         AppendDouble(sb, "decay_half_life_hours", config.Compaction.DecayHalfLifeHours); sb.Append(',');
         AppendDouble(sb, "warm_threshold", config.Compaction.WarmThreshold); sb.Append(',');
         AppendDouble(sb, "promote_threshold", config.Compaction.PromoteThreshold); sb.Append(',');
-        AppendInt(sb, "warm_sweep_interval_days", config.Compaction.WarmSweepIntervalDays);
+        AppendInt(sb, "warm_sweep_interval_days", config.Compaction.WarmSweepIntervalDays); sb.Append(',');
+        AppendInt(sb, "auto_demote_min_injections", config.Compaction.AutoDemoteMinInjections);
         sb.Append("},");
 
         // embedding
@@ -92,6 +94,16 @@ public static class ConfigJsonSerializer
             {
                 AppendDouble(sb, "fts_weight", search.FtsWeight.Value);
             }
+            sb.Append('}');
+        }
+
+        // tool_cache (optional)
+        if (Microsoft.FSharp.Core.FSharpOption<Core.Config.ToolCacheConfig>.get_IsSome(config.ToolCache))
+        {
+            var tc = config.ToolCache.Value;
+            sb.Append(",\"tool_cache\":{");
+            AppendInt(sb, "max_entries", tc.MaxEntries); sb.Append(',');
+            AppendInt(sb, "default_ttl_seconds", tc.DefaultTtlSeconds);
             sb.Append('}');
         }
 

@@ -19,8 +19,7 @@
 //      AutoMigrationGuard.CheckAndMigrateAsync BEFORE calling this (so the
 //      migration path can rename the old DB before we open a handle on it).
 //
-// Handler budget: 14 memory + 7 KB + 3 session + 5 eval + 2 config + 4 misc = 35.
-// (status, import_host, compact_now, migrate_to_remote) = 35.
+// Handler budget: Memory (16) + KB (8) + Session (4) + Eval (5) + Config (2) + Misc (4) = 39.
 //
 // AOT: no reflection. Every handler is constructed via direct `new`. The
 // Eval/Config/ImportHost/CompactNow handlers have no-arg constructors that
@@ -128,7 +127,7 @@ public static class ServerComposition
 
         var registry = new ToolRegistry();
 
-        // ---- Memory (14) ----
+        // ---- Memory (16) ----
         registry.Register(new MemoryStoreHandler(store, embedder, vectors, scopeDefault));
         registry.Register(new MemorySearchHandler(embedder, hybrid, scopeDefault, retrievalLog, syncQueue));
         registry.Register(new MemoryGetHandler(store));
@@ -144,8 +143,9 @@ public static class ServerComposition
         registry.Register(new MemoryLineageHandler(compactionLog));
         registry.Register(new MemoryExportHandler(store));
         registry.Register(new MemoryImportHandler(store, vectors, embedder));
+        registry.Register(new MemoryExtractHandler(store, embedder, scopeDefault));
 
-        // ---- KB (7) ----
+        // ---- KB (8) ----
         registry.Register(new KbSearchHandler(embedder, hybrid, remoteBackend, scopeDefault, retrievalLog, syncQueue));
         registry.Register(new KbIngestFileHandler(fileIngester, scopeDefault));
         registry.Register(new KbIngestDirHandler(fileIngester, scopeDefault));
@@ -153,11 +153,13 @@ public static class ServerComposition
         registry.Register(new KbRefreshHandler(store, vectors, fileIngester));
         registry.Register(new KbRemoveHandler(store, vectors));
         registry.Register(new KbSummarizeHandler(store));
+        registry.Register(new KbResolveHandler(store));
 
-        // ---- Session (3) ----
+        // ---- Session (4) ----
         registry.Register(new SessionStartHandler(sessionLifecycle, periodicSync, syncService));
         registry.Register(new SessionEndHandler(sessionLifecycle, store, compactionLogWriter, syncService: syncService));
         registry.Register(new SessionContextHandler(store));
+        registry.Register(new SessionRefreshHandler(sessionLifecycle));
 
         // ---- Eval (5) — self-bootstrap production executors ----
         registry.Register(new EvalReportHandler());
@@ -249,6 +251,14 @@ public static class ServerComposition
         {
             MigrationRunner.RunMigrations(conn);
 
+            // Phase 3 idea 2c — tool-result cache (SQLite-backed, local only).
+            var toolCacheCfg = FSharpOption<Core.Config.ToolCacheConfig>.get_IsSome(cfg.ToolCache)
+                ? cfg.ToolCache.Value : null;
+            var toolCacheStore = new ToolCacheStore(
+                conn,
+                maxEntries: toolCacheCfg?.MaxEntries ?? 200,
+                defaultTtlSeconds: toolCacheCfg?.DefaultTtlSeconds ?? 600);
+
             var store = new SqliteStore(conn);
             var vec = new VectorSearch(conn);
             var fts = new FtsSearch(conn);
@@ -316,6 +326,11 @@ public static class ServerComposition
             // lastSessionAge in session_start.
             var usageQuery = new TotalRecall.Infrastructure.Usage.UsageQueryService(conn);
 
+            // Phase 5: retrieval telemetry — log locally in sqlite-only mode.
+            // syncQueue stays null because there is no cortex to push to.
+            // Constructed before SessionLifecycle so the delegate can be passed in.
+            var retrievalLog = new RetrievalEventLog(conn);
+
             var sessionLifecycle = new SessionLifecycle(
                 importers, store, compactionLog,
                 usageIndexer: usageIndexer,
@@ -323,16 +338,17 @@ public static class ServerComposition
                 skillImportService: sqliteSkillService,
                 tokenBudget: cfg.Tiers.Hot.TokenBudget,
                 maxEntries: cfg.Tiers.Hot.MaxEntries,
-                usageQuery: usageQuery);
+                usageQuery: usageQuery,
+                embedder: embedder,
+                autoDemoteMinInjections: cfg.Compaction.AutoDemoteMinInjections,
+                taskWeight: cfg.Tiers.Hot.TaskWeight,
+                retrievalStatsSince: retrievalLog.GetStatsSince,
+                cacheStats: toolCacheStore.GetSessionStats);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
                 EmbeddingModel: cfg.Embedding.Model,
                 EmbeddingDimensions: cfg.Embedding.Dimensions);
-
-            // Phase 5: retrieval telemetry — log locally in sqlite-only mode.
-            // syncQueue stays null because there is no cortex to push to.
-            var retrievalLog = new RetrievalEventLog(conn);
 
             var registry = BuildRegistry(
                 store, vec, embedder, hybrid,
@@ -343,6 +359,11 @@ public static class ServerComposition
                 syncBacklog: new Infrastructure.Sync.SyncBacklogReader(conn));
 
             registry.Register(new UsageStatusHandler(usageQuery));
+
+            // Phase 3 idea 2c — cache handlers are SQLite/cortex-only (the
+            // cache table lives in the local DB), same pattern as usage_status.
+            registry.Register(new CacheCheckHandler(toolCacheStore));
+            registry.Register(new CacheStoreHandler(toolCacheStore));
 
             // Skill MCP handlers — sqlite mode: cache-backed, no cortex client.
             // Use NullSkillClient as the fallback so any cache miss returns null
@@ -411,7 +432,10 @@ public static class ServerComposition
             var sessionLifecycle = new SessionLifecycle(importers, store, compactionLog,
                 storageMode: storageMode,
                 tokenBudget: cfg.Tiers.Hot.TokenBudget,
-                maxEntries: cfg.Tiers.Hot.MaxEntries);
+                maxEntries: cfg.Tiers.Hot.MaxEntries,
+                embedder: embedder,
+                autoDemoteMinInjections: cfg.Compaction.AutoDemoteMinInjections,
+                taskWeight: cfg.Tiers.Hot.TaskWeight);
 
             var statusOptions = new StatusOptions(
                 DbPath: connStr,
@@ -476,6 +500,14 @@ public static class ServerComposition
         try
         {
             MigrationRunner.RunMigrations(conn);
+
+            // Phase 3 idea 2c — tool-result cache (SQLite-backed, local only).
+            var toolCacheCfgCortex = FSharpOption<Core.Config.ToolCacheConfig>.get_IsSome(cfg.ToolCache)
+                ? cfg.ToolCache.Value : null;
+            var toolCacheStore = new ToolCacheStore(
+                conn,
+                maxEntries: toolCacheCfgCortex?.MaxEntries ?? 200,
+                defaultTtlSeconds: toolCacheCfgCortex?.DefaultTtlSeconds ?? 600);
 
             var localStore = new SqliteStore(conn);
             var vec = new VectorSearch(conn);
@@ -558,6 +590,11 @@ public static class ServerComposition
 
             var usageQuery = new TotalRecall.Infrastructure.Usage.UsageQueryService(conn);
 
+            // Phase 5: retrieval telemetry — log locally AND enqueue for
+            // push in cortex mode so SyncService.FlushAsync picks it up.
+            // Constructed before SessionLifecycle so the delegate can be passed in.
+            var retrievalLog = new RetrievalEventLog(conn);
+
             var sessionLifecycle = new SessionLifecycle(
                 importers, routingStore, compactionLog,
                 usageIndexer: usageIndexer,
@@ -565,16 +602,17 @@ public static class ServerComposition
                 skillImportService: skillImportService,
                 tokenBudget: cfg.Tiers.Hot.TokenBudget,
                 maxEntries: cfg.Tiers.Hot.MaxEntries,
-                usageQuery: usageQuery);
+                usageQuery: usageQuery,
+                embedder: embedder,
+                autoDemoteMinInjections: cfg.Compaction.AutoDemoteMinInjections,
+                taskWeight: cfg.Tiers.Hot.TaskWeight,
+                retrievalStatsSince: retrievalLog.GetStatsSince,
+                cacheStats: toolCacheStore.GetSessionStats);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
                 EmbeddingModel: cfg.Embedding.Model,
                 EmbeddingDimensions: cfg.Embedding.Dimensions);
-
-            // Phase 5: retrieval telemetry — log locally AND enqueue for
-            // push in cortex mode so SyncService.FlushAsync picks it up.
-            var retrievalLog = new RetrievalEventLog(conn);
 
             var registry = BuildRegistry(
                 routingStore, vec, embedder, hybrid,
@@ -588,6 +626,11 @@ public static class ServerComposition
                 syncBacklog: new Infrastructure.Sync.SyncBacklogReader(conn));
 
             registry.Register(new UsageStatusHandler(usageQuery));
+
+            // Phase 3 idea 2c — cache handlers are SQLite/cortex-only (the
+            // cache table lives in the local DB), same pattern as usage_status.
+            registry.Register(new CacheCheckHandler(toolCacheStore));
+            registry.Register(new CacheStoreHandler(toolCacheStore));
 
             // Plan 2: skill_* MCP handlers — cortex-mode: cache-first, cortex fallback.
             registry.Register(new SkillSearchHandler(localSkillSearch, skillClient));

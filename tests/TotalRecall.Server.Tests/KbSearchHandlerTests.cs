@@ -45,7 +45,7 @@ public class KbSearchHandlerTests
             collectionId is null ? FSharpOption<string>.None : FSharpOption<string>.Some(collectionId),
             "",
             EntryType.Preference,
-            "{}");
+            "{}", 0);
 
     private static SearchResult MakeResult(
         string id,

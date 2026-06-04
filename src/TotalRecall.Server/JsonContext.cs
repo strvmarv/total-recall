@@ -715,6 +715,91 @@ public sealed record CompactNowResultDto(
     [property: JsonPropertyName("compacted")] int Compacted,
     [property: JsonPropertyName("message")] string Message);
 
+// ---------- Phase 3 idea 2c: tool cache DTOs ----------
+
+// Property-body style (not the file's usual positional-record style) because
+// the optional hit-only fields need per-property [JsonIgnore(WhenWritingNull)]
+// to drop their keys from miss responses under the context-wide
+// DefaultIgnoreCondition = Never.
+public sealed record CacheCheckResultDto
+{
+    [JsonPropertyName("hit")]
+    public bool Hit { get; init; }
+
+    [JsonPropertyName("content"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Content { get; init; }
+
+    [JsonPropertyName("cachedAt"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CachedAt { get; init; }
+
+    [JsonPropertyName("tokenSavings"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? TokenSavings { get; init; }
+}
+
+public sealed record CacheStoreResultDto
+{
+    [JsonPropertyName("stored")]
+    public bool Stored { get; init; }
+
+    [JsonPropertyName("tokenEstimate")]
+    public int TokenEstimate { get; init; }
+}
+
+// ---------- Phase 3 idea 2c: kb_resolve DTOs ----------
+
+public sealed record KbResolveChunkDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("content")] string Content);
+
+// Property-body style for the same reason as CacheCheckResultDto: optional
+// fields need per-property [JsonIgnore(WhenWritingNull)] to drop their keys
+// from miss responses under the context-wide DefaultIgnoreCondition = Never.
+public sealed record KbResolveResultDto
+{
+    [JsonPropertyName("found")]
+    public bool Found { get; init; }
+
+    [JsonPropertyName("collectionId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CollectionId { get; init; }
+
+    [JsonPropertyName("documentId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DocumentId { get; init; }
+
+    [JsonPropertyName("chunkCount")]
+    public int ChunkCount { get; init; }
+
+    [JsonPropertyName("chunks")]
+    public KbResolveChunkDto[] Chunks { get; init; } = System.Array.Empty<KbResolveChunkDto>();
+
+    [JsonPropertyName("tokenEstimate")]
+    public int TokenEstimate { get; init; }
+
+    [JsonPropertyName("rawFileTokens"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RawFileTokens { get; init; }
+
+    [JsonPropertyName("savings"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? Savings { get; init; }
+}
+
+// ---------- Phase 3 idea 2e: memory_extract DTOs ----------
+
+public sealed record MemoryExtractEntryDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("content")] string Content);
+
+public sealed record MemoryExtractResultDto
+{
+    [JsonPropertyName("stored")]
+    public int Stored { get; init; }
+
+    [JsonPropertyName("entries")]
+    public MemoryExtractEntryDto[] Entries { get; init; } = System.Array.Empty<MemoryExtractEntryDto>();
+
+    [JsonPropertyName("duplicatesSkipped")]
+    public int DuplicatesSkipped { get; init; }
+}
+
 // ---------- Task 15: migrate_to_remote ----------
 
 public sealed record MigrateToRemoteResultDto(
@@ -770,6 +855,10 @@ public sealed record MigrateToRemoteResultDto(
 [JsonSerializable(typeof(System.Collections.Generic.List<ImportSummaryRow>))]
 [JsonSerializable(typeof(System.Collections.Generic.List<RegressionAlert>))]
 [JsonSerializable(typeof(System.Collections.Generic.List<string>))]
+// ---- Phase 2 idea 1d: Hint DTO ----
+[JsonSerializable(typeof(Hint))]
+[JsonSerializable(typeof(System.Collections.Generic.List<Hint>))]
+[JsonSerializable(typeof(System.Collections.Generic.Dictionary<string, object>))]
 // ---- Task 4.10: session_end / session_context DTOs ----
 [JsonSerializable(typeof(SessionEndResultDto))]
 [JsonSerializable(typeof(SessionContextResultDto))]
@@ -840,6 +929,17 @@ public sealed record MigrateToRemoteResultDto(
 [JsonSerializable(typeof(CompactNowResultDto))]
 // ---- Task 15: migrate_to_remote ----
 [JsonSerializable(typeof(MigrateToRemoteResultDto))]
+// ---- Phase 3 idea 2e: memory_extract ----
+[JsonSerializable(typeof(MemoryExtractResultDto))]
+[JsonSerializable(typeof(MemoryExtractEntryDto))]
+[JsonSerializable(typeof(MemoryExtractEntryDto[]))]
+// ---- Phase 3 idea 2c: tool cache ----
+[JsonSerializable(typeof(CacheCheckResultDto))]
+[JsonSerializable(typeof(CacheStoreResultDto))]
+// ---- Phase 3 idea 2c: kb_resolve ----
+[JsonSerializable(typeof(KbResolveResultDto))]
+[JsonSerializable(typeof(KbResolveChunkDto))]
+[JsonSerializable(typeof(KbResolveChunkDto[]))]
 // ---- Plan 2 Task 5: Skills DTOs (live in TotalRecall.Infrastructure.Skills) ----
 [JsonSerializable(typeof(TotalRecall.Infrastructure.Skills.ImportedSkill))]
 [JsonSerializable(typeof(TotalRecall.Infrastructure.Skills.ImportedSkill[]))]
@@ -861,6 +961,22 @@ public sealed record MigrateToRemoteResultDto(
 // the {"deleted":true} acknowledgement (Task 12).
 [JsonSerializable(typeof(SkillListWireResponse))]
 [JsonSerializable(typeof(SkillDeleteWireResponse))]
+// ---- Phase 1 Step 4: session_refresh DTOs ----
+[JsonSerializable(typeof(RefreshResult))]
+[JsonSerializable(typeof(ChangeSummary))]
+[JsonSerializable(typeof(ChangeEntry))]
+[JsonSerializable(typeof(ChangeEntry[]))]
+[JsonSerializable(typeof(System.Collections.Generic.List<ChangeEntry>))]
+[JsonSerializable(typeof(EfficiencyStats))]
+[JsonSerializable(typeof(HotTierUtilization))]
+[JsonSerializable(typeof(InjectionImpact))]
+[JsonSerializable(typeof(SessionInfo))]
+// ---- Phase 3 idea 2a: efficiency stats fold-in ----
+[JsonSerializable(typeof(CacheStats))]
+[JsonSerializable(typeof(Recommendation))]
+[JsonSerializable(typeof(Recommendation[]))]
+[JsonSerializable(typeof(System.Collections.Generic.List<Recommendation>))]
+[JsonSerializable(typeof(System.Collections.Generic.IReadOnlyList<Recommendation>))]
 public partial class JsonContext : JsonSerializerContext
 {
 }

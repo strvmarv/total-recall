@@ -48,4 +48,12 @@ public interface ISessionLifecycle
     /// Task 4.10 backfill.
     /// </summary>
     string SessionId { get; }
+
+    /// <summary>
+    /// Phase 1 Step 4 — refreshes hot-tier context mid-session. Runs warm
+    /// sweep, re-assembles context, and returns change summary with
+    /// efficiency stats. Accepts an optional task description for
+    /// task-aware ranking (Phase 2).
+    /// </summary>
+    Task<RefreshResult> RefreshAsync(string? task = null, CancellationToken ct = default);
 }

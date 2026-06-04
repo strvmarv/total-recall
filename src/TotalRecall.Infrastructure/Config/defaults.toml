@@ -5,6 +5,7 @@
 max_entries = 50
 token_budget = 4000
 carry_forward_threshold = 0.7
+task_weight = 0.0
 
 [tiers.warm]
 max_entries = 10000
@@ -22,6 +23,13 @@ decay_half_life_hours = 168
 warm_threshold = 0.3
 promote_threshold = 0.7
 warm_sweep_interval_days = 7
+auto_demote_min_injections = 10
+
+# Per-type decay half-lives (hours). Falls back to decay_half_life_hours.
+# decay_half_life_correction = 720   # 30 days
+# decay_half_life_preference = 336   # 14 days
+# decay_half_life_surfaced = 72      # 3 days
+# decay_half_life_decision = 168     # 7 days
 
 [embedding]
 model = "all-MiniLM-L6-v2"
@@ -37,6 +45,10 @@ fts_weight = 0.3
 
 [scope]
 default = "user:local"
+
+[tool_cache]
+max_entries = 200
+default_ttl_seconds = 600
 
 # --- Storage mode ---
 # Controls how the plugin stores and retrieves data.

@@ -73,8 +73,68 @@ public sealed class McpServerTests
         var result = init.GetProperty("result");
         Assert.Equal("2024-11-05", result.GetProperty("protocolVersion").GetString());
         Assert.Equal("total-recall", result.GetProperty("serverInfo").GetProperty("name").GetString());
-        Assert.Equal("0.1.0", result.GetProperty("serverInfo").GetProperty("version").GetString());
+        // serverInfo.version is resolved from the Server assembly's
+        // InformationalVersion at runtime (stamped by -p:Version at release).
+        // Assert it matches that resolution — and is no longer the historic
+        // hardcoded "0.1.0" — without pinning a literal that drifts per build.
+        var reportedVersion = result.GetProperty("serverInfo").GetProperty("version").GetString();
+        Assert.Equal(McpServer.ResolveServerVersion(), reportedVersion);
+        Assert.False(string.IsNullOrEmpty(reportedVersion));
+        Assert.NotEqual("0.1.0", reportedVersion);
         Assert.True(result.GetProperty("capabilities").TryGetProperty("tools", out _));
+    }
+
+    [Fact]
+    public async Task ToolsCall_HandlerThrowsArgumentException_ReturnsToolErrorResult()
+    {
+        // Validation failures must surface as tool-level isError results
+        // (MCP-idiomatic: the calling LLM reads the message and corrects),
+        // not as JSON-RPC protocol errors. Routed via ErrorTranslator.
+        var registry = new ToolRegistry();
+        registry.Register(new InlineHandler(
+            "boom", "throws", EmptyObjectSchema(),
+            _ => throw new System.ArgumentException("argsHash is required")));
+
+        var input = new System.IO.StringReader(
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"boom\",\"arguments\":{}}}\n");
+        var output = new System.IO.StringWriter();
+
+        var server = new McpServer(input, output, registry);
+        await server.RunAsync();
+
+        var resp = ParseResponse(Lines(output.ToString())[0]);
+        Assert.False(resp.TryGetProperty("error", out _)); // not a protocol error
+        var result = resp.GetProperty("result");
+        Assert.True(result.GetProperty("isError").GetBoolean());
+        Assert.Equal(
+            "Invalid arguments: argsHash is required",
+            result.GetProperty("content")[0].GetProperty("text").GetString());
+    }
+
+    [Fact]
+    public async Task ToolsCall_HandlerThrowsUnexpected_ReturnsSanitizedToolError()
+    {
+        var registry = new ToolRegistry();
+        registry.Register(new InlineHandler(
+            "boom", "throws", EmptyObjectSchema(),
+            _ => throw new System.InvalidOperationException("secret connection string")));
+
+        var input = new System.IO.StringReader(
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"boom\",\"arguments\":{}}}\n");
+        var output = new System.IO.StringWriter();
+
+        var server = new McpServer(input, output, registry);
+        await server.RunAsync();
+
+        var resp = ParseResponse(Lines(output.ToString())[0]);
+        Assert.False(resp.TryGetProperty("error", out _));
+        var result = resp.GetProperty("result");
+        Assert.True(result.GetProperty("isError").GetBoolean());
+        var text = result.GetProperty("content")[0].GetProperty("text").GetString();
+        // Sanitized: type name only, never the exception message (may carry
+        // secrets/paths). ErrorTranslator's documented contract.
+        Assert.Equal("Internal error: InvalidOperationException. Check server logs for details.", text);
+        Assert.DoesNotContain("secret connection string", text);
     }
 
     [Fact]

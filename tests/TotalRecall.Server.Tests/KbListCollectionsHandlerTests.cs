@@ -39,7 +39,7 @@ public class KbListCollectionsHandlerTests
             collectionId is null ? FSharpOption<string>.None : FSharpOption<string>.Some(collectionId),
             "",
             EntryType.Preference,
-            metadataJson ?? "{}");
+            metadataJson ?? "{}", 0);
 
     [Fact]
     public async Task HappyPath_ReturnsCollectionsWithCounts()

@@ -12,6 +12,7 @@ type HotTierConfig = {
     MaxEntries: int
     TokenBudget: int
     CarryForwardThreshold: float
+    TaskWeight: float
 }
 
 type WarmTierConfig = {
@@ -38,6 +39,13 @@ type CompactionConfig = {
     WarmThreshold: float
     PromoteThreshold: float
     WarmSweepIntervalDays: int
+    /// Phase 2 idea 1c — per-type decay half-lives (hours).
+    /// Falls back to DecayHalfLifeHours when not set for a given type.
+    DecayHalfLifeCorrection: float option
+    DecayHalfLifePreference: float option
+    DecayHalfLifeSurfaced: float option
+    DecayHalfLifeDecision: float option
+    AutoDemoteMinInjections: int
 }
 
 type EmbeddingConfig = {
@@ -84,6 +92,12 @@ type SkillConfig = {
     ExtraDirs: string [] option
 }
 
+/// Phase 3 idea 2c — tool-result cache settings.
+type ToolCacheConfig = {
+    MaxEntries: int
+    DefaultTtlSeconds: int
+}
+
 type TotalRecallConfig = {
     Tiers: TiersConfig
     Compaction: CompactionConfig
@@ -95,6 +109,7 @@ type TotalRecallConfig = {
     Cortex: CortexConfig option
     Scope: ScopeConfig option
     Skill: SkillConfig option
+    ToolCache: ToolCacheConfig option
 }
 
 // --- pure helpers (mirrors src-ts/config.ts isSafeKey + deepMerge + setNestedKey) ---

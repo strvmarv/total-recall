@@ -40,7 +40,7 @@ public sealed class RecentCommandTests : IDisposable
             FSharpOption<SourceTool>.None, FSharpOption<string>.None,
             ListModule.OfSeq(Array.Empty<string>()),
             ts, ts + 1, ts + 2, 0, 0.5,
-            FSharpOption<string>.None, FSharpOption<string>.None, "user:local", type, "{}");
+            FSharpOption<string>.None, FSharpOption<string>.None, "user:local", type, "{}", 0);
 
     [Fact]
     public async Task Json_MergesAndSortsDesc()

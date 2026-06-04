@@ -211,6 +211,10 @@ public static class MigrationRunner
         Migration12_SkillCacheContentAndEmbedding,
         // Migration 13: skill usage counter columns + skill_usage_events table
         Migration13_SkillUsage,
+        // Migration 14: times_injected column on all 6 content tables (Phase 2 idea 1c)
+        Migration14_TimesInjected,
+        // Migration 15: tool_cache table (Phase 3 idea 2c)
+        Migration15_ToolCache,
     };
 
     /// <summary>
@@ -668,6 +672,59 @@ public static class MigrationRunner
             "CREATE INDEX IF NOT EXISTS ix_skill_usage_events_skill_id ON skill_usage_events(skill_id)");
         Exec(conn, tx,
             "CREATE INDEX IF NOT EXISTS ix_skill_usage_events_unsynced ON skill_usage_events(synced_at) WHERE synced_at IS NULL");
+    }
+
+    /// <summary>
+    /// Migration 14 — adds <c>times_injected</c> column to all six content
+    /// tables. Tracks how many times each entry has been fed to the host LLM
+    /// via BuildContext. Powers per-type decay enhancements and auto-demotion
+    /// of dead-weight entries (Phase 2 idea 1c).
+    /// </summary>
+    private static void Migration14_TimesInjected(
+        MsSqliteConnection conn,
+        Microsoft.Data.Sqlite.SqliteTransaction tx)
+    {
+        foreach (var (tier, type) in AllTablePairs)
+        {
+            var table = TableName(tier, type);
+            using var alter = conn.CreateCommand();
+            alter.Transaction = tx;
+            alter.CommandText =
+                $"ALTER TABLE {table} ADD COLUMN times_injected INTEGER NOT NULL DEFAULT 0";
+            alter.ExecuteNonQuery();
+        }
+    }
+
+    /// <summary>
+    /// Migration 15 — <c>tool_cache</c> table for tool-result caching
+    /// (Phase 3 idea 2c). Stores host tool results keyed by
+    /// (tool, args_hash). TTL governs freshness at read time;
+    /// ToolCacheStore enforces LRU capacity on write.
+    /// </summary>
+    private static void Migration15_ToolCache(
+        MsSqliteConnection conn,
+        Microsoft.Data.Sqlite.SqliteTransaction tx)
+    {
+        Exec(conn, tx, """
+            CREATE TABLE IF NOT EXISTS tool_cache (
+                tool           TEXT NOT NULL,
+                args_hash      TEXT NOT NULL,
+                content        TEXT NOT NULL,
+                content_hash   TEXT NOT NULL,
+                stored_at_ms   INTEGER NOT NULL,
+                ttl_seconds    INTEGER NOT NULL DEFAULT 600,
+                hit_count      INTEGER NOT NULL DEFAULT 0,
+                last_hit_at_ms INTEGER,
+                token_estimate INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (tool, args_hash)
+            )
+            """);
+
+        // TTL purge scans filter on stored_at_ms; the LRU eviction path
+        // sorts by COALESCE(last_hit_at_ms, stored_at_ms) over a table
+        // capped at ~200 rows, so only the purge column gets an index.
+        Exec(conn, tx,
+            "CREATE INDEX IF NOT EXISTS idx_tool_cache_stored_at ON tool_cache(stored_at_ms)");
     }
 
     // --- helpers ----------------------------------------------------------

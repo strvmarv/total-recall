@@ -29,12 +29,13 @@ public sealed class SessionStartHandlerTests
         HotEntryCount: 3,
         Context: "- hello",
         TierSummary: new TierSummary(3, 4, 5, 6, 7),
-        Hints: new List<string> { "hint1", "hint2" },
+        Hints: new List<Hint> { new() { Summary = "hint1" }, new() { Summary = "hint2" } },
         LastSessionAge: "5 minutes ago",
         SmokeTest: null,
         RegressionAlerts: null,
         Storage: "sqlite",
-        HotContextTruncated: false);
+        HotContextTruncated: false,
+        SessionAgeHint: null);
 
     [Fact]
     public async Task HappyPath_ReturnsSessionInitResult()

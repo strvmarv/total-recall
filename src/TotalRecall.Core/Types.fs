@@ -54,7 +54,20 @@ type Entry = {
     /// JSON metadata stored as the raw string. Core does not interpret it;
     /// consumers do their own deserialization when needed.
     MetadataJson: string
+    /// Phase 2 idea 1c — number of times this entry has been injected into
+    /// host LLM context via BuildContext. Starts at 0, incremented by the
+    /// store layer on each injection. Powers auto-demotion of dead weight.
+    TimesInjected: int
 }
+
+/// Phase 2 idea 1d — structured hint type for actionable hint generation.
+/// Mirrors spec §6.2 table. Priority determines ordering; duplicates are
+/// resolved by keeping the highest-priority occurrence.
+type HintType =
+    | WarmPromotionCandidate
+    | TaskRelevantWarm
+    | SessionAge
+    | ContextPressure
 
 /// A search result with score and rank, used by HybridSearch.
 type SearchResult = {

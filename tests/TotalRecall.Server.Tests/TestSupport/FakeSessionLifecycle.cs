@@ -22,12 +22,21 @@ public sealed class FakeSessionLifecycle : ISessionLifecycle
     public string SessionId => SessionIdValue;
     public bool IsInitialized { get; private set; }
 
+    public int RefreshCallCount { get; private set; }
+    public RefreshResult RefreshResultToReturn { get; set; } = new();
+
     public Task<SessionInitResult> EnsureInitializedAsync(CancellationToken ct = default)
     {
         EnsureInitializedCallCount++;
         LastToken = ct;
         IsInitialized = true;
         return Task.FromResult(ResultToReturn);
+    }
+
+    public Task<RefreshResult> RefreshAsync(string? task = null, CancellationToken ct = default)
+    {
+        RefreshCallCount++;
+        return Task.FromResult(RefreshResultToReturn);
     }
 
     public static SessionInitResult MakeDefaultResult(string sessionId) => new(
@@ -40,10 +49,11 @@ public sealed class FakeSessionLifecycle : ISessionLifecycle
         HotEntryCount: 0,
         Context: string.Empty,
         TierSummary: new TierSummary(0, 0, 0, 0, 0),
-        Hints: new List<string>(),
+        Hints: new List<Hint>(),
         LastSessionAge: null,
         SmokeTest: null,
         RegressionAlerts: null,
         Storage: "sqlite",
-        HotContextTruncated: false);
+        HotContextTruncated: false,
+        SessionAgeHint: null);
 }

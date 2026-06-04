@@ -53,7 +53,7 @@ public sealed class SessionEndHandlerTests
             FSharpOption<string>.None,
             scope: "",
             entryType: entryType ?? EntryType.Preference,
-            metadataJson: "{}");
+            metadataJson: "{}", timesInjected: 0);
     }
 
     private sealed class FakeStore : IStore
@@ -83,7 +83,7 @@ public sealed class SessionEndHandlerTests
             slot[idx] = new Entry(e.Id, e.Content, e.Summary, e.Source, e.SourceTool, e.Project,
                 e.Tags, e.CreatedAt, e.UpdatedAt, e.LastAccessedAt, e.AccessCount,
                 opts.DecayScore ?? e.DecayScore,
-                e.ParentId, e.CollectionId, e.Scope, e.EntryType, e.MetadataJson);
+                e.ParentId, e.CollectionId, e.Scope, e.EntryType, e.MetadataJson, e.TimesInjected);
         }
 
         public void Delete(Tier t, ContentType ct, string id) => Slot(t, ct).RemoveAll(e => e.Id == id);
@@ -109,6 +109,8 @@ public sealed class SessionEndHandlerTests
 
         public string? FindByContent(Tier tier, ContentType type, string content)
             => Slot(tier, type).FirstOrDefault(e => e.Content == content)?.Id;
+
+        public void UpdateInjectionCounts(IReadOnlyList<(Tier tier, ContentType type, string id)> entries) { }
     }
 
     // ---- stub shape (no store) ----
