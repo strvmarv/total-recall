@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 2.0.0 - 2026-06-04
+
+Active token optimization, phases 1-3. total-recall moves from passive responder toward active co-pilot: accurate token accounting, mid-session context refresh, usage-driven memory selection, tool-result caching, and host-LLM fact extraction.
+
+### Breaking
+
+- **`session_start` `hints` changed from `string[]` to structured objects.** Each hint is now `{priority, type, entryId, summary, suggestedAction, suggestedArgs}` — priority-1 hints carry a pre-filled `memory_promote` invocation. Consumers parsing hints as plain strings must update (the bundled skill, Hermes provider, and CLI are already updated).
+- **Tool validation failures are now MCP tool-level errors, not JSON-RPC protocol errors.** A bad argument (missing/empty/wrong type/invalid enum) returns a result with `isError: true` and an `Invalid arguments: <reason>` message the calling LLM can read and act on, instead of a `-32603 Internal error` protocol error with a stack trace on stderr. Hosts with retry logic keyed on protocol errors for bad arguments will observe the new shape. Structured `model_not_ready` payloads now actually reach the wire through the same path (previously destroyed by the generic catch).
+
+### Added
+
+- **`session_refresh` MCP tool.** Mid-session hot-tier refresh: recalculates decay, runs the warm sweep, re-assembles context with current budget, and reports a change summary plus efficiency stats — hot-tier utilization, token-denominated injection impact, real session duration, retrieval count/latency, tool-cache economics (`hits`/`misses`/`tokensSaved`/`hitRate`), and advisory `recommendations` (`session_refresh` past 30 min; `memory_extract` at 8+ retrievals). Optional `task` argument enables task-aware ranking.
+- **Tool-result cache: `cache_check` + `cache_store` MCP tools** (sqlite/cortex modes). New `tool_cache` table (migration 15) keyed by `(tool, argsHash)` with TTL freshness at read, expired purge + LRU cap (default 200) at write, and per-session savings counters surfaced via `session_refresh`. Configurable via the new `[tool_cache]` section (`max_entries`, `default_ttl_seconds`).
+- **`kb_resolve` MCP tool.** Resolves a file path to its ingested knowledge-base chunks — a token-efficient alternative to re-reading raw files — reporting `tokenEstimate`, `rawFileTokens`, and clamped `savings`.
+- **`memory_extract` MCP tool.** Persists facts/decisions/preferences/corrections/action items the host LLM extracted from conversation text. Validates the whole batch before writing anything, dedups against existing hot-tier content, and maps fact types onto entry types (`fact`/`action_item` → surfaced).
+- **Progressive summarization + dynamic detail levels in context assembly.** Hot entries render full → summary → compact as budget allows, with extractive truncation, auto-tagging (keyword extraction + entry type), and a compact-view footer listing IDs for `memory_get` follow-up.
+- **BERT-accurate token counting.** `countTokens`/`truncateToTokens` in the Core tokenizer; budget ceiling stays on the fast heuristic, exact counts reported in responses.
+- **Per-type decay half-lives.** Corrections 720h, preferences 336h, decisions 168h, surfaced 72h (configurable via `decay_half_life_*` keys), falling back to `decay_half_life_hours`.
+- **Injection tracking + dead-weight auto-demotion.** Migration 14 adds `times_injected` to all six content tables; entries injected ≥ `auto_demote_min_injections` times (default 10) but never accessed are demoted to warm during the sweep.
+- **Task-aware context selection.** `session_refresh(task: ...)` blends decay with task relevance under the new `tiers.hot.task_weight` config (default 0, pure decay).
+- **`ListEntriesOpts.Source` filter** across SQLite, Postgres, and the routing store.
+
+### Fixed
+
+- **MCP `serverInfo.version` no longer hardcoded `0.1.0`.** Resolved from the assembly's `InformationalVersion` (stamped by the release workflow), matching the `--version` behavior fixed previously for the CLI.
+- **Plugin manifest version drift repaired.** `.claude-plugin`/`.copilot-plugin`/`.cursor-plugin` manifests had been left at 1.3.0 by the 1.4.0 release, and `package-lock.json` had said 1.0.0 since the 1.0.0 release. All five version sites are synced at 2.0.0.
+
+### Changed
+
+- Handler surface grew to 47 handler files (39 in the core registry + mode-dependent cache/usage/skill registrations); handler docs reconciled.
+- A pre-existing `memory_store` defect (caller `entryType` ignored for the `entry_type` column) is documented in `docs/TODO.md` — `memory_extract` writes the mapped type correctly; the siblings will be reconciled in a follow-up.
+
 ## 1.4.0 - 2026-06-03
 
 ### Added
