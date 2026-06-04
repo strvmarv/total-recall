@@ -411,14 +411,16 @@ public sealed class ConfigLoader : IConfigLoader
             skill = FSharpOption<Core.Config.SkillConfig>.None;
         }
 
+        // [tool_cache] always exists in the merged table because defaults.toml
+        // ships it and user configs deep-merge over defaults — so GetInt's
+        // throw path and the None branch are only reachable when Project is
+        // called on a hand-constructed table (defensive, not a config surface).
         FSharpOption<Core.Config.ToolCacheConfig> toolCache;
         if (table.TryGetValue("tool_cache", out var tcObj) && tcObj is TomlTable tcTable)
         {
             var tcCfg = new Core.Config.ToolCacheConfig(
-                tcTable.TryGetValue("max_entries", out var tcMax)
-                    ? Convert.ToInt32(tcMax) : 200,
-                tcTable.TryGetValue("default_ttl_seconds", out var tcTtl)
-                    ? Convert.ToInt32(tcTtl) : 600);
+                GetInt(tcTable, "max_entries"),
+                GetInt(tcTable, "default_ttl_seconds"));
             toolCache = FSharpOption<Core.Config.ToolCacheConfig>.Some(tcCfg);
         }
         else
