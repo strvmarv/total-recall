@@ -745,6 +745,42 @@ public sealed record CacheStoreResultDto
     public int TokenEstimate { get; init; }
 }
 
+// ---------- Phase 3 idea 2c: kb_resolve DTOs ----------
+
+public sealed record KbResolveChunkDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("content")] string Content);
+
+// Property-body style for the same reason as CacheCheckResultDto: optional
+// fields need per-property [JsonIgnore(WhenWritingNull)] to drop their keys
+// from miss responses under the context-wide DefaultIgnoreCondition = Never.
+public sealed record KbResolveResultDto
+{
+    [JsonPropertyName("found")]
+    public bool Found { get; init; }
+
+    [JsonPropertyName("collectionId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CollectionId { get; init; }
+
+    [JsonPropertyName("documentId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DocumentId { get; init; }
+
+    [JsonPropertyName("chunkCount")]
+    public int ChunkCount { get; init; }
+
+    [JsonPropertyName("chunks")]
+    public KbResolveChunkDto[] Chunks { get; init; } = System.Array.Empty<KbResolveChunkDto>();
+
+    [JsonPropertyName("tokenEstimate")]
+    public int TokenEstimate { get; init; }
+
+    [JsonPropertyName("rawFileTokens"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RawFileTokens { get; init; }
+
+    [JsonPropertyName("savings"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? Savings { get; init; }
+}
+
 // ---------- Task 15: migrate_to_remote ----------
 
 public sealed record MigrateToRemoteResultDto(
@@ -877,6 +913,10 @@ public sealed record MigrateToRemoteResultDto(
 // ---- Phase 3 idea 2c: tool cache ----
 [JsonSerializable(typeof(CacheCheckResultDto))]
 [JsonSerializable(typeof(CacheStoreResultDto))]
+// ---- Phase 3 idea 2c: kb_resolve ----
+[JsonSerializable(typeof(KbResolveResultDto))]
+[JsonSerializable(typeof(KbResolveChunkDto))]
+[JsonSerializable(typeof(KbResolveChunkDto[]))]
 // ---- Plan 2 Task 5: Skills DTOs (live in TotalRecall.Infrastructure.Skills) ----
 [JsonSerializable(typeof(TotalRecall.Infrastructure.Skills.ImportedSkill))]
 [JsonSerializable(typeof(TotalRecall.Infrastructure.Skills.ImportedSkill[]))]

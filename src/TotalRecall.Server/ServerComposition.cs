@@ -19,7 +19,7 @@
 //      AutoMigrationGuard.CheckAndMigrateAsync BEFORE calling this (so the
 //      migration path can rename the old DB before we open a handle on it).
 //
-// Handler budget: Memory (15) + KB (7) + Session (4) + Eval (5) + Config (2) + Misc (5) = 38.
+// Handler budget: Memory (15) + KB (8) + Session (4) + Eval (5) + Config (2) + Misc (4) = 38.
 //
 // AOT: no reflection. Every handler is constructed via direct `new`. The
 // Eval/Config/ImportHost/CompactNow handlers have no-arg constructors that
@@ -127,7 +127,7 @@ public static class ServerComposition
 
         var registry = new ToolRegistry();
 
-        // ---- Memory (14) ----
+        // ---- Memory (15) ----
         registry.Register(new MemoryStoreHandler(store, embedder, vectors, scopeDefault));
         registry.Register(new MemorySearchHandler(embedder, hybrid, scopeDefault, retrievalLog, syncQueue));
         registry.Register(new MemoryGetHandler(store));
@@ -144,7 +144,7 @@ public static class ServerComposition
         registry.Register(new MemoryExportHandler(store));
         registry.Register(new MemoryImportHandler(store, vectors, embedder));
 
-        // ---- KB (7) ----
+        // ---- KB (8) ----
         registry.Register(new KbSearchHandler(embedder, hybrid, remoteBackend, scopeDefault, retrievalLog, syncQueue));
         registry.Register(new KbIngestFileHandler(fileIngester, scopeDefault));
         registry.Register(new KbIngestDirHandler(fileIngester, scopeDefault));
@@ -152,6 +152,7 @@ public static class ServerComposition
         registry.Register(new KbRefreshHandler(store, vectors, fileIngester));
         registry.Register(new KbRemoveHandler(store, vectors));
         registry.Register(new KbSummarizeHandler(store));
+        registry.Register(new KbResolveHandler(store));
 
         // ---- Session (4) ----
         registry.Register(new SessionStartHandler(sessionLifecycle, periodicSync, syncService));

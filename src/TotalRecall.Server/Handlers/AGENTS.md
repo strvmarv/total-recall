@@ -1,6 +1,6 @@
 # Handlers — Agent Guide
 
-This directory contains **one file per MCP tool handler** (39 total). Each handler is a `sealed class` implementing `IToolHandler`.
+This directory contains **one file per MCP tool handler** (38 total). Each handler is a `sealed class` implementing `IToolHandler`.
 
 ---
 
@@ -108,7 +108,7 @@ Never use `JsonSerializer.Serialize(obj)` with the reflection-based overload.
 1. Create `<ToolName>Handler.cs` in this directory — `sealed class`, `IToolHandler`.
 2. Add the DTO(s) to `../JsonContext.cs` if the response shape is new.
 3. Register in `../ServerComposition.cs` → `BuildRegistry()` in the appropriate group:
-   - Memory (15), KB (7), Session (3), Eval (5), Config (2), Misc (4)
+   - Memory (15), KB (8), Session (4), Eval (5), Config (2), Misc (4)
 4. Update the handler count in the `BuildRegistry` comment.
 5. Add a test in `../../../../tests/TotalRecall.Server.Tests/Handlers/`.
 
@@ -121,7 +121,7 @@ Never use `JsonSerializer.Serialize(obj)` with the reflection-based overload.
 | Group | Count | Handlers |
 |-------|-------|----------|
 | Memory | 15 | store, search, get, update, delete, promote, demote, inspect, history, recent, list, get_all, lineage, export, import |
-| KB | 7 | search, ingest_file, ingest_dir, list_collections, refresh, remove, summarize |
+| KB | 8 | search, ingest_file, ingest_dir, list_collections, refresh, remove, summarize, resolve |
 | Session | 4 | start, end, context, refresh |
 | Eval | 5 | report, benchmark, compare, snapshot, grow |
 | Config | 2 | get, set |
