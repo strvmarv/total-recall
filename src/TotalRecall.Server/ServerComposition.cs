@@ -249,6 +249,14 @@ public static class ServerComposition
         {
             MigrationRunner.RunMigrations(conn);
 
+            // Phase 3 idea 2c — tool-result cache (SQLite-backed, local only).
+            var toolCacheCfg = FSharpOption<Core.Config.ToolCacheConfig>.get_IsSome(cfg.ToolCache)
+                ? cfg.ToolCache.Value : null;
+            var toolCacheStore = new ToolCacheStore(
+                conn,
+                maxEntries: toolCacheCfg?.MaxEntries ?? 200,
+                defaultTtlSeconds: toolCacheCfg?.DefaultTtlSeconds ?? 600);
+
             var store = new SqliteStore(conn);
             var vec = new VectorSearch(conn);
             var fts = new FtsSearch(conn);
@@ -346,6 +354,11 @@ public static class ServerComposition
                 syncBacklog: new Infrastructure.Sync.SyncBacklogReader(conn));
 
             registry.Register(new UsageStatusHandler(usageQuery));
+
+            // Phase 3 idea 2c — cache handlers are SQLite/cortex-only (the
+            // cache table lives in the local DB), same pattern as usage_status.
+            registry.Register(new CacheCheckHandler(toolCacheStore));
+            registry.Register(new CacheStoreHandler(toolCacheStore));
 
             // Skill MCP handlers — sqlite mode: cache-backed, no cortex client.
             // Use NullSkillClient as the fallback so any cache miss returns null
@@ -483,6 +496,14 @@ public static class ServerComposition
         {
             MigrationRunner.RunMigrations(conn);
 
+            // Phase 3 idea 2c — tool-result cache (SQLite-backed, local only).
+            var toolCacheCfgCortex = FSharpOption<Core.Config.ToolCacheConfig>.get_IsSome(cfg.ToolCache)
+                ? cfg.ToolCache.Value : null;
+            var toolCacheStore = new ToolCacheStore(
+                conn,
+                maxEntries: toolCacheCfgCortex?.MaxEntries ?? 200,
+                defaultTtlSeconds: toolCacheCfgCortex?.DefaultTtlSeconds ?? 600);
+
             var localStore = new SqliteStore(conn);
             var vec = new VectorSearch(conn);
             var fts = new FtsSearch(conn);
@@ -597,6 +618,11 @@ public static class ServerComposition
                 syncBacklog: new Infrastructure.Sync.SyncBacklogReader(conn));
 
             registry.Register(new UsageStatusHandler(usageQuery));
+
+            // Phase 3 idea 2c — cache handlers are SQLite/cortex-only (the
+            // cache table lives in the local DB), same pattern as usage_status.
+            registry.Register(new CacheCheckHandler(toolCacheStore));
+            registry.Register(new CacheStoreHandler(toolCacheStore));
 
             // Plan 2: skill_* MCP handlers — cortex-mode: cache-first, cortex fallback.
             registry.Register(new SkillSearchHandler(localSkillSearch, skillClient));

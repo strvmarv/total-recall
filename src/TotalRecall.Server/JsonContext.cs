@@ -715,6 +715,32 @@ public sealed record CompactNowResultDto(
     [property: JsonPropertyName("compacted")] int Compacted,
     [property: JsonPropertyName("message")] string Message);
 
+// ---------- Phase 3 idea 2c: tool cache DTOs ----------
+
+public sealed record CacheCheckResultDto
+{
+    [JsonPropertyName("hit")]
+    public bool Hit { get; init; }
+
+    [JsonPropertyName("content"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Content { get; init; }
+
+    [JsonPropertyName("cachedAt"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CachedAt { get; init; }
+
+    [JsonPropertyName("tokenSavings"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? TokenSavings { get; init; }
+}
+
+public sealed record CacheStoreResultDto
+{
+    [JsonPropertyName("stored")]
+    public bool Stored { get; init; }
+
+    [JsonPropertyName("tokenEstimate")]
+    public int TokenEstimate { get; init; }
+}
+
 // ---------- Task 15: migrate_to_remote ----------
 
 public sealed record MigrateToRemoteResultDto(
@@ -844,6 +870,9 @@ public sealed record MigrateToRemoteResultDto(
 [JsonSerializable(typeof(CompactNowResultDto))]
 // ---- Task 15: migrate_to_remote ----
 [JsonSerializable(typeof(MigrateToRemoteResultDto))]
+// ---- Phase 3 idea 2c: tool cache ----
+[JsonSerializable(typeof(CacheCheckResultDto))]
+[JsonSerializable(typeof(CacheStoreResultDto))]
 // ---- Plan 2 Task 5: Skills DTOs (live in TotalRecall.Infrastructure.Skills) ----
 [JsonSerializable(typeof(TotalRecall.Infrastructure.Skills.ImportedSkill))]
 [JsonSerializable(typeof(TotalRecall.Infrastructure.Skills.ImportedSkill[]))]
