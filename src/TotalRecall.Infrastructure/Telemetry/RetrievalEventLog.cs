@@ -157,7 +157,8 @@ UPDATE retrieval_events
             "FROM retrieval_events WHERE timestamp >= $since";
         cmd.Parameters.AddWithValue("$since", sinceMs);
         using var reader = cmd.ExecuteReader();
-        reader.Read();
+        if (!reader.Read())
+            return (0, 0.0);
         return ((int)reader.GetInt64(0), reader.GetDouble(1));
     }
 

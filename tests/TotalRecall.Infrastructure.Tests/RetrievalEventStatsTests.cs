@@ -11,7 +11,10 @@ public sealed class RetrievalEventStatsTests
         var conn = new MsSqliteConnection("Data Source=:memory:");
         conn.Open();
         using var cmd = conn.CreateCommand();
-        // Mirror of the Migration 1 retrieval_events DDL (Schema.cs).
+        // Inline mirror of SystemTableDdls[0] in Schema.cs (retrieval_events).
+        // Deliberately NOT MigrationRunner: that needs the vec0 native
+        // extension and would force [Trait Integration], dropping these tests
+        // from the default suite. Update here if retrieval_events gains columns.
         cmd.CommandText = """
             CREATE TABLE retrieval_events (
                 id                       TEXT PRIMARY KEY NOT NULL,
