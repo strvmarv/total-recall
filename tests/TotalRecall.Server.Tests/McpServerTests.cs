@@ -85,6 +85,59 @@ public sealed class McpServerTests
     }
 
     [Fact]
+    public async Task ToolsCall_HandlerThrowsArgumentException_ReturnsToolErrorResult()
+    {
+        // Validation failures must surface as tool-level isError results
+        // (MCP-idiomatic: the calling LLM reads the message and corrects),
+        // not as JSON-RPC protocol errors. Routed via ErrorTranslator.
+        var registry = new ToolRegistry();
+        registry.Register(new InlineHandler(
+            "boom", "throws", EmptyObjectSchema(),
+            _ => throw new System.ArgumentException("argsHash is required")));
+
+        var input = new System.IO.StringReader(
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"boom\",\"arguments\":{}}}\n");
+        var output = new System.IO.StringWriter();
+
+        var server = new McpServer(input, output, registry);
+        await server.RunAsync();
+
+        var resp = ParseResponse(Lines(output.ToString())[0]);
+        Assert.False(resp.TryGetProperty("error", out _)); // not a protocol error
+        var result = resp.GetProperty("result");
+        Assert.True(result.GetProperty("isError").GetBoolean());
+        Assert.Equal(
+            "Invalid arguments: argsHash is required",
+            result.GetProperty("content")[0].GetProperty("text").GetString());
+    }
+
+    [Fact]
+    public async Task ToolsCall_HandlerThrowsUnexpected_ReturnsSanitizedToolError()
+    {
+        var registry = new ToolRegistry();
+        registry.Register(new InlineHandler(
+            "boom", "throws", EmptyObjectSchema(),
+            _ => throw new System.InvalidOperationException("secret connection string")));
+
+        var input = new System.IO.StringReader(
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"boom\",\"arguments\":{}}}\n");
+        var output = new System.IO.StringWriter();
+
+        var server = new McpServer(input, output, registry);
+        await server.RunAsync();
+
+        var resp = ParseResponse(Lines(output.ToString())[0]);
+        Assert.False(resp.TryGetProperty("error", out _));
+        var result = resp.GetProperty("result");
+        Assert.True(result.GetProperty("isError").GetBoolean());
+        var text = result.GetProperty("content")[0].GetProperty("text").GetString();
+        // Sanitized: type name only, never the exception message (may carry
+        // secrets/paths). ErrorTranslator's documented contract.
+        Assert.Equal("Internal error: InvalidOperationException. Check server logs for details.", text);
+        Assert.DoesNotContain("secret connection string", text);
+    }
+
+    [Fact]
     public async Task ToolsList_EmptyWhenNoneRegistered()
     {
         var input = new System.IO.StringReader(

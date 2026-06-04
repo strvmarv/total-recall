@@ -244,7 +244,21 @@ public sealed class McpServer
         if (!_registry.TryGet(callParams.Name, out var handler) || handler is null)
             throw new InvalidOperationException($"Tool not found: {callParams.Name}");
 
-        return await handler.ExecuteAsync(callParams.Arguments, ct).ConfigureAwait(false);
+        try
+        {
+            return await handler.ExecuteAsync(callParams.Arguments, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Tool execution failures are MCP tool-level errors (result with
+            // isError: true), not JSON-RPC protocol errors — the calling LLM
+            // sees the text and can react. ErrorTranslator picks the shape:
+            // model_not_ready structured payload, validation message echo for
+            // ArgumentException, or sanitized internal error (full chain to
+            // stderr). Envelope-level failures above (missing params, unknown
+            // tool) intentionally stay on the protocol-error path.
+            return ErrorTranslator.Translate(ex);
+        }
     }
 
     // ----- wire output helpers -----
