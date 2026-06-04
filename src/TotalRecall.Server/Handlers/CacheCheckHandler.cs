@@ -46,13 +46,18 @@ public sealed class CacheCheckHandler : IToolHandler
             throw new ArgumentException("cache_check requires a JSON object argument", nameof(arguments));
 
         var args = arguments.Value;
-        var tool = ReadRequiredString(args, "tool");
-        var argsHash = ReadRequiredString(args, "argsHash");
+        var tool = ArgumentParsing.ReadRequiredString(args, "tool");
+        if (tool.Length == 0)
+            throw new ArgumentException("tool must be a non-empty string");
+        var argsHash = ArgumentParsing.ReadRequiredString(args, "argsHash");
+        if (argsHash.Length == 0)
+            throw new ArgumentException("argsHash must be a non-empty string");
         int? maxAge = null;
         if (args.TryGetProperty("maxAgeSeconds", out var maxAgeEl)
-            && maxAgeEl.ValueKind == JsonValueKind.Number)
+            && maxAgeEl.ValueKind == JsonValueKind.Number
+            && maxAgeEl.TryGetInt32(out var maxAgeVal))
         {
-            maxAge = maxAgeEl.GetInt32();
+            maxAge = maxAgeVal;
         }
 
         var hit = _cache.Check(tool, argsHash, maxAge);
@@ -76,13 +81,4 @@ public sealed class CacheCheckHandler : IToolHandler
         });
     }
 
-    private static string ReadRequiredString(JsonElement args, string name)
-    {
-        if (!args.TryGetProperty(name, out var prop) || prop.ValueKind != JsonValueKind.String)
-            throw new ArgumentException($"{name} is required and must be a string");
-        var v = prop.GetString();
-        if (string.IsNullOrEmpty(v))
-            throw new ArgumentException($"{name} must be a non-empty string");
-        return v;
-    }
 }

@@ -95,4 +95,13 @@ public sealed class CacheHandlerTests : IDisposable
             storeHandler.ExecuteAsync(
                 Args("""{"tool":"Read","argsHash":"abc"}"""), CancellationToken.None));
     }
+
+    [Fact]
+    public async Task CacheStore_EmptyContent_Throws()
+    {
+        var storeHandler = new CacheStoreHandler(_cache);
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            storeHandler.ExecuteAsync(
+                Args("""{"tool":"Read","argsHash":"abc","content":""}"""), CancellationToken.None));
+    }
 }

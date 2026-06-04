@@ -717,6 +717,10 @@ public sealed record CompactNowResultDto(
 
 // ---------- Phase 3 idea 2c: tool cache DTOs ----------
 
+// Property-body style (not the file's usual positional-record style) because
+// the optional hit-only fields need per-property [JsonIgnore(WhenWritingNull)]
+// to drop their keys from miss responses under the context-wide
+// DefaultIgnoreCondition = Never.
 public sealed record CacheCheckResultDto
 {
     [JsonPropertyName("hit")]

@@ -47,19 +47,22 @@ public sealed class CacheStoreHandler : IToolHandler
             throw new ArgumentException("cache_store requires a JSON object argument", nameof(arguments));
 
         var args = arguments.Value;
-        var tool = ReadRequiredString(args, "tool");
-        var argsHash = ReadRequiredString(args, "argsHash");
-
-        if (!args.TryGetProperty("content", out var contentEl)
-            || contentEl.ValueKind != JsonValueKind.String)
-            throw new ArgumentException("content is required and must be a string");
-        var content = contentEl.GetString() ?? "";
+        var tool = ArgumentParsing.ReadRequiredString(args, "tool");
+        if (tool.Length == 0)
+            throw new ArgumentException("tool must be a non-empty string");
+        var argsHash = ArgumentParsing.ReadRequiredString(args, "argsHash");
+        if (argsHash.Length == 0)
+            throw new ArgumentException("argsHash must be a non-empty string");
+        var content = ArgumentParsing.ReadRequiredString(args, "content");
+        if (content.Length == 0)
+            throw new ArgumentException("content must be a non-empty string");
 
         int? ttl = null;
         if (args.TryGetProperty("ttlSeconds", out var ttlEl)
-            && ttlEl.ValueKind == JsonValueKind.Number)
+            && ttlEl.ValueKind == JsonValueKind.Number
+            && ttlEl.TryGetInt32(out var ttlVal))
         {
-            ttl = ttlEl.GetInt32();
+            ttl = ttlVal;
         }
 
         var tokenEstimate = _cache.StoreResult(tool, argsHash, content, ttl);
@@ -73,13 +76,4 @@ public sealed class CacheStoreHandler : IToolHandler
         });
     }
 
-    private static string ReadRequiredString(JsonElement args, string name)
-    {
-        if (!args.TryGetProperty(name, out var prop) || prop.ValueKind != JsonValueKind.String)
-            throw new ArgumentException($"{name} is required and must be a string");
-        var v = prop.GetString();
-        if (string.IsNullOrEmpty(v))
-            throw new ArgumentException($"{name} must be a non-empty string");
-        return v;
-    }
 }
