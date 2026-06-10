@@ -2,7 +2,7 @@
 //
 // Plan 6 Task 6.0a — promoted from src/TotalRecall.Cli/Internal/TierNames.cs
 // so both the CLI and the MCP Server can share the same Tier/ContentType
-// parse + format helpers and the 6-pair sweep table without duplicating
+// parse + format helpers and the 8-pair sweep table without duplicating
 // code (closes Plan 5 carry-forward #8). The shape of the public surface
 // matches the old Cli-local version one-for-one; the only difference is
 // the namespace and the fact that it is now `public`.
@@ -15,28 +15,31 @@ public static class TierNames
 {
     public static readonly (Tier Tier, ContentType Type)[] AllTablePairs =
     {
-        (Tier.Hot,  ContentType.Memory),
-        (Tier.Warm, ContentType.Memory),
-        (Tier.Cold, ContentType.Memory),
-        (Tier.Hot,  ContentType.Knowledge),
-        (Tier.Warm, ContentType.Knowledge),
-        (Tier.Cold, ContentType.Knowledge),
+        (Tier.Hot,    ContentType.Memory),
+        (Tier.Warm,   ContentType.Memory),
+        (Tier.Cold,   ContentType.Memory),
+        (Tier.Pinned, ContentType.Memory),
+        (Tier.Hot,    ContentType.Knowledge),
+        (Tier.Warm,   ContentType.Knowledge),
+        (Tier.Cold,   ContentType.Knowledge),
+        (Tier.Pinned, ContentType.Knowledge),
     };
 
     public static string TierName(Tier t) =>
-        t.IsHot ? "hot" : t.IsWarm ? "warm" : "cold";
+        t.IsHot ? "hot" : t.IsWarm ? "warm" : t.IsPinned ? "pinned" : "cold";
 
     public static string ContentTypeName(ContentType c) =>
         c.IsMemory ? "memory" : "knowledge";
 
     /// <summary>
-    /// Parse "hot"|"warm"|"cold" → Tier. Returns null for unknown values.
+    /// Parse "hot"|"warm"|"cold"|"pinned" → Tier. Returns null for unknown values.
     /// </summary>
     public static Tier? ParseTier(string s) => s switch
     {
         "hot" => Tier.Hot,
         "warm" => Tier.Warm,
         "cold" => Tier.Cold,
+        "pinned" => Tier.Pinned,
         _ => null,
     };
 
@@ -82,9 +85,13 @@ public static class TierNames
         : "Ingested";
 
     /// <summary>
-    /// Tier warmth rank: hot=2, warm=1, cold=0. Used by promote/demote
-    /// direction gates (promote must increase rank, demote must decrease).
+    /// Tier warmth rank: pinned=3, hot=2, warm=1, cold=0. Pinned ranks above
+    /// hot. Rank 3 exists for ordering/display and as a mathematical backstop
+    /// in the promote/demote direction checks. The promote/demote handlers
+    /// (MCP and CLI) already reject pinned as both source and target; the
+    /// pin/unpin handlers that serve as the only doors in and out of pinned
+    /// are introduced in later tasks.
     /// </summary>
     public static int WarmthRank(Tier t) =>
-        t.IsHot ? 2 : t.IsWarm ? 1 : 0;
+        t.IsPinned ? 3 : t.IsHot ? 2 : t.IsWarm ? 1 : 0;
 }

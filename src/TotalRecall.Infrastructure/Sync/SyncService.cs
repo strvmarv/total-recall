@@ -27,7 +27,10 @@ public sealed class SyncService
     private const string WatermarkKey = "cortex_last_pull_at";
     private const string SkillsWatermarkKey = "cortex_skills_last_pull_at";
 
-    /// <summary>Memory tiers to search when looking up entries locally.</summary>
+    // NOTE: pinned is intentionally EXCLUDED. The pinned tier is local-only
+    // (Cortex has no pinned support yet), so the remote never holds pinned
+    // entries to reconcile. Including pinned here would let remote tombstones/
+    // updates mutate or delete a local pin, which is wrong. (User decision 2026-06-09.)
     private static readonly Tier[] AllMemoryTiers = { Tier.Hot, Tier.Warm, Tier.Cold };
 
     public SyncService(IStore localStore, IRemoteBackend remote, SyncQueue syncQueue, MsSqliteConnection conn, ISkillCache? skillCache = null)

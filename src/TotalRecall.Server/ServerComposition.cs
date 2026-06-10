@@ -6,7 +6,7 @@
 //
 //   1. BuildRegistry(...) — pure function that takes pre-built infrastructure
 //      singletons plus a SessionLifecycle and StatusOptions, constructs all
-//      32 handlers, and registers them in a ToolRegistry. Pure means no I/O
+//      41 core handlers, and registers them in a ToolRegistry. Pure means no I/O
 //      and no disposal — all of that is the caller's job. This seam exists
 //      for testability: a unit test can inject fakes and assert the handler
 //      set is complete (count + expected names) without opening a real DB.
@@ -19,7 +19,7 @@
 //      AutoMigrationGuard.CheckAndMigrateAsync BEFORE calling this (so the
 //      migration path can rename the old DB before we open a handle on it).
 //
-// Handler budget: Memory (16) + KB (8) + Session (4) + Eval (5) + Config (2) + Misc (4) = 39.
+// Handler budget: Memory (18) + KB (8) + Session (4) + Eval (5) + Config (2) + Misc (4) = 41.
 //
 // AOT: no reflection. Every handler is constructed via direct `new`. The
 // Eval/Config/ImportHost/CompactNow handlers have no-arg constructors that
@@ -38,6 +38,7 @@ using TotalRecall.Infrastructure.Config;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Importers;
 using TotalRecall.Infrastructure.Ingestion;
+using TotalRecall.Infrastructure.Memory;
 using TotalRecall.Infrastructure.Search;
 using TotalRecall.Infrastructure.Skills;
 using TotalRecall.Infrastructure.Storage;
@@ -114,7 +115,8 @@ public static class ServerComposition
         RetrievalEventLog? retrievalLog = null,
         Infrastructure.Sync.SyncQueue? syncQueue = null,
         CompactionLog? compactionLogWriter = null,
-        Infrastructure.Sync.SyncBacklogReader? syncBacklog = null)
+        Infrastructure.Sync.SyncBacklogReader? syncBacklog = null,
+        int pinnedMaxChars = PinnedTierLimits.DefaultMaxContentChars)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(vectors);
@@ -127,8 +129,8 @@ public static class ServerComposition
 
         var registry = new ToolRegistry();
 
-        // ---- Memory (16) ----
-        registry.Register(new MemoryStoreHandler(store, embedder, vectors, scopeDefault));
+        // ---- Memory (18) ----
+        registry.Register(new MemoryStoreHandler(store, embedder, vectors, scopeDefault, pinnedMaxChars));
         registry.Register(new MemorySearchHandler(embedder, hybrid, scopeDefault, retrievalLog, syncQueue));
         registry.Register(new MemoryGetHandler(store));
         registry.Register(new MemoryGetAllHandler(store));
@@ -136,6 +138,8 @@ public static class ServerComposition
         registry.Register(new MemoryDeleteHandler(store, vectors));
         registry.Register(new MemoryPromoteHandler(store, vectors, embedder, compactionLogWriter, syncQueue));
         registry.Register(new MemoryDemoteHandler(store, vectors, embedder, compactionLogWriter, syncQueue));
+        registry.Register(new MemoryPinHandler(store, vectors, embedder, compactionLogWriter, syncQueue, pinnedMaxChars));
+        registry.Register(new MemoryUnpinHandler(store, vectors, embedder, compactionLogWriter, syncQueue));
         registry.Register(new MemoryInspectHandler(store, compactionLog));
         registry.Register(new MemoryHistoryHandler(compactionLog));
         registry.Register(new MemoryRecentHandler(store, scopeDefault));
@@ -356,7 +360,8 @@ public static class ServerComposition
                 scopeDefault: ResolveScopeDefault(cfg),
                 retrievalLog: retrievalLog,
                 compactionLogWriter: compactionLog,
-                syncBacklog: new Infrastructure.Sync.SyncBacklogReader(conn));
+                syncBacklog: new Infrastructure.Sync.SyncBacklogReader(conn),
+                pinnedMaxChars: ResolvePinnedMaxChars(cfg));
 
             registry.Register(new UsageStatusHandler(usageQuery));
 
@@ -445,7 +450,8 @@ public static class ServerComposition
             var registry = BuildRegistry(
                 store, vec, embedder, hybrid,
                 fileIngester, compactionLog, sessionLifecycle, statusOptions,
-                scopeDefault: ResolveScopeDefault(cfg));
+                scopeDefault: ResolveScopeDefault(cfg),
+                pinnedMaxChars: ResolvePinnedMaxChars(cfg));
 
             return new ServerCompositionHandles(dataSource, registry, store, storageMode);
         }
@@ -623,7 +629,8 @@ public static class ServerComposition
                 retrievalLog: retrievalLog,
                 syncQueue: syncQueue,
                 compactionLogWriter: compactionLog,
-                syncBacklog: new Infrastructure.Sync.SyncBacklogReader(conn));
+                syncBacklog: new Infrastructure.Sync.SyncBacklogReader(conn),
+                pinnedMaxChars: ResolvePinnedMaxChars(cfg));
 
             registry.Register(new UsageStatusHandler(usageQuery));
 
@@ -671,4 +678,15 @@ public static class ServerComposition
             return null;
         return scopeCfg.Default.Value;
     }
+
+    /// <summary>
+    /// Resolves the effective pinned content character limit from
+    /// <c>[tiers.pinned] max_content_chars</c>. Falls back to
+    /// <see cref="PinnedTierLimits.DefaultMaxContentChars"/> (500) when the
+    /// section is absent, matching the <c>Pinned: option</c> design in Config.fs.
+    /// </summary>
+    private static int ResolvePinnedMaxChars(Core.Config.TotalRecallConfig cfg) =>
+        FSharpOption<Core.Config.PinnedTierConfig>.get_IsSome(cfg.Tiers.Pinned)
+            ? cfg.Tiers.Pinned.Value.MaxContentChars
+            : PinnedTierLimits.DefaultMaxContentChars;
 }

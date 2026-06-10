@@ -165,7 +165,7 @@ public sealed class InspectCommand : ICliCommand
         Row("updated_at", FormatTimestamp(e.UpdatedAt));
         Row("last_accessed_at", FormatTimestamp(e.LastAccessedAt));
         Row("access_count", e.AccessCount.ToString(CultureInfo.InvariantCulture));
-        Row("decay_score", e.DecayScore.ToString("F4", CultureInfo.InvariantCulture));
+        Row("decay_score", tier.IsPinned ? "n/a" : e.DecayScore.ToString("F4", CultureInfo.InvariantCulture));
         Row("parent_id", OptString(e.ParentId) ?? "(none)");
         Row("collection_id", OptString(e.CollectionId) ?? "(none)");
         Row("metadata", string.IsNullOrEmpty(e.MetadataJson) ? "(none)" : e.MetadataJson);

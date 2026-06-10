@@ -1,19 +1,18 @@
-// src/TotalRecall.Server/Handlers/MemoryPromoteHandler.cs
+// src/TotalRecall.Server/Handlers/MemoryUnpinHandler.cs
 //
-// Plan 6 Task 6.0a — MCP wrapper for the same 4-step promotion sequence
-// that `total-recall memory promote` already runs (PromoteCommand.cs).
-// The business logic lives in Infrastructure.Memory.MoveHelpers so both
-// the CLI and the Server drive a single implementation (closes Plan 5
-// carry-forward #8).
+// Pinned tier (spec 2026-06-09). Moves an entry from the pinned tier back to
+// warm, resuming the normal decay/compaction lifecycle. The inverse of
+// MemoryPinHandler. Mirrors MemoryPinHandler's structure: locate via
+// MoveHelpers sweep, 4-step MoveAndReEmbed, optional compaction log + sync
+// queue telemetry, MemoryMoveResultDto response. Throws ArgumentException on
+// bad args; ErrorTranslator renders MCP errors.
 //
-// Args: { id (required), tier? (default "hot", must be hot|warm),
-//         type? (memory|knowledge, defaults to source type) }.
-// Response: MemoryMoveResultDto with from_* / to_* tier + content_type.
-//
-// Handler throws ArgumentException on bad args / missing entry / bad
-// direction; the ErrorTranslator at the McpServer boundary maps those to
-// structured error tool responses. We deliberately do NOT catch anything
-// here (Plan 4 convention).
+// Only pinned entries may be unpinned — attempting to unpin a non-pinned entry
+// throws ArgumentException without moving anything. This is intentionally
+// asymmetric with MemoryPinHandler, which is idempotent (pinning an already-pinned
+// entry succeeds as a no-op): unpinning is an explicit one-way exit from the pinned
+// tier, and a non-pinned target almost always signals a caller error rather than a
+// benign double-call, so failing loudly is the safer default.
 
 using System;
 using System.Collections.Generic;
@@ -30,14 +29,13 @@ using TotalRecall.Infrastructure.Telemetry;
 
 namespace TotalRecall.Server.Handlers;
 
-public sealed class MemoryPromoteHandler : IToolHandler
+public sealed class MemoryUnpinHandler : IToolHandler
 {
     private static readonly JsonElement _inputSchema = JsonDocument.Parse("""
         {
           "type": "object",
           "properties": {
             "id":   {"type":"string","description":"Entry ID"},
-            "tier": {"type":"string","enum":["hot","warm"],"description":"Target tier (default: hot)"},
             "type": {"type":"string","enum":["memory","knowledge"],"description":"Target content type (default: source type)"}
           },
           "required": ["id"]
@@ -48,9 +46,11 @@ public sealed class MemoryPromoteHandler : IToolHandler
     private readonly IVectorSearch _vec;
     private readonly IEmbedder _embedder;
     private readonly CompactionLog? _compactionLog;
+    // Intentionally retained but currently unused: pinned tier movements are not synced to
+    // Cortex (local-only); kept for ctor-signature stability and future use.
     private readonly SyncQueue? _syncQueue;
 
-    public MemoryPromoteHandler(
+    public MemoryUnpinHandler(
         IStore store,
         IVectorSearch vec,
         IEmbedder embedder,
@@ -64,29 +64,22 @@ public sealed class MemoryPromoteHandler : IToolHandler
         _syncQueue = syncQueue;
     }
 
-    public string Name => "memory_promote";
-    public string Description => "Promote a memory or knowledge entry to a warmer tier (re-embeds)";
+    public string Name => "memory_unpin";
+    public string Description =>
+        "Unpin a pinned entry: moves it to the warm tier where the normal decay/compaction lifecycle resumes";
     public JsonElement InputSchema => _inputSchema;
 
     public Task<ToolCallResult> ExecuteAsync(JsonElement? arguments, CancellationToken ct)
     {
         if (!arguments.HasValue)
-            throw new ArgumentException("memory_promote requires arguments", nameof(arguments));
+            throw new ArgumentException("memory_unpin requires arguments", nameof(arguments));
         var args = arguments.Value;
         if (args.ValueKind != JsonValueKind.Object)
-            throw new ArgumentException("memory_promote arguments must be a JSON object", nameof(arguments));
+            throw new ArgumentException("memory_unpin arguments must be a JSON object", nameof(arguments));
 
         var id = ReadRequiredString(args, "id");
         if (id.Length == 0)
             throw new ArgumentException("id must be a non-empty string");
-
-        var tierStr = ReadOptionalString(args, "tier") ?? "hot";
-        var toTier = TierNames.ParseTier(tierStr)
-            ?? throw new ArgumentException($"invalid tier '{tierStr}' (expected hot|warm)");
-        if (toTier.IsCold)
-            throw new ArgumentException("cannot promote to cold (use memory_demote instead)");
-        if (toTier.IsPinned) // pinned tier is exclusive to memory_pin / memory_unpin
-            throw new ArgumentException("cannot promote to pinned (use memory_pin instead)");
 
         ContentType? requestedType = null;
         var typeStr = ReadOptionalString(args, "type");
@@ -100,54 +93,34 @@ public sealed class MemoryPromoteHandler : IToolHandler
 
         var located = MoveHelpers.Locate(_store, id)
             ?? throw new ArgumentException($"entry {id} not found");
-
         var (fromTier, fromType, entry) = located;
-        if (fromTier.IsPinned) // pinned tier is exclusive to memory_pin / memory_unpin
+        if (!fromTier.IsPinned)
             throw new ArgumentException(
-                $"entry {id} is pinned; use memory_unpin to release it first");
+                $"entry {id} is not pinned (tier: {TierNames.TierName(fromTier)})");
         var targetType = requestedType ?? fromType;
 
-        if (TierNames.WarmthRank(toTier) <= TierNames.WarmthRank(fromTier))
-            throw new ArgumentException(
-                $"cannot promote {TierNames.TierName(fromTier)} -> {TierNames.TierName(toTier)} (target must be warmer)");
+        MoveHelpers.MoveAndReEmbed(
+            _store, _vec, _embedder, entry, Tier.Pinned, fromType, Tier.Warm, targetType);
 
-        MoveHelpers.MoveAndReEmbed(_store, _vec, _embedder, entry, fromTier, fromType, toTier, targetType);
-
-        // Phase 6: compaction telemetry. Log locally and enqueue for cortex
-        // push. Both sinks are optional — compositions that do not wire
-        // them leave both null and skip this block entirely.
-        if (_compactionLog is not null || _syncQueue is not null)
+        // Pinned movements are not synced to Cortex (pinned tier is local-only).
+        if (_compactionLog is not null)
         {
-            var fromTierName = TierNames.TierName(fromTier);
-            var toTierName = TierNames.TierName(toTier);
-            var nowUtc = DateTime.UtcNow;
-
-            _compactionLog?.LogEvent(new CompactionLogEntry(
+            _compactionLog.LogEvent(new CompactionLogEntry(
                 SessionId: "unknown",
-                SourceTier: fromTierName,
-                TargetTier: toTierName,
+                SourceTier: "pinned",
+                TargetTier: "warm",
                 SourceEntryIds: new[] { id },
                 TargetEntryId: id,
                 DecayScores: new Dictionary<string, double> { [id] = entry.DecayScore },
-                Reason: "manual_promote",
+                Reason: "manual_unpin",
                 ConfigSnapshotId: "default"));
-
-            _syncQueue?.Enqueue("compaction", "push", null,
-                CompactionSyncPayload.Event(
-                    entryId: id,
-                    fromTier: fromTierName,
-                    toTier: toTierName,
-                    action: "promote",
-                    semanticDrift: null,
-                    decayScore: entry.DecayScore,
-                    timestampUtc: nowUtc));
         }
 
         var dto = new MemoryMoveResultDto(
             Id: id,
-            FromTier: TierNames.TierName(fromTier),
+            FromTier: "pinned",
             FromContentType: TierNames.ContentTypeName(fromType),
-            ToTier: TierNames.TierName(toTier),
+            ToTier: "warm",
             ToContentType: TierNames.ContentTypeName(targetType),
             Success: true);
         var jsonText = JsonSerializer.Serialize(dto, JsonContext.Default.MemoryMoveResultDto);

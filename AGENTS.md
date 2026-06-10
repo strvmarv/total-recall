@@ -9,12 +9,12 @@ This file is the operational handbook for AI agents and human contributors worki
 ## Quick Reference
 
 ### Project Overview
-.NET 8 NativeAOT MCP server plugin (C# imperative shell + F# functional core) with npm packaging for Claude Code / Copilot CLI / Cursor / OpenCode marketplace distribution. Three-tier memory (Hot/Warm/Cold) + hierarchical KB, all local by default (SQLite + sqlite-vec + bundled ONNX), optionally synced to Cortex.
+.NET 8 NativeAOT MCP server plugin (C# imperative shell + F# functional core) with npm packaging for Claude Code / Copilot CLI / Cursor / OpenCode marketplace distribution. Four-tier memory (Pinned/Hot/Warm/Cold — pinned is user-curated via `memory_pin`/`memory_unpin`, always injected first, immune to decay/compaction) + hierarchical KB, all local by default (SQLite + sqlite-vec + bundled ONNX), optionally synced to Cortex (pinned entries are local-only, never synced).
 
 ### Layer Diagram
 ```
 TotalRecall.Host (C#)          ← AOT entry point + composition root
-├── TotalRecall.Server (C#)    ← MCP JSON-RPC over stdio; 47 handlers (one file each)
+├── TotalRecall.Server (C#)    ← MCP JSON-RPC over stdio; 49 handlers (one file each)
 ├── TotalRecall.Cli (C#)       ← CLI commands (Spectre.Console)
 ├── TotalRecall.Infrastructure (C#) ← SQLite/Postgres, ONNX embedder, importers, migrations
 └── TotalRecall.Core (F#)      ← Pure functions: tokenizer, decay, ranking, parsers, chunker
@@ -85,12 +85,13 @@ The .NET SDK is pinned by `global.json` at the repo root (`{"sdk":{"version":"10
 
 The embedding model (`models/all-MiniLM-L6-v2/model.onnx`) is stored with Git LFS. Contributors need `git lfs install` before cloning. The model is bundled so plugin users get offline embeddings without a HuggingFace download on first run. If the model is missing at runtime, the .NET embedder has a fallback to download from HuggingFace (see `src/TotalRecall.Infrastructure/Embedding/ModelManager.cs`).
 
-### Version sync — five files, one version (STANDING RULE)
+### Version sync — six files, one version (STANDING RULE)
 
-total-recall is a multi-host plugin (Claude Code, Copilot CLI, Cursor, OpenCode, …). Each host reads its own plugin manifest, and every manifest carries its own `version` field. They MUST all match the `package.json` version on every release. Historical drift incidents:
+total-recall is a multi-host plugin (Claude Code, Copilot CLI, Cursor, OpenCode, Hermes, …). Each host reads its own plugin manifest, and every manifest carries its own `version` field. They MUST all match the `package.json` version on every release. Historical drift incidents:
 
 - `.copilot-plugin/plugin.json` was stuck on `0.1.0` for many releases — Copilot CLI users saw `0.1.0` reported even when npm was at 0.7.2
 - `.claude-plugin/plugin.json` was stuck on `0.7.2` through the entire TS→.NET cutover (beta.1 → beta.3) until the build agent caught it during the beta.4 audit
+- `hermes-plugin/plugin.yaml` was stuck on `1.4.0` through the 2.0.0 release — the v2.0.0 sync repaired the plugin.json drift but missed the one YAML manifest (caught during the 2.1.0 release)
 
 **On every release you MUST bump the version in ALL of these to the same value:**
 
@@ -99,16 +100,25 @@ total-recall is a multi-host plugin (Claude Code, Copilot CLI, Cursor, OpenCode,
 3. `.claude-plugin/plugin.json`
 4. `.copilot-plugin/plugin.json`
 5. `.cursor-plugin/plugin.json`
+6. `hermes-plugin/plugin.yaml` (the one non-JSON manifest — a plain-text grep for the old version string is the only way it shows up)
 
 `.opencode/` uses `INSTALL.md` (no versioned manifest) so it is exempt, but any version references in that doc should still be reviewed.
 
-When agents dispatch subagents to bump versions or cut releases, this list MUST be included in the prompt. Never assume "I'll just bump package.json" — every release must sync all five.
+**Version surfaces that are NOT bumped in-repo** (do not "fix" these during a release):
+
+- The AOT binary's `--version` output and the MCP `serverInfo.version` are stamped at release time by `.github/workflows/release.yml` from the git tag (`-p:Version` / `-p:InformationalVersion`). The repo contains no hardcoded value for them — tagging `vX.Y.Z` is the bump.
+- `hermes-plugin/mcp_client.py` `clientInfo` (`hermes-mcp-client 0.1.0`) identifies the MCP client implementation, not the plugin; `protocolVersion` is the MCP spec date.
+- `global.json` pins the .NET SDK; `Version="..."` attributes in `.csproj` files are NuGet package references.
+
+The fastest audit is a repo-wide grep for the OLD version string after bumping — anything still matching (outside `CHANGELOG.md` history and the exclusions above) was missed.
+
+When agents dispatch subagents to bump versions or cut releases, this list MUST be included in the prompt. Never assume "I'll just bump package.json" — every release must sync all six.
 
 A follow-up in `docs/TODO.md` ("Plugin Version Single Source of Truth") tracks adding a pre-commit or CI check to enforce this automatically.
 
 ### Release flow
 
-1. Bump version in all five files above to the same value.
+1. Bump version in all six files above to the same value.
 2. Update `CHANGELOG.md` with the new version's `### Fixed` / `### Added` / `### Changed` sections.
 3. Commit with a message like `release(beta.N): bump to 0.x.y-beta.N; …` or `release: v0.x.y; …`.
 4. Tag with `git tag -a vX.Y.Z -m "..."` (annotated tag with a release-note body in the tag message — `gh release` displays it).
@@ -270,7 +280,7 @@ The root cause is Windows Defender mid-scanning the freshly-extracted `total-rec
 3. **Warm sweep** — if last sweep was more than `warm_sweep_interval_days` ago, moves old unaccessed warm entries to cold. Tracked via `compaction_log` with `reason = 'warm_sweep_decay'`.
 4. **Project docs auto-ingest** — detects `README.md`, `CONTRIBUTING.md`, `CLAUDE.md`, `AGENTS.md`, and `docs/` in cwd. Ingests into a `<project>-project-docs` KB collection. Deduplicates via `import_log`.
 5. **Smoke test** — if `_meta.smoke_test_version` differs from current package version, runs a 22-query benchmark from `eval/benchmarks/smoke.jsonl`. Pass threshold: `exactMatchRate >= 0.8`. Writes version to `_meta` on completion. Result returned as `smokeTest` field.
-6. **Hot tier assembly** — returns current hot entries as injectable context. Enforces token budget by evicting lowest-decay entries to warm.
+6. **Pinned + hot tier assembly** — pinned entries are injected first, verbatim, under a `## Pinned directives (always follow)` header (never truncated; their token cost reduces the hot budget), then current hot entries as injectable context. Enforces token budget by evicting lowest-decay entries to warm. Pinned storage is never scanned by decay, the warm sweep, or compaction.
 7. **Tier summary** — counts entries across all tiers and KB collections, returned as `tierSummary` in the response.
 8. **Hint generation** — `GenerateHints()` surfaces up to 5 high-value warm memories: corrections and preferences (priority 1), frequently accessed entries with `access_count >= 3` (priority 2), and recently promoted entries (priority 3). Each hint is truncated to 120 chars. No LLM calls — DB queries only.
 9. **Session continuity** — `GetLastSessionAge()` returns human-readable relative time since last compaction event (proxy for last session). Returns `null` for first-time users.
@@ -295,7 +305,7 @@ The root cause is Windows Defender mid-scanning the freshly-extracted `total-rec
 
 `ToolContext` (in `src/TotalRecall.Server/`) carries session state through all tool handlers: `Store`, `Config`, `Embedder`, `SessionId`, and `ConfigSnapshotId`. The `ConfigSnapshotId` is set by `session_start` and used by `memory_search` (for retrieval event logging) and the compactor (for compaction logging). New tools that call `LogRetrievalEvent` should pass `ctx.ConfigSnapshotId`.
 
-The composition root in `src/TotalRecall.Host/Program.cs` wires up all dependencies (storage, embedder, importers, MCP server, migration guard) and is the AOT entry point. The 47 MCP handlers live in `src/TotalRecall.Server/Handlers/` — one file per handler.
+The composition root in `src/TotalRecall.Host/Program.cs` wires up all dependencies (storage, embedder, importers, MCP server, migration guard) and is the AOT entry point. The 49 MCP handlers live in `src/TotalRecall.Server/Handlers/` — one file per handler.
 
 ---
 
@@ -303,15 +313,7 @@ The composition root in `src/TotalRecall.Host/Program.cs` wires up all dependenc
 
 Schema changes are handled by a sequential migration framework in `src/TotalRecall.Infrastructure/Storage/Schema.cs`. The `MigrationRunner` runs each migration function inside a transaction, indexed by `_schema_version`. On startup, it checks the current schema version and runs any newer migrations.
 
-Current migrations (as of 0.8.0-beta.7):
-
-1. **Migration 1** — initial schema (entries tables, vec0 virtual tables, FTS, telemetry tables, _meta, _schema_version).
-2. **Migration 2** — knowledge tier tables (`hot_knowledge`, `warm_knowledge`, `cold_knowledge` + vec).
-3. **Migration 3** — retrieval event log + import log.
-4. **Migration 4** — `compaction_log.source TEXT NOT NULL DEFAULT 'compaction'` for distinguishing compactor-originated movements from manual `promote`/`demote`.
-5. **Migration 5** — sweeps all 6 content/vec table pairs and deletes orphan rows (added in 0.8.0-beta.6 to clean up state from the parallel-store concurrency bug fixed in the same release).
-6. **Migration 6** — usage telemetry schema (`usage_events`, `usage_daily`, `usage_watermarks` tables).
-7. **Migration 7** — `sync_queue` table for cortex connection.
+Schema is managed by sequential migrations (currently 16; Migration 16 added the pinned tables). For the authoritative migration table, see `src/TotalRecall.Infrastructure/AGENTS.md`.
 
 To add a schema change:
 
@@ -337,7 +339,7 @@ These are non-negotiable rules that apply to every commit, every PR, every subag
 
 1. **No `Co-Authored-By: Claude ...` (or any AI co-author) trailers** in commit messages. Project history is attributed solely to human authors. When dispatching subagents that include `git commit` instructions, the prompt MUST explicitly say "do NOT add any Co-Authored-By trailer."
 2. **Spec and plan documents in `docs/superpowers/specs/` and `docs/superpowers/plans/` are NEVER committed.** They live in the working tree only. The brainstorming and writing-plans skills both default to committing them — that default is overridden on this project. Do not auto-commit them.
-3. **Five-file version sync on every release** (see "Version sync" section above).
+3. **Six-file version sync on every release** (see "Version sync" section above).
 4. **Never delete anything destructively.** This applies broadly: never `git reset --hard` without confirmation, never `git push --force` without confirmation, never delete user data. The `AutoMigrationGuard` follows this principle: it sidelines suspect database files to `<dbPath>.failed-migration-<utc>` instead of deleting them.
 
 ## Deferred Items

@@ -52,7 +52,7 @@ public static class RecentQuery
 
         var tiers = o.Tier is { } only
             ? new[] { only }
-            : new[] { Tier.Hot, Tier.Warm, Tier.Cold };
+            : new[] { Tier.Hot, Tier.Warm, Tier.Cold, Tier.Pinned };
 
         var merged = new List<(Tier Tier, Entry Entry)>();
         foreach (var tier in tiers)

@@ -342,7 +342,9 @@ public sealed record TierSizesDto(
     [property: JsonPropertyName("warm_memories")] int WarmMemories,
     [property: JsonPropertyName("warm_knowledge")] int WarmKnowledge,
     [property: JsonPropertyName("cold_memories")] int ColdMemories,
-    [property: JsonPropertyName("cold_knowledge")] int ColdKnowledge);
+    [property: JsonPropertyName("cold_knowledge")] int ColdKnowledge,
+    [property: JsonPropertyName("pinned_memories")] int PinnedMemories,
+    [property: JsonPropertyName("pinned_knowledge")] int PinnedKnowledge);
 
 public sealed record KbStatusDto(
     [property: JsonPropertyName("collections")] KbCollectionSummaryDto[] Collections,

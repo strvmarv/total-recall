@@ -10,6 +10,7 @@ type Tier =
     | Hot
     | Warm
     | Cold
+    | Pinned
 
 type ContentType =
     | Memory

@@ -1,8 +1,11 @@
-// src/TotalRecall.Cli/Commands/Memory/DemoteCommand.cs
+// src/TotalRecall.Cli/Commands/Memory/UnpinCommand.cs
 //
-// Plan 5 Task 5.4 — `total-recall memory demote <id> [--tier warm|cold]
-// [--type memory|knowledge]`. Same 4-step sequence as PromoteCommand with
-// the inverted direction gate (target must be strictly colder).
+// Pinned tier Task 10 — `total-recall memory unpin <id> [--type memory|knowledge]`.
+// CLI twin of the MCP memory_unpin handler
+// (TotalRecall.Server.Handlers.MemoryUnpinHandler): moves a pinned entry
+// back to warm, resuming the normal decay/compaction lifecycle. Only pinned
+// entries may be unpinned — a non-pinned target fails loudly (exit 2)
+// without moving anything, intentionally asymmetric with the idempotent pin.
 
 using System;
 using System.IO;
@@ -16,25 +19,25 @@ using TotalRecall.Infrastructure.Storage;
 
 namespace TotalRecall.Cli.Commands.Memory;
 
-public sealed class DemoteCommand : ICliCommand
+public sealed class UnpinCommand : ICliCommand
 {
     private readonly IStore? _store;
     private readonly IVectorSearch? _vec;
     private readonly IEmbedder? _embedder;
 
-    public DemoteCommand() { }
+    public UnpinCommand() { }
 
     // Test/composition seam.
-    public DemoteCommand(IStore store, IVectorSearch vec, IEmbedder embedder)
+    public UnpinCommand(IStore store, IVectorSearch vec, IEmbedder embedder)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _vec = vec ?? throw new ArgumentNullException(nameof(vec));
         _embedder = embedder ?? throw new ArgumentNullException(nameof(embedder));
     }
 
-    public string Name => "demote";
+    public string Name => "unpin";
     public string? Group => "memory";
-    public string Description => "Demote a memory or knowledge entry to a colder tier (also re-embeds)";
+    public string Description => "Unpin a pinned entry: moves it to warm where the normal decay/compaction lifecycle resumes";
 
     public Task<int> RunAsync(string[] args)
     {
@@ -44,7 +47,6 @@ public sealed class DemoteCommand : ICliCommand
     private int Execute(string[] args)
     {
         string? id = null;
-        string tierStr = "warm";
         string? typeStr = null;
 
         for (int i = 0; i < args.Length; i++)
@@ -52,18 +54,10 @@ public sealed class DemoteCommand : ICliCommand
             var a = args[i];
             switch (a)
             {
-                case "--tier":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("memory demote: --tier requires a value");
-                        return 2;
-                    }
-                    tierStr = args[++i];
-                    break;
                 case "--type":
                     if (i + 1 >= args.Length)
                     {
-                        Console.Error.WriteLine("memory demote: --type requires a value");
+                        Console.Error.WriteLine("memory unpin: --type requires a value");
                         return 2;
                     }
                     typeStr = args[++i];
@@ -71,13 +65,13 @@ public sealed class DemoteCommand : ICliCommand
                 default:
                     if (a.StartsWith('-'))
                     {
-                        Console.Error.WriteLine($"memory demote: unknown argument '{a}'");
+                        Console.Error.WriteLine($"memory unpin: unknown argument '{a}'");
                         PrintUsage(Console.Error);
                         return 2;
                     }
                     if (id is not null)
                     {
-                        Console.Error.WriteLine($"memory demote: unexpected positional '{a}'");
+                        Console.Error.WriteLine($"memory unpin: unexpected positional '{a}'");
                         PrintUsage(Console.Error);
                         return 2;
                     }
@@ -88,26 +82,8 @@ public sealed class DemoteCommand : ICliCommand
 
         if (string.IsNullOrEmpty(id))
         {
-            Console.Error.WriteLine("memory demote: <id> is required");
+            Console.Error.WriteLine("memory unpin: <id> is required");
             PrintUsage(Console.Error);
-            return 2;
-        }
-
-        var toTier = TierNames.ParseTier(tierStr);
-        if (toTier is null)
-        {
-            Console.Error.WriteLine($"memory demote: invalid --tier '{tierStr}' (expected warm|cold)");
-            return 2;
-        }
-        // demote targets are strictly colder, so hot is never legal here.
-        if (toTier.IsHot)
-        {
-            Console.Error.WriteLine("memory demote: cannot demote to hot (use promote instead)");
-            return 2;
-        }
-        if (toTier.IsPinned)
-        {
-            Console.Error.WriteLine("memory demote: cannot demote to pinned (use 'memory pin' instead)");
             return 2;
         }
 
@@ -117,7 +93,7 @@ public sealed class DemoteCommand : ICliCommand
             toType = TierNames.ParseContentType(typeStr);
             if (toType is null)
             {
-                Console.Error.WriteLine($"memory demote: invalid --type '{typeStr}' (expected memory|knowledge)");
+                Console.Error.WriteLine($"memory unpin: invalid --type '{typeStr}' (expected memory|knowledge)");
                 return 2;
             }
         }
@@ -144,7 +120,7 @@ public sealed class DemoteCommand : ICliCommand
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"memory demote: failed to initialize: {ex.Message}");
+            Console.Error.WriteLine($"memory unpin: failed to initialize: {ex.Message}");
             return 1;
         }
 
@@ -153,36 +129,27 @@ public sealed class DemoteCommand : ICliCommand
             var located = MoveHelpers.Locate(store, id);
             if (located is null)
             {
-                Console.Error.WriteLine($"memory demote: entry {id} not found");
+                Console.Error.WriteLine($"memory unpin: entry {id} not found");
                 return 1;
             }
 
             var (fromTier, fromType, entry) = located.Value;
-            if (fromTier.IsPinned)
+            if (!fromTier.IsPinned)
             {
-                Console.Error.WriteLine($"memory demote: entry {id} is pinned; use 'memory unpin' to release it first");
+                Console.Error.WriteLine(
+                    $"memory unpin: entry {id} is not pinned (tier: {TierNames.TierName(fromTier)})");
                 return 2;
             }
             var targetType = toType ?? fromType;
 
-            // Direction gate: demotion must target a strictly colder tier.
-            if (TierNames.WarmthRank(toTier) >= TierNames.WarmthRank(fromTier))
-            {
-                Console.Error.WriteLine(
-                    $"memory demote: cannot demote {TierNames.TierName(fromTier)} -> {TierNames.TierName(toTier)} (target must be colder)");
-                return 2;
-            }
+            MoveHelpers.MoveAndReEmbed(store, vec, embedder, entry, Tier.Pinned, fromType, Tier.Warm, targetType);
 
-            MoveHelpers.MoveAndReEmbed(store, vec, embedder, entry, fromTier, fromType, toTier, targetType);
-
-            Console.Out.WriteLine(
-                $"demoted {id} from {TierNames.TierName(fromTier)}/{TierNames.ContentTypeName(fromType)} " +
-                $"to {TierNames.TierName(toTier)}/{TierNames.ContentTypeName(targetType)}");
+            Console.Out.WriteLine($"unpinned {id} -> warm/{TierNames.ContentTypeName(targetType)}");
             return 0;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"memory demote: failed: {ex.Message}");
+            Console.Error.WriteLine($"memory unpin: failed: {ex.Message}");
             return 1;
         }
         finally
@@ -193,6 +160,6 @@ public sealed class DemoteCommand : ICliCommand
 
     private static void PrintUsage(TextWriter w)
     {
-        w.WriteLine("Usage: total-recall memory demote <id> [--tier warm|cold] [--type memory|knowledge]");
+        w.WriteLine("Usage: total-recall memory unpin <id> [--type memory|knowledge]");
     }
 }

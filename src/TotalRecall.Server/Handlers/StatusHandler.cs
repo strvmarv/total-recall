@@ -13,7 +13,7 @@
 //     values that live outside the store/lifecycle seams and would
 //     otherwise have to be pulled from the process host configuration.
 //
-//   - tierSizes is 6 IStore.Count calls, one per (tier, type).
+//   - tierSizes is 8 IStore.Count calls, one per (tier, type).
 //
 //   - knowledgeBase enumerates cold_knowledge rows whose metadata.type ==
 //     "collection" via IStore.ListByMetadata (option b — collections
@@ -113,7 +113,9 @@ public sealed class StatusHandler : IToolHandler
             WarmMemories: _store.Count(Tier.Warm, ContentType.Memory),
             WarmKnowledge: _store.Count(Tier.Warm, ContentType.Knowledge),
             ColdMemories: _store.Count(Tier.Cold, ContentType.Memory),
-            ColdKnowledge: _store.Count(Tier.Cold, ContentType.Knowledge));
+            ColdKnowledge: _store.Count(Tier.Cold, ContentType.Knowledge),
+            PinnedMemories: _store.Count(Tier.Pinned, ContentType.Memory),
+            PinnedKnowledge: _store.Count(Tier.Pinned, ContentType.Knowledge));
 
         ct.ThrowIfCancellationRequested();
 

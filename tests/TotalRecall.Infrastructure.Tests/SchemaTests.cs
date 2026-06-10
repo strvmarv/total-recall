@@ -145,8 +145,8 @@ public sealed class SchemaTests
         Assert.True(reader.Read());
         var count = reader.GetInt64(0);
         var maxVersion = reader.GetInt64(1);
-        Assert.Equal(15L, count);
-        Assert.Equal(15L, maxVersion);
+        Assert.Equal(16L, count);
+        Assert.Equal(16L, maxVersion);
     }
 
     [Fact]
@@ -256,8 +256,10 @@ VALUES
     [Fact]
     public void CleanupOrphanRows_CoversAllTierTypePairs()
     {
-        // Pin the cleanup sweep to all 6 (tier, type) pairs so a future
-        // change can't silently skip one table.
+        // Pin the cleanup sweep to the original 6 pre-pinned (tier, type) pairs so a future
+        // change can't silently skip one table. The public CleanupOrphanRows now sweeps 8
+        // pairs (AllTablePairs + PinnedTablePairs); pinned-pair orphan cleanup is covered
+        // by PinnedTierSchemaTests.
         using var conn = SqliteConnection.Open(":memory:");
         MigrationRunner.RunMigrations(conn);
 

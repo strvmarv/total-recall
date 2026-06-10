@@ -48,7 +48,7 @@ public sealed class FakeSessionLifecycle : ISessionLifecycle
         ProjectDocs: null,
         HotEntryCount: 0,
         Context: string.Empty,
-        TierSummary: new TierSummary(0, 0, 0, 0, 0),
+        TierSummary: new TierSummary(0, 0, 0, 0, 0, 0),
         Hints: new List<Hint>(),
         LastSessionAge: null,
         SmokeTest: null,

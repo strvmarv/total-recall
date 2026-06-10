@@ -37,7 +37,7 @@ C# callers in `TotalRecall.Infrastructure` call into this layer via direct F# in
 
 ```fsharp
 // Tiers — used as dispatch keys everywhere
-type Tier = Hot | Warm | Cold
+type Tier = Hot | Warm | Cold | Pinned
 
 // Content types — determines which table pair (hot_memories vs hot_knowledge)
 type ContentType = Memory | Knowledge
@@ -56,7 +56,7 @@ type Entry = {
 ```
 
 C# callers access these via `TotalRecall.Core.Tier.Hot`, `TotalRecall.Core.ContentType.Memory`, etc.
-For discriminated union case checks from C#: `tier.IsHot`, `tier.IsWarm`, `tier.IsCold`.
+For discriminated union case checks from C#: `tier.IsHot`, `tier.IsWarm`, `tier.IsCold`, `tier.IsPinned`.
 
 ---
 

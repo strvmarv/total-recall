@@ -205,6 +205,8 @@ public static class CliApp
             new Commands.Memory.InspectCommand(),
             new Commands.Memory.LineageCommand(),
             new Commands.Memory.PromoteCommand(),
+            new Commands.Memory.PinCommand(),
+            new Commands.Memory.UnpinCommand(),
             new Commands.Kb.ListCommand(),
             new Commands.Kb.RefreshCommand(),
             new Commands.Kb.RemoveCommand(),

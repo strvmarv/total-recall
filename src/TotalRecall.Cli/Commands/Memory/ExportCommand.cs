@@ -70,7 +70,7 @@ public sealed class ExportCommand : ICliCommand
                         var t = TierNames.ParseTier(token);
                         if (t is null)
                         {
-                            Console.Error.WriteLine($"memory export: invalid tier '{token}' (expected hot|warm|cold)");
+                            Console.Error.WriteLine($"memory export: invalid tier '{token}' (expected hot|warm|cold|pinned)");
                             return 2;
                         }
                         tierFilter.Add(t);
@@ -310,6 +310,6 @@ public sealed class ExportCommand : ICliCommand
 
     private static void PrintUsage(TextWriter w)
     {
-        w.WriteLine("Usage: total-recall memory export [--tiers hot,warm,cold] [--types memory,knowledge] [--out path] [--pretty]");
+        w.WriteLine("Usage: total-recall memory export [--tiers hot,warm,cold,pinned] [--types memory,knowledge] [--out path] [--pretty]");
     }
 }

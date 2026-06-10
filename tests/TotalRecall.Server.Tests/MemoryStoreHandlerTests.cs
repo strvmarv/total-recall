@@ -335,4 +335,76 @@ public class MemoryStoreHandlerTests
         var call = store.InsertWithEmbeddingCalls.Single();
         Assert.Equal("team:eng", call.Opts.Scope);
     }
+
+    [Fact]
+    public async Task Store_PinnedTrue_InsertsIntoPinnedTier()
+    {
+        var (handler, store, _, _) = MakeHandler();
+        var result = await handler.ExecuteAsync(
+            ParseArgs("""{"content":"never forget","pinned":true}"""), CancellationToken.None);
+
+        Assert.NotEqual(true, result.IsError);
+        Assert.Single(store.InsertWithEmbeddingCalls);
+        Assert.Equal(Tier.Pinned, store.InsertWithEmbeddingCalls[0].Tier);
+    }
+
+    [Fact]
+    public async Task Store_PinnedTrueWithTier_Throws()
+    {
+        var (handler, _, _, _) = MakeHandler();
+        await Assert.ThrowsAsync<ArgumentException>(() => handler.ExecuteAsync(
+            ParseArgs("""{"content":"x","pinned":true,"tier":"warm"}"""), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Store_TierPinnedString_DirectsToPinnedFlag()
+    {
+        var (handler, _, _, _) = MakeHandler();
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => handler.ExecuteAsync(
+            ParseArgs("""{"content":"x","tier":"pinned"}"""), CancellationToken.None));
+        Assert.Contains("pinned", ex.Message);
+    }
+
+    [Fact]
+    public async Task Store_PinnedOverLimit_Rejected_NonPinnedUnaffected()
+    {
+        var (handler, store, _, _) = MakeHandler(); // default limit 500
+        var big = new string('a', 501);
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => handler.ExecuteAsync(
+            ParseArgs($$"""{"content":"{{big}}","pinned":true}"""), CancellationToken.None));
+        Assert.Contains("500", ex.Message);
+
+        // Same content WITHOUT pinned stores fine (only the 100k global cap applies).
+        var ok = await handler.ExecuteAsync(
+            ParseArgs($$"""{"content":"{{big}}"}"""), CancellationToken.None);
+        Assert.NotEqual(true, ok.IsError);
+    }
+
+    // M1: Regression anchor — pinned:false must not route to the pinned tier.
+    [Fact]
+    public async Task Store_PinnedFalse_StoresInHotTier()
+    {
+        var (handler, store, _, _) = MakeHandler();
+        var args = ParseArgs("""{"content":"x","pinned":false}""");
+
+        await handler.ExecuteAsync(args, CancellationToken.None);
+
+        var call = Assert.Single(store.InsertWithEmbeddingCalls);
+        Assert.Equal(Tier.Hot, call.Tier);
+    }
+
+    // M2: pinned:true with contentType:knowledge lands in (Tier.Pinned, ContentType.Knowledge).
+    [Fact]
+    public async Task Store_PinnedTrue_Knowledge_InsertsIntoPinnedKnowledge()
+    {
+        var (handler, store, _, _) = MakeHandler();
+        var args = ParseArgs("""{"content":"x","pinned":true,"contentType":"knowledge"}""");
+
+        await handler.ExecuteAsync(args, CancellationToken.None);
+
+        var call = Assert.Single(store.InsertWithEmbeddingCalls);
+        Assert.Equal(Tier.Pinned, call.Tier);
+        Assert.Equal(ContentType.Knowledge, call.Type);
+    }
 }

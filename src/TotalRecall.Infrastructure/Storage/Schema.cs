@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using TotalRecall.Core;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
@@ -42,6 +43,7 @@ public static class MigrationRunner
         if (tier.IsHot) tierStr = "hot";
         else if (tier.IsWarm) tierStr = "warm";
         else if (tier.IsCold) tierStr = "cold";
+        else if (tier.IsPinned) tierStr = "pinned";
         else throw new ArgumentOutOfRangeException(nameof(tier));
 
         string typeStr;
@@ -58,7 +60,11 @@ public static class MigrationRunner
     internal static string FtsTableName(Tier tier, ContentType type) =>
         $"{TableName(tier, type)}_fts";
 
-    /// <summary>All 6 (tier, type) pairs the schema creates tables for.</summary>
+    /// <summary>All 6 (tier, type) pairs the schema creates tables for.
+    /// DO NOT extend: historical migrations 1, 3, 5, 8, 9, 14 iterate this
+    /// array and altering it would change what those already-applied
+    /// migrations create on fresh databases. Pinned tables are created by
+    /// Migration 16 with the full current column set instead.</summary>
     internal static readonly (Tier Tier, ContentType Type)[] AllTablePairs =
     {
         (Tier.Hot,  ContentType.Memory),
@@ -67,6 +73,15 @@ public static class MigrationRunner
         (Tier.Hot,  ContentType.Knowledge),
         (Tier.Warm, ContentType.Knowledge),
         (Tier.Cold, ContentType.Knowledge),
+    };
+
+    /// <summary>The 2 (tier, type) pairs for the pinned tier, created by
+    /// Migration 16. Kept separate from <see cref="AllTablePairs"/> so
+    /// historical migrations are not affected.</summary>
+    internal static readonly (Tier Tier, ContentType Type)[] PinnedTablePairs =
+    {
+        (Tier.Pinned, ContentType.Memory),
+        (Tier.Pinned, ContentType.Knowledge),
     };
 
     private const string SchemaVersionDdl = """
@@ -96,6 +111,8 @@ public static class MigrationRunner
         )
         """;
 
+    // Note: the scope index (idx_<name>_scope) is intentionally excluded here —
+    // it was added via Migration 8 for the original 6 tables; Migration 16 appends it inline for pinned tables.
     private static string[] ContentTableIndexes(string name) => new[]
     {
         $"CREATE INDEX IF NOT EXISTS idx_{name}_project       ON {name}(project)",
@@ -215,6 +232,8 @@ public static class MigrationRunner
         Migration14_TimesInjected,
         // Migration 15: tool_cache table (Phase 3 idea 2c)
         Migration15_ToolCache,
+        // Migration 16: pinned tier content tables (pinned_memories, pinned_knowledge)
+        Migration16_PinnedTier,
     };
 
     /// <summary>
@@ -400,7 +419,9 @@ public static class MigrationRunner
         MsSqliteConnection conn,
         Microsoft.Data.Sqlite.SqliteTransaction tx)
     {
-        CleanupOrphanRowsInTransaction(conn, tx);
+        // Frozen at the 6 pre-pinned pairs: on a fresh DB this migration runs
+        // before Migration 16 creates the pinned tables.
+        CleanupOrphanRowsInTransaction(conn, tx, AllTablePairs);
     }
 
     /// <summary>
@@ -416,15 +437,16 @@ public static class MigrationRunner
     {
         ArgumentNullException.ThrowIfNull(conn);
         using var tx = conn.BeginTransaction();
-        CleanupOrphanRowsInTransaction(conn, tx);
+        CleanupOrphanRowsInTransaction(conn, tx, AllTablePairs.Concat(PinnedTablePairs));
         tx.Commit();
     }
 
     private static void CleanupOrphanRowsInTransaction(
         MsSqliteConnection conn,
-        Microsoft.Data.Sqlite.SqliteTransaction tx)
+        Microsoft.Data.Sqlite.SqliteTransaction tx,
+        IEnumerable<(Tier Tier, ContentType Type)> pairs)
     {
-        foreach (var (tier, type) in AllTablePairs)
+        foreach (var (tier, type) in pairs)
         {
             var contentTable = TableName(tier, type);
             var vecTable = VecTableName(tier, type);
@@ -725,6 +747,78 @@ public static class MigrationRunner
         // capped at ~200 rows, so only the purge column gets an index.
         Exec(conn, tx,
             "CREATE INDEX IF NOT EXISTS idx_tool_cache_stored_at ON tool_cache(stored_at_ms)");
+    }
+
+    /// <summary>
+    /// Migration 16 — pinned tier (spec 2026-06-09). Creates
+    /// pinned_memories / pinned_knowledge with the full current column set
+    /// (scope, entry_type, times_injected included — migrations 8/9/14 only
+    /// touch the original six tables), plus vec0 + FTS5 + triggers + indexes
+    /// mirroring Migrations 1 and 3. MigrationRunner.AllTablePairs is NOT
+    /// extended: it describes the table set managed by migrations 1-15.
+    /// </summary>
+    private static void Migration16_PinnedTier(
+        MsSqliteConnection conn,
+        Microsoft.Data.Sqlite.SqliteTransaction tx)
+    {
+        foreach (var (tier, type) in PinnedTablePairs)
+        {
+            var tbl = TableName(tier, type);
+            var vecTbl = VecTableName(tier, type);
+            var ftsTbl = FtsTableName(tier, type);
+
+            Exec(conn, tx, $$"""
+                CREATE TABLE IF NOT EXISTS {{tbl}} (
+                    id                TEXT PRIMARY KEY NOT NULL,
+                    content           TEXT NOT NULL,
+                    summary           TEXT,
+                    source            TEXT,
+                    source_tool       TEXT,
+                    project           TEXT,
+                    tags              TEXT DEFAULT '[]',
+                    created_at        INTEGER NOT NULL,
+                    updated_at        INTEGER NOT NULL,
+                    last_accessed_at  INTEGER NOT NULL,
+                    access_count      INTEGER DEFAULT 0,
+                    decay_score       REAL DEFAULT 1.0,
+                    parent_id         TEXT,
+                    collection_id     TEXT,
+                    metadata          TEXT DEFAULT '{}',
+                    scope             TEXT NOT NULL DEFAULT '',
+                    entry_type        TEXT NOT NULL DEFAULT 'Preference',
+                    times_injected    INTEGER NOT NULL DEFAULT 0
+                )
+                """);
+
+            Exec(conn, tx,
+                $"CREATE VIRTUAL TABLE IF NOT EXISTS {vecTbl} USING vec0(embedding float[384])");
+
+            foreach (var idx in ContentTableIndexes(tbl))
+                Exec(conn, tx, idx);
+            Exec(conn, tx, $"CREATE INDEX IF NOT EXISTS idx_{tbl}_scope ON {tbl}(scope)");
+
+            Exec(conn, tx,
+                $"CREATE VIRTUAL TABLE IF NOT EXISTS {ftsTbl} USING fts5(content, tags, content={tbl}, content_rowid=rowid)");
+
+            Exec(conn, tx, $$"""
+                CREATE TRIGGER IF NOT EXISTS {{tbl}}_fts_ai AFTER INSERT ON {{tbl}} BEGIN
+                    INSERT INTO {{ftsTbl}}(rowid, content, tags) VALUES (new.rowid, new.content, new.tags);
+                END
+                """);
+            Exec(conn, tx, $$"""
+                CREATE TRIGGER IF NOT EXISTS {{tbl}}_fts_ad AFTER DELETE ON {{tbl}} BEGIN
+                    INSERT INTO {{ftsTbl}}({{ftsTbl}}, rowid, content, tags) VALUES('delete', old.rowid, old.content, old.tags);
+                END
+                """);
+            Exec(conn, tx, $$"""
+                CREATE TRIGGER IF NOT EXISTS {{tbl}}_fts_au AFTER UPDATE ON {{tbl}} BEGIN
+                    INSERT INTO {{ftsTbl}}({{ftsTbl}}, rowid, content, tags) VALUES('delete', old.rowid, old.content, old.tags);
+                    INSERT INTO {{ftsTbl}}(rowid, content, tags) VALUES (new.rowid, new.content, new.tags);
+                END
+                """);
+
+            // No FTS backfill needed (unlike Migration 3): pinned tables are always empty at migration time.
+        }
     }
 
     // --- helpers ----------------------------------------------------------

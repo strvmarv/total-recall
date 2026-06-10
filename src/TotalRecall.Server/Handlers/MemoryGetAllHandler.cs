@@ -54,7 +54,7 @@ public sealed class MemoryGetAllHandler : IToolHandler
             var tierStr = ArgumentParsing.ReadOptionalString(args, "tier");
             if (tierStr is not null)
                 tier = TierNames.ParseTier(tierStr)
-                    ?? throw new ArgumentException($"invalid tier '{tierStr}' (expected hot, warm, or cold)");
+                    ?? throw new ArgumentException($"invalid tier '{tierStr}' (expected hot, warm, cold, or pinned)");
 
             sourceTool = ArgumentParsing.ReadOptionalString(args, "source_tool");
             tags = ArgumentParsing.ReadTags(args);

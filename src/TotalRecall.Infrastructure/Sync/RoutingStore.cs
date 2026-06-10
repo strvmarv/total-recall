@@ -57,6 +57,9 @@ public sealed class RoutingStore : IStore
     public void Delete(Tier tier, ContentType type, string id)
     {
         _local.Delete(tier, type, id);
+        // Pinned ids were never pushed to Cortex (local-only tier), so no
+        // remote delete is needed — skip the enqueue entirely.
+        if (tier.IsPinned) return;
         _syncQueue.Enqueue("memory", "delete", id,
             SyncPayload.Delete(id));
     }
@@ -93,6 +96,11 @@ public sealed class RoutingStore : IStore
 
     private void EnqueueUpsert(Tier tier, ContentType type, string id)
     {
+        // Pinned tier is LOCAL-ONLY: the Cortex remote has no pinned-memory
+        // support yet, so pinned entries are never pushed. (User decision
+        // 2026-06-09: pinned is local-only; non-destructive to remote.)
+        if (tier.IsPinned) return;
+
         // Best-effort: the caller's local write has already committed by the
         // time we reach this method. A failure to enqueue the cortex-sync
         // payload must NOT surface as a user-visible write error — the

@@ -200,4 +200,29 @@ public class MemoryPromoteHandlerTests
         Assert.True(handler.InputSchema.TryGetProperty("properties", out var props));
         Assert.True(props.TryGetProperty("id", out _));
     }
+
+    // ---------------- Task 3: pinned-tier guards ----------------
+
+    [Fact]
+    public async Task PinnedSource_IsRejected_PointsToUnpin()
+    {
+        var (handler, store, _, _) = MakeHandler();
+        store.Seed(Tier.Pinned, ContentType.Memory, MakeEntry("p1"));
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            handler.ExecuteAsync(ParseArgs("""{"id":"p1"}"""), CancellationToken.None));
+        Assert.Contains("memory_unpin", ex.Message);
+        Assert.Empty(store.MoveCalls); // nothing moved — regression guard
+    }
+
+    [Fact]
+    public async Task PinnedTarget_IsRejected_PointsToPin()
+    {
+        var (handler, store, _, _) = MakeHandler();
+        store.Seed(Tier.Warm, ContentType.Memory, MakeEntry("w1"));
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            handler.ExecuteAsync(ParseArgs("""{"id":"w1","tier":"pinned"}"""), CancellationToken.None));
+        Assert.Contains("memory_pin", ex.Message);
+    }
 }

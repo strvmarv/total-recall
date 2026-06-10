@@ -43,7 +43,8 @@ public sealed class StatusCommandTests : IDisposable
                 new Core.Config.TiersConfig(
                     new Core.Config.HotTierConfig(20, 4000, 0.5, 0.0),
                     new Core.Config.WarmTierConfig(1000, 50, 0.3, 90),
-                    new Core.Config.ColdTierConfig(500, 50, 1000)),
+                    new Core.Config.ColdTierConfig(500, 50, 1000),
+                    FSharpOption<Core.Config.PinnedTierConfig>.None),
                 new Core.Config.CompactionConfig(168.0, 0.3, 0.7, 30, FSharpOption<double>.None, FSharpOption<double>.None, FSharpOption<double>.None, FSharpOption<double>.None, 10),
                 new Core.Config.EmbeddingConfig(model, dims,
                     FSharpOption<string>.None,
@@ -108,6 +109,8 @@ public sealed class StatusCommandTests : IDisposable
         var tiers = root.GetProperty("tierSizes");
         Assert.Equal(0, tiers.GetProperty("hot").GetProperty("memory").GetInt32());
         Assert.Equal(0, tiers.GetProperty("cold").GetProperty("knowledge").GetInt32());
+        Assert.Equal(0, tiers.GetProperty("pinned").GetProperty("memory").GetInt32());
+        Assert.Equal(0, tiers.GetProperty("pinned").GetProperty("knowledge").GetInt32());
 
         var kb = root.GetProperty("knowledgeBase");
         Assert.Equal(0, kb.GetProperty("collections").GetArrayLength());
@@ -126,10 +129,14 @@ public sealed class StatusCommandTests : IDisposable
     public async Task Json_Seeded_ReflectsCountsAndCollections()
     {
         var store = new FakeStore();
-        // 2 hot memories, 1 warm memory, 1 cold knowledge chunk + 2 collections.
+        // 2 hot memories, 1 warm memory, 1 cold knowledge chunk + 2 collections,
+        // 2 pinned memories, 1 pinned knowledge.
         store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: "hm1"));
         store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: "hm2"));
         store.Seed(Tier.Warm, ContentType.Memory, EntryFactory.Make(id: "wm1"));
+        store.Seed(Tier.Pinned, ContentType.Memory, EntryFactory.Make(id: "pm1"));
+        store.Seed(Tier.Pinned, ContentType.Memory, EntryFactory.Make(id: "pm2"));
+        store.Seed(Tier.Pinned, ContentType.Knowledge, EntryFactory.Make(id: "pk1"));
         store.Seed(Tier.Cold, ContentType.Knowledge, EntryFactory.Make(
             id: "coll-a",
             metadataJson: "{\"type\":\"collection\",\"name\":\"Alpha\"}"));
@@ -159,6 +166,8 @@ public sealed class StatusCommandTests : IDisposable
             Assert.Equal(2, tiers.GetProperty("hot").GetProperty("memory").GetInt32());
             Assert.Equal(1, tiers.GetProperty("warm").GetProperty("memory").GetInt32());
             Assert.Equal(3, tiers.GetProperty("cold").GetProperty("knowledge").GetInt32());
+            Assert.Equal(2, tiers.GetProperty("pinned").GetProperty("memory").GetInt32());
+            Assert.Equal(1, tiers.GetProperty("pinned").GetProperty("knowledge").GetInt32());
 
             var kb = root.GetProperty("knowledgeBase");
             Assert.Equal(2, kb.GetProperty("collections").GetArrayLength());

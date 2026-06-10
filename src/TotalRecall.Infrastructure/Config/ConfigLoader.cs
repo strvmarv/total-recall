@@ -265,7 +265,28 @@ public sealed class ConfigLoader : IConfigLoader
             GetInt(cold, "chunk_overlap_tokens"),
             GetInt(cold, "lazy_summary_threshold"));
 
-        var tiersCfg = new Core.Config.TiersConfig(hotCfg, warmCfg, coldCfg);
+        // Pinned tier config is optional — absent in existing config files.
+        var pinnedCfgOpt = Microsoft.FSharp.Core.FSharpOption<Core.Config.PinnedTierConfig>.None;
+        if (tiers.TryGetValue("pinned", out var pinnedObj) && pinnedObj is TomlTable pinnedTable)
+        {
+            int maxContentChars;
+            try
+            {
+                var mccOpt = TryGetInt(pinnedTable, "max_content_chars");
+                maxContentChars = Microsoft.FSharp.Core.FSharpOption<int>.get_IsSome(mccOpt)
+                    ? mccOpt.Value
+                    : 500;
+            }
+            catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException)
+            {
+                throw new InvalidDataException(
+                    "tiers.pinned.max_content_chars must be an integer", ex);
+            }
+            pinnedCfgOpt = Microsoft.FSharp.Core.FSharpOption<Core.Config.PinnedTierConfig>.Some(
+                new Core.Config.PinnedTierConfig(maxContentChars));
+        }
+
+        var tiersCfg = new Core.Config.TiersConfig(hotCfg, warmCfg, coldCfg, pinnedCfgOpt);
 
         var compaction = GetTable(table, "compaction");
         var compactionCfg = new Core.Config.CompactionConfig(

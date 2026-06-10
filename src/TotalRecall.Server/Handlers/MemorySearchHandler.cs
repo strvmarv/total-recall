@@ -41,6 +41,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Embedding;
+using TotalRecall.Infrastructure.Memory;
 using TotalRecall.Infrastructure.Search;
 using TotalRecall.Infrastructure.Sync;
 using TotalRecall.Infrastructure.Telemetry;
@@ -62,7 +63,7 @@ public sealed class MemorySearchHandler : IToolHandler
             "query":        {"type":"string","description":"Search query"},
             "topK":         {"type":"number","description":"Number of results to return (default: 10)"},
             "minScore":     {"type":"number","description":"Minimum similarity score (0-1)"},
-            "tiers":        {"type":"array","items":{"type":"string","enum":["hot","warm","cold"]},"description":"Tiers to search (default: all)"},
+            "tiers":        {"type":"array","items":{"type":"string","enum":["hot","warm","cold","pinned"]},"description":"Tiers to search (default: all)"},
             "contentTypes": {"type":"array","items":{"type":"string","enum":["memory","knowledge"]},"description":"Content types to search (default: all)"},
             "scopes":       {"type":"array","items":{"type":"string"},"description":"Scope(s) to search. Defaults to configured default scope. Pass multiple to broaden (e.g. [\"user:paul\",\"global:jira\"])."}
           },
@@ -288,13 +289,8 @@ public sealed class MemorySearchHandler : IToolHandler
         return list;
     }
 
-    private static Tier ParseTier(string s) => s switch
-    {
-        "hot" => Tier.Hot,
-        "warm" => Tier.Warm,
-        "cold" => Tier.Cold,
-        _ => throw new ArgumentException($"Invalid tier: {s}. Must be hot, warm, or cold"),
-    };
+    private static Tier ParseTier(string s) =>
+        TierNames.ParseTier(s) ?? throw new ArgumentException($"Invalid tier: {s}. Must be hot, warm, cold, or pinned");
 
     private static ContentType ParseContentType(string s) => s switch
     {
