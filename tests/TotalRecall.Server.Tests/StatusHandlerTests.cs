@@ -328,4 +328,20 @@ public sealed class StatusHandlerTests
         Assert.Equal(JsonValueKind.Object, handler.InputSchema.ValueKind);
         Assert.Equal(JsonValueKind.Object, handler.InputSchema.GetProperty("properties").ValueKind);
     }
+
+    [Fact]
+    public async Task TierSizes_IncludesPinnedCounts()
+    {
+        var store = new FakeStore();
+        // Seed at least one pinned memory and one pinned knowledge so counts
+        // are non-zero, proving population rather than mere key presence.
+        store.SeedCount(Tier.Pinned, ContentType.Memory, 3);
+        store.SeedCount(Tier.Pinned, ContentType.Knowledge, 7);
+
+        var root = await RunAsync(store, new FakeSessionLifecycle(), Options());
+
+        var ts = root.GetProperty("tierSizes");
+        Assert.Equal(3, ts.GetProperty("pinned_memories").GetInt32());
+        Assert.Equal(7, ts.GetProperty("pinned_knowledge").GetInt32());
+    }
 }

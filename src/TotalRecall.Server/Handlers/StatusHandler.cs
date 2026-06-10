@@ -113,7 +113,9 @@ public sealed class StatusHandler : IToolHandler
             WarmMemories: _store.Count(Tier.Warm, ContentType.Memory),
             WarmKnowledge: _store.Count(Tier.Warm, ContentType.Knowledge),
             ColdMemories: _store.Count(Tier.Cold, ContentType.Memory),
-            ColdKnowledge: _store.Count(Tier.Cold, ContentType.Knowledge));
+            ColdKnowledge: _store.Count(Tier.Cold, ContentType.Knowledge),
+            PinnedMemories: _store.Count(Tier.Pinned, ContentType.Memory),
+            PinnedKnowledge: _store.Count(Tier.Pinned, ContentType.Knowledge));
 
         ct.ThrowIfCancellationRequested();
 
