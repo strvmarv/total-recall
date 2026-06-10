@@ -74,16 +74,16 @@ public class MemoryGetHandlerTests
     public async Task IteratesAllTablePairs_UntilFound()
     {
         var (handler, store) = MakeHandler();
-        // Put row in Cold/Knowledge — last in the iteration order.
-        store.Seed(Tier.Cold, ContentType.Knowledge, MakeEntry("zz"));
+        // Put the entry in Pinned/Knowledge — the last pair in AllTablePairs —
+        // so every pair is visited before the match is found.
+        store.Seed(Tier.Pinned, ContentType.Knowledge, MakeEntry("zz"));
 
         var result = await handler.ExecuteAsync(ParseArgs("""{"id":"zz"}"""), CancellationToken.None);
 
-        // All 7 pairs should have been tried (the match is the 7th — Cold/Knowledge
-        // moved from position 6 to 7 after Pinned/Memory was inserted at position 4).
-        Assert.Equal(7, store.GetCalls.Count);
+        // All 8 pairs must have been tried (entry is in the last slot).
+        Assert.Equal(8, store.GetCalls.Count); // == EntryMapping.AllTablePairs.Length
         using var doc = JsonDocument.Parse(result.Content[0].Text);
-        Assert.Equal("cold", doc.RootElement.GetProperty("tier").GetString());
+        Assert.Equal("pinned", doc.RootElement.GetProperty("tier").GetString());
         Assert.Equal("knowledge", doc.RootElement.GetProperty("content_type").GetString());
     }
 

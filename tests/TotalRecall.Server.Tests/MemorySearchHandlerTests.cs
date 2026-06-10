@@ -418,6 +418,8 @@ public class MemorySearchHandlerTests
                 .Select(e => e.GetString()).ToArray();
             Assert.Contains("hot_memory", names);
             Assert.Contains("cold_knowledge", names);
+            Assert.Contains("pinned_memory", names);
+            Assert.Contains("pinned_knowledge", names);
         }
 
         // --- assert sync queue payload ---

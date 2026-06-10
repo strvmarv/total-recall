@@ -2,7 +2,7 @@
 //
 // Plan 6 Task 6.0a — promoted from src/TotalRecall.Cli/Internal/TierNames.cs
 // so both the CLI and the MCP Server can share the same Tier/ContentType
-// parse + format helpers and the 6-pair sweep table without duplicating
+// parse + format helpers and the 8-pair sweep table without duplicating
 // code (closes Plan 5 carry-forward #8). The shape of the public surface
 // matches the old Cli-local version one-for-one; the only difference is
 // the namespace and the fact that it is now `public`.
@@ -32,7 +32,7 @@ public static class TierNames
         c.IsMemory ? "memory" : "knowledge";
 
     /// <summary>
-    /// Parse "hot"|"warm"|"cold" → Tier. Returns null for unknown values.
+    /// Parse "hot"|"warm"|"cold"|"pinned" → Tier. Returns null for unknown values.
     /// </summary>
     public static Tier? ParseTier(string s) => s switch
     {
@@ -85,11 +85,12 @@ public static class TierNames
         : "Ingested";
 
     /// <summary>
-    /// Tier warmth rank: pinned=3, hot=2, warm=1, cold=0. Promote/demote
-    /// direction gates never legally target pinned — both handlers reject
-    /// pinned source AND target tiers explicitly before the rank check
-    /// (memory_pin / memory_unpin are the only doors). Rank 3 exists for
-    /// ordering/display only.
+    /// Tier warmth rank: pinned=3, hot=2, warm=1, cold=0. Pinned ranks above
+    /// hot. Rank 3 exists for ordering/display and as a mathematical backstop
+    /// in the promote/demote direction checks; explicit pinned-tier guards in
+    /// the pin/unpin and promote/demote handlers are added in a later task.
+    /// memory_pin / memory_unpin are the only intended doors in and out of
+    /// pinned.
     /// </summary>
     public static int WarmthRank(Tier t) =>
         t.IsPinned ? 3 : t.IsHot ? 2 : t.IsWarm ? 1 : 0;
