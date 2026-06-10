@@ -269,9 +269,19 @@ public sealed class ConfigLoader : IConfigLoader
         var pinnedCfgOpt = Microsoft.FSharp.Core.FSharpOption<Core.Config.PinnedTierConfig>.None;
         if (tiers.TryGetValue("pinned", out var pinnedObj) && pinnedObj is TomlTable pinnedTable)
         {
-            var maxContentChars = pinnedTable.TryGetValue("max_content_chars", out var mcc)
-                ? Convert.ToInt32(mcc)
-                : 500;
+            int maxContentChars;
+            try
+            {
+                var mccOpt = TryGetInt(pinnedTable, "max_content_chars");
+                maxContentChars = Microsoft.FSharp.Core.FSharpOption<int>.get_IsSome(mccOpt)
+                    ? mccOpt.Value
+                    : 500;
+            }
+            catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException)
+            {
+                throw new InvalidDataException(
+                    "tiers.pinned.max_content_chars must be an integer", ex);
+            }
             pinnedCfgOpt = Microsoft.FSharp.Core.FSharpOption<Core.Config.PinnedTierConfig>.Some(
                 new Core.Config.PinnedTierConfig(maxContentChars));
         }

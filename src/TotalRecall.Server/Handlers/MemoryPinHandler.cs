@@ -45,7 +45,8 @@ public sealed class MemoryPinHandler : IToolHandler
     /// <summary>Default per-entry size cap for pinned content (chars).
     /// Pinned content is injected verbatim every session and never
     /// truncated, so size is enforced at the door. Overridden by
-    /// Tiers.Pinned.MaxContentChars.</summary>
+    /// Tiers.Pinned.MaxContentChars. Measured in .NET <c>string.Length</c>
+    /// (UTF-16 code units), so e.g. an emoji counts as ~2.</summary>
     public const int DefaultMaxContentChars = 500;
 
     private readonly IStore _store;
@@ -121,9 +122,11 @@ public sealed class MemoryPinHandler : IToolHandler
                 _store, _vec, _embedder, entry, fromTier, fromType, Tier.Pinned, targetType);
         }
 
-        // One post-move update: normalize decay_score to 1.0 (unused for
-        // pinned entries — spec data-model section) and apply the scope
-        // choice via the project column.
+        // Post-move update: normalize decay_score to 1.0 on fresh moves
+        // (unused for pinned entries — spec data-model section) and apply the
+        // scope choice via the project column. Skip the write entirely when the
+        // entry was already pinned and no scope change was requested, so we
+        // don't spuriously bump updated_at or fire the FTS _fts_au trigger.
         string? effectiveProject = null;
         var clearProject = scope == "global";
         if (scope == "project")
@@ -133,12 +136,16 @@ public sealed class MemoryPinHandler : IToolHandler
                 throw new ArgumentException(
                     "scope='project' requires a project argument (the entry has no existing project)");
         }
-        _store.Update(Tier.Pinned, targetType, id, new UpdateEntryOpts
+        var needsUpdate = !alreadyPinned || scope is not null;
+        if (needsUpdate)
         {
-            DecayScore = 1.0,
-            Project = effectiveProject,
-            ClearProject = clearProject,
-        });
+            _store.Update(Tier.Pinned, targetType, id, new UpdateEntryOpts
+            {
+                DecayScore = alreadyPinned ? (double?)null : 1.0,
+                Project = effectiveProject,
+                ClearProject = clearProject,
+            });
+        }
 
         if (!alreadyPinned && (_compactionLog is not null || _syncQueue is not null))
         {

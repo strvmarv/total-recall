@@ -147,4 +147,52 @@ public class MemoryPinHandlerTests
         var result = await handler.ExecuteAsync(ParseArgs("""{"id":"big"}"""), CancellationToken.None);
         Assert.NotEqual(true, result.IsError);
     }
+
+    // T1: already-pinned no-scope path must not call Update (I1 regression lock)
+    [Fact]
+    public async Task Pin_AlreadyPinned_NoScope_DoesNotCallUpdate()
+    {
+        var (handler, store, _, _) = MakeHandler();
+        store.Seed(Tier.Pinned, ContentType.Memory, MakeEntry("p1"));
+
+        await handler.ExecuteAsync(ParseArgs("""{"id":"p1"}"""), CancellationToken.None);
+
+        Assert.Empty(store.MoveCalls);
+        Assert.Empty(store.UpdateCalls);
+    }
+
+    // T2: already-pinned with existing project, no scope arg → no write
+    [Fact]
+    public async Task Pin_AlreadyPinned_WithProject_NoScope_DoesNotCallUpdate()
+    {
+        var (handler, store, _, _) = MakeHandler();
+        store.Seed(Tier.Pinned, ContentType.Memory, MakeEntry("p2", project: "existing-proj"));
+
+        await handler.ExecuteAsync(ParseArgs("""{"id":"p2"}"""), CancellationToken.None);
+
+        Assert.Empty(store.MoveCalls);
+        Assert.Empty(store.UpdateCalls); // existing project preserved; no write needed
+    }
+
+    // T3: pin a hot knowledge entry with type:"knowledge" explicitly →
+    // result DTO reflects knowledge content type, move targets knowledge slot.
+    // (The handler supports cross-content-type pinning the same way promote does:
+    // the caller passes type=<target> and the handler uses it as targetType.)
+    [Fact]
+    public async Task Pin_KnowledgeEntry_TypeArgKnowledge_ResultIsKnowledge()
+    {
+        var (handler, store, vec, _) = MakeHandler();
+        store.Seed(Tier.Hot, ContentType.Knowledge, MakeEntry("k1", "some kb content"));
+
+        var result = await handler.ExecuteAsync(
+            ParseArgs("""{"id":"k1","type":"knowledge"}"""), CancellationToken.None);
+
+        Assert.NotEqual(true, result.IsError);
+        using var doc = JsonDocument.Parse(result.Content[0].Text);
+        Assert.Equal("knowledge", doc.RootElement.GetProperty("to_content_type").GetString());
+        Assert.Equal("pinned", doc.RootElement.GetProperty("to_tier").GetString());
+        Assert.Single(store.MoveCalls);
+        Assert.Equal(ContentType.Knowledge, store.MoveCalls[0].ToType);
+        Assert.Equal(Tier.Pinned, store.MoveCalls[0].ToTier);
+    }
 }
