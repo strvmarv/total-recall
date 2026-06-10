@@ -237,6 +237,7 @@ public sealed class MigrateToRemoteHandler : IToolHandler
 
         foreach (var (tier, type) in _allPairs)
         {
+            if (tier.IsPinned) continue; // pinned is local-only; Cortex has no pinned support yet
             if (!includeKnowledge && type == ContentType.Knowledge)
                 continue;
 

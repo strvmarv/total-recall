@@ -145,6 +145,13 @@ public sealed class MemoryImportHandler : IToolHandler
                 if (parsed is not null) ctype = parsed;
             }
 
+            // Preserve the original id so export→import round-trips are
+            // stable and pinned entries land under their original id.
+            string? importId = entryElem.TryGetProperty("id", out var importIdEl)
+                && importIdEl.ValueKind == JsonValueKind.String
+                ? importIdEl.GetString()
+                : null;
+
             var opts = new InsertEntryOpts(
                 Content: content,
                 Summary: ReadOptionalString(entryElem, "summary"),
@@ -155,6 +162,7 @@ public sealed class MemoryImportHandler : IToolHandler
                 ParentId: ReadOptionalString(entryElem, "parent_id"),
                 CollectionId: ReadOptionalString(entryElem, "collection_id"),
                 MetadataJson: ReadMetadataJson(entryElem),
+                Id: importId,
                 EntryType: EntryType.Imported);
 
             var newId = _store.Insert(tier, ctype, opts);

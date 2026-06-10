@@ -224,4 +224,51 @@ public sealed class MigrateToRemoteHandlerTests
         Assert.False(string.IsNullOrEmpty(handler.Description));
         Assert.Equal(JsonValueKind.Object, handler.InputSchema.ValueKind);
     }
+
+    // ------------------------------------------------------------------
+    // Test 6: pinned entries are NOT migrated (local-only, 2026-06-09)
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task PinnedEntries_AreNotMigrated()
+    {
+        // Pinned tier is local-only; Cortex has no pinned support yet.
+        // Seeding a pinned entry in the source must not produce any migrate
+        // attempt, while a warm entry in the same run IS migrated.
+        var source = new FakeStore();
+        var target = new FakeStore();
+        var embedder = new RecordingFakeEmbedder();
+        var vectors = new FakeVectorSearch();
+
+        // Pinned entry — must be skipped.
+        source.SeedList(Tier.Pinned, ContentType.Memory, MakeEntry("pinned-only"));
+        // Warm entry — must be migrated.
+        source.SeedList(Tier.Warm, ContentType.Memory, MakeEntry("warm-migrate"));
+
+        var handler = MakeHandler(source, target, embedder, vectors);
+
+        var result = await handler.ExecuteAsync(null, CancellationToken.None);
+
+        using var doc = JsonDocument.Parse(result.Content[0].Text);
+        var root = doc.RootElement;
+
+        // Only the warm entry is migrated; pinned is silently skipped
+        // (not counted as error, not counted as skipped — just not attempted).
+        Assert.Equal(1, root.GetProperty("migrated").GetInt32());
+        Assert.Equal(0, root.GetProperty("errors").GetInt32());
+
+        // Exactly one embed call (for warm-migrate only).
+        Assert.Single(embedder.Calls);
+        Assert.Equal("content of warm-migrate", embedder.Calls[0]);
+
+        // Exactly one InsertWithEmbedding call into the target.
+        Assert.Single(target.InsertWithEmbeddingCalls);
+        var call = target.InsertWithEmbeddingCalls[0];
+        Assert.Equal(Tier.Warm, call.Tier);
+        Assert.Equal("warm-migrate", call.Opts.Id);
+
+        // The pinned entry was never touched in the target.
+        Assert.All(target.InsertWithEmbeddingCalls,
+            c => Assert.False(c.Tier.IsPinned, "pinned entry must not be migrated to target"));
+    }
 }

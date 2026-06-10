@@ -100,11 +100,10 @@ public sealed class MemoryUnpinHandler : IToolHandler
         MoveHelpers.MoveAndReEmbed(
             _store, _vec, _embedder, entry, Tier.Pinned, fromType, Tier.Warm, targetType);
 
-        if (_compactionLog is not null || _syncQueue is not null)
+        // Pinned movements are not synced to Cortex (pinned tier is local-only).
+        if (_compactionLog is not null)
         {
-            var nowUtc = DateTime.UtcNow;
-
-            _compactionLog?.LogEvent(new CompactionLogEntry(
+            _compactionLog.LogEvent(new CompactionLogEntry(
                 SessionId: "unknown",
                 SourceTier: "pinned",
                 TargetTier: "warm",
@@ -113,16 +112,6 @@ public sealed class MemoryUnpinHandler : IToolHandler
                 DecayScores: new Dictionary<string, double> { [id] = entry.DecayScore },
                 Reason: "manual_unpin",
                 ConfigSnapshotId: "default"));
-
-            _syncQueue?.Enqueue("compaction", "push", null,
-                CompactionSyncPayload.Event(
-                    entryId: id,
-                    fromTier: "pinned",
-                    toTier: "warm",
-                    action: "unpin",
-                    semanticDrift: null,
-                    decayScore: entry.DecayScore,
-                    timestampUtc: nowUtc));
         }
 
         var dto = new MemoryMoveResultDto(

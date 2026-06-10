@@ -159,6 +159,7 @@ public class MemoryExportHandlerTests
         Assert.True(call.Tier.IsPinned, "imported entry should land in pinned tier");
         Assert.True(call.Type.IsMemory, "imported entry should be ContentType.Memory");
         Assert.Equal("c-pinned-1", call.Opts.Content);
+        Assert.Equal("pinned-1", call.Opts.Id); // id must round-trip through export/import
     }
 
     [Fact]

@@ -11,6 +11,9 @@ using System.Threading.Tasks;
 using Microsoft.FSharp.Collections;
 using Microsoft.FSharp.Core;
 using TotalRecall.Core;
+using TotalRecall.Infrastructure.Storage;
+using TotalRecall.Infrastructure.Sync;
+using TotalRecall.Infrastructure.Telemetry;
 using TotalRecall.Server.Handlers;
 using TotalRecall.Server.Tests.TestSupport;
 using Xunit;
@@ -102,5 +105,63 @@ public class MemoryUnpinHandlerTests
         Assert.Equal(Tier.Pinned, store.MoveCalls[0].FromTier);
         Assert.Equal(Tier.Warm, store.MoveCalls[0].ToTier);
         Assert.Equal(ContentType.Knowledge, store.MoveCalls[0].ToType);
+    }
+
+    // ---- Local-only / sync-queue tests (user decision 2026-06-09) ----
+
+    [Fact]
+    public async Task Unpin_WithSyncQueue_DoesNotEnqueueToSyncQueue()
+    {
+        // Unpin moves pinned→warm. The movement itself is local-only.
+        // Even when a SyncQueue is provided, the unpin handler must NOT
+        // enqueue anything to it (warm re-entry is handled by RoutingStore).
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        var store = new FakeStore();
+        var syncQueue = new SyncQueue(conn);
+
+        store.Seed(Tier.Pinned, ContentType.Memory, MakeEntry("sq-u1", "sync-queue unpin test"));
+
+        var handler = new MemoryUnpinHandler(store, new FakeVectorSearch(),
+            new RecordingFakeEmbedder(), syncQueue: syncQueue);
+
+        await handler.ExecuteAsync(ParseArgs("""{"id":"sq-u1"}"""), CancellationToken.None);
+
+        // The sync queue must remain empty — the unpin handler does not push
+        // compaction telemetry (local-only pinned tier; Cortex has no pin support).
+        var items = syncQueue.Drain(limit: 10);
+        Assert.Empty(items);
+    }
+
+    [Fact]
+    public async Task Unpin_WithCompactionLogAndSyncQueue_LogsLocallyButDoesNotEnqueueSync()
+    {
+        // Local compaction log must still record the unpin movement even though
+        // the sync queue must NOT receive an enqueue.
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        var store = new FakeStore();
+        var compactionLog = new CompactionLog(conn);
+        var syncQueue = new SyncQueue(conn);
+
+        store.Seed(Tier.Pinned, ContentType.Memory, MakeEntry("cq-u1", "compaction unpin test"));
+
+        var handler = new MemoryUnpinHandler(store, new FakeVectorSearch(),
+            new RecordingFakeEmbedder(), compactionLog: compactionLog, syncQueue: syncQueue);
+
+        await handler.ExecuteAsync(ParseArgs("""{"id":"cq-u1"}"""), CancellationToken.None);
+
+        // Local compaction log should record the unpin.
+        var movements = compactionLog.GetRecentMovements(limit: 10);
+        Assert.Single(movements);
+        Assert.Equal("pinned", movements[0].SourceTier);
+        Assert.Equal("warm", movements[0].TargetTier);
+        Assert.Equal("manual_unpin", movements[0].Reason);
+
+        // Sync queue must be empty — no outbound Cortex push for pinned.
+        var items = syncQueue.Drain(limit: 10);
+        Assert.Empty(items);
     }
 }

@@ -152,12 +152,12 @@ public sealed class MemoryPinHandler : IToolHandler
             });
         }
 
-        if (!alreadyPinned && (_compactionLog is not null || _syncQueue is not null))
+        // Pinned movements are not synced to Cortex (pinned tier is local-only).
+        if (!alreadyPinned && _compactionLog is not null)
         {
             var fromTierName = TierNames.TierName(fromTier);
-            var nowUtc = DateTime.UtcNow;
 
-            _compactionLog?.LogEvent(new CompactionLogEntry(
+            _compactionLog.LogEvent(new CompactionLogEntry(
                 SessionId: "unknown",
                 SourceTier: fromTierName,
                 TargetTier: "pinned",
@@ -166,16 +166,6 @@ public sealed class MemoryPinHandler : IToolHandler
                 DecayScores: new Dictionary<string, double> { [id] = entry.DecayScore },
                 Reason: "manual_pin",
                 ConfigSnapshotId: "default"));
-
-            _syncQueue?.Enqueue("compaction", "push", null,
-                CompactionSyncPayload.Event(
-                    entryId: id,
-                    fromTier: fromTierName,
-                    toTier: "pinned",
-                    action: "pin",
-                    semanticDrift: null,
-                    decayScore: entry.DecayScore,
-                    timestampUtc: nowUtc));
         }
 
         var dto = new MemoryMoveResultDto(

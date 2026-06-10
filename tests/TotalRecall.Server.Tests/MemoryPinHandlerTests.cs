@@ -11,6 +11,9 @@ using System.Threading.Tasks;
 using Microsoft.FSharp.Collections;
 using Microsoft.FSharp.Core;
 using TotalRecall.Core;
+using TotalRecall.Infrastructure.Storage;
+using TotalRecall.Infrastructure.Sync;
+using TotalRecall.Infrastructure.Telemetry;
 using TotalRecall.Server.Handlers;
 using TotalRecall.Server.Tests.TestSupport;
 using Xunit;
@@ -194,5 +197,61 @@ public class MemoryPinHandlerTests
         Assert.Single(store.MoveCalls);
         Assert.Equal(ContentType.Knowledge, store.MoveCalls[0].ToType);
         Assert.Equal(Tier.Pinned, store.MoveCalls[0].ToTier);
+    }
+
+    // ---- Local-only / sync-queue tests (user decision 2026-06-09) ----
+
+    [Fact]
+    public async Task Pin_WithSyncQueue_DoesNotEnqueueToSyncQueue()
+    {
+        // Pinned tier is local-only. Even when a SyncQueue is provided,
+        // the pin handler must NOT enqueue anything to it.
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        var store = new FakeStore();
+        var syncQueue = new SyncQueue(conn);
+
+        store.Seed(Tier.Warm, ContentType.Memory, MakeEntry("sq-1", "sync-queue test"));
+
+        var handler = new MemoryPinHandler(store, new FakeVectorSearch(),
+            new RecordingFakeEmbedder(), syncQueue: syncQueue);
+
+        await handler.ExecuteAsync(ParseArgs("""{"id":"sq-1"}"""), CancellationToken.None);
+
+        // The sync queue must remain empty — pinned movements are never synced to Cortex.
+        var items = syncQueue.Drain(limit: 10);
+        Assert.Empty(items);
+    }
+
+    [Fact]
+    public async Task Pin_WithCompactionLogAndSyncQueue_LogsLocallyButDoesNotEnqueueSync()
+    {
+        // Compaction log (local history) must still record the pin movement even
+        // though the sync queue must NOT receive an enqueue.
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        var store = new FakeStore();
+        var compactionLog = new CompactionLog(conn);
+        var syncQueue = new SyncQueue(conn);
+
+        store.Seed(Tier.Hot, ContentType.Memory, MakeEntry("cq-1", "compaction log test"));
+
+        var handler = new MemoryPinHandler(store, new FakeVectorSearch(),
+            new RecordingFakeEmbedder(), compactionLog: compactionLog, syncQueue: syncQueue);
+
+        await handler.ExecuteAsync(ParseArgs("""{"id":"cq-1"}"""), CancellationToken.None);
+
+        // Local compaction log should record the pin.
+        var movements = compactionLog.GetRecentMovements(limit: 10);
+        Assert.Single(movements);
+        Assert.Equal("hot", movements[0].SourceTier);
+        Assert.Equal("pinned", movements[0].TargetTier);
+        Assert.Equal("manual_pin", movements[0].Reason);
+
+        // Sync queue must be empty — no outbound Cortex push for pinned.
+        var items = syncQueue.Drain(limit: 10);
+        Assert.Empty(items);
     }
 }
