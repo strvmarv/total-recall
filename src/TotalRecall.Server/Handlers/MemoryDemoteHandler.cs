@@ -74,7 +74,7 @@ public sealed class MemoryDemoteHandler : IToolHandler
             ?? throw new ArgumentException($"invalid tier '{tierStr}' (expected warm|cold)");
         if (toTier.IsHot)
             throw new ArgumentException("cannot demote to hot (use memory_promote instead)");
-        if (toTier.IsPinned)
+        if (toTier.IsPinned) // pinned tier is exclusive to memory_pin / memory_unpin
             throw new ArgumentException("cannot demote to pinned (use memory_pin instead)");
 
         ContentType? requestedType = null;
@@ -91,7 +91,7 @@ public sealed class MemoryDemoteHandler : IToolHandler
             ?? throw new ArgumentException($"entry {id} not found");
 
         var (fromTier, fromType, entry) = located;
-        if (fromTier.IsPinned)
+        if (fromTier.IsPinned) // pinned tier is exclusive to memory_pin / memory_unpin
             throw new ArgumentException(
                 $"entry {id} is pinned; use memory_unpin to release it first");
         var targetType = requestedType ?? fromType;

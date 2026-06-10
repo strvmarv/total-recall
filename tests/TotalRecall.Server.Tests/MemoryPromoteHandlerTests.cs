@@ -212,6 +212,7 @@ public class MemoryPromoteHandlerTests
         var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
             handler.ExecuteAsync(ParseArgs("""{"id":"p1"}"""), CancellationToken.None));
         Assert.Contains("memory_unpin", ex.Message);
+        Assert.Empty(store.MoveCalls); // nothing moved — regression guard
     }
 
     [Fact]

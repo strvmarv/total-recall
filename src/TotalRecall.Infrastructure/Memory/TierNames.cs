@@ -87,10 +87,10 @@ public static class TierNames
     /// <summary>
     /// Tier warmth rank: pinned=3, hot=2, warm=1, cold=0. Pinned ranks above
     /// hot. Rank 3 exists for ordering/display and as a mathematical backstop
-    /// in the promote/demote direction checks; explicit pinned-tier guards in
-    /// the pin/unpin and promote/demote handlers are added in a later task.
-    /// memory_pin / memory_unpin are the only intended doors in and out of
-    /// pinned.
+    /// in the promote/demote direction checks. The promote/demote handlers
+    /// (MCP and CLI) already reject pinned as both source and target; the
+    /// pin/unpin handlers that serve as the only doors in and out of pinned
+    /// are introduced in later tasks.
     /// </summary>
     public static int WarmthRank(Tier t) =>
         t.IsPinned ? 3 : t.IsHot ? 2 : t.IsWarm ? 1 : 0;

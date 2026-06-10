@@ -101,4 +101,33 @@ public sealed class DemoteCommandTests : IDisposable
         Assert.Equal(2, code);
         Assert.Contains("target must be colder", _errWriter.ToString());
     }
+
+    // ---------------- Task 3: pinned-tier guards ----------------
+
+    [Fact]
+    public async Task PinnedSource_ReturnsExit2_MentionsUnpin()
+    {
+        // Demoting an entry that lives in the pinned tier must be refused;
+        // the user should use memory_unpin / 'memory unpin' instead.
+        var (cmd, store, _, _) = Build();
+        store.Seed(Tier.Pinned, ContentType.Memory, EntryFactory.Make("p1"));
+
+        var code = await cmd.RunAsync(new[] { "p1", "--tier", "cold" });
+
+        Assert.Equal(2, code);
+        Assert.Contains("unpin", _errWriter.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(store.MoveCalls); // nothing moved
+    }
+
+    [Fact]
+    public async Task PinnedTarget_ReturnsExit2_MentionsPin()
+    {
+        // Passing --tier pinned must be rejected before any store lookup;
+        // the user should use memory_pin / 'memory pin' instead.
+        var (cmd, _, _, _) = Build();
+        var code = await cmd.RunAsync(new[] { "abc", "--tier", "pinned" });
+
+        Assert.Equal(2, code);
+        Assert.Contains("pin", _errWriter.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
 }
