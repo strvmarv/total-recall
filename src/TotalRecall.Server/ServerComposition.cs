@@ -19,7 +19,7 @@
 //      AutoMigrationGuard.CheckAndMigrateAsync BEFORE calling this (so the
 //      migration path can rename the old DB before we open a handle on it).
 //
-// Handler budget: Memory (17) + KB (8) + Session (4) + Eval (5) + Config (2) + Misc (4) = 40.
+// Handler budget: Memory (18) + KB (8) + Session (4) + Eval (5) + Config (2) + Misc (4) = 41.
 //
 // AOT: no reflection. Every handler is constructed via direct `new`. The
 // Eval/Config/ImportHost/CompactNow handlers have no-arg constructors that
@@ -128,7 +128,7 @@ public static class ServerComposition
 
         var registry = new ToolRegistry();
 
-        // ---- Memory (17) ----
+        // ---- Memory (18) ----
         registry.Register(new MemoryStoreHandler(store, embedder, vectors, scopeDefault));
         registry.Register(new MemorySearchHandler(embedder, hybrid, scopeDefault, retrievalLog, syncQueue));
         registry.Register(new MemoryGetHandler(store));
@@ -138,6 +138,7 @@ public static class ServerComposition
         registry.Register(new MemoryPromoteHandler(store, vectors, embedder, compactionLogWriter, syncQueue));
         registry.Register(new MemoryDemoteHandler(store, vectors, embedder, compactionLogWriter, syncQueue));
         registry.Register(new MemoryPinHandler(store, vectors, embedder, compactionLogWriter, syncQueue, pinnedMaxChars));
+        registry.Register(new MemoryUnpinHandler(store, vectors, embedder, compactionLogWriter, syncQueue));
         registry.Register(new MemoryInspectHandler(store, compactionLog));
         registry.Register(new MemoryHistoryHandler(compactionLog));
         registry.Register(new MemoryRecentHandler(store, scopeDefault));
