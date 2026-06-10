@@ -377,7 +377,7 @@ The MCP server exposes 41 core tools in every backend mode; local SQLite and Cor
 | Status & Usage | `status`, `usage_status`† |
 | Cache | `cache_check`†, `cache_store`† |
 | Migration | `migrate_to_remote` |
-| Skills† | `skill_search`, `skill_get`, `skill_list`, `skill_import_host`, `skill_delete` *(Cortex mode only)* |
+| Skills† | `skill_search`, `skill_get`, `skill_list`, `skill_import_host`, `skill_delete` *(skill_delete: Cortex mode only)* |
 
 †Unavailable in Postgres mode (local SQLite + Cortex modes only).
 
