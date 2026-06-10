@@ -49,6 +49,13 @@ public sealed class MemoryPinHandler : IToolHandler
     /// (UTF-16 code units), so e.g. an emoji counts as ~2.</summary>
     public const int DefaultMaxContentChars = 500;
 
+    /// <summary>Returns the canonical content-limit error message for pinned
+    /// entries. Single source of truth used by both <see cref="MemoryPinHandler"/>
+    /// and <see cref="MemoryStoreHandler"/> so the wording stays identical.</summary>
+    public static string ContentLimitMessage(int limit, int actual) =>
+        $"pinned entries are limited to {limit} characters ({actual} given); " +
+        "trim the content or store a concise summary and pin that instead";
+
     private readonly IStore _store;
     private readonly IVectorSearch _vec;
     private readonly IEmbedder _embedder;
@@ -113,9 +120,7 @@ public sealed class MemoryPinHandler : IToolHandler
         var alreadyPinned = fromTier.IsPinned;
         if (!alreadyPinned && entry.Content.Length > _maxContentChars)
             throw new ArgumentException(
-                $"pinned entries are limited to {_maxContentChars} characters " +
-                $"({entry.Content.Length} given); trim the content or store a " +
-                "concise summary and pin that instead");
+                ContentLimitMessage(_maxContentChars, entry.Content.Length));
         if (!alreadyPinned)
         {
             MoveHelpers.MoveAndReEmbed(

@@ -66,7 +66,7 @@ public sealed class MemoryStoreHandler : IToolHandler
           "type": "object",
           "properties": {
             "content":     {"type":"string","description":"The content to store"},
-            "tier":        {"type":"string","enum":["hot","warm","cold"],"description":"Storage tier (default: hot)"},
+            "tier":        {"type":"string","enum":["hot","warm","cold"],"description":"Storage tier (default: hot; use pinned:true for the pinned tier)"},
             "contentType": {"type":"string","enum":["memory","knowledge"],"description":"Content type (default: memory)"},
             "entryType":   {"type":"string","enum":["correction","preference","decision","surfaced","imported","compacted","ingested"],"description":"Entry type"},
             "project":     {"type":"string","description":"Project scope"},
@@ -143,9 +143,7 @@ public sealed class MemoryStoreHandler : IToolHandler
             throw new ArgumentException("specify either pinned or tier, not both");
         if (pinned && content.Length > _pinnedMaxContentChars)
             throw new ArgumentException(
-                $"pinned entries are limited to {_pinnedMaxContentChars} characters " +
-                $"({content.Length} given); trim the content or store a concise " +
-                "summary and pin that instead");
+                MemoryPinHandler.ContentLimitMessage(_pinnedMaxContentChars, content.Length));
         var tier = pinned ? Tier.Pinned : ReadTier(args);
         var contentType = ReadContentType(args);
         var entryType = ReadEntryType(args);
@@ -193,6 +191,12 @@ public sealed class MemoryStoreHandler : IToolHandler
 
         ct.ThrowIfCancellationRequested();
 
+        // PRE-EXISTING behavior: ALL memory_store inserts use EntryType.Preference
+        // in the column regardless of the `entryType` arg (which lands in
+        // metadata JSON only). This means a pinned:true stored entry has
+        // entry_type=Preference in the column, whereas an entry moved into the
+        // pinned tier via memory_pin preserves its original entry_type column
+        // value. Task 8 (session-start injection) must handle both cases.
         var id = _store.InsertWithEmbedding(
             tier,
             contentType,
