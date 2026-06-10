@@ -60,7 +60,8 @@ public sealed class MigrateToRemoteHandler : IToolHandler
         """).RootElement.Clone();
 
     // (Tier, ContentType) cartesian product — drives iteration order.
-    // Uses TierNames.AllTablePairs to include all four tiers (hot, warm, cold, pinned).
+    // Uses TierNames.AllTablePairs but pinned is skipped at loop time
+    // (local-only; Cortex has no pinned support yet).
     private static readonly (Tier Tier, ContentType Type)[] _allPairs =
         TierNames.AllTablePairs;
 
@@ -237,7 +238,8 @@ public sealed class MigrateToRemoteHandler : IToolHandler
 
         foreach (var (tier, type) in _allPairs)
         {
-            if (tier.IsPinned) continue; // pinned is local-only; Cortex has no pinned support yet
+            if (tier.IsPinned) continue; // pinned is local-only; Cortex has no pinned support yet.
+                                         // Pinned entries are silently not migrated — known UX gap pending Cortex pinned support.
             if (!includeKnowledge && type == ContentType.Knowledge)
                 continue;
 

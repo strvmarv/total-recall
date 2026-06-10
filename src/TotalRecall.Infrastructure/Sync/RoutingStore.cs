@@ -57,8 +57,9 @@ public sealed class RoutingStore : IStore
     public void Delete(Tier tier, ContentType type, string id)
     {
         _local.Delete(tier, type, id);
-        // NOTE: pinned entries may produce a remote delete enqueue here, but
-        // that will no-op on Cortex since pinned ids were never pushed.
+        // Pinned ids were never pushed to Cortex (local-only tier), so no
+        // remote delete is needed — skip the enqueue entirely.
+        if (tier.IsPinned) return;
         _syncQueue.Enqueue("memory", "delete", id,
             SyncPayload.Delete(id));
     }

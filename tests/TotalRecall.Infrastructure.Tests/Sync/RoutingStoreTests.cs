@@ -167,6 +167,48 @@ public sealed class RoutingStoreTests
         Assert.Empty(items);
     }
 
+    [Fact]
+    public void Delete_Pinned_DoesNotEnqueue()
+    {
+        // Pinned ids were never pushed to Cortex, so deleting a pinned entry
+        // must NOT enqueue a remote delete — the guard should return early.
+        using var conn = OpenAndMigrate();
+        var syncQueue = new SyncQueue(conn);
+        var local = Substitute.For<IStore>();
+        var remote = Substitute.For<IRemoteBackend>();
+
+        var store = new RoutingStore(local, remote, syncQueue);
+        store.Delete(Tier.Pinned, ContentType.Memory, "pin-del-1");
+
+        local.Received(1).Delete(Tier.Pinned, ContentType.Memory, "pin-del-1");
+
+        // Nothing enqueued — pinned tier is local-only.
+        Assert.Empty(syncQueue.Drain(10));
+    }
+
+    [Fact]
+    public void Delete_NonPinned_StillEnqueues()
+    {
+        // Deleting a non-pinned entry (e.g. Hot) must still enqueue the remote
+        // delete as before; the pinned guard must not affect other tiers.
+        using var conn = OpenAndMigrate();
+        var syncQueue = new SyncQueue(conn);
+        var local = Substitute.For<IStore>();
+        var remote = Substitute.For<IRemoteBackend>();
+
+        var store = new RoutingStore(local, remote, syncQueue);
+        store.Delete(Tier.Hot, ContentType.Memory, "hot-del-1");
+
+        local.Received(1).Delete(Tier.Hot, ContentType.Memory, "hot-del-1");
+
+        var items = syncQueue.Drain(10);
+        Assert.Single(items);
+        Assert.Equal("memory", items[0].EntityType);
+        Assert.Equal("delete", items[0].Operation);
+        Assert.Equal("hot-del-1", items[0].EntityId);
+        Assert.Contains("hot-del-1", items[0].Payload);
+    }
+
     // -----------------------------------------------------------------------
     // Pinned-tier local-only tests (user decision 2026-06-09)
     // -----------------------------------------------------------------------

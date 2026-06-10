@@ -46,6 +46,8 @@ public sealed class MemoryUnpinHandler : IToolHandler
     private readonly IVectorSearch _vec;
     private readonly IEmbedder _embedder;
     private readonly CompactionLog? _compactionLog;
+    // Intentionally retained but currently unused: pinned tier movements are not synced to
+    // Cortex (local-only); kept for ctor-signature stability and future use.
     private readonly SyncQueue? _syncQueue;
 
     public MemoryUnpinHandler(
