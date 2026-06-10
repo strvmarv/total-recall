@@ -1,7 +1,7 @@
 // src/TotalRecall.Server/Handlers/MemoryExportHandler.cs
 //
 // Plan 6 Task 6.0a — ports `memory export` (ExportCommand.cs) to MCP.
-// Sweeps the 6 (tier, type) tables, applies optional tier/type filters,
+// Sweeps the 8 (tier, type) tables, applies optional tier/type filters,
 // and returns a JSON envelope { version, exported_at, entries[] } that
 // memory_import can consume. The CLI version also supports writing to a
 // file via --out; the handler returns the payload inline only (callers

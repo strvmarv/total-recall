@@ -130,6 +130,7 @@ Call `memory_store` with the provided content. Optionally accept flags:
 - `--tier hot|warm|cold` (default: hot)
 - `--tags tag1,tag2`
 - `--type correction|preference|decision`
+- `--pinned` is not a tier value — to store-and-pin new content use `memory_store` with `pinned: true` (see `### pin`).
 
 ### forget <query>
 

@@ -1422,4 +1422,39 @@ public sealed class SessionLifecycleTests
         Assert.Contains(store.InjectionCountCalls,
             t => t.tier == Tier.Pinned && t.type == ContentType.Memory && t.id == "pm1");
     }
+
+    // ---------- PinnedLifecycle round-trip ----------
+
+    [Fact]
+    public async Task PinnedLifecycle_RoundTrip_PinInjected_UnpinExcluded()
+    {
+        const string DirectiveContent = "always use kebab-case for branch names";
+
+        // --- Phase 1: pinned entry IS injected on session init ---
+        var store = new FakeStore();
+        store.Entries[(Tier.Pinned, ContentType.Memory)] = new List<Entry>
+        {
+            MakeEntry("pin1", DirectiveContent),
+        };
+
+        var lifecycle1 = BuildLifecycle(store);
+        var result1 = await lifecycle1.EnsureInitializedAsync();
+
+        Assert.Contains("## Pinned directives (always follow)", result1.Context);
+        Assert.Contains(DirectiveContent, result1.Context);
+
+        // --- Simulate unpin: move the entry from Pinned → Warm (as the handler does) ---
+        store.Move(Tier.Pinned, ContentType.Memory, Tier.Warm, ContentType.Memory, "pin1");
+
+        // --- Phase 2: new session over the same store — pinned block must be absent ---
+        var lifecycle2 = BuildLifecycle(store);
+        var result2 = await lifecycle2.EnsureInitializedAsync();
+
+        // No pins remain, so the directive header must not appear.
+        Assert.DoesNotContain("## Pinned directives (always follow)", result2.Context);
+        // The content may appear in a future warm-tier hint but must NOT be in a pinned block.
+        // Guard: confirm the header is truly gone — content in warm context is acceptable.
+        var headerIdx = result2.Context.IndexOf("## Pinned directives (always follow)", StringComparison.Ordinal);
+        Assert.Equal(-1, headerIdx);
+    }
 }
