@@ -662,6 +662,7 @@ VALUES
         if (tier.IsHot) return "hot";
         if (tier.IsWarm) return "warm";
         if (tier.IsCold) return "cold";
+        if (tier.IsPinned) return "pinned";
         throw new ArgumentOutOfRangeException(nameof(tier));
     }
 

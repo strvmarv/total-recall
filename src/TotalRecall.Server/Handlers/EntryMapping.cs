@@ -4,7 +4,7 @@
 // MemoryGet/Search/Update/Delete and KbSearch handlers. Plan 4 carry-forward #3.
 //
 // Exposes:
-//   - AllTablePairs: the 6 (Tier, ContentType) combinations used when
+//   - AllTablePairs: the 8 (Tier, ContentType) combinations used when
 //     a tool has to sweep every table to locate an entry.
 //   - TierName / ContentTypeName: F# DU → wire-format string.
 //   - ToEntryDto: Core.Entry → EntryDto (applies OptString + Tags array).
@@ -19,16 +19,18 @@ internal static class EntryMapping
 {
     public static readonly (Tier Tier, ContentType Type)[] AllTablePairs =
     {
-        (Tier.Hot,  ContentType.Memory),
-        (Tier.Warm, ContentType.Memory),
-        (Tier.Cold, ContentType.Memory),
-        (Tier.Hot,  ContentType.Knowledge),
-        (Tier.Warm, ContentType.Knowledge),
-        (Tier.Cold, ContentType.Knowledge),
+        (Tier.Hot,    ContentType.Memory),
+        (Tier.Warm,   ContentType.Memory),
+        (Tier.Cold,   ContentType.Memory),
+        (Tier.Pinned, ContentType.Memory),
+        (Tier.Hot,    ContentType.Knowledge),
+        (Tier.Warm,   ContentType.Knowledge),
+        (Tier.Cold,   ContentType.Knowledge),
+        (Tier.Pinned, ContentType.Knowledge),
     };
 
     public static string TierName(Tier t) =>
-        t.IsHot ? "hot" : t.IsWarm ? "warm" : "cold";
+        t.IsHot ? "hot" : t.IsWarm ? "warm" : t.IsPinned ? "pinned" : "cold";
 
     public static string ContentTypeName(ContentType c) =>
         c.IsMemory ? "memory" : "knowledge";

@@ -79,8 +79,9 @@ public class MemoryGetHandlerTests
 
         var result = await handler.ExecuteAsync(ParseArgs("""{"id":"zz"}"""), CancellationToken.None);
 
-        // All 6 pairs should have been tried (the match is the 6th).
-        Assert.Equal(6, store.GetCalls.Count);
+        // All 7 pairs should have been tried (the match is the 7th — Cold/Knowledge
+        // moved from position 6 to 7 after Pinned/Memory was inserted at position 4).
+        Assert.Equal(7, store.GetCalls.Count);
         using var doc = JsonDocument.Parse(result.Content[0].Text);
         Assert.Equal("cold", doc.RootElement.GetProperty("tier").GetString());
         Assert.Equal("knowledge", doc.RootElement.GetProperty("content_type").GetString());

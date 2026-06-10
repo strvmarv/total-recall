@@ -15,16 +15,18 @@ public static class TierNames
 {
     public static readonly (Tier Tier, ContentType Type)[] AllTablePairs =
     {
-        (Tier.Hot,  ContentType.Memory),
-        (Tier.Warm, ContentType.Memory),
-        (Tier.Cold, ContentType.Memory),
-        (Tier.Hot,  ContentType.Knowledge),
-        (Tier.Warm, ContentType.Knowledge),
-        (Tier.Cold, ContentType.Knowledge),
+        (Tier.Hot,    ContentType.Memory),
+        (Tier.Warm,   ContentType.Memory),
+        (Tier.Cold,   ContentType.Memory),
+        (Tier.Pinned, ContentType.Memory),
+        (Tier.Hot,    ContentType.Knowledge),
+        (Tier.Warm,   ContentType.Knowledge),
+        (Tier.Cold,   ContentType.Knowledge),
+        (Tier.Pinned, ContentType.Knowledge),
     };
 
     public static string TierName(Tier t) =>
-        t.IsHot ? "hot" : t.IsWarm ? "warm" : "cold";
+        t.IsHot ? "hot" : t.IsWarm ? "warm" : t.IsPinned ? "pinned" : "cold";
 
     public static string ContentTypeName(ContentType c) =>
         c.IsMemory ? "memory" : "knowledge";
@@ -37,6 +39,7 @@ public static class TierNames
         "hot" => Tier.Hot,
         "warm" => Tier.Warm,
         "cold" => Tier.Cold,
+        "pinned" => Tier.Pinned,
         _ => null,
     };
 
@@ -82,9 +85,12 @@ public static class TierNames
         : "Ingested";
 
     /// <summary>
-    /// Tier warmth rank: hot=2, warm=1, cold=0. Used by promote/demote
-    /// direction gates (promote must increase rank, demote must decrease).
+    /// Tier warmth rank: pinned=3, hot=2, warm=1, cold=0. Promote/demote
+    /// direction gates never legally target pinned — both handlers reject
+    /// pinned source AND target tiers explicitly before the rank check
+    /// (memory_pin / memory_unpin are the only doors). Rank 3 exists for
+    /// ordering/display only.
     /// </summary>
     public static int WarmthRank(Tier t) =>
-        t.IsHot ? 2 : t.IsWarm ? 1 : 0;
+        t.IsPinned ? 3 : t.IsHot ? 2 : t.IsWarm ? 1 : 0;
 }
