@@ -418,7 +418,7 @@ Backends (selected by config):
 
 **Local mode:** all state lives in `~/.total-recall/total-recall.db`. The embedding model and the sqlite-vec native extension are bundled with the binary. No network calls required at runtime.
 
-**Cortex mode:** user memories write locally first for low latency. A `RoutingStore` wraps every write: persist locally, enqueue to `sync_queue`. A background sync loop flushes the queue to Cortex every `sync_interval_seconds` (default: 300) and at session boundaries. Global knowledge (team KB, connectors) is read directly from Cortex. Pinned entries are excluded from all sync paths — local-only until Cortex gains pinned-tier support.
+**Cortex mode:** user memories write locally first for low latency. A `RoutingStore` wraps every write: persist locally, enqueue to `sync_queue`. A background sync loop flushes the queue to Cortex every `sync_interval_seconds` (default: 300) and at session boundaries. Global knowledge (team KB, connectors) is read directly from Cortex.
 
 ---
 

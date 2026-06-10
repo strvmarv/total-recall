@@ -109,6 +109,7 @@ Never use `JsonSerializer.Serialize(obj)` with the reflection-based overload.
 2. Add the DTO(s) to `../JsonContext.cs` if the response shape is new.
 3. Register in `../ServerComposition.cs` → `BuildRegistry()` in the appropriate group:
    - Memory (18), KB (8), Session (4), Eval (5), Config (2), Misc (4)
+   - Mode-conditional handlers (usage_status, cache_*, skill_*) bypass BuildRegistry — they are registered in OpenSqlite/OpenCortex; see 'Post-BuildRegistry registrations' below.
 4. Update the handler count in the `BuildRegistry` comment.
 5. Add a test in `../../../../tests/TotalRecall.Server.Tests/Handlers/`.
 

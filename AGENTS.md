@@ -303,15 +303,7 @@ The composition root in `src/TotalRecall.Host/Program.cs` wires up all dependenc
 
 Schema changes are handled by a sequential migration framework in `src/TotalRecall.Infrastructure/Storage/Schema.cs`. The `MigrationRunner` runs each migration function inside a transaction, indexed by `_schema_version`. On startup, it checks the current schema version and runs any newer migrations.
 
-Current migrations (as of 0.8.0-beta.7):
-
-1. **Migration 1** — initial schema (entries tables, vec0 virtual tables, FTS, telemetry tables, _meta, _schema_version).
-2. **Migration 2** — knowledge tier tables (`hot_knowledge`, `warm_knowledge`, `cold_knowledge` + vec).
-3. **Migration 3** — retrieval event log + import log.
-4. **Migration 4** — `compaction_log.source TEXT NOT NULL DEFAULT 'compaction'` for distinguishing compactor-originated movements from manual `promote`/`demote`.
-5. **Migration 5** — sweeps all 6 content/vec table pairs and deletes orphan rows (added in 0.8.0-beta.6 to clean up state from the parallel-store concurrency bug fixed in the same release).
-6. **Migration 6** — usage telemetry schema (`usage_events`, `usage_daily`, `usage_watermarks` tables).
-7. **Migration 7** — `sync_queue` table for cortex connection.
+Schema is managed by sequential migrations (currently 16; Migration 16 added the pinned tables). For the authoritative migration table, see `src/TotalRecall.Infrastructure/AGENTS.md`.
 
 To add a schema change:
 

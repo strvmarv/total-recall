@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Pinned tier** — fourth memory tier for user-pinned entries: always injected verbatim at session start (ahead of the hot tier) and on session_refresh, structurally immune to decay, warm-sweep demotion, and compaction. New `memory_pin` / `memory_unpin` MCP tools and `total-recall memory pin|unpin` CLI verbs; `pinned: true` flag on `memory_store`; `pinned` accepted in search/list/recent/export tier filters; `tierSummary.pinned` count, `status` pinned counts, and a `pinned_budget_pressure` session-start hint. Pinned entries are capped at 500 chars (`tiers.pinned.max_content_chars`) — rejected at the door, never truncated. SQLite Migration 16; no Postgres schema change (new `tier` value).
+- **Pinned tier** — fourth memory tier for user-pinned entries: always injected verbatim at session start (ahead of the hot tier), structurally immune to decay, warm-sweep demotion, and compaction. session_refresh re-assembles context with pinned entries included. New `memory_pin` / `memory_unpin` MCP tools and `total-recall memory pin|unpin` CLI verbs; `pinned: true` flag on `memory_store`; `pinned` accepted in search/list/recent/export tier filters; `tierSummary.pinned` count, `status` pinned counts, and a `pinned_budget_pressure` session-start hint. Pinned entries are capped at 500 chars (`tiers.pinned.max_content_chars`) — rejected at the door, never truncated. SQLite Migration 16; no Postgres schema change (new `tier` value).
 
 ### Known limitations
 
