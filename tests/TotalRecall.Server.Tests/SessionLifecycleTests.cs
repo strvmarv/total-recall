@@ -33,7 +33,8 @@ public sealed class SessionLifecycleTests
         IEnumerable<string>? tags = null,
         int accessCount = 0,
         long createdAt = 0,
-        double decayScore = 1.0)   // ← new param
+        double decayScore = 1.0,
+        int timesInjected = 0)
     {
         return new Entry(
             id,
@@ -52,7 +53,7 @@ public sealed class SessionLifecycleTests
             FSharpOption<string>.None,          // collectionId
             "",                                 // scope
             EntryType.Preference,               // entryType
-            "{}", 0);                           // metadataJson
+            "{}", timesInjected);               // metadataJson, timesInjected
     }
 
     private sealed class FakeStore : IStore
@@ -69,6 +70,9 @@ public sealed class SessionLifecycleTests
 
         // Diagnostic counters used by a couple of tests.
         public int CollectionsCallCount { get; private set; }
+
+        // Records Move calls for warm-sweep immunity assertions.
+        public List<(Tier FromTier, ContentType FromType, Tier ToTier, ContentType ToType, string Id)> MoveCalls { get; } = new();
 
         private List<Entry> Slot(Tier t, ContentType ct)
         {
@@ -141,6 +145,7 @@ public sealed class SessionLifecycleTests
 
         public void Move(Tier fromTier, ContentType fromType, Tier toTier, ContentType toType, string id)
         {
+            MoveCalls.Add((fromTier, fromType, toTier, toType, id));
             var src = Slot(fromTier, fromType);
             var entry = src.FirstOrDefault(e => e.Id == id);
             if (entry is null) return;
@@ -1147,5 +1152,190 @@ public sealed class SessionLifecycleTests
         Assert.Equal(0, result.Efficiency.Session.RetrievalsPerformed);
         Assert.Equal(0.0, result.Efficiency.Session.AvgRetrievalLatencyMs);
         Assert.Empty(result.Recommendations);
+    }
+
+    // ---------- Task 8: BuildPinnedBlock unit tests ----------
+
+    [Fact]
+    public void BuildPinnedBlock_Empty_ReturnsEmpty()
+    {
+        var (block, ids) = SessionLifecycle.BuildPinnedBlock(
+            Array.Empty<Entry>(), Array.Empty<Entry>());
+        Assert.Equal(string.Empty, block);
+        Assert.Empty(ids);
+    }
+
+    [Fact]
+    public void BuildPinnedBlock_RendersVerbatim_NoTruncation()
+    {
+        var longContent = new string('x', 10_000); // far beyond any token budget
+        var entries = new[] { MakeEntry("p1", longContent) };
+
+        var (block, ids) = SessionLifecycle.BuildPinnedBlock(entries, Array.Empty<Entry>());
+
+        Assert.Contains(longContent, block); // verbatim — never truncated
+        Assert.Single(ids);
+        Assert.Equal((Tier.Pinned, ContentType.Memory, "p1"), ids[0]);
+    }
+
+    [Fact]
+    public void BuildPinnedBlock_IncludesKnowledgeEntries()
+    {
+        var (block, ids) = SessionLifecycle.BuildPinnedBlock(
+            new[] { MakeEntry("m1", "mem") }, new[] { MakeEntry("k1", "know") });
+
+        Assert.Contains("mem", block);
+        Assert.Contains("know", block);
+        Assert.Equal(2, ids.Count);
+        Assert.Equal(ContentType.Memory, ids[0].Item2);
+        Assert.Equal(ContentType.Knowledge, ids[1].Item2);
+    }
+
+    [Fact]
+    public void BuildPinnedBlock_HasDirectiveHeader()
+    {
+        var (block, _) = SessionLifecycle.BuildPinnedBlock(
+            new[] { MakeEntry("m1", "rule") }, Array.Empty<Entry>());
+        Assert.StartsWith("## Pinned directives (always follow)", block);
+    }
+
+    [Fact]
+    public void BuildPinnedBlock_IdsHaveCorrectTierAndType()
+    {
+        var (_, ids) = SessionLifecycle.BuildPinnedBlock(
+            new[] { MakeEntry("mem1", "m") },
+            new[] { MakeEntry("kb1", "k") });
+
+        Assert.Equal(2, ids.Count);
+        Assert.Equal(Tier.Pinned, ids[0].Item1);
+        Assert.Equal(ContentType.Memory, ids[0].Item2);
+        Assert.Equal("mem1", ids[0].Item3);
+        Assert.Equal(Tier.Pinned, ids[1].Item1);
+        Assert.Equal(ContentType.Knowledge, ids[1].Item2);
+        Assert.Equal("kb1", ids[1].Item3);
+    }
+
+    // ---------- Task 8: Session init integration tests ----------
+
+    [Fact]
+    public async Task SessionInit_PinnedBlock_PrependsContext_AndBudgetsHotTier()
+    {
+        var store = new FakeStore();
+        store.Entries[(Tier.Pinned, ContentType.Memory)] = new List<Entry>
+        {
+            MakeEntry("pm1", "PINNED-CONTENT"),
+        };
+        store.Entries[(Tier.Hot, ContentType.Memory)] = new List<Entry>
+        {
+            MakeEntry("h1", "HOT-CONTENT"),
+        };
+
+        var lifecycle = BuildLifecycle(store);
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        Assert.StartsWith("## Pinned", result.Context);
+        var pinnedIdx = result.Context.IndexOf("PINNED-CONTENT", StringComparison.Ordinal);
+        var hotIdx = result.Context.IndexOf("HOT-CONTENT", StringComparison.Ordinal);
+        Assert.True(pinnedIdx >= 0);
+        Assert.True(hotIdx > pinnedIdx, "Pinned content must appear before hot content");
+        Assert.Equal(1, result.TierSummary.Pinned);
+    }
+
+    [Fact]
+    public async Task SessionInit_TierSummaryPinned_ReflectsCount()
+    {
+        var store = new FakeStore();
+        store.Entries[(Tier.Pinned, ContentType.Memory)] = new List<Entry>
+        {
+            MakeEntry("pm1", "pin one"),
+            MakeEntry("pm2", "pin two"),
+        };
+        store.Entries[(Tier.Pinned, ContentType.Knowledge)] = new List<Entry>
+        {
+            MakeEntry("pk1", "pinned knowledge"),
+        };
+
+        var lifecycle = BuildLifecycle(store);
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        Assert.Equal(3, result.TierSummary.Pinned);
+    }
+
+    [Fact]
+    public async Task SessionInit_PinnedOverHalfBudget_EmitsPressureHint_ContentStillPresent()
+    {
+        // HeuristicEstimateTokens = words * 0.75. tokenBudget=10 → half=5.
+        // Content with many words to exceed 5 tokens estimate.
+        // "PINNED word1 word2 word3 word4 word5 word6 word7 word8 word9" = 10 words → ~8 tokens > 5.
+        var bigContent = "PINNED " + string.Join(" ", Enumerable.Range(1, 15).Select(i => $"word{i}"));
+        var store = new FakeStore();
+        store.Entries[(Tier.Pinned, ContentType.Memory)] = new List<Entry>
+        {
+            MakeEntry("pm1", bigContent),
+        };
+
+        var lifecycle = BuildLifecycle(store, tokenBudget: 10);
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        Assert.Contains(result.Hints, h => h.Type == "pinned_budget_pressure");
+        Assert.Contains("PINNED", result.Context); // still injected — never truncated
+    }
+
+    [Fact]
+    public async Task SessionInit_NoPinnedEntries_NoBudgetHint()
+    {
+        var store = new FakeStore();
+        store.Entries[(Tier.Hot, ContentType.Memory)] = new List<Entry>
+        {
+            MakeEntry("h1", "normal hot entry"),
+        };
+
+        var lifecycle = BuildLifecycle(store, tokenBudget: 10);
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        Assert.DoesNotContain(result.Hints, h => h.Type == "pinned_budget_pressure");
+    }
+
+    [Fact]
+    public async Task SessionInit_PinnedKb_NotCountedInKbField()
+    {
+        // Kb field should only count hot+warm+cold knowledge, not pinned knowledge.
+        var store = new FakeStore();
+        store.Entries[(Tier.Pinned, ContentType.Knowledge)] = new List<Entry>
+        {
+            MakeEntry("pk1", "pinned knowledge"),
+        };
+        store.Entries[(Tier.Hot, ContentType.Knowledge)] = new List<Entry>
+        {
+            MakeEntry("hk1", "hot knowledge"),
+        };
+
+        var lifecycle = BuildLifecycle(store);
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        // Kb = hot+warm+cold knowledge only (1 hot here)
+        Assert.Equal(1, result.TierSummary.Kb);
+        // Pinned = pinned memory + pinned knowledge (0+1=1)
+        Assert.Equal(1, result.TierSummary.Pinned);
+    }
+
+    // ---------- Task 8: Warm sweep immunity test ----------
+
+    [Fact]
+    public async Task WarmSweep_NeverTouchesPinned()
+    {
+        var store = new FakeStore();
+        // Dead-weight profile: TimesInjected >= autoDemoteMinInjections=10, AccessCount=0.
+        // If warm sweep accidentally visited pinned entries, it would try to move this.
+        store.Entries[(Tier.Pinned, ContentType.Memory)] = new List<Entry>
+        {
+            MakeEntry("pm1", "pinned dead-weight", accessCount: 0, timesInjected: 20),
+        };
+
+        var lifecycle = BuildLifecycle(store);
+        await lifecycle.EnsureInitializedAsync();
+
+        // No Move calls should involve the Pinned tier as FromTier.
+        Assert.DoesNotContain(store.MoveCalls, c => c.FromTier.IsPinned);
     }
 }

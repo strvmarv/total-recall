@@ -258,6 +258,13 @@ public sealed class SessionLifecycle : ISessionLifecycle
         // 3. Hot entries listing — used for both context and hot count.
         var hotEntries = _store.List(Tier.Hot, ContentType.Memory);
 
+        // 3a. Pinned entries — always injected verbatim, ahead of the hot tier
+        // (spec 2026-06-09). The hot tier gets whatever budget remains.
+        var pinnedMemories = _store.List(Tier.Pinned, ContentType.Memory);
+        var pinnedKnowledge = _store.List(Tier.Pinned, ContentType.Knowledge);
+        var (pinnedBlock, pinnedIds) = BuildPinnedBlock(pinnedMemories, pinnedKnowledge);
+        var pinnedTokens = pinnedBlock.Length > 0 ? HeuristicEstimateTokens(pinnedBlock) : 0;
+
         // 4. Tier summary.
         var tierSummary = new TierSummary(
             Hot: _store.Count(Tier.Hot, ContentType.Memory),
@@ -265,28 +272,32 @@ public sealed class SessionLifecycle : ISessionLifecycle
                 + _store.Count(Tier.Warm, ContentType.Knowledge),
             Cold: _store.Count(Tier.Cold, ContentType.Memory)
                 + _store.Count(Tier.Cold, ContentType.Knowledge),
+            Pinned: pinnedMemories.Count + pinnedKnowledge.Count,
             Kb: _store.Count(Tier.Hot, ContentType.Knowledge)
                 + _store.Count(Tier.Warm, ContentType.Knowledge)
                 + _store.Count(Tier.Cold, ContentType.Knowledge),
             Collections: _store.CountKnowledgeCollections());
 
         // 5. Context string assembly — dynamic detail levels, extractive truncation.
+        // Hot tier gets whatever budget the pinned block hasn't consumed.
         var ctxResult = BuildContext(hotEntries, new BuildContextOptions
         {
-            TokenBudget = _tokenBudget,
+            TokenBudget = Math.Max(0, _tokenBudget - pinnedTokens),
         });
         var baseContext = ctxResult.Context;
         var hotContextTruncated = ctxResult.Truncated;
 
         // Phase 2 idea 1c — increment times_injected for every entry that
         // was injected into the host LLM context. Batch update per-tier/type.
-        if (ctxResult.InjectedIds.Count > 0)
+        // Include pinned ids so their times_injected increments like hot.
+        var injectionTuples = ctxResult.InjectedIds
+            .Select(id => (Tier.Hot, ContentType.Memory, id))
+            .Concat(pinnedIds)
+            .ToList();
+        if (injectionTuples.Count > 0)
         {
             try
             {
-                var injectionTuples = ctxResult.InjectedIds
-                    .Select(id => (Tier.Hot, ContentType.Memory, id))
-                    .ToList();
                 _store.UpdateInjectionCounts(injectionTuples);
             }
             catch (Exception ex)
@@ -295,17 +306,29 @@ public sealed class SessionLifecycle : ISessionLifecycle
             }
         }
 
-        // Append skills block after a blank-line separator when both parts are non-empty.
-        string context;
-        if (baseContext.Length > 0 && skillsBlock.Length > 0)
-            context = baseContext + "\n\n" + skillsBlock;
-        else if (skillsBlock.Length > 0)
-            context = skillsBlock;
-        else
-            context = baseContext;
+        // Assemble context: pinned block FIRST, then base/hot context, then skills.
+        // Join non-empty parts with "\n\n".
+        var parts = new[] { pinnedBlock, baseContext, skillsBlock }
+            .Where(p => p.Length > 0);
+        var context = string.Join("\n\n", parts);
 
         // 6. Hints.
         var hints = GenerateHints(_store, warmPromotedIds);
+        // Soft-cap warning: when pinned entries consume >50% of the budget, advise
+        // review. Pins are still injected even if they exceed the entire budget.
+        if (pinnedTokens > _tokenBudget / 2)
+        {
+            hints = new[]
+            {
+                new Hint
+                {
+                    Priority = 1,
+                    Type = "pinned_budget_pressure",
+                    Summary = $"Pinned entries consume ~{pinnedTokens} of the {_tokenBudget}-token context budget; hot-tier context is being squeezed. Review pins.",
+                    SuggestedAction = "memory_unpin",
+                },
+            }.Concat(hints).ToList();
+        }
 
         // 7. Last session age (humanized). Prefer usage_events MAX(ts) — that
         //    actually tracks session activity per host. Fall back to the
@@ -384,6 +407,39 @@ public sealed class SessionLifecycle : ISessionLifecycle
     }
 
     // -------- helpers (internal so tests can call them directly) --------
+
+    /// <summary>
+    /// Renders pinned entries for session-start context. Pinned content is
+    /// ALWAYS injected verbatim — no detail levels, no extractive truncation
+    /// (spec 2026-06-09). Returns the rendered block and the (tier, type, id)
+    /// triples for injection-count tracking.
+    /// </summary>
+    public static (string Block, IReadOnlyList<(Tier, ContentType, string)> Ids) BuildPinnedBlock(
+        IReadOnlyList<Entry> pinnedMemories,
+        IReadOnlyList<Entry> pinnedKnowledge)
+    {
+        var total = pinnedMemories.Count + pinnedKnowledge.Count;
+        if (total == 0)
+            return (string.Empty, Array.Empty<(Tier, ContentType, string)>());
+
+        var sb = new StringBuilder();
+        // Directive header: injection != obedience — phrase the block as rules
+        // the host model must follow, not passive background context.
+        sb.Append("## Pinned directives (always follow)");
+        var ids = new List<(Tier, ContentType, string)>(total);
+
+        foreach (var e in pinnedMemories)
+        {
+            sb.Append("\n- ").Append(e.Content);
+            ids.Add((Tier.Pinned, ContentType.Memory, e.Id));
+        }
+        foreach (var e in pinnedKnowledge)
+        {
+            sb.Append("\n- ").Append(e.Content);
+            ids.Add((Tier.Pinned, ContentType.Knowledge, e.Id));
+        }
+        return (sb.ToString(), ids);
+    }
 
     /// <summary>
     /// Builds the <c>## Available Skills</c> context block from a list response.
@@ -1318,6 +1374,7 @@ public sealed record TierSummary(
     [property: JsonPropertyName("hot")] int Hot,
     [property: JsonPropertyName("warm")] int Warm,
     [property: JsonPropertyName("cold")] int Cold,
+    [property: JsonPropertyName("pinned")] int Pinned,
     [property: JsonPropertyName("kb")] int Kb,
     [property: JsonPropertyName("collections")] int Collections);
 

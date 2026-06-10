@@ -28,7 +28,7 @@ public sealed class SessionStartHandlerTests
         ProjectDocs: null,
         HotEntryCount: 3,
         Context: "- hello",
-        TierSummary: new TierSummary(3, 4, 5, 6, 7),
+        TierSummary: new TierSummary(3, 4, 5, 0, 6, 7),
         Hints: new List<Hint> { new() { Summary = "hint1" }, new() { Summary = "hint2" } },
         LastSessionAge: "5 minutes ago",
         SmokeTest: null,
