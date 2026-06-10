@@ -85,6 +85,8 @@ public sealed class MemoryPromoteHandler : IToolHandler
             ?? throw new ArgumentException($"invalid tier '{tierStr}' (expected hot|warm)");
         if (toTier.IsCold)
             throw new ArgumentException("cannot promote to cold (use memory_demote instead)");
+        if (toTier.IsPinned)
+            throw new ArgumentException("cannot promote to pinned (use memory_pin instead)");
 
         ContentType? requestedType = null;
         var typeStr = ReadOptionalString(args, "type");
@@ -100,6 +102,9 @@ public sealed class MemoryPromoteHandler : IToolHandler
             ?? throw new ArgumentException($"entry {id} not found");
 
         var (fromTier, fromType, entry) = located;
+        if (fromTier.IsPinned)
+            throw new ArgumentException(
+                $"entry {id} is pinned; use memory_unpin to release it first");
         var targetType = requestedType ?? fromType;
 
         if (TierNames.WarmthRank(toTier) <= TierNames.WarmthRank(fromTier))
