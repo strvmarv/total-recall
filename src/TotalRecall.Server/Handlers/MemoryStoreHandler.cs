@@ -73,7 +73,8 @@ public sealed class MemoryStoreHandler : IToolHandler
             "tags":        {"type":["array","string"],"items":{"type":"string"},"description":"Tags (array, JSON-encoded array string, or comma-separated string)"},
             "source":      {"type":"string","description":"Source identifier"},
             "visibility":  {"type":"string","enum":["private","team","public"],"description":"Entry visibility: 'private' (default), 'team', or 'public'"},
-            "scope":       {"type":"string","description":"Scope for this entry (e.g. user:paul, team:eng, service:bot). Uses configured default if omitted."}
+            "scope":       {"type":"string","description":"Scope for this entry (e.g. user:paul, team:eng, service:bot). Uses configured default if omitted."},
+            "pinned":      {"type":"boolean","description":"Store directly into the pinned tier (always injected, never decays). Mutually exclusive with tier."}
           },
           "required": ["content"]
         }
@@ -97,13 +98,20 @@ public sealed class MemoryStoreHandler : IToolHandler
     private readonly IEmbedder _embedder;
     private readonly IVectorSearch _vectorSearch;
     private readonly string? _scopeDefault;
+    private readonly int _pinnedMaxContentChars;
 
-    public MemoryStoreHandler(IStore store, IEmbedder embedder, IVectorSearch vectorSearch, string? scopeDefault = null)
+    public MemoryStoreHandler(
+        IStore store,
+        IEmbedder embedder,
+        IVectorSearch vectorSearch,
+        string? scopeDefault = null,
+        int pinnedMaxContentChars = MemoryPinHandler.DefaultMaxContentChars)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _embedder = embedder ?? throw new ArgumentNullException(nameof(embedder));
         _vectorSearch = vectorSearch ?? throw new ArgumentNullException(nameof(vectorSearch));
         _scopeDefault = scopeDefault;
+        _pinnedMaxContentChars = pinnedMaxContentChars;
     }
 
     public string Name => "memory_store";
@@ -128,7 +136,17 @@ public sealed class MemoryStoreHandler : IToolHandler
             throw new ArgumentException(
                 $"Content exceeds maximum length of {MaxContentLength} characters");
 
-        var tier = ReadTier(args);
+        var pinned = args.TryGetProperty("pinned", out var pinnedEl)
+            && pinnedEl.ValueKind == JsonValueKind.True;
+        if (pinned && args.TryGetProperty("tier", out var tierEl)
+            && tierEl.ValueKind != JsonValueKind.Null)
+            throw new ArgumentException("specify either pinned or tier, not both");
+        if (pinned && content.Length > _pinnedMaxContentChars)
+            throw new ArgumentException(
+                $"pinned entries are limited to {_pinnedMaxContentChars} characters " +
+                $"({content.Length} given); trim the content or store a concise " +
+                "summary and pin that instead");
+        var tier = pinned ? Tier.Pinned : ReadTier(args);
         var contentType = ReadContentType(args);
         var entryType = ReadEntryType(args);
         var project = ReadOptionalString(args, "project");
@@ -231,6 +249,8 @@ public sealed class MemoryStoreHandler : IToolHandler
             "hot" => Tier.Hot,
             "warm" => Tier.Warm,
             "cold" => Tier.Cold,
+            "pinned" => throw new ArgumentException(
+                "tier 'pinned' is not valid here; use the pinned:true flag instead"),
             _ => throw new ArgumentException($"Invalid tier: {v}. Must be hot, warm, or cold"),
         };
     }

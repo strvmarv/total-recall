@@ -129,7 +129,7 @@ public static class ServerComposition
         var registry = new ToolRegistry();
 
         // ---- Memory (18) ----
-        registry.Register(new MemoryStoreHandler(store, embedder, vectors, scopeDefault));
+        registry.Register(new MemoryStoreHandler(store, embedder, vectors, scopeDefault, pinnedMaxChars));
         registry.Register(new MemorySearchHandler(embedder, hybrid, scopeDefault, retrievalLog, syncQueue));
         registry.Register(new MemoryGetHandler(store));
         registry.Register(new MemoryGetAllHandler(store));
