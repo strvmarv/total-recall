@@ -99,10 +99,46 @@ internal static class SyncPayload
         sb.Append('"').Append(key).Append("\":\"").Append(Escape(value)).Append('"');
     }
 
+    // RFC 8259 string escaping. Escapes the two structural characters (\ and "),
+    // the five short-form control escapes (\b \f \n \r \t), and EVERY remaining
+    // C0 control character (U+0000–U+001F) as a \uXXXX sequence. Emitting a raw
+    // control byte — as the previous \n\r\t-only implementation did for e.g.
+    // U+0001 in a code snippet — produces invalid JSON that the drain side cannot
+    // parse, wedging the whole sync queue. Non-control characters (incl. non-ASCII)
+    // are valid unescaped in a UTF-8 JSON string and pass through verbatim.
     private static string Escape(string s)
-        => s.Replace("\\", "\\\\")
-            .Replace("\"", "\\\"")
-            .Replace("\n", "\\n")
-            .Replace("\r", "\\r")
-            .Replace("\t", "\\t");
+    {
+        StringBuilder? sb = null;
+        for (var i = 0; i < s.Length; i++)
+        {
+            var c = s[i];
+            string? rep = c switch
+            {
+                '\\' => "\\\\",
+                '"' => "\\\"",
+                '\b' => "\\b",
+                '\f' => "\\f",
+                '\n' => "\\n",
+                '\r' => "\\r",
+                '\t' => "\\t",
+                _ => null, // either no escaping needed, or a \uXXXX control char (below)
+            };
+
+            if (rep is null && c >= ' ')
+            {
+                sb?.Append(c);
+                continue;
+            }
+
+            // First char that needs escaping: allocate and back-fill the clean prefix.
+            sb ??= new StringBuilder(s.Length + 16).Append(s, 0, i);
+            if (rep is not null)
+                sb.Append(rep);
+            else
+                // Remaining C0 control char (< U+0020) with no short form: \uXXXX.
+                sb.Append("\\u").Append(((int)c).ToString("x4", System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        return sb?.ToString() ?? s;
+    }
 }

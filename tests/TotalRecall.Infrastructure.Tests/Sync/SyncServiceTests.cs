@@ -318,6 +318,91 @@ public sealed class SyncServiceTests
     }
 
     // -----------------------------------------------------------------------
+    // Test: a single un-parseable payload must not crash the flush or wedge the
+    // queue. Regression for the poison-pill bug where one memory row with a raw
+    // control char (invalid JSON) threw an uncaught JsonException out of
+    // FlushAsync — crashing session_end and blocking every row behind it
+    // (none ever marked completed OR failed → attempts stayed 0 forever).
+    // -----------------------------------------------------------------------
+    [Fact]
+    public async Task FlushAsync_PoisonPayload_QuarantinesItAndFlushesTheRest()
+    {
+        using var conn = OpenAndMigrate();
+        var t0 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var now = t0;
+        var syncQueue = new SyncQueue(conn, () => now);
+        var local = Substitute.For<IStore>();
+        var remote = Substitute.For<IRemoteBackend>();
+
+        // A raw U+0001 control char makes this payload invalid JSON — exactly
+        // what JsonDocument.Parse rejects. Enqueued FIRST so it sits at the head
+        // of the memory drain batch (where the real poison pill lived).
+        var poison = "{\"id\":\"bad-1\",\"content\":\"x" + (char)0x01 + "y\"}";
+        syncQueue.Enqueue("memory", "upsert", "bad-1", poison);
+        syncQueue.Enqueue("memory", "upsert", "good-1",
+            JsonSerializer.Serialize(new { id = "good-1", content = "fine" }));
+
+        var svc = new SyncService(local, remote, syncQueue, conn);
+
+        // Must NOT throw (this is what session_end relies on).
+        await svc.FlushAsync(CancellationToken.None);
+
+        // The well-formed row was pushed...
+        await remote.Received(1).UpsertMemoriesAsync(
+            Arg.Is<SyncEntry[]>(arr => arr.Length == 1 && arr[0].Id == "good-1"),
+            Arg.Any<CancellationToken>());
+
+        // ...and removed from the queue, while the poison row was quarantined
+        // (marked failed with an error + backoff), not silently dropped.
+        now = t0.AddSeconds(61);
+        var leftover = syncQueue.Drain("memory", 10);
+        Assert.Single(leftover);
+        Assert.Equal("bad-1", leftover[0].EntityId);
+        Assert.Equal(1, leftover[0].Attempts);
+        Assert.NotNull(leftover[0].LastError);
+    }
+
+    // -----------------------------------------------------------------------
+    // Test: the telemetry drain path is equally poison-resistant. A corrupt
+    // usage payload must be quarantined while the valid rows still push.
+    // -----------------------------------------------------------------------
+    [Fact]
+    public async Task FlushAsync_PoisonTelemetryPayload_QuarantinesItAndPushesTheRest()
+    {
+        using var conn = OpenAndMigrate();
+        var t0 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var now = t0;
+        var syncQueue = new SyncQueue(conn, () => now);
+        var local = Substitute.For<IStore>();
+        var remote = Substitute.For<IRemoteBackend>();
+
+        // Invalid JSON (raw control char) — must not abort the usage drain.
+        syncQueue.Enqueue("usage", "push", null, "[{\"session_id\":\"x" + (char)0x01 + "\"}]");
+        syncQueue.Enqueue("usage", "push", null, JsonSerializer.Serialize(new[]
+        {
+            new SyncUsageEvent("sess-ok", "host", "model", "proj", 100, 50, null, null, DateTime.UtcNow)
+        }));
+
+        var svc = new SyncService(local, remote, syncQueue, conn);
+        await svc.FlushAsync(CancellationToken.None);
+
+        // The valid usage row was pushed (possibly across Phase-1 + catch-up calls).
+        var pushed = remote.ReceivedCalls()
+            .Where(c => c.GetMethodInfo().Name == nameof(IRemoteBackend.PushUsageEventsAsync))
+            .SelectMany(c => (SyncUsageEvent[])c.GetArguments()[0]!)
+            .ToList();
+        Assert.Contains(pushed, e => e.SessionId == "sess-ok");
+        Assert.DoesNotContain(pushed, e => e.SessionId.Contains((char)0x01));
+
+        // The corrupt row was quarantined (failed + backoff), not dropped.
+        now = t0.AddSeconds(61);
+        var leftover = syncQueue.Drain("usage", 10);
+        Assert.Single(leftover);
+        Assert.Equal(1, leftover[0].Attempts);
+        Assert.NotNull(leftover[0].LastError);
+    }
+
+    // -----------------------------------------------------------------------
     // Test 5: FlushAsync pushes telemetry (usage, retrieval, compaction)
     // -----------------------------------------------------------------------
     [Fact]

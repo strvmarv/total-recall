@@ -154,58 +154,26 @@ public sealed class SyncService
         var retrievalItems = _syncQueue.Drain("retrieval", RetrievalDrainLimit);
         var compactionItems = _syncQueue.Drain("compaction", CompactionDrainLimit);
 
-        // Memory upserts — batch
+        // Memory upserts — batch. Parse defensively: a payload that can't be
+        // parsed is quarantined (MarkFailed) rather than aborting the flush, so
+        // one corrupt row can't crash session_end or block the rest of the queue.
         if (memoryUpserts.Count > 0)
         {
-            try
+            var parsed = ParseOrQuarantine(memoryUpserts, ParseSyncEntry);
+            if (parsed.Count > 0)
             {
-                var entries = memoryUpserts.Select(i =>
+                try
                 {
-                    var doc = JsonDocument.Parse(i.Payload);
-                    var root = doc.RootElement;
-                    return new SyncEntry(
-                        Id: root.GetProperty("id").GetString()!,
-                        Content: root.GetProperty("content").GetString()!,
-                        EntryType: root.TryGetProperty("entry_type", out var et) && et.ValueKind == JsonValueKind.String
-                            ? et.GetString()!
-                            : "Preference",
-                        ContentType: root.TryGetProperty("content_type", out var ct) && ct.ValueKind == JsonValueKind.String
-                            ? ct.GetString()!
-                            : "Memory",
-                        Tags: root.TryGetProperty("tags", out var tagsEl) && tagsEl.ValueKind == JsonValueKind.Array
-                            ? tagsEl.EnumerateArray().Select(t => t.GetString()!).ToArray()
-                            : Array.Empty<string>(),
-                        Source: root.TryGetProperty("source", out var srcEl) && srcEl.ValueKind == JsonValueKind.String
-                            ? srcEl.GetString()
-                            : null,
-                        AccessCount: root.TryGetProperty("access_count", out var acEl) && acEl.ValueKind == JsonValueKind.Number
-                            ? acEl.GetInt32()
-                            : 0,
-                        DecayScore: root.TryGetProperty("decay_score", out var dsEl) && dsEl.ValueKind == JsonValueKind.Number
-                            ? dsEl.GetDouble()
-                            : 1.0,
-                        CreatedAt: root.TryGetProperty("created_at", out var caEl) && caEl.ValueKind == JsonValueKind.String
-                            ? caEl.GetDateTime()
-                            : DateTime.UtcNow,
-                        UpdatedAt: root.TryGetProperty("updated_at", out var uaEl) && uaEl.ValueKind == JsonValueKind.String
-                            ? uaEl.GetDateTime()
-                            : DateTime.UtcNow,
-                        Scope: root.TryGetProperty("scope", out var scEl) && scEl.ValueKind == JsonValueKind.String
-                            ? scEl.GetString()
-                            : null,
-                        Tier: root.TryGetProperty("tier", out var tierEl) && tierEl.ValueKind == JsonValueKind.String
-                            ? tierEl.GetString()
-                            : null);
-                }).ToArray();
-
-                await _remote.UpsertMemoriesAsync(entries, ct).ConfigureAwait(false);
-                foreach (var item in memoryUpserts)
-                    _syncQueue.MarkCompleted(item.Id);
-            }
-            catch (CortexUnreachableException ex)
-            {
-                foreach (var item in memoryUpserts)
-                    _syncQueue.MarkFailed(item.Id, ex.Message);
+                    await _remote.UpsertMemoriesAsync(
+                        parsed.Select(p => p.Parsed).ToArray(), ct).ConfigureAwait(false);
+                    foreach (var (item, _) in parsed)
+                        _syncQueue.MarkCompleted(item.Id);
+                }
+                catch (CortexUnreachableException ex)
+                {
+                    foreach (var (item, _) in parsed)
+                        _syncQueue.MarkFailed(item.Id, ex.Message);
+                }
             }
         }
 
@@ -223,62 +191,14 @@ public sealed class SyncService
             }
         }
 
-        // Usage telemetry
-        if (usageItems.Count > 0)
-        {
-            try
-            {
-                var events = usageItems
-                    .SelectMany(i => JsonSerializer.Deserialize(i.Payload, SyncJsonContext.Default.SyncUsageEventArray) ?? Array.Empty<SyncUsageEvent>())
-                    .ToArray();
-                await _remote.PushUsageEventsAsync(events, ct).ConfigureAwait(false);
-                foreach (var item in usageItems)
-                    _syncQueue.MarkCompleted(item.Id);
-            }
-            catch (CortexUnreachableException ex)
-            {
-                foreach (var item in usageItems)
-                    _syncQueue.MarkFailed(item.Id, ex.Message);
-            }
-        }
-
-        // Retrieval telemetry
-        if (retrievalItems.Count > 0)
-        {
-            try
-            {
-                var events = retrievalItems
-                    .SelectMany(i => JsonSerializer.Deserialize(i.Payload, SyncJsonContext.Default.SyncRetrievalEventArray) ?? Array.Empty<SyncRetrievalEvent>())
-                    .ToArray();
-                await _remote.PushRetrievalEventsAsync(events, ct).ConfigureAwait(false);
-                foreach (var item in retrievalItems)
-                    _syncQueue.MarkCompleted(item.Id);
-            }
-            catch (CortexUnreachableException ex)
-            {
-                foreach (var item in retrievalItems)
-                    _syncQueue.MarkFailed(item.Id, ex.Message);
-            }
-        }
-
-        // Compaction telemetry
-        if (compactionItems.Count > 0)
-        {
-            try
-            {
-                var events = compactionItems
-                    .SelectMany(i => JsonSerializer.Deserialize(i.Payload, SyncJsonContext.Default.SyncCompactionEntryArray) ?? Array.Empty<SyncCompactionEntry>())
-                    .ToArray();
-                await _remote.PushCompactionEntriesAsync(events, ct).ConfigureAwait(false);
-                foreach (var item in compactionItems)
-                    _syncQueue.MarkCompleted(item.Id);
-            }
-            catch (CortexUnreachableException ex)
-            {
-                foreach (var item in compactionItems)
-                    _syncQueue.MarkFailed(item.Id, ex.Message);
-            }
-        }
+        // Telemetry (usage / retrieval / compaction). Each batch is parsed
+        // defensively and pushed; un-parseable rows are quarantined per-item.
+        await FlushTelemetryBatchAsync(usageItems, ParseUsage,
+            events => _remote.PushUsageEventsAsync(events, ct), ct).ConfigureAwait(false);
+        await FlushTelemetryBatchAsync(retrievalItems, ParseRetrieval,
+            events => _remote.PushRetrievalEventsAsync(events, ct), ct).ConfigureAwait(false);
+        await FlushTelemetryBatchAsync(compactionItems, ParseCompaction,
+            events => _remote.PushCompactionEntriesAsync(events, ct), ct).ConfigureAwait(false);
 
         // Phase 2: catch-up drain for the three telemetry queues. Phase 1's
         // small fair-share quotas protected against starvation; this loop
@@ -287,17 +207,14 @@ public sealed class SyncService
         // Memory upserts/deletes intentionally not in catch-up — payloads are
         // larger and per-flush bounding is acceptable until a memory backlog
         // becomes a real problem.
-        if (!await CatchUpTelemetryAsync(
-                "usage",
-                batch => PushUsageBatchAsync(batch, ct), ct).ConfigureAwait(false))
+        if (!await CatchUpTelemetryAsync("usage", ParseUsage,
+                events => _remote.PushUsageEventsAsync(events, ct), ct).ConfigureAwait(false))
             return;
-        if (!await CatchUpTelemetryAsync(
-                "retrieval",
-                batch => PushRetrievalBatchAsync(batch, ct), ct).ConfigureAwait(false))
+        if (!await CatchUpTelemetryAsync("retrieval", ParseRetrieval,
+                events => _remote.PushRetrievalEventsAsync(events, ct), ct).ConfigureAwait(false))
             return;
-        if (!await CatchUpTelemetryAsync(
-                "compaction",
-                batch => PushCompactionBatchAsync(batch, ct), ct).ConfigureAwait(false))
+        if (!await CatchUpTelemetryAsync("compaction", ParseCompaction,
+                events => _remote.PushCompactionEntriesAsync(events, ct), ct).ConfigureAwait(false))
             return;
 
         // Drain unsynced skill_usage_events in chunks of 100. Each chunk is pushed
@@ -318,56 +235,148 @@ public sealed class SyncService
         }
     }
 
-    // Phase 2 catch-up helper. Returns true on normal completion (empty queue
-    // or hit safety cap), false if CortexUnreachableException terminated the
-    // loop — caller bails on false so we don't keep hammering a dead remote.
-    private async Task<bool> CatchUpTelemetryAsync(
+    // Phase 2 catch-up helper. Returns true on normal completion (empty queue,
+    // all rows quarantined, or hit safety cap), false if CortexUnreachableException
+    // terminated the loop — caller bails on false so we don't keep hammering a
+    // dead remote. Quarantined (un-parseable) rows are marked failed and excluded
+    // from the next drain by their backoff window, so the loop still terminates.
+    private async Task<bool> CatchUpTelemetryAsync<T>(
         string entityType,
-        Func<IReadOnlyList<SyncQueueItem>, Task> pushBatchAsync,
+        Func<string, T[]> parse,
+        Func<T[], Task> push,
         CancellationToken ct)
     {
         for (int i = 0; i < MaxCatchUpBatches; i++)
         {
             var batch = _syncQueue.Drain(entityType, CatchUpBatchSize);
             if (batch.Count == 0) return true;
-            try
-            {
-                await pushBatchAsync(batch).ConfigureAwait(false);
-                foreach (var item in batch)
-                    _syncQueue.MarkCompleted(item.Id);
-            }
-            catch (CortexUnreachableException ex)
-            {
-                foreach (var item in batch)
-                    _syncQueue.MarkFailed(item.Id, ex.Message);
-                return false;
-            }
+            if (!await FlushTelemetryBatchAsync(batch, parse, push, ct).ConfigureAwait(false))
+                return false; // remote unreachable — stop catch-up
         }
         return true;
     }
 
-    private Task PushUsageBatchAsync(IReadOnlyList<SyncQueueItem> batch, CancellationToken ct)
+    // Parse a drained telemetry batch defensively and push the parsed events.
+    // Returns false ONLY when the remote is unreachable (transient — caller may
+    // stop). Un-parseable rows are quarantined per-item and do not fail the batch.
+    private async Task<bool> FlushTelemetryBatchAsync<T>(
+        IReadOnlyList<SyncQueueItem> items,
+        Func<string, T[]> parse,
+        Func<T[], Task> push,
+        CancellationToken ct)
     {
-        var events = batch
-            .SelectMany(i => JsonSerializer.Deserialize(i.Payload, SyncJsonContext.Default.SyncUsageEventArray) ?? Array.Empty<SyncUsageEvent>())
-            .ToArray();
-        return _remote.PushUsageEventsAsync(events, ct);
+        ct.ThrowIfCancellationRequested();
+        if (items.Count == 0) return true;
+
+        var parsed = ParseOrQuarantine(items, parse);
+        if (parsed.Count == 0) return true; // every row quarantined — nothing to push
+
+        var events = parsed.SelectMany(p => p.Parsed).ToArray();
+        try
+        {
+            await push(events).ConfigureAwait(false);
+            foreach (var (item, _) in parsed)
+                _syncQueue.MarkCompleted(item.Id);
+            return true;
+        }
+        catch (CortexUnreachableException ex)
+        {
+            foreach (var (item, _) in parsed)
+                _syncQueue.MarkFailed(item.Id, ex.Message);
+            return false;
+        }
     }
 
-    private Task PushRetrievalBatchAsync(IReadOnlyList<SyncQueueItem> batch, CancellationToken ct)
+    // Parse each drained item's payload, routing any item whose payload is
+    // permanently un-parseable (malformed JSON, missing/wrong-typed fields) to
+    // MarkFailed — it can never succeed, so it is quarantined with an error and a
+    // backoff window rather than aborting the flush or wedging the whole queue.
+    // Transport errors (CortexUnreachableException) are NOT raised here — parsing
+    // never touches the remote — so they cannot be misclassified as poison.
+    private List<(SyncQueueItem Item, T Parsed)> ParseOrQuarantine<T>(
+        IReadOnlyList<SyncQueueItem> items, Func<string, T> parse)
     {
-        var events = batch
-            .SelectMany(i => JsonSerializer.Deserialize(i.Payload, SyncJsonContext.Default.SyncRetrievalEventArray) ?? Array.Empty<SyncRetrievalEvent>())
-            .ToArray();
-        return _remote.PushRetrievalEventsAsync(events, ct);
+        var ok = new List<(SyncQueueItem, T)>(items.Count);
+        foreach (var item in items)
+        {
+            T parsed;
+            try
+            {
+                parsed = parse(item.Payload);
+            }
+            catch (Exception ex) when (
+                ex is JsonException or KeyNotFoundException or InvalidOperationException
+                   or FormatException or OverflowException or NotSupportedException)
+            {
+                _syncQueue.MarkFailed(item.Id, "unparseable payload (quarantined): " + ex.Message);
+                // Surface the quarantine: otherwise a permanently-stuck row keeps
+                // PendingCount() non-zero with no visible reason. last_error holds
+                // the detail; this makes the event observable in the process log.
+                Console.Error.WriteLine(
+                    $"[total-recall] sync item {item.Id} ({item.EntityType}) quarantined: {ex.GetType().Name}: {ex.Message}");
+                continue;
+            }
+            ok.Add((item, parsed));
+        }
+        return ok;
     }
 
-    private Task PushCompactionBatchAsync(IReadOnlyList<SyncQueueItem> batch, CancellationToken ct)
+    // A literal "null" payload deserializes to null. That is never something
+    // SyncPayload emits (telemetry is always a JSON array), so treat it as
+    // corruption and let ParseOrQuarantine isolate the row rather than silently
+    // dropping it via a coalesce-to-empty. A genuinely empty batch is "[]",
+    // which deserializes to a zero-length array, not null.
+    private static SyncUsageEvent[] ParseUsage(string payload)
+        => JsonSerializer.Deserialize(payload, SyncJsonContext.Default.SyncUsageEventArray)
+           ?? throw new JsonException("usage payload deserialized to null");
+
+    private static SyncRetrievalEvent[] ParseRetrieval(string payload)
+        => JsonSerializer.Deserialize(payload, SyncJsonContext.Default.SyncRetrievalEventArray)
+           ?? throw new JsonException("retrieval payload deserialized to null");
+
+    private static SyncCompactionEntry[] ParseCompaction(string payload)
+        => JsonSerializer.Deserialize(payload, SyncJsonContext.Default.SyncCompactionEntryArray)
+           ?? throw new JsonException("compaction payload deserialized to null");
+
+    // Hydrate a SyncEntry from a queued memory-upsert payload. The JsonDocument is
+    // disposed before return — every field is copied out to a managed value/string.
+    private static SyncEntry ParseSyncEntry(string payload)
     {
-        var entries = batch
-            .SelectMany(i => JsonSerializer.Deserialize(i.Payload, SyncJsonContext.Default.SyncCompactionEntryArray) ?? Array.Empty<SyncCompactionEntry>())
-            .ToArray();
-        return _remote.PushCompactionEntriesAsync(entries, ct);
+        using var doc = JsonDocument.Parse(payload);
+        var root = doc.RootElement;
+        return new SyncEntry(
+            Id: root.GetProperty("id").GetString()!,
+            Content: root.GetProperty("content").GetString()!,
+            EntryType: root.TryGetProperty("entry_type", out var et) && et.ValueKind == JsonValueKind.String
+                ? et.GetString()!
+                : "Preference",
+            ContentType: root.TryGetProperty("content_type", out var ctp) && ctp.ValueKind == JsonValueKind.String
+                ? ctp.GetString()!
+                : "Memory",
+            Tags: root.TryGetProperty("tags", out var tagsEl) && tagsEl.ValueKind == JsonValueKind.Array
+                ? tagsEl.EnumerateArray().Select(t => t.GetString()!).ToArray()
+                : Array.Empty<string>(),
+            Source: root.TryGetProperty("source", out var srcEl) && srcEl.ValueKind == JsonValueKind.String
+                ? srcEl.GetString()
+                : null,
+            AccessCount: root.TryGetProperty("access_count", out var acEl) && acEl.ValueKind == JsonValueKind.Number
+                ? acEl.GetInt32()
+                : 0,
+            DecayScore: root.TryGetProperty("decay_score", out var dsEl) && dsEl.ValueKind == JsonValueKind.Number
+                ? dsEl.GetDouble()
+                : 1.0,
+            CreatedAt: root.TryGetProperty("created_at", out var caEl) && caEl.ValueKind == JsonValueKind.String
+                ? caEl.GetDateTime()
+                : DateTime.UtcNow,
+            UpdatedAt: root.TryGetProperty("updated_at", out var uaEl) && uaEl.ValueKind == JsonValueKind.String
+                ? uaEl.GetDateTime()
+                : DateTime.UtcNow,
+            Scope: root.TryGetProperty("scope", out var scEl) && scEl.ValueKind == JsonValueKind.String
+                ? scEl.GetString()
+                : null,
+            Tier: root.TryGetProperty("tier", out var tierEl) && tierEl.ValueKind == JsonValueKind.String
+                ? tierEl.GetString()
+                : null);
     }
 
     /// <summary>
