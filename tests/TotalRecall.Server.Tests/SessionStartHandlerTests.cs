@@ -66,6 +66,7 @@ public sealed class SessionStartHandlerTests
         Assert.Equal(3, summary.GetProperty("hot").GetInt32());
         Assert.Equal(4, summary.GetProperty("warm").GetInt32());
         Assert.Equal(5, summary.GetProperty("cold").GetInt32());
+        Assert.Equal(0, summary.GetProperty("pinned").GetInt32());
     }
 
     [Fact]

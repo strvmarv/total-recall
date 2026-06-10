@@ -163,7 +163,13 @@ public sealed class SessionLifecycleTests
             return $"{tier}|{type}|{string.Join(",", parts)}";
         }
 
-        public void UpdateInjectionCounts(IReadOnlyList<(Tier tier, ContentType type, string id)> entries) { }
+        // Records all UpdateInjectionCounts calls for injection-tracking assertions.
+        public List<(Tier tier, ContentType type, string id)> InjectionCountCalls { get; } = new();
+
+        public void UpdateInjectionCounts(IReadOnlyList<(Tier tier, ContentType type, string id)> entries)
+        {
+            InjectionCountCalls.AddRange(entries);
+        }
     }
 
     private sealed class FakeImporter : IImporter
@@ -1264,9 +1270,12 @@ public sealed class SessionLifecycleTests
     [Fact]
     public async Task SessionInit_PinnedOverHalfBudget_EmitsPressureHint_ContentStillPresent()
     {
-        // HeuristicEstimateTokens = words * 0.75. tokenBudget=10 → half=5.
-        // Content with many words to exceed 5 tokens estimate.
-        // "PINNED word1 word2 word3 word4 word5 word6 word7 word8 word9" = 10 words → ~8 tokens > 5.
+        // HeuristicEstimateTokens = words * 0.75 (ceiling). tokenBudget=10; threshold:
+        // pinnedTokens * 2 > 10 i.e. pinnedTokens >= 6.
+        // The estimate runs over the WHOLE pinned block including the
+        // "## Pinned directives (always follow)" header. Block for this test:
+        // header (5 words) + "\n- PINNED word1…word15" (17 words) = 22 words
+        // → ceiling(22 * 0.75) = 17 tokens. 17*2=34 > 10 → hint fires.
         var bigContent = "PINNED " + string.Join(" ", Enumerable.Range(1, 15).Select(i => $"word{i}"));
         var store = new FakeStore();
         store.Entries[(Tier.Pinned, ContentType.Memory)] = new List<Entry>
@@ -1337,5 +1346,80 @@ public sealed class SessionLifecycleTests
 
         // No Move calls should involve the Pinned tier as FromTier.
         Assert.DoesNotContain(store.MoveCalls, c => c.FromTier.IsPinned);
+    }
+
+    // ---------- Task 8 / Fix 2: pinned re-injected on RefreshAsync ----------
+
+    [Fact]
+    public async Task Refresh_PinnedBlock_PrependedToContext()
+    {
+        // Seed a pinned memory and a hot memory so both appear in refresh context.
+        var store = new FakeStore();
+        store.Entries[(Tier.Pinned, ContentType.Memory)] = new List<Entry>
+        {
+            MakeEntry("pm1", "PINNED-DIRECTIVE"),
+        };
+        store.Entries[(Tier.Hot, ContentType.Memory)] = new List<Entry>
+        {
+            MakeEntry("h1", "HOT-CONTENT"),
+        };
+
+        var lifecycle = BuildLifecycle(store);
+        await lifecycle.EnsureInitializedAsync();
+        var result = await lifecycle.RefreshAsync();
+
+        // Pinned directive header must appear in the refresh context.
+        Assert.Contains("## Pinned directives (always follow)", result.Context);
+        // Pinned content must come before hot content.
+        var pinnedIdx = result.Context.IndexOf("PINNED-DIRECTIVE", StringComparison.Ordinal);
+        var hotIdx    = result.Context.IndexOf("HOT-CONTENT",      StringComparison.Ordinal);
+        Assert.True(pinnedIdx >= 0, "Pinned content missing from refresh context");
+        Assert.True(hotIdx > pinnedIdx, "Pinned content must appear before hot content");
+    }
+
+    [Fact]
+    public async Task Refresh_PinnedTokens_ReduceHotBudget_AndCountInTokenCount()
+    {
+        // Large pinned content + tiny budget — pinned still fully injected verbatim,
+        // and TokenCount includes the pinned token estimate.
+        var bigContent = "PINNED " + string.Join(" ", Enumerable.Range(1, 30).Select(i => $"word{i}"));
+        var store = new FakeStore();
+        store.Entries[(Tier.Pinned, ContentType.Memory)] = new List<Entry>
+        {
+            MakeEntry("pm1", bigContent),
+        };
+
+        var lifecycle = BuildLifecycle(store, tokenBudget: 10);
+        await lifecycle.EnsureInitializedAsync();
+        var result = await lifecycle.RefreshAsync();
+
+        // Full pinned content must appear in the refresh context (never truncated).
+        Assert.Contains("PINNED", result.Context);
+        // TokenCount must be >= estimated pinned tokens (header + content words * 0.75).
+        var pinnedBlockEstimate = SessionLifecycle.HeuristicEstimateTokens(
+            "## Pinned directives (always follow)\n- " + bigContent);
+        Assert.True(result.TokenCount >= pinnedBlockEstimate,
+            $"TokenCount {result.TokenCount} should be >= pinnedBlockEstimate {pinnedBlockEstimate}");
+    }
+
+    [Fact]
+    public async Task Refresh_PinnedIds_IncludedInInjectionCounts()
+    {
+        // Verify that RefreshAsync calls UpdateInjectionCounts with the pinned entry id.
+        var store = new FakeStore();
+        store.Entries[(Tier.Pinned, ContentType.Memory)] = new List<Entry>
+        {
+            MakeEntry("pm1", "always-follow-rule"),
+        };
+
+        var lifecycle = BuildLifecycle(store);
+        await lifecycle.EnsureInitializedAsync();
+        // Clear init-time injection records so we only see refresh calls.
+        store.InjectionCountCalls.Clear();
+
+        await lifecycle.RefreshAsync();
+
+        Assert.Contains(store.InjectionCountCalls,
+            t => t.tier == Tier.Pinned && t.type == ContentType.Memory && t.id == "pm1");
     }
 }

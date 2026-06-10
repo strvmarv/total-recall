@@ -314,9 +314,10 @@ public sealed class SessionLifecycle : ISessionLifecycle
 
         // 6. Hints.
         var hints = GenerateHints(_store, warmPromotedIds);
-        // Soft-cap warning: when pinned entries consume >50% of the budget, advise
-        // review. Pins are still injected even if they exceed the entire budget.
-        if (pinnedTokens > _tokenBudget / 2)
+        // Soft-cap warning: when pinned entries consume strictly more than half the
+        // budget, advise review. Multiplication avoids integer-division skew on odd
+        // budgets. Pins are still injected even if they exceed the entire budget.
+        if (pinnedTokens * 2 > _tokenBudget)
         {
             hints = new[]
             {
@@ -1125,20 +1126,31 @@ public sealed class SessionLifecycle : ISessionLifecycle
             hotEntries = sorted;
         }
 
+        // 2a. Pinned entries — re-injected on every refresh so that host re-injection
+        // after compaction never silently drops pins (spec 2026-06-09).
+        var pinnedMemories = _store.List(Tier.Pinned, ContentType.Memory);
+        var pinnedKnowledge = _store.List(Tier.Pinned, ContentType.Knowledge);
+        var (pinnedBlock, pinnedIds) = BuildPinnedBlock(pinnedMemories, pinnedKnowledge);
+        var pinnedTokens = pinnedBlock.Length > 0 ? HeuristicEstimateTokens(pinnedBlock) : 0;
+
         var ctxResult = BuildContext(hotEntries, new BuildContextOptions
         {
-            TokenBudget = _tokenBudget,
+            // Hot tier gets whatever budget the pinned block hasn't consumed,
+            // matching the accounting used in EnsureInitializedAsync.
+            TokenBudget = Math.Max(0, _tokenBudget - pinnedTokens),
         });
 
         // 3. Phase 2 idea 1c — injection tracking on refresh.
-        if (ctxResult.InjectedIds.Count > 0)
+        // Include pinned ids so their times_injected increments like hot.
+        var refreshInjectionTuples = ctxResult.InjectedIds
+            .Select(id => (Tier.Hot, ContentType.Memory, id))
+            .Concat(pinnedIds)
+            .ToList();
+        if (refreshInjectionTuples.Count > 0)
         {
             try
             {
-                var tuples = ctxResult.InjectedIds
-                    .Select(id => (Tier.Hot, ContentType.Memory, id))
-                    .ToList();
-                _store.UpdateInjectionCounts(tuples);
+                _store.UpdateInjectionCounts(refreshInjectionTuples);
             }
             catch (Exception ex)
             {
@@ -1215,12 +1227,14 @@ public sealed class SessionLifecycle : ISessionLifecycle
             // spec §7.3.1: memoriesInjected + skillsInjected + hintsInjected
             // sum to totalInjected. (The name reads like an entry count; it
             // is not. Entry counts live in HotTierUtilization.EntriesUsed.)
+            // Pinned tokens are included in MemoriesInjected + TotalInjected
+            // so the invariant memories+skills+hints == total is preserved.
             InjectionImpact = new InjectionImpact
             {
-                MemoriesInjected = ctxResult.TokenCount,
+                MemoriesInjected = ctxResult.TokenCount + pinnedTokens,
                 SkillsInjected = 0,
                 HintsInjected = 0,
-                TotalInjected = ctxResult.TokenCount,
+                TotalInjected = ctxResult.TokenCount + pinnedTokens,
             },
             Cache = cacheBlock,
             Session = new SessionInfo
@@ -1257,11 +1271,16 @@ public sealed class SessionLifecycle : ISessionLifecycle
             sessionAgeHint = $"Session is {sessionAgeMinutes:F0} minutes old. Consider calling session_refresh for updated decay scores.";
         }
 
+        // Assemble refresh context: pinned block FIRST (matching init join style),
+        // then hot context. Non-empty parts joined with "\n\n".
+        var refreshParts = new[] { pinnedBlock, ctxResult.Context }.Where(p => p.Length > 0);
+        var refreshContext = string.Join("\n\n", refreshParts);
+
         return new RefreshResult
         {
-            Context = ctxResult.Context,
+            Context = refreshContext,
             ContextTruncated = ctxResult.Truncated,
-            TokenCount = ctxResult.TokenCount,
+            TokenCount = ctxResult.TokenCount + pinnedTokens,
             TokenBudget = _tokenBudget,
             Changes = changes,
             Efficiency = efficiency,
