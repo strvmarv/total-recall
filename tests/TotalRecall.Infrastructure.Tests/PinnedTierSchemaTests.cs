@@ -44,6 +44,35 @@ public sealed class PinnedTierSchemaTests
     }
 
     [Fact]
+    public void Migration16_CreatesPinnedFtsSyncTriggers()
+    {
+        // All 6 FTS sync triggers for the 2 pinned tables must exist after RunMigrations.
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        var triggerNames = new HashSet<string>();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='trigger' ORDER BY name";
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read()) triggerNames.Add(reader.GetString(0));
+
+        // Each of the 2 pinned tables has 3 FTS sync triggers:
+        //   <base>_fts_ai (after insert), <base>_fts_ad (after delete), <base>_fts_au (after update)
+        var expected = new HashSet<string>
+        {
+            "pinned_memories_fts_ai",
+            "pinned_memories_fts_ad",
+            "pinned_memories_fts_au",
+            "pinned_knowledge_fts_ai",
+            "pinned_knowledge_fts_ad",
+            "pinned_knowledge_fts_au",
+        };
+
+        Assert.Equal(6, expected.Count);
+        Assert.Superset(expected, triggerNames);
+    }
+
+    [Fact]
     public void TableName_Pinned_ReturnsPinnedTables()
     {
         Assert.Equal("pinned_memories", MigrationRunner.TableName(Tier.Pinned, ContentType.Memory));

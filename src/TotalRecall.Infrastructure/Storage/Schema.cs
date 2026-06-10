@@ -78,7 +78,7 @@ public static class MigrationRunner
     /// <summary>The 2 (tier, type) pairs for the pinned tier, created by
     /// Migration 16. Kept separate from <see cref="AllTablePairs"/> so
     /// historical migrations are not affected.</summary>
-    private static readonly (Tier Tier, ContentType Type)[] PinnedTablePairs =
+    internal static readonly (Tier Tier, ContentType Type)[] PinnedTablePairs =
     {
         (Tier.Pinned, ContentType.Memory),
         (Tier.Pinned, ContentType.Knowledge),
@@ -111,6 +111,8 @@ public static class MigrationRunner
         )
         """;
 
+    // Note: the scope index (idx_<name>_scope) is intentionally excluded here —
+    // it was added via Migration 8 for the original 6 tables; Migration 16 appends it inline for pinned tables.
     private static string[] ContentTableIndexes(string name) => new[]
     {
         $"CREATE INDEX IF NOT EXISTS idx_{name}_project       ON {name}(project)",
@@ -814,6 +816,8 @@ public static class MigrationRunner
                     INSERT INTO {{ftsTbl}}(rowid, content, tags) VALUES (new.rowid, new.content, new.tags);
                 END
                 """);
+
+            // No FTS backfill needed (unlike Migration 3): pinned tables are always empty at migration time.
         }
     }
 
