@@ -24,6 +24,7 @@ internal sealed class FakeStore : IStore
     public List<(Tier FromTier, ContentType FromType, Tier ToTier, ContentType ToType, string Id)> MoveCalls { get; } = new();
     public List<(Tier Tier, ContentType Type, InsertEntryOpts Opts, string NewId)> InsertCalls { get; } = new();
     public List<(Tier Tier, ContentType Type, string Id)> DeleteCalls { get; } = new();
+    public List<(Tier Tier, ContentType Type, string Id, UpdateEntryOpts Opts)> UpdateCalls { get; } = new();
     private int _nextInsertId = 0;
     private long _nextRowid = 1;
 
@@ -138,8 +139,11 @@ internal sealed class FakeStore : IStore
         return null;
     }
 
-    // Unused surface — throw to catch accidental use.
-    public void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts) => throw new NotImplementedException();
+    // Pinned tier Task 10 (pin/unpin verbs) — recording-only Update so
+    // PinCommand's post-move decay/scope write can be asserted. Does not
+    // mutate the stored Entry; tests assert against UpdateCalls instead.
+    public void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts)
+        => UpdateCalls.Add((tier, type, id, opts));
 
     // Plan 5 Task 5.9 (status) — real Count so the CLI StatusCommand can
     // be driven by a fake store without dragging in real Sqlite. Scans
