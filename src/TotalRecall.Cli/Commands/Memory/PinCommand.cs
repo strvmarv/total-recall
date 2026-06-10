@@ -28,24 +28,18 @@ namespace TotalRecall.Cli.Commands.Memory;
 
 public sealed class PinCommand : ICliCommand
 {
-    /// <summary>Default per-entry size cap for pinned content (chars).
-    /// Mirrors MemoryPinHandler.DefaultMaxContentChars in the Server
-    /// project (the Cli project does not reference Server). Overridden by
-    /// config [tiers.pinned] max_content_chars.</summary>
-    internal const int DefaultMaxContentChars = 500;
-
     // Test seam: all dependencies are injected together so a unit test
     // can record calls against the fakes without hitting real SQLite or ONNX.
     private readonly IStore? _store;
     private readonly IVectorSearch? _vec;
     private readonly IEmbedder? _embedder;
-    private readonly int _injectedMaxContentChars = DefaultMaxContentChars;
+    private readonly int _injectedMaxContentChars = PinnedTierLimits.DefaultMaxContentChars;
 
     public PinCommand() { }
 
     // Test/composition seam.
     public PinCommand(IStore store, IVectorSearch vec, IEmbedder embedder,
-        int maxContentChars = DefaultMaxContentChars)
+        int maxContentChars = PinnedTierLimits.DefaultMaxContentChars)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _vec = vec ?? throw new ArgumentNullException(nameof(vec));
@@ -187,8 +181,7 @@ public sealed class PinCommand : ICliCommand
             if (!alreadyPinned && entry.Content.Length > maxContentChars)
             {
                 Console.Error.WriteLine(
-                    $"memory pin: pinned entries are limited to {maxContentChars} characters " +
-                    $"({entry.Content.Length} given); trim the content or store a concise summary and pin that");
+                    $"memory pin: {PinnedTierLimits.ContentLimitMessage(maxContentChars, entry.Content.Length)}");
                 return 2;
             }
 
@@ -244,15 +237,15 @@ public sealed class PinCommand : ICliCommand
     /// <summary>
     /// Resolves the effective pinned content character limit from
     /// <c>[tiers.pinned] max_content_chars</c> in the effective config,
-    /// falling back to <see cref="DefaultMaxContentChars"/> when the section
-    /// is absent. Mirrors ServerComposition.ResolvePinnedMaxChars.
+    /// falling back to <see cref="PinnedTierLimits.DefaultMaxContentChars"/> when
+    /// the section is absent. Mirrors ServerComposition.ResolvePinnedMaxChars.
     /// </summary>
     private static int ResolvePinnedMaxChars()
     {
         var cfg = new ConfigLoader().LoadEffectiveConfig();
         return FSharpOption<Core.Config.PinnedTierConfig>.get_IsSome(cfg.Tiers.Pinned)
             ? cfg.Tiers.Pinned.Value.MaxContentChars
-            : DefaultMaxContentChars;
+            : PinnedTierLimits.DefaultMaxContentChars;
     }
 
     private static void PrintUsage(TextWriter w)

@@ -42,20 +42,6 @@ public sealed class MemoryPinHandler : IToolHandler
         }
         """).RootElement.Clone();
 
-    /// <summary>Default per-entry size cap for pinned content (chars).
-    /// Pinned content is injected verbatim every session and never
-    /// truncated, so size is enforced at the door. Overridden by
-    /// Tiers.Pinned.MaxContentChars. Measured in .NET <c>string.Length</c>
-    /// (UTF-16 code units), so e.g. an emoji counts as ~2.</summary>
-    public const int DefaultMaxContentChars = 500;
-
-    /// <summary>Returns the canonical content-limit error message for pinned
-    /// entries. Single source of truth used by both <see cref="MemoryPinHandler"/>
-    /// and <see cref="MemoryStoreHandler"/> so the wording stays identical.</summary>
-    public static string ContentLimitMessage(int limit, int actual) =>
-        $"pinned entries are limited to {limit} characters ({actual} given); " +
-        "trim the content or store a concise summary and pin that instead";
-
     private readonly IStore _store;
     private readonly IVectorSearch _vec;
     private readonly IEmbedder _embedder;
@@ -71,7 +57,7 @@ public sealed class MemoryPinHandler : IToolHandler
         IEmbedder embedder,
         CompactionLog? compactionLog = null,
         SyncQueue? syncQueue = null,
-        int maxContentChars = DefaultMaxContentChars)
+        int maxContentChars = PinnedTierLimits.DefaultMaxContentChars)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _vec = vec ?? throw new ArgumentNullException(nameof(vec));
@@ -122,7 +108,7 @@ public sealed class MemoryPinHandler : IToolHandler
         var alreadyPinned = fromTier.IsPinned;
         if (!alreadyPinned && entry.Content.Length > _maxContentChars)
             throw new ArgumentException(
-                ContentLimitMessage(_maxContentChars, entry.Content.Length));
+                PinnedTierLimits.ContentLimitMessage(_maxContentChars, entry.Content.Length));
 
         // Resolve scope/project BEFORE moving so a validation failure leaves
         // the entry untouched. (Previously this block ran post-move, which

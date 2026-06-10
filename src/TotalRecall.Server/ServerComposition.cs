@@ -38,6 +38,7 @@ using TotalRecall.Infrastructure.Config;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Importers;
 using TotalRecall.Infrastructure.Ingestion;
+using TotalRecall.Infrastructure.Memory;
 using TotalRecall.Infrastructure.Search;
 using TotalRecall.Infrastructure.Skills;
 using TotalRecall.Infrastructure.Storage;
@@ -115,7 +116,7 @@ public static class ServerComposition
         Infrastructure.Sync.SyncQueue? syncQueue = null,
         CompactionLog? compactionLogWriter = null,
         Infrastructure.Sync.SyncBacklogReader? syncBacklog = null,
-        int pinnedMaxChars = MemoryPinHandler.DefaultMaxContentChars)
+        int pinnedMaxChars = PinnedTierLimits.DefaultMaxContentChars)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(vectors);
@@ -681,11 +682,11 @@ public static class ServerComposition
     /// <summary>
     /// Resolves the effective pinned content character limit from
     /// <c>[tiers.pinned] max_content_chars</c>. Falls back to
-    /// <see cref="MemoryPinHandler.DefaultMaxContentChars"/> (500) when the
+    /// <see cref="PinnedTierLimits.DefaultMaxContentChars"/> (500) when the
     /// section is absent, matching the <c>Pinned: option</c> design in Config.fs.
     /// </summary>
     private static int ResolvePinnedMaxChars(Core.Config.TotalRecallConfig cfg) =>
         FSharpOption<Core.Config.PinnedTierConfig>.get_IsSome(cfg.Tiers.Pinned)
             ? cfg.Tiers.Pinned.Value.MaxContentChars
-            : MemoryPinHandler.DefaultMaxContentChars;
+            : PinnedTierLimits.DefaultMaxContentChars;
 }

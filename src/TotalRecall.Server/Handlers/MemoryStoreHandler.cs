@@ -46,6 +46,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Embedding;
+using TotalRecall.Infrastructure.Memory;
 using TotalRecall.Infrastructure.Search;
 using TotalRecall.Infrastructure.Storage;
 
@@ -105,7 +106,7 @@ public sealed class MemoryStoreHandler : IToolHandler
         IEmbedder embedder,
         IVectorSearch vectorSearch,
         string? scopeDefault = null,
-        int pinnedMaxContentChars = MemoryPinHandler.DefaultMaxContentChars)
+        int pinnedMaxContentChars = PinnedTierLimits.DefaultMaxContentChars)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _embedder = embedder ?? throw new ArgumentNullException(nameof(embedder));
@@ -143,7 +144,7 @@ public sealed class MemoryStoreHandler : IToolHandler
             throw new ArgumentException("specify either pinned or tier, not both");
         if (pinned && content.Length > _pinnedMaxContentChars)
             throw new ArgumentException(
-                MemoryPinHandler.ContentLimitMessage(_pinnedMaxContentChars, content.Length));
+                PinnedTierLimits.ContentLimitMessage(_pinnedMaxContentChars, content.Length));
         var tier = pinned ? Tier.Pinned : ReadTier(args);
         var contentType = ReadContentType(args);
         var entryType = ReadEntryType(args);
