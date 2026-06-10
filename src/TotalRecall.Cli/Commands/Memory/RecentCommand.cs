@@ -73,7 +73,7 @@ public sealed class RecentCommand : ICliCommand
                         return Fail("--tier requires a value");
                     tier = TierNames.ParseTier(args[++i]);
                     if (tier is null)
-                        return Fail("--tier must be hot, warm, or cold");
+                        return Fail("--tier must be hot, warm, cold, or pinned");
                     break;
                 case "--type":
                     if (i + 1 >= args.Length)
@@ -249,6 +249,6 @@ public sealed class RecentCommand : ICliCommand
 
     private static void PrintUsage(TextWriter w)
     {
-        w.WriteLine("Usage: total-recall memory recent [--limit N] [--tier hot|warm|cold] [--type <entryType>] [--project <p>] [--order created|updated|accessed] [--scope <s> ...] [--json]");
+        w.WriteLine("Usage: total-recall memory recent [--limit N] [--tier hot|warm|cold|pinned] [--type <entryType>] [--project <p>] [--order created|updated|accessed] [--scope <s> ...] [--json]");
     }
 }

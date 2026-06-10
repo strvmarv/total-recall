@@ -23,7 +23,7 @@ public sealed class MemoryListHandler : IToolHandler
         {
           "type": "object",
           "properties": {
-            "tier":         {"type":"string","enum":["hot","warm","cold"],"description":"Restrict to one tier; default all three"},
+            "tier":         {"type":"string","enum":["hot","warm","cold","pinned"],"description":"Restrict to one tier; default all"},
             "content_type": {"type":"string","enum":["memory","knowledge"],"description":"Restrict to one content type; default both"},
             "tags":         {"type":"array","items":{"type":"string"},"description":"Filter by tags stored in metadata"},
             "project":      {"type":"string","description":"Filter by exact project name"},
@@ -62,7 +62,7 @@ public sealed class MemoryListHandler : IToolHandler
             var tierStr = ArgumentParsing.ReadOptionalString(args, "tier");
             if (tierStr is not null)
                 tierFilter = TierNames.ParseTier(tierStr)
-                    ?? throw new ArgumentException($"invalid tier '{tierStr}' (expected hot, warm, or cold)");
+                    ?? throw new ArgumentException($"invalid tier '{tierStr}' (expected hot, warm, cold, or pinned)");
 
             var ctStr = ArgumentParsing.ReadOptionalString(args, "content_type");
             if (ctStr is not null)

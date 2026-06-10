@@ -35,7 +35,7 @@ public sealed class MemoryExportHandler : IToolHandler
             "tiers": {
               "description":"Optional tier filter (array or comma-separated string)",
               "oneOf":[
-                {"type":"array","items":{"type":"string","enum":["hot","warm","cold"]}},
+                {"type":"array","items":{"type":"string","enum":["hot","warm","cold","pinned"]}},
                 {"type":"string"}
               ]
             },
@@ -75,7 +75,7 @@ public sealed class MemoryExportHandler : IToolHandler
                 foreach (var token in ReadStringList(tEl, "tiers"))
                 {
                     var parsed = TierNames.ParseTier(token)
-                        ?? throw new ArgumentException($"invalid tier '{token}' (expected hot|warm|cold)");
+                        ?? throw new ArgumentException($"invalid tier '{token}' (expected hot|warm|cold|pinned)");
                     tierFilter.Add(parsed);
                 }
             }

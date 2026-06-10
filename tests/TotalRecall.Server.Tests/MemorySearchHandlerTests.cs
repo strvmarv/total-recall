@@ -476,4 +476,51 @@ public class MemorySearchHandlerTests
         Assert.Single(retrievalLog.GetEvents(new RetrievalEventQuery()));
         Assert.Equal(0, syncQueue.PendingCount());
     }
+
+    // ---------------- Task 7: pinned tier filter tests ----------------
+
+    [Fact]
+    public async Task Search_TiersPinnedFilter_OnlySearchesPinnedTables()
+    {
+        var (handler, _, hybrid) = NewFixture();
+
+        await handler.ExecuteAsync(
+            Args("""{"query":"x","tiers":["pinned"]}"""),
+            CancellationToken.None);
+
+        var tiers = hybrid.Calls[0].Tiers;
+        Assert.Equal(2, tiers.Count);
+        Assert.All(tiers, t => Assert.True(t.Tier.IsPinned, "expected only pinned tier"));
+        Assert.Contains(tiers, t => t.Type.IsMemory);
+        Assert.Contains(tiers, t => t.Type.IsKnowledge);
+    }
+
+    [Fact]
+    public async Task Search_DefaultTiers_IncludePinned()
+    {
+        var (handler, _, hybrid) = NewFixture();
+
+        await handler.ExecuteAsync(
+            Args("""{"query":"x"}"""),
+            CancellationToken.None);
+
+        var tiers = hybrid.Calls[0].Tiers;
+        Assert.Equal(8, tiers.Count);
+        Assert.Contains(tiers, t => t.Tier.IsPinned && t.Type.IsMemory);
+        Assert.Contains(tiers, t => t.Tier.IsPinned && t.Type.IsKnowledge);
+    }
+
+    [Fact]
+    public async Task Search_TiersPinnedString_Accepted_NotThrows()
+    {
+        // Regression guard: "pinned" was previously rejected as invalid tier.
+        var (handler, _, _) = NewFixture();
+
+        var ex = await Record.ExceptionAsync(() =>
+            handler.ExecuteAsync(
+                Args("""{"query":"x","tiers":["pinned"]}"""),
+                CancellationToken.None));
+
+        Assert.Null(ex);
+    }
 }
