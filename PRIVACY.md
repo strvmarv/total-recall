@@ -60,7 +60,9 @@ On `session_start`, total-recall scans known memory locations for Claude Code, C
 
 ## Data retention and deletion
 
-All data is yours. To delete everything:
+All data is yours. Most memories age out automatically (decay moves unused entries to colder tiers over time), but entries you place in the **pinned tier** are exempt from decay and compaction — they persist indefinitely until you explicitly unpin (`memory_unpin`) or delete them.
+
+To delete everything:
 
 ```bash
 rm -rf ~/.total-recall/

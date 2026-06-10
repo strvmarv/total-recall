@@ -9,12 +9,12 @@ This file is the operational handbook for AI agents and human contributors worki
 ## Quick Reference
 
 ### Project Overview
-.NET 8 NativeAOT MCP server plugin (C# imperative shell + F# functional core) with npm packaging for Claude Code / Copilot CLI / Cursor / OpenCode marketplace distribution. Three-tier memory (Hot/Warm/Cold) + hierarchical KB, all local by default (SQLite + sqlite-vec + bundled ONNX), optionally synced to Cortex.
+.NET 8 NativeAOT MCP server plugin (C# imperative shell + F# functional core) with npm packaging for Claude Code / Copilot CLI / Cursor / OpenCode marketplace distribution. Four-tier memory (Pinned/Hot/Warm/Cold — pinned is user-curated via `memory_pin`/`memory_unpin`, always injected first, immune to decay/compaction) + hierarchical KB, all local by default (SQLite + sqlite-vec + bundled ONNX), optionally synced to Cortex (pinned entries are local-only, never synced).
 
 ### Layer Diagram
 ```
 TotalRecall.Host (C#)          ← AOT entry point + composition root
-├── TotalRecall.Server (C#)    ← MCP JSON-RPC over stdio; 47 handlers (one file each)
+├── TotalRecall.Server (C#)    ← MCP JSON-RPC over stdio; 49 handlers (one file each)
 ├── TotalRecall.Cli (C#)       ← CLI commands (Spectre.Console)
 ├── TotalRecall.Infrastructure (C#) ← SQLite/Postgres, ONNX embedder, importers, migrations
 └── TotalRecall.Core (F#)      ← Pure functions: tokenizer, decay, ranking, parsers, chunker
@@ -270,7 +270,7 @@ The root cause is Windows Defender mid-scanning the freshly-extracted `total-rec
 3. **Warm sweep** — if last sweep was more than `warm_sweep_interval_days` ago, moves old unaccessed warm entries to cold. Tracked via `compaction_log` with `reason = 'warm_sweep_decay'`.
 4. **Project docs auto-ingest** — detects `README.md`, `CONTRIBUTING.md`, `CLAUDE.md`, `AGENTS.md`, and `docs/` in cwd. Ingests into a `<project>-project-docs` KB collection. Deduplicates via `import_log`.
 5. **Smoke test** — if `_meta.smoke_test_version` differs from current package version, runs a 22-query benchmark from `eval/benchmarks/smoke.jsonl`. Pass threshold: `exactMatchRate >= 0.8`. Writes version to `_meta` on completion. Result returned as `smokeTest` field.
-6. **Hot tier assembly** — returns current hot entries as injectable context. Enforces token budget by evicting lowest-decay entries to warm.
+6. **Pinned + hot tier assembly** — pinned entries are injected first, verbatim, under a `## Pinned directives (always follow)` header (never truncated; their token cost reduces the hot budget), then current hot entries as injectable context. Enforces token budget by evicting lowest-decay entries to warm. Pinned storage is never scanned by decay, the warm sweep, or compaction.
 7. **Tier summary** — counts entries across all tiers and KB collections, returned as `tierSummary` in the response.
 8. **Hint generation** — `GenerateHints()` surfaces up to 5 high-value warm memories: corrections and preferences (priority 1), frequently accessed entries with `access_count >= 3` (priority 2), and recently promoted entries (priority 3). Each hint is truncated to 120 chars. No LLM calls — DB queries only.
 9. **Session continuity** — `GetLastSessionAge()` returns human-readable relative time since last compaction event (proxy for last session). Returns `null` for first-time users.
@@ -295,7 +295,7 @@ The root cause is Windows Defender mid-scanning the freshly-extracted `total-rec
 
 `ToolContext` (in `src/TotalRecall.Server/`) carries session state through all tool handlers: `Store`, `Config`, `Embedder`, `SessionId`, and `ConfigSnapshotId`. The `ConfigSnapshotId` is set by `session_start` and used by `memory_search` (for retrieval event logging) and the compactor (for compaction logging). New tools that call `LogRetrievalEvent` should pass `ctx.ConfigSnapshotId`.
 
-The composition root in `src/TotalRecall.Host/Program.cs` wires up all dependencies (storage, embedder, importers, MCP server, migration guard) and is the AOT entry point. The 47 MCP handlers live in `src/TotalRecall.Server/Handlers/` — one file per handler.
+The composition root in `src/TotalRecall.Host/Program.cs` wires up all dependencies (storage, embedder, importers, MCP server, migration guard) and is the AOT entry point. The 49 MCP handlers live in `src/TotalRecall.Server/Handlers/` — one file per handler.
 
 ---
 

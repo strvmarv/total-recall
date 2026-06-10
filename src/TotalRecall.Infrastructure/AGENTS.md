@@ -60,7 +60,7 @@ falls back to SQLite, setting `StorageMode` to `"sqlite (cortex failed)"`.
 
 ### Schema
 
-8 sequential migrations in `Storage/Schema.cs`. **Never modify existing migrations** — only append.
+16 sequential migrations in `Storage/Schema.cs`. **Never modify existing migrations** — only append.
 
 | Migration | What it adds |
 |-----------|-------------|
@@ -72,9 +72,24 @@ falls back to SQLite, setting `StorageMode` to `"sqlite (cortex failed)"`.
 | 6 | Usage telemetry: `usage_events`, `usage_daily`, `usage_watermarks` |
 | 7 | `sync_queue` for Cortex outbound buffering |
 | 8 | `scope TEXT NOT NULL DEFAULT ''` on all 6 content tables + indexes |
+| 9 | `entry_type` column on all content tables |
+| 10 | `skill_cache` table for local skill metadata sync |
+| 11 | `sync_queue.next_attempt_at` column (exponential backoff retry) |
+| 12 | `skill_cache` content + frontmatter + content_hash + embedding + fingerprint columns |
+| 13 | Skill usage counter columns + `skill_usage_events` table |
+| 14 | `times_injected` column on all 6 content tables |
+| 15 | `tool_cache` table |
+| 16 | Pinned tier: `pinned_memories` / `pinned_knowledge` with the full current column set + vec0 + FTS5 + triggers |
 
-Table naming: `{tier}_{type}` (e.g., `hot_memories`, `cold_knowledge`). Vec tables: `{table}_vec`. FTS tables: `{table}_fts`.
+Table naming: `{tier}_{type}` (e.g., `hot_memories`, `cold_knowledge`, `pinned_memories`). Vec tables: `{table}_vec`. FTS tables: `{table}_fts`.
 `MigrationRunner.TableName(tier, type)` is the canonical helper — use it, don't inline strings.
+
+**Three table-pair arrays — know which includes pinned:**
+
+- `TierNames.AllTablePairs` (`Memory/TierNames.cs`) and `EntryMapping.AllTablePairs` (`Server/Handlers/EntryMapping.cs`) — **8 pairs** (pinned included). Use these for runtime enumeration.
+- `MigrationRunner.AllTablePairs` (`Storage/Schema.cs`) — **deliberately frozen at the 6 historical pairs**. Migrations 1–15 predate the pinned tier and must keep producing the same schema; Migration 16 creates the pinned tables with the full current column set instead of replaying the historical column evolution.
+
+**Postgres:** no schema change for pinned — tier is a column on the `memories` / `knowledge` tables, so pinned is just a new `tier='pinned'` value (`PostgresMigrationRunner` is untouched).
 
 ---
 
@@ -180,6 +195,18 @@ the active config snapshot.
 
 **Offline resilience**: if Cortex is unreachable, local reads/writes continue. The queue
 is durable (SQLite) and survives process restarts.
+
+**Pinned is local-only (deliberate)**: the remote Cortex backend has no pinned-tier support
+yet, so the pinned tier is excluded from every sync path:
+
+- `RoutingStore` never enqueues pinned upserts or deletes to `sync_queue`
+- `SyncService` pull/reconcile excludes pinned — remote updates and tombstones can never
+  mutate a local pin
+- `migrate_to_remote` silently skips pinned entries
+
+Pinning an entry that already exists remotely leaves the remote copy alone (accepted edge:
+a later re-pull can reintroduce it as a separate non-pinned entry). Lifting these gates
+requires a companion rai-ops-cortex change — tracked in `docs/TODO.md`.
 
 ---
 

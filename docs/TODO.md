@@ -108,6 +108,12 @@ Before committing to the schema migration, verify whether `KnowledgeChunk.Label`
 
 **Files:** `src/TotalRecall.Server/Handlers/KbSearchHandler.cs`, `src/TotalRecall.Infrastructure/Sync/IRemoteBackend.cs`, `src/TotalRecall.Infrastructure/Sync/CortexClient.cs` (plugin); `TotalRecall.Cortex.Core/Entities/KnowledgeChunk.cs`, `TotalRecall.Cortex.Api/Controllers/PluginSyncController.cs` (cortex)
 
+### Cortex Pinned-Tier Support
+
+rai-ops-cortex must implement the pinned tier server-side; until then pinned is local-only (not synced, not migrated). The plugin gates are deliberate: `RoutingStore` never enqueues pinned upserts/deletes to `sync_queue`, `SyncService` pull/reconcile excludes pinned (remote updates/tombstones can never mutate a local pin), and `migrate_to_remote` silently skips pinned entries. Accepted edge until then: pinning an entry that already exists remotely leaves the remote copy untouched, and a later re-pull can reintroduce it as a separate non-pinned entry. When Cortex implements pinned: lift the RoutingStore/SyncService/MigrateToRemote pinned gates.
+
+**Files:** `src/TotalRecall.Infrastructure/Sync/RoutingStore.cs`, `src/TotalRecall.Infrastructure/Sync/SyncService.cs`, `src/TotalRecall.Server/Handlers/MigrateToRemoteHandler.cs` (plugin); rai-ops-cortex (server-side pinned tier)
+
 ### Reranker (Cortex-Side)
 
 Cross-encoder or Cohere Rerank API pass after pgvector retrieval on the Cortex side, improving KB search quality for plugin queries. Plugin-side reranking (bundled ONNX cross-encoder) is a separate future consideration. Address when retrieval eval metrics show top-K precision is a bottleneck.

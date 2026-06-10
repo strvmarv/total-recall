@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- **Pinned tier** — fourth memory tier for user-pinned entries: always injected verbatim at session start (ahead of the hot tier) and on session_refresh, structurally immune to decay, warm-sweep demotion, and compaction. New `memory_pin` / `memory_unpin` MCP tools and `total-recall memory pin|unpin` CLI verbs; `pinned: true` flag on `memory_store`; `pinned` accepted in search/list/recent/export tier filters; `tierSummary.pinned` count, `status` pinned counts, and a `pinned_budget_pressure` session-start hint. Pinned entries are capped at 500 chars (`tiers.pinned.max_content_chars`) — rejected at the door, never truncated. SQLite Migration 16; no Postgres schema change (new `tier` value).
+
+### Known limitations
+
+- **Pinned is local-only for the Cortex backend**: the remote Cortex service has no pinned-tier support yet, so pinned entries are never pushed, pulled, reconciled, or migrated (`migrate_to_remote` skips them). Pinning an entry that already exists remotely leaves the remote copy untouched; a later re-pull of that remote copy can reintroduce it as a separate non-pinned entry. Requires a companion rai-ops-cortex change to lift.
+
 ## 2.0.0 - 2026-06-04
 
 Active token optimization, phases 1-3. total-recall moves from passive responder toward active co-pilot: accurate token accounting, mid-session context refresh, usage-driven memory selection, tool-result caching, and host-LLM fact extraction.

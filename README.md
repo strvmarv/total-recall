@@ -6,6 +6,7 @@
 ║  CLIENT: Quaid, Douglas                      ║
 ║  STATUS: MEMORY EXTRACTION IN PROGRESS       ║
 ║                                              ║
+║  > Loading tier: PINNED ......... [OK]       ║
 ║  > Loading tier: HOT ............ [OK]       ║
 ║  > Loading tier: WARM ........... [OK]       ║
 ║  > Loading tier: COLD ........... [OK]       ║
@@ -53,7 +54,7 @@ Every TUI coding assistant has the same gaps:
 - **Persistent memory** — corrections, preferences, decisions, and project context survive sessions automatically
 - **Cross-tool** — one memory store shared across Claude Code, Copilot CLI, Cursor, Cline, OpenCode, and Hermes; existing memories auto-import on first run
 - **Cross-device** — point `TOTAL_RECALL_DB_PATH` at a cloud-synced folder and your memory follows you everywhere
-- **Smarter context, lower token cost** — a three-tier model (Hot / Warm / Cold) enforces a 4000-token budget per prompt, so you get relevant context without carrying everything
+- **Smarter context, lower token cost** — a four-tier model (Pinned / Hot / Warm / Cold) enforces a 4000-token budget per prompt, so you get relevant context without carrying everything
 - **Token expenditure tracking** — see exactly what each session costs, broken down by host, project, and time window
 - **Knowledge base** — ingest your docs, READMEs, API references, and architecture notes; retrieved semantically when relevant
 - **Observability** — measure retrieval quality, run benchmarks, and compare config changes with the built-in eval framework
@@ -127,11 +128,12 @@ Every memory has an entry type that tells total-recall what it is and how to tre
 
 ## How It Works
 
-### Three-Tier Model
+### Four-Tier Model
 
-total-recall uses a three-tier memory model designed to balance signal density with token cost:
+total-recall uses a four-tier memory model designed to balance signal density with token cost:
 
-- **Hot** (up to 50 entries, 4000-token budget) — auto-injected into every prompt. Your most important corrections, preferences, and recently promoted entries are always present without any query.
+- **Pinned** (user-curated, 500 chars per entry) — entries you pin via `memory_pin` (or store-and-pin with `memory_store { pinned: true }`). Always injected verbatim at session start, ahead of the hot tier, under a `## Pinned directives (always follow)` header — never truncated, never decayed, never demoted, never compacted. Oversized content is rejected at the door (configurable via `tiers.pinned.max_content_chars`). The only way out is `memory_unpin` (→ warm).
+- **Hot** (up to 50 entries, 4000-token budget) — auto-injected into every prompt. Your most important corrections, preferences, and recently promoted entries are always present without any query. Pinned tokens come off the top of this budget.
 - **Warm** (up to 10K entries) — retrieved semantically per query. When you ask about authentication, relevant auth memories surface automatically. Entries decay over time; unused ones migrate to cold.
 - **Cold** (unlimited, hierarchical) — your knowledge base. Ingest entire directories — source trees, documentation, design specs — and they're retrieved when relevant.
 
@@ -150,9 +152,9 @@ For enterprise deployments, swap in a remote embedder (OpenAI, Amazon Bedrock) f
 Every `session_start` call runs the same sequence:
 
 1. **Import sync** — scans all installed host tools (Claude Code, Copilot CLI, Cursor, Cline, OpenCode, Hermes), deduplicates via content hash, and imports new entries.
-2. **Hot tier assembly** — assembles current hot entries as injectable context for the session.
+2. **Pinned + hot tier assembly** — pinned entries are injected first, verbatim and untruncated, then current hot entries fill the remaining token budget.
 3. **Hint generation** — surfaces up to 5 high-value warm memories as actionable one-liners: `Correction` and `Preference` entries first, frequently accessed entries (3+ accesses) second, recently promoted entries third. No LLM calls — pure DB queries.
-4. **Tier summary** — counts entries across hot, warm, cold, and all KB collections.
+4. **Tier summary** — counts entries across pinned, hot, warm, cold, and all KB collections (`tierSummary.pinned` included). A `pinned_budget_pressure` hint fires when pins consume over half the token budget (suggested action: `memory_unpin`).
 5. **Session continuity** — reports human-readable time since the last compaction event (proxy for last active session).
 
 Every `session_start` also runs a skill scan: it reads `~/.claude/skills/` plus any directories listed in `[skills] extra_dirs`, persists the content + a locally-computed embedding to a SQLite skill cache, and advertises discovered skills as an `## Available Skills` block in the session context. Scanned skills are invokable on demand via the `skill_get` MCP tool and discoverable via `skill_search` (hybrid semantic + keyword ranking with a usage-decay tie-breaker) — both work entirely offline with no Cortex required. In Cortex mode the scanned skills are also pushed to Cortex, usage events sync back as a multi-machine rollup, and pulled skills from other machines merge into the same local cache.
@@ -186,6 +188,8 @@ All commands are routed through the `/total-recall:commands` skill:
 | `/total-recall:commands inspect <id>` | Deep dive on single entry with compaction history |
 | `/total-recall:commands promote <id>` | Move entry to higher tier |
 | `/total-recall:commands demote <id>` | Move entry to lower tier |
+| `/total-recall:commands pin <id>` | Pin entry — always injected at session start, never decays |
+| `/total-recall:commands unpin <id>` | Release a pinned entry back to the warm tier |
 | `/total-recall:commands history` | Show recent tier movements |
 | `/total-recall:commands lineage <id>` | Show compaction ancestry |
 | `/total-recall:commands export` | Export to portable JSON format |
@@ -218,9 +222,12 @@ The config file lives at `~/.total-recall/config.toml`. All fields have defaults
 ```toml
 # total-recall configuration
 
+[tiers.pinned]
+max_content_chars = 500           # Max characters per pinned entry (oversize rejected, never truncated)
+
 [tiers.hot]
 max_entries = 50                  # Max entries auto-injected per prompt
-token_budget = 4000               # Max tokens for hot tier injection
+token_budget = 4000               # Max tokens for hot tier injection (pinned tokens come off the top)
 carry_forward_threshold = 0.7     # Score threshold to stay in hot
 
 [tiers.warm]
@@ -289,6 +296,7 @@ Total Recall Cortex is the shared backend platform that adds team knowledge base
 
 In Cortex mode, the plugin operates as a hybrid:
 - **User memories** are stored locally (fast reads/writes), synced bidirectionally to Cortex every 300 seconds and at session boundaries
+- **Pinned entries are local-only** — Cortex has no pinned-tier support yet, so pins are never pushed, pulled, reconciled, or migrated (`migrate_to_remote` skips them)
 - **Global knowledge** (team KB, connector-ingested data) is queried remotely from Cortex
 - **Telemetry** (usage, retrieval events, compaction log) is pushed to Cortex for unified dashboards
 - **Skills** are synced to Cortex so team members share the same skill library
@@ -354,23 +362,26 @@ A bundle (directory with supporting files) uses the same frontmatter in its `SKI
 
 ## Developer Reference
 
-The MCP server exposes 33 tools in local/Postgres mode and 38 in Cortex mode (adds 5 skill tools). All tool names follow the pattern `<domain>_<action>`.
+The MCP server exposes 41 core tools in every backend mode; local SQLite and Cortex modes add usage, cache, and skill tools (48 and 49 total, respectively). All tool names follow the pattern `<domain>_<action>`.
 
 | Category | Tools |
 |---|---|
-| Session | `session_start`, `session_end`, `session_context` |
-| Memory | `memory_store`, `memory_get`, `memory_update`, `memory_delete`, `memory_inspect`, `memory_search` |
-| Tier management | `memory_promote`, `memory_demote`, `memory_history`, `memory_lineage` |
+| Session | `session_start`, `session_end`, `session_context`, `session_refresh` |
+| Memory | `memory_store`, `memory_get`, `memory_get_all`, `memory_update`, `memory_delete`, `memory_inspect`, `memory_search`, `memory_list`, `memory_recent`, `memory_extract` |
+| Tier management | `memory_promote`, `memory_demote`, `memory_pin`, `memory_unpin`, `memory_history`, `memory_lineage` |
 | Import / Export | `memory_export`, `memory_import`, `import_host` |
-| Knowledge base | `kb_ingest_file`, `kb_ingest_dir`, `kb_search`, `kb_list_collections`, `kb_refresh`, `kb_remove`, `kb_summarize` |
+| Knowledge base | `kb_ingest_file`, `kb_ingest_dir`, `kb_search`, `kb_list_collections`, `kb_refresh`, `kb_remove`, `kb_summarize`, `kb_resolve` |
 | Compaction | `compact_now` |
 | Eval | `eval_report`, `eval_benchmark`, `eval_compare`, `eval_snapshot`, `eval_grow` |
 | Config | `config_get`, `config_set` |
 | Status & Usage | `status`, `usage_status`† |
+| Cache | `cache_check`†, `cache_store`† |
 | Migration | `migrate_to_remote` |
-| Skills *(Cortex mode)* | `skill_search`, `skill_get`, `skill_list`, `skill_delete`, `skill_import_host` |
+| Skills† | `skill_search`, `skill_get`, `skill_list`, `skill_import_host`, `skill_delete` *(Cortex mode only)* |
 
-†`usage_status` is unavailable in Postgres mode.
+†Unavailable in Postgres mode (local SQLite + Cortex modes only).
+
+Pinned tier surface: `memory_pin` moves any entry into the pinned tier (with optional `scope: "project" | "global"`); `memory_unpin` releases it to warm; `memory_store` accepts `pinned: true` to store-and-pin new content; `memory_promote` / `memory_demote` reject pinned as source or target. `pinned` is accepted in the tier filters of `memory_search`, `memory_list`, `memory_recent`, `memory_export`, and `memory_get_all`, and `status` reports pinned counts.
 
 Handler implementations live in `src/TotalRecall.Server/Handlers/<ToolName>Handler.cs`. Tool wiring: `src/TotalRecall.Server/ServerComposition.cs → BuildRegistry()`.
 
@@ -382,11 +393,12 @@ Handler implementations live in `src/TotalRecall.Server/Handlers/<ToolName>Handl
 MCP Server (.NET 8 NativeAOT — C# imperative shell + F# functional core)
 ├── TotalRecall.Core (F#)        — pure functions: tokenizer, decay, hybrid ranking, parsers, chunker
 ├── TotalRecall.Infrastructure   — SQLite/Postgres storage, ONNX/remote embedder, importers, migrations
-├── TotalRecall.Server           — MCP JSON-RPC server, 33 tool handlers (38 in Cortex mode), lifecycle
+├── TotalRecall.Server           — MCP JSON-RPC server, 41 core tool handlers (48–49 with mode-dependent tools), lifecycle
 ├── TotalRecall.Cli              — CLI commands (status, eval, kb, memory, config, migrate)
 └── TotalRecall.Host             — composition root, AOT entry point, migration guard
 
 Tiers:
+  Pinned (500 chars/entry) → user-pinned; always injected first, never decays or compacts
   Hot (50 entries)   → auto-injected every prompt
   Warm (10K entries) → BM25 + cosine hybrid search per query
   Cold (unlimited)   → hierarchical KB retrieval
@@ -406,7 +418,7 @@ Backends (selected by config):
 
 **Local mode:** all state lives in `~/.total-recall/total-recall.db`. The embedding model and the sqlite-vec native extension are bundled with the binary. No network calls required at runtime.
 
-**Cortex mode:** user memories write locally first for low latency. A `RoutingStore` wraps every write: persist locally, enqueue to `sync_queue`. A background sync loop flushes the queue to Cortex every `sync_interval_seconds` (default: 300) and at session boundaries. Global knowledge (team KB, connectors) is read directly from Cortex.
+**Cortex mode:** user memories write locally first for low latency. A `RoutingStore` wraps every write: persist locally, enqueue to `sync_queue`. A background sync loop flushes the queue to Cortex every `sync_interval_seconds` (default: 300) and at session boundaries. Global knowledge (team KB, connectors) is read directly from Cortex. Pinned entries are excluded from all sync paths — local-only until Cortex gains pinned-tier support.
 
 ---
 
