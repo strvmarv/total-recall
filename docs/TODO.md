@@ -173,13 +173,14 @@ All workflows currently use `actions/checkout@v4`, `actions/setup-dotnet@v4`, `a
 
 ### Plugin Version Single Source of Truth
 
-**Five** version locations can drift silently:
+**Six** version locations can drift silently:
 
 1. `package.json` (`version` field)
 2. `package-lock.json` (top-level `version` field AND `packages[""].version` — npm keeps both in sync; the safest edit is a `replace_all` of the old version string)
 3. `.claude-plugin/plugin.json`
 4. `.copilot-plugin/plugin.json`
 5. `.cursor-plugin/plugin.json`
+6. `hermes-plugin/plugin.yaml`
 
 Multiple drift incidents were discovered during the 0.7.2 → 0.8.0 cutover:
 
@@ -188,16 +189,16 @@ Multiple drift incidents were discovered during the 0.7.2 → 0.8.0 cutover:
 - `.cursor-plugin/plugin.json` was stale at `0.7.2` for the same reason.
 - `package-lock.json`'s top-level `version` field was drifting independently of `package.json` through beta.4 until the Mac agent's beta.6 lockfile regeneration synced them.
 
-All five were synced to `0.8.0-beta.4` in the beta.4 commit, and the standing rule is documented in `AGENTS.md` § "Version sync — five files, one version". The AGENTS.md entry was bumped from "four" to "five" in the 2026-04-09 doc audit when the build agent noticed `package-lock.json` had been drifting.
+All five JSON sites were synced to `0.8.0-beta.4` in the beta.4 commit, and the standing rule is documented in `AGENTS.md` § "Version sync — six files, one version". The AGENTS.md entry was bumped from "four" to "five" in the 2026-04-09 doc audit when the build agent noticed `package-lock.json` had been drifting, and from "five" to "six" during the 2.1.0 release when `hermes-plugin/plugin.yaml` turned up stuck at `1.4.0` (the 2.0.0 sync had missed the one YAML manifest).
 
 Automate the enforcement with either:
 
 - A pre-commit hook that treats `package.json` as authoritative and derives the other manifests' version fields from it (auto-sync). Note `package-lock.json` is tricky to edit safely in a hook — consider running `npm install --package-lock-only --force --os=darwin --cpu=arm64` after the sync to regenerate the lockfile cross-platform (the `--force --os/--cpu` flags are required on npm 11+ to resolve all optional-dep RID variants; a plain `npm install` without them regenerates a single-platform lockfile and breaks every non-host CI matrix leg — this is exactly how beta.1 shipped a broken lockfile that didn't get caught until beta.6).
-- A `dotnet-ci.yml` step that fails if the five versions disagree (safety-net check, no auto-fix).
+- A `dotnet-ci.yml` step that fails if the six versions disagree (safety-net check, no auto-fix).
 
 The pre-commit sync eliminates human error at the source. The CI check catches it if the hook is bypassed or never installed. Ideally both.
 
-**Files:** `package.json`, `package-lock.json`, `.claude-plugin/plugin.json`, `.copilot-plugin/plugin.json`, `.cursor-plugin/plugin.json`, `git-hooks/pre-commit` (new), `.github/workflows/dotnet-ci.yml`
+**Files:** `package.json`, `package-lock.json`, `.claude-plugin/plugin.json`, `.copilot-plugin/plugin.json`, `.cursor-plugin/plugin.json`, `hermes-plugin/plugin.yaml`, `git-hooks/pre-commit` (new), `.github/workflows/dotnet-ci.yml`
 
 ### Scrub Stale TS References in .NET Source Comments
 

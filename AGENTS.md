@@ -85,12 +85,13 @@ The .NET SDK is pinned by `global.json` at the repo root (`{"sdk":{"version":"10
 
 The embedding model (`models/all-MiniLM-L6-v2/model.onnx`) is stored with Git LFS. Contributors need `git lfs install` before cloning. The model is bundled so plugin users get offline embeddings without a HuggingFace download on first run. If the model is missing at runtime, the .NET embedder has a fallback to download from HuggingFace (see `src/TotalRecall.Infrastructure/Embedding/ModelManager.cs`).
 
-### Version sync — five files, one version (STANDING RULE)
+### Version sync — six files, one version (STANDING RULE)
 
-total-recall is a multi-host plugin (Claude Code, Copilot CLI, Cursor, OpenCode, …). Each host reads its own plugin manifest, and every manifest carries its own `version` field. They MUST all match the `package.json` version on every release. Historical drift incidents:
+total-recall is a multi-host plugin (Claude Code, Copilot CLI, Cursor, OpenCode, Hermes, …). Each host reads its own plugin manifest, and every manifest carries its own `version` field. They MUST all match the `package.json` version on every release. Historical drift incidents:
 
 - `.copilot-plugin/plugin.json` was stuck on `0.1.0` for many releases — Copilot CLI users saw `0.1.0` reported even when npm was at 0.7.2
 - `.claude-plugin/plugin.json` was stuck on `0.7.2` through the entire TS→.NET cutover (beta.1 → beta.3) until the build agent caught it during the beta.4 audit
+- `hermes-plugin/plugin.yaml` was stuck on `1.4.0` through the 2.0.0 release — the v2.0.0 sync repaired the plugin.json drift but missed the one YAML manifest (caught during the 2.1.0 release)
 
 **On every release you MUST bump the version in ALL of these to the same value:**
 
@@ -99,16 +100,25 @@ total-recall is a multi-host plugin (Claude Code, Copilot CLI, Cursor, OpenCode,
 3. `.claude-plugin/plugin.json`
 4. `.copilot-plugin/plugin.json`
 5. `.cursor-plugin/plugin.json`
+6. `hermes-plugin/plugin.yaml` (the one non-JSON manifest — a plain-text grep for the old version string is the only way it shows up)
 
 `.opencode/` uses `INSTALL.md` (no versioned manifest) so it is exempt, but any version references in that doc should still be reviewed.
 
-When agents dispatch subagents to bump versions or cut releases, this list MUST be included in the prompt. Never assume "I'll just bump package.json" — every release must sync all five.
+**Version surfaces that are NOT bumped in-repo** (do not "fix" these during a release):
+
+- The AOT binary's `--version` output and the MCP `serverInfo.version` are stamped at release time by `.github/workflows/release.yml` from the git tag (`-p:Version` / `-p:InformationalVersion`). The repo contains no hardcoded value for them — tagging `vX.Y.Z` is the bump.
+- `hermes-plugin/mcp_client.py` `clientInfo` (`hermes-mcp-client 0.1.0`) identifies the MCP client implementation, not the plugin; `protocolVersion` is the MCP spec date.
+- `global.json` pins the .NET SDK; `Version="..."` attributes in `.csproj` files are NuGet package references.
+
+The fastest audit is a repo-wide grep for the OLD version string after bumping — anything still matching (outside `CHANGELOG.md` history and the exclusions above) was missed.
+
+When agents dispatch subagents to bump versions or cut releases, this list MUST be included in the prompt. Never assume "I'll just bump package.json" — every release must sync all six.
 
 A follow-up in `docs/TODO.md` ("Plugin Version Single Source of Truth") tracks adding a pre-commit or CI check to enforce this automatically.
 
 ### Release flow
 
-1. Bump version in all five files above to the same value.
+1. Bump version in all six files above to the same value.
 2. Update `CHANGELOG.md` with the new version's `### Fixed` / `### Added` / `### Changed` sections.
 3. Commit with a message like `release(beta.N): bump to 0.x.y-beta.N; …` or `release: v0.x.y; …`.
 4. Tag with `git tag -a vX.Y.Z -m "..."` (annotated tag with a release-note body in the tag message — `gh release` displays it).
@@ -329,7 +339,7 @@ These are non-negotiable rules that apply to every commit, every PR, every subag
 
 1. **No `Co-Authored-By: Claude ...` (or any AI co-author) trailers** in commit messages. Project history is attributed solely to human authors. When dispatching subagents that include `git commit` instructions, the prompt MUST explicitly say "do NOT add any Co-Authored-By trailer."
 2. **Spec and plan documents in `docs/superpowers/specs/` and `docs/superpowers/plans/` are NEVER committed.** They live in the working tree only. The brainstorming and writing-plans skills both default to committing them — that default is overridden on this project. Do not auto-commit them.
-3. **Five-file version sync on every release** (see "Version sync" section above).
+3. **Six-file version sync on every release** (see "Version sync" section above).
 4. **Never delete anything destructively.** This applies broadly: never `git reset --hard` without confirmation, never `git push --force` without confirmation, never delete user data. The `AutoMigrationGuard` follows this principle: it sidelines suspect database files to `<dbPath>.failed-migration-<utc>` instead of deleting them.
 
 ## Deferred Items
