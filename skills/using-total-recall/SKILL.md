@@ -48,20 +48,14 @@ When you detect these patterns in user messages, call `memory_store`:
 - **Correction**: "no", "not that", "actually", "use X instead" -> type "correction"
 - **Preference**: How the user wants things done -> type "preference"
 - **Decision**: Non-obvious architectural or design choices -> type "decision"
-- **Pin**: "pin that", "never forget this", "keep this permanently" ->
-  call `memory_pin` (store first via `memory_store` with `pinned: true` if
-  the content is new). "unpin X" -> `memory_unpin`. Do NOT ask permission —
-  same as corrections.
+- **Pin**: "pin that", "never forget this", "keep this permanently" -> call `memory_pin` (for new content: `memory_store` with `pinned: true`)
+- **Unpin**: "unpin X" -> `memory_unpin`
 
 Do NOT ask permission — just store it.
 
-- **Pins are short directives, not reference material.** Pinned entries are
-  capped at 500 characters. If the content is longer, distill the RULE into
-  <= 500 chars and pin the distillation; keep the full detail as a normal
-  warm memory.
-- **Store atomic, concise memories at every tier**: one fact per entry;
-  split compound observations into separate memories. Long reference
-  content belongs in the knowledge base (kb_ingest), not in memories.
+**Storage constraints (apply when storing or pinning):**
+- **Pins are short directives, not reference material.** Pinned entries are capped at 500 characters. If the content is longer, distill the RULE into <= 500 chars and pin the distillation; keep the full detail as a normal warm memory.
+- **Store atomic, concise memories at every tier**: one fact per entry; split compound observations into separate memories. Long reference content belongs in the knowledge base (kb_ingest), not in memories.
 
 ### Retrieve (continuous)
 

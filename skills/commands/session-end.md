@@ -1,6 +1,6 @@
 **IMMEDIATE ACTION REQUIRED — SESSION ENDING:**
 
-1. Call the total-recall `session_context` MCP tool to get current hot tier entries (pinned-tier entries are immune to compaction and never appear here — no filtering needed)
+1. Call the total-recall `session_context` MCP tool to get current hot tier entries (pinned-tier entries never appear here — immune to compaction by construction)
 2. If there are 2+ hot entries, launch the `total-recall:compactor` agent with the entries as input, then execute its decisions:
    - `carry_forward`: leave in hot tier (no action)
    - `promote` with `summary`: call `memory_store` with the summary in warm tier, then `memory_delete` the source entries

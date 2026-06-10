@@ -162,7 +162,8 @@ Call `memory_pin` with the entry ID and optional scope/project/type. Pin a memor
 - CLI: `total-recall memory pin <id> [--scope project|global] [--project <name>] [--type memory|knowledge]`
 - `scope: "global"` makes the pin visible in every project; `scope: "project"` scopes it to the given (or existing) project; omitted keeps the entry's current project.
 - Pinning an already-pinned entry is a no-op success (scope still applied).
-- Pinned entries are capped at 500 characters (TOML: `[tiers.pinned]` `max_content_chars`) — pins are directives, not reference material. Oversized content is rejected, never truncated or auto-summarized: distill the rule and pin the distillation.
+- Pinned entries are capped at 500 characters (config: `tiers.pinned.max_content_chars`, default 500) — pins are directives, not reference material. Oversized content is rejected, never truncated or auto-summarized: distill the rule and pin the distillation; keep the full detail as a normal warm memory.
+- For NEW content, `memory_store` with `pinned: true` stores-and-pins in one call (no pre-existing id required).
 
 ### unpin <id> [--type memory|knowledge]
 
@@ -178,7 +179,7 @@ Call `memory_history`. Show recent tier movements from the compaction log as a t
 
 ### recent [--limit N] [--tier hot|warm|cold|pinned] [--type <entryType>] [--project <name>] [--order created|updated|accessed]
 
-Call `memory_recent` with the parsed flags (defaults: limit 20, all tiers, order `created`). Valid `--tier` values: `hot`, `warm`, `cold`, `pinned`. Render the returned `entries` as a numbered list, newest first:
+Call `memory_recent` with the parsed flags (defaults: limit 20, all tiers, order `created`). Render the returned `entries` as a numbered list, newest first:
 
 `N. [<timestamp>] <tier> · <entry_type> · <project> — <preview>`
 
