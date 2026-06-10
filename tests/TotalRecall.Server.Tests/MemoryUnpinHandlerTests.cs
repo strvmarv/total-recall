@@ -80,4 +80,27 @@ public class MemoryUnpinHandlerTests
         await Assert.ThrowsAsync<ArgumentException>(() => handler.ExecuteAsync(
             ParseArgs("""{"id":"nope"}"""), CancellationToken.None));
     }
+
+    // Parity with Pin_KnowledgeEntry_TypeArgKnowledge_ResultIsKnowledge: a pinned
+    // KNOWLEDGE entry unpinned with type:"knowledge" moves to (Warm,Knowledge) and
+    // the result DTO reflects the knowledge content type end-to-end.
+    [Fact]
+    public async Task Unpin_KnowledgeEntry_MovesToWarmKnowledge()
+    {
+        var (handler, store, vec, _) = MakeHandler();
+        store.Seed(Tier.Pinned, ContentType.Knowledge, MakeEntry("k1", "some kb content"));
+
+        var result = await handler.ExecuteAsync(
+            ParseArgs("""{"id":"k1","type":"knowledge"}"""), CancellationToken.None);
+
+        Assert.NotEqual(true, result.IsError);
+        using var doc = JsonDocument.Parse(result.Content[0].Text);
+        Assert.Equal("pinned", doc.RootElement.GetProperty("from_tier").GetString());
+        Assert.Equal("warm", doc.RootElement.GetProperty("to_tier").GetString());
+        Assert.Equal("knowledge", doc.RootElement.GetProperty("to_content_type").GetString());
+        Assert.Single(store.MoveCalls);
+        Assert.Equal(Tier.Pinned, store.MoveCalls[0].FromTier);
+        Assert.Equal(Tier.Warm, store.MoveCalls[0].ToTier);
+        Assert.Equal(ContentType.Knowledge, store.MoveCalls[0].ToType);
+    }
 }

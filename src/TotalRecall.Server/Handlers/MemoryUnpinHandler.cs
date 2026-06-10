@@ -8,7 +8,11 @@
 // bad args; ErrorTranslator renders MCP errors.
 //
 // Only pinned entries may be unpinned — attempting to unpin a non-pinned entry
-// throws ArgumentException without moving anything.
+// throws ArgumentException without moving anything. This is intentionally
+// asymmetric with MemoryPinHandler, which is idempotent (pinning an already-pinned
+// entry succeeds as a no-op): unpinning is an explicit one-way exit from the pinned
+// tier, and a non-pinned target almost always signals a caller error rather than a
+// benign double-call, so failing loudly is the safer default.
 
 using System;
 using System.Collections.Generic;
