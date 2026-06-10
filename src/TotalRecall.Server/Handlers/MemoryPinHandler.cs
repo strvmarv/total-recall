@@ -123,6 +123,20 @@ public sealed class MemoryPinHandler : IToolHandler
         if (!alreadyPinned && entry.Content.Length > _maxContentChars)
             throw new ArgumentException(
                 ContentLimitMessage(_maxContentChars, entry.Content.Length));
+
+        // Resolve scope/project BEFORE moving so a validation failure leaves
+        // the entry untouched. (Previously this block ran post-move, which
+        // stranded the entry in pinned on error.)
+        string? effectiveProject = null;
+        var clearProject = scope == "global";
+        if (scope == "project")
+        {
+            effectiveProject = project ?? EntryMapping.OptString(entry.Project);
+            if (string.IsNullOrEmpty(effectiveProject))
+                throw new ArgumentException(
+                    "scope='project' requires a project argument (the entry has no existing project)");
+        }
+
         if (!alreadyPinned)
         {
             MoveHelpers.MoveAndReEmbed(
@@ -134,15 +148,6 @@ public sealed class MemoryPinHandler : IToolHandler
         // scope choice via the project column. Skip the write entirely when the
         // entry was already pinned and no scope change was requested, so we
         // don't spuriously bump updated_at or fire the FTS _fts_au trigger.
-        string? effectiveProject = null;
-        var clearProject = scope == "global";
-        if (scope == "project")
-        {
-            effectiveProject = project ?? EntryMapping.OptString(entry.Project);
-            if (string.IsNullOrEmpty(effectiveProject))
-                throw new ArgumentException(
-                    "scope='project' requires a project argument (the entry has no existing project)");
-        }
         var needsUpdate = !alreadyPinned || scope is not null;
         if (needsUpdate)
         {

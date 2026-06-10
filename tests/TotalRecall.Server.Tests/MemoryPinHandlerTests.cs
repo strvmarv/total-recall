@@ -115,6 +115,25 @@ public class MemoryPinHandlerTests
             ParseArgs("""{"id":"e1","scope":"project"}"""), CancellationToken.None));
     }
 
+    // Regression: scope validation must happen BEFORE MoveAndReEmbed so a failed
+    // pin (entry has no project and no project arg) leaves the entry untouched.
+    // Previously, the handler moved the entry to pinned THEN threw — stranding it.
+    [Fact]
+    public async Task Pin_ScopeProject_NoProjectAnywhere_ThrowsBeforeMove()
+    {
+        var (handler, store, _, _) = MakeHandler();
+        store.Seed(Tier.Warm, ContentType.Memory, MakeEntry("e1")); // entry has no project
+
+        await Assert.ThrowsAsync<ArgumentException>(() => handler.ExecuteAsync(
+            ParseArgs("""{"id":"e1","scope":"project"}"""), CancellationToken.None));
+
+        // The entry must NOT have been moved — store must record zero moves.
+        Assert.Empty(store.MoveCalls);
+        // The entry must still live in warm, not pinned.
+        Assert.Null(store.Entries.GetValueOrDefault((Tier.Pinned, ContentType.Memory, "e1")));
+        Assert.NotNull(store.Entries.GetValueOrDefault((Tier.Warm, ContentType.Memory, "e1")));
+    }
+
     [Fact]
     public async Task Pin_MissingEntry_Throws()
     {
