@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 2.1.1 - 2026-06-10
+
+### Fixed
+
+- **Sync-queue poison pill that crashed `session_end` and wedged the entire Cortex backlog.** A memory whose content held a raw C0 control character (e.g. a captured code snippet containing a literal U+0001) was written to the sync queue as invalid JSON: the hand-rolled, AOT-safe `SyncPayload` escaper only handled `\ " \n \r \t` and emitted every other control byte unescaped, violating RFC 8259. On drain, `SyncService.FlushAsync` parsed payloads inside a `try` that caught only `CortexUnreachableException`, so the resulting `JsonException` propagated uncaught and aborted the whole flush before any item could be marked completed or failed. Because the corrupt row sat at the head of the memory drain batch, every periodic sync re-threw on it and the backlog grew without bound (all rows stuck at `attempts = 0`); `session_end`, which flushes first, surfaced the raw `JsonReaderException`. Two-part fix: (1) `SyncPayload.Escape` now emits the `\b \f \n \r \t` short forms plus `\uXXXX` for every other C0 control character (RFC 8259-compliant), with a no-allocation fast path when nothing needs escaping; (2) `FlushAsync` parses each drained item defensively and quarantines a permanently-unparseable payload — marking it failed with a backoff window and a diagnostic log line — instead of aborting the batch, so one corrupt row can no longer crash `session_end` or block the rest of the queue. Telemetry payloads that deserialize to `null` are quarantined rather than silently dropped, and a latent `JsonDocument` leak in the memory-upsert parse path is closed.
+
 ## 2.1.0 - 2026-06-10
 
 ### Added
