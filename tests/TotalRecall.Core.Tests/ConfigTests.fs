@@ -85,6 +85,7 @@ let configTests =
                     Hot = { MaxEntries = 50; TokenBudget = 8000; CarryForwardThreshold = 0.5; TaskWeight = 0.0 }
                     Warm = { MaxEntries = 200; RetrievalTopK = 10; SimilarityThreshold = 0.5; ColdDecayDays = 30 }
                     Cold = { ChunkMaxTokens = 500; ChunkOverlapTokens = 50; LazySummaryThreshold = 100 }
+                    Pinned = None
                 }
                 Compaction = {
                     DecayHalfLifeHours = 24.0

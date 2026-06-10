@@ -28,10 +28,15 @@ type ColdTierConfig = {
     LazySummaryThreshold: int
 }
 
+type PinnedTierConfig = {
+    MaxContentChars: int
+}
+
 type TiersConfig = {
     Hot: HotTierConfig
     Warm: WarmTierConfig
     Cold: ColdTierConfig
+    Pinned: PinnedTierConfig option   // optional: absent in existing config files
 }
 
 type CompactionConfig = {

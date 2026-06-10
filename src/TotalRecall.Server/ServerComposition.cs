@@ -19,7 +19,7 @@
 //      AutoMigrationGuard.CheckAndMigrateAsync BEFORE calling this (so the
 //      migration path can rename the old DB before we open a handle on it).
 //
-// Handler budget: Memory (16) + KB (8) + Session (4) + Eval (5) + Config (2) + Misc (4) = 39.
+// Handler budget: Memory (17) + KB (8) + Session (4) + Eval (5) + Config (2) + Misc (4) = 40.
 //
 // AOT: no reflection. Every handler is constructed via direct `new`. The
 // Eval/Config/ImportHost/CompactNow handlers have no-arg constructors that
@@ -114,7 +114,8 @@ public static class ServerComposition
         RetrievalEventLog? retrievalLog = null,
         Infrastructure.Sync.SyncQueue? syncQueue = null,
         CompactionLog? compactionLogWriter = null,
-        Infrastructure.Sync.SyncBacklogReader? syncBacklog = null)
+        Infrastructure.Sync.SyncBacklogReader? syncBacklog = null,
+        int pinnedMaxChars = MemoryPinHandler.DefaultMaxContentChars)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(vectors);
@@ -127,7 +128,7 @@ public static class ServerComposition
 
         var registry = new ToolRegistry();
 
-        // ---- Memory (16) ----
+        // ---- Memory (17) ----
         registry.Register(new MemoryStoreHandler(store, embedder, vectors, scopeDefault));
         registry.Register(new MemorySearchHandler(embedder, hybrid, scopeDefault, retrievalLog, syncQueue));
         registry.Register(new MemoryGetHandler(store));
@@ -136,6 +137,7 @@ public static class ServerComposition
         registry.Register(new MemoryDeleteHandler(store, vectors));
         registry.Register(new MemoryPromoteHandler(store, vectors, embedder, compactionLogWriter, syncQueue));
         registry.Register(new MemoryDemoteHandler(store, vectors, embedder, compactionLogWriter, syncQueue));
+        registry.Register(new MemoryPinHandler(store, vectors, embedder, compactionLogWriter, syncQueue, pinnedMaxChars));
         registry.Register(new MemoryInspectHandler(store, compactionLog));
         registry.Register(new MemoryHistoryHandler(compactionLog));
         registry.Register(new MemoryRecentHandler(store, scopeDefault));
@@ -356,7 +358,8 @@ public static class ServerComposition
                 scopeDefault: ResolveScopeDefault(cfg),
                 retrievalLog: retrievalLog,
                 compactionLogWriter: compactionLog,
-                syncBacklog: new Infrastructure.Sync.SyncBacklogReader(conn));
+                syncBacklog: new Infrastructure.Sync.SyncBacklogReader(conn),
+                pinnedMaxChars: ResolvePinnedMaxChars(cfg));
 
             registry.Register(new UsageStatusHandler(usageQuery));
 
@@ -445,7 +448,8 @@ public static class ServerComposition
             var registry = BuildRegistry(
                 store, vec, embedder, hybrid,
                 fileIngester, compactionLog, sessionLifecycle, statusOptions,
-                scopeDefault: ResolveScopeDefault(cfg));
+                scopeDefault: ResolveScopeDefault(cfg),
+                pinnedMaxChars: ResolvePinnedMaxChars(cfg));
 
             return new ServerCompositionHandles(dataSource, registry, store, storageMode);
         }
@@ -623,7 +627,8 @@ public static class ServerComposition
                 retrievalLog: retrievalLog,
                 syncQueue: syncQueue,
                 compactionLogWriter: compactionLog,
-                syncBacklog: new Infrastructure.Sync.SyncBacklogReader(conn));
+                syncBacklog: new Infrastructure.Sync.SyncBacklogReader(conn),
+                pinnedMaxChars: ResolvePinnedMaxChars(cfg));
 
             registry.Register(new UsageStatusHandler(usageQuery));
 
@@ -671,4 +676,15 @@ public static class ServerComposition
             return null;
         return scopeCfg.Default.Value;
     }
+
+    /// <summary>
+    /// Resolves the effective pinned content character limit from
+    /// <c>[tiers.pinned] max_content_chars</c>. Falls back to
+    /// <see cref="MemoryPinHandler.DefaultMaxContentChars"/> (500) when the
+    /// section is absent, matching the <c>Pinned: option</c> design in Config.fs.
+    /// </summary>
+    private static int ResolvePinnedMaxChars(Core.Config.TotalRecallConfig cfg) =>
+        FSharpOption<Core.Config.PinnedTierConfig>.get_IsSome(cfg.Tiers.Pinned)
+            ? cfg.Tiers.Pinned.Value.MaxContentChars
+            : MemoryPinHandler.DefaultMaxContentChars;
 }

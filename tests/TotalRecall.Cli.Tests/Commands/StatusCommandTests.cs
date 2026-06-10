@@ -43,7 +43,8 @@ public sealed class StatusCommandTests : IDisposable
                 new Core.Config.TiersConfig(
                     new Core.Config.HotTierConfig(20, 4000, 0.5, 0.0),
                     new Core.Config.WarmTierConfig(1000, 50, 0.3, 90),
-                    new Core.Config.ColdTierConfig(500, 50, 1000)),
+                    new Core.Config.ColdTierConfig(500, 50, 1000),
+                    FSharpOption<Core.Config.PinnedTierConfig>.None),
                 new Core.Config.CompactionConfig(168.0, 0.3, 0.7, 30, FSharpOption<double>.None, FSharpOption<double>.None, FSharpOption<double>.None, FSharpOption<double>.None, 10),
                 new Core.Config.EmbeddingConfig(model, dims,
                     FSharpOption<string>.None,
