@@ -7,7 +7,7 @@
 // IStore / IConfigLoader primitives.
 //
 // Scope vs. StatusHandler:
-//   * tierSizes         — 6 Count() calls, one per (tier, content_type).
+//   * tierSizes         — 8 Count() calls, one per (tier, content_type).
 //   * knowledgeBase     — ListByMetadata({type:"collection"}) enumeration.
 //   * db                — path + size (FileInfo.Length, nullable).
 //   * embedding         — model + dimensions from effective config.
@@ -142,6 +142,8 @@ public sealed class StatusCommand : ICliCommand
         int WarmKnowledge,
         int ColdMemory,
         int ColdKnowledge,
+        int PinnedMemory,
+        int PinnedKnowledge,
         IReadOnlyList<KbCollectionRow> Collections,
         int TotalChunks,
         string DbPath,
@@ -159,6 +161,8 @@ public sealed class StatusCommand : ICliCommand
         int warmKnow = store.Count(Tier.Warm, ContentType.Knowledge);
         int coldMem = store.Count(Tier.Cold, ContentType.Memory);
         int coldKnow = store.Count(Tier.Cold, ContentType.Knowledge);
+        int pinnedMem = store.Count(Tier.Pinned, ContentType.Memory);
+        int pinnedKnow = store.Count(Tier.Pinned, ContentType.Knowledge);
 
         var collectionRows = store.ListByMetadata(
             Tier.Cold, ContentType.Knowledge, CollectionFilter, null);
@@ -213,6 +217,7 @@ public sealed class StatusCommand : ICliCommand
 
         return new StatusData(
             hotMem, hotKnow, warmMem, warmKnow, coldMem, coldKnow,
+            pinnedMem, pinnedKnow,
             collections, totalChunks,
             dbPath, sizeBytes,
             model, dims);
@@ -248,6 +253,8 @@ public sealed class StatusCommand : ICliCommand
         tiers.AddRow("warm", "knowledge", d.WarmKnowledge.ToString(CultureInfo.InvariantCulture));
         tiers.AddRow("cold", "memory", d.ColdMemory.ToString(CultureInfo.InvariantCulture));
         tiers.AddRow("cold", "knowledge", d.ColdKnowledge.ToString(CultureInfo.InvariantCulture));
+        tiers.AddRow("pinned", "memory", d.PinnedMemory.ToString(CultureInfo.InvariantCulture));
+        tiers.AddRow("pinned", "knowledge", d.PinnedKnowledge.ToString(CultureInfo.InvariantCulture));
         AnsiConsole.Write(tiers);
 
         if (d.Collections.Count == 0)
@@ -320,6 +327,10 @@ public sealed class StatusCommand : ICliCommand
         AppendString(sb, "cold"); sb.Append(":{");
         AppendIntField(sb, "memory", d.ColdMemory); sb.Append(',');
         AppendIntField(sb, "knowledge", d.ColdKnowledge);
+        sb.Append("},");
+        AppendString(sb, "pinned"); sb.Append(":{");
+        AppendIntField(sb, "memory", d.PinnedMemory); sb.Append(',');
+        AppendIntField(sb, "knowledge", d.PinnedKnowledge);
         sb.Append('}');
         sb.Append("},");
 

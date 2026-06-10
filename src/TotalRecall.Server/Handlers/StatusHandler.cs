@@ -13,7 +13,7 @@
 //     values that live outside the store/lifecycle seams and would
 //     otherwise have to be pulled from the process host configuration.
 //
-//   - tierSizes is 6 IStore.Count calls, one per (tier, type).
+//   - tierSizes is 8 IStore.Count calls, one per (tier, type).
 //
 //   - knowledgeBase enumerates cold_knowledge rows whose metadata.type ==
 //     "collection" via IStore.ListByMetadata (option b — collections

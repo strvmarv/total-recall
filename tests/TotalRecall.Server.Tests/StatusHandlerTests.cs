@@ -92,6 +92,8 @@ public sealed class StatusHandlerTests
     [Fact]
     public async Task TierSizes_CountsFromStore()
     {
+        // Exhaustive tier inventory: all 8 (tier, type) pairs seeded with
+        // distinct non-zero counts so each field is provably populated.
         var store = new FakeStore();
         store.SeedCount(Tier.Hot, ContentType.Memory, 11);
         store.SeedCount(Tier.Hot, ContentType.Knowledge, 22);
@@ -99,6 +101,8 @@ public sealed class StatusHandlerTests
         store.SeedCount(Tier.Warm, ContentType.Knowledge, 44);
         store.SeedCount(Tier.Cold, ContentType.Memory, 55);
         store.SeedCount(Tier.Cold, ContentType.Knowledge, 66);
+        store.SeedCount(Tier.Pinned, ContentType.Memory, 77);
+        store.SeedCount(Tier.Pinned, ContentType.Knowledge, 88);
 
         var root = await RunAsync(store, new FakeSessionLifecycle(), Options());
 
@@ -109,6 +113,8 @@ public sealed class StatusHandlerTests
         Assert.Equal(44, ts.GetProperty("warm_knowledge").GetInt32());
         Assert.Equal(55, ts.GetProperty("cold_memories").GetInt32());
         Assert.Equal(66, ts.GetProperty("cold_knowledge").GetInt32());
+        Assert.Equal(77, ts.GetProperty("pinned_memories").GetInt32());
+        Assert.Equal(88, ts.GetProperty("pinned_knowledge").GetInt32());
     }
 
     [Fact]
@@ -288,6 +294,8 @@ public sealed class StatusHandlerTests
         store.SeedCount(Tier.Warm, ContentType.Knowledge, 4);
         store.SeedCount(Tier.Cold, ContentType.Memory, 5);
         store.SeedCount(Tier.Cold, ContentType.Knowledge, 6);
+        store.SeedCount(Tier.Pinned, ContentType.Memory, 7);
+        store.SeedCount(Tier.Pinned, ContentType.Knowledge, 8);
         store.SeedListByMetadata(
             Tier.Cold,
             ContentType.Knowledge,
@@ -308,6 +316,8 @@ public sealed class StatusHandlerTests
 
         // Spot-check nested shape.
         Assert.Equal(6, root.GetProperty("tierSizes").GetProperty("cold_knowledge").GetInt32());
+        Assert.Equal(7, root.GetProperty("tierSizes").GetProperty("pinned_memories").GetInt32());
+        Assert.Equal(8, root.GetProperty("tierSizes").GetProperty("pinned_knowledge").GetInt32());
         var kb = root.GetProperty("knowledgeBase");
         Assert.Equal(1, kb.GetProperty("collections").GetArrayLength());
         Assert.Equal("Alpha", kb.GetProperty("collections")[0].GetProperty("name").GetString());
