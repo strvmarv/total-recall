@@ -15,10 +15,11 @@ This skill ensures the total-recall memory system is active for this session.
    - Suggest running `/total-recall:commands setup` to auto-configure permissions for future sessions
    - Proceed without memory features — this is degraded mode, not fatal
 3. **Announce startup** using the returned data:
-   - Report tier summary: hot, warm, cold, KB counts from `tierSummary`
+   - Report tier summary: pinned, hot, warm, cold, KB counts from `tierSummary`
    - Report storage backend from `storage` (e.g. "sqlite", "cortex", "postgres"). If it shows a fallback like "sqlite (cortex failed)", flag this prominently.
    - If `lastSessionAge` is present, mention when the last session was
    - If `hints` are present, briefly surface the most relevant ones
+   - If `pinned_budget_pressure` is present in `hints`, surface it prominently: pinned entries are eating over half the context budget — suggest unpinning or trimming entries
    - Keep it to 2-3 lines max
 4. Use `hints` to inform your behavior throughout the session
 5. Incorporate the returned context to inform your responses
@@ -47,8 +48,20 @@ When you detect these patterns in user messages, call `memory_store`:
 - **Correction**: "no", "not that", "actually", "use X instead" -> type "correction"
 - **Preference**: How the user wants things done -> type "preference"
 - **Decision**: Non-obvious architectural or design choices -> type "decision"
+- **Pin**: "pin that", "never forget this", "keep this permanently" ->
+  call `memory_pin` (store first via `memory_store` with `pinned: true` if
+  the content is new). "unpin X" -> `memory_unpin`. Do NOT ask permission —
+  same as corrections.
 
 Do NOT ask permission — just store it.
+
+- **Pins are short directives, not reference material.** Pinned entries are
+  capped at 500 characters. If the content is longer, distill the RULE into
+  <= 500 chars and pin the distillation; keep the full detail as a normal
+  warm memory.
+- **Store atomic, concise memories at every tier**: one fact per entry;
+  split compound observations into separate memories. Long reference
+  content belongs in the knowledge base (kb_ingest), not in memories.
 
 ### Retrieve (continuous)
 

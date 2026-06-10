@@ -22,12 +22,13 @@ These behaviors run automatically throughout the session. Tool calls will be vis
 
 1. Call the `session_start` MCP tool to sync imports and assemble hot tier context (this may already be cached — call it regardless to receive the context)
 2. **Announce startup** using the returned data:
-   - Report tier summary: hot, warm, cold, KB counts from `tierSummary`
+   - Report tier summary: pinned, hot, warm, cold, KB counts from `tierSummary`
    - Report storage backend from `storage` (e.g. "sqlite", "cortex", "postgres"). If it shows a fallback like "sqlite (cortex failed)", flag this prominently.
    - If `lastSessionAge` is present, mention when the last session was
    - If `hints` are present, briefly surface the most relevant ones
+   - If `pinned_budget_pressure` is present in `hints`, surface it prominently: pinned entries are eating over half the context budget — suggest unpinning or trimming entries
    - Keep it to 2-3 lines max. Example:
-     > total-recall loaded — 3 hot, 12 warm, 5 cold, 2 KB collections. Storage: cortex. Last session: 2 hours ago.
+     > total-recall loaded — 2 pinned, 3 hot, 12 warm, 5 cold, 2 KB collections. Storage: cortex. Last session: 2 hours ago.
      > Context: TODO list at docs/TODO.md; user prefers bundled PRs for refactors.
 3. Use `hints` to inform your behavior throughout the session — they represent high-value memories like user corrections, preferences, and frequently accessed project context
 4. Incorporate the full `context` field to inform your responses
@@ -82,8 +83,10 @@ Print the command reference table below. Do not call any MCP tools.
 | `inspect <id>` | Full details for a single entry |
 | `promote <id>` | Move an entry up one tier |
 | `demote <id>` | Move an entry down one tier |
+| `pin <id>` | Pin an entry to the pinned tier (always injected, never decays) |
+| `unpin <id>` | Release a pinned entry back to the warm tier |
 | `history` | Timeline of recent tier movements |
-| `recent` | List newest memories by timestamp (`--limit`, `--tier`, `--type`, `--project`, `--order`) |
+| `recent` | List newest memories by timestamp (`--limit`, `--tier`, `--type`, `--project`, `--order`); `--tier pinned` supported |
 | `lineage <id>` | Compaction ancestry tree for an entry |
 | `export` | Export memories to JSON (`--tiers`, `--types`) |
 | `import <path>` | Import memories from a JSON file |
@@ -113,13 +116,13 @@ Auto-configure Claude Code permissions so total-recall MCP tools are allowed (re
 ### status
 
 Call the `status` MCP tool. Format as a dashboard showing:
-- Tier sizes (hot/warm/cold with counts for memories and knowledge)
+- Tier sizes (pinned/hot/warm/cold with counts for memories and knowledge)
 - Session ID
 - Total entry count
 
 ### search <query>
 
-Call `memory_search` with the query, all tiers enabled, top_k=10. Format results grouped by tier, showing: content preview, similarity score, source, tags. Offer actions: `/total-recall:commands promote <id>` or `/total-recall:commands forget <id>`.
+Call `memory_search` with the query, all tiers enabled, top_k=10. Format results grouped by tier, showing: content preview, similarity score, source, tags. Valid tier filter values: `hot`, `warm`, `cold`, `pinned`. Offer actions: `/total-recall:commands promote <id>`, `/total-recall:commands pin <id>`, or `/total-recall:commands forget <id>`.
 
 ### store <content>
 
@@ -151,13 +154,31 @@ Call `memory_promote` with the entry ID and target tier/type. Default target: on
 
 Call `memory_demote` with the entry ID and target tier/type. Default target: one tier down, same content type.
 
+### pin <id> [--scope project|global] [--project <name>] [--type memory|knowledge]
+
+Call `memory_pin` with the entry ID and optional scope/project/type. Pin a memory so it is ALWAYS injected at session start and never decays or compacts. The only way out is `unpin`.
+
+- MCP: `memory_pin { id, scope?: "project"|"global", project?, type? }`
+- CLI: `total-recall memory pin <id> [--scope project|global] [--project <name>] [--type memory|knowledge]`
+- `scope: "global"` makes the pin visible in every project; `scope: "project"` scopes it to the given (or existing) project; omitted keeps the entry's current project.
+- Pinning an already-pinned entry is a no-op success (scope still applied).
+- Pinned entries are capped at 500 characters (config: `Tiers.Pinned.MaxContentChars`) — pins are directives, not reference material. Oversized content is rejected, never truncated or auto-summarized: distill the rule and pin the distillation.
+
+### unpin <id> [--type memory|knowledge]
+
+Call `memory_unpin` with the entry ID. Release a pinned entry back to the warm tier, where the normal decay/compaction lifecycle resumes.
+
+- MCP: `memory_unpin { id, type? }`
+- CLI: `total-recall memory unpin <id> [--type memory|knowledge]`
+- Errors if the entry is not pinned (reports its actual tier).
+
 ### history
 
 Call `memory_history`. Show recent tier movements from the compaction log as a timeline.
 
-### recent [--limit N] [--tier hot|warm|cold] [--type <entryType>] [--project <name>] [--order created|updated|accessed]
+### recent [--limit N] [--tier hot|warm|cold|pinned] [--type <entryType>] [--project <name>] [--order created|updated|accessed]
 
-Call `memory_recent` with the parsed flags (defaults: limit 20, all tiers, order `created`). Render the returned `entries` as a numbered list, newest first:
+Call `memory_recent` with the parsed flags (defaults: limit 20, all tiers, order `created`). Valid `--tier` values: `hot`, `warm`, `cold`, `pinned`. Render the returned `entries` as a numbered list, newest first:
 
 `N. [<timestamp>] <tier> · <entry_type> · <project> — <preview>`
 
@@ -169,7 +190,7 @@ Call `memory_lineage` with the entry ID. Show the full compaction ancestry tree.
 
 ### export
 
-Call `memory_export`. Optionally accept `--tiers hot,warm,cold` and `--types memory,knowledge` to filter.
+Call `memory_export`. Optionally accept `--tiers hot,warm,cold,pinned` and `--types memory,knowledge` to filter.
 
 ### import <path>
 

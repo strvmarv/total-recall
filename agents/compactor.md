@@ -13,7 +13,7 @@ You are the total-recall compactor. Your job is to review hot tier memory entrie
 
 ## Input
 
-You receive the current hot tier entries with their decay scores, access counts, and content.
+You receive the current hot tier entries with their decay scores, access counts, and content. Pinned-tier entries never appear here — they are immune to compaction by construction, so no filtering is needed.
 
 ## Process
 
