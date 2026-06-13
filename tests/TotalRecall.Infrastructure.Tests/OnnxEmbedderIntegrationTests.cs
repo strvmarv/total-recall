@@ -166,6 +166,18 @@ public sealed class OnnxEmbedderIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void Embed_BgeGolden_FirstDimsStable()
+    {
+        using var embedder = NewEmbedder();
+        var v = embedder.Embed("the quick brown fox");
+        // Golden: first 5 dims from BAAI/bge-small-en-v1.5 @ pinned revision 5c38ec7,
+        // CLS-pooled + L2-normalized. Tolerance covers fp32 platform jitter.
+        float[] expected = { -0.08282185f, -0.050440833f, -0.000510249f, 0.016936373f, 0.0344118f };
+        for (int i = 0; i < expected.Length; i++)
+            Assert.InRange(v[i], expected[i] - 1e-3f, expected[i] + 1e-3f);
+    }
+
+    [Fact]
     public void Dispose_ReleasesSession()
     {
         var embedder = NewEmbedder();
