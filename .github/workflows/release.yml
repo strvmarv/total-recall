@@ -76,10 +76,10 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
 
-      # bge-small fp32 ONNX (133 MB) is fetched + sha256-verified at build, not committed. dotnet publish bundles models/ into the per-RID tarball.
-      - name: Fetch bge-small ONNX model
-        shell: bash
-        run: sh scripts/fetch-bge-small.sh
+      # NOTE: the bge-small model is NOT fetched here. dotnet publish does not
+      # copy models/ into the publish tree, so a build-leg fetch would never reach
+      # the artifact. The model is fetched once in the publish job and seeded into
+      # both the npm package and the per-RID release tarballs (see below).
 
       # The tag name drives -p:Version so the AOT binary reports the right
       # string from `total-recall --version` (CliApp.ResolveAppVersion reads
@@ -187,6 +187,16 @@ jobs:
       - name: Upgrade npm for trusted publishing
         run: npm install -g npm@latest
 
+      # Fetch the bge-small model so `npm pack` includes it (package.json `files`
+      # lists models/, and the files allowlist overrides .gitignore at pack time).
+      # This ships ONE top-level models/ copy in the npm package; the model is not
+      # committed (133 MB, fetched + sha256-verified). The same fetched dir is
+      # reused below to seed the per-RID release tarballs (after npm has packed,
+      # so the per-RID copies do not bloat the npm package).
+      - name: Fetch bge-small ONNX model
+        shell: bash
+        run: sh scripts/fetch-bge-small.sh
+
       - name: Download linux-x64 artifact
         uses: actions/download-artifact@v7
         with:
@@ -289,9 +299,9 @@ jobs:
       - name: Stage per-RID release assets
         shell: bash
         # The AOT binary alone is NOT runnable — it depends on sibling
-        # libonnxruntime.dylib, vec0.dylib (via sqlite-vec), the models/
-        # subtree, and any other native runtime assets staged into
-        # binaries/<rid>/ by the matrix publish step. Uploading just the
+        # libonnxruntime.dylib, vec0.dylib (via sqlite-vec), and any other
+        # native runtime assets staged into binaries/<rid>/ by the matrix publish
+        # step, plus the models/ subtree seeded just below. Uploading just the
         # executable (as 0.8.0-beta.4 did) produces a TypeInitializationException
         # at first DB open because Microsoft.ML.OnnxRuntime cannot P/Invoke
         # into the missing libonnxruntime.dylib.
@@ -305,6 +315,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-assets
+          # Seed each per-RID publish tree with the fetched model. dotnet publish
+          # does NOT copy models/ into binaries/<rid>/, so a git-clone install
+          # (whose cloned repo lacks the gitignored model) would otherwise find no
+          # model anywhere. With models/ in the tarball, FindBundledModelsDir
+          # resolves binaries/<rid>/models/ via walk-up from the extracted tree.
+          # npm already packed above, so this does NOT bloat the npm package.
+          for rid in linux-x64 linux-arm64 osx-arm64 win-x64; do
+            cp -r models "binaries/$rid/models"
+            test -f "binaries/$rid/models/bge-small-en-v1.5/model.onnx"
+          done
           # tar -C <dir> -czf <out> . packs the contents of <dir> at the
           # archive root so extraction with `tar -xzf archive -C dest`
           # drops them straight into dest/ without a leading <rid>/ dir.
