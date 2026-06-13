@@ -80,6 +80,7 @@ default_ttl_seconds = 600
 # bedrock_region = "us-east-1"
 # bedrock_model = "cohere.embed-v4:0"
 # api_key = ""                    # or set TOTAL_RECALL_EMBEDDING_API_KEY env var
+# query_prefix = "Represent this sentence for searching relevant passages: "  # prepended to SEARCH queries only (asymmetric retrieval); omit to disable
 
 # --- User identity (optional, Postgres only) ---
 # [user]

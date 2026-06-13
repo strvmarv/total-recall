@@ -63,6 +63,8 @@ public sealed class OnnxEmbedderIntegrationTests : IDisposable
             + AppContext.BaseDirectory);
     }
 
+    // The prefix only affects EmbedQuery tests (e.g. EmbedQuery_PrependsConfiguredPrefix);
+    // the Embed-based tests are unaffected because documents are embedded without a prefix.
     private const string TestPrefix = "PREFIX: ";
 
     private OnnxEmbedder NewEmbedder()
