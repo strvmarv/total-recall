@@ -63,10 +63,12 @@ public sealed class OnnxEmbedderIntegrationTests : IDisposable
             + AppContext.BaseDirectory);
     }
 
+    private const string TestPrefix = "PREFIX: ";
+
     private OnnxEmbedder NewEmbedder()
     {
         var manager = new ModelManager(_registry, _bundledModelsDir, _tempUserDir);
-        return new OnnxEmbedder(manager, ModelName);
+        return new OnnxEmbedder(manager, ModelName, TestPrefix);
     }
 
     [Fact]
@@ -150,6 +152,15 @@ public sealed class OnnxEmbedderIntegrationTests : IDisposable
         var second = embedder.Embed("second");
         Assert.True(embedder.IsLoaded);
         Assert.Equal(ExpectedDimensions, second.Length);
+    }
+
+    [Fact]
+    public void EmbedQuery_PrependsConfiguredPrefix()
+    {
+        using var embedder = NewEmbedder();
+        var viaQuery = embedder.EmbedQuery("retrieval target");
+        var viaManualPrefix = embedder.Embed(TestPrefix + "retrieval target");
+        Assert.Equal(viaManualPrefix, viaQuery);
     }
 
     [Fact]

@@ -98,7 +98,7 @@ let configTests =
                     DecayHalfLifeDecision = None
                     AutoDemoteMinInjections = 10
                 }
-                Embedding = { Model = "all-MiniLM-L6-v2"; Dimensions = 384; Provider = None; Endpoint = None; BedrockRegion = None; BedrockModel = None; ModelName = None; ApiKey = None }
+                Embedding = { Model = "all-MiniLM-L6-v2"; Dimensions = 384; Provider = None; Endpoint = None; BedrockRegion = None; BedrockModel = None; ModelName = None; ApiKey = None; EmbeddingQueryPrefix = None }
                 Regression = None
                 Search = Some { FtsWeight = Some 0.3 }
                 Storage = None

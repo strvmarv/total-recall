@@ -24,8 +24,12 @@ public sealed class OnnxEmbedder : IEmbedder, IDisposable
     private const string ModelFileName = "model.onnx";
     private const string TokenizerFileName = "tokenizer.json";
 
+    /// bge-small-en-v1.5 asymmetric retrieval instruction. Applied to queries only.
+    public const string DefaultQueryPrefix = "Represent this sentence for searching relevant passages: ";
+
     private readonly ModelManager _modelManager;
     private readonly string _modelName;
+    private readonly string _queryPrefix;
     private readonly object _loadLock = new();
 
     private InferenceSession? _session;
@@ -34,7 +38,7 @@ public sealed class OnnxEmbedder : IEmbedder, IDisposable
     private IReadOnlyList<string>? _inputNames;   // subset of input_ids/attention_mask/token_type_ids the graph declares
     private string? _outputName;                  // hidden-state output (prefers last_hidden_state)
 
-    public OnnxEmbedder(ModelManager modelManager, string modelName)
+    public OnnxEmbedder(ModelManager modelManager, string modelName, string? queryPrefix = null)
     {
         ArgumentNullException.ThrowIfNull(modelManager);
         if (string.IsNullOrWhiteSpace(modelName))
@@ -43,6 +47,7 @@ public sealed class OnnxEmbedder : IEmbedder, IDisposable
         }
         _modelManager = modelManager;
         _modelName = modelName;
+        _queryPrefix = queryPrefix ?? DefaultQueryPrefix;
     }
 
     /// <summary>
@@ -144,6 +149,13 @@ public sealed class OnnxEmbedder : IEmbedder, IDisposable
         }
 
         return pooled;
+    }
+
+    /// <inheritdoc />
+    public float[] EmbedQuery(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        return Embed(_queryPrefix + text);
     }
 
     private void EnsureLoaded()

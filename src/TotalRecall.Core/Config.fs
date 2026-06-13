@@ -62,6 +62,7 @@ type EmbeddingConfig = {
     BedrockModel: string option
     ModelName: string option
     ApiKey: string option
+    EmbeddingQueryPrefix: string option
 }
 
 type StorageConfig = {

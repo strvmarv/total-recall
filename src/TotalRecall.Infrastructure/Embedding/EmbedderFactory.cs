@@ -20,7 +20,7 @@ namespace TotalRecall.Infrastructure.Embedding;
 /// </summary>
 public static class EmbedderFactory
 {
-    public static OnnxEmbedder CreateProduction()
+    public static OnnxEmbedder CreateProduction(string? queryPrefix = null)
     {
         var bundledModelsDir = FindBundledModelsDir();
         var registryPath = Path.Combine(bundledModelsDir, "registry.json");
@@ -33,7 +33,7 @@ public static class EmbedderFactory
         Directory.CreateDirectory(userModelsDir);
 
         var manager = new ModelManager(registry, bundledModelsDir, userModelsDir);
-        return new OnnxEmbedder(manager, "all-MiniLM-L6-v2");
+        return new OnnxEmbedder(manager, "all-MiniLM-L6-v2", queryPrefix);
     }
 
     /// <summary>
@@ -50,7 +50,11 @@ public static class EmbedderFactory
         switch (provider.ToLowerInvariant())
         {
             case "local":
-                return CreateProduction();
+            {
+                var prefix = FSharpOption<string>.get_IsSome(cfg.EmbeddingQueryPrefix)
+                    ? cfg.EmbeddingQueryPrefix.Value : null;
+                return CreateProduction(prefix);
+            }
 
             case "openai":
             {

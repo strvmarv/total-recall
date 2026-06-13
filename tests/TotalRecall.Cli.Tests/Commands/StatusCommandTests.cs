@@ -52,6 +52,7 @@ public sealed class StatusCommandTests : IDisposable
                     FSharpOption<string>.None,
                     FSharpOption<string>.None,
                     FSharpOption<string>.None,
+                    FSharpOption<string>.None,
                     FSharpOption<string>.None),
                 FSharpOption<Core.Config.RegressionConfig>.None,
                 FSharpOption<Core.Config.SearchConfig>.None,
