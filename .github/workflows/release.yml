@@ -56,10 +56,8 @@ jobs:
             exe: total-recall.exe
     runs-on: ${{ matrix.os }}
     steps:
-      - name: Checkout (with LFS for ONNX model files)
+      - name: Checkout
         uses: actions/checkout@v5
-        with:
-          lfs: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -77,6 +75,11 @@ jobs:
       - name: Install clang for NativeAOT (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+
+      # bge-small fp32 ONNX (133 MB) is fetched + sha256-verified at build, not committed. dotnet publish bundles models/ into the per-RID tarball.
+      - name: Fetch bge-small ONNX model
+        shell: bash
+        run: sh scripts/fetch-bge-small.sh
 
       # The tag name drives -p:Version so the AOT binary reports the right
       # string from `total-recall --version` (CliApp.ResolveAppVersion reads

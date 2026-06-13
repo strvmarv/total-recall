@@ -14,8 +14,8 @@ namespace TotalRecall.Infrastructure.Embedding;
 
 /// <summary>
 /// ONNX-runtime backed text embedder. Lazily loads the ONNX model and the
-/// WordPiece vocabulary on first use, then runs inference, mean-pools over
-/// the sequence dimension, and L2-normalizes the result.
+/// WordPiece vocabulary on first use, then runs inference, CLS-pools (takes
+/// the token-0 hidden state), and L2-normalizes the result.
 ///
 /// Ports <c>src-ts/embedding/embedder.ts</c>.
 /// </summary>
@@ -31,6 +31,8 @@ public sealed class OnnxEmbedder : IEmbedder, IDisposable
     private InferenceSession? _session;
     private FSharpMap<string, int>? _vocab;
     private ModelSpec? _spec;
+    private IReadOnlyList<string>? _inputNames;   // subset of input_ids/attention_mask/token_type_ids the graph declares
+    private string? _outputName;                  // hidden-state output (prefers last_hidden_state)
 
     public OnnxEmbedder(ModelManager modelManager, string modelName)
     {
@@ -78,8 +80,6 @@ public sealed class OnnxEmbedder : IEmbedder, IDisposable
         ArgumentNullException.ThrowIfNull(text);
         EnsureLoaded();
 
-        // Tokenize via F# Core. Tokenizer.tokenize returns an F# int list
-        // with CLS/SEP already prepended/appended and truncated to 512.
         var tokenList = Tokenizer.tokenize(_vocab!, text);
         int[] tokenIds = ListModule.ToArray(tokenList);
         int seqLen = tokenIds.Length;
@@ -94,28 +94,38 @@ public sealed class OnnxEmbedder : IEmbedder, IDisposable
             tokenTypeIds[0, i] = 0L;
         }
 
-        var inputs = new[]
+        var inputs = new List<NamedOnnxValue>(_inputNames!.Count);
+        foreach (var name in _inputNames!)
         {
-            NamedOnnxValue.CreateFromTensor("input_ids", inputIds),
-            NamedOnnxValue.CreateFromTensor("attention_mask", attentionMask),
-            NamedOnnxValue.CreateFromTensor("token_type_ids", tokenTypeIds),
-        };
-
-        using var results = _session!.Run(inputs);
-        var lastHidden = results[0].AsTensor<float>(); // [1, seqLen, hiddenSize]
-
-        int hiddenSize = _spec!.Dimensions;
-        var pooled = new float[hiddenSize];
-        for (int i = 0; i < seqLen; i++)
-        {
-            for (int d = 0; d < hiddenSize; d++)
+            inputs.Add(name switch
             {
-                pooled[d] += lastHidden[0, i, d];
-            }
+                "input_ids" => NamedOnnxValue.CreateFromTensor(name, inputIds),
+                "attention_mask" => NamedOnnxValue.CreateFromTensor(name, attentionMask),
+                "token_type_ids" => NamedOnnxValue.CreateFromTensor(name, tokenTypeIds),
+                _ => throw new InvalidOperationException($"Unexpected ONNX input '{name}'"),
+            });
         }
+
+        using var results = _session!.Run(inputs, new[] { _outputName! });
+        var hidden = results[0].AsTensor<float>(); // [1, seqLen, hiddenSize]
+        var dims = hidden.Dimensions;
+        if (dims.Length != 3)
+        {
+            throw new InvalidOperationException(
+                $"ONNX output '{_outputName}' has rank {dims.Length}; CLS pooling requires a rank-3 " +
+                "[batch,seq,hidden] hidden-state output. Wrong model?");
+        }
+        int hiddenSize = dims[2];
+        if (hiddenSize != _spec!.Dimensions)
+        {
+            throw new InvalidOperationException(
+                $"ONNX model produced {hiddenSize}-dim hidden states; expected {_spec.Dimensions}. Wrong model?");
+        }
+
+        var pooled = new float[hiddenSize];
         for (int d = 0; d < hiddenSize; d++)
         {
-            pooled[d] /= seqLen;
+            pooled[d] = hidden[0, 0, d];
         }
 
         double sumSq = 0.0;
@@ -160,11 +170,27 @@ public sealed class OnnxEmbedder : IEmbedder, IDisposable
                 GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
             };
             var session = new InferenceSession(onnxPath, opts);
+
+            var declared = session.InputMetadata.Keys.ToHashSet(StringComparer.Ordinal);
+            var wanted = new[] { "input_ids", "attention_mask", "token_type_ids" };
+            var inputNames = wanted.Where(declared.Contains).ToArray();
+            if (!inputNames.Contains("input_ids") || !inputNames.Contains("attention_mask"))
+            {
+                session.Dispose();
+                throw new InvalidOperationException(
+                    $"ONNX model inputs [{string.Join(",", declared)}] do not include the required input_ids + attention_mask.");
+            }
+            var outputName = session.OutputMetadata.ContainsKey("last_hidden_state")
+                ? "last_hidden_state"
+                : session.OutputMetadata.Keys.First();
+
             var vocab = LoadVocab(tokenizerPath);
 
             _session = session;
             _vocab = vocab;
             _spec = spec;
+            _inputNames = inputNames;
+            _outputName = outputName;
         }
     }
 
@@ -209,6 +235,8 @@ public sealed class OnnxEmbedder : IEmbedder, IDisposable
         _session = null;
         _vocab = null;
         _spec = null;
+        _inputNames = null;
+        _outputName = null;
     }
 }
 

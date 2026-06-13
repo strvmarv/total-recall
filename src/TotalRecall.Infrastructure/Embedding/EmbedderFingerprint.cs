@@ -82,6 +82,19 @@ public static class EmbedderFingerprint
         }
     }
 
+    /// <summary>
+    /// Unconditionally overwrite the stored fingerprint with the configured
+    /// embedder's descriptor. Used by the reindex command after re-embedding
+    /// every vector into a new model's space — <see cref="EnsureMatches"/>
+    /// cannot be used there because the stale fingerprint would make it throw.
+    /// </summary>
+    public static void Restamp(IMetaStore meta, IEmbedder embedder)
+    {
+        ArgumentNullException.ThrowIfNull(meta);
+        ArgumentNullException.ThrowIfNull(embedder);
+        Stamp(meta, embedder.Descriptor);
+    }
+
     private static EmbedderDescriptor? ReadStored(IMetaStore meta)
     {
         var provider = meta.GetMeta(KeyProvider);
