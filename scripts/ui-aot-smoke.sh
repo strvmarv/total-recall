@@ -12,11 +12,15 @@
 #     compilation is not supported") — run the linux leg on a Linux CI runner.
 #   * Run `npm ci` at the repo root first so the sqlite-vec native libs are
 #     present (the Host publish guard fails without them).
+#   * -p:BuildSpa=true makes the TotalRecall.Web build run `npm ci && vite build`
+#     in src/TotalRecall.Web/ClientApp and embed the real SPA, so Node/npm must be
+#     available. Without it the embedded UI is only the Node-free placeholder.
 set -euo pipefail
-RID="${1:-$(dotnet --info | awk -F': ' '/RID:/{print $2; exit}')}"
-echo "Publishing Host (AOT) for $RID ..."
+# Resolve the host RID, trimming the alignment padding `dotnet --info` adds (and any CR).
+RID="${1:-$(dotnet --info | sed -n 's/.*RID:[[:space:]]*//p' | head -1 | tr -d '[:space:]')}"
+echo "Publishing Host (AOT, real SPA) for $RID ..."
 dotnet publish src/TotalRecall.Host/TotalRecall.Host.csproj \
-  -c Release -r "$RID" -p:PublishAot=true 2>&1 | tee /tmp/ui-aot-publish.log
+  -c Release -r "$RID" -p:PublishAot=true -p:BuildSpa=true 2>&1 | tee /tmp/ui-aot-publish.log
 
 if grep -E "warning IL[0-9]" /tmp/ui-aot-publish.log; then
   echo "AOT trim/warnings detected — failing." >&2
@@ -37,6 +41,18 @@ if [ -z "$BIN" ]; then
   echo "Could not find published total-recall binary for $RID under bin/Release or bin/x64/Release." >&2
   exit 1
 fi
-echo "Smoke-booting $BIN ui --smoke ..."
-"$BIN" ui --smoke
-echo "AOT UI smoke OK"
+echo "Smoke-booting $BIN ui (real SPA) ..."
+"$BIN" ui --no-open --port 5588 &
+UI_PID=$!
+trap 'kill "$UI_PID" 2>/dev/null || true' EXIT
+# Wait for readiness — the real Host opens the DB and runs the migration guard on boot.
+for _ in $(seq 1 20); do
+  curl -sf http://127.0.0.1:5588/api/health >/dev/null 2>&1 && break
+  sleep 1
+done
+ROOT=$(curl -s http://127.0.0.1:5588/)
+echo "$ROOT" | grep -q "window.__TR_BOOTSTRAP__" || { echo "FAIL: bootstrap not injected" >&2; exit 1; }
+ASSET=$(echo "$ROOT" | grep -oE '/assets/[^"]+\.js' | head -1)
+[ -n "$ASSET" ] || { echo "FAIL: no SPA asset referenced in index.html" >&2; exit 1; }
+curl -sf "http://127.0.0.1:5588$ASSET" >/dev/null || { echo "FAIL: SPA asset not served ($ASSET)" >&2; exit 1; }
+echo "AOT UI smoke OK (real SPA embedded + served)"
