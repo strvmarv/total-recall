@@ -6,4 +6,5 @@ namespace TotalRecall.Web;
 [JsonSourceGenerationOptions(WriteIndented = false)]
 [JsonSerializable(typeof(HealthInfo))]
 [JsonSerializable(typeof(ApiError))]
+[JsonSerializable(typeof(BootstrapInfo))]
 public partial class WebJsonContext : JsonSerializerContext;

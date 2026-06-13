@@ -93,11 +93,39 @@ public sealed class ApiIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Root_ServesEmbeddedIndex()
+    public async Task Root_ServesIndex_WithInjectedBootstrap()
     {
         var resp = await _client.GetAsync("/");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
-        Assert.Contains("total-recall web UI", await resp.Content.ReadAsStringAsync());
+        Assert.Equal("text/html", resp.Content.Headers.ContentType?.MediaType);
+        var body = await resp.Content.ReadAsStringAsync();
+        Assert.Contains("total-recall web UI", body);            // placeholder marker (test build is Node-free)
+        Assert.Contains("window.__TR_BOOTSTRAP__", body);        // bootstrap injected
+        Assert.Contains("\"token\":\"" + Token + "\"", body);    // the per-launch token
+        Assert.Contains("\"backend\":\"sqlite\"", body);
+    }
+
+    [Fact]
+    public async Task Index_IsNotCached()
+    {
+        var resp = await _client.GetAsync("/");
+        Assert.Equal("no-store", resp.Headers.CacheControl?.ToString());
+    }
+
+    [Fact]
+    public async Task DeepLink_FallsBackToIndex()
+    {
+        var resp = await _client.GetAsync("/memory");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.Contains("window.__TR_BOOTSTRAP__", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task UnknownApiRoute_Returns404Json_NotHtml()
+    {
+        var resp = await _client.SendAsync(Req(HttpMethod.Get, "/api/does-not-exist"));
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+        Assert.Equal("application/json", resp.Content.Headers.ContentType?.MediaType);
     }
 
     [Fact]

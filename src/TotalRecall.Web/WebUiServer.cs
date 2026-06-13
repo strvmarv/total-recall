@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading;
@@ -69,11 +70,14 @@ public static partial class WebUiServer
             await next();
         });
 
-        // --- Embedded static files (placeholder page in Plan 1) ---
+        // --- Embedded static assets (JS/CSS/etc). index.html is NOT served here;
+        //     it is returned by the SPA fallback below with the bootstrap injected. ---
         var embedded = new ManifestEmbeddedFileProvider(
             typeof(WebUiServer).Assembly, "wwwroot");
-        app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = embedded });
         app.UseStaticFiles(new StaticFileOptions { FileProvider = embedded });
+
+        // Build the bootstrapped shell HTML once (token/backend/version are fixed per launch).
+        var indexHtml = BuildIndexHtml(embedded, token, backendLabel, version);
 
         // --- API ---
         app.MapGet("/api/health", () => Results.Json(
@@ -116,6 +120,23 @@ public static partial class WebUiServer
             return Results.Content(text, "application/json", System.Text.Encoding.UTF8, status);
         });
 
+        // SPA fallback: any non-/api route returns the bootstrapped shell so
+        // client-side routing (deep links / refresh) works. /api/* unmatched -> 404 JSON.
+        app.MapFallback(async ctx =>
+        {
+            if (ctx.Request.Path.StartsWithSegments("/api"))
+            {
+                ctx.Response.StatusCode = StatusCodes.Status404NotFound;
+                await ctx.Response.WriteAsJsonAsync(
+                    new ApiError("not_found", "No such API route."),
+                    WebJsonContext.Default.ApiError);
+                return;
+            }
+            ctx.Response.ContentType = "text/html; charset=utf-8";
+            ctx.Response.Headers.CacheControl = "no-store";
+            await ctx.Response.WriteAsync(indexHtml);
+        });
+
         return app;
     }
 
@@ -128,5 +149,37 @@ public static partial class WebUiServer
             throw new InvalidOperationException(
                 "Web server reported no bound address; Kestrel may have failed to start.");
         return addr;
+    }
+
+    /// <summary>
+    /// Reads the embedded index.html and injects
+    /// <c>window.__TR_BOOTSTRAP__ = {token, backend, version}</c> before
+    /// &lt;/head&gt; so the SPA can authenticate /api/* and show the backend.
+    /// </summary>
+    private static string BuildIndexHtml(
+        Microsoft.Extensions.FileProviders.IFileProvider embedded,
+        string token, string backend, string version)
+    {
+        var file = embedded.GetFileInfo("index.html");
+        string html;
+        if (file.Exists)
+        {
+            using var stream = file.CreateReadStream();
+            using var reader = new StreamReader(stream);
+            html = reader.ReadToEnd();
+        }
+        else
+        {
+            html = "<!doctype html><html><head></head><body>"
+                 + "<p>total-recall web UI assets missing.</p></body></html>";
+        }
+
+        var json = JsonSerializer.Serialize(
+            new BootstrapInfo(token, backend, version),
+            WebJsonContext.Default.BootstrapInfo);
+        var script = $"<script>window.__TR_BOOTSTRAP__ = {json};</script>";
+
+        var headClose = html.IndexOf("</head>", StringComparison.OrdinalIgnoreCase);
+        return headClose >= 0 ? html.Insert(headClose, script) : script + html;
     }
 }
