@@ -26,6 +26,7 @@
     <ProjectReference Include="..\TotalRecall.Infrastructure\TotalRecall.Infrastructure.csproj" />
     <ProjectReference Include="..\TotalRecall.Server\TotalRecall.Server.csproj" />
     <ProjectReference Include="..\TotalRecall.Cli\TotalRecall.Cli.csproj" />
+    <ProjectReference Include="..\TotalRecall.Web\TotalRecall.Web.csproj" />
   </ItemGroup>
 
   <!--

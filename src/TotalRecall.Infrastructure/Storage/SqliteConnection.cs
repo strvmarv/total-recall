@@ -25,6 +25,14 @@ public static class SqliteConnection
     /// Path to the database file, or <c>:memory:</c> for an in-memory DB.
     /// </param>
     /// <returns>An open connection ready for schema initialization.</returns>
+    /// <remarks>
+    /// The pragma batch (WAL + busy_timeout=5000ms + foreign_keys + synchronous) is
+    /// connection-scoped, not file-level. All read-write connections to the
+    /// total-recall DB MUST be obtained through this method so they consistently
+    /// carry the busy_timeout needed for safe cross-process access (the MCP server
+    /// and <c>total-recall ui</c> share one DB file). Read-only importer paths that build
+    /// their own connection string intentionally bypass this.
+    /// </remarks>
     public static MsSqliteConnection Open(string dbPath)
     {
         var conn = new MsSqliteConnection($"Data Source={dbPath}");
@@ -37,8 +45,12 @@ public static class SqliteConnection
             using (var cmd = conn.CreateCommand())
             {
                 // journal_mode is a no-op for :memory: but harmless.
+                // busy_timeout lets the total-recall UI process wait up to
+                // 5 s instead of immediately throwing SQLITE_BUSY when the
+                // MCP server holds a write lock on the same file.
                 cmd.CommandText =
                     "PRAGMA journal_mode=WAL;" +
+                    "PRAGMA busy_timeout=5000;" +
                     "PRAGMA foreign_keys=ON;" +
                     "PRAGMA synchronous=NORMAL;";
                 cmd.ExecuteNonQuery();
