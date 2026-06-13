@@ -6,6 +6,7 @@
 //
 //   total-recall               -> serve mode (MCP stdio server)
 //   total-recall serve         -> serve mode (explicit)
+//   total-recall ui            -> local web UI server (TotalRecall.Web)
 //   total-recall <anything>    -> CLI dispatch via TotalRecall.Cli.CliApp
 //
 // Serve mode flow:
@@ -190,6 +191,11 @@ internal static class Program
                     break;
                 case "--host" when i + 1 < args.Length: host = args[++i]; break;
                 case "--token" when i + 1 < args.Length: token = args[++i]; break;
+                case "--port":
+                case "--host":
+                case "--token":
+                    Console.Error.WriteLine($"total-recall ui: {args[i]} requires a value");
+                    return 2;
                 case "--no-open": open = false; break;
                 case "--smoke": smoke = true; open = false; break;
                 case "--help" or "-h":
@@ -213,7 +219,8 @@ internal static class Program
             && host != "::1")
         {
             Console.Error.WriteLine(
-                $"total-recall ui: WARNING binding non-loopback host '{host}' exposes the UI on your network; token auth is required.");
+                $"total-recall ui: WARNING binding non-loopback host '{host}' exposes the UI on your network. " +
+                "Access requires the bearer token printed at startup (an ephemeral token is generated unless you pass --token).");
         }
 
         using var cts = new CancellationTokenSource();
