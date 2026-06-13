@@ -18,3 +18,8 @@ docs/superpowers/
 
 # AOT-published native binaries staged for matrix release (populated by CI in Task 6.5)
 binaries/
+
+# total-recall web UI: SPA build output (generated; embedded into the assembly)
+src/TotalRecall.Web/wwwroot/
+src/TotalRecall.Web/ClientApp/node_modules/
+src/TotalRecall.Web/ClientApp/*.tsbuildinfo
