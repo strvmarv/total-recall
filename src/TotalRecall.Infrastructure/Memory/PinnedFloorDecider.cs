@@ -37,12 +37,19 @@ public static class PinnedFloorDecider
         if (!cfg.Enabled)
             return (FloorVerdict.Skip, state with { TurnCount = nextTurn });
 
-        var inject = (nextTurn - state.LastInjectedTurn) >= cfg.EveryNTurns;
+        // Clamp degenerate config rather than injecting on every turn.
+        var everyN = cfg.EveryNTurns > 0 ? cfg.EveryNTurns : 6;
+        var growthBytes = cfg.GrowthTokens > 0 ? (long)cfg.GrowthTokens * BytesPerToken : long.MaxValue;
+
+        // Re-inject on the Nth turn after the last injection (>= is inclusive and
+        // also catches stale/skipped-turn state). Not off-by-one: last=1, everyN=6
+        // first fires at nextTurn=7 (6 turns later).
+        var inject = (nextTurn - state.LastInjectedTurn) >= everyN;
 
         if (!inject && bytes is long b)
         {
             var bytesDelta = b - state.LastInjectedBytes;
-            if (bytesDelta >= (long)cfg.GrowthTokens * BytesPerToken)
+            if (bytesDelta >= growthBytes)
                 inject = true;
         }
 
@@ -52,6 +59,9 @@ public static class PinnedFloorDecider
             {
                 TurnCount = nextTurn,
                 LastInjectedTurn = nextTurn,
+                // note: if bytes are unavailable at inject time we keep the old
+                // growth baseline; the growth arm may fire on the next turn that
+                // does have a byte count. Acceptable — resetting to 0 is worse.
                 LastInjectedBytes = bytes ?? state.LastInjectedBytes,
             });
         }
