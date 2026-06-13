@@ -131,7 +131,7 @@ public sealed class KbSearchHandler : IToolHandler
             return await SearchRemoteAsync(query, topK, scopes, ct).ConfigureAwait(false);
         }
 
-        var vector = _embedder.Embed(query);
+        var vector = _embedder.EmbedQuery(query);
 
         ct.ThrowIfCancellationRequested();
 

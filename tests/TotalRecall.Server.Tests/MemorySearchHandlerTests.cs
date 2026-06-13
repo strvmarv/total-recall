@@ -260,6 +260,20 @@ public class MemorySearchHandlerTests
     }
 
     [Fact]
+    public async Task Embedder_UsesEmbedQuery_ForAsymmetricPrefix()
+    {
+        var (handler, fake, _) = NewFixture();
+
+        await handler.ExecuteAsync(
+            Args("""{"query":"hello world"}"""),
+            CancellationToken.None);
+
+        // Queries must flow through EmbedQuery so the ONNX embedder prepends
+        // the bge asymmetric instruction prefix (default impl stays symmetric).
+        Assert.True(fake.EmbedQueryCalled);
+    }
+
+    [Fact]
     public async Task InvalidTierString_Throws()
     {
         var (handler, _, _) = NewFixture();

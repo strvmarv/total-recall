@@ -154,9 +154,10 @@ public sealed class MemorySearchHandler : IToolHandler
 
         ct.ThrowIfCancellationRequested();
 
-        // Matches MemoryStoreHandler: synchronous Embed call warms the
-        // ONNX singleton on first use.
-        var vector = _embedder.Embed(query);
+        // Matches MemoryStoreHandler: synchronous embed call warms the
+        // ONNX singleton on first use. EmbedQuery applies the asymmetric
+        // bge query instruction prefix (default impl stays symmetric).
+        var vector = _embedder.EmbedQuery(query);
 
         ct.ThrowIfCancellationRequested();
 

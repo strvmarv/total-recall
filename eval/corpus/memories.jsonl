@@ -38,7 +38,7 @@
 {"content":"Custom errors extend AppError class which wraps code and message","type":"decision","tags":["typescript","errors"]}
 {"content":"Use Promise.allSettled when failures of individual promises should not abort the batch","type":"preference","tags":["typescript","async"]}
 {"content":"Implement exponential backoff with jitter for all retry logic","type":"preference","tags":["typescript","async"]}
-{"content":"Embedding model is all-MiniLM-L6-v2 producing 384-dimensional vectors","type":"decision","tags":["embeddings","config"]}
+{"content":"Embedding model is bge-small-en-v1.5 producing 384-dimensional vectors","type":"decision","tags":["embeddings","config"]}
 {"content":"Hot tier maximum capacity is 50 entries before overflow to warm","type":"decision","tags":["config","tiers"]}
 {"content":"Warm tier promotion threshold score is 0.5","type":"decision","tags":["config","tiers"]}
 {"content":"Decay half-life for memory scoring is 7 days","type":"decision","tags":["config","decay"]}
