@@ -20,8 +20,10 @@ public sealed class FakeToolHandler : IToolHandler
 
     public string Name { get; }
     public string Description => "fake";
-    public JsonElement InputSchema =>
+    private static readonly JsonElement _schema =
         JsonDocument.Parse("""{"type":"object","properties":{}}""").RootElement.Clone();
+
+    public JsonElement InputSchema => _schema;
 
     public Task<ToolCallResult> ExecuteAsync(JsonElement? arguments, CancellationToken ct) =>
         Task.FromResult(new ToolCallResult

@@ -53,7 +53,7 @@ public static partial class WebUiServer
             }
 
             // /api/health is open (liveness/smoke); everything else under /api needs the token.
-            if (path.StartsWithSegments("/api") && !path.StartsWithSegments("/api/health"))
+            if (path.StartsWithSegments("/api") && !path.Equals("/api/health", StringComparison.OrdinalIgnoreCase))
             {
                 var provided = ctx.Request.Headers[TokenHeader].ToString();
                 if (!LocalAuth.TokenMatches(token, string.IsNullOrEmpty(provided) ? null : provided))
@@ -88,10 +88,24 @@ public static partial class WebUiServer
                     statusCode: StatusCodes.Status404NotFound);
 
             JsonElement? args = null;
-            if (req.ContentLength is > 0)
+            using (var reader = new StreamReader(req.Body, leaveOpen: false))
             {
-                using var doc = await JsonDocument.ParseAsync(req.Body, cancellationToken: ct);
-                args = doc.RootElement.Clone();
+                var body = await reader.ReadToEndAsync(ct);
+                if (!string.IsNullOrWhiteSpace(body))
+                {
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(body);
+                        args = doc.RootElement.Clone();
+                    }
+                    catch (JsonException)
+                    {
+                        return Results.Json(
+                            new ApiError("invalid_json", "Request body is not valid JSON."),
+                            WebJsonContext.Default.ApiError,
+                            statusCode: StatusCodes.Status400BadRequest);
+                    }
+                }
             }
 
             var result = await handler.ExecuteAsync(args, ct);
@@ -110,6 +124,9 @@ public static partial class WebUiServer
     {
         var feature = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>();
         var addr = feature?.Addresses.FirstOrDefault();
-        return addr ?? "http://127.0.0.1";
+        if (string.IsNullOrEmpty(addr))
+            throw new InvalidOperationException(
+                "Web server reported no bound address; Kestrel may have failed to start.");
+        return addr;
     }
 }

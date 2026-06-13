@@ -20,6 +20,7 @@ public sealed class ApiIntegrationTests : IAsyncLifetime
         var registry = new ToolRegistry();
         registry.Register(new FakeToolHandler("status", """{"ok":true}"""));
         registry.Register(new FakeToolHandler("migrate_to_remote", """{"x":1}"""));
+        registry.Register(new FakeToolHandler("eval_report", """{"err":1}""", isError: true));
 
         var options = new WebUiOptions(Port: 0, Host: "127.0.0.1", OpenBrowser: false, Token: Token, Smoke: false);
         _app = WebUiServer.BuildApp(options, registry, Token, backendLabel: "sqlite", version: "test");
@@ -65,6 +66,7 @@ public sealed class ApiIntegrationTests : IAsyncLifetime
     {
         var resp = await _client.SendAsync(Req(HttpMethod.Post, "/api/tool/migrate_to_remote"));
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+        Assert.Contains("unknown_tool", await resp.Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -96,5 +98,22 @@ public sealed class ApiIntegrationTests : IAsyncLifetime
         var resp = await _client.GetAsync("/");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         Assert.Contains("total-recall web UI", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Dispatch_HandlerError_Returns400()
+    {
+        var resp = await _client.SendAsync(Req(HttpMethod.Post, "/api/tool/eval_report"));
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Dispatch_MalformedJsonBody_Returns400()
+    {
+        var r = Req(HttpMethod.Post, "/api/tool/status");
+        r.Content = new StringContent("{not valid", System.Text.Encoding.UTF8, "application/json");
+        var resp = await _client.SendAsync(r);
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Contains("invalid_json", await resp.Content.ReadAsStringAsync());
     }
 }
