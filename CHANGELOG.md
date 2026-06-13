@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 3.0.2 - 2026-06-13
+
+### Fixed
+
+- **The cortex backend now auto-migrates its local vector index on a model change, like sqlite.** Embedder-fingerprint stamping had only ever been wired into the sqlite and postgres startup paths — never the cortex path — so a cortex database was never stamped. After the bge model swap it ended up *unstamped but populated* with stale vectors, and the local index silently kept producing degraded retrieval (no auto-migration, no warning). The migration is now wired into the cortex composition (`OpenCortexCore`) and re-embeds the **local** vec0 index in place under `embedding.on_model_change = "auto"`; the remote cortex re-embeds independently as before.
+- **An unstamped-but-populated index is now treated as a model change instead of "fresh DB".** Previously a database with no fingerprint was assumed brand-new and simply stamped — correct only when the index is empty. If it holds vectors (from an unknown prior model), the startup migration now re-embeds them (`auto`), warns (`warn`), or refuses to start (`block`), the same as a detected fingerprint mismatch. A genuinely empty database is still just stamped. This applies to both the sqlite and cortex local indexes and closes a silent-degradation window for databases that predate fingerprint stamping.
+
 ## 3.0.1 - 2026-06-13
 
 ### Fixed
