@@ -30,8 +30,9 @@ public sealed class EmbedderFingerprintMismatchException : InvalidOperationExcep
         "but the current configuration uses " +
         $"provider={configured.Provider}, model={configured.Model}, revision={Quote(configured.Revision)}, dimensions={configured.Dimensions}. " +
         "Continuing would mix embedding spaces and silently degrade retrieval quality. " +
-        "Either restore the original embedder configuration, or rebuild the database from a fresh path " +
-        "(e.g. by pointing TOTAL_RECALL_DB_PATH at a new file) and re-ingest your memories.";
+        "Either run `total-recall reindex-embeddings` to re-embed existing vectors into the new " +
+        "model's space, restore the original embedder configuration, or rebuild from a fresh DB " +
+        "(point TOTAL_RECALL_DB_PATH at a new file) and re-ingest.";
 
     private static string Quote(string s) => string.IsNullOrEmpty(s) ? "(none)" : s;
 }
