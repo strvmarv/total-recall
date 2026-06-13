@@ -1,6 +1,8 @@
 {
   "compilerOptions": {
     "composite": true,
+    // composite requires emit; redirect it outside the source tree so `tsc -b`
+    // can't drop a vite.config.js that would shadow vite.config.ts for Vite.
     "outDir": "./node_modules/.tmp/tsc-node",
     "skipLibCheck": true,
     "module": "ESNext",

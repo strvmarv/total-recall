@@ -3,10 +3,9 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 
 const el = document.getElementById('root');
-if (el) {
-  createRoot(el).render(
-    <StrictMode>
-      <App />
-    </StrictMode>,
-  );
-}
+if (!el) throw new Error('Root element #root not found');
+createRoot(el).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);
