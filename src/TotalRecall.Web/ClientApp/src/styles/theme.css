@@ -1,0 +1,31 @@
+:root {
+  /* Palette */
+  --tr-bg: #f7f8fa;
+  --tr-surface: #ffffff;
+  --tr-topbar-bg: #1b2330;
+  --tr-topbar-fg: #e7ebf2;
+  --tr-text: #1b2330;
+  --tr-text-muted: #5b6675;
+  --tr-border: #e3e7ee;
+  --tr-accent: #3b82f6;
+  --tr-accent-weak: #e8f0fe;
+
+  /* Backend badge dots */
+  --tr-badge-sqlite: #16a34a;
+  --tr-badge-postgres: #2563eb;
+  --tr-badge-cortex: #9333ea;
+  --tr-badge-unknown: #9ca3af;
+
+  /* Spacing & shape */
+  --tr-space-1: 4px;
+  --tr-space-2: 8px;
+  --tr-space-3: 12px;
+  --tr-space-4: 16px;
+  --tr-space-6: 24px;
+  --tr-radius: 8px;
+  --tr-topbar-h: 52px;
+
+  /* Type */
+  --tr-font: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --tr-font-mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+}

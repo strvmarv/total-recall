@@ -1,0 +1,77 @@
+@import './theme.css';
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  font-family: var(--tr-font);
+  color: var(--tr-text);
+  background: var(--tr-bg);
+}
+
+/* Top bar */
+.tr-topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--tr-space-6);
+  height: var(--tr-topbar-h);
+  padding: 0 var(--tr-space-4);
+  background: var(--tr-topbar-bg);
+  color: var(--tr-topbar-fg);
+}
+.tr-brand { font-weight: 700; letter-spacing: 0.2px; }
+.tr-nav { display: flex; gap: var(--tr-space-2); align-items: center; }
+.tr-nav-link {
+  color: var(--tr-topbar-fg);
+  text-decoration: none;
+  padding: var(--tr-space-1) var(--tr-space-3);
+  border-radius: var(--tr-radius);
+  font-size: 14px;
+  opacity: 0.82;
+}
+.tr-nav-link:hover { opacity: 1; background: rgba(255, 255, 255, 0.08); }
+.tr-nav-link.is-active { opacity: 1; background: rgba(255, 255, 255, 0.16); }
+
+.tr-topbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--tr-space-4);
+}
+
+/* Global search */
+.tr-search input {
+  width: 170px;
+  height: 30px;
+  padding: 0 var(--tr-space-3);
+  border: 1px solid transparent;
+  border-radius: var(--tr-radius);
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--tr-topbar-fg);
+  font-size: 13px;
+}
+.tr-search input::placeholder { color: rgba(231, 235, 242, 0.6); }
+.tr-search input:focus { outline: none; border-color: var(--tr-accent); background: rgba(255, 255, 255, 0.16); }
+
+/* Backend badge */
+.tr-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--tr-space-2);
+  font-size: 12px;
+  font-weight: 600;
+  padding: var(--tr-space-1) var(--tr-space-3);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+}
+.tr-badge-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--tr-badge-unknown); }
+.tr-badge-sqlite .tr-badge-dot { background: var(--tr-badge-sqlite); }
+.tr-badge-postgres .tr-badge-dot { background: var(--tr-badge-postgres); }
+.tr-badge-cortex .tr-badge-dot { background: var(--tr-badge-cortex); }
+
+/* Content */
+.tr-main { padding: var(--tr-space-6); }
+.tr-placeholder { background: var(--tr-surface); border: 1px solid var(--tr-border); border-radius: var(--tr-radius); padding: var(--tr-space-6); }
+.tr-placeholder h1 { margin: 0 0 var(--tr-space-2); font-size: 20px; }
+.tr-placeholder-note { font-family: var(--tr-font-mono); color: var(--tr-text); margin: 0 0 var(--tr-space-2); }
+.tr-placeholder-sub { color: var(--tr-text-muted); margin: 0; }
