@@ -1080,7 +1080,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         {
             try
             {
-                taskEmbedding = _embedder.Embed(task);
+                taskEmbedding = _embedder.EmbedQuery(task);
             }
             catch (Exception ex)
             {

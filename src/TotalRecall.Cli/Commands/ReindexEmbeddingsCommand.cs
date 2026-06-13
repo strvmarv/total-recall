@@ -109,6 +109,12 @@ public sealed class ReindexEmbeddingsCommand : ICliCommand
             Console.Error.WriteLine($"reindex-embeddings: failed: {ex.Message}");
             return Task.FromResult(1);
         }
+        finally
+        {
+            // OnnxEmbedder holds an InferenceSession that must be released on
+            // every exit path (success or failure).
+            (embedder as IDisposable)?.Dispose();
+        }
     }
 
     private static bool IsPostgres(Core.Config.TotalRecallConfig cfg)

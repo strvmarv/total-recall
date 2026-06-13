@@ -23,7 +23,7 @@ public sealed class LocalSkillSearch(ISkillCache cache, IEmbedder embedder) : IL
         if (filtered.Count == 0) return Array.Empty<SkillSearchHitDto>();
 
         float[]? qv = null;
-        try { qv = embedder.Embed(query); }
+        try { qv = embedder.EmbedQuery(query); }
         catch { /* fall back to keyword-only */ }
 
         var tokens = Tokenize(query);

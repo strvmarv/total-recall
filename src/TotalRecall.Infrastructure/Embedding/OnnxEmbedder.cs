@@ -54,7 +54,7 @@ public sealed class OnnxEmbedder : IEmbedder, IDisposable
     /// True once the ONNX session and vocab have been loaded. Exposed for
     /// tests that verify laziness.
     /// </summary>
-    public bool IsLoaded => _session is not null && _vocab is not null;
+    public bool IsLoaded => _session is not null && _vocab is not null && _inputNames is not null && _outputName is not null;
 
     /// <inheritdoc />
     public EmbedderDescriptor Descriptor
