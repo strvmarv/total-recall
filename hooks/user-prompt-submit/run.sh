@@ -11,6 +11,20 @@ elif [ -n "${COPILOT_CLI:-}" ]; then
   host="copilot-cli"
 fi
 
-# Forward hook stdin to the command. On ANY failure, emit a no-op object.
-total-recall pinned-floor --host "$host" || printf '{}'
+# Cursor's beforeSubmitPrompt cannot inject context; short-circuit so we don't
+# spawn the CLI or advance session state pointlessly.
+if [ "$host" = "cursor" ]; then
+  printf '{}\n'
+  exit 0
+fi
+
+# Capture the CLI's stdout so a mid-write crash can never produce torn output.
+# stdin is still inherited by the child (it reads the hook payload). Emit
+# exactly one JSON object: the CLI's output on success, else a no-op.
+output=$(total-recall pinned-floor --host "$host" 2>/dev/null)
+if [ $? -ne 0 ] || [ -z "$output" ]; then
+  printf '{}\n'
+else
+  printf '%s\n' "$output"
+fi
 exit 0
