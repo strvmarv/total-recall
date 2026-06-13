@@ -50,6 +50,8 @@ for _ in $(seq 1 20); do
   curl -sf http://127.0.0.1:5588/api/health >/dev/null 2>&1 && break
   sleep 1
 done
+curl -sf http://127.0.0.1:5588/api/health >/dev/null 2>&1 \
+  || { echo "FAIL: server did not become ready within 20s" >&2; exit 1; }
 ROOT=$(curl -s http://127.0.0.1:5588/)
 echo "$ROOT" | grep -q "window.__TR_BOOTSTRAP__" || { echo "FAIL: bootstrap not injected" >&2; exit 1; }
 ASSET=$(echo "$ROOT" | grep -oE '/assets/[^"]+\.js' | head -1)

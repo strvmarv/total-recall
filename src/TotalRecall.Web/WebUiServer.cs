@@ -74,7 +74,16 @@ public static partial class WebUiServer
         //     it is returned by the SPA fallback below with the bootstrap injected. ---
         var embedded = new ManifestEmbeddedFileProvider(
             typeof(WebUiServer).Assembly, "wwwroot");
-        app.UseStaticFiles(new StaticFileOptions { FileProvider = embedded });
+        app.UseStaticFiles(new StaticFileOptions
+        {
+            FileProvider = embedded,
+            OnPrepareResponse = ctx =>
+            {
+                // Vite content-hashes asset filenames, so they are safe to cache forever.
+                if (ctx.Context.Request.Path.StartsWithSegments("/assets"))
+                    ctx.Context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
+            },
+        });
 
         // Build the bootstrapped shell HTML once (token/backend/version are fixed per launch).
         var indexHtml = BuildIndexHtml(embedded, token, backendLabel, version);
