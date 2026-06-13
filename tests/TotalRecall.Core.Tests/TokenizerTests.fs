@@ -108,18 +108,19 @@ let tokenizerTests =
             Expect.isTrue (truncated.Length > 0) "should produce non-empty result"
             Expect.isTrue (text.StartsWith(truncated.Trim())) "truncated should be a prefix of original"
 
-        // Pins the F# normalizer's no-accent-stripping behavior. The normalize
-        // step lowercases (ToLowerInvariant) but deliberately does NOT decompose
-        // or strip combining accent marks, so accented words are not folded to
-        // their ASCII forms before WordPiece. With the bert-base-uncased vocab
-        // that bge-small reuses, "café"/"résumé" therefore miss every vocab
-        // entry (their stripped forms "cafe"=7668 / "resume"=13746 DO exist) and
-        // each whole word collapses to a single UNK (100): the result is
-        // [CLS=101; UNK; UNK; SEP=102]. If a future change adds accent-stripping
-        // (e.g. NFD + Mn removal, as canonical BERT preprocessing does), this
-        // test will fail and force a conscious decision rather than silently
-        // changing token IDs across the embedding pipeline.
-        testCase "tokenize does not strip accents (pins UNK fallthrough)" <| fun _ ->
+        // GUARD against a silent change to a KNOWN GAP — not an endorsement of
+        // accent->UNK as desired behavior. The F# tokenizer does not perform
+        // canonical BERT NFD + Mn accent stripping, so accented words collapse
+        // to UNK. With the bert-base-uncased vocab that bge-small reuses,
+        // "café"/"résumé" miss every vocab entry (their stripped forms
+        // "cafe"=7668 / "resume"=13746 DO exist) and each whole word collapses
+        // to a single UNK (100): the result is [CLS=101; UNK; UNK; SEP=102].
+        // This is a known fidelity gap — pre-existing, and it affected the prior
+        // model equally — pinned here so that any future change to accent
+        // handling (e.g. adding NFD + Mn removal, as canonical BERT
+        // preprocessing does) is a conscious decision rather than a silent shift
+        // of token IDs across the embedding pipeline.
+        testCase "tokenize accented input falls through to UNK (known gap vs canonical BERT accent-stripping)" <| fun _ ->
             let vocab = FixtureLoader.loadVocab()
             let actual = Tokenizer.tokenize vocab "café résumé" |> List.toArray
             Expect.equal actual [| 101; 100; 100; 102 |]

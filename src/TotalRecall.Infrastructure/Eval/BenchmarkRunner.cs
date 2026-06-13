@@ -102,6 +102,7 @@ public sealed class BenchmarkRunner
             foreach (var entry in corpus)
             {
                 ct.ThrowIfCancellationRequested();
+                // Documents/corpus embed via Embed (no query prefix) — only queries get the asymmetric bge instruction.
                 var vector = _embedder.Embed(entry.Content);
                 var metadataJson = $"{{\"entry_type\":\"{EscapeForJson(entry.Type)}\"}}";
                 var id = _store.Insert(
