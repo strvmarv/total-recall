@@ -21,6 +21,8 @@ public sealed class LocalAuthTests
     [InlineData("127.0.0.1")]
     [InlineData("127.0.0.1:5577")]
     [InlineData("[::1]:5577")]
+    [InlineData("[::1]")]
+    [InlineData("::1")]
     public void IsAllowedHost_True_ForLoopback(string host) =>
         Assert.True(LocalAuth.IsAllowedHost(host, allowedHost: "127.0.0.1"));
 
@@ -43,5 +45,11 @@ public sealed class LocalAuthTests
         Assert.True(LocalAuth.TokenMatches("abc123", "abc123"));
         Assert.False(LocalAuth.TokenMatches("abc123", "abc124"));
         Assert.False(LocalAuth.TokenMatches("abc123", null));
+    }
+
+    [Fact]
+    public void GenerateToken_ReturnsDistinctValues()
+    {
+        Assert.NotEqual(LocalAuth.GenerateToken(), LocalAuth.GenerateToken());
     }
 }

@@ -20,8 +20,12 @@ public static class LocalAuth
     }
 
     /// <summary>
-    /// True when the request Host header's hostname is loopback OR matches the
-    /// server's explicitly-bound host. Strips any port and IPv6 brackets.
+    /// True when the request Host header's hostname is loopback (localhost / 127.0.0.1
+    /// / ::1) OR matches <paramref name="allowedHost"/>. By contract,
+    /// <paramref name="allowedHost"/> is the server's actual bound host (the caller
+    /// passes the address Kestrel is listening on). When the operator opts into a
+    /// non-loopback bind via `--host`, that host becomes allowed by design — the
+    /// CLI warns about the exposure at launch. Loopback is always allowed.
     /// </summary>
     public static bool IsAllowedHost(string? hostHeader, string allowedHost)
     {
@@ -32,23 +36,34 @@ public static class LocalAuth
         return host.Equals(allowedHost, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>Constant-time token comparison.</summary>
+    /// <summary>
+    /// Constant-time token comparison. Both inputs are hashed to a fixed 32-byte
+    /// SHA-256 digest before comparison, so the comparison is constant-time
+    /// regardless of input length (FixedTimeEquals itself requires equal-length spans).
+    /// </summary>
     public static bool TokenMatches(string expected, string? provided)
     {
         if (provided is null) return false;
-        var a = System.Text.Encoding.UTF8.GetBytes(expected);
-        var b = System.Text.Encoding.UTF8.GetBytes(provided);
+        Span<byte> a = stackalloc byte[32];
+        Span<byte> b = stackalloc byte[32];
+        SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(expected), a);
+        SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(provided), b);
         return CryptographicOperations.FixedTimeEquals(a, b);
     }
 
     private static string StripPort(string hostHeader)
     {
-        // IPv6: [::1]:5577 -> ::1
+        // IPv6 with brackets: [::1]:5577 -> ::1
         if (hostHeader.StartsWith('['))
         {
             var close = hostHeader.IndexOf(']');
             return close > 0 ? hostHeader.Substring(1, close - 1) : hostHeader;
         }
+        // Bare IPv6 (multiple colons, no brackets, no port): return as-is so
+        // "::1" is recognized as loopback rather than misparsed at the first colon.
+        if (hostHeader.IndexOf(':') != hostHeader.LastIndexOf(':'))
+            return hostHeader;
+        // IPv4 / hostname with optional :port
         var colon = hostHeader.IndexOf(':');
         return colon >= 0 ? hostHeader.Substring(0, colon) : hostHeader;
     }
