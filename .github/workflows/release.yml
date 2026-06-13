@@ -131,6 +131,15 @@ jobs:
           set -euo pipefail
           mkdir -p "binaries/$RID"
           cp -a "src/TotalRecall.Host/bin/Release/net8.0/$RID/publish/." "binaries/$RID/"
+          # Strip debug symbols. .pdb (Windows), .dbg (Linux), and .dsym bundles
+          # (macOS) are developer-only and never loaded at runtime, yet they were
+          # ~half of every release tarball. Harmless when nothing matches; the
+          # executable ($EXE = total-recall[.exe]) is never matched by these globs.
+          # This trims BOTH the npm package and the per-RID release tarballs (both
+          # derive from this staged tree) and is what keeps the bundled 133 MB bge
+          # model under npm's publish payload limit (a fat tree tripped E413).
+          find "binaries/$RID" -type f \( -name '*.pdb' -o -name '*.dbg' \) -delete
+          find "binaries/$RID" -type d -iname '*.dsym' -prune -exec rm -rf {} +
           echo "--- staged tree ---"
           ls -la "binaries/$RID"
           test -f "binaries/$RID/$EXE"
@@ -145,6 +154,13 @@ jobs:
           $dest = "binaries/$env:RID"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
           Copy-Item -Recurse -Force "src/TotalRecall.Host/bin/Release/net8.0/$env:RID/publish/*" $dest
+          # Strip debug symbols (see the Unix step) — dev-only, never loaded at
+          # runtime, and the bulk of the release/npm payload. The win-x64 publish
+          # emits total-recall.pdb (~123 MB).
+          # Use the "$dest\*" path form, not bare $dest: -Include only takes effect
+          # when the path ends in a wildcard (PowerShell's documented -Include gotcha).
+          Get-ChildItem -Path "$dest\*" -Recurse -File -Include *.pdb,*.dbg | Remove-Item -Force
+          Get-ChildItem -Path "$dest\*" -Recurse -Directory -Filter *.dsym | Remove-Item -Recurse -Force
           Write-Host "--- staged tree ---"
           Get-ChildItem $dest
           if (-not (Test-Path "$dest/$env:EXE")) {
@@ -251,6 +267,34 @@ jobs:
           chmod +x binaries/linux-x64/total-recall
           chmod +x binaries/linux-arm64/total-recall
           chmod +x binaries/osx-arm64/total-recall
+
+      # Regression guard for the E413 class of failure. The npm registry rejects
+      # oversized publish payloads with "413 Payload Too Large" — v3.0.0 hit this
+      # because debug symbols (~half the tree) plus the 133 MB bge model pushed the
+      # tarball past the limit. `npm pack --dry-run` reports the exact packed size
+      # WITHOUT publishing; fail here (with an actionable message) rather than
+      # discovering the limit mid-publish. Reference points: v2.2.0 packed ~137 MB
+      # (published fine); symbol-stripped v3.0.1 packs ~145 MB; the rejected v3.0.0
+      # was ~214 MB. 180 MB sits safely between known-good and known-bad.
+      - name: Guard npm package size (pre-publish)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # `.size` is the COMPRESSED (gzipped) tarball — the bytes actually PUT to
+          # the registry — not `.unpackedSize` (the raw file-sum, which is ~3-4x
+          # larger and would false-fail this guard). stderr is NOT suppressed so a
+          # failed pack surfaces in the log instead of yielding an empty SIZE.
+          SIZE=$(npm pack --dry-run --json | jq '.[0].size')
+          if [ -z "$SIZE" ] || [ "$SIZE" = "null" ]; then
+            echo "::error::npm pack --dry-run produced no parseable tarball size — pack likely failed (see log above)." >&2
+            exit 1
+          fi
+          LIMIT=$((180 * 1024 * 1024))
+          echo "packed tarball: ${SIZE} bytes (ceiling ${LIMIT})"
+          if [ "$SIZE" -gt "$LIMIT" ]; then
+            echo "::error::npm package ($SIZE bytes) exceeds the safe publish ceiling ($LIMIT bytes). Check for debug symbols (*.pdb/*.dbg/*.dsym) in binaries/ or an oversized models/ tree before publishing." >&2
+            exit 1
+          fi
 
       - name: npm publish
         # Auth via OIDC trusted publishing — NO token. Requires the package's

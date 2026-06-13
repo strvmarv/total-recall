@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 3.0.1 - 2026-06-13
+
+### Fixed
+
+- **Release packaging: strip debug symbols so `npm publish` stops exceeding the registry payload limit.** v3.0.0 failed to publish with `npm error 413 Payload Too Large` — the release artifacts had been bundling developer-only debug symbols (`.pdb`/`.dbg`/`.dsym`, roughly half of every tarball since v2.2.0), and stacking the new 133 MB bge model on top pushed the publish payload past npm's ceiling. The release workflow now removes those symbols from each staged publish tree (the runtime never loaded them), which trims both the npm package and the per-RID release tarballs back under the limit, and a pre-publish size guard now fails the build if the packed tarball regresses past a safe ceiling. No code or runtime behavior change; this is the release that actually ships the v3.0.0 changes below.
+
 ## 3.0.0 - 2026-06-13
 
 ### Breaking Changes
