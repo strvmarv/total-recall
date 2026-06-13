@@ -24,6 +24,7 @@ using Microsoft.FSharp.Core;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Importers;
+using TotalRecall.Infrastructure.Memory;
 using TotalRecall.Infrastructure.Skills;
 using TotalRecall.Infrastructure.Storage;
 using TotalRecall.Infrastructure.Telemetry;
@@ -262,7 +263,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         // (spec 2026-06-09). The hot tier gets whatever budget remains.
         var pinnedMemories = _store.List(Tier.Pinned, ContentType.Memory);
         var pinnedKnowledge = _store.List(Tier.Pinned, ContentType.Knowledge);
-        var (pinnedBlock, pinnedIds) = BuildPinnedBlock(pinnedMemories, pinnedKnowledge);
+        var (pinnedBlock, pinnedIds) = PinnedBlockRenderer.Render(pinnedMemories, pinnedKnowledge);
         var pinnedTokens = pinnedBlock.Length > 0 ? HeuristicEstimateTokens(pinnedBlock) : 0;
 
         // 4. Tier summary.
@@ -418,29 +419,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
     public static (string Block, IReadOnlyList<(Tier, ContentType, string)> Ids) BuildPinnedBlock(
         IReadOnlyList<Entry> pinnedMemories,
         IReadOnlyList<Entry> pinnedKnowledge)
-    {
-        var total = pinnedMemories.Count + pinnedKnowledge.Count;
-        if (total == 0)
-            return (string.Empty, Array.Empty<(Tier, ContentType, string)>());
-
-        var sb = new StringBuilder();
-        // Directive header: injection != obedience — phrase the block as rules
-        // the host model must follow, not passive background context.
-        sb.Append("## Pinned directives (always follow)");
-        var ids = new List<(Tier, ContentType, string)>(total);
-
-        foreach (var e in pinnedMemories)
-        {
-            sb.Append("\n- ").Append(e.Content);
-            ids.Add((Tier.Pinned, ContentType.Memory, e.Id));
-        }
-        foreach (var e in pinnedKnowledge)
-        {
-            sb.Append("\n- ").Append(e.Content);
-            ids.Add((Tier.Pinned, ContentType.Knowledge, e.Id));
-        }
-        return (sb.ToString(), ids);
-    }
+        => PinnedBlockRenderer.Render(pinnedMemories, pinnedKnowledge);
 
     /// <summary>
     /// Builds the <c>## Available Skills</c> context block from a list response.
@@ -1130,7 +1109,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         // after compaction never silently drops pins (spec 2026-06-09).
         var pinnedMemories = _store.List(Tier.Pinned, ContentType.Memory);
         var pinnedKnowledge = _store.List(Tier.Pinned, ContentType.Knowledge);
-        var (pinnedBlock, pinnedIds) = BuildPinnedBlock(pinnedMemories, pinnedKnowledge);
+        var (pinnedBlock, pinnedIds) = PinnedBlockRenderer.Render(pinnedMemories, pinnedKnowledge);
         var pinnedTokens = pinnedBlock.Length > 0 ? HeuristicEstimateTokens(pinnedBlock) : 0;
 
         var ctxResult = BuildContext(hotEntries, new BuildContextOptions
