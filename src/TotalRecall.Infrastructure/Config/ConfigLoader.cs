@@ -337,7 +337,8 @@ public sealed class ConfigLoader : IConfigLoader
             TryGetString(embedding, "bedrock_model"),
             TryGetString(embedding, "model_name"),
             TryGetString(embedding, "api_key"),
-            TryGetString(embedding, "query_prefix"));
+            TryGetString(embedding, "query_prefix"),
+            TryGetString(embedding, "on_model_change"));
 
         FSharpOption<Core.Config.RegressionConfig> regression;
         if (table.TryGetValue("regression", out var regObj) && regObj is TomlTable regTable)

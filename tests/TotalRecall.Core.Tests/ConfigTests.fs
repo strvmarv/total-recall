@@ -98,7 +98,7 @@ let configTests =
                     DecayHalfLifeDecision = None
                     AutoDemoteMinInjections = 10
                 }
-                Embedding = { Model = "bge-small-en-v1.5"; Dimensions = 384; Provider = None; Endpoint = None; BedrockRegion = None; BedrockModel = None; ModelName = None; ApiKey = None; EmbeddingQueryPrefix = None }
+                Embedding = { Model = "bge-small-en-v1.5"; Dimensions = 384; Provider = None; Endpoint = None; BedrockRegion = None; BedrockModel = None; ModelName = None; ApiKey = None; EmbeddingQueryPrefix = None; OnModelChange = Some "warn" }
                 Regression = None
                 Search = Some { FtsWeight = Some 0.3 }
                 Storage = None
@@ -110,5 +110,6 @@ let configTests =
             }
             Expect.equal cfg.Tiers.Hot.MaxEntries 50 "field access works"
             Expect.equal cfg.Embedding.Model "bge-small-en-v1.5" "nested field access works"
+            Expect.equal cfg.Embedding.OnModelChange (Some "warn") "on_model_change optional field works"
             Expect.equal cfg.Search (Some { FtsWeight = Some 0.3 }) "optional record works"
     ]

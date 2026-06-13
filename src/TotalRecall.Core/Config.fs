@@ -66,6 +66,7 @@ type EmbeddingConfig = {
     ModelName: string option
     ApiKey: string option
     EmbeddingQueryPrefix: string option
+    OnModelChange: string option
 }
 
 type StorageConfig = {
