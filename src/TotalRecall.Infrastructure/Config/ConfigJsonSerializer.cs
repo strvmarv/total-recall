@@ -67,6 +67,13 @@ public static class ConfigJsonSerializer
             sb.Append(',');
             AppendString(sb, "query_prefix", config.Embedding.EmbeddingQueryPrefix.Value);
         }
+        // on_model_change is optional and emitted only when present, mirroring
+        // query_prefix above so snapshots stay byte-identical for ConfigSnapshotStore dedup.
+        if (Microsoft.FSharp.Core.FSharpOption<string>.get_IsSome(config.Embedding.OnModelChange))
+        {
+            sb.Append(',');
+            AppendString(sb, "on_model_change", config.Embedding.OnModelChange.Value);
+        }
         sb.Append('}');
 
         // regression (optional)

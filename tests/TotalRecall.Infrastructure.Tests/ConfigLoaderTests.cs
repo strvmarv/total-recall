@@ -398,6 +398,37 @@ public sealed class ConfigLoaderTests : IDisposable
     }
 
     [Fact]
+    public void LoadEffectiveConfig_WithOnModelChange_ParsesValue()
+    {
+        var userPath = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(userPath, """
+            [embedding]
+            on_model_change = "block"
+            """);
+        var loader = new ConfigLoader();
+
+        var cfg = loader.LoadEffectiveConfig(userPath);
+
+        Assert.True(FSharpOption<string>.get_IsSome(cfg.Embedding.OnModelChange));
+        Assert.Equal("block", cfg.Embedding.OnModelChange.Value);
+    }
+
+    [Fact]
+    public void LoadEffectiveConfig_NoOnModelChange_IsNone()
+    {
+        var userPath = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(userPath, """
+            [embedding]
+            provider = "local"
+            """);
+        var loader = new ConfigLoader();
+
+        var cfg = loader.LoadEffectiveConfig(userPath);
+
+        Assert.True(FSharpOption<string>.get_IsNone(cfg.Embedding.OnModelChange));
+    }
+
+    [Fact]
     public void LoadDefaults_StorageAndUserAreNone()
     {
         var loader = new ConfigLoader();

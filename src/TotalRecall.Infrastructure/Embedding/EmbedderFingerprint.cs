@@ -59,27 +59,63 @@ public static class EmbedderFingerprint
     internal const string KeyDimensions = "embed.dimensions";
 
     /// <summary>
+    /// The relationship between the fingerprint stamped in <c>_meta</c> and the
+    /// configured embedder, as reported by <see cref="Check"/>.
+    /// </summary>
+    public enum FingerprintState
+    {
+        /// <summary>A complete fingerprint is stamped and matches the configured embedder.</summary>
+        Match,
+
+        /// <summary>No (or only a partial) fingerprint is stamped — first open / never fully stamped.</summary>
+        Unstamped,
+
+        /// <summary>A complete fingerprint is stamped but differs from the configured embedder.</summary>
+        Mismatch,
+    }
+
+    /// <summary>
+    /// Classify the stored fingerprint against the configured embedder WITHOUT
+    /// stamping, throwing, or mutating anything. This is the state seam the
+    /// startup policy dispatches on (auto/warn/block); <see cref="EnsureMatches"/>
+    /// is expressed over it.
+    /// </summary>
+    /// <param name="stored">
+    /// On return: <c>null</c> when the result is <see cref="FingerprintState.Unstamped"/>;
+    /// otherwise the descriptor read from <c>_meta</c> (the value being compared).
+    /// </param>
+    public static FingerprintState Check(IMetaStore meta, IEmbedder embedder, out EmbedderDescriptor? stored)
+    {
+        ArgumentNullException.ThrowIfNull(meta);
+        ArgumentNullException.ThrowIfNull(embedder);
+
+        stored = ReadStored(meta);
+        if (stored is null)
+        {
+            return FingerprintState.Unstamped;
+        }
+
+        return Equal(stored, embedder.Descriptor)
+            ? FingerprintState.Match
+            : FingerprintState.Mismatch;
+    }
+
+    /// <summary>
     /// If no fingerprint is stamped, stamp the configured embedder's
     /// descriptor. If a fingerprint is stamped, compare it to the configured
     /// embedder and throw on mismatch.
     /// </summary>
     public static void EnsureMatches(IMetaStore meta, IEmbedder embedder)
     {
-        ArgumentNullException.ThrowIfNull(meta);
-        ArgumentNullException.ThrowIfNull(embedder);
-
-        var configured = embedder.Descriptor;
-
-        var stored = ReadStored(meta);
-        if (stored is null)
+        switch (Check(meta, embedder, out var stored))
         {
-            Stamp(meta, configured);
-            return;
-        }
-
-        if (!Equal(stored, configured))
-        {
-            throw new EmbedderFingerprintMismatchException(stored, configured);
+            case FingerprintState.Unstamped:
+                Stamp(meta, embedder.Descriptor);
+                return;
+            case FingerprintState.Mismatch:
+                throw new EmbedderFingerprintMismatchException(stored!, embedder.Descriptor);
+            default: // Match
+                return;
         }
     }
 

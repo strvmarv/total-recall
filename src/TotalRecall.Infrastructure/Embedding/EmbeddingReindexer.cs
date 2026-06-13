@@ -4,6 +4,7 @@ using TotalRecall.Core;
 using TotalRecall.Infrastructure.Memory;
 using TotalRecall.Infrastructure.Search;
 using TotalRecall.Infrastructure.Storage;
+using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
 namespace TotalRecall.Infrastructure.Embedding;
 
@@ -48,5 +49,49 @@ public sealed class EmbeddingReindexer
                 progress?.WriteLine($"  {TierNames.TierName(tier)}/{TierNames.ContentTypeName(type)}: {inPair} re-embedded");
         }
         return total;
+    }
+
+    /// <summary>
+    /// Atomically re-embed every row with <paramref name="embedder"/> and re-stamp
+    /// the embedder fingerprint, on a single sqlite connection. Returns the number
+    /// of vectors re-embedded. A mid-run failure rolls the whole thing back so the
+    /// DB never ends up half-rewritten (a mix of old and new embedding spaces).
+    ///
+    /// Shared by the <c>reindex-embeddings</c> CLI command and the sqlite startup
+    /// auto-migration path so both get identical atomicity.
+    ///
+    /// SqliteStore/VectorSearch create commands WITHOUT setting .Transaction;
+    /// Microsoft.Data.Sqlite throws if a SqliteTransaction OBJECT is active and a
+    /// command's .Transaction isn't set. Raw SQL transaction control
+    /// (BEGIN/COMMIT/ROLLBACK) does NOT create a SqliteTransaction object, so it
+    /// sidesteps that enforcement.
+    /// </summary>
+    public static int RunAtomicSqlite(
+        MsSqliteConnection conn,
+        IStore store,
+        IVectorSearch vec,
+        IEmbedder embedder,
+        TextWriter? progress)
+    {
+        ArgumentNullException.ThrowIfNull(conn);
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(vec);
+        ArgumentNullException.ThrowIfNull(embedder);
+
+        void Exec(string sql) { using var c = conn.CreateCommand(); c.CommandText = sql; c.ExecuteNonQuery(); }
+        Exec("BEGIN IMMEDIATE");
+        try
+        {
+            var reindexer = new EmbeddingReindexer(store, vec, embedder);
+            int n = reindexer.Reindex(progress);
+            EmbedderFingerprint.Restamp((IMetaStore)store, embedder);
+            Exec("COMMIT");
+            return n;
+        }
+        catch
+        {
+            try { Exec("ROLLBACK"); } catch { /* best-effort */ }
+            throw;
+        }
     }
 }

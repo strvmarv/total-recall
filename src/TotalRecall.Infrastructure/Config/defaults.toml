@@ -92,6 +92,7 @@ default_ttl_seconds = 600
 # bedrock_model = "cohere.embed-v4:0"
 # api_key = ""                    # or set TOTAL_RECALL_EMBEDDING_API_KEY env var
 # query_prefix = "Represent this sentence for searching relevant passages: "  # prepended to SEARCH queries only (asymmetric retrieval); omit to disable
+# on_model_change = "auto"   # on a local model change: auto (default) re-embeds the DB in place; warn = run degraded; block = refuse to start
 
 # --- User identity (optional, Postgres only) ---
 # [user]

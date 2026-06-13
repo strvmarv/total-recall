@@ -79,30 +79,13 @@ public sealed class ReindexEmbeddingsCommand : ICliCommand
             var store = new SqliteStore(conn);
             var vec = new VectorSearch(conn);
 
-            // Atomic reindex: a mid-run failure must roll the whole thing back so
-            // the DB never ends up half-rewritten (a mix of old and new embedding
-            // spaces). SqliteStore/VectorSearch create commands WITHOUT setting
-            // .Transaction; Microsoft.Data.Sqlite throws if a SqliteTransaction
-            // OBJECT is active and a command's .Transaction isn't set. Raw SQL
-            // transaction control (BEGIN/COMMIT/ROLLBACK) does NOT create a
-            // SqliteTransaction object, so it sidesteps that enforcement.
-            void Exec(string sql) { using var c = conn.CreateCommand(); c.CommandText = sql; c.ExecuteNonQuery(); }
-            Exec("BEGIN IMMEDIATE");
-            try
-            {
-                var reindexer = new EmbeddingReindexer(store, vec, embedder);
-                int n = reindexer.Reindex(Console.Out);
-                EmbedderFingerprint.Restamp(store, embedder);
-                Exec("COMMIT");
-                sw.Stop();
-                Console.WriteLine($"total-recall: re-embedded {n} entries in {sw.ElapsedMilliseconds}ms; fingerprint re-stamped.");
-                return Task.FromResult(0);
-            }
-            catch
-            {
-                try { Exec("ROLLBACK"); } catch { /* best-effort */ }
-                throw;
-            }
+            // Atomic reindex (shared with the sqlite startup auto-migration path):
+            // a mid-run failure rolls the whole thing back so the DB never ends up
+            // half-rewritten (a mix of old and new embedding spaces).
+            int n = EmbeddingReindexer.RunAtomicSqlite(conn, store, vec, embedder, Console.Out);
+            sw.Stop();
+            Console.WriteLine($"total-recall: re-embedded {n} entries in {sw.ElapsedMilliseconds}ms; fingerprint re-stamped.");
+            return Task.FromResult(0);
         }
         catch (Exception ex)
         {

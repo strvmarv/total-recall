@@ -145,7 +145,7 @@ Retrieval combines **BM25 full-text search** and **cosine vector similarity**, m
 
 All memories are embedded with [bge-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5) (384 dimensions, CLS pooling, with an asymmetric query prefix for searches), running locally via ONNX — no API calls, no network dependency. The model (~133 MB) is fetched and sha256-verified at release build time and ships bundled inside the npm/release artifact; there is no runtime HuggingFace download. If the bundled model is absent, the binary fails fast with a clear error rather than fetching anything.
 
-If you swap the local embedder, run `total-recall reindex-embeddings` to re-embed existing memories into the new model's vector space — otherwise the server refuses to open a database whose vectors were written by a different model.
+If you swap the local embedder, existing vectors are in the old model's space. By default (`embedding.on_model_change = "auto"`) a **sqlite** database re-embeds itself automatically on the next launch — a one-time, atomic in-place re-embed; no manual step. Set `on_model_change = "warn"` to run with the stale vectors (degraded retrieval, recurring warning) or `"block"` to refuse to start. **Postgres** can't auto-migrate: under `auto` it stops with an actionable error — re-ingest into a fresh database or use `"warn"`. **Cortex** users run `total-recall reindex-embeddings` to re-embed the local vector index (the remote re-embeds independently).
 
 For enterprise deployments, swap in a remote embedder (OpenAI, Amazon Bedrock) for higher-dimensional vectors and finer-grained retrieval across shared team knowledge.
 

@@ -25,6 +25,7 @@ public sealed class EmbedderFactoryTests
             bedrockModel is null ? FSharpOption<string>.None : FSharpOption<string>.Some(bedrockModel),
             modelName is null ? FSharpOption<string>.None : FSharpOption<string>.Some(modelName),
             apiKey is null ? FSharpOption<string>.None : FSharpOption<string>.Some(apiKey),
+            FSharpOption<string>.None,
             FSharpOption<string>.None);
     }
 
