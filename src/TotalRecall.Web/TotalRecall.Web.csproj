@@ -26,8 +26,9 @@
           Condition="'$(BuildSpa)' == 'true'"
           BeforeTargets="EnsureWwwRoot">
     <Message Importance="high" Text="BuildSpa=true: building ClientApp via Vite..." />
-    <Exec Command="npm ci" WorkingDirectory="$(SpaRoot)"
-          Condition="!Exists('$(SpaRoot)node_modules')" />
+    <!-- npm ci is the integrity gate: always run it on the opt-in BuildSpa path so the
+         embedded bundle is reproducible from the lockfile (never a stale node_modules). -->
+    <Exec Command="npm ci" WorkingDirectory="$(SpaRoot)" />
     <Exec Command="npm run build" WorkingDirectory="$(SpaRoot)" />
     <Error Condition="!Exists('wwwroot\index.html')"
            Text="BuildSpa=true but Vite produced no wwwroot/index.html. Is Node installed and the build succeeding?" />
