@@ -36,9 +36,9 @@ If you install total-recall via Claude Code's `/plugin` flow using a `source: gi
 
 This does **not** happen when installing via `npm install -g @strvmarv/total-recall` — all platform binaries ship inside the npm tarball.
 
-### 2. ONNX model fallback download (conditional)
+### 2. ONNX embedding model (no runtime download)
 
-The embedding model (`all-MiniLM-L6-v2`) is bundled in the `models/` directory. If the model file is missing (e.g., after a partial install or failed Git LFS fetch), the runtime downloads it from **HuggingFace** (`huggingface.co`). This is a one-time fetch of model weights — no memory data is sent.
+The embedding model (`bge-small-en-v1.5`, ~133 MB) is fetched and sha256-verified at release **build** time and ships bundled inside the release/npm artifact in the `models/` directory. The runtime does **not** download it from HuggingFace or anywhere else — if the bundled model is missing, the binary fails fast with a clear error rather than reaching out to the network.
 
 ### 3. Nothing else
 
@@ -48,7 +48,7 @@ There is no telemetry, no crash reporting, no usage analytics, no cloud sync, an
 
 ## Embeddings and AI processing
 
-Vector embeddings are computed **locally** using the bundled ONNX runtime and `all-MiniLM-L6-v2` model. Your text is never sent to an embedding API or any remote model service.
+Vector embeddings are computed **locally** using the bundled ONNX runtime and `bge-small-en-v1.5` model. Your text is never sent to an embedding API or any remote model service.
 
 ---
 

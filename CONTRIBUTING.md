@@ -47,7 +47,7 @@ TOTAL_RECALL_DB_PATH="$SCRATCH/test.db" \
 rm -rf "$SCRATCH"
 ```
 
-Expected output: tier counts, KB info, embedding model `all-MiniLM-L6-v2`, schema version 5+, exit 0.
+Expected output: tier counts, KB info, embedding model `bge-small-en-v1.5`, schema version 5+, exit 0.
 
 The new `VerifyVecExtensionPublished` MSBuild target (added in 0.8.0-beta.6) runs after `dotnet publish` and emits an `<Error>` if `runtimes/vec0.{so,dylib,dll}` is missing from the publish output. If you ever see that error, run `npm ci` at the repo root and verify `node_modules/sqlite-vec-<rid>/vec0.*` exists for your target RID.
 

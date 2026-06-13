@@ -81,9 +81,11 @@ The build artifact is a per-platform AOT-published binary at `src/TotalRecall.Ho
 
 The .NET SDK is pinned by `global.json` at the repo root (`{"sdk":{"version":"10.0.100","rollForward":"latestFeature"}}`). The pin exists because GitHub-hosted macOS runners ship .NET 10 preview pre-installed and we need every CI matrix leg to use the same SDK regardless of runner pre-installs. .NET 10 SDK builds the `net8.0` target framework cleanly.
 
-### ONNX model is tracked via Git LFS
+### ONNX model is fetched at build time (not committed)
 
-The embedding model (`models/all-MiniLM-L6-v2/model.onnx`) is stored with Git LFS. Contributors need `git lfs install` before cloning. The model is bundled so plugin users get offline embeddings without a HuggingFace download on first run. If the model is missing at runtime, the .NET embedder has a fallback to download from HuggingFace (see `src/TotalRecall.Infrastructure/Embedding/ModelManager.cs`).
+The embedding model (`models/bge-small-en-v1.5/model.onnx`, ~133 MB fp32) is **not** committed to the repo and is not in Git LFS. Contributors run `sh scripts/fetch-bge-small.sh` once to fetch + sha256-verify it from a pinned HuggingFace revision into `models/bge-small-en-v1.5/`. Release builds run the same script and bundle the verified model into the per-RID release tarball, so plugin users get offline embeddings with no runtime HuggingFace download. At runtime the .NET `ModelManager` validates the bundled model and throws a clear error if it is absent — it does NOT download (see `src/TotalRecall.Infrastructure/Embedding/ModelManager.cs`).
+
+After swapping the local embedder, run `total-recall reindex-embeddings` to re-embed existing memories into the new model's vector space; the server otherwise refuses to open a database whose vectors were written by a different model.
 
 ### Version sync — six files, one version (STANDING RULE)
 

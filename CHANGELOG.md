@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- **Replaced the local embedder with `bge-small-en-v1.5`** (CLS pooling, 384-dim, with an asymmetric query prefix applied to searches), retiring `all-MiniLM-L6-v2`. The model (~133 MB fp32) is now fetched and sha256-verified at release build time from a pinned HuggingFace revision (`scripts/fetch-bge-small.sh`) and bundled into the per-RID release artifact — it is no longer committed to the repo / Git LFS, and there is no runtime HuggingFace download (the runtime validates the bundled model and fails fast if absent).
+
+### Added
+
+- **`total-recall reindex-embeddings` CLI command** — re-embeds existing local vectors into the new model's vector space after an embedder swap. The server otherwise refuses to open a database whose vectors were written by a different model.
+
 ## 2.1.1 - 2026-06-10
 
 ### Fixed

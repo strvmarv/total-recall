@@ -34,10 +34,10 @@ When `session_start` returns an error response containing `"error": "model_not_r
 
 | reason | What it means | What to do |
 |---|---|---|
-| `downloading` | First-run bootstrap is in progress (90 MB ONNX model). Another process or this one holds the lock. | Wait 5–10 seconds and call `session_start` again. Repeat up to 12 times (~2 minutes total). Surface a brief status to the user on the first retry: "Total-recall is downloading its embedding model on first run. This is a one-time setup." |
-| `missing` | Model not present and no bootstrap has started. | Call `session_start` again to trigger the bootstrap. |
-| `corrupted` | Model file present but failed checksum (e.g., partial download, bad bundled file, Git LFS pointer). | Call `session_start` once more — bootstrap will re-download. If it fails again with the same reason, surface the `hint` field to the user verbatim (it contains manual install instructions) and proceed without memory. |
-| `failed` | Network failure or other unrecoverable download error. | Surface the `hint` field verbatim to the user (manual install commands) and proceed without memory features for this session. Do NOT keep retrying — that will only delay the user. |
+| `downloading` | First-run bootstrap is in progress (loading/validating the ~133 MB bundled ONNX model). Another process or this one holds the lock. | Wait 5–10 seconds and call `session_start` again. Repeat up to 12 times (~2 minutes total). Surface a brief status to the user on the first retry: "Total-recall is preparing its embedding model on first run. This is a one-time setup." |
+| `missing` | Bundled model not found on disk. The runtime does not download it — it must be present in the artifact (fetched + sha256-verified at build via `scripts/fetch-bge-small.sh`). | Surface the `hint` field to the user verbatim (it contains manual install instructions) and proceed without memory features for this session. |
+| `corrupted` | Model file present but failed checksum (e.g., partial install or a bad bundled file). | Call `session_start` once more in case it was a transient read. If it fails again with the same reason, surface the `hint` field to the user verbatim (it contains manual install instructions) and proceed without memory. |
+| `failed` | Other unrecoverable error preparing the model. | Surface the `hint` field verbatim to the user (manual install commands) and proceed without memory features for this session. Do NOT keep retrying — that will only delay the user. |
 
 After successful recovery, all subsequent total-recall behaviors (capture, retrieve, session end) should resume normally. If recovery is impossible, the assistant must continue helping the user with their actual task — memory unavailability is a degraded mode, not a fatal error.
 
