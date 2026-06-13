@@ -523,6 +523,16 @@ public static class ServerComposition
             var vec = new VectorSearch(conn);
             var fts = new FtsSearch(conn);
             var embedder = EmbedderFactory.CreateFromConfig(cfg.Embedding);
+
+            // Cortex auto-migrates its LOCAL vec0 index here, exactly like the
+            // sqlite path (cortex stores locally in SQLite). The remote re-embeds
+            // independently via content-only sync, so this only governs the local
+            // index. Without this, a cortex DB was never fingerprint-stamped, so a
+            // model swap left it unstamped-but-populated with stale local vectors.
+            var onModelChange = OnModelChangePolicy.Parse(
+                FSharpOption<string>.get_IsSome(cfg.Embedding.OnModelChange) ? cfg.Embedding.OnModelChange.Value : null);
+            EmbedderMigration.EnsureCompatibleSqlite(conn, localStore, vec, embedder, onModelChange, Console.Error);
+
             var hybrid = new HybridSearch(vec, fts, localStore);
 
             var cortexClient = CortexClient.Create(cortexUrl, cortexPat);
