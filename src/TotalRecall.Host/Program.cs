@@ -183,9 +183,9 @@ internal static class Program
             switch (args[i])
             {
                 case "--port" when i + 1 < args.Length:
-                    if (!int.TryParse(args[++i], out port))
+                    if (!int.TryParse(args[++i], out port) || port < 0 || port > 65535)
                     {
-                        Console.Error.WriteLine($"total-recall ui: invalid --port value '{args[i]}'");
+                        Console.Error.WriteLine($"total-recall ui: invalid --port value '{args[i]}' (expected 0-65535)");
                         return 2;
                     }
                     break;
@@ -225,6 +225,62 @@ internal static class Program
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+
+        // Migration-guard preamble — parity with RunServeAsync. WebUiServer.RunAsync
+        // calls ServerComposition.OpenProduction(), whose contract requires the caller
+        // to run AutoMigrationGuard FIRST so a legacy TS-format DB is renamed out of
+        // the way BEFORE a Sqlite handle is opened on the target path. The guard is
+        // idempotent: an already-migrated DB short-circuits at a marker check.
+
+        // Step 1: resolve DB path eagerly. Honors TOTAL_RECALL_DB_PATH; any
+        // validation failure must fail at startup with a clear stderr message.
+        string dbPath;
+        try
+        {
+            dbPath = ConfigLoader.GetDbPath();
+        }
+        catch (SqliteDbPathException ex)
+        {
+            Console.Error.WriteLine($"total-recall ui: {ex.Message}");
+            return 1;
+        }
+
+        // Step 1.5: ensure the data dir AND the dbPath parent dir both exist.
+        try
+        {
+            System.IO.Directory.CreateDirectory(ConfigLoader.GetDataDir());
+            var dbParent = System.IO.Path.GetDirectoryName(dbPath);
+            if (!string.IsNullOrEmpty(dbParent))
+            {
+                System.IO.Directory.CreateDirectory(dbParent);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"total-recall ui: failed to create data directories: {ex.Message}");
+            return 1;
+        }
+
+        // Step 2: migration guard. Runs against the resolved dbPath, not an open
+        // connection — the guard renames the legacy DB out of the way BEFORE we
+        // open a handle on it, so this must execute first.
+        try
+        {
+            var migrator = new TsDataMigrator(EmbedderFactory.CreateProduction());
+            var guard = new AutoMigrationGuard(migrator);
+            var guardResult = await guard.CheckAndMigrateAsync(dbPath, cts.Token)
+                .ConfigureAwait(false);
+            if (guardResult == GuardResult.MigrationFailed)
+            {
+                Console.Error.WriteLine("total-recall ui: aborting ui (migration failed)");
+                return 1;
+            }
+        }
+        catch (Exception ex)
+        {
+            ExceptionLogger.LogChain("total-recall ui: migration guard threw", ex);
+            return 1;
+        }
 
         var options = new WebUiOptions(Port: port, Host: host, OpenBrowser: open, Token: token, Smoke: smoke);
         return await WebUiServer.RunAsync(options, cts.Token).ConfigureAwait(false);

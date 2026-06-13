@@ -5,9 +5,9 @@ namespace TotalRecall.Web.Security;
 
 /// <summary>
 /// Stateless helpers for the local-only auth model: an ephemeral per-launch
-/// bearer token injected into index.html and required on /api/*, plus a
-/// Host-header allowlist that mitigates DNS-rebinding against the loopback
-/// server. No multi-user auth; single local user.
+/// bearer token required on /api/* (and, in a later plan, surfaced to the
+/// served SPA), plus a Host-header allowlist that mitigates DNS-rebinding
+/// against the loopback server. No multi-user auth; single local user.
 /// </summary>
 public static class LocalAuth
 {
@@ -33,6 +33,11 @@ public static class LocalAuth
         var host = StripPort(hostHeader);
         if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase)) return true;
         if (host is "127.0.0.1" or "::1") return true;
+        // Wildcard bind (all interfaces): the server is intentionally reachable
+        // on every interface, so the Host header cannot be validated against a
+        // single bind address. The bearer token is the security boundary in this
+        // explicitly-opted-in mode, so accept any non-empty host here.
+        if (allowedHost is "0.0.0.0" or "::") return true;
         return host.Equals(allowedHost, StringComparison.OrdinalIgnoreCase);
     }
 

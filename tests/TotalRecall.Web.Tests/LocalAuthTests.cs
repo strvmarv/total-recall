@@ -39,6 +39,15 @@ public sealed class LocalAuthTests
         Assert.True(LocalAuth.IsAllowedHost("0.0.0.0:5577", allowedHost: "0.0.0.0"));
     }
 
+    [Theory]
+    [InlineData("192.168.1.50:5577")]
+    [InlineData("10.0.0.5")]
+    [InlineData("example.local")]
+    public void IsAllowedHost_True_ForAnyHost_WhenBoundToWildcard(string host)
+    {
+        Assert.True(LocalAuth.IsAllowedHost(host, allowedHost: "0.0.0.0"));
+    }
+
     [Fact]
     public void TokenMatches_IsConstantTimeEqual()
     {
