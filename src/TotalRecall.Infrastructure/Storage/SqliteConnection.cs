@@ -37,8 +37,12 @@ public static class SqliteConnection
             using (var cmd = conn.CreateCommand())
             {
                 // journal_mode is a no-op for :memory: but harmless.
+                // busy_timeout lets the total-recall UI process wait up to
+                // 5 s instead of immediately throwing SQLITE_BUSY when the
+                // MCP server holds a write lock on the same file.
                 cmd.CommandText =
                     "PRAGMA journal_mode=WAL;" +
+                    "PRAGMA busy_timeout=5000;" +
                     "PRAGMA foreign_keys=ON;" +
                     "PRAGMA synchronous=NORMAL;";
                 cmd.ExecuteNonQuery();
