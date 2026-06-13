@@ -18,6 +18,17 @@ chunk_max_tokens = 512
 chunk_overlap_tokens = 50
 lazy_summary_threshold = 5
 
+[tiers.pinned]
+# Per-entry size cap for pinned content (chars). Pinned content is injected
+# verbatim and never truncated, so size is enforced at the door.
+max_content_chars = 500
+# Pinned-directive "floor": a per-turn UserPromptSubmit hook re-asserts the
+# pinned block near the live edge so directives keep being followed in long
+# sessions. Re-injects when EITHER trigger trips since the last injection:
+floor_enabled       = true   # set false to disable the per-turn floor
+floor_every_n_turns = 6      # re-inject at least every N user turns
+floor_growth_tokens = 6000   # re-inject after ~this many tokens of transcript growth
+
 [compaction]
 decay_half_life_hours = 168
 warm_threshold = 0.3

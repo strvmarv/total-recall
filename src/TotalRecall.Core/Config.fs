@@ -30,6 +30,9 @@ type ColdTierConfig = {
 
 type PinnedTierConfig = {
     MaxContentChars: int
+    FloorEnabled: bool
+    FloorEveryNTurns: int
+    FloorGrowthTokens: int
 }
 
 type TiersConfig = {
