@@ -8,6 +8,12 @@ namespace TotalRecall.Web.Api;
 /// Anything not in this set returns 404 from the dispatch endpoint, so the
 /// UI can never invoke dangerous/irrelevant tools (e.g. migrate_to_remote).
 /// Later UI plans extend this set as their sections land.
+///
+/// NOTE: some allowlisted tools are only registered in certain backend modes
+/// (e.g. usage_status is SQLite/Cortex-only, not Postgres). Allowlisting a name
+/// does not guarantee the tool exists in the active backend — the dispatch
+/// endpoint re-checks ToolRegistry.TryGet after this allowlist check and
+/// returns 404 when an allowlisted tool is not registered in the current mode.
 /// </summary>
 public static class ToolAllowlist
 {
