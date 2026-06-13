@@ -94,8 +94,9 @@ public sealed class OnnxEmbedder : IEmbedder, IDisposable
             tokenTypeIds[0, i] = 0L;
         }
 
-        var inputs = new List<NamedOnnxValue>(_inputNames!.Count);
-        foreach (var name in _inputNames!)
+        var inputNames = _inputNames!;
+        var inputs = new List<NamedOnnxValue>(inputNames.Count);
+        foreach (var name in inputNames)
         {
             inputs.Add(name switch
             {
@@ -165,7 +166,7 @@ public sealed class OnnxEmbedder : IEmbedder, IDisposable
             var onnxPath = Path.Combine(modelDir, ModelFileName);
             var tokenizerPath = Path.Combine(modelDir, TokenizerFileName);
 
-            var opts = new SessionOptions
+            using var opts = new SessionOptions
             {
                 GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
             };

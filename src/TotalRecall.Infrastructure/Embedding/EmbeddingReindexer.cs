@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using TotalRecall.Core;
+using TotalRecall.Infrastructure.Memory;
 using TotalRecall.Infrastructure.Search;
 using TotalRecall.Infrastructure.Storage;
 
@@ -14,18 +15,6 @@ namespace TotalRecall.Infrastructure.Embedding;
 /// </summary>
 public sealed class EmbeddingReindexer
 {
-    private static readonly (Tier Tier, ContentType Type)[] Pairs =
-    {
-        (Tier.Pinned, ContentType.Memory),
-        (Tier.Hot, ContentType.Memory),
-        (Tier.Warm, ContentType.Memory),
-        (Tier.Cold, ContentType.Memory),
-        (Tier.Pinned, ContentType.Knowledge),
-        (Tier.Hot, ContentType.Knowledge),
-        (Tier.Warm, ContentType.Knowledge),
-        (Tier.Cold, ContentType.Knowledge),
-    };
-
     private readonly IStore _store;
     private readonly IVectorSearch _vectors;
     private readonly IEmbedder _embedder;
@@ -41,7 +30,7 @@ public sealed class EmbeddingReindexer
     public int Reindex(TextWriter? progress)
     {
         int total = 0;
-        foreach (var (tier, type) in Pairs)
+        foreach (var (tier, type) in TierNames.AllTablePairs)
         {
             var rows = _store.List(tier, type);
             int inPair = 0;
@@ -56,7 +45,7 @@ public sealed class EmbeddingReindexer
                 total++;
             }
             if (inPair > 0)
-                progress?.WriteLine($"  {TotalRecall.Infrastructure.Memory.TierNames.TierName(tier)}/{TotalRecall.Infrastructure.Memory.TierNames.ContentTypeName(type)}: {inPair} re-embedded");
+                progress?.WriteLine($"  {TierNames.TierName(tier)}/{TierNames.ContentTypeName(type)}: {inPair} re-embedded");
         }
         return total;
     }
