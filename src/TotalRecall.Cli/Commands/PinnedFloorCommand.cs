@@ -71,19 +71,20 @@ public sealed class PinnedFloorCommand : ICliCommand
             long? bytes = transcriptPath is null ? null : SizeOf(transcriptPath);
             var (verdict, next) = PinnedFloorDecider.Decide(state, new FloorSignal(bytes), thresholds);
 
-            PinnedFloorState.Save(stateDir, next);
-
             if (verdict == FloorVerdict.Inject)
             {
                 var block = RenderBlock();
                 if (!string.IsNullOrEmpty(block))
                 {
                     var ctx = ReminderPreamble + "\n\n" + block;
+                    PinnedFloorState.Save(stateDir, next);
                     output.WriteLine(EnvelopeForHost(host, ctx));
                     return 0;
                 }
             }
 
+            // Skip, or inject-with-empty-block: advance + persist state, no injection.
+            PinnedFloorState.Save(stateDir, next);
             output.WriteLine("{}");
             return 0;
         }
