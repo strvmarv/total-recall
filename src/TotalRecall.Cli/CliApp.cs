@@ -270,6 +270,10 @@ public static class CliApp
         Console.WriteLine("  -h, --help       Show this help text");
         Console.WriteLine("  -v, --version    Show the total-recall version");
         Console.WriteLine("");
+        Console.WriteLine("Server:");
+        Console.WriteLine("  serve            Run the MCP stdio server (default)");
+        Console.WriteLine("  ui               Launch the local web UI (total-recall ui --help)");
+        Console.WriteLine("");
 
         if (registry.Count == 0)
         {

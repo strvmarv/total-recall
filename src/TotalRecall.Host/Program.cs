@@ -40,6 +40,7 @@ using TotalRecall.Infrastructure.Diagnostics;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Migration;
 using TotalRecall.Server;
+using TotalRecall.Web;
 
 namespace TotalRecall.Host;
 
@@ -50,6 +51,11 @@ internal static class Program
         if (args.Length == 0 || args[0] == "serve")
         {
             return await RunServeAsync().ConfigureAwait(false);
+        }
+
+        if (args[0] == "ui")
+        {
+            return await RunUiAsync(args).ConfigureAwait(false);
         }
 
         return await TotalRecall.Cli.CliApp.RunAsync(args).ConfigureAwait(false);
@@ -161,5 +167,59 @@ internal static class Program
         {
             handles.Dispose();
         }
+    }
+
+    private static async Task<int> RunUiAsync(string[] args)
+    {
+        int port = 5577;
+        string host = "127.0.0.1";
+        bool open = true;
+        string token = "";
+        bool smoke = false;
+
+        for (int i = 1; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--port" when i + 1 < args.Length:
+                    if (!int.TryParse(args[++i], out port))
+                    {
+                        Console.Error.WriteLine($"total-recall ui: invalid --port value '{args[i]}'");
+                        return 2;
+                    }
+                    break;
+                case "--host" when i + 1 < args.Length: host = args[++i]; break;
+                case "--token" when i + 1 < args.Length: token = args[++i]; break;
+                case "--no-open": open = false; break;
+                case "--smoke": smoke = true; open = false; break;
+                case "--help" or "-h":
+                    Console.WriteLine("Usage: total-recall ui [--port N] [--host H] [--no-open] [--token T] [--smoke]");
+                    Console.WriteLine("");
+                    Console.WriteLine("Launch the local web UI (loopback only by default).");
+                    Console.WriteLine("  --port N     Port to bind (default 5577; 0 = pick a free port)");
+                    Console.WriteLine("  --host H     Bind host (default 127.0.0.1). Non-loopback exposes the UI on your network.");
+                    Console.WriteLine("  --token T    Bearer token for /api/*. If omitted, an ephemeral token is generated and printed at startup.");
+                    Console.WriteLine("  --no-open    Do not open the browser automatically");
+                    Console.WriteLine("  --smoke      Boot, confirm /api/health, then exit (CI hook)");
+                    return 0;
+                default:
+                    Console.Error.WriteLine($"total-recall ui: unknown argument '{args[i]}'");
+                    return 2;
+            }
+        }
+
+        if (!host.Equals("127.0.0.1", StringComparison.Ordinal)
+            && !host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+            && host != "::1")
+        {
+            Console.Error.WriteLine(
+                $"total-recall ui: WARNING binding non-loopback host '{host}' exposes the UI on your network; token auth is required.");
+        }
+
+        using var cts = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+
+        var options = new WebUiOptions(Port: port, Host: host, OpenBrowser: open, Token: token, Smoke: smoke);
+        return await WebUiServer.RunAsync(options, cts.Token).ConfigureAwait(false);
     }
 }
