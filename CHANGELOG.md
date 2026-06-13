@@ -9,15 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking Changes
 
-- **The local embedding model changed**, so existing databases hold vectors in the previous model's space. On sqlite/postgres backends the server will refuse to start with an embedder-fingerprint mismatch until you run `total-recall reindex-embeddings`. Cortex-mode users should also run `total-recall reindex-embeddings` (it re-embeds the local vector index) to avoid silently mixed embedding spaces in local retrieval.
+- **The local embedding model changed** (`all-MiniLM-L6-v2` → `bge-small-en-v1.5`), so databases created before this release hold vectors in the old model's space. The upgrade path now depends on backend:
+  - **sqlite** (the default) migrates automatically — see the auto-migration entry under _Changed_. No manual step; upgrading no longer blocks startup.
+  - **postgres** cannot auto-migrate: under the default `embedding.on_model_change = "auto"` the server refuses to start with an explicit, actionable error. Re-ingest into a fresh database, or set `embedding.on_model_change = "warn"` to run with (temporarily) degraded retrieval.
+  - **cortex** users should run `total-recall reindex-embeddings` to re-embed the local vector index — cortex sync is content-only, so the remote re-embeds independently and only the local index is stale.
 
 ### Changed
 
 - **Replaced the local embedder with `bge-small-en-v1.5`** (CLS pooling, 384-dim, with an asymmetric query prefix applied to searches), retiring `all-MiniLM-L6-v2`. The model (~133 MB fp32) is now fetched and sha256-verified at release build time from a pinned HuggingFace revision (`scripts/fetch-bge-small.sh`) and bundled into the per-RID release artifact — it is no longer committed to the repo / Git LFS, and there is no runtime HuggingFace download (the runtime validates the bundled model and fails fast if absent).
+- **Startup auto-migrates local embeddings on a model change instead of hard-blocking.** When a database's stored embedder fingerprint no longer matches the configured embedder, the **sqlite** startup path re-embeds every local vector in place — atomically (`BEGIN IMMEDIATE` → re-embed → re-stamp → `COMMIT`, so a mid-run failure rolls back and the next launch retries cleanly) — then continues, under the default `embedding.on_model_change = "auto"`. The first launch after an upgrade therefore does a one-time re-embed and logs progress to stderr. The new **`embedding.on_model_change`** setting controls this: `auto` (default) re-embeds in place; `warn` runs with the stale vectors and a recurring warning (no re-stamp); `block` restores the previous fail-fast refusal. On **postgres**, `auto` surfaces an explicit error (in-place migration isn't supported there); `warn`/`block` behave as on sqlite.
 
 ### Added
 
-- **`total-recall reindex-embeddings` CLI command** — re-embeds existing local vectors into the new model's vector space after an embedder swap. The server otherwise refuses to open a database whose vectors were written by a different model.
+- **`total-recall reindex-embeddings` CLI command** — re-embeds existing local vectors into the new model's vector space after an embedder swap. With `on_model_change = "auto"` (the default) sqlite handles this automatically at startup; the command remains for cortex local-index re-embedding, for `warn`/`block` users who deferred the migration, and for a manual offline re-embed.
 
 ## 2.2.0 - 2026-06-13
 

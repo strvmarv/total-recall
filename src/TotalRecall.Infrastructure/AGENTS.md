@@ -119,9 +119,13 @@ to the repo / not in Git LFS).
 
 `bge-small-en-v1.5` uses **CLS pooling** (not mean pooling) and an asymmetric query prefix:
 search queries are embedded with the `bge` retrieval-instruction prefix while stored documents are
-not. After swapping the local embedder, run `total-recall reindex-embeddings` to re-embed existing
-memories into the new model's vector space — the server otherwise refuses to open a database whose
-vectors were written by a different model.
+not. After swapping the local embedder the startup guard (`EmbedderMigration`, called from
+`ServerComposition.OpenSqlite`/`OpenPostgres`) detects the fingerprint mismatch and acts per
+`embedding.on_model_change` (`OnModelChange`, default `auto`): sqlite auto-re-embeds in place
+atomically via `EmbeddingReindexer.RunAtomicSqlite`; `warn` continues without re-stamping; `block`
+throws `EmbedderFingerprintMismatchException`. Postgres `auto` throws an explicit unsupported error.
+`total-recall reindex-embeddings` runs the same atomic re-embed offline (still required for cortex's
+local index and for `warn`/`block`).
 
 **Known limitation — tokenizer accent handling**: the bundled F# WordPiece tokenizer lowercases but
 does **not** strip accents (canonical BERT also strips accents). Accented words that don't match a

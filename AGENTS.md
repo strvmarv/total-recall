@@ -87,7 +87,7 @@ The .NET SDK is pinned by `global.json` at the repo root (`{"sdk":{"version":"10
 
 The embedding model (`models/bge-small-en-v1.5/model.onnx`, ~133 MB fp32) is **not** committed to the repo and is not in Git LFS. Contributors run `sh scripts/fetch-bge-small.sh` once to fetch + sha256-verify it from a pinned HuggingFace revision into `models/bge-small-en-v1.5/`. Release builds run the same script and bundle the verified model into the per-RID release tarball, so plugin users get offline embeddings with no runtime HuggingFace download. At runtime the .NET `ModelManager` validates the bundled model and throws a clear error if it is absent — it does NOT download (see `src/TotalRecall.Infrastructure/Embedding/ModelManager.cs`).
 
-After swapping the local embedder, run `total-recall reindex-embeddings` to re-embed existing memories into the new model's vector space; the server otherwise refuses to open a database whose vectors were written by a different model.
+After swapping the local embedder, the startup guard detects the embedder-fingerprint mismatch and acts per `embedding.on_model_change` (default `auto`): on **sqlite** it auto-re-embeds the database in place atomically and continues; `warn` runs degraded without re-stamping; `block` is the legacy fail-fast refusal. On **postgres**, `auto` raises an explicit "not supported" error (re-ingest fresh / use `warn`). The `total-recall reindex-embeddings` command does the same re-embed offline and is still needed for cortex local-index re-embedding and for `warn`/`block` users. See `EmbedderMigration` + `ServerComposition`.
 
 ### Version sync — six files, one version (STANDING RULE)
 
