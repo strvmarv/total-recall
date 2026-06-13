@@ -495,4 +495,43 @@ public sealed class ConfigLoaderTests : IDisposable
         Assert.Equal(200, cfg.ToolCache.Value.MaxEntries);
         Assert.Equal(600, cfg.ToolCache.Value.DefaultTtlSeconds);
     }
+
+    // --- [tiers.pinned] floor config tests --------------------------------
+
+    [Fact]
+    public void Pinned_FloorDefaults_WhenSectionPresentWithoutFloorKeys()
+    {
+        var userPath = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(userPath, "[tiers.pinned]\nmax_content_chars = 500\n");
+        var cfg = new ConfigLoader().LoadEffectiveConfig(userPath);
+
+        Assert.True(Microsoft.FSharp.Core.FSharpOption<Core.Config.PinnedTierConfig>.get_IsSome(cfg.Tiers.Pinned));
+        var pinned = cfg.Tiers.Pinned.Value;
+        Assert.Equal(500, pinned.MaxContentChars);
+        Assert.True(pinned.FloorEnabled);
+        Assert.Equal(6, pinned.FloorEveryNTurns);
+        Assert.Equal(6000, pinned.FloorGrowthTokens);
+    }
+
+    [Fact]
+    public void Pinned_FloorOverrides_AreParsed()
+    {
+        var userPath = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(userPath, "[tiers.pinned]\nfloor_enabled = false\nfloor_every_n_turns = 3\nfloor_growth_tokens = 1000\n");
+        var cfg = new ConfigLoader().LoadEffectiveConfig(userPath);
+
+        var pinned = cfg.Tiers.Pinned.Value;
+        Assert.False(pinned.FloorEnabled);
+        Assert.Equal(3, pinned.FloorEveryNTurns);
+        Assert.Equal(1000, pinned.FloorGrowthTokens);
+    }
+
+    [Fact]
+    public void Pinned_FloorEveryN_WrongType_ThrowsInvalidData()
+    {
+        var userPath = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(userPath, "[tiers.pinned]\nfloor_every_n_turns = \"x\"\n");
+        Assert.Throws<InvalidDataException>(() =>
+            new ConfigLoader().LoadEffectiveConfig(userPath));
+    }
 }

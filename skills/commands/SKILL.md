@@ -51,6 +51,16 @@ On each user message that is a question or task request:
 2. If top score < 0.5, also search cold/knowledge tier
 3. Use results to inform your response
 
+### Pinned directives (continuous)
+
+Pinned directives are re-asserted automatically near the live edge by the
+per-turn pinned floor (where the host supports it — see the capability matrix
+under "Pinned directive floor" below). You do not need to do anything for this.
+
+Additionally: when the user makes a **significant task switch** (a clearly new
+piece of work), call `session_refresh` once. This re-prepends the pinned block
+and refreshes hot-tier context near the current generation point.
+
 ### Session End
 
 At session end, follow the directive in [`session-end.md`](session-end.md) — it is the single source of truth, injected verbatim by the SessionEnd hook (`hooks/session-end/run.sh`).
@@ -61,6 +71,20 @@ At session end, follow the directive in [`session-end.md`](session-end.md) — i
 - ALWAYS store corrections — highest-value memories
 - ALWAYS search warm tier before answering project questions
 - NEVER modify host tool files (Claude Code memory/, CLAUDE.md, etc.)
+
+## Pinned directive floor
+
+A `UserPromptSubmit` hook re-injects the pinned block on an adaptive throttle
+(config: `[tiers.pinned] floor_enabled / floor_every_n_turns / floor_growth_tokens`)
+so pinned directives keep being followed in long sessions. It re-asserts when
+either trigger trips since the last injection: N turns elapsed, or ~`growth_tokens`
+of transcript growth. Set `floor_enabled = false` to disable.
+
+| Host | Per-turn floor | Mechanism |
+|------|----------------|-----------|
+| Claude Code | Active | `UserPromptSubmit` → `additionalContext` |
+| Copilot CLI | Pending upstream fix | `UserPromptSubmit` → `additionalContext` |
+| Cursor | Layered fallback | session-start + skill-guided `session_refresh` |
 
 ---
 

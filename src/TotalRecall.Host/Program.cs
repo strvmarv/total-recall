@@ -6,6 +6,7 @@
 //
 //   total-recall               -> serve mode (MCP stdio server)
 //   total-recall serve         -> serve mode (explicit)
+//   total-recall ui            -> local web UI server (TotalRecall.Web)
 //   total-recall <anything>    -> CLI dispatch via TotalRecall.Cli.CliApp
 //
 // Serve mode flow:
@@ -40,6 +41,7 @@ using TotalRecall.Infrastructure.Diagnostics;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Migration;
 using TotalRecall.Server;
+using TotalRecall.Web;
 
 namespace TotalRecall.Host;
 
@@ -50,6 +52,11 @@ internal static class Program
         if (args.Length == 0 || args[0] == "serve")
         {
             return await RunServeAsync().ConfigureAwait(false);
+        }
+
+        if (args[0] == "ui")
+        {
+            return await RunUiAsync(args).ConfigureAwait(false);
         }
 
         return await TotalRecall.Cli.CliApp.RunAsync(args).ConfigureAwait(false);
@@ -161,5 +168,121 @@ internal static class Program
         {
             handles.Dispose();
         }
+    }
+
+    private static async Task<int> RunUiAsync(string[] args)
+    {
+        int port = 5577;
+        string host = "127.0.0.1";
+        bool open = true;
+        string token = "";
+        bool smoke = false;
+
+        for (int i = 1; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--port" when i + 1 < args.Length:
+                    if (!int.TryParse(args[++i], out port) || port < 0 || port > 65535)
+                    {
+                        Console.Error.WriteLine($"total-recall ui: invalid --port value '{args[i]}' (expected 0-65535)");
+                        return 2;
+                    }
+                    break;
+                case "--host" when i + 1 < args.Length: host = args[++i]; break;
+                case "--token" when i + 1 < args.Length: token = args[++i]; break;
+                case "--port":
+                case "--host":
+                case "--token":
+                    Console.Error.WriteLine($"total-recall ui: {args[i]} requires a value");
+                    return 2;
+                case "--no-open": open = false; break;
+                case "--smoke": smoke = true; open = false; break;
+                case "--help" or "-h":
+                    Console.WriteLine("Usage: total-recall ui [--port N] [--host H] [--no-open] [--token T] [--smoke]");
+                    Console.WriteLine("");
+                    Console.WriteLine("Launch the local web UI (loopback only by default).");
+                    Console.WriteLine("  --port N     Port to bind (default 5577; 0 = pick a free port)");
+                    Console.WriteLine("  --host H     Bind host (default 127.0.0.1). Non-loopback exposes the UI on your network.");
+                    Console.WriteLine("  --token T    Bearer token for /api/*. If omitted, an ephemeral token is generated and printed at startup.");
+                    Console.WriteLine("  --no-open    Do not open the browser automatically");
+                    Console.WriteLine("  --smoke      Boot, confirm /api/health, then exit (CI hook)");
+                    return 0;
+                default:
+                    Console.Error.WriteLine($"total-recall ui: unknown argument '{args[i]}'");
+                    return 2;
+            }
+        }
+
+        if (!host.Equals("127.0.0.1", StringComparison.Ordinal)
+            && !host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+            && host != "::1")
+        {
+            Console.Error.WriteLine(
+                $"total-recall ui: WARNING binding non-loopback host '{host}' exposes the UI on your network. " +
+                "Access requires the bearer token printed at startup (an ephemeral token is generated unless you pass --token).");
+        }
+
+        using var cts = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+
+        // Migration-guard preamble — parity with RunServeAsync. WebUiServer.RunAsync
+        // calls ServerComposition.OpenProduction(), whose contract requires the caller
+        // to run AutoMigrationGuard FIRST so a legacy TS-format DB is renamed out of
+        // the way BEFORE a Sqlite handle is opened on the target path. The guard is
+        // idempotent: an already-migrated DB short-circuits at a marker check.
+
+        // Step 1: resolve DB path eagerly. Honors TOTAL_RECALL_DB_PATH; any
+        // validation failure must fail at startup with a clear stderr message.
+        string dbPath;
+        try
+        {
+            dbPath = ConfigLoader.GetDbPath();
+        }
+        catch (SqliteDbPathException ex)
+        {
+            Console.Error.WriteLine($"total-recall ui: {ex.Message}");
+            return 1;
+        }
+
+        // Step 1.5: ensure the data dir AND the dbPath parent dir both exist.
+        try
+        {
+            System.IO.Directory.CreateDirectory(ConfigLoader.GetDataDir());
+            var dbParent = System.IO.Path.GetDirectoryName(dbPath);
+            if (!string.IsNullOrEmpty(dbParent))
+            {
+                System.IO.Directory.CreateDirectory(dbParent);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"total-recall ui: failed to create data directories: {ex.Message}");
+            return 1;
+        }
+
+        // Step 2: migration guard. Runs against the resolved dbPath, not an open
+        // connection — the guard renames the legacy DB out of the way BEFORE we
+        // open a handle on it, so this must execute first.
+        try
+        {
+            var migrator = new TsDataMigrator(EmbedderFactory.CreateProduction());
+            var guard = new AutoMigrationGuard(migrator);
+            var guardResult = await guard.CheckAndMigrateAsync(dbPath, cts.Token)
+                .ConfigureAwait(false);
+            if (guardResult == GuardResult.MigrationFailed)
+            {
+                Console.Error.WriteLine("total-recall ui: aborting ui (migration failed)");
+                return 1;
+            }
+        }
+        catch (Exception ex)
+        {
+            ExceptionLogger.LogChain("total-recall ui: migration guard threw", ex);
+            return 1;
+        }
+
+        var options = new WebUiOptions(Port: port, Host: host, OpenBrowser: open, Token: token, Smoke: smoke);
+        return await WebUiServer.RunAsync(options, cts.Token).ConfigureAwait(false);
     }
 }

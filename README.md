@@ -161,6 +161,25 @@ Every `session_start` call runs the same sequence:
 
 Every `session_start` also runs a skill scan: it reads `~/.claude/skills/` plus any directories listed in `[skills] extra_dirs`, persists the content + a locally-computed embedding to a SQLite skill cache, and advertises discovered skills as an `## Available Skills` block in the session context. Scanned skills are invokable on demand via the `skill_get` MCP tool and discoverable via `skill_search` (hybrid semantic + keyword ranking with a usage-decay tie-breaker) — both work entirely offline with no Cortex required. In Cortex mode the scanned skills are also pushed to Cortex, usage events sync back as a multi-machine rollup, and pulled skills from other machines merge into the same local cache.
 
+### Pinned-Directive Floor
+
+Pinned directives are injected once at `session_start`, but in a long session they drift far enough up the transcript that the model stops honoring them. The **pinned floor** re-asserts the pinned block near the live edge on an adaptive throttle, so your pins keep being followed all session long.
+
+A per-turn `UserPromptSubmit` hook runs before each prompt and re-injects the pinned block when **either** trigger trips since the last injection:
+
+- `floor_every_n_turns` user turns have elapsed (default 6), **or**
+- ~`floor_growth_tokens` of transcript growth has accumulated (default 6000).
+
+The first turn of a session seeds the throttle and skips (the block was just injected at session start). The re-injected block is rendered verbatim — identical to the session-start block — and prefixed with a short reminder line. The hook is **fail-safe: it never blocks or rejects a prompt**. Disable it entirely with `floor_enabled = false`.
+
+Per-host support:
+
+| Host | Per-turn floor | Mechanism |
+|---|---|---|
+| Claude Code | Active | `UserPromptSubmit` hook → `additionalContext` |
+| Copilot CLI | Pending upstream fix | Wired the same way, but Copilot CLI currently ignores the returned `additionalContext` |
+| Cursor | Layered fallback | session-start injection + skill-guided `session_refresh` (Cursor's `beforeSubmitPrompt` is block-only and cannot inject context) |
+
 ---
 
 ## Supported Platforms
@@ -226,6 +245,9 @@ The config file lives at `~/.total-recall/config.toml`. All fields have defaults
 
 [tiers.pinned]
 max_content_chars = 500           # Max characters per pinned entry (oversize rejected, never truncated)
+floor_enabled = true              # Per-turn pinned-directive floor (UserPromptSubmit re-injection)
+floor_every_n_turns = 6           # Re-inject the pinned block at least every N user turns
+floor_growth_tokens = 6000        # ...or after ~this many tokens of transcript growth (whichever trips first)
 
 [tiers.hot]
 max_entries = 50                  # Max entries auto-injected per prompt

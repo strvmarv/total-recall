@@ -19,6 +19,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`total-recall reindex-embeddings` CLI command** — re-embeds existing local vectors into the new model's vector space after an embedder swap. The server otherwise refuses to open a database whose vectors were written by a different model.
 
+## 2.2.0 - 2026-06-13
+
+### Added
+
+- **Pinned-directive floor — a per-turn re-injection of the pinned block near the live edge.** Long sessions push the session-start pinned block far enough up the transcript that the model stops honoring it; the floor re-asserts it. A new `UserPromptSubmit` hook (`hooks/user-prompt-submit/run.sh`) runs before each prompt, backed by a new `total-recall pinned-floor --host <host>` CLI command that reads the host hook payload from stdin, consults an adaptive throttle, and on an "inject" turn renders the pinned block live from the DB and emits host-correct `additionalContext` JSON. The throttle re-injects when EITHER trigger trips since the last injection: `floor_every_n_turns` user turns elapse, OR ~`floor_growth_tokens` of transcript growth (measured from transcript byte size). The first turn of a session seeds state and skips, since `session_start` already injected the block. **Fail-safe: the hook never blocks or rejects a prompt** — any error emits `{}` and exits 0.
+- **New `[tiers.pinned]` floor config keys** (defaults in parentheses): `floor_enabled` (`true`), `floor_every_n_turns` (`6`), `floor_growth_tokens` (`6000`). Set `floor_enabled = false` to disable the per-turn floor entirely.
+- **`PinnedBlockRenderer` extraction (single source of truth).** The pinned-block rendering previously inlined in `SessionLifecycle.BuildPinnedBlock` now lives in `src/TotalRecall.Infrastructure/Memory/PinnedBlockRenderer.cs`, shared by the Server (session start + `session_refresh`) and the CLI (the `pinned-floor` hook). Pinned content is rendered verbatim under the `## Pinned directives (always follow)` header — no detail levels, no truncation — so every injection path produces an identical block.
+- **Per-session throttle state** (`PinnedFloorState`) persisted as a small JSON file under `<dataDir>/floor-state/<session>.json`; reads are fail-safe (any error yields a fresh, unseeded state) and stale files older than 3 days are pruned on each run. The throttle decision itself (`PinnedFloorDecider`) is a pure, I/O-free function.
+
+### Per-host capability matrix
+
+| Host | Per-turn floor | Mechanism |
+|------|----------------|-----------|
+| Claude Code | Active | `UserPromptSubmit` → `additionalContext` |
+| Copilot CLI | Pending upstream fix | `UserPromptSubmit` → `additionalContext` (upstream currently ignores the returned `additionalContext`) |
+| Cursor | Layered fallback | session-start injection + skill-guided `session_refresh` (`beforeSubmitPrompt` is block-only and cannot inject context) |
+
 ## 2.1.1 - 2026-06-10
 
 ### Fixed

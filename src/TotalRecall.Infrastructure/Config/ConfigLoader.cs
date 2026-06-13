@@ -282,8 +282,33 @@ public sealed class ConfigLoader : IConfigLoader
                 throw new InvalidDataException(
                     "tiers.pinned.max_content_chars must be an integer", ex);
             }
+
+            bool floorEnabled;
+            int floorEveryN;
+            int floorGrowth;
+            try
+            {
+                var feOpt = TryGetBool(pinnedTable, "floor_enabled");
+                floorEnabled = Microsoft.FSharp.Core.FSharpOption<bool>.get_IsSome(feOpt)
+                    ? feOpt.Value
+                    : true;
+                var fenOpt = TryGetInt(pinnedTable, "floor_every_n_turns");
+                floorEveryN = Microsoft.FSharp.Core.FSharpOption<int>.get_IsSome(fenOpt)
+                    ? fenOpt.Value
+                    : 6;
+                var fgtOpt = TryGetInt(pinnedTable, "floor_growth_tokens");
+                floorGrowth = Microsoft.FSharp.Core.FSharpOption<int>.get_IsSome(fgtOpt)
+                    ? fgtOpt.Value
+                    : 6000;
+            }
+            catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException)
+            {
+                throw new InvalidDataException(
+                    "tiers.pinned floor_* keys must be the correct type (bool/int)", ex);
+            }
+
             pinnedCfgOpt = Microsoft.FSharp.Core.FSharpOption<Core.Config.PinnedTierConfig>.Some(
-                new Core.Config.PinnedTierConfig(maxContentChars));
+                new Core.Config.PinnedTierConfig(maxContentChars, floorEnabled, floorEveryN, floorGrowth));
         }
 
         var tiersCfg = new Core.Config.TiersConfig(hotCfg, warmCfg, coldCfg, pinnedCfgOpt);
@@ -506,6 +531,11 @@ public sealed class ConfigLoader : IConfigLoader
         table.TryGetValue(key, out var value)
             ? FSharpOption<int>.Some(Convert.ToInt32(value))
             : FSharpOption<int>.None;
+
+    private static FSharpOption<bool> TryGetBool(TomlTable table, string key) =>
+        table.TryGetValue(key, out var value)
+            ? FSharpOption<bool>.Some(Convert.ToBoolean(value))
+            : FSharpOption<bool>.None;
 
     private static FSharpOption<string> TryGetString(TomlTable table, string key) =>
         table.TryGetValue(key, out var value) && value is string s
