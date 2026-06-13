@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Linq;
 using TotalRecall.Infrastructure.Memory;
 using TotalRecall.Infrastructure.Search;
 using TotalRecall.Infrastructure.Storage;
@@ -207,14 +206,16 @@ public static class EmbedderMigration
     /// True when the index holds no content rows in ANY of
     /// <see cref="TierNames.AllTablePairs"/> — the exact set
     /// <see cref="EmbeddingReindexer.Reindex"/> walks, so "non-empty" here means
-    /// "the reindexer would rewrite ≥1 vector." Short-circuits on the first
-    /// non-empty pair so a populated DB does not enumerate every table.
+    /// "the reindexer would rewrite ≥1 vector." Uses <see cref="IStore.Count"/>
+    /// (a <c>SELECT COUNT(*)</c>) rather than <c>List(...).Any()</c> so a large
+    /// table is never materialized just to test for existence; short-circuits on
+    /// the first non-empty pair.
     /// </summary>
     private static bool IndexIsEmpty(IStore store)
     {
         foreach (var (tier, type) in TierNames.AllTablePairs)
         {
-            if (store.List(tier, type).Any())
+            if (store.Count(tier, type) > 0)
             {
                 return false;
             }

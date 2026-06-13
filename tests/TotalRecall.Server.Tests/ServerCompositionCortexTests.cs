@@ -83,6 +83,57 @@ public sealed class ServerCompositionCortexTests
         }
     }
 
+    /// <summary>
+    /// The exact bug this change closes: a cortex DB that was NEVER fingerprint-
+    /// stamped (cortex historically skipped stamping) yet is POPULATED with vectors
+    /// from a prior model — i.e. <c>_meta</c> has no <c>embed.*</c> keys. With
+    /// on_model_change="block", opening cortex must run the migration on the local
+    /// index, observe Unstamped-but-populated, and throw. This proves the cortex
+    /// wiring reaches the NEW branch (not just the already-covered Mismatch path):
+    /// the seeded DB here is deliberately left unstamped.
+    /// </summary>
+    [Fact]
+    public void OpenCortex_PopulatedLocalDb_Unstamped_Block_Throws()
+    {
+        var home = Path.Combine(Path.GetTempPath(), $"tr-cortex-unstamped-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(home);
+        var dbPath = Path.Combine(home, "local.db");
+
+        var prevHome = Environment.GetEnvironmentVariable("TOTAL_RECALL_HOME");
+        var prevDbPath = Environment.GetEnvironmentVariable("TOTAL_RECALL_DB_PATH");
+        try
+        {
+            Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", home);
+            Environment.SetEnvironmentVariable("TOTAL_RECALL_DB_PATH", dbPath);
+            File.WriteAllText(
+                Path.Combine(home, "config.toml"),
+                "[embedding]\non_model_change = \"block\"\n");
+
+            // Seed a populated local index but DO NOT stamp a fingerprint —
+            // models a cortex DB created before stamping was wired into the path.
+            var oldE = new FixedDescriptorEmbedder("local", "old-model", "", 384);
+            using (var conn = SqliteConnection.Open(dbPath))
+            {
+                MigrationRunner.RunMigrations(conn);
+                var store = new SqliteStore(conn);
+                store.InsertWithEmbedding(Tier.Warm, ContentType.Memory,
+                    new InsertEntryOpts("seed"), oldE.Embed("seed"));
+                // No EmbedderFingerprint.Restamp: _meta has zero embed.* keys → Unstamped.
+            }
+            MsSqliteConnection.ClearAllPools();
+
+            Assert.Throws<EmbedderFingerprintMismatchException>(
+                () => ServerComposition.OpenCortexForTest(dbPath, "https://cortex.test", "tr_test123"));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", prevHome);
+            Environment.SetEnvironmentVariable("TOTAL_RECALL_DB_PATH", prevDbPath);
+            MsSqliteConnection.ClearAllPools();
+            try { Directory.Delete(home, recursive: true); } catch (IOException) { }
+        }
+    }
+
     /// <summary>IEmbedder with a fully controllable descriptor; Embed returns a
     /// normalized constant vector so the seeded row is valid for the vec0 table.</summary>
     private sealed class FixedDescriptorEmbedder : IEmbedder

@@ -240,6 +240,12 @@ public static class ServerComposition
         }
     }
 
+    // Resolve the embedder model-change policy from config (FSharp option interop
+    // in one place). Used by every backend's startup migration call.
+    private static OnModelChange ResolveOnModelChange(Core.Config.TotalRecallConfig cfg) =>
+        OnModelChangePolicy.Parse(
+            FSharpOption<string>.get_IsSome(cfg.Embedding.OnModelChange) ? cfg.Embedding.OnModelChange.Value : null);
+
     private static ServerCompositionHandles OpenSqlite(Core.Config.TotalRecallConfig cfg, string? dbPath, string storageMode = "sqlite")
     {
         var resolvedDbPath = dbPath ?? ConfigLoader.GetDbPath();
@@ -267,8 +273,7 @@ public static class ServerComposition
             var vec = new VectorSearch(conn);
             var fts = new FtsSearch(conn);
             var embedder = EmbedderFactory.CreateFromConfig(cfg.Embedding);
-            var onModelChange = OnModelChangePolicy.Parse(
-                FSharpOption<string>.get_IsSome(cfg.Embedding.OnModelChange) ? cfg.Embedding.OnModelChange.Value : null);
+            var onModelChange = ResolveOnModelChange(cfg);
             EmbedderMigration.EnsureCompatibleSqlite(conn, store, vec, embedder, onModelChange, Console.Error);
             var hybrid = new HybridSearch(vec, fts, store);
 
@@ -415,8 +420,7 @@ public static class ServerComposition
             var vec = new PgvectorSearch(dataSource, userId);
             var fts = new PostgresFtsSearch(dataSource, userId);
             var embedder = EmbedderFactory.CreateFromConfig(cfg.Embedding);
-            var onModelChange = OnModelChangePolicy.Parse(
-                FSharpOption<string>.get_IsSome(cfg.Embedding.OnModelChange) ? cfg.Embedding.OnModelChange.Value : null);
+            var onModelChange = ResolveOnModelChange(cfg);
             EmbedderMigration.EnsureCompatiblePostgres(store, embedder, onModelChange, Console.Error);
             var hybrid = new HybridSearch(vec, fts, store);
 
@@ -529,8 +533,7 @@ public static class ServerComposition
             // independently via content-only sync, so this only governs the local
             // index. Without this, a cortex DB was never fingerprint-stamped, so a
             // model swap left it unstamped-but-populated with stale local vectors.
-            var onModelChange = OnModelChangePolicy.Parse(
-                FSharpOption<string>.get_IsSome(cfg.Embedding.OnModelChange) ? cfg.Embedding.OnModelChange.Value : null);
+            var onModelChange = ResolveOnModelChange(cfg);
             EmbedderMigration.EnsureCompatibleSqlite(conn, localStore, vec, embedder, onModelChange, Console.Error);
 
             var hybrid = new HybridSearch(vec, fts, localStore);

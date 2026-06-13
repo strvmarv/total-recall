@@ -414,6 +414,9 @@ public sealed class EmbedderMigrationTests
         Assert.Equal(EmbedderFingerprint.FingerprintState.Unstamped,
             EmbedderFingerprint.Check(store, e, out _));
         Assert.Contains("on_model_change=warn", log.ToString());
+        // Distinct unstamped wording (not the "X -> Y" Mismatch message) — guards
+        // against a future copy-paste of the Mismatch branch into this path.
+        Assert.Contains("no embedder fingerprint", log.ToString());
     }
 
     [Fact]

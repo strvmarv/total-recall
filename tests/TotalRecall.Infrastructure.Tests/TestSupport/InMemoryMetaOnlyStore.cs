@@ -21,8 +21,11 @@ public sealed class InMemoryMetaOnlyStore : IStore, IMetaStore
     public string? GetMeta(string key) => _meta.TryGetValue(key, out var v) ? v : null;
     public void SetMeta(string key, string value) => _meta[key] = value;
 
-    // --- IStore.List: returns empty so EnsureCompatiblePostgres's IndexIsEmpty
-    // check sees an EMPTY index (this double models a fresh/empty postgres DB).
+    // --- IStore Count/List: report an EMPTY index so EnsureCompatiblePostgres's
+    // IndexIsEmpty check (which calls Count) sees a fresh/empty postgres DB. List
+    // returns empty for parity.
+    public int Count(Tier tier, ContentType type) => 0;
+
     public IReadOnlyList<Entry> List(Tier tier, ContentType type, ListEntriesOpts? opts = null) =>
         Array.Empty<Entry>();
 
@@ -36,7 +39,6 @@ public sealed class InMemoryMetaOnlyStore : IStore, IMetaStore
     public long? GetInternalKey(Tier tier, ContentType type, string id) => throw NotUsed();
     public void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts) => throw NotUsed();
     public void Delete(Tier tier, ContentType type, string id) => throw NotUsed();
-    public int Count(Tier tier, ContentType type) => throw NotUsed();
     public int CountKnowledgeCollections() => throw NotUsed();
     public IReadOnlyList<Entry> ListByMetadata(Tier tier, ContentType type, IReadOnlyDictionary<string, string> metadataFilter, ListEntriesOpts? opts = null) => throw NotUsed();
     public void Move(Tier fromTier, ContentType fromType, Tier toTier, ContentType toType, string id) => throw NotUsed();
