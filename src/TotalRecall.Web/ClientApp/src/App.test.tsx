@@ -36,4 +36,9 @@ describe('AppShell routing', () => {
     renderAt('/config');
     expect(screen.getByRole('heading', { name: 'Config' })).toBeInTheDocument();
   });
+
+  it('renders Not found for an unknown route', () => {
+    renderAt('/nope');
+    expect(screen.getByRole('heading', { name: 'Not found' })).toBeInTheDocument();
+  });
 });
