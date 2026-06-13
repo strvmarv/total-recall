@@ -525,4 +525,13 @@ public sealed class ConfigLoaderTests : IDisposable
         Assert.Equal(3, pinned.FloorEveryNTurns);
         Assert.Equal(1000, pinned.FloorGrowthTokens);
     }
+
+    [Fact]
+    public void Pinned_FloorEveryN_WrongType_ThrowsInvalidData()
+    {
+        var userPath = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(userPath, "[tiers.pinned]\nfloor_every_n_turns = \"x\"\n");
+        Assert.Throws<InvalidDataException>(() =>
+            new ConfigLoader().LoadEffectiveConfig(userPath));
+    }
 }
