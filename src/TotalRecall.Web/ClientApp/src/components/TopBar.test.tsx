@@ -39,7 +39,7 @@ describe('TopBar', () => {
 
   it('shows the backend badge from the bootstrap', () => {
     renderTopBar();
-    expect(screen.getByText('Cortex')).toBeInTheDocument();
+    expect(screen.getByTitle(/Storage backend: Cortex/i)).toHaveTextContent('Cortex');
   });
 
   it('navigates to /memory?q= on search submit', async () => {

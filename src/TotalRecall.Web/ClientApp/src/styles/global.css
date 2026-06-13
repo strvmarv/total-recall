@@ -51,7 +51,12 @@ body {
   font-size: 13px;
 }
 .tr-search input::placeholder { color: rgba(231, 235, 242, 0.6); }
-.tr-search input:focus { outline: none; border-color: var(--tr-accent); background: rgba(255, 255, 255, 0.16); }
+.tr-search input:focus-visible {
+  outline: none;
+  border-color: var(--tr-accent);
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 0 0 2px var(--tr-accent);
+}
 
 /* Backend badge */
 .tr-badge {
