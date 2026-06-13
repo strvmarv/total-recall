@@ -21,6 +21,11 @@ public sealed class InMemoryMetaOnlyStore : IStore, IMetaStore
     public string? GetMeta(string key) => _meta.TryGetValue(key, out var v) ? v : null;
     public void SetMeta(string key, string value) => _meta[key] = value;
 
+    // --- IStore.List: returns empty so EnsureCompatiblePostgres's IndexIsEmpty
+    // check sees an EMPTY index (this double models a fresh/empty postgres DB).
+    public IReadOnlyList<Entry> List(Tier tier, ContentType type, ListEntriesOpts? opts = null) =>
+        Array.Empty<Entry>();
+
     // --- IStore: not reached by the postgres mismatch policy; fail loudly ---
     private static Exception NotUsed() =>
         new NotSupportedException("InMemoryMetaOnlyStore only implements the _meta surface.");
@@ -31,7 +36,6 @@ public sealed class InMemoryMetaOnlyStore : IStore, IMetaStore
     public long? GetInternalKey(Tier tier, ContentType type, string id) => throw NotUsed();
     public void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts) => throw NotUsed();
     public void Delete(Tier tier, ContentType type, string id) => throw NotUsed();
-    public IReadOnlyList<Entry> List(Tier tier, ContentType type, ListEntriesOpts? opts = null) => throw NotUsed();
     public int Count(Tier tier, ContentType type) => throw NotUsed();
     public int CountKnowledgeCollections() => throw NotUsed();
     public IReadOnlyList<Entry> ListByMetadata(Tier tier, ContentType type, IReadOnlyDictionary<string, string> metadataFilter, ListEntriesOpts? opts = null) => throw NotUsed();
