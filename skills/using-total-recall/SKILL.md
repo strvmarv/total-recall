@@ -65,6 +65,18 @@ On each user message that is a question or task request:
 2. If top score < 0.5, also search cold/knowledge tier
 3. Use results to inform your response
 
+### Pinned directives (continuous)
+
+Pinned directives are re-asserted automatically near the live edge by the
+per-turn pinned floor (where the host supports it — see the capability matrix in
+`skills/commands/SKILL.md`). You do not need to do anything for this.
+
+Additionally: when the user makes a **significant task switch** (a clearly new
+piece of work), call `session_refresh` once. This re-prepends the pinned block
+and refreshes hot-tier context near the current generation point. On hosts
+without a per-turn floor (e.g. Cursor) this is the primary way pinned directives
+stay salient — so do it on task switches there especially.
+
 ### Session End
 
 1. Call `session_context` to get current hot tier entries
