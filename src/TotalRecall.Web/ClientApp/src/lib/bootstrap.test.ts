@@ -16,7 +16,7 @@ describe('getBootstrap', () => {
   it('falls back to dev defaults when not injected', () => {
     const b = getBootstrap();
     expect(b.backend).toBe('sqlite');   // default when no VITE_TR_BACKEND
-    expect(typeof b.token).toBe('string');
+    expect(b.token).toBe('');           // VITE_TR_TOKEN absent -> ''
     expect(b.version).toBe('dev');
   });
 });

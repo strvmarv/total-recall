@@ -39,7 +39,19 @@ describe('api', () => {
     const h = await api.health();
 
     expect(h.status).toBe('ok');
+    expect(h.backend).toBe('sqlite');
+    expect(h.version).toBe('t');
     expect(f.mock.calls[0][0]).toBe('/api/health');
+    expect(f.mock.calls[0][1]?.method).toBeUndefined(); // GET (no method override)
+  });
+
+  it('tool() sends no body when args is omitted', async () => {
+    const f = mockFetch(200, '{}');
+    vi.stubGlobal('fetch', f);
+
+    await api.tool('ping');
+
+    expect(f.mock.calls[0][1].body).toBeUndefined();
   });
 
   it('throws ApiError on non-2xx', async () => {
