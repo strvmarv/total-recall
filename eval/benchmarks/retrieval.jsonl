@@ -38,7 +38,7 @@
 {"query":"custom error class pattern","expected_content_contains":"AppError","expected_tier":"warm"}
 {"query":"handle partial promise failures","expected_content_contains":"Promise.allSettled","expected_tier":"warm"}
 {"query":"retry strategy for flaky operations","expected_content_contains":"exponential backoff","expected_tier":"warm"}
-{"query":"which embedding model is used","expected_content_contains":"all-MiniLM-L6-v2","expected_tier":"warm"}
+{"query":"which embedding model is used","expected_content_contains":"bge-small-en-v1.5","expected_tier":"warm"}
 {"query":"hot tier size limit","expected_content_contains":"50","expected_tier":"warm"}
 {"query":"warm promotion score threshold","expected_content_contains":"0.5","expected_tier":"warm"}
 {"query":"how long is the decay half-life","expected_content_contains":"7 days","expected_tier":"warm"}
@@ -116,7 +116,7 @@
 {"query":"sqlite-vec","expected_content_contains":"sqlite-vec","expected_tier":"warm"}
 {"query":"MCP","expected_content_contains":"MCP","expected_tier":"warm"}
 {"query":"compaction","expected_content_contains":"compaction","expected_tier":"warm"}
-{"query":"embeddings","expected_content_contains":"all-MiniLM","expected_tier":"warm"}
+{"query":"embeddings","expected_content_contains":"bge-small","expected_tier":"warm"}
 {"query":"benchmark","expected_content_contains":"seeds corpus","expected_tier":"warm"}
 {"query":"scoping","expected_content_contains":"package.json","expected_tier":"warm"}
 {"query":"ingestion","expected_content_contains":"chunked","expected_tier":"warm"}

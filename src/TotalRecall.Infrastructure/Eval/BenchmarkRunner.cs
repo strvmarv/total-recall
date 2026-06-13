@@ -128,7 +128,10 @@ public sealed class BenchmarkRunner
             foreach (var bq in queries)
             {
                 ct.ThrowIfCancellationRequested();
-                var qVec = _embedder.Embed(bq.Query);
+                // Asymmetric retrieval: queries get the bge query prefix via
+                // EmbedQuery (corpus/documents stay on Embed above) so the
+                // benchmark mirrors production search and measures real recall.
+                var qVec = _embedder.EmbedQuery(bq.Query);
 
                 var sw = Stopwatch.StartNew();
                 var results = _hybridSearch.Search(

@@ -5,7 +5,7 @@
 {"query":"input validation library","expected_content_contains":"zod","expected_tier":"warm"}
 {"query":"how to generate a unique ID","expected_content_contains":"randomUUID","expected_tier":"warm"}
 {"query":"deep copy an object","expected_content_contains":"structuredClone","expected_tier":"warm"}
-{"query":"which embedding model is used","expected_content_contains":"all-MiniLM-L6-v2","expected_tier":"warm"}
+{"query":"which embedding model is used","expected_content_contains":"bge-small-en-v1.5","expected_tier":"warm"}
 {"query":"hot tier size limit","expected_content_contains":"50","expected_tier":"warm"}
 {"query":"SQLite write mode","expected_content_contains":"WAL","expected_tier":"warm"}
 {"query":"how many memory tiers are there","expected_content_contains":"three tiers","expected_tier":"warm"}
@@ -19,4 +19,4 @@
 {"query":"which database extension for vectors","expected_content_contains":"sqlite-vec","expected_tier":"warm","expected_absent":"pgvector"}
 {"query":"hot tier","expected_content_contains":"50","expected_tier":"warm"}
 {"query":"MCP","expected_content_contains":"MCP","expected_tier":"warm"}
-{"query":"embeddings","expected_content_contains":"all-MiniLM","expected_tier":"warm"}
+{"query":"embeddings","expected_content_contains":"bge-small","expected_tier":"warm"}
