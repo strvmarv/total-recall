@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 2.2.1 - 2026-06-13
+
+### Fixed
+
+- **Pinned-directive floor silently disabled when a stale or absent global `total-recall` shadowed the plugin binary.** The `UserPromptSubmit` hook (`hooks/user-prompt-submit/run.sh`) invoked the CLI as a bare `total-recall` resolved from `PATH`, rather than the plugin-bundled binary the MCP server uses (`node "$CLAUDE_PLUGIN_ROOT/bin/start.js"`). On any host where `total-recall` on `PATH` was missing — or was a different, older version without the `pinned-floor` command — the hook's fail-safe caught the resulting error and emitted `{}` every turn, so the floor never fired and the breakage was invisible. The hook now derives the plugin root from its own location (`${BASH_SOURCE[0]}`, matching the `session-start`/`session-end` hooks) and runs `node "$PLUGIN_ROOT/bin/start.js" pinned-floor`, pinning it to the same versioned binary the plugin ships. No `PATH` dependency, no version drift.
+
 ## 2.2.0 - 2026-06-13
 
 ### Added
