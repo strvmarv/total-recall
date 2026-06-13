@@ -235,6 +235,20 @@ public class KbSearchHandlerTests
     }
 
     [Fact]
+    public async Task Embedder_UsesEmbedQuery_ForAsymmetricPrefix()
+    {
+        var (handler, fake, _) = NewFixture();
+
+        await handler.ExecuteAsync(
+            Args("""{"query":"hello world"}"""),
+            CancellationToken.None);
+
+        // Queries must flow through EmbedQuery so the ONNX embedder prepends
+        // the bge asymmetric instruction prefix (default impl stays symmetric).
+        Assert.True(fake.EmbedQueryCalled);
+    }
+
+    [Fact]
     public async Task Scopes_SingleValue_PassedToHybridOpts()
     {
         var (handler, _, hybrid) = NewFixture();

@@ -52,6 +52,7 @@ public sealed class StatusCommandTests : IDisposable
                     FSharpOption<string>.None,
                     FSharpOption<string>.None,
                     FSharpOption<string>.None,
+                    FSharpOption<string>.None,
                     FSharpOption<string>.None),
                 FSharpOption<Core.Config.RegressionConfig>.None,
                 FSharpOption<Core.Config.SearchConfig>.None,
@@ -72,7 +73,7 @@ public sealed class StatusCommandTests : IDisposable
     public async Task EmptyStore_ReturnsZero()
     {
         var store = new FakeStore();
-        var loader = new FakeConfigLoader("all-MiniLM-L6-v2", 384);
+        var loader = new FakeConfigLoader("bge-small-en-v1.5", 384);
         var cmd = new StatusCommand(store, loader, "/tmp/nonexistent-tr.db", new StringWriter());
 
         var code = await cmd.RunAsync(Array.Empty<string>());
@@ -84,7 +85,7 @@ public sealed class StatusCommandTests : IDisposable
     public async Task UnknownArg_ReturnsExit2()
     {
         var store = new FakeStore();
-        var loader = new FakeConfigLoader("all-MiniLM-L6-v2", 384);
+        var loader = new FakeConfigLoader("bge-small-en-v1.5", 384);
         var cmd = new StatusCommand(store, loader, "/tmp/x.db", new StringWriter());
 
         var code = await cmd.RunAsync(new[] { "--bogus" });

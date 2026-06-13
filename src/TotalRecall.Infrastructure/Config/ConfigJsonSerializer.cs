@@ -59,6 +59,14 @@ public static class ConfigJsonSerializer
         sb.Append("\"embedding\":{");
         AppendString(sb, "model", config.Embedding.Model); sb.Append(',');
         AppendInt(sb, "dimensions", config.Embedding.Dimensions);
+        // query_prefix is optional and appended last so snapshots taken
+        // before the field existed (and configs without a prefix) stay
+        // byte-identical for ConfigSnapshotStore dedup.
+        if (Microsoft.FSharp.Core.FSharpOption<string>.get_IsSome(config.Embedding.EmbeddingQueryPrefix))
+        {
+            sb.Append(',');
+            AppendString(sb, "query_prefix", config.Embedding.EmbeddingQueryPrefix.Value);
+        }
         sb.Append('}');
 
         // regression (optional)

@@ -17,14 +17,15 @@ public sealed class EmbedderFactoryTests
         int dimensions = 384)
     {
         return new Core.Config.EmbeddingConfig(
-            "all-MiniLM-L6-v2",
+            "bge-small-en-v1.5",
             dimensions,
             provider is null ? FSharpOption<string>.None : FSharpOption<string>.Some(provider),
             endpoint is null ? FSharpOption<string>.None : FSharpOption<string>.Some(endpoint),
             bedrockRegion is null ? FSharpOption<string>.None : FSharpOption<string>.Some(bedrockRegion),
             bedrockModel is null ? FSharpOption<string>.None : FSharpOption<string>.Some(bedrockModel),
             modelName is null ? FSharpOption<string>.None : FSharpOption<string>.Some(modelName),
-            apiKey is null ? FSharpOption<string>.None : FSharpOption<string>.Some(apiKey));
+            apiKey is null ? FSharpOption<string>.None : FSharpOption<string>.Some(apiKey),
+            FSharpOption<string>.None);
     }
 
     [Fact]

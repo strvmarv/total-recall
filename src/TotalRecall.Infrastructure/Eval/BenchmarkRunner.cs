@@ -102,6 +102,7 @@ public sealed class BenchmarkRunner
             foreach (var entry in corpus)
             {
                 ct.ThrowIfCancellationRequested();
+                // Documents/corpus embed via Embed (no query prefix) — only queries get the asymmetric bge instruction.
                 var vector = _embedder.Embed(entry.Content);
                 var metadataJson = $"{{\"entry_type\":\"{EscapeForJson(entry.Type)}\"}}";
                 var id = _store.Insert(
@@ -128,7 +129,10 @@ public sealed class BenchmarkRunner
             foreach (var bq in queries)
             {
                 ct.ThrowIfCancellationRequested();
-                var qVec = _embedder.Embed(bq.Query);
+                // Asymmetric retrieval: queries get the bge query prefix via
+                // EmbedQuery (corpus/documents stay on Embed above) so the
+                // benchmark mirrors production search and measures real recall.
+                var qVec = _embedder.EmbedQuery(bq.Query);
 
                 var sw = Stopwatch.StartNew();
                 var results = _hybridSearch.Search(

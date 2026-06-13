@@ -59,14 +59,14 @@ public sealed class ModelRegistryTests : IDisposable
         var registry = ModelRegistry.LoadFromFile(registryPath!);
         Assert.Equal(1, registry.Version);
 
-        var spec = registry.GetSpec("all-MiniLM-L6-v2");
-        Assert.Equal("all-MiniLM-L6-v2", spec.Name);
+        var spec = registry.GetSpec("bge-small-en-v1.5");
+        Assert.Equal("bge-small-en-v1.5", spec.Name);
         Assert.Equal(384, spec.Dimensions);
-        Assert.Equal(90405214, spec.SizeBytes);
-        Assert.Equal("main", spec.Revision);
+        Assert.Equal("828e1496d7fabb79cfa4dcd84fa38625c0d3d21da474a00f08db0f559940cf35", spec.Sha256);
+        Assert.Equal(133093490, spec.SizeBytes);
+        Assert.Equal("5c38ec7c405ec4b44b94cc5a9bb96e735b38267a", spec.Revision);
         Assert.Contains("model.onnx", spec.Files.Keys);
         Assert.Contains("tokenizer.json", spec.Files.Keys);
-        Assert.Contains("tokenizer_config.json", spec.Files.Keys);
     }
 
     [Fact]

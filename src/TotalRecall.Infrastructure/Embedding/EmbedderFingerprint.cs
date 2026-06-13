@@ -30,8 +30,9 @@ public sealed class EmbedderFingerprintMismatchException : InvalidOperationExcep
         "but the current configuration uses " +
         $"provider={configured.Provider}, model={configured.Model}, revision={Quote(configured.Revision)}, dimensions={configured.Dimensions}. " +
         "Continuing would mix embedding spaces and silently degrade retrieval quality. " +
-        "Either restore the original embedder configuration, or rebuild the database from a fresh path " +
-        "(e.g. by pointing TOTAL_RECALL_DB_PATH at a new file) and re-ingest your memories.";
+        "Either run `total-recall reindex-embeddings` to re-embed existing vectors into the new " +
+        "model's space, restore the original embedder configuration, or rebuild from a fresh DB " +
+        "(point TOTAL_RECALL_DB_PATH at a new file) and re-ingest.";
 
     private static string Quote(string s) => string.IsNullOrEmpty(s) ? "(none)" : s;
 }
@@ -44,7 +45,7 @@ public sealed class EmbedderFingerprintMismatchException : InvalidOperationExcep
 /// is thrown on any difference.
 ///
 /// This closes the silent-failure window where swapping to a different
-/// embedding model with the same dimensionality (e.g. all-MiniLM-L6-v2 →
+/// embedding model with the same dimensionality (e.g. bge-small-en-v1.5 →
 /// OpenAI text-embedding-3-small at 384 dims) would leave the existing
 /// 384-dim vectors in place while new vectors are produced in a different
 /// semantic space. Dimension mismatches already fail loudly at the vec0 /
@@ -80,6 +81,19 @@ public static class EmbedderFingerprint
         {
             throw new EmbedderFingerprintMismatchException(stored, configured);
         }
+    }
+
+    /// <summary>
+    /// Unconditionally overwrite the stored fingerprint with the configured
+    /// embedder's descriptor. Used by the reindex command after re-embedding
+    /// every vector into a new model's space — <see cref="EnsureMatches"/>
+    /// cannot be used there because the stale fingerprint would make it throw.
+    /// </summary>
+    public static void Restamp(IMetaStore meta, IEmbedder embedder)
+    {
+        ArgumentNullException.ThrowIfNull(meta);
+        ArgumentNullException.ThrowIfNull(embedder);
+        Stamp(meta, embedder.Descriptor);
     }
 
     private static EmbedderDescriptor? ReadStored(IMetaStore meta)

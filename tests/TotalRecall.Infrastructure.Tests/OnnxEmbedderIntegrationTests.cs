@@ -8,13 +8,13 @@ namespace TotalRecall.Infrastructure.Tests;
 
 /// <summary>
 /// Integration tests for <see cref="OnnxEmbedder"/>. These tests load the
-/// real bundled <c>models/all-MiniLM-L6-v2/</c> model and run a full ONNX
+/// real bundled <c>models/bge-small-en-v1.5/</c> model and run a full ONNX
 /// inference, so they are slow (first call ~500ms, subsequent calls ~10-50ms).
 /// </summary>
 [Trait("Category", "Integration")]
 public sealed class OnnxEmbedderIntegrationTests : IDisposable
 {
-    private const string ModelName = "all-MiniLM-L6-v2";
+    private const string ModelName = "bge-small-en-v1.5";
     private const int ExpectedDimensions = 384;
 
     private readonly string _tempUserDir;
@@ -63,10 +63,14 @@ public sealed class OnnxEmbedderIntegrationTests : IDisposable
             + AppContext.BaseDirectory);
     }
 
+    // The prefix only affects EmbedQuery tests (e.g. EmbedQuery_PrependsConfiguredPrefix);
+    // the Embed-based tests are unaffected because documents are embedded without a prefix.
+    private const string TestPrefix = "PREFIX: ";
+
     private OnnxEmbedder NewEmbedder()
     {
         var manager = new ModelManager(_registry, _bundledModelsDir, _tempUserDir);
-        return new OnnxEmbedder(manager, ModelName);
+        return new OnnxEmbedder(manager, ModelName, TestPrefix);
     }
 
     [Fact]
@@ -150,6 +154,42 @@ public sealed class OnnxEmbedderIntegrationTests : IDisposable
         var second = embedder.Embed("second");
         Assert.True(embedder.IsLoaded);
         Assert.Equal(ExpectedDimensions, second.Length);
+    }
+
+    [Fact]
+    public void EmbedQuery_PrependsConfiguredPrefix()
+    {
+        using var embedder = NewEmbedder();
+        var viaQuery = embedder.EmbedQuery("retrieval target");
+        var viaManualPrefix = embedder.Embed(TestPrefix + "retrieval target");
+        Assert.Equal(viaManualPrefix, viaQuery);
+    }
+
+    [Fact]
+    public void Embed_BgeGolden_FirstDimsStable()
+    {
+        using var embedder = NewEmbedder();
+        var v = embedder.Embed("the quick brown fox");
+
+        // In-test L2-norm guard: CLS-pooled output is L2-normalized, so the
+        // vector must be a unit vector. Catches a normalization/scale regression
+        // that a per-dim tolerance might otherwise mask.
+        double sumSq = 0.0;
+        foreach (var x in v) sumSq += x * x;
+        var norm = Math.Sqrt(sumSq);
+        Assert.InRange(norm, 1.0 - 1e-4, 1.0 + 1e-4);
+
+        // Golden: first 16 dims from BAAI/bge-small-en-v1.5 @ pinned revision 5c38ec7,
+        // CLS-pooled + L2-normalized. Tolerance covers fp32 platform jitter.
+        float[] expected =
+        {
+            -0.08282185f, -0.050440833f, -0.000510249f, 0.016936373f,
+            0.0344118f, 0.0010443031f, 0.014455685f, 0.038501132f,
+            -0.04123964f, 0.024549829f, 0.0035820778f, -0.0823486f,
+            -0.027498012f, 0.062608466f, -0.023907604f, -0.0047324f,
+        };
+        for (int i = 0; i < expected.Length; i++)
+            Assert.InRange(v[i], expected[i] - 1e-3f, expected[i] + 1e-3f);
     }
 
     [Fact]

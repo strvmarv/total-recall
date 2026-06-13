@@ -101,17 +101,32 @@ Table naming: `{tier}_{type}` (e.g., `hot_memories`, `cold_knowledge`, `pinned_m
 interface IEmbedder
 {
     Task<float[]> EmbedAsync(string text, CancellationToken ct = default);
-    int Dimensions { get; }  // 384 for local all-MiniLM-L6-v2
+    int Dimensions { get; }  // 384 for local bge-small-en-v1.5
 }
 ```
 
 **Factory**: `EmbedderFactory.CreateFromConfig(cfg.Embedding)` selects the implementation:
-- `provider = "local"` (default) → `OnnxEmbedder` using bundled `models/all-MiniLM-L6-v2/model.onnx`
+- `provider = "local"` (default) → `OnnxEmbedder` using bundled `models/bge-small-en-v1.5/model.onnx`
 - `provider = "openai"` → `RemoteEmbedder` with OpenAI-compatible endpoint
 - `provider = "bedrock"` → `RemoteEmbedder` with Amazon Bedrock
 
-**Model path**: `ModelManager.cs` handles model discovery. Falls back to HuggingFace download if
-`models/all-MiniLM-L6-v2/model.onnx` is missing (e.g., after a git-source install without LFS).
+**Model path**: `ModelManager.cs` handles model discovery. It validates the bundled
+`models/bge-small-en-v1.5/model.onnx` and throws a clear error if it is absent — it does **not**
+download from HuggingFace. The model is fetched + sha256-verified at release build time
+(`scripts/fetch-bge-small.sh`, pinned HF revision) and bundled into the per-RID release artifact;
+for a git-source build, run `sh scripts/fetch-bge-small.sh` once to fetch it (it is not committed
+to the repo / not in Git LFS).
+
+`bge-small-en-v1.5` uses **CLS pooling** (not mean pooling) and an asymmetric query prefix:
+search queries are embedded with the `bge` retrieval-instruction prefix while stored documents are
+not. After swapping the local embedder, run `total-recall reindex-embeddings` to re-embed existing
+memories into the new model's vector space — the server otherwise refuses to open a database whose
+vectors were written by a different model.
+
+**Known limitation — tokenizer accent handling**: the bundled F# WordPiece tokenizer lowercases but
+does **not** strip accents (canonical BERT also strips accents). Accented words that don't match a
+vocab entry therefore fall through to `[UNK]`. Impact is low for the English/code-heavy content this
+memory system embeds; the behavior is pinned by a tokenizer test so it can't regress silently.
 
 ---
 

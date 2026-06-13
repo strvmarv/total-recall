@@ -10,7 +10,7 @@ total-recall is a **.NET 8 NativeAOT** plugin since 0.8.0 — a C# imperative sh
 
 - **.NET 10 SDK** — pinned by `global.json` at the repo root (`{"sdk":{"version":"10.0.100","rollForward":"latestFeature"}}`). The .NET 10 SDK builds the `net8.0` target framework cleanly. Install from [dotnet.microsoft.com/download](https://dotnet.microsoft.com/download).
 - **Node.js >= 20** — used only by `npm install` to pull the per-platform `sqlite-vec` native extension into `node_modules/`. The Infrastructure csproj's `<Content Include="node_modules/sqlite-vec-<rid>/vec0.*">` step copies the matching variant into the build output.
-- **Git LFS** — `git lfs install` before cloning. The `all-MiniLM-L6-v2` ONNX model is stored in LFS.
+- **Model fetch** — run `sh scripts/fetch-bge-small.sh` once before building or running the ONNX integration tests. It downloads + SHA256-verifies the `bge-small-en-v1.5` ONNX model into `models/bge-small-en-v1.5/` (133 MB, not committed).
 
 ### Clone and build
 
@@ -47,7 +47,7 @@ TOTAL_RECALL_DB_PATH="$SCRATCH/test.db" \
 rm -rf "$SCRATCH"
 ```
 
-Expected output: tier counts, KB info, embedding model `all-MiniLM-L6-v2`, schema version 5+, exit 0.
+Expected output: tier counts, KB info, embedding model `bge-small-en-v1.5`, schema version 5+, exit 0.
 
 The new `VerifyVecExtensionPublished` MSBuild target (added in 0.8.0-beta.6) runs after `dotnet publish` and emits an `<Error>` if `runtimes/vec0.{so,dylib,dll}` is missing from the publish output. If you ever see that error, run `npm ci` at the repo root and verify `node_modules/sqlite-vec-<rid>/vec0.*` exists for your target RID.
 

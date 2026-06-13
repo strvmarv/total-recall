@@ -193,7 +193,7 @@ public static class PostgresMigrationRunner
     /// </summary>
     /// <param name="dataSource">Open Npgsql data source.</param>
     /// <param name="dimensions">
-    /// Embedding vector dimensionality (e.g. 384 for all-MiniLM-L6-v2).
+    /// Embedding vector dimensionality (e.g. 384 for bge-small-en-v1.5).
     /// Must be &gt; 0 and must match the model in use.
     /// </param>
     public static void RunMigrations(NpgsqlDataSource dataSource, int dimensions)

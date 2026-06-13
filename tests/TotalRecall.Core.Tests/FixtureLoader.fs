@@ -63,7 +63,7 @@ let loadVocab () : Map<string, int> =
     // git; extracting it ad-hoc is a Task 2.1 temporary hack that should
     // NOT be repeated here.
     let tokenizerJsonPath =
-        Path.Combine(findWorktreeRoot(), "models", "all-MiniLM-L6-v2", "tokenizer.json")
+        Path.Combine(findWorktreeRoot(), "models", "bge-small-en-v1.5", "tokenizer.json")
     if not (File.Exists tokenizerJsonPath) then
         failwithf "tokenizer.json not found: %s" tokenizerJsonPath
     let json = File.ReadAllText(tokenizerJsonPath)

@@ -143,7 +143,9 @@ Retrieval combines **BM25 full-text search** and **cosine vector similarity**, m
 
 ### Embeddings
 
-All memories are embedded with [all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) (384 dimensions), running locally via ONNX — no API calls, no network dependency. The model ships bundled in the npm package. If it's missing (e.g., a git clone without LFS), the binary downloads it from HuggingFace automatically on first run.
+All memories are embedded with [bge-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5) (384 dimensions, CLS pooling, with an asymmetric query prefix for searches), running locally via ONNX — no API calls, no network dependency. The model (~133 MB) is fetched and sha256-verified at release build time and ships bundled inside the npm/release artifact; there is no runtime HuggingFace download. If the bundled model is absent, the binary fails fast with a clear error rather than fetching anything.
+
+If you swap the local embedder, run `total-recall reindex-embeddings` to re-embed existing memories into the new model's vector space — otherwise the server refuses to open a database whose vectors were written by a different model.
 
 For enterprise deployments, swap in a remote embedder (OpenAI, Amazon Bedrock) for higher-dimensional vectors and finer-grained retrieval across shared team knowledge.
 
@@ -284,7 +286,7 @@ latency_ratio = 2.0               # Alert if latency increased by this factor vs
 min_events = 20                   # Minimum retrieval events required before regression check runs
 
 [embedding]
-model = "all-MiniLM-L6-v2"       # Embedding model name
+model = "bge-small-en-v1.5"      # Embedding model name
 dimensions = 384                  # Embedding dimensions
 # provider = "local"              # "local" (default) | "openai" | "bedrock"
 # endpoint = "https://api.openai.com/v1"   # OpenAI-compatible base URL
@@ -450,7 +452,7 @@ These apply only if you're building from source. The prebuilt binary is self-con
 
 - **.NET 10 SDK** — pinned by `global.json` at the repo root; builds the `net8.0` NativeAOT target
 - **npm** — for `npm ci`, which pulls `sqlite-vec` native libs needed by the csproj copy targets
-- **Git LFS** — run `git lfs install` before cloning; the ONNX embedding model is stored in LFS. If LFS fetch fails, the binary auto-downloads the model from HuggingFace on first run.
+- **Embedding model** — run `sh scripts/fetch-bge-small.sh` once to fetch + sha256-verify the `bge-small-en-v1.5` ONNX model (~133 MB) into `models/bge-small-en-v1.5/`. The model is no longer committed to the repo (not in Git LFS); release builds fetch and bundle it into the per-RID artifact.
 
 ---
 
@@ -459,7 +461,7 @@ These apply only if you're building from source. The prebuilt binary is self-con
 ```bash
 git clone https://github.com/strvmarv/total-recall.git
 cd total-recall
-git lfs pull                               # fetch the ONNX model
+sh scripts/fetch-bge-small.sh              # fetch + sha256-verify the ONNX model (~133 MB)
 npm ci                                     # pulls sqlite-vec native libs into node_modules/
 dotnet build src/TotalRecall.sln
 dotnet test src/TotalRecall.sln --filter "Category!=Integration"   # ~1000 tests
@@ -495,7 +497,7 @@ If you're building plugins for TUI coding assistants, start with [superpowers](h
 - [sqlite-vec](https://github.com/asg017/sqlite-vec) — vector similarity search in SQLite (loaded as a native extension via `LoadExtension`)
 - [Microsoft.ML.OnnxRuntime](https://onnxruntime.ai/docs/get-started/with-csharp.html) — local ML inference, AOT-compatible
 - [Microsoft.ML.Tokenizers](https://learn.microsoft.com/en-us/dotnet/api/microsoft.ml.tokenizers) — canonical BERT BasicTokenization + WordPiece
-- [all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) — sentence embeddings (384d)
+- [bge-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5) — sentence embeddings (384d, CLS pooling)
 - Hand-rolled JSON-RPC stdio MCP server in `TotalRecall.Server` (no SDK dependency)
 - [Spectre.Console](https://spectreconsole.net/) — CLI rendering for `total-recall status` / `eval` / `kb list`
 

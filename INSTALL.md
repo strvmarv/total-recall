@@ -4,7 +4,7 @@ This file is designed to be read by AI coding assistants. If you're an LLM helpi
 
 ## What total-recall ships as
 
-Since 0.8.0, total-recall is a **prebuilt .NET 8 NativeAOT binary** wrapped by a tiny Node launcher (`bin/start.js`) that detects the host platform and exec's the right per-RID binary. The npm package ships binaries for `linux-x64`, `linux-arm64`, `osx-arm64`, and `win-x64`. No `dotnet` runtime, no `bun`, and no system SQLite needed — the binary bundles its own `libe_sqlite3`, `libonnxruntime`, `vec0` (sqlite-vec extension), and the `all-MiniLM-L6-v2` ONNX embedding model.
+Since 0.8.0, total-recall is a **prebuilt .NET 8 NativeAOT binary** wrapped by a tiny Node launcher (`bin/start.js`) that detects the host platform and exec's the right per-RID binary. The npm package ships binaries for `linux-x64`, `linux-arm64`, `osx-arm64`, and `win-x64`. No `dotnet` runtime, no `bun`, and no system SQLite needed — the binary bundles its own `libe_sqlite3`, `libonnxruntime`, `vec0` (sqlite-vec extension), and the `bge-small-en-v1.5` ONNX embedding model (~133 MB).
 
 ## Prerequisites
 
@@ -199,7 +199,7 @@ total-recall --version
 # Expected: total-recall 0.8.0 (or 0.7.2 if you're on stable)
 
 total-recall status
-# Expected: tier counts, KB info, embedding model "all-MiniLM-L6-v2", schema version
+# Expected: tier counts, KB info, embedding model "bge-small-en-v1.5", schema version
 ```
 
 In a Claude Code (or other host) session, the first session output should include:
@@ -216,7 +216,7 @@ You can verify it's working with:
 
 1. Creates `~/.total-recall/` directory if missing
 2. Creates SQLite database with schema (`Schema.cs` MigrationRunner applies all migrations 1..5)
-3. Loads the bundled `all-MiniLM-L6-v2` ONNX embedding model from `models/` (no download needed)
+3. Loads the bundled `bge-small-en-v1.5` ONNX embedding model from `models/` (no download needed at runtime — it was fetched and sha256-verified at build time and shipped inside the artifact)
 4. Scans for existing memories from host tools (Claude Code, Copilot CLI, Cursor, Cline, OpenCode, Hermes), deduplicates via content hash
 5. Auto-ingests project docs (README, docs/, etc.) into a `<project>-project-docs` KB collection
 6. Runs a quick smoke test (22-query benchmark) to verify retrieval quality

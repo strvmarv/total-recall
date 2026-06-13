@@ -1,15 +1,14 @@
 {
   "version": 1,
   "models": {
-    "all-MiniLM-L6-v2": {
+    "bge-small-en-v1.5": {
       "dimensions": 384,
-      "sha256": "6fd5d72fe4589f189f8ebc006442dbb529bb7ce38f8082112682524616046452",
-      "sizeBytes": 90405214,
-      "revision": "main",
+      "sha256": "828e1496d7fabb79cfa4dcd84fa38625c0d3d21da474a00f08db0f559940cf35",
+      "sizeBytes": 133093490,
+      "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
       "files": {
-        "model.onnx": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/{revision}/onnx/model.onnx",
-        "tokenizer.json": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/{revision}/tokenizer.json",
-        "tokenizer_config.json": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/{revision}/tokenizer_config.json"
+        "model.onnx": "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/{revision}/onnx/model.onnx",
+        "tokenizer.json": "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/{revision}/tokenizer.json"
       }
     }
   }
