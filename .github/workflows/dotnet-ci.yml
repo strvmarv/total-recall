@@ -46,5 +46,12 @@ jobs:
       - name: Build
         run: dotnet build src/TotalRecall.sln --no-restore --configuration Release
 
+      # The bge-small model is no longer committed / in Git LFS (it is fetched +
+      # sha256-verified at release build time). The tokenizer/ONNX tests load it
+      # from models/bge-small-en-v1.5/, so fetch it here too — otherwise those
+      # tests fail with "tokenizer.json not found" and CI is red on every push.
+      - name: Fetch bge-small model (tests load it; not committed)
+        run: sh scripts/fetch-bge-small.sh
+
       - name: Test
         run: dotnet test src/TotalRecall.sln --no-build --configuration Release --logger "console;verbosity=normal" --filter "Category!=Integration"
