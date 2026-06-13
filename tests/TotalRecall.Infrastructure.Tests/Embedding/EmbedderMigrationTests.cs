@@ -172,6 +172,43 @@ public sealed class EmbedderMigrationTests
         finally { Cleanup(dbPath); }
     }
 
+    [Fact]
+    public void Sqlite_Mismatch_Auto_ReindexFails_ThrowsWithEscapeHatch_DbUnchanged()
+    {
+        var dbPath = TempDb("autofail");
+        try
+        {
+            using var conn = SqliteConnection.Open(dbPath);
+            MigrationRunner.RunMigrations(conn);
+            var store = new SqliteStore(conn);
+            var vec = new VectorSearch(conn);
+
+            // Two rows + OLD fingerprint (model "const-1").
+            var oldE = new ConstantEmbedder(1.0f);
+            store.InsertWithEmbedding(Tier.Warm, ContentType.Memory,
+                new InsertEntryOpts("alpha"), oldE.Embed("alpha"));
+            store.InsertWithEmbedding(Tier.Warm, ContentType.Memory,
+                new InsertEntryOpts("beta"), oldE.Embed("beta"));
+            EmbedderFingerprint.Restamp(store, oldE);
+
+            // New embedder mismatches (model "fake") AND throws on the 2nd re-embed.
+            var newE = new ThrowingEmbedder(throwOnCall: 2);
+            Assert.Equal(EmbedderFingerprint.FingerprintState.Mismatch,
+                EmbedderFingerprint.Check(store, newE, out _));
+
+            // Auto re-embed fails mid-run → wrapped error names the warn escape hatch.
+            var ex = Assert.Throws<System.InvalidOperationException>(
+                () => EmbedderMigration.EnsureCompatibleSqlite(conn, store, vec, newE, OnModelChange.Auto, log: null));
+            Assert.Contains("on_model_change=\"warn\"", ex.Message);
+
+            // Atomic rollback: the OLD fingerprint is intact, so the next boot retries cleanly
+            // (no half-migrated, mixed-space state).
+            Assert.Equal(EmbedderFingerprint.FingerprintState.Match,
+                EmbedderFingerprint.Check(store, oldE, out _));
+        }
+        finally { Cleanup(dbPath); }
+    }
+
     // ---------------------------------------------------------------------
     // EnsureCompatiblePostgres (no live pg — only the _meta surface is touched)
     // ---------------------------------------------------------------------

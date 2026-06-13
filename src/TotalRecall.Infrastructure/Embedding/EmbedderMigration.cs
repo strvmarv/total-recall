@@ -76,7 +76,24 @@ public static class EmbedderMigration
                         log?.WriteLine(
                             $"[total-recall] embedding model changed ({stored!.Model} -> {embedder.Descriptor.Model}); " +
                             "re-embedding the local database in place (one-time, this may take a moment)...");
-                        var n = EmbeddingReindexer.RunAtomicSqlite(conn, store, vec, embedder, log);
+                        int n;
+                        try
+                        {
+                            n = EmbeddingReindexer.RunAtomicSqlite(conn, store, vec, embedder, log);
+                        }
+                        catch (Exception ex)
+                        {
+                            // The reindex is atomic, so a failure here left the DB unchanged (old
+                            // vectors + old fingerprint) — the next boot will retry. Surface the
+                            // escape hatch so a permanently-broken embedder isn't an unrecoverable
+                            // boot loop with an opaque error.
+                            throw new InvalidOperationException(
+                                $"[total-recall] automatic re-embedding failed after a model change " +
+                                $"({stored!.Model} -> {embedder.Descriptor.Model}): {ex.Message}. The database " +
+                                "was left unchanged. To start the server with degraded retrieval instead, set " +
+                                "embedding.on_model_change=\"warn\" (or \"block\" to keep failing fast), then run " +
+                                "`total-recall reindex-embeddings` once the embedder is healthy.", ex);
+                        }
                         log?.WriteLine(
                             $"[total-recall] re-embedded {n} entries; embedder fingerprint updated.");
                         return;
@@ -124,8 +141,9 @@ public static class EmbedderMigration
                     case OnModelChange.Warn:
                         log?.WriteLine(
                             $"[total-recall] embedding model changed ({stored!.Model} -> {embedder.Descriptor.Model}); " +
-                            "running with stale vectors (on_model_change=warn). Local retrieval quality is degraded " +
-                            "until you run `total-recall reindex-embeddings`.");
+                            "running with stale vectors (on_model_change=warn). Local retrieval quality is degraded. " +
+                            "On the postgres backend, re-embed by re-ingesting into a fresh database " +
+                            "(`total-recall reindex-embeddings` does not support postgres).");
                         return;
 
                     default: // Auto
