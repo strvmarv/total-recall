@@ -58,7 +58,29 @@ public sealed class ReindexEmbeddingsCommandTests : IDisposable
             var rc = await new ReindexEmbeddingsCommand().RunAsync(new[] { "--db", dbPath });
 
             Assert.Equal(0, rc);
-            Assert.Contains("re-embedded", _outWriter.ToString());
+            Assert.Contains("re-embedded 2 entries", _outWriter.ToString());
+
+            // Prove the reindex actually rewrote the vectors rather than merely
+            // returning a count. The seed vectors were all-zero (new float[384]);
+            // after running the real bge embedder the stored vec0 rows must be
+            // non-zero. The `embedding` column is raw little-endian float32 bytes
+            // (384 * 4 = 1536 bytes); assert at least one byte is non-zero.
+            MsSqliteConnection.ClearAllPools();
+            using (var verify = SqliteConnection.Open(dbPath))
+            {
+                using var cmd = verify.CreateCommand();
+                cmd.CommandText = "SELECT embedding FROM warm_memories_vec";
+                using var reader = cmd.ExecuteReader();
+                int rowsSeen = 0;
+                while (reader.Read())
+                {
+                    rowsSeen++;
+                    var bytes = (byte[])reader["embedding"];
+                    Assert.NotEmpty(bytes);
+                    Assert.Contains(bytes, b => b != 0);
+                }
+                Assert.Equal(2, rowsSeen);
+            }
         }
         finally
         {
