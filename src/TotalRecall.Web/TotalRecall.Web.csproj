@@ -5,6 +5,7 @@
     <AssemblyName>TotalRecall.Web</AssemblyName>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
     <IsAotCompatible>true</IsAotCompatible>
     <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
   </PropertyGroup>
@@ -14,8 +15,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\TotalRecall.Server\TotalRecall.Server.csproj" />
-    <ProjectReference Include="..\TotalRecall.Infrastructure\TotalRecall.Infrastructure.csproj" />
-    <ProjectReference Include="..\TotalRecall.Core\TotalRecall.Core.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="wwwroot\**\*" />
