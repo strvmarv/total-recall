@@ -129,6 +129,15 @@ public sealed class ApiIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task UnknownApiRoute_NoToken_Returns401_NotFallback()
+    {
+        // The token guard runs before the fallback: an unknown /api/* route without a
+        // token is 401 (auth), not the fallback's 404 — never the SPA HTML shell.
+        var resp = await _client.SendAsync(Req(HttpMethod.Get, "/api/does-not-exist", withToken: false));
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+    }
+
+    [Fact]
     public async Task Dispatch_HandlerError_Returns400()
     {
         var resp = await _client.SendAsync(Req(HttpMethod.Post, "/api/tool/eval_report"));

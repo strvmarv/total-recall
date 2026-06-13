@@ -132,6 +132,9 @@ public static partial class WebUiServer
                     WebJsonContext.Default.ApiError);
                 return;
             }
+            // Non-/api unmatched route -> SPA shell. A missing static asset also lands here
+            // and returns the shell with 200; harmless because the built index.html only
+            // references hashed assets that exist.
             ctx.Response.ContentType = "text/html; charset=utf-8";
             ctx.Response.Headers.CacheControl = "no-store";
             await ctx.Response.WriteAsync(indexHtml);
@@ -165,7 +168,7 @@ public static partial class WebUiServer
         if (file.Exists)
         {
             using var stream = file.CreateReadStream();
-            using var reader = new StreamReader(stream);
+            using var reader = new StreamReader(stream, System.Text.Encoding.UTF8);
             html = reader.ReadToEnd();
         }
         else
