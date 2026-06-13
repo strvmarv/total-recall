@@ -25,7 +25,7 @@ using Xunit;
 public sealed class StatusHandlerTests
 {
     private const string DefaultDbPath = "/tmp/total-recall-status-tests-nonexistent.db";
-    private const string DefaultModel = "all-MiniLM-L6-v2";
+    private const string DefaultModel = "bge-small-en-v1.5";
     private const int DefaultDims = 384;
 
     private static readonly Dictionary<string, string> CollectionFilter =

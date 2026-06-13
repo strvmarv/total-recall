@@ -32,7 +32,7 @@ auto_demote_min_injections = 10
 # decay_half_life_decision = 168     # 7 days
 
 [embedding]
-model = "all-MiniLM-L6-v2"
+model = "bge-small-en-v1.5"
 dimensions = 384
 
 [regression]

@@ -17,7 +17,7 @@ public sealed class EmbedderFactoryTests
         int dimensions = 384)
     {
         return new Core.Config.EmbeddingConfig(
-            "all-MiniLM-L6-v2",
+            "bge-small-en-v1.5",
             dimensions,
             provider is null ? FSharpOption<string>.None : FSharpOption<string>.Some(provider),
             endpoint is null ? FSharpOption<string>.None : FSharpOption<string>.Some(endpoint),

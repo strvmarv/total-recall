@@ -9,7 +9,7 @@ namespace TotalRecall.Infrastructure.Embedding;
 /// See <see cref="EmbedderFingerprint"/> for the read/write/guard logic.
 /// </summary>
 /// <param name="Provider">Provider tag: <c>local</c>, <c>openai</c>, or <c>bedrock</c>.</param>
-/// <param name="Model">Model identifier (e.g. <c>all-MiniLM-L6-v2</c>, <c>text-embedding-3-small</c>).</param>
+/// <param name="Model">Model identifier (e.g. <c>bge-small-en-v1.5</c>, <c>text-embedding-3-small</c>).</param>
 /// <param name="Revision">
 /// Revision/version of the model. For the local ONNX provider this is the
 /// <c>revision</c> field from <c>models/registry.json</c>; for remote providers

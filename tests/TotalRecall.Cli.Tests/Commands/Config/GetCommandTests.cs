@@ -49,7 +49,7 @@ public sealed class GetCommandTests : IDisposable
         var t = new TomlTable();
         ConfigWriter.SetNestedKey(t, "tiers.hot.max_entries", 50L);
         ConfigWriter.SetNestedKey(t, "tiers.warm.similarity_threshold", 0.65);
-        ConfigWriter.SetNestedKey(t, "embedding.model", "all-MiniLM-L6-v2");
+        ConfigWriter.SetNestedKey(t, "embedding.model", "bge-small-en-v1.5");
         ConfigWriter.SetNestedKey(t, "embedding.dimensions", 384L);
         return t;
     }
@@ -77,7 +77,7 @@ public sealed class GetCommandTests : IDisposable
         var text = sink.ToString();
         Assert.Contains("tiers", text);
         Assert.Contains("embedding", text);
-        Assert.Contains("all-MiniLM-L6-v2", text);
+        Assert.Contains("bge-small-en-v1.5", text);
     }
 
     [Fact]
@@ -91,7 +91,7 @@ public sealed class GetCommandTests : IDisposable
         Assert.Equal(0, code);
         var text = sink.ToString();
         Assert.Contains("embedding.model", text);
-        Assert.Contains("all-MiniLM-L6-v2", text);
+        Assert.Contains("bge-small-en-v1.5", text);
     }
 
     [Fact]
@@ -119,7 +119,7 @@ public sealed class GetCommandTests : IDisposable
         Assert.StartsWith("{", text);
         Assert.EndsWith("}", text);
         Assert.Contains("\"tiers\"", text);
-        Assert.Contains("\"all-MiniLM-L6-v2\"", text);
+        Assert.Contains("\"bge-small-en-v1.5\"", text);
     }
 
     [Fact]

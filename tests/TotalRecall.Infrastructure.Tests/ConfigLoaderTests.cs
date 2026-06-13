@@ -62,7 +62,7 @@ public sealed class ConfigLoaderTests : IDisposable
         Assert.Equal(0.7, cfg.Compaction.PromoteThreshold, 6);
         Assert.Equal(7, cfg.Compaction.WarmSweepIntervalDays);
 
-        Assert.Equal("all-MiniLM-L6-v2", cfg.Embedding.Model);
+        Assert.Equal("bge-small-en-v1.5", cfg.Embedding.Model);
         Assert.Equal(384, cfg.Embedding.Dimensions);
 
         Assert.True(FSharpOption<Core.Config.RegressionConfig>.get_IsSome(cfg.Regression));
@@ -93,7 +93,7 @@ public sealed class ConfigLoaderTests : IDisposable
         var cfg = loader.LoadEffectiveConfig(userConfigPath: null);
 
         Assert.Equal(50, cfg.Tiers.Hot.MaxEntries);
-        Assert.Equal("all-MiniLM-L6-v2", cfg.Embedding.Model);
+        Assert.Equal("bge-small-en-v1.5", cfg.Embedding.Model);
     }
 
     [Fact]
@@ -126,7 +126,7 @@ public sealed class ConfigLoaderTests : IDisposable
         Assert.Equal(0.7, cfg.Tiers.Hot.CarryForwardThreshold, 6);
         // Other sections untouched.
         Assert.Equal(10000, cfg.Tiers.Warm.MaxEntries);
-        Assert.Equal("all-MiniLM-L6-v2", cfg.Embedding.Model);
+        Assert.Equal("bge-small-en-v1.5", cfg.Embedding.Model);
     }
 
     [Fact]
@@ -203,7 +203,7 @@ public sealed class ConfigLoaderTests : IDisposable
         // Sibling from defaults preserved.
         Assert.Equal(4000L, Convert.ToInt64(hot["token_budget"]));
         var embedding = Assert.IsType<TomlTable>(table["embedding"]);
-        Assert.Equal("all-MiniLM-L6-v2", embedding["model"]);
+        Assert.Equal("bge-small-en-v1.5", embedding["model"]);
         // Custom (non-schema) keys survive — this is the main reason
         // LoadEffectiveTable exists alongside LoadEffectiveConfig.
         var custom = Assert.IsType<TomlTable>(table["custom"]);
@@ -353,7 +353,7 @@ public sealed class ConfigLoaderTests : IDisposable
         warm_sweep_interval_days = 7
 
         [embedding]
-        model = "all-MiniLM-L6-v2"
+        model = "bge-small-en-v1.5"
         dimensions = 384
         """;
 

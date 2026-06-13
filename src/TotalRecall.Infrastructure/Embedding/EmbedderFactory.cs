@@ -16,7 +16,7 @@ namespace TotalRecall.Infrastructure.Embedding;
 /// Walks AppContext.BaseDirectory upward to find bundled <c>models/</c>,
 /// loads the registry, points the user override dir at
 /// <c>$HOME/.total-recall/models</c>, and constructs an
-/// <see cref="OnnxEmbedder"/> for "all-MiniLM-L6-v2".
+/// <see cref="OnnxEmbedder"/> for "bge-small-en-v1.5".
 /// </summary>
 public static class EmbedderFactory
 {
@@ -33,7 +33,7 @@ public static class EmbedderFactory
         Directory.CreateDirectory(userModelsDir);
 
         var manager = new ModelManager(registry, bundledModelsDir, userModelsDir);
-        return new OnnxEmbedder(manager, "all-MiniLM-L6-v2", queryPrefix);
+        return new OnnxEmbedder(manager, "bge-small-en-v1.5", queryPrefix);
     }
 
     /// <summary>

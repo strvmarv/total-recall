@@ -101,17 +101,17 @@ Table naming: `{tier}_{type}` (e.g., `hot_memories`, `cold_knowledge`, `pinned_m
 interface IEmbedder
 {
     Task<float[]> EmbedAsync(string text, CancellationToken ct = default);
-    int Dimensions { get; }  // 384 for local all-MiniLM-L6-v2
+    int Dimensions { get; }  // 384 for local bge-small-en-v1.5
 }
 ```
 
 **Factory**: `EmbedderFactory.CreateFromConfig(cfg.Embedding)` selects the implementation:
-- `provider = "local"` (default) → `OnnxEmbedder` using bundled `models/all-MiniLM-L6-v2/model.onnx`
+- `provider = "local"` (default) → `OnnxEmbedder` using bundled `models/bge-small-en-v1.5/model.onnx`
 - `provider = "openai"` → `RemoteEmbedder` with OpenAI-compatible endpoint
 - `provider = "bedrock"` → `RemoteEmbedder` with Amazon Bedrock
 
 **Model path**: `ModelManager.cs` handles model discovery. Falls back to HuggingFace download if
-`models/all-MiniLM-L6-v2/model.onnx` is missing (e.g., after a git-source install without LFS).
+`models/bge-small-en-v1.5/model.onnx` is missing (e.g., after a git-source install without LFS).
 
 ---
 

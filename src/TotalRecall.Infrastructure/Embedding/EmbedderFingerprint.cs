@@ -45,7 +45,7 @@ public sealed class EmbedderFingerprintMismatchException : InvalidOperationExcep
 /// is thrown on any difference.
 ///
 /// This closes the silent-failure window where swapping to a different
-/// embedding model with the same dimensionality (e.g. all-MiniLM-L6-v2 →
+/// embedding model with the same dimensionality (e.g. bge-small-en-v1.5 →
 /// OpenAI text-embedding-3-small at 384 dims) would leave the existing
 /// 384-dim vectors in place while new vectors are produced in a different
 /// semantic space. Dimension mismatches already fail loudly at the vec0 /

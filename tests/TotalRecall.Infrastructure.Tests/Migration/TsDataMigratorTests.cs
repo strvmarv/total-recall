@@ -267,7 +267,7 @@ VALUES
         var userDir = Path.Combine(_tempDir, "user-models");
         Directory.CreateDirectory(userDir);
         var manager = new ModelManager(registry, bundledModelsDir, userDir);
-        using var realEmbedder = new OnnxEmbedder(manager, "all-MiniLM-L6-v2");
+        using var realEmbedder = new OnnxEmbedder(manager, "bge-small-en-v1.5");
 
         // Seed with a fake embedder (fast) — the re-embedding pass happens
         // during migration using the real embedder.

@@ -8,13 +8,13 @@ namespace TotalRecall.Infrastructure.Tests;
 
 /// <summary>
 /// Integration tests for <see cref="OnnxEmbedder"/>. These tests load the
-/// real bundled <c>models/all-MiniLM-L6-v2/</c> model and run a full ONNX
+/// real bundled <c>models/bge-small-en-v1.5/</c> model and run a full ONNX
 /// inference, so they are slow (first call ~500ms, subsequent calls ~10-50ms).
 /// </summary>
 [Trait("Category", "Integration")]
 public sealed class OnnxEmbedderIntegrationTests : IDisposable
 {
-    private const string ModelName = "all-MiniLM-L6-v2";
+    private const string ModelName = "bge-small-en-v1.5";
     private const int ExpectedDimensions = 384;
 
     private readonly string _tempUserDir;

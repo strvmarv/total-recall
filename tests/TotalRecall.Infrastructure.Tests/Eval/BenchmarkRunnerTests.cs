@@ -242,7 +242,7 @@ public sealed class BenchmarkRunnerTests : IDisposable
             var userDir = Path.Combine(_tempDir, "models");
             Directory.CreateDirectory(userDir);
             var manager = new ModelManager(registry, bundledModelsDir, userDir);
-            using var embedder = new OnnxEmbedder(manager, "all-MiniLM-L6-v2");
+            using var embedder = new OnnxEmbedder(manager, "bge-small-en-v1.5");
 
             var runner = new BenchmarkRunner(store, vec, hybrid, embedder);
             var result = await runner.RunAsync(

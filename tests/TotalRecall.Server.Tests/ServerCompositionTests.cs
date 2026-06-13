@@ -34,7 +34,7 @@ public sealed class ServerCompositionTests
         var sessionLifecycle = new FakeSessionLifecycle();
         var statusOptions = new StatusOptions(
             DbPath: "/tmp/test.db",
-            EmbeddingModel: "all-MiniLM-L6-v2",
+            EmbeddingModel: "bge-small-en-v1.5",
             EmbeddingDimensions: 384);
 
         return ServerComposition.BuildRegistry(

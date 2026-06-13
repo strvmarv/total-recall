@@ -48,17 +48,17 @@ public sealed class ConfigSetHandlerTests : IDisposable
     {
         var handler = NewHandler();
         var result = await handler.ExecuteAsync(
-            Args("""{"key":"embedding.model","value":"all-MiniLM-L6-v2"}"""),
+            Args("""{"key":"embedding.model","value":"bge-small-en-v1.5"}"""),
             CancellationToken.None);
         using var doc = JsonDocument.Parse(result.Content[0].Text);
         Assert.Equal("embedding.model", doc.RootElement.GetProperty("key").GetString());
-        Assert.Equal("all-MiniLM-L6-v2", doc.RootElement.GetProperty("new_value").GetString());
+        Assert.Equal("bge-small-en-v1.5", doc.RootElement.GetProperty("new_value").GetString());
         Assert.True(doc.RootElement.GetProperty("written").GetBoolean());
 
         Assert.True(File.Exists(_configPath));
         var parsed = Toml.Parse(File.ReadAllText(_configPath)).ToModel();
         var embedding = (TomlTable)parsed["embedding"];
-        Assert.Equal("all-MiniLM-L6-v2", (string)embedding["model"]);
+        Assert.Equal("bge-small-en-v1.5", (string)embedding["model"]);
     }
 
     [Fact]
