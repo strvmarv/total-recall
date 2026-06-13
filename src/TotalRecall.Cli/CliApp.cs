@@ -192,6 +192,7 @@ public static class CliApp
             new Commands.StatusCommand(),
             new Commands.UsageCommand(),
             new Commands.MigrateCommand(),
+            new Commands.ReindexEmbeddingsCommand(),
             new Commands.Eval.BenchmarkCommand(),
             new Commands.Eval.ReportCommand(),
             new Commands.Eval.CompareCommand(),
