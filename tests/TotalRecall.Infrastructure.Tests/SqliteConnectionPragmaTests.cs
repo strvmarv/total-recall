@@ -32,8 +32,6 @@ public sealed class SqliteConnectionPragmaTests
                 cmd.CommandText = "PRAGMA busy_timeout;";
                 busyTimeout = Convert.ToInt32(cmd.ExecuteScalar());
             }
-            // Release the connection pool so the file can be deleted on cleanup.
-            MsSqliteConnection.ClearAllPools();
             Assert.Equal("wal", journalMode);
             Assert.True(busyTimeout >= 3000);
         }

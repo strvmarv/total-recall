@@ -64,5 +64,9 @@ public sealed class SqliteConnectionTests
         var sync = (long)cmd.ExecuteScalar()!;
         // NORMAL = 1
         Assert.Equal(1L, sync);
+
+        cmd.CommandText = "PRAGMA busy_timeout";
+        var busyTimeout = (long)cmd.ExecuteScalar()!;
+        Assert.Equal(5000L, busyTimeout);
     }
 }
