@@ -19,6 +19,8 @@ public static class PinnedBlockRenderer
         IReadOnlyList<Entry> pinnedMemories,
         IReadOnlyList<Entry> pinnedKnowledge)
     {
+        ArgumentNullException.ThrowIfNull(pinnedMemories);
+        ArgumentNullException.ThrowIfNull(pinnedKnowledge);
         var total = pinnedMemories.Count + pinnedKnowledge.Count;
         if (total == 0)
             return (string.Empty, Array.Empty<(Tier, ContentType, string)>());

@@ -65,4 +65,9 @@ public sealed class PinnedBlockRendererTests
         Assert.StartsWith("## Pinned directives (always follow)", block);
         Assert.Equal("## Pinned directives (always follow)", PinnedBlockRenderer.Header);
     }
+
+    [Fact]
+    public void Render_NullMemories_Throws() =>
+        Assert.Throws<ArgumentNullException>(() =>
+            PinnedBlockRenderer.Render(null!, Array.Empty<Entry>()));
 }

@@ -411,17 +411,6 @@ public sealed class SessionLifecycle : ISessionLifecycle
     // -------- helpers (internal so tests can call them directly) --------
 
     /// <summary>
-    /// Renders pinned entries for session-start context. Pinned content is
-    /// ALWAYS injected verbatim — no detail levels, no extractive truncation
-    /// (spec 2026-06-09). Returns the rendered block and the (tier, type, id)
-    /// triples for injection-count tracking.
-    /// </summary>
-    public static (string Block, IReadOnlyList<(Tier, ContentType, string)> Ids) BuildPinnedBlock(
-        IReadOnlyList<Entry> pinnedMemories,
-        IReadOnlyList<Entry> pinnedKnowledge)
-        => PinnedBlockRenderer.Render(pinnedMemories, pinnedKnowledge);
-
-    /// <summary>
     /// Builds the <c>## Available Skills</c> context block from a list response.
     /// Returns an empty string when there are no skills.
     /// </summary>
