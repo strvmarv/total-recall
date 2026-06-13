@@ -23,8 +23,20 @@ if grep -E "warning IL[0-9]" /tmp/ui-aot-publish.log; then
   exit 1
 fi
 
-BIN="src/TotalRecall.Host/bin/Release/net8.0/$RID/publish/total-recall"
-[ -f "$BIN" ] || BIN="$BIN.exe"
+# Locate the published binary. A vcvars64-initialized shell exports Platform=x64,
+# nesting output under bin/x64/Release/...; a plain publish uses bin/Release/...
+BIN=""
+for base in "src/TotalRecall.Host/bin/Release" "src/TotalRecall.Host/bin/x64/Release"; do
+  for cand in \
+    "$base/net8.0/$RID/publish/total-recall" \
+    "$base/net8.0/$RID/publish/total-recall.exe"; do
+    if [ -f "$cand" ]; then BIN="$cand"; break 2; fi
+  done
+done
+if [ -z "$BIN" ]; then
+  echo "Could not find published total-recall binary for $RID under bin/Release or bin/x64/Release." >&2
+  exit 1
+fi
 echo "Smoke-booting $BIN ui --smoke ..."
 "$BIN" ui --smoke
 echo "AOT UI smoke OK"
