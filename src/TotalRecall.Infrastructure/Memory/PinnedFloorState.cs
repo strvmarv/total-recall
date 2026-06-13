@@ -27,6 +27,8 @@ public static class PinnedFloorState
 
     public static string FileName(string sessionId)
     {
+        // Collision risk for generated session IDs is negligible; if IDs ever become
+        // user-supplied free-text, add a short hash suffix to disambiguate.
         var sb = new StringBuilder(sessionId.Length + 5);
         foreach (var ch in sessionId)
             sb.Append(char.IsLetterOrDigit(ch) || ch == '-' || ch == '_' ? ch : '_');
@@ -58,23 +60,27 @@ public static class PinnedFloorState
 
     public static void Save(string stateDir, FloorState state)
     {
-        Directory.CreateDirectory(stateDir);
-        var sb = new StringBuilder();
-        sb.Append('{');
-        JsonWriter.AppendString(sb, "sessionId"); sb.Append(':');
-        JsonWriter.AppendString(sb, state.SessionId); sb.Append(',');
-        JsonWriter.AppendString(sb, "turnCount"); sb.Append(':');
-        JsonWriter.AppendNumber(sb, state.TurnCount); sb.Append(',');
-        JsonWriter.AppendString(sb, "lastInjectedTurn"); sb.Append(':');
-        JsonWriter.AppendNumber(sb, state.LastInjectedTurn); sb.Append(',');
-        JsonWriter.AppendString(sb, "lastInjectedBytes"); sb.Append(':');
-        JsonWriter.AppendNumber(sb, state.LastInjectedBytes); sb.Append(',');
-        JsonWriter.AppendString(sb, "seeded"); sb.Append(':');
-        JsonWriter.AppendBool(sb, state.Seeded);
-        sb.Append('}');
+        try
+        {
+            Directory.CreateDirectory(stateDir);
+            var sb = new StringBuilder();
+            sb.Append('{');
+            JsonWriter.AppendString(sb, "sessionId"); sb.Append(':');
+            JsonWriter.AppendString(sb, state.SessionId); sb.Append(',');
+            JsonWriter.AppendString(sb, "turnCount"); sb.Append(':');
+            JsonWriter.AppendNumber(sb, state.TurnCount); sb.Append(',');
+            JsonWriter.AppendString(sb, "lastInjectedTurn"); sb.Append(':');
+            JsonWriter.AppendNumber(sb, state.LastInjectedTurn); sb.Append(',');
+            JsonWriter.AppendString(sb, "lastInjectedBytes"); sb.Append(':');
+            JsonWriter.AppendNumber(sb, state.LastInjectedBytes); sb.Append(',');
+            JsonWriter.AppendString(sb, "seeded"); sb.Append(':');
+            JsonWriter.AppendBool(sb, state.Seeded);
+            sb.Append('}');
 
-        var path = Path.Combine(stateDir, FileName(state.SessionId));
-        File.WriteAllText(path, sb.ToString());
+            var path = Path.Combine(stateDir, FileName(state.SessionId));
+            File.WriteAllText(path, sb.ToString());
+        }
+        catch { }
     }
 
     public static void Prune(string stateDir, double maxAgeDays, DateTimeOffset nowUtc)
@@ -94,9 +100,15 @@ public static class PinnedFloorState
 
     private static FloorState Fresh(string sessionId) => new(sessionId, 0, 0, 0L, false);
 
-    private static int GetInt(JsonElement r, string name) =>
-        r.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : 0;
+    private static int GetInt(JsonElement r, string name)
+    {
+        if (!r.TryGetProperty(name, out var v) || v.ValueKind != JsonValueKind.Number) return 0;
+        return v.TryGetInt32(out var i) ? i : 0;
+    }
 
-    private static long GetLong(JsonElement r, string name) =>
-        r.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt64() : 0L;
+    private static long GetLong(JsonElement r, string name)
+    {
+        if (!r.TryGetProperty(name, out var v) || v.ValueKind != JsonValueKind.Number) return 0L;
+        return v.TryGetInt64(out var l) ? l : 0L;
+    }
 }

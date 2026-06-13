@@ -67,4 +67,32 @@ public sealed class PinnedFloorStateTests : IDisposable
         Assert.False(File.Exists(oldPath));
         Assert.True(File.Exists(Path.Combine(_dir, PinnedFloorState.FileName("new"))));
     }
+
+    [Fact]
+    public void Save_OverwritesExistingState()
+    {
+        PinnedFloorState.Save(_dir, new FloorState("s", 1, 1, 100, true));
+        PinnedFloorState.Save(_dir, new FloorState("s", 9, 8, 7000, true));
+        var loaded = PinnedFloorState.Load(_dir, "s");
+        Assert.Equal(9, loaded.TurnCount);
+        Assert.Equal(8, loaded.LastInjectedTurn);
+        Assert.Equal(7000, loaded.LastInjectedBytes);
+    }
+
+    [Fact]
+    public void Prune_WhenDirAbsent_DoesNotThrow()
+    {
+        var missing = System.IO.Path.Combine(_dir, "does-not-exist");
+        var ex = Record.Exception(() =>
+            PinnedFloorState.Prune(missing, maxAgeDays: 7, nowUtc: DateTimeOffset.UtcNow));
+        Assert.Null(ex);
+    }
+
+    [Fact]
+    public void RoundTrip_LargeLongBytes()
+    {
+        var saved = new FloorState("big", 2, 1, long.MaxValue, true);
+        PinnedFloorState.Save(_dir, saved);
+        Assert.Equal(long.MaxValue, PinnedFloorState.Load(_dir, "big").LastInjectedBytes);
+    }
 }
