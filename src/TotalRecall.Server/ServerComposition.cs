@@ -311,12 +311,13 @@ public static class ServerComposition
                 new ReindexCoordinator().Run(wconn, wstore, wvec, wembedder, progress, ct, Console.Error);
             }
             catch (OperationCanceledException) { /* shutdown; resume next boot */ }
+            catch (Exception) when (ct.IsCancellationRequested) { /* cancel race (e.g. CTS disposed mid-cancel) — clean shutdown */ }
             catch (Exception ex)
             {
                 progress.Fail(ex.Message);
                 Console.Error.WriteLine($"[total-recall] background re-index worker error: {ex.Message}");
             }
-            finally { (wembedder as IDisposable)?.Dispose(); }
+            finally { try { (wembedder as IDisposable)?.Dispose(); } catch { /* best-effort */ } }
         }, ct);
 
         return (progress, cts);
