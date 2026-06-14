@@ -55,6 +55,7 @@ export function buildSuggestions(i: InsightInputs): Suggestion[] {
 
   if (i.evalReport && i.evalReport.totalEvents > 0 && i.evalReport.missRate > 0.4) {
     out.push({ id: 'retrieval-misses', icon: '🎯', title: 'Retrieval miss rate is high', impact: 'medium',
+      // TODO: navigate to a dedicated eval/retrieval detail page once one exists (Usage is the closest current surface).
       evidence: `${Math.round(i.evalReport.missRate * 100)}% of recent retrievals missed — add memories or lower the similarity threshold.`, action: { kind: 'navigate', to: '/usage', label: 'See details' } });
   }
 
