@@ -193,3 +193,14 @@ body {
 .tr-insight-evidence { margin: var(--tr-space-1) 0 0; font-size: 13px; color: var(--tr-text-muted); }
 .tr-impact { font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 1px var(--tr-space-2); border-radius: 999px; }
 .tr-impact-high { background: #fde2e2; color: #b91c1c; } .tr-impact-medium { background: #fef3c7; color: #b45309; } .tr-impact-low { background: #e8eaed; color: #475569; }
+
+.tr-config h1 { font-size: 22px; margin: 0 0 var(--tr-space-4); }
+.tr-config-section { background: var(--tr-surface); border: 1px solid var(--tr-border); border-radius: var(--tr-radius); padding: var(--tr-space-4); margin-bottom: var(--tr-space-4); }
+.tr-config-title { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--tr-text-muted); margin: 0 0 var(--tr-space-3); }
+.tr-config-field { display: flex; align-items: center; gap: var(--tr-space-3); padding: var(--tr-space-2) 0; flex-wrap: wrap; }
+.tr-config-field > label { flex: 1; min-width: 220px; font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
+.tr-config-key { font-size: 11px; color: var(--tr-text-muted); font-family: var(--tr-font-mono); }
+.tr-config-control { display: flex; align-items: center; gap: var(--tr-space-2); }
+.tr-config-control input[type=number] { width: 140px; height: 32px; border: 1px solid var(--tr-border); border-radius: var(--tr-radius); padding: 0 var(--tr-space-2); font: inherit; }
+.tr-config-saved { color: #16a34a; font-size: 12px; }
+.tr-config-ro { font-family: var(--tr-font-mono); font-size: 13px; color: var(--tr-text); }
