@@ -10,6 +10,8 @@ using System.Text.Json;
 using TotalRecall.Server;
 using Xunit;
 
+namespace TotalRecall.Server.Tests;
+
 public class DumpCatalogTests
 {
     // The catalog is exactly the tools/list result shape: { "tools": [ {name, description, inputSchema}, ... ] }
