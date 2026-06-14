@@ -34,6 +34,7 @@
 //   // result.ok === true  -> result.path points at an executable binary
 //   // result.ok === false -> result.error is a human-readable message
 
+import crypto from 'node:crypto';
 import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -88,6 +89,37 @@ export function getArchiveName(rid) {
 
 export function getDownloadUrl(rid, version) {
   return `https://github.com/strvmarv/total-recall/releases/download/v${version}/${getArchiveName(rid)}`;
+}
+
+export function getManifestUrl(version) {
+  return `https://github.com/strvmarv/total-recall/releases/download/v${version}/provisioning.manifest.json`;
+}
+
+// Streaming sha256 so we never load a ~90 MB archive fully into memory.
+export function sha256File(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const rs = fs.createReadStream(filePath);
+    rs.on('error', reject);
+    rs.on('data', (chunk) => hash.update(chunk));
+    rs.on('end', () => resolve(hash.digest('hex')));
+  });
+}
+
+// Marker written next to the installed binary after a verified download, so a
+// later launch trusts presence + version match and skips re-hashing 90 MB.
+function verifiedMarkerPath(rid) { return path.join(repoRoot, 'binaries', rid, '.verified.json'); }
+
+export function readVerifiedMarker(rid) {
+  try {
+    const { version, sha256 } = JSON.parse(fs.readFileSync(verifiedMarkerPath(rid), 'utf8'));
+    if (typeof version !== 'string' || typeof sha256 !== 'string') return null;
+    return { version, sha256 };
+  } catch { return null; }
+}
+
+export function writeVerifiedMarker(rid, version, sha256) {
+  try { fs.writeFileSync(verifiedMarkerPath(rid), JSON.stringify({ version, sha256 })); } catch { /* best-effort */ }
 }
 
 function httpGetFollowRedirects(url, redirectsLeft = 5) {
@@ -168,7 +200,7 @@ function extractArchive(archivePath, destDir) {
   execFileSync(tarExecutable(), ['-xzf', archivePath, '-C', destDir], { stdio: 'inherit' });
 }
 
-export async function ensureBinary({ logPrefix = '[total-recall]', onProgress } = {}) {
+export async function ensureBinary({ logPrefix = '[total-recall]', onProgress, expectedSha256 = null, url: urlOverride = null } = {}) {
   const report = typeof onProgress === 'function' ? onProgress : () => {};
   const { platform, arch } = process;
   const rid = detectRid(platform, arch);
@@ -198,7 +230,7 @@ export async function ensureBinary({ logPrefix = '[total-recall]', onProgress } 
     return { ok: false, error: `could not read package.json version: ${e.message}` };
   }
 
-  const url = getDownloadUrl(rid, version);
+  const url = urlOverride ?? getDownloadUrl(rid, version);
   const destDir = path.dirname(binaryPath);
 
   // Stage archive download into a fresh tmp file alongside destDir so an
@@ -247,6 +279,27 @@ export async function ensureBinary({ logPrefix = '[total-recall]', onProgress } 
     };
   }
 
+  if (expectedSha256) {
+    let actual;
+    try {
+      actual = await sha256File(tmpArchivePath);
+    } catch (e) {
+      try { fs.rmSync(tmpArchivePath, { force: true }); } catch {}
+      return { ok: false, error: `checksum read failed: ${e.message}`, url };
+    }
+    if (actual.toLowerCase() !== expectedSha256.toLowerCase()) {
+      try { fs.rmSync(tmpArchivePath, { force: true }); } catch {}
+      // NEVER extract an unverified archive. Not retryable: a mismatch means a
+      // corrupt or tampered asset, not a transient network blip.
+      return {
+        ok: false,
+        error: `checksum mismatch for ${archiveName}: expected ${expectedSha256}, got ${actual}`,
+        url,
+        checksumMismatch: true,
+      };
+    }
+  }
+
   try {
     extractArchive(tmpArchivePath, destDir);
   } catch (e) {
@@ -283,6 +336,8 @@ export async function ensureBinary({ logPrefix = '[total-recall]', onProgress } 
       };
     }
   }
+
+  if (expectedSha256) writeVerifiedMarker(rid, version, expectedSha256);
 
   process.stderr.write(`${logPrefix} Installed at ${binaryPath}\n`);
   return { ok: true, path: binaryPath, rid, downloaded: true, sizeBytes: received };
