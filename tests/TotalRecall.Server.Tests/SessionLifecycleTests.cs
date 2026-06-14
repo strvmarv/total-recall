@@ -1456,6 +1456,30 @@ public sealed class SessionLifecycleTests
         Assert.DoesNotContain(result.Hints, h => h.Type == "reindex_in_progress");
     }
 
+    [Theory]
+    [InlineData(TotalRecall.Infrastructure.Embedding.ReindexProgress.Phase.Completed)]
+    [InlineData(TotalRecall.Infrastructure.Embedding.ReindexProgress.Phase.Failed)]
+    public async Task SessionInit_ReindexCompletedOrFailed_NotSurfacedAtSessionStart(
+        TotalRecall.Infrastructure.Embedding.ReindexProgress.Phase terminal)
+    {
+        // session_start surfaces reindex ONLY when Running; terminal states
+        // (Completed/Failed) are status-tool-only and must not appear here.
+        var progress = new TotalRecall.Infrastructure.Embedding.ReindexProgress();
+        progress.BeginRunning(total: 100, model: "m", startedAtUnixMs: 1);
+        progress.Advance(100);
+        if (terminal == TotalRecall.Infrastructure.Embedding.ReindexProgress.Phase.Completed)
+            progress.Complete();
+        else
+            progress.Fail("boom");
+
+        var lifecycle = BuildLifecycle(new FakeStore(), reindexProgress: progress);
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        // No background task (or at least no reindex) is surfaced for terminal states.
+        Assert.True(result.BackgroundTasks is null || result.BackgroundTasks.Reindex is null);
+        Assert.DoesNotContain(result.Hints, h => h.Type == "reindex_in_progress");
+    }
+
     [Fact]
     public async Task SessionInit_ProvisionedMarkerPresent_SurfacesSetupOnce_AndHint()
     {

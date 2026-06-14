@@ -45,15 +45,7 @@ public static class ProvisionNotice
     {
         if (string.IsNullOrEmpty(binaryDir)) return null;
 
-        string path;
-        try
-        {
-            path = Path.Combine(binaryDir, MarkerFileName);
-        }
-        catch
-        {
-            return null;
-        }
+        var path = Path.Combine(binaryDir, MarkerFileName);
 
         string json;
         try
@@ -108,6 +100,7 @@ public sealed record ProvisionMarker
     [JsonPropertyName("durationMs")]
     public long DurationMs { get; init; }
 
+    // parsed from the marker but intentionally not surfaced on the wire (SetupNoticeDto)
     [JsonPropertyName("completedAtUnixMs")]
     public long CompletedAtUnixMs { get; init; }
 }

@@ -360,9 +360,11 @@ public sealed class SessionLifecycle : ISessionLifecycle
             }.Concat(hints).ToList();
         }
 
-        // Background-task hints. Prepend so they survive the 5-hint cap applied
-        // inside GenerateHints (the reindex hint is HIGH priority and must not be
-        // dropped). The setup notice is LOW priority but rare and one-time.
+        // Background-task hints. Prepended here and intentionally EXEMPT from the
+        // 5-hint content cap applied inside GenerateHints — these system/background
+        // hints must always survive (the reindex hint is HIGH priority and must not
+        // be dropped). The setup notice is LOW priority but rare and one-time. As a
+        // result the final emitted list can exceed 5.
         var bgHints = new List<Hint>();
         if (reindexStatus is not null)
         {
@@ -395,7 +397,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
             hints = bgHints.Concat(hints).ToList();
         }
 
-        // 7. Last session age (humanized). Prefer usage_events MAX(ts) — that
+        // 8. Last session age (humanized). Prefer usage_events MAX(ts) — that
         //    actually tracks session activity per host. Fall back to the
         //    compaction log (last tier movement excl. warm sweep) when no
         //    usage reader is wired (e.g. pure-postgres composition).
@@ -977,7 +979,11 @@ public sealed class SessionLifecycle : ISessionLifecycle
     }
 
     /// <summary>
-    /// Generates structured actionable hints. Four priorities, capped at 5.
+    /// Generates structured actionable hints. Four priorities. Caps the
+    /// <em>content</em> hints produced here at 5. Callers may PREPEND additional
+    /// high-priority system/background hints (pinned-budget-pressure,
+    /// reindex-in-progress, setup-complete) that are EXEMPT from this cap — so
+    /// the final emitted list can exceed 5.
     /// Phase 2 idea 1d: replaces flat truncated strings with Hint DTOs that
     /// carry entry IDs, suggested MCP tool names, and pre-filled arguments.
     /// </summary>

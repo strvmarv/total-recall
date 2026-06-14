@@ -230,7 +230,7 @@ public sealed class StatusHandler : IToolHandler
             if (state is not null)
             {
                 var reindex = new ReindexStatusDto(state, snap.Done, snap.Total, snap.Model);
-                backgroundTasks = new BackgroundTasksDto(reindex, Setup: null);
+                backgroundTasks = new BackgroundTasksDto(reindex, null);
             }
         }
 
