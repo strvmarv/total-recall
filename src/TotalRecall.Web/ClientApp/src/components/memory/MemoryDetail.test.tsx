@@ -39,4 +39,23 @@ describe('MemoryDetail', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Delete' })); // confirm in dialog
     expect(spy).toHaveBeenCalledWith('memory_delete', { id: 'a1' });
   });
+
+  it('edits content and saves via memory_update', async () => {
+    const onChanged = vi.fn();
+    const spy = vi.spyOn(api, 'tool').mockImplementation((name: string) => {
+      if (name === 'memory_inspect') return Promise.resolve(INSPECT) as Promise<unknown>;
+      if (name === 'memory_lineage') return Promise.resolve(LINEAGE) as Promise<unknown>;
+      return Promise.resolve({ updated: true }) as Promise<unknown>;
+    });
+    const { default: userEvent } = await import('@testing-library/user-event');
+    render(<MemoryDetail id="a1" onClose={() => {}} onChanged={onChanged} />);
+    await screen.findByText('full content here');
+    await userEvent.click(screen.getByRole('button', { name: /edit/i }));
+    const ta = screen.getByLabelText(/content/i);
+    await userEvent.clear(ta);
+    await userEvent.type(ta, 'updated content');
+    await userEvent.click(screen.getByRole('button', { name: /save/i }));
+    expect(spy).toHaveBeenCalledWith('memory_update', expect.objectContaining({ id: 'a1', content: 'updated content' }));
+    expect(onChanged).toHaveBeenCalled();
+  });
 });

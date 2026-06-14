@@ -29,6 +29,8 @@ export function MemoryDetail({ id, onClose, onChanged }: {
   const [pending, setPending] = useState<{ title: string; body?: string; confirmLabel: string; danger?: boolean; run: () => Promise<unknown> } | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
 
   async function confirmRun() {
     if (!pending) return;
@@ -48,7 +50,24 @@ export function MemoryDetail({ id, onClose, onChanged }: {
       {inspect.error && <p className="tr-card-error" role="alert" title={inspect.error}>Couldn't load this entry.</p>}
       {d && (
         <>
-          <p className="tr-detail-content">{d.content}</p>
+          {editing ? (
+            <form className="tr-edit-form" onSubmit={async (e) => {
+              e.preventDefault();
+              setBusy(true); setActionError(null);
+              try { await api.tool('memory_update', { id, content: draft }); setEditing(false); onChanged(); }
+              catch (err) { setActionError(err instanceof Error ? err.message : String(err)); }
+              finally { setBusy(false); }
+            }}>
+              <label htmlFor="tr-edit-content">Content (saving re-embeds the entry)</label>
+              <textarea id="tr-edit-content" value={draft} onChange={(e) => setDraft(e.target.value)} rows={6} />
+              <div className="tr-modal-actions">
+                <button type="button" className="tr-btn" onClick={() => setEditing(false)} disabled={busy}>Cancel</button>
+                <button type="submit" className="tr-btn tr-btn-primary" disabled={busy || !draft.trim()}>Save</button>
+              </div>
+            </form>
+          ) : (
+            <p className="tr-detail-content">{d.content}</p>
+          )}
           <dl className="tr-detail-meta">
             <div><dt>Tier</dt><dd>{d.tier}</dd></div>
             <div><dt>Type</dt><dd>{d.content_type}</dd></div>
@@ -64,13 +83,14 @@ export function MemoryDetail({ id, onClose, onChanged }: {
             {lineage.loading && <p className="tr-card-muted">Loading…</p>}
             {lineage.data ? <LineageTree node={lineage.data} /> : <p className="tr-card-muted">No lineage.</p>}
           </div>
-          {!pending && (
+          {!pending && !editing && (
             <div className="tr-detail-actions">
               {d.tier === 'pinned'
                 ? <button type="button" className="tr-btn" disabled={busy} onClick={() => setPending({ title: 'Unpin this entry?', confirmLabel: 'Unpin', run: () => api.tool('memory_unpin', { id }) })}>Unpin</button>
                 : <button type="button" className="tr-btn" disabled={busy} onClick={() => setPending({ title: 'Pin this entry?', confirmLabel: 'Pin', run: () => api.tool('memory_pin', { id }) })}>Pin</button>}
               <button type="button" className="tr-btn" disabled={busy} onClick={() => setPending({ title: 'Promote this entry?', confirmLabel: 'Promote', run: () => api.tool('memory_promote', { id }) })}>Promote</button>
               <button type="button" className="tr-btn" disabled={busy} onClick={() => setPending({ title: 'Demote this entry?', confirmLabel: 'Demote', run: () => api.tool('memory_demote', { id }) })}>Demote</button>
+              <button type="button" className="tr-btn" disabled={busy} onClick={() => { setDraft(d.content); setEditing(true); }}>Edit</button>
               <button type="button" className="tr-btn tr-btn-danger" disabled={busy} onClick={() => setPending({ title: 'Delete this entry?', body: 'This cannot be undone.', confirmLabel: 'Delete', danger: true, run: () => api.tool('memory_delete', { id }) })}>Delete</button>
             </div>
           )}
