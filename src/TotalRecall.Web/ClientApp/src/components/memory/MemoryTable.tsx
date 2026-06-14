@@ -14,6 +14,7 @@ export function MemoryTable({ rows, selectedId, onSelect }: {
       <tbody>
         {rows.map((r) => (
           <tr key={r.id} className={r.id === selectedId ? 'is-selected' : undefined}
+            aria-selected={r.id === selectedId}
             onClick={() => onSelect(r.id)} tabIndex={0}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(r.id); } }}>
             <td><span className={`tr-tier-badge tr-tier-${r.tier}`}>{r.tier}</span></td>

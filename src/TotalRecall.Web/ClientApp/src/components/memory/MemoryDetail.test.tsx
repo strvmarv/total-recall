@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryDetail } from './MemoryDetail';
 import { api } from '../../lib/api';
 import type { MemoryInspectResult, LineageNode } from '../../lib/types';
@@ -38,6 +38,7 @@ describe('MemoryDetail', () => {
     await userEvent.click(screen.getByRole('button', { name: /delete/i }));
     await userEvent.click(screen.getByRole('button', { name: 'Delete' })); // confirm in dialog
     expect(spy).toHaveBeenCalledWith('memory_delete', { id: 'a1' });
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
   });
 
   it('edits content and saves via memory_update', async () => {

@@ -23,7 +23,8 @@ export function Memory() {
   const [refreshKey, setRefreshKey] = useState(0);
   const refresh = () => setRefreshKey((k) => k + 1);
 
-  useEffect(() => { setFilters((f) => ({ ...f, query: params.get('q') ?? f.query })); }, [params]);
+  const urlQuery = params.get('q') ?? '';
+  useEffect(() => { setFilters((f) => ({ ...f, query: urlQuery })); }, [urlQuery]);
 
   const q = filters.query.trim();
   const { data, error, loading } = useAsync<MemoryListEntry[]>(async () => {

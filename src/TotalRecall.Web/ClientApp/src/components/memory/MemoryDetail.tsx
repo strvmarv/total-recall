@@ -81,7 +81,8 @@ export function MemoryDetail({ id, onClose, onChanged }: {
           <div className="tr-detail-section">
             <h3>Lineage</h3>
             {lineage.loading && <p className="tr-card-muted">Loading…</p>}
-            {lineage.data ? <LineageTree node={lineage.data} /> : <p className="tr-card-muted">No lineage.</p>}
+            {lineage.error && <p className="tr-card-error" role="alert" title={lineage.error}>Couldn't load lineage.</p>}
+            {!lineage.loading && !lineage.error && (lineage.data ? <LineageTree node={lineage.data} /> : <p className="tr-card-muted">No lineage.</p>)}
           </div>
           {!pending && !editing && (
             <div className="tr-detail-actions">

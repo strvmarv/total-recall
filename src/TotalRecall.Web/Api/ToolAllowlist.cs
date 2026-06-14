@@ -29,8 +29,8 @@ public static class ToolAllowlist
         "memory_history",
         "memory_get",
         "memory_inspect",
-        // memory write/curate tools — reachable only with the per-launch token
         "memory_lineage",
+        // memory write/curate tools — reachable only with the per-launch token
         "memory_update",
         "memory_pin",
         "memory_unpin",
