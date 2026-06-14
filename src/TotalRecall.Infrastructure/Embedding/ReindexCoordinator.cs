@@ -21,6 +21,16 @@ namespace TotalRecall.Infrastructure.Embedding;
 /// rides on the <c>_meta</c> lock key (<see cref="LockKey"/>), stored as a simple
 /// delimited <c>"{pid}:{startedAtUnixMs}"</c> string — NOT JSON, because the
 /// server compiles NativeAOT and reflection-based serialization is unavailable.
+///
+/// The <c>_meta</c> lock is a best-effort ADVISORY lock, NOT atomically exclusive.
+/// <see cref="TryAcquire"/> is a read-then-write with no DB-level compare-and-swap,
+/// so two concurrent callers can both observe "no live lock" and both proceed. This
+/// is acceptable: SQLite WAL serializes writers and <see cref="EmbeddingReindexer.RunBatched"/>
+/// commits per batch, so concurrent reindexers are merely wasteful, not corrupting.
+/// The known residual risk is PID reuse within the <see cref="StaleAfter"/> staleness
+/// window (a recycled pid could read as "still alive"); the 30-minute cap is the
+/// backstop for that — it is deliberately generous and should NOT be shortened on the
+/// mistaken belief it is safer.
 /// </summary>
 public sealed class ReindexCoordinator
 {
@@ -41,6 +51,9 @@ public sealed class ReindexCoordinator
     }
 
     /// <summary>
+    /// SQLite-only: takes a concrete <see cref="MsSqliteConnection"/>; the Postgres
+    /// flow does not use this coordinator.
+    ///
     /// Idempotent and resumable. Acquires the lock (skips entirely if a live runner
     /// in another process holds it), runs <see cref="EmbeddingReindexer.RunBatched"/>
     /// from the persisted cursor, and on FULL completion restamps the fingerprint and
@@ -95,19 +108,24 @@ public sealed class ReindexCoordinator
     /// <summary>
     /// Take the lock unless a parseable, non-stale lock owned by a still-alive,
     /// DIFFERENT pid is present. On success (re)stamps the lock with our pid + now.
+    ///
+    /// ADVISORY only: this is a read-then-write with no DB-level compare-and-swap, so
+    /// two concurrent callers can both proceed (see the class summary). An unparseable
+    /// lock value is treated as absent and taken over.
     /// </summary>
     private bool TryAcquire(IMetaStore meta)
     {
+        var nowMs = _nowUnixMs();
         var raw = meta.GetMeta(LockKey);
         if (TryParse(raw, out int pid, out long startedAt)
-            && (_nowUnixMs() - startedAt) <= (long)StaleAfter.TotalMilliseconds
+            && (nowMs - startedAt) <= (long)StaleAfter.TotalMilliseconds
             && pid != _pid
             && IsAlive(pid))
         {
             return false; // someone else holds a live lock
         }
 
-        meta.SetMeta(LockKey, $"{_pid}:{_nowUnixMs()}");
+        meta.SetMeta(LockKey, $"{_pid}:{nowMs}");
         return true;
     }
 
@@ -132,7 +150,9 @@ public sealed class ReindexCoordinator
         if (string.IsNullOrEmpty(raw))
             return false;
 
-        var parts = raw.Split(':');
+        // Split into at most 2 so a future format extension (extra ':' segments)
+        // degrades safely to "unparseable ⇒ take over" rather than misbehaving.
+        var parts = raw.Split(':', 2);
         return parts.Length == 2
             && int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out pid)
             && long.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out startedAt);

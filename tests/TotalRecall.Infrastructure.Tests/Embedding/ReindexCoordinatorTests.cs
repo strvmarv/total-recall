@@ -117,6 +117,27 @@ public sealed class ReindexCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public void Run_TakesOverUnparseableLock()
+    {
+        var total = ReindexHarness.Seed(_store, _vec, warmMemories: 30, coldKnowledge: 0);
+        EmbedderFingerprint.Restamp(_store, new FakeEmbedder()); // stale fingerprint
+
+        // Garbage lock value → unparseable → treated as absent → taken over.
+        _store.SetMeta(ReindexCoordinator.LockKey, "not-a-valid-lock");
+
+        var progress = new ReindexProgress();
+        var coord = new ReindexCoordinator(nowUnixMs: Now, pid: Environment.ProcessId);
+        coord.Run(_conn, _store, _vec, _newEmbedder, progress, CancellationToken.None, log: null);
+
+        // Proceeded to completion: fingerprint stamped, lock cleared.
+        Assert.Equal(EmbedderFingerprint.FingerprintState.Match,
+            EmbedderFingerprint.Check(_store, _newEmbedder, out _));
+        Assert.Null(_store.GetMeta(ReindexCoordinator.LockKey));
+        Assert.Equal(ReindexProgress.Phase.Completed, progress.State);
+        Assert.Equal(total, progress.Done);
+    }
+
+    [Fact]
     public void Run_Cancellation_LeavesResumableCursor_ReleasesLock_NotCompleted()
     {
         ReindexHarness.Seed(_store, _vec, warmMemories: 1000, coldKnowledge: 0);
@@ -139,10 +160,11 @@ public sealed class ReindexCoordinatorTests : IDisposable
         Assert.NotNull(_store.GetMeta(EmbeddingReindexer.CursorTargetKey));
         Assert.NotNull(_store.GetMeta(EmbeddingReindexer.CursorPairKey));
         Assert.NotNull(_store.GetMeta(EmbeddingReindexer.CursorRowidKey));
-        // Fingerprint NOT stamped; progress not Completed.
+        // Fingerprint NOT stamped; after a mid-run cancel the coordinator rethrows
+        // without calling Complete/Fail, so state stays Running.
         Assert.Equal(EmbedderFingerprint.FingerprintState.Mismatch,
             EmbedderFingerprint.Check(_store, _newEmbedder, out _));
-        Assert.NotEqual(ReindexProgress.Phase.Completed, progress.State);
+        Assert.Equal(ReindexProgress.Phase.Running, progress.State);
     }
 
     [Fact]
