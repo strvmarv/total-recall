@@ -272,8 +272,10 @@ function provisionLockPath(rid) { return path.join(repoRoot, 'binaries', `.provi
 function provisionerAlive(lockPath) {
   try {
     const { pid, startedAt } = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
-    if (typeof startedAt === 'number' && Date.now() - startedAt > 30 * 60 * 1000) return false; // hard cap
     if (typeof pid !== 'number') return false;
+    // Hard cap also fires when startedAt is missing/corrupt (e.g. a lock from an
+    // older build), so a reused-PID collision can't keep a dead lock alive forever.
+    if (typeof startedAt !== 'number' || Date.now() - startedAt > 30 * 60 * 1000) return false;
     process.kill(pid, 0); // throws if not alive
     return true;
   } catch { return false; }
@@ -305,7 +307,15 @@ async function runProvision() {
 }
 
 // Run as a detached provisioner when invoked directly with --provision.
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
-    && process.argv.includes('--provision')) {
+// Resolve both sides through realpath so a symlinked invocation still matches
+// (path.resolve alone would not follow the link). Falls back to a plain resolve
+// if realpath fails. The spawn above always passes the real module path, so this
+// only matters for manual invocation.
+function isDirectProvisionInvocation() {
+  if (!process.argv[1] || !process.argv.includes('--provision')) return false;
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  return real(process.argv[1]) === real(fileURLToPath(import.meta.url));
+}
+if (isDirectProvisionInvocation()) {
   runProvision();
 }
