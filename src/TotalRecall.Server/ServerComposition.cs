@@ -59,6 +59,7 @@ public sealed class ServerCompositionHandles : IDisposable
 {
     private readonly IDisposable _resource;
     private readonly Infrastructure.Sync.PeriodicSync? _periodicSync;
+    private readonly System.Threading.CancellationTokenSource? _reindexCts;
     public ToolRegistry Registry { get; }
 
     /// <summary>
@@ -73,17 +74,34 @@ public sealed class ServerCompositionHandles : IDisposable
     /// </summary>
     public string StorageMode { get; }
 
-    internal ServerCompositionHandles(IDisposable resource, ToolRegistry registry, IStore store, string storageMode = "sqlite", Infrastructure.Sync.PeriodicSync? periodicSync = null)
+    /// <summary>
+    /// Live progress of an in-process background re-index, when one was started
+    /// at composition (on_model_change=auto + a mismatched/unstamped-populated
+    /// local index). Null when no background re-index is running. Read by
+    /// session_start / the status tool to surface "re-indexing" state.
+    /// </summary>
+    public ReindexProgress? ReindexProgress { get; }
+
+    internal ServerCompositionHandles(IDisposable resource, ToolRegistry registry, IStore store, string storageMode = "sqlite", Infrastructure.Sync.PeriodicSync? periodicSync = null, ReindexProgress? reindexProgress = null, System.Threading.CancellationTokenSource? reindexCts = null)
     {
         _resource = resource;
         Registry = registry;
         Store = store;
         StorageMode = storageMode;
         _periodicSync = periodicSync;
+        ReindexProgress = reindexProgress;
+        _reindexCts = reindexCts;
     }
 
     public void Dispose()
     {
+        // Signal the background re-index worker to stop BEFORE tearing down the
+        // primary resource. The worker owns its OWN connection (so it isn't using
+        // _resource), but RunBatched commits per batch + persists a resume cursor,
+        // so cancelling between batches is a clean, resumable shutdown. Best-effort
+        // — disposal must never throw.
+        try { _reindexCts?.Cancel(); } catch { /* best-effort */ }
+        try { _reindexCts?.Dispose(); } catch { /* best-effort */ }
         try { _periodicSync?.Dispose(); } catch { /* best-effort */ }
         try { _resource.Dispose(); } catch { /* best-effort */ }
     }
@@ -246,6 +264,64 @@ public static class ServerComposition
         OnModelChangePolicy.Parse(
             FSharpOption<string>.get_IsSome(cfg.Embedding.OnModelChange) ? cfg.Embedding.OnModelChange.Value : null);
 
+    /// <summary>
+    /// Given the <see cref="EmbedderMigration.EnsureCompatibleSqlite"/> decision,
+    /// start an IN-PROCESS background re-index worker when (and only when) the
+    /// decision is <see cref="EmbedderCompatibility.ReindexInBackground"/>. Returns
+    /// the live <see cref="ReindexProgress"/> and the <see cref="System.Threading.CancellationTokenSource"/>
+    /// that owns the worker's lifetime (both null when no worker is started) so the
+    /// composition handles can surface progress and cancel on dispose.
+    ///
+    /// Fire-and-forget: the slow re-embed stays off the MCP handshake path — this
+    /// returns essentially immediately. The worker opens its OWN sqlite connection
+    /// and its OWN embedder because Microsoft.Data.Sqlite connections are not
+    /// thread-safe to share and the server's primary connection is used by request
+    /// handlers on other threads.
+    /// </summary>
+    /// <param name="embedderFactory">Seam for tests to inject a deterministic
+    /// embedder; defaults to <see cref="EmbedderFactory.CreateFromConfig"/> over
+    /// <paramref name="embCfg"/> (the real ONNX embedder in production).</param>
+    internal static (ReindexProgress?, System.Threading.CancellationTokenSource?) MaybeStartBackgroundReindex(
+        EmbedderCompatibility decision, string resolvedDbPath, Core.Config.EmbeddingConfig embCfg,
+        Func<IEmbedder>? embedderFactory = null)
+    {
+        if (decision != EmbedderCompatibility.ReindexInBackground) return (null, null);
+
+        var progress = new ReindexProgress();
+        var cts = new System.Threading.CancellationTokenSource();
+        var ct = cts.Token;
+        var makeEmbedder = embedderFactory ?? (() => EmbedderFactory.CreateFromConfig(embCfg));
+
+        Console.Error.WriteLine(
+            "[total-recall] embedding model changed; starting background re-index of local vectors. " +
+            "Retrieval quality is degraded until it completes.");
+
+        System.Threading.Tasks.Task.Run(() =>
+        {
+            // OWN connection + OWN embedder: the server's primary connection is used by
+            // request handlers on other threads; Microsoft.Data.Sqlite connections are not
+            // thread-safe to share, and the ONNX InferenceSession gets its own instance.
+            IEmbedder? wembedder = null;
+            try
+            {
+                using var wconn = SqliteConnection.Open(resolvedDbPath); // WAL + busy_timeout already set; loads sqlite-vec
+                var wstore = new SqliteStore(wconn);
+                var wvec = new VectorSearch(wconn);
+                wembedder = makeEmbedder();
+                new ReindexCoordinator().Run(wconn, wstore, wvec, wembedder, progress, ct, Console.Error);
+            }
+            catch (OperationCanceledException) { /* shutdown; resume next boot */ }
+            catch (Exception ex)
+            {
+                progress.Fail(ex.Message);
+                Console.Error.WriteLine($"[total-recall] background re-index worker error: {ex.Message}");
+            }
+            finally { (wembedder as IDisposable)?.Dispose(); }
+        }, ct);
+
+        return (progress, cts);
+    }
+
     private static ServerCompositionHandles OpenSqlite(Core.Config.TotalRecallConfig cfg, string? dbPath, string storageMode = "sqlite")
     {
         var resolvedDbPath = dbPath ?? ConfigLoader.GetDbPath();
@@ -274,8 +350,8 @@ public static class ServerComposition
             var fts = new FtsSearch(conn);
             var embedder = EmbedderFactory.CreateFromConfig(cfg.Embedding);
             var onModelChange = ResolveOnModelChange(cfg);
-            // TODO(Task 5): consume decision to start background reindex worker
-            EmbedderMigration.EnsureCompatibleSqlite(store, embedder, onModelChange, Console.Error);
+            var decision = EmbedderMigration.EnsureCompatibleSqlite(store, embedder, onModelChange, Console.Error);
+            var (reindexProgress, reindexCts) = MaybeStartBackgroundReindex(decision, resolvedDbPath, cfg.Embedding);
             var hybrid = new HybridSearch(vec, fts, store);
 
             var compactionLog = new CompactionLog(conn);
@@ -387,7 +463,7 @@ public static class ServerComposition
             registry.Register(new SkillImportHostHandler(
                 sqliteSkillService, () => Environment.CurrentDirectory));
 
-            return new ServerCompositionHandles(conn, registry, store, storageMode);
+            return new ServerCompositionHandles(conn, registry, store, storageMode, reindexProgress: reindexProgress, reindexCts: reindexCts);
         }
         catch
         {
@@ -535,8 +611,8 @@ public static class ServerComposition
             // index. Without this, a cortex DB was never fingerprint-stamped, so a
             // model swap left it unstamped-but-populated with stale local vectors.
             var onModelChange = ResolveOnModelChange(cfg);
-            // TODO(Task 5): consume decision to start background reindex worker
-            EmbedderMigration.EnsureCompatibleSqlite(localStore, embedder, onModelChange, Console.Error);
+            var decision = EmbedderMigration.EnsureCompatibleSqlite(localStore, embedder, onModelChange, Console.Error);
+            var (reindexProgress, reindexCts) = MaybeStartBackgroundReindex(decision, resolvedDbPath, cfg.Embedding);
 
             var hybrid = new HybridSearch(vec, fts, localStore);
 
@@ -666,7 +742,7 @@ public static class ServerComposition
             registry.Register(new SkillImportHostHandler(
                 skillImportService, () => Environment.CurrentDirectory));
 
-            return new ServerCompositionHandles(conn, registry, routingStore, storageMode, periodicSync);
+            return new ServerCompositionHandles(conn, registry, routingStore, storageMode, periodicSync, reindexProgress, reindexCts);
         }
         catch
         {
