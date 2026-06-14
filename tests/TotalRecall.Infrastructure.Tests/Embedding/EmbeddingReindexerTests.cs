@@ -119,9 +119,10 @@ public sealed class EmbeddingReindexerTests : IDisposable
     {
         ReindexHarness.Seed(_store, _vec, warmMemories: 1000, coldKnowledge: 0);
         using var cts = new CancellationTokenSource();
-        // Cancels the token after 150 embeds — i.e. partway through the 2nd
-        // batch of 100, so exactly 1 batch (100 rows) has committed by the time
-        // the NEXT batch's top-of-loop cancellation check fires.
+        // Cancels the token after 150 embeds — partway through processing, so by
+        // the time the NEXT batch's top-of-loop cancellation check fires, at least
+        // one batch (1 or 2 of 100 rows each) has committed and the cursor is
+        // resumable. The exact count depends on batch/embed interleaving.
         var cancelling = new CancelAfterEmbedder(_newEmbedder, cts, afterCalls: 150);
 
         // Cancellation contract: RunBatched THROWS OperationCanceledException after
@@ -136,7 +137,7 @@ public sealed class EmbeddingReindexerTests : IDisposable
         Assert.NotNull(_store.GetMeta(EmbeddingReindexer.CursorPairKey));
         Assert.NotNull(_store.GetMeta(EmbeddingReindexer.CursorRowidKey));
 
-        // At least one batch committed (cursor at rowid 200) but not the whole run.
+        // At least one batch committed (cursor >= rowid 100) but not the whole run.
         long cursorRowid = long.Parse(_store.GetMeta(EmbeddingReindexer.CursorRowidKey)!);
         Assert.True(cursorRowid >= 100 && cursorRowid < 1000,
             $"expected a partial cursor (100 <= rowid < 1000) but got {cursorRowid}");
@@ -146,7 +147,7 @@ public sealed class EmbeddingReindexerTests : IDisposable
     public void RunBatched_SkipsRowDeletedMidBatch_DoesNotThrow()
     {
         ReindexHarness.Seed(_store, _vec, warmMemories: 10, coldKnowledge: 0);
-        var hook = new DeleteOnFirstEmbed(_newEmbedder, _store, _conn, Tier.Warm, ContentType.Memory);
+        var hook = new DeleteOnFirstEmbed(_newEmbedder, _store, Tier.Warm, ContentType.Memory);
 
         var ex = Record.Exception(() =>
             EmbeddingReindexer.RunBatched(
@@ -247,16 +248,14 @@ internal sealed class DeleteOnFirstEmbed : IEmbedder
 {
     private readonly IEmbedder _inner;
     private readonly SqliteStore _store;
-    private readonly MsSqliteConnection _conn;
     private readonly Tier _tier;
     private readonly ContentType _type;
     private bool _deleted;
 
-    public DeleteOnFirstEmbed(IEmbedder inner, SqliteStore store, MsSqliteConnection conn, Tier tier, ContentType type)
+    public DeleteOnFirstEmbed(IEmbedder inner, SqliteStore store, Tier tier, ContentType type)
     {
         _inner = inner;
         _store = store;
-        _conn = conn;
         _tier = tier;
         _type = type;
     }

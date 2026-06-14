@@ -117,14 +117,17 @@ public sealed class EmbeddingReindexer
         // belongs to a different (interrupted) migration and must be discarded.
         int startPair = 0;
         long startRowid = 0;
-        if (string.Equals(meta.GetMeta(CursorTargetKey), embedder.Descriptor.Model, StringComparison.Ordinal))
+        var model = embedder.Descriptor.Model;
+        if (!string.IsNullOrEmpty(model) && string.Equals(meta.GetMeta(CursorTargetKey), model, StringComparison.Ordinal))
         {
             startPair = ParseIntOr(meta.GetMeta(CursorPairKey), 0);
             startRowid = ParseLongOr(meta.GetMeta(CursorRowidKey), 0);
-            if (startPair < 0) startPair = 0;
-            if (startPair > pairs.Length) startPair = pairs.Length;
+            // A malformed or out-of-range pair index means the cursor cannot be
+            // trusted — restart the whole reindex rather than skipping rows (which
+            // would let the caller stamp the fingerprint against stale vectors).
+            if (startPair < 0 || startPair >= pairs.Length) { startPair = 0; startRowid = 0; }
         }
-        meta.SetMeta(CursorTargetKey, embedder.Descriptor.Model);
+        meta.SetMeta(CursorTargetKey, model);
 
         int total = 0;
         for (int pi = startPair; pi < pairs.Length; pi++)
@@ -161,10 +164,11 @@ public sealed class EmbeddingReindexer
                             vec.InsertEmbedding(tier, type, id, vector);
                             wrote++;
                         }
-                        catch (InvalidOperationException)
+                        catch (InvalidOperationException) when (store.GetInternalKey(tier, type, id) is null)
                         {
-                            // Row vanished between the read and the write (deleted
-                            // mid-batch); its vec row is already gone — skip it.
+                            // Row was deleted between the read and the write — skip it.
+                            // A still-present entry rethrows (triggering the batch ROLLBACK)
+                            // so a real failure never silently loses a vector.
                         }
                     }
 
