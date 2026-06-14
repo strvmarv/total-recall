@@ -46,4 +46,15 @@ describe('TokenUsageCard', () => {
     render2(<TokenUsageCard refreshKey={0} />);
     expect(await screen.findByText(/load this panel/i)).toBeInTheDocument();
   });
+
+  it('shows an estimated cost from priced models', async () => {
+    const end = Date.UTC(2026, 5, 14);
+    const data = usage([
+      { key: 'claude-sonnet-x', session_count: 1, turn_count: 1, input_tokens: 1_000_000, cache_creation_tokens: 0, cache_read_tokens: 0, output_tokens: 0 },
+    ], end);
+    // make the model bucket key drive cost; grand_total still sums tokens
+    vi.spyOn(api, 'tool').mockResolvedValue(data);
+    render2(<TokenUsageCard refreshKey={0} />);
+    expect(await screen.findByText(/\$3\.00/)).toBeInTheDocument(); // 1M sonnet input @ $3
+  });
 });
