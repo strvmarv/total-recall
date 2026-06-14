@@ -274,7 +274,8 @@ public static class ServerComposition
             var fts = new FtsSearch(conn);
             var embedder = EmbedderFactory.CreateFromConfig(cfg.Embedding);
             var onModelChange = ResolveOnModelChange(cfg);
-            EmbedderMigration.EnsureCompatibleSqlite(conn, store, vec, embedder, onModelChange, Console.Error);
+            // TODO(Task 5): consume decision to start background reindex worker
+            EmbedderMigration.EnsureCompatibleSqlite(store, embedder, onModelChange, Console.Error);
             var hybrid = new HybridSearch(vec, fts, store);
 
             var compactionLog = new CompactionLog(conn);
@@ -534,7 +535,8 @@ public static class ServerComposition
             // index. Without this, a cortex DB was never fingerprint-stamped, so a
             // model swap left it unstamped-but-populated with stale local vectors.
             var onModelChange = ResolveOnModelChange(cfg);
-            EmbedderMigration.EnsureCompatibleSqlite(conn, localStore, vec, embedder, onModelChange, Console.Error);
+            // TODO(Task 5): consume decision to start background reindex worker
+            EmbedderMigration.EnsureCompatibleSqlite(localStore, embedder, onModelChange, Console.Error);
 
             var hybrid = new HybridSearch(vec, fts, localStore);
 

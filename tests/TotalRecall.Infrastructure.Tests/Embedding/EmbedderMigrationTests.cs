@@ -9,6 +9,14 @@ using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
 namespace TotalRecall.Infrastructure.Tests.Embedding;
 
+/// <summary>
+/// <see cref="EmbedderMigration"/> is a DECISION-ONLY seam now: it classifies the
+/// startup situation and returns an <see cref="EmbedderCompatibility"/> without
+/// re-embedding inline. The only mutation it makes is stamping a fresh
+/// (unstamped + empty) DB. These tests assert that decision contract — they
+/// deliberately do NOT assert any vector rewrite, because the re-embed is driven
+/// by the caller (a background worker) in a later task.
+/// </summary>
 public sealed class EmbedderMigrationTests
 {
     // ---------------------------------------------------------------------
@@ -16,7 +24,34 @@ public sealed class EmbedderMigrationTests
     // ---------------------------------------------------------------------
 
     [Fact]
-    public void Sqlite_Unstamped_Empty_Stamps_NoReembed()
+    public void Sqlite_Match_ReturnsCompatible_NoStampChange()
+    {
+        var dbPath = TempDb("match");
+        try
+        {
+            using var conn = SqliteConnection.Open(dbPath);
+            MigrationRunner.RunMigrations(conn);
+            var store = new SqliteStore(conn);
+
+            var e = new ConstantEmbedder(0.5f);
+            store.InsertWithEmbedding(Tier.Warm, ContentType.Memory,
+                new InsertEntryOpts("seed"), e.Embed("seed"));
+            EmbedderFingerprint.Restamp(store, e);
+
+            var log = new StringWriter();
+            var decision = EmbedderMigration.EnsureCompatibleSqlite(store, e, OnModelChange.Auto, log);
+
+            Assert.Equal(EmbedderCompatibility.Compatible, decision);
+            // No-op: nothing logged, still Match.
+            Assert.Equal("", log.ToString());
+            Assert.Equal(EmbedderFingerprint.FingerprintState.Match,
+                EmbedderFingerprint.Check(store, e, out _));
+        }
+        finally { Cleanup(dbPath); }
+    }
+
+    [Fact]
+    public void Sqlite_Unstamped_Empty_ReturnsCompatible_Stamps()
     {
         var dbPath = TempDb("unstamped-empty");
         try
@@ -24,7 +59,6 @@ public sealed class EmbedderMigrationTests
             using var conn = SqliteConnection.Open(dbPath);
             MigrationRunner.RunMigrations(conn);
             var store = new SqliteStore(conn);
-            var vec = new VectorSearch(conn);
 
             var e = new ConstantEmbedder(0.5f);
 
@@ -34,20 +68,20 @@ public sealed class EmbedderMigrationTests
                 EmbedderFingerprint.Check(store, e, out _));
 
             var log = new StringWriter();
-            EmbedderMigration.EnsureCompatibleSqlite(conn, store, vec, e, OnModelChange.Auto, log);
+            var decision = EmbedderMigration.EnsureCompatibleSqlite(store, e, OnModelChange.Auto, log);
 
+            Assert.Equal(EmbedderCompatibility.Compatible, decision);
             // Now stamped → Match.
             Assert.Equal(EmbedderFingerprint.FingerprintState.Match,
                 EmbedderFingerprint.Check(store, e, out _));
-
-            // Empty index → pure stamp, nothing logged (no re-embed announcement).
+            // Empty index → pure stamp, nothing logged.
             Assert.Equal("", log.ToString());
         }
         finally { Cleanup(dbPath); }
     }
 
     [Fact]
-    public void Sqlite_Unstamped_Populated_Auto_ReEmbeds_Restamps()
+    public void Sqlite_Unstamped_Populated_Auto_ReturnsReindexInBackground_NoStamp_NoVectorChange()
     {
         var dbPath = TempDb("unstamped-pop-auto");
         try
@@ -69,27 +103,34 @@ public sealed class EmbedderMigrationTests
             Assert.Equal(EmbedderFingerprint.FingerprintState.Unstamped,
                 EmbedderFingerprint.Check(store, newE, out _));
 
-            var log = new StringWriter();
-            EmbedderMigration.EnsureCompatibleSqlite(conn, store, vec, newE, OnModelChange.Auto, log);
-
-            // Re-embedded → fingerprint now Match.
-            Assert.Equal(EmbedderFingerprint.FingerprintState.Match,
-                EmbedderFingerprint.Check(store, newE, out _));
-
-            // Vectors rewritten into the new model's space: self-similarity ~1.0.
-            var hits = vec.SearchByVector(Tier.Warm, ContentType.Memory, newE.Embed("anything"),
+            // Snapshot the OLD vector for the warm row so we can prove it is untouched.
+            var beforeHits = vec.SearchByVector(Tier.Warm, ContentType.Memory, oldE.Embed("alpha"),
                 new VectorSearchOpts(TopK: 5));
-            Assert.Contains(hits, h => h.Score > 0.999);
+            Assert.Contains(beforeHits, h => h.Score > 0.999);
 
-            // Re-embedding announcement + count.
-            Assert.Contains("re-embedding the local database", log.ToString());
-            Assert.Contains("re-embedded 2 entries", log.ToString());
+            var log = new StringWriter();
+            var decision = EmbedderMigration.EnsureCompatibleSqlite(store, newE, OnModelChange.Auto, log);
+
+            Assert.Equal(EmbedderCompatibility.ReindexInBackground, decision);
+            // Decision-only: no stamp, no logging here (the caller logs when it starts the worker).
+            Assert.Equal(EmbedderFingerprint.FingerprintState.Unstamped,
+                EmbedderFingerprint.Check(store, newE, out _));
+            Assert.Equal("", log.ToString());
+
+            // Vectors NOT rewritten: the old-model vector still self-matches, the
+            // new-model query does not.
+            var afterOld = vec.SearchByVector(Tier.Warm, ContentType.Memory, oldE.Embed("alpha"),
+                new VectorSearchOpts(TopK: 5));
+            Assert.Contains(afterOld, h => h.Score > 0.999);
+            var afterNew = vec.SearchByVector(Tier.Warm, ContentType.Memory, newE.Embed("anything"),
+                new VectorSearchOpts(TopK: 5));
+            Assert.DoesNotContain(afterNew, h => h.Score > 0.999);
         }
         finally { Cleanup(dbPath); }
     }
 
     [Fact]
-    public void Sqlite_Unstamped_Populated_Warn_NoStamp_Logs()
+    public void Sqlite_Unstamped_Populated_Warn_ReturnsWarned_NoStamp_Logs()
     {
         var dbPath = TempDb("unstamped-pop-warn");
         try
@@ -97,7 +138,6 @@ public sealed class EmbedderMigrationTests
             using var conn = SqliteConnection.Open(dbPath);
             MigrationRunner.RunMigrations(conn);
             var store = new SqliteStore(conn);
-            var vec = new VectorSearch(conn);
 
             var oldE = new ConstantEmbedder(1.0f);
             store.InsertWithEmbedding(Tier.Warm, ContentType.Memory,
@@ -106,13 +146,16 @@ public sealed class EmbedderMigrationTests
 
             var newE = new ConstantEmbedder(0.5f);
             var log = new StringWriter();
-            EmbedderMigration.EnsureCompatibleSqlite(conn, store, vec, newE, OnModelChange.Warn, log);
+            var decision = EmbedderMigration.EnsureCompatibleSqlite(store, newE, OnModelChange.Warn, log);
 
+            Assert.Equal(EmbedderCompatibility.Warned, decision);
             // No restamp: still Unstamped on the next Check (the nag persists).
             Assert.Equal(EmbedderFingerprint.FingerprintState.Unstamped,
                 EmbedderFingerprint.Check(store, newE, out _));
 
+            // Degraded-retrieval warning was logged.
             Assert.Contains("on_model_change=warn", log.ToString());
+            Assert.Contains("retrieval quality", log.ToString());
         }
         finally { Cleanup(dbPath); }
     }
@@ -126,7 +169,6 @@ public sealed class EmbedderMigrationTests
             using var conn = SqliteConnection.Open(dbPath);
             MigrationRunner.RunMigrations(conn);
             var store = new SqliteStore(conn);
-            var vec = new VectorSearch(conn);
 
             var oldE = new ConstantEmbedder(1.0f);
             store.InsertWithEmbedding(Tier.Warm, ContentType.Memory,
@@ -135,40 +177,13 @@ public sealed class EmbedderMigrationTests
 
             var newE = new ConstantEmbedder(0.5f);
             Assert.Throws<EmbedderFingerprintMismatchException>(
-                () => EmbedderMigration.EnsureCompatibleSqlite(conn, store, vec, newE, OnModelChange.Block, log: null));
+                () => EmbedderMigration.EnsureCompatibleSqlite(store, newE, OnModelChange.Block, log: null));
         }
         finally { Cleanup(dbPath); }
     }
 
     [Fact]
-    public void Sqlite_Match_NoOp_NoThrow()
-    {
-        var dbPath = TempDb("match");
-        try
-        {
-            using var conn = SqliteConnection.Open(dbPath);
-            MigrationRunner.RunMigrations(conn);
-            var store = new SqliteStore(conn);
-            var vec = new VectorSearch(conn);
-
-            var e = new ConstantEmbedder(0.5f);
-            store.InsertWithEmbedding(Tier.Warm, ContentType.Memory,
-                new InsertEntryOpts("seed"), e.Embed("seed"));
-            EmbedderFingerprint.Restamp(store, e);
-
-            var log = new StringWriter();
-            EmbedderMigration.EnsureCompatibleSqlite(conn, store, vec, e, OnModelChange.Auto, log);
-
-            // No-op: nothing logged, still Match.
-            Assert.Equal("", log.ToString());
-            Assert.Equal(EmbedderFingerprint.FingerprintState.Match,
-                EmbedderFingerprint.Check(store, e, out _));
-        }
-        finally { Cleanup(dbPath); }
-    }
-
-    [Fact]
-    public void Sqlite_Mismatch_Auto_ReEmbeds_RestampsAndLogs()
+    public void Sqlite_Mismatch_Auto_ReturnsReindexInBackground_NoStamp_NoVectorChange()
     {
         var dbPath = TempDb("auto");
         try
@@ -191,26 +206,24 @@ public sealed class EmbedderMigrationTests
                 EmbedderFingerprint.Check(store, newE, out _));
 
             var log = new StringWriter();
-            EmbedderMigration.EnsureCompatibleSqlite(conn, store, vec, newE, OnModelChange.Auto, log);
+            var decision = EmbedderMigration.EnsureCompatibleSqlite(store, newE, OnModelChange.Auto, log);
 
-            // Re-embedded → fingerprint now Match.
+            Assert.Equal(EmbedderCompatibility.ReindexInBackground, decision);
+            // Decision-only: the OLD fingerprint is untouched and nothing was logged here.
             Assert.Equal(EmbedderFingerprint.FingerprintState.Match,
-                EmbedderFingerprint.Check(store, newE, out _));
+                EmbedderFingerprint.Check(store, oldE, out _));
+            Assert.Equal("", log.ToString());
 
-            // Vectors rewritten into the new model's space: self-similarity ~1.0.
-            var hits = vec.SearchByVector(Tier.Warm, ContentType.Memory, newE.Embed("anything"),
+            // Vectors NOT rewritten: the new-model query does not self-match.
+            var afterNew = vec.SearchByVector(Tier.Warm, ContentType.Memory, newE.Embed("anything"),
                 new VectorSearchOpts(TopK: 5));
-            Assert.Contains(hits, h => h.Score > 0.999);
-
-            // A log line was emitted (re-embedding announcement).
-            Assert.Contains("re-embedding the local database", log.ToString());
-            Assert.Contains("re-embedded 2 entries", log.ToString());
+            Assert.DoesNotContain(afterNew, h => h.Score > 0.999);
         }
         finally { Cleanup(dbPath); }
     }
 
     [Fact]
-    public void Sqlite_Mismatch_Warn_NoThrow_FingerprintUnchanged_Logs()
+    public void Sqlite_Mismatch_Warn_ReturnsWarned_FingerprintUnchanged_Logs()
     {
         var dbPath = TempDb("warn");
         try
@@ -218,7 +231,6 @@ public sealed class EmbedderMigrationTests
             using var conn = SqliteConnection.Open(dbPath);
             MigrationRunner.RunMigrations(conn);
             var store = new SqliteStore(conn);
-            var vec = new VectorSearch(conn);
 
             var oldE = new ConstantEmbedder(1.0f);
             store.InsertWithEmbedding(Tier.Warm, ContentType.Memory,
@@ -227,8 +239,9 @@ public sealed class EmbedderMigrationTests
 
             var newE = new ConstantEmbedder(0.5f);
             var log = new StringWriter();
-            EmbedderMigration.EnsureCompatibleSqlite(conn, store, vec, newE, OnModelChange.Warn, log);
+            var decision = EmbedderMigration.EnsureCompatibleSqlite(store, newE, OnModelChange.Warn, log);
 
+            Assert.Equal(EmbedderCompatibility.Warned, decision);
             // No restamp: still Mismatch on the next Check (the nag persists).
             Assert.Equal(EmbedderFingerprint.FingerprintState.Mismatch,
                 EmbedderFingerprint.Check(store, newE, out _));
@@ -250,7 +263,6 @@ public sealed class EmbedderMigrationTests
             using var conn = SqliteConnection.Open(dbPath);
             MigrationRunner.RunMigrations(conn);
             var store = new SqliteStore(conn);
-            var vec = new VectorSearch(conn);
 
             var oldE = new ConstantEmbedder(1.0f);
             store.InsertWithEmbedding(Tier.Warm, ContentType.Memory,
@@ -259,44 +271,7 @@ public sealed class EmbedderMigrationTests
 
             var newE = new ConstantEmbedder(0.5f);
             Assert.Throws<EmbedderFingerprintMismatchException>(
-                () => EmbedderMigration.EnsureCompatibleSqlite(conn, store, vec, newE, OnModelChange.Block, log: null));
-        }
-        finally { Cleanup(dbPath); }
-    }
-
-    [Fact]
-    public void Sqlite_Mismatch_Auto_ReindexFails_ThrowsWithEscapeHatch_DbUnchanged()
-    {
-        var dbPath = TempDb("autofail");
-        try
-        {
-            using var conn = SqliteConnection.Open(dbPath);
-            MigrationRunner.RunMigrations(conn);
-            var store = new SqliteStore(conn);
-            var vec = new VectorSearch(conn);
-
-            // Two rows + OLD fingerprint (model "const-1").
-            var oldE = new ConstantEmbedder(1.0f);
-            store.InsertWithEmbedding(Tier.Warm, ContentType.Memory,
-                new InsertEntryOpts("alpha"), oldE.Embed("alpha"));
-            store.InsertWithEmbedding(Tier.Warm, ContentType.Memory,
-                new InsertEntryOpts("beta"), oldE.Embed("beta"));
-            EmbedderFingerprint.Restamp(store, oldE);
-
-            // New embedder mismatches (model "fake") AND throws on the 2nd re-embed.
-            var newE = new ThrowingEmbedder(throwOnCall: 2);
-            Assert.Equal(EmbedderFingerprint.FingerprintState.Mismatch,
-                EmbedderFingerprint.Check(store, newE, out _));
-
-            // Auto re-embed fails mid-run → wrapped error names the warn escape hatch.
-            var ex = Assert.Throws<System.InvalidOperationException>(
-                () => EmbedderMigration.EnsureCompatibleSqlite(conn, store, vec, newE, OnModelChange.Auto, log: null));
-            Assert.Contains("on_model_change=\"warn\"", ex.Message);
-
-            // Atomic rollback: the OLD fingerprint is intact, so the next boot retries cleanly
-            // (no half-migrated, mixed-space state).
-            Assert.Equal(EmbedderFingerprint.FingerprintState.Match,
-                EmbedderFingerprint.Check(store, oldE, out _));
+                () => EmbedderMigration.EnsureCompatibleSqlite(store, newE, OnModelChange.Block, log: null));
         }
         finally { Cleanup(dbPath); }
     }
@@ -306,7 +281,7 @@ public sealed class EmbedderMigrationTests
     // ---------------------------------------------------------------------
 
     [Fact]
-    public void Postgres_Unstamped_Stamps()
+    public void Postgres_Unstamped_Empty_ReturnsCompatible_Stamps()
     {
         var store = new InMemoryMetaOnlyStore();
         var e = new StubEmbedder("onnx", "bge-small-en-v1.5", "rev1", 384);
@@ -314,22 +289,24 @@ public sealed class EmbedderMigrationTests
         Assert.Equal(EmbedderFingerprint.FingerprintState.Unstamped,
             EmbedderFingerprint.Check(store, e, out _));
 
-        EmbedderMigration.EnsureCompatiblePostgres(store, e, OnModelChange.Auto, log: null);
+        var decision = EmbedderMigration.EnsureCompatiblePostgres(store, e, OnModelChange.Auto, log: null);
 
+        Assert.Equal(EmbedderCompatibility.Compatible, decision);
         Assert.Equal(EmbedderFingerprint.FingerprintState.Match,
             EmbedderFingerprint.Check(store, e, out _));
     }
 
     [Fact]
-    public void Postgres_Match_NoOp()
+    public void Postgres_Match_ReturnsCompatible_NoOp()
     {
         var store = new InMemoryMetaOnlyStore();
         var e = new StubEmbedder("onnx", "bge-small-en-v1.5", "rev1", 384);
         EmbedderFingerprint.Restamp(store, e);
 
         var log = new StringWriter();
-        EmbedderMigration.EnsureCompatiblePostgres(store, e, OnModelChange.Auto, log);
+        var decision = EmbedderMigration.EnsureCompatiblePostgres(store, e, OnModelChange.Auto, log);
 
+        Assert.Equal(EmbedderCompatibility.Compatible, decision);
         Assert.Equal("", log.ToString());
         Assert.Equal(EmbedderFingerprint.FingerprintState.Match,
             EmbedderFingerprint.Check(store, e, out _));
@@ -348,7 +325,7 @@ public sealed class EmbedderMigrationTests
     }
 
     [Fact]
-    public void Postgres_Mismatch_Warn_NoThrow_Unchanged_Logs()
+    public void Postgres_Mismatch_Warn_ReturnsWarned_Unchanged_Logs()
     {
         var store = new InMemoryMetaOnlyStore();
         var oldE = new StubEmbedder("onnx", "minilm", "rev1", 384);
@@ -356,8 +333,9 @@ public sealed class EmbedderMigrationTests
 
         var newE = new StubEmbedder("onnx", "bge-small-en-v1.5", "rev1", 384);
         var log = new StringWriter();
-        EmbedderMigration.EnsureCompatiblePostgres(store, newE, OnModelChange.Warn, log);
+        var decision = EmbedderMigration.EnsureCompatiblePostgres(store, newE, OnModelChange.Warn, log);
 
+        Assert.Equal(EmbedderCompatibility.Warned, decision);
         // No restamp: still Mismatch; old fingerprint intact.
         Assert.Equal(EmbedderFingerprint.FingerprintState.Mismatch,
             EmbedderFingerprint.Check(store, newE, out _));
@@ -384,7 +362,7 @@ public sealed class EmbedderMigrationTests
     [Fact]
     public void Postgres_Unstamped_Populated_Auto_Throws_MentionsPostgresBackend()
     {
-        // Populated (List returns ≥1 row) but no fingerprint stamped → must route
+        // Populated (Count returns ≥1 row) but no fingerprint stamped → must route
         // into the same dispatch as Mismatch; auto on postgres is unsupported.
         var store = new InMemoryMetaContentStore(rowCount: 1);
         var e = new StubEmbedder("onnx", "bge-small-en-v1.5", "rev1", 384);
@@ -402,14 +380,15 @@ public sealed class EmbedderMigrationTests
     }
 
     [Fact]
-    public void Postgres_Unstamped_Populated_Warn_Logs()
+    public void Postgres_Unstamped_Populated_Warn_ReturnsWarned_Logs()
     {
         var store = new InMemoryMetaContentStore(rowCount: 1);
         var e = new StubEmbedder("onnx", "bge-small-en-v1.5", "rev1", 384);
 
         var log = new StringWriter();
-        EmbedderMigration.EnsureCompatiblePostgres(store, e, OnModelChange.Warn, log);
+        var decision = EmbedderMigration.EnsureCompatiblePostgres(store, e, OnModelChange.Warn, log);
 
+        Assert.Equal(EmbedderCompatibility.Warned, decision);
         // No restamp: still Unstamped (the nag persists across restarts).
         Assert.Equal(EmbedderFingerprint.FingerprintState.Unstamped,
             EmbedderFingerprint.Check(store, e, out _));

@@ -1,12 +1,31 @@
 using System;
 using System.IO;
-using System.Threading;
 using TotalRecall.Infrastructure.Memory;
-using TotalRecall.Infrastructure.Search;
 using TotalRecall.Infrastructure.Storage;
-using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
 namespace TotalRecall.Infrastructure.Embedding;
+
+/// <summary>
+/// Outcome of an <c>EnsureCompatible*</c> startup-policy decision. This is a
+/// pure classification — the method performs no embedding/IO beyond stamping a
+/// fresh DB; the caller acts on the decision (Task 5 launches a background
+/// re-index worker when it sees <see cref="ReindexInBackground"/>).
+/// </summary>
+public enum EmbedderCompatibility
+{
+    /// <summary>Fingerprint matches (or a fresh DB was just stamped). Proceed normally.</summary>
+    Compatible,
+
+    /// <summary>Mismatch under <c>on_model_change=warn</c>: a degraded-retrieval
+    /// warning was logged, the fingerprint was deliberately left un-restamped (so
+    /// the nag persists), and the server should run with stale vectors.</summary>
+    Warned,
+
+    /// <summary>Mismatch under <c>on_model_change=auto</c> on the sqlite/cortex-local
+    /// backend: the caller should launch a background re-index. Nothing was logged
+    /// or re-embedded here — the caller logs when it starts the worker.</summary>
+    ReindexInBackground,
+}
 
 /// <summary>
 /// Startup embedder-compatibility policy. Encapsulates what happens at store
@@ -14,17 +33,19 @@ namespace TotalRecall.Infrastructure.Embedding;
 /// in <c>_meta</c>, honoring <c>embedding.on_model_change</c>
 /// (<see cref="OnModelChange"/>: auto | warn | block).
 ///
-/// This is the testable seam ServerComposition delegates to. The contract
-/// (identical for both backends):
+/// This is a DECISION-ONLY seam: it classifies the situation and returns an
+/// <see cref="EmbedderCompatibility"/>. It performs no re-embedding here (the
+/// caller drives that, e.g. via a background worker). The only mutation it makes
+/// is stamping a fresh (unstamped + empty) DB. The contract (identical for both
+/// backends, except the auto branch):
 /// <list type="table">
-///   <item><term>Match</term><description>no-op.</description></item>
+///   <item><term>Match</term><description><see cref="EmbedderCompatibility.Compatible"/>.</description></item>
 ///   <item><term>Unstamped + EMPTY index</term><description>stamp the configured
-///   embedder (fresh DB — no vectors to migrate).</description></item>
+///   embedder (fresh DB — no vectors to migrate); <see cref="EmbedderCompatibility.Compatible"/>.</description></item>
 ///   <item><term>Unstamped + POPULATED index</term><description>routes into the
 ///   SAME mode dispatch as Mismatch — the existing vectors came from an unknown
-///   prior model and must be re-embedded (auto) / nagged about (warn) / blocked.
-///   There is no <c>stored</c> descriptor, so messages say "existing vectors have
-///   no embedder fingerprint" instead of "X -&gt; Y".</description></item>
+///   prior model. There is no <c>stored</c> descriptor, so warn messages say
+///   "existing vectors have no embedder fingerprint" instead of "X -&gt; Y".</description></item>
 ///   <item><term>Mismatch</term><description>dispatch on policy.</description></item>
 /// </list>
 ///
@@ -41,28 +62,26 @@ namespace TotalRecall.Infrastructure.Embedding;
 public static class EmbedderMigration
 {
     /// <summary>
-    /// SQLite startup path. Match → no-op; Unstamped+empty → stamp; Mismatch OR
+    /// SQLite startup decision. Match → <see cref="EmbedderCompatibility.Compatible"/>;
+    /// Unstamped+empty → stamp, <see cref="EmbedderCompatibility.Compatible"/>; Mismatch OR
     /// Unstamped+populated → dispatch on <paramref name="mode"/>:
     /// <list type="bullet">
-    ///   <item><see cref="OnModelChange.Auto"/> → re-embed every row in place via
-    ///   <see cref="EmbeddingReindexer.RunBatched"/> + restamp, then continue.</item>
-    ///   <item><see cref="OnModelChange.Warn"/> → log a degraded-retrieval warning and continue,
-    ///   WITHOUT restamping (so the nag persists across restarts).</item>
+    ///   <item><see cref="OnModelChange.Auto"/> → <see cref="EmbedderCompatibility.ReindexInBackground"/>
+    ///   (no logging, no re-embed here — the caller starts the background worker and logs then).</item>
+    ///   <item><see cref="OnModelChange.Warn"/> → log a degraded-retrieval warning (WITHOUT
+    ///   restamping, so the nag persists across restarts) and return
+    ///   <see cref="EmbedderCompatibility.Warned"/>.</item>
     ///   <item><see cref="OnModelChange.Block"/> → throw
     ///   <see cref="EmbedderFingerprintMismatchException"/> (legacy fail-fast).</item>
     /// </list>
     /// </summary>
-    public static void EnsureCompatibleSqlite(
-        MsSqliteConnection conn,
+    public static EmbedderCompatibility EnsureCompatibleSqlite(
         IStore store,
-        IVectorSearch vec,
         IEmbedder embedder,
         OnModelChange mode,
         TextWriter? log)
     {
-        ArgumentNullException.ThrowIfNull(conn);
         ArgumentNullException.ThrowIfNull(store);
-        ArgumentNullException.ThrowIfNull(vec);
         ArgumentNullException.ThrowIfNull(embedder);
 
         var meta = (IMetaStore)store;
@@ -70,14 +89,14 @@ public static class EmbedderMigration
 
         if (state == EmbedderFingerprint.FingerprintState.Match)
         {
-            return;
+            return EmbedderCompatibility.Compatible;
         }
 
         // Unstamped + EMPTY index = fresh DB → stamp and continue (no migration).
         if (state == EmbedderFingerprint.FingerprintState.Unstamped && IndexIsEmpty(store))
         {
             EmbedderFingerprint.Restamp(meta, embedder);
-            return;
+            return EmbedderCompatibility.Compatible;
         }
 
         // Otherwise: Mismatch, OR Unstamped + populated. Both mean the existing
@@ -100,59 +119,31 @@ public static class EmbedderMigration
                     : $"[total-recall] embedding model changed ({from} -> {embedder.Descriptor.Model}); " +
                       "running with stale vectors (on_model_change=warn). Local retrieval quality is degraded " +
                       "until you run `total-recall reindex-embeddings`.");
-                return;
+                return EmbedderCompatibility.Warned;
 
-            default: // Auto
-                log?.WriteLine(stored is null
-                    ? "[total-recall] existing vectors have no embedder fingerprint (likely produced by a " +
-                      $"prior model); re-embedding the local database in place (one-time, this may take a moment)..."
-                    : $"[total-recall] embedding model changed ({from} -> {embedder.Descriptor.Model}); " +
-                      "re-embedding the local database in place (one-time, this may take a moment)...");
-                int n;
-                try
-                {
-                    // Batched, resumable re-embed run to completion in this one pass.
-                    // Each batch commits in its own short txn (cursor == committed
-                    // data); RunBatched deliberately does NOT stamp the fingerprint,
-                    // so we restamp here once the full pass succeeds.
-                    n = EmbeddingReindexer.RunBatched(
-                        conn, store, vec, embedder, new ReindexProgress(), CancellationToken.None, log);
-                    EmbedderFingerprint.Restamp(meta, embedder);
-                }
-                catch (Exception ex)
-                {
-                    // A mid-run failure leaves the fingerprint un-restamped (still the
-                    // old / unstamped value), so the next boot retries — and the
-                    // committed batches mean it resumes rather than restarts. Surface
-                    // the escape hatch so a permanently-broken embedder isn't an
-                    // unrecoverable boot loop with an opaque error.
-                    throw new InvalidOperationException(
-                        $"[total-recall] automatic re-embedding failed after a model change " +
-                        $"({from} -> {embedder.Descriptor.Model}): {ex.Message}. The fingerprint was " +
-                        "left un-restamped, so the next boot resumes from the last committed batch. " +
-                        "To start the server with degraded retrieval instead, set " +
-                        "embedding.on_model_change=\"warn\" (or \"block\" to keep failing fast), then run " +
-                        "`total-recall reindex-embeddings` once the embedder is healthy.", ex);
-                }
-                log?.WriteLine(
-                    $"[total-recall] re-embedded {n} entries; embedder fingerprint updated.");
-                return;
+            default: // Auto — defer the re-embed to a background worker the caller starts.
+                // Do NOT log or restamp here: the caller logs when it launches the
+                // worker, and the fingerprint is restamped only once the background
+                // pass completes (so an interrupted run resumes on the next boot).
+                return EmbedderCompatibility.ReindexInBackground;
         }
     }
 
     /// <summary>
-    /// Postgres startup path. Match → no-op; Unstamped+empty → stamp; Mismatch OR
+    /// Postgres startup decision. Match → <see cref="EmbedderCompatibility.Compatible"/>;
+    /// Unstamped+empty → stamp, <see cref="EmbedderCompatibility.Compatible"/>; Mismatch OR
     /// Unstamped+populated → dispatch on <paramref name="mode"/>:
     /// <list type="bullet">
     ///   <item><see cref="OnModelChange.Auto"/> → throw <see cref="InvalidOperationException"/>:
-    ///   in-place auto-migration is unsupported on the postgres backend; the message is actionable.</item>
-    ///   <item><see cref="OnModelChange.Warn"/> → log a degraded-retrieval warning and continue,
-    ///   WITHOUT restamping.</item>
+    ///   in-place auto-migration is unsupported on the postgres backend (there is no local vec
+    ///   index to background-reindex); the message is actionable.</item>
+    ///   <item><see cref="OnModelChange.Warn"/> → log a degraded-retrieval warning (WITHOUT
+    ///   restamping) and return <see cref="EmbedderCompatibility.Warned"/>.</item>
     ///   <item><see cref="OnModelChange.Block"/> → throw
     ///   <see cref="EmbedderFingerprintMismatchException"/> (legacy fail-fast).</item>
     /// </list>
     /// </summary>
-    public static void EnsureCompatiblePostgres(
+    public static EmbedderCompatibility EnsureCompatiblePostgres(
         IStore store,
         IEmbedder embedder,
         OnModelChange mode,
@@ -166,14 +157,14 @@ public static class EmbedderMigration
 
         if (state == EmbedderFingerprint.FingerprintState.Match)
         {
-            return;
+            return EmbedderCompatibility.Compatible;
         }
 
         // Unstamped + EMPTY index = fresh DB → stamp and continue (no migration).
         if (state == EmbedderFingerprint.FingerprintState.Unstamped && IndexIsEmpty(store))
         {
             EmbedderFingerprint.Restamp(meta, embedder);
-            return;
+            return EmbedderCompatibility.Compatible;
         }
 
         // Otherwise: Mismatch, OR Unstamped + populated — dispatch identically.
@@ -196,9 +187,9 @@ public static class EmbedderMigration
                       "running with stale vectors (on_model_change=warn). Local retrieval quality is degraded. " +
                       "On the postgres backend, re-embed by re-ingesting into a fresh database " +
                       "(`total-recall reindex-embeddings` does not support postgres).");
-                return;
+                return EmbedderCompatibility.Warned;
 
-            default: // Auto
+            default: // Auto — unsupported on postgres (no local vec index to background-reindex).
                 throw new InvalidOperationException(stored is null
                     ? "[total-recall] existing vectors have no embedder fingerprint (likely produced by a " +
                       "prior model), but automatic re-embedding is not supported on the postgres backend. " +
