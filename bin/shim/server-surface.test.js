@@ -62,3 +62,33 @@ test('unknown method before ready is method-not-found', () => {
   assert.equal(out.kind, 'respond');
   assert.equal(out.message.error.code, -32601);
 });
+
+// Regression guards: falsy-but-valid request ids must NOT be misclassified as
+// notifications. A future rewrite to `!msg.id` would silently break these.
+test('request with id:0 is treated as a request, not a notification', () => {
+  const out = surface.route({ jsonrpc: '2.0', id: 0, method: 'ping' }, new ShimState());
+  assert.equal(out.kind, 'respond');
+  assert.deepEqual(out.message.result, {});
+  assert.equal(out.message.id, 0);
+});
+
+test("request with id:'' is treated as a request, not a notification", () => {
+  const out = surface.route({ jsonrpc: '2.0', id: '', method: 'ping' }, new ShimState());
+  assert.equal(out.kind, 'respond');
+  assert.deepEqual(out.message.result, {});
+  assert.equal(out.message.id, '');
+});
+
+// An unknown notification pre-ready is dropped (nothing to forward yet); e.g.
+// notifications/cancelled before the engine is live has nothing to cancel.
+test('unknown notification before ready is dropped', () => {
+  const out = surface.route({ jsonrpc: '2.0', method: 'notifications/cancelled' }, new ShimState());
+  assert.equal(out.kind, 'drop');
+});
+
+// Once proxying, a non-initialized notification forwards to the live engine.
+test('unknown notification once proxying is proxied', () => {
+  const s = new ShimState(); s.set('proxying');
+  const out = surface.route({ jsonrpc: '2.0', method: 'notifications/cancelled' }, s);
+  assert.equal(out.kind, 'proxy');
+});
