@@ -7,7 +7,10 @@ function dayKey(ms: number): string {
 export interface DayCount { day: string; count: number; }
 export function movementsByDay(movements: CompactionMovement[]): DayCount[] {
   const m = new Map<string, number>();
-  for (const mv of movements) m.set(dayKey(mv.timestamp), (m.get(dayKey(mv.timestamp)) ?? 0) + 1);
+  for (const mv of movements) {
+    const k = dayKey(mv.timestamp);
+    m.set(k, (m.get(k) ?? 0) + 1);
+  }
   return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([day, count]) => ({ day, count }));
 }
 

@@ -20,13 +20,15 @@ export function RetrievalQualityCard({ refreshKey }: { refreshKey: number }) {
         {data && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--tr-space-5)' }}>
             <div style={{ width: 96, height: 96, position: 'relative' }}>
-              <ResponsiveContainer>
-                <PieChart>
-                  <Pie data={pie} dataKey="value" innerRadius={32} outerRadius={46} startAngle={90} endAngle={-270} isAnimationActive={false}>
-                    {pie.map((s) => <Cell key={s.name} fill={s.color} />)}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
+              <div aria-hidden="true" style={{ width: '100%', height: '100%' }}>
+                <ResponsiveContainer>
+                  <PieChart>
+                    <Pie data={pie} dataKey="value" innerRadius={32} outerRadius={46} startAngle={90} endAngle={-270} isAnimationActive={false}>
+                      {pie.map((s) => <Cell key={s.name} fill={s.color} />)}
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
               <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', fontWeight: 700 }}>{pct(data.hitRate)}</div>
             </div>
             <div>

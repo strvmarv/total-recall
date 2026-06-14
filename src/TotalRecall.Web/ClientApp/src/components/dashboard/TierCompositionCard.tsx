@@ -27,25 +27,29 @@ export function TierCompositionCard({ refreshKey }: { refreshKey: number }) {
   return (
     <Card title="Tier composition">
       <CardState loading={loading} error={error} empty={!!data && total === 0} emptyText="No memories yet.">
-        <div style={{ width: '100%', height: 56 }}>
-          <ResponsiveContainer>
-            <BarChart layout="vertical" data={[{ name: 'tiers', ...row }]} stackOffset="expand" margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
-              <XAxis type="number" hide domain={[0, 1]} />
+        {data && (
+          <>
+            <div aria-hidden="true" style={{ width: '100%', height: 56 }}>
+              <ResponsiveContainer>
+                <BarChart layout="vertical" data={[{ name: 'tiers', ...row }]} stackOffset="expand" margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                  <XAxis type="number" hide domain={[0, 1]} />
+                  {segs.map((s) => (
+                    <Bar key={s.key} dataKey={s.key} stackId="t" fill={s.color} isAnimationActive={false} />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <ul className="tr-legend">
               {segs.map((s) => (
-                <Bar key={s.key} dataKey={s.key} stackId="t" fill={s.color} isAnimationActive={false} />
+                <li className="tr-legend-item" key={s.key}>
+                  <span className="tr-legend-dot" style={{ background: s.color }} />
+                  {s.label} <strong>{s.value}</strong>
+                </li>
               ))}
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-        <ul className="tr-legend">
-          {segs.map((s) => (
-            <li className="tr-legend-item" key={s.key}>
-              <span className="tr-legend-dot" style={{ background: s.color }} />
-              {s.label} <strong>{s.value}</strong>
-            </li>
-          ))}
-        </ul>
-        <p className="tr-stat-sub">{collections} collections</p>
+            </ul>
+            <p className="tr-stat-sub">{collections} collections</p>
+          </>
+        )}
       </CardState>
     </Card>
   );

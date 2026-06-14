@@ -24,4 +24,10 @@ describe('RetrievalQualityCard', () => {
     render(<RetrievalQualityCard refreshKey={0} />);
     expect(await screen.findByText(/No retrieval events/i)).toBeInTheDocument();
   });
+
+  it('shows a friendly error when the fetch fails', async () => {
+    vi.spyOn(api, 'tool').mockRejectedValue(new Error('boom'));
+    render(<RetrievalQualityCard refreshKey={0} />);
+    expect(await screen.findByText(/load this panel/i)).toBeInTheDocument();
+  });
 });

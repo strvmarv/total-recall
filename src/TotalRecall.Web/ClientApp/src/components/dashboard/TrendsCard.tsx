@@ -21,10 +21,10 @@ export function TrendsCard({ refreshKey }: { refreshKey: number }) {
           <>
             <div className="tr-stat-figure">{data.movements.length} movements</div>
             <div className="tr-stat-sub">tier movements (compaction log)</div>
-            <div style={{ width: '100%', height: 48, marginTop: 'var(--tr-space-3)' }}>
+            <div aria-hidden="true" style={{ width: '100%', height: 48, marginTop: 'var(--tr-space-3)' }}>
               <ResponsiveContainer>
                 <AreaChart data={series} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
-                  <Area type="monotone" dataKey="v" stroke="var(--tr-tier-warm)" fill="#fde9c8" isAnimationActive={false} />
+                  <Area type="monotone" dataKey="v" stroke="var(--tr-tier-warm)" fill="var(--tr-tier-warm-weak)" isAnimationActive={false} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>

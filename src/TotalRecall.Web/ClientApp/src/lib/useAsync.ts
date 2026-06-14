@@ -25,13 +25,22 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[]): AsyncState<T
   const fnRef = useRef(fn);
   fnRef.current = fn;
   const loadedOnce = useRef(false);
+  const dataRef = useRef<T | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     if (!loadedOnce.current) setLoading(true);
     fnRef.current()
-      .then((d) => { if (!cancelled) { setData(d); setError(null); loadedOnce.current = true; } })
-      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
+      .then((d) => { if (!cancelled) { dataRef.current = d; setData(d); setError(null); loadedOnce.current = true; } })
+      .catch((e) => {
+        if (cancelled) return;
+        // After the first attempt (success OR failure) we stop forcing the
+        // "Loading…" state so background polls don't flicker.
+        loadedOnce.current = true;
+        // Keep the last good data on screen through a transient poll failure;
+        // only surface the error when there is nothing else to show.
+        if (dataRef.current === null) setError(e instanceof Error ? e.message : String(e));
+      })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
     // deps is an opaque, caller-controlled array (see the JSDoc contract above).

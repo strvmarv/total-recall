@@ -16,8 +16,9 @@ export interface WeekOverWeek { current: number; previous: number; deltaPercent:
 
 /** day-bucket keys are ISO dates ("YYYY-MM-DD"); window is [endMs-7d, endMs] vs [endMs-14d, endMs-7d). */
 export function weekOverWeek(buckets: UsageBucket[], endMs: number): WeekOverWeek {
-  const curStart = endMs - 7 * DAY;
-  const prevStart = endMs - 14 * DAY;
+  const endDay = endMs - (endMs % DAY); // normalize to UTC midnight so date-keyed buckets compare correctly
+  const curStart = endDay - 7 * DAY;
+  const prevStart = endDay - 14 * DAY;
   let current = 0;
   let previous = 0;
   for (const bk of buckets) {

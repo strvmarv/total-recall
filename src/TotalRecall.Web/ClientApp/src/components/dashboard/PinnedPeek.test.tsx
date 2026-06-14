@@ -29,4 +29,10 @@ describe('PinnedPeek', () => {
     render2(<PinnedPeek refreshKey={0} />);
     expect(await screen.findByText(/No pinned directives/i)).toBeInTheDocument();
   });
+
+  it('shows a friendly error when the fetch fails', async () => {
+    vi.spyOn(api, 'tool').mockRejectedValue(new Error('boom'));
+    render2(<PinnedPeek refreshKey={0} />);
+    expect(await screen.findByText(/load this panel/i)).toBeInTheDocument();
+  });
 });

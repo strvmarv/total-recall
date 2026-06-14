@@ -29,4 +29,10 @@ describe('RecentActivityPeek', () => {
     render2(<RecentActivityPeek refreshKey={0} />);
     expect(await screen.findByText(/No recent activity/i)).toBeInTheDocument();
   });
+
+  it('shows a friendly error when the fetch fails', async () => {
+    vi.spyOn(api, 'tool').mockRejectedValue(new Error('boom'));
+    render2(<RecentActivityPeek refreshKey={0} />);
+    expect(await screen.findByText(/load this panel/i)).toBeInTheDocument();
+  });
 });

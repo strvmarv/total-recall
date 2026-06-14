@@ -101,6 +101,7 @@ body {
 
 .tr-stat-figure { font-size: 28px; font-weight: 700; color: var(--tr-text); }
 .tr-stat-sub { color: var(--tr-text-muted); font-size: 13px; margin-top: var(--tr-space-1); }
+/* Intentional inversion: rising token spend/activity is "bad" (red), falling is "good" (green). */
 .tr-delta-up { color: #b91c1c; }
 .tr-delta-down { color: #16a34a; }
 .tr-legend { display: flex; flex-wrap: wrap; gap: var(--tr-space-2) var(--tr-space-4); margin-top: var(--tr-space-3); font-size: 13px; }

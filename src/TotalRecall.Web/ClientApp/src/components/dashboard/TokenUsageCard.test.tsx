@@ -40,4 +40,10 @@ describe('TokenUsageCard', () => {
     render2(<TokenUsageCard refreshKey={0} />);
     expect(await screen.findByText(/usage tracking unavailable/i)).toBeInTheDocument();
   });
+
+  it('shows a friendly error when the fetch fails', async () => {
+    vi.spyOn(api, 'tool').mockRejectedValue(new Error('boom'));
+    render2(<TokenUsageCard refreshKey={0} />);
+    expect(await screen.findByText(/load this panel/i)).toBeInTheDocument();
+  });
 });

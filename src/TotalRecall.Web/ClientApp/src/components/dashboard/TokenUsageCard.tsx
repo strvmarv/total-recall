@@ -32,7 +32,7 @@ export function TokenUsageCard({ refreshKey }: { refreshKey: number }) {
                 {wow.deltaPercent >= 0 ? '▲' : '▼'} {Math.abs(wow.deltaPercent).toFixed(1)}% vs prior week
               </div>
             )}
-            <div style={{ width: '100%', height: 48, marginTop: 'var(--tr-space-3)' }}>
+            <div aria-hidden="true" style={{ width: '100%', height: 48, marginTop: 'var(--tr-space-3)' }}>
               <ResponsiveContainer>
                 <AreaChart data={series} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
                   <Area type="monotone" dataKey="v" stroke="var(--tr-accent)" fill="var(--tr-accent-weak)" isAnimationActive={false} />
