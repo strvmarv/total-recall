@@ -26,6 +26,8 @@ This skill ensures the total-recall memory system is active for this session.
 4. Use `hints` to inform your behavior throughout the session
 5. Incorporate the returned context to inform your responses
 
+The built-in web UI is available at any time via `total-recall ui` (opens a local browser dashboard on port 5577 by default). It is independent of the MCP session — no AI assistant needed to use it.
+
 ## Ongoing Behaviors
 
 Once initialized, follow these behaviors throughout the session. Tool calls will be visible to the user.

@@ -11,6 +11,7 @@ total-recall is a **.NET 8 NativeAOT** plugin since 0.8.0 — a C# imperative sh
 - **.NET 10 SDK** — pinned by `global.json` at the repo root (`{"sdk":{"version":"10.0.100","rollForward":"latestFeature"}}`). The .NET 10 SDK builds the `net8.0` target framework cleanly. Install from [dotnet.microsoft.com/download](https://dotnet.microsoft.com/download).
 - **Node.js >= 20** — used only by `npm install` to pull the per-platform `sqlite-vec` native extension into `node_modules/`. The Infrastructure csproj's `<Content Include="node_modules/sqlite-vec-<rid>/vec0.*">` step copies the matching variant into the build output.
 - **Model fetch** — run `sh scripts/fetch-bge-small.sh` once before building or running the ONNX integration tests. It downloads + SHA256-verifies the `bge-small-en-v1.5` ONNX model into `models/bge-small-en-v1.5/` (133 MB, not committed).
+- **ClientApp build (optional)** — the React SPA in `src/TotalRecall.Web/ClientApp/` is **not** built by default. `dotnet build` and the full test suite are Node-free. To build the SPA, run `npm ci && npm run build` inside `src/TotalRecall.Web/ClientApp/`, or pass `-p:BuildSpa=true` to `dotnet build`/`dotnet publish`, which runs those commands automatically. Release publishes always include `-p:BuildSpa=true`.
 
 ### Clone and build
 

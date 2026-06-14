@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 3.1.0 - 2026-06-14
+
+### Added
+
+- **Built-in local web UI (`total-recall ui`).** The single NativeAOT binary now serves an embedded React SPA on a local Kestrel server (default port 5577). Six sections: Dashboard (tier composition, retrieval quality, token usage, recent activity, trend sparklines), Memory (browse/search/filter/promote/demote/pin/delete), Knowledge Base (collections, search, ingest, refresh, remove), Usage (token spend by host/project/model/time with client-side cost estimates), ✨ Insights (memory-health score + suggestion cards — cost-spike, capture-mix, pinned pressure, retrieval misses, empty KB — pure heuristics, no LLM), and Config (edit a safe subset of tuning knobs, persisted via `config_set`; storage/embedding read-only). Security model: loopback-only bind by default, ephemeral per-launch bearer token injected directly into the served HTML, Host-header allowlist against DNS-rebinding. The SPA build is opt-in (`-p:BuildSpa=true`); default builds and the full test suite remain Node-free. **v1 deferrals** (tracked in `docs/TODO.md`): server-side `/api/insights` engine, editable/persisted `[pricing]` config section, usage activity heatmap (needs hourly `GroupBy`), per-project trend sparklines, Cortex remote phase, SSE/live push.
+
 ## 3.0.4 - 2026-06-13
 
 ### Fixed
