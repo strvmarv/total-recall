@@ -37,7 +37,13 @@ public static class ToolAllowlist
         "memory_promote",
         "memory_demote",
         "memory_delete",
+        // knowledge base tools
         "kb_list_collections",
+        "kb_ingest_file",
+        "kb_ingest_dir",
+        "kb_refresh",
+        "kb_remove",
+        "kb_search",
         "config_get",
     };
 

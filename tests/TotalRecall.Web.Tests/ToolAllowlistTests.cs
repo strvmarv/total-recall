@@ -23,6 +23,11 @@ public sealed class ToolAllowlistTests
     [InlineData("memory_demote")]
     [InlineData("memory_delete")]
     [InlineData("kb_list_collections")]
+    [InlineData("kb_ingest_file")]
+    [InlineData("kb_ingest_dir")]
+    [InlineData("kb_refresh")]
+    [InlineData("kb_remove")]
+    [InlineData("kb_search")]
     [InlineData("config_get")]
     public void IsAllowed_True_ForCuratedTools(string name) =>
         Assert.True(ToolAllowlist.IsAllowed(name));

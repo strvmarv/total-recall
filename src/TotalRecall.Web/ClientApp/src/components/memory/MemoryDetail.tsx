@@ -3,7 +3,7 @@ import { api } from '../../lib/api';
 import { useAsync } from '../../lib/useAsync';
 import { timeAgo } from '../../lib/time';
 import type { MemoryInspectResult, LineageNode } from '../../lib/types';
-import { ConfirmDialog } from './ConfirmDialog';
+import { ConfirmDialog } from '../ConfirmDialog';
 
 function LineageTree({ node }: { node: LineageNode }) {
   return (

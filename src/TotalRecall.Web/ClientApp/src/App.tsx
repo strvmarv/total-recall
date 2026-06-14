@@ -3,6 +3,7 @@ import { TopBar } from './components/TopBar';
 import { SectionPlaceholder } from './pages/SectionPlaceholder';
 import { Memory } from './pages/Memory';
 import { Dashboard } from './pages/Dashboard';
+import { KnowledgeBase } from './pages/KnowledgeBase';
 
 /** Router-agnostic shell (testable with MemoryRouter). */
 export function AppShell() {
@@ -13,7 +14,7 @@ export function AppShell() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/memory" element={<Memory />} />
-          <Route path="/kb" element={<SectionPlaceholder title="Knowledge Base" />} />
+          <Route path="/kb" element={<KnowledgeBase />} />
           <Route path="/usage" element={<SectionPlaceholder title="Usage" />} />
           <Route path="/insights" element={<SectionPlaceholder title="Insights" />} />
           <Route path="/config" element={<SectionPlaceholder title="Config" />} />
