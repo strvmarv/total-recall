@@ -4,7 +4,12 @@ node_modules/
 .env
 .remember/
 docs/superpowers/
+.superpowers/
 .worktrees/
+
+# Claude Code local artifacts (machine-local settings + nested worktrees)
+.claude/worktrees/
+.claude/settings.local.json
 
 # .NET build artifacts
 [Bb]in/
