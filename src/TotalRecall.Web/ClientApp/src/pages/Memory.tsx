@@ -48,6 +48,7 @@ export function Memory() {
   return (
     <section className="tr-memory" aria-label="Memory">
       <h1>Memory</h1>
+      {q && <p className="tr-card-muted">Search: &quot;{q}&quot;</p>}
       <MemoryFilters value={filters} onChange={setFilters} />
       <div className="tr-memory-body">
         <div className="tr-memory-list">
