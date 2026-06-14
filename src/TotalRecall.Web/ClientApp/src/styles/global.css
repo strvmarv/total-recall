@@ -174,3 +174,22 @@ body {
 .tr-usage-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .tr-usage-table th, .tr-usage-table td { text-align: left; padding: var(--tr-space-2) var(--tr-space-3); border-bottom: 1px solid var(--tr-border); }
 .tr-usage-table td.num, .tr-usage-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.tr-insights h1 { font-size: 22px; margin: 0 0 var(--tr-space-4); }
+.tr-health { display: flex; align-items: center; gap: var(--tr-space-4); background: var(--tr-surface); border: 1px solid var(--tr-border); border-radius: var(--tr-radius); padding: var(--tr-space-5); margin-bottom: var(--tr-space-5); }
+.tr-health-num { font-size: 48px; font-weight: 800; line-height: 1; }
+.tr-health-meta { flex: 1; }
+.tr-health-label { font-size: 13px; color: var(--tr-text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: var(--tr-space-2); }
+.tr-health-bar { height: 10px; background: var(--tr-border); border-radius: 999px; overflow: hidden; }
+.tr-health-fill { display: block; height: 100%; }
+.tr-health-good { color: #16a34a; } .tr-health-fill.tr-health-good { background: #16a34a; }
+.tr-health-ok { color: #b45309; } .tr-health-fill.tr-health-ok { background: #f59e0b; }
+.tr-health-low { color: #b91c1c; } .tr-health-fill.tr-health-low { background: #ef4444; }
+.tr-insight-list { display: flex; flex-direction: column; gap: var(--tr-space-3); }
+.tr-insight { display: flex; align-items: center; gap: var(--tr-space-4); background: var(--tr-surface); border: 1px solid var(--tr-border); border-radius: var(--tr-radius); padding: var(--tr-space-4); }
+.tr-insight-icon { font-size: 24px; }
+.tr-insight-body { flex: 1; }
+.tr-insight-head { display: flex; align-items: center; gap: var(--tr-space-3); }
+.tr-insight-head h3 { margin: 0; font-size: 15px; }
+.tr-insight-evidence { margin: var(--tr-space-1) 0 0; font-size: 13px; color: var(--tr-text-muted); }
+.tr-impact { font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 1px var(--tr-space-2); border-radius: 999px; }
+.tr-impact-high { background: #fde2e2; color: #b91c1c; } .tr-impact-medium { background: #fef3c7; color: #b45309; } .tr-impact-low { background: #e8eaed; color: #475569; }
