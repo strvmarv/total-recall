@@ -22,12 +22,21 @@ public static class ToolAllowlist
         "status",
         "usage_status",
         "eval_report",
+        // memory read tools
         "memory_search",
         "memory_list",
         "memory_recent",
         "memory_history",
         "memory_get",
         "memory_inspect",
+        "memory_lineage",
+        // memory write/curate tools — reachable only with the per-launch token
+        "memory_update",
+        "memory_pin",
+        "memory_unpin",
+        "memory_promote",
+        "memory_demote",
+        "memory_delete",
         "kb_list_collections",
         "config_get",
     };

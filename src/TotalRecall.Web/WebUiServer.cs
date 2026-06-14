@@ -121,7 +121,19 @@ public static partial class WebUiServer
                 }
             }
 
-            var result = await handler.ExecuteAsync(args, ct);
+            ToolCallResult result;
+            try
+            {
+                result = await handler.ExecuteAsync(args, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                throw; // client disconnect / shutdown — let the framework handle it
+            }
+            catch (Exception ex)
+            {
+                result = ErrorTranslator.Translate(ex);
+            }
             var text = result.Content.Length > 0 ? result.Content[0].Text : "null";
             var status = (result.IsError ?? false)
                 ? StatusCodes.Status400BadRequest

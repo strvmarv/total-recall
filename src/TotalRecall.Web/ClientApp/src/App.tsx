@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { TopBar } from './components/TopBar';
 import { SectionPlaceholder } from './pages/SectionPlaceholder';
-import { MemoryPlaceholder } from './pages/MemoryPlaceholder';
+import { Memory } from './pages/Memory';
 import { Dashboard } from './pages/Dashboard';
 
 /** Router-agnostic shell (testable with MemoryRouter). */
@@ -12,7 +12,7 @@ export function AppShell() {
       <main className="tr-main">
         <Routes>
           <Route path="/" element={<Dashboard />} />
-          <Route path="/memory" element={<MemoryPlaceholder />} />
+          <Route path="/memory" element={<Memory />} />
           <Route path="/kb" element={<SectionPlaceholder title="Knowledge Base" />} />
           <Route path="/usage" element={<SectionPlaceholder title="Usage" />} />
           <Route path="/insights" element={<SectionPlaceholder title="Insights" />} />

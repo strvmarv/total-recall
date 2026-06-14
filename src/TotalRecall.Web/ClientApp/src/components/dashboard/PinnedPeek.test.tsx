@@ -7,7 +7,7 @@ import type { MemoryListResult } from '../../lib/types';
 
 const LIST: MemoryListResult = {
   entries: [
-    { id: '1', tier: 'pinned', content_type: 'memory', content: 'Never add Co-Authored-By trailers', summary: null, project: 'total-recall', tags: [], created_at: 1, updated_at: 1, scope: 'user' },
+    { id: '1', tier: 'pinned', content_type: 'memory', content: 'Never add Co-Authored-By trailers', summary: null, source_tool: null, project: 'total-recall', tags: [], created_at: 1, updated_at: 1, scope: 'user' },
   ],
   count: 1, total: 12, limit: 8, offset: 0,
 };

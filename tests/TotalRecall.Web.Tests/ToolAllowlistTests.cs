@@ -15,6 +15,13 @@ public sealed class ToolAllowlistTests
     [InlineData("memory_history")]
     [InlineData("memory_get")]
     [InlineData("memory_inspect")]
+    [InlineData("memory_lineage")]
+    [InlineData("memory_update")]
+    [InlineData("memory_pin")]
+    [InlineData("memory_unpin")]
+    [InlineData("memory_promote")]
+    [InlineData("memory_demote")]
+    [InlineData("memory_delete")]
     [InlineData("kb_list_collections")]
     [InlineData("config_get")]
     public void IsAllowed_True_ForCuratedTools(string name) =>

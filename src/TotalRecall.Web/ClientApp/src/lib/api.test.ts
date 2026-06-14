@@ -58,4 +58,19 @@ describe('api', () => {
     vi.stubGlobal('fetch', mockFetch(404, '{"error":"unknown_tool"}'));
     await expect(api.tool('nope')).rejects.toBeInstanceOf(ApiError);
   });
+
+  it('throws ApiError with message from JSON body field when body is {"error":"...","message":"..."}', async () => {
+    vi.stubGlobal('fetch', mockFetch(400, '{"error":"invalid_arguments","message":"id is required"}'));
+    const err = await api.tool('bad').catch((e) => e) as ApiError;
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.message).toBe('id is required');
+    expect(err.status).toBe(400);
+  });
+
+  it('throws ApiError with trimmed raw text when body is non-JSON', async () => {
+    vi.stubGlobal('fetch', mockFetch(400, 'bad things happened', 'text/plain'));
+    const err = await api.tool('bad').catch((e) => e) as ApiError;
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.message).toBe('bad things happened');
+  });
 });

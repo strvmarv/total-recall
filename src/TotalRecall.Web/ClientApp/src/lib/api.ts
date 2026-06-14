@@ -19,10 +19,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (token) headers.set('X-Total-Recall-Token', token);
 
   const resp = await fetch(`/api${path}`, { ...init, headers });
-  const text = await resp.text();
   if (!resp.ok) {
-    throw new ApiError(resp.status, text || `Request failed: ${resp.status}`);
+    const raw = await resp.text();
+    let message = raw.trim();
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as { message?: string; error?: string };
+        message = parsed.message ?? parsed.error ?? message;
+      } catch {
+        /* non-JSON body: keep the trimmed raw text */
+      }
+    }
+    throw new ApiError(resp.status, message || `HTTP ${resp.status}`);
   }
+  const text = await resp.text();
   return (text ? JSON.parse(text) : null) as T;
 }
 

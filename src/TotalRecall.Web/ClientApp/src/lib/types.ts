@@ -52,7 +52,7 @@ export interface MemoryHistoryResult { movements: CompactionMovement[]; count: n
 
 export interface MemoryListEntry {
   id: string; tier: string; content_type: string; content: string;
-  summary: string | null; project: string | null; tags: string[];
+  summary: string | null; source_tool: string | null; project: string | null; tags: string[];
   created_at: number; updated_at: number; scope: string;
 }
 export interface MemoryListResult { entries: MemoryListEntry[]; count: number; total: number; limit: number; offset: number; }
@@ -62,3 +62,26 @@ export interface MemoryRecentEntry {
   created_at: number; updated_at: number; last_accessed_at: number; preview: string;
 }
 export interface MemoryRecentResult { entries: MemoryRecentEntry[]; count: number; order: string; }
+
+export interface EntryDto {
+  id: string; content: string; summary: string | null; source: string | null;
+  project: string | null; tags: string[]; created_at: number; updated_at: number;
+  last_accessed_at: number; access_count: number; decay_score: number; scope: string;
+}
+export interface MemorySearchHit { entry: EntryDto; score: number; tier: string; content_type: string; rank: number; }
+export type MemorySearchResult = MemorySearchHit[];
+
+export interface MemoryInspectResult {
+  id: string; tier: string; content_type: string; content: string; summary: string | null;
+  source: string | null; source_tool: string | null; project: string | null; tags: string[];
+  created_at: number; updated_at: number; last_accessed_at: number; access_count: number;
+  decay_score: number; parent_id: string | null; collection_id: string | null;
+  metadata: string; compaction_history: CompactionMovement | null;
+}
+export interface LineageNode {
+  id: string; compaction_log_id: string | null; reason: string | null; timestamp: number | null;
+  source_tier: string | null; target_tier: string | null; sources: LineageNode[] | null;
+}
+export interface MemoryMoveResult { id: string; from_tier: string; from_content_type: string; to_tier: string; to_content_type: string; success: boolean; }
+export interface MemoryUpdateResult { updated: boolean; }
+export interface MemoryDeleteResult { deleted: boolean; }
