@@ -4,6 +4,7 @@ import { SectionPlaceholder } from './pages/SectionPlaceholder';
 import { Memory } from './pages/Memory';
 import { Dashboard } from './pages/Dashboard';
 import { KnowledgeBase } from './pages/KnowledgeBase';
+import { Usage } from './pages/Usage';
 
 /** Router-agnostic shell (testable with MemoryRouter). */
 export function AppShell() {
@@ -15,7 +16,7 @@ export function AppShell() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/memory" element={<Memory />} />
           <Route path="/kb" element={<KnowledgeBase />} />
-          <Route path="/usage" element={<SectionPlaceholder title="Usage" />} />
+          <Route path="/usage" element={<Usage />} />
           <Route path="/insights" element={<SectionPlaceholder title="Insights" />} />
           <Route path="/config" element={<SectionPlaceholder title="Config" />} />
           <Route path="*" element={<SectionPlaceholder title="Not found" note="Unknown route." />} />

@@ -166,3 +166,12 @@ body {
 .tr-kb-results { list-style: none; margin: var(--tr-space-3) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--tr-space-2); }
 .tr-kb-hit { font-size: 13px; padding: var(--tr-space-2); border: 1px solid var(--tr-border); border-radius: var(--tr-radius); }
 .tr-kb-hit-meta { color: var(--tr-text-muted); font-size: 12px; }
+
+.tr-usage h1 { font-size: 22px; margin: 0 0 var(--tr-space-4); }
+.tr-usage-filters { display: flex; gap: var(--tr-space-3); flex-wrap: wrap; margin-bottom: var(--tr-space-4); }
+.tr-usage-filters select, .tr-usage-filters .tr-input { height: 34px; }
+.tr-usage-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--tr-space-4); }
+.tr-usage-stat { }
+.tr-usage-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tr-usage-table th, .tr-usage-table td { text-align: left; padding: var(--tr-space-2) var(--tr-space-3); border-bottom: 1px solid var(--tr-border); }
+.tr-usage-table td.num, .tr-usage-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
