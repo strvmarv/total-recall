@@ -79,10 +79,15 @@ public sealed class ReindexEmbeddingsCommand : ICliCommand
             var store = new SqliteStore(conn);
             var vec = new VectorSearch(conn);
 
-            // Atomic reindex (shared with the sqlite startup auto-migration path):
-            // a mid-run failure rolls the whole thing back so the DB never ends up
-            // half-rewritten (a mix of old and new embedding spaces).
-            int n = EmbeddingReindexer.RunAtomicSqlite(conn, store, vec, embedder, Console.Out);
+            // Batched, resumable reindex (shared with the sqlite startup
+            // auto-migration path): each batch commits in its own short txn so the
+            // write lock is never held for the whole multi-minute re-embed, and an
+            // interrupted run resumes from the _meta cursor instead of restarting.
+            // RunBatched does NOT stamp the fingerprint, so re-stamp after the pass.
+            int n = EmbeddingReindexer.RunBatched(
+                conn, store, vec, embedder, new ReindexProgress(),
+                System.Threading.CancellationToken.None, Console.Out);
+            EmbedderFingerprint.Restamp(store, embedder);
             sw.Stop();
             Console.WriteLine($"total-recall: re-embedded {n} entries in {sw.ElapsedMilliseconds}ms; fingerprint re-stamped.");
             return Task.FromResult(0);

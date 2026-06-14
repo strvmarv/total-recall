@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Threading;
 using TotalRecall.Infrastructure.Memory;
 using TotalRecall.Infrastructure.Search;
 using TotalRecall.Infrastructure.Storage;
@@ -44,7 +45,7 @@ public static class EmbedderMigration
     /// Unstamped+populated → dispatch on <paramref name="mode"/>:
     /// <list type="bullet">
     ///   <item><see cref="OnModelChange.Auto"/> → re-embed every row in place via
-    ///   <see cref="EmbeddingReindexer.RunAtomicSqlite"/> (atomic) + restamp, then continue.</item>
+    ///   <see cref="EmbeddingReindexer.RunBatched"/> + restamp, then continue.</item>
     ///   <item><see cref="OnModelChange.Warn"/> → log a degraded-retrieval warning and continue,
     ///   WITHOUT restamping (so the nag persists across restarts).</item>
     ///   <item><see cref="OnModelChange.Block"/> → throw
@@ -110,18 +111,26 @@ public static class EmbedderMigration
                 int n;
                 try
                 {
-                    n = EmbeddingReindexer.RunAtomicSqlite(conn, store, vec, embedder, log);
+                    // Batched, resumable re-embed run to completion in this one pass.
+                    // Each batch commits in its own short txn (cursor == committed
+                    // data); RunBatched deliberately does NOT stamp the fingerprint,
+                    // so we restamp here once the full pass succeeds.
+                    n = EmbeddingReindexer.RunBatched(
+                        conn, store, vec, embedder, new ReindexProgress(), CancellationToken.None, log);
+                    EmbedderFingerprint.Restamp(meta, embedder);
                 }
                 catch (Exception ex)
                 {
-                    // The reindex is atomic, so a failure here left the DB unchanged (old
-                    // vectors + old fingerprint) — the next boot will retry. Surface the
-                    // escape hatch so a permanently-broken embedder isn't an unrecoverable
-                    // boot loop with an opaque error.
+                    // A mid-run failure leaves the fingerprint un-restamped (still the
+                    // old / unstamped value), so the next boot retries — and the
+                    // committed batches mean it resumes rather than restarts. Surface
+                    // the escape hatch so a permanently-broken embedder isn't an
+                    // unrecoverable boot loop with an opaque error.
                     throw new InvalidOperationException(
                         $"[total-recall] automatic re-embedding failed after a model change " +
-                        $"({from} -> {embedder.Descriptor.Model}): {ex.Message}. The database " +
-                        "was left unchanged. To start the server with degraded retrieval instead, set " +
+                        $"({from} -> {embedder.Descriptor.Model}): {ex.Message}. The fingerprint was " +
+                        "left un-restamped, so the next boot resumes from the last committed batch. " +
+                        "To start the server with degraded retrieval instead, set " +
                         "embedding.on_model_change=\"warn\" (or \"block\" to keep failing fast), then run " +
                         "`total-recall reindex-embeddings` once the embedder is healthy.", ex);
                 }
