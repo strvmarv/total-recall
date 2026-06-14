@@ -5,6 +5,7 @@ import { Memory } from './pages/Memory';
 import { Dashboard } from './pages/Dashboard';
 import { KnowledgeBase } from './pages/KnowledgeBase';
 import { Usage } from './pages/Usage';
+import { Insights } from './pages/Insights';
 
 /** Router-agnostic shell (testable with MemoryRouter). */
 export function AppShell() {
@@ -17,7 +18,7 @@ export function AppShell() {
           <Route path="/memory" element={<Memory />} />
           <Route path="/kb" element={<KnowledgeBase />} />
           <Route path="/usage" element={<Usage />} />
-          <Route path="/insights" element={<SectionPlaceholder title="Insights" />} />
+          <Route path="/insights" element={<Insights />} />
           <Route path="/config" element={<SectionPlaceholder title="Config" />} />
           <Route path="*" element={<SectionPlaceholder title="Not found" note="Unknown route." />} />
         </Routes>
