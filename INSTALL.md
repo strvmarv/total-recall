@@ -9,7 +9,7 @@ Since 0.8.0, total-recall is a **prebuilt .NET 8 NativeAOT binary** wrapped by a
 ## Prerequisites
 
 - **Node.js >= 20.0.0** — required only for `npm install` and the `bin/start.js` launcher (~60 lines, zero runtime overhead). The actual MCP server is the prebuilt .NET binary.
-- **Internet access** — only needed if you install via Claude Code's `/plugin` flow with a `source: github` marketplace entry. In that case `bin/start.js` downloads the matching per-RID archive (~22 MB) from GitHub Releases on first launch. The npm install path ships all RIDs in the tarball and doesn't need a runtime download.
+- **Internet access** — only needed if you install via Claude Code's `/plugin` flow with a `source: github` marketplace entry. In that case `bin/start.js` downloads the matching per-RID archive (~90 MB, includes the bundled embedding model) from GitHub Releases. To avoid stalling the MCP startup handshake, the download runs in the **background** on first launch: the first session reports "first-run setup, downloading…" and runs without memory, then the next launch (reload the plugin or restart) starts instantly. The npm install path ships all RIDs in the tarball and needs no runtime download.
 - **Intel Mac (`darwin-x64`) is not currently shipped.** Apple Silicon (`osx-arm64`) is. All Apple hardware sold since November 2020 is arm64.
 
 ## Relocating the database

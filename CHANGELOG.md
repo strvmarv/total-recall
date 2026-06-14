@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 3.0.3 - 2026-06-13
+
+### Fixed
+
+- **First launch on the git/marketplace install path no longer risks bricking the MCP server.** `bin/start.js` used to download the ~90 MB binary archive *synchronously* before it could answer the MCP startup handshake; on a slow connection that exceeded Claude Code's stdio startup timeout (a hard wall-clock with no retry), so the server was killed and the partial download discarded — leaving the binary unprovisioned on every subsequent launch. Now a missing binary triggers a **detached background download** (pid-stamped lockfile guards against duplicates) and `start.js` exits fast with a one-time "downloading in the background, available next launch" message. The next launch finds the binary and starts instantly. npm installs are unaffected (the binary ships in the tarball).
+- **Windows binary extraction no longer fails when a GNU `tar` is on `PATH`.** `scripts/fetch-binary.js` extracted the release archive with bare `tar`; if Git for Windows / msys `tar` resolved first, it treated the `C:\...` destination as a remote host and failed (`Cannot connect to C:`). It now pins to the bundled `%SystemRoot%\System32\tar.exe` (bsdtar) on Windows.
+
 ## 3.0.2 - 2026-06-13
 
 ### Fixed

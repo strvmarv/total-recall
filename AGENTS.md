@@ -163,13 +163,13 @@ Both paths converge on the same `bin/start.js` launcher because `.mcp.json` alwa
 }
 ```
 
-`bin/start.js` is ~60 lines of zero-dep Node. It calls `ensureBinary()` from `scripts/fetch-binary.js` which:
-1. Detects the host RID via `process.platform` / `process.arch`
-2. Checks `binaries/<rid>/total-recall` (or `total-recall.exe`) for existence
-3. If missing, downloads `total-recall-<rid>.tar.gz` from the matching GitHub Release (URL computed from `package.json` version) into `os.tmpdir()`, extracts via system `tar` (or `tar.exe` on Windows since 1803), and writes the result into `binaries/<rid>/`
-4. Returns the binary path so `bin/start.js` can `child_process.spawn` it
+`bin/start.js` is zero-dep Node. It present-checks `binaries/<rid>/total-recall` (or `total-recall.exe`):
+1. **Binary present** (npm installs, and every launch after the first on the git path) → `child_process.spawn` it with stdio passthrough. The common, instant path.
+2. **Binary missing** → it does NOT download in-band. The ~90 MB fetch must stay off the MCP startup handshake: Claude Code's stdio startup timeout is a hard wall-clock with no stdio-extension and no retry, so a slow synchronous download gets the server killed and the partial download discarded (a permanent first-launch brick). Instead `start.js` calls `provisionInBackground()`, which spawns a **detached** `node scripts/fetch-binary.js --provision` downloader (guarded by a pid-stamped `binaries/.provision-<rid>.lock`), prints a one-time "downloading in the background, available next launch" message, and exits fast. The detached child runs `ensureBinary()` (download `total-recall-<rid>.tar.gz` from the matching GitHub Release → extract → write into `binaries/<rid>/`) and survives `start.js` being killed; the next launch finds the binary and starts instantly.
 
-The download fallback exists because the **git-clone install path** fetches the source tree without `binaries/` (we never commit prebuilt binaries to git — the npm tarball ships them, but git-source installs don't go through npm). When a Claude Code marketplace entry uses `source: github`, the installed tree has `bin/start.js` and `scripts/fetch-binary.js` but no `binaries/`, and the download fallback kicks in on first launch.
+`ensureBinary()` (shared with `scripts/postinstall.js`, where blocking is fine — install time has no MCP timeout) extracts via `tarExecutable()`: on Windows it pins to `%SystemRoot%\System32\tar.exe` (bsdtar), because a GNU `tar` earlier on PATH (Git for Windows / msys) treats the `C:\...` destination as a remote host and fails ("Cannot connect to C:").
+
+This background-fetch path exists because the **git-clone install path** fetches the source tree without `binaries/` (we never commit prebuilt binaries to git — the npm tarball ships them, but git-source installs don't go through npm). When a Claude Code marketplace entry uses `source: github`, the installed tree has `bin/start.js` and `scripts/fetch-binary.js` but no `binaries/`, so the background fetch provisions it on first launch.
 
 ### Removing a plugin install (for testing)
 
