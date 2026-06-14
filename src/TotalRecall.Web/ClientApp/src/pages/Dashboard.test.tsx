@@ -17,12 +17,13 @@ describe('Dashboard shell', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders the page heading and all six panel titles', () => {
+  it('renders the page heading and six panel regions', () => {
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
     expect(screen.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeInTheDocument();
-    for (const t of ['Tier composition', 'Token usage', 'Retrieval quality', 'Trends', '📌 Pinned directives', '🕒 Recent activity']) {
-      expect(screen.getByRole('heading', { name: t })).toBeInTheDocument();
-    }
+    // The Dashboard root and each Card render a <section aria-label> (role "region"):
+    // 1 root + 4 cards + 2 peeks = 7. Counting regions keeps this shell test
+    // independent of the panel titles, which the child components own.
+    expect(screen.getAllByRole('region')).toHaveLength(7);
   });
 
   it('has a manual refresh control', () => {

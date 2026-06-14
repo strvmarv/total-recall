@@ -1,16 +1,19 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 
-export function Card({ title, drillTo, drillLabel, children }: {
+export function Card({ title, headingLevel = 2, drillTo, drillLabel, children }: {
   title: string;
+  /** Heading level for the card title; default 2. Set to keep the document outline correct if Card is nested. */
+  headingLevel?: 2 | 3 | 4;
   drillTo?: string;
   drillLabel?: string;
   children: ReactNode;
 }) {
+  const Heading = `h${headingLevel}` as const;
   return (
     <section className="tr-card" aria-label={title}>
       <header className="tr-card-head">
-        <h2 className="tr-card-title">{title}</h2>
+        <Heading className="tr-card-title">{title}</Heading>
         {drillTo && <Link className="tr-card-drill" to={drillTo}>{drillLabel ?? 'view →'}</Link>}
       </header>
       <div className="tr-card-body">{children}</div>

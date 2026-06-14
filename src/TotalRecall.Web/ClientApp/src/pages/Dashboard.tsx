@@ -20,7 +20,7 @@ export function Dashboard() {
   }, [refresh]);
 
   return (
-    <section className="tr-dashboard">
+    <section className="tr-dashboard" aria-label="Dashboard">
       <header className="tr-dashboard-head">
         <h1>Dashboard</h1>
         <button type="button" className="tr-refresh" onClick={refresh} aria-label="Refresh dashboard">↻ Refresh</button>
