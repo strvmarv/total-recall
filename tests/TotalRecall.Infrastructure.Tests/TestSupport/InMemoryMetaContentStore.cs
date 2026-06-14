@@ -31,6 +31,7 @@ public sealed class InMemoryMetaContentStore : IStore, IMetaStore
     // --- IMetaStore ---
     public string? GetMeta(string key) => _meta.TryGetValue(key, out var v) ? v : null;
     public void SetMeta(string key, string value) => _meta[key] = value;
+    public void DeleteMeta(string key) => _meta.Remove(key);
 
     // --- IStore surface IndexIsEmpty reaches: Count (primary) + List (parity) ---
     public int Count(Tier tier, ContentType type) => _rowCount;

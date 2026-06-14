@@ -690,6 +690,16 @@ VALUES
         cmd.Parameters.AddWithValue("$v", value);
         cmd.ExecuteNonQuery();
     }
+
+    /// <inheritdoc />
+    public void DeleteMeta(string key)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM _meta WHERE key = $k";
+        cmd.Parameters.AddWithValue("$k", key);
+        cmd.ExecuteNonQuery();
+    }
 }
 
 /// <summary>

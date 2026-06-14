@@ -20,4 +20,9 @@ public interface IMetaStore
     /// for the same key.
     /// </summary>
     void SetMeta(string key, string value);
+
+    /// <summary>
+    /// Remove a meta key. No-op if absent.
+    /// </summary>
+    void DeleteMeta(string key);
 }

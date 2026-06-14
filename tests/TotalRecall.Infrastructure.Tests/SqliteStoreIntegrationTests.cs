@@ -421,6 +421,24 @@ public sealed class SqliteStoreIntegrationTests
     }
 
     [Fact]
+    public void DeleteMeta_RemovesKey_AbsentKeyIsNoOp()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            store.SetMeta("embed.reindex.lock", "123:456");
+            Assert.Equal("123:456", store.GetMeta("embed.reindex.lock"));
+
+            store.DeleteMeta("embed.reindex.lock");
+            Assert.Null(store.GetMeta("embed.reindex.lock"));
+
+            // Deleting an absent key is a no-op (does not throw).
+            store.DeleteMeta("embed.reindex.lock");
+            Assert.Null(store.GetMeta("embed.reindex.lock"));
+        }
+    }
+
+    [Fact]
     public void Move_TransfersRowAcrossTiers()
     {
         var (conn, store) = NewStore();

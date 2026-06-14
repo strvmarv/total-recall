@@ -20,6 +20,7 @@ public sealed class InMemoryMetaOnlyStore : IStore, IMetaStore
     // --- IMetaStore (the only surface EnsureCompatiblePostgres touches) ---
     public string? GetMeta(string key) => _meta.TryGetValue(key, out var v) ? v : null;
     public void SetMeta(string key, string value) => _meta[key] = value;
+    public void DeleteMeta(string key) => _meta.Remove(key);
 
     // --- IStore Count/List: report an EMPTY index so EnsureCompatiblePostgres's
     // IndexIsEmpty check (which calls Count) sees a fresh/empty postgres DB. List
