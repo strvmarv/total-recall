@@ -122,9 +122,17 @@ function httpGetFollowRedirects(url, redirectsLeft = 5) {
   });
 }
 
-async function streamToFile(res, destPath) {
+// Stream the response body to destPath. The optional onData(chunkLength)
+// callback is invoked for every received chunk so callers can count bytes;
+// it must not throw (counting/progress reporting is best-effort and must
+// never abort the download). Error handling stays symmetric: a failure on
+// either the read or write side destroys the other and rejects.
+async function streamToFile(res, destPath, onData) {
   await new Promise((resolve, reject) => {
     const out = fs.createWriteStream(destPath);
+    if (typeof onData === 'function') {
+      res.on('data', (chunk) => { try { onData(chunk.length); } catch {} });
+    }
     res.pipe(out);
     out.on('finish', resolve);
     out.on('error', (e) => {
@@ -160,7 +168,8 @@ function extractArchive(archivePath, destDir) {
   execFileSync(tarExecutable(), ['-xzf', archivePath, '-C', destDir], { stdio: 'inherit' });
 }
 
-export async function ensureBinary({ logPrefix = '[total-recall]' } = {}) {
+export async function ensureBinary({ logPrefix = '[total-recall]', onProgress } = {}) {
+  const report = typeof onProgress === 'function' ? onProgress : () => {};
   const { platform, arch } = process;
   const rid = detectRid(platform, arch);
 
@@ -177,7 +186,9 @@ export async function ensureBinary({ logPrefix = '[total-recall]' } = {}) {
 
   const binaryPath = getBinaryPath(rid);
   if (fs.existsSync(binaryPath)) {
-    return { ok: true, path: binaryPath, rid, downloaded: false };
+    let sizeBytes = 0;
+    try { sizeBytes = fs.statSync(binaryPath).size; } catch {}
+    return { ok: true, path: binaryPath, rid, downloaded: false, sizeBytes };
   }
 
   let version;
@@ -206,9 +217,27 @@ export async function ensureBinary({ logPrefix = '[total-recall]' } = {}) {
     return { ok: false, error: `could not create ${destDir}: ${e.message}`, url };
   }
 
+  let received = 0;
   try {
     const res = await httpGetFollowRedirects(url);
-    await streamToFile(res, tmpArchivePath);
+    const total = Number(res.headers['content-length']) || 0;
+    // Throttle progress reports so we don't rewrite the lock file (a disk
+    // write) on every TCP chunk: only emit when ≥500 ms has elapsed since
+    // the last report OR ≥2 MB more has arrived.
+    let lastReportAt = 0;
+    let lastReportBytes = 0;
+    await streamToFile(res, tmpArchivePath, (len) => {
+      received += len;
+      const now = Date.now();
+      if (now - lastReportAt >= 500 || received - lastReportBytes >= 2 * 1024 * 1024) {
+        lastReportAt = now;
+        lastReportBytes = received;
+        report({ bytes: received, total, phase: 'downloading' });
+      }
+    });
+    // Final downloading tick so consumers see 100% before extraction starts.
+    report({ bytes: received, total, phase: 'downloading' });
+    report({ bytes: received, total, phase: 'extracting' });
   } catch (e) {
     try { fs.rmSync(tmpArchivePath, { force: true }); } catch {}
     return {
@@ -256,7 +285,7 @@ export async function ensureBinary({ logPrefix = '[total-recall]' } = {}) {
   }
 
   process.stderr.write(`${logPrefix} Installed at ${binaryPath}\n`);
-  return { ok: true, path: binaryPath, rid, downloaded: true };
+  return { ok: true, path: binaryPath, rid, downloaded: true, sizeBytes: received };
 }
 
 // Background provisioning ----------------------------------------------------
@@ -268,6 +297,24 @@ export async function ensureBinary({ logPrefix = '[total-recall]' } = {}) {
 // launch finds the binary and starts instantly.
 
 function provisionLockPath(rid) { return path.join(repoRoot, 'binaries', `.provision-${rid}.lock`); }
+
+// Post-provision marker the .NET server reads once to surface "first-run
+// setup complete" to the user. Lives next to the installed binary. Shape is a
+// shared contract with the server: { version, sizeBytes, durationMs, completedAtUnixMs }.
+function provisionedMarkerPath(rid) { return path.join(repoRoot, 'binaries', rid, '.provisioned.json'); }
+
+// Read in-flight download progress for start.js to display on a subsequent
+// launch while a detached provisioner is still running. The provisioner
+// rewrites the lock file with {pid, startedAt, bytes, total, phase} as bytes
+// arrive; returns {bytes, total, phase} or null if the lock is absent,
+// unparseable, or has not yet recorded progress fields.
+export function readProvisionProgress(rid) {
+  try {
+    const { bytes, total, phase } = JSON.parse(fs.readFileSync(provisionLockPath(rid), 'utf8'));
+    if (typeof bytes !== 'number' || typeof total !== 'number' || typeof phase !== 'string') return null;
+    return { bytes, total, phase };
+  } catch { return null; }
+}
 
 function provisionerAlive(lockPath) {
   try {
@@ -301,7 +348,44 @@ export function provisionInBackground({ logPrefix = '[total-recall]' } = {}) {
 async function runProvision() {
   const rid = detectRid(process.platform, process.arch);
   const lockPath = rid ? provisionLockPath(rid) : null;
-  try { await ensureBinary({ logPrefix: '[total-recall:provision]' }); }
+
+  // The parent wrote {pid, startedAt} into the lock; preserve startedAt so
+  // provisionerAlive's liveness/age checks keep working across our rewrites.
+  let startedAt = Date.now();
+  if (lockPath) {
+    try {
+      const prev = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+      if (typeof prev.startedAt === 'number') startedAt = prev.startedAt;
+    } catch { /* fall back to now */ }
+  }
+  const start = Date.now();
+
+  // Rewrite the lock as {pid, startedAt, bytes, total, phase} on each progress
+  // tick. pid + startedAt are preserved verbatim so provisionerAlive (which
+  // only reads those two) keeps reporting this provisioner as alive. Best-effort.
+  const onProgress = lockPath
+    ? ({ bytes, total, phase }) => {
+        try {
+          fs.writeFileSync(lockPath, JSON.stringify({ pid: process.pid, startedAt, bytes, total, phase }));
+        } catch { /* progress is a nicety, not load-bearing */ }
+      }
+    : undefined;
+
+  try {
+    const result = await ensureBinary({ logPrefix: '[total-recall:provision]', onProgress });
+    // Drop the post-provision marker BEFORE the finally removes the lock, so
+    // the server has a stable signal even if the lock is gone. Best-effort.
+    if (result && result.ok === true && rid) {
+      try {
+        fs.writeFileSync(provisionedMarkerPath(rid), JSON.stringify({
+          version: getVersion(),
+          sizeBytes: result.sizeBytes ?? 0,
+          durationMs: Date.now() - start,
+          completedAtUnixMs: Date.now(),
+        }));
+      } catch { /* marker is a nicety, not load-bearing */ }
+    }
+  }
   catch { /* best-effort */ }
   finally { if (lockPath) { try { fs.rmSync(lockPath, { force: true }); } catch {} } }
 }

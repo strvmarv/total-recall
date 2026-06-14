@@ -25,7 +25,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import process from 'node:process';
 
-import { detectRid, getBinaryPath, provisionInBackground } from '../scripts/fetch-binary.js';
+import { detectRid, getBinaryPath, provisionInBackground, readProvisionProgress } from '../scripts/fetch-binary.js';
 
 // Present-check fast path: never block the MCP startup handshake on the
 // ~90 MB binary download. If the binary is missing (git/marketplace install
@@ -38,6 +38,24 @@ if (!binaryPath || !fs.existsSync(binaryPath)) {
   const p = provisionInBackground({ logPrefix: '[total-recall]' });
   if (p.status === 'unsupported') {
     process.stderr.write(`[total-recall] unsupported platform: ${process.platform}/${process.arch}\n`);
+  } else if (p.status === 'in-progress') {
+    // A detached provisioner from a prior launch is still downloading. Surface
+    // its live byte-progress (written into the lock file) so the user can see
+    // it advancing instead of a static "still downloading" line.
+    const prog = readProvisionProgress(p.rid ?? rid);
+    if (prog && prog.phase === 'extracting') {
+      process.stderr.write('[total-recall] first-run setup: extracting memory engine…\n');
+    } else if (prog && prog.total > 0) {
+      const mb = (n) => (n / (1024 * 1024)).toFixed(1);
+      const pct = Math.floor((prog.bytes / prog.total) * 100);
+      process.stderr.write(
+        `[total-recall] first-run setup: downloading memory engine — ${mb(prog.bytes)}/${mb(prog.total)} MB (${pct}%)…\n`);
+    } else {
+      process.stderr.write(
+        '[total-recall] First-run setup: downloading the memory engine (~90 MB) in the background.\n' +
+        '[total-recall] Memory becomes available once it finishes — reload the plugin or restart your\n' +
+        '[total-recall] session in a minute. (One-time; only the git/marketplace install path needs it.)\n');
+    }
   } else {
     process.stderr.write(
       '[total-recall] First-run setup: downloading the memory engine (~90 MB) in the background.\n' +
