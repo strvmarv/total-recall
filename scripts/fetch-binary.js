@@ -138,6 +138,18 @@ async function streamToFile(res, destPath) {
   });
 }
 
+// Resolve the tar executable. On Windows a GNU tar earlier on PATH (e.g.
+// from Git for Windows / msys) treats an absolute destination like
+// `C:\...` as a remote host spec ("Cannot connect to C:"), so we pin to
+// the bundled bsdtar at %SystemRoot%\System32\tar.exe when present.
+function tarExecutable() {
+  if (process.platform === 'win32') {
+    const sysTar = path.join(process.env.SystemRoot || 'C:\Windows', 'System32', 'tar.exe');
+    if (fs.existsSync(sysTar)) return sysTar;
+  }
+  return 'tar';
+}
+
 // Extract a .tar.gz archive into destDir. destDir must already exist.
 // Uses system `tar` (GNU tar on Linux, BSD tar on macOS, bsdtar/libarchive
 // shipped as `tar.exe` on Windows 10+ since build 17063 / 1803). All
@@ -145,7 +157,7 @@ async function streamToFile(res, destPath) {
 // so there is no per-platform branch and no PowerShell fallback. Throws
 // on failure — callers wrap in try/catch and clean up the archive.
 function extractArchive(archivePath, destDir) {
-  execFileSync('tar', ['-xzf', archivePath, '-C', destDir], { stdio: 'inherit' });
+  execFileSync(tarExecutable(), ['-xzf', archivePath, '-C', destDir], { stdio: 'inherit' });
 }
 
 export async function ensureBinary({ logPrefix = '[total-recall]' } = {}) {
