@@ -29,7 +29,8 @@ export function KbIngest({ onIngested }: { onIngested: () => void }) {
     setBusy(true); setError(null); setMessage(null);
     try {
       const r = await api.tool<KbIngestDirResult>('kb_ingest_dir', { path: dirPath.trim(), glob: glob.trim() || undefined });
-      setMessage(`Ingested ${r.document_count} documents (${r.total_chunks} chunks).`);
+      const errSuffix = r.errors.length > 0 ? ` (${r.errors.length} file(s) failed)` : '';
+      setMessage(`Ingested ${r.document_count} documents (${r.total_chunks} chunks)${errSuffix}.`);
       setDirPath(''); setGlob('');
       onIngested();
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }

@@ -38,8 +38,8 @@ export function KbCollectionsTable({ collections, onChanged }: {
               <td>
                 {!pending && (
                   <>
-                    <button type="button" className="tr-btn" disabled={busy} onClick={() => setPending({ title: `Refresh "${c.name}"?`, body: 'Re-ingests from the source path.', confirmLabel: 'Refresh', run: () => api.tool('kb_refresh', { collection: c.id }) })}>Refresh</button>{' '}
-                    <button type="button" className="tr-btn tr-btn-danger" disabled={busy} onClick={() => setPending({ title: `Remove "${c.name}"?`, body: 'Deletes the collection and all its chunks. This cannot be undone.', confirmLabel: 'Remove', danger: true, run: () => api.tool('kb_remove', { id: c.id }) })}>Remove</button>
+                    <button type="button" className="tr-btn" disabled={busy} onClick={() => { setError(null); setPending({ title: `Refresh "${c.name}"?`, body: 'Re-ingests from the source path.', confirmLabel: 'Refresh', run: () => api.tool('kb_refresh', { collection: c.id }) }); }}>Refresh</button>{' '}
+                    <button type="button" className="tr-btn tr-btn-danger" disabled={busy} onClick={() => { setError(null); setPending({ title: `Remove "${c.name}"?`, body: 'Deletes the collection and all its chunks. This cannot be undone.', confirmLabel: 'Remove', danger: true, run: () => api.tool('kb_remove', { id: c.id }) }); }}>Remove</button>
                   </>
                 )}
               </td>

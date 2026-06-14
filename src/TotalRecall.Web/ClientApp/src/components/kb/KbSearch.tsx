@@ -13,7 +13,7 @@ export function KbSearch() {
   async function run(e: React.FormEvent) {
     e.preventDefault();
     if (!query.trim()) return;
-    setBusy(true); setError(null);
+    setBusy(true); setError(null); setResult(null);
     try { setResult(await api.tool<KbSearchResult>('kb_search', { query: query.trim() })); }
     catch (err) { setError(err instanceof Error ? err.message : String(err)); }
     finally { setBusy(false); }

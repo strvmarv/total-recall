@@ -34,10 +34,12 @@ describe('KbCollectionsTable', () => {
   });
 
   it('refreshes a collection after confirm', async () => {
+    const onChanged = vi.fn();
     const spy = vi.spyOn(api, 'tool').mockResolvedValue({ collection_id: 'c1', files: 1, chunks: 42, refreshed: true });
-    render(<KbCollectionsTable collections={cols} onChanged={() => {}} />);
+    render(<KbCollectionsTable collections={cols} onChanged={onChanged} />);
     await userEvent.click(screen.getByRole('button', { name: /refresh/i }));
     await userEvent.click(screen.getByRole('button', { name: 'Refresh' })); // confirm
     expect(spy).toHaveBeenCalledWith('kb_refresh', { collection: 'c1' });
+    await vi.waitFor(() => expect(onChanged).toHaveBeenCalled());
   });
 });
