@@ -45,6 +45,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using TotalRecall.Core;
+using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Storage;
 using TotalRecall.Infrastructure.Sync;
 
@@ -81,18 +82,21 @@ public sealed class StatusHandler : IToolHandler
     private readonly ISessionLifecycle _sessionLifecycle;
     private readonly StatusOptions _options;
     private readonly SyncBacklogReader? _syncBacklog;
+    private readonly ReindexProgress? _reindexProgress;
 
     public StatusHandler(
         IStore store,
         ISessionLifecycle sessionLifecycle,
         StatusOptions options,
-        SyncBacklogReader? syncBacklog = null)
+        SyncBacklogReader? syncBacklog = null,
+        ReindexProgress? reindexProgress = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _sessionLifecycle = sessionLifecycle
             ?? throw new ArgumentNullException(nameof(sessionLifecycle));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _syncBacklog = syncBacklog;
+        _reindexProgress = reindexProgress;
     }
 
     public string Name => "status";
@@ -209,6 +213,27 @@ public sealed class StatusHandler : IToolHandler
             }
         }
 
+        // Background-task surfacing (v3.0.4). status MAY surface terminal states
+        // too (running/completed/failed); only Idle (or no progress) yields null.
+        // setup is null here — the provisioned notice is consumed by session_start.
+        BackgroundTasksDto? backgroundTasks = null;
+        if (_reindexProgress is not null)
+        {
+            var snap = _reindexProgress.Snapshot();
+            string? state = snap.State switch
+            {
+                ReindexProgress.Phase.Running => "running",
+                ReindexProgress.Phase.Completed => "completed",
+                ReindexProgress.Phase.Failed => "failed",
+                _ => null, // Idle → not surfaced
+            };
+            if (state is not null)
+            {
+                var reindex = new ReindexStatusDto(state, snap.Done, snap.Total, snap.Model);
+                backgroundTasks = new BackgroundTasksDto(reindex, Setup: null);
+            }
+        }
+
         var dto = new StatusResultDto(
             TierSizes: tierSizes,
             KnowledgeBase: kb,
@@ -216,7 +241,8 @@ public sealed class StatusHandler : IToolHandler
             Embedding: embedding,
             Activity: activity,
             LastCompaction: lastCompaction,
-            SyncBacklog: syncBacklog);
+            SyncBacklog: syncBacklog,
+            BackgroundTasks: backgroundTasks);
 
         var jsonText = JsonSerializer.Serialize(dto, JsonContext.Default.StatusResultDto);
 

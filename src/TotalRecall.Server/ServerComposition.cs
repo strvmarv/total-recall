@@ -134,7 +134,8 @@ public static class ServerComposition
         Infrastructure.Sync.SyncQueue? syncQueue = null,
         CompactionLog? compactionLogWriter = null,
         Infrastructure.Sync.SyncBacklogReader? syncBacklog = null,
-        int pinnedMaxChars = PinnedTierLimits.DefaultMaxContentChars)
+        int pinnedMaxChars = PinnedTierLimits.DefaultMaxContentChars,
+        ReindexProgress? reindexProgress = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(vectors);
@@ -195,7 +196,7 @@ public static class ServerComposition
         registry.Register(new ConfigSetHandler());
 
         // ---- Misc (4) ----
-        registry.Register(new StatusHandler(store, sessionLifecycle, statusOptions, syncBacklog));
+        registry.Register(new StatusHandler(store, sessionLifecycle, statusOptions, syncBacklog, reindexProgress));
         registry.Register(new ImportHostHandler()); // self-bootstraps the 7 importers
         registry.Register(new CompactNowHandler());
         registry.Register(new MigrateToRemoteHandler()); // self-bootstraps source+target stores
@@ -432,7 +433,9 @@ public static class ServerComposition
                 autoDemoteMinInjections: cfg.Compaction.AutoDemoteMinInjections,
                 taskWeight: cfg.Tiers.Hot.TaskWeight,
                 retrievalStatsSince: retrievalLog.GetStatsSince,
-                cacheStats: toolCacheStore.GetSessionStats);
+                cacheStats: toolCacheStore.GetSessionStats,
+                reindexProgress: reindexProgress,
+                binaryDir: AppContext.BaseDirectory);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
@@ -446,7 +449,8 @@ public static class ServerComposition
                 retrievalLog: retrievalLog,
                 compactionLogWriter: compactionLog,
                 syncBacklog: new Infrastructure.Sync.SyncBacklogReader(conn),
-                pinnedMaxChars: ResolvePinnedMaxChars(cfg));
+                pinnedMaxChars: ResolvePinnedMaxChars(cfg),
+                reindexProgress: reindexProgress);
 
             registry.Register(new UsageStatusHandler(usageQuery));
 
@@ -526,7 +530,8 @@ public static class ServerComposition
                 maxEntries: cfg.Tiers.Hot.MaxEntries,
                 embedder: embedder,
                 autoDemoteMinInjections: cfg.Compaction.AutoDemoteMinInjections,
-                taskWeight: cfg.Tiers.Hot.TaskWeight);
+                taskWeight: cfg.Tiers.Hot.TaskWeight,
+                binaryDir: AppContext.BaseDirectory); // reindex stays null — postgres has no local background reindex
 
             var statusOptions = new StatusOptions(
                 DbPath: connStr,
@@ -709,7 +714,9 @@ public static class ServerComposition
                 autoDemoteMinInjections: cfg.Compaction.AutoDemoteMinInjections,
                 taskWeight: cfg.Tiers.Hot.TaskWeight,
                 retrievalStatsSince: retrievalLog.GetStatsSince,
-                cacheStats: toolCacheStore.GetSessionStats);
+                cacheStats: toolCacheStore.GetSessionStats,
+                reindexProgress: reindexProgress,
+                binaryDir: AppContext.BaseDirectory);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
@@ -726,7 +733,8 @@ public static class ServerComposition
                 syncQueue: syncQueue,
                 compactionLogWriter: compactionLog,
                 syncBacklog: new Infrastructure.Sync.SyncBacklogReader(conn),
-                pinnedMaxChars: ResolvePinnedMaxChars(cfg));
+                pinnedMaxChars: ResolvePinnedMaxChars(cfg),
+                reindexProgress: reindexProgress);
 
             registry.Register(new UsageStatusHandler(usageQuery));
 

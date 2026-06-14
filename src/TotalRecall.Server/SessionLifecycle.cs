@@ -57,6 +57,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
     private readonly double _taskWeight;
     private readonly Func<long, (int Count, double AvgLatencyMs)>? _retrievalStatsSince;
     private readonly Func<(long Hits, long Misses, long TokensSaved)>? _cacheStats;
+    private readonly ReindexProgress? _reindexProgress;
+    private readonly string? _binaryDir;
 
     /// <summary>Phase 3 idea 2a — advisory thresholds for RefreshAsync recommendations.</summary>
     private const double SessionRefreshThresholdMinutes = 30;
@@ -83,7 +85,9 @@ public sealed class SessionLifecycle : ISessionLifecycle
         int autoDemoteMinInjections = 10,
         double taskWeight = 0.0,
         Func<long, (int Count, double AvgLatencyMs)>? retrievalStatsSince = null,
-        Func<(long Hits, long Misses, long TokensSaved)>? cacheStats = null)
+        Func<(long Hits, long Misses, long TokensSaved)>? cacheStats = null,
+        ReindexProgress? reindexProgress = null,
+        string? binaryDir = null)
     {
         ArgumentNullException.ThrowIfNull(importers);
         ArgumentNullException.ThrowIfNull(store);
@@ -104,6 +108,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
         _taskWeight = taskWeight >= 0 && taskWeight <= 1 ? taskWeight : 0.0;
         _retrievalStatsSince = retrievalStatsSince;
         _cacheStats = cacheStats;
+        _reindexProgress = reindexProgress;
+        _binaryDir = binaryDir;
     }
 
     /// <inheritdoc />
@@ -313,7 +319,29 @@ public sealed class SessionLifecycle : ISessionLifecycle
             .Where(p => p.Length > 0);
         var context = string.Join("\n\n", parts);
 
-        // 6. Hints.
+        // 6. Background-task surfacing (v3.0.4). Host-agnostic: surfaced both as
+        // structured backgroundTasks fields AND as hints the skill can relay.
+        //
+        // reindex — only surface the Running state at session start (terminal
+        // states aren't actionable here). setup — one-time provisioned notice,
+        // consumed (file deleted) by ReadAndConsume on first read.
+        ReindexStatusDto? reindexStatus = null;
+        if (_reindexProgress is not null)
+        {
+            var snap = _reindexProgress.Snapshot();
+            if (snap.State == ReindexProgress.Phase.Running)
+                reindexStatus = new ReindexStatusDto("running", snap.Done, snap.Total, snap.Model);
+        }
+
+        var setupNotice = _binaryDir is not null
+            ? ProvisionNotice.ReadAndConsume(_binaryDir)
+            : null;
+
+        var backgroundTasks = (reindexStatus is null && setupNotice is null)
+            ? null
+            : new BackgroundTasksDto(reindexStatus, setupNotice);
+
+        // 7. Hints.
         var hints = GenerateHints(_store, warmPromotedIds);
         // Soft-cap warning: when pinned entries consume strictly more than half the
         // budget, advise review. Multiplication avoids integer-division skew on odd
@@ -330,6 +358,41 @@ public sealed class SessionLifecycle : ISessionLifecycle
                     SuggestedAction = "memory_unpin",
                 },
             }.Concat(hints).ToList();
+        }
+
+        // Background-task hints. Prepend so they survive the 5-hint cap applied
+        // inside GenerateHints (the reindex hint is HIGH priority and must not be
+        // dropped). The setup notice is LOW priority but rare and one-time.
+        var bgHints = new List<Hint>();
+        if (reindexStatus is not null)
+        {
+            // Highest priority used by existing code is 1; reuse it so this rides
+            // at the top of the actionable list.
+            bgHints.Add(new Hint
+            {
+                Priority = 1,
+                Type = "reindex_in_progress",
+                Summary = $"Embedding re-index in progress ({reindexStatus.Done}/{reindexStatus.Total}); "
+                    + "local semantic retrieval is degraded until it completes. "
+                    + "It runs in the background — the server is fully usable.",
+            });
+        }
+        if (setupNotice is not null)
+        {
+            var mb = setupNotice.SizeBytes / 1024.0 / 1024.0;
+            var seconds = setupNotice.DurationMs / 1000.0;
+            bgHints.Add(new Hint
+            {
+                Priority = 4,
+                Type = "setup_complete",
+                Summary = $"First-run setup complete — downloaded the memory engine v{setupNotice.Version} "
+                    + $"({mb.ToString("0.#", CultureInfo.InvariantCulture)} MB) in "
+                    + $"{seconds.ToString("0.#", CultureInfo.InvariantCulture)}s.",
+            });
+        }
+        if (bgHints.Count > 0)
+        {
+            hints = bgHints.Concat(hints).ToList();
         }
 
         // 7. Last session age (humanized). Prefer usage_events MAX(ts) — that
@@ -362,7 +425,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
             RegressionAlerts: null, // TODO(Plan 5+): regression detection not ported
             Storage: _storageMode,
             HotContextTruncated: hotContextTruncated,
-            SessionAgeHint: null); // fresh session, no hint needed
+            SessionAgeHint: null, // fresh session, no hint needed
+            BackgroundTasks: backgroundTasks);
     }
 
     private void RunWarmSweep()
@@ -1340,7 +1404,8 @@ public sealed record SessionInitResult(
     [property: JsonPropertyName("regressionAlerts")] IReadOnlyList<RegressionAlert>? RegressionAlerts,
     [property: JsonPropertyName("storage")] string Storage,
     [property: JsonPropertyName("hotContextTruncated")] bool HotContextTruncated,
-    [property: JsonPropertyName("sessionAgeHint")] string? SessionAgeHint);
+    [property: JsonPropertyName("sessionAgeHint")] string? SessionAgeHint,
+    [property: JsonPropertyName("backgroundTasks")] BackgroundTasksDto? BackgroundTasks = null);
 
 /// <summary>One row in the host-importer summary. Skill fields default to
 /// zero / empty for legacy memory-only importers; the skill import sweep

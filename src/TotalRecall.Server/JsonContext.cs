@@ -320,7 +320,8 @@ public sealed record StatusResultDto(
     [property: JsonPropertyName("embedding")] EmbeddingStatusDto Embedding,
     [property: JsonPropertyName("activity")] ActivityStatusDto Activity,
     [property: JsonPropertyName("lastCompaction")] LastCompactionDto? LastCompaction,
-    [property: JsonPropertyName("syncBacklog")] SyncBacklogDto? SyncBacklog);
+    [property: JsonPropertyName("syncBacklog")] SyncBacklogDto? SyncBacklog,
+    [property: JsonPropertyName("backgroundTasks")] BackgroundTasksDto? BackgroundTasks = null);
 
 // Outbound sync queue + skill_usage_events backlog visibility. Null when the
 // handler doesn't have a SQLite connection (e.g. tests, cortex-only modes).
@@ -374,6 +375,30 @@ public sealed record LastCompactionDto(
     [property: JsonPropertyName("from")] string From,
     [property: JsonPropertyName("to")] string To,
     [property: JsonPropertyName("reason")] string Reason);
+
+// ---------- v3.0.4: background-task surfacing ----------
+//
+// Host-agnostic, MCP-standard background-task progress relayed through
+// session_start (SessionInitResult.BackgroundTasks) and status
+// (StatusResultDto.BackgroundTasks). Two tasks are surfaced:
+//   - reindex — in-process embedding re-index progress (ReindexProgress).
+//   - setup   — one-time "first-run binary download complete" notice, read
+//               from the Node provisioner's `.provisioned.json` marker.
+public sealed record BackgroundTasksDto(
+    [property: JsonPropertyName("reindex")] ReindexStatusDto? Reindex,
+    [property: JsonPropertyName("setup")]   SetupNoticeDto?   Setup);
+
+public sealed record ReindexStatusDto(
+    [property: JsonPropertyName("state")] string State,   // "running" | "completed" | "failed"
+    [property: JsonPropertyName("done")] long Done,
+    [property: JsonPropertyName("total")] long Total,
+    [property: JsonPropertyName("model")] string Model);
+
+public sealed record SetupNoticeDto(
+    [property: JsonPropertyName("event")] string Event,        // "provisioned"
+    [property: JsonPropertyName("version")] string Version,
+    [property: JsonPropertyName("sizeBytes")] long SizeBytes,
+    [property: JsonPropertyName("durationMs")] long DurationMs);
 
 // ---- Task 6.0a: memory admin DTOs ----
 //
@@ -875,6 +900,11 @@ public sealed record MigrateToRemoteResultDto(
 [JsonSerializable(typeof(EmbeddingStatusDto))]
 [JsonSerializable(typeof(ActivityStatusDto))]
 [JsonSerializable(typeof(LastCompactionDto))]
+// ---- v3.0.4: background-task surfacing ----
+[JsonSerializable(typeof(BackgroundTasksDto))]
+[JsonSerializable(typeof(ReindexStatusDto))]
+[JsonSerializable(typeof(SetupNoticeDto))]
+[JsonSerializable(typeof(ProvisionMarker))]
 // ---- Task 6.0a: memory admin DTOs ----
 [JsonSerializable(typeof(MemoryMoveResultDto))]
 [JsonSerializable(typeof(MemoryInspectResultDto))]

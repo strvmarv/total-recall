@@ -62,9 +62,10 @@ public sealed class StatusHandlerTests
     private static async Task<JsonElement> RunAsync(
         FakeStore store,
         FakeSessionLifecycle lifecycle,
-        StatusOptions options)
+        StatusOptions options,
+        TotalRecall.Infrastructure.Embedding.ReindexProgress? reindexProgress = null)
     {
-        var handler = new StatusHandler(store, lifecycle, options);
+        var handler = new StatusHandler(store, lifecycle, options, syncBacklog: null, reindexProgress: reindexProgress);
         var result = await handler.ExecuteAsync(null, CancellationToken.None);
         Assert.False(result.IsError ?? false);
         return JsonDocument.Parse(result.Content[0].Text).RootElement.Clone();
@@ -353,5 +354,78 @@ public sealed class StatusHandlerTests
         var ts = root.GetProperty("tierSizes");
         Assert.Equal(3, ts.GetProperty("pinned_memories").GetInt32());
         Assert.Equal(7, ts.GetProperty("pinned_knowledge").GetInt32());
+    }
+
+    // ---------- v3.0.4: background-task surfacing ----------
+
+    [Fact]
+    public async Task BackgroundTasks_Null_WhenNoReindexProgress()
+    {
+        var store = new FakeStore();
+
+        var root = await RunAsync(store, new FakeSessionLifecycle(), Options());
+
+        // No progress wired -> emitted as literal JSON null (Never default).
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("backgroundTasks").ValueKind);
+    }
+
+    [Fact]
+    public async Task BackgroundTasks_Null_WhenReindexIdle()
+    {
+        var store = new FakeStore();
+        var progress = new TotalRecall.Infrastructure.Embedding.ReindexProgress();
+
+        var root = await RunAsync(store, new FakeSessionLifecycle(), Options(), reindexProgress: progress);
+
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("backgroundTasks").ValueKind);
+    }
+
+    [Fact]
+    public async Task BackgroundTasks_Running_SurfacesReindex()
+    {
+        var store = new FakeStore();
+        var progress = new TotalRecall.Infrastructure.Embedding.ReindexProgress();
+        progress.BeginRunning(total: 200, model: "bge", startedAtUnixMs: 1);
+        progress.Advance(40);
+
+        var root = await RunAsync(store, new FakeSessionLifecycle(), Options(), reindexProgress: progress);
+
+        var bg = root.GetProperty("backgroundTasks");
+        var reindex = bg.GetProperty("reindex");
+        Assert.Equal("running", reindex.GetProperty("state").GetString());
+        Assert.Equal(40, reindex.GetProperty("done").GetInt64());
+        Assert.Equal(200, reindex.GetProperty("total").GetInt64());
+        Assert.Equal("bge", reindex.GetProperty("model").GetString());
+        // setup is consumed by session_start, never surfaced through status.
+        Assert.Equal(JsonValueKind.Null, bg.GetProperty("setup").ValueKind);
+    }
+
+    [Fact]
+    public async Task BackgroundTasks_Completed_SurfacesTerminalState()
+    {
+        var store = new FakeStore();
+        var progress = new TotalRecall.Infrastructure.Embedding.ReindexProgress();
+        progress.BeginRunning(total: 10, model: "m", startedAtUnixMs: 1);
+        progress.Advance(10);
+        progress.Complete();
+
+        var root = await RunAsync(store, new FakeSessionLifecycle(), Options(), reindexProgress: progress);
+
+        var reindex = root.GetProperty("backgroundTasks").GetProperty("reindex");
+        Assert.Equal("completed", reindex.GetProperty("state").GetString());
+    }
+
+    [Fact]
+    public async Task BackgroundTasks_Failed_SurfacesTerminalState()
+    {
+        var store = new FakeStore();
+        var progress = new TotalRecall.Infrastructure.Embedding.ReindexProgress();
+        progress.BeginRunning(total: 10, model: "m", startedAtUnixMs: 1);
+        progress.Fail("boom");
+
+        var root = await RunAsync(store, new FakeSessionLifecycle(), Options(), reindexProgress: progress);
+
+        var reindex = root.GetProperty("backgroundTasks").GetProperty("reindex");
+        Assert.Equal("failed", reindex.GetProperty("state").GetString());
     }
 }

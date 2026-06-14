@@ -243,7 +243,9 @@ public sealed class SessionLifecycleTests
         int tokenBudget = 4000,
         int maxEntries = 50,
         Func<long, (int Count, double AvgLatencyMs)>? retrievalStatsSince = null,
-        Func<(long Hits, long Misses, long TokensSaved)>? cacheStats = null)
+        Func<(long Hits, long Misses, long TokensSaved)>? cacheStats = null,
+        TotalRecall.Infrastructure.Embedding.ReindexProgress? reindexProgress = null,
+        string? binaryDir = null)
     {
         return new SessionLifecycle(
             (importers ?? Array.Empty<IImporter>()).ToList(),
@@ -258,7 +260,9 @@ public sealed class SessionLifecycleTests
             tokenBudget: tokenBudget,
             maxEntries: maxEntries,
             retrievalStatsSince: retrievalStatsSince,
-            cacheStats: cacheStats);
+            cacheStats: cacheStats,
+            reindexProgress: reindexProgress,
+            binaryDir: binaryDir);
     }
 
     private sealed class FakeSkillImportService : ISkillImportService
@@ -1395,5 +1399,178 @@ public sealed class SessionLifecycleTests
         // Guard: confirm the header is truly gone — content in warm context is acceptable.
         var headerIdx = result2.Context.IndexOf("## Pinned directives (always follow)", StringComparison.Ordinal);
         Assert.Equal(-1, headerIdx);
+    }
+
+    // ---------- v3.0.4: background-task surfacing (reindex + setup) ----------
+
+    private static string NewTempDir()
+    {
+        var dir = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(),
+            "total-recall-session-bg-tests-" + Guid.NewGuid());
+        System.IO.Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    [Fact]
+    public async Task SessionInit_ReindexRunning_SurfacesBackgroundTask_AndHint()
+    {
+        var progress = new TotalRecall.Infrastructure.Embedding.ReindexProgress();
+        progress.BeginRunning(total: 100, model: "m", startedAtUnixMs: 1);
+        progress.Advance(10); // done=10
+
+        var lifecycle = BuildLifecycle(new FakeStore(), reindexProgress: progress);
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        Assert.NotNull(result.BackgroundTasks);
+        Assert.NotNull(result.BackgroundTasks!.Reindex);
+        Assert.Equal("running", result.BackgroundTasks.Reindex!.State);
+        Assert.Equal(10, result.BackgroundTasks.Reindex.Done);
+        Assert.Equal(100, result.BackgroundTasks.Reindex.Total);
+        Assert.Equal("m", result.BackgroundTasks.Reindex.Model);
+        Assert.Null(result.BackgroundTasks.Setup);
+
+        Assert.Contains(result.Hints, h => h.Type == "reindex_in_progress");
+    }
+
+    [Fact]
+    public async Task SessionInit_NoReindexProgress_NoMarker_BackgroundTasksNull_NoReindexHint()
+    {
+        var lifecycle = BuildLifecycle(new FakeStore());
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        Assert.Null(result.BackgroundTasks);
+        Assert.DoesNotContain(result.Hints, h => h.Type == "reindex_in_progress");
+        Assert.DoesNotContain(result.Hints, h => h.Type == "setup_complete");
+    }
+
+    [Fact]
+    public async Task SessionInit_ReindexIdle_NotSurfaced()
+    {
+        // A fresh (Idle) progress object must not surface at session start.
+        var progress = new TotalRecall.Infrastructure.Embedding.ReindexProgress();
+        var lifecycle = BuildLifecycle(new FakeStore(), reindexProgress: progress);
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        Assert.Null(result.BackgroundTasks);
+        Assert.DoesNotContain(result.Hints, h => h.Type == "reindex_in_progress");
+    }
+
+    [Fact]
+    public async Task SessionInit_ProvisionedMarkerPresent_SurfacesSetupOnce_AndHint()
+    {
+        var dir = NewTempDir();
+        try
+        {
+            var path = System.IO.Path.Combine(dir, ProvisionNotice.MarkerFileName);
+            System.IO.File.WriteAllText(path,
+                "{\"version\":\"3.0.4\",\"sizeBytes\":12582912,\"durationMs\":4200,\"completedAtUnixMs\":1700000000000}");
+
+            var lifecycle1 = BuildLifecycle(new FakeStore(), binaryDir: dir);
+            var result1 = await lifecycle1.EnsureInitializedAsync();
+
+            Assert.NotNull(result1.BackgroundTasks);
+            Assert.NotNull(result1.BackgroundTasks!.Setup);
+            Assert.Equal("provisioned", result1.BackgroundTasks.Setup!.Event);
+            Assert.Equal("3.0.4", result1.BackgroundTasks.Setup.Version);
+            Assert.Equal(12582912L, result1.BackgroundTasks.Setup.SizeBytes);
+            Assert.Equal(4200L, result1.BackgroundTasks.Setup.DurationMs);
+            Assert.Null(result1.BackgroundTasks.Reindex);
+            Assert.Contains(result1.Hints, h => h.Type == "setup_complete");
+
+            // One-time: the marker is consumed (deleted). A fresh lifecycle over
+            // the same dir must NOT surface a setup notice again.
+            Assert.False(System.IO.File.Exists(path));
+            var lifecycle2 = BuildLifecycle(new FakeStore(), binaryDir: dir);
+            var result2 = await lifecycle2.EnsureInitializedAsync();
+
+            Assert.Null(result2.BackgroundTasks);
+            Assert.DoesNotContain(result2.Hints, h => h.Type == "setup_complete");
+        }
+        finally
+        {
+            System.IO.Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task SessionInit_ReindexAndSetupBoth_SurfacedTogether()
+    {
+        var dir = NewTempDir();
+        try
+        {
+            var path = System.IO.Path.Combine(dir, ProvisionNotice.MarkerFileName);
+            System.IO.File.WriteAllText(path,
+                "{\"version\":\"3.0.4\",\"sizeBytes\":1048576,\"durationMs\":900,\"completedAtUnixMs\":1700000000000}");
+
+            var progress = new TotalRecall.Infrastructure.Embedding.ReindexProgress();
+            progress.BeginRunning(total: 50, model: "bge", startedAtUnixMs: 1);
+            progress.Advance(5);
+
+            var lifecycle = BuildLifecycle(new FakeStore(), reindexProgress: progress, binaryDir: dir);
+            var result = await lifecycle.EnsureInitializedAsync();
+
+            Assert.NotNull(result.BackgroundTasks);
+            Assert.NotNull(result.BackgroundTasks!.Reindex);
+            Assert.NotNull(result.BackgroundTasks.Setup);
+            Assert.Equal("running", result.BackgroundTasks.Reindex!.State);
+            Assert.Equal("provisioned", result.BackgroundTasks.Setup!.Event);
+            Assert.Contains(result.Hints, h => h.Type == "reindex_in_progress");
+            Assert.Contains(result.Hints, h => h.Type == "setup_complete");
+        }
+        finally
+        {
+            System.IO.Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task SessionInit_ReindexHint_SurvivesFiveHintCap()
+    {
+        // Fill the regular hint pipeline to its cap of 5 (2 corrections +
+        // 2 preferences for P1 + frequents for P2), then assert the prepended
+        // reindex hint still appears (it is not subject to the cap).
+        var store = new FakeStore();
+        store.ByMetadata[FakeStore.MetaKey(Tier.Warm, ContentType.Memory,
+            new Dictionary<string, string> { ["entry_type"] = "correction" })] = new()
+        {
+            MakeEntry("c1", "c-one", accessCount: 9),
+            MakeEntry("c2", "c-two", accessCount: 8),
+        };
+        store.Entries[(Tier.Warm, ContentType.Memory)] = new()
+        {
+            MakeEntry("f1", "f-one", accessCount: 7),
+            MakeEntry("f2", "f-two", accessCount: 6),
+        };
+
+        var progress = new TotalRecall.Infrastructure.Embedding.ReindexProgress();
+        progress.BeginRunning(total: 100, model: "m", startedAtUnixMs: 1);
+
+        var lifecycle = BuildLifecycle(store, reindexProgress: progress);
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        Assert.Contains(result.Hints, h => h.Type == "reindex_in_progress");
+        // The reindex hint is prepended FIRST so the skill sees it at the top.
+        Assert.Equal("reindex_in_progress", result.Hints[0].Type);
+    }
+
+    [Fact]
+    public async Task SessionInit_BackgroundTasks_SerializeViaSourceGen()
+    {
+        var progress = new TotalRecall.Infrastructure.Embedding.ReindexProgress();
+        progress.BeginRunning(total: 100, model: "m", startedAtUnixMs: 1);
+        progress.Advance(25);
+
+        var lifecycle = BuildLifecycle(new FakeStore(), reindexProgress: progress);
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        var json = System.Text.Json.JsonSerializer.Serialize(result, JsonContext.Default.SessionInitResult);
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        var bg = doc.RootElement.GetProperty("backgroundTasks");
+        var reindex = bg.GetProperty("reindex");
+        Assert.Equal("running", reindex.GetProperty("state").GetString());
+        Assert.Equal(25, reindex.GetProperty("done").GetInt64());
+        Assert.Equal(100, reindex.GetProperty("total").GetInt64());
+        Assert.Equal("m", reindex.GetProperty("model").GetString());
     }
 }
