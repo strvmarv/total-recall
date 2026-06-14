@@ -27,6 +27,33 @@
 //      the client sends `shutdown`. Disposal of the composition handles
 //      releases the Sqlite connection.
 //
+// ============================================================================
+// BOOT-PATH RULE — DO NOT BLOCK THE MCP HANDSHAKE ON LENGTHY WORK.
+// ============================================================================
+// Steps 1-3 run BEFORE step 4 begins answering the MCP `initialize` handshake.
+// The MCP client (e.g. Claude Code) enforces that handshake with a HARD
+// wall-clock startup timeout: no retry, and writing to stderr does NOT extend
+// it. So everything from Main() down through ServerComposition.OpenProduction()
+// must complete fast and bounded — typically a second or two, never tens of
+// seconds.
+//
+// Any operation whose cost scales with user data or the network — first-run
+// binary download, embedder re-index / model-change migration, large host
+// imports — MUST be deferred to the background and self-heal, NOT run
+// synchronously on this path. Boot degraded-but-functional and converge later;
+// never make the server's very ability to start depend on a long job finishing.
+//
+// This is not hypothetical. v3.0.2's cortex auto-migration re-embedded the whole
+// local DB synchronously inside OpenProduction; on a populated DB (tens of
+// thousands of rows) that blew the startup timeout, and because the re-index was
+// atomic it rolled back and re-ran on EVERY boot -> an unrecoverable boot loop.
+// v3.0.4 moved the re-index to a background worker for exactly this reason.
+// Prior art for the pattern already exists: the first-run binary download
+// backgrounds in bin/start.js / scripts/fetch-binary.js, and host import
+// backgrounds in SessionLifecycle (session_start reports zero immediately).
+// When you add new startup work, follow that pattern.
+// ============================================================================
+//
 // Plan 5 carry-forward closures:
 //   #1 — production composition root: closed here.
 //   #7 — sync-over-async at CliApp dispatch: closed by the Main-is-async
@@ -142,6 +169,13 @@ internal static class Program
 
         // Step 3: open production composition (shared Sqlite connection +
         // all Infrastructure singletons + populated ToolRegistry).
+        //
+        // INVARIANT: OpenProduction MUST return fast and bounded — step 4 below
+        // starts answering the MCP handshake, which has a hard, no-retry startup
+        // timeout. Do NOT add data-/network-scaled work (re-index, downloads,
+        // bulk imports) on this synchronous path; defer it to a background worker
+        // and boot degraded-but-functional. See the BOOT-PATH RULE in the file
+        // header for the v3.0.2 boot-loop that motivated this.
         ServerCompositionHandles handles;
         try
         {
