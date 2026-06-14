@@ -12,6 +12,7 @@ public sealed class ToolAllowlistTests
     [InlineData("memory_search")]
     [InlineData("memory_list")]
     [InlineData("memory_recent")]
+    [InlineData("memory_history")]
     [InlineData("memory_get")]
     [InlineData("memory_inspect")]
     [InlineData("kb_list_collections")]
