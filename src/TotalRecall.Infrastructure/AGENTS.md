@@ -119,17 +119,27 @@ to the repo / not in Git LFS).
 
 `bge-small-en-v1.5` uses **CLS pooling** (not mean pooling) and an asymmetric query prefix:
 search queries are embedded with the `bge` retrieval-instruction prefix while stored documents are
-not. After swapping the local embedder the startup guard (`EmbedderMigration`, called from
-`ServerComposition.OpenSqlite`/`OpenPostgres`/`OpenCortexCore`) detects a fingerprint **mismatch** —
-or an **unstamped-but-populated** index (vectors present but no fingerprint, e.g. a cortex DB created
-before stamping was wired into that path) — and acts per `embedding.on_model_change` (`OnModelChange`,
-default `auto`): sqlite and the cortex **local** vec0 index auto-re-embed in place atomically via
-`EmbeddingReindexer.RunAtomicSqlite`; `warn` continues without re-stamping; `block` throws
-`EmbedderFingerprintMismatchException`. Postgres `auto` throws an explicit unsupported error. An
+not. After swapping the local embedder the startup guard (`EmbedderMigration.EnsureCompatibleSqlite`,
+called from `ServerComposition.OpenSqlite`/`OpenPostgres`/`OpenCortexCore`) detects a fingerprint
+**mismatch** — or an **unstamped-but-populated** index (vectors present but no fingerprint, e.g. a
+cortex DB created before stamping was wired into that path) — and **returns a decision** (it does no
+re-embedding itself) per `embedding.on_model_change` (`OnModelChange`, default `auto`):
+- `auto` → returns `ReindexInBackground`. Composition then starts an **in-process background worker**
+  (its own SQLite connection + its own embedder) that re-embeds the sqlite / cortex **local** vec0
+  index via `ReindexCoordinator` → `EmbeddingReindexer.RunBatched`. This is **never on the MCP boot
+  path** — a synchronous re-embed of a large DB (~27 min for ~25k rows) would blow the stdio startup
+  timeout into an atomic-rollback boot loop (the v3.0.2 regression this design fixes). `RunBatched`
+  embeds OFF the write lock and commits per batch, advancing a `_meta` cursor (`embed.reindex.*`) so an
+  interrupted run **resumes** instead of restarting; the coordinator takes a best-effort advisory lock
+  (`embed.reindex.lock`) and stamps the fingerprint only after a full pass. While it runs, local
+  retrieval is degraded; `session_start`/`status` surface `backgroundTasks.reindex` + a hint.
+- `warn` → returns `Warned`: continues without re-stamping (recurring nag).
+- `block` → throws `EmbedderFingerprintMismatchException`.
+Postgres `auto` throws an explicit unsupported error (no local vec index to background-reindex). An
 **empty** unstamped DB just stamps (genuinely fresh — nothing to migrate). For cortex only the local
 index is migrated; the remote re-embeds independently via content-only sync. `total-recall
-reindex-embeddings` runs the same atomic re-embed offline (for `warn`/`block` deferrals and manual
-re-embeds).
+reindex-embeddings` runs the **same** `ReindexCoordinator` foreground (run-to-completion, also
+resumable) — for `warn`/`block` deferrals and manual offline re-embeds.
 
 **Known limitation — tokenizer accent handling**: the bundled F# WordPiece tokenizer lowercases but
 does **not** strip accents (canonical BERT also strips accents). Accented words that don't match a

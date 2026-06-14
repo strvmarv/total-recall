@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 3.0.4 - 2026-06-13
+
+### Fixed
+
+- **The embedder re-index no longer runs synchronously on the MCP startup path — it can no longer brick the server.** v3.0.2 wired cortex (and sqlite) to re-embed the local vector index on a model change, but that re-embed ran *inside server composition, before the MCP `initialize` handshake*. On a real populated database this was fatal: re-embedding ~25k rows through the bge ONNX model took ~27 minutes — far past Claude Code's hard, no-retry stdio startup timeout — and because the re-embed was a single atomic transaction, the timeout kill rolled it back, so the *next* launch re-ran the identical doomed migration: an unrecoverable boot loop. The re-embed now runs in an **in-process background worker** (its own connection + embedder) that starts only after the server is already answering tool calls; the startup path never blocks on it. The `Program.cs` boot sequence carries an explicit invariant comment so future startup work doesn't regress this.
+
+### Changed
+
+- **Re-index is now batched and resumable.** `EmbeddingReindexer.RunBatched` embeds off the write lock and commits per batch, advancing a `_meta` cursor, so concurrent `memory_store`/search keep working during a re-index and an interrupted run resumes from where it left off instead of restarting from zero. A best-effort advisory lock keeps two runners from doubling up, and the embedder fingerprint is stamped only after a full pass completes. One reusable `ReindexCoordinator` now backs both the startup auto-migration and the `total-recall reindex-embeddings` CLI (the CLI runs it foreground/to-completion, also resumable). The old single-transaction `RunAtomicSqlite` is removed.
+- **Background-task progress is surfaced to the user, portably.** `session_start` and the `status` tool now return a `backgroundTasks` block: `reindex` (state + done/total + model) while a re-index runs, plus a one-time `setup` notice when first-run binary provisioning just completed. These ride in tool results — the host-agnostic, MCP-standard channel — and the `using-total-recall` skill surfaces them, so during a re-index you're told local semantic retrieval is degraded until it finishes (FTS still works), in any harness. It self-heals when the pass completes.
+- **First-run binary download now reports progress.** The detached provisioner records download bytes/total into its lockfile so `bin/start.js` prints `downloading memory engine — N/M MB (X%)…` on a launch while the download is still in flight, and writes a `binaries/<rid>/.provisioned.json` marker the server consumes once to confirm setup completed.
+
 ## 3.0.3 - 2026-06-13
 
 ### Fixed
