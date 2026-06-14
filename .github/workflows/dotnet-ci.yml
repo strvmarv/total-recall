@@ -53,5 +53,15 @@ jobs:
       - name: Fetch bge-small model (tests load it; not committed)
         run: sh scripts/fetch-bge-small.sh
 
+      - name: Catalog drift guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet run --project src/TotalRecall.Host -- dump-catalog > /tmp/catalog.json
+          if ! diff -u catalog.json /tmp/catalog.json; then
+            echo "::error::catalog.json is stale. Regenerate with: dotnet run --project src/TotalRecall.Host -- dump-catalog > catalog.json" >&2
+            exit 1
+          fi
+
       - name: Test
         run: dotnet test src/TotalRecall.sln --no-build --configuration Release --logger "console;verbosity=normal" --filter "Category!=Integration"

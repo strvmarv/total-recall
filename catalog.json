@@ -1,0 +1,1221 @@
+{
+  "tools": [
+    {
+      "name": "memory_store",
+      "description": "Store a new memory or knowledge entry",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "The content to store"
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "hot",
+              "warm",
+              "cold"
+            ],
+            "description": "Storage tier (default: hot; use pinned:true for the pinned tier)"
+          },
+          "contentType": {
+            "type": "string",
+            "enum": [
+              "memory",
+              "knowledge"
+            ],
+            "description": "Content type (default: memory)"
+          },
+          "entryType": {
+            "type": "string",
+            "enum": [
+              "correction",
+              "preference",
+              "decision",
+              "surfaced",
+              "imported",
+              "compacted",
+              "ingested"
+            ],
+            "description": "Entry type"
+          },
+          "project": {
+            "type": "string",
+            "description": "Project scope"
+          },
+          "tags": {
+            "type": [
+              "array",
+              "string"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Tags (array, JSON-encoded array string, or comma-separated string)"
+          },
+          "source": {
+            "type": "string",
+            "description": "Source identifier"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "team",
+              "public"
+            ],
+            "description": "Entry visibility: \u0027private\u0027 (default), \u0027team\u0027, or \u0027public\u0027"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Scope for this entry (e.g. user:paul, team:eng, service:bot). Uses configured default if omitted."
+          },
+          "pinned": {
+            "type": "boolean",
+            "description": "Store directly into the pinned tier (always injected, never decays). Mutually exclusive with tier."
+          }
+        },
+        "required": [
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "memory_search",
+      "description": "Search memories and knowledge using semantic similarity",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query"
+          },
+          "topK": {
+            "type": "number",
+            "description": "Number of results to return (default: 10)"
+          },
+          "minScore": {
+            "type": "number",
+            "description": "Minimum similarity score (0-1)"
+          },
+          "tiers": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "hot",
+                "warm",
+                "cold",
+                "pinned"
+              ]
+            },
+            "description": "Tiers to search (default: all)"
+          },
+          "contentTypes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "memory",
+                "knowledge"
+              ]
+            },
+            "description": "Content types to search (default: all)"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Scope(s) to search. Defaults to configured default scope. Pass multiple to broaden (e.g. [\u0022user:paul\u0022,\u0022global:jira\u0022])."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "memory_get",
+      "description": "Retrieve a specific memory entry by ID",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Entry ID"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "memory_get_all",
+      "description": "Full dump of all entries matching filters (no pagination)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tier": {
+            "type": "string",
+            "description": "Storage tier to dump (default: warm)"
+          },
+          "source_tool": {
+            "type": "string",
+            "description": "Filter by source tool (metadata key)"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Filter by tags (metadata key)"
+          }
+        }
+      }
+    },
+    {
+      "name": "memory_update",
+      "description": "Update an existing memory entry",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Entry ID"
+          },
+          "content": {
+            "type": "string",
+            "description": "New content"
+          },
+          "summary": {
+            "type": "string",
+            "description": "New summary"
+          },
+          "tags": {
+            "type": [
+              "array",
+              "string"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "New tags (array, JSON-encoded array string, or comma-separated string)"
+          },
+          "project": {
+            "type": "string",
+            "description": "New project"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "memory_delete",
+      "description": "Delete a memory entry by ID",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Entry ID"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "memory_promote",
+      "description": "Promote a memory or knowledge entry to a warmer tier (re-embeds)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Entry ID"
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "hot",
+              "warm"
+            ],
+            "description": "Target tier (default: hot)"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "memory",
+              "knowledge"
+            ],
+            "description": "Target content type (default: source type)"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "memory_demote",
+      "description": "Demote a memory or knowledge entry to a colder tier (re-embeds)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Entry ID"
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "warm",
+              "cold"
+            ],
+            "description": "Target tier (default: cold)"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "memory",
+              "knowledge"
+            ],
+            "description": "Target content type (default: source type)"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "memory_pin",
+      "description": "Pin a memory or knowledge entry: moves it to the pinned tier where it is always injected into session context and never decays or compacts",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Entry ID"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "project",
+              "global"
+            ],
+            "description": "Pin visibility: \u0027project\u0027 scopes to a project, \u0027global\u0027 clears the project (visible everywhere). Omitted: keep the entry\u0027s current project."
+          },
+          "project": {
+            "type": "string",
+            "description": "Project name used with scope=\u0027project\u0027. Omitted: keep the entry\u0027s existing project."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "memory",
+              "knowledge"
+            ],
+            "description": "Target content type (default: source type)"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "memory_unpin",
+      "description": "Unpin a pinned entry: moves it to the warm tier where the normal decay/compaction lifecycle resumes",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Entry ID"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "memory",
+              "knowledge"
+            ],
+            "description": "Target content type (default: source type)"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "memory_inspect",
+      "description": "Show full details for a memory or knowledge entry",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Entry ID"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "memory_history",
+      "description": "Show recent compaction movements",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number",
+            "description": "Max rows to return (1..1000, default 50)"
+          }
+        }
+      }
+    },
+    {
+      "name": "memory_recent",
+      "description": "List recent memories newest-first by timestamp, merged across tiers",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number",
+            "description": "Max entries to return (1..200, default 20)"
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "hot",
+              "warm",
+              "cold",
+              "pinned"
+            ],
+            "description": "Restrict to one tier; default all merged"
+          },
+          "type": {
+            "type": "string",
+            "description": "Filter by entry type: correction|preference|decision|surfaced|imported|compacted|ingested"
+          },
+          "project": {
+            "type": "string",
+            "description": "Filter by exact project name"
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "created",
+              "updated",
+              "accessed"
+            ],
+            "description": "Sort field (default created)"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Scope filter; defaults to the server\u0027s default scope"
+          }
+        }
+      }
+    },
+    {
+      "name": "memory_list",
+      "description": "Paginated listing of memory entries with optional filters",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tier": {
+            "type": "string",
+            "enum": [
+              "hot",
+              "warm",
+              "cold",
+              "pinned"
+            ],
+            "description": "Restrict to one tier; default all"
+          },
+          "content_type": {
+            "type": "string",
+            "enum": [
+              "memory",
+              "knowledge"
+            ],
+            "description": "Restrict to one content type; default both"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Filter by tags stored in metadata"
+          },
+          "project": {
+            "type": "string",
+            "description": "Filter by exact project name"
+          },
+          "source_tool": {
+            "type": "string",
+            "description": "Filter by source tool (metadata)"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Max entries to return (default 50, max 200)"
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Number of entries to skip (default 0)"
+          }
+        }
+      }
+    },
+    {
+      "name": "memory_lineage",
+      "description": "Show compaction ancestry for an entry",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Entry ID"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "memory_export",
+      "description": "Export memory/knowledge entries as a JSON envelope",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tiers": {
+            "description": "Optional tier filter (array or comma-separated string)",
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "hot",
+                    "warm",
+                    "cold",
+                    "pinned"
+                  ]
+                }
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "types": {
+            "description": "Optional content-type filter (array or comma-separated string)",
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "memory",
+                    "knowledge"
+                  ]
+                }
+              },
+              {
+                "type": "string"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "memory_import",
+      "description": "Import memory/knowledge entries from a JSON array",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "description": "Array of entry objects matching the memory_export row shape",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "entries"
+        ]
+      }
+    },
+    {
+      "name": "memory_extract",
+      "description": "Store facts, decisions, preferences, corrections, and action items extracted from text by the host LLM. This tool only persists; extraction is the host\u0027s job.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Source identifier (e.g. \u0027conversation_compact\u0027)"
+          },
+          "facts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "decision",
+                    "fact",
+                    "preference",
+                    "correction",
+                    "action_item"
+                  ]
+                },
+                "content": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "type",
+                "content"
+              ]
+            }
+          }
+        },
+        "required": [
+          "source",
+          "facts"
+        ]
+      }
+    },
+    {
+      "name": "kb_search",
+      "description": "Search the knowledge base (cold/knowledge tier)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query"
+          },
+          "collection": {
+            "type": "string",
+            "description": "Optional collection ID to restrict search"
+          },
+          "top_k": {
+            "type": "number",
+            "description": "Number of results to return (default: 10)"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Scope(s) to search. Defaults to configured default scope. Pass multiple to broaden (e.g. [\u0022user:paul\u0022,\u0022global:jira\u0022])."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "kb_ingest_file",
+      "description": "Ingest a single file into the knowledge base",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path to the file to ingest"
+          },
+          "collection": {
+            "type": "string",
+            "description": "Optional collection ID to add to"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Scope for ingested entries (e.g. user:paul, team:eng, service:bot). Uses configured default if omitted."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "kb_ingest_dir",
+      "description": "Ingest a directory of files into the knowledge base",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path to the directory to ingest"
+          },
+          "glob": {
+            "type": "string",
+            "description": "Optional glob pattern to filter files"
+          },
+          "collection": {
+            "type": "string",
+            "description": "Optional collection name override"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Scope for ingested entries (e.g. user:paul, team:eng, service:bot). Uses configured default if omitted."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "kb_list_collections",
+      "description": "List knowledge base collections with document and chunk counts",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "kb_refresh",
+      "description": "Re-ingest a knowledge base collection from its source path",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "collection": {
+            "type": "string",
+            "description": "Collection id to refresh"
+          }
+        },
+        "required": [
+          "collection"
+        ]
+      }
+    },
+    {
+      "name": "kb_remove",
+      "description": "Remove a knowledge base entry (cascades to children)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Entry id (collection root or chunk)"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "kb_summarize",
+      "description": "Set the summary field on a knowledge base collection",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "collection": {
+            "type": "string",
+            "description": "Collection id"
+          },
+          "summary": {
+            "type": "string",
+            "description": "Summary text to write"
+          }
+        },
+        "required": [
+          "collection",
+          "summary"
+        ]
+      }
+    },
+    {
+      "name": "kb_resolve",
+      "description": "Resolve a file path to its knowledge base chunks (token-efficient alternative to reading the raw file)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File path to resolve to knowledge base chunks"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "session_start",
+      "description": "Initialize a session: sync host tool imports and assemble hot tier context",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "session_end",
+      "description": "End a session: compact the hot tier and return compaction results",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "session_context",
+      "description": "Return current hot tier entries as formatted context text",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "session_refresh",
+      "description": "Refresh hot-tier context mid-session. Recalculates decay scores, runs warm sweep, promotes/demotes entries, and returns updated context with efficiency stats.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "Optional: current task description for task-aware ranking (Phase 2)"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "eval_report",
+      "description": "Aggregate retrieval-event metrics over a time window",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "number",
+            "description": "Window in days (default 7)"
+          },
+          "session": {
+            "type": "string",
+            "description": "Filter by session id"
+          },
+          "config_snapshot": {
+            "type": "string",
+            "description": "Filter by config snapshot id"
+          },
+          "threshold": {
+            "type": "number",
+            "description": "Similarity threshold override"
+          }
+        }
+      }
+    },
+    {
+      "name": "eval_benchmark",
+      "description": "Run the retrieval benchmark suite (long-running)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "corpus": {
+            "type": "string",
+            "description": "Path to corpus JSONL"
+          },
+          "benchmark": {
+            "type": "string",
+            "description": "Path to benchmark JSONL"
+          }
+        }
+      }
+    },
+    {
+      "name": "eval_compare",
+      "description": "Compare retrieval metrics between two config snapshots",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "baseline": {
+            "type": "string",
+            "description": "Snapshot name/id to compare against (alias: before)"
+          },
+          "before": {
+            "type": "string",
+            "description": "Snapshot name/id to compare against"
+          },
+          "after": {
+            "type": "string",
+            "description": "Snapshot name/id to compare (default \u0027latest\u0027)"
+          },
+          "days": {
+            "type": "number",
+            "description": "Window in days (default 30)"
+          }
+        }
+      }
+    },
+    {
+      "name": "eval_snapshot",
+      "description": "Create a named config snapshot (dedupes against the latest)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Snapshot name"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "eval_grow",
+      "description": "List or resolve pending benchmark candidates",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "resolve"
+            ],
+            "description": "list pending candidates, or resolve accepts/rejects"
+          },
+          "accept": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "candidate ids to accept (resolve)"
+          },
+          "reject": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "candidate ids to reject (resolve)"
+          },
+          "benchmark": {
+            "type": "string",
+            "description": "path to benchmark JSONL (resolve)"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "config_get",
+      "description": "Return the full effective config, or a specific dotted key",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Dotted config key (optional; omit for full config)"
+          }
+        }
+      }
+    },
+    {
+      "name": "config_set",
+      "description": "Write a user-override config value (dotted key)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Dotted config key"
+          },
+          "value": {
+            "description": "New value (string/number/bool)"
+          }
+        },
+        "required": [
+          "key",
+          "value"
+        ]
+      }
+    },
+    {
+      "name": "status",
+      "description": "Get the status of the total-recall memory system",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "import_host",
+      "description": "Detect and import memories/knowledge from installed host tools",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Restrict to a single importer by name"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "Detect\u002Bscan only; skip import"
+          }
+        }
+      }
+    },
+    {
+      "name": "compact_now",
+      "description": "Host-orchestrated compaction trigger (informational stub)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "migrate_to_remote",
+      "description": "Migrate local SQLite entries to a configured remote Postgres instance with re-embedding",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "dry_run": {
+            "type": "boolean",
+            "description": "Report counts without writing (default false)"
+          },
+          "include_knowledge": {
+            "type": "boolean",
+            "description": "Include Knowledge-type entries (default true)"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "team",
+              "public"
+            ],
+            "description": "Visibility for migrated entries (default \u0027private\u0027)"
+          }
+        }
+      }
+    },
+    {
+      "name": "usage_status",
+      "description": "Get token usage across hosts (claude-code, copilot-cli, ...). Use for visibility reports (last 7 days, group by host/project/day/model) and for current quota state (last 5h window for claude-code).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "window": {
+            "type": "string",
+            "enum": [
+              "5h",
+              "1d",
+              "7d",
+              "30d",
+              "90d",
+              "all"
+            ],
+            "description": "Lookback window. Default 7d."
+          },
+          "group_by": {
+            "type": "string",
+            "enum": [
+              "host",
+              "project",
+              "day",
+              "model",
+              "session",
+              "none"
+            ],
+            "description": "Bucket dimension. Default host."
+          },
+          "host": {
+            "type": "string",
+            "description": "Filter to a single host (e.g. claude-code, copilot-cli)."
+          },
+          "project": {
+            "type": "string",
+            "description": "Filter to a single project path."
+          },
+          "top": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Limit to the top N buckets by total tokens."
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "cache_check",
+      "description": "Check the tool-result cache for a previously stored result (token-saving replay of identical tool calls)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string",
+            "description": "Tool name the result was cached under"
+          },
+          "argsHash": {
+            "type": "string",
+            "description": "Canonical hash of the tool arguments"
+          },
+          "maxAgeSeconds": {
+            "type": "number",
+            "description": "Optional freshness ceiling in seconds (narrower than the stored TTL)"
+          }
+        },
+        "required": [
+          "tool",
+          "argsHash"
+        ]
+      }
+    },
+    {
+      "name": "cache_store",
+      "description": "Store a tool result in the tool-result cache for later cache_check replay",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string",
+            "description": "Tool name to cache the result under"
+          },
+          "argsHash": {
+            "type": "string",
+            "description": "Canonical hash of the tool arguments"
+          },
+          "content": {
+            "type": "string",
+            "description": "The tool result content to cache"
+          },
+          "ttlSeconds": {
+            "type": "number",
+            "description": "Time-to-live in seconds (default 600)"
+          }
+        },
+        "required": [
+          "tool",
+          "argsHash",
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "skill_search",
+      "description": "Search skills via hybrid local ranking; cortex fallback when configured",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Restrict to a scope (global/team/user). Informational \u2014 cortex filters by caller\u0027s visible scopes."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limit": {
+            "type": "number",
+            "description": "1..100, default 10"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "skill_get",
+      "description": "Fetch a single skill by id or by (name, scope, scopeId)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Skill GUID. Supply either id OR the name\u002Bscope\u002BscopeId triple, not both."
+          },
+          "name": {
+            "type": "string",
+            "description": "Skill name (required when using natural-key lookup)"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Skill scope (required when using natural-key lookup)"
+          },
+          "scopeId": {
+            "type": "string",
+            "description": "Skill scope ID (required when using natural-key lookup)"
+          }
+        }
+      }
+    },
+    {
+      "name": "skill_list",
+      "description": "List skills visible to the caller with base64 skip-cursor paging",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "description": "Restrict to a scope"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque base64 cursor from a previous page"
+          },
+          "limit": {
+            "type": "number",
+            "description": "1..200, default 50"
+          }
+        }
+      }
+    },
+    {
+      "name": "skill_import_host",
+      "description": "Scan local Claude Code skills and push them to cortex",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}
