@@ -61,7 +61,11 @@ export function getByPath(obj: unknown, path: string): unknown {
 export type FieldValue = number | boolean | string;
 export function validateField(field: ConfigField, raw: string | boolean): { value: FieldValue } | { error: string } {
   if (field.type === 'bool') return { value: Boolean(raw) };
-  if (field.type === 'string') return { value: String(raw) };
+  if (field.type === 'string') {
+    const s = String(raw).trim();
+    if (s === '') return { error: 'Enter a value.' };
+    return { value: s };
+  }
   if (raw === '' ) return { error: 'Enter a value.' };
   const num = Number(raw);
   if (Number.isNaN(num)) return { error: 'Enter a number.' };

@@ -26,6 +26,7 @@ describe('Config page', () => {
     render(<Config />);
     expect(await screen.findByLabelText(/similarity threshold/i)).toHaveValue(0.65);
     expect(screen.getByText('bge-small-en-v1.5')).toBeInTheDocument(); // read-only embedding.model
+    expect(screen.getByLabelText(/default scope/i)).toHaveValue('user:local');
   });
 
   it('persists an edit via config_set', async () => {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { validateField, type ConfigField as Field, type FieldValue } from '../../lib/configFields';
 
 export function ConfigField({ field, value, onSave }: {
@@ -11,6 +11,10 @@ export function ConfigField({ field, value, onSave }: {
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [error, setError] = useState<string | null>(null);
   const dirty = field.type === 'bool' ? draft !== initial : String(draft) !== String(initial);
+
+  useEffect(() => {
+    setDraft(field.type === 'bool' ? Boolean(value) : value == null ? '' : String(value));
+  }, [value, field.type]);
 
   async function save() {
     const v = validateField(field, draft);
@@ -26,6 +30,8 @@ export function ConfigField({ field, value, onSave }: {
       <div className="tr-config-control">
         {field.type === 'bool'
           ? <input id={field.key} type="checkbox" checked={Boolean(draft)} onChange={(e) => { setDraft(e.target.checked); setStatus('idle'); }} />
+          : field.type === 'string'
+          ? <input id={field.key} type="text" value={String(draft)} onChange={(e) => { setDraft(e.target.value); setStatus('idle'); }} />
           : <input id={field.key} type="number" inputMode="decimal" value={String(draft)} onChange={(e) => { setDraft(e.target.value); setStatus('idle'); }} />}
         {dirty && <button type="button" className="tr-btn" onClick={save} disabled={status === 'saving'}>Save</button>}
         {status === 'saved' && !dirty && <span className="tr-config-saved">✓ saved</span>}

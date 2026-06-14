@@ -22,6 +22,11 @@ describe('validateField', () => {
     expect(validateField(floatF, '0.65')).toEqual({ value: 0.65 });
   });
   it('coerces bool', () => { expect(validateField({ key: 'k', label: 'k', type: 'bool' }, true)).toEqual({ value: true }); });
+  it('accepts a non-empty string and rejects blank', () => {
+    const f: ConfigField = { key: 'scope.default', label: 'Default scope', type: 'string' };
+    expect(validateField(f, 'user:local')).toEqual({ value: 'user:local' });
+    expect(validateField(f, '   ')).toHaveProperty('error');
+  });
 });
 
 describe('EDITABLE_SECTIONS', () => {
