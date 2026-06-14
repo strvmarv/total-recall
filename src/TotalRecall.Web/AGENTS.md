@@ -20,8 +20,8 @@ starts a local Kestrel HTTP server serving a React SPA with six sections:
 | Memory | Browse, search, filter, promote/demote/pin/delete individual entries |
 | Knowledge Base | Collections list, KB search, ingest files/directories, refresh/remove |
 | Usage | Token spend by host, project, model, and time window; per-session breakdown |
-| ✨ Insights | Retrieval health score, near-duplicate candidates, high-access pin suggestions |
-| Config | Read current configuration (read-only in v1) |
+| ✨ Insights | Memory-health score + suggestion cards (cost-spike, capture-mix, pinned-budget pressure, retrieval misses, empty KB) — pure client-side heuristics, no LLM |
+| Config | Edit a safe subset of tuning knobs (validated, persisted via `config_set`); storage/embedding shown read-only |
 
 The web UI is a local management tool — it dispatches to the **same `ToolRegistry` handlers** used by the MCP server, over a loopback HTTP API.
 
