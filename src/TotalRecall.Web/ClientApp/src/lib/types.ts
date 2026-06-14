@@ -85,3 +85,14 @@ export interface LineageNode {
 export interface MemoryMoveResult { id: string; from_tier: string; from_content_type: string; to_tier: string; to_content_type: string; success: boolean; }
 export interface MemoryUpdateResult { updated: boolean; }
 export interface MemoryDeleteResult { deleted: boolean; }
+
+export interface KbCollection {
+  id: string; name: string; document_count: number; chunk_count: number;
+  created_at: number; summary: string | null; source_path: string | null;
+}
+export interface KbListCollectionsResult { collections: KbCollection[]; count: number; }
+export interface KbIngestFileResult { document_id: string; chunk_count: number; validation_passed: boolean; }
+export interface KbIngestDirResult { collection_id: string; document_count: number; total_chunks: number; errors: string[]; validation_passed: boolean; validation_failures: string[]; }
+export interface KbRefreshResult { collection_id: string; files: number; chunks: number; refreshed: boolean; }
+export interface KbRemoveResult { id: string; removed: boolean; cascaded_count: number; }
+export interface KbSearchResult { results: MemorySearchHit[]; hierarchicalMatch: unknown; needsSummary: boolean; }

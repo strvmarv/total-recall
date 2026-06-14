@@ -155,3 +155,14 @@ body {
 .tr-modal-actions { display: flex; justify-content: flex-end; gap: var(--tr-space-2); margin-top: var(--tr-space-4); }
 .tr-edit-form label { display: block; font-size: 12px; color: var(--tr-text-muted); margin-bottom: var(--tr-space-1); }
 .tr-edit-form textarea { width: 100%; font: inherit; border: 1px solid var(--tr-border); border-radius: var(--tr-radius); padding: var(--tr-space-3); resize: vertical; }
+
+.tr-kb h1 { font-size: 22px; margin: 0 0 var(--tr-space-4); }
+.tr-kb-heading { font-size: 14px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--tr-text-muted); margin: var(--tr-space-5) 0 var(--tr-space-3); }
+.tr-kb-panel { background: var(--tr-surface); border: 1px solid var(--tr-border); border-radius: var(--tr-radius); padding: var(--tr-space-4); margin-bottom: var(--tr-space-4); }
+.tr-kb-form { display: flex; gap: var(--tr-space-2); flex-wrap: wrap; align-items: flex-end; }
+.tr-kb-form .tr-field { display: flex; flex-direction: column; gap: var(--tr-space-1); }
+.tr-kb-form label { font-size: 11px; color: var(--tr-text-muted); text-transform: uppercase; }
+.tr-kb-result { font-size: 13px; margin-top: var(--tr-space-2); }
+.tr-kb-results { list-style: none; margin: var(--tr-space-3) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--tr-space-2); }
+.tr-kb-hit { font-size: 13px; padding: var(--tr-space-2); border: 1px solid var(--tr-border); border-radius: var(--tr-radius); }
+.tr-kb-hit-meta { color: var(--tr-text-muted); font-size: 12px; }
