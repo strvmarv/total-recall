@@ -22,24 +22,30 @@
 // HTTP(S) fetch logic.
 
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import process from 'node:process';
 
-import { ensureBinary } from '../scripts/fetch-binary.js';
+import { detectRid, getBinaryPath, provisionInBackground } from '../scripts/fetch-binary.js';
 
-const result = await ensureBinary({ logPrefix: '[total-recall]' });
+// Present-check fast path: never block the MCP startup handshake on the
+// ~90 MB binary download. If the binary is missing (git/marketplace install
+// path), kick a detached background downloader and exit fast with guidance;
+// the next launch finds the binary and starts instantly.
+const rid = detectRid(process.platform, process.arch);
+const binaryPath = rid ? getBinaryPath(rid) : null;
 
-if (!result.ok) {
-  process.stderr.write(`[total-recall] ${result.error}\n`);
-  if (result.url) {
-    process.stderr.write(`[total-recall]   url: ${result.url}\n`);
+if (!binaryPath || !fs.existsSync(binaryPath)) {
+  const p = provisionInBackground({ logPrefix: '[total-recall]' });
+  if (p.status === 'unsupported') {
+    process.stderr.write(`[total-recall] unsupported platform: ${process.platform}/${process.arch}\n`);
+  } else {
+    process.stderr.write(
+      '[total-recall] First-run setup: downloading the memory engine (~90 MB) in the background.\n' +
+      '[total-recall] Memory becomes available once it finishes — reload the plugin or restart your\n' +
+      '[total-recall] session in a minute. (One-time; only the git/marketplace install path needs it.)\n');
   }
-  process.stderr.write(
-    '[total-recall] File an issue: https://github.com/strvmarv/total-recall/issues\n'
-  );
   process.exit(1);
 }
-
-const binaryPath = result.path;
 
 // Spawn with inherited stdio — MCP requires a raw, unbuffered byte channel.
 const child = spawn(binaryPath, process.argv.slice(2), {

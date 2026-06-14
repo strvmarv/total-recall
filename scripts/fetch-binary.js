@@ -38,7 +38,7 @@ import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -144,7 +144,7 @@ async function streamToFile(res, destPath) {
 // the bundled bsdtar at %SystemRoot%\System32\tar.exe when present.
 function tarExecutable() {
   if (process.platform === 'win32') {
-    const sysTar = path.join(process.env.SystemRoot || 'C:\Windows', 'System32', 'tar.exe');
+    const sysTar = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
     if (fs.existsSync(sysTar)) return sysTar;
   }
   return 'tar';
@@ -257,4 +257,55 @@ export async function ensureBinary({ logPrefix = '[total-recall]' } = {}) {
 
   process.stderr.write(`${logPrefix} Installed at ${binaryPath}\n`);
   return { ok: true, path: binaryPath, rid, downloaded: true };
+}
+
+// Background provisioning ----------------------------------------------------
+//
+// On the git/marketplace install path the binary is missing at first launch
+// and the ~90 MB download cannot happen on the MCP startup handshake (Claude
+// Code's stdio startup timeout is a hard wall-clock with no retry). Instead we
+// spawn a DETACHED background downloader and let start.js exit fast; the next
+// launch finds the binary and starts instantly.
+
+function provisionLockPath(rid) { return path.join(repoRoot, 'binaries', `.provision-${rid}.lock`); }
+
+function provisionerAlive(lockPath) {
+  try {
+    const { pid, startedAt } = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+    if (typeof startedAt === 'number' && Date.now() - startedAt > 30 * 60 * 1000) return false; // hard cap
+    if (typeof pid !== 'number') return false;
+    process.kill(pid, 0); // throws if not alive
+    return true;
+  } catch { return false; }
+}
+
+// status: 'present' | 'started' | 'in-progress' | 'unsupported'
+export function provisionInBackground({ logPrefix = '[total-recall]' } = {}) {
+  const rid = detectRid(process.platform, process.arch);
+  if (!rid) return { status: 'unsupported', rid: null };
+  if (fs.existsSync(getBinaryPath(rid))) return { status: 'present', rid };
+
+  const lockPath = provisionLockPath(rid);
+  try { fs.mkdirSync(path.dirname(lockPath), { recursive: true }); } catch {}
+  if (fs.existsSync(lockPath) && provisionerAlive(lockPath)) return { status: 'in-progress', rid };
+
+  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--provision'],
+    { detached: true, stdio: 'ignore', windowsHide: true });
+  child.unref();
+  try { fs.writeFileSync(lockPath, JSON.stringify({ pid: child.pid, startedAt: Date.now() })); } catch {}
+  return { status: 'started', rid };
+}
+
+async function runProvision() {
+  const rid = detectRid(process.platform, process.arch);
+  const lockPath = rid ? provisionLockPath(rid) : null;
+  try { await ensureBinary({ logPrefix: '[total-recall:provision]' }); }
+  catch { /* best-effort */ }
+  finally { if (lockPath) { try { fs.rmSync(lockPath, { force: true }); } catch {} } }
+}
+
+// Run as a detached provisioner when invoked directly with --provision.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+    && process.argv.includes('--provision')) {
+  runProvision();
 }
