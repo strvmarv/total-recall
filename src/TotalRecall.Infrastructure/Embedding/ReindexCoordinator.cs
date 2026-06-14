@@ -101,7 +101,7 @@ public sealed class ReindexCoordinator
         }
         finally
         {
-            ReleaseLock(meta);
+            ReleaseLock(meta, log);
         }
     }
 
@@ -130,10 +130,19 @@ public sealed class ReindexCoordinator
     }
 
     /// <summary>Release the lock only if WE still hold it (don't clobber a takeover).</summary>
-    private void ReleaseLock(IMetaStore meta)
+    private void ReleaseLock(IMetaStore meta, TextWriter? log)
     {
-        if (TryParse(meta.GetMeta(LockKey), out int pid, out _) && pid == _pid)
-            meta.DeleteMeta(LockKey);
+        try
+        {
+            if (TryParse(meta.GetMeta(LockKey), out int pid, out _) && pid == _pid)
+                meta.DeleteMeta(LockKey);
+        }
+        catch (Exception ex)
+        {
+            // A silently-stuck lock blocks the next boot's reindex for up to StaleAfter
+            // (30 min). Surface it best-effort — but never throw from release.
+            log?.WriteLine($"[total-recall] warning: could not release re-index lock: {ex.Message}");
+        }
     }
 
     private static void ClearCursor(IMetaStore meta)

@@ -503,7 +503,8 @@ public static class ServerComposition
             var fts = new PostgresFtsSearch(dataSource, userId);
             var embedder = EmbedderFactory.CreateFromConfig(cfg.Embedding);
             var onModelChange = ResolveOnModelChange(cfg);
-            EmbedderMigration.EnsureCompatiblePostgres(store, embedder, onModelChange, Console.Error);
+            // postgres has no background-reindex path; Warned/Compatible both mean "proceed", Auto/Block throw.
+            _ = EmbedderMigration.EnsureCompatiblePostgres(store, embedder, onModelChange, Console.Error);
             var hybrid = new HybridSearch(vec, fts, store);
 
             var compactionLog = new PostgresCompactionLog(dataSource);

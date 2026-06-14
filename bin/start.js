@@ -52,7 +52,7 @@ if (!binaryPath || !fs.existsSync(binaryPath)) {
         `[total-recall] first-run setup: downloading memory engine — ${mb(prog.bytes)}/${mb(prog.total)} MB (${pct}%)…\n`);
     } else {
       process.stderr.write(
-        '[total-recall] First-run setup: downloading the memory engine (~90 MB) in the background.\n' +
+        '[total-recall] first-run setup: downloading the memory engine (~90 MB) in the background.\n' +
         '[total-recall] Memory becomes available once it finishes — reload the plugin or restart your\n' +
         '[total-recall] session in a minute. (One-time; only the git/marketplace install path needs it.)\n');
     }

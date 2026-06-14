@@ -90,8 +90,21 @@ public sealed class ReindexEmbeddingsCommand : ICliCommand
             var progress = new ReindexProgress();
             new ReindexCoordinator().Run(conn, store, vec, embedder, progress, System.Threading.CancellationToken.None, Console.Out);
             sw.Stop();
-            Console.WriteLine($"total-recall: re-embedded {progress.Done} entries in {sw.ElapsedMilliseconds}ms; fingerprint re-stamped.");
-            return Task.FromResult(0);
+            switch (progress.State)
+            {
+                case ReindexProgress.Phase.Idle:
+                    // The coordinator skipped because a live runner elsewhere holds the
+                    // advisory lock — it never began, so State stayed Idle. Not an error.
+                    Console.WriteLine("total-recall: a re-index is already running elsewhere; skipped.");
+                    return Task.FromResult(0);
+                case ReindexProgress.Phase.Failed:
+                    Console.Error.WriteLine($"total-recall: re-index failed: {progress.Error}");
+                    return Task.FromResult(1);
+                case ReindexProgress.Phase.Completed:
+                default:
+                    Console.WriteLine($"total-recall: re-embedded {progress.Done} entries in {sw.ElapsedMilliseconds}ms; fingerprint re-stamped.");
+                    return Task.FromResult(0);
+            }
         }
         catch (Exception ex)
         {
