@@ -45,6 +45,7 @@ public static class ToolAllowlist
         "kb_remove",
         "kb_search",
         "config_get",
+        "config_set", // token-guarded safe-subset writer
     };
 
     public static bool IsAllowed(string name) =>
