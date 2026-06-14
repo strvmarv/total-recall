@@ -29,8 +29,10 @@ fi
 
 # Locate the published binary. A vcvars64-initialized shell exports Platform=x64,
 # nesting output under bin/x64/Release/...; a plain publish uses bin/Release/...
+# Prefer the x64 path FIRST: on Windows the vcvars publish lands there, and a
+# stale bin/Release binary from an earlier (pre-vcvars) run must not shadow it.
 BIN=""
-for base in "src/TotalRecall.Host/bin/Release" "src/TotalRecall.Host/bin/x64/Release"; do
+for base in "src/TotalRecall.Host/bin/x64/Release" "src/TotalRecall.Host/bin/Release"; do
   for cand in \
     "$base/net8.0/$RID/publish/total-recall" \
     "$base/net8.0/$RID/publish/total-recall.exe"; do
