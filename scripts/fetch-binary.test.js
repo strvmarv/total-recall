@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { sha256File, getManifestUrl } from './fetch-binary.js';
+import { sha256File, getManifestUrl, verifyArchiveChecksum } from './fetch-binary.js';
 
 test('sha256File computes the hex digest of a file', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tr-sha-'));
@@ -21,12 +21,33 @@ test('getManifestUrl points at the versioned release asset', () => {
     'https://github.com/strvmarv/total-recall/releases/download/v3.2.0/provisioning.manifest.json');
 });
 
-import { ensureBinary } from './fetch-binary.js';
+// verifyArchiveChecksum is the security-critical gate ensureBinary runs before
+// extraction. Testing it directly keeps the suite hermetic (no network) while
+// actually exercising the match / mismatch / read-failure contract. The full
+// download+extract path is covered offline in the golden shim test.
+test('verifyArchiveChecksum: matching digest returns null', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tr-vsum-'));
+  const f = path.join(dir, 'a.tar.gz');
+  fs.writeFileSync(f, 'archive-bytes');
+  const good = crypto.createHash('sha256').update('archive-bytes').digest('hex');
+  assert.equal(await verifyArchiveChecksum(f, good.toUpperCase(), 'a.tar.gz'), null); // case-insensitive
+  fs.rmSync(dir, { recursive: true, force: true });
+});
 
-test('ensureBinary refuses to extract on checksum mismatch', async () => {
-  // This test documents the contract: a non-matching expectedSha256 yields
-  // { ok:false, checksumMismatch:true }. Real download+verify is exercised
-  // offline in the golden shim test with a fake provisioner; this unit suite
-  // stays hermetic and does not hit the network.
-  assert.ok(typeof ensureBinary === 'function');
+test('verifyArchiveChecksum: mismatch flags checksumMismatch (non-retryable)', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tr-vsum-'));
+  const f = path.join(dir, 'a.tar.gz');
+  fs.writeFileSync(f, 'archive-bytes');
+  const bad = await verifyArchiveChecksum(f, 'deadbeef', 'a.tar.gz');
+  assert.equal(bad.ok, false);
+  assert.equal(bad.checksumMismatch, true);
+  assert.match(bad.error, /checksum mismatch/i);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('verifyArchiveChecksum: read failure is a plain error, NOT checksumMismatch', async () => {
+  const r = await verifyArchiveChecksum(path.join(os.tmpdir(), 'tr-does-not-exist-xyz'), 'deadbeef');
+  assert.equal(r.ok, false);
+  assert.notEqual(r.checksumMismatch, true); // a missing file may be retried; a mismatch may not
+  assert.match(r.error, /checksum read failed/i);
 });

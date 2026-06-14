@@ -41,6 +41,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { pipeline } from 'node:stream/promises';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -96,14 +97,36 @@ export function getManifestUrl(version) {
 }
 
 // Streaming sha256 so we never load a ~90 MB archive fully into memory.
-export function sha256File(filePath) {
-  return new Promise((resolve, reject) => {
-    const hash = crypto.createHash('sha256');
-    const rs = fs.createReadStream(filePath);
-    rs.on('error', reject);
-    rs.on('data', (chunk) => hash.update(chunk));
-    rs.on('end', () => resolve(hash.digest('hex')));
+// pipeline() tears the read stream down (closes the fd) even on error, which
+// the hand-rolled 'end'-listener version did not guarantee.
+export async function sha256File(filePath) {
+  const hash = crypto.createHash('sha256');
+  await pipeline(fs.createReadStream(filePath), async function* (source) {
+    for await (const chunk of source) hash.update(chunk);
   });
+  return hash.digest('hex');
+}
+
+// Security-critical comparison, extracted from ensureBinary so it can be tested
+// hermetically (no network). Returns null when the file matches expectedSha256;
+// otherwise an error-result object. checksumMismatch is set ONLY on an actual
+// digest mismatch (corrupt/tampered asset, not retryable) — a read failure is a
+// plain error so callers may retry it.
+export async function verifyArchiveChecksum(filePath, expectedSha256, archiveName = 'archive') {
+  let actual;
+  try {
+    actual = await sha256File(filePath);
+  } catch (e) {
+    return { ok: false, error: `checksum read failed: ${e.message}` };
+  }
+  if (actual.toLowerCase() !== expectedSha256.toLowerCase()) {
+    return {
+      ok: false,
+      error: `checksum mismatch for ${archiveName}: expected ${expectedSha256}, got ${actual}`,
+      checksumMismatch: true,
+    };
+  }
+  return null;
 }
 
 // Marker written next to the installed binary after a verified download, so a
@@ -279,24 +302,13 @@ export async function ensureBinary({ logPrefix = '[total-recall]', onProgress, e
     };
   }
 
-  if (expectedSha256) {
-    let actual;
-    try {
-      actual = await sha256File(tmpArchivePath);
-    } catch (e) {
+  // NEVER extract an unverified archive when a checksum was supplied. Opt-in:
+  // callers that pass no expectedSha256 (postinstall, runProvision) skip this.
+  if (expectedSha256 != null) {
+    const bad = await verifyArchiveChecksum(tmpArchivePath, expectedSha256, archiveName);
+    if (bad) {
       try { fs.rmSync(tmpArchivePath, { force: true }); } catch {}
-      return { ok: false, error: `checksum read failed: ${e.message}`, url };
-    }
-    if (actual.toLowerCase() !== expectedSha256.toLowerCase()) {
-      try { fs.rmSync(tmpArchivePath, { force: true }); } catch {}
-      // NEVER extract an unverified archive. Not retryable: a mismatch means a
-      // corrupt or tampered asset, not a transient network blip.
-      return {
-        ok: false,
-        error: `checksum mismatch for ${archiveName}: expected ${expectedSha256}, got ${actual}`,
-        url,
-        checksumMismatch: true,
-      };
+      return { ...bad, url };
     }
   }
 
@@ -337,7 +349,7 @@ export async function ensureBinary({ logPrefix = '[total-recall]', onProgress, e
     }
   }
 
-  if (expectedSha256) writeVerifiedMarker(rid, version, expectedSha256);
+  if (expectedSha256 != null) writeVerifiedMarker(rid, version, expectedSha256);
 
   process.stderr.write(`${logPrefix} Installed at ${binaryPath}\n`);
   return { ok: true, path: binaryPath, rid, downloaded: true, sizeBytes: received };
