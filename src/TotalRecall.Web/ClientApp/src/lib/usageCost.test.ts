@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { estimatedCost, monthlyRunRate, cacheSavings, cacheHitRate } from './usageCost';
+import { estimatedCost, monthlyRunRate, cacheSavings, cacheHitRate, windowDays } from './usageCost';
 import type { UsageBucket } from './types';
 
 const b = (key: string, input: number, output: number, cacheRead = 0, cacheCreate = 0): UsageBucket => ({
@@ -27,5 +27,19 @@ describe('usageCost', () => {
   it('cacheHitRate = cache_read / (input + cacheCreate + cacheRead)', () => {
     expect(cacheHitRate({ input_tokens: 30, cache_creation_tokens: 10, cache_read_tokens: 60 })).toBeCloseTo(0.6, 5);
     expect(cacheHitRate({ input_tokens: 0, cache_creation_tokens: 0, cache_read_tokens: 0 })).toBe(0);
+  });
+});
+
+describe('windowDays', () => {
+  const t = Date.UTC(2026, 5, 1);
+
+  it('same instant floors to 1', () => {
+    expect(windowDays(t, t)).toBe(1);
+  });
+  it('sub-day interval floors to 1', () => {
+    expect(windowDays(t, t + 5 * 3600 * 1000)).toBe(1);
+  });
+  it('31-day span returns 31', () => {
+    expect(windowDays(t, t + 31 * 86400000)).toBe(31);
   });
 });

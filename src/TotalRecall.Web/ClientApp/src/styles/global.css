@@ -171,7 +171,6 @@ body {
 .tr-usage-filters { display: flex; gap: var(--tr-space-3); flex-wrap: wrap; margin-bottom: var(--tr-space-4); }
 .tr-usage-filters select, .tr-usage-filters .tr-input { height: 34px; }
 .tr-usage-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--tr-space-4); }
-.tr-usage-stat { }
 .tr-usage-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .tr-usage-table th, .tr-usage-table td { text-align: left; padding: var(--tr-space-2) var(--tr-space-3); border-bottom: 1px solid var(--tr-border); }
 .tr-usage-table td.num, .tr-usage-table th.num { text-align: right; font-variant-numeric: tabular-nums; }

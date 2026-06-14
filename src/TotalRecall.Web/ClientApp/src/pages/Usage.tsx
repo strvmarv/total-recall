@@ -8,7 +8,7 @@ import { UsageTopSessions } from '../components/usage/UsageTopSessions';
 
 export function Usage() {
   const [filters, setFilters] = useState<UsageFilterState>({ window: '7d', host: '', project: '' });
-  const [refreshKey] = useState(0);
+  const refreshKey = 0;
   return (
     <section className="tr-usage" aria-label="Usage">
       <h1>Usage</h1>

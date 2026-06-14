@@ -22,7 +22,7 @@ export function UsageModelMix({ filters, refreshKey }: { filters: UsageFilterSta
     () => api.tool<UsageResult>('usage_status', usageArgs(filters, 'model')),
     [filters.window, filters.host, filters.project, refreshKey],
   );
-  const slices = (data?.buckets ?? []).map((b, i) => ({ name: friendly(b.key), value: tokensOf(b), color: COLORS[i % COLORS.length] })).filter((s) => s.value > 0);
+  const slices = (data?.buckets ?? []).map((b, i) => ({ id: b.key, name: friendly(b.key), value: tokensOf(b), color: COLORS[i % COLORS.length] })).filter((s) => s.value > 0);
 
   return (
     <Card title="Model mix (by tokens)">
@@ -30,11 +30,11 @@ export function UsageModelMix({ filters, refreshKey }: { filters: UsageFilterSta
         <div style={{ display: 'flex', gap: 'var(--tr-space-4)', alignItems: 'center' }}>
           <div aria-hidden="true" style={{ width: 120, height: 120 }}>
             <ResponsiveContainer>
-              <PieChart><Pie data={slices} dataKey="value" innerRadius={36} outerRadius={56} isAnimationActive={false}>{slices.map((s) => <Cell key={s.name} fill={s.color} />)}</Pie></PieChart>
+              <PieChart><Pie data={slices} dataKey="value" innerRadius={36} outerRadius={56} isAnimationActive={false}>{slices.map((s) => <Cell key={s.id} fill={s.color} />)}</Pie></PieChart>
             </ResponsiveContainer>
           </div>
           <ul className="tr-legend" style={{ flexDirection: 'column', gap: 'var(--tr-space-1)' }}>
-            {slices.map((s) => <li className="tr-legend-item" key={s.name}><span className="tr-legend-dot" style={{ background: s.color }} />{s.name} <strong>{s.value.toLocaleString('en-US')}</strong></li>)}
+            {slices.map((s) => <li className="tr-legend-item" key={s.id}><span className="tr-legend-dot" style={{ background: s.color }} />{s.name} <strong>{s.value.toLocaleString('en-US')}</strong></li>)}
           </ul>
         </div>
       </CardState>

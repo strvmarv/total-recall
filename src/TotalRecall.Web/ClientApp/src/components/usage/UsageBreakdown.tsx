@@ -17,7 +17,7 @@ export function UsageBreakdown({ filters, refreshKey }: { filters: UsageFilterSt
     <Card title="By project">
       <CardState loading={loading} error={error} empty={!!data && rows.length === 0} emptyText="No usage in this window.">
         <table className="tr-usage-table">
-          <thead><tr><th>Project</th><th className="num">Input</th><th className="num">Cache-read</th><th className="num">Output</th><th className="num">Turns</th></tr></thead>
+          <thead><tr><th scope="col">Project</th><th scope="col" className="num">Input</th><th scope="col" className="num">Cache-read</th><th scope="col" className="num">Output</th><th scope="col" className="num">Turns</th></tr></thead>
           <tbody>
             {rows.map((b) => (
               <tr key={b.key}>
