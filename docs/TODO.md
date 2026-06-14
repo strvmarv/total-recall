@@ -255,6 +255,42 @@ Meaningful refactor — probably 1-2 days of work plus a beta cycle to validate.
 
 **Files:** `package.json`, `bin/start.js`, `.github/workflows/release.yml`, new per-platform package scaffolding
 
+### Web UI: server-side Insights engine
+
+The Insights section currently derives all signals client-side from data already fetched for other sections. A dedicated `/api/insights` (or `insights` MCP tool) would run server-side analysis: near-duplicate detection via cosine similarity above a configurable threshold, retrieval-gap detection (high-frequency queries with low hit-rate), threshold simulation (show how changing `similarity_threshold` changes recall), and high-access-count pin promotion suggestions. The current client-side approach is a useful v1 but a server-side engine would be more accurate and work on larger stores.
+
+**Files:** `src/TotalRecall.Server/Handlers/` (new `InsightsHandler.cs`), `src/TotalRecall.Web/Api/ToolAllowlist.cs` (add `insights`), `src/TotalRecall.Web/ClientApp/src/lib/insights.ts` (shift from client-side to API-driven)
+
+### Web UI: editable/persisted pricing config
+
+The Usage section uses a bundled static pricing table for cost estimates. A `[pricing]` config section would let operators supply their own model pricing (e.g. enterprise agreements, region-specific rates) and persist it alongside `config.toml`. The Config page in the UI would expose an editor for these fields.
+
+**Files:** `src/TotalRecall.Core/Config.fs` (add `PricingConfig`), `src/TotalRecall.Infrastructure/Config/` (TOML loader), `src/TotalRecall.Web/ClientApp/src/lib/pricing.ts` (consume from config API), `src/TotalRecall.Web/ClientApp/src/pages/Config.tsx`
+
+### Web UI: usage activity heatmap
+
+The Dashboard Trends card shows daily-rollup data. A GitHub-style heatmap (activity by day-of-week × hour-of-day) would surface session timing patterns — useful for understanding when your AI assistant is most active. Requires an hourly `GroupBy` on `usage_events` that the current `usage_status` tool does not return.
+
+**Files:** `src/TotalRecall.Server/Handlers/UsageStatusHandler.cs` (add hourly breakdown option), `src/TotalRecall.Web/ClientApp/src/components/dashboard/` (new `ActivityHeatmapCard.tsx`)
+
+### Web UI: per-project trend sparklines
+
+The Dashboard lists recent activity but has no per-project comparison view. Sparklines (e.g. weekly token spend per project over 4 weeks) would make cross-project trends visible without switching to the full Usage section.
+
+**Files:** `src/TotalRecall.Server/Handlers/UsageStatusHandler.cs`, `src/TotalRecall.Web/ClientApp/src/components/dashboard/TrendsCard.tsx`
+
+### Web UI: Cortex remote phase
+
+In Cortex mode the web UI connects to the local plugin process as usual, but some data (team KB, remote usage, connector-ingested documents) lives on the remote Cortex instance. The Cortex-facing API endpoints are not yet proxied through the web UI server. Requires either a proxy endpoint or a direct Cortex API token flow surfaced in Config.
+
+**Files:** `src/TotalRecall.Web/` (new Cortex-proxy middleware), `src/TotalRecall.Web/ClientApp/src/lib/api.ts`
+
+### Web UI: SSE / live push
+
+All UI sections poll on-demand or on page load. Real-time updates (e.g. "new memory stored", "compaction completed", "re-index progress") would require SSE or WebSocket push from the server. The current design explicitly deferred this to keep the v1 architecture simple.
+
+**Files:** `src/TotalRecall.Web/WebUiServer.cs` (add SSE endpoint), `src/TotalRecall.Web/ClientApp/src/lib/` (new `useEventSource.ts`)
+
 ### MemoryStoreHandler ignores caller entryType for the column
 
 `memory_store` parses and validates the `entryType` argument into metadata JSON but hardcodes `EntryType.Preference` for the `entry_type` column in the `InsertWithEmbedding` call. `memory_extract` (Phase 3) maps the validated string to the correct `EntryType` discriminated union value and writes it to the column — the two siblings diverge. Fix `MemoryStoreHandler` to map the validated string to the `EntryType` DU (consider per-type decay accuracy impact on existing rows that were silently written as Preference). Found during Phase 3 code review.

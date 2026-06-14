@@ -124,6 +124,7 @@ Print the command reference table below. Do not call any MCP tools.
 | `eval` | Retrieval quality report (`--benchmark`, `--compare`, `--snapshot`) |
 | `config [get\|set]` | View or update configuration |
 | `update` | Update the plugin to the latest version |
+| `ui` | Open the built-in web management UI in the browser (`total-recall ui`) |
 
 ### setup
 
@@ -263,6 +264,16 @@ Call `compact_now`. Note: the response is **informational only** — real compac
 
 - `get`: call `config_get` with the key (or omit for full config)
 - `set`: call `config_set` with key and value
+
+### ui [--port N] [--no-open] [--host H] [--smoke]
+
+Launch the built-in web management UI. This is a CLI command, not an MCP tool — instruct the user to run:
+
+```bash
+total-recall ui
+```
+
+Optionally pass flags: `--port N` (default 5577), `--no-open` (skip browser auto-open), `--host H` (bind address, default `localhost`), `--smoke` (CI probe: start, check `/api/health`, exit 0/1). The UI provides six sections: Dashboard · Memory · Knowledge Base · Usage · Insights · Config. The access token is embedded in the served page — no manual credential setup needed.
 
 ### import-host [source]
 

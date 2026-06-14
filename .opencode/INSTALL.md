@@ -72,6 +72,16 @@ Copy the skills directory to your OpenCode plugins:
 cp -r skills/ ~/.opencode/plugins/total-recall/skills/
 ```
 
+## Web UI
+
+The same binary ships a built-in browser interface. After installation:
+
+```bash
+total-recall ui
+```
+
+This starts a local server on port 5577 and opens the browser. The access token is embedded in the page automatically. Use `--port`, `--no-open`, or `--smoke` as needed. No additional install required.
+
 ## First session
 
 Restart OpenCode. total-recall will auto-initialize on first session.

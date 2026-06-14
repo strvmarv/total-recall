@@ -40,7 +40,11 @@ This does **not** happen when installing via `npm install -g @strvmarv/total-rec
 
 The embedding model (`bge-small-en-v1.5`, ~133 MB) is fetched and sha256-verified at release **build** time and ships bundled inside the release/npm artifact in the `models/` directory. The runtime does **not** download it from HuggingFace or anywhere else — if the bundled model is missing, the binary fails fast with a clear error rather than reaching out to the network.
 
-### 3. Nothing else
+### 3. Web UI (local only)
+
+`total-recall ui` binds a local loopback port (default 5577) and serves the management SPA with an ephemeral per-launch bearer token embedded in the page. No new data leaves the machine: the UI dispatches to the same local tool handlers as the MCP server, and the pricing table used to estimate costs in the Usage section is bundled local config — cost figures are estimates, not billed amounts.
+
+### 4. Nothing else
 
 There is no telemetry, no crash reporting, no usage analytics, no cloud sync, and no account system. The plugin does not phone home.
 

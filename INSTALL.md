@@ -212,6 +212,27 @@ You can verify it's working with:
 - `/total-recall:commands status` — shows tier sizes and health
 - `/total-recall:commands search "test"` — runs a test search
 
+## Launch the web UI
+
+total-recall includes a built-in browser UI served directly from the same binary:
+
+```bash
+total-recall ui
+```
+
+This starts a local server on port **5577** (default) and opens the browser automatically. The access token is embedded in the served page — no credentials to copy. The UI provides six sections: Dashboard, Memory, Knowledge Base, Usage, Insights, and Config.
+
+Useful flags:
+
+```bash
+total-recall ui --port 5600      # use a different port
+total-recall ui --no-open        # start without auto-opening the browser
+total-recall ui --host 0.0.0.0   # bind all interfaces (use with caution on shared machines)
+total-recall ui --smoke          # CI/scripted check: probe /api/health and exit 0 or 1
+```
+
+The server binds loopback only by default and uses an ephemeral per-launch token for security. No separate install or Node.js is needed.
+
 ## What Happens on First Run
 
 1. Creates `~/.total-recall/` directory if missing

@@ -53,6 +53,7 @@ Every TUI coding assistant has the same gaps:
 
 - **Persistent memory** — corrections, preferences, decisions, and project context survive sessions automatically
 - **Cross-tool** — one memory store shared across Claude Code, Copilot CLI, Cursor, Cline, OpenCode, and Hermes; existing memories auto-import on first run
+- **Built-in web UI** — `total-recall ui` opens a local browser dashboard (Dashboard, Memory, Knowledge Base, Usage, Insights, Config) for visual memory management without touching the CLI or AI session
 - **Cross-device** — point `TOTAL_RECALL_DB_PATH` at a cloud-synced folder and your memory follows you everywhere
 - **Smarter context, lower token cost** — a four-tier model (Pinned / Hot / Warm / Cold) enforces a 4000-token budget per prompt, so you get relevant context without carrying everything
 - **Token expenditure tracking** — see exactly what each session costs, broken down by host, project, and time window
@@ -102,7 +103,7 @@ Then add to your tool's MCP config:
 }
 ```
 
-This works with **Copilot CLI**, **OpenCode**, **Cline**, **Cursor**, **Hermes**, and any other MCP-compatible tool.
+This works with **Copilot CLI**, **OpenCode**, **Cline**, **Cursor**, **Hermes**, and any other MCP-compatible tool. The `total-recall ui` command is available independently of MCP configuration — it is a local management surface, not a host tool.
 
 > **Note:** `npx -y @strvmarv/total-recall` does not work due to an [npm bug](https://github.com/npm/cli/issues/3753) with scoped package binaries. Use the global install (`total-recall` command) instead.
 
@@ -192,6 +193,38 @@ Per-host support:
 | OpenCode | Full | Plugin wrapper, auto-import from OpenCode project and agent files |
 | Cline | Full | Auto-import from task history; MCP server config required |
 | Hermes | Importer | Auto-import from SOUL.md and skills on first run; no session hooks |
+
+---
+
+## Web UI
+
+total-recall ships a built-in local web UI — a third surface alongside the MCP server (AI assistant integration) and the CLI (`total-recall status`, `total-recall eval`, etc.). It is a React SPA served directly from the single NativeAOT binary, no separate install or Node required.
+
+```bash
+total-recall ui                  # serve on http://localhost:5577 and open the browser
+total-recall ui --port 5600      # custom port
+total-recall ui --no-open        # suppress auto-open (e.g. remote / headless)
+total-recall ui --host 0.0.0.0   # bind all interfaces (warns about exposure)
+total-recall ui --token <tok>    # supply a fixed token instead of a per-launch random one
+total-recall ui --smoke          # CI mode: start, GET /api/health, exit 0/1
+```
+
+The server binds **loopback only** (`localhost`) by default. Every launch generates a fresh ephemeral bearer token that is injected directly into the served HTML, so opening the URL in a browser is sufficient — no copy-paste of credentials. A Host-header allowlist mitigates DNS-rebinding.
+
+**Six sections** are available in the navigation bar:
+
+| Section | What it shows |
+|---|---|
+| Dashboard | Tier composition, retrieval quality, token usage, recent activity, trend sparklines |
+| Memory | Browse, search, filter, promote/demote/pin/delete individual entries |
+| Knowledge Base | List collections, search, ingest files/directories, refresh or remove collections |
+| Usage | Token expenditure by host, project, model, and time window; per-session breakdown |
+| ✨ Insights | Retrieval health score, near-duplicate candidates, high-access pin suggestions, threshold analysis |
+| Config | Read current configuration; all values are read-only in v1 |
+
+**Cost figures** in the Usage section are **client-side estimates** derived from a bundled model pricing table. They are not billed amounts.
+
+The SPA build is **opt-in** (`-p:BuildSpa=true` triggers `npm ci && npm run build` in `ClientApp/` and embeds the Vite output in the assembly). Default `dotnet build` and all tests are Node-free — the binary falls back to a placeholder page when built without the SPA. Release builds always include the SPA.
 
 ---
 
@@ -418,7 +451,8 @@ MCP Server (.NET 8 NativeAOT — C# imperative shell + F# functional core)
 ├── TotalRecall.Core (F#)        — pure functions: tokenizer, decay, hybrid ranking, parsers, chunker
 ├── TotalRecall.Infrastructure   — SQLite/Postgres storage, ONNX/remote embedder, importers, migrations
 ├── TotalRecall.Server           — MCP JSON-RPC server, 41 core tool handlers (48–49 with mode-dependent tools), lifecycle
-├── TotalRecall.Cli              — CLI commands (status, eval, kb, memory, config, migrate)
+├── TotalRecall.Web              — embedded ASP.NET Core minimal API + React SPA (the web UI)
+├── TotalRecall.Cli              — CLI commands (status, eval, kb, memory, config, migrate, ui)
 └── TotalRecall.Host             — composition root, AOT entry point, migration guard
 
 Tiers:

@@ -9,13 +9,14 @@ This file is the operational handbook for AI agents and human contributors worki
 ## Quick Reference
 
 ### Project Overview
-.NET 8 NativeAOT MCP server plugin (C# imperative shell + F# functional core) with npm packaging for Claude Code / Copilot CLI / Cursor / OpenCode marketplace distribution. Four-tier memory (Pinned/Hot/Warm/Cold — pinned is user-curated via `memory_pin`/`memory_unpin`, always injected first, immune to decay/compaction) + hierarchical KB, all local by default (SQLite + sqlite-vec + bundled ONNX), optionally synced to Cortex (pinned entries are local-only, never synced).
+.NET 8 NativeAOT MCP server plugin (C# imperative shell + F# functional core) with npm packaging for Claude Code / Copilot CLI / Cursor / OpenCode marketplace distribution. Four-tier memory (Pinned/Hot/Warm/Cold — pinned is user-curated via `memory_pin`/`memory_unpin`, always injected first, immune to decay/compaction) + hierarchical KB, all local by default (SQLite + sqlite-vec + bundled ONNX), optionally synced to Cortex (pinned entries are local-only, never synced). The single binary also exposes a third surface: a built-in local web UI (`total-recall ui`) serving an embedded React SPA with six sections (Dashboard, Memory, Knowledge Base, Usage, Insights, Config) via `TotalRecall.Web`.
 
 ### Layer Diagram
 ```
 TotalRecall.Host (C#)          ← AOT entry point + composition root
 ├── TotalRecall.Server (C#)    ← MCP JSON-RPC over stdio; 49 handlers (one file each)
-├── TotalRecall.Cli (C#)       ← CLI commands (Spectre.Console)
+├── TotalRecall.Web (C#)       ← embedded minimal-API + React SPA (web UI), dispatches to ToolRegistry
+├── TotalRecall.Cli (C#)       ← CLI commands (Spectre.Console), including `total-recall ui`
 ├── TotalRecall.Infrastructure (C#) ← SQLite/Postgres, ONNX embedder, importers, migrations
 └── TotalRecall.Core (F#)      ← Pure functions: tokenizer, decay, ranking, parsers, chunker
 
@@ -24,6 +25,8 @@ npm wrapper layer (zero-dep Node):
   scripts/fetch-binary.js ← download from GitHub Releases (shared by postinstall + launcher)
   scripts/postinstall.js, scripts/verify-binaries.js
 ```
+
+> **BuildSpa is opt-in.** `TotalRecall.Web` compiles the React SPA only when `-p:BuildSpa=true` is passed (e.g. in release publish). Default `dotnet build` and all tests are Node-free — the binary embeds a placeholder page instead. See `src/TotalRecall.Web/AGENTS.md` for the full build pipeline.
 
 ### WHERE TO LOOK
 
