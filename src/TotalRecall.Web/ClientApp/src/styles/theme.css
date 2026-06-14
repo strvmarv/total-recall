@@ -29,4 +29,21 @@
   /* Type */
   --tr-font: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --tr-font-mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+
+  /* Tier composition colors */
+  --tr-tier-pinned: #9333ea;
+  --tr-tier-hot: #ef4444;
+  --tr-tier-warm: #f59e0b;
+  --tr-tier-warm-weak: #fde9c8;
+  --tr-tier-cold: #3b82f6;
+  --tr-tier-kb: #16a34a;
+
+  /* Recent-activity entry-type tag colors */
+  --tr-tag-correction: #fde2e2; --tr-tag-correction-fg: #b91c1c;
+  --tr-tag-preference: #e0ecff; --tr-tag-preference-fg: #1d4ed8;
+  --tr-tag-decision: #e8e0ff; --tr-tag-decision-fg: #6d28d9;
+  --tr-tag-surfaced: #e8eaed; --tr-tag-surfaced-fg: #475569;
+  --tr-tag-imported: #dcfce7; --tr-tag-imported-fg: #15803d;
+  --tr-tag-compacted: #fef3c7; --tr-tag-compacted-fg: #b45309;
+  --tr-tag-ingested: #cffafe; --tr-tag-ingested-fg: #0e7490;
 }

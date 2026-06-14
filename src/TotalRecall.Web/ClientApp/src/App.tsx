@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { TopBar } from './components/TopBar';
 import { SectionPlaceholder } from './pages/SectionPlaceholder';
 import { MemoryPlaceholder } from './pages/MemoryPlaceholder';
+import { Dashboard } from './pages/Dashboard';
 
 /** Router-agnostic shell (testable with MemoryRouter). */
 export function AppShell() {
@@ -10,7 +11,7 @@ export function AppShell() {
       <TopBar />
       <main className="tr-main">
         <Routes>
-          <Route path="/" element={<SectionPlaceholder title="Dashboard" />} />
+          <Route path="/" element={<Dashboard />} />
           <Route path="/memory" element={<MemoryPlaceholder />} />
           <Route path="/kb" element={<SectionPlaceholder title="Knowledge Base" />} />
           <Route path="/usage" element={<SectionPlaceholder title="Usage" />} />

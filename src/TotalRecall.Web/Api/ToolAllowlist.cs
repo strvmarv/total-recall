@@ -25,6 +25,7 @@ public static class ToolAllowlist
         "memory_search",
         "memory_list",
         "memory_recent",
+        "memory_history",
         "memory_get",
         "memory_inspect",
         "kb_list_collections",
