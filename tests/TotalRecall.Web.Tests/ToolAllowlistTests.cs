@@ -29,6 +29,7 @@ public sealed class ToolAllowlistTests
     [InlineData("kb_remove")]
     [InlineData("kb_search")]
     [InlineData("config_get")]
+    [InlineData("config_set")]
     public void IsAllowed_True_ForCuratedTools(string name) =>
         Assert.True(ToolAllowlist.IsAllowed(name));
 
