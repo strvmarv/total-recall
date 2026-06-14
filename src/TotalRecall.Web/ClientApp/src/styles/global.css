@@ -112,3 +112,22 @@ body {
 .tr-peek-text { color: var(--tr-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tr-peek-time { color: var(--tr-text-muted); font-size: 12px; white-space: nowrap; margin-left: auto; }
 .tr-tag { font-size: 11px; font-weight: 600; padding: 1px var(--tr-space-2); border-radius: 999px; white-space: nowrap; text-transform: lowercase; }
+
+.tr-memory h1 { font-size: 22px; margin: 0 0 var(--tr-space-4); }
+.tr-mem-filters { display: flex; gap: var(--tr-space-3); margin-bottom: var(--tr-space-4); flex-wrap: wrap; }
+.tr-input, .tr-mem-filters select { height: 34px; border: 1px solid var(--tr-border); border-radius: var(--tr-radius); padding: 0 var(--tr-space-3); font: inherit; background: var(--tr-surface); color: var(--tr-text); }
+.tr-input { min-width: 260px; }
+.tr-input:focus-visible, .tr-mem-filters select:focus-visible { outline: 2px solid var(--tr-accent); outline-offset: 1px; }
+.tr-memory-body { display: grid; grid-template-columns: 1fr; gap: var(--tr-space-5); }
+.tr-memory-body:has(.tr-memory-detail) { grid-template-columns: 1.6fr 1fr; }
+.tr-table { width: 100%; border-collapse: collapse; background: var(--tr-surface); border: 1px solid var(--tr-border); border-radius: var(--tr-radius); }
+.tr-table th, .tr-table td { text-align: left; padding: var(--tr-space-2) var(--tr-space-3); border-bottom: 1px solid var(--tr-border); font-size: 13px; }
+.tr-table th { color: var(--tr-text-muted); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em; }
+.tr-table tbody tr { cursor: pointer; }
+.tr-table tbody tr:hover { background: var(--tr-accent-weak); }
+.tr-table tbody tr.is-selected { background: var(--tr-accent-weak); }
+.tr-table-content { max-width: 0; width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr-tier-badge { font-size: 11px; font-weight: 600; padding: 1px var(--tr-space-2); border-radius: 999px; color: #fff; }
+.tr-tier-pinned { background: var(--tr-tier-pinned); } .tr-tier-hot { background: var(--tr-tier-hot); }
+.tr-tier-warm { background: var(--tr-tier-warm); } .tr-tier-cold { background: var(--tr-tier-cold); }
+.tr-memory-detail { background: var(--tr-surface); border: 1px solid var(--tr-border); border-radius: var(--tr-radius); padding: var(--tr-space-5); align-self: start; }
