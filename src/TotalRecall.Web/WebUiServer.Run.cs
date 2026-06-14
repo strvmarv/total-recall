@@ -55,8 +55,8 @@ public static partial class WebUiServer
                 return 1;
             }
             var url = ResolveBoundUrl(app);
-            Console.WriteLine($"total-recall ui: {url}");
-            Console.WriteLine($"total-recall ui: token {token}");
+            Console.WriteLine($"total-recall ui: serving at {url}");
+            Console.WriteLine("total-recall ui: the access token is embedded in the page; just open the URL.");
 
             if (options.Smoke)
             {

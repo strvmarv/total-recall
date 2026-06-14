@@ -27,3 +27,8 @@ binaries/
 # bge-small ONNX model is fetched + sha256-verified at build (scripts/fetch-bge-small.sh),
 # never committed (133 MB, over GitHub's per-file limit). Release CI bundles it into the tarball.
 models/bge-small-en-v1.5/
+
+# total-recall web UI: SPA build output (generated; embedded into the assembly)
+src/TotalRecall.Web/wwwroot/
+src/TotalRecall.Web/ClientApp/node_modules/
+src/TotalRecall.Web/ClientApp/*.tsbuildinfo

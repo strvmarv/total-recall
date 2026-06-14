@@ -9,6 +9,10 @@
     <IsAotCompatible>true</IsAotCompatible>
     <EnableRequestDelegateGenerator>true</EnableRequestDelegateGenerator>
     <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+    <!-- SPA build is opt-in: default off so `dotnet build`/tests stay Node-free.
+         Release publishes pass -p:BuildSpa=true (see scripts/ui-aot-smoke.sh). -->
+    <BuildSpa Condition="'$(BuildSpa)' == ''">false</BuildSpa>
+    <SpaRoot>ClientApp\</SpaRoot>
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
@@ -17,7 +21,37 @@
   <ItemGroup>
     <ProjectReference Include="..\TotalRecall.Server\TotalRecall.Server.csproj" />
   </ItemGroup>
-  <ItemGroup>
-    <EmbeddedResource Include="wwwroot\**\*" />
-  </ItemGroup>
+  <!-- 1. When BuildSpa=true, compile the SPA into wwwroot via Vite. -->
+  <Target Name="BuildClientApp"
+          Condition="'$(BuildSpa)' == 'true'"
+          BeforeTargets="EnsureWwwRoot">
+    <Message Importance="high" Text="BuildSpa=true: building ClientApp via Vite..." />
+    <!-- npm ci is the integrity gate: always run it on the opt-in BuildSpa path so the
+         embedded bundle is reproducible from the lockfile (never a stale node_modules). -->
+    <Exec Command="npm ci" WorkingDirectory="$(SpaRoot)" />
+    <Exec Command="npm run build" WorkingDirectory="$(SpaRoot)" />
+    <Error Condition="!Exists('wwwroot\index.html')"
+           Text="BuildSpa=true but Vite produced no wwwroot/index.html. Is Node installed and the build succeeding?" />
+  </Target>
+
+  <!-- 2. When NOT building the SPA, wipe wwwroot and drop in the placeholder so a
+          Node-free build is deterministic (never embeds stale assets left by a
+          prior BuildSpa=true build). When BuildSpa=true, BuildClientApp already
+          populated wwwroot/index.html, so the copy is skipped. -->
+  <Target Name="EnsureWwwRoot" BeforeTargets="EmbedWwwRoot">
+    <RemoveDir Condition="'$(BuildSpa)' != 'true'" Directories="wwwroot" />
+    <MakeDir Directories="wwwroot" />
+    <Copy SourceFiles="build\placeholder.html"
+          DestinationFiles="wwwroot\index.html"
+          Condition="!Exists('wwwroot\index.html')" />
+  </Target>
+
+  <!-- 3. Embed everything under wwwroot (added from inside a target so Vite's
+          hashed assets, produced after evaluation, are included). Spike-confirmed
+          hook: PrepareForBuild;GenerateEmbeddedFilesManifest. -->
+  <Target Name="EmbedWwwRoot" BeforeTargets="PrepareForBuild;GenerateEmbeddedFilesManifest">
+    <ItemGroup>
+      <EmbeddedResource Include="wwwroot\**\*" />
+    </ItemGroup>
+  </Target>
 </Project>
