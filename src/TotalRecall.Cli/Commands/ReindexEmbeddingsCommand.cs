@@ -79,17 +79,18 @@ public sealed class ReindexEmbeddingsCommand : ICliCommand
             var store = new SqliteStore(conn);
             var vec = new VectorSearch(conn);
 
-            // Batched, resumable reindex (shared with the sqlite startup
-            // auto-migration path): each batch commits in its own short txn so the
-            // write lock is never held for the whole multi-minute re-embed, and an
-            // interrupted run resumes from the _meta cursor instead of restarting.
-            // RunBatched does NOT stamp the fingerprint, so re-stamp after the pass.
-            int n = EmbeddingReindexer.RunBatched(
-                conn, store, vec, embedder, new ReindexProgress(),
-                System.Threading.CancellationToken.None, Console.Out);
-            EmbedderFingerprint.Restamp(store, embedder);
+            // Run through the shared coordinator so the CLI, the server background
+            // worker, and any future caller all take ONE reindex path: it acquires
+            // the advisory lock, computes the total + BeginRunning, runs the batched
+            // resumable re-embed (each batch in its own short txn so the write lock
+            // is never held for the whole multi-minute pass), and on completion
+            // re-stamps the fingerprint + clears the resume cursor. Run to completion
+            // in the foreground — there is no MCP handshake to protect here, and an
+            // interrupted run is now resumable on re-run.
+            var progress = new ReindexProgress();
+            new ReindexCoordinator().Run(conn, store, vec, embedder, progress, System.Threading.CancellationToken.None, Console.Out);
             sw.Stop();
-            Console.WriteLine($"total-recall: re-embedded {n} entries in {sw.ElapsedMilliseconds}ms; fingerprint re-stamped.");
+            Console.WriteLine($"total-recall: re-embedded {progress.Done} entries in {sw.ElapsedMilliseconds}ms; fingerprint re-stamped.");
             return Task.FromResult(0);
         }
         catch (Exception ex)
