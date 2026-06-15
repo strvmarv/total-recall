@@ -32,7 +32,6 @@ const shim = runShim({
   stdin: process.stdin,
   stdout: process.stdout,
   catalog,
-  version: pkg.version,
   serverName: 'total-recall',
   serverVersion: pkg.version,
   protocolVersion: '2024-11-05',
