@@ -25,7 +25,7 @@ body {
   font-family: var(--tr-font-mono); font-weight: 700; color: var(--tr-text);
   padding: 0 var(--tr-space-4) var(--tr-space-5); letter-spacing: -0.01em;
 }
-.tr-caret { color: var(--tr-accent); animation: tr-blink 1.1s steps(1) infinite; margin-left: 1px; }
+.tr-caret { color: var(--tr-accent); margin-left: 1px; }
 @keyframes tr-blink { 50% { opacity: 0; } }
 .tr-nav { display: flex; flex-direction: column; }
 .tr-nav-link {
@@ -94,11 +94,9 @@ body {
   .tr-card:nth-child(2) { animation-delay: .05s; }
   .tr-card:nth-child(3) { animation-delay: .1s; }
   .tr-card:nth-child(4) { animation-delay: .15s; }
+  .tr-caret { animation: tr-blink 1.1s steps(1) infinite; }
 }
 @keyframes tr-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) {
-  .tr-caret { animation: none; }
-}
 
 /* Backend badge */
 .tr-badge {
@@ -173,7 +171,7 @@ body {
 .tr-table tbody tr:hover { background: var(--tr-accent-weak); }
 .tr-table tbody tr.is-selected { background: var(--tr-accent-weak); }
 .tr-table-content { max-width: 0; width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tr-tier-badge { font-family: var(--tr-font-mono); font-size: 11px; font-weight: 600; padding: 1px var(--tr-space-2); border-radius: var(--tr-radius); color: #fff; }
+.tr-tier-badge { font-family: var(--tr-font-mono); font-size: 11px; font-weight: 600; padding: 1px var(--tr-space-2); border-radius: var(--tr-radius); color: var(--tr-tier-badge-fg); }
 .tr-tier-pinned { background: var(--tr-tier-pinned); } .tr-tier-hot { background: var(--tr-tier-hot); }
 .tr-tier-warm { background: var(--tr-tier-warm); } .tr-tier-cold { background: var(--tr-tier-cold); }
 .tr-memory-detail { padding: var(--tr-space-5); align-self: start; }
@@ -194,7 +192,7 @@ body {
 .tr-btn:disabled { opacity: 0.5; cursor: default; }
 .tr-btn-primary { background: var(--tr-accent); color: var(--tr-accent-fg); border-color: var(--tr-accent); }
 .tr-btn-danger { color: var(--tr-danger); border-color: var(--tr-danger); }
-.tr-btn-danger:hover { background: var(--tr-accent-weak); }
+.tr-btn-danger:hover { background: var(--tr-danger-weak); }
 .tr-modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: grid; place-items: center; z-index: 50; }
 .tr-modal { background: var(--tr-surface); border: 1px solid var(--tr-border); border-radius: var(--tr-radius); padding: var(--tr-space-5); min-width: 320px; max-width: 480px; box-shadow: 0 10px 40px rgba(0,0,0,0.4); }
 .tr-modal h3 { margin: 0 0 var(--tr-space-3); }

@@ -9,11 +9,8 @@
   --tr-radius: 6px;
   --tr-rail-w: 172px;
 
-  /* Default (dark) — overridden by [data-theme] blocks below */
-  color-scheme: dark;
-}
-
-[data-theme='dark'] {
+  /* Default palette is dark — [data-theme='light'] overrides below.
+     Carried on :root so colors resolve even if data-theme is absent. */
   color-scheme: dark;
   --tr-bg: #0c0e11;
   --tr-bg-grid: rgba(255,255,255,0.03);
@@ -26,6 +23,7 @@
   --tr-accent: #ffb454;
   --tr-accent-weak: rgba(255,180,84,0.10);
   --tr-accent-fg: #0c0e11;
+  --tr-danger-weak: rgba(255,107,107,0.10);
   --tr-success: #4ade80;
   --tr-danger: #ff6b6b;
   --tr-warning: #ffce80;
@@ -34,6 +32,7 @@
   /* tiers */
   --tr-tier-pinned: #a855f7; --tr-tier-hot: #ff6b6b; --tr-tier-warm: #f59e0b;
   --tr-tier-cold: #3b82f6; --tr-tier-kb: #4ade80; --tr-tier-warm-weak: #3a2a12;
+  --tr-tier-badge-fg: #0c0e11;
 
   /* entry-type tags (bg / fg) */
   --tr-tag-correction: #3a1414; --tr-tag-correction-fg: #ff8888;
@@ -43,6 +42,10 @@
   --tr-tag-imported: #102a1a; --tr-tag-imported-fg: #7fe0a5;
   --tr-tag-compacted: #33260a; --tr-tag-compacted-fg: #ffce80;
   --tr-tag-ingested: #0a2a30; --tr-tag-ingested-fg: #7fdfe8;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
 }
 
 [data-theme='light'] {
@@ -58,14 +61,16 @@
   --tr-accent: #b45309;
   --tr-accent-weak: rgba(180,83,9,0.08);
   --tr-accent-fg: #fffdf8;
+  --tr-danger-weak: rgba(194,65,12,0.08);
   --tr-success: #15803d;
   --tr-danger: #c2410c;
-  --tr-warning: #b45309;
+  --tr-warning: #92400e;
   --tr-info: #1d4ed8;
 
   /* tiers */
   --tr-tier-pinned: #9333ea; --tr-tier-hot: #dc2626; --tr-tier-warm: #d97706;
   --tr-tier-cold: #2563eb; --tr-tier-kb: #15803d; --tr-tier-warm-weak: #fde9c8;
+  --tr-tier-badge-fg: #ffffff;
 
   /* entry-type tags (bg / fg) */
   --tr-tag-correction: #fde2e2; --tr-tag-correction-fg: #b91c1c;
