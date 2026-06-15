@@ -1,17 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { TopBar } from './TopBar';
+import { SideRail } from './SideRail';
 
 function renderRail() {
   return render(
     <MemoryRouter initialEntries={['/']}>
-      <TopBar />
+      <SideRail />
     </MemoryRouter>,
   );
 }
 
-describe('SideRail (TopBar)', () => {
+describe('SideRail', () => {
   beforeEach(() => {
     (window as unknown as { __TR_BOOTSTRAP__?: unknown }).__TR_BOOTSTRAP__ = {
       token: 't', backend: 'cortex', version: 'x',

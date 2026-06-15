@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { TopBar } from './components/TopBar';
+import { SideRail } from './components/SideRail';
 import { SectionPlaceholder } from './pages/SectionPlaceholder';
 import { Memory } from './pages/Memory';
 import { Dashboard } from './pages/Dashboard';
@@ -12,7 +12,7 @@ import { Config } from './pages/Config';
 export function AppShell() {
   return (
     <div className="tr-app">
-      <TopBar />
+      <SideRail />
       <main className="tr-main">
         <Routes>
           <Route path="/" element={<Dashboard />} />

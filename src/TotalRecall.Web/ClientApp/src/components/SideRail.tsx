@@ -4,7 +4,7 @@ import { BackendBadge } from './BackendBadge';
 import { ThemeToggle } from './ThemeToggle';
 import { getBootstrap } from '../lib/bootstrap';
 
-export function TopBar() {
+export function SideRail() {
   const { version } = getBootstrap();
   return (
     <aside className="tr-rail" aria-label="Sidebar">
