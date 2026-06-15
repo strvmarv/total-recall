@@ -259,6 +259,21 @@ public static class ServerComposition
         }
     }
 
+    /// <summary>
+    /// Build the LOCAL (sqlite) tool surface against a throwaway <paramref name="dbPath"/>,
+    /// IGNORING the machine's configured backend (OpenSqlite does not consult
+    /// cfg.Storage.Mode). Used by <see cref="CatalogDumper"/> to emit the committed
+    /// catalog.json. Unlike forcing local mode via environment variables, this does
+    /// NOT mutate process-wide state — essential because xunit runs the catalog test
+    /// concurrently with tests that read TOTAL_RECALL_* env, and mutating that env
+    /// would race them into flaky failures.
+    /// </summary>
+    internal static ServerCompositionHandles OpenLocalForCatalog(string dbPath)
+    {
+        var cfg = new ConfigLoader().LoadEffectiveConfig();
+        return OpenSqlite(cfg, dbPath, "sqlite");
+    }
+
     // Resolve the embedder model-change policy from config (FSharp option interop
     // in one place). Used by every backend's startup migration call.
     private static OnModelChange ResolveOnModelChange(Core.Config.TotalRecallConfig cfg) =>

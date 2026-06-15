@@ -23,27 +23,14 @@ public static class CatalogDumper
         Directory.CreateDirectory(tempHome);
         var dbPath = Path.Combine(tempHome, "catalog-dump.db");
 
-        // Snapshot the env vars we mutate so we can restore them. Without this,
-        // calling this from an in-process test runner (xunit shares one process
-        // across test classes) would leak TOTAL_RECALL_HOME etc. into every
-        // subsequently-running test and break their isolation.
-        var prevHome = Environment.GetEnvironmentVariable("TOTAL_RECALL_HOME");
-        var prevDbPath = Environment.GetEnvironmentVariable("TOTAL_RECALL_DB_PATH");
-        var prevCortexUrl = Environment.GetEnvironmentVariable("TOTAL_RECALL_CORTEX_URL");
-        var prevCortexPat = Environment.GetEnvironmentVariable("TOTAL_RECALL_CORTEX_PAT");
-
-        // Force local sqlite: empty home (no config.toml) + cleared backend env vars.
-        // TOTAL_RECALL_HOME with no config.toml causes LoadEffectiveConfig to return
-        // defaults → configuredMode = "local" → OpenSqlite is used.
-        Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", tempHome);
-        Environment.SetEnvironmentVariable("TOTAL_RECALL_DB_PATH", dbPath);
-        Environment.SetEnvironmentVariable("TOTAL_RECALL_CORTEX_URL", "");
-        Environment.SetEnvironmentVariable("TOTAL_RECALL_CORTEX_PAT", "");
-
         ServerCompositionHandles? handles = null;
         try
         {
-            handles = ServerComposition.OpenProduction(dbPath);
+            // OpenLocalForCatalog builds the sqlite tool surface directly against
+            // our throwaway db, regardless of the machine's configured backend, and
+            // WITHOUT mutating process-wide environment. The env-mutation approach
+            // raced concurrent env-reading tests under xunit's parallel runner.
+            handles = ServerComposition.OpenLocalForCatalog(dbPath);
             // ListTools() already returns a ToolSpec[] behind IReadOnlyList; reuse
             // it directly, falling back to a materialize only if that ever changes.
             var specs = handles.Registry.ListTools();
@@ -57,11 +44,6 @@ public static class CatalogDumper
         finally
         {
             handles?.Dispose();
-            // Restore env to its pre-call state (setting null removes the var).
-            Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", prevHome);
-            Environment.SetEnvironmentVariable("TOTAL_RECALL_DB_PATH", prevDbPath);
-            Environment.SetEnvironmentVariable("TOTAL_RECALL_CORTEX_URL", prevCortexUrl);
-            Environment.SetEnvironmentVariable("TOTAL_RECALL_CORTEX_PAT", prevCortexPat);
             try { Directory.Delete(tempHome, recursive: true); } catch { /* best-effort */ }
         }
     }
