@@ -19,7 +19,42 @@ test('handshake completes and tools/call is forwarded and returned', async () =>
   proxy.stop();
 });
 
-test('crash after handshake fires onExit and synthesizes not_ready for pending ids', async () => {
+test('pendingIds tracks requests, clears on response, ignores notifications and handshake', async () => {
+  const proxy = new EngineProxy({ command: process.execPath, args: [fake], stderr: process.stderr });
+  proxy.onForward = () => {};
+  await proxy.startAndHandshake();
+
+  // The reserved handshake id must never leak into the pending set.
+  assert.ok(!proxy.pendingIds().includes('__shim_init__'));
+
+  // Notification (no id) -> not tracked.
+  proxy.send({ jsonrpc: '2.0', method: 'notifications/foo' });
+  assert.deepEqual(proxy.pendingIds(), []);
+
+  // Request (with id) -> tracked until its response arrives.
+  proxy.send({ jsonrpc: '2.0', id: 42, method: 'tools/call', params: { name: 'x' } });
+  assert.ok(proxy.pendingIds().includes(42));
+
+  // After the engine answers, the id is cleared.
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(proxy.pendingIds(), []);
+
+  proxy.stop();
+});
+
+test('stderrTail captures engine diagnostics and passes them through', async () => {
+  let passthrough = '';
+  const sink = { write: (s) => { passthrough += s; } };
+  const proxy = new EngineProxy({ command: process.execPath, args: [fake, '--log-stderr'], stderr: sink });
+  proxy.onForward = () => {};
+  await proxy.startAndHandshake();
+  await new Promise((r) => setTimeout(r, 50));
+  assert.match(proxy.stderrTail(), /engine-diag-line/);
+  assert.match(passthrough, /engine-diag-line/);
+  proxy.stop();
+});
+
+test('crash after handshake fires onExit (orchestrator synthesizes from pendingIds)', async () => {
   const forwarded = [];
   let exited = false;
   const proxy = new EngineProxy({ command: process.execPath, args: [fake, '--crash-after-initialize'], stderr: process.stderr });
@@ -29,6 +64,14 @@ test('crash after handshake fires onExit and synthesizes not_ready for pending i
   await proxy.startAndHandshake().catch(() => {});
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(exited, true);
+});
+
+test('startAndHandshake twice throws rather than leaking a child', async () => {
+  const proxy = new EngineProxy({ command: process.execPath, args: [fake], stderr: process.stderr });
+  proxy.onForward = () => {};
+  await proxy.startAndHandshake();
+  assert.throws(() => proxy.startAndHandshake(), /called twice/);
+  proxy.stop();
 });
 
 test('hang on initialize rejects the handshake within the timeout', async () => {

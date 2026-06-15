@@ -13,6 +13,7 @@ import { spawn } from 'node:child_process';
 import { readMessages, writeMessage } from './jsonrpc-stdio.js';
 
 const HANDSHAKE_ID = '__shim_init__'; // string id; harness uses numbers/uuids
+const STDERR_TAIL_MAX = 8192;         // chars of recent engine stderr to retain
 
 export class EngineProxy {
   constructor({ command, args = [], stderr, handshakeTimeoutMs = 30000 }) {
@@ -24,7 +25,7 @@ export class EngineProxy {
     this._handshakeResolve = null;
     this._handshakeReject = null;
     this._pending = new Set();      // harness request ids forwarded, awaiting response
-    this._stderrTail = [];          // bounded ring buffer of recent stderr lines
+    this._stderrTail = '';          // byte-bounded tail of recent engine stderr
     this._stopped = false;
 
     this.onForward = () => {};       // (msg) => void  — engine -> harness
@@ -32,18 +33,27 @@ export class EngineProxy {
   }
 
   startAndHandshake() {
+    if (this._child) throw new Error('EngineProxy.startAndHandshake() called twice');
     return new Promise((resolve, reject) => {
       this._handshakeResolve = resolve;
       this._handshakeReject = reject;
 
       this._child = spawn(this._command, this._args, { stdio: ['pipe', 'pipe', 'pipe'] });
 
+      // The engine can die mid-write (crash-after-initialize): writing to a
+      // dead pipe emits EPIPE on child.stdin. On POSIX an unhandled stream
+      // error here can crash the shim, so absorb it — the 'exit' handler owns
+      // the real recovery path.
+      this._child.stdin.on('error', () => { /* EPIPE on dead engine; best-effort */ });
+
       readMessages(this._child.stdout, (msg) => this._onEngineMessage(msg));
 
       this._child.stderr.on('data', (b) => {
         const text = b.toString();
-        this._stderrTail.push(text);
-        if (this._stderrTail.length > 50) this._stderrTail.shift();
+        // Keep the last STDERR_TAIL_MAX characters. Bounding by characters (not
+        // by chunk count) means a pathological engine spraying tiny chunks
+        // can't shrink the retained diagnostic window.
+        this._stderrTail = (this._stderrTail + text).slice(-STDERR_TAIL_MAX);
         this._stderr.write(text);
       });
 
@@ -73,7 +83,7 @@ export class EngineProxy {
           this.stop();
         }
       }, this._handshakeTimeoutMs);
-      if (timer.unref) timer.unref();
+      timer.unref();
 
       // Kick the handshake.
       writeMessage(this._child.stdin, {
@@ -85,8 +95,11 @@ export class EngineProxy {
 
   _onEngineMessage(msg) {
     if (msg.id === HANDSHAKE_ID) {
-      // Engine accepted initialize -> send initialized, mark ready.
-      writeMessage(this._child.stdin, { jsonrpc: '2.0', method: 'notifications/initialized' });
+      // Engine accepted initialize -> send initialized, mark ready. Guard the
+      // write: a crash-after-initialize engine may already have a dead stdin.
+      if (this._child.stdin.writable) {
+        writeMessage(this._child.stdin, { jsonrpc: '2.0', method: 'notifications/initialized' });
+      }
       if (this._handshakeResolve) {
         const res = this._handshakeResolve;
         this._handshakeResolve = this._handshakeReject = null;
@@ -109,7 +122,7 @@ export class EngineProxy {
   // Ids forwarded but not yet answered (used to synthesize responses on crash).
   pendingIds() { return [...this._pending]; }
 
-  stderrTail() { return this._stderrTail.join(''); }
+  stderrTail() { return this._stderrTail; }
 
   stop() {
     this._stopped = true;

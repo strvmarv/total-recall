@@ -3,11 +3,14 @@
 //   (default)      answer initialize, echo tools/call as a text result
 //   --crash-after-initialize   exit(1) right after the initialize handshake
 //   --hang-initialize          never answer initialize
+//   --log-stderr               emit a marker line on stderr at startup
 import readline from 'node:readline';
 
 const mode = process.argv[2] ?? '';
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 const write = (o) => process.stdout.write(JSON.stringify(o) + '\n');
+
+if (mode === '--log-stderr') process.stderr.write('engine-diag-line\n');
 
 rl.on('line', (line) => {
   const s = line.trim();
