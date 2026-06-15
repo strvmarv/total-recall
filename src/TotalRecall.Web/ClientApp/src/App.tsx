@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { CommandPalette } from './components/CommandPalette';
 import { SideRail } from './components/SideRail';
 import { SectionPlaceholder } from './pages/SectionPlaceholder';
 import { Memory } from './pages/Memory';
@@ -12,6 +13,7 @@ import { Config } from './pages/Config';
 export function AppShell() {
   return (
     <div className="tr-app">
+      <CommandPalette />
       <SideRail />
       <main className="tr-main">
         <Routes>
