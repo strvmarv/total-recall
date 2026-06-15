@@ -11,17 +11,6 @@
 
   /* Default (dark) — overridden by [data-theme] blocks below */
   color-scheme: dark;
-
-  /* Legacy compat: still consumed by the not-yet-redesigned global.css
-     (topbar + backend badge dots). Removed when global.css is restyled
-     to the new token system in a later phase. */
-  --tr-topbar-bg: #1b2330;
-  --tr-topbar-fg: #e7ebf2;
-  --tr-topbar-h: 52px;
-  --tr-badge-sqlite: #16a34a;
-  --tr-badge-postgres: #2563eb;
-  --tr-badge-cortex: #9333ea;
-  --tr-badge-unknown: #9ca3af;
 }
 
 [data-theme='dark'] {
