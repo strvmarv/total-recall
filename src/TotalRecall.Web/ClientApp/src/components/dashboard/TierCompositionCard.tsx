@@ -1,4 +1,4 @@
-import { Bar, BarChart, ResponsiveContainer, XAxis } from 'recharts';
+import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis } from 'recharts';
 import { Card, CardState } from '../Card';
 import { useAsync } from '../../lib/useAsync';
 import { api } from '../../lib/api';
@@ -35,6 +35,7 @@ export function TierCompositionCard({ refreshKey }: { refreshKey: number }) {
               <ResponsiveContainer>
                 <BarChart layout="vertical" data={[{ name: 'tiers', ...row }]} stackOffset="expand" margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                   <XAxis type="number" hide domain={[0, 1]} />
+                  <YAxis type="category" dataKey="name" hide />
                   {segs.map((s) => (
                     <Bar key={s.key} dataKey={s.key} stackId="t" fill={s.color} isAnimationActive={false} />
                   ))}

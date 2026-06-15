@@ -241,7 +241,7 @@ body {
 .tr-insight-head h3 { margin: 0; font-size: 15px; }
 .tr-insight-evidence { margin: var(--tr-space-1) 0 0; font-size: 13px; color: var(--tr-text-muted); }
 .tr-impact { font-family: var(--tr-font-mono); font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 1px var(--tr-space-2); border-radius: var(--tr-radius); }
-.tr-impact-high { background: var(--tr-accent-weak); color: var(--tr-danger); }
+.tr-impact-high { background: var(--tr-danger-weak); color: var(--tr-danger); }
 .tr-impact-medium { background: var(--tr-accent-weak); color: var(--tr-warning); }
 .tr-impact-low { background: var(--tr-surface-2); color: var(--tr-text-muted); }
 
