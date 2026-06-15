@@ -202,6 +202,8 @@ total-recall ships a built-in local web UI — a third surface alongside the MCP
 
 **Design.** The UI has a developer-native *Terminal / Archive* identity: a monospace-forward type system (self-hosted **JetBrains Mono** + **IBM Plex Sans** — bundled into the binary, no CDN, fully offline), a fixed **left navigation rail**, a faint ruled-grid backdrop, and an amber phosphor accent. It ships **dark and light themes** with a toggle — your choice persists, and on first visit it follows your OS preference. A **⌘K / Ctrl-K command palette** jumps to any page and runs live search across memories and the knowledge base, so the whole UI is reachable from the keyboard.
 
+![total-recall web UI — Dashboard, dark theme](docs/images/web-ui-dashboard.png)
+
 ```bash
 total-recall ui                  # serve on http://localhost:5577 and open the browser
 total-recall ui --port 5600      # custom port
