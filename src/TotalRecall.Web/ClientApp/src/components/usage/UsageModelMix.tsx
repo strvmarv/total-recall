@@ -4,8 +4,8 @@ import { useAsync } from '../../lib/useAsync';
 import { api } from '../../lib/api';
 import type { UsageResult } from '../../lib/types';
 import { usageArgs, type UsageFilterState } from './UsageFilters';
+import { useChartTheme } from '../../lib/chartTheme';
 
-const COLORS = ['var(--tr-tier-pinned)', 'var(--tr-tier-cold)', 'var(--tr-tier-warm)', 'var(--tr-tier-kb)', 'var(--tr-tier-hot)'];
 function friendly(model: string): string {
   const m = model.toLowerCase();
   if (m.includes('opus')) return 'Opus';
@@ -18,11 +18,13 @@ function tokensOf(b: { input_tokens: number | null; cache_creation_tokens: numbe
 }
 
 export function UsageModelMix({ filters, refreshKey }: { filters: UsageFilterState; refreshKey: number }) {
+  const theme = useChartTheme();
+  const colors = [theme.tierPinned, theme.tierCold, theme.tierWarm, theme.tierKb, theme.tierHot];
   const { data, error, loading } = useAsync<UsageResult>(
     () => api.tool<UsageResult>('usage_status', usageArgs(filters, 'model')),
     [filters.window, filters.host, filters.project, refreshKey],
   );
-  const slices = (data?.buckets ?? []).map((b, i) => ({ id: b.key, name: friendly(b.key), value: tokensOf(b), color: COLORS[i % COLORS.length] })).filter((s) => s.value > 0);
+  const slices = (data?.buckets ?? []).map((b, i) => ({ id: b.key, name: friendly(b.key), value: tokensOf(b), color: colors[i % colors.length] })).filter((s) => s.value > 0);
 
   return (
     <Card title="Model mix (by tokens)">

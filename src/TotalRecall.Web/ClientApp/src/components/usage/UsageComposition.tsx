@@ -4,8 +4,10 @@ import { useAsync } from '../../lib/useAsync';
 import { api } from '../../lib/api';
 import type { UsageResult } from '../../lib/types';
 import { usageArgs, type UsageFilterState } from './UsageFilters';
+import { useChartTheme } from '../../lib/chartTheme';
 
 export function UsageComposition({ filters, refreshKey }: { filters: UsageFilterState; refreshKey: number }) {
+  const theme = useChartTheme();
   const { data, error, loading } = useAsync<UsageResult>(
     () => api.tool<UsageResult>('usage_status', usageArgs(filters, 'day')),
     [filters.window, filters.host, filters.project, refreshKey],
@@ -20,11 +22,11 @@ export function UsageComposition({ filters, refreshKey }: { filters: UsageFilter
         <div aria-hidden="true" style={{ width: '100%', height: 220 }}>
           <ResponsiveContainer>
             <BarChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-              <XAxis dataKey="day" fontSize={11} /><YAxis fontSize={11} width={48} /><Tooltip />
-              <Bar dataKey="input" stackId="t" fill="var(--tr-tier-cold)" isAnimationActive={false} />
-              <Bar dataKey="cacheRead" stackId="t" fill="var(--tr-tier-kb)" isAnimationActive={false} />
-              <Bar dataKey="cacheCreate" stackId="t" fill="var(--tr-tier-warm)" isAnimationActive={false} />
-              <Bar dataKey="output" stackId="t" fill="var(--tr-tier-pinned)" isAnimationActive={false} />
+              <XAxis dataKey="day" fontSize={11} tick={{ fill: theme.tick }} /><YAxis fontSize={11} width={48} tick={{ fill: theme.tick }} /><Tooltip />
+              <Bar dataKey="input" stackId="t" fill={theme.tierCold} isAnimationActive={false} />
+              <Bar dataKey="cacheRead" stackId="t" fill={theme.tierKb} isAnimationActive={false} />
+              <Bar dataKey="cacheCreate" stackId="t" fill={theme.tierWarm} isAnimationActive={false} />
+              <Bar dataKey="output" stackId="t" fill={theme.tierPinned} isAnimationActive={false} />
             </BarChart>
           </ResponsiveContainer>
         </div>
