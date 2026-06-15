@@ -122,11 +122,9 @@ Cross-encoder or Cohere Rerank API pass after pgvector retrieval on the Cortex s
 
 Items identified during the 0.7.2 TS → 0.8.0 .NET cutover but deferred out of the beta window. Revisit once `main` is on `0.8.x` and the beta has baked cleanly.
 
-### Checksum Verification of Downloaded Binaries
+### ~~Checksum Verification of Downloaded Binaries~~
 
-`scripts/fetch-binary.js` currently trusts TLS when fetching from GitHub Releases. Add a sidecar `total-recall-<rid>.sha256` file per RID in the release assets, attach via `release.yml`, and verify the SHA-256 in `ensureBinary()` before the rename-into-place step. Reject and delete the tmp file on mismatch; include expected vs. actual digest in the error message.
-
-**Files:** `scripts/fetch-binary.js`, `.github/workflows/release.yml`
+Implemented in the MCP bootstrap shim: the shim provisioner downloads the engine archive and verifies it by sha256 against `provisioning.manifest.json` (generated and attached to each GitHub Release by `release.yml`) before extracting. A `.verified.json` marker next to the binary keeps steady-state startup instant (no re-hash on every launch). Reject-on-mismatch with clear error included.
 
 ### Signed Releases
 
@@ -296,3 +294,25 @@ All UI sections poll on-demand or on page load. Real-time updates (e.g. "new mem
 `memory_store` parses and validates the `entryType` argument into metadata JSON but hardcodes `EntryType.Preference` for the `entry_type` column in the `InsertWithEmbedding` call. `memory_extract` (Phase 3) maps the validated string to the correct `EntryType` discriminated union value and writes it to the column — the two siblings diverge. Fix `MemoryStoreHandler` to map the validated string to the `EntryType` DU (consider per-type decay accuracy impact on existing rows that were silently written as Preference). Found during Phase 3 code review.
 
 **Files:** `src/TotalRecall.Server/Handlers/MemoryStoreHandler.cs` (`InsertWithEmbedding` call), `src/TotalRecall.Server/Handlers/MemoryExtractHandler.cs` (reference implementation)
+
+## Follow-ups deferred from the MCP bootstrap shim
+
+Items identified during the MCP bootstrap shim implementation but intentionally deferred.
+
+### Mode-aware catalog
+
+`catalog.json` captures the local/sqlite tool surface (41 core + mode-dependent tools). Postgres mode exposes fewer tools, so the pre-engine `tools/list` served by the shim is cosmetically broad until the engine starts and emits `notifications/tools/list_changed` with the authoritative mode-specific list. Tool calls always proxy correctly once the engine is up — only the initial discovery list is approximate. A follow-up would generate and commit a separate `catalog-postgres.json` and have the shim select the right one based on config/env.
+
+**Files:** `bin/shim/server-surface.js`, `.github/workflows/release.yml` (catalog generation step), `catalog.json`
+
+### Mid-session engine hot-swap
+
+The shim supervises and restarts the engine on crash, but currently requires the MCP host to reconnect (or wait for the shim restart) to pick up a new engine version. A follow-up would allow provisioning a new engine version in the background and hot-swapping the proxy target without dropping the MCP connection, enabling zero-downtime upgrades mid-session.
+
+**Files:** `bin/shim/orchestrator.js`, `bin/shim/engine-proxy.js`, `bin/shim/provisioner.js`
+
+### Richer provisioning progress surfaced to the user
+
+During provisioning the shim returns a minimal `{ "status": "not_ready", "phase": "provisioning" }` result. A follow-up would include download progress (bytes transferred / total, percentage) so the host or skill can surface a real-time progress indicator to the user rather than a plain "still starting" message.
+
+**Files:** `bin/shim/provisioner.js`, `bin/shim/server-surface.js`, `skills/using-total-recall/SKILL.md`

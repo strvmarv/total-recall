@@ -1,117 +1,47 @@
 #!/usr/bin/env node
-// Launcher for the total-recall MCP server (.NET AOT build).
+// Launcher/shim for the total-recall MCP server.
 //
-// Responsibilities:
-//   1. Ensure the correct .NET AOT binary is present under
-//      binaries/<rid>/ — either because it was shipped in the npm
-//      tarball / committed by an earlier postinstall run, or by
-//      downloading it now from the matching GitHub Release.
-//   2. Exec it with full stdio passthrough so the MCP JSON-RPC channel
-//      (stdin/stdout) remains a raw byte stream.
-//   3. Forward SIGINT/SIGTERM and propagate the child's exit code.
-//
-// The download-on-missing fallback exists because Claude Code's
-// /plugin update flow clones the git repo (which does NOT contain
-// binaries/) rather than installing the npm tarball. In that case
-// ensureBinary() pulls the right binary from GitHub Releases on first
-// launch. Users installing via npm get the same path as a no-op
-// because scripts/postinstall.js already downloaded the binary.
-//
-// Zero runtime dependencies — Node built-ins only. Reuses the shared
-// downloader at ../scripts/fetch-binary.js for RID detection and
-// HTTP(S) fetch logic.
+// Unlike the old "present-check or background-download-and-exit" gate, this
+// process IS the MCP server from the harness's point of view: it answers the
+// initialize handshake instantly, serves a static tools/list, returns a
+// structured not_ready result for tool calls while the engine provisions, then
+// spawns and proxies to the engine binary. Once the shim is running the MCP
+// connection never drops; all not-ready states are in-band tool results. (The
+// only hard exit is before any connection exists — an unsupported platform.)
+// See bin/shim/* and
+// docs/superpowers/specs/2026-06-14-mcp-bootstrap-shim-design.md.
 
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import process from 'node:process';
+import { detectRid } from '../scripts/fetch-binary.js';
+import { runShim } from './shim/orchestrator.js';
+import { ensureProvisioned, makeProductionDeps } from './shim/provisioner.js';
 
-import { detectRid, getBinaryPath, provisionInBackground, readProvisionProgress } from '../scripts/fetch-binary.js';
-
-// Present-check fast path: never block the MCP startup handshake on the
-// ~90 MB binary download. If the binary is missing (git/marketplace install
-// path), kick a detached background downloader and exit fast with guidance;
-// the next launch finds the binary and starts instantly.
 const rid = detectRid(process.platform, process.arch);
-const binaryPath = rid ? getBinaryPath(rid) : null;
-
-if (!binaryPath || !fs.existsSync(binaryPath)) {
-  const p = provisionInBackground({ logPrefix: '[total-recall]' });
-  if (p.status === 'unsupported') {
-    process.stderr.write(`[total-recall] unsupported platform: ${process.platform}/${process.arch}\n`);
-  } else if (p.status === 'in-progress') {
-    // A detached provisioner from a prior launch is still downloading. Surface
-    // its live byte-progress (written into the lock file) so the user can see
-    // it advancing instead of a static "still downloading" line.
-    const prog = readProvisionProgress(p.rid ?? rid);
-    if (prog && prog.phase === 'extracting') {
-      process.stderr.write('[total-recall] first-run setup: extracting memory engine…\n');
-    } else if (prog && prog.total > 0) {
-      const mb = (n) => (n / (1024 * 1024)).toFixed(1);
-      const pct = Math.floor((prog.bytes / prog.total) * 100);
-      process.stderr.write(
-        `[total-recall] first-run setup: downloading memory engine — ${mb(prog.bytes)}/${mb(prog.total)} MB (${pct}%)…\n`);
-    } else {
-      process.stderr.write(
-        '[total-recall] first-run setup: downloading the memory engine (~90 MB) in the background.\n' +
-        '[total-recall] Memory becomes available once it finishes — reload the plugin or restart your\n' +
-        '[total-recall] session in a minute. (One-time; only the git/marketplace install path needs it.)\n');
-    }
-  } else {
-    process.stderr.write(
-      '[total-recall] First-run setup: downloading the memory engine (~90 MB) in the background.\n' +
-      '[total-recall] Memory becomes available once it finishes — reload the plugin or restart your\n' +
-      '[total-recall] session in a minute. (One-time; only the git/marketplace install path needs it.)\n');
-  }
+if (!rid) {
+  process.stderr.write(`[total-recall] unsupported platform: ${process.platform}/${process.arch}\n`);
   process.exit(1);
 }
 
-// Spawn with inherited stdio — MCP requires a raw, unbuffered byte channel.
-const child = spawn(binaryPath, process.argv.slice(2), {
-  stdio: 'inherit',
-  env: process.env,
-  windowsHide: false,
+const catalogUrl = new URL('../catalog.json', import.meta.url);
+const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const catalog = JSON.parse(fs.readFileSync(catalogUrl, 'utf8'));
+
+const deps = makeProductionDeps();
+const engineArgs = process.argv.slice(2); // pass through `serve` etc. (default = serve)
+
+const shim = runShim({
+  stdin: process.stdin,
+  stdout: process.stdout,
+  catalog,
+  serverName: 'total-recall',
+  serverVersion: pkg.version,
+  protocolVersion: '2024-11-05',
+  provision: (onProgress) => ensureProvisioned({ ...deps, onProgress }),
+  engineCommand: deps.binaryPath,
+  engineArgs,
 });
 
-// Forward termination signals so the child can clean up its resources
-// (SQLite WAL checkpoints, lockfiles, etc).
-const forwardSignal = (signal) => {
-  if (!child.killed) {
-    try {
-      child.kill(signal);
-    } catch {
-      // ignore — child may already be exiting
-    }
-  }
-};
-process.on('SIGINT', () => forwardSignal('SIGINT'));
-process.on('SIGTERM', () => forwardSignal('SIGTERM'));
-
-child.on('error', (err) => {
-  if (err && err.code === 'ENOENT') {
-    process.stderr.write(
-      `[total-recall] Failed to exec binary (ENOENT): ${binaryPath}\n` +
-        '  The file exists but could not be executed. On Unix, check the\n' +
-        '  executable bit (chmod +x). On macOS, check Gatekeeper quarantine.\n'
-    );
-  } else if (err && err.code === 'EACCES') {
-    process.stderr.write(
-      `[total-recall] Permission denied executing binary: ${binaryPath}\n` +
-        '  Fix: chmod +x "' + binaryPath + '"\n'
-    );
-  } else {
-    process.stderr.write(
-      `[total-recall] Failed to spawn binary: ${err && err.message ? err.message : String(err)}\n`
-    );
-  }
-  process.exit(1);
-});
-
-child.on('exit', (code, signal) => {
-  if (signal) {
-    // Re-raise the signal on ourselves so the parent shell sees the right
-    // termination cause (128 + signal number for bash-style exit codes).
-    process.kill(process.pid, signal);
-    return;
-  }
-  process.exit(code ?? 1);
-});
+const shutdown = () => { try { shim.stop(); } catch {} process.exit(0); };
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);

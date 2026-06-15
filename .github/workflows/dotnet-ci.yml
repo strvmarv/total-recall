@@ -53,5 +53,34 @@ jobs:
       - name: Fetch bge-small model (tests load it; not committed)
         run: sh scripts/fetch-bge-small.sh
 
+      - name: Catalog drift guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          # --configuration Release --no-build: reuse the binaries from the Build
+          # step. Without these, `dotnet run` defaults to Debug, triggers a fresh
+          # build, and its MSBuild output leaks onto stdout into the redirect file —
+          # making the diff fail spuriously. --no-build keeps stdout to the catalog.
+          dotnet run --project src/TotalRecall.Host --configuration Release --no-build -- dump-catalog > /tmp/catalog.json
+          if ! diff -u catalog.json /tmp/catalog.json; then
+            echo "::error::catalog.json is stale. Regenerate with: dotnet run --project src/TotalRecall.Host -- dump-catalog > catalog.json" >&2
+            exit 1
+          fi
+
       - name: Test
         run: dotnet test src/TotalRecall.sln --no-build --configuration Release --logger "console;verbosity=normal" --filter "Category!=Integration"
+
+  shim-tests:
+    name: Shim tests (Node)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+      # No `npm ci` on purpose: the shim + fetch-binary tests import only Node
+      # built-ins (zero runtime deps), and `npm ci` would run the postinstall
+      # binary download (~90 MB) for nothing. If a shim test ever needs an npm
+      # package, add `npm ci --ignore-scripts` here.
+      - name: Run shim tests
+        run: npm run test:shim

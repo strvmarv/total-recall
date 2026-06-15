@@ -86,6 +86,14 @@ internal static class Program
             return await RunUiAsync(args).ConfigureAwait(false);
         }
 
+        if (args[0] == "dump-catalog")
+        {
+            // Build/release tool: print the local-mode tools/list catalog to stdout.
+            Console.OutputEncoding = Encoding.UTF8;
+            Console.Out.Write(TotalRecall.Server.CatalogDumper.DumpLocalCatalogJson());
+            return 0;
+        }
+
         return await TotalRecall.Cli.CliApp.RunAsync(args).ConfigureAwait(false);
     }
 

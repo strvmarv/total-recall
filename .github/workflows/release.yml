@@ -392,6 +392,35 @@ jobs:
           echo "--- archive contents preview ---"
           tar -tzf release-assets/total-recall-osx-arm64.tar.gz | head -20
 
+      - name: Generate provisioning manifest
+        shell: bash
+        # The Node shim (bin/start.js) downloads + sha256-verifies the engine
+        # archive against this manifest when the binary is missing at launch.
+        # Checksums only exist after the archives are staged, so the manifest is
+        # generated here (not committed) and attached as a release asset.
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          sha() { sha256sum "release-assets/total-recall-$1.tar.gz" | awk '{print $1}'; }
+          size() { stat -c%s "release-assets/total-recall-$1.tar.gz"; }
+          base="https://github.com/strvmarv/total-recall/releases/download/v${VERSION}"
+          cat > release-assets/provisioning.manifest.json <<JSON
+          {
+            "manifestVersion": 1,
+            "package": "total-recall",
+            "version": "${VERSION}",
+            "artifacts": {
+              "linux-x64":   { "archive": "total-recall-linux-x64.tar.gz",   "url": "${base}/total-recall-linux-x64.tar.gz",   "sha256": "$(sha linux-x64)",   "sizeBytes": $(size linux-x64),   "binaryRelPath": "binaries/linux-x64/total-recall" },
+              "linux-arm64": { "archive": "total-recall-linux-arm64.tar.gz", "url": "${base}/total-recall-linux-arm64.tar.gz", "sha256": "$(sha linux-arm64)", "sizeBytes": $(size linux-arm64), "binaryRelPath": "binaries/linux-arm64/total-recall" },
+              "osx-arm64":   { "archive": "total-recall-osx-arm64.tar.gz",   "url": "${base}/total-recall-osx-arm64.tar.gz",   "sha256": "$(sha osx-arm64)",   "sizeBytes": $(size osx-arm64),   "binaryRelPath": "binaries/osx-arm64/total-recall" },
+              "win-x64":     { "archive": "total-recall-win-x64.tar.gz",     "url": "${base}/total-recall-win-x64.tar.gz",     "sha256": "$(sha win-x64)",     "sizeBytes": $(size win-x64),     "binaryRelPath": "binaries/win-x64/total-recall.exe" }
+            }
+          }
+          JSON
+          echo "--- manifest ---"
+          cat release-assets/provisioning.manifest.json
+          node -e "JSON.parse(require('fs').readFileSync('release-assets/provisioning.manifest.json','utf8'))"
+
       - name: Attach archives to GitHub release
         uses: softprops/action-gh-release@v3
         with:
@@ -400,5 +429,6 @@ jobs:
             release-assets/total-recall-linux-arm64.tar.gz
             release-assets/total-recall-osx-arm64.tar.gz
             release-assets/total-recall-win-x64.tar.gz
+            release-assets/provisioning.manifest.json
           prerelease: ${{ contains(github.ref_name, '-') }}
           fail_on_unmatched_files: true
