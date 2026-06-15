@@ -16,23 +16,39 @@ import {
   ensureBinary, readVerifiedMarker,
 } from '../../scripts/fetch-binary.js';
 
+// Note on the static import above: ensureProvisioned does NOT reference
+// ensureBinary / readVerifiedMarker — it operates purely on injected deps, so
+// the "all I/O is injected, suite runs offline" contract holds at runtime. The
+// two I/O functions are imported only so makeProductionDeps can wire them into
+// the production deps object. Importing them eagerly is safe: fetch-binary.js
+// has no import-time side effects (its only top-level action,
+// isDirectProvisionInvocation(), is false unless the process was launched with
+// --provision), and Node 20 cannot require() an ESM module synchronously, so a
+// lazy synchronous load is not available without making makeProductionDeps
+// async — which would break its synchronous call contract.
+
+// Returns one of:
+//   { ok: true,  binaryPath }                  — engine is present and usable.
+//   { ok: false, error, retryable }            — provisioning failed.
+// `retryable` is defined ONLY on the failure shape: true for transient faults
+// (network, manifest fetch) and false for terminal ones (checksum mismatch,
+// missing artifact). Consumers must branch on `ok` first and read `retryable`
+// only when `ok === false` — it is intentionally absent on success.
 export async function ensureProvisioned(deps) {
   const {
     binaryPath, rid, version,
-    exists, readVerifiedMarker: readMarker,
-    fetchManifest, ensureBinary: ensure, onProgress,
+    exists, fetchManifest, ensureBinary: ensure, onProgress,
   } = deps;
 
-  // Fast path — present + marker matches this version.
+  // Fast path — binary present: trust it.
+  // Presence alone is sufficient. A .verified marker matching this version is
+  // the happy path, but its absence (npm tarball ships the binary with no
+  // marker) or a stale-version marker does NOT trigger a re-download: a single
+  // shim process is pinned to one version, so a "present but wrong-version"
+  // binary cannot arise mid-process, and re-verifying a 90 MB tree on every
+  // launch is the cost we deliberately avoid. Since every present-binary case
+  // resolves identically, we skip reading the marker entirely here.
   if (exists(binaryPath)) {
-    const marker = readMarker(rid);
-    if (marker && marker.version === version) {
-      return { ok: true, binaryPath };
-    }
-    // Present but unverified/old-version: trust presence (npm path ships the
-    // binary without a marker) — re-verifying a 90 MB tree every launch is the
-    // cost we explicitly avoid. Mismatched-version binaries can't happen in a
-    // single shim process (one version per process).
     return { ok: true, binaryPath };
   }
 
@@ -61,13 +77,15 @@ export async function ensureProvisioned(deps) {
       ok: false,
       error: result.error,
       // Checksum mismatch = corrupt/tampered asset, do NOT auto-retry.
-      retryable: result.checksumMismatch ? false : true,
+      // Any other failure (network, extract, disk) is transient -> retryable.
+      retryable: !result.checksumMismatch,
     };
   }
   return { ok: true, binaryPath: result.path };
 }
 
-// Real implementations for production use by start.js.
+// Real implementations for production use by start.js. Kept synchronous so
+// callers can build deps inline without awaiting.
 export function makeProductionDeps({ onProgress } = {}) {
   const rid = detectRid(process.platform, process.arch);
   const binaryPath = rid ? getBinaryPath(rid) : null;
@@ -79,36 +97,62 @@ export function makeProductionDeps({ onProgress } = {}) {
     readVerifiedMarker,
     fetchManifest: fetchManifestFromRelease,
     ensureBinary,
-    onProgress,
+    // Only attach onProgress when a callback was actually supplied, so the deps
+    // object never carries an explicit `onProgress: undefined` key.
+    ...(typeof onProgress === 'function' ? { onProgress } : {}),
   };
 }
 
 function readPackageVersion() {
   const url = new URL('../../package.json', import.meta.url);
-  return JSON.parse(fs.readFileSync(url, 'utf8')).version;
+  const { version } = JSON.parse(fs.readFileSync(url, 'utf8'));
+  if (typeof version !== 'string' || version.length === 0) {
+    throw new Error('package.json has no version field');
+  }
+  return version;
 }
+
+// Hard wall-clock cap for the manifest fetch. This runs on the startup-critical
+// path (the MCP handshake has its own timeout), so a stalled TLS handshake or a
+// server that accepts the connection but never responds must not hang the event
+// loop. A few-KB manifest over a reachable network completes well under this.
+const MANIFEST_FETCH_TIMEOUT_MS = 15_000;
 
 // GET the manifest release asset (a few KB) and parse it.
 function fetchManifestFromRelease(version) {
   const url = getManifestUrl(version);
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, arg) => { if (!settled) { settled = true; fn(arg); } };
+
     const get = (u, redirects = 5) => {
-      https.get(u, (res) => {
+      const req = https.get(u, (res) => {
         const status = res.statusCode ?? 0;
         if (status >= 300 && status < 400 && res.headers.location) {
-          if (redirects <= 0) { res.resume(); reject(new Error('too many redirects')); return; }
+          if (redirects <= 0) { res.resume(); finish(reject, new Error('too many redirects')); return; }
           res.resume();
           const next = res.headers.location.startsWith('http')
             ? res.headers.location : new URL(res.headers.location, u).toString();
           get(next, redirects - 1);
           return;
         }
-        if (status !== 200) { res.resume(); reject(new Error(`HTTP ${status} for manifest`)); return; }
+        if (status !== 200) { res.resume(); finish(reject, new Error(`HTTP ${status} for manifest`)); return; }
         let body = '';
         res.setEncoding('utf8');
         res.on('data', (c) => { body += c; });
-        res.on('end', () => { try { resolve(JSON.parse(body)); } catch (e) { reject(e); } });
-      }).on('error', reject);
+        res.on('end', () => {
+          try { finish(resolve, JSON.parse(body)); }
+          catch (e) { finish(reject, e); }
+        });
+      });
+      req.on('error', (e) => finish(reject, e));
+      // Tear the socket down on a stall so a slow/dead peer can't hold the loop
+      // open. destroy() emits 'error', which finish()'s settled guard absorbs
+      // if we already rejected via the timeout below.
+      req.setTimeout(MANIFEST_FETCH_TIMEOUT_MS, () => {
+        req.destroy(new Error('manifest fetch timed out'));
+        finish(reject, new Error('manifest fetch timed out'));
+      });
     };
     get(url);
   });
