@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 3.2.0 - 2026-06-14
+
+### Changed
+
+- **The MCP server is now a thin always-on shim that never drops its connection.** `bin/start.js` was rewritten as a zero-dependency Node MCP shim: it answers `initialize`/`ping`/`tools/list` instantly, returns a structured `not_ready` tool result while the engine binary provisions in the background, then spawns and proxies to the engine — supervising and restarting it on crash with exponential backoff. This eliminates the `MCP error -32000: Connection closed` failure on first launch after a plugin update (the old launcher did a detached background download and then exited, closing the stdio transport). All not-ready states (`provisioning`, `starting-engine`, `engine-restarting`, `engine-failed`) are surfaced in-band as `{status:"not_ready", phase:…}` tool results, so recovery is uniform across every harness — wait briefly and retry; the connection stays up.
+- **Engine archives are sha256-verified on download** against a release `provisioning.manifest.json` (generated and attached by the release workflow). Previously there was no checksum on the downloaded archive. A `.verified.json` marker next to the binary keeps steady-state startup instant (no re-hash of the ~90 MB tree).
+- **`tools/list` is served from a committed `catalog.json` before the engine is up**, then re-fetched from the authoritative engine via `notifications/tools/list_changed` once the shim is proxying. A CI drift guard keeps `catalog.json` in sync with the engine's local tool surface.
+
+### Added
+
+- **`dump-catalog` engine command** (`dotnet run --project src/TotalRecall.Host -- dump-catalog`) emits the local/sqlite `tools/list` JSON used to (re)generate the committed `catalog.json`.
+- **Shim test suite** (`npm run test:shim`) — `node:test`, zero-dependency, runs as a Node-only CI job independent of .NET.
+
 ## 3.1.0 - 2026-06-14
 
 ### Added
