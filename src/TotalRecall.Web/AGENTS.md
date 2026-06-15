@@ -125,6 +125,7 @@ ClientApp/
 ├── src/
 │   ├── pages/          — one file per section (Dashboard, Memory, KnowledgeBase, Usage, Insights, Config)
 │   ├── components/     — shared and per-section components
+│   │   ├── (shell)     — SideRail (left nav + brand caret), CommandPalette (⌘K), ThemeToggle, Card
 │   │   ├── dashboard/  — TierCompositionCard, TokenUsageCard, TrendsCard, RetrievalQualityCard, …
 │   │   ├── memory/     — MemoryTable, MemoryDetail, MemoryFilters
 │   │   ├── kb/         — KbCollectionsTable, KbSearch, KbIngest
@@ -139,12 +140,18 @@ ClientApp/
 │       ├── usageCost.ts — cost calculation helpers
 │       ├── insights.ts  — client-side insight signal derivation
 │       ├── trendsMath.ts, usageMath.ts, time.ts, configFields.ts — pure utilities
-│       └── useAsync.ts  — generic data-fetching hook
+│       ├── useAsync.ts  — generic data-fetching hook
+│       ├── useTheme.ts  — dark/light theme state (persists to localStorage; OS-default on first visit)
+│       ├── useHotkey.ts — Ctrl/Cmd+key global hotkey hook (powers the ⌘K palette)
+│       └── chartTheme.ts — resolves theme tokens for Recharts; useChartTheme() recolors charts on theme toggle
+├── src/styles/          — theme.css (dual-theme CSS custom-property tokens) + global.css (Terminal/Archive styling)
 ├── vite.config.ts       — Vite config; dev-server proxies /api to port 5577
 └── package.json         — dependencies: React 18, Recharts (charting), Vitest (tests)
 ```
 
-**Charting:** All charts use [Recharts](https://recharts.org/). No other charting library is present.
+**Charting:** All charts use [Recharts](https://recharts.org/). No other charting library is present. Chart colors are **not** hardcoded — components call `useChartTheme()` (`lib/chartTheme.ts`), which reads the active theme's CSS custom properties and re-resolves them via a `MutationObserver` on the `<html data-theme>` attribute, so charts recolor live when the user toggles dark/light.
+
+**Design system:** A developer-native *Terminal / Archive* identity. `styles/theme.css` defines all color/type/spacing as CSS custom properties on `:root` (dark defaults) with a `[data-theme='light']` override block; `styles/global.css` consumes only those tokens (no hardcoded hex). The shell is a fixed left rail (`SideRail`) plus a `⌘K` `CommandPalette`; fonts (JetBrains Mono + IBM Plex Sans) are self-hosted via `@fontsource` and bundled by Vite (no CDN). Theme choice persists in `localStorage` and an inline no-FOUC script in `index.html` applies it before first paint. Animations are gated behind `prefers-reduced-motion`.
 
 **Tests:** `npm test` (or `npm run test`) runs Vitest in `jsdom` mode. Test files live alongside the source (`*.test.tsx` / `*.test.ts`). The test setup file is `src/test/setup.ts`.
 

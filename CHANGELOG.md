@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- **The built-in web UI was redesigned with a developer-native _Terminal / Archive_ visual identity.** The generic top-bar layout was replaced with a fixed **left navigation rail**; the type system is now monospace-forward (self-hosted **JetBrains Mono** + **IBM Plex Sans**, bundled by Vite — no CDN, fully offline), over a faint ruled-grid backdrop with an amber phosphor accent. The whole surface is now driven by a CSS custom-property token system.
+- **Dark and light themes with a toggle.** The UI ships both themes; the choice persists in `localStorage` and defaults to the OS `prefers-color-scheme` on first visit (a no-FOUC inline script applies it before first paint). Recharts charts read their colors from the theme tokens and recolor live on toggle. Motion (the blinking brand caret, staggered panel reveals) respects `prefers-reduced-motion`.
+
+### Added
+
+- **⌘K / Ctrl-K command palette.** A keyboard-first palette jumps to any page and runs live, debounced search across memories and the knowledge base (via the existing allowlisted `memory_search` / `kb_search` tools), with full arrow-key navigation and ARIA combobox semantics. It replaces the previous inline global-search box.
+
+### Fixed
+
+- **The Dashboard tier-composition bar now renders.** The stacked `layout="vertical"` bar chart was missing its category axis, so it drew zero segments; adding a hidden category `YAxis` restores the proportional pinned/hot/warm/cold/KB bar.
+
 ## 3.2.1 - 2026-06-15
 
 ### Fixed
