@@ -3,23 +3,25 @@ import { Card, CardState } from '../Card';
 import { useAsync } from '../../lib/useAsync';
 import { api } from '../../lib/api';
 import type { StatusResult } from '../../lib/types';
+import { useChartTheme, type ChartTheme } from '../../lib/chartTheme';
 
 interface Seg { key: string; label: string; value: number; color: string; }
 
-function segments(s: StatusResult): Seg[] {
+function segments(s: StatusResult, theme: ChartTheme): Seg[] {
   const t = s.tierSizes;
   return [
-    { key: 'pinned', label: 'Pinned', value: t.pinned_memories + t.pinned_knowledge, color: 'var(--tr-tier-pinned)' },
-    { key: 'hot', label: 'Hot', value: t.hot_memories + t.hot_knowledge, color: 'var(--tr-tier-hot)' },
-    { key: 'warm', label: 'Warm', value: t.warm_memories + t.warm_knowledge, color: 'var(--tr-tier-warm)' },
-    { key: 'cold', label: 'Cold', value: t.cold_memories + t.cold_knowledge, color: 'var(--tr-tier-cold)' },
-    { key: 'kb', label: 'KB', value: s.knowledgeBase.totalChunks, color: 'var(--tr-tier-kb)' },
+    { key: 'pinned', label: 'Pinned', value: t.pinned_memories + t.pinned_knowledge, color: theme.tierPinned },
+    { key: 'hot', label: 'Hot', value: t.hot_memories + t.hot_knowledge, color: theme.tierHot },
+    { key: 'warm', label: 'Warm', value: t.warm_memories + t.warm_knowledge, color: theme.tierWarm },
+    { key: 'cold', label: 'Cold', value: t.cold_memories + t.cold_knowledge, color: theme.tierCold },
+    { key: 'kb', label: 'KB', value: s.knowledgeBase.totalChunks, color: theme.tierKb },
   ];
 }
 
 export function TierCompositionCard({ refreshKey }: { refreshKey: number }) {
+  const theme = useChartTheme();
   const { data, error, loading } = useAsync<StatusResult>(() => api.tool<StatusResult>('status'), [refreshKey]);
-  const segs = data ? segments(data) : [];
+  const segs = data ? segments(data, theme) : [];
   const total = segs.reduce((a, s) => a + s.value, 0);
   const collections = data?.knowledgeBase.collections.length ?? 0;
   const row = Object.fromEntries(segs.map((s) => [s.key, s.value])) as Record<string, number>;

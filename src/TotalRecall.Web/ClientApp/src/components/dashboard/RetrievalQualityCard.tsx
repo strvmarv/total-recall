@@ -3,15 +3,17 @@ import { Card, CardState } from '../Card';
 import { useAsync } from '../../lib/useAsync';
 import { api } from '../../lib/api';
 import type { EvalReport } from '../../lib/types';
+import { useChartTheme } from '../../lib/chartTheme';
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
 export function RetrievalQualityCard({ refreshKey }: { refreshKey: number }) {
+  const theme = useChartTheme();
   const { data, error, loading } = useAsync<EvalReport>(() => api.tool<EvalReport>('eval_report'), [refreshKey]);
   const empty = !!data && data.totalEvents === 0;
   const pie = data ? [
-    { name: 'hit', value: data.hitRate, color: 'var(--tr-tier-kb)' },
-    { name: 'miss', value: Math.max(0, 1 - data.hitRate), color: 'var(--tr-border)' },
+    { name: 'hit', value: data.hitRate, color: theme.tierKb },
+    { name: 'miss', value: Math.max(0, 1 - data.hitRate), color: theme.grid },
   ] : [];
 
   return (

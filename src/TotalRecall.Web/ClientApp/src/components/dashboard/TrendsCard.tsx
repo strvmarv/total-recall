@@ -4,8 +4,10 @@ import { useAsync } from '../../lib/useAsync';
 import { api } from '../../lib/api';
 import type { MemoryHistoryResult } from '../../lib/types';
 import { movementsByDay, transitionCounts } from '../../lib/trendsMath';
+import { useChartTheme } from '../../lib/chartTheme';
 
 export function TrendsCard({ refreshKey }: { refreshKey: number }) {
+  const theme = useChartTheme();
   const { data, error, loading } = useAsync<MemoryHistoryResult>(
     () => api.tool<MemoryHistoryResult>('memory_history', { limit: 1000 }),
     [refreshKey],
@@ -24,7 +26,7 @@ export function TrendsCard({ refreshKey }: { refreshKey: number }) {
             <div aria-hidden="true" style={{ width: '100%', height: 48, marginTop: 'var(--tr-space-3)' }}>
               <ResponsiveContainer>
                 <AreaChart data={series} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
-                  <Area type="monotone" dataKey="v" stroke="var(--tr-tier-warm)" fill="var(--tr-tier-warm-weak)" isAnimationActive={false} />
+                  <Area type="monotone" dataKey="v" stroke={theme.tierWarm} fill={theme.tierWarm} fillOpacity={0.15} isAnimationActive={false} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>

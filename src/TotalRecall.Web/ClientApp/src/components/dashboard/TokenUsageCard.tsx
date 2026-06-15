@@ -5,10 +5,12 @@ import { api } from '../../lib/api';
 import type { UsageResult } from '../../lib/types';
 import { dailyTotals, sumTokens, weekOverWeek } from '../../lib/usageMath';
 import { estimatedCost } from '../../lib/usageCost';
+import { useChartTheme } from '../../lib/chartTheme';
 
 const fmt = (n: number) => n.toLocaleString('en-US');
 
 export function TokenUsageCard({ refreshKey }: { refreshKey: number }) {
+  const theme = useChartTheme();
   // Primary fetch: day buckets — drives loading/empty state, sparkline, WoW delta
   const { data: dayData, error, loading } = useAsync<UsageResult>(
     () => api.tool<UsageResult>('usage_status', { window: '30d', group_by: 'day' }),
@@ -44,7 +46,7 @@ export function TokenUsageCard({ refreshKey }: { refreshKey: number }) {
             <div aria-hidden="true" style={{ width: '100%', height: 48, marginTop: 'var(--tr-space-3)' }}>
               <ResponsiveContainer>
                 <AreaChart data={series} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
-                  <Area type="monotone" dataKey="v" stroke="var(--tr-accent)" fill="var(--tr-accent-weak)" isAnimationActive={false} />
+                  <Area type="monotone" dataKey="v" stroke={theme.accent} fill={theme.accent} fillOpacity={0.1} isAnimationActive={false} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
