@@ -1,12 +1,14 @@
 import { NavLink } from 'react-router-dom';
 import { NAV_ITEMS } from './nav';
-import { GlobalSearch } from './GlobalSearch';
 import { BackendBadge } from './BackendBadge';
+import { ThemeToggle } from './ThemeToggle';
+import { getBootstrap } from '../lib/bootstrap';
 
 export function TopBar() {
+  const { version } = getBootstrap();
   return (
-    <header className="tr-topbar">
-      <div className="tr-brand">total-recall</div>
+    <aside className="tr-rail" aria-label="Sidebar">
+      <div className="tr-brand">total-recall<span className="tr-caret" aria-hidden="true">▌</span></div>
       <nav className="tr-nav" aria-label="Primary">
         {NAV_ITEMS.map((item) => (
           <NavLink
@@ -19,10 +21,11 @@ export function TopBar() {
           </NavLink>
         ))}
       </nav>
-      <div className="tr-topbar-right">
-        <GlobalSearch />
+      <div className="tr-rail-foot">
         <BackendBadge />
+        <span className="tr-rail-version">v{version}</span>
+        <ThemeToggle />
       </div>
-    </header>
+    </aside>
   );
 }
