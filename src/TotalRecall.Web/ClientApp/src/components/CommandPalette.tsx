@@ -17,6 +17,7 @@ export function CommandPalette() {
   const inputRef = useRef<HTMLInputElement>(null);
   const openRef = useRef(open);
   const prevFocusRef = useRef<HTMLElement | null>(null);
+  const listRef = useRef<HTMLUListElement>(null);
 
   useEffect(() => { openRef.current = open; }, [open]);
 
@@ -77,6 +78,12 @@ export function CommandPalette() {
     return () => { alive = false; clearTimeout(t); };
   }, [q, open, navigate]);
 
+  // Keep the active option scrolled into view as the user navigates.
+  useEffect(() => {
+    if (!open) return;
+    listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+  }, [active, open, hits]);
+
   if (!open) return null;
 
   const term = q.trim();
@@ -90,9 +97,13 @@ export function CommandPalette() {
   }
 
   function onInputKeyDown(e: React.KeyboardEvent) {
-    if (e.key === 'ArrowDown') { e.preventDefault(); setActive((i) => (list.length ? Math.min(i + 1, list.length - 1) : 0)); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((i) => Math.max(i - 1, 0)); }
-    else if (e.key === 'Tab') { e.preventDefault(); } // keep focus within the palette
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActive(list.length ? Math.min(activeIdx + 1, list.length - 1) : 0);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActive(Math.max(activeIdx - 1, 0));
+    } else if (e.key === 'Tab') { e.preventDefault(); } // keep focus within the palette
   }
 
   return (
@@ -100,13 +111,13 @@ export function CommandPalette() {
       <div className="tr-cmdk" role="dialog" aria-label="Command palette" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <form role="search" onSubmit={onSubmit}>
           <input
-            ref={inputRef} role="combobox" aria-expanded="true" aria-controls="tr-cmdk-list"
+            ref={inputRef} role="combobox" aria-haspopup="listbox" aria-expanded="true" aria-controls="tr-cmdk-list"
             aria-activedescendant={activeIdx >= 0 ? `tr-cmdk-opt-${activeIdx}` : undefined}
             className="tr-cmdk-input" placeholder="Jump to a page, or search memories & knowledge…"
             value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onInputKeyDown}
           />
         </form>
-        <ul id="tr-cmdk-list" className="tr-cmdk-list" role="listbox">
+        <ul ref={listRef} id="tr-cmdk-list" className="tr-cmdk-list" role="listbox">
           {list.length === 0 && <li className="tr-cmdk-empty">No matches.</li>}
           {list.map((h, i) => (
             <li key={h.key} id={`tr-cmdk-opt-${i}`} role="option" aria-selected={i === activeIdx}>

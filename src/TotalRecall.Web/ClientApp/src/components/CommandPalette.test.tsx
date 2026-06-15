@@ -51,8 +51,17 @@ describe('CommandPalette', () => {
     renderPalette();
     await userEvent.keyboard('{Control>}k{/Control}');
     const input = screen.getByRole('combobox');
-    // Empty query -> nav commands; active starts at Dashboard(0). Down -> Memory(1).
-    await userEvent.type(input, '{ArrowDown}{Enter}');
+    // Empty query -> nav commands; active starts at Dashboard(0).
+    const optionsBefore = screen.getAllByRole('option');
+    expect(optionsBefore[0]).toHaveAttribute('aria-selected', 'true');
+    expect(optionsBefore[1]).toHaveAttribute('aria-selected', 'false');
+    // ArrowDown moves the highlight to the second option (Memory).
+    await userEvent.type(input, '{ArrowDown}');
+    const optionsAfter = screen.getAllByRole('option');
+    expect(optionsAfter[0]).toHaveAttribute('aria-selected', 'false');
+    expect(optionsAfter[1]).toHaveAttribute('aria-selected', 'true');
+    // Enter runs the now-active item (Memory).
+    await userEvent.type(input, '{Enter}');
     expect(screen.getByTestId('loc')).toHaveTextContent('/memory');
   });
 });

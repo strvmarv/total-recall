@@ -23,3 +23,9 @@ if (!('matchMedia' in window)) {
     dispatchEvent() { return false; },
   });
 }
+
+// jsdom does not implement Element.prototype.scrollIntoView; CommandPalette
+// calls it to keep the active option visible during keyboard navigation.
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+}
