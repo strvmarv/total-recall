@@ -11,7 +11,7 @@ import { Config } from './pages/Config';
 /** Router-agnostic shell (testable with MemoryRouter). */
 export function AppShell() {
   return (
-    <>
+    <div className="tr-app">
       <TopBar />
       <main className="tr-main">
         <Routes>
@@ -24,7 +24,7 @@ export function AppShell() {
           <Route path="*" element={<SectionPlaceholder title="Not found" note="Unknown route." />} />
         </Routes>
       </main>
-    </>
+    </div>
   );
 }
 
