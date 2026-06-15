@@ -8,7 +8,9 @@ class ResizeObserverStub {
 }
 (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = ResizeObserverStub;
 
-// jsdom has no matchMedia; useTheme reads it for the system-preference default.
+// jsdom has no matchMedia. The Phase 1 inline script in index.html uses it to
+// resolve the system-preference default; this stub prevents hard crashes if any
+// test indirectly exercises that path. useTheme itself does NOT call matchMedia.
 if (!('matchMedia' in window)) {
   (window as unknown as { matchMedia: unknown }).matchMedia = (query: string) => ({
     matches: false,
