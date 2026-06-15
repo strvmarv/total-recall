@@ -20,6 +20,7 @@ describe('SideRail (TopBar)', () => {
   });
   afterEach(() => {
     delete (window as unknown as { __TR_BOOTSTRAP__?: unknown }).__TR_BOOTSTRAP__;
+    delete document.documentElement.dataset.theme;
   });
 
   it('renders all six nav sections', () => {
