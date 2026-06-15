@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 3.3.1 - 2026-06-15
+
+### Fixed
+
+- **`total-recall ui` (and every other non-`serve` subcommand) no longer floods the console and dies.** Since 3.2.0, `bin/start.js` wrapped _every_ invocation in the MCP stdio shim, which spawns the engine and performs an `initialize` handshake. Only `serve` speaks MCP JSON-RPC on stdout; `ui`, `reindex-embeddings`, `config`, and `dump-catalog` emit human-readable output. Routing those through the shim made it parse their stdout as protocol (`[total-recall:shim] dropping unparseable line`, repeated) and time out the never-answered handshake — killing and restarting the process five times before giving up in degraded mode, which tore down the web server ("it stopped working"). The launcher now dispatches: `serve` (or no args) goes through the shim; every other subcommand provisions then spawns the engine directly with inherited stdio (`bin/shim/direct.js`).
+- **The web UI no longer jumps back to the Dashboard after sitting idle on another page.** This was a downstream symptom of the same bug: the shim restarted the web server every ~30s underneath the open tab, minting a fresh per-launch token each time and breaking the loaded page. With the launcher fix the server is a single stable process, so the open page stays put.
+
+### Changed
+
+- **Denser Config page.** The Config sections now tile into a responsive multi-column grid (instead of one tall stacked column) with tighter row and section spacing, so wide screens pack several sections per row.
+
+### Docs
+
+- Added a sanitized Dashboard screenshot to the README **Web UI** section.
+
 ## 3.3.0 - 2026-06-15
 
 ### Changed
