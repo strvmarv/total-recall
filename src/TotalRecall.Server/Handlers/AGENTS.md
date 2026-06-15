@@ -4,6 +4,20 @@ This directory contains **one file per MCP tool handler** (49 total). Each handl
 
 ---
 
+## catalog.json — pre-engine tools/list
+
+The shim's `bin/start.js` serves a static `catalog.json` (repo root) as the `tools/list` response before the engine is ready (or between restarts). This file captures the **local/sqlite tool surface** (41 core + mode-dependent tools). To regenerate it after adding or removing handlers:
+
+```bash
+dotnet run --project src/TotalRecall.Host -- dump-catalog > catalog.json
+```
+
+CI runs a **"Catalog drift guard"** step that regenerates `catalog.json` and diffs it against the committed version — the build fails if they differ. Keep `catalog.json` committed and up-to-date whenever you add, remove, or rename a tool handler.
+
+> Note: `catalog.json` reflects the local/sqlite surface. Postgres mode exposes fewer tools; the pre-engine `tools/list` is therefore cosmetically broad until the engine comes up and re-advertises via `notifications/tools/list_changed`. Tool calls always proxy correctly — only the pre-engine discovery list is approximate.
+
+---
+
 ## IToolHandler Contract
 
 ```csharp

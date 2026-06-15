@@ -32,7 +32,27 @@ The built-in web UI is available at any time via `total-recall ui` (opens a loca
 
 Once initialized, follow these behaviors throughout the session. Tool calls will be visible to the user.
 
-### Handling model bootstrap errors
+### Handling startup not-ready results (shim provisioning)
+
+Since the MCP bootstrap shim (`bin/start.js`) stays connected while it provisions and starts the engine, a `tools/call` may return a structured not-ready result **before the engine is up** instead of dropping the connection. The response shape is an MCP tool result with `isError: true` and a JSON text payload:
+
+```json
+{ "status": "not_ready", "phase": "<phase>", "hint": "total-recall is still starting up; retry in a moment." }
+```
+
+The key phases you will actually see:
+
+| phase | What it means | What to do |
+|---|---|---|
+| `provisioning` | First launch after a plugin update — the shim is downloading and sha256-verifying the engine binary from GitHub Releases. | Wait 5–10 seconds and retry the tool call. Self-heals; the connection stays up. |
+| `engine-restarting` | The engine crashed and the shim is restarting it. | Retry shortly (5–10 s). After repeated failures the shim reports `engine-failed`. |
+| `engine-failed` | Engine could not be started after several attempts. | Surface the phase to the user and suggest restarting the MCP host. |
+
+The MCP connection **never drops** during provisioning — this eliminates the old `MCP error -32000: Connection closed` that would appear on first launch after a plugin update. Once the shim is proxying to the engine (`phase: "proxying"`), it emits `notifications/tools/list_changed` and normal operation resumes.
+
+This is **distinct** from the engine's own `model_not_ready` error (embedding model, described below). Both use the same recovery approach: wait briefly and retry.
+
+### Handling model bootstrap errors (embedding model)
 
 When `session_start` returns an error response containing `"error": "model_not_ready"`, parse the JSON payload and follow the recovery flow based on `reason`:
 

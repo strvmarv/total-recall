@@ -32,7 +32,7 @@ You control where the database lives by setting `TOTAL_RECALL_DB_PATH`.
 
 ### 1. Binary download on first launch (conditional)
 
-If you install total-recall via Claude Code's `/plugin` flow using a `source: github` marketplace entry, the `bin/start.js` launcher downloads a prebuilt binary archive (~22 MB) from **GitHub Releases** (`github.com/strvmarv/total-recall`) on first launch. This is a one-time fetch of a compiled executable — no memory data is sent. The download URL is derived from the version in `package.json` and hits only `github.com` and `objects.githubusercontent.com`.
+If you install total-recall via Claude Code's `/plugin` flow using a `source: github` marketplace entry, the `bin/start.js` shim downloads a prebuilt binary archive (~22 MB) from **GitHub Releases** (`github.com/strvmarv/total-recall`) on first launch and verifies it by sha256 against the release `provisioning.manifest.json` before use. This is a one-time fetch of a compiled executable — no memory data is sent. The download URL is derived from the version in `package.json` and hits only `github.com` and `objects.githubusercontent.com`. No new data leaves the machine during this process.
 
 This does **not** happen when installing via `npm install -g @strvmarv/total-recall` — all platform binaries ship inside the npm tarball.
 

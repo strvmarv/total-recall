@@ -447,6 +447,13 @@ Handler implementations live in `src/TotalRecall.Server/Handlers/<ToolName>Handl
 ## Architecture
 
 ```
+npm wrapper layer (Node, zero runtime dependencies):
+  bin/start.js (MCP bootstrap shim) — comes up instantly; answers initialize/ping/tools/list
+    from catalog.json before the engine is ready; provisions (sha256-verified download via
+    release provisioning.manifest.json) + spawns + proxies the engine; supervises and
+    restarts on crash; the MCP connection never drops (no more MCP error -32000 on first
+    launch after an update); emits notifications/tools/list_changed once proxying begins.
+
 MCP Server (.NET 8 NativeAOT — C# imperative shell + F# functional core)
 ├── TotalRecall.Core (F#)        — pure functions: tokenizer, decay, hybrid ranking, parsers, chunker
 ├── TotalRecall.Infrastructure   — SQLite/Postgres storage, ONNX/remote embedder, importers, migrations

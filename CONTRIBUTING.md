@@ -97,12 +97,17 @@ tests/
 ├── TotalRecall.Server.Tests/     — xUnit (MCP handlers + AutoMigrationGuard state machine)
 └── TotalRecall.Infrastructure.Tests/ — xUnit (storage, embedding, importers, eval)
 
-bin/start.js                      — Node launcher: detect RID, exec binaries/<rid>/total-recall
-scripts/fetch-binary.js           — first-launch downloader for git-clone installs
+bin/start.js                      — MCP bootstrap shim entry point (IS the MCP server; provisions + proxies)
+bin/shim/                         — shim modules: jsonrpc-stdio, state, server-surface, provisioner,
+                                    engine-proxy, orchestrator (+ *.test.js, fixtures/)
+catalog.json                      — committed static tools/list (local/sqlite surface); regenerate with
+                                    `dotnet run --project src/TotalRecall.Host -- dump-catalog > catalog.json`
+scripts/fetch-binary.js           — download helper (shared by postinstall + shim provisioner)
 scripts/postinstall.js            — npm postinstall hook (delegates to fetch-binary)
 scripts/verify-binaries.js        — prepublishOnly safety check (4 RIDs present)
-.github/workflows/dotnet-ci.yml   — push/PR CI: dotnet build + test on ubuntu-latest
+.github/workflows/dotnet-ci.yml   — push/PR CI: dotnet build + test + shim tests + catalog drift guard
 .github/workflows/release.yml     — v* tag CI: 4-platform AOT matrix + npm publish + GitHub Release
+                                    (also generates and attaches provisioning.manifest.json)
 ```
 
 ---
@@ -353,6 +358,30 @@ dotnet test src/TotalRecall.sln --filter "FullyQualifiedName~AutoMigrationGuard"
 ```
 
 For F# tests (Expecto), the project's test runner is invoked the same way — `dotnet test` works uniformly across xUnit (C#) and Expecto (F#) projects.
+
+### Shim tests (Node, independent of .NET)
+
+The MCP bootstrap shim (`bin/shim/`) has its own Node test suite using the built-in `node:test` runner:
+
+```bash
+npm run test:shim
+```
+
+This runs `node --test bin/shim/ scripts/fetch-binary.test.js` — no .NET SDK or built binary required. Run this when changing anything under `bin/shim/`, `bin/start.js`, or `scripts/fetch-binary.js`.
+
+### Regenerating catalog.json
+
+`catalog.json` (repo root) is the static `tools/list` payload the shim serves before the engine is ready. Regenerate it after adding, removing, or renaming MCP tool handlers:
+
+```bash
+dotnet run --project src/TotalRecall.Host -- dump-catalog > catalog.json
+```
+
+CI runs a "Catalog drift guard" step that regenerates and diffs this file — the build fails if they differ. Always commit the updated `catalog.json` alongside handler changes.
+
+### Provisioning manifest
+
+`provisioning.manifest.json` is generated and attached to each GitHub Release by `.github/workflows/release.yml` — it is **not committed** to the repo. It contains the sha256 digest for each per-RID archive; the shim verifies downloads against it. You do not need to create or edit it manually.
 
 ---
 
