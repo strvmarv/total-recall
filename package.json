@@ -10,7 +10,8 @@
   "scripts": {
     "prepare": "git config core.hooksPath git-hooks || true",
     "postinstall": "node scripts/postinstall.js",
-    "prepublishOnly": "node scripts/verify-binaries.js"
+    "prepublishOnly": "node scripts/verify-binaries.js",
+    "test:shim": "node --test bin/shim/ scripts/fetch-binary.test.js"
   },
   "files": [
     "bin/",

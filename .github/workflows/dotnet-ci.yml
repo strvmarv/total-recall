@@ -69,3 +69,14 @@ jobs:
 
       - name: Test
         run: dotnet test src/TotalRecall.sln --no-build --configuration Release --logger "console;verbosity=normal" --filter "Category!=Integration"
+
+  shim-tests:
+    name: Shim tests (Node)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+      - name: Run shim tests
+        run: npm run test:shim
