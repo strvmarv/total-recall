@@ -91,6 +91,11 @@ export function runShim(opts) {
     .then(() => provision((p) => state.set('provisioning', p)))
     .then((r) => {
       if (r && r.ok) { startEngine(); return; }
+      // `retryable` is recorded into the not_ready payload for the agent/skill to
+      // see; this release does NOT auto-retry provisioning (recovery is model-
+      // driven — the agent re-calls the tool). TODO: if automatic provisioning
+      // retry is ever added, READ this flag back from state.detail here rather
+      // than re-deriving it.
       state.set('provisioning-failed', { error: r ? r.error : 'unknown', retryable: r ? r.retryable : false });
       stderr.write(`[total-recall:shim] provisioning failed: ${r ? r.error : 'unknown'}\n`);
     })

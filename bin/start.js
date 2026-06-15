@@ -5,8 +5,10 @@
 // process IS the MCP server from the harness's point of view: it answers the
 // initialize handshake instantly, serves a static tools/list, returns a
 // structured not_ready result for tool calls while the engine provisions, then
-// spawns and proxies to the engine binary. The connection never drops; all
-// not-ready states are in-band tool results. See bin/shim/* and
+// spawns and proxies to the engine binary. Once the shim is running the MCP
+// connection never drops; all not-ready states are in-band tool results. (The
+// only hard exit is before any connection exists — an unsupported platform.)
+// See bin/shim/* and
 // docs/superpowers/specs/2026-06-14-mcp-bootstrap-shim-design.md.
 
 import fs from 'node:fs';

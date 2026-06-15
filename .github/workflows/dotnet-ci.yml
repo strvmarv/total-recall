@@ -78,5 +78,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 20
+      # No `npm ci` on purpose: the shim + fetch-binary tests import only Node
+      # built-ins (zero runtime deps), and `npm ci` would run the postinstall
+      # binary download (~90 MB) for nothing. If a shim test ever needs an npm
+      # package, add `npm ci --ignore-scripts` here.
       - name: Run shim tests
         run: npm run test:shim

@@ -54,16 +54,26 @@ test('stderrTail captures engine diagnostics and passes them through', async () 
   proxy.stop();
 });
 
-test('crash after handshake fires onExit (orchestrator synthesizes from pendingIds)', async () => {
+test('crash after handshake surfaces as onExit OR a rejected handshake', async () => {
   const forwarded = [];
   let exited = false;
+  let rejected = false;
   const proxy = new EngineProxy({ command: process.execPath, args: [fake, '--crash-after-initialize'], stderr: process.stderr });
   proxy.onForward = (m) => forwarded.push(m);
   proxy.onExit = () => { exited = true; };
-  // handshake succeeds, then the engine exits(1) immediately.
-  await proxy.startAndHandshake().catch(() => {});
-  await new Promise((r) => setTimeout(r, 50));
-  assert.equal(exited, true);
+  // The fake answers initialize then exits(1) immediately. Two valid races:
+  //   - stdout wins  -> handshake resolves, then exit -> onExit fires
+  //   - exit wins    -> handshake rejects before resolve
+  // Both prove the crash surfaced; the orchestrator's .catch routes a rejected
+  // handshake through the same exit handling, so either outcome is correct.
+  await proxy.startAndHandshake().catch(() => { rejected = true; });
+  // Poll briefly for the post-resolve exit case rather than a fixed sleep.
+  const start = Date.now();
+  while (!exited && !rejected && Date.now() - start < 2000) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  assert.ok(exited || rejected, 'engine crash after init must surface as onExit or a rejected handshake');
+  proxy.stop();
 });
 
 test('startAndHandshake twice throws rather than leaking a child', async () => {
