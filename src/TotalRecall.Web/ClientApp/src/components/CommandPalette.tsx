@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
+import { useHotkey } from '../lib/useHotkey';
 import { NAV_ITEMS } from './nav';
 import type { MemorySearchResult, KbSearchResult } from '../lib/types';
 
@@ -21,11 +22,11 @@ export function CommandPalette() {
 
   useEffect(() => { openRef.current = open; }, [open]);
 
-  // Global open/close hotkeys (Esc only acts when open).
+  // ⌘K / Ctrl-K toggles the palette; Esc closes it when open.
+  useHotkey('k', () => setOpen((o) => !o));
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setOpen((o) => !o); }
-      else if (e.key === 'Escape' && openRef.current) { setOpen(false); }
+      if (e.key === 'Escape' && openRef.current) setOpen(false);
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);

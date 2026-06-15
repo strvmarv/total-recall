@@ -44,10 +44,7 @@
   --tr-tag-ingested: #0a2a30; --tr-tag-ingested-fg: #7fdfe8;
 }
 
-[data-theme='dark'] {
-  color-scheme: dark;
-}
-
+/* Dark is the :root default above. Only [data-theme='light'] overrides. */
 [data-theme='light'] {
   color-scheme: light;
   --tr-bg: #f4f1e9;

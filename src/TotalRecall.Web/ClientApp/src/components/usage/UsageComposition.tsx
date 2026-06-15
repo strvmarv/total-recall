@@ -22,7 +22,13 @@ export function UsageComposition({ filters, refreshKey }: { filters: UsageFilter
         <div aria-hidden="true" style={{ width: '100%', height: 220 }}>
           <ResponsiveContainer>
             <BarChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-              <XAxis dataKey="day" fontSize={11} tick={{ fill: theme.tick, fontFamily: theme.mono }} /><YAxis fontSize={11} width={48} tick={{ fill: theme.tick, fontFamily: theme.mono }} /><Tooltip />
+              <XAxis dataKey="day" fontSize={11} tick={{ fill: theme.tick, fontFamily: theme.mono }} /><YAxis fontSize={11} width={48} tick={{ fill: theme.tick, fontFamily: theme.mono }} />
+              <Tooltip
+                contentStyle={{ background: 'var(--tr-surface)', border: '1px solid var(--tr-border)', borderRadius: 'var(--tr-radius)', color: 'var(--tr-text)', fontFamily: 'var(--tr-font-mono)', fontSize: 12 }}
+                labelStyle={{ color: 'var(--tr-text-muted)' }}
+                itemStyle={{ color: 'var(--tr-text)' }}
+                cursor={{ fill: 'var(--tr-accent-weak)' }}
+              />
               <Bar dataKey="input" stackId="t" fill={theme.tierCold} isAnimationActive={false} />
               <Bar dataKey="cacheRead" stackId="t" fill={theme.tierKb} isAnimationActive={false} />
               <Bar dataKey="cacheCreate" stackId="t" fill={theme.tierWarm} isAnimationActive={false} />
