@@ -24,28 +24,30 @@ export function Config() {
       {error && <p className="tr-card-error" role="alert" title={error}>Couldn't load config.</p>}
       {cfg && (
         <>
-          {EDITABLE_SECTIONS.map((sec) => (
-            <section className="tr-config-section" key={sec.title}>
-              <h2 className="tr-config-title">{sec.title}</h2>
-              {sec.fields.map((f) => (
-                <ConfigField key={f.key} field={f} value={getByPath(cfg, f.key)} onSave={save} />
-              ))}
-            </section>
-          ))}
-          {READONLY_KEYS.map((sec) => (
-            <section className="tr-config-section" key={sec.title}>
-              <h2 className="tr-config-title">{sec.title}</h2>
-              {sec.keys.map((k) => {
-                const v = getByPath(cfg, k);
-                return (
-                  <div className="tr-config-field" key={k}>
-                    <label>{k}</label>
-                    <span className="tr-config-ro">{v == null ? '—' : String(v)}</span>
-                  </div>
-                );
-              })}
-            </section>
-          ))}
+          <div className="tr-config-grid">
+            {EDITABLE_SECTIONS.map((sec) => (
+              <section className="tr-config-section" key={sec.title}>
+                <h2 className="tr-config-title">{sec.title}</h2>
+                {sec.fields.map((f) => (
+                  <ConfigField key={f.key} field={f} value={getByPath(cfg, f.key)} onSave={save} />
+                ))}
+              </section>
+            ))}
+            {READONLY_KEYS.map((sec) => (
+              <section className="tr-config-section" key={sec.title}>
+                <h2 className="tr-config-title">{sec.title}</h2>
+                {sec.keys.map((k) => {
+                  const v = getByPath(cfg, k);
+                  return (
+                    <div className="tr-config-field" key={k}>
+                      <label>{k}</label>
+                      <span className="tr-config-ro">{v == null ? '—' : String(v)}</span>
+                    </div>
+                  );
+                })}
+              </section>
+            ))}
+          </div>
           <p className="tr-stat-sub">Storage and embedding are read-only — changing them can break the running instance. Edit them in <code>config.toml</code>. (Per-model pricing editing arrives with a future config section.)</p>
         </>
       )}
