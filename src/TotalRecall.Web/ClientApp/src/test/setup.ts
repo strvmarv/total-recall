@@ -7,3 +7,17 @@ class ResizeObserverStub {
   disconnect() {}
 }
 (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = ResizeObserverStub;
+
+// jsdom has no matchMedia; useTheme reads it for the system-preference default.
+if (!('matchMedia' in window)) {
+  (window as unknown as { matchMedia: unknown }).matchMedia = (query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener() {},
+    removeEventListener() {},
+    addListener() {},
+    removeListener() {},
+    dispatchEvent() { return false; },
+  });
+}
