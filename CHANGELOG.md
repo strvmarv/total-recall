@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 3.2.1 - 2026-06-15
+
+### Fixed
+
+- **The built-in web UI (`total-recall ui`) now actually ships in the published binaries.** The release workflow built the engine with `-p:PublishAot=true` but never passed `-p:BuildSpa=true`, so every published binary since the UI landed (3.1.0) served only the Node-free placeholder ("SPA assets were not built"). The `Publish (Unix)` and `Publish (Windows)` steps now pass `-p:BuildSpa=true`, so Vite builds the React SPA and it is embedded (served via `ManifestEmbeddedFileProvider`, AOT-safe) into each released RID. No source changes to the UI itself — it was complete since 3.1.0, just not bundled.
+
 ## 3.2.0 - 2026-06-14
 
 ### Changed

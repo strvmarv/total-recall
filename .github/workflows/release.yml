@@ -103,6 +103,7 @@ jobs:
             -c Release \
             -r "$RID" \
             -p:PublishAot=true \
+            -p:BuildSpa=true \
             -p:Version="$VERSION" \
             -p:InformationalVersion="$VERSION"
 
@@ -118,6 +119,7 @@ jobs:
             -c Release `
             -r "$env:RID" `
             -p:PublishAot=true `
+            -p:BuildSpa=true `
             -p:Version="$version" `
             -p:InformationalVersion="$version"
 
