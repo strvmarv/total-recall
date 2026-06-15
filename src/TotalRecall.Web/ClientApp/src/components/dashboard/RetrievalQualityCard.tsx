@@ -13,7 +13,7 @@ export function RetrievalQualityCard({ refreshKey }: { refreshKey: number }) {
   const empty = !!data && data.totalEvents === 0;
   const pie = data ? [
     { name: 'hit', value: data.hitRate, color: theme.tierKb },
-    { name: 'miss', value: Math.max(0, 1 - data.hitRate), color: theme.grid },
+    { name: 'miss', value: Math.max(0, 1 - data.hitRate), color: theme.tick },
   ] : [];
 
   return (

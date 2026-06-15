@@ -22,7 +22,7 @@ export function UsageComposition({ filters, refreshKey }: { filters: UsageFilter
         <div aria-hidden="true" style={{ width: '100%', height: 220 }}>
           <ResponsiveContainer>
             <BarChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-              <XAxis dataKey="day" fontSize={11} tick={{ fill: theme.tick }} /><YAxis fontSize={11} width={48} tick={{ fill: theme.tick }} /><Tooltip />
+              <XAxis dataKey="day" fontSize={11} tick={{ fill: theme.tick, fontFamily: theme.mono }} /><YAxis fontSize={11} width={48} tick={{ fill: theme.tick, fontFamily: theme.mono }} /><Tooltip />
               <Bar dataKey="input" stackId="t" fill={theme.tierCold} isAnimationActive={false} />
               <Bar dataKey="cacheRead" stackId="t" fill={theme.tierKb} isAnimationActive={false} />
               <Bar dataKey="cacheCreate" stackId="t" fill={theme.tierWarm} isAnimationActive={false} />
@@ -31,10 +31,10 @@ export function UsageComposition({ filters, refreshKey }: { filters: UsageFilter
           </ResponsiveContainer>
         </div>
         <ul className="tr-legend">
-          <li className="tr-legend-item"><span className="tr-legend-dot" style={{ background: 'var(--tr-tier-cold)' }} />input</li>
-          <li className="tr-legend-item"><span className="tr-legend-dot" style={{ background: 'var(--tr-tier-kb)' }} />cache-read</li>
-          <li className="tr-legend-item"><span className="tr-legend-dot" style={{ background: 'var(--tr-tier-warm)' }} />cache-create</li>
-          <li className="tr-legend-item"><span className="tr-legend-dot" style={{ background: 'var(--tr-tier-pinned)' }} />output</li>
+          <li className="tr-legend-item"><span className="tr-legend-dot" style={{ background: theme.tierCold }} />input</li>
+          <li className="tr-legend-item"><span className="tr-legend-dot" style={{ background: theme.tierKb }} />cache-read</li>
+          <li className="tr-legend-item"><span className="tr-legend-dot" style={{ background: theme.tierWarm }} />cache-create</li>
+          <li className="tr-legend-item"><span className="tr-legend-dot" style={{ background: theme.tierPinned }} />output</li>
         </ul>
       </CardState>
     </Card>

@@ -20,11 +20,11 @@ export function chartTheme(): ChartTheme {
     accent: v('--tr-accent') || '#ffb454',
     grid: v('--tr-border') || 'rgba(255,255,255,0.09)',
     tick: v('--tr-text-muted') || '#8b919b',
-    tierPinned: v('--tr-tier-pinned'),
-    tierHot: v('--tr-tier-hot'),
-    tierWarm: v('--tr-tier-warm'),
-    tierCold: v('--tr-tier-cold'),
-    tierKb: v('--tr-tier-kb'),
+    tierPinned: v('--tr-tier-pinned') || '#a855f7',
+    tierHot: v('--tr-tier-hot') || '#ff6b6b',
+    tierWarm: v('--tr-tier-warm') || '#f59e0b',
+    tierCold: v('--tr-tier-cold') || '#3b82f6',
+    tierKb: v('--tr-tier-kb') || '#4ade80',
     mono: v('--tr-font-mono'),
   };
 }
@@ -37,8 +37,6 @@ export function useChartTheme(): ChartTheme {
     const el = document.documentElement;
     const obs = new MutationObserver(() => setTheme(chartTheme()));
     obs.observe(el, { attributes: true, attributeFilter: ['data-theme'] });
-    // Re-resolve once after mount in case custom props weren't ready at first read.
-    setTheme(chartTheme());
     return () => obs.disconnect();
   }, []);
   return theme;
