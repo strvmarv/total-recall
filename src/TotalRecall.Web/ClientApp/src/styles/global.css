@@ -258,6 +258,7 @@ body {
 .tr-config-ro { font-family: var(--tr-font-mono); font-size: 13px; color: var(--tr-text); }
 
 /* Command palette (Cmd/Ctrl+K) */
+/* z-index stacking: modal-backdrop=50, cmdk-backdrop=60 (palette sits above modals) */
 .tr-cmdk-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: grid; place-items: start center; padding-top: 12vh; z-index: 60; }
 .tr-cmdk { width: min(640px, 92vw); background: var(--tr-surface); border: 1px solid var(--tr-border); border-radius: var(--tr-radius); box-shadow: 0 24px 70px -20px rgba(0,0,0,0.6); overflow: hidden; }
 .tr-cmdk-input { width: 100%; font: inherit; font-family: var(--tr-font-mono); font-size: 14px; color: var(--tr-text); background: transparent; border: 0; border-bottom: 1px solid var(--tr-border); padding: var(--tr-space-4); }
@@ -265,6 +266,7 @@ body {
 .tr-cmdk-list { list-style: none; margin: 0; padding: var(--tr-space-2); max-height: 50vh; overflow: auto; }
 .tr-cmdk-item { width: 100%; display: flex; gap: var(--tr-space-3); align-items: baseline; text-align: left; font: inherit; background: transparent; border: 0; border-radius: var(--tr-radius); padding: var(--tr-space-2) var(--tr-space-3); cursor: pointer; color: var(--tr-text); }
 .tr-cmdk-item:hover { background: var(--tr-accent-weak); }
+.tr-cmdk-item.is-active { background: var(--tr-accent-weak); }
 .tr-cmdk-group { font-family: var(--tr-font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--tr-text-faint); width: 80px; flex-shrink: 0; }
 .tr-cmdk-label { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tr-cmdk-empty { color: var(--tr-text-muted); padding: var(--tr-space-3); font-size: 13px; }

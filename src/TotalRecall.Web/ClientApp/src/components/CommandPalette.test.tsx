@@ -46,4 +46,13 @@ describe('CommandPalette', () => {
     await userEvent.type(screen.getByRole('combobox'), 'cortex');
     await waitFor(() => expect(spy).toHaveBeenCalledWith('memory_search', expect.objectContaining({ query: 'cortex' })));
   });
+
+  it('arrow keys move the highlight and Enter runs the active item', async () => {
+    renderPalette();
+    await userEvent.keyboard('{Control>}k{/Control}');
+    const input = screen.getByRole('combobox');
+    // Empty query -> nav commands; active starts at Dashboard(0). Down -> Memory(1).
+    await userEvent.type(input, '{ArrowDown}{Enter}');
+    expect(screen.getByTestId('loc')).toHaveTextContent('/memory');
+  });
 });
