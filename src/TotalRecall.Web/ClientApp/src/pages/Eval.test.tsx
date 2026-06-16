@@ -255,7 +255,7 @@ describe('Eval page', () => {
     renderEval(['/eval?grow=how%20to%20deploy']);
     const row = await screen.findByText('how to deploy');
     expect(row.closest('tr')).toHaveClass('tr-row-hl');
-    expect(screen.getByText(/looking for/i)).toBeInTheDocument();
+    expect(screen.getByText(/looking for/i)).toHaveTextContent('how to deploy');
   });
 
   it('shows the banner with a reason when there is no matching candidate', async () => {
