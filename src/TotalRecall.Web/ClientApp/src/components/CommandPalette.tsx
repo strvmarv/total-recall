@@ -63,7 +63,7 @@ export function CommandPalette() {
         api.tool<KbSearchResult>('kb_search', { query: term }),
       ]);
       if (!alive) return;
-      const mem = memR.status === 'fulfilled' ? (memR.value ?? []) : [];
+      const mem = memR.status === 'fulfilled' ? (memR.value?.results ?? []) : [];
       const kb = kbR.status === 'fulfilled' ? (kbR.value?.results ?? []) : [];
       const m: Hit[] = mem.slice(0, 6).map((h) => ({
         key: `mem:${h.entry.id}`, label: clip(h.entry.content), group: 'Memories',

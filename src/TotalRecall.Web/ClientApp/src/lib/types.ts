@@ -152,7 +152,7 @@ export interface EntryDto {
   last_accessed_at: number; access_count: number; decay_score: number; scope: string;
 }
 export interface MemorySearchHit { entry: EntryDto; score: number; tier: string; content_type: string; rank: number; }
-export type MemorySearchResult = MemorySearchHit[];
+export interface MemorySearchResult { retrievalId: string; results: MemorySearchHit[]; }
 
 export interface MemoryInspectResult {
   id: string; tier: string; content_type: string; content: string; summary: string | null;
@@ -178,4 +178,4 @@ export interface KbIngestFileResult { document_id: string; chunk_count: number; 
 export interface KbIngestDirResult { collection_id: string; document_count: number; total_chunks: number; errors: string[]; validation_passed: boolean; validation_failures: string[]; }
 export interface KbRefreshResult { collection_id: string; files: number; chunks: number; refreshed: boolean; }
 export interface KbRemoveResult { id: string; removed: boolean; cascaded_count: number; }
-export interface KbSearchResult { results: MemorySearchHit[]; hierarchicalMatch: unknown; needsSummary: boolean; }
+export interface KbSearchResult { retrievalId: string; results: MemorySearchHit[]; hierarchicalMatch: unknown; needsSummary: boolean; }

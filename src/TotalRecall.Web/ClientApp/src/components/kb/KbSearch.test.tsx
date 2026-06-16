@@ -6,6 +6,7 @@ import { api } from '../../lib/api';
 import type { KbSearchResult } from '../../lib/types';
 
 const RESULT: KbSearchResult = {
+  retrievalId: 'r2',
   results: [{ entry: { id: 'k1', content: 'chunk about embeddings', summary: null, source: null, project: null, tags: [], created_at: 1, updated_at: 1, last_accessed_at: 1, access_count: 0, decay_score: 0, scope: 'u' }, score: 0.88, tier: 'cold', content_type: 'knowledge', rank: 1 }],
   hierarchicalMatch: null, needsSummary: false,
 };

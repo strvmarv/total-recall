@@ -8,7 +8,7 @@ import { MemoryTable } from '../components/memory/MemoryTable';
 import { MemoryDetail } from '../components/memory/MemoryDetail';
 import type { MemoryListEntry, MemoryListResult, MemorySearchResult } from '../lib/types';
 
-function hitToRow(h: MemorySearchResult[number]): MemoryListEntry {
+function hitToRow(h: MemorySearchResult['results'][number]): MemoryListEntry {
   return {
     id: h.entry.id, tier: h.tier, content_type: h.content_type, content: h.entry.content,
     summary: h.entry.summary, source_tool: null, project: h.entry.project, tags: h.entry.tags,
@@ -29,12 +29,12 @@ export function Memory() {
   const q = filters.query.trim();
   const { data, error, loading } = useAsync<MemoryListEntry[]>(async () => {
     if (q) {
-      const hits = await api.tool<MemorySearchResult>('memory_search', {
+      const res = await api.tool<MemorySearchResult>('memory_search', {
         query: q,
         tiers: filters.tier ? [filters.tier] : undefined,
         contentTypes: filters.type ? [filters.type] : undefined,
       });
-      return hits.map(hitToRow);
+      return res.results.map(hitToRow);
     }
     const res = await api.tool<MemoryListResult>('memory_list', {
       tier: filters.tier || undefined,

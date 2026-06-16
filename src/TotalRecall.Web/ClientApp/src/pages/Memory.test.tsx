@@ -22,8 +22,8 @@ describe('Memory page', () => {
   });
 
   it('initializes the query from ?q and searches', async () => {
-    const hits = [{ entry: { id: 'a1', content: 'hit text', summary: null, source: null, project: null, tags: [], created_at: 1, updated_at: 1, last_accessed_at: 1, access_count: 0, decay_score: 0, scope: 'u' }, score: 0.9, tier: 'warm', content_type: 'memory', rank: 1 }];
-    const spy = vi.spyOn(api, 'tool').mockResolvedValue(hits);
+    const envelope = { retrievalId: 'r1', results: [{ entry: { id: 'a1', content: 'hit text', summary: null, source: null, project: null, tags: [], created_at: 1, updated_at: 1, last_accessed_at: 1, access_count: 0, decay_score: 0, scope: 'u' }, score: 0.9, tier: 'warm', content_type: 'memory', rank: 1 }] };
+    const spy = vi.spyOn(api, 'tool').mockResolvedValue(envelope);
     render(<MemoryRouter initialEntries={['/memory?q=hello']}><Memory /></MemoryRouter>);
     expect(await screen.findByText('hit text')).toBeInTheDocument();
     expect(spy).toHaveBeenCalledWith('memory_search', expect.objectContaining({ query: 'hello' }));

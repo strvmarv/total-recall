@@ -40,7 +40,7 @@ describe('CommandPalette', () => {
   });
 
   it('runs live search for queries >= 2 chars', async () => {
-    const spy = vi.spyOn(api, 'tool').mockResolvedValue([] as never);
+    const spy = vi.spyOn(api, 'tool').mockResolvedValue({ retrievalId: 'r1', results: [], hierarchicalMatch: null, needsSummary: false } as never);
     renderPalette();
     await userEvent.keyboard('{Control>}k{/Control}');
     await userEvent.type(screen.getByRole('combobox'), 'cortex');
