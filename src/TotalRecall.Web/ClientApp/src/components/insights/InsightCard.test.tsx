@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { InsightCard } from './InsightCard';
@@ -104,8 +104,8 @@ describe('InsightCard — near-dup cluster delete with determinate progress', ()
     // Should show progress indicator with "Deleting 1 of 2"
     expect(await screen.findByText(/Deleting 1 of 2/)).toBeInTheDocument();
 
-    // Fire second progress
-    capturedOnProgress(2, 2);
+    // Fire second progress (wrapped in act — it triggers a React state update)
+    act(() => { capturedOnProgress(2, 2); });
     expect(await screen.findByText(/Deleting 2 of 2/)).toBeInTheDocument();
 
     // Resolve — progress clears
