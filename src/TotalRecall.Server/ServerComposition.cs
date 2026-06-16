@@ -135,7 +135,8 @@ public static class ServerComposition
         CompactionLog? compactionLogWriter = null,
         Infrastructure.Sync.SyncBacklogReader? syncBacklog = null,
         int pinnedMaxChars = PinnedTierLimits.DefaultMaxContentChars,
-        ReindexProgress? reindexProgress = null)
+        ReindexProgress? reindexProgress = null,
+        string querySource = "assistant")
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(vectors);
@@ -151,7 +152,7 @@ public static class ServerComposition
         // ---- Memory (18, +1 assistant-only memory_feedback when a
         //      RetrievalEventLog is wired — see below) ----
         registry.Register(new MemoryStoreHandler(store, embedder, vectors, scopeDefault, pinnedMaxChars));
-        registry.Register(new MemorySearchHandler(embedder, hybrid, scopeDefault, retrievalLog, syncQueue));
+        registry.Register(new MemorySearchHandler(embedder, hybrid, scopeDefault, retrievalLog, syncQueue, querySource));
         // Assistant-only feedback tool (Task 1.6). Registered immediately after
         // memory_search because it consumes the retrievalId memory_search emits.
         // Both production paths (sqlite + cortex) wire a RetrievalEventLog, so
@@ -178,7 +179,7 @@ public static class ServerComposition
         registry.Register(new MemoryExtractHandler(store, embedder, scopeDefault));
 
         // ---- KB (8) ----
-        registry.Register(new KbSearchHandler(embedder, hybrid, remoteBackend, scopeDefault, retrievalLog, syncQueue));
+        registry.Register(new KbSearchHandler(embedder, hybrid, remoteBackend, scopeDefault, retrievalLog, syncQueue, querySource));
         registry.Register(new KbIngestFileHandler(fileIngester, scopeDefault));
         registry.Register(new KbIngestDirHandler(fileIngester, scopeDefault));
         registry.Register(new KbListCollectionsHandler(store));
@@ -228,7 +229,7 @@ public static class ServerComposition
     /// this method, so the legacy TS-format DB (if any) is renamed out of
     /// the way before we open a handle.
     /// </remarks>
-    public static ServerCompositionHandles OpenProduction(string? dbPath = null)
+    public static ServerCompositionHandles OpenProduction(string? dbPath = null, string querySource = "assistant")
     {
         var cfg = new ConfigLoader().LoadEffectiveConfig();
 
@@ -255,9 +256,9 @@ public static class ServerComposition
         {
             return configuredMode switch
             {
-                "cortex" => OpenCortex(cfg, dbPath, FriendlyName(configuredMode)),
-                "postgres" => OpenPostgres(cfg, FriendlyName(configuredMode)),
-                _ => OpenSqlite(cfg, dbPath, FriendlyName(configuredMode))
+                "cortex" => OpenCortex(cfg, dbPath, FriendlyName(configuredMode), querySource),
+                "postgres" => OpenPostgres(cfg, FriendlyName(configuredMode), querySource),
+                _ => OpenSqlite(cfg, dbPath, FriendlyName(configuredMode), querySource)
             };
         }
         catch (Exception ex) when (configuredMode is "cortex" or "postgres")
@@ -267,7 +268,7 @@ public static class ServerComposition
             var friendly = FriendlyName(configuredMode);
             Console.Error.WriteLine(
                 $"[total-recall] {friendly} storage failed, falling back to sqlite: {ex.Message}");
-            return OpenSqlite(cfg, dbPath, $"sqlite ({friendly} failed)");
+            return OpenSqlite(cfg, dbPath, $"sqlite ({friendly} failed)", querySource);
         }
     }
 
@@ -351,7 +352,7 @@ public static class ServerComposition
         return (progress, cts);
     }
 
-    private static ServerCompositionHandles OpenSqlite(Core.Config.TotalRecallConfig cfg, string? dbPath, string storageMode = "sqlite")
+    private static ServerCompositionHandles OpenSqlite(Core.Config.TotalRecallConfig cfg, string? dbPath, string storageMode = "sqlite", string querySource = "assistant")
     {
         var resolvedDbPath = dbPath ?? ConfigLoader.GetDbPath();
         Directory.CreateDirectory(ConfigLoader.GetDataDir());
@@ -477,7 +478,8 @@ public static class ServerComposition
                 compactionLogWriter: compactionLog,
                 syncBacklog: new Infrastructure.Sync.SyncBacklogReader(conn),
                 pinnedMaxChars: ResolvePinnedMaxChars(cfg),
-                reindexProgress: reindexProgress);
+                reindexProgress: reindexProgress,
+                querySource: querySource);
 
             registry.Register(new UsageStatusHandler(usageQuery));
 
@@ -504,7 +506,7 @@ public static class ServerComposition
         }
     }
 
-    private static ServerCompositionHandles OpenPostgres(Core.Config.TotalRecallConfig cfg, string storageMode = "postgres")
+    private static ServerCompositionHandles OpenPostgres(Core.Config.TotalRecallConfig cfg, string storageMode = "postgres", string querySource = "assistant")
     {
         if (!FSharpOption<Core.Config.StorageConfig>.get_IsSome(cfg.Storage)
             || !FSharpOption<string>.get_IsSome(cfg.Storage.Value.ConnectionString))
@@ -570,7 +572,8 @@ public static class ServerComposition
                 store, vec, embedder, hybrid,
                 fileIngester, compactionLog, sessionLifecycle, statusOptions,
                 scopeDefault: ResolveScopeDefault(cfg),
-                pinnedMaxChars: ResolvePinnedMaxChars(cfg));
+                pinnedMaxChars: ResolvePinnedMaxChars(cfg),
+                querySource: querySource);
 
             return new ServerCompositionHandles(dataSource, registry, store, storageMode);
         }
@@ -581,7 +584,7 @@ public static class ServerComposition
         }
     }
 
-    private static ServerCompositionHandles OpenCortex(Core.Config.TotalRecallConfig cfg, string? dbPath, string storageMode = "cortex")
+    private static ServerCompositionHandles OpenCortex(Core.Config.TotalRecallConfig cfg, string? dbPath, string storageMode = "cortex", string querySource = "assistant")
     {
         // Cortex mode uses SQLite locally, plus a RoutingStore that enqueues
         // writes for eventual push to the remote Cortex backend.
@@ -603,7 +606,7 @@ public static class ServerComposition
         var cortexUrl = cfg.Cortex.Value.Url;
         var cortexPat = cfg.Cortex.Value.Pat;
 
-        return OpenCortexCore(cfg, resolvedDbPath, cortexUrl, cortexPat, storageMode);
+        return OpenCortexCore(cfg, resolvedDbPath, cortexUrl, cortexPat, storageMode, querySource);
     }
 
     /// <summary>
@@ -619,7 +622,7 @@ public static class ServerComposition
 
     private static ServerCompositionHandles OpenCortexCore(
         Core.Config.TotalRecallConfig cfg, string resolvedDbPath,
-        string cortexUrl, string cortexPat, string storageMode = "cortex")
+        string cortexUrl, string cortexPat, string storageMode = "cortex", string querySource = "assistant")
     {
         var conn = SqliteConnection.Open(resolvedDbPath);
         try
@@ -762,7 +765,8 @@ public static class ServerComposition
                 compactionLogWriter: compactionLog,
                 syncBacklog: new Infrastructure.Sync.SyncBacklogReader(conn),
                 pinnedMaxChars: ResolvePinnedMaxChars(cfg),
-                reindexProgress: reindexProgress);
+                reindexProgress: reindexProgress,
+                querySource: querySource);
 
             registry.Register(new UsageStatusHandler(usageQuery));
 

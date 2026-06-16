@@ -17,6 +17,10 @@
 namespace TotalRecall.Server.Tests;
 
 using System.Collections.Generic;
+using System.Linq;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using TotalRecall.Infrastructure.Storage;
 using TotalRecall.Infrastructure.Telemetry;
 using TotalRecall.Server.Handlers;
@@ -52,6 +56,43 @@ public sealed class ServerCompositionTests
             fileIngester, compactionLog, sessionLifecycle, statusOptions,
             retrievalLog: new RetrievalEventLog(conn));
         return conn;
+    }
+
+    // Task 1.7 — a registry built with querySource: "web-ui" must tag the
+    // retrieval events its memory_search emits as "web-ui" (not the default
+    // "assistant"), so eval_report's assistant-scoped stats aren't polluted
+    // by browser-driven searches.
+    [Fact]
+    public async Task BuildRegistry_TagsWebUiSource_OnSearch()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+        var log = new RetrievalEventLog(conn);
+
+        var store = new FakeStore();
+        var vectors = new FakeVectorSearch();
+        var embedder = new RecordingFakeEmbedder();
+        var hybrid = new RecordingFakeHybridSearch();
+        var fileIngester = new RecordingFakeFileIngester();
+        var compactionLog = new FakeCompactionLog();
+        var sessionLifecycle = new FakeSessionLifecycle();
+        var statusOptions = new StatusOptions(
+            DbPath: "/tmp/test.db",
+            EmbeddingModel: "bge-small-en-v1.5",
+            EmbeddingDimensions: 384);
+
+        var registry = ServerComposition.BuildRegistry(
+            store, vectors, embedder, hybrid,
+            fileIngester, compactionLog, sessionLifecycle, statusOptions,
+            retrievalLog: log,
+            querySource: "web-ui");
+
+        Assert.True(registry.TryGet("memory_search", out var handler));
+        await handler!.ExecuteAsync(
+            JsonDocument.Parse("""{"query":"hi"}""").RootElement, CancellationToken.None);
+
+        var events = log.GetEvents(new RetrievalEventQuery());
+        Assert.Equal("web-ui", events.Single().QuerySource);
     }
 
     [Fact]

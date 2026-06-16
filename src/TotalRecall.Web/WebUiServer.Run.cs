@@ -24,7 +24,7 @@ public static partial class WebUiServer
         ServerCompositionHandles handles;
         try
         {
-            handles = ServerComposition.OpenProduction();
+            handles = ServerComposition.OpenProduction(querySource: "web-ui");
         }
         catch (Exception ex)
         {
