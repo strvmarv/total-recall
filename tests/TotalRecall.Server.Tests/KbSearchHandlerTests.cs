@@ -372,7 +372,7 @@ public class KbSearchHandlerTests
         Assert.Single(rows);
         var row = rows[0];
         Assert.Equal("kb hello", row.QueryText);
-        Assert.Equal("kb_search", row.QuerySource);
+        Assert.Equal("assistant", row.QuerySource);
         Assert.Equal(2, row.ResultCount);
 
         using (var tiersDoc = JsonDocument.Parse(row.TiersSearchedJson))
@@ -409,5 +409,39 @@ public class KbSearchHandlerTests
             CancellationToken.None);
 
         Assert.NotEqual(true, result.IsError);
+    }
+
+    [Fact]
+    public async Task KbSearch_IncludesRetrievalId_AndTagsSource()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        var embed = new RecordingFakeEmbedder();
+        var hybrid = new RecordingFakeHybridSearch
+        {
+            NextResult = new[]
+            {
+                MakeResult("kb-1", score: 0.88, rank: 1),
+            },
+        };
+        var log = new RetrievalEventLog(conn);
+
+        var handler = new KbSearchHandler(
+            embed, hybrid,
+            remote: null,
+            scopeDefault: null,
+            retrievalLog: log,
+            syncQueue: null,
+            querySource: "assistant");
+
+        var result = await handler.ExecuteAsync(
+            Args("""{"query":"kb hello"}"""), CancellationToken.None);
+
+        using var doc = JsonDocument.Parse(result.Content[0].Text);
+        Assert.True(doc.RootElement.TryGetProperty("retrievalId", out var rid));
+        Assert.False(string.IsNullOrEmpty(rid.GetString()));
+
+        Assert.Equal("assistant", log.GetEvents(new RetrievalEventQuery()).Single().QuerySource);
     }
 }
