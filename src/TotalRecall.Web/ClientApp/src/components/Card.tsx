@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { Skeleton } from './Skeleton';
 
 export function Card({ title, headingLevel = 2, drillTo, drillLabel, children }: {
   title: string;
@@ -33,7 +34,7 @@ export function CardState({ loading, error, empty, emptyText, children }: {
   emptyText?: string;
   children: ReactNode;
 }) {
-  if (loading) return <p className="tr-card-muted">Loading…</p>;
+  if (loading) return <Skeleton rows={3} />;
   if (error) return <p className="tr-card-error" role="alert" title={error}>Couldn't load this panel.</p>;
   if (empty) return <p className="tr-card-muted">{emptyText ?? 'No data yet.'}</p>;
   return <>{children}</>;
