@@ -31,10 +31,12 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.FSharp.Core;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Config;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Eval;
+using TotalRecall.Infrastructure.Memory;
 using TotalRecall.Infrastructure.Search;
 using TotalRecall.Infrastructure.Storage;
 using TotalRecall.Infrastructure.Telemetry;
@@ -55,6 +57,13 @@ public interface IInsightsContext : IDisposable
 
     /// <summary>Configured similarity threshold (Warm tier) — the curve's "current".</summary>
     double SimilarityThreshold { get; }
+
+    /// <summary>
+    /// Configured pinned-tier max content chars (<c>tiers.pinned.max_content_chars</c>,
+    /// default 500). Pin candidates whose content exceeds this cap cannot be
+    /// pinned (<c>memory_pin</c> rejects them), so they are filtered out.
+    /// </summary>
+    int PinnedMaxContentChars { get; }
 
     /// <summary>Retrieval events in the last <paramref name="days"/> window.</summary>
     IReadOnlyList<RetrievalEventRow> GetEvents(int days);
@@ -295,15 +304,25 @@ public sealed class InsightsHandler : IToolHandler
         // Across hot/warm/cold memory tiers, list by access_count DESC, keep
         // entries with access_count >= threshold that are NOT already pinned.
         // (Listing only non-pinned tiers already excludes pinned entries.)
+        //
+        // Also exclude entries whose content exceeds the pinned-tier cap
+        // (tiers.pinned.max_content_chars): memory_pin rejects oversize content,
+        // so suggesting it would yield an un-pinnable candidate. We over-fetch a
+        // little extra per tier so the cap filter doesn't starve the final cap-to-10.
+        var pinnedMaxContentChars = ctx.PinnedMaxContentChars;
         var candidates = new List<(Tier Tier, Entry Entry)>();
         foreach (var tier in new[] { Tier.Hot, Tier.Warm, Tier.Cold })
         {
             var rows = ctx.Store.List(tier, ContentType.Memory,
-                new ListEntriesOpts { OrderBy = "access_count DESC", Limit = MaxPinCandidates });
+                new ListEntriesOpts { OrderBy = "access_count DESC" });
+            int kept = 0;
             foreach (var e in rows)
             {
-                if (e.AccessCount >= pinAccessThreshold)
-                    candidates.Add((tier, e));
+                if (kept >= MaxPinCandidates) break;
+                if (e.AccessCount < pinAccessThreshold) continue;
+                if (e.Content.Length > pinnedMaxContentChars) continue;
+                candidates.Add((tier, e));
+                kept++;
             }
         }
 
@@ -532,24 +551,32 @@ public sealed class InsightsHandler : IToolHandler
 
         private ProductionInsightsContext(
             MsSqliteConnection conn, IStore store, IVectorSearch vectors,
-            IEmbedder embedder, double threshold)
+            IEmbedder embedder, double threshold, int pinnedMaxContentChars)
         {
             _conn = conn;
             Store = store;
             Vectors = vectors;
             _embedder = embedder;
             SimilarityThreshold = threshold;
+            PinnedMaxContentChars = pinnedMaxContentChars;
         }
 
         public IStore Store { get; }
         public IVectorSearch Vectors { get; }
         public IEmbedder Embedder => _embedder;
         public double SimilarityThreshold { get; }
+        public int PinnedMaxContentChars { get; }
 
         public static ProductionInsightsContext Open()
         {
             var cfg = new ConfigLoader().LoadEffectiveConfig();
             var threshold = cfg.Tiers.Warm.SimilarityThreshold;
+            // Pinned tier is optional in Config.fs (absent in legacy config files);
+            // fall back to the shared default cap (500) when the section is missing.
+            var pinnedMaxContentChars =
+                FSharpOption<Core.Config.PinnedTierConfig>.get_IsSome(cfg.Tiers.Pinned)
+                    ? cfg.Tiers.Pinned.Value.MaxContentChars
+                    : PinnedTierLimits.DefaultMaxContentChars;
             var dbPath = ConfigLoader.GetDbPath();
             var conn = SqliteConnection.Open(dbPath);
             try
@@ -558,7 +585,7 @@ public sealed class InsightsHandler : IToolHandler
                 var store = new SqliteStore(conn);
                 var vec = new VectorSearch(conn);
                 var embedder = EmbedderFactory.CreateFromConfig(cfg.Embedding);
-                return new ProductionInsightsContext(conn, store, vec, embedder, threshold);
+                return new ProductionInsightsContext(conn, store, vec, embedder, threshold, pinnedMaxContentChars);
             }
             catch
             {

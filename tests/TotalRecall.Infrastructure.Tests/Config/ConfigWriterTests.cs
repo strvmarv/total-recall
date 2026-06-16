@@ -173,6 +173,88 @@ public sealed class ConfigWriterTests : IDisposable
         Assert.Equal(3.0, Convert.ToDouble(x["y"]));
     }
 
+    // --- TOML array serialization -----------------------------------------
+
+    [Fact]
+    public void SerializeTomlTable_StringArray_RoundTrips()
+    {
+        var t = new TomlTable();
+        var skills = new TomlTable();
+        var dirs = new TomlArray { "a/b", "c\\d" };
+        skills["extra_dirs"] = dirs;
+        t["skills"] = skills;
+
+        var serialized = ConfigWriter.SerializeTomlTable(t);
+
+        var model = Toml.Parse(serialized).ToModel();
+        var skillsBack = Assert.IsType<TomlTable>(model["skills"]);
+        var arr = Assert.IsType<TomlArray>(skillsBack["extra_dirs"]);
+        Assert.Equal(2, arr.Count);
+        Assert.Equal("a/b", arr[0]);
+        Assert.Equal("c\\d", arr[1]);
+    }
+
+    [Fact]
+    public void SaveUserOverride_SetsScalar_PreservesExistingArray()
+    {
+        var path = Path.Combine(_tempDir, "config.toml");
+        // Mirror a real user config: a [skills] section that already holds an array.
+        File.WriteAllText(path, """
+            [skills]
+            extra_dirs = [ "C:\\Users\\me\\.total-recall\\skills" ]
+            """);
+
+        // This used to throw NotSupportedException because re-serializing the whole
+        // config hit the TomlArray during the write.
+        ConfigWriter.SaveUserOverride(path, "tiers.warm.similarity_threshold", 0.42);
+
+        var text = File.ReadAllText(path);
+        var model = Toml.Parse(text).ToModel();
+
+        // New scalar landed.
+        var tiers = Assert.IsType<TomlTable>(model["tiers"]);
+        var warm = Assert.IsType<TomlTable>(tiers["warm"]);
+        Assert.Equal(0.42, Convert.ToDouble(warm["similarity_threshold"]));
+
+        // Pre-existing array preserved.
+        var skills = Assert.IsType<TomlTable>(model["skills"]);
+        var arr = Assert.IsType<TomlArray>(skills["extra_dirs"]);
+        var only = Assert.Single(arr);
+        Assert.Equal("C:\\Users\\me\\.total-recall\\skills", only);
+    }
+
+    [Fact]
+    public void SerializeTomlTable_EmptyArray_EmitsBrackets()
+    {
+        var t = new TomlTable { ["xs"] = new TomlArray() };
+        var serialized = ConfigWriter.SerializeTomlTable(t);
+        Assert.Contains("xs = []", serialized);
+
+        var model = Toml.Parse(serialized).ToModel();
+        var arr = Assert.IsType<TomlArray>(model["xs"]);
+        Assert.Empty(arr);
+    }
+
+    [Fact]
+    public void SerializeTomlTable_IntAndDoubleArrays_RoundTrip()
+    {
+        var t = new TomlTable
+        {
+            ["ints"] = new TomlArray { 1L, 2L, 3L },
+            ["doubles"] = new TomlArray { 1.5, 2.0 },
+        };
+
+        var serialized = ConfigWriter.SerializeTomlTable(t);
+        var model = Toml.Parse(serialized).ToModel();
+
+        var ints = Assert.IsType<TomlArray>(model["ints"]);
+        Assert.Equal(new long[] { 1L, 2L, 3L }, new[] { Convert.ToInt64(ints[0]), Convert.ToInt64(ints[1]), Convert.ToInt64(ints[2]) });
+
+        var doubles = Assert.IsType<TomlArray>(model["doubles"]);
+        Assert.Equal(1.5, Convert.ToDouble(doubles[0]));
+        Assert.Equal(2.0, Convert.ToDouble(doubles[1]));
+    }
+
     // --- GetNestedValue ---------------------------------------------------
 
     [Fact]

@@ -63,7 +63,7 @@ public class InsightsHandlerTests
         public TestInsightsContext(
             MsSqliteConnection conn, IStore store, IVectorSearch vec, IEmbedder embedder,
             double threshold, IReadOnlyList<RetrievalEventRow> events,
-            IReadOnlyList<CandidateRow> candidates, int kbChunks)
+            IReadOnlyList<CandidateRow> candidates, int kbChunks, int pinnedMaxContentChars)
         {
             _conn = conn;
             Store = store;
@@ -73,6 +73,7 @@ public class InsightsHandlerTests
             _events = events;
             _candidates = candidates;
             _kbChunks = kbChunks;
+            PinnedMaxContentChars = pinnedMaxContentChars;
         }
 
         private readonly IReadOnlyList<RetrievalEventRow> _events;
@@ -83,6 +84,7 @@ public class InsightsHandlerTests
         public IVectorSearch Vectors { get; }
         public IEmbedder Embedder { get; }
         public double SimilarityThreshold { get; }
+        public int PinnedMaxContentChars { get; }
         public IReadOnlyList<RetrievalEventRow> GetEvents(int days) => _events;
         public IReadOnlyList<CandidateRow> ListPendingCandidates() => _candidates;
         public int TotalKnowledgeChunks() => _kbChunks;
@@ -102,6 +104,7 @@ public class InsightsHandlerTests
         public List<RetrievalEventRow> Events { get; } = new();
         public List<CandidateRow> Candidates { get; } = new();
         public int KbChunks { get; set; }
+        public int PinnedMaxContentChars { get; set; } = 500;
 
         public Fixture()
         {
@@ -136,7 +139,7 @@ public class InsightsHandlerTests
 
         public InsightsContextProvider Provider() =>
             () => new TestInsightsContext(Conn, Store, Vec, Embedder, Threshold,
-                Events, Candidates, KbChunks);
+                Events, Candidates, KbChunks, PinnedMaxContentChars);
 
         public void Dispose() => Conn.Dispose();
     }
@@ -323,6 +326,25 @@ public class InsightsHandlerTests
         Assert.Equal(1, candidates.GetArrayLength());
         Assert.Equal(12, candidates[0].GetProperty("accessCount").GetInt32());
         Assert.Equal("warm", candidates[0].GetProperty("tier").GetString());
+    }
+
+    [Fact]
+    public async Task PinCandidates_ExcludesEntriesOverPinnedCap()
+    {
+        using var fx = new Fixture();
+        fx.PinnedMaxContentChars = 500;
+        // Short high-access memory: pinnable -> included.
+        var shortId = fx.Seed(Tier.Warm, "short but frequently used memory", accessCount: 20);
+        // Long high-access memory: exceeds the pinned cap -> NOT pinnable, excluded
+        // even though its access_count is higher.
+        fx.Seed(Tier.Warm, new string('x', 501), accessCount: 99);
+
+        var root = await RunAsync(fx, """{"pinAccessThreshold":8}""");
+        var candidates = root.GetProperty("pinCandidates");
+
+        Assert.Equal(1, candidates.GetArrayLength());
+        Assert.Equal(shortId, candidates[0].GetProperty("id").GetString());
+        Assert.Equal(20, candidates[0].GetProperty("accessCount").GetInt32());
     }
 
     [Fact]

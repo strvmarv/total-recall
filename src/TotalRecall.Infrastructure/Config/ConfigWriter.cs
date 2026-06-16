@@ -7,10 +7,11 @@
 // AOT note: Tomlyn's Toml.FromModel / reflection-based projection is NOT
 // trim-safe. Rather than gamble on its surface being reachable after
 // trimming, this module hand-rolls a minimal TOML writer that covers the
-// subset the config ever uses: scalars (bool, long, double, string) and
-// nested tables. That is deliberately less than full-TOML — arrays and
-// datetimes are not supported. If future config keys demand them, extend
-// AppendTomlValue rather than falling back to Toml.FromModel.
+// subset the config ever uses: scalars (bool, long, double, string),
+// inline arrays of those scalars (e.g. [skills] extra_dirs), and nested
+// tables. That is deliberately less than full-TOML — datetimes and
+// arrays-of-tables are not supported. If future config keys demand them,
+// extend AppendTomlValue rather than falling back to Toml.FromModel.
 
 using System;
 using System.Collections.Generic;
@@ -148,8 +149,9 @@ public static class ConfigWriter
     //
     // Emits a canonical subset: top-level scalars first, then [section]
     // tables (lexicographically sorted for stable output). Nested tables
-    // become dotted headers. Scalars supported: bool, int/long, double,
-    // string. Anything else throws — callers should not persist such values.
+    // become dotted headers. Values supported: bool, int/long, double,
+    // string, and inline arrays of those. Anything else (datetimes,
+    // arrays-of-tables) throws — callers should not persist such values.
 
     /// <summary>
     /// Serializes <paramref name="table"/> to a TOML string. AOT-safe.
@@ -282,10 +284,25 @@ public static class ConfigWriter
                 }
                 sb.Append(ftext);
                 break;
+            case TomlArray arr:
+                // Inline array: [elem1, elem2, ...]. Elements are serialized
+                // recursively, so this naturally covers arrays of scalars (the
+                // only kind the config uses, e.g. [skills] extra_dirs) and even
+                // nested arrays. An array-of-inline-tables (TomlTable element)
+                // is not something the config uses, so it falls through to the
+                // NotSupportedException below.
+                sb.Append('[');
+                for (int i = 0; i < arr.Count; i++)
+                {
+                    if (i > 0) sb.Append(", ");
+                    AppendTomlValue(sb, arr[i]);
+                }
+                sb.Append(']');
+                break;
             default:
                 throw new NotSupportedException(
                     $"ConfigWriter cannot serialize TOML value of type {value.GetType().Name}. "
-                    + "Supported types: bool, string, int, long, double.");
+                    + "Supported types: bool, string, int, long, double, array.");
         }
     }
 
