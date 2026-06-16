@@ -5,10 +5,11 @@ import type { InsightCard as Card } from '../../lib/insights';
 import { fmtScore } from '../../lib/insights';
 import type { InsightsThresholdPoint } from '../../lib/types';
 import { useChartTheme } from '../../lib/chartTheme';
+import { OperationProgress } from '../OperationProgress';
 
 export interface InsightCardActions {
   /** near-dup: delete every id in `deleteIds` (one tool call each), then refetch. */
-  onDeleteCluster: (card: Extract<Card, { kind: 'near-dup' }>) => Promise<void>;
+  onDeleteCluster: (card: Extract<Card, { kind: 'near-dup' }>, onProgress: (done: number, total: number) => void) => Promise<void>;
   /** pin: memory_pin the entry, then refetch. */
   onPin: (card: Extract<Card, { kind: 'pin' }>) => Promise<void>;
   /** threshold: config_set the suggested value, then refetch. */
@@ -37,6 +38,8 @@ export function InsightCard({ card, actions }: { card: Card; actions: InsightCar
   const [error, setError] = useState<string | null>(null);
   // near-dup destructive two-step confirm
   const [confirming, setConfirming] = useState(false);
+  // near-dup delete progress
+  const [prog, setProg] = useState<{ done: number; total: number } | null>(null);
 
   async function run(fn: () => Promise<void>) {
     setBusy(true);
@@ -66,7 +69,15 @@ export function InsightCard({ card, actions }: { card: Card; actions: InsightCar
                 type="button"
                 className="tr-btn tr-btn-danger"
                 disabled={busy}
-                onClick={() => run(async () => { await actions.onDeleteCluster(card); setConfirming(false); })}
+                onClick={() => run(async () => {
+                  setProg({ done: 0, total: card.deleteIds.length });
+                  try {
+                    await actions.onDeleteCluster(card, (done, total) => setProg({ done, total }));
+                    setConfirming(false);
+                  } finally {
+                    setProg(null);
+                  }
+                })}
               >
                 Confirm: delete {card.deleteIds.length}?
               </button>
@@ -84,6 +95,7 @@ export function InsightCard({ card, actions }: { card: Card; actions: InsightCar
           )}
           <Link className="tr-btn" to={card.reviewTo}>Review</Link>
         </div>
+        {busy && prog && <OperationProgress mode="determinate" done={prog.done} total={prog.total} verb="Deleting" />}
         {error && <p className="tr-card-error" role="alert">{error}</p>}
       </Shell>
     );

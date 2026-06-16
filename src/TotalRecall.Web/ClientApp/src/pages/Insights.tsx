@@ -57,8 +57,14 @@ export function Insights() {
                   card={card}
                   actions={{
                     curvePoints: data.insights.thresholdCurve.points,
-                    onDeleteCluster: async (c) => {
-                      const results = await Promise.allSettled(c.deleteIds.map((id) => api.tool('memory_delete', { id })));
+                    onDeleteCluster: async (c, onProgress) => {
+                      const total = c.deleteIds.length;
+                      let done = 0;
+                      const results = await Promise.allSettled(
+                        c.deleteIds.map((id) =>
+                          api.tool('memory_delete', { id }).finally(() => { done += 1; onProgress(done, total); }),
+                        ),
+                      );
                       // Record the ids that actually deleted so the card disappears
                       // optimistically — even if the server recompute lags the refetch.
                       const succeeded = c.deleteIds.filter((_, i) => results[i].status === 'fulfilled');
