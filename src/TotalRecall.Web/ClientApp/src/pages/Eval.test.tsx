@@ -1,0 +1,167 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { Eval } from './Eval';
+import { api } from '../lib/api';
+import type {
+  EvalReport, EvalBenchmarkResult, EvalCompareResult,
+  EvalGrowListResult, EvalGrowResolveResult, EvalSnapshotResult,
+} from '../lib/types';
+
+const REPORT: EvalReport = {
+  precision: 0.82, hitRate: 0.75, missRate: 0.25, mrr: 0.6, avgLatencyMs: 42, totalEvents: 120,
+  byTier: { hot: { precision: 0.9, hitRate: 0.8, avgScore: 0.71, count: 60 } },
+  byContentType: { fact: { precision: 0.85, hitRate: 0.78, count: 80 } },
+  topMisses: [{ query: 'how to reset widget', topScore: 0.41, timestamp: 1_700_000_000_000 }],
+  falsePositives: [{ query: 'stale doc', topScore: 0.66, timestamp: 1_700_000_000_000 }],
+  compactionHealth: { totalCompactions: 5, avgPreservationRatio: 0.92, entriesWithDrift: 1 },
+};
+
+const BENCHMARK: EvalBenchmarkResult = {
+  totalQueries: 12, exactMatchRate: 0.83, fuzzyMatchRate: 0.92, tierRoutingRate: 0.75,
+  negativePassRate: 1, avgLatencyMs: 18,
+  details: [
+    { query: 'capital of france', expectedContains: 'Paris', topResult: 'Paris is the capital', topScore: 0.88, matched: true, fuzzyMatched: true, hasNegativeAssertion: false, negativePass: true },
+  ],
+};
+
+const GROW_LIST: EvalGrowListResult = {
+  action: 'list',
+  candidates: [
+    { id: 'c1', queryText: 'how to deploy', topScore: 0.4, topResultContent: 'deploy doc', topResultEntryId: 'e1', firstSeen: 1, lastSeen: 2, timesSeen: 7, status: 'pending' },
+    { id: 'c2', queryText: 'rollback steps', topScore: 0.3, topResultContent: null, topResultEntryId: null, firstSeen: 1, lastSeen: 2, timesSeen: 3, status: 'pending' },
+  ],
+  count: 2,
+};
+
+const GROW_RESOLVE: EvalGrowResolveResult = {
+  action: 'resolve', accepted: 1, rejected: 1, corpusEntries: ['c1'], benchmarkPath: '/data/benchmark.jsonl',
+};
+
+const COMPARE: EvalCompareResult = {
+  beforeId: 'snap-a', afterId: 'latest',
+  deltas: { precision: 0.05, hitRate: 0.03, mrr: 0.02, missRate: -0.03, avgLatencyMs: -4 },
+  regressions: [{ queryText: 'q regressed', beforeOutcome: 'hit', afterOutcome: 'miss', beforeScore: 0.8, afterScore: 0.3 }],
+  improvements: [{ queryText: 'q improved', beforeOutcome: 'miss', afterOutcome: 'hit', beforeScore: 0.2, afterScore: 0.9 }],
+  warning: null,
+};
+
+const SNAPSHOT: EvalSnapshotResult = { id: 'snap-xyz', name: 'baseline', deduped: false };
+
+/** Default mock: report + grow-list resolve immediately; other tools pend unless overridden. */
+function mockApi(overrides?: (name: string, args?: unknown) => Promise<unknown> | undefined) {
+  vi.spyOn(api, 'tool').mockImplementation((name: string, args?: unknown) => {
+    const o = overrides?.(name, args);
+    if (o) return o as Promise<never>;
+    if (name === 'eval_report') return Promise.resolve(REPORT) as Promise<never>;
+    if (name === 'eval_grow') return Promise.resolve(GROW_LIST) as Promise<never>;
+    return new Promise<never>(() => {}); // benchmark/compare/snapshot only on demand
+  });
+}
+
+describe('Eval page', () => {
+  beforeEach(() => {
+    (window as unknown as { __TR_BOOTSTRAP__?: unknown }).__TR_BOOTSTRAP__ = { token: 't', backend: 'sqlite', version: 'x' };
+  });
+  afterEach(() => { delete (window as unknown as { __TR_BOOTSTRAP__?: unknown }).__TR_BOOTSTRAP__; vi.restoreAllMocks(); });
+
+  it('renders the heading and all four section cards', async () => {
+    mockApi();
+    render(<Eval />);
+    expect(screen.getByRole('heading', { name: 'Eval', level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /retrieval report/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /run benchmark/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /grow benchmark/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /compare snapshots/i })).toBeInTheDocument();
+  });
+
+  it('renders report metrics, per-tier and per-content-type tables, and top misses', async () => {
+    mockApi();
+    render(<Eval />);
+    // headline metric
+    expect(await screen.findByText('82%')).toBeInTheDocument(); // precision
+    // per-tier table row
+    expect(await screen.findByText('hot')).toBeInTheDocument();
+    // per-content-type row
+    expect(await screen.findByText('fact')).toBeInTheDocument();
+    // top miss
+    expect(await screen.findByText('how to reset widget')).toBeInTheDocument();
+  });
+
+  it('re-queries the report when the window selector changes to 30 days', async () => {
+    const spy = vi.fn();
+    mockApi((name, args) => { if (name === 'eval_report') { spy(args); return Promise.resolve(REPORT); } return undefined; });
+    render(<Eval />);
+    await screen.findByText('82%');
+    await waitFor(() => expect(spy).toHaveBeenCalledWith(expect.objectContaining({ days: 7 })));
+    await userEvent.selectOptions(screen.getByLabelText(/report window/i), '30');
+    await waitFor(() => expect(spy).toHaveBeenCalledWith(expect.objectContaining({ days: 30 })));
+  });
+
+  it('runs the benchmark on click and renders the rates + details table', async () => {
+    let resolveBench: (v: EvalBenchmarkResult) => void = () => {};
+    mockApi((name) => {
+      if (name === 'eval_benchmark') return new Promise<EvalBenchmarkResult>((res) => { resolveBench = res; });
+      return undefined;
+    });
+    const spy = vi.spyOn(api, 'tool');
+    render(<Eval />);
+    const btn = await screen.findByRole('button', { name: /run benchmark/i });
+    await userEvent.click(btn);
+    expect(spy).toHaveBeenCalledWith('eval_benchmark', undefined);
+    expect(btn).toBeDisabled(); // in-flight loading state
+    resolveBench(BENCHMARK);
+    expect(await screen.findByText('83%')).toBeInTheDocument(); // exact match rate
+    expect(screen.getByText('capital of france')).toBeInTheDocument(); // details row
+    await waitFor(() => expect(btn).not.toBeDisabled());
+  });
+
+  it('grow: selecting accept/reject then Resolve calls eval_grow with the right args and refreshes', async () => {
+    const calls: { name: string; args?: unknown }[] = [];
+    vi.spyOn(api, 'tool').mockImplementation((name: string, args?: unknown) => {
+      calls.push({ name, args });
+      if (name === 'eval_report') return Promise.resolve(REPORT) as Promise<never>;
+      if (name === 'eval_grow') {
+        const a = args as { action: string } | undefined;
+        if (a?.action === 'resolve') return Promise.resolve(GROW_RESOLVE) as Promise<never>;
+        return Promise.resolve(GROW_LIST) as Promise<never>;
+      }
+      return new Promise<never>(() => {}) as Promise<never>;
+    });
+    render(<Eval />);
+    // candidate rows load
+    const row1 = (await screen.findByText('how to deploy')).closest('tr')!;
+    const row2 = screen.getByText('rollback steps').closest('tr')!;
+    // accept c1, reject c2
+    await userEvent.click(within(row1).getByRole('button', { name: /accept/i }));
+    await userEvent.click(within(row2).getByRole('button', { name: /reject/i }));
+    await userEvent.click(screen.getByRole('button', { name: /^resolve/i }));
+    await waitFor(() => {
+      const resolve = calls.find((c) => c.name === 'eval_grow' && (c.args as { action?: string })?.action === 'resolve');
+      expect(resolve).toBeTruthy();
+      expect(resolve!.args).toEqual({ action: 'resolve', accept: ['c1'], reject: ['c2'] });
+    });
+    // resolve result surfaced
+    expect(await screen.findByText(/\/data\/benchmark\.jsonl/)).toBeInTheDocument();
+  });
+
+  it('compare: Compare button calls eval_compare and renders deltas + regressions/improvements', async () => {
+    mockApi((name) => { if (name === 'eval_compare') return Promise.resolve(COMPARE); return undefined; });
+    const spy = vi.spyOn(api, 'tool');
+    render(<Eval />);
+    await userEvent.click(await screen.findByRole('button', { name: /^compare/i }));
+    await waitFor(() => expect(spy).toHaveBeenCalledWith('eval_compare', expect.objectContaining({ after: 'latest' })));
+    expect(await screen.findByText('q regressed')).toBeInTheDocument();
+    expect(screen.getByText('q improved')).toBeInTheDocument();
+  });
+
+  it('snapshot: name + button calls eval_snapshot and shows the returned id', async () => {
+    mockApi((name) => { if (name === 'eval_snapshot') return Promise.resolve(SNAPSHOT); return undefined; });
+    const spy = vi.spyOn(api, 'tool');
+    render(<Eval />);
+    await userEvent.type(await screen.findByLabelText(/snapshot name/i), 'baseline');
+    await userEvent.click(screen.getByRole('button', { name: /^snapshot/i }));
+    await waitFor(() => expect(spy).toHaveBeenCalledWith('eval_snapshot', { name: 'baseline' }));
+    expect(await screen.findByText(/snap-xyz/)).toBeInTheDocument();
+  });
+});

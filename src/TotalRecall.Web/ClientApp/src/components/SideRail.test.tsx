@@ -23,9 +23,9 @@ describe('SideRail', () => {
     delete document.documentElement.dataset.theme;
   });
 
-  it('renders all six nav sections', () => {
+  it('renders all seven nav sections', () => {
     renderRail();
-    for (const label of ['Dashboard', 'Memory', 'Knowledge Base', 'Usage', '✨ Insights', 'Config']) {
+    for (const label of ['Dashboard', 'Memory', 'Knowledge Base', 'Usage', '✨ Insights', 'Eval', 'Config']) {
       expect(screen.getByRole('link', { name: label })).toBeInTheDocument();
     }
   });

@@ -21,7 +21,12 @@ public static class ToolAllowlist
     {
         "status",
         "usage_status",
+        // eval / retrieval-quality tools (surfaced by the Eval page)
         "eval_report",
+        "eval_benchmark",
+        "eval_compare",
+        "eval_grow",
+        "eval_snapshot",
         // memory read tools
         "memory_search",
         "memory_list",

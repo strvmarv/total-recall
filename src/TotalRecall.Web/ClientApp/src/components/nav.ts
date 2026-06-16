@@ -3,12 +3,13 @@ export interface NavItem {
   label: string;
 }
 
-/** Spec nav order: Dashboard · Memory · Knowledge Base · Usage · ✨ Insights · Config. */
+/** Spec nav order: Dashboard · Memory · Knowledge Base · Usage · ✨ Insights · Eval · Config. */
 export const NAV_ITEMS: NavItem[] = [
   { path: '/', label: 'Dashboard' },
   { path: '/memory', label: 'Memory' },
   { path: '/kb', label: 'Knowledge Base' },
   { path: '/usage', label: 'Usage' },
   { path: '/insights', label: '✨ Insights' },
+  { path: '/eval', label: 'Eval' },
   { path: '/config', label: 'Config' },
 ];

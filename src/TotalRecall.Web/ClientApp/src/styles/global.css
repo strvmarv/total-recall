@@ -245,6 +245,31 @@ body {
 .tr-impact-medium { background: var(--tr-accent-weak); color: var(--tr-warning); }
 .tr-impact-low { background: var(--tr-surface-2); color: var(--tr-text-muted); }
 
+/* Eval */
+.tr-eval h1 { margin: 0 0 var(--tr-space-3); }
+.tr-eval-intro { margin: 0 0 var(--tr-space-5); }
+.tr-eval > .tr-card { margin-bottom: var(--tr-space-5); }
+.tr-eval .tr-card-grid > .tr-card { margin-bottom: 0; }
+.tr-eval-controls { display: flex; align-items: center; gap: var(--tr-space-3); flex-wrap: wrap; margin-bottom: var(--tr-space-4); }
+.tr-eval-controls > label { font-size: 13px; color: var(--tr-text-muted); }
+.tr-eval-controls select { height: 34px; border: 1px solid var(--tr-border); border-radius: var(--tr-radius); padding: 0 var(--tr-space-3); font: inherit; background: var(--tr-surface); color: var(--tr-text); }
+.tr-eval-subhead { font-size: 13px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--tr-text-muted); margin: var(--tr-space-4) 0 var(--tr-space-2); }
+.tr-eval-bench-rates, .tr-eval-deltas { margin-bottom: var(--tr-space-4); }
+.tr-eval-compaction { margin-top: var(--tr-space-4); }
+.tr-eval-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--tr-space-2); }
+.tr-eval-list-row { display: flex; flex-direction: column; gap: 1px; padding: var(--tr-space-2) 0; border-bottom: 1px solid var(--tr-border); }
+.tr-eval-list-row:last-child { border-bottom: 0; }
+.tr-eval-query { font-family: var(--tr-font-mono); font-size: 13px; color: var(--tr-text); }
+.tr-eval-choice { display: inline-flex; gap: var(--tr-space-2); }
+.tr-eval-choice .tr-btn { padding: var(--tr-space-1) var(--tr-space-2); font-size: 12px; }
+.tr-eval-form { display: flex; gap: var(--tr-space-3); flex-wrap: wrap; align-items: flex-end; margin-bottom: var(--tr-space-3); }
+.tr-eval-form .tr-field { display: flex; flex-direction: column; gap: var(--tr-space-1); }
+.tr-eval-form .tr-field label { font-size: 12px; color: var(--tr-text-muted); }
+.tr-eval-form .tr-input { min-width: 180px; }
+.tr-eval-warning { margin-bottom: var(--tr-space-3); }
+.tr-eval-change-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--tr-space-5); margin-top: var(--tr-space-3); }
+@media (max-width: 880px) { .tr-eval-change-cols { grid-template-columns: minmax(0, 1fr); } }
+
 /* Config */
 .tr-config h1 { margin: 0 0 var(--tr-space-4); }
 /* Sections tile into a responsive multi-column grid so wide screens pack many

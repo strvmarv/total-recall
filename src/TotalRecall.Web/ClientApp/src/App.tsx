@@ -7,6 +7,7 @@ import { Dashboard } from './pages/Dashboard';
 import { KnowledgeBase } from './pages/KnowledgeBase';
 import { Usage } from './pages/Usage';
 import { Insights } from './pages/Insights';
+import { Eval } from './pages/Eval';
 import { Config } from './pages/Config';
 
 /** Router-agnostic shell (testable with MemoryRouter). */
@@ -22,6 +23,7 @@ export function AppShell() {
           <Route path="/kb" element={<KnowledgeBase />} />
           <Route path="/usage" element={<Usage />} />
           <Route path="/insights" element={<Insights />} />
+          <Route path="/eval" element={<Eval />} />
           <Route path="/config" element={<Config />} />
           <Route path="*" element={<SectionPlaceholder title="Not found" note="Unknown route." />} />
         </Routes>

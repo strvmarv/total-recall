@@ -36,7 +36,66 @@ export interface EvalReport {
   mrr: number;
   avgLatencyMs: number;
   totalEvents: number;
+  // Rich fields surfaced on the Eval page (RetrievalQualityCard only reads the
+  // top-line subset above, so these additions are safe). All emitted camelCase.
+  byTier?: Record<string, { precision: number; hitRate: number; avgScore: number; count: number }>;
+  byContentType?: Record<string, { precision: number; hitRate: number; count: number }>;
+  topMisses?: { query: string; topScore: number | null; timestamp: number }[];
+  falsePositives?: { query: string; topScore: number | null; timestamp: number }[];
+  compactionHealth?: { totalCompactions: number; avgPreservationRatio: number | null; entriesWithDrift: number };
 }
+
+export interface EvalBenchmarkDetail {
+  query: string;
+  expectedContains: string;
+  topResult: string | null;
+  topScore: number;
+  matched: boolean;
+  fuzzyMatched: boolean;
+  hasNegativeAssertion: boolean;
+  negativePass: boolean;
+}
+export interface EvalBenchmarkResult {
+  totalQueries: number;
+  exactMatchRate: number;
+  fuzzyMatchRate: number;
+  tierRoutingRate: number;
+  negativePassRate: number;
+  avgLatencyMs: number;
+  details: EvalBenchmarkDetail[];
+}
+
+export interface EvalCompareChange {
+  queryText: string;
+  beforeOutcome: string;
+  afterOutcome: string;
+  beforeScore: number | null;
+  afterScore: number | null;
+}
+export interface EvalCompareResult {
+  beforeId: string;
+  afterId: string;
+  deltas: { precision: number; hitRate: number; mrr: number; missRate: number; avgLatencyMs: number };
+  regressions: EvalCompareChange[];
+  improvements: EvalCompareChange[];
+  warning: string | null;
+}
+
+export interface EvalGrowCandidate {
+  id: string;
+  queryText: string;
+  topScore: number;
+  topResultContent: string | null;
+  topResultEntryId: string | null;
+  firstSeen: number;
+  lastSeen: number;
+  timesSeen: number;
+  status: string;
+}
+export interface EvalGrowListResult { action: string; candidates: EvalGrowCandidate[]; count: number; }
+export interface EvalGrowResolveResult { action: string; accepted: number; rejected: number; corpusEntries: string[]; benchmarkPath: string; }
+
+export interface EvalSnapshotResult { id: string; name: string; deduped: boolean; }
 
 export interface CompactionMovement {
   id: string;
