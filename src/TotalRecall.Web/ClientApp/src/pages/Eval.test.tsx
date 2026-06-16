@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Eval } from './Eval';
 import { api } from '../lib/api';
@@ -225,13 +225,23 @@ describe('Eval page', () => {
       return undefined;
     });
     render(<Eval />);
+    // Wait for the component to finish its initial data load under real timers,
+    // so findByRole polling doesn't fight fake timers.
     const btn = await screen.findByRole('button', { name: /run benchmark/i });
-    await userEvent.click(btn);
-    // Switch to fake timers after the click so userEvent doesn't hang, then advance
+    // Switch to fake timers now — before the click — so the component's setInterval
+    // (created inside the useEffect that watches busy) runs under fake timers.
     vi.useFakeTimers();
-    vi.advanceTimersByTime(3000);
-    expect(screen.getByText(/Running benchmark…/)).toBeInTheDocument();
-    vi.useRealTimers();
-    resolveBench(BENCHMARK);
+    try {
+      // Use fireEvent (synchronous) to avoid userEvent's internal setTimeout delays
+      // that would hang under fake timers.
+      act(() => { fireEvent.click(btn); });
+      // Advance 3 s under fake timers so the setInterval fires and elapsedMs reaches 3000.
+      act(() => { vi.advanceTimersByTime(3000); });
+      // Elapsed must actually read "3s", not just the initial "0s".
+      expect(screen.getByText(/Running benchmark… 3s/)).toBeInTheDocument();
+      resolveBench(BENCHMARK);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
