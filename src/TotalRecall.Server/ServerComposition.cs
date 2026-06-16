@@ -19,7 +19,7 @@
 //      AutoMigrationGuard.CheckAndMigrateAsync BEFORE calling this (so the
 //      migration path can rename the old DB before we open a handle on it).
 //
-// Handler budget: Memory (18) + KB (8) + Session (4) + Eval (5) + Config (2) + Misc (4) + Insights (1) = 42.
+// Handler budget: Memory (19) + KB (8) + Session (4) + Eval (5) + Config (2) + Misc (4) + Insights (1) = 43.
 //
 // AOT: no reflection. Every handler is constructed via direct `new`. The
 // Eval/Config/ImportHost/CompactNow handlers have no-arg constructors that

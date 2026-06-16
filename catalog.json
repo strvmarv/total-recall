@@ -856,6 +856,14 @@
           "threshold": {
             "type": "number",
             "description": "Similarity threshold override"
+          },
+          "source": {
+            "type": "string",
+            "description": "Query source to score (default \u0027assistant\u0027)"
+          },
+          "grace_minutes": {
+            "type": "number",
+            "description": "Minutes before an un-acted retrieval counts as a miss (default 60)"
           }
         }
       }

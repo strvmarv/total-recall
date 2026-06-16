@@ -96,6 +96,31 @@ public sealed class ServerCompositionTests
         Assert.Equal(expected, actual);
     }
 
+    // When no RetrievalEventLog is supplied (e.g. the postgres/no-telemetry
+    // path) memory_feedback must be absent from the registry.
+    [Fact]
+    public void BuildRegistry_OmitsMemoryFeedback_WhenNoRetrievalLog()
+    {
+        var store = new FakeStore();
+        var vectors = new FakeVectorSearch();
+        var embedder = new RecordingFakeEmbedder();
+        var hybrid = new RecordingFakeHybridSearch();
+        var fileIngester = new RecordingFakeFileIngester();
+        var compactionLog = new FakeCompactionLog();
+        var sessionLifecycle = new FakeSessionLifecycle();
+        var statusOptions = new StatusOptions(
+            DbPath: "/tmp/test.db",
+            EmbeddingModel: "bge-small-en-v1.5",
+            EmbeddingDimensions: 384);
+
+        var registry = ServerComposition.BuildRegistry(
+            store, vectors, embedder, hybrid,
+            fileIngester, compactionLog, sessionLifecycle, statusOptions,
+            retrievalLog: null);
+
+        Assert.False(registry.TryGet("memory_feedback", out _));
+    }
+
     // The assistant-only memory_feedback tool registers in BOTH composition
     // modes whenever a RetrievalEventLog is wired — which production always
     // does for sqlite + cortex.
