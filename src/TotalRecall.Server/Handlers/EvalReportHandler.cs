@@ -98,8 +98,12 @@ public sealed class EvalReportHandler : IToolHandler
                     throw new ArgumentException("threshold must be a number");
                 thresholdOverride = tEl.GetDouble();
             }
-            if (args.TryGetProperty("source", out var srcEl) && srcEl.ValueKind == JsonValueKind.String)
+            if (args.TryGetProperty("source", out var srcEl))
+            {
+                if (srcEl.ValueKind != JsonValueKind.String)
+                    throw new ArgumentException("source must be a string");
                 source = srcEl.GetString()!;
+            }
             if (args.TryGetProperty("grace_minutes", out var gEl))
             {
                 if (gEl.ValueKind != JsonValueKind.Number)

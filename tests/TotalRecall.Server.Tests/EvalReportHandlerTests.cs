@@ -117,6 +117,14 @@ public class EvalReportHandlerTests
     }
 
     [Fact]
+    public async Task InvalidSource_Throws()
+    {
+        var handler = new EvalReportHandler(_ => MakeInputs());
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => handler.ExecuteAsync(Args("""{"source":123}"""), CancellationToken.None));
+    }
+
+    [Fact]
     public async Task InvalidGraceMinutes_Throws()
     {
         var handler = new EvalReportHandler(_ => MakeInputs());
