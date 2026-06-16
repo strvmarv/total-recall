@@ -19,6 +19,11 @@
 // rather than reading the raw vec0 row by rowid. This is the simpler correct
 // option: it needs no per-tier vec0 SQL and flows cleanly through the IEmbedder
 // seam the rest of the handler already depends on.
+//
+// v1 limitation — near-duplicate detection is SAME-TIER: each live-set entry is
+// only compared against other entries in its own tier (the vec0 search is scoped
+// to one tier table). Identical content split across different tiers (e.g. a hot
+// copy and a warm copy) will NOT cluster together in v1.
 
 using System;
 using System.Collections.Generic;
@@ -77,15 +82,18 @@ public sealed class InsightsHandler : IToolHandler
     private const int RecentCaptureWindow = 30;
     private const int MaxPinCandidates = 10;
     private const int MaxRetrievalGaps = 5;
+    // Per-entry vec0 over-sample cap when grouping near-duplicates: ask for up to
+    // this many same-tier neighbors per entry (capped further by the live set).
+    private const int NearDupTopK = 50;
 
     private static readonly JsonElement _inputSchema = JsonDocument.Parse("""
         {
           "type": "object",
           "properties": {
-            "days": {"type":"number","description":"Window in days for retrieval-gap + threshold-curve analysis (default 7)"},
+            "days": {"type":"integer","description":"Window in days for retrieval-gap + threshold-curve analysis (default 7)"},
             "nearDupThreshold": {"type":"number","description":"Min similarity (app score scale) to cluster near-duplicates (default 0.85)"},
-            "pinAccessThreshold": {"type":"number","description":"Min access_count for a pin-promotion candidate (default 8)"},
-            "limit": {"type":"number","description":"Cap on live-set memories scanned for near-duplicates (default 200)"}
+            "pinAccessThreshold": {"type":"integer","description":"Min access_count for a pin-promotion candidate (default 8)"},
+            "limit": {"type":"integer","description":"Cap on live-set memories scanned for near-duplicates (default 200)"}
           }
         }
         """).RootElement.Clone();
@@ -102,7 +110,7 @@ public sealed class InsightsHandler : IToolHandler
 
     public string Name => "insights";
     public string Description =>
-        "Entry-level analysis of the memory store: near-duplicate clusters, pin candidates, retrieval gaps, threshold curve, and a self-explaining health score";
+        "Entry-level analysis of the memory store: near-duplicate clusters, pin candidates, retrieval gaps, threshold curve, and a self-explaining health score. Near-duplicate detection is same-tier in v1: identical content split across different tiers won't cluster together.";
     public JsonElement InputSchema => _inputSchema;
 
     public Task<ToolCallResult> ExecuteAsync(JsonElement? arguments, CancellationToken ct)
@@ -123,6 +131,8 @@ public sealed class InsightsHandler : IToolHandler
                 if (nEl.ValueKind != JsonValueKind.Number)
                     throw new ArgumentException("nearDupThreshold must be a number");
                 nearDupThreshold = nEl.GetDouble();
+                if (nearDupThreshold is < 0.0 or > 1.0)
+                    throw new ArgumentException("nearDupThreshold must be between 0 and 1");
             }
         }
 
@@ -152,7 +162,6 @@ public sealed class InsightsHandler : IToolHandler
         return Task.FromResult(new ToolCallResult
         {
             Content = new[] { new ToolContent { Type = "text", Text = jsonText } },
-            IsError = false,
         });
     }
 
@@ -162,16 +171,19 @@ public sealed class InsightsHandler : IToolHandler
         IInsightsContext ctx, double threshold, int limit, CancellationToken ct)
     {
         // Live set = hot + warm + pinned memory tiers (skip cold archive),
-        // capped at `limit` total entries scanned.
+        // capped at `limit` total entries scanned. Push the cap down to SQL via
+        // a running remainder so we never materialize more rows than we'll keep.
         var liveTiers = new[] { Tier.Hot, Tier.Warm, Tier.Pinned };
         var entries = new List<(Tier Tier, Entry Entry)>();
+        int remaining = limit;
         foreach (var tier in liveTiers)
         {
-            if (entries.Count >= limit) break;
-            foreach (var e in ctx.Store.List(tier, ContentType.Memory))
+            if (remaining <= 0) break;
+            foreach (var e in ctx.Store.List(tier, ContentType.Memory,
+                new ListEntriesOpts { Limit = remaining }))
             {
                 entries.Add((tier, e));
-                if (entries.Count >= limit) break;
+                remaining--;
             }
         }
 
@@ -191,7 +203,7 @@ public sealed class InsightsHandler : IToolHandler
             var (tier, entry) = entries[i];
             var vec = ctx.Embedder.Embed(entry.Content);
             // Same-tier/type search. Oversample generously; the live set is capped.
-            var topK = Math.Min(entries.Count, 50);
+            var topK = Math.Min(entries.Count, NearDupTopK);
             var hits = ctx.Vectors.SearchByVector(
                 tier, ContentType.Memory,
                 vec.AsMemory(),
@@ -228,11 +240,15 @@ public sealed class InsightsHandler : IToolHandler
             var members = kvp.Value;
             if (members.Count < 2) continue;
 
+            // Build the membership set once per cluster so the pairScore scans
+            // below are O(1) lookups instead of O(M) List.Contains probes.
+            var memberSet = new HashSet<int>(members);
+
             // topScore = max pairwise score among members of this cluster.
             double topScore = 0;
             foreach (var (key, score) in pairScore)
             {
-                if (members.Contains(key.Item1) && members.Contains(key.Item2) && score > topScore)
+                if (memberSet.Contains(key.Item1) && memberSet.Contains(key.Item2) && score > topScore)
                     topScore = score;
             }
 
@@ -244,7 +260,7 @@ public sealed class InsightsHandler : IToolHandler
                 foreach (var (key, score) in pairScore)
                 {
                     if ((key.Item1 == mi || key.Item2 == mi)
-                        && members.Contains(key.Item1) && members.Contains(key.Item2)
+                        && memberSet.Contains(key.Item1) && memberSet.Contains(key.Item2)
                         && score > memberBest)
                         memberBest = score;
                 }
@@ -253,11 +269,16 @@ public sealed class InsightsHandler : IToolHandler
                     Id: entry.Id,
                     Tier: TierName(tier),
                     Preview: Preview(entry.Content),
-                    Score: memberBest));
+                    Score: memberBest,
+                    CreatedAt: entry.CreatedAt));
             }
             memberDtos.Sort((a, b) => b.Score.CompareTo(a.Score));
 
             groups.Add(new NearDuplicateGroupDto(
+                // GroupId is the highest-scoring member (memberDtos is sorted by
+                // score DESC) — it serves only as the cluster anchor/identity.
+                // The Phase 3 UI "keep newest, delete the rest" choice is made
+                // client-side from each member's createdAt, NOT from this anchor.
                 GroupId: memberDtos[0].Id,
                 TopScore: topScore,
                 Members: memberDtos.ToArray()));
@@ -394,7 +415,10 @@ public sealed class InsightsHandler : IToolHandler
         HealthComponentDto capture;
         if (recent.Count == 0)
         {
-            capture = new HealthComponentDto(0, 25, "no recent entries to assess capture quality");
+            // Intentional parity with the client's computeHealthScore: when there
+            // are no recent entries the client returns ratio 1 (→ full 25 marks),
+            // so the server must award full capture marks too, not 0.
+            capture = new HealthComponentDto(25, 25, "no recent entries yet — assumed healthy");
         }
         else
         {
@@ -406,7 +430,11 @@ public sealed class InsightsHandler : IToolHandler
         }
 
         // Pinned (max 20): <= 15 → 20, else max(0, 20-(count-15)).
-        var pinnedCount = ctx.Store.List(Tier.Pinned, ContentType.Memory).Count;
+        // Parity with the client health score, which sums pinned memories AND
+        // pinned knowledge. Use IStore.Count (same mechanism as StatusHandler's
+        // tier sizing) rather than materializing rows via List().Count.
+        var pinnedCount = ctx.Store.Count(Tier.Pinned, ContentType.Memory)
+            + ctx.Store.Count(Tier.Pinned, ContentType.Knowledge);
         int pinnedScore = pinnedCount <= 15 ? 20 : Math.Max(0, 20 - (pinnedCount - 15));
         var pinnedDetail = pinnedCount <= 15
             ? $"{pinnedCount} pinned — within budget"
@@ -429,7 +457,11 @@ public sealed class InsightsHandler : IToolHandler
         if (!args.TryGetProperty(name, out var el)) return fallback;
         if (el.ValueKind != JsonValueKind.Number)
             throw new ArgumentException($"{name} must be a number");
-        var v = el.GetInt32();
+        // TryGetInt32 returns false for fractional numbers (e.g. 7.5) instead of
+        // throwing InvalidOperationException like GetInt32 — surface a clear
+        // ArgumentException so callers see a sensible validation error.
+        if (!el.TryGetInt32(out var v))
+            throw new ArgumentException($"{name} must be an integer");
         if (v <= 0) throw new ArgumentException($"{name} must be positive");
         return v;
     }
@@ -437,7 +469,11 @@ public sealed class InsightsHandler : IToolHandler
     private static string Preview(string content)
     {
         if (string.IsNullOrEmpty(content)) return string.Empty;
-        var collapsed = string.Join(' ', content.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        // Split on any run of whitespace (null char[] = default whitespace set),
+        // dropping empties and trimming each token, then rejoin with single
+        // spaces — collapses newlines/tabs/runs into a clean single-line preview.
+        var collapsed = string.Join(' ', content.Split(
+            (char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
         return collapsed.Length <= PreviewMaxChars ? collapsed : collapsed.Substring(0, PreviewMaxChars);
     }
 

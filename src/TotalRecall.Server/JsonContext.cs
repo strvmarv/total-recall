@@ -853,11 +853,15 @@ public sealed record HealthBreakdownDto(
     [property: JsonPropertyName("pinned")] HealthComponentDto Pinned,
     [property: JsonPropertyName("kb")] HealthComponentDto Kb);
 
+// createdAt (epoch-ms) lets the Phase 3 "keep newest, delete the rest" UI action
+// pick the newest member of a near-duplicate cluster client-side; the server's
+// GroupId anchor is highest-scoring, not newest.
 public sealed record NearDuplicateMemberDto(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("tier")] string Tier,
     [property: JsonPropertyName("preview")] string Preview,
-    [property: JsonPropertyName("score")] double Score);
+    [property: JsonPropertyName("score")] double Score,
+    [property: JsonPropertyName("createdAt")] long CreatedAt);
 
 public sealed record NearDuplicateGroupDto(
     [property: JsonPropertyName("groupId")] string GroupId,

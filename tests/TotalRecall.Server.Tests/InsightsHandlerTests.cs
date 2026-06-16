@@ -192,25 +192,92 @@ public class InsightsHandlerTests
     }
 
     [Fact]
-    public async Task NearDuplicates_TransitiveCollapse_IntoOneCluster()
+    public async Task NearDuplicates_SameTierClusters_NotCrossTier()
     {
         using var fx = new Fixture();
         fx.Threshold = 0.7;
-        // Three identical memories: A~B, B~C, A~C all pair => one cluster of 3.
+        // Two identical WARM memories + one identical HOT memory. Near-dup
+        // detection is SAME-TIER (v1): the vec0 search is scoped to one tier,
+        // so the hot copy never joins the warm pair even though its content is
+        // identical. Result: a single cluster of size 2 (the two warm dups),
+        // with the hot copy isolated in its own tier.
         fx.Seed(Tier.Warm, "transitive duplicate content");
         fx.Seed(Tier.Warm, "transitive duplicate content");
         fx.Seed(Tier.Hot, "transitive duplicate content");
-        // A distinct entry that must NOT join.
+        // A distinct warm entry that must NOT join.
         fx.Seed(Tier.Warm, "entirely different topic here");
 
         var root = await RunAsync(fx, """{"nearDupThreshold":0.7}""");
         var groups = root.GetProperty("nearDuplicates");
 
-        // Same-tier search means hot vs warm don't cross; verify the two warm
-        // dups collapse into one cluster of size 2 (the hot one is alone in its
-        // tier), and the distinct warm entry is excluded.
         Assert.Equal(1, groups.GetArrayLength());
         Assert.Equal(2, groups[0].GetProperty("members").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task NearDuplicates_ThreeMemberCluster_TopScoreIsMaxPairwise()
+    {
+        using var fx = new Fixture();
+        fx.Threshold = 0.7;
+        // Three near-duplicate memories in the SAME tier => one cluster of 3.
+        //
+        // The HashEmbedder is intentionally bimodal: identical content yields
+        // identical vectors (app score ~1.0) and any distinct content yields an
+        // orthogonal vector (app score ~-1.0). There is no intermediate band, so
+        // "slightly varying content" cannot produce differing-but-above-threshold
+        // pairwise scores with this test embedder — three exact dups are the only
+        // way to land three members above the 0.7 threshold in one cluster. The
+        // assertion that matters regardless of embedder shape is that the group's
+        // topScore equals the maximum pairwise score across its members.
+        fx.Seed(Tier.Warm, "alpha shared token");           // A
+        fx.Seed(Tier.Warm, "alpha shared token");           // B == A
+        fx.Seed(Tier.Warm, "alpha shared token");           // C == A == B
+        // A distinct entry that must NOT join.
+        fx.Seed(Tier.Warm, "completely different subject");
+
+        var root = await RunAsync(fx, """{"nearDupThreshold":0.7}""");
+        var groups = root.GetProperty("nearDuplicates");
+
+        Assert.Equal(1, groups.GetArrayLength());
+        var group = groups[0];
+        Assert.Equal(3, group.GetProperty("members").GetArrayLength());
+
+        // topScore must equal the maximum pairwise score among the three members
+        // (per-member score is each member's best pairwise edge, so the cluster's
+        // max member score IS the max pairwise score).
+        var maxMemberScore = group.GetProperty("members").EnumerateArray()
+            .Select(m => m.GetProperty("score").GetDouble())
+            .Max();
+        Assert.Equal(maxMemberScore, group.GetProperty("topScore").GetDouble(), 6);
+        Assert.True(group.GetProperty("topScore").GetDouble() >= 0.7);
+    }
+
+    [Fact]
+    public async Task NearDuplicates_MembersCarryCreatedAt()
+    {
+        using var fx = new Fixture();
+        fx.Threshold = 0.7;
+        // accessCount>0 routes Seed through the UPDATE that also sets created_at,
+        // so the two dups carry distinct, known timestamps the client can use to
+        // pick the newest member.
+        fx.Seed(Tier.Warm, "timestamped duplicate content", accessCount: 1, createdAt: 5000);
+        fx.Seed(Tier.Warm, "timestamped duplicate content", accessCount: 1, createdAt: 9000);
+
+        var root = await RunAsync(fx, """{"nearDupThreshold":0.7}""");
+        var groups = root.GetProperty("nearDuplicates");
+        Assert.Equal(1, groups.GetArrayLength());
+        var members = groups[0].GetProperty("members");
+        Assert.Equal(2, members.GetArrayLength());
+        foreach (var m in members.EnumerateArray())
+        {
+            Assert.True(m.TryGetProperty("createdAt", out var ca));
+            Assert.True(ca.GetInt64() > 0);
+        }
+        var stamps = members.EnumerateArray()
+            .Select(m => m.GetProperty("createdAt").GetInt64())
+            .OrderBy(x => x)
+            .ToArray();
+        Assert.Equal(new long[] { 5000, 9000 }, stamps);
     }
 
     [Fact]
