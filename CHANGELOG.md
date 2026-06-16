@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- **Retrieval-quality feedback loop.** New assistant-only `memory_feedback` MCP tool lets the host confirm whether a retrieval was actually used; `memory_search` and `kb_search` now return a `retrievalId` to correlate the feedback. `eval_report` (and the Insights health score) infer un-acted retrievals as misses after a configurable grace window, scoped to the `assistant` query source. The Dashboard **"Retrieval quality"** card is now driven by this real signal instead of always reading 0%.
+- **Web UI loading vocabulary.** Two reusable components — `Skeleton` (page/panel loads) and `OperationProgress` (determinate "X of N" + bar, or indeterminate + live elapsed) — now give consistent feedback across Insights, Eval, Knowledge Base, Memory, and Config. Both respect `prefers-reduced-motion`.
+- **Insights retrieval-gap cards explain themselves and hand off to Eval.** A gap card now says why the query matters and deep-links to the Eval → **Grow benchmark** section (`/eval?grow=<query>`), which surfaces a banner and highlights the matching candidate (or explains when it isn't a current candidate).
+
+### Changed
+
+- **`memory_search` response shape is now `{ retrievalId, results }`** (was a bare array); `kb_search` responses gain a top-level `retrievalId`. Retrieval events now record a real `query_source` (`assistant` / `web-ui` / `cli`) instead of a single hardcoded value, so retrieval-quality metrics can be scoped to assistant traffic.
+
+> **Upgrade note:** because un-acted assistant retrievals are now inferred as misses after the grace window, the "Retrieval quality" / health-score metric may *dip* immediately after upgrading and stay lower until the assistant adopts `memory_feedback`. This reflects real measurement (previously these retrievals were silently treated as hits), not a regression.
+
 ## 3.4.1 - 2026-06-15
 
 ### Fixed

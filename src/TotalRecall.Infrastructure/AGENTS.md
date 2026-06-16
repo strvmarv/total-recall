@@ -214,7 +214,16 @@ Flow:
 
 **Retrieval event logging**: `memory_search` and `kb_search` handlers call `LogRetrievalEvent()`
 after each search. Pass `ctx.ConfigSnapshotId` (set by `session_start`) so events are tagged to
-the active config snapshot.
+the active config snapshot. Each event records a `query_source` (`assistant` / `web-ui` / `cli`)
+so metrics can be scoped to assistant traffic; the search handlers return the logged event's
+`retrievalId`, and `memory_feedback` calls `UpdateOutcome()` to mark whether it was used.
+
+**Read-time outcome inference** (`Eval/Metrics.cs` → `Compute(events, threshold, nowMs, graceWindowMs, …)`):
+outcomes are resolved when metrics are computed, not stored. `OutcomeUsed == true` is a hit;
+`false` is a miss; `NULL` is a miss only once the event is older than `nowMs - graceWindowMs`
+(otherwise it is pending and excluded). `eval_report`, the Insights health score, and the CLI
+`eval report` all pass a grace window (default 60 min) so un-acted assistant retrievals age into
+misses rather than silently counting as hits.
 
 ---
 

@@ -118,6 +118,34 @@ rai-ops-cortex must implement the pinned tier server-side; until then pinned is 
 
 Cross-encoder or Cohere Rerank API pass after pgvector retrieval on the Cortex side, improving KB search quality for plugin queries. Plugin-side reranking (bundled ONNX cross-encoder) is a separate future consideration. Address when retrieval eval metrics show top-K precision is a bottleneck.
 
+## Follow-ups deferred from the retrieval-quality feedback loop
+
+Items identified while building the `memory_feedback` / read-time-inference loop and the web UI loading vocabulary. Not urgent.
+
+### Session-scoped retrieval-feedback correlation
+
+`memory_feedback` matches a retrieval purely by `retrievalId`. If a host reuses or loses the id across a session boundary, feedback can't be attributed. A follow-up would let `memory_feedback` also accept/verify a `session` and fall back to the most-recent un-acted retrieval for that session when no id is supplied.
+
+**Files:** `src/TotalRecall.Server/Handlers/MemoryFeedbackHandler.cs`, `src/TotalRecall.Infrastructure/Telemetry/RetrievalEventLog.cs`
+
+### Cortex-side retrieval-outcome aggregation
+
+Retrieval outcomes are recorded in the local `retrieval_events` table only. In cortex mode there is no roll-up of feedback across team members, so retrieval-quality metrics stay per-user/local. A follow-up would sync (anonymized) outcome signals to Cortex and aggregate them server-side.
+
+**Files:** `src/TotalRecall.Infrastructure/Sync/` (new outcome sync), rai-ops-cortex (aggregation endpoint)
+
+### Configurable grace window for miss inference
+
+The read-time miss-inference grace window is exposed on `eval_report` (`grace_minutes`, default 60) and the CLI (`--grace-minutes`), but the Insights health score hardcodes 60 minutes (`InsightsHandler.GraceWindowMs`). A config knob (e.g. `regression.grace_minutes` in `config.toml`) would let operators tune it once and have every consumer honor it.
+
+**Files:** `src/TotalRecall.Core/Config.fs`, `src/TotalRecall.Server/Handlers/InsightsHandler.cs`, `src/TotalRecall.Server/Handlers/EvalReportHandler.cs`
+
+### ConfirmDialog double-submit guard
+
+The shared `ConfirmDialog` confirm button has no `disabled={busy}` guard, so double-clicking Confirm while an action is in flight can re-enter the handler (`MemoryDetail.tsx` / `KbCollectionsTable.tsx` only guard against null-pending, not busy-pending). Pre-existing; surfaced by the new busy/elapsed progress work. One-line fix: thread a `busy` prop into `ConfirmDialog` and disable the confirm button.
+
+**Files:** `src/TotalRecall.Web/ClientApp/src/components/ConfirmDialog.tsx`, `src/TotalRecall.Web/ClientApp/src/components/memory/MemoryDetail.tsx`, `src/TotalRecall.Web/ClientApp/src/components/kb/KbCollectionsTable.tsx`
+
 ## Post-cutover follow-ups (0.8.x .NET)
 
 Items identified during the 0.7.2 TS → 0.8.0 .NET cutover but deferred out of the beta window. Revisit once `main` is on `0.8.x` and the beta has baked cleanly.

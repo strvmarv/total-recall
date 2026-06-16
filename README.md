@@ -424,12 +424,12 @@ A bundle (directory with supporting files) uses the same frontmatter in its `SKI
 
 ## Developer Reference
 
-The MCP server exposes 41 core tools in every backend mode; local SQLite and Cortex modes add usage, cache, and skill tools (48 and 49 total, respectively). All tool names follow the pattern `<domain>_<action>`.
+The MCP server exposes 41 core tools in every backend mode; local SQLite and Cortex modes add usage, cache, skill, and feedback tools (49 and 50 total, respectively). All tool names follow the pattern `<domain>_<action>`.
 
 | Category | Tools |
 |---|---|
 | Session | `session_start`, `session_end`, `session_context`, `session_refresh` |
-| Memory | `memory_store`, `memory_get`, `memory_get_all`, `memory_update`, `memory_delete`, `memory_inspect`, `memory_search`, `memory_list`, `memory_recent`, `memory_extract` |
+| Memory | `memory_store`, `memory_get`, `memory_get_all`, `memory_update`, `memory_delete`, `memory_inspect`, `memory_search`, `memory_list`, `memory_recent`, `memory_extract`, `memory_feedback`† |
 | Tier management | `memory_promote`, `memory_demote`, `memory_pin`, `memory_unpin`, `memory_history`, `memory_lineage` |
 | Import / Export | `memory_export`, `memory_import`, `import_host` |
 | Knowledge base | `kb_ingest_file`, `kb_ingest_dir`, `kb_search`, `kb_list_collections`, `kb_refresh`, `kb_remove`, `kb_summarize`, `kb_resolve` |
@@ -444,6 +444,8 @@ The MCP server exposes 41 core tools in every backend mode; local SQLite and Cor
 †Unavailable in Postgres mode (local SQLite + Cortex modes only).
 
 Pinned tier surface: `memory_pin` moves any entry into the pinned tier (with optional `scope: "project" | "global"`); `memory_unpin` releases it to warm; `memory_store` accepts `pinned: true` to store-and-pin new content; `memory_promote` / `memory_demote` reject pinned as source or target. `pinned` is accepted in the tier filters of `memory_search`, `memory_list`, `memory_recent`, `memory_export`, and `memory_get_all`, and `status` reports pinned counts.
+
+Retrieval-quality feedback: `memory_search` returns `{ retrievalId, results }` and `kb_search` returns a top-level `retrievalId`. The assistant can call `memory_feedback` with that `retrievalId` to confirm whether the retrieval was actually used; un-acted retrievals are inferred as misses after a grace window. This drives the `eval_report` metrics and the web UI's "Retrieval quality" card. `memory_feedback` is intentionally assistant-only — it is not exposed to the web UI.
 
 Handler implementations live in `src/TotalRecall.Server/Handlers/<ToolName>Handler.cs`. Tool wiring: `src/TotalRecall.Server/ServerComposition.cs → BuildRegistry()`.
 

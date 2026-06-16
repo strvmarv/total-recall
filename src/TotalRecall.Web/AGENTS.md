@@ -16,11 +16,11 @@ starts a local Kestrel HTTP server serving a React SPA with seven sections:
 
 | Section | What it provides |
 |---|---|
-| Dashboard | Tier composition, retrieval quality, token usage, recent activity, trend sparklines |
+| Dashboard | Tier composition, retrieval quality (now driven by the real `memory_feedback` + read-time-inference loop), token usage, recent activity, trend sparklines |
 | Memory | Browse, search, filter, promote/demote/pin/delete individual entries |
 | Knowledge Base | Collections list, KB search, ingest files/directories, refresh/remove |
 | Usage | Token spend by host, project, model, and time window; per-session breakdown |
-| ✨ Insights | Memory-health score + breakdown and actionable cards from the server-side `insights` tool (merge near-duplicates, pin high-use entries, retrieval gaps, threshold tuning), plus a client-only cost-spike nudge |
+| ✨ Insights | Memory-health score + breakdown and actionable cards from the server-side `insights` tool (merge near-duplicates, pin high-use entries, retrieval gaps, threshold tuning), plus a client-only cost-spike nudge. Retrieval-gap cards deep-link into the Eval → Grow section via `/eval?grow=<query>`. |
 | Eval | Run the retrieval benchmark, review the rich `eval_report`, grow the benchmark from misses (`eval_grow`), and compare config snapshots (`eval_compare` / `eval_snapshot`) |
 | Config | Edit a safe subset of tuning knobs (validated, persisted via `config_set`); storage/embedding shown read-only |
 
@@ -51,7 +51,7 @@ Dispatches to a registered `IToolHandler` via the `ToolRegistry`. The request bo
 
 Two-layer gate before dispatch:
 
-1. **`ToolAllowlist.IsAllowed(name)`** — static allowlist of tool names reachable from the web UI (`Api/ToolAllowlist.cs`). Tools not in this set return 404. The allowlist is a curated safe subset: it excludes tools like `migrate_to_remote` that are irrelevant or potentially destructive from a browser.
+1. **`ToolAllowlist.IsAllowed(name)`** — static allowlist of tool names reachable from the web UI (`Api/ToolAllowlist.cs`). Tools not in this set return 404. The allowlist is a curated safe subset: it excludes tools like `migrate_to_remote` that are irrelevant or potentially destructive from a browser. It also intentionally excludes `memory_feedback` — retrieval feedback is an assistant-loop signal (the assistant correlates a `retrievalId` with whether it used the result), not a browser action.
 2. **`registry.TryGet(name, out handler)`** — some allowlisted tools are only registered in certain backend modes (e.g. `usage_status` is not available in Postgres mode). A second 404 is returned when the tool is allowlisted but not registered in the active backend.
 
 ### `GET /api/health`
@@ -126,7 +126,7 @@ ClientApp/
 ├── src/
 │   ├── pages/          — one file per section (Dashboard, Memory, KnowledgeBase, Usage, Insights, Eval, Config)
 │   ├── components/     — shared and per-section components
-│   │   ├── (shell)     — SideRail (left nav + brand caret), CommandPalette (⌘K), ThemeToggle, Card
+│   │   ├── (shell)     — SideRail (left nav + brand caret), CommandPalette (⌘K), ThemeToggle, Card, Skeleton, OperationProgress
 │   │   ├── dashboard/  — TierCompositionCard, TokenUsageCard, TrendsCard, RetrievalQualityCard, …
 │   │   ├── memory/     — MemoryTable, MemoryDetail, MemoryFilters
 │   │   ├── kb/         — KbCollectionsTable, KbSearch, KbIngest
@@ -153,6 +153,8 @@ ClientApp/
 **Charting:** All charts use [Recharts](https://recharts.org/). No other charting library is present. Chart colors are **not** hardcoded — components call `useChartTheme()` (`lib/chartTheme.ts`), which reads the active theme's CSS custom properties and re-resolves them via a `MutationObserver` on the `<html data-theme>` attribute, so charts recolor live when the user toggles dark/light.
 
 **Design system:** A developer-native *Terminal / Archive* identity. `styles/theme.css` defines all color/type/spacing as CSS custom properties on `:root` (dark defaults) with a `[data-theme='light']` override block; `styles/global.css` consumes only those tokens (no hardcoded hex). The shell is a fixed left rail (`SideRail`) plus a `⌘K` `CommandPalette`; fonts (JetBrains Mono + IBM Plex Sans) are self-hosted via `@fontsource` and bundled by Vite (no CDN). Theme choice persists in `localStorage` and an inline no-FOUC script in `index.html` applies it before first paint. Animations are gated behind `prefers-reduced-motion`.
+
+**Loading & progress vocabulary:** Two reusable components express in-flight state consistently across sections. `Skeleton` (`components/Skeleton.tsx`) is for *page/panel loads* — shimmer rows (+ optional bar) with `role="status"` / `aria-busy`; it's wired into `CardState`'s loading branch, so any `Card` using `CardState` gets it for free. `OperationProgress` (`components/OperationProgress.tsx`) is for *user-triggered operations*: a discriminated union of `determinate` ("verb X of N" + bar, e.g. Insights cluster delete) and `indeterminate` ("verb… Ns" + live elapsed, e.g. Eval benchmark, KB ingest, memory/config saves). The caller owns the elapsed timer via a `useEffect` keyed on the busy flag. Both gate animation behind `prefers-reduced-motion`.
 
 **Tests:** `npm test` (or `npm run test`) runs Vitest in `jsdom` mode. Test files live alongside the source (`*.test.tsx` / `*.test.ts`). The test setup file is `src/test/setup.ts`.
 
