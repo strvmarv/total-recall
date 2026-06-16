@@ -1,68 +1,191 @@
-import type { StatusResult, EvalReport, UsageBucket, MemoryRecentEntry } from './types';
+import type { InsightsResult, InsightsThresholdCurve, UsageBucket } from './types';
 import { weekOverWeek } from './usageMath';
 
-export interface InsightInputs {
-  status: StatusResult;
-  evalReport: EvalReport | null;
-  usageDaily: UsageBucket[];
-  usageEndMs: number;
-  recent: MemoryRecentEntry[];
+// The config key the safe-subset writer accepts for the retrieval similarity
+// threshold — the same key the Config page exposes as "Similarity threshold".
+export const SIMILARITY_THRESHOLD_KEY = 'tiers.warm.similarity_threshold';
+
+export type Impact = 'high' | 'medium' | 'low';
+
+/**
+ * A card descriptor produced by the pure mapper. Every variant carries a real
+ * action: a navigate target (`gap`/`cost-spike`), a tool-call (`pin` →
+ * memory_pin, `near-dup` → memory_delete with `destructive: true`), or the
+ * special threshold render (`threshold` → config_set). React components own the
+ * side-effecting tool calls and the destructive confirm flow.
+ */
+export type InsightCard =
+  | {
+      kind: 'near-dup';
+      id: string;
+      icon: string;
+      title: string;
+      impact: Impact;
+      /** Newest member (max createdAt) — kept. */
+      keepId: string;
+      keepPreview: string;
+      /** Older members to delete via memory_delete (one call each). */
+      deleteIds: string[];
+      topScore: number;
+      /** Deep-link to review the cluster manually. */
+      reviewTo: string;
+      /** Destructive → two-click inline confirm. */
+      destructive: true;
+    }
+  | {
+      kind: 'pin';
+      id: string;
+      icon: string;
+      title: string;
+      impact: Impact;
+      entryId: string;
+      preview: string;
+      accessCount: number;
+      tier: string;
+    }
+  | {
+      kind: 'gap';
+      id: string;
+      icon: string;
+      title: string;
+      impact: Impact;
+      query: string;
+      timesSeen: number;
+      topScore: number | null;
+      to: string;
+    }
+  | {
+      kind: 'threshold';
+      id: string;
+      icon: string;
+      title: string;
+      impact: Impact;
+      configKey: string;
+      current: number;
+      suggested: number;
+    }
+  | {
+      kind: 'cost-spike';
+      id: string;
+      icon: string;
+      title: string;
+      impact: Impact;
+      evidence: string;
+      to: string;
+    };
+
+/**
+ * The threshold curve point with the best MRR. Ties break to the LOWER
+ * threshold (more recall). Returns null for an empty curve.
+ */
+export function suggestedThreshold(curve: InsightsThresholdCurve): number | null {
+  if (curve.points.length === 0) return null;
+  let best = curve.points[0];
+  for (const p of curve.points) {
+    if (p.mrr > best.mrr || (p.mrr === best.mrr && p.threshold < best.threshold)) {
+      best = p;
+    }
+  }
+  return best.threshold;
 }
-export type SuggestionAction = { kind: 'navigate'; to: string; label: string } | { kind: 'info' };
-export interface Suggestion { id: string; icon: string; title: string; impact: 'high' | 'medium' | 'low'; evidence: string; action: SuggestionAction; }
 
-const PINNED_SOFT_CAP = 15;
-const CURATED = new Set(['correction', 'preference', 'decision']);
+const fmtScore = (s: number) => s.toFixed(2);
 
-function pinnedTotal(s: StatusResult): number { return s.tierSizes.pinned_memories + s.tierSizes.pinned_knowledge; }
-function captureMix(recent: MemoryRecentEntry[]): { curated: number; total: number; ratio: number } {
-  if (recent.length === 0) return { curated: 0, total: 0, ratio: 1 };
-  const curated = recent.filter((e) => CURATED.has(e.entry_type)).length;
-  return { curated, total: recent.length, ratio: curated / recent.length };
-}
+/**
+ * Pure mapper: insights payload (+ already-fetched usage for the one client-only
+ * cost-spike nudge) → an ordered array of actionable card descriptors. No card is
+ * pure-info; every variant carries a navigate target, a tool-call, or the
+ * threshold/apply special render. Side effects live in the React components.
+ */
+export function buildCards(
+  insights: InsightsResult,
+  usageDaily: UsageBucket[],
+  usageEndMs: number,
+): InsightCard[] {
+  const out: InsightCard[] = [];
 
-/** Memory-health score 0..100: retrieval(0-35) + capture mix(0-25) + pinned discipline(0-20) + KB presence(10/20). */
-export function computeHealthScore(i: InsightInputs): number {
-  const retrieval = i.evalReport && i.evalReport.totalEvents > 0 ? Math.round(i.evalReport.hitRate * 35) : 25;
-  const mix = captureMix(i.recent);
-  const capture = Math.round(Math.min(1, mix.ratio / 0.3) * 25); // 30%+ curated → full marks
-  const pinned = pinnedTotal(i.status);
-  const pinnedScore = pinned <= PINNED_SOFT_CAP ? 20 : Math.max(0, 20 - (pinned - PINNED_SOFT_CAP));
-  const kb = i.status.knowledgeBase.totalChunks > 0 ? 20 : 10;
-  return Math.max(0, Math.min(100, retrieval + capture + pinnedScore + kb));
-}
+  // 1. Near-duplicate clusters → "keep newest, delete the rest".
+  insights.nearDuplicates.forEach((g, i) => {
+    if (g.members.length < 2) return;
+    // Newest = max(createdAt); the rest are deleted.
+    const newest = g.members.reduce((a, b) => (b.createdAt > a.createdAt ? b : a));
+    const deleteIds = g.members.filter((m) => m.id !== newest.id).map((m) => m.id);
+    if (deleteIds.length === 0) return;
+    out.push({
+      kind: 'near-dup',
+      id: `near-dup-${g.groupId}-${i}`,
+      icon: '🧬',
+      title: 'Near-duplicate cluster',
+      impact: deleteIds.length > 1 ? 'medium' : 'low',
+      keepId: newest.id,
+      keepPreview: newest.preview,
+      deleteIds,
+      topScore: g.topScore,
+      reviewTo: '/memory',
+      destructive: true,
+    });
+  });
 
-export function buildSuggestions(i: InsightInputs): Suggestion[] {
-  const out: Suggestion[] = [];
+  // 2. Pin candidates → inline "Pin".
+  insights.pinCandidates.forEach((p) => {
+    out.push({
+      kind: 'pin',
+      id: `pin-${p.id}`,
+      icon: '📌',
+      title: 'Frequently accessed — pin it?',
+      impact: 'low',
+      entryId: p.id,
+      preview: p.preview,
+      accessCount: p.accessCount,
+      tier: p.tier,
+    });
+  });
 
-  const wow = weekOverWeek(i.usageDaily, i.usageEndMs);
+  // 3. Retrieval gaps → "Open in Eval".
+  insights.retrievalGaps.forEach((g, i) => {
+    out.push({
+      kind: 'gap',
+      id: `gap-${i}`,
+      icon: '🎯',
+      title: 'Retrieval gap',
+      impact: g.timesSeen >= 5 ? 'medium' : 'low',
+      query: g.query,
+      timesSeen: g.timesSeen,
+      topScore: g.topScore,
+      to: '/eval',
+    });
+  });
+
+  // 4. Threshold curve → "Apply" (only when the suggestion differs from current).
+  const suggested = suggestedThreshold(insights.thresholdCurve);
+  if (suggested !== null && suggested !== insights.thresholdCurve.current) {
+    out.push({
+      kind: 'threshold',
+      id: 'threshold',
+      icon: '🎚️',
+      title: 'Tune the similarity threshold',
+      impact: 'medium',
+      configKey: SIMILARITY_THRESHOLD_KEY,
+      current: insights.thresholdCurve.current,
+      suggested,
+    });
+  }
+
+  // 5. Cost spike (client-only): week-over-week token growth > 25%.
+  const wow = weekOverWeek(usageDaily, usageEndMs);
   if (wow.deltaPercent !== null && wow.deltaPercent > 25) {
-    out.push({ id: 'cost-spike', icon: '💰', title: 'Token usage is rising', impact: wow.deltaPercent > 50 ? 'high' : 'medium',
-      evidence: `Up ${wow.deltaPercent.toFixed(0)}% vs the prior week.`, action: { kind: 'navigate', to: '/usage', label: 'Open Usage' } });
-  }
-
-  const mix = captureMix(i.recent);
-  if (mix.total >= 5 && mix.ratio < 0.2) {
-    out.push({ id: 'capture-mix', icon: '📊', title: 'Mostly auto-captured memories', impact: 'low',
-      evidence: `Only ${mix.curated} of ${mix.total} recent entries are corrections, preferences, or decisions.`, action: { kind: 'info' } });
-  }
-
-  const pinned = pinnedTotal(i.status);
-  if (pinned > PINNED_SOFT_CAP) {
-    out.push({ id: 'pinned-pressure', icon: '📌', title: 'Many pinned directives', impact: pinned > 25 ? 'high' : 'medium',
-      evidence: `${pinned} pinned entries — trim to keep the context budget lean.`, action: { kind: 'navigate', to: '/memory', label: 'Review pinned' } });
-  }
-
-  if (i.evalReport && i.evalReport.totalEvents > 0 && i.evalReport.missRate > 0.4) {
-    out.push({ id: 'retrieval-misses', icon: '🎯', title: 'Retrieval miss rate is high', impact: 'medium',
-      // TODO: navigate to a dedicated eval/retrieval detail page once one exists (Usage is the closest current surface).
-      evidence: `${Math.round(i.evalReport.missRate * 100)}% of recent retrievals missed — add memories or lower the similarity threshold.`, action: { kind: 'navigate', to: '/usage', label: 'See details' } });
-  }
-
-  if (i.status.knowledgeBase.totalChunks === 0) {
-    out.push({ id: 'empty-kb', icon: '🔎', title: 'Knowledge base is empty', impact: 'low',
-      evidence: 'Ingest docs to ground retrieval in your own reference material.', action: { kind: 'navigate', to: '/kb', label: 'Ingest docs' } });
+    out.push({
+      kind: 'cost-spike',
+      id: 'cost-spike',
+      icon: '💰',
+      title: 'Token usage is rising',
+      impact: wow.deltaPercent > 50 ? 'high' : 'medium',
+      evidence: `Up ${wow.deltaPercent.toFixed(0)}% vs the prior week.`,
+      to: '/usage',
+    });
   }
 
   return out;
 }
+
+export { fmtScore };

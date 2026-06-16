@@ -21,6 +21,8 @@ public static class ToolAllowlist
     {
         "status",
         "usage_status",
+        // entry-level analysis engine (surfaced by the Insights page)
+        "insights",
         // eval / retrieval-quality tools (surfaced by the Eval page)
         "eval_report",
         "eval_benchmark",

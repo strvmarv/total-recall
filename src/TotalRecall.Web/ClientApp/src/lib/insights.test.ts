@@ -1,53 +1,170 @@
 import { describe, expect, it } from 'vitest';
-import { computeHealthScore, buildSuggestions, type InsightInputs } from './insights';
-import type { StatusResult, EvalReport, MemoryRecentEntry, UsageBucket } from './types';
+import { buildCards, suggestedThreshold, type InsightCard } from './insights';
+import type { InsightsResult, UsageBucket } from './types';
 
-function status(pinned = 2, chunks = 100): StatusResult {
+// ── fixtures ──────────────────────────────────────────────────────────────────
+function base(over: Partial<InsightsResult> = {}): InsightsResult {
   return {
-    tierSizes: { hot_memories: 3, hot_knowledge: 0, warm_memories: 50, warm_knowledge: 0, cold_memories: 200, cold_knowledge: 0, pinned_memories: pinned, pinned_knowledge: 0 },
-    knowledgeBase: { collections: [], totalChunks: chunks },
-    db: { path: 'x', sizeBytes: 1, sessionId: 's' }, embedding: { model: 'b', dimensions: 1 },
+    healthScore: 80,
+    healthBreakdown: {
+      retrieval: { score: 30, max: 35, detail: 'hit rate 86%' },
+      capture: { score: 20, max: 25, detail: '4 of 10 recent entries are curated' },
+      pinned: { score: 20, max: 20, detail: '3 pinned — within budget' },
+      kb: { score: 10, max: 20, detail: 'no knowledge base ingested' },
+    },
+    nearDuplicates: [],
+    pinCandidates: [],
+    retrievalGaps: [],
+    thresholdCurve: { current: 0.7, points: [
+      { threshold: 0.5, hitRate: 0.5, precision: 0.5, mrr: 0.40 },
+      { threshold: 0.6, hitRate: 0.6, precision: 0.6, mrr: 0.55 },
+      { threshold: 0.7, hitRate: 0.7, precision: 0.7, mrr: 0.60 },
+      { threshold: 0.8, hitRate: 0.6, precision: 0.8, mrr: 0.65 },
+      { threshold: 0.9, hitRate: 0.4, precision: 0.9, mrr: 0.65 },
+    ] },
+    ...over,
   };
 }
-const evalGood: EvalReport = { precision: 0.9, hitRate: 0.9, missRate: 0.1, mrr: 0.8, avgLatencyMs: 20, totalEvents: 100 };
-const recent = (types: string[]): MemoryRecentEntry[] => types.map((t, i) => ({ id: String(i), tier: 'warm', entry_type: t, project: null, created_at: 1, updated_at: 1, last_accessed_at: 1, preview: 'x' }));
 const day = (key: string, input: number): UsageBucket => ({ key, session_count: 1, turn_count: 1, input_tokens: input, cache_creation_tokens: 0, cache_read_tokens: 0, output_tokens: 0 });
 
-describe('computeHealthScore', () => {
-  it('is high for good retrieval, curated mix, few pins, KB present', () => {
-    const i: InsightInputs = { status: status(2, 100), evalReport: evalGood, usageDaily: [], usageEndMs: 0, recent: recent(['correction', 'preference', 'decision']) };
-    expect(computeHealthScore(i)).toBeGreaterThanOrEqual(90);
+// Every produced card must carry a real action — no pure-info cards.
+function assertActionable(cards: InsightCard[]) {
+  for (const c of cards) {
+    if (c.kind === 'near-dup') {
+      expect(c.deleteIds.length).toBeGreaterThan(0);
+      expect(c.reviewTo).toBeTruthy();
+    } else if (c.kind === 'pin') {
+      expect(c.entryId).toBeTruthy();
+    } else if (c.kind === 'gap') {
+      expect(c.to).toBeTruthy();
+    } else if (c.kind === 'threshold') {
+      expect(c.suggested).not.toBeNull();
+    } else if (c.kind === 'cost-spike') {
+      expect(c.to).toBeTruthy();
+    } else {
+      throw new Error(`card ${(c as InsightCard).id} has no recognized action`);
+    }
+  }
+}
+
+describe('suggestedThreshold', () => {
+  it('picks the point with the best MRR', () => {
+    const curve = base().thresholdCurve;
+    // mrr peaks at 0.8 and 0.9 (both 0.65) → tie-break to the LOWER threshold 0.8
+    expect(suggestedThreshold(curve)).toBe(0.8);
   });
-  it('is lower with poor retrieval, no curation, empty KB', () => {
-    const i: InsightInputs = { status: status(2, 0), evalReport: { ...evalGood, hitRate: 0.1, missRate: 0.9 }, usageDaily: [], usageEndMs: 0, recent: recent(['surfaced', 'surfaced', 'surfaced']) };
-    expect(computeHealthScore(i)).toBeLessThan(60);
+  it('tie-breaks to the lower threshold', () => {
+    const curve = { current: 0.7, points: [
+      { threshold: 0.6, hitRate: 0.6, precision: 0.6, mrr: 0.7 },
+      { threshold: 0.7, hitRate: 0.6, precision: 0.6, mrr: 0.7 },
+    ] };
+    expect(suggestedThreshold(curve)).toBe(0.6);
   });
-  it('clamps to 0..100', () => {
-    const i: InsightInputs = { status: status(0, 0), evalReport: null, usageDaily: [], usageEndMs: 0, recent: [] };
-    const s = computeHealthScore(i);
-    expect(s).toBeGreaterThanOrEqual(0); expect(s).toBeLessThanOrEqual(100);
+  it('returns null for an empty curve', () => {
+    expect(suggestedThreshold({ current: 0.7, points: [] })).toBeNull();
   });
 });
 
-describe('buildSuggestions', () => {
-  it('flags a cost spike from weekly token growth', () => {
+describe('buildCards', () => {
+  it('maps a near-duplicate cluster to a keep-newest card targeting the older members', () => {
+    const insights = base({ nearDuplicates: [{
+      groupId: 'a', topScore: 0.95,
+      members: [
+        { id: 'old1', tier: 'warm', preview: 'dup A', score: 0.95, createdAt: 1000 },
+        { id: 'newest', tier: 'hot', preview: 'dup A newest', score: 0.95, createdAt: 3000 },
+        { id: 'old2', tier: 'warm', preview: 'dup A', score: 0.9, createdAt: 2000 },
+      ],
+    }] });
+    const cards = buildCards(insights, [], 0);
+    const dup = cards.find((c) => c.kind === 'near-dup');
+    expect(dup).toBeTruthy();
+    if (dup?.kind !== 'near-dup') throw new Error('expected near-dup');
+    // newest is the max(createdAt) member → kept; the other two are deleted.
+    expect(dup.keepId).toBe('newest');
+    expect(dup.keepPreview).toBe('dup A newest');
+    expect([...dup.deleteIds].sort()).toEqual(['old1', 'old2']);
+    expect(dup.topScore).toBe(0.95);
+    assertActionable([dup]);
+  });
+
+  it('maps each pin candidate to a Pin action card', () => {
+    const insights = base({ pinCandidates: [
+      { id: 'p1', tier: 'warm', preview: 'pin me', accessCount: 12 },
+    ] });
+    const cards = buildCards(insights, [], 0);
+    const pin = cards.find((c) => c.kind === 'pin');
+    if (pin?.kind !== 'pin') throw new Error('expected pin');
+    expect(pin.entryId).toBe('p1');
+    expect(pin.accessCount).toBe(12);
+    expect(pin.preview).toBe('pin me');
+  });
+
+  it('maps each retrieval gap to an Open-in-Eval card', () => {
+    const insights = base({ retrievalGaps: [{ query: 'how to deploy', timesSeen: 7, topScore: 0.4 }] });
+    const cards = buildCards(insights, [], 0);
+    const gap = cards.find((c) => c.kind === 'gap');
+    if (gap?.kind !== 'gap') throw new Error('expected gap');
+    expect(gap.to).toBe('/eval');
+    expect(gap.query).toBe('how to deploy');
+    expect(gap.timesSeen).toBe(7);
+  });
+
+  it('emits a threshold-apply card with the suggested value when it differs from current', () => {
+    const cards = buildCards(base(), [], 0); // current 0.7, suggested 0.8
+    const thr = cards.find((c) => c.kind === 'threshold');
+    if (thr?.kind !== 'threshold') throw new Error('expected threshold');
+    expect(thr.current).toBe(0.7);
+    expect(thr.suggested).toBe(0.8);
+    expect(thr.configKey).toBe('tiers.warm.similarity_threshold');
+  });
+
+  it('omits the threshold card when the suggested value equals current', () => {
+    const insights = base({ thresholdCurve: { current: 0.7, points: [
+      { threshold: 0.6, hitRate: 0.5, precision: 0.5, mrr: 0.5 },
+      { threshold: 0.7, hitRate: 0.6, precision: 0.6, mrr: 0.9 }, // best mrr at current → no suggestion
+    ] } });
+    const cards = buildCards(insights, [], 0);
+    expect(cards.find((c) => c.kind === 'threshold')).toBeUndefined();
+  });
+
+  it('still fires a cost-spike card from week-over-week usage growth', () => {
     const end = Date.UTC(2026, 5, 14);
-    const usageDaily = [day('2026-06-02', 100), day('2026-06-10', 300)]; // prior 100, current 300 → +200%
-    const s = buildSuggestions({ status: status(), evalReport: evalGood, usageDaily, usageEndMs: end, recent: recent(['correction']) });
-    expect(s.find((x) => x.id === 'cost-spike')).toBeTruthy();
+    const usageDaily = [day('2026-06-02', 100), day('2026-06-10', 300)]; // +200%
+    const cards = buildCards(base(), usageDaily, end);
+    const spike = cards.find((c) => c.kind === 'cost-spike');
+    if (spike?.kind !== 'cost-spike') throw new Error('expected cost-spike');
+    expect(spike.to).toBe('/usage');
   });
-  it('flags pinned pressure over the soft cap', () => {
-    const s = buildSuggestions({ status: status(20, 100), evalReport: evalGood, usageDaily: [], usageEndMs: 0, recent: recent(['correction']) });
-    expect(s.find((x) => x.id === 'pinned-pressure')?.impact).toBe('medium');
+
+  it('does not fire a cost-spike card without week-over-week growth', () => {
+    const cards = buildCards(base(), [], 0);
+    expect(cards.find((c) => c.kind === 'cost-spike')).toBeUndefined();
   });
-  it('flags empty KB and high miss rate', () => {
-    const s = buildSuggestions({ status: status(2, 0), evalReport: { ...evalGood, missRate: 0.6, totalEvents: 50 }, usageDaily: [], usageEndMs: 0, recent: recent(['surfaced', 'surfaced', 'surfaced', 'surfaced', 'surfaced']) });
-    expect(s.find((x) => x.id === 'empty-kb')).toBeTruthy();
-    expect(s.find((x) => x.id === 'retrieval-misses')).toBeTruthy();
-    expect(s.find((x) => x.id === 'capture-mix')).toBeTruthy();
+
+  it('produces only actionable cards (no pure-info cards)', () => {
+    const insights = base({
+      nearDuplicates: [{ groupId: 'g', topScore: 0.9, members: [
+        { id: 'x', tier: 'warm', preview: 'a', score: 0.9, createdAt: 1 },
+        { id: 'y', tier: 'warm', preview: 'b', score: 0.9, createdAt: 2 },
+      ] }],
+      pinCandidates: [{ id: 'p', tier: 'hot', preview: 'p', accessCount: 9 }],
+      retrievalGaps: [{ query: 'q', timesSeen: 3, topScore: null }],
+    });
+    const end = Date.UTC(2026, 5, 14);
+    const usageDaily = [day('2026-06-02', 100), day('2026-06-10', 300)];
+    const cards = buildCards(insights, usageDaily, end);
+    expect(cards.length).toBeGreaterThan(0);
+    assertActionable(cards);
   });
-  it('returns nothing for a healthy system', () => {
-    const s = buildSuggestions({ status: status(2, 100), evalReport: evalGood, usageDaily: [], usageEndMs: 0, recent: recent(['correction', 'preference']) });
-    expect(s).toHaveLength(0);
+
+  it('returns no cards for a clean payload', () => {
+    const cards = buildCards(base(), [], 0);
+    // base has suggested 0.8 != current 0.7, so a threshold card appears; with an
+    // equal-suggestion curve and no findings there should be nothing.
+    const clean = buildCards(base({ thresholdCurve: { current: 0.7, points: [
+      { threshold: 0.7, hitRate: 0.6, precision: 0.6, mrr: 0.9 },
+    ] } }), [], 0);
+    expect(cards.length).toBe(1); // threshold only
+    expect(clean.length).toBe(0);
   });
 });

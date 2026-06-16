@@ -97,6 +97,30 @@ export interface EvalGrowResolveResult { action: string; accepted: number; rejec
 
 export interface EvalSnapshotResult { id: string; name: string; deduped: boolean; }
 
+// ── insights tool (entry-level analysis) ──────────────────────────────────────
+// Mirrors the server InsightsResultDto (all camelCase as emitted).
+export interface InsightsHealthComponent { score: number; max: number; detail: string; }
+export interface InsightsHealthBreakdown {
+  retrieval: InsightsHealthComponent;
+  capture: InsightsHealthComponent;
+  pinned: InsightsHealthComponent;
+  kb: InsightsHealthComponent;
+}
+export interface InsightsNearDupMember { id: string; tier: string; preview: string; score: number; createdAt: number; }
+export interface InsightsNearDupGroup { groupId: string; topScore: number; members: InsightsNearDupMember[]; }
+export interface InsightsPinCandidate { id: string; tier: string; preview: string; accessCount: number; }
+export interface InsightsRetrievalGap { query: string; timesSeen: number; topScore: number | null; }
+export interface InsightsThresholdPoint { threshold: number; hitRate: number; precision: number; mrr: number; }
+export interface InsightsThresholdCurve { current: number; points: InsightsThresholdPoint[]; }
+export interface InsightsResult {
+  healthScore: number;
+  healthBreakdown: InsightsHealthBreakdown;
+  nearDuplicates: InsightsNearDupGroup[];
+  pinCandidates: InsightsPinCandidate[];
+  retrievalGaps: InsightsRetrievalGap[];
+  thresholdCurve: InsightsThresholdCurve;
+}
+
 export interface CompactionMovement {
   id: string;
   timestamp: number;
