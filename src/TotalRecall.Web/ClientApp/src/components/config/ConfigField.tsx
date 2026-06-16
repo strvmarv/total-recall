@@ -19,8 +19,7 @@ export function ConfigField({ field, value, onSave }: {
   }, [value, field.type]);
 
   useEffect(() => {
-    if (status !== 'saving') { return; }
-    setElapsed(0);
+    if (status !== 'saving') { setElapsed(0); return; }
     const start = Date.now();
     const t = setInterval(() => setElapsed(Date.now() - start), 250);
     return () => clearInterval(t);
