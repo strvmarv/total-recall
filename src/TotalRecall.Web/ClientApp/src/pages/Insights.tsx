@@ -5,6 +5,7 @@ import { buildCards, type InsightCard as Card } from '../lib/insights';
 import { HealthScore } from '../components/insights/HealthScore';
 import { InsightCard } from '../components/insights/InsightCard';
 import type { InsightsResult, UsageResult } from '../lib/types';
+import { Skeleton } from '../components/Skeleton';
 
 interface InsightsData {
   insights: InsightsResult;
@@ -41,7 +42,7 @@ export function Insights() {
   return (
     <section className="tr-insights" aria-label="Insights">
       <h1>✨ Insights</h1>
-      {loading && <p className="tr-card-muted">Loading…</p>}
+      {loading && <Skeleton rows={4} bar label="Computing insights…" />}
       {error && <p className="tr-card-error" role="alert" title={error}>Couldn't compute insights.</p>}
       {data && (
         <>

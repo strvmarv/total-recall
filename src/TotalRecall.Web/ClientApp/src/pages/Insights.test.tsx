@@ -257,4 +257,12 @@ describe('Insights page', () => {
     expect(await screen.findByText(/computed server-side from your local store/i)).toBeInTheDocument();
     expect(screen.getByText(/no llm/i)).toBeInTheDocument();
   });
+
+  it('shows a skeleton with a progress bar while loading', () => {
+    // mock api.tool to never resolve within the test tick (so it stays loading)
+    vi.spyOn(api, 'tool').mockImplementation(() => new Promise(() => {}) as Promise<never>);
+    render(<MemoryRouter><Insights /></MemoryRouter>);
+    expect(screen.getByRole('status')).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByTestId('tr-skeleton-bar')).toBeInTheDocument();
+  });
 });
