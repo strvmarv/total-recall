@@ -145,12 +145,15 @@ public sealed class PostgresSmokeTests
                 Assert.NotEmpty(searchResult.Content);
 
                 // 6. Parse the JSON response and assert at least 1 result.
+                // memory_search now returns a {retrievalId, results} envelope.
                 var jsonText = searchResult.Content[0].Text;
                 using var doc = JsonDocument.Parse(jsonText);
                 var root = doc.RootElement;
-                Assert.Equal(JsonValueKind.Array, root.ValueKind);
-                Assert.True(root.GetArrayLength() >= 1,
-                    $"Expected at least 1 search result, got {root.GetArrayLength()}");
+                Assert.Equal(JsonValueKind.Object, root.ValueKind);
+                var results = root.GetProperty("results");
+                Assert.Equal(JsonValueKind.Array, results.ValueKind);
+                Assert.True(results.GetArrayLength() >= 1,
+                    $"Expected at least 1 search result, got {results.GetArrayLength()}");
             }
             finally
             {
