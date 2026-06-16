@@ -10,12 +10,17 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* App layout: left rail + content */
-.tr-app { display: flex; min-height: 100%; }
+/* App layout: left rail + content. The shell is pinned to the viewport height so
+   the rail stays fixed and only .tr-main scrolls (otherwise the page grows with
+   content and the rail's bottom-pinned theme toggle slides off-screen). */
+.tr-app { display: flex; height: 100vh; overflow: hidden; }
 
-/* Left rail */
+/* Left rail: spans the viewport; scrolls internally only if its OWN content is
+   taller than the viewport, so margin-top:auto on .tr-rail-foot pins the version
+   + theme toggle to the bottom of the viewport rather than the growing page. */
 .tr-rail {
   width: var(--tr-rail-w); flex-shrink: 0;
+  height: 100vh; overflow-y: auto;
   display: flex; flex-direction: column;
   padding: var(--tr-space-4) 0;
   border-right: 1px solid var(--tr-border);
@@ -54,9 +59,10 @@ body {
 .tr-theme-toggle:hover { color: var(--tr-text); border-color: var(--tr-accent); }
 .tr-theme-toggle-label { text-transform: lowercase; }
 
-/* Content area with ruled-grid backdrop */
+/* Content area with ruled-grid backdrop. This is the scroll container — the rail
+   stays put while only the body scrolls. */
 .tr-main {
-  flex: 1; min-width: 0; padding: var(--tr-space-6);
+  flex: 1; min-width: 0; overflow-y: auto; padding: var(--tr-space-6);
   background-image:
     linear-gradient(var(--tr-bg-grid) 1px, transparent 1px),
     linear-gradient(90deg, var(--tr-bg-grid) 1px, transparent 1px);

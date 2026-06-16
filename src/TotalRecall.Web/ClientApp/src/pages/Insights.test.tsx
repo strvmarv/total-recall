@@ -129,6 +129,31 @@ describe('Insights page', () => {
     await waitFor(() => expect(calls.filter((c) => c.name === 'insights').length).toBeGreaterThanOrEqual(2));
   });
 
+  it('near-dup card: optimistically removed after delete even if the refetch still returns it', async () => {
+    // insights ALWAYS returns the same cluster (simulating server recompute lag);
+    // memory_delete resolves. The card must disappear anyway via optimistic removal.
+    const calls: { name: string; args?: unknown }[] = [];
+    mockApi(insights({ nearDuplicates: [{
+      groupId: 'g', topScore: 0.95,
+      members: [
+        { id: 'old1', tier: 'warm', preview: 'dup', score: 0.95, createdAt: 1000 },
+        { id: 'newest', tier: 'hot', preview: 'dup newest', score: 0.95, createdAt: 3000 },
+        { id: 'old2', tier: 'warm', preview: 'dup', score: 0.9, createdAt: 2000 },
+      ],
+    }] }), calls);
+    renderPage();
+    // two-click confirm
+    await userEvent.click(await screen.findByRole('button', { name: /keep newest, delete the rest/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /confirm: delete 2/i }));
+    // deletes fired
+    await waitFor(() => {
+      const deletes = calls.filter((c) => c.name === 'memory_delete');
+      expect(deletes.map((c) => (c.args as { id: string }).id).sort()).toEqual(['old1', 'old2']);
+    });
+    // card is gone from the DOM despite the insights refetch returning the cluster again
+    await waitFor(() => expect(screen.queryByText('Near-duplicate cluster')).not.toBeInTheDocument());
+  });
+
   it('near-dup card: first click only arms the confirm — no delete yet', async () => {
     const calls: { name: string; args?: unknown }[] = [];
     mockApi(insights({ nearDuplicates: [{
