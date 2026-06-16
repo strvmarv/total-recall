@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 3.4.1 - 2026-06-15
+
+### Fixed
+
+- **Insights "Pin" no longer suggests memories that can't be pinned.** Pin candidates are now filtered by the pinned-tier content cap (`tiers.pinned.max_content_chars`, default 500), so clicking **Pin** no longer fails with "pinned entries are limited to N characters". The candidate query is also bounded so it never scans an entire tier on large stores.
+- **Applying an Insights suggestion (or any `config_set`) no longer crashes when your `config.toml` contains an array.** The AOT TOML writer now serializes inline arrays (e.g. `[skills] extra_dirs`), fixing `System.NotSupportedException: ConfigWriter cannot serialize TOML value of type TomlArray`.
+- **Deleting a near-duplicate cluster removes the card immediately.** The Insights page now optimistically drops a cluster the moment its deletes succeed instead of waiting for a refetch (which could lag behind the delete under the cortex backend).
+- **The left nav rail is now sticky.** Only the page body scrolls; the rail — including the light/dark toggle — stays fixed to the viewport on long pages.
+
 ## 3.4.0 - 2026-06-15
 
 ### Added
