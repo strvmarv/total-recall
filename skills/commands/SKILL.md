@@ -51,6 +51,18 @@ On each user message that is a question or task request:
 2. If top score < 0.5, also search cold/knowledge tier
 3. Use results to inform your response
 
+### Feedback (continuous)
+
+`memory_search` and `kb_search` now return a `retrievalId` alongside `results`.
+After you use retrieved memories in your work, call `memory_feedback`:
+
+- Used it → `memory_feedback({ retrievalId, used: true })`
+- Searched and nothing was relevant → `memory_feedback({ retrievalId, used: false })`
+
+Report once per search, as soon as you know the outcome. Skip the call only when
+`retrievalId` is empty. Do NOT ask permission — just report it. This is what makes
+the Dashboard "Retrieval quality" metric real.
+
 ### Pinned directives (continuous)
 
 Pinned directives are re-asserted automatically near the live edge by the
