@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import type { KbIngestDirResult, KbIngestFileResult } from '../../lib/types';
+import { OperationProgress } from '../OperationProgress';
 
 export function KbIngest({ onIngested }: { onIngested: () => void }) {
   const [filePath, setFilePath] = useState('');
@@ -9,6 +10,14 @@ export function KbIngest({ onIngested }: { onIngested: () => void }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (!busy) { setElapsed(0); return; }
+    const start = Date.now();
+    const t = setInterval(() => setElapsed(Date.now() - start), 250);
+    return () => clearInterval(t);
+  }, [busy]);
 
   async function ingestFile(e: React.FormEvent) {
     e.preventDefault();
@@ -57,6 +66,7 @@ export function KbIngest({ onIngested }: { onIngested: () => void }) {
         </div>
         <button type="submit" className="tr-btn" disabled={busy || !dirPath.trim()}>Ingest directory</button>
       </form>
+      {busy && <OperationProgress mode="indeterminate" verb="Ingesting" elapsedMs={elapsed} />}
       {message && <p className="tr-kb-result" role="status">{message}</p>}
       {error && <p className="tr-card-error tr-kb-result" role="alert">{error}</p>}
     </div>

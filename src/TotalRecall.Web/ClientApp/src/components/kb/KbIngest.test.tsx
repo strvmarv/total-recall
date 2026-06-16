@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { KbIngest } from './KbIngest';
 import { api } from '../../lib/api';
@@ -25,5 +25,33 @@ describe('KbIngest', () => {
     await userEvent.type(screen.getByLabelText(/file path/i), '/nope');
     await userEvent.click(screen.getByRole('button', { name: /ingest file/i }));
     expect(await screen.findByText(/path does not exist/i)).toBeInTheDocument();
+  });
+
+  it('shows OperationProgress with elapsed seconds while dir ingest is in-flight', async () => {
+    const onIngested = vi.fn();
+    // Use a never-resolving promise to keep the call in-flight
+    vi.spyOn(api, 'tool').mockImplementation(() => new Promise(() => {}));
+
+    render(<KbIngest onIngested={onIngested} />);
+
+    // Type into the dir path input (real timers still active for findBy / userEvent internals)
+    await userEvent.type(screen.getByLabelText(/directory path/i), '/tmp/docs');
+
+    // Switch to fake timers BEFORE the click so setInterval is created under them
+    vi.useFakeTimers();
+    try {
+      const dirInput = screen.getByLabelText(/directory path/i);
+      const form = dirInput.closest('form')!;
+      // Use synchronous fireEvent — userEvent hangs under fake timers
+      act(() => { fireEvent.submit(form); });
+
+      // Advance fake time so the elapsed interval fires past 3s
+      act(() => { vi.advanceTimersByTime(3000); });
+
+      // Assert the OperationProgress rendered with verb + elapsed seconds
+      expect(screen.getByText(/Ingesting… 3s/)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

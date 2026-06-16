@@ -1,16 +1,25 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { timeAgo } from '../../lib/time';
 import { ConfirmDialog } from '../ConfirmDialog';
+import { OperationProgress } from '../OperationProgress';
 import type { KbCollection } from '../../lib/types';
 
 export function KbCollectionsTable({ collections, onChanged }: {
   collections: KbCollection[];
   onChanged: () => void;
 }) {
-  const [pending, setPending] = useState<{ title: string; body?: string; confirmLabel: string; danger?: boolean; run: () => Promise<unknown> } | null>(null);
+  const [pending, setPending] = useState<{ title: string; body?: string; confirmLabel: string; danger?: boolean; verb: 'Refreshing' | 'Removing'; run: () => Promise<unknown> } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (!busy) { setElapsed(0); return; }
+    const start = Date.now();
+    const t = setInterval(() => setElapsed(Date.now() - start), 250);
+    return () => clearInterval(t);
+  }, [busy]);
 
   async function confirmRun() {
     if (!pending) return;
@@ -25,6 +34,7 @@ export function KbCollectionsTable({ collections, onChanged }: {
   return (
     <>
       {error && <p className="tr-card-error" role="alert">{error}</p>}
+      {busy && pending && <OperationProgress mode="indeterminate" verb={pending.verb} elapsedMs={elapsed} />}
       <table className="tr-table">
         <thead><tr><th>Name</th><th>Documents</th><th>Chunks</th><th>Source</th><th>Created</th><th>Actions</th></tr></thead>
         <tbody>
@@ -38,8 +48,8 @@ export function KbCollectionsTable({ collections, onChanged }: {
               <td>
                 {!pending && (
                   <>
-                    <button type="button" className="tr-btn" disabled={busy} onClick={() => { setError(null); setPending({ title: `Refresh "${c.name}"?`, body: 'Re-ingests from the source path.', confirmLabel: 'Refresh', run: () => api.tool('kb_refresh', { collection: c.id }) }); }}>Refresh</button>{' '}
-                    <button type="button" className="tr-btn tr-btn-danger" disabled={busy} onClick={() => { setError(null); setPending({ title: `Remove "${c.name}"?`, body: 'Deletes the collection and all its chunks. This cannot be undone.', confirmLabel: 'Remove', danger: true, run: () => api.tool('kb_remove', { id: c.id }) }); }}>Remove</button>
+                    <button type="button" className="tr-btn" disabled={busy} onClick={() => { setError(null); setPending({ title: `Refresh "${c.name}"?`, body: 'Re-ingests from the source path.', confirmLabel: 'Refresh', verb: 'Refreshing', run: () => api.tool('kb_refresh', { collection: c.id }) }); }}>Refresh</button>{' '}
+                    <button type="button" className="tr-btn tr-btn-danger" disabled={busy} onClick={() => { setError(null); setPending({ title: `Remove "${c.name}"?`, body: 'Deletes the collection and all its chunks. This cannot be undone.', confirmLabel: 'Remove', danger: true, verb: 'Removing', run: () => api.tool('kb_remove', { id: c.id }) }); }}>Remove</button>
                   </>
                 )}
               </td>
