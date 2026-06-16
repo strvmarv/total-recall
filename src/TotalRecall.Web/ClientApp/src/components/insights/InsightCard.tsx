@@ -134,8 +134,11 @@ export function InsightCard({ card, actions }: { card: Card; actions: InsightCar
         <p className="tr-insight-evidence">
           seen {card.timesSeen}× · top score {card.topScore == null ? '—' : fmtScore(card.topScore)}
         </p>
+        <p className="tr-insight-evidence">
+          This query keeps retrieving weakly. Track it as a benchmark case to measure whether tuning fixes it.
+        </p>
         <div className="tr-insight-actions">
-          <Link className="tr-btn tr-btn-primary" to={card.to}>Open in Eval</Link>
+          <Link className="tr-btn tr-btn-primary" to={card.to}>Track in Eval →</Link>
         </div>
       </Shell>
     );

@@ -140,7 +140,7 @@ export function buildCards(
     });
   });
 
-  // 3. Retrieval gaps → "Open in Eval".
+  // 3. Retrieval gaps → "Track in Eval" (deep-links to the Grow candidate).
   insights.retrievalGaps.forEach((g, i) => {
     out.push({
       kind: 'gap',
@@ -151,7 +151,7 @@ export function buildCards(
       query: g.query,
       timesSeen: g.timesSeen,
       topScore: g.topScore,
-      to: '/eval',
+      to: `/eval?grow=${encodeURIComponent(g.query)}`,
     });
   });
 

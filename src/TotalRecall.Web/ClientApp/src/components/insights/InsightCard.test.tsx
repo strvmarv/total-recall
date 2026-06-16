@@ -32,6 +32,27 @@ function makeActions(onDeleteCluster: InsightCardActions['onDeleteCluster']): In
   };
 }
 
+const noopActions: InsightCardActions = makeActions(vi.fn());
+
+describe('InsightCard — gap card', () => {
+  it('gap card links to Grow with the query and uses the Track label', () => {
+    const card: Extract<Card, { kind: 'gap' }> = {
+      kind: 'gap',
+      id: 'gap-0',
+      icon: '🎯',
+      title: 'Retrieval gap',
+      impact: 'low',
+      query: 'cortex vuln pipeline 400',
+      timesSeen: 6,
+      topScore: 0.41,
+      to: `/eval?grow=${encodeURIComponent('cortex vuln pipeline 400')}`,
+    };
+    render(<MemoryRouter><InsightCard card={card} actions={noopActions} /></MemoryRouter>);
+    const link = screen.getByRole('link', { name: /track in eval/i });
+    expect(link).toHaveAttribute('href', '/eval?grow=cortex%20vuln%20pipeline%20400');
+  });
+});
+
 describe('InsightCard — near-dup cluster delete with determinate progress', () => {
   it('shows determinate OperationProgress while onDeleteCluster is in-flight', async () => {
     const card = nearDupCard(['a', 'b']);
