@@ -314,7 +314,7 @@ public sealed class InsightsHandler : IToolHandler
         foreach (var tier in new[] { Tier.Hot, Tier.Warm, Tier.Cold })
         {
             var rows = ctx.Store.List(tier, ContentType.Memory,
-                new ListEntriesOpts { OrderBy = "access_count DESC" });
+                new ListEntriesOpts { OrderBy = "access_count DESC", Limit = MaxPinCandidates * 5 });
             int kept = 0;
             foreach (var e in rows)
             {
