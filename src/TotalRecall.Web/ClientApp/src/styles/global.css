@@ -302,6 +302,8 @@ body {
 .tr-eval-warning { margin-bottom: var(--tr-space-3); }
 .tr-eval-change-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--tr-space-5); margin-top: var(--tr-space-3); }
 @media (max-width: 880px) { .tr-eval-change-cols { grid-template-columns: minmax(0, 1fr); } }
+.tr-row-hl { outline: 1px solid var(--tr-accent); background: var(--tr-surface-2, rgba(255,255,255,.06)); }
+.tr-eval-banner { border: 1px solid var(--tr-accent); border-radius: var(--tr-radius); padding: var(--tr-space-2) var(--tr-space-3); margin-bottom: var(--tr-space-3); }
 
 /* Config */
 .tr-config h1 { margin: 0 0 var(--tr-space-4); }

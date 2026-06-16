@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Card, CardState } from '../components/Card';
 import { OperationProgress } from '../components/OperationProgress';
 import { useAsync } from '../lib/useAsync';
@@ -17,6 +18,8 @@ const when = (t: number) => new Date(t).toLocaleString();
 const BENCH_ROW_CAP = 50;
 
 export function Eval() {
+  const [params] = useSearchParams();
+  const grow = params.get('grow') ?? undefined;
   return (
     <section className="tr-eval" aria-label="Eval">
       <h1>Eval</h1>
@@ -24,7 +27,7 @@ export function Eval() {
       <ReportSection />
       <div className="tr-card-grid">
         <BenchmarkSection />
-        <GrowSection />
+        <GrowSection focusQuery={grow} />
       </div>
       <CompareSection />
     </section>
@@ -209,7 +212,7 @@ function matchLabel(d: { matched: boolean; fuzzyMatched: boolean; hasNegativeAss
 // ── 3. Grow ────────────────────────────────────────────────────────────────
 type Choice = 'none' | 'accept' | 'reject';
 
-function GrowSection() {
+function GrowSection({ focusQuery }: { focusQuery?: string }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [choices, setChoices] = useState<Record<string, Choice>>({});
   const [busy, setBusy] = useState(false);
@@ -219,6 +222,7 @@ function GrowSection() {
   // resolve() bumps refreshKey right after setting resolveResult; skip clearing on that
   // self-triggered pass so the fresh confirmation survives, but clear on any later refresh.
   const keepResultOnNextRefresh = useRef(false);
+  const rowRef = useRef<HTMLTableRowElement | null>(null);
 
   const { data, error, loading } = useAsync<EvalGrowListResult>(
     () => api.tool<EvalGrowListResult>('eval_grow', { action: 'list' }),
@@ -226,6 +230,11 @@ function GrowSection() {
   );
   const candidates = data?.candidates ?? [];
   const empty = !!data && candidates.length === 0;
+
+  const norm = (s: string) => s.trim().toLowerCase();
+  const match = focusQuery ? candidates.find((c) => norm(c.queryText) === norm(focusQuery)) : undefined;
+
+  useEffect(() => { rowRef.current?.scrollIntoView({ block: 'center' }); }, [focusQuery, data]);
 
   // Clear any stale resolve confirmation when the candidate list refreshes for a new pass.
   useEffect(() => {
@@ -261,6 +270,14 @@ function GrowSection() {
   return (
     <Card title="Grow benchmark">
       <p className="tr-stat-sub">Real low-score queries that could become benchmark cases. Accept to add to the corpus, reject to dismiss.</p>
+      {focusQuery && (
+        <p className="tr-eval-banner" role="status">
+          {`\u{1F3AF} From Insights — `}<strong>{`looking for: ${focusQuery}`}</strong>{`. `}
+          {match
+            ? `Accept it to add to the benchmark corpus.`
+            : <span>{`This query is not a current candidate (different threshold, or already resolved).`}</span>}
+        </p>
+      )}
       <CardState loading={loading} error={error} empty={empty} emptyText="No grow candidates pending.">
         {data && candidates.length > 0 && (
           <>
@@ -268,7 +285,9 @@ function GrowSection() {
               <thead><tr><th scope="col">Query</th><th scope="col" className="num">Seen</th><th scope="col" className="num">Top score</th><th scope="col">Decision</th></tr></thead>
               <tbody>
                 {candidates.map((c: EvalGrowCandidate) => (
-                  <tr key={c.id}>
+                  <tr key={c.id}
+                      ref={match?.id === c.id ? rowRef : undefined}
+                      className={match?.id === c.id ? 'tr-row-hl' : undefined}>
                     <td title={c.topResultContent ?? undefined}>{c.queryText}</td>
                     <td className="num">{num(c.timesSeen)}</td>
                     <td className="num">{c.topScore.toFixed(3)}</td>

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { Eval } from './Eval';
 import { api } from '../lib/api';
 import type {
@@ -59,6 +60,10 @@ function mockApi(overrides?: (name: string, args?: unknown) => Promise<unknown> 
   });
 }
 
+function renderEval(initialEntries: string[] = ['/eval']) {
+  return render(<MemoryRouter initialEntries={initialEntries}><Eval /></MemoryRouter>);
+}
+
 describe('Eval page', () => {
   beforeEach(() => {
     (window as unknown as { __TR_BOOTSTRAP__?: unknown }).__TR_BOOTSTRAP__ = { token: 't', backend: 'sqlite', version: 'x' };
@@ -67,7 +72,7 @@ describe('Eval page', () => {
 
   it('renders the heading and all four section cards', async () => {
     mockApi();
-    render(<Eval />);
+    renderEval();
     expect(screen.getByRole('heading', { name: 'Eval', level: 1 })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /retrieval report/i })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /run benchmark/i })).toBeInTheDocument();
@@ -77,7 +82,7 @@ describe('Eval page', () => {
 
   it('renders report metrics, per-tier and per-content-type tables, and top misses', async () => {
     mockApi();
-    render(<Eval />);
+    renderEval();
     // headline metric
     expect(await screen.findByText('82%')).toBeInTheDocument(); // precision
     // per-tier table row
@@ -91,7 +96,7 @@ describe('Eval page', () => {
   it('re-queries the report when the window selector changes to 30 days', async () => {
     const spy = vi.fn();
     mockApi((name, args) => { if (name === 'eval_report') { spy(args); return Promise.resolve(REPORT); } return undefined; });
-    render(<Eval />);
+    renderEval();
     await screen.findByText('82%');
     await waitFor(() => expect(spy).toHaveBeenCalledWith(expect.objectContaining({ days: 7 })));
     await userEvent.selectOptions(screen.getByLabelText(/report window/i), '30');
@@ -105,7 +110,7 @@ describe('Eval page', () => {
       return undefined;
     });
     const spy = vi.spyOn(api, 'tool');
-    render(<Eval />);
+    renderEval();
     const btn = await screen.findByRole('button', { name: /run benchmark/i });
     await userEvent.click(btn);
     expect(spy).toHaveBeenCalledWith('eval_benchmark', undefined);
@@ -128,7 +133,7 @@ describe('Eval page', () => {
       }
       return new Promise<never>(() => {}) as Promise<never>;
     });
-    render(<Eval />);
+    renderEval();
     // candidate rows load
     const row1 = (await screen.findByText('how to deploy')).closest('tr')!;
     const row2 = screen.getByText('rollback steps').closest('tr')!;
@@ -148,7 +153,7 @@ describe('Eval page', () => {
   it('compare: Compare button calls eval_compare and renders deltas + regressions/improvements', async () => {
     mockApi((name) => { if (name === 'eval_compare') return Promise.resolve(COMPARE); return undefined; });
     const spy = vi.spyOn(api, 'tool');
-    render(<Eval />);
+    renderEval();
     // before is required, so the Compare button stays disabled until an id is entered
     const compareBtn = await screen.findByRole('button', { name: /^compare/i });
     expect(compareBtn).toBeDisabled();
@@ -163,7 +168,7 @@ describe('Eval page', () => {
   it('snapshot: name + button calls eval_snapshot and shows the returned id', async () => {
     mockApi((name) => { if (name === 'eval_snapshot') return Promise.resolve(SNAPSHOT); return undefined; });
     const spy = vi.spyOn(api, 'tool');
-    render(<Eval />);
+    renderEval();
     await userEvent.type(await screen.findByLabelText(/snapshot name/i), 'baseline');
     await userEvent.click(screen.getByRole('button', { name: /^snapshot/i }));
     await waitFor(() => expect(spy).toHaveBeenCalledWith('eval_snapshot', { name: 'baseline' }));
@@ -174,7 +179,7 @@ describe('Eval page', () => {
 
   it('benchmark: surfaces the failure alert when eval_benchmark rejects', async () => {
     mockApi((name) => { if (name === 'eval_benchmark') return Promise.reject(new Error('embedder unavailable')); return undefined; });
-    render(<Eval />);
+    renderEval();
     await userEvent.click(await screen.findByRole('button', { name: /run benchmark/i }));
     const alert = await screen.findByText('Benchmark failed.');
     expect(alert).toHaveAttribute('role', 'alert');
@@ -188,7 +193,7 @@ describe('Eval page', () => {
       }
       return undefined;
     });
-    render(<Eval />);
+    renderEval();
     const row1 = (await screen.findByText('how to deploy')).closest('tr')!;
     await userEvent.click(within(row1).getByRole('button', { name: /accept/i }));
     await userEvent.click(screen.getByRole('button', { name: /^resolve/i }));
@@ -199,7 +204,7 @@ describe('Eval page', () => {
 
   it('compare: surfaces the failure alert when eval_compare rejects', async () => {
     mockApi((name) => { if (name === 'eval_compare') return Promise.reject(new Error('baseline is required')); return undefined; });
-    render(<Eval />);
+    renderEval();
     // before is required, so enter an id to enable the Compare button
     await userEvent.type(await screen.findByLabelText(/before/i), 'snap-a');
     await userEvent.click(screen.getByRole('button', { name: /^compare/i }));
@@ -210,7 +215,7 @@ describe('Eval page', () => {
 
   it('snapshot: surfaces the failure alert when eval_snapshot rejects', async () => {
     mockApi((name) => { if (name === 'eval_snapshot') return Promise.reject(new Error('disk full')); return undefined; });
-    render(<Eval />);
+    renderEval();
     await userEvent.type(await screen.findByLabelText(/snapshot name/i), 'baseline');
     await userEvent.click(screen.getByRole('button', { name: /^snapshot/i }));
     const alert = await screen.findByText('Snapshot failed.');
@@ -224,7 +229,7 @@ describe('Eval page', () => {
       if (name === 'eval_benchmark') return new Promise<EvalBenchmarkResult>((res) => { resolveBench = res; });
       return undefined;
     });
-    render(<Eval />);
+    renderEval();
     // Wait for the component to finish its initial data load under real timers,
     // so findByRole polling doesn't fight fake timers.
     const btn = await screen.findByRole('button', { name: /run benchmark/i });
@@ -243,5 +248,20 @@ describe('Eval page', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('highlights the matching grow candidate from the query param', async () => {
+    mockApi();
+    renderEval(['/eval?grow=how%20to%20deploy']);
+    const row = await screen.findByText('how to deploy');
+    expect(row.closest('tr')).toHaveClass('tr-row-hl');
+    expect(screen.getByText(/looking for/i)).toBeInTheDocument();
+  });
+
+  it('shows the banner with a reason when there is no matching candidate', async () => {
+    mockApi();
+    renderEval(['/eval?grow=missing%20query']);
+    expect(await screen.findByText(/looking for/i)).toHaveTextContent('missing query');
+    expect(screen.getByText(/not a current candidate/i)).toBeInTheDocument();
   });
 });
