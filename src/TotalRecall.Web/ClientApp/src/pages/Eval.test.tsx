@@ -149,8 +149,13 @@ describe('Eval page', () => {
     mockApi((name) => { if (name === 'eval_compare') return Promise.resolve(COMPARE); return undefined; });
     const spy = vi.spyOn(api, 'tool');
     render(<Eval />);
-    await userEvent.click(await screen.findByRole('button', { name: /^compare/i }));
-    await waitFor(() => expect(spy).toHaveBeenCalledWith('eval_compare', expect.objectContaining({ after: 'latest' })));
+    // before is required, so the Compare button stays disabled until an id is entered
+    const compareBtn = await screen.findByRole('button', { name: /^compare/i });
+    expect(compareBtn).toBeDisabled();
+    await userEvent.type(screen.getByLabelText(/before/i), 'snap-a');
+    expect(compareBtn).not.toBeDisabled();
+    await userEvent.click(compareBtn);
+    await waitFor(() => expect(spy).toHaveBeenCalledWith('eval_compare', expect.objectContaining({ before: 'snap-a', after: 'latest' })));
     expect(await screen.findByText('q regressed')).toBeInTheDocument();
     expect(screen.getByText('q improved')).toBeInTheDocument();
   });
@@ -163,5 +168,53 @@ describe('Eval page', () => {
     await userEvent.click(screen.getByRole('button', { name: /^snapshot/i }));
     await waitFor(() => expect(spy).toHaveBeenCalledWith('eval_snapshot', { name: 'baseline' }));
     expect(await screen.findByText(/snap-xyz/)).toBeInTheDocument();
+  });
+
+  // ── error paths: each async action surfaces its section's alert when the tool rejects ──
+
+  it('benchmark: surfaces the failure alert when eval_benchmark rejects', async () => {
+    mockApi((name) => { if (name === 'eval_benchmark') return Promise.reject(new Error('embedder unavailable')); return undefined; });
+    render(<Eval />);
+    await userEvent.click(await screen.findByRole('button', { name: /run benchmark/i }));
+    const alert = await screen.findByText('Benchmark failed.');
+    expect(alert).toHaveAttribute('role', 'alert');
+    expect(alert).toHaveAttribute('title', 'embedder unavailable');
+  });
+
+  it('grow: surfaces the resolve failure alert when eval_grow resolve rejects', async () => {
+    mockApi((name, args) => {
+      if (name === 'eval_grow' && (args as { action?: string })?.action === 'resolve') {
+        return Promise.reject(new Error('write denied'));
+      }
+      return undefined;
+    });
+    render(<Eval />);
+    const row1 = (await screen.findByText('how to deploy')).closest('tr')!;
+    await userEvent.click(within(row1).getByRole('button', { name: /accept/i }));
+    await userEvent.click(screen.getByRole('button', { name: /^resolve/i }));
+    const alert = await screen.findByText('Resolve failed.');
+    expect(alert).toHaveAttribute('role', 'alert');
+    expect(alert).toHaveAttribute('title', 'write denied');
+  });
+
+  it('compare: surfaces the failure alert when eval_compare rejects', async () => {
+    mockApi((name) => { if (name === 'eval_compare') return Promise.reject(new Error('baseline is required')); return undefined; });
+    render(<Eval />);
+    // before is required, so enter an id to enable the Compare button
+    await userEvent.type(await screen.findByLabelText(/before/i), 'snap-a');
+    await userEvent.click(screen.getByRole('button', { name: /^compare/i }));
+    const alert = await screen.findByText('Compare failed.');
+    expect(alert).toHaveAttribute('role', 'alert');
+    expect(alert).toHaveAttribute('title', 'baseline is required');
+  });
+
+  it('snapshot: surfaces the failure alert when eval_snapshot rejects', async () => {
+    mockApi((name) => { if (name === 'eval_snapshot') return Promise.reject(new Error('disk full')); return undefined; });
+    render(<Eval />);
+    await userEvent.type(await screen.findByLabelText(/snapshot name/i), 'baseline');
+    await userEvent.click(screen.getByRole('button', { name: /^snapshot/i }));
+    const alert = await screen.findByText('Snapshot failed.');
+    expect(alert).toHaveAttribute('role', 'alert');
+    expect(alert).toHaveAttribute('title', 'disk full');
   });
 });

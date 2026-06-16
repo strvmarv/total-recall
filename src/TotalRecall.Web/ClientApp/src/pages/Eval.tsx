@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Card, CardState } from '../components/Card';
 import { useAsync } from '../lib/useAsync';
 import { api } from '../lib/api';
@@ -47,7 +47,7 @@ function ReportSection() {
     <Card title="Retrieval report">
       <div className="tr-eval-controls">
         <label htmlFor="tr-eval-window">Report window</label>
-        <select id="tr-eval-window" aria-label="Report window" value={String(days)} onChange={(e) => setDays(Number(e.target.value))}>
+        <select id="tr-eval-window" value={String(days)} onChange={(e) => setDays(Number(e.target.value))}>
           <option value="7">Last 7 days</option>
           <option value="30">Last 30 days</option>
         </select>
@@ -187,11 +187,14 @@ function BenchmarkSection() {
   );
 }
 
+const Pass = () => <span aria-label="passed">✓</span>;
+const Fail = () => <span aria-label="failed">✗</span>;
+
 function matchLabel(d: { matched: boolean; fuzzyMatched: boolean; hasNegativeAssertion: boolean; negativePass: boolean }) {
-  if (d.hasNegativeAssertion) return d.negativePass ? 'neg ✓' : 'neg ✗';
-  if (d.matched) return 'exact ✓';
-  if (d.fuzzyMatched) return 'fuzzy ✓';
-  return '✗';
+  if (d.hasNegativeAssertion) return <>neg {d.negativePass ? <Pass /> : <Fail />}</>;
+  if (d.matched) return <>exact <Pass /></>;
+  if (d.fuzzyMatched) return <>fuzzy <Pass /></>;
+  return <Fail />;
 }
 
 // ── 3. Grow ────────────────────────────────────────────────────────────────
@@ -203,6 +206,9 @@ function GrowSection() {
   const [busy, setBusy] = useState(false);
   const [resolveResult, setResolveResult] = useState<EvalGrowResolveResult | null>(null);
   const [resolveError, setResolveError] = useState<string | null>(null);
+  // resolve() bumps refreshKey right after setting resolveResult; skip clearing on that
+  // self-triggered pass so the fresh confirmation survives, but clear on any later refresh.
+  const keepResultOnNextRefresh = useRef(false);
 
   const { data, error, loading } = useAsync<EvalGrowListResult>(
     () => api.tool<EvalGrowListResult>('eval_grow', { action: 'list' }),
@@ -210,6 +216,12 @@ function GrowSection() {
   );
   const candidates = data?.candidates ?? [];
   const empty = !!data && candidates.length === 0;
+
+  // Clear any stale resolve confirmation when the candidate list refreshes for a new pass.
+  useEffect(() => {
+    if (keepResultOnNextRefresh.current) { keepResultOnNextRefresh.current = false; return; }
+    setResolveResult(null);
+  }, [refreshKey]);
 
   const set = (id: string, choice: Choice) =>
     setChoices((prev) => ({ ...prev, [id]: prev[id] === choice ? 'none' : choice }));
@@ -223,6 +235,7 @@ function GrowSection() {
       const r = await api.tool<EvalGrowResolveResult>('eval_grow', { action: 'resolve', accept, reject });
       setResolveResult(r);
       setChoices({});
+      keepResultOnNextRefresh.current = true; // preserve the confirmation across the refresh we trigger next
       setRefreshKey((k) => k + 1); // refresh the candidate list
     } catch (err) { setResolveError(err instanceof Error ? err.message : String(err)); }
     finally { setBusy(false); }
@@ -259,13 +272,15 @@ function GrowSection() {
             </div>
           </>
         )}
-        {resolveError && <p className="tr-card-error" role="alert" title={resolveError}>Resolve failed.</p>}
-        {resolveResult && (
-          <p className="tr-stat-sub" role="status">
-            Accepted {num(resolveResult.accepted)} · rejected {num(resolveResult.rejected)}. Benchmark written to <code>{resolveResult.benchmarkPath}</code>.
-          </p>
-        )}
       </CardState>
+      {/* Rendered as siblings of CardState so the list re-fetch (which collapses CardState to a
+          loading fallback) can't tear down a fresh resolve confirmation or its error. */}
+      {resolveError && <p className="tr-card-error" role="alert" title={resolveError}>Resolve failed.</p>}
+      {resolveResult && (
+        <p className="tr-stat-sub" role="status">
+          Accepted {num(resolveResult.accepted)} · rejected {num(resolveResult.rejected)}. Benchmark written to <code>{resolveResult.benchmarkPath}</code>.
+        </p>
+      )}
     </Card>
   );
 }
@@ -306,18 +321,18 @@ function CompareSection() {
 
   return (
     <Card title="Compare snapshots">
-      <p className="tr-stat-sub">Compare two config snapshots by id. There is no snapshot list — enter ids as free text. Leave <em>before</em> blank to use the server's default baseline; <em>after</em> defaults to <code>latest</code>.</p>
+      <p className="tr-stat-sub">Compare two config snapshots by id. You must enter a <em>before</em> snapshot id; <em>after</em> defaults to <code>latest</code>. There is no snapshot list yet, so enter ids as free text.</p>
 
       <div className="tr-eval-form">
         <div className="tr-field">
           <label htmlFor="tr-eval-before">Before</label>
-          <input id="tr-eval-before" className="tr-input" value={before} onChange={(e) => setBefore(e.target.value)} placeholder="(default baseline)" />
+          <input id="tr-eval-before" className="tr-input" value={before} onChange={(e) => setBefore(e.target.value)} placeholder="snapshot id (required)" />
         </div>
         <div className="tr-field">
           <label htmlFor="tr-eval-after">After</label>
           <input id="tr-eval-after" className="tr-input" value={after} onChange={(e) => setAfter(e.target.value)} placeholder="latest" />
         </div>
-        <button type="button" className="tr-btn tr-btn-primary" onClick={compare} disabled={busy}>{busy ? 'Comparing…' : 'Compare'}</button>
+        <button type="button" className="tr-btn tr-btn-primary" onClick={compare} disabled={busy || !before.trim()}>{busy ? 'Comparing…' : 'Compare'}</button>
       </div>
       {error && <p className="tr-card-error" role="alert" title={error}>Compare failed.</p>}
       {result && (
@@ -325,11 +340,11 @@ function CompareSection() {
           {result.warning && <p className="tr-card-error tr-eval-warning" role="alert">{result.warning}</p>}
           <p className="tr-stat-sub">{result.beforeId} → {result.afterId}</p>
           <div className="tr-usage-cards tr-eval-deltas">
-            <Stat figure={signed(result.deltas.precision, pct)} sub="Δ precision" />
-            <Stat figure={signed(result.deltas.hitRate, pct)} sub="Δ hit rate" />
-            <Stat figure={signed(result.deltas.mrr, (x) => x.toFixed(3))} sub="Δ MRR" />
-            <Stat figure={signed(result.deltas.missRate, pct)} sub="Δ miss rate" />
-            <Stat figure={signed(result.deltas.avgLatencyMs, (x) => `${Math.round(x)} ms`)} sub="Δ latency" />
+            <Stat figure={signed(result.deltas.precision, pct)} sub="Δ precision (higher is better)" valence={valence(result.deltas.precision, true)} />
+            <Stat figure={signed(result.deltas.hitRate, pct)} sub="Δ hit rate (higher is better)" valence={valence(result.deltas.hitRate, true)} />
+            <Stat figure={signed(result.deltas.mrr, (x) => x.toFixed(3))} sub="Δ MRR (higher is better)" valence={valence(result.deltas.mrr, true)} />
+            <Stat figure={signed(result.deltas.missRate, pct)} sub="Δ miss rate (lower is better)" valence={valence(result.deltas.missRate, false)} />
+            <Stat figure={signed(result.deltas.avgLatencyMs, (x) => `${Math.round(x)} ms`)} sub="Δ latency (lower is better)" valence={valence(result.deltas.avgLatencyMs, false)} />
           </div>
           <div className="tr-eval-change-cols">
             <ChangeList title="Regressions" items={result.regressions} />
@@ -375,9 +390,22 @@ function ChangeList({ title, items }: { title: string; items: EvalCompareResult[
 }
 
 // ── shared bits ────────────────────────────────────────────────────────────
-function Stat({ figure, sub }: { figure: string; sub: string }) {
-  return <div className="tr-usage-stat"><div className="tr-stat-figure">{figure}</div><div className="tr-stat-sub">{sub}</div></div>;
+function Stat({ figure, sub, valence }: { figure: string; sub: string; valence?: 'good' | 'bad' | null }) {
+  const valenceClass = valence ? ` tr-valence-${valence}` : '';
+  return <div className="tr-usage-stat"><div className={`tr-stat-figure${valenceClass}`}>{figure}</div><div className="tr-stat-sub">{sub}</div></div>;
 }
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 const signed = (x: number, fmt: (n: number) => string) => `${x > 0 ? '+' : ''}${fmt(x)}`;
+
+/**
+ * Valence of a delta given which direction is desirable.
+ * `higherIsBetter` metrics (precision/hitRate/mrr): positive delta is good.
+ * `lowerIsBetter` metrics (missRate/avgLatencyMs): positive delta is bad.
+ * A zero delta is neutral (no color).
+ */
+const valence = (delta: number, higherIsBetter: boolean): 'good' | 'bad' | null => {
+  if (delta === 0) return null;
+  const improved = higherIsBetter ? delta > 0 : delta < 0;
+  return improved ? 'good' : 'bad';
+};

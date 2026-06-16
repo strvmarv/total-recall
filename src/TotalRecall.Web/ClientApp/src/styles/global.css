@@ -147,6 +147,9 @@ body {
 /* Intentional inversion: rising token spend/activity is "bad" (red), falling is "good" (green). */
 .tr-delta-up { color: var(--tr-danger); }
 .tr-delta-down { color: var(--tr-success); }
+/* Valence-coded delta figures (good = improvement, bad = regression), independent of sign direction. */
+.tr-stat-figure.tr-valence-good { color: var(--tr-success); }
+.tr-stat-figure.tr-valence-bad { color: var(--tr-danger); }
 .tr-legend { display: flex; flex-wrap: wrap; gap: var(--tr-space-2) var(--tr-space-4); margin-top: var(--tr-space-3); font-size: 13px; }
 .tr-legend-item { display: inline-flex; align-items: center; gap: var(--tr-space-2); }
 .tr-legend-dot { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
