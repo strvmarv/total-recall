@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { api } from '../../lib/api';
 import { useAsync } from '../../lib/useAsync';
 import { timeAgo } from '../../lib/time';
 import type { MemoryInspectResult, LineageNode } from '../../lib/types';
 import { ConfirmDialog } from '../ConfirmDialog';
+import { OperationProgress } from '../OperationProgress';
 
 function LineageTree({ node }: { node: LineageNode }) {
   return (
@@ -26,11 +27,19 @@ export function MemoryDetail({ id, onClose, onChanged }: {
   const lineage = useAsync<LineageNode | null>(() => api.tool<LineageNode | null>('memory_lineage', { id }), [id]);
   const d = inspect.data;
 
-  const [pending, setPending] = useState<{ title: string; body?: string; confirmLabel: string; danger?: boolean; run: () => Promise<unknown> } | null>(null);
+  const [pending, setPending] = useState<{ title: string; body?: string; confirmLabel: string; danger?: boolean; verb: 'Pinning' | 'Unpinning' | 'Promoting' | 'Demoting' | 'Deleting'; run: () => Promise<unknown> } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
+
+  useEffect(() => {
+    if (!busy) { setElapsed(0); return; }
+    const start = Date.now();
+    const t = setInterval(() => setElapsed(Date.now() - start), 250);
+    return () => clearInterval(t);
+  }, [busy]);
 
   async function confirmRun() {
     if (!pending) return;
@@ -64,6 +73,7 @@ export function MemoryDetail({ id, onClose, onChanged }: {
                 <button type="button" className="tr-btn" onClick={() => setEditing(false)} disabled={busy}>Cancel</button>
                 <button type="submit" className="tr-btn tr-btn-primary" disabled={busy || !draft.trim()}>Save</button>
               </div>
+              {busy && <OperationProgress mode="indeterminate" verb="Saving" elapsedMs={elapsed} />}
             </form>
           ) : (
             <p className="tr-detail-content">{d.content}</p>
@@ -87,14 +97,15 @@ export function MemoryDetail({ id, onClose, onChanged }: {
           {!pending && !editing && (
             <div className="tr-detail-actions">
               {d.tier === 'pinned'
-                ? <button type="button" className="tr-btn" disabled={busy} onClick={() => setPending({ title: 'Unpin this entry?', confirmLabel: 'Unpin', run: () => api.tool('memory_unpin', { id }) })}>Unpin</button>
-                : <button type="button" className="tr-btn" disabled={busy} onClick={() => setPending({ title: 'Pin this entry?', confirmLabel: 'Pin', run: () => api.tool('memory_pin', { id }) })}>Pin</button>}
-              <button type="button" className="tr-btn" disabled={busy} onClick={() => setPending({ title: 'Promote this entry?', confirmLabel: 'Promote', run: () => api.tool('memory_promote', { id }) })}>Promote</button>
-              <button type="button" className="tr-btn" disabled={busy} onClick={() => setPending({ title: 'Demote this entry?', confirmLabel: 'Demote', run: () => api.tool('memory_demote', { id }) })}>Demote</button>
+                ? <button type="button" className="tr-btn" disabled={busy} onClick={() => setPending({ title: 'Unpin this entry?', confirmLabel: 'Unpin', verb: 'Unpinning', run: () => api.tool('memory_unpin', { id }) })}>Unpin</button>
+                : <button type="button" className="tr-btn" disabled={busy} onClick={() => setPending({ title: 'Pin this entry?', confirmLabel: 'Pin', verb: 'Pinning', run: () => api.tool('memory_pin', { id }) })}>Pin</button>}
+              <button type="button" className="tr-btn" disabled={busy} onClick={() => setPending({ title: 'Promote this entry?', confirmLabel: 'Promote', verb: 'Promoting', run: () => api.tool('memory_promote', { id }) })}>Promote</button>
+              <button type="button" className="tr-btn" disabled={busy} onClick={() => setPending({ title: 'Demote this entry?', confirmLabel: 'Demote', verb: 'Demoting', run: () => api.tool('memory_demote', { id }) })}>Demote</button>
               <button type="button" className="tr-btn" disabled={busy} onClick={() => { setDraft(d.content); setEditing(true); }}>Edit</button>
-              <button type="button" className="tr-btn tr-btn-danger" disabled={busy} onClick={() => setPending({ title: 'Delete this entry?', body: 'This cannot be undone.', confirmLabel: 'Delete', danger: true, run: () => api.tool('memory_delete', { id }) })}>Delete</button>
+              <button type="button" className="tr-btn tr-btn-danger" disabled={busy} onClick={() => setPending({ title: 'Delete this entry?', body: 'This cannot be undone.', confirmLabel: 'Delete', danger: true, verb: 'Deleting', run: () => api.tool('memory_delete', { id }) })}>Delete</button>
             </div>
           )}
+          {pending && busy && <OperationProgress mode="indeterminate" verb={pending.verb} elapsedMs={elapsed} />}
           {actionError && <p className="tr-card-error" role="alert">{actionError}</p>}
           {pending && <ConfirmDialog title={pending.title} body={pending.body} confirmLabel={pending.confirmLabel} danger={pending.danger} onConfirm={confirmRun} onCancel={() => setPending(null)} />}
         </>

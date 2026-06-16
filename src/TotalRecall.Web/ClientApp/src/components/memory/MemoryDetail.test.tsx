@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryDetail } from './MemoryDetail';
 import { api } from '../../lib/api';
 import type { MemoryInspectResult, LineageNode } from '../../lib/types';
@@ -58,5 +58,28 @@ describe('MemoryDetail', () => {
     await userEvent.click(screen.getByRole('button', { name: /save/i }));
     expect(spy).toHaveBeenCalledWith('memory_update', expect.objectContaining({ id: 'a1', content: 'updated content' }));
     expect(onChanged).toHaveBeenCalled();
+  });
+
+  it('shows OperationProgress and disables Save while memory_update is in-flight', async () => {
+    vi.spyOn(api, 'tool').mockImplementation((name: string) => {
+      if (name === 'memory_inspect') return Promise.resolve(INSPECT) as Promise<unknown>;
+      if (name === 'memory_lineage') return Promise.resolve(LINEAGE) as Promise<unknown>;
+      return new Promise(() => {}); // memory_update never resolves → stays in-flight
+    });
+    const { default: userEvent } = await import('@testing-library/user-event');
+    render(<MemoryDetail id="a1" onClose={() => {}} onChanged={() => {}} />);
+    await screen.findByText('full content here'); // initial load under REAL timers
+    await userEvent.click(screen.getByRole('button', { name: /edit/i })); // enter edit mode (real timers)
+    const saveBtn = screen.getByRole('button', { name: /save/i });
+    vi.useFakeTimers(); // BEFORE the submit → interval under fake timers
+    try {
+      const form = saveBtn.closest('form')!;
+      act(() => { fireEvent.submit(form); }); // synchronous; userEvent hangs under fake timers
+      act(() => { vi.advanceTimersByTime(3000); }); // interval fires → elapsed ~3000
+      expect(screen.getByRole('status')).toHaveTextContent('Saving… 3s'); // proves timer advanced
+      expect(saveBtn).toBeDisabled(); // trigger disabled while busy
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
