@@ -210,12 +210,12 @@ describe('Insights page', () => {
     await waitFor(() => expect(calls.filter((c) => c.name === 'insights').length).toBeGreaterThanOrEqual(2));
   });
 
-  it('gap card: renders the query and an "Open in Eval" link to /eval', async () => {
+  it('gap card: renders the query and a "Track in Eval" link with an encoded grow param', async () => {
     mockApi(insights({ retrievalGaps: [{ query: 'how to deploy', timesSeen: 7, topScore: 0.41 }] }), []);
     renderPage();
     expect(await screen.findByText('how to deploy')).toBeInTheDocument();
-    const link = await screen.findByRole('link', { name: /open in eval/i });
-    expect(link).toHaveAttribute('href', '/eval');
+    const link = await screen.findByRole('link', { name: /track in eval/i });
+    expect(link).toHaveAttribute('href', `/eval?grow=${encodeURIComponent('how to deploy')}`);
   });
 
   it('cost-spike card: renders when week-over-week tokens jump and links to /usage', async () => {

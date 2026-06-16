@@ -99,12 +99,12 @@ describe('buildCards', () => {
     expect(pin.preview).toBe('pin me');
   });
 
-  it('maps each retrieval gap to an Open-in-Eval card', () => {
+  it('maps each retrieval gap to a Track-in-Eval card with an encoded grow param', () => {
     const insights = base({ retrievalGaps: [{ query: 'how to deploy', timesSeen: 7, topScore: 0.4 }] });
     const cards = buildCards(insights, [], 0);
     const gap = cards.find((c) => c.kind === 'gap');
     if (gap?.kind !== 'gap') throw new Error('expected gap');
-    expect(gap.to).toBe('/eval');
+    expect(gap.to).toBe(`/eval?grow=${encodeURIComponent('how to deploy')}`);
     expect(gap.query).toBe('how to deploy');
     expect(gap.timesSeen).toBe(7);
   });
