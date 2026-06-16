@@ -289,8 +289,8 @@ public static class ConfigWriter
                 // recursively, so this naturally covers arrays of scalars (the
                 // only kind the config uses, e.g. [skills] extra_dirs) and even
                 // nested arrays. An array-of-inline-tables (TomlTable element)
-                // is not something the config uses, so it falls through to the
-                // NotSupportedException below.
+                // is not something the config uses; the recursive call below
+                // hits the default branch and throws NotSupportedException for it.
                 sb.Append('[');
                 for (int i = 0; i < arr.Count; i++)
                 {
