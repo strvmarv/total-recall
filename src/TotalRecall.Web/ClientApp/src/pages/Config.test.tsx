@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Config } from './Config';
 import { api } from '../lib/api';
@@ -34,9 +34,28 @@ describe('Config page', () => {
       (name === 'config_set' ? Promise.resolve({ key: 'search.fts_weight', oldValue: '0.3', newValue: '0.4', written: true }) : Promise.resolve(CONFIG)) as Promise<unknown>);
     render(<Config />);
     const input = await screen.findByLabelText(/fts weight/i);
-    await userEvent.clear(input);
-    await userEvent.type(input, '0.4');
+    await act(async () => {});   // flush any pending React work from initial load
+    fireEvent.change(input, { target: { value: '0.4' } });
     await userEvent.click(screen.getAllByRole('button', { name: /save/i })[0]);
     expect(spy).toHaveBeenCalledWith('config_set', { key: 'search.fts_weight', value: 0.4 });
+  });
+
+  it('shows OperationProgress and disables Save while config_set is in-flight', async () => {
+    vi.spyOn(api, 'tool').mockImplementation((name: string) =>
+      name === 'config_set' ? new Promise(() => {})           // never resolves → stays saving
+      : Promise.resolve(CONFIG) as Promise<unknown>);
+    render(<Config />);
+    const input = await screen.findByLabelText(/fts weight/i);   // initial load under REAL timers
+    fireEvent.change(input, { target: { value: '0.4' } });       // deterministic value set
+    const saveBtn = screen.getAllByRole('button', { name: /save/i })[0];
+    vi.useFakeTimers();                                           // BEFORE the click
+    try {
+      act(() => { fireEvent.click(saveBtn); });                  // synchronous; userEvent hangs under fake timers
+      act(() => { vi.advanceTimersByTime(3000); });
+      expect(screen.getByRole('status')).toHaveTextContent('Saving… 3s'); // proves timer advanced
+      expect(saveBtn).toBeDisabled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
