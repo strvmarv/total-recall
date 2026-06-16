@@ -331,3 +331,17 @@ body {
 .tr-cmdk-group { font-family: var(--tr-font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--tr-text-faint); width: 80px; flex-shrink: 0; }
 .tr-cmdk-label { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tr-cmdk-empty { color: var(--tr-text-muted); padding: var(--tr-space-3); font-size: 13px; }
+
+/* ---- Loading skeleton + progress bar ---- */
+.tr-visually-hidden { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+.tr-skeleton { display:flex; flex-direction:column; gap:var(--tr-space-2); }
+.tr-skeleton-row { height:var(--tr-space-6, 2.25rem); border-radius:var(--tr-radius); background:var(--tr-surface-2, rgba(255,255,255,.04)); }
+.tr-skeleton-bar { height:3px; border-radius:2px; background:var(--tr-surface-2, rgba(255,255,255,.06)); overflow:hidden; position:relative; }
+.tr-skeleton-bar > i { position:absolute; left:0; top:0; height:100%; width:40%; background:var(--tr-accent); border-radius:2px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .tr-skeleton-row { background-image:linear-gradient(90deg, transparent 0, var(--tr-surface-2, rgba(255,255,255,.10)) 40%, transparent 80%); background-size:400px 100%; animation:tr-shimmer 1.3s linear infinite; }
+  .tr-skeleton-bar > i { animation:tr-bar-indeterminate 1.2s ease-in-out infinite; }
+}
+@keyframes tr-shimmer { 0% { background-position:-400px 0; } 100% { background-position:400px 0; } }
+@keyframes tr-bar-indeterminate { 0% { left:-40%; } 100% { left:100%; } }
