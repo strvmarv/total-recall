@@ -5,7 +5,7 @@
 // The test uses the Plan 4 fakes under tests/TotalRecall.Server.Tests/
 // TestSupport/ so no real Sqlite / ONNX / FAISS is touched. The single
 // verification contract is that BuildRegistry returns a ToolRegistry
-// populated with the exact set of 41 production handlers, in the order
+// populated with the exact set of 42 production handlers, in the order
 // the composition root registers them, with the tool names matching the
 // wire protocol.
 //

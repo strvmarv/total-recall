@@ -12,7 +12,7 @@ This document describes `TotalRecall.Web`: the embedded ASP.NET Core minimal-API
 total-recall ui [--port N] [--no-open] [--host H] [--token T] [--smoke]
 ```
 
-starts a local Kestrel HTTP server serving a React SPA with six sections:
+starts a local Kestrel HTTP server serving a React SPA with seven sections:
 
 | Section | What it provides |
 |---|---|
@@ -20,7 +20,8 @@ starts a local Kestrel HTTP server serving a React SPA with six sections:
 | Memory | Browse, search, filter, promote/demote/pin/delete individual entries |
 | Knowledge Base | Collections list, KB search, ingest files/directories, refresh/remove |
 | Usage | Token spend by host, project, model, and time window; per-session breakdown |
-| ✨ Insights | Memory-health score + suggestion cards (cost-spike, capture-mix, pinned-budget pressure, retrieval misses, empty KB) — pure client-side heuristics, no LLM |
+| ✨ Insights | Memory-health score + breakdown and actionable cards from the server-side `insights` tool (merge near-duplicates, pin high-use entries, retrieval gaps, threshold tuning), plus a client-only cost-spike nudge |
+| Eval | Run the retrieval benchmark, review the rich `eval_report`, grow the benchmark from misses (`eval_grow`), and compare config snapshots (`eval_compare` / `eval_snapshot`) |
 | Config | Edit a safe subset of tuning knobs (validated, persisted via `config_set`); storage/embedding shown read-only |
 
 The web UI is a local management tool — it dispatches to the **same `ToolRegistry` handlers** used by the MCP server, over a loopback HTTP API.
@@ -123,7 +124,7 @@ The embedded files are served at runtime via `ManifestEmbeddedFileProvider` (see
 ```
 ClientApp/
 ├── src/
-│   ├── pages/          — one file per section (Dashboard, Memory, KnowledgeBase, Usage, Insights, Config)
+│   ├── pages/          — one file per section (Dashboard, Memory, KnowledgeBase, Usage, Insights, Eval, Config)
 │   ├── components/     — shared and per-section components
 │   │   ├── (shell)     — SideRail (left nav + brand caret), CommandPalette (⌘K), ThemeToggle, Card
 │   │   ├── dashboard/  — TierCompositionCard, TokenUsageCard, TrendsCard, RetrievalQualityCard, …
@@ -138,7 +139,7 @@ ClientApp/
 │       ├── types.ts     — shared TypeScript types (mirrors server-side shapes)
 │       ├── pricing.ts   — bundled model pricing table (client-side cost estimation)
 │       ├── usageCost.ts — cost calculation helpers
-│       ├── insights.ts  — client-side insight signal derivation
+│       ├── insights.ts  — pure mapper: server `insights` tool payload → actionable cards (+ client-only cost-spike)
 │       ├── trendsMath.ts, usageMath.ts, time.ts, configFields.ts — pure utilities
 │       ├── useAsync.ts  — generic data-fetching hook
 │       ├── useTheme.ts  — dark/light theme state (persists to localStorage; OS-default on first visit)
@@ -163,7 +164,6 @@ ClientApp/
 
 These are known gaps in the v1 implementation, tracked in `docs/TODO.md`:
 
-- **Server-side `/api/insights` engine** — near-duplicate merge, retrieval-gap detection, threshold simulation. Currently all client-side.
 - **Editable/persisted pricing** — `[pricing]` config section + Config editor for custom model pricing.
 - **Usage activity heatmap** — needs hourly `GroupBy` on `usage_events` (current `usage_status` returns only daily rollups).
 - **Per-project trend sparklines** — per-project weekly comparison.

@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 3.4.0 - 2026-06-15
+
+### Added
+
+- **Eval page in the web UI** — a retrieval-quality command center for the previously CLI-only eval toolchain. Review a rich `eval_report` (hit/miss/precision/MRR/latency with per-tier and per-content-type breakdowns, top misses, and compaction health), **run the retrieval benchmark** against the local embedder, **grow** the benchmark by accepting/rejecting candidates auto-captured from real retrieval misses, and **compare** two config snapshots (plus create named snapshots). The four execute/write tools (`eval_benchmark`, `eval_compare`, `eval_grow`, `eval_snapshot`) are now reachable from the web UI, token-gated like every other call.
+- **Server-side Insights engine (`insights` MCP tool).** Replaces the old client-side heuristics with entry-level analysis of your local store: near-duplicate memory clusters (same-tier cosine over the live set), pin-promotion candidates (high access count, not yet pinned), retrieval gaps, a recall-vs-threshold curve, and a self-explaining health score with a four-part breakdown. Works in every backend mode (user memories are stored locally and locally embedded even under cortex).
+
+### Changed
+
+- **The Insights page is rebuilt on the new engine and every card is now actionable** — no more dead "info" cards. Merge a near-duplicate cluster ("keep newest, delete the rest"), promote a frequently-accessed memory to pinned inline, jump from a retrieval gap straight into the Eval page, and apply a suggested similarity threshold from the recall curve. The health score now expands to show its retrieval / capture / pinned / KB breakdown. The web UI left rail now has **seven** sections (Insights · **Eval** added).
+
+### Docs
+
+- README and the AGENTS guides updated for the new Eval page, the `insights` tool, and the rebuilt Insights page.
+
 ## 3.3.1 - 2026-06-15
 
 ### Fixed

@@ -333,6 +333,8 @@ The root cause is Windows Defender mid-scanning the freshly-extracted `total-rec
 
 `eval_grow` lists pending benchmark candidates auto-captured from retrieval misses (in `benchmark_candidates`) and lets you accept/reject them. Accepted entries get appended to `eval/benchmarks/retrieval.jsonl`.
 
+`insights` runs entry-level analysis of the local memory store (works in every backend mode — user memories are stored locally and locally embedded even under cortex): near-duplicate clusters (same-tier cosine over the live set hot+warm+pinned, capped by `limit`), pin-promotion candidates (high `access_count`, not yet pinned), retrieval gaps, a recall-vs-threshold curve (`Metrics.Compute` run at several thresholds over one load of `retrieval_events`), and a self-explaining health score with a four-part breakdown (retrieval/capture/pinned/KB). It powers the web UI Insights page. Near-duplicate detection is same-tier in v1.
+
 ### `ToolContext` and the composition root
 
 `ToolContext` (in `src/TotalRecall.Server/`) carries session state through all tool handlers: `Store`, `Config`, `Embedder`, `SessionId`, and `ConfigSnapshotId`. The `ConfigSnapshotId` is set by `session_start` and used by `memory_search` (for retrieval event logging) and the compactor (for compaction logging). New tools that call `LogRetrievalEvent` should pass `ctx.ConfigSnapshotId`.

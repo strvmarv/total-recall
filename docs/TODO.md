@@ -253,11 +253,16 @@ Meaningful refactor — probably 1-2 days of work plus a beta cycle to validate.
 
 **Files:** `package.json`, `bin/start.js`, `.github/workflows/release.yml`, new per-platform package scaffolding
 
-### Web UI: server-side Insights engine
+### ~~Web UI: server-side Insights engine~~ — done in v3.4.0
 
-The Insights section currently derives all signals client-side from data already fetched for other sections. A dedicated `/api/insights` (or `insights` MCP tool) would run server-side analysis: near-duplicate detection via cosine similarity above a configurable threshold, retrieval-gap detection (high-frequency queries with low hit-rate), threshold simulation (show how changing `similarity_threshold` changes recall), and high-access-count pin promotion suggestions. The current client-side approach is a useful v1 but a server-side engine would be more accurate and work on larger stores.
+Shipped as the `insights` MCP tool (`src/TotalRecall.Server/Handlers/InsightsHandler.cs`) + a rebuilt Insights page: near-duplicate clusters (same-tier cosine over the live set), pin-promotion candidates (high `access_count`, unpinned), retrieval gaps, a recall-vs-threshold curve (`Metrics.Compute` at several thresholds over one load of `retrieval_events`), and a self-explaining health score with a four-part breakdown. The page (`src/TotalRecall.Web/ClientApp/src/lib/insights.ts` + `pages/Insights.tsx`) maps the payload to actionable cards (merge near-dups via `memory_delete`, pin via `memory_pin`, threshold tuning via `config_set`).
 
-**Files:** `src/TotalRecall.Server/Handlers/` (new `InsightsHandler.cs`), `src/TotalRecall.Web/Api/ToolAllowlist.cs` (add `insights`), `src/TotalRecall.Web/ClientApp/src/lib/insights.ts` (shift from client-side to API-driven)
+**Follow-ups deferred from this work:**
+
+- **Cross-tier near-duplicate clustering.** v1 near-dup detection is same-tier only (the vec0 search is scoped to one tier table), so identical content split across hot/warm/pinned tiers won't cluster together. A cross-tier pass would compare each live-set entry against the merged set rather than just its own tier.
+  **Files:** `src/TotalRecall.Server/Handlers/InsightsHandler.cs` (`ComputeNearDuplicates`)
+- **Eval Compare snapshot picker.** The Eval page's Compare section takes free-text snapshot ids because there is no snapshot-list tool, so users must already know the ids. A snapshot-list capability would let the UI offer a dropdown.
+  **Files:** new server handler/tool to enumerate config snapshots, `src/TotalRecall.Web/Api/ToolAllowlist.cs`, `src/TotalRecall.Web/ClientApp/src/pages/Eval.tsx`
 
 ### Web UI: editable/persisted pricing config
 

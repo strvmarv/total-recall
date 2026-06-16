@@ -53,7 +53,7 @@ Every TUI coding assistant has the same gaps:
 
 - **Persistent memory** — corrections, preferences, decisions, and project context survive sessions automatically
 - **Cross-tool** — one memory store shared across Claude Code, Copilot CLI, Cursor, Cline, OpenCode, and Hermes; existing memories auto-import on first run
-- **Built-in web UI** — `total-recall ui` opens a local browser dashboard (Dashboard, Memory, Knowledge Base, Usage, Insights, Config) for visual memory management without touching the CLI or AI session. Dark/light themes, a keyboard-first ⌘K command palette, and a developer-native *Terminal / Archive* design
+- **Built-in web UI** — `total-recall ui` opens a local browser dashboard (Dashboard, Memory, Knowledge Base, Usage, Insights, Eval, Config) for visual memory management without touching the CLI or AI session. Dark/light themes, a keyboard-first ⌘K command palette, and a developer-native *Terminal / Archive* design
 - **Cross-device** — point `TOTAL_RECALL_DB_PATH` at a cloud-synced folder and your memory follows you everywhere
 - **Smarter context, lower token cost** — a four-tier model (Pinned / Hot / Warm / Cold) enforces a 4000-token budget per prompt, so you get relevant context without carrying everything
 - **Token expenditure tracking** — see exactly what each session costs, broken down by host, project, and time window
@@ -215,7 +215,7 @@ total-recall ui --smoke          # CI mode: start, GET /api/health, exit 0/1
 
 The server binds **loopback only** (`localhost`) by default. Every launch generates a fresh ephemeral bearer token that is injected directly into the served HTML, so opening the URL in a browser is sufficient — no copy-paste of credentials. A Host-header allowlist mitigates DNS-rebinding.
 
-**Six sections** are available in the left navigation rail:
+**Seven sections** are available in the left navigation rail:
 
 | Section | What it shows |
 |---|---|
@@ -223,7 +223,8 @@ The server binds **loopback only** (`localhost`) by default. Every launch genera
 | Memory | Browse, search, filter, promote/demote/pin/delete individual entries |
 | Knowledge Base | List collections, search, ingest files/directories, refresh or remove collections |
 | Usage | Token expenditure by host, project, model, and time window; per-session breakdown |
-| ✨ Insights | Memory-health score + actionable suggestion cards (cost-spike, capture-mix, pinned-budget pressure, retrieval misses, empty KB) — pure heuristics, no LLM |
+| ✨ Insights | Memory-health score with an expandable breakdown, plus actionable cards computed server-side from your local store (no LLM): merge near-duplicate memories, promote high-use entries to pinned, surface retrieval gaps, and tune the similarity threshold from a recall curve |
+| Eval | Run the retrieval benchmark, review hit/miss/MRR with per-tier & per-content-type breakdowns and top misses, grow the benchmark from real retrieval misses, and compare config snapshots |
 | Config | Edit a safe subset of tuning knobs (validated, persisted via `config_set`); storage & embedding shown read-only |
 
 **Cost figures** in the Usage section are **client-side estimates** derived from a bundled model pricing table. They are not billed amounts.

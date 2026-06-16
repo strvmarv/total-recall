@@ -1032,7 +1032,7 @@
         "type": "object",
         "properties": {
           "days": {
-            "type": "number",
+            "type": "integer",
             "description": "Window in days for retrieval-gap \u002B threshold-curve analysis (default 7)"
           },
           "nearDupThreshold": {
@@ -1040,11 +1040,11 @@
             "description": "Min similarity (app score scale) to cluster near-duplicates (default 0.85)"
           },
           "pinAccessThreshold": {
-            "type": "number",
+            "type": "integer",
             "description": "Min access_count for a pin-promotion candidate (default 8)"
           },
           "limit": {
-            "type": "number",
+            "type": "integer",
             "description": "Cap on live-set memories scanned for near-duplicates (default 200)"
           }
         }
