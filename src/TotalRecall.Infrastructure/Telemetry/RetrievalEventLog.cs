@@ -38,7 +38,8 @@ public sealed record RetrievalEventQuery(
     string? SessionId = null,
     string? ConfigSnapshotId = null,
     int? Days = null,
-    int? Limit = null);
+    int? Limit = null,
+    string? QuerySource = null);
 
 /// <summary>
 /// Read-side row returned by <see cref="RetrievalEventLog.GetEvents"/>. The
@@ -180,6 +181,7 @@ UPDATE retrieval_events
         if (query.SessionId is not null) clauses.Add("session_id = $sid");
         if (query.ConfigSnapshotId is not null) clauses.Add("config_snapshot_id = $cfg");
         if (query.Days is not null) clauses.Add("timestamp >= $cutoff");
+        if (query.QuerySource is not null) clauses.Add("query_source = $qsrc");
 
         if (clauses.Count > 0)
         {
@@ -201,6 +203,8 @@ UPDATE retrieval_events
             var cutoff = DateTimeOffset.UtcNow.AddDays(-query.Days.Value).ToUnixTimeMilliseconds();
             cmd.Parameters.AddWithValue("$cutoff", cutoff);
         }
+        if (query.QuerySource is not null)
+            cmd.Parameters.AddWithValue("$qsrc", query.QuerySource);
         if (query.Limit is not null)
             cmd.Parameters.AddWithValue("$limit", query.Limit.Value);
 

@@ -26,12 +26,13 @@ public sealed class RetrievalEventLogTests
         byte[]? embedding = null,
         string sessionId = "sess-1",
         long? latency = 12,
-        int? scanned = 100)
+        int? scanned = 100,
+        string querySource = "user")
     {
         return new RetrievalEventEntry(
             SessionId: sessionId,
             QueryText: "what is x?",
-            QuerySource: "user",
+            QuerySource: querySource,
             Results: results ?? new[]
             {
                 new RetrievalResultItem("e1", "hot", "memory", 0.95, 1),
@@ -302,6 +303,23 @@ VALUES
             }
             var rows = log.GetEvents(new RetrievalEventQuery(Limit: 2));
             Assert.Equal(2, rows.Count);
+        }
+    }
+
+    [Fact]
+    public void GetEvents_FiltersByQuerySource()
+    {
+        var (conn, log) = NewLog();
+        using (conn)
+        {
+            log.LogEvent(MakeEntry(querySource: "assistant"));
+            log.LogEvent(MakeEntry(querySource: "web-ui"));
+            log.LogEvent(MakeEntry(querySource: "assistant"));
+
+            var rows = log.GetEvents(new RetrievalEventQuery(QuerySource: "assistant"));
+
+            Assert.Equal(2, rows.Count);
+            Assert.All(rows, r => Assert.Equal("assistant", r.QuerySource));
         }
     }
 }
