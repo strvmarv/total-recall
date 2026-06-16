@@ -86,6 +86,8 @@ public static class Metrics
     public static MetricsReport Compute(
         IReadOnlyList<RetrievalEventRow> events,
         double similarityThreshold,
+        long nowMs,
+        long graceWindowMs,
         IReadOnlyList<CompactionAnalyticsRow>? compactionRows = null)
     {
         ArgumentNullException.ThrowIfNull(events);
@@ -107,33 +109,34 @@ public static class Metrics
                 CompactionHealth: ComputeCompactionHealth(compaction));
         }
 
-        // Precision = used / withOutcome.
-        var withOutcome = events.Where(e => e.OutcomeUsed.HasValue).ToList();
-        var usedCount = withOutcome.Count(e => e.OutcomeUsed == true);
-        var precision = withOutcome.Count > 0 ? (double)usedCount / withOutcome.Count : 0.0;
+        // Resolve each event's outcome at read time; pending (recent NULL) events
+        // are excluded from every rate.
+        var scored = events
+            .Select(e => (Event: e, Outcome: ResolveOutcome(e, nowMs, graceWindowMs)))
+            .Where(x => x.Outcome.HasValue)
+            .Select(x => (x.Event, Used: x.Outcome!.Value))
+            .ToList();
 
-        // Hit rate uses the same numerator/denominator (mirrors the TS impl).
-        var hitRate = precision;
+        var hits = scored.Count(x => x.Used);
+        var precision = scored.Count > 0 ? (double)hits / scored.Count : 0.0;
+        var hitRate = precision;          // mirrors the prior identity
+        var mrr = precision;              // simplified MRR on the same hit/miss basis
 
-        // Miss rate: events whose top_score is null OR below the threshold.
-        var missCount = events.Count(e =>
-            e.TopScore is null || e.TopScore.Value < similarityThreshold);
-        var missRate = (double)missCount / events.Count;
+        // Miss rate (score quality) over the same scored set.
+        var missCount = scored.Count(x =>
+            x.Event.TopScore is null || x.Event.TopScore.Value < similarityThreshold);
+        var missRate = scored.Count > 0 ? (double)missCount / scored.Count : 0.0;
 
-        // Simplified MRR: 1.0 for "used" top results, 0 otherwise.
-        var mrrSum = withOutcome.Sum(e => e.OutcomeUsed == true ? 1.0 : 0.0);
-        var mrr = withOutcome.Count > 0 ? mrrSum / withOutcome.Count : 0.0;
-
-        // Average latency over events that recorded one.
-        var latencies = events.Where(e => e.LatencyMs.HasValue).ToList();
+        // Average latency over scored events that recorded one.
+        var latencies = scored.Where(x => x.Event.LatencyMs.HasValue).ToList();
         var avgLatencyMs = latencies.Count > 0
-            ? latencies.Average(e => (double)e.LatencyMs!.Value)
+            ? latencies.Average(x => (double)x.Event.LatencyMs!.Value)
             : 0.0;
 
-        // Group by tier (only events that have a top tier).
-        var byTier = events
-            .Where(e => !string.IsNullOrEmpty(e.TopTier))
-            .GroupBy(e => e.TopTier!, StringComparer.Ordinal)
+        // Group by tier / content type over scored events, carrying the resolved outcome.
+        var byTier = scored
+            .Where(x => !string.IsNullOrEmpty(x.Event.TopTier))
+            .GroupBy(x => x.Event.TopTier!, StringComparer.Ordinal)
             .ToDictionary(
                 g => g.Key,
                 g =>
@@ -143,10 +146,9 @@ public static class Metrics
                 },
                 StringComparer.Ordinal);
 
-        // Group by content type.
-        var byContentType = events
-            .Where(e => !string.IsNullOrEmpty(e.TopContentType))
-            .GroupBy(e => e.TopContentType!, StringComparer.Ordinal)
+        var byContentType = scored
+            .Where(x => !string.IsNullOrEmpty(x.Event.TopContentType))
+            .GroupBy(x => x.Event.TopContentType!, StringComparer.Ordinal)
             .ToDictionary(
                 g => g.Key,
                 g =>
@@ -156,22 +158,20 @@ public static class Metrics
                 },
                 StringComparer.Ordinal);
 
-        // Top misses: lowest scoring (null sorts as -1, matching TS).
-        var topMisses = events
-            .Where(e => e.TopScore is null || e.TopScore.Value < similarityThreshold)
-            .OrderBy(e => e.TopScore ?? -1.0)
+        // Top misses: lowest scoring scored events (null sorts as -1).
+        var topMisses = scored
+            .Where(x => x.Event.TopScore is null || x.Event.TopScore.Value < similarityThreshold)
+            .OrderBy(x => x.Event.TopScore ?? -1.0)
             .Take(10)
-            .Select(e => new MissEntry(e.QueryText, e.TopScore, e.Timestamp))
+            .Select(x => new MissEntry(x.Event.QueryText, x.Event.TopScore, x.Event.Timestamp))
             .ToList();
 
-        // False positives: high score but rejected by the user.
-        var falsePositives = events
-            .Where(e => e.OutcomeUsed == false
-                        && e.TopScore.HasValue
-                        && e.TopScore.Value >= similarityThreshold)
-            .OrderByDescending(e => e.TopScore ?? 0.0)
+        // False positives: explicit negatives with a high score.
+        var falsePositives = scored
+            .Where(x => !x.Used && x.Event.TopScore.HasValue && x.Event.TopScore.Value >= similarityThreshold)
+            .OrderByDescending(x => x.Event.TopScore ?? 0.0)
             .Take(10)
-            .Select(e => new MissEntry(e.QueryText, e.TopScore, e.Timestamp))
+            .Select(x => new MissEntry(x.Event.QueryText, x.Event.TopScore, x.Event.Timestamp))
             .ToList();
 
         return new MetricsReport(
@@ -188,21 +188,23 @@ public static class Metrics
             CompactionHealth: ComputeCompactionHealth(compaction));
     }
 
-    private static (double Precision, double HitRate, double AvgScore) ComputeGroupMetrics(
-        IEnumerable<RetrievalEventRow> events)
+    // Read-time outcome resolution. true = hit, false = miss, null = pending (excluded).
+    private static bool? ResolveOutcome(RetrievalEventRow e, long nowMs, long graceWindowMs)
     {
-        var list = events as IList<RetrievalEventRow> ?? events.ToList();
-        var withOutcome = list.Where(e => e.OutcomeUsed.HasValue).ToList();
-        var used = withOutcome.Count(e => e.OutcomeUsed == true);
-        var precision = withOutcome.Count > 0 ? (double)used / withOutcome.Count : 0.0;
-        var hitRate = precision;
+        if (e.OutcomeUsed == true) return true;
+        if (e.OutcomeUsed == false) return false;
+        return e.Timestamp < nowMs - graceWindowMs ? false : (bool?)null;
+    }
 
-        var withScore = list.Where(e => e.TopScore.HasValue).ToList();
-        var avgScore = withScore.Count > 0
-            ? withScore.Average(e => e.TopScore!.Value)
-            : 0.0;
-
-        return (precision, hitRate, avgScore);
+    private static (double Precision, double HitRate, double AvgScore) ComputeGroupMetrics(
+        IEnumerable<(RetrievalEventRow Event, bool Used)> scored)
+    {
+        var list = scored as IList<(RetrievalEventRow Event, bool Used)> ?? scored.ToList();
+        var used = list.Count(x => x.Used);
+        var precision = list.Count > 0 ? (double)used / list.Count : 0.0;
+        var withScore = list.Where(x => x.Event.TopScore.HasValue).ToList();
+        var avgScore = withScore.Count > 0 ? withScore.Average(x => x.Event.TopScore!.Value) : 0.0;
+        return (precision, precision, avgScore);
     }
 
     private static CompactionHealthMetrics ComputeCompactionHealth(

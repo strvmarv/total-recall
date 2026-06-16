@@ -67,8 +67,14 @@ public static class ComparisonMetrics
         ArgumentNullException.ThrowIfNull(eventsBefore);
         ArgumentNullException.ThrowIfNull(eventsAfter);
 
-        var before = Metrics.Compute(eventsBefore, similarityThreshold);
-        var after = Metrics.Compute(eventsAfter, similarityThreshold);
+        // Comparison aggregates each side at read time. Events here carry explicit
+        // outcomes (the compare command snapshots resolved sides), so the grace
+        // window only affects unresolved NULLs; use "now" with a 1h grace as the
+        // default resolution clock.
+        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        const long graceWindowMs = 60 * 60 * 1000L;
+        var before = Metrics.Compute(eventsBefore, similarityThreshold, nowMs, graceWindowMs);
+        var after = Metrics.Compute(eventsAfter, similarityThreshold, nowMs, graceWindowMs);
 
         var deltas = new MetricDeltas(
             Precision: after.Precision - before.Precision,

@@ -104,7 +104,10 @@ public sealed class EvalReportHandler : IToolHandler
         var inputs = provider(query);
         var threshold = thresholdOverride ?? inputs.SimilarityThreshold;
 
-        var report = Metrics.Compute(inputs.Events, threshold, inputs.CompactionRows);
+        // TODO(Task 1.3): thread the real clock + configured grace window here.
+        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        const long graceWindowMs = 60 * 60 * 1000L;
+        var report = Metrics.Compute(inputs.Events, threshold, nowMs, graceWindowMs, inputs.CompactionRows);
 
         var tierMap = new Dictionary<string, EvalReportTierDto>(StringComparer.Ordinal);
         foreach (var kvp in report.ByTier)

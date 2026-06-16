@@ -390,7 +390,9 @@ public sealed class InsightsHandler : IToolHandler
         for (int i = 0; i < CurveThresholds.Length; i++)
         {
             var t = CurveThresholds[i];
-            var report = Metrics.Compute(events, t);
+            // TODO(Task 1.3): thread the real clock + configured grace window here.
+            var report = Metrics.Compute(events, t,
+                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), 60 * 60 * 1000L);
             points[i] = new ThresholdPointDto(
                 Threshold: t,
                 HitRate: report.HitRate,
@@ -413,7 +415,9 @@ public sealed class InsightsHandler : IToolHandler
         }
         else
         {
-            var report = Metrics.Compute(events, ctx.SimilarityThreshold);
+            // TODO(Task 1.3): thread the real clock + configured grace window here.
+            var report = Metrics.Compute(events, ctx.SimilarityThreshold,
+                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), 60 * 60 * 1000L);
             var score = (int)Math.Round(report.HitRate * 35.0, MidpointRounding.AwayFromZero);
             retrieval = new HealthComponentDto(
                 Math.Clamp(score, 0, 35), 35,

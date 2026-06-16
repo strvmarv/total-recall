@@ -36,10 +36,87 @@ public sealed class MetricsTests
             TiersSearchedJson: "[]",
             TotalCandidatesScanned: null);
 
+    // Shorthand for the read-time-resolution tests: explicit outcome + timestamp.
+    private static RetrievalEventRow Ev(bool? outcomeUsed, long ts, double? topScore,
+        string tier = "warm", string contentType = "memory", string source = "assistant")
+        => new(
+            Id: Guid.NewGuid().ToString(),
+            Timestamp: ts,
+            SessionId: "s",
+            QueryText: "q",
+            QuerySource: source,
+            QueryEmbedding: null,
+            ResultsJson: "[]",
+            ResultCount: 1,
+            TopScore: topScore,
+            TopTier: tier,
+            TopContentType: contentType,
+            OutcomeUsed: outcomeUsed,
+            OutcomeSignal: null,
+            ConfigSnapshotId: "cfg",
+            LatencyMs: 5,
+            TiersSearchedJson: "[]",
+            TotalCandidatesScanned: null);
+
+    private const long Now = 10_000_000L;
+    private const long Grace = 60 * 60 * 1000L; // 60 min
+
+    [Fact]
+    public void Compute_UsedTrue_CountsAsHit()
+    {
+        var events = new[] { Ev(outcomeUsed: true, ts: Now - 2 * Grace, topScore: 0.9) };
+        var r = Metrics.Compute(events, similarityThreshold: 0.5, nowMs: Now, graceWindowMs: Grace);
+        Assert.Equal(1.0, r.HitRate, 3);
+        Assert.Equal(1.0, r.Precision, 3);
+    }
+
+    [Fact]
+    public void Compute_AgedNull_CountsAsMiss()
+    {
+        var events = new[] { Ev(outcomeUsed: null, ts: Now - 2 * Grace, topScore: 0.9) };
+        var r = Metrics.Compute(events, 0.5, Now, Grace);
+        Assert.Equal(0.0, r.HitRate, 3);
+        Assert.Equal(1, r.TotalEvents);
+    }
+
+    [Fact]
+    public void Compute_RecentNull_IsPending_Excluded()
+    {
+        var events = new[]
+        {
+            Ev(outcomeUsed: null, ts: Now - 60_000, topScore: 0.9), // 1 min old → pending
+            Ev(outcomeUsed: true, ts: Now - 2 * Grace, topScore: 0.9),
+        };
+        var r = Metrics.Compute(events, 0.5, Now, Grace);
+        Assert.Equal(1.0, r.HitRate, 3); // 1 hit / 1 scored; pending excluded
+    }
+
+    [Fact]
+    public void Compute_Mixed_PrecisionIsHitsOverScored()
+    {
+        var events = new[]
+        {
+            Ev(outcomeUsed: true,  ts: Now - 2 * Grace, topScore: 0.9),
+            Ev(outcomeUsed: false, ts: Now - 2 * Grace, topScore: 0.9),
+            Ev(outcomeUsed: null,  ts: Now - 2 * Grace, topScore: 0.2), // aged → miss
+            Ev(outcomeUsed: null,  ts: Now - 1000,      topScore: 0.9), // pending → excluded
+        };
+        var r = Metrics.Compute(events, 0.5, Now, Grace);
+        Assert.Equal(1.0 / 3.0, r.HitRate, 3); // 1 hit / 3 scored
+    }
+
+    [Fact]
+    public void Compute_Empty_IsZeroed()
+    {
+        var r = Metrics.Compute(Array.Empty<RetrievalEventRow>(), 0.5, Now, Grace);
+        Assert.Equal(0, r.TotalEvents);
+        Assert.Equal(0.0, r.HitRate, 3);
+    }
+
     [Fact]
     public void EmptyEvents_ReturnsZeroMetrics()
     {
-        var r = Metrics.Compute(Array.Empty<RetrievalEventRow>(), 0.5);
+        var r = Metrics.Compute(Array.Empty<RetrievalEventRow>(), 0.5, Now, Grace);
         Assert.Equal(0, r.TotalEvents);
         Assert.Equal(0.0, r.Precision);
         Assert.Equal(0.0, r.HitRate);
@@ -58,23 +135,25 @@ public sealed class MetricsTests
     {
         var events = new List<RetrievalEventRow>
         {
-            // 4 with outcome: 3 used, 1 unused
+            // All aged (ts:0 ≪ Now - Grace): 3 used → hits, 1 unused → miss.
             Event("1", topScore: 0.9, topTier: "warm", topContentType: "memory", outcomeUsed: true,  latencyMs: 10),
             Event("2", topScore: 0.8, topTier: "warm", topContentType: "memory", outcomeUsed: true,  latencyMs: 20),
             Event("3", topScore: 0.7, topTier: "hot",  topContentType: "memory", outcomeUsed: true,  latencyMs: 30),
             Event("4", topScore: 0.6, topTier: "warm", topContentType: "memory", outcomeUsed: false, latencyMs: 40),
-            // 1 without outcome — counts toward total + miss-rate calc but not precision
+            // null outcome but aged → resolves to a miss, so it now scores too.
             Event("5", topScore: 0.1, topTier: "cold", topContentType: "memory"),
         };
 
-        var r = Metrics.Compute(events, similarityThreshold: 0.5);
+        var r = Metrics.Compute(events, similarityThreshold: 0.5, nowMs: Now, graceWindowMs: Grace);
 
         Assert.Equal(5, r.TotalEvents);
-        Assert.Equal(3.0 / 4.0, r.Precision);
-        Assert.Equal(3.0 / 4.0, r.HitRate);
+        // 5 scored (aged null is a miss); 3 hits → 3/5.
+        Assert.Equal(3.0 / 5.0, r.Precision);
+        Assert.Equal(3.0 / 5.0, r.HitRate);
         // miss = score < 0.5 OR null → only event "5"
         Assert.Equal(1.0 / 5.0, r.MissRate);
-        Assert.Equal(3.0 / 4.0, r.Mrr);
+        Assert.Equal(3.0 / 5.0, r.Mrr);
+        // Avg latency over scored events that recorded one (events 1-4; "5" has none).
         Assert.Equal((10 + 20 + 30 + 40) / 4.0, r.AvgLatencyMs);
     }
 
@@ -89,7 +168,7 @@ public sealed class MetricsTests
             Event("4", topScore: 0.7, topTier: "hot",  outcomeUsed: true),
         };
 
-        var r = Metrics.Compute(events, 0.5);
+        var r = Metrics.Compute(events, 0.5, Now, Grace);
         Assert.True(r.ByTier.ContainsKey("warm"));
         Assert.True(r.ByTier.ContainsKey("hot"));
 
@@ -109,15 +188,17 @@ public sealed class MetricsTests
         var events = new List<RetrievalEventRow>();
         for (int i = 0; i < 12; i++)
         {
-            events.Add(Event($"m{i}", topScore: 0.1 * (i + 1), queryText: $"missQ{i}"));
+            // Mark these used so they're scored hits, not false-positive candidates;
+            // top-miss selection is purely score-based, so they still feed TopMisses.
+            events.Add(Event($"m{i}", topScore: 0.1 * (i + 1), outcomeUsed: true, queryText: $"missQ{i}"));
         }
         // false positives: high score but rejected
         events.Add(Event("fp1", topScore: 0.95, outcomeUsed: false, queryText: "fpA"));
         events.Add(Event("fp2", topScore: 0.85, outcomeUsed: false, queryText: "fpB"));
 
-        var r = Metrics.Compute(events, similarityThreshold: 0.5);
+        var r = Metrics.Compute(events, similarityThreshold: 0.5, nowMs: Now, graceWindowMs: Grace);
 
-        // Misses are everything with score < 0.5 → 5 entries (0.1..0.5),
+        // Misses are everything with score < 0.5 → 4 entries (0.1..0.4),
         // sorted ascending by topScore.
         Assert.True(r.TopMisses.Count <= 10);
         Assert.True(r.TopMisses.Count >= 4);
@@ -141,7 +222,7 @@ public sealed class MetricsTests
         {
             Event("a"), Event("b"), Event("c"),
         };
-        var r = Metrics.Compute(events, 0.5);
+        var r = Metrics.Compute(events, 0.5, Now, Grace);
         Assert.Equal(0.0, r.Precision);
         Assert.Equal(0.0, r.HitRate);
         Assert.Equal(1.0, r.MissRate);
@@ -158,7 +239,7 @@ public sealed class MetricsTests
             new("3", 3000, PreservationRatio: null, SemanticDrift: 0.25),
             new("4", 4000, PreservationRatio: 1.0, SemanticDrift: null),
         };
-        var r = Metrics.Compute(Array.Empty<RetrievalEventRow>(), 0.5, rows);
+        var r = Metrics.Compute(Array.Empty<RetrievalEventRow>(), 0.5, Now, Grace, rows);
         Assert.Equal(4, r.CompactionHealth.TotalCompactions);
         Assert.Equal((0.8 + 0.6 + 1.0) / 3.0, r.CompactionHealth.AvgPreservationRatio!.Value, 6);
         Assert.Equal(2, r.CompactionHealth.EntriesWithDrift); // 0.3 and 0.25 > 0.2

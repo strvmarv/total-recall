@@ -116,7 +116,10 @@ public sealed class ReportCommand : ICliCommand
             return Task.FromResult(1);
         }
 
-        var report = Metrics.Compute(inputs.Events, inputs.SimilarityThreshold, inputs.CompactionRows);
+        // TODO(Task 1.3): thread the real clock + configured grace window here.
+        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        const long graceWindowMs = 60 * 60 * 1000L;
+        var report = Metrics.Compute(inputs.Events, inputs.SimilarityThreshold, nowMs, graceWindowMs, inputs.CompactionRows);
 
         if (emitJson)
         {
