@@ -85,7 +85,9 @@ public class InsightsHandlerTests
         public IEmbedder Embedder { get; }
         public double SimilarityThreshold { get; }
         public int PinnedMaxContentChars { get; }
-        public IReadOnlyList<RetrievalEventRow> GetEvents(int days) => _events;
+        // The test fixture returns the same in-memory list for any source; the
+        // assistant-scoping is exercised at the production SQL layer, not here.
+        public IReadOnlyList<RetrievalEventRow> GetEvents(int days, string? source = null) => _events;
         public IReadOnlyList<CandidateRow> ListPendingCandidates() => _candidates;
         public int TotalKnowledgeChunks() => _kbChunks;
 

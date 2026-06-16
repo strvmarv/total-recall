@@ -46,7 +46,9 @@ public sealed class EvalReportHandler : IToolHandler
             "days": {"type":"number","description":"Window in days (default 7)"},
             "session": {"type":"string","description":"Filter by session id"},
             "config_snapshot": {"type":"string","description":"Filter by config snapshot id"},
-            "threshold": {"type":"number","description":"Similarity threshold override"}
+            "threshold": {"type":"number","description":"Similarity threshold override"},
+            "source": {"type":"string","description":"Query source to score (default 'assistant')"},
+            "grace_minutes": {"type":"number","description":"Minutes before an un-acted retrieval counts as a miss (default 60)"}
           }
         }
         """).RootElement.Clone();
@@ -71,6 +73,10 @@ public sealed class EvalReportHandler : IToolHandler
         string? sessionId = null;
         string? configSnapshotId = null;
         double? thresholdOverride = null;
+        // Retrieval-quality metrics are driven by ASSISTANT feedback, so score the
+        // assistant source by default; callers may override via "source".
+        string source = "assistant";
+        double graceMinutes = 60.0;
 
         if (arguments.HasValue && arguments.Value.ValueKind == JsonValueKind.Object)
         {
@@ -92,6 +98,15 @@ public sealed class EvalReportHandler : IToolHandler
                     throw new ArgumentException("threshold must be a number");
                 thresholdOverride = tEl.GetDouble();
             }
+            if (args.TryGetProperty("source", out var srcEl) && srcEl.ValueKind == JsonValueKind.String)
+                source = srcEl.GetString()!;
+            if (args.TryGetProperty("grace_minutes", out var gEl))
+            {
+                if (gEl.ValueKind != JsonValueKind.Number)
+                    throw new ArgumentException("grace_minutes must be a number");
+                graceMinutes = gEl.GetDouble();
+                if (graceMinutes < 0) throw new ArgumentException("grace_minutes must be non-negative");
+            }
         }
 
         ct.ThrowIfCancellationRequested();
@@ -99,14 +114,14 @@ public sealed class EvalReportHandler : IToolHandler
         var query = new RetrievalEventQuery(
             SessionId: sessionId,
             ConfigSnapshotId: configSnapshotId,
-            Days: days);
+            Days: days,
+            QuerySource: source);
         var provider = _provider ?? BuildProductionProvider();
         var inputs = provider(query);
         var threshold = thresholdOverride ?? inputs.SimilarityThreshold;
 
-        // TODO(Task 1.3): thread the real clock + configured grace window here.
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        const long graceWindowMs = 60 * 60 * 1000L;
+        var graceWindowMs = (long)(graceMinutes * 60_000);
         var report = Metrics.Compute(inputs.Events, threshold, nowMs, graceWindowMs, inputs.CompactionRows);
 
         var tierMap = new Dictionary<string, EvalReportTierDto>(StringComparer.Ordinal);

@@ -60,6 +60,10 @@ public sealed class ReportCommand : ICliCommand
         string? sessionId = null;
         string? configSnapshotId = null;
         bool emitJson = false;
+        // Retrieval-quality metrics are driven by ASSISTANT feedback, mirroring
+        // the eval_report MCP tool: score the assistant source by default.
+        string source = "assistant";
+        double graceMinutes = 60.0;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -70,6 +74,24 @@ public sealed class ReportCommand : ICliCommand
                     if (i + 1 >= args.Length || !int.TryParse(args[i + 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out days) || days <= 0)
                     {
                         Console.Error.WriteLine("eval report: --days requires a positive integer");
+                        return Task.FromResult(2);
+                    }
+                    i++;
+                    break;
+                case "--source":
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.Error.WriteLine("eval report: --source requires a value");
+                        return Task.FromResult(2);
+                    }
+                    source = args[++i];
+                    break;
+                case "--grace-minutes":
+                    if (i + 1 >= args.Length
+                        || !double.TryParse(args[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out graceMinutes)
+                        || graceMinutes < 0)
+                    {
+                        Console.Error.WriteLine("eval report: --grace-minutes requires a non-negative number");
                         return Task.FromResult(2);
                     }
                     i++;
@@ -106,7 +128,8 @@ public sealed class ReportCommand : ICliCommand
             var query = new RetrievalEventQuery(
                 SessionId: sessionId,
                 ConfigSnapshotId: configSnapshotId,
-                Days: days);
+                Days: days,
+                QuerySource: source);
             var provider = _provider ?? BuildProductionProvider();
             inputs = provider(query);
         }
@@ -116,9 +139,8 @@ public sealed class ReportCommand : ICliCommand
             return Task.FromResult(1);
         }
 
-        // TODO(Task 1.3): thread the real clock + configured grace window here.
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        const long graceWindowMs = 60 * 60 * 1000L;
+        var graceWindowMs = (long)(graceMinutes * 60_000);
         var report = Metrics.Compute(inputs.Events, inputs.SimilarityThreshold, nowMs, graceWindowMs, inputs.CompactionRows);
 
         if (emitJson)
@@ -371,6 +393,6 @@ public sealed class ReportCommand : ICliCommand
 
     private static void PrintUsage(TextWriter w)
     {
-        w.WriteLine("Usage: total-recall eval report [--days N] [--session ID] [--config-snapshot ID] [--json]");
+        w.WriteLine("Usage: total-recall eval report [--days N] [--session ID] [--config-snapshot ID] [--source NAME] [--grace-minutes N] [--json]");
     }
 }

@@ -106,6 +106,16 @@ public sealed class MetricsTests
     }
 
     [Fact]
+    public void Compute_AgedNullHighScore_AppearsInFalsePositives()
+    {
+        // Aged null outcome resolves to a miss; a high score above threshold makes
+        // it a false positive (surfaced strongly, never acted on).
+        var events = new[] { Ev(outcomeUsed: null, ts: Now - 2 * Grace, topScore: 0.9) };
+        var r = Metrics.Compute(events, similarityThreshold: 0.5, nowMs: Now, graceWindowMs: Grace);
+        Assert.Single(r.FalsePositives);
+    }
+
+    [Fact]
     public void Compute_Empty_IsZeroed()
     {
         var r = Metrics.Compute(Array.Empty<RetrievalEventRow>(), 0.5, Now, Grace);

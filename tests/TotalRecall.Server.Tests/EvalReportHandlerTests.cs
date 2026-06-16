@@ -14,13 +14,13 @@ namespace TotalRecall.Server.Tests;
 
 public class EvalReportHandlerTests
 {
-    private static RetrievalEventRow Event(double? topScore, bool? used, string? tier = "warm", string? ct = "memory", long? lat = 5, string query = "q")
+    private static RetrievalEventRow Event(double? topScore, bool? used, string? tier = "warm", string? ct = "memory", long? lat = 5, string query = "q", long ts = 1000, string source = "test")
         => new(
             Id: Guid.NewGuid().ToString(),
-            Timestamp: 1000,
+            Timestamp: ts,
             SessionId: "s",
             QueryText: query,
-            QuerySource: "test",
+            QuerySource: source,
             QueryEmbedding: null,
             ResultsJson: "[]",
             ResultCount: 0,
@@ -85,6 +85,45 @@ public class EvalReportHandlerTests
         Assert.Equal(14, captured!.Days);
         Assert.Equal("s1", captured.SessionId);
         Assert.Equal("c1", captured.ConfigSnapshotId);
+    }
+
+    [Fact]
+    public async Task EvalReport_DefaultsSourceToAssistant_AndPassesGrace()
+    {
+        RetrievalEventQuery? captured = null;
+        var handler = new EvalReportHandler(q =>
+        {
+            captured = q;
+            return new EvalReportInputs(
+                Events: new List<RetrievalEventRow> { Event(0.9, true, ts: 1000, source: "assistant") },
+                CompactionRows: Array.Empty<CompactionAnalyticsRow>(),
+                SimilarityThreshold: 0.5);
+        });
+
+        var result = await handler.ExecuteAsync(Args("""{"days":7,"grace_minutes":30}"""), CancellationToken.None);
+
+        Assert.NotNull(captured);
+        Assert.Equal("assistant", captured!.QuerySource);
+        Assert.NotEqual(true, result.IsError);
+    }
+
+    [Fact]
+    public async Task SourceArg_OverridesDefault()
+    {
+        RetrievalEventQuery? captured = null;
+        var handler = new EvalReportHandler(q => { captured = q; return MakeInputs(); });
+        await handler.ExecuteAsync(Args("""{"source":"user"}"""), CancellationToken.None);
+        Assert.Equal("user", captured!.QuerySource);
+    }
+
+    [Fact]
+    public async Task InvalidGraceMinutes_Throws()
+    {
+        var handler = new EvalReportHandler(_ => MakeInputs());
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => handler.ExecuteAsync(Args("""{"grace_minutes":"abc"}"""), CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => handler.ExecuteAsync(Args("""{"grace_minutes":-1}"""), CancellationToken.None));
     }
 
     [Fact]

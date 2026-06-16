@@ -65,8 +65,14 @@ public interface IInsightsContext : IDisposable
     /// </summary>
     int PinnedMaxContentChars { get; }
 
-    /// <summary>Retrieval events in the last <paramref name="days"/> window.</summary>
-    IReadOnlyList<RetrievalEventRow> GetEvents(int days);
+    /// <summary>
+    /// Retrieval events in the last <paramref name="days"/> window, optionally
+    /// scoped to a single <paramref name="source"/> (<c>query_source</c>). Pass
+    /// <c>null</c> for all sources. Quality/health metrics request the
+    /// "assistant" source (assistant feedback drives retrieval quality), while
+    /// gap detection reads all sources.
+    /// </summary>
+    IReadOnlyList<RetrievalEventRow> GetEvents(int days, string? source = null);
 
     /// <summary>Pending benchmark candidates (frequent low-score queries).</summary>
     IReadOnlyList<CandidateRow> ListPendingCandidates();
@@ -94,6 +100,9 @@ public sealed class InsightsHandler : IToolHandler
     // Per-entry vec0 over-sample cap when grouping near-duplicates: ask for up to
     // this many same-tier neighbors per entry (capped further by the live set).
     private const int NearDupTopK = 50;
+    // Grace window before an un-acted retrieval resolves to a miss (60 min),
+    // matching eval_report's default.
+    private const long GraceWindowMs = 60L * 60_000;
 
     private static readonly JsonElement _inputSchema = JsonDocument.Parse("""
         {
@@ -151,10 +160,15 @@ public sealed class InsightsHandler : IToolHandler
 
         var nearDuplicates = ComputeNearDuplicates(context, nearDupThreshold, limit, ct);
         var pinCandidates = ComputePinCandidates(context, pinAccessThreshold);
-        var events = context.GetEvents(days);
-        var retrievalGaps = ComputeRetrievalGaps(context, events);
-        var thresholdCurve = ComputeThresholdCurve(events, context.SimilarityThreshold);
-        var breakdown = ComputeHealthBreakdown(context, events);
+        // Gap detection spans ALL sources (a weak query is a gap regardless of who
+        // issued it). Retrieval-quality metrics (threshold curve + health) are
+        // driven by ASSISTANT feedback, so they read the assistant source only —
+        // consistent with eval_report.
+        var gapEvents = context.GetEvents(days, source: null);
+        var qualityEvents = context.GetEvents(days, source: "assistant");
+        var retrievalGaps = ComputeRetrievalGaps(context, gapEvents);
+        var thresholdCurve = ComputeThresholdCurve(qualityEvents, context.SimilarityThreshold);
+        var breakdown = ComputeHealthBreakdown(context, qualityEvents);
         var healthScore = Math.Clamp(
             breakdown.Retrieval.Score + breakdown.Capture.Score + breakdown.Pinned.Score + breakdown.Kb.Score,
             0, 100);
@@ -390,9 +404,8 @@ public sealed class InsightsHandler : IToolHandler
         for (int i = 0; i < CurveThresholds.Length; i++)
         {
             var t = CurveThresholds[i];
-            // TODO(Task 1.3): thread the real clock + configured grace window here.
             var report = Metrics.Compute(events, t,
-                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), 60 * 60 * 1000L);
+                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), GraceWindowMs);
             points[i] = new ThresholdPointDto(
                 Threshold: t,
                 HitRate: report.HitRate,
@@ -415,9 +428,8 @@ public sealed class InsightsHandler : IToolHandler
         }
         else
         {
-            // TODO(Task 1.3): thread the real clock + configured grace window here.
             var report = Metrics.Compute(events, ctx.SimilarityThreshold,
-                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), 60 * 60 * 1000L);
+                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), GraceWindowMs);
             var score = (int)Math.Round(report.HitRate * 35.0, MidpointRounding.AwayFromZero);
             retrieval = new HealthComponentDto(
                 Math.Clamp(score, 0, 35), 35,
@@ -598,8 +610,8 @@ public sealed class InsightsHandler : IToolHandler
             }
         }
 
-        public IReadOnlyList<RetrievalEventRow> GetEvents(int days) =>
-            new RetrievalEventLog(_conn).GetEvents(new RetrievalEventQuery(Days: days));
+        public IReadOnlyList<RetrievalEventRow> GetEvents(int days, string? source = null) =>
+            new RetrievalEventLog(_conn).GetEvents(new RetrievalEventQuery(Days: days, QuerySource: source));
 
         public IReadOnlyList<CandidateRow> ListPendingCandidates() =>
             new BenchmarkCandidates(_conn).ListPending();

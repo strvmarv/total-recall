@@ -147,6 +147,32 @@ public sealed class ReportCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task DefaultsQuerySourceToAssistant()
+    {
+        RetrievalEventQuery? captured = null;
+        var cmd = new ReportCommand(q => { captured = q; return MakeInputs(); });
+        var code = await cmd.RunAsync(new[] { "--days", "7" });
+        Assert.Equal(0, code);
+        Assert.Equal("assistant", captured!.QuerySource);
+    }
+
+    [Fact]
+    public async Task GraceMinutesOption_Parses()
+    {
+        var cmd = new ReportCommand(q => MakeInputs());
+        var code = await cmd.RunAsync(new[] { "--grace-minutes", "30" });
+        Assert.Equal(0, code);
+    }
+
+    [Fact]
+    public async Task InvalidGraceMinutes_ReturnsExit2()
+    {
+        var cmd = new ReportCommand(q => MakeInputs());
+        var code = await cmd.RunAsync(new[] { "--grace-minutes", "-5" });
+        Assert.Equal(2, code);
+    }
+
+    [Fact]
     public async Task InvalidDays_ReturnsExit2()
     {
         var cmd = new ReportCommand(q => MakeInputs());
