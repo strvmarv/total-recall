@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`memory_search` response shape is now `{ retrievalId, results }`** (was a bare array); `kb_search` responses gain a top-level `retrievalId`. Retrieval events now record a real `query_source` (`assistant` / `web-ui` / `cli`) instead of a single hardcoded value, so retrieval-quality metrics can be scoped to assistant traffic.
 
+- **Retrieval metrics now exclude still-pending retrievals.** `Metrics.Compute` resolves outcomes at read time and drops recent un-acted retrievals (inside the grace window) from the scored set entirely, so `missRate` is now `misses / scored` rather than `misses / allEvents`. Charts that tracked the old denominator will shift accordingly.
+
 > **Upgrade note:** because un-acted assistant retrievals are now inferred as misses after the grace window, the "Retrieval quality" / health-score metric may *dip* immediately after upgrading and stay lower until the assistant adopts `memory_feedback`. This reflects real measurement (previously these retrievals were silently treated as hits), not a regression.
 
 ## 3.4.1 - 2026-06-15
