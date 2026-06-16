@@ -345,3 +345,11 @@ body {
 }
 @keyframes tr-shimmer { 0% { background-position:-400px 0; } 100% { background-position:400px 0; } }
 @keyframes tr-bar-indeterminate { 0% { left:-40%; } 100% { left:100%; } }
+
+/* ---- Operation progress ---- */
+.tr-opprog { display:inline-flex; align-items:center; gap:var(--tr-space-2); font-size:.85rem; color:var(--tr-text-muted); }
+.tr-opprog-bar { width:120px; height:5px; border-radius:3px; background:var(--tr-surface-2, rgba(255,255,255,.08)); overflow:hidden; }
+.tr-opprog-bar > i { display:block; height:100%; background:var(--tr-accent); border-radius:3px; transition:width .25s ease; }
+.tr-spinner { width:14px; height:14px; border-radius:50%; border:2px solid var(--tr-surface-2, rgba(255,255,255,.2)); border-top-color:var(--tr-accent); display:inline-block; }
+@media (prefers-reduced-motion: no-preference) { .tr-spinner { animation:tr-spin .7s linear infinite; } }
+@keyframes tr-spin { to { transform:rotate(360deg); } }
