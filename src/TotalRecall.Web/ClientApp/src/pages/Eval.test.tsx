@@ -217,4 +217,21 @@ describe('Eval page', () => {
     expect(alert).toHaveAttribute('role', 'alert');
     expect(alert).toHaveAttribute('title', 'disk full');
   });
+
+  it('benchmark: shows OperationProgress with elapsed time while eval_benchmark is in-flight', async () => {
+    let resolveBench: (v: EvalBenchmarkResult) => void = () => {};
+    mockApi((name) => {
+      if (name === 'eval_benchmark') return new Promise<EvalBenchmarkResult>((res) => { resolveBench = res; });
+      return undefined;
+    });
+    render(<Eval />);
+    const btn = await screen.findByRole('button', { name: /run benchmark/i });
+    await userEvent.click(btn);
+    // Switch to fake timers after the click so userEvent doesn't hang, then advance
+    vi.useFakeTimers();
+    vi.advanceTimersByTime(3000);
+    expect(screen.getByText(/Running benchmark…/)).toBeInTheDocument();
+    vi.useRealTimers();
+    resolveBench(BENCHMARK);
+  });
 });

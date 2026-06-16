@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Card, CardState } from '../components/Card';
+import { OperationProgress } from '../components/OperationProgress';
 import { useAsync } from '../lib/useAsync';
 import { api } from '../lib/api';
 import type {
@@ -134,6 +135,14 @@ function BenchmarkSection() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<EvalBenchmarkResult | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (!busy) { setElapsed(0); return; }
+    const start = Date.now();
+    const t = setInterval(() => setElapsed(Date.now() - start), 250);
+    return () => clearInterval(t);
+  }, [busy]);
 
   async function run() {
     setBusy(true); setError(null);
@@ -153,7 +162,7 @@ function BenchmarkSection() {
         <button type="button" className="tr-btn tr-btn-primary" onClick={run} disabled={busy}>
           {busy ? 'Running…' : 'Run benchmark'}
         </button>
-        {busy && <span className="tr-stat-sub" role="status">Running benchmark against the local embedder…</span>}
+        {busy && <OperationProgress mode="indeterminate" verb="Running benchmark" elapsedMs={elapsed} />}
       </div>
       {error && <p className="tr-card-error" role="alert" title={error}>Benchmark failed.</p>}
       {result && (
@@ -204,6 +213,7 @@ function GrowSection() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [choices, setChoices] = useState<Record<string, Choice>>({});
   const [busy, setBusy] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const [resolveResult, setResolveResult] = useState<EvalGrowResolveResult | null>(null);
   const [resolveError, setResolveError] = useState<string | null>(null);
   // resolve() bumps refreshKey right after setting resolveResult; skip clearing on that
@@ -222,6 +232,13 @@ function GrowSection() {
     if (keepResultOnNextRefresh.current) { keepResultOnNextRefresh.current = false; return; }
     setResolveResult(null);
   }, [refreshKey]);
+
+  useEffect(() => {
+    if (!busy) { setElapsed(0); return; }
+    const start = Date.now();
+    const t = setInterval(() => setElapsed(Date.now() - start), 250);
+    return () => clearInterval(t);
+  }, [busy]);
 
   const set = (id: string, choice: Choice) =>
     setChoices((prev) => ({ ...prev, [id]: prev[id] === choice ? 'none' : choice }));
@@ -269,6 +286,7 @@ function GrowSection() {
               <button type="button" className="tr-btn tr-btn-primary" onClick={resolve} disabled={busy || (accept.length === 0 && reject.length === 0)}>
                 {busy ? 'Resolving…' : `Resolve (${accept.length} accept · ${reject.length} reject)`}
               </button>
+              {busy && <OperationProgress mode="indeterminate" verb="Resolving" elapsedMs={elapsed} />}
             </div>
           </>
         )}
@@ -290,13 +308,29 @@ function CompareSection() {
   const [before, setBefore] = useState('');
   const [after, setAfter] = useState('latest');
   const [busy, setBusy] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<EvalCompareResult | null>(null);
 
   const [snapName, setSnapName] = useState('');
   const [snapBusy, setSnapBusy] = useState(false);
+  const [snapElapsed, setSnapElapsed] = useState(0);
   const [snapError, setSnapError] = useState<string | null>(null);
   const [snapResult, setSnapResult] = useState<EvalSnapshotResult | null>(null);
+
+  useEffect(() => {
+    if (!busy) { setElapsed(0); return; }
+    const start = Date.now();
+    const t = setInterval(() => setElapsed(Date.now() - start), 250);
+    return () => clearInterval(t);
+  }, [busy]);
+
+  useEffect(() => {
+    if (!snapBusy) { setSnapElapsed(0); return; }
+    const start = Date.now();
+    const t = setInterval(() => setSnapElapsed(Date.now() - start), 250);
+    return () => clearInterval(t);
+  }, [snapBusy]);
 
   async function compare() {
     setBusy(true); setError(null); setResult(null);
@@ -333,6 +367,7 @@ function CompareSection() {
           <input id="tr-eval-after" className="tr-input" value={after} onChange={(e) => setAfter(e.target.value)} placeholder="latest" />
         </div>
         <button type="button" className="tr-btn tr-btn-primary" onClick={compare} disabled={busy || !before.trim()}>{busy ? 'Comparing…' : 'Compare'}</button>
+        {busy && <OperationProgress mode="indeterminate" verb="Comparing" elapsedMs={elapsed} />}
       </div>
       {error && <p className="tr-card-error" role="alert" title={error}>Compare failed.</p>}
       {result && (
@@ -360,6 +395,7 @@ function CompareSection() {
           <input id="tr-eval-snap" className="tr-input" value={snapName} onChange={(e) => setSnapName(e.target.value)} placeholder="e.g. baseline" />
         </div>
         <button type="button" className="tr-btn" onClick={snapshot} disabled={snapBusy || !snapName.trim()}>{snapBusy ? 'Snapshotting…' : 'Snapshot'}</button>
+        {snapBusy && <OperationProgress mode="indeterminate" verb="Snapshotting" elapsedMs={snapElapsed} />}
       </div>
       {snapError && <p className="tr-card-error" role="alert" title={snapError}>Snapshot failed.</p>}
       {snapResult && (
