@@ -46,8 +46,12 @@ export function Insights() {
                   actions={{
                     curvePoints: data.insights.thresholdCurve.points,
                     onDeleteCluster: async (c) => {
-                      await Promise.all(c.deleteIds.map((id) => api.tool('memory_delete', { id })));
+                      const results = await Promise.allSettled(c.deleteIds.map((id) => api.tool('memory_delete', { id })));
+                      // Always refetch so the card re-derives from server state — even on
+                      // partial failure the successful deletes must be reflected.
                       refresh();
+                      const failed = results.filter((r) => r.status === 'rejected');
+                      if (failed.length > 0) throw new Error(`${failed.length} delete(s) failed`);
                     },
                     onPin: async (c) => {
                       await api.tool('memory_pin', { id: c.entryId });

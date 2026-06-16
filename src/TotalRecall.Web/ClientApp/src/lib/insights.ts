@@ -10,9 +10,10 @@ export type Impact = 'high' | 'medium' | 'low';
 /**
  * A card descriptor produced by the pure mapper. Every variant carries a real
  * action: a navigate target (`gap`/`cost-spike`), a tool-call (`pin` →
- * memory_pin, `near-dup` → memory_delete with `destructive: true`), or the
- * special threshold render (`threshold` → config_set). React components own the
- * side-effecting tool calls and the destructive confirm flow.
+ * memory_pin, `near-dup` → memory_delete), or the special threshold render
+ * (`threshold` → config_set). React components own the side-effecting tool calls
+ * and the destructive two-click confirm flow for `near-dup` (no `destructive`
+ * flag on the descriptor — the kind itself is the signal).
  */
 export type InsightCard =
   | {
@@ -29,8 +30,6 @@ export type InsightCard =
       topScore: number;
       /** Deep-link to review the cluster manually. */
       reviewTo: string;
-      /** Destructive → two-click inline confirm. */
-      destructive: true;
     }
   | {
       kind: 'pin';
@@ -81,7 +80,8 @@ export type InsightCard =
 export function suggestedThreshold(curve: InsightsThresholdCurve): number | null {
   if (curve.points.length === 0) return null;
   let best = curve.points[0];
-  for (const p of curve.points) {
+  // Start at the second point — `best` is already seeded with points[0].
+  for (const p of curve.points.slice(1)) {
     if (p.mrr > best.mrr || (p.mrr === best.mrr && p.threshold < best.threshold)) {
       best = p;
     }
@@ -89,7 +89,7 @@ export function suggestedThreshold(curve: InsightsThresholdCurve): number | null
   return best.threshold;
 }
 
-const fmtScore = (s: number) => s.toFixed(2);
+export const fmtScore = (s: number) => s.toFixed(2);
 
 /**
  * Pure mapper: insights payload (+ already-fetched usage for the one client-only
@@ -105,7 +105,7 @@ export function buildCards(
   const out: InsightCard[] = [];
 
   // 1. Near-duplicate clusters → "keep newest, delete the rest".
-  insights.nearDuplicates.forEach((g, i) => {
+  insights.nearDuplicates.forEach((g) => {
     if (g.members.length < 2) return;
     // Newest = max(createdAt); the rest are deleted.
     const newest = g.members.reduce((a, b) => (b.createdAt > a.createdAt ? b : a));
@@ -113,7 +113,7 @@ export function buildCards(
     if (deleteIds.length === 0) return;
     out.push({
       kind: 'near-dup',
-      id: `near-dup-${g.groupId}-${i}`,
+      id: `near-dup-${g.groupId}`,
       icon: '🧬',
       title: 'Near-duplicate cluster',
       impact: deleteIds.length > 1 ? 'medium' : 'low',
@@ -122,7 +122,6 @@ export function buildCards(
       deleteIds,
       topScore: g.topScore,
       reviewTo: '/memory',
-      destructive: true,
     });
   });
 
@@ -187,5 +186,3 @@ export function buildCards(
 
   return out;
 }
-
-export { fmtScore };

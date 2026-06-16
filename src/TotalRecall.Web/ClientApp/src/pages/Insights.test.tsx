@@ -69,14 +69,27 @@ describe('Insights page', () => {
     });
   });
 
+  it('shows an inline alert when the insights fetch fails', async () => {
+    vi.spyOn(api, 'tool').mockImplementation((name: string) => {
+      if (name === 'insights') return Promise.reject(new Error('boom')) as Promise<never>;
+      return Promise.resolve(USAGE) as Promise<never>; // usage_status (tolerated)
+    });
+    renderPage();
+    const alert = await screen.findByText("Couldn't compute insights.");
+    expect(alert).toHaveAttribute('role', 'alert');
+  });
+
   it('expands the health breakdown disclosure on click', async () => {
     mockApi(insights(), []);
     renderPage();
     const toggle = await screen.findByRole('button', { name: /show breakdown/i });
     expect(screen.queryByText('Retrieval')).not.toBeInTheDocument();
     await userEvent.click(toggle);
+    // all four health components render
     expect(screen.getByText('Retrieval')).toBeInTheDocument();
     expect(screen.getByText('Capture mix')).toBeInTheDocument();
+    expect(screen.getByText('Pinned discipline')).toBeInTheDocument();
+    expect(screen.getByText('Knowledge base')).toBeInTheDocument();
     expect(screen.getByText('hit rate 86%')).toBeInTheDocument();
   });
 
@@ -149,6 +162,59 @@ describe('Insights page', () => {
     await userEvent.click(await screen.findByRole('button', { name: /^pin$/i }));
     const alert = await screen.findByText('pin denied');
     expect(alert).toHaveAttribute('role', 'alert');
+  });
+
+  it('surfaces an inline alert when a near-dup delete fails (and still refetches)', async () => {
+    const calls: { name: string; args?: unknown }[] = [];
+    mockApi(insights({ nearDuplicates: [{
+      groupId: 'g', topScore: 0.95,
+      members: [
+        { id: 'old1', tier: 'warm', preview: 'dup', score: 0.95, createdAt: 1000 },
+        { id: 'newest', tier: 'hot', preview: 'dup newest', score: 0.95, createdAt: 3000 },
+      ],
+    }] }), calls,
+      (name) => name === 'memory_delete' ? Promise.reject(new Error('delete denied')) : undefined);
+    renderPage();
+    // two-click confirm
+    await userEvent.click(await screen.findByRole('button', { name: /keep newest, delete the rest/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /confirm: delete 1/i }));
+    // inline alert surfaces (Promise.allSettled → thrown "N delete(s) failed")
+    const alert = await screen.findByText(/1 delete\(s\) failed/i);
+    expect(alert).toHaveAttribute('role', 'alert');
+    // refetch ran despite the failure
+    await waitFor(() => expect(calls.filter((c) => c.name === 'insights').length).toBeGreaterThanOrEqual(2));
+  });
+
+  it('gap card: renders the query and an "Open in Eval" link to /eval', async () => {
+    mockApi(insights({ retrievalGaps: [{ query: 'how to deploy', timesSeen: 7, topScore: 0.41 }] }), []);
+    renderPage();
+    expect(await screen.findByText('how to deploy')).toBeInTheDocument();
+    const link = await screen.findByRole('link', { name: /open in eval/i });
+    expect(link).toHaveAttribute('href', '/eval');
+  });
+
+  it('cost-spike card: renders when week-over-week tokens jump and links to /usage', async () => {
+    // end_ms anchored at a fixed UTC midnight; current week tokens >> prior week → spike.
+    const endMs = Date.parse('2026-06-15T00:00:00Z');
+    const bucket = (key: string, tokens: number): UsageResult['buckets'][number] => ({
+      key, session_count: 1, turn_count: 1,
+      input_tokens: tokens, cache_creation_tokens: 0, cache_read_tokens: 0, output_tokens: 0,
+    });
+    const spikeUsage: UsageResult = {
+      ...USAGE,
+      query: { start_ms: endMs - 14 * 86_400_000, end_ms: endMs, group_by: 'day' },
+      buckets: [
+        bucket('2026-06-04', 100), // prior week
+        bucket('2026-06-11', 500), // current week → +400%
+      ],
+    };
+    const calls: { name: string; args?: unknown }[] = [];
+    mockApi(insights(), calls,
+      (name) => name === 'usage_status' ? Promise.resolve(spikeUsage) as Promise<never> : undefined);
+    renderPage();
+    expect(await screen.findByText(/token usage is rising/i)).toBeInTheDocument();
+    const link = await screen.findByRole('link', { name: /open usage/i });
+    expect(link).toHaveAttribute('href', '/usage');
   });
 
   it('shows the all-clear empty state when there are no cards', async () => {

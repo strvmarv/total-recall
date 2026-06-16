@@ -177,8 +177,10 @@ function ThresholdChart({ points, current, suggested }: { points: InsightsThresh
             contentStyle={{ background: 'var(--tr-surface)', border: '1px solid var(--tr-border)', borderRadius: 'var(--tr-radius)', fontFamily: theme.mono, fontSize: 11 }}
             labelStyle={{ color: 'var(--tr-text-muted)' }}
           />
-          <ReferenceLine x={current} stroke={theme.tick} strokeDasharray="3 3" />
-          <ReferenceLine x={suggested} stroke={theme.accent} />
+          {/* Reference markers use tier colors distinct from the data lines
+              (hitRate=tierKb green, precision=accent) so they stay readable at the intersection. */}
+          <ReferenceLine x={current} stroke={theme.tierHot} strokeDasharray="3 3" />
+          <ReferenceLine x={suggested} stroke={theme.tierWarm} />
           <Line type="monotone" dataKey="hitRate" stroke={theme.tierKb} dot={false} isAnimationActive={false} />
           <Line type="monotone" dataKey="precision" stroke={theme.accent} dot={false} isAnimationActive={false} />
         </LineChart>
