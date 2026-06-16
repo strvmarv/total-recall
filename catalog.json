@@ -1027,7 +1027,7 @@
     },
     {
       "name": "insights",
-      "description": "Entry-level analysis of the memory store: near-duplicate clusters, pin candidates, retrieval gaps, threshold curve, and a self-explaining health score",
+      "description": "Entry-level analysis of the memory store: near-duplicate clusters, pin candidates, retrieval gaps, threshold curve, and a self-explaining health score. Near-duplicate detection is same-tier in v1: identical content split across different tiers won\u0027t cluster together.",
       "inputSchema": {
         "type": "object",
         "properties": {
