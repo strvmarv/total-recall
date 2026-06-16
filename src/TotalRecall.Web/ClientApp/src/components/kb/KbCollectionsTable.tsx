@@ -34,6 +34,7 @@ export function KbCollectionsTable({ collections, onChanged }: {
   return (
     <>
       {error && <p className="tr-card-error" role="alert">{error}</p>}
+      {/* pending stays non-null for the whole in-flight window (it's cleared in confirmRun's try/catch, not at start), so .verb is always safe to read while busy. */}
       {busy && pending && <OperationProgress mode="indeterminate" verb={pending.verb} elapsedMs={elapsed} />}
       <table className="tr-table">
         <thead><tr><th>Name</th><th>Documents</th><th>Chunks</th><th>Source</th><th>Created</th><th>Actions</th></tr></thead>

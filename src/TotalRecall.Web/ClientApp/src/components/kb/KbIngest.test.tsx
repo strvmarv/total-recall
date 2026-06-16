@@ -48,8 +48,10 @@ describe('KbIngest', () => {
       // Advance fake time so the elapsed interval fires past 3s
       act(() => { vi.advanceTimersByTime(3000); });
 
-      // Assert the OperationProgress rendered with verb + elapsed seconds
-      expect(screen.getByText(/Ingesting… 3s/)).toBeInTheDocument();
+      // Assert the OperationProgress rendered with verb + elapsed seconds.
+      // Use the status role + exact text so the test proves the timer advanced to 3s
+      // (not merely that the verb rendered on a 0s initial mount).
+      expect(screen.getByRole('status')).toHaveTextContent('Ingesting… 3s');
     } finally {
       vi.useRealTimers();
     }
