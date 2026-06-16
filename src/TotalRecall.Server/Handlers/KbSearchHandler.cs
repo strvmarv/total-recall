@@ -275,7 +275,7 @@ public sealed class KbSearchHandler : IToolHandler
 
         if (results.Length == 0)
         {
-            var emptyJson = "{\"results\":[],\"hierarchicalMatch\":null,\"needsSummary\":false}";
+            var emptyJson = "{\"retrievalId\":\"\",\"results\":[],\"hierarchicalMatch\":null,\"needsSummary\":false}";
             return new ToolCallResult
             {
                 Content = new[] { new ToolContent { Type = "text", Text = emptyJson } },
@@ -309,7 +309,7 @@ public sealed class KbSearchHandler : IToolHandler
         }
 
         var resultsJson = JsonSerializer.Serialize(dtos, JsonContext.Default.MemorySearchResultDtoArray);
-        var jsonText = $"{{\"results\":{resultsJson},\"hierarchicalMatch\":null,\"needsSummary\":false}}";
+        var jsonText = $"{{\"retrievalId\":\"\",\"results\":{resultsJson},\"hierarchicalMatch\":null,\"needsSummary\":false}}";
 
         return new ToolCallResult
         {

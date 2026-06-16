@@ -411,6 +411,93 @@ public class KbSearchHandlerTests
         Assert.NotEqual(true, result.IsError);
     }
 
+    // ---------------- Remote (cortex) path: retrievalId shape ----------------
+
+    /// <summary>
+    /// Stub IRemoteBackend whose SearchKnowledgeAsync returns a caller-supplied array.
+    /// All other methods are no-ops; only SearchKnowledge is exercised by these tests.
+    /// </summary>
+    private sealed class StubRemoteBackend : IRemoteBackend
+    {
+        public SyncSearchResult[] KbResults { get; set; } = Array.Empty<SyncSearchResult>();
+
+        public Task<SyncSearchResult[]> SearchKnowledgeAsync(string query, int topK, IReadOnlyList<string>? scopes, CancellationToken ct)
+            => Task.FromResult(KbResults);
+        public Task<SyncSearchResult[]> SearchMemoriesAsync(string query, string scope, int topK, CancellationToken ct)
+            => Task.FromResult(Array.Empty<SyncSearchResult>());
+        public Task<SyncStatusResult> GetStatusAsync(CancellationToken ct)
+            => Task.FromResult(new SyncStatusResult(0, 0, 0, 0));
+        public Task UpsertMemoriesAsync(SyncEntry[] entries, CancellationToken ct) => Task.CompletedTask;
+        public Task DeleteMemoryAsync(string id, CancellationToken ct) => Task.CompletedTask;
+        public Task<SyncPullResult> GetUserMemoriesModifiedSinceAsync(DateTimeOffset since, CancellationToken ct)
+            => Task.FromResult(new SyncPullResult(Array.Empty<SyncEntry>(), null));
+        public Task PushUsageEventsAsync(SyncUsageEvent[] events, CancellationToken ct) => Task.CompletedTask;
+        public Task PushRetrievalEventsAsync(SyncRetrievalEvent[] events, CancellationToken ct) => Task.CompletedTask;
+        public Task PushCompactionEntriesAsync(SyncCompactionEntry[] entries, CancellationToken ct) => Task.CompletedTask;
+        public Task PushSkillUsageAsync(PluginSyncSkillUsageEvent[] events, CancellationToken ct) => Task.CompletedTask;
+        public Task<PluginSyncSkillDto[]> GetSkillsModifiedSinceAsync(DateTime? since, CancellationToken ct)
+            => Task.FromResult(Array.Empty<PluginSyncSkillDto>());
+    }
+
+    [Fact]
+    public async Task Remote_NonEmptyResults_IncludesRetrievalIdKey()
+    {
+        var stub = new StubRemoteBackend
+        {
+            KbResults = new[]
+            {
+                new SyncSearchResult("remote-1", "some content", 0.9, null, null),
+            },
+        };
+        var embed = new RecordingFakeEmbedder();
+        var hybrid = new RecordingFakeHybridSearch();
+        var handler = new KbSearchHandler(embed, hybrid, remote: stub);
+
+        var result = await handler.ExecuteAsync(
+            Args("""{"query":"remote query"}"""),
+            CancellationToken.None);
+
+        Assert.NotEqual(true, result.IsError);
+        using var doc = JsonDocument.Parse(result.Content[0].Text);
+        var root = doc.RootElement;
+
+        // retrievalId must be present as the first top-level key and be empty string
+        // (remote path does not log locally — cortex records telemetry server-side).
+        Assert.True(root.TryGetProperty("retrievalId", out var ridProp),
+            "remote kb_search envelope must contain a top-level 'retrievalId' key");
+        Assert.Equal("", ridProp.GetString());
+
+        // Wire shape must still include the other expected keys.
+        Assert.True(root.TryGetProperty("results", out var results));
+        Assert.Equal(1, results.GetArrayLength());
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("hierarchicalMatch").ValueKind);
+        Assert.False(root.GetProperty("needsSummary").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Remote_EmptyResults_IncludesRetrievalIdKey()
+    {
+        var stub = new StubRemoteBackend { KbResults = Array.Empty<SyncSearchResult>() };
+        var embed = new RecordingFakeEmbedder();
+        var hybrid = new RecordingFakeHybridSearch();
+        var handler = new KbSearchHandler(embed, hybrid, remote: stub);
+
+        var result = await handler.ExecuteAsync(
+            Args("""{"query":"remote query"}"""),
+            CancellationToken.None);
+
+        Assert.NotEqual(true, result.IsError);
+        using var doc = JsonDocument.Parse(result.Content[0].Text);
+        var root = doc.RootElement;
+
+        Assert.True(root.TryGetProperty("retrievalId", out var ridProp),
+            "remote kb_search empty-results envelope must contain a top-level 'retrievalId' key");
+        Assert.Equal("", ridProp.GetString());
+
+        Assert.True(root.TryGetProperty("results", out var results));
+        Assert.Equal(0, results.GetArrayLength());
+    }
+
     [Fact]
     public async Task KbSearch_IncludesRetrievalId_AndTagsSource()
     {
