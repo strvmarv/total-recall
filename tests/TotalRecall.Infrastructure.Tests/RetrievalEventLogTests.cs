@@ -200,6 +200,18 @@ public sealed class RetrievalEventLogTests
     }
 
     [Fact]
+    public void UpdateOutcome_ReturnsAffectedRowCount()
+    {
+        var (conn, log) = NewLog();
+        using (conn)
+        {
+            var id = log.LogEvent(MakeEntry());
+            Assert.Equal(1, log.UpdateOutcome(id, new RetrievalOutcome(true, "answered")));
+            Assert.Equal(0, log.UpdateOutcome("nope", new RetrievalOutcome(true, null)));
+        }
+    }
+
+    [Fact]
     public void UpdateOutcome_NullSignal_StoredAsNull()
     {
         var (conn, log) = NewLog();

@@ -137,6 +137,30 @@
       }
     },
     {
+      "name": "memory_feedback",
+      "description": "Record whether a retrieved memory (by retrievalId) was actually used",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "retrievalId": {
+            "type": "string",
+            "description": "Id returned by memory_search/kb_search"
+          },
+          "used": {
+            "type": "boolean",
+            "description": "Whether the retrieved memory was used (default true)"
+          },
+          "signal": {
+            "type": "string",
+            "description": "Optional free-text outcome signal"
+          }
+        },
+        "required": [
+          "retrievalId"
+        ]
+      }
+    },
+    {
       "name": "memory_get",
       "description": "Retrieve a specific memory entry by ID",
       "inputSchema": {

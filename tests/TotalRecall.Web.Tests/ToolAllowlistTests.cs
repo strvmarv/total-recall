@@ -36,6 +36,9 @@ public sealed class ToolAllowlistTests
     [Theory]
     [InlineData("migrate_to_remote")]
     [InlineData("session_end")]
+    // memory_feedback is assistant-only: registered in the MCP ToolRegistry
+    // but deliberately NOT browser-reachable, so it must stay off the allowlist.
+    [InlineData("memory_feedback")]
     [InlineData("")]
     [InlineData(null)]
     [InlineData("does_not_exist")]

@@ -126,9 +126,11 @@ VALUES
 
     /// <summary>
     /// UPDATE the outcome columns of an already-logged event. No-op if the
-    /// id does not exist.
+    /// id does not exist. Returns the number of rows affected (0 when the id
+    /// is unknown, 1 when matched) so callers can report whether the update
+    /// landed without a separate existence check.
     /// </summary>
-    public void UpdateOutcome(string eventId, RetrievalOutcome outcome)
+    public int UpdateOutcome(string eventId, RetrievalOutcome outcome)
     {
         ArgumentNullException.ThrowIfNull(eventId);
         ArgumentNullException.ThrowIfNull(outcome);
@@ -141,7 +143,7 @@ UPDATE retrieval_events
         cmd.Parameters.AddWithValue("$used", outcome.Used ? 1 : 0);
         cmd.Parameters.AddWithValue("$signal", (object?)outcome.Signal ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$id", eventId);
-        cmd.ExecuteNonQuery();
+        return cmd.ExecuteNonQuery();
     }
 
     /// <summary>

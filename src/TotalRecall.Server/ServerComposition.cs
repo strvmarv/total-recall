@@ -148,9 +148,18 @@ public static class ServerComposition
 
         var registry = new ToolRegistry();
 
-        // ---- Memory (18) ----
+        // ---- Memory (18, +1 assistant-only memory_feedback when a
+        //      RetrievalEventLog is wired — see below) ----
         registry.Register(new MemoryStoreHandler(store, embedder, vectors, scopeDefault, pinnedMaxChars));
         registry.Register(new MemorySearchHandler(embedder, hybrid, scopeDefault, retrievalLog, syncQueue));
+        // Assistant-only feedback tool (Task 1.6). Registered immediately after
+        // memory_search because it consumes the retrievalId memory_search emits.
+        // Both production paths (sqlite + cortex) wire a RetrievalEventLog, so
+        // this is always present in production; the null-guard keeps the
+        // postgres/no-telemetry path clean. NOT added to the Web ToolAllowlist:
+        // the browser must never reach it.
+        if (retrievalLog is not null)
+            registry.Register(new MemoryFeedbackHandler(retrievalLog));
         registry.Register(new MemoryGetHandler(store));
         registry.Register(new MemoryGetAllHandler(store));
         registry.Register(new MemoryUpdateHandler(store, embedder, vectors));

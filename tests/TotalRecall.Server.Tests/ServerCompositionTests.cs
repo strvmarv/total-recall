@@ -17,14 +17,24 @@
 namespace TotalRecall.Server.Tests;
 
 using System.Collections.Generic;
+using TotalRecall.Infrastructure.Storage;
+using TotalRecall.Infrastructure.Telemetry;
 using TotalRecall.Server.Handlers;
 using TotalRecall.Server.Tests.TestSupport;
 using Xunit;
+using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
 public sealed class ServerCompositionTests
 {
-    private static ToolRegistry BuildWithFakes()
+    // Production always wires a RetrievalEventLog in both sqlite + cortex
+    // modes, so the assistant-only memory_feedback tool is always present.
+    // The fake registry mirrors that by passing a real (in-memory) log. The
+    // returned connection owns the log's lifetime — callers dispose it.
+    private static MsSqliteConnection OpenAndBuild(out ToolRegistry registry)
     {
+        var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
         var store = new FakeStore();
         var vectors = new FakeVectorSearch();
         var embedder = new RecordingFakeEmbedder();
@@ -37,21 +47,24 @@ public sealed class ServerCompositionTests
             EmbeddingModel: "bge-small-en-v1.5",
             EmbeddingDimensions: 384);
 
-        return ServerComposition.BuildRegistry(
+        registry = ServerComposition.BuildRegistry(
             store, vectors, embedder, hybrid,
-            fileIngester, compactionLog, sessionLifecycle, statusOptions);
+            fileIngester, compactionLog, sessionLifecycle, statusOptions,
+            retrievalLog: new RetrievalEventLog(conn));
+        return conn;
     }
 
     [Fact]
     public void BuildRegistry_RegistersAllProductionHandlers()
     {
-        var registry = BuildWithFakes();
+        using var conn = OpenAndBuild(out var registry);
 
         // Expected handler set — must stay in sync with ServerComposition.
         var expected = new[]
         {
-            // Memory (18)
-            "memory_store", "memory_search", "memory_get", "memory_get_all",
+            // Memory (19) — memory_feedback is assistant-only (not allowlisted)
+            "memory_store", "memory_search", "memory_feedback",
+            "memory_get", "memory_get_all",
             "memory_update", "memory_delete", "memory_promote", "memory_demote",
             "memory_pin", "memory_unpin",
             "memory_inspect", "memory_history", "memory_recent", "memory_list",
@@ -83,10 +96,22 @@ public sealed class ServerCompositionTests
         Assert.Equal(expected, actual);
     }
 
+    // The assistant-only memory_feedback tool registers in BOTH composition
+    // modes whenever a RetrievalEventLog is wired — which production always
+    // does for sqlite + cortex.
+    [Fact]
+    public void BuildRegistry_RegistersMemoryFeedback_WhenRetrievalLogWired()
+    {
+        using var conn = OpenAndBuild(out var registry);
+        Assert.True(registry.TryGet("memory_feedback", out var handler));
+        Assert.NotNull(handler);
+        Assert.Equal("memory_feedback", handler!.Name);
+    }
+
     [Fact]
     public void BuildRegistry_EveryHandlerIsLookupable()
     {
-        var registry = BuildWithFakes();
+        using var conn = OpenAndBuild(out var registry);
 
         foreach (var spec in registry.ListTools())
         {
@@ -99,7 +124,7 @@ public sealed class ServerCompositionTests
     [Fact]
     public void BuildRegistry_ToolSpecsHaveSchemas()
     {
-        var registry = BuildWithFakes();
+        using var conn = OpenAndBuild(out var registry);
 
         foreach (var spec in registry.ListTools())
         {

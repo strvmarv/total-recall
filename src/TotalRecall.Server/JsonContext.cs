@@ -220,6 +220,14 @@ public sealed record MemorySearchResponseDto(
     [property: JsonPropertyName("retrievalId")] string RetrievalId,
     [property: JsonPropertyName("results")] MemorySearchResultDto[] Results);
 
+// ---------- Task 1.6: memory_feedback result payload ----------
+//
+// Wire shape returned by the assistant-only memory_feedback tool. `updated`
+// is true when the retrievalId matched an existing event (outcome recorded),
+// false for an unknown id (idempotent no-op).
+public sealed record MemoryFeedbackResultDto(
+    [property: JsonPropertyName("updated")] bool Updated);
+
 // ---------- Task 4.8: memory_get result payload ----------
 //
 // Wire shape matches src-ts/memory/get.ts: `{tier, content_type, entry}`.
@@ -927,6 +935,7 @@ public sealed record InsightsResultDto(
 [JsonSerializable(typeof(MemorySearchResultDto))]
 [JsonSerializable(typeof(MemorySearchResultDto[]))]
 [JsonSerializable(typeof(MemorySearchResponseDto))]
+[JsonSerializable(typeof(MemoryFeedbackResultDto))]
 [JsonSerializable(typeof(EntryDto))]
 [JsonSerializable(typeof(MemoryGetResultDto))]
 [JsonSerializable(typeof(MemoryGetAllResultDto))]
