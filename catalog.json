@@ -1026,6 +1026,31 @@
       }
     },
     {
+      "name": "insights",
+      "description": "Entry-level analysis of the memory store: near-duplicate clusters, pin candidates, retrieval gaps, threshold curve, and a self-explaining health score",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "number",
+            "description": "Window in days for retrieval-gap \u002B threshold-curve analysis (default 7)"
+          },
+          "nearDupThreshold": {
+            "type": "number",
+            "description": "Min similarity (app score scale) to cluster near-duplicates (default 0.85)"
+          },
+          "pinAccessThreshold": {
+            "type": "number",
+            "description": "Min access_count for a pin-promotion candidate (default 8)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Cap on live-set memories scanned for near-duplicates (default 200)"
+          }
+        }
+      }
+    },
+    {
       "name": "usage_status",
       "description": "Get token usage across hosts (claude-code, copilot-cli, ...). Use for visibility reports (last 7 days, group by host/project/day/model) and for current quota state (last 5h window for claude-code).",
       "inputSchema": {

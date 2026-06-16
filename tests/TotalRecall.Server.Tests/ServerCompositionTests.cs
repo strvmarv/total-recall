@@ -68,6 +68,8 @@ public sealed class ServerCompositionTests
             "config_get", "config_set",
             // Misc (4)
             "status", "import_host", "compact_now", "migrate_to_remote",
+            // Insights (1)
+            "insights",
         };
 
         Assert.Equal(expected.Length, registry.Count);

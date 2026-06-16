@@ -835,6 +835,64 @@ public sealed record MigrateToRemoteResultDto(
     [property: JsonPropertyName("errors")] int Errors,
     [property: JsonPropertyName("dry_run")] bool DryRun);
 
+// ---------- insights ----------
+//
+// Wire shapes for the `insights` MCP tool — entry-level analysis of the
+// memory store. camelCase wire names (via the context-wide policy + explicit
+// JsonPropertyName) mirror the SPA InsightsResult type. The four
+// HealthComponentDto sub-scores sum to HealthScore.
+
+public sealed record HealthComponentDto(
+    [property: JsonPropertyName("score")] int Score,
+    [property: JsonPropertyName("max")] int Max,
+    [property: JsonPropertyName("detail")] string Detail);
+
+public sealed record HealthBreakdownDto(
+    [property: JsonPropertyName("retrieval")] HealthComponentDto Retrieval,
+    [property: JsonPropertyName("capture")] HealthComponentDto Capture,
+    [property: JsonPropertyName("pinned")] HealthComponentDto Pinned,
+    [property: JsonPropertyName("kb")] HealthComponentDto Kb);
+
+public sealed record NearDuplicateMemberDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("tier")] string Tier,
+    [property: JsonPropertyName("preview")] string Preview,
+    [property: JsonPropertyName("score")] double Score);
+
+public sealed record NearDuplicateGroupDto(
+    [property: JsonPropertyName("groupId")] string GroupId,
+    [property: JsonPropertyName("topScore")] double TopScore,
+    [property: JsonPropertyName("members")] NearDuplicateMemberDto[] Members);
+
+public sealed record PinCandidateDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("tier")] string Tier,
+    [property: JsonPropertyName("preview")] string Preview,
+    [property: JsonPropertyName("accessCount")] int AccessCount);
+
+public sealed record RetrievalGapDto(
+    [property: JsonPropertyName("query")] string Query,
+    [property: JsonPropertyName("timesSeen")] int TimesSeen,
+    [property: JsonPropertyName("topScore")] double? TopScore);
+
+public sealed record ThresholdPointDto(
+    [property: JsonPropertyName("threshold")] double Threshold,
+    [property: JsonPropertyName("hitRate")] double HitRate,
+    [property: JsonPropertyName("precision")] double Precision,
+    [property: JsonPropertyName("mrr")] double Mrr);
+
+public sealed record ThresholdCurveDto(
+    [property: JsonPropertyName("current")] double Current,
+    [property: JsonPropertyName("points")] ThresholdPointDto[] Points);
+
+public sealed record InsightsResultDto(
+    [property: JsonPropertyName("healthScore")] int HealthScore,
+    [property: JsonPropertyName("healthBreakdown")] HealthBreakdownDto HealthBreakdown,
+    [property: JsonPropertyName("nearDuplicates")] NearDuplicateGroupDto[] NearDuplicates,
+    [property: JsonPropertyName("pinCandidates")] PinCandidateDto[] PinCandidates,
+    [property: JsonPropertyName("retrievalGaps")] RetrievalGapDto[] RetrievalGaps,
+    [property: JsonPropertyName("thresholdCurve")] ThresholdCurveDto ThresholdCurve);
+
 // ---------- source-gen context ----------
 
 [JsonSourceGenerationOptions(
@@ -961,6 +1019,21 @@ public sealed record MigrateToRemoteResultDto(
 [JsonSerializable(typeof(CompactNowResultDto))]
 // ---- Task 15: migrate_to_remote ----
 [JsonSerializable(typeof(MigrateToRemoteResultDto))]
+// ---- insights ----
+[JsonSerializable(typeof(InsightsResultDto))]
+[JsonSerializable(typeof(HealthBreakdownDto))]
+[JsonSerializable(typeof(HealthComponentDto))]
+[JsonSerializable(typeof(NearDuplicateGroupDto))]
+[JsonSerializable(typeof(NearDuplicateGroupDto[]))]
+[JsonSerializable(typeof(NearDuplicateMemberDto))]
+[JsonSerializable(typeof(NearDuplicateMemberDto[]))]
+[JsonSerializable(typeof(PinCandidateDto))]
+[JsonSerializable(typeof(PinCandidateDto[]))]
+[JsonSerializable(typeof(RetrievalGapDto))]
+[JsonSerializable(typeof(RetrievalGapDto[]))]
+[JsonSerializable(typeof(ThresholdCurveDto))]
+[JsonSerializable(typeof(ThresholdPointDto))]
+[JsonSerializable(typeof(ThresholdPointDto[]))]
 // ---- Phase 3 idea 2e: memory_extract ----
 [JsonSerializable(typeof(MemoryExtractResultDto))]
 [JsonSerializable(typeof(MemoryExtractEntryDto))]

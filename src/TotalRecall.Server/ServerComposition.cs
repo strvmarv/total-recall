@@ -201,6 +201,9 @@ public static class ServerComposition
         registry.Register(new CompactNowHandler());
         registry.Register(new MigrateToRemoteHandler()); // self-bootstraps source+target stores
 
+        // ---- Insights (1) — self-bootstraps a short-lived local SQLite store ----
+        registry.Register(new InsightsHandler());
+
         return registry;
     }
 
