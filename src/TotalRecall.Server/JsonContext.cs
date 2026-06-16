@@ -214,6 +214,12 @@ public sealed record MemorySearchResultDto(
     [property: JsonPropertyName("content_type")] string ContentType,
     [property: JsonPropertyName("rank")] int Rank);
 
+// Envelope returned by memory_search: the retrieval-event id (for memory_feedback)
+// plus the result array. Empty retrievalId when no telemetry sink is wired.
+public sealed record MemorySearchResponseDto(
+    [property: JsonPropertyName("retrievalId")] string RetrievalId,
+    [property: JsonPropertyName("results")] MemorySearchResultDto[] Results);
+
 // ---------- Task 4.8: memory_get result payload ----------
 //
 // Wire shape matches src-ts/memory/get.ts: `{tier, content_type, entry}`.
@@ -920,6 +926,7 @@ public sealed record InsightsResultDto(
 [JsonSerializable(typeof(JsonElement))]
 [JsonSerializable(typeof(MemorySearchResultDto))]
 [JsonSerializable(typeof(MemorySearchResultDto[]))]
+[JsonSerializable(typeof(MemorySearchResponseDto))]
 [JsonSerializable(typeof(EntryDto))]
 [JsonSerializable(typeof(MemoryGetResultDto))]
 [JsonSerializable(typeof(MemoryGetAllResultDto))]

@@ -77,8 +77,9 @@ public class MemorySearchHandlerTests
         Assert.Single(result.Content);
 
         using var doc = JsonDocument.Parse(result.Content[0].Text);
-        Assert.Equal(JsonValueKind.Array, doc.RootElement.ValueKind);
-        Assert.Equal(0, doc.RootElement.GetArrayLength());
+        var results = doc.RootElement.GetProperty("results");
+        Assert.Equal(JsonValueKind.Array, results.ValueKind);
+        Assert.Equal(0, results.GetArrayLength());
     }
 
     [Fact]
@@ -96,7 +97,7 @@ public class MemorySearchHandlerTests
             CancellationToken.None);
 
         using var doc = JsonDocument.Parse(result.Content[0].Text);
-        var arr = doc.RootElement;
+        var arr = doc.RootElement.GetProperty("results");
         Assert.Equal(2, arr.GetArrayLength());
 
         var r0 = arr[0];
@@ -418,7 +419,7 @@ public class MemorySearchHandlerTests
         Assert.Single(rows);
         var row = rows[0];
         Assert.Equal("hello phase5", row.QueryText);
-        Assert.Equal("memory_search", row.QuerySource);
+        Assert.Equal("assistant", row.QuerySource);
         Assert.Equal(2, row.ResultCount);
         Assert.Equal("unknown", row.SessionId);
         Assert.Equal("default", row.ConfigSnapshotId);
@@ -455,6 +456,44 @@ public class MemorySearchHandlerTests
         Assert.Equal(JsonValueKind.Null, evt.GetProperty("outcome_signal").ValueKind);
         Assert.True(evt.GetProperty("latency_ms").GetDouble() >= 0.0);
         Assert.False(string.IsNullOrEmpty(evt.GetProperty("timestamp").GetString()));
+    }
+
+    [Fact]
+    public async Task MemorySearch_ReturnsEnvelopeWithRetrievalId_AndTagsSource()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+
+        var embed = new RecordingFakeEmbedder();
+        var hybrid = new RecordingFakeHybridSearch
+        {
+            NextResult = new[]
+            {
+                MakeResult("id-a", Tier.Hot, ContentType.Memory, 0.91, 1),
+                MakeResult("id-b", Tier.Warm, ContentType.Knowledge, 0.42, 2),
+            },
+        };
+        var log = new RetrievalEventLog(conn);
+
+        var handler = new MemorySearchHandler(
+            embed, hybrid,
+            scopeDefault: null,
+            retrievalLog: log,
+            syncQueue: null,
+            querySource: "assistant");
+
+        var result = await handler.ExecuteAsync(
+            Args("""{"query":"hello phase5"}"""), CancellationToken.None);
+
+        using var doc = JsonDocument.Parse(result.Content[0].Text);
+        var root = doc.RootElement;
+        Assert.Equal(JsonValueKind.Object, root.ValueKind);
+        Assert.True(root.TryGetProperty("retrievalId", out var rid));
+        Assert.False(string.IsNullOrEmpty(rid.GetString()));
+        Assert.Equal(2, root.GetProperty("results").GetArrayLength());
+
+        var row = log.GetEvents(new RetrievalEventQuery()).Single();
+        Assert.Equal("assistant", row.QuerySource);
     }
 
     [Fact]

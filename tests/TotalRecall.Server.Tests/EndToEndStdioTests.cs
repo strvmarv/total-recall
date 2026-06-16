@@ -157,7 +157,13 @@ public sealed class EndToEndStdioTests
         var searchText = searchContent[0].GetProperty("text").GetString()!;
         using (var searchDoc = JsonDocument.Parse(searchText))
         {
-            var arr = searchDoc.RootElement;
+            // memory_search now returns a {retrievalId, results} envelope. With
+            // no telemetry sink wired into this test registry, retrievalId is
+            // empty and results is an empty array.
+            var root = searchDoc.RootElement;
+            Assert.Equal(JsonValueKind.Object, root.ValueKind);
+            Assert.Equal("", root.GetProperty("retrievalId").GetString());
+            var arr = root.GetProperty("results");
             Assert.Equal(JsonValueKind.Array, arr.ValueKind);
             Assert.Equal(0, arr.GetArrayLength());
         }

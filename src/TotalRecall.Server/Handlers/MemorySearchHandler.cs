@@ -76,19 +76,22 @@ public sealed class MemorySearchHandler : IToolHandler
     private readonly string? _scopeDefault;
     private readonly RetrievalEventLog? _retrievalLog;
     private readonly SyncQueue? _syncQueue;
+    private readonly string _querySource;
 
     public MemorySearchHandler(
         IEmbedder embedder,
         IHybridSearch hybridSearch,
         string? scopeDefault = null,
         RetrievalEventLog? retrievalLog = null,
-        SyncQueue? syncQueue = null)
+        SyncQueue? syncQueue = null,
+        string querySource = "assistant")
     {
         _embedder = embedder ?? throw new ArgumentNullException(nameof(embedder));
         _hybridSearch = hybridSearch ?? throw new ArgumentNullException(nameof(hybridSearch));
         _scopeDefault = scopeDefault;
         _retrievalLog = retrievalLog;
         _syncQueue = syncQueue;
+        _querySource = querySource;
     }
 
     public string Name => "memory_search";
@@ -185,7 +188,11 @@ public sealed class MemorySearchHandler : IToolHandler
 
         // Phase 5: retrieval telemetry. Log locally and enqueue for cortex
         // push. Both sinks are optional — sqlite-only compositions leave
-        // both null and skip this block entirely.
+        // both null and skip this block entirely. The local LogEvent returns
+        // the new event id, which we surface in the response envelope so the
+        // assistant can later call memory_feedback(retrievalId, ...). Stays
+        // empty when no RetrievalEventLog is wired.
+        string retrievalId = "";
         if (_retrievalLog is not null || _syncQueue is not null)
         {
             var tiersSearched = tiers
@@ -208,10 +215,10 @@ public sealed class MemorySearchHandler : IToolHandler
                         Score: r.Score,
                         Rank: r.Rank));
                 }
-                _retrievalLog.LogEvent(new RetrievalEventEntry(
+                retrievalId = _retrievalLog.LogEvent(new RetrievalEventEntry(
                     SessionId: "unknown",          // Phase 5 MVT: no session context yet.
                     QueryText: query,
-                    QuerySource: "memory_search",
+                    QuerySource: _querySource,
                     Results: resultItems,
                     TiersSearched: tiersSearched,
                     ConfigSnapshotId: "default",  // Phase 5 MVT: placeholder.
@@ -230,7 +237,8 @@ public sealed class MemorySearchHandler : IToolHandler
                     timestampUtc: nowUtc));
         }
 
-        var jsonText = JsonSerializer.Serialize(dtos, JsonContext.Default.MemorySearchResultDtoArray);
+        var response = new MemorySearchResponseDto(retrievalId, dtos);
+        var jsonText = JsonSerializer.Serialize(response, JsonContext.Default.MemorySearchResponseDto);
 
         return Task.FromResult(new ToolCallResult
         {
