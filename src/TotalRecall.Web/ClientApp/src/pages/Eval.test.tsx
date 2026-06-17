@@ -177,6 +177,9 @@ describe('Eval page', () => {
     await userEvent.click(within(row).getByRole('button', { name: /accept/i }));
     await userEvent.click(screen.getByRole('button', { name: /^resolve/i }));
     expect(await screen.findByText(/Blocked 1 candidate/i)).toBeInTheDocument();
+    // nothing was written, so the summary must NOT claim the benchmark was written
+    expect(screen.getByText(/Nothing written to the benchmark corpus/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Benchmark written to/i)).not.toBeInTheDocument();
   });
 
   it('compare: Compare button calls eval_compare and renders deltas + regressions/improvements', async () => {

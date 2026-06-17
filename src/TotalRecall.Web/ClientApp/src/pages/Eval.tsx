@@ -320,7 +320,10 @@ function GrowSection({ focusQuery }: { focusQuery?: string }) {
       {resolveError && <p className="tr-card-error" role="alert" title={resolveError}>Resolve failed.</p>}
       {resolveResult && (
         <p className="tr-stat-sub" role="status">
-          Accepted {num(resolveResult.accepted)} · rejected {num(resolveResult.rejected)}. Benchmark written to <code>{resolveResult.benchmarkPath}</code>.
+          Accepted {num(resolveResult.accepted)} · rejected {num(resolveResult.rejected)}.
+          {resolveResult.corpusEntries.length > 0
+            ? <> Benchmark written to <code>{resolveResult.benchmarkPath}</code>.</>
+            : ' Nothing written to the benchmark corpus.'}
         </p>
       )}
       {resolveResult && resolveResult.blocked.length > 0 && (
