@@ -103,3 +103,13 @@ default_ttl_seconds = 600
 # Useful for non-Claude-Code hosts (e.g. Cursor) that don't have a native skills directory.
 # [skills]
 # extra_dirs = ["~/my-skills"]
+
+# --- Eval grow safety (optional) ---
+# `eval_grow` captures real retrieval misses as benchmark candidates. Accepting
+# one appends the query (and a snippet of the surfaced content) to the committed
+# benchmark corpus. Generic secrets/PII (emails, API tokens, private keys) are
+# ALWAYS blocked from being accepted. Add your own internal terms (product names,
+# customers, hostnames) below to block those too — matched case-insensitively as
+# substrings. Blocked candidates stay pending so you can review/redact them.
+# [eval.grow]
+# sensitive_terms = ["acme-internal", "project-codename"]
