@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 3.5.1 - 2026-06-17
+
+### Fixed
+
+- **Web UI "Run benchmark" no longer fails with "Benchmark failed."** `eval_benchmark` (and the CLI `eval benchmark`) defaulted the bundled corpus/benchmark to working-directory-relative paths, so the run threw `FileNotFoundException: corpus not found: eval\corpus\memories.jsonl` whenever the host process (the Web UI server, the MCP host) was launched from anywhere other than the package root. The bundled `eval/` files now resolve relative to the binary location (walking up from `AppContext.BaseDirectory`), the same way the embedder locates `models/`. The shared resolution lives in a new `EvalPaths` helper, which also replaces the two duplicated path-resolvers that `eval_grow` had been carrying.
+
 ## 3.5.0 - 2026-06-16
 
 ### Added
