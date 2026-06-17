@@ -38,6 +38,10 @@ public static class EvalPaths
     /// </summary>
     public static string ResolveFrom(string startDir, params string[] segments)
     {
+        ArgumentException.ThrowIfNullOrEmpty(startDir);
+        if (segments is null || segments.Length == 0)
+            throw new ArgumentException("at least one path segment is required", nameof(segments));
+
         var dir = new DirectoryInfo(startDir);
         while (dir is not null)
         {

@@ -57,4 +57,23 @@ public sealed class EvalPathsTests : IDisposable
 
         Assert.Equal(Path.Combine("eval", "benchmarks", "retrieval.jsonl"), resolved);
     }
+
+    [Fact]
+    public void ResolveFrom_Throws_OnEmptySegments()
+    {
+        // Without segments the result would silently collapse to "eval" and
+        // mis-resolve. Reject it at the API boundary instead.
+        Assert.Throws<ArgumentException>(() => EvalPaths.ResolveFrom(_root));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void ResolveFrom_Throws_OnMissingStartDir(string? startDir)
+    {
+        // ArgumentNullException (null) / ArgumentException (empty) both derive
+        // from ArgumentException.
+        Assert.ThrowsAny<ArgumentException>(
+            () => EvalPaths.ResolveFrom(startDir!, "corpus", "memories.jsonl"));
+    }
 }

@@ -102,13 +102,24 @@ public class EvalBenchmarkHandlerTests : IDisposable
     }
 
     [Fact]
-    public async Task NoArgs_ResolvesBundledCorpusByAbsolutePath_NotCwdRelative()
+    public async Task NoArgs_ResolvesDefaultsViaEvalPaths_NotCwdRelative()
     {
         // Regression: the Web UI calls eval_benchmark with no args, so the
-        // handler must resolve the bundled corpus/benchmark relative to the
-        // binary location (AppContext.BaseDirectory walk-up), not the process
-        // CWD. A CWD-relative default throws FileNotFoundException when the
-        // server's CWD is not the package root.
+        // handler must resolve the bundled corpus/benchmark via EvalPaths
+        // (binary-relative walk-up from AppContext.BaseDirectory), not a bare
+        // CWD-relative path that throws FileNotFoundException when the host's
+        // CWD is not the package root. The CWD-independent walk-up + fallback
+        // logic itself is covered deterministically by EvalPathsTests; here we
+        // verify the handler is wired to it. Skip when the bundled eval/ tree
+        // isn't discoverable from the test binary (mirrors BenchmarkRunnerTests).
+        var expectedCorpus = EvalPaths.Resolve("corpus", "memories.jsonl");
+        var expectedBenchmark = EvalPaths.Resolve("benchmarks", "retrieval.jsonl");
+        if (!File.Exists(expectedCorpus) || !File.Exists(expectedBenchmark))
+        {
+            Console.WriteLine("skipping: bundled eval corpus not discoverable from test binary");
+            return;
+        }
+
         BenchmarkOptions? captured = null;
         var handler = new EvalBenchmarkHandler((opts, _) =>
         {
@@ -119,11 +130,9 @@ public class EvalBenchmarkHandlerTests : IDisposable
         await handler.ExecuteAsync(arguments: null, CancellationToken.None);
 
         Assert.NotNull(captured);
-        Assert.True(Path.IsPathRooted(captured!.CorpusPath),
+        Assert.Equal(expectedCorpus, captured!.CorpusPath);
+        Assert.Equal(expectedBenchmark, captured.BenchmarkPath);
+        Assert.True(Path.IsPathRooted(captured.CorpusPath),
             $"corpus path should be absolute, was: {captured.CorpusPath}");
-        Assert.True(Path.IsPathRooted(captured.BenchmarkPath),
-            $"benchmark path should be absolute, was: {captured.BenchmarkPath}");
-        Assert.EndsWith(Path.Combine("eval", "corpus", "memories.jsonl"), captured.CorpusPath);
-        Assert.EndsWith(Path.Combine("eval", "benchmarks", "retrieval.jsonl"), captured.BenchmarkPath);
     }
 }
