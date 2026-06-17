@@ -48,8 +48,8 @@ public sealed class BenchmarkCommand : ICliCommand
 
     public async Task<int> RunAsync(string[] args)
     {
-        string corpusPath = Path.Combine("eval", "corpus", "memories.jsonl");
-        string benchmarkPath = Path.Combine("eval", "benchmarks", "retrieval.jsonl");
+        string corpusPath = EvalPaths.Resolve("corpus", "memories.jsonl");
+        string benchmarkPath = EvalPaths.Resolve("benchmarks", "retrieval.jsonl");
         bool verbose = false;
 
         for (int i = 0; i < args.Length; i++)

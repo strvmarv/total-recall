@@ -100,4 +100,30 @@ public class EvalBenchmarkHandlerTests : IDisposable
         var handler = new EvalBenchmarkHandler((_, _) => Task.FromResult(FakeResult()));
         Assert.Equal("eval_benchmark", handler.Name);
     }
+
+    [Fact]
+    public async Task NoArgs_ResolvesBundledCorpusByAbsolutePath_NotCwdRelative()
+    {
+        // Regression: the Web UI calls eval_benchmark with no args, so the
+        // handler must resolve the bundled corpus/benchmark relative to the
+        // binary location (AppContext.BaseDirectory walk-up), not the process
+        // CWD. A CWD-relative default throws FileNotFoundException when the
+        // server's CWD is not the package root.
+        BenchmarkOptions? captured = null;
+        var handler = new EvalBenchmarkHandler((opts, _) =>
+        {
+            captured = opts;
+            return Task.FromResult(FakeResult());
+        });
+
+        await handler.ExecuteAsync(arguments: null, CancellationToken.None);
+
+        Assert.NotNull(captured);
+        Assert.True(Path.IsPathRooted(captured!.CorpusPath),
+            $"corpus path should be absolute, was: {captured.CorpusPath}");
+        Assert.True(Path.IsPathRooted(captured.BenchmarkPath),
+            $"benchmark path should be absolute, was: {captured.BenchmarkPath}");
+        Assert.EndsWith(Path.Combine("eval", "corpus", "memories.jsonl"), captured.CorpusPath);
+        Assert.EndsWith(Path.Combine("eval", "benchmarks", "retrieval.jsonl"), captured.BenchmarkPath);
+    }
 }

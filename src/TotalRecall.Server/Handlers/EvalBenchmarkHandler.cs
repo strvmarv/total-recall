@@ -59,8 +59,8 @@ public sealed class EvalBenchmarkHandler : IToolHandler
 
     public async Task<ToolCallResult> ExecuteAsync(JsonElement? arguments, CancellationToken ct)
     {
-        string corpusPath = Path.Combine("eval", "corpus", "memories.jsonl");
-        string benchmarkPath = Path.Combine("eval", "benchmarks", "retrieval.jsonl");
+        string corpusPath = EvalPaths.Resolve("corpus", "memories.jsonl");
+        string benchmarkPath = EvalPaths.Resolve("benchmarks", "retrieval.jsonl");
 
         if (arguments.HasValue && arguments.Value.ValueKind == JsonValueKind.Object)
         {

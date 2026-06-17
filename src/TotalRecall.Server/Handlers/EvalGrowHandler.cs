@@ -14,7 +14,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -115,7 +114,7 @@ public sealed class EvalGrowHandler : IToolHandler
             {
                 var accepts = ReadStringArray(args, "accept");
                 var rejects = ReadStringArray(args, "reject");
-                string benchmarkPath = ResolveDefaultBenchmarkPath();
+                string benchmarkPath = EvalPaths.Resolve("benchmarks", "retrieval.jsonl");
                 if (args.TryGetProperty("benchmark", out var bEl) && bEl.ValueKind == JsonValueKind.String)
                 {
                     var s = bEl.GetString();
@@ -157,18 +156,6 @@ public sealed class EvalGrowHandler : IToolHandler
             if (!string.IsNullOrEmpty(s)) list.Add(s);
         }
         return list;
-    }
-
-    private static string ResolveDefaultBenchmarkPath()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null)
-        {
-            var candidate = Path.Combine(dir.FullName, "eval", "benchmarks", "retrieval.jsonl");
-            if (File.Exists(candidate)) return candidate;
-            dir = dir.Parent;
-        }
-        return Path.Combine("eval", "benchmarks", "retrieval.jsonl");
     }
 
     private static IEvalGrowExecutor BuildProductionExecutor() => new ProductionGrowExecutor();

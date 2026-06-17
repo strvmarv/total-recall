@@ -107,7 +107,7 @@ public sealed class GrowCommand : ICliCommand
                     RenderList(executor.ListPending());
                     return Task.FromResult(0);
                 case "resolve":
-                    var path = benchmarkPath ?? ResolveDefaultBenchmarkPath();
+                    var path = benchmarkPath ?? EvalPaths.Resolve("benchmarks", "retrieval.jsonl");
                     var result = executor.Resolve(accepts, rejects, path);
                     Console.Out.WriteLine(
                         $"Accepted {result.Accepted}, rejected {result.Rejected}. " +
@@ -133,18 +133,6 @@ public sealed class GrowCommand : ICliCommand
             var trimmed = part.Trim();
             if (trimmed.Length > 0) target.Add(trimmed);
         }
-    }
-
-    private static string ResolveDefaultBenchmarkPath()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null)
-        {
-            var candidate = Path.Combine(dir.FullName, "eval", "benchmarks", "retrieval.jsonl");
-            if (File.Exists(candidate)) return candidate;
-            dir = dir.Parent;
-        }
-        return Path.Combine("eval", "benchmarks", "retrieval.jsonl");
     }
 
     private static void RenderList(IReadOnlyList<CandidateRow> rows)
