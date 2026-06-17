@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 3.5.2 - 2026-06-17
+
+### Security
+
+- **The retrieval benchmark no longer touches or surfaces your live data.** `eval_benchmark` (and the CLI `eval benchmark`) ran against your real database — seeding the synthetic corpus into it and hybrid-searching the whole store — so per-query results could surface real memories/KB (internal names, even secret-bearing docs) and the seeded corpus was outranked by your real entries. The benchmark now runs against an isolated, ephemeral database created, used, and deleted per run: your live store is never read or written, and match rates reflect only the corpus.
+- **`eval_grow` can no longer leak sensitive content into the public benchmark.** Candidates are captured from real retrieval misses; accepting one appended the query and a snippet of the surfaced content to the committed `eval/benchmarks/retrieval.jsonl`. Accepts are now scanned and blocked when they contain secrets/PII (emails, API tokens, private keys — always on) or a configured internal term; blocked candidates stay pending for review. The CLI table and web UI grow list flag sensitive candidates.
+
+### Added
+
+- **`eval.grow.sensitive_terms` config** (string array, default empty) — caller-supplied internal terms (product names, customers, hostnames) to block from the grow benchmark, on top of the always-on generic secret/PII detection. Matched case-insensitively as substrings and kept in your **local** config, so no internal names ship in the public defaults.
+
 ## 3.5.1 - 2026-06-17
 
 ### Fixed

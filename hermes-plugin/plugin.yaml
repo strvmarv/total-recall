@@ -1,5 +1,5 @@
 name: total-recall
-version: 3.5.1
+version: 3.5.2
 description: Persistent cross-session memory via total-recall MCP server
 author: strvmarv
 platforms: [linux, macos, windows]
