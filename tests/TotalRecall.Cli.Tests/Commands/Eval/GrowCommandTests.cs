@@ -46,7 +46,7 @@ public sealed class GrowCommandTests : IDisposable
             LastAccepts = accepts;
             LastRejects = rejects;
             LastPath = benchmarkPath;
-            return new CandidateResolveResult(accepts.Count, rejects.Count, new List<string> { "{\"query\":\"x\"}" });
+            return new CandidateResolveResult(accepts.Count, rejects.Count, new List<string> { "{\"query\":\"x\"}" }, Array.Empty<BlockedCandidate>());
         }
     }
 

@@ -97,7 +97,8 @@ public sealed class EvalGrowHandler : IToolHandler
                         FirstSeen: r.FirstSeen,
                         LastSeen: r.LastSeen,
                         TimesSeen: r.TimesSeen,
-                        Status: r.Status);
+                        Status: r.Status,
+                        Sensitive: r.Sensitive);
                 }
                 var dto = new EvalGrowListResultDto(
                     Action: "list",
@@ -123,12 +124,21 @@ public sealed class EvalGrowHandler : IToolHandler
                 var result = executor.Resolve(accepts, rejects, benchmarkPath);
                 var corpus = new string[result.CorpusEntries.Count];
                 for (int i = 0; i < corpus.Length; i++) corpus[i] = result.CorpusEntries[i];
+                var blocked = new EvalGrowBlockedDto[result.Blocked.Count];
+                for (int i = 0; i < blocked.Length; i++)
+                {
+                    var b = result.Blocked[i];
+                    var reasons = new string[b.Reasons.Count];
+                    for (int j = 0; j < reasons.Length; j++) reasons[j] = b.Reasons[j];
+                    blocked[i] = new EvalGrowBlockedDto(b.Id, reasons);
+                }
                 var dto = new EvalGrowResolveResultDto(
                     Action: "resolve",
                     Accepted: result.Accepted,
                     Rejected: result.Rejected,
                     CorpusEntries: corpus,
-                    BenchmarkPath: benchmarkPath);
+                    BenchmarkPath: benchmarkPath,
+                    Blocked: blocked);
                 var jsonText = JsonSerializer.Serialize(dto, JsonContext.Default.EvalGrowResolveResultDto);
                 return Task.FromResult(new ToolCallResult
                 {
@@ -164,12 +174,13 @@ public sealed class EvalGrowHandler : IToolHandler
     {
         public IReadOnlyList<CandidateRow> ListPending()
         {
+            var terms = ConfigLoader.LoadGrowSensitiveTerms();
             var dbPath = ConfigLoader.GetDbPath();
             var conn = SqliteConnection.Open(dbPath);
             try
             {
                 MigrationRunner.RunMigrations(conn);
-                return new BenchmarkCandidates(conn).ListPending();
+                return new BenchmarkCandidates(conn).ListPending(terms);
             }
             finally
             {
@@ -180,12 +191,13 @@ public sealed class EvalGrowHandler : IToolHandler
         public CandidateResolveResult Resolve(
             IReadOnlyList<string> accepts, IReadOnlyList<string> rejects, string benchmarkPath)
         {
+            var terms = ConfigLoader.LoadGrowSensitiveTerms();
             var dbPath = ConfigLoader.GetDbPath();
             var conn = SqliteConnection.Open(dbPath);
             try
             {
                 MigrationRunner.RunMigrations(conn);
-                return new BenchmarkCandidates(conn).Resolve(accepts, rejects, benchmarkPath);
+                return new BenchmarkCandidates(conn).Resolve(accepts, rejects, benchmarkPath, terms);
             }
             finally
             {

@@ -39,7 +39,8 @@ public sealed record CandidateRow(
     long FirstSeen,
     long LastSeen,
     int TimesSeen,
-    string Status);
+    string Status,
+    bool Sensitive = false);
 
 /// <summary>
 /// Context attached to a miss when upserting it as a benchmark candidate.
@@ -48,15 +49,22 @@ public sealed record CandidateRow(
 /// </summary>
 public sealed record MissContext(string Query, string? TopContent, string? TopEntryId);
 
+/// <summary>A candidate the accept guard refused to write, with category reasons.</summary>
+public sealed record BlockedCandidate(string Id, IReadOnlyList<string> Reasons);
+
 /// <summary>
-/// Result of <see cref="BenchmarkCandidates.Resolve"/>. Counts mirror the
-/// number of accept/reject ids the caller passed in; <see cref="CorpusEntries"/>
-/// is the set of JSON lines appended to the benchmark corpus file.
+/// Result of <see cref="BenchmarkCandidates.Resolve"/>. <see cref="Accepted"/>
+/// and <see cref="Rejected"/> mirror the accept/reject id counts the caller
+/// passed in (legacy contract). <see cref="CorpusEntries"/> is the set of JSON
+/// lines actually appended to the benchmark corpus — blocked and unknown ids
+/// are excluded. <see cref="Blocked"/> lists accept ids withheld because their
+/// query or surfaced content tripped the sensitivity guard (left pending).
 /// </summary>
 public sealed record CandidateResolveResult(
     int Accepted,
     int Rejected,
-    IReadOnlyList<string> CorpusEntries);
+    IReadOnlyList<string> CorpusEntries,
+    IReadOnlyList<BlockedCandidate> Blocked);
 
 /// <summary>
 /// Read/upsert helpers over <c>benchmark_candidates</c>. The 5.3a slice
@@ -77,7 +85,7 @@ public sealed class BenchmarkCandidates
     /// <c>times_seen DESC, top_score ASC</c>. Mirrors <c>listCandidates</c>
     /// in TS.
     /// </summary>
-    public IReadOnlyList<CandidateRow> ListPending()
+    public IReadOnlyList<CandidateRow> ListPending(IReadOnlyCollection<string>? sensitiveTerms = null)
     {
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = @"
@@ -91,19 +99,27 @@ ORDER BY times_seen DESC, top_score ASC";
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
         {
+            var queryText = reader.GetString(1);
+            var topContent = reader.IsDBNull(3) ? null : reader.GetString(3);
             rows.Add(new CandidateRow(
                 Id: reader.GetString(0),
-                QueryText: reader.GetString(1),
+                QueryText: queryText,
                 TopScore: reader.IsDBNull(2) ? 0.0 : reader.GetDouble(2),
-                TopResultContent: reader.IsDBNull(3) ? null : reader.GetString(3),
+                TopResultContent: topContent,
                 TopResultEntryId: reader.IsDBNull(4) ? null : reader.GetString(4),
                 FirstSeen: reader.GetInt64(5),
                 LastSeen: reader.GetInt64(6),
                 TimesSeen: reader.GetInt32(7),
-                Status: reader.GetString(8)));
+                Status: reader.GetString(8),
+                Sensitive: IsSensitive(queryText, topContent, sensitiveTerms)));
         }
         return rows;
     }
+
+    private static bool IsSensitive(
+        string query, string? content, IReadOnlyCollection<string>? terms)
+        => SensitiveContentScanner.Scan(query, terms).Count > 0
+            || SensitiveContentScanner.Scan(content, terms).Count > 0;
 
     /// <summary>
     /// Upsert one row per miss. New rows start at <c>times_seen=1</c> and
@@ -165,13 +181,15 @@ ON CONFLICT(query_text) DO UPDATE SET
     public CandidateResolveResult Resolve(
         IReadOnlyList<string> acceptIds,
         IReadOnlyList<string> rejectIds,
-        string benchmarkFilePath)
+        string benchmarkFilePath,
+        IReadOnlyCollection<string>? sensitiveTerms = null)
     {
         ArgumentNullException.ThrowIfNull(acceptIds);
         ArgumentNullException.ThrowIfNull(rejectIds);
         ArgumentNullException.ThrowIfNull(benchmarkFilePath);
 
         var corpusEntries = new List<string>();
+        var blocked = new List<BlockedCandidate>();
         var today = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
         // Plan 5 Task 5.10 — make accept/reject + file append atomic.
@@ -214,6 +232,19 @@ ON CONFLICT(query_text) DO UPDATE SET
                     }
                 }
                 if (query is null) continue;
+
+                // Accept guard: never append a real captured query/content to
+                // the public benchmark corpus if it carries secrets, PII, or a
+                // configured internal term. Blocked candidates are left pending
+                // so the operator can review/redact them.
+                var reasons = new List<string>();
+                reasons.AddRange(SensitiveContentScanner.Scan(query, sensitiveTerms));
+                reasons.AddRange(SensitiveContentScanner.Scan(topContent, sensitiveTerms));
+                if (reasons.Count > 0)
+                {
+                    blocked.Add(new BlockedCandidate(id, reasons));
+                    continue;
+                }
 
                 pAcceptId.Value = id;
                 acceptCmd.ExecuteNonQuery();
@@ -283,7 +314,8 @@ ON CONFLICT(query_text) DO UPDATE SET
         return new CandidateResolveResult(
             Accepted: acceptIds.Count,
             Rejected: rejectIds.Count,
-            CorpusEntries: corpusEntries);
+            CorpusEntries: corpusEntries,
+            Blocked: blocked);
     }
 
     private static string BuildCorpusEntry(string query, string expectedContains, string addedDate)

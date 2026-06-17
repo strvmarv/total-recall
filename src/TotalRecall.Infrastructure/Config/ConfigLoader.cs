@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Microsoft.FSharp.Core;
@@ -133,6 +134,29 @@ public sealed class ConfigLoader : IConfigLoader
         }
 
         return expanded;
+    }
+
+    /// <summary>
+    /// Read <c>eval.grow.sensitive_terms</c> from the effective config — the
+    /// caller-supplied internal-term denylist for the eval_grow accept guard.
+    /// Defaults to an empty list (no internal names ship in <c>defaults.toml</c>).
+    /// Blank entries are dropped.
+    /// </summary>
+    public static IReadOnlyList<string> LoadGrowSensitiveTerms(string? userConfigPath = null)
+    {
+        var table = new ConfigLoader().LoadEffectiveTable(userConfigPath);
+        if (table.TryGetValue("eval", out var evalObj) && evalObj is TomlTable evalTable
+            && evalTable.TryGetValue("grow", out var growObj) && growObj is TomlTable growTable
+            && growTable.TryGetValue("sensitive_terms", out var termsObj) && termsObj is TomlArray arr)
+        {
+            var list = new List<string>(arr.Count);
+            foreach (var item in arr)
+            {
+                if (item is string s && !string.IsNullOrWhiteSpace(s)) list.Add(s);
+            }
+            return list;
+        }
+        return Array.Empty<string>();
     }
 
     /// <inheritdoc/>

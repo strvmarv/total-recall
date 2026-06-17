@@ -34,7 +34,8 @@ public class EvalGrowHandlerTests
             return NextResolveResult ?? new CandidateResolveResult(
                 Accepted: accepts.Count,
                 Rejected: rejects.Count,
-                CorpusEntries: Array.Empty<string>());
+                CorpusEntries: Array.Empty<string>(),
+                Blocked: Array.Empty<BlockedCandidate>());
         }
     }
 
@@ -65,7 +66,8 @@ public class EvalGrowHandlerTests
             NextResolveResult = new CandidateResolveResult(
                 Accepted: 2,
                 Rejected: 1,
-                CorpusEntries: new[] { "{\"query\":\"q1\"}", "{\"query\":\"q2\"}" }),
+                CorpusEntries: new[] { "{\"query\":\"q1\"}", "{\"query\":\"q2\"}" },
+                Blocked: Array.Empty<BlockedCandidate>()),
         };
         var handler = new EvalGrowHandler(fake);
         var result = await handler.ExecuteAsync(
@@ -119,6 +121,41 @@ public class EvalGrowHandlerTests
         Assert.NotNull(dto);
         Assert.Equal("list", dto!.Action);
         Assert.Single(dto.Candidates);
+    }
+
+    [Fact]
+    public async Task List_SurfacesSensitiveFlag()
+    {
+        var fake = new FakeGrow();
+        fake.Rows.Add(new CandidateRow("id1", "clean", 0.1, "fine", null, 1, 2, 1, "pending", Sensitive: false));
+        fake.Rows.Add(new CandidateRow("id2", "secret", 0.1, "ghp_x", null, 1, 2, 1, "pending", Sensitive: true));
+        var handler = new EvalGrowHandler(fake);
+        var result = await handler.ExecuteAsync(Args("""{"action":"list"}"""), CancellationToken.None);
+        using var doc = JsonDocument.Parse(result.Content[0].Text);
+        var cands = doc.RootElement.GetProperty("candidates");
+        Assert.False(cands[0].GetProperty("sensitive").GetBoolean());
+        Assert.True(cands[1].GetProperty("sensitive").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Resolve_SurfacesBlockedCandidates()
+    {
+        var fake = new FakeGrow
+        {
+            NextResolveResult = new CandidateResolveResult(
+                Accepted: 1,
+                Rejected: 0,
+                CorpusEntries: Array.Empty<string>(),
+                Blocked: new[] { new BlockedCandidate("id9", new[] { "API token or secret" }) }),
+        };
+        var handler = new EvalGrowHandler(fake);
+        var result = await handler.ExecuteAsync(
+            Args("""{"action":"resolve","accept":["id9"]}"""), CancellationToken.None);
+        using var doc = JsonDocument.Parse(result.Content[0].Text);
+        var blocked = doc.RootElement.GetProperty("blocked");
+        Assert.Equal(1, blocked.GetArrayLength());
+        Assert.Equal("id9", blocked[0].GetProperty("id").GetString());
+        Assert.Equal("API token or secret", blocked[0].GetProperty("reasons")[0].GetString());
     }
 
     [Fact]

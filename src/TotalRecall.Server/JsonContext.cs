@@ -706,19 +706,25 @@ public sealed record EvalGrowCandidateDto(
     [property: JsonPropertyName("firstSeen")] long FirstSeen,
     [property: JsonPropertyName("lastSeen")] long LastSeen,
     [property: JsonPropertyName("timesSeen")] int TimesSeen,
-    [property: JsonPropertyName("status")] string Status);
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("sensitive")] bool Sensitive);
 
 public sealed record EvalGrowListResultDto(
     [property: JsonPropertyName("action")] string Action,
     [property: JsonPropertyName("candidates")] EvalGrowCandidateDto[] Candidates,
     [property: JsonPropertyName("count")] int Count);
 
+public sealed record EvalGrowBlockedDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("reasons")] string[] Reasons);
+
 public sealed record EvalGrowResolveResultDto(
     [property: JsonPropertyName("action")] string Action,
     [property: JsonPropertyName("accepted")] int Accepted,
     [property: JsonPropertyName("rejected")] int Rejected,
     [property: JsonPropertyName("corpusEntries")] string[] CorpusEntries,
-    [property: JsonPropertyName("benchmarkPath")] string BenchmarkPath);
+    [property: JsonPropertyName("benchmarkPath")] string BenchmarkPath,
+    [property: JsonPropertyName("blocked")] EvalGrowBlockedDto[] Blocked);
 
 // ---- Task 6.0d: Config + misc DTOs ----
 //
@@ -1031,6 +1037,8 @@ public sealed record InsightsResultDto(
 [JsonSerializable(typeof(EvalGrowCandidateDto[]))]
 [JsonSerializable(typeof(EvalGrowListResultDto))]
 [JsonSerializable(typeof(EvalGrowResolveResultDto))]
+[JsonSerializable(typeof(EvalGrowBlockedDto))]
+[JsonSerializable(typeof(EvalGrowBlockedDto[]))]
 // ---- Task 6.0d: Config + misc DTOs ----
 [JsonSerializable(typeof(ConfigSetResultDto))]
 [JsonSerializable(typeof(ImportHostSourceDto))]

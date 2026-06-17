@@ -112,6 +112,14 @@ public sealed class GrowCommand : ICliCommand
                     Console.Out.WriteLine(
                         $"Accepted {result.Accepted}, rejected {result.Rejected}. " +
                         $"Appended {result.CorpusEntries.Count} corpus entries to {path}.");
+                    if (result.Blocked.Count > 0)
+                    {
+                        Console.Out.WriteLine(
+                            $"Blocked {result.Blocked.Count} candidate(s) for sensitive content " +
+                            "(left pending — review/redact before accepting):");
+                        foreach (var b in result.Blocked)
+                            Console.Out.WriteLine($"  {b.Id}: {string.Join(", ", b.Reasons)}");
+                    }
                     return Task.FromResult(0);
                 default:
                     Console.Error.WriteLine($"eval grow: unknown action '{action}' (expected list|resolve)");
@@ -143,6 +151,7 @@ public sealed class GrowCommand : ICliCommand
         t.AddColumn(new TableColumn("Top Score").RightAligned());
         t.AddColumn("Top Content");
         t.AddColumn(new TableColumn("Times Seen").RightAligned());
+        t.AddColumn("Sensitive");
         t.AddColumn("First Seen");
         t.AddColumn("Last Seen");
         foreach (var r in rows)
@@ -153,6 +162,7 @@ public sealed class GrowCommand : ICliCommand
                 r.TopScore.ToString("F3", CultureInfo.InvariantCulture),
                 Markup.Escape(Truncate(r.TopResultContent ?? "(none)", 50)),
                 r.TimesSeen.ToString(CultureInfo.InvariantCulture),
+                r.Sensitive ? "[red]yes[/]" : "",
                 r.FirstSeen.ToString(CultureInfo.InvariantCulture),
                 r.LastSeen.ToString(CultureInfo.InvariantCulture));
         }
@@ -174,12 +184,13 @@ public sealed class GrowCommand : ICliCommand
     {
         public IReadOnlyList<CandidateRow> ListPending()
         {
+            var terms = ConfigLoader.LoadGrowSensitiveTerms();
             var dbPath = ConfigLoader.GetDbPath();
             var conn = SqliteConnection.Open(dbPath);
             try
             {
                 MigrationRunner.RunMigrations(conn);
-                return new BenchmarkCandidates(conn).ListPending();
+                return new BenchmarkCandidates(conn).ListPending(terms);
             }
             finally
             {
@@ -189,12 +200,13 @@ public sealed class GrowCommand : ICliCommand
 
         public CandidateResolveResult Resolve(IReadOnlyList<string> accepts, IReadOnlyList<string> rejects, string benchmarkPath)
         {
+            var terms = ConfigLoader.LoadGrowSensitiveTerms();
             var dbPath = ConfigLoader.GetDbPath();
             var conn = SqliteConnection.Open(dbPath);
             try
             {
                 MigrationRunner.RunMigrations(conn);
-                return new BenchmarkCandidates(conn).Resolve(accepts, rejects, benchmarkPath);
+                return new BenchmarkCandidates(conn).Resolve(accepts, rejects, benchmarkPath, terms);
             }
             finally
             {
