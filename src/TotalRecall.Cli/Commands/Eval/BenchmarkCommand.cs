@@ -14,11 +14,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Spectre.Console;
 using TotalRecall.Cli.Internal;
-using TotalRecall.Infrastructure.Config;
-using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Eval;
-using TotalRecall.Infrastructure.Search;
-using TotalRecall.Infrastructure.Storage;
 using TotalRecall.Infrastructure.Telemetry;
 
 namespace TotalRecall.Cli.Commands.Eval;
@@ -112,29 +108,9 @@ public sealed class BenchmarkCommand : ICliCommand
         return 0;
     }
 
-    private static BenchmarkExecutor BuildProductionExecutor()
-    {
-        return async (opts, ct) =>
-        {
-            var dbPath = ConfigLoader.GetDbPath();
-            var conn = SqliteConnection.Open(dbPath);
-            try
-            {
-                MigrationRunner.RunMigrations(conn);
-                var store = new SqliteStore(conn);
-                var vec = new VectorSearch(conn);
-                var fts = new FtsSearch(conn);
-                var hybrid = new HybridSearch(vec, fts, store);
-                var embedder = EmbedderFactory.CreateProduction();
-                var runner = new BenchmarkRunner(store, vec, hybrid, embedder);
-                return await runner.RunAsync(opts, ct).ConfigureAwait(false);
-            }
-            finally
-            {
-                conn.Dispose();
-            }
-        };
-    }
+    // The benchmark runs against an isolated, ephemeral DB — never the live
+    // store — so it cannot surface or mutate real memories/KB. See IsolatedBenchmark.
+    private static BenchmarkExecutor BuildProductionExecutor() => IsolatedBenchmark.RunAsync;
 
     private static void Render(BenchmarkResult result, bool verbose)
     {

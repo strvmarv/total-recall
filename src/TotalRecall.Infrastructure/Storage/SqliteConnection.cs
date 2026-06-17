@@ -33,9 +33,17 @@ public static class SqliteConnection
     /// and <c>total-recall ui</c> share one DB file). Read-only importer paths that build
     /// their own connection string intentionally bypass this.
     /// </remarks>
-    public static MsSqliteConnection Open(string dbPath)
+    /// <param name="pooling">
+    /// When <c>false</c>, opens with connection pooling disabled so
+    /// <see cref="System.IDisposable.Dispose"/> releases the file handle
+    /// immediately. Used by throwaway databases (e.g. the isolated benchmark)
+    /// that must be deletable right after use; default <c>true</c> preserves
+    /// pooling for the long-lived shared store.
+    /// </param>
+    public static MsSqliteConnection Open(string dbPath, bool pooling = true)
     {
-        var conn = new MsSqliteConnection($"Data Source={dbPath}");
+        var connString = pooling ? $"Data Source={dbPath}" : $"Data Source={dbPath};Pooling=False";
+        var conn = new MsSqliteConnection(connString);
         try
         {
             conn.Open();

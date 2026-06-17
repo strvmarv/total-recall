@@ -19,11 +19,7 @@ using System.IO;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using TotalRecall.Infrastructure.Config;
-using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Eval;
-using TotalRecall.Infrastructure.Search;
-using TotalRecall.Infrastructure.Storage;
 
 namespace TotalRecall.Server.Handlers;
 
@@ -119,27 +115,7 @@ public sealed class EvalBenchmarkHandler : IToolHandler
         };
     }
 
-    private static EvalBenchmarkExecutor BuildProductionExecutor()
-    {
-        return async (opts, ct) =>
-        {
-            var dbPath = ConfigLoader.GetDbPath();
-            var conn = SqliteConnection.Open(dbPath);
-            try
-            {
-                MigrationRunner.RunMigrations(conn);
-                var store = new SqliteStore(conn);
-                var vec = new VectorSearch(conn);
-                var fts = new FtsSearch(conn);
-                var hybrid = new HybridSearch(vec, fts, store);
-                var embedder = EmbedderFactory.CreateProduction();
-                var runner = new BenchmarkRunner(store, vec, hybrid, embedder);
-                return await runner.RunAsync(opts, ct).ConfigureAwait(false);
-            }
-            finally
-            {
-                conn.Dispose();
-            }
-        };
-    }
+    // The benchmark runs against an isolated, ephemeral DB — never the live
+    // store — so it cannot surface or mutate real memories/KB. See IsolatedBenchmark.
+    private static EvalBenchmarkExecutor BuildProductionExecutor() => IsolatedBenchmark.RunAsync;
 }
