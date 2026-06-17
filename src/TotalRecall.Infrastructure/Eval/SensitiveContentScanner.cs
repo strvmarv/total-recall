@@ -62,9 +62,14 @@ public static class SensitiveContentScanner
             foreach (var raw in internalTerms)
             {
                 if (string.IsNullOrWhiteSpace(raw)) continue;
-                var term = raw.Trim();
-                if (text.Contains(term, StringComparison.OrdinalIgnoreCase))
-                    reasons.Add($"internal term: {term}");
+                if (text.Contains(raw.Trim(), StringComparison.OrdinalIgnoreCase))
+                {
+                    // Category label only — never echo the matched term, in case
+                    // an operator put a real secret in sensitive_terms. One reason
+                    // is enough regardless of how many terms matched.
+                    reasons.Add("internal term");
+                    break;
+                }
             }
         }
 

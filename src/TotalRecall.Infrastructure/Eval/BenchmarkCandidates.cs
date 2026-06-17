@@ -54,11 +54,13 @@ public sealed record BlockedCandidate(string Id, IReadOnlyList<string> Reasons);
 
 /// <summary>
 /// Result of <see cref="BenchmarkCandidates.Resolve"/>. <see cref="Accepted"/>
-/// and <see cref="Rejected"/> mirror the accept/reject id counts the caller
-/// passed in (legacy contract). <see cref="CorpusEntries"/> is the set of JSON
-/// lines actually appended to the benchmark corpus — blocked and unknown ids
-/// are excluded. <see cref="Blocked"/> lists accept ids withheld because their
-/// query or surfaced content tripped the sensitivity guard (left pending).
+/// is the number of candidates ACTUALLY written to the corpus (accept ids that
+/// existed and passed the sensitivity guard) — unknown ids and blocked ids are
+/// NOT counted, so the headline number never overstates what landed.
+/// <see cref="Rejected"/> mirrors the reject id count the caller passed in.
+/// <see cref="CorpusEntries"/> is the set of JSON lines appended (count equals
+/// <see cref="Accepted"/>). <see cref="Blocked"/> lists accept ids withheld
+/// because their query or surfaced content tripped the guard (left pending).
 /// </summary>
 public sealed record CandidateResolveResult(
     int Accepted,
@@ -312,7 +314,7 @@ ON CONFLICT(query_text) DO UPDATE SET
         }
 
         return new CandidateResolveResult(
-            Accepted: acceptIds.Count,
+            Accepted: corpusEntries.Count, // actually-written, not caller-requested
             Rejected: rejectIds.Count,
             CorpusEntries: corpusEntries,
             Blocked: blocked);

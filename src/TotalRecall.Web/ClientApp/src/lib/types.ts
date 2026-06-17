@@ -91,9 +91,11 @@ export interface EvalGrowCandidate {
   lastSeen: number;
   timesSeen: number;
   status: string;
+  sensitive: boolean;
 }
+export interface EvalGrowBlocked { id: string; reasons: string[]; }
 export interface EvalGrowListResult { action: string; candidates: EvalGrowCandidate[]; count: number; }
-export interface EvalGrowResolveResult { action: string; accepted: number; rejected: number; corpusEntries: string[]; benchmarkPath: string; }
+export interface EvalGrowResolveResult { action: string; accepted: number; rejected: number; corpusEntries: string[]; benchmarkPath: string; blocked: EvalGrowBlocked[]; }
 
 export interface EvalSnapshotResult { id: string; name: string; deduped: boolean; }
 

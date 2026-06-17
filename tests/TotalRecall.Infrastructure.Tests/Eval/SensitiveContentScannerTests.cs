@@ -31,12 +31,15 @@ public sealed class SensitiveContentScannerTests
     }
 
     [Fact]
-    public void Scan_DetectsConfiguredInternalTerm_CaseInsensitive()
+    public void Scan_DetectsConfiguredInternalTerm_CaseInsensitive_WithoutEchoingTheTerm()
     {
         var reasons = SensitiveContentScanner.Scan(
             "the CORTEX staging rotation procedure",
             new[] { "cortex", "talentbrew" });
-        Assert.Contains(reasons, r => r.Contains("cortex", System.StringComparison.OrdinalIgnoreCase));
+        // Detection fires...
+        Assert.Contains("internal term", reasons);
+        // ...but the matched term value is NEVER echoed (it could be a real secret).
+        Assert.DoesNotContain(reasons, r => r.Contains("cortex", System.StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

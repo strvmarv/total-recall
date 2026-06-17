@@ -29,14 +29,14 @@ const BENCHMARK: EvalBenchmarkResult = {
 const GROW_LIST: EvalGrowListResult = {
   action: 'list',
   candidates: [
-    { id: 'c1', queryText: 'how to deploy', topScore: 0.4, topResultContent: 'deploy doc', topResultEntryId: 'e1', firstSeen: 1, lastSeen: 2, timesSeen: 7, status: 'pending' },
-    { id: 'c2', queryText: 'rollback steps', topScore: 0.3, topResultContent: null, topResultEntryId: null, firstSeen: 1, lastSeen: 2, timesSeen: 3, status: 'pending' },
+    { id: 'c1', queryText: 'how to deploy', topScore: 0.4, topResultContent: 'deploy doc', topResultEntryId: 'e1', firstSeen: 1, lastSeen: 2, timesSeen: 7, status: 'pending', sensitive: false },
+    { id: 'c2', queryText: 'rollback steps', topScore: 0.3, topResultContent: null, topResultEntryId: null, firstSeen: 1, lastSeen: 2, timesSeen: 3, status: 'pending', sensitive: false },
   ],
   count: 2,
 };
 
 const GROW_RESOLVE: EvalGrowResolveResult = {
-  action: 'resolve', accepted: 1, rejected: 1, corpusEntries: ['c1'], benchmarkPath: '/data/benchmark.jsonl',
+  action: 'resolve', accepted: 1, rejected: 1, corpusEntries: ['c1'], benchmarkPath: '/data/benchmark.jsonl', blocked: [],
 };
 
 const COMPARE: EvalCompareResult = {
@@ -148,6 +148,35 @@ describe('Eval page', () => {
     });
     // resolve result surfaced
     expect(await screen.findByText(/\/data\/benchmark\.jsonl/)).toBeInTheDocument();
+  });
+
+  it('grow: flags sensitive candidates and surfaces a blocked notice on resolve', async () => {
+    const sensitiveList: EvalGrowListResult = {
+      action: 'list',
+      candidates: [
+        { id: 's1', queryText: 'rotate the mirror token', topScore: 0.2, topResultContent: 'secret doc', topResultEntryId: 'e1', firstSeen: 1, lastSeen: 2, timesSeen: 4, status: 'pending', sensitive: true },
+      ],
+      count: 1,
+    };
+    const blockedResolve: EvalGrowResolveResult = {
+      action: 'resolve', accepted: 0, rejected: 0, corpusEntries: [], benchmarkPath: '/data/benchmark.jsonl',
+      blocked: [{ id: 's1', reasons: ['API token or secret'] }],
+    };
+    vi.spyOn(api, 'tool').mockImplementation((name: string, args?: unknown) => {
+      if (name === 'eval_report') return Promise.resolve(REPORT) as Promise<never>;
+      if (name === 'eval_grow') {
+        const a = args as { action: string } | undefined;
+        if (a?.action === 'resolve') return Promise.resolve(blockedResolve) as Promise<never>;
+        return Promise.resolve(sensitiveList) as Promise<never>;
+      }
+      return new Promise<never>(() => {}) as Promise<never>;
+    });
+    renderEval();
+    const row = (await screen.findByText('rotate the mirror token')).closest('tr')!;
+    expect(within(row).getByText('⚠', { exact: false })).toBeInTheDocument(); // sensitive badge
+    await userEvent.click(within(row).getByRole('button', { name: /accept/i }));
+    await userEvent.click(screen.getByRole('button', { name: /^resolve/i }));
+    expect(await screen.findByText(/Blocked 1 candidate/i)).toBeInTheDocument();
   });
 
   it('compare: Compare button calls eval_compare and renders deltas + regressions/improvements', async () => {

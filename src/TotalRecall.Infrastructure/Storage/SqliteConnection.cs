@@ -42,8 +42,11 @@ public static class SqliteConnection
     /// </param>
     public static MsSqliteConnection Open(string dbPath, bool pooling = true)
     {
-        var connString = pooling ? $"Data Source={dbPath}" : $"Data Source={dbPath};Pooling=False";
-        var conn = new MsSqliteConnection(connString);
+        // Build via the typed builder so a dbPath containing reserved
+        // characters (e.g. a semicolon) can't bleed into the connection string.
+        var csb = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = dbPath };
+        if (!pooling) csb.Pooling = false;
+        var conn = new MsSqliteConnection(csb.ConnectionString);
         try
         {
             conn.Open();

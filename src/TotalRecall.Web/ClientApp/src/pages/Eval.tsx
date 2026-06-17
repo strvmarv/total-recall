@@ -288,7 +288,12 @@ function GrowSection({ focusQuery }: { focusQuery?: string }) {
                   <tr key={c.id}
                       ref={match?.id === c.id ? rowRef : undefined}
                       className={match?.id === c.id ? 'tr-row-hl' : undefined}>
-                    <td title={c.topResultContent ?? undefined}>{c.queryText}</td>
+                    <td title={c.topResultContent ?? undefined}>
+                      {c.queryText}
+                      {c.sensitive && (
+                        <span className="tr-eval-sensitive" title="Contains a secret, PII, or a configured internal term — will be blocked from the public benchmark if accepted">{' ⚠'}</span>
+                      )}
+                    </td>
                     <td className="num">{num(c.timesSeen)}</td>
                     <td className="num">{c.topScore.toFixed(3)}</td>
                     <td>
@@ -316,6 +321,11 @@ function GrowSection({ focusQuery }: { focusQuery?: string }) {
       {resolveResult && (
         <p className="tr-stat-sub" role="status">
           Accepted {num(resolveResult.accepted)} · rejected {num(resolveResult.rejected)}. Benchmark written to <code>{resolveResult.benchmarkPath}</code>.
+        </p>
+      )}
+      {resolveResult && resolveResult.blocked.length > 0 && (
+        <p className="tr-card-error" role="alert">
+          Blocked {num(resolveResult.blocked.length)} candidate(s) with sensitive content (secrets, PII, or an internal term) — left pending, not written to the public benchmark.
         </p>
       )}
     </Card>

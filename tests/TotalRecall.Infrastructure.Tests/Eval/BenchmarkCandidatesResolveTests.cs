@@ -134,7 +134,7 @@ public sealed class BenchmarkCandidatesResolveTests : IDisposable
         {
             var benchmarkFile = Path.Combine(_tempDir, "r.jsonl");
             var result = bc.Resolve(new[] { "does-not-exist" }, Array.Empty<string>(), benchmarkFile);
-            Assert.Equal(1, result.Accepted); // count mirrors caller input
+            Assert.Equal(0, result.Accepted); // unknown id wrote nothing, so it is not counted
             Assert.Empty(result.CorpusEntries);
             Assert.False(File.Exists(benchmarkFile));
         }
