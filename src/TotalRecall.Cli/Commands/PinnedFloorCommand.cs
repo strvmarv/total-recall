@@ -32,12 +32,16 @@ public sealed class PinnedFloorCommand : ICliCommand
     private readonly TextWriter? _out;
     private readonly FloorThresholds? _thresholds;
     private readonly Func<string, long?>? _sizer;
+    private readonly bool? _projectScoping;
+    private readonly ProjectResolver? _projectResolver;
 
     public PinnedFloorCommand() { }
 
     public PinnedFloorCommand(
         IStore store, string stateDir, TextReader input, TextWriter output,
-        FloorThresholds thresholds, Func<string, long?> transcriptSizer)
+        FloorThresholds thresholds, Func<string, long?> transcriptSizer,
+        bool? projectScoping = null,
+        ProjectResolver? projectResolver = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _stateDir = stateDir ?? throw new ArgumentNullException(nameof(stateDir));
@@ -45,6 +49,8 @@ public sealed class PinnedFloorCommand : ICliCommand
         _out = output ?? throw new ArgumentNullException(nameof(output));
         _thresholds = thresholds;
         _sizer = transcriptSizer ?? throw new ArgumentNullException(nameof(transcriptSizer));
+        _projectScoping = projectScoping;
+        _projectResolver = projectResolver;
     }
 
     public string Name => "pinned-floor";
@@ -60,7 +66,7 @@ public sealed class PinnedFloorCommand : ICliCommand
         {
             var host = ParseHost(args);
             var input = (_in ?? Console.In).ReadToEnd();
-            var (sessionId, transcriptPath) = ParsePayload(input);
+            var (sessionId, transcriptPath, cwd) = ParsePayload(input);
 
             var stateDir = _stateDir ?? PinnedFloorState.DefaultStateDir();
             var thresholds = _thresholds ?? LoadThresholds();
@@ -73,7 +79,7 @@ public sealed class PinnedFloorCommand : ICliCommand
 
             if (verdict == FloorVerdict.Inject)
             {
-                var block = RenderBlock();
+                var block = RenderBlock(cwd);
                 if (!string.IsNullOrEmpty(block))
                 {
                     var ctx = ReminderPreamble + "\n\n" + block;
@@ -102,14 +108,15 @@ public sealed class PinnedFloorCommand : ICliCommand
         return "claude-code";
     }
 
-    private static (string SessionId, string? TranscriptPath) ParsePayload(string json)
+    private static (string SessionId, string? TranscriptPath, string? Cwd) ParsePayload(string json)
     {
-        if (string.IsNullOrWhiteSpace(json)) return ("unknown-session", null);
+        if (string.IsNullOrWhiteSpace(json)) return ("unknown-session", null, null);
         using var doc = JsonDocument.Parse(json);
         var r = doc.RootElement;
         var session = GetString(r, "session_id") ?? GetString(r, "sessionId") ?? "unknown-session";
         var transcript = GetString(r, "transcript_path") ?? GetString(r, "transcriptPath");
-        return (session, transcript);
+        var cwd = GetString(r, "cwd") ?? GetString(r, "workingDirectory");
+        return (session, transcript, cwd);
     }
 
     private static string? GetString(JsonElement r, string name) =>
@@ -134,10 +141,14 @@ public sealed class PinnedFloorCommand : ICliCommand
         return new FloorThresholds(true, 6, 6000);
     }
 
-    private string RenderBlock()
+    private string RenderBlock(string? cwd)
     {
+        var project = (_projectResolver ?? new ProjectResolver())
+            .Resolve(cwd ?? Environment.CurrentDirectory);
+        var opts = PinnedScope.OptsFor(project, _projectScoping ?? LoadProjectScoping());
+
         if (_store is not null)
-            return RenderFrom(_store);
+            return RenderFrom(_store, opts);
 
         var dbPath = ConfigLoader.GetDbPath();
         MsSqliteConnection? owned = null;
@@ -145,8 +156,7 @@ public sealed class PinnedFloorCommand : ICliCommand
         {
             owned = SqliteConnection.Open(dbPath);
             MigrationRunner.RunMigrations(owned);
-            var store = new SqliteStore(owned);
-            return RenderFrom(store);
+            return RenderFrom(new SqliteStore(owned), opts);
         }
         finally
         {
@@ -154,12 +164,20 @@ public sealed class PinnedFloorCommand : ICliCommand
         }
     }
 
-    private static string RenderFrom(IStore store)
+    private static string RenderFrom(IStore store, ListEntriesOpts? opts)
     {
-        var mem = store.List(Tier.Pinned, ContentType.Memory);
-        var know = store.List(Tier.Pinned, ContentType.Knowledge);
+        var mem = store.List(Tier.Pinned, ContentType.Memory, opts);
+        var know = store.List(Tier.Pinned, ContentType.Knowledge, opts);
         var (block, _) = PinnedBlockRenderer.Render(mem, know);
         return block;
+    }
+
+    private bool LoadProjectScoping()
+    {
+        var cfg = new ConfigLoader().LoadEffectiveConfig();
+        var pinned = cfg.Tiers.Pinned;
+        return !Microsoft.FSharp.Core.FSharpOption<Core.Config.PinnedTierConfig>.get_IsSome(pinned)
+            || pinned.Value.ProjectScoping;
     }
 
     private static string EnvelopeForHost(string host, string additionalContext)

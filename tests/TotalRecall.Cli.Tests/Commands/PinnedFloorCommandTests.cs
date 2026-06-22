@@ -25,8 +25,25 @@ public sealed class PinnedFloorCommandTests : IDisposable
     private static readonly FloorThresholds Always = new(true, 1, 6000); // inject every turn after seed
 
     private PinnedFloorCommand MakeCmd(FakeStore store, TextReader stdin, TextWriter stdout,
-        Func<string, long?>? sizer = null) =>
-        new PinnedFloorCommand(store, _dir, stdin, stdout, Always, sizer ?? (_ => null));
+        Func<string, long?>? sizer = null,
+        bool? projectScoping = null,
+        ProjectResolver? projectResolver = null) =>
+        new PinnedFloorCommand(store, _dir, stdin, stdout, Always, sizer ?? (_ => null),
+            projectScoping, projectResolver);
+
+    /// <summary>
+    /// Creates a minimal temp git repo with a remote "origin" URL for testing.
+    /// Mirrors the helper in ProjectResolverTests.
+    /// </summary>
+    private static string MakeTempRepo(string remoteUrl)
+    {
+        var repo = Path.Combine(Path.GetTempPath(), "tr-floorcmd-repo-" + Guid.NewGuid().ToString("N"));
+        var git = Path.Combine(repo, ".git");
+        Directory.CreateDirectory(git);
+        var config = $"[core]\n\trepositoryformatversion = 0\n[remote \"origin\"]\n\turl = {remoteUrl}\n";
+        File.WriteAllText(Path.Combine(git, "config"), config);
+        return repo;
+    }
 
     [Fact]
     public async Task NoOpTurn_EmitsEmptyObject_AndSeeds()
@@ -116,6 +133,93 @@ public sealed class PinnedFloorCommandTests : IDisposable
         var after = PinnedFloorState.Load(_dir, "s9");
         Assert.Equal(1, after.TurnCount);
         Assert.Equal(1, after.LastInjectedTurn);
+    }
+
+    [Fact]
+    public async Task Inject_turn_filters_block_to_global_and_current_project()
+    {
+        // Seed: one global pin (no project), one for "o/r", one for "o/x".
+        var store = new FakeStore();
+        store.Seed(Tier.Pinned, ContentType.Memory,
+            EntryFactory.Make(id: "global1", content: "global-directive", project: null));
+        store.Seed(Tier.Pinned, ContentType.Memory,
+            EntryFactory.Make(id: "or1", content: "or-directive", project: "o/r"));
+        store.Seed(Tier.Pinned, ContentType.Memory,
+            EntryFactory.Make(id: "ox1", content: "ox-directive", project: "o/x"));
+
+        // Create a temp git repo whose origin resolves to "o/r".
+        var repo = MakeTempRepo("https://github.com/o/r.git");
+        try
+        {
+            // Pre-seed inject state so the decider emits Inject on turn 2.
+            PinnedFloorState.Save(_dir, new FloorState("sA", 1, 1, 0, true));
+
+            var payload = $"{{\"session_id\":\"sA\",\"cwd\":\"{repo.Replace("\\", "\\\\")}\"}}" ;
+            var outw = new StringWriter();
+            var cmd = MakeCmd(store, new StringReader(payload), outw,
+                projectScoping: true, projectResolver: new ProjectResolver());
+
+            var code = await cmd.RunAsync(new[] { "--host", "claude-code" });
+
+            Assert.Equal(0, code);
+            using var doc = JsonDocument.Parse(outw.ToString());
+            var ctx = doc.RootElement
+                .GetProperty("hookSpecificOutput")
+                .GetProperty("additionalContext")
+                .GetString();
+
+            Assert.NotNull(ctx);
+            Assert.Contains("global-directive", ctx);
+            Assert.Contains("or-directive", ctx);
+            Assert.DoesNotContain("ox-directive", ctx);
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task Inject_turn_with_scoping_disabled_renders_all_pins()
+    {
+        // Seed: global, "o/r", "o/x".
+        var store = new FakeStore();
+        store.Seed(Tier.Pinned, ContentType.Memory,
+            EntryFactory.Make(id: "global2", content: "global-directive2", project: null));
+        store.Seed(Tier.Pinned, ContentType.Memory,
+            EntryFactory.Make(id: "or2", content: "or-directive2", project: "o/r"));
+        store.Seed(Tier.Pinned, ContentType.Memory,
+            EntryFactory.Make(id: "ox2", content: "ox-directive2", project: "o/x"));
+
+        var repo = MakeTempRepo("https://github.com/o/r.git");
+        try
+        {
+            PinnedFloorState.Save(_dir, new FloorState("sB", 1, 1, 0, true));
+
+            var payload = $"{{\"session_id\":\"sB\",\"cwd\":\"{repo.Replace("\\", "\\\\")}\"}}" ;
+            var outw = new StringWriter();
+            // Scoping disabled: all pins should render regardless of project.
+            var cmd = MakeCmd(store, new StringReader(payload), outw,
+                projectScoping: false, projectResolver: new ProjectResolver());
+
+            var code = await cmd.RunAsync(new[] { "--host", "claude-code" });
+
+            Assert.Equal(0, code);
+            using var doc = JsonDocument.Parse(outw.ToString());
+            var ctx = doc.RootElement
+                .GetProperty("hookSpecificOutput")
+                .GetProperty("additionalContext")
+                .GetString();
+
+            Assert.NotNull(ctx);
+            Assert.Contains("global-directive2", ctx);
+            Assert.Contains("or-directive2", ctx);
+            Assert.Contains("ox-directive2", ctx);
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { }
+        }
     }
 }
 

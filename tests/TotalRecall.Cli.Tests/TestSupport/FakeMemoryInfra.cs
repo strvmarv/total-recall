@@ -68,6 +68,21 @@ internal sealed class FakeStore : IStore
         // predicates (e.g. RecentQuery) get correctly filtered results.
         if (opts?.EntryType is { } et)
             results.RemoveAll(e => !e.EntryType.Equals(et));
+        // Honor GlobalOnly: return only entries with no project set.
+        if (opts?.GlobalOnly == true)
+        {
+            results.RemoveAll(e => Microsoft.FSharp.Core.FSharpOption<string>.get_IsSome(e.Project));
+        }
+        // Honor Project + IncludeGlobal: return project-matching entries and optionally globals.
+        else if (opts?.Project is { } proj)
+        {
+            results.RemoveAll(e =>
+            {
+                var hasProject = Microsoft.FSharp.Core.FSharpOption<string>.get_IsSome(e.Project);
+                if (!hasProject) return !opts.IncludeGlobal; // global entry: keep if IncludeGlobal
+                return !string.Equals(e.Project.Value, proj, StringComparison.Ordinal);
+            });
+        }
         return results;
     }
 
