@@ -28,6 +28,11 @@ max_content_chars = 500
 floor_enabled       = true   # set false to disable the per-turn floor
 floor_every_n_turns = 6      # re-inject at least every N user turns
 floor_growth_tokens = 6000   # re-inject after ~this many tokens of transcript growth
+# Project-scoped pinned injection: when true, pins tagged to a project
+# (git remote slug, e.g. "owner/repo") inject only in that repo; untagged
+# pins are global and inject everywhere. When no repo is detected, only
+# global pins inject. Set false to inject all pins everywhere.
+project_scoping     = true
 
 [compaction]
 decay_half_life_hours = 168

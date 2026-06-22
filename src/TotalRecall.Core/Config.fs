@@ -33,6 +33,7 @@ type PinnedTierConfig = {
     FloorEnabled: bool
     FloorEveryNTurns: int
     FloorGrowthTokens: int
+    ProjectScoping: bool
 }
 
 type TiersConfig = {

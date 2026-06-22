@@ -542,19 +542,21 @@ public sealed class ConfigLoaderTests : IDisposable
         Assert.True(pinned.FloorEnabled);
         Assert.Equal(6, pinned.FloorEveryNTurns);
         Assert.Equal(6000, pinned.FloorGrowthTokens);
+        Assert.True(pinned.ProjectScoping); // defaults to true
     }
 
     [Fact]
     public void Pinned_FloorOverrides_AreParsed()
     {
         var userPath = Path.Combine(_tempDir, "config.toml");
-        File.WriteAllText(userPath, "[tiers.pinned]\nfloor_enabled = false\nfloor_every_n_turns = 3\nfloor_growth_tokens = 1000\n");
+        File.WriteAllText(userPath, "[tiers.pinned]\nfloor_enabled = false\nfloor_every_n_turns = 3\nfloor_growth_tokens = 1000\nproject_scoping = false\n");
         var cfg = new ConfigLoader().LoadEffectiveConfig(userPath);
 
         var pinned = cfg.Tiers.Pinned.Value;
         Assert.False(pinned.FloorEnabled);
         Assert.Equal(3, pinned.FloorEveryNTurns);
         Assert.Equal(1000, pinned.FloorGrowthTokens);
+        Assert.False(pinned.ProjectScoping);
     }
 
     [Fact]

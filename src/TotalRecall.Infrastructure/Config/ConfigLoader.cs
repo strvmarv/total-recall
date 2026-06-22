@@ -310,6 +310,7 @@ public sealed class ConfigLoader : IConfigLoader
             bool floorEnabled;
             int floorEveryN;
             int floorGrowth;
+            bool projectScoping;
             try
             {
                 var feOpt = TryGetBool(pinnedTable, "floor_enabled");
@@ -324,6 +325,10 @@ public sealed class ConfigLoader : IConfigLoader
                 floorGrowth = Microsoft.FSharp.Core.FSharpOption<int>.get_IsSome(fgtOpt)
                     ? fgtOpt.Value
                     : 6000;
+                var psOpt = TryGetBool(pinnedTable, "project_scoping");
+                projectScoping = Microsoft.FSharp.Core.FSharpOption<bool>.get_IsSome(psOpt)
+                    ? psOpt.Value
+                    : true;
             }
             catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException)
             {
@@ -332,7 +337,7 @@ public sealed class ConfigLoader : IConfigLoader
             }
 
             pinnedCfgOpt = Microsoft.FSharp.Core.FSharpOption<Core.Config.PinnedTierConfig>.Some(
-                new Core.Config.PinnedTierConfig(maxContentChars, floorEnabled, floorEveryN, floorGrowth));
+                new Core.Config.PinnedTierConfig(maxContentChars, floorEnabled, floorEveryN, floorGrowth, projectScoping));
         }
 
         var tiersCfg = new Core.Config.TiersConfig(hotCfg, warmCfg, coldCfg, pinnedCfgOpt);
