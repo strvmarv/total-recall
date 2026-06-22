@@ -59,6 +59,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
     private readonly Func<(long Hits, long Misses, long TokensSaved)>? _cacheStats;
     private readonly ReindexProgress? _reindexProgress;
     private readonly string? _binaryDir;
+    private readonly bool _projectScoping;
+    private readonly ProjectResolver _projectResolver;
 
     /// <summary>Phase 3 idea 2a — advisory thresholds for RefreshAsync recommendations.</summary>
     private const double SessionRefreshThresholdMinutes = 30;
@@ -87,7 +89,9 @@ public sealed class SessionLifecycle : ISessionLifecycle
         Func<long, (int Count, double AvgLatencyMs)>? retrievalStatsSince = null,
         Func<(long Hits, long Misses, long TokensSaved)>? cacheStats = null,
         ReindexProgress? reindexProgress = null,
-        string? binaryDir = null)
+        string? binaryDir = null,
+        bool projectScoping = true,
+        ProjectResolver? projectResolver = null)
     {
         ArgumentNullException.ThrowIfNull(importers);
         ArgumentNullException.ThrowIfNull(store);
@@ -110,6 +114,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
         _cacheStats = cacheStats;
         _reindexProgress = reindexProgress;
         _binaryDir = binaryDir;
+        _projectScoping = projectScoping;
+        _projectResolver = projectResolver ?? new ProjectResolver();
     }
 
     /// <inheritdoc />
@@ -267,8 +273,11 @@ public sealed class SessionLifecycle : ISessionLifecycle
 
         // 3a. Pinned entries — always injected verbatim, ahead of the hot tier
         // (spec 2026-06-09). The hot tier gets whatever budget remains.
-        var pinnedMemories = _store.List(Tier.Pinned, ContentType.Memory);
-        var pinnedKnowledge = _store.List(Tier.Pinned, ContentType.Knowledge);
+        // Project-scoping: only inject pins for the current project and globals.
+        var pinnedProject = _projectResolver.Resolve(Environment.CurrentDirectory);
+        var pinnedOpts = PinnedScope.OptsFor(pinnedProject, _projectScoping);
+        var pinnedMemories = _store.List(Tier.Pinned, ContentType.Memory, pinnedOpts);
+        var pinnedKnowledge = _store.List(Tier.Pinned, ContentType.Knowledge, pinnedOpts);
         var (pinnedBlock, pinnedIds) = PinnedBlockRenderer.Render(pinnedMemories, pinnedKnowledge);
         var pinnedTokens = pinnedBlock.Length > 0 ? HeuristicEstimateTokens(pinnedBlock) : 0;
 
@@ -1166,8 +1175,11 @@ public sealed class SessionLifecycle : ISessionLifecycle
 
         // 2a. Pinned entries — re-injected on every refresh so that host re-injection
         // after compaction never silently drops pins (spec 2026-06-09).
-        var pinnedMemories = _store.List(Tier.Pinned, ContentType.Memory);
-        var pinnedKnowledge = _store.List(Tier.Pinned, ContentType.Knowledge);
+        // Project-scoping: only inject pins for the current project and globals.
+        var pinnedProject = _projectResolver.Resolve(Environment.CurrentDirectory);
+        var pinnedOpts = PinnedScope.OptsFor(pinnedProject, _projectScoping);
+        var pinnedMemories = _store.List(Tier.Pinned, ContentType.Memory, pinnedOpts);
+        var pinnedKnowledge = _store.List(Tier.Pinned, ContentType.Knowledge, pinnedOpts);
         var (pinnedBlock, pinnedIds) = PinnedBlockRenderer.Render(pinnedMemories, pinnedKnowledge);
         var pinnedTokens = pinnedBlock.Length > 0 ? HeuristicEstimateTokens(pinnedBlock) : 0;
 

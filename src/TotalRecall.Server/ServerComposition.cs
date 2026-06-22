@@ -463,7 +463,8 @@ public static class ServerComposition
                 retrievalStatsSince: retrievalLog.GetStatsSince,
                 cacheStats: toolCacheStore.GetSessionStats,
                 reindexProgress: reindexProgress,
-                binaryDir: AppContext.BaseDirectory);
+                binaryDir: AppContext.BaseDirectory,
+                projectScoping: ResolveProjectScoping(cfg));
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
@@ -561,7 +562,8 @@ public static class ServerComposition
                 embedder: embedder,
                 autoDemoteMinInjections: cfg.Compaction.AutoDemoteMinInjections,
                 taskWeight: cfg.Tiers.Hot.TaskWeight,
-                binaryDir: AppContext.BaseDirectory); // reindex stays null — postgres has no local background reindex
+                binaryDir: AppContext.BaseDirectory, // reindex stays null — postgres has no local background reindex
+                projectScoping: ResolveProjectScoping(cfg));
 
             var statusOptions = new StatusOptions(
                 DbPath: connStr,
@@ -747,7 +749,8 @@ public static class ServerComposition
                 retrievalStatsSince: retrievalLog.GetStatsSince,
                 cacheStats: toolCacheStore.GetSessionStats,
                 reindexProgress: reindexProgress,
-                binaryDir: AppContext.BaseDirectory);
+                binaryDir: AppContext.BaseDirectory,
+                projectScoping: ResolveProjectScoping(cfg));
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
@@ -825,4 +828,14 @@ public static class ServerComposition
         FSharpOption<Core.Config.PinnedTierConfig>.get_IsSome(cfg.Tiers.Pinned)
             ? cfg.Tiers.Pinned.Value.MaxContentChars
             : PinnedTierLimits.DefaultMaxContentChars;
+
+    /// <summary>
+    /// Resolves the effective project-scoping flag from
+    /// <c>[tiers.pinned] project_scoping</c>. Defaults to <c>true</c> when the
+    /// section is absent, matching the <c>Pinned: option</c> design in Config.fs.
+    /// </summary>
+    private static bool ResolveProjectScoping(Core.Config.TotalRecallConfig cfg) =>
+        FSharpOption<Core.Config.PinnedTierConfig>.get_IsSome(cfg.Tiers.Pinned)
+            ? cfg.Tiers.Pinned.Value.ProjectScoping
+            : true;
 }
