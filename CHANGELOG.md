@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 3.6.0 - 2026-06-22
+
+### Added
+
+- **Project-scoped pinned-directive injection.** Pinned entries can now be scoped to a specific git repository so that repo-level rules (coding conventions, branch policies, secret patterns) inject only when the assistant is working in the right project, while global pins (no `project` tag) continue to inject everywhere. Three injection sites are all consistent: `session_start`, `session_refresh`, and the per-turn pinned-floor hook. Fail-closed: when no git repo is detected in the current working directory, only global pins inject — no cross-project leakage.
+- **`tiers.pinned.project_scoping` config flag** (default `true`). Set to `false` to restore the legacy behavior of injecting all pins in every session regardless of repo.
+- **`ProjectResolver`** (`src/TotalRecall.Infrastructure/Memory/ProjectResolver.cs`) — pure filesystem detection of the current git repo: walks upward from cwd for `.git`, follows linked-worktree `gitdir:` pointers, and reads `[remote "origin"] url` from the git config file to produce a lowercase `owner/repo` slug (e.g. `radancy-pe/rai-ops-cortex`). Handles scp-style, https, and ssh:// remote URLs; strips trailing `.git`; falls back to the bare repo-root folder name when no remote is configured. Results are memoized in-process keyed by normalized absolute cwd; any error yields `null` (treated as "no repo").
+- **`ProjectKey.FromRemoteUrl`** (`src/TotalRecall.Infrastructure/Memory/ProjectKey.cs`) — pure URL-to-slug reducer shared by `ProjectResolver` and tests.
+- **`PinnedScope.OptsFor`** (`src/TotalRecall.Infrastructure/Memory/PinnedScope.cs`) — single policy function: scoping off → all pins; scoping on + repo detected → repo pins + globals; scoping on + no repo → globals only.
+
 ## 3.5.2 - 2026-06-17
 
 ### Security

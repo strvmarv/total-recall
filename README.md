@@ -133,7 +133,7 @@ Every memory has an entry type that tells total-recall what it is and how to tre
 
 total-recall uses a four-tier memory model designed to balance signal density with token cost:
 
-- **Pinned** (user-curated, 500 chars per entry) — entries you pin via `memory_pin` (or store-and-pin with `memory_store { pinned: true }`). Always injected verbatim at session start, ahead of the hot tier, under a `## Pinned directives (always follow)` header — never truncated, never decayed, never demoted, never compacted. Oversized content is rejected at the door (configurable via `tiers.pinned.max_content_chars`). The only way out is `memory_unpin` (→ warm).
+- **Pinned** (user-curated, 500 chars per entry) — entries you pin via `memory_pin` (or store-and-pin with `memory_store { pinned: true }`). Always injected verbatim at session start, ahead of the hot tier, under a `## Pinned directives (always follow)` header — never truncated, never decayed, never demoted, never compacted. Oversized content is rejected at the door (configurable via `tiers.pinned.max_content_chars`). The only way out is `memory_unpin` (→ warm). **Project-scoped injection** (default on): untagged pins are global and inject everywhere; a pin tagged with a `project` value (lowercase `owner/repo` slug or folder name) injects only when the detected cwd matches that repo. When no git repo is detected, only global pins inject (fail-closed).
 - **Hot** (up to 50 entries, 4000-token budget) — auto-injected into every prompt. Your most important corrections, preferences, and recently promoted entries are always present without any query. Pinned tokens come off the top of this budget.
 - **Warm** (up to 10K entries) — retrieved semantically per query. When you ask about authentication, relevant auth memories surface automatically. Entries decay over time; unused ones migrate to cold.
 - **Cold** (unlimited, hierarchical) — your knowledge base. Ingest entire directories — source trees, documentation, design specs — and they're retrieved when relevant.
@@ -155,7 +155,7 @@ For enterprise deployments, swap in a remote embedder (OpenAI, Amazon Bedrock) f
 Every `session_start` call runs the same sequence:
 
 1. **Import sync** — scans all installed host tools (Claude Code, Copilot CLI, Cursor, Cline, OpenCode, Hermes), deduplicates via content hash, and imports new entries.
-2. **Pinned + hot tier assembly** — pinned entries are injected first, verbatim and untruncated, then current hot entries fill the remaining token budget.
+2. **Pinned + hot tier assembly** — pinned entries are injected first, verbatim and untruncated, then current hot entries fill the remaining token budget. When `tiers.pinned.project_scoping` is on (default), only global pins and pins tagged to the detected repo are included; if no repo is detected, only global pins inject (fail-closed).
 3. **Hint generation** — surfaces up to 5 high-value warm memories as actionable one-liners: `Correction` and `Preference` entries first, frequently accessed entries (3+ accesses) second, recently promoted entries third. No LLM calls — pure DB queries.
 4. **Tier summary** — counts entries across pinned, hot, warm, cold, and all KB collections (`tierSummary.pinned` included). A `pinned_budget_pressure` hint fires when pins consume over half the token budget (suggested action: `memory_unpin`).
 5. **Session continuity** — reports human-readable time since the last compaction event (proxy for last active session).
@@ -171,7 +171,7 @@ A per-turn `UserPromptSubmit` hook runs before each prompt and re-injects the pi
 - `floor_every_n_turns` user turns have elapsed (default 6), **or**
 - ~`floor_growth_tokens` of transcript growth has accumulated (default 6000).
 
-The first turn of a session seeds the throttle and skips (the block was just injected at session start). The re-injected block is rendered verbatim — identical to the session-start block — and prefixed with a short reminder line. The hook is **fail-safe: it never blocks or rejects a prompt**. Disable it entirely with `floor_enabled = false`.
+The first turn of a session seeds the throttle and skips (the block was just injected at session start). The re-injected block is rendered verbatim — identical to the session-start block — and prefixed with a short reminder line. Project scoping applies here too: the hook reads the cwd from the hook payload and filters pins by the detected repo (same fail-closed semantics as session start). The hook is **fail-safe: it never blocks or rejects a prompt**. Disable it entirely with `floor_enabled = false`.
 
 Per-host support:
 
@@ -286,6 +286,7 @@ max_content_chars = 500           # Max characters per pinned entry (oversize re
 floor_enabled = true              # Per-turn pinned-directive floor (UserPromptSubmit re-injection)
 floor_every_n_turns = 6           # Re-inject the pinned block at least every N user turns
 floor_growth_tokens = 6000        # ...or after ~this many tokens of transcript growth (whichever trips first)
+project_scoping = true            # Scope pinned injection by git repo: repo-tagged pins inject only in their repo; untagged pins are global; fail-closed when no repo detected
 
 [tiers.hot]
 max_entries = 50                  # Max entries auto-injected per prompt
@@ -443,7 +444,7 @@ The MCP server exposes 41 core tools in every backend mode; local SQLite and Cor
 
 †Unavailable in Postgres mode (local SQLite + Cortex modes only).
 
-Pinned tier surface: `memory_pin` moves any entry into the pinned tier (with optional `scope: "project" | "global"`); `memory_unpin` releases it to warm; `memory_store` accepts `pinned: true` to store-and-pin new content; `memory_promote` / `memory_demote` reject pinned as source or target. `pinned` is accepted in the tier filters of `memory_search`, `memory_list`, `memory_recent`, `memory_export`, and `memory_get_all`, and `status` reports pinned counts.
+Pinned tier surface: `memory_pin` moves any entry into the pinned tier (with optional `scope: "project" | "global"`); `memory_unpin` releases it to warm; `memory_store` accepts `pinned: true` to store-and-pin new content; `memory_promote` / `memory_demote` reject pinned as source or target. `pinned` is accepted in the tier filters of `memory_search`, `memory_list`, `memory_recent`, `memory_export`, and `memory_get_all`, and `status` reports pinned counts. **Project-scoped injection** (enabled by `tiers.pinned.project_scoping`, default on): a pin is tagged to a repo by setting its `project` field to the lowercase `owner/repo` slug (e.g. `radancy-pe/rai-ops-cortex`) or bare folder name when no remote is configured — at injection time `ProjectResolver` detects the current repo from cwd (pure filesystem walk) and `PinnedScope.OptsFor` filters accordingly. Untagged (null-project) pins are global and always inject. When no repo is detected the injection is fail-closed to globals only.
 
 Retrieval-quality feedback: `memory_search` returns `{ retrievalId, results }` and `kb_search` returns a top-level `retrievalId`. The assistant can call `memory_feedback` with that `retrievalId` to confirm whether the retrieval was actually used; un-acted retrievals are inferred as misses after a grace window. This drives the `eval_report` metrics and the web UI's "Retrieval quality" card. `memory_feedback` is intentionally assistant-only — it is not exposed to the web UI.
 
