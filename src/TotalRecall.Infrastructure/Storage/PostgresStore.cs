@@ -292,7 +292,11 @@ VALUES
            .Append(" WHERE tier = @tier");
         cmd.Parameters.AddWithValue("@tier", tierStr);
 
-        if (opts?.Project is not null)
+        if (opts?.GlobalOnly == true)
+        {
+            sql.Append(" AND project IS NULL");
+        }
+        else if (opts?.Project is not null)
         {
             if (opts.IncludeGlobal)
                 sql.Append(" AND (project = @project OR project IS NULL)");

@@ -193,4 +193,11 @@ public sealed record ListEntriesOpts
     /// a file path. Null means no source filter.
     /// </summary>
     public string? Source { get; init; }
+    /// <summary>
+    /// When true, only rows whose <c>project</c> column IS NULL (global
+    /// entries) are returned. Mutually exclusive with <see cref="Project"/>;
+    /// if both are set, <c>GlobalOnly</c> wins. Used by project-scoped pinned
+    /// injection to fail closed when no project is detected.
+    /// </summary>
+    public bool GlobalOnly { get; init; }
 }

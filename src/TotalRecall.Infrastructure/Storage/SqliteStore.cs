@@ -287,7 +287,11 @@ VALUES
 
         var whereClauses = new List<string>();
 
-        if (opts?.Project is not null)
+        if (opts?.GlobalOnly == true)
+        {
+            whereClauses.Add("project IS NULL");
+        }
+        else if (opts?.Project is not null)
         {
             if (opts.IncludeGlobal)
                 whereClauses.Add("(project = $project OR project IS NULL)");
