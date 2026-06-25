@@ -51,7 +51,7 @@ public sealed class SessionEndHintCommand : ICliCommand
             var threshold = _threshold ?? LoadThreshold();
             var hotCount = CountHot();
 
-            if (hotCount >= threshold && host == "claude-code")
+            if (threshold > 0 && hotCount >= threshold && host == "claude-code")
             {
                 var msg = $"total-recall: {hotCount} uncompacted hot-tier memory entries. "
                     + "Run /total-recall:commands compact next session to summarize them.";

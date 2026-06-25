@@ -117,7 +117,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         _reindexProgress = reindexProgress;
         _binaryDir = binaryDir;
         _projectScoping = projectScoping;
-        _compactionHintThreshold = compactionHintThreshold > 0 ? compactionHintThreshold : 5;
+        _compactionHintThreshold = compactionHintThreshold;
         _projectResolver = projectResolver ?? new ProjectResolver();
     }
 

@@ -40,4 +40,20 @@ public sealed class SessionEndHintCommandTests
         Assert.Equal(0, code);
         Assert.Equal("{}", outw.ToString().Trim());
     }
+
+    [Fact]
+    public async Task ThresholdZero_EmitsEmptyObject()
+    {
+        var store = new FakeStore();
+        for (var i = 0; i < 5; i++)
+            store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: $"h{i}"));
+        var outw = new StringWriter();
+
+        var cmd = new SessionEndHintCommand(store, outw, threshold: 0);
+        var code = await cmd.RunAsync(new[] { "--host", "claude-code" });
+
+        Assert.Equal(0, code);
+        Assert.Equal("{}", outw.ToString().Trim());
+        Assert.DoesNotContain("systemMessage", outw.ToString());
+    }
 }
