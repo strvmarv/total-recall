@@ -95,4 +95,20 @@ public sealed class PinnedFloorStateTests : IDisposable
         PinnedFloorState.Save(_dir, saved);
         Assert.Equal(long.MaxValue, PinnedFloorState.Load(_dir, "big").LastInjectedBytes);
     }
+
+    [Fact]
+    public void Prune_DeletesOldSentinels_KeepsFreshSentinels()
+    {
+        Directory.CreateDirectory(_dir);
+        var oldSentinel = Path.Combine(_dir, "compaction-nudged-old-session");
+        var freshSentinel = Path.Combine(_dir, "compaction-nudged-fresh-session");
+        File.WriteAllText(oldSentinel, "1");
+        File.WriteAllText(freshSentinel, "1");
+        File.SetLastWriteTimeUtc(oldSentinel, DateTime.UtcNow.AddDays(-30));
+
+        PinnedFloorState.Prune(_dir, maxAgeDays: 7, nowUtc: DateTimeOffset.UtcNow);
+
+        Assert.False(File.Exists(oldSentinel));
+        Assert.True(File.Exists(freshSentinel));
+    }
 }

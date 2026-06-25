@@ -1,81 +1,119 @@
 // src/TotalRecall.Cli/Commands/CompactCommand.cs
 //
-// Plan 5 Task 5.9 — `total-recall compact`. Informational stub. Per the
-// host-agnostic architecture (spec Flow 2), compaction LLM judgment lives
-// in the host tool's subagent layer, NOT in the .NET binary. The server
-// exposes session_context / memory_store / memory_delete / memory_promote
-// primitives; host tools (Claude Code, Copilot CLI, etc.) orchestrate
-// compaction via their own judgment mechanism.
-//
-// This CLI verb exists so `total-recall compact` doesn't 404 — it prints
-// an explanation pointing users at the host-side compaction path and the
+// Plan 5 Task 5.9 — `total-recall compact`. Without `--run`, prints an
+// explanation pointing users at the host-side compaction path and the
 // CLI-side inspection commands (memory history / memory lineage).
+// With `--run`, executes a heuristic hot→warm sweep via HotTierCompactor.
 
 using System;
 using System.IO;
 using System.Threading.Tasks;
-using Spectre.Console;
+using TotalRecall.Core;
+using TotalRecall.Infrastructure.Config;
+using TotalRecall.Infrastructure.Memory;
+using TotalRecall.Infrastructure.Storage;
+using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
 namespace TotalRecall.Cli.Commands;
 
 public sealed class CompactCommand : ICliCommand
 {
     private readonly TextWriter? _out;
+    private readonly IStore? _store;
+    private readonly double _warmThreshold;
+    private readonly double _decayConstantHours;
+    private readonly long? _nowMs;
 
     public CompactCommand() { }
 
-    // Test/composition seam.
+    // Explainer-only test seam.
     public CompactCommand(TextWriter output)
     {
         _out = output ?? throw new ArgumentNullException(nameof(output));
     }
 
+    // --run test seam.
+    public CompactCommand(IStore store, TextWriter output,
+        double warmThreshold, double decayConstantHours, long nowMs)
+    {
+        _store = store ?? throw new ArgumentNullException(nameof(store));
+        _out = output ?? throw new ArgumentNullException(nameof(output));
+        _warmThreshold = warmThreshold;
+        _decayConstantHours = decayConstantHours;
+        _nowMs = nowMs;
+    }
+
     public string Name => "compact";
     public string? Group => null;
-    public string Description => "Manual compaction trigger (host-tool managed)";
+    public string Description => "Compact the hot tier (--run for a heuristic sweep; default explains the host-managed path)";
 
     public Task<int> RunAsync(string[] args) => Task.FromResult(Execute(args));
 
     private int Execute(string[] args)
     {
+        var output = _out ?? Console.Out;
+
+        if (args.Length > 0 && args[0] == "--run")
+        {
+            return RunSweep(output);
+        }
         if (args.Length > 0)
         {
-            var a = args[0];
-            // --help is handled by the dispatcher, but tolerate it just in case.
-            if (a == "--help" || a == "-h") return 0;
-            Console.Error.WriteLine($"compact: unknown argument '{a}'");
+            Console.Error.WriteLine($"compact: unknown argument '{args[0]}'");
             return 2;
         }
+        PrintExplainer(output);
+        return 0;
+    }
 
-        // Intentionally plain writes rather than AnsiConsole.MarkupLine so
-        // that in-process Console.SetOut capture from tests works reliably
-        // (see CliApp help-rendering note). The output is still the same
-        // explanatory block specified in Task 5.9.
+    private int RunSweep(TextWriter output)
+    {
+        var nowMs = _nowMs ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+        if (_store is not null)
+        {
+            var r = HotTierCompactor.Compact(_store, "cli-compact", nowMs,
+                _warmThreshold, _decayConstantHours, compactionLog: null, reason: "manual_compact");
+            output.WriteLine($"compacted: promoted={r.Promoted} carryForward={r.CarryForward}");
+            return 0;
+        }
+
+        var cfg = new ConfigLoader().LoadEffectiveConfig();
+        var dbPath = ConfigLoader.GetDbPath();
+        MsSqliteConnection? owned = null;
+        try
+        {
+            owned = SqliteConnection.Open(dbPath);
+            MigrationRunner.RunMigrations(owned);
+            // SqliteStore(connection) does not own the connection (_ownsConnection
+            // == false), so its Dispose is a no-op; disposing `owned` here releases
+            // the only owned resource. Matches PinnedFloorCommand.RenderBlock.
+            var store = new SqliteStore(owned);
+            var r = HotTierCompactor.Compact(store, "cli-compact", nowMs,
+                cfg.Compaction.WarmThreshold, cfg.Compaction.DecayHalfLifeHours,
+                compactionLog: null, reason: "manual_compact");
+            output.WriteLine($"compacted: promoted={r.Promoted} carryForward={r.CarryForward}");
+            return 0;
+        }
+        finally
+        {
+            owned?.Dispose();
+        }
+    }
+
+    private static void PrintExplainer(TextWriter output)
+    {
         var lines = new[]
         {
             "Compaction is driven by the host tool's LLM layer (e.g., Claude Code's",
-            "compactor subagent), not the total-recall CLI. See spec Flow 2: the",
-            "server exposes session_context, memory_store, memory_delete, and",
-            "memory_promote primitives, and the host orchestrates compaction via",
-            "its own judgment mechanism.",
-            "",
-            "To trigger compaction:",
-            "  - In Claude Code: run /total-recall compact (or let the session-end",
-            "    hook fire it automatically).",
-            "  - From another host tool: call session_context to inspect hot tier,",
-            "    then issue the appropriate memory_store/memory_delete/memory_promote",
-            "    calls.",
+            "compactor subagent) for high-quality summaries. Run '/total-recall:commands",
+            "compact' in your host for LLM compaction, or 'total-recall compact --run'",
+            "for a fast, deterministic decay-based hot→warm sweep (no LLM).",
             "",
             "To inspect compaction history from the CLI:",
             "  - total-recall memory history        (recent movements)",
             "  - total-recall memory lineage <id>   (ancestry tree)",
         };
-
-        foreach (var line in lines)
-        {
-            if (_out is not null) _out.WriteLine(line);
-            else Console.Out.WriteLine(line);
-        }
-        return 0;
+        foreach (var line in lines) output.WriteLine(line);
     }
 }

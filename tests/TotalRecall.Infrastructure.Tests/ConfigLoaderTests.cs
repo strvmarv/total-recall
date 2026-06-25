@@ -567,4 +567,13 @@ public sealed class ConfigLoaderTests : IDisposable
         Assert.Throws<InvalidDataException>(() =>
             new ConfigLoader().LoadEffectiveConfig(userPath));
     }
+
+    // --- tiers.hot.compaction_hint_threshold ---------------------------------
+
+    [Fact]
+    public void DefaultConfig_HasCompactionHintThresholdOfFive()
+    {
+        var cfg = new ConfigLoader().LoadEffectiveConfig();
+        Assert.Equal(5, cfg.Tiers.Hot.CompactionHintThreshold);
+    }
 }

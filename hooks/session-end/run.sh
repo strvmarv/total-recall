@@ -1,56 +1,30 @@
 #!/usr/bin/env bash
-# total-recall SessionEnd hook
-# Injects the session-end directive fragment as additionalContext.
+# total-recall SessionEnd hook.
 #
-# The directive lives in skills/commands/session-end.md so it stays
-# in one place — the same file can be referenced by the SKILL.md and is
-# not duplicated in this shell script. If the fragment is missing we
-# exit 0 silently rather than blocking session end.
+# Emits a USER-FACING compaction nudge (systemMessage) when the hot tier has
+# accumulated uncompacted entries. Does NOT inject any model directive:
+# SessionEnd fires while the session is terminating, so there is no model turn
+# to act on injected context, and Claude Code's SessionEnd schema rejects
+# hookSpecificOutput/additionalContext outright.
 #
-# Payload is plain text (no <IMPORTANT>/XML wrappers) — it is already
-# injected inside a system-reminder block by the host, and nested markup
-# is redundant / inconsistently handled across hosts. Tool references in
-# the fragment use functional names (e.g. "session_context MCP tool")
-# instead of hardcoded mcp__ prefixes, because each host namespaces
-# plugin MCP tools differently.
-
-set -euo pipefail
+# All logic lives in the CLI (`session-end-hint`); this wrapper only forwards
+# the host flag and must NEVER fail session teardown (exit 0, "{}" on error).
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-FRAGMENT_FILE="$PLUGIN_ROOT/skills/commands/session-end.md"
 
-if [ ! -f "$FRAGMENT_FILE" ]; then
-  exit 0
-fi
-
-FRAGMENT_CONTENT=$(cat "$FRAGMENT_FILE")
-
-# Escape string for JSON embedding using bash parameter substitution
-escape_for_json() {
-    local s="$1"
-    s="${s//\\/\\\\}"
-    s="${s//\"/\\\"}"
-    s="${s//$'\n'/\\n}"
-    s="${s//$'\r'/\\r}"
-    s="${s//$'\t'/\\t}"
-    printf '%s' "$s"
-}
-
-session_context=$(escape_for_json "$FRAGMENT_CONTENT")
-
-# Platform-aware JSON output:
-# - Cursor: additional_context (snake_case) — note: Cursor 1.7 has no
-#   SessionEnd hook, so this branch is unreachable today but kept for
-#   forward compatibility
-# - Claude Code: hookSpecificOutput.additionalContext (nested)
-# - Copilot CLI / others: additionalContext (top-level, SDK standard)
+host="claude-code"
 if [ -n "${CURSOR_PLUGIN_ROOT:-}" ]; then
-  printf '{\n  "additional_context": "%s"\n}\n' "$session_context"
-elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -z "${COPILOT_CLI:-}" ]; then
-  printf '{\n  "hookSpecificOutput": {\n    "hookEventName": "SessionEnd",\n    "additionalContext": "%s"\n  }\n}\n' "$session_context"
-else
-  printf '{\n  "additionalContext": "%s"\n}\n' "$session_context"
+  host="cursor"
+elif [ -n "${COPILOT_CLI:-}" ]; then
+  host="copilot-cli"
 fi
 
+output=$(node "$PLUGIN_ROOT/bin/start.js" session-end-hint --host "$host" 2>/dev/null)
+if [ $? -ne 0 ] || [ -z "$output" ]; then
+  printf '{}\n'
+else
+  printf '%s\n' "$output"
+fi
 exit 0

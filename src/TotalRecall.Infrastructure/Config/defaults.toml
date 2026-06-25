@@ -6,6 +6,7 @@ max_entries = 50
 token_budget = 4000
 carry_forward_threshold = 0.7
 task_weight = 0.0
+compaction_hint_threshold = 5
 
 [tiers.warm]
 max_entries = 10000

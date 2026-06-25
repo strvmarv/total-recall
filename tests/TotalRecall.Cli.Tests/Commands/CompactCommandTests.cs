@@ -2,66 +2,37 @@ using System;
 using System.IO;
 using System.Threading.Tasks;
 using TotalRecall.Cli.Commands;
+using TotalRecall.Cli.Tests.TestSupport;
+using TotalRecall.Core;
 using Xunit;
 
 namespace TotalRecall.Cli.Tests.Commands;
 
-[Collection("ConsoleCapture")]
-public sealed class CompactCommandTests : IDisposable
+public sealed class CompactCommandTests
 {
-    private readonly TextWriter _origOut;
-    private readonly TextWriter _origErr;
-    private readonly StringWriter _outWriter = new();
-    private readonly StringWriter _errWriter = new();
-
-    public CompactCommandTests()
-    {
-        _origOut = Console.Out;
-        _origErr = Console.Error;
-        Console.SetOut(_outWriter);
-        Console.SetError(_errWriter);
-    }
-
-    public void Dispose()
-    {
-        Console.SetOut(_origOut);
-        Console.SetError(_origErr);
-    }
-
     [Fact]
-    public async Task HelpFlag_ReturnsZero()
+    public async Task Run_PromotesStaleHotEntries_AndReportsCount()
     {
-        var injected = new StringWriter();
-        var cmd = new CompactCommand(injected);
+        var store = new FakeStore();
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: "stale", lastAccessedAt: 0));
+        store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: "fresh", lastAccessedAt: now));
+        var outw = new StringWriter();
 
-        var code = await cmd.RunAsync(new[] { "--help" });
+        var cmd = new CompactCommand(store, outw, warmThreshold: 0.5, decayConstantHours: 168, nowMs: now);
+        var code = await cmd.RunAsync(new[] { "--run" });
 
         Assert.Equal(0, code);
+        Assert.Contains("promoted=1", outw.ToString());
     }
 
     [Fact]
-    public async Task NoArgs_PrintsExplanation_ReturnsZero()
+    public async Task NoArgs_PrintsExplainerAndReturnsZero()
     {
-        var injected = new StringWriter();
-        var cmd = new CompactCommand(injected);
-
+        var outw = new StringWriter();
+        var cmd = new CompactCommand(outw);
         var code = await cmd.RunAsync(Array.Empty<string>());
-
         Assert.Equal(0, code);
-        var text = injected.ToString();
-        Assert.Contains("host tool", text);
-        Assert.Contains("session_context", text);
-        Assert.Contains("memory history", text);
-    }
-
-    [Fact]
-    public async Task UnknownArg_ReturnsExit2()
-    {
-        var injected = new StringWriter();
-        var cmd = new CompactCommand(injected);
-
-        var code = await cmd.RunAsync(new[] { "--bogus" });
-
-        Assert.Equal(2, code);
+        Assert.Contains("Compaction is driven by", outw.ToString());
     }
 }

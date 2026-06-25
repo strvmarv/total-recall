@@ -13,11 +13,11 @@
 // tests continue to pass without modification.
 
 using System;
-using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using TotalRecall.Core;
+using TotalRecall.Infrastructure.Memory;
 using TotalRecall.Infrastructure.Storage;
 using TotalRecall.Infrastructure.Telemetry;
 
@@ -86,71 +86,15 @@ public sealed class SessionEndHandler : IToolHandler
         };
     }
 
-    // Recalculate decay scores for all hot-memory entries, promote those
-    // below warm_threshold to warm tier, and log each movement.
+    // Delegate hot→warm compaction to the shared HotTierCompactor, which routes
+    // through the canonical Decay.calculateDecayScore formula in Decay.fs.
     private (int carryForward, int promoted, int discarded) CompactHotTier(CancellationToken ct)
     {
-        var store = _store!;
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var sessionId = _sessionLifecycle.SessionId;
-
-        var hotEntries = store.List(Tier.Hot, ContentType.Memory);
-        var promoted = 0;
-
-        foreach (var entry in hotEntries)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            var score = CalculateDecayScore(entry, nowMs, _decayConstantHours);
-
-            // Persist the refreshed score so the warm sweep at next session_start
-            // has accurate ordering even if session_end isn't called again.
-            try
-            {
-                store.Update(Tier.Hot, ContentType.Memory, entry.Id,
-                    new UpdateEntryOpts { DecayScore = score });
-            }
-            catch (InvalidOperationException) { continue; } // concurrently deleted
-
-            if (score >= _warmThreshold) continue;
-
-            try
-            {
-                store.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, entry.Id);
-                _compactionLog?.LogEvent(new CompactionLogEntry(
-                    SessionId: sessionId,
-                    SourceTier: "hot",
-                    TargetTier: "warm",
-                    SourceEntryIds: new[] { entry.Id },
-                    TargetEntryId: null,
-                    DecayScores: new Dictionary<string, double> { [entry.Id] = score },
-                    Reason: "session_end_decay",
-                    ConfigSnapshotId: ""));
-                promoted++;
-            }
-            catch (InvalidOperationException) { } // concurrently deleted — skip
-        }
-
-        var carryForward = store.Count(Tier.Hot, ContentType.Memory);
-        return (carryForward, promoted, discarded: 0);
-    }
-
-    // Inline implementation of the Decay.fs formula for C# interop simplicity.
-    // Keep in sync with src/TotalRecall.Core/Decay.fs.
-    private static double CalculateDecayScore(Entry entry, long nowMs, double decayConstantHours)
-    {
-        var hoursSinceAccess = (nowMs - entry.LastAccessedAt) / 3_600_000.0;
-        var timeFactor = Math.Exp(-hoursSinceAccess / decayConstantHours);
-        var freqFactor = 1.0 + Math.Log(1.0 + entry.AccessCount) / Math.Log(2.0);
-        var typeWeight = entry.EntryType switch
-        {
-            var t when t.IsCorrection => 1.5,
-            var t when t.IsPreference => 1.3,
-            var t when t.IsImported   => 1.1,
-            var t when t.IsIngested   => 0.9,
-            var t when t.IsSurfaced   => 0.8,
-            _                         => 1.0, // Decision, Compacted
-        };
-        return timeFactor * freqFactor * typeWeight;
+        var r = HotTierCompactor.Compact(
+            _store!, _sessionLifecycle.SessionId, nowMs,
+            _warmThreshold, _decayConstantHours, _compactionLog,
+            reason: "session_end_decay", ct: ct);
+        return (r.CarryForward, r.Promoted, r.Discarded);
     }
 }

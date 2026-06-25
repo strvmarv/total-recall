@@ -61,6 +61,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
     private readonly string? _binaryDir;
     private readonly bool _projectScoping;
     private readonly ProjectResolver _projectResolver;
+    private readonly int _compactionHintThreshold;
 
     /// <summary>Phase 3 idea 2a — advisory thresholds for RefreshAsync recommendations.</summary>
     private const double SessionRefreshThresholdMinutes = 30;
@@ -91,6 +92,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         ReindexProgress? reindexProgress = null,
         string? binaryDir = null,
         bool projectScoping = true,
+        int compactionHintThreshold = 5,
         ProjectResolver? projectResolver = null)
     {
         ArgumentNullException.ThrowIfNull(importers);
@@ -115,6 +117,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         _reindexProgress = reindexProgress;
         _binaryDir = binaryDir;
         _projectScoping = projectScoping;
+        _compactionHintThreshold = compactionHintThreshold;
         _projectResolver = projectResolver ?? new ProjectResolver();
     }
 
@@ -351,7 +354,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
             : new BackgroundTasksDto(reindexStatus, setupNotice);
 
         // 7. Hints.
-        var hints = GenerateHints(_store, warmPromotedIds);
+        var hints = GenerateHints(_store, warmPromotedIds, _compactionHintThreshold);
         // Soft-cap warning: when pinned entries consume strictly more than half the
         // budget, advise review. Multiplication avoids integer-division skew on odd
         // budgets. Pins are still injected even if they exceed the entire budget.
@@ -998,10 +1001,28 @@ public sealed class SessionLifecycle : ISessionLifecycle
     /// </summary>
     public static IReadOnlyList<Hint> GenerateHints(
         IStore store,
-        IReadOnlyList<string> warmPromotedIds)
+        IReadOnlyList<string> warmPromotedIds,
+        int compactionHintThreshold = 0)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var hints = new List<Hint>();
+
+        // Priority 0: suggest user-triggered compaction when the hot tier is full.
+        // Emitted first so the 5-hint content cap never drops it.
+        if (compactionHintThreshold > 0)
+        {
+            var hotCount = store.Count(Tier.Hot, ContentType.Memory);
+            if (hotCount >= compactionHintThreshold)
+            {
+                hints.Add(new Hint
+                {
+                    Priority = 2,
+                    Type = "hot_tier_compaction_suggested",
+                    Summary = $"{hotCount} hot-tier entries are uncompacted. Run /total-recall:commands compact to summarize them into the warm tier (or compact --fast for a no-LLM sweep).",
+                    SuggestedAction = "compact",
+                });
+            }
+        }
 
         // Priority 1: corrections + preferences (max 2) — suggest memory_promote.
         var corrections = store.ListByMetadata(
