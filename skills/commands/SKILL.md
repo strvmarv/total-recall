@@ -75,7 +75,7 @@ and refreshes hot-tier context near the current generation point.
 
 ### Session End
 
-At session end, follow the directive in [`session-end.md`](session-end.md) — it is the single source of truth, injected verbatim by the SessionEnd hook (`hooks/session-end/run.sh`).
+At session end, total-recall surfaces a hint suggesting you run `/total-recall:commands compact` to promote hot entries before the session closes. Compaction is user-triggered — run the command when the hint appears or whenever you want to compact manually. Also call the `session_end` MCP tool for final bookkeeping.
 
 ### Rules
 
@@ -132,7 +132,7 @@ Print the command reference table below. Do not call any MCP tools.
 | `kb list` | List KB collections |
 | `kb refresh <col>` | Re-ingest a KB collection |
 | `kb remove <id>` | Remove a KB entry |
-| `compact` | Run hot-tier compaction now |
+| `compact [--fast]` | Compact hot tier now (default: model-driven; `--fast`: heuristic sweep) |
 | `eval` | Retrieval quality report (`--benchmark`, `--compare`, `--snapshot`) |
 | `config [get\|set]` | View or update configuration |
 | `update` | Update the plugin to the latest version |
@@ -261,9 +261,14 @@ Call `kb_refresh` with the collection ID. Report re-ingestion results.
 
 Call `kb_remove` with the entry ID. Ask for confirmation first.
 
-### compact
+### compact [--fast]
 
-Call `compact_now`. Note: the response is **informational only** — real compaction is host-orchestrated via the Session End flow (`session_context` + `memory_promote`/`memory_demote`/`memory_store`/`memory_delete`). Surface the returned guidance and point the user at the Session End mechanism if they want to actually compact now.
+Run hot-tier compaction now. Compaction is user-triggered; hints appear at session start, mid-session, and session end to remind you. Two modes:
+
+- **Default (model-driven):** Launches the `total-recall:compactor` agent against current hot tier entries (via `session_context`), then executes its decisions — carry forward, promote with summary, or discard. Reports a one-line summary of what was promoted/discarded.
+- **`--fast` (heuristic):** Runs `total-recall compact --run` — a deterministic decay-based sweep that promotes hot entries whose decay score falls below `compaction.warm_threshold`. No LLM, fast and cheap.
+
+See the full command body in [`compact.md`](compact.md).
 
 ### eval [--benchmark] [--compare <name>] [--snapshot <name>]
 
