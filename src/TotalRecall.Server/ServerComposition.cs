@@ -460,6 +460,7 @@ public static class ServerComposition
                 embedder: embedder,
                 autoDemoteMinInjections: cfg.Compaction.AutoDemoteMinInjections,
                 taskWeight: cfg.Tiers.Hot.TaskWeight,
+                compactionHintThreshold: cfg.Tiers.Hot.CompactionHintThreshold,
                 retrievalStatsSince: retrievalLog.GetStatsSince,
                 cacheStats: toolCacheStore.GetSessionStats,
                 reindexProgress: reindexProgress,
