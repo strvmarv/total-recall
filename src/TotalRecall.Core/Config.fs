@@ -13,6 +13,7 @@ type HotTierConfig = {
     TokenBudget: int
     CarryForwardThreshold: float
     TaskWeight: float
+    CompactionHintThreshold: int
 }
 
 type WarmTierConfig = {

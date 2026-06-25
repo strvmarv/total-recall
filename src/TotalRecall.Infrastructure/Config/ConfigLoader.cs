@@ -276,7 +276,10 @@ public sealed class ConfigLoader : IConfigLoader
             GetDouble(hot, "carry_forward_threshold"),
             hot.TryGetValue("task_weight", out var tw)
                 ? Convert.ToDouble(tw)
-                : 0.0);
+                : 0.0,
+            hot.TryGetValue("compaction_hint_threshold", out var cht)
+                ? Convert.ToInt32(cht)
+                : 5);
 
         var warmCfg = new Core.Config.WarmTierConfig(
             GetInt(warm, "max_entries"),
