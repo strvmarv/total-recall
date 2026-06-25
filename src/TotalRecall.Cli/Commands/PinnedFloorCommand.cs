@@ -8,6 +8,7 @@
 // never block or reject the user's prompt.
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -77,19 +78,32 @@ public sealed class PinnedFloorCommand : ICliCommand
             long? bytes = transcriptPath is null ? null : SizeOf(transcriptPath);
             var (verdict, next) = PinnedFloorDecider.Decide(state, new FloorSignal(bytes), thresholds);
 
+            var threshold = LoadCompactionThreshold();
+            var hotCount = CountHot();
+            var nudge = CompactionNudge.TryTake(stateDir, sessionId, hotCount, threshold);
+
             if (verdict == FloorVerdict.Inject)
             {
                 var block = RenderBlock(cwd);
-                if (!string.IsNullOrEmpty(block))
+                var parts = new List<string>();
+                if (!string.IsNullOrEmpty(block)) parts.Add(ReminderPreamble + "\n\n" + block);
+                if (nudge is not null) parts.Add(nudge);
+
+                if (parts.Count > 0)
                 {
-                    var ctx = ReminderPreamble + "\n\n" + block;
                     PinnedFloorState.Save(stateDir, next);
-                    output.WriteLine(EnvelopeForHost(host, ctx));
+                    output.WriteLine(EnvelopeForHost(host, string.Join("\n\n", parts)));
                     return 0;
                 }
             }
+            else if (nudge is not null)
+            {
+                // Skip turn, but the once-per-session nudge is due: emit it alone.
+                PinnedFloorState.Save(stateDir, next);
+                output.WriteLine(EnvelopeForHost(host, nudge));
+                return 0;
+            }
 
-            // Skip, or inject-with-empty-block: advance + persist state, no injection.
             PinnedFloorState.Save(stateDir, next);
             output.WriteLine("{}");
             return 0;
@@ -178,6 +192,25 @@ public sealed class PinnedFloorCommand : ICliCommand
         var pinned = cfg.Tiers.Pinned;
         return !Microsoft.FSharp.Core.FSharpOption<Core.Config.PinnedTierConfig>.get_IsSome(pinned)
             || pinned.Value.ProjectScoping;
+    }
+
+    private int LoadCompactionThreshold()
+    {
+        try { return new ConfigLoader().LoadEffectiveConfig().Tiers.Hot.CompactionHintThreshold; }
+        catch { return 5; }
+    }
+
+    private int CountHot()
+    {
+        try
+        {
+            if (_store is not null) return _store.Count(Tier.Hot, ContentType.Memory);
+            var dbPath = ConfigLoader.GetDbPath();
+            using var conn = SqliteConnection.Open(dbPath);
+            MigrationRunner.RunMigrations(conn);
+            return new SqliteStore(conn).Count(Tier.Hot, ContentType.Memory);
+        }
+        catch { return 0; }
     }
 
     private static string EnvelopeForHost(string host, string additionalContext)

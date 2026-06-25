@@ -94,6 +94,11 @@ public static class PinnedFloorState
                 try { if (File.GetLastWriteTimeUtc(file) < cutoff) File.Delete(file); }
                 catch { }
             }
+            foreach (var file in Directory.EnumerateFiles(stateDir, "compaction-nudged-*"))
+            {
+                try { if (File.GetLastWriteTimeUtc(file) < cutoff) File.Delete(file); }
+                catch { }
+            }
         }
         catch { }
     }
