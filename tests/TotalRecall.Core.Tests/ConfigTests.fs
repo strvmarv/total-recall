@@ -82,7 +82,7 @@ let configTests =
         testCase "TotalRecallConfig record can be constructed" <| fun _ ->
             let cfg : TotalRecallConfig = {
                 Tiers = {
-                    Hot = { MaxEntries = 50; TokenBudget = 8000; CarryForwardThreshold = 0.5; TaskWeight = 0.0 }
+                    Hot = { MaxEntries = 50; TokenBudget = 8000; CarryForwardThreshold = 0.5; TaskWeight = 0.0; CompactionHintThreshold = 5 }
                     Warm = { MaxEntries = 200; RetrievalTopK = 10; SimilarityThreshold = 0.5; ColdDecayDays = 30 }
                     Cold = { ChunkMaxTokens = 500; ChunkOverlapTokens = 50; LazySummaryThreshold = 100 }
                     Pinned = None
