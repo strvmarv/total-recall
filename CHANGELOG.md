@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 3.7.0 - 2026-06-25
+
+### Added
+
+- **User-triggered compaction with proactive hints.** The `SessionEnd` hook no longer injects a compaction *directive* — Claude Code's `SessionEnd` schema rejects `hookSpecificOutput`/`additionalContext`, and no hook fires at session end with a following model turn to execute one. Compaction is now user-triggered via the `/total-recall:commands compact` command (model-driven LLM summaries by default, `--fast` for a no-LLM heuristic sweep), and the plugin nudges toward it at three points: `session_start`, throttled mid-session (once per session), and session end.
+- **`tiers.hot.compaction_hint_threshold` config** (default `5`). Hot-tier entry count at or above this triggers the compaction hint on all three surfaces; `0` disables it uniformly.
+- **`total-recall compact --run`** — real heuristic hot→warm sweep from the CLI, sharing one decay implementation (`Decay.fs`) with the `session_end` MCP tool via the new `HotTierCompactor`.
+
+### Fixed
+
+- **`SessionEnd` hook crash.** `hooks/session-end/run.sh` now emits schema-valid output only (`{}`, or a user-facing `systemMessage` at/above threshold), ending the `Hook JSON output validation failed — (root): Invalid input` error. A golden test asserts the output never carries `hookSpecificOutput`/`additionalContext`.
+
 ## 3.6.1 - 2026-06-22
 
 ### Fixed
