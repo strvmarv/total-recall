@@ -21,8 +21,7 @@ elif [ -n "${COPILOT_CLI:-}" ]; then
   host="copilot-cli"
 fi
 
-output=$(node "$PLUGIN_ROOT/bin/start.js" session-end-hint --host "$host" 2>/dev/null)
-if [ $? -ne 0 ] || [ -z "$output" ]; then
+if ! output=$(node "$PLUGIN_ROOT/bin/start.js" session-end-hint --host "$host" 2>/dev/null) || [ -z "$output" ]; then
   printf '{}\n'
 else
   printf '%s\n' "$output"

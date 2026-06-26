@@ -35,4 +35,13 @@ public sealed class CompactCommandTests
         Assert.Equal(0, code);
         Assert.Contains("Compaction is driven by", outw.ToString());
     }
+
+    [Fact]
+    public async Task UnknownArg_ReturnsExitTwo()
+    {
+        var outw = new StringWriter();
+        var cmd = new CompactCommand(outw);
+        var code = await cmd.RunAsync(new[] { "--bogus" });
+        Assert.Equal(2, code);
+    }
 }

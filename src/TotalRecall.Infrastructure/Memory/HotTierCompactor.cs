@@ -57,7 +57,7 @@ public static class HotTierCompactor
                     SessionId: sessionId,
                     SourceTier: "hot",
                     TargetTier: "warm",
-                    SourceEntryIds: new[] { entry.Id },
+                    SourceEntryIds: [entry.Id],
                     TargetEntryId: null,
                     DecayScores: new Dictionary<string, double> { [entry.Id] = score },
                     Reason: reason,

@@ -44,6 +44,10 @@ public sealed class InMemoryTestStore : IStore
         if (idx < 0)
             throw new InvalidOperationException($"entry '{id}' not found in {tier}/{type}");
         var e = slot[idx];
+        // NOTE: F# records are immutable, so an update is a full reconstruction.
+        // This positional Entry ctor mirrors every field by position — adding or
+        // reordering an Entry field silently breaks this copy (the compiler only
+        // catches a change in arity, not a reordering of same-typed fields).
         slot[idx] = new Entry(
             e.Id, e.Content, e.Summary, e.Source, e.SourceTool, e.Project,
             e.Tags, e.CreatedAt, e.UpdatedAt, e.LastAccessedAt, e.AccessCount,
