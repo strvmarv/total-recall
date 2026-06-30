@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "total-recall-prompt-submit",
+      "description": "Re-assert pinned directives near the live edge of the transcript on the engine's adaptive throttle.",
+      "trigger": "UserPromptSubmit",
+      "action": {
+        "type": "command",
+        "command": "pwsh -NoProfile -NonInteractive -File hooks/kiro/user-prompt-submit.ps1"
+      },
+      "timeout": 10,
+      "enabled": true
+    }
+  ]
+}

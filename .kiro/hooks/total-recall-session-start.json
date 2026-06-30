@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "total-recall-session-start",
+      "description": "Inject total-recall SKILL.md instructions at session start so the agent knows to call session_start before its first reply.",
+      "trigger": "SessionStart",
+      "action": {
+        "type": "command",
+        "command": "pwsh -NoProfile -NonInteractive -File hooks/kiro/session-start.ps1"
+      },
+      "timeout": 15,
+      "enabled": true
+    }
+  ]
+}
