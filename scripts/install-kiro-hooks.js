@@ -46,7 +46,7 @@ export async function installKiroHooks() {
 
   if (existsSync(hooksSrc)) {
     mkdirSync(hooksDest, { recursive: true });
-    const files = readdirSync(hooksSrc).filter(f => f.startsWith('total-recall-') && f.endsWith('.json'));
+    const files = readdirSync(hooksSrc).filter(f => f.startsWith('total-recall-') && f.endsWith('.kiro.hook'));
     for (const file of files) {
       cpSync(join(hooksSrc, file), join(hooksDest, file), { force: true });
     }
