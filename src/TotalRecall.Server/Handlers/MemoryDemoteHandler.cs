@@ -91,6 +91,14 @@ public sealed class MemoryDemoteHandler : IToolHandler
         var (fromTier, fromType, entry) = located;
         var targetType = requestedType ?? fromType;
 
+        // Tier model v2 (Task 9): a sticky-hot entry is "pinned" (the merged
+        // replacement for the retired pinned tier). Demoting it would silently
+        // drop the pin (warm has no sticky column), so reject it — the user must
+        // memory_unpin first, mirroring the old Tier.Pinned guard.
+        if (fromTier.IsHot && _store.IsSticky(fromType, id))
+            throw new ArgumentException(
+                $"entry {id} is sticky (pinned); use memory_unpin to release it first");
+
         if (TierNames.WarmthRank(toTier) >= TierNames.WarmthRank(fromTier))
             throw new ArgumentException(
                 $"cannot demote {TierNames.TierName(fromTier)} -> {TierNames.TierName(toTier)} (target must be colder)");

@@ -110,9 +110,43 @@ public class MemoryDemoteHandlerTests
         Assert.Equal("memory_demote", handler.Name);
     }
 
-    // Tier model v2 (Task 9): the pinned tier is retired, so the former
-    // "pinned source cannot be demoted" guard test is removed (a sticky-hot
-    // entry demotes like any hot entry once its sticky flag is cleared).
+    // Tier model v2 (Task 9): a sticky-hot entry is "pinned" (merged from the
+    // retired pinned tier). Demoting it must be REJECTED, not silently unpin it.
+
+    [Fact]
+    public async Task StickyHotSource_IsRejected_PointsToUnpin()
+    {
+        var (handler, store, vec, _) = MakeHandler();
+        store.Seed(Tier.Hot, ContentType.Memory, MakeEntry("h1"));
+        store.SetSticky(ContentType.Memory, "h1", true);
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            handler.ExecuteAsync(ParseArgs("""{"id":"h1","tier":"warm"}"""), CancellationToken.None));
+        Assert.Contains("memory_unpin", ex.Message);
+        // Nothing moved — the entry stays in Hot AND stays sticky.
+        Assert.Empty(store.MoveCalls);
+        Assert.Empty(vec.DeleteCalls);
+        Assert.True(store.IsSticky(ContentType.Memory, "h1"));
+    }
+
+    [Fact]
+    public async Task AfterUnpin_NonStickyHot_DemotesToWarm()
+    {
+        // Companion: once sticky is cleared (via memory_unpin), the now-plain
+        // hot entry demotes normally to warm.
+        var (handler, store, _, _) = MakeHandler();
+        store.Seed(Tier.Hot, ContentType.Memory, MakeEntry("h1"));
+        store.SetSticky(ContentType.Memory, "h1", true);
+        store.SetSticky(ContentType.Memory, "h1", false); // memory_unpin cleared it
+
+        var result = await handler.ExecuteAsync(
+            ParseArgs("""{"id":"h1","tier":"warm"}"""), CancellationToken.None);
+
+        using var doc = JsonDocument.Parse(result.Content[0].Text);
+        Assert.Equal("warm", doc.RootElement.GetProperty("to_tier").GetString());
+        Assert.True(doc.RootElement.GetProperty("success").GetBoolean());
+        Assert.Single(store.MoveCalls);
+    }
 
     [Fact]
     public async Task PinnedTarget_IsRejected_AsInvalidTier()

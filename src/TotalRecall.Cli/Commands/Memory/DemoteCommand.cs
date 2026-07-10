@@ -155,6 +155,17 @@ public sealed class DemoteCommand : ICliCommand
             var (fromTier, fromType, entry) = located.Value;
             var targetType = toType ?? fromType;
 
+            // Tier model v2 (Task 9): a sticky-hot entry is "pinned" (the merged
+            // replacement for the retired pinned tier). Demoting it would silently
+            // drop the pin (warm has no sticky column), so reject it — the user
+            // must unpin first, mirroring the old Tier.Pinned guard.
+            if (fromTier.IsHot && store.IsSticky(fromType, id))
+            {
+                Console.Error.WriteLine(
+                    $"memory demote: entry {id} is sticky (pinned); use 'memory unpin' to release it first");
+                return 2;
+            }
+
             // Direction gate: demotion must target a strictly colder tier.
             if (TierNames.WarmthRank(toTier) >= TierNames.WarmthRank(fromTier))
             {
