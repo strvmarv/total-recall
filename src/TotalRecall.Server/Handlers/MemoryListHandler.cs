@@ -23,7 +23,8 @@ public sealed class MemoryListHandler : IToolHandler
         {
           "type": "object",
           "properties": {
-            "tier":         {"type":"string","enum":["hot","warm","cold","pinned"],"description":"Restrict to one tier; default all"},
+            "tier":         {"type":"string","enum":["hot","warm","cold"],"description":"Restrict to one tier; default all"},
+            "sticky":       {"type":"boolean","description":"When true, list only sticky (pinned) hot entries"},
             "content_type": {"type":"string","enum":["memory","knowledge"],"description":"Restrict to one content type; default both"},
             "tags":         {"type":"array","items":{"type":"string"},"description":"Filter by tags stored in metadata"},
             "project":      {"type":"string","description":"Filter by exact project name"},
@@ -52,6 +53,7 @@ public sealed class MemoryListHandler : IToolHandler
         IReadOnlyList<string>? tagsFilter = null;
         string? project = null;
         string? sourceTool = null;
+        bool stickyOnly = false;
         int limit = 50;
         int offset = 0;
 
@@ -62,7 +64,13 @@ public sealed class MemoryListHandler : IToolHandler
             var tierStr = ArgumentParsing.ReadOptionalString(args, "tier");
             if (tierStr is not null)
                 tierFilter = TierNames.ParseTier(tierStr)
-                    ?? throw new ArgumentException($"invalid tier '{tierStr}' (expected hot, warm, cold, or pinned)");
+                    ?? throw new ArgumentException($"invalid tier '{tierStr}' (expected hot, warm, or cold)");
+
+            // Tier model v2 (Task 9): sticky=true lists the merged sticky-hot
+            // entries (the replacement for the retired pinned tier).
+            if (args.TryGetProperty("sticky", out var stickyEl)
+                && stickyEl.ValueKind == JsonValueKind.True)
+                stickyOnly = true;
 
             var ctStr = ArgumentParsing.ReadOptionalString(args, "content_type");
             if (ctStr is not null)
@@ -91,6 +99,8 @@ public sealed class MemoryListHandler : IToolHandler
             // Apply tier / content_type filters.
             if (tierFilter is not null && pair.Tier != tierFilter) continue;
             if (contentTypeFilter is not null && pair.Type != contentTypeFilter) continue;
+            // sticky is hot-only — skip non-hot pairs entirely when requested.
+            if (stickyOnly && !pair.Tier.IsHot) continue;
 
             ct.ThrowIfCancellationRequested();
 
@@ -102,7 +112,8 @@ public sealed class MemoryListHandler : IToolHandler
             {
                 Project = project,
                 OrderBy = "created_at DESC",
-                Limit = perTableLimit
+                Limit = perTableLimit,
+                StickyOnly = stickyOnly, // hot-only guard applied in the store
             });
             foreach (var e in rows)
                 allEntries.Add((tier, type, e));

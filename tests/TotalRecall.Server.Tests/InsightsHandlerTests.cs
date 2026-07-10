@@ -127,7 +127,7 @@ public class InsightsHandlerTests
             {
                 // TableName is internal to Infrastructure; replicate the memory-tier
                 // naming convention inline (hot_memories / warm_memories / ...).
-                var tierStr = tier.IsHot ? "hot" : tier.IsWarm ? "warm" : tier.IsCold ? "cold" : "pinned";
+                var tierStr = tier.IsHot ? "hot" : tier.IsWarm ? "warm" : "cold";
                 using var cmd = Conn.CreateCommand();
                 cmd.CommandText =
                     $"UPDATE {tierStr}_memories SET access_count = $ac, created_at = $ca WHERE id = $id";
@@ -320,7 +320,10 @@ public class InsightsHandlerTests
         using var fx = new Fixture();
         fx.Seed(Tier.Warm, "hot memory", accessCount: 12);   // candidate
         fx.Seed(Tier.Warm, "rarely used", accessCount: 3);   // below threshold
-        fx.Seed(Tier.Pinned, "already pinned", accessCount: 99); // pinned => excluded
+        // Tier model v2 (Task 9): an already-sticky hot entry is not a warm
+        // promotion candidate (pin candidates scan warm only).
+        var already = fx.Seed(Tier.Hot, "already pinned", accessCount: 99);
+        fx.Store.SetSticky(ContentType.Memory, already, true);
 
         var root = await RunAsync(fx, """{"pinAccessThreshold":8}""");
         var candidates = root.GetProperty("pinCandidates");
@@ -456,7 +459,12 @@ public class InsightsHandlerTests
     public async Task HealthBreakdown_PinnedOverBudget_DegradesScore()
     {
         using var fx = new Fixture();
-        for (int i = 0; i < 18; i++) fx.Seed(Tier.Pinned, $"pinned memory {i}");
+        // Tier model v2 (Task 9): "pinned" health = sticky-hot count.
+        for (int i = 0; i < 18; i++)
+        {
+            var pid = fx.Seed(Tier.Hot, $"pinned memory {i}");
+            fx.Store.SetSticky(ContentType.Memory, pid, true);
+        }
         var root = await RunAsync(fx);
         var pinned = root.GetProperty("healthBreakdown").GetProperty("pinned");
         // 18 pinned => 20 - (18-15) = 17

@@ -42,6 +42,54 @@ public sealed class TierV2DataMigrationTests
         store.InsertWithEmbedding(tier, type, opts, embedder.Embed(content));
     }
 
+    // Tier model v2 (Task 9): Tier.Pinned is retired, so legacy pinned rows can
+    // no longer be seeded via the store. Migration 16 still creates the physical
+    // pinned_* tables (they are dropped by RunOnce), so seed them by raw SQL —
+    // content row (the FTS trigger fills the fts index) + a real vec companion
+    // for the migration's source-vec-delete step (RC2) to act on.
+    private static void InsertPinnedRow(
+        MsSqliteConnection conn,
+        IEmbedder embedder,
+        string id,
+        string content,
+        EntryType entryType,
+        string scope)
+    {
+        const string tbl = "pinned_memories";
+        long rowid;
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = $@"
+INSERT INTO {tbl}
+  (id, content, summary, source, source_tool, project, tags,
+   created_at, updated_at, last_accessed_at, access_count, decay_score,
+   parent_id, collection_id, metadata, scope, entry_type, times_injected)
+VALUES
+  ($id, $content, NULL, NULL, NULL, NULL, '[]',
+   1, 1, 1, 0, 1.0,
+   NULL, NULL, '{{}}', $scope, $et, 0)";
+            cmd.Parameters.AddWithValue("$id", id);
+            cmd.Parameters.AddWithValue("$content", content);
+            cmd.Parameters.AddWithValue("$scope", scope);
+            cmd.Parameters.AddWithValue("$et",
+                TotalRecall.Infrastructure.Memory.TierNames.EntryTypeName(entryType));
+            cmd.ExecuteNonQuery();
+        }
+        using (var rc = conn.CreateCommand())
+        {
+            rc.CommandText = "SELECT last_insert_rowid()";
+            rowid = (long)rc.ExecuteScalar()!;
+        }
+        var emb = embedder.Embed(content);
+        using var vc = conn.CreateCommand();
+        vc.CommandText = $"INSERT INTO {tbl}_vec (rowid, embedding) VALUES ($r, $e)";
+        vc.Parameters.AddWithValue("$r", rowid);
+        vc.Parameters.AddWithValue("$e",
+            System.Runtime.InteropServices.MemoryMarshal
+                .AsBytes(new System.ReadOnlySpan<float>(emb)).ToArray());
+        vc.ExecuteNonQuery();
+    }
+
     private static long ScalarCount(MsSqliteConnection conn, string sql)
     {
         using var cmd = conn.CreateCommand();
@@ -60,7 +108,7 @@ public sealed class TierV2DataMigrationTests
         var embedder = new RecordingFakeEmbedder();
 
         // legacy rows: a pinned Correction (type + scope must survive) + an old hot note
-        InsertViaStore(store, embedder, Tier.Pinned, ContentType.Memory,
+        InsertPinnedRow(conn, embedder,
             id: "p1", content: "pinned fact", entryType: EntryType.Correction, scope: "global");
         InsertViaStore(store, embedder, Tier.Hot, ContentType.Memory,
             id: "h1", content: "old hot note");
@@ -102,7 +150,7 @@ public sealed class TierV2DataMigrationTests
         var store = new SqliteStore(conn);
         var embedder = new RecordingFakeEmbedder();
 
-        InsertViaStore(store, embedder, Tier.Pinned, ContentType.Memory,
+        InsertPinnedRow(conn, embedder,
             id: "p1", content: "pinned fact", entryType: EntryType.Decision, scope: "global");
         InsertViaStore(store, embedder, Tier.Hot, ContentType.Memory,
             id: "h1", content: "old hot note");

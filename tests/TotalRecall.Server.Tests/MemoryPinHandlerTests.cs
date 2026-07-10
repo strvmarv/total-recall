@@ -92,8 +92,8 @@ public class MemoryPinHandlerTests
 
         Assert.Single(store.List(Tier.Hot, ContentType.Memory,
             new ListEntriesOpts { StickyOnly = true }));
-        // Nothing landed in the pinned tier.
-        Assert.DoesNotContain(store.MoveCalls, c => c.ToTier.IsPinned);
+        // Tier model v2 (Task 9): every move targets hot (no pinned tier).
+        Assert.All(store.MoveCalls, c => Assert.True(c.ToTier.IsHot));
     }
 
     [Fact]

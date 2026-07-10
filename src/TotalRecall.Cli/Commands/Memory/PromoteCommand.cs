@@ -110,11 +110,6 @@ public sealed class PromoteCommand : ICliCommand
             Console.Error.WriteLine("memory promote: cannot promote to cold (use demote instead)");
             return 2;
         }
-        if (toTier.IsPinned)
-        {
-            Console.Error.WriteLine("memory promote: cannot promote to pinned (use 'memory pin' instead)");
-            return 2;
-        }
 
         ContentType? toType = null;
         if (typeStr is not null)
@@ -163,11 +158,6 @@ public sealed class PromoteCommand : ICliCommand
             }
 
             var (fromTier, fromType, entry) = located.Value;
-            if (fromTier.IsPinned)
-            {
-                Console.Error.WriteLine($"memory promote: entry {id} is pinned; use 'memory unpin' to release it first");
-                return 2;
-            }
             var targetType = toType ?? fromType;
 
             // Direction gate: promotion must target a strictly warmer tier.

@@ -73,7 +73,7 @@
           },
           "pinned": {
             "type": "boolean",
-            "description": "Store directly into the pinned tier (always injected, never decays). Mutually exclusive with tier."
+            "description": "Store as sticky in the hot tier (always injected, never decays or compacts). Mutually exclusive with tier."
           }
         },
         "required": [
@@ -106,8 +106,7 @@
               "enum": [
                 "hot",
                 "warm",
-                "cold",
-                "pinned"
+                "cold"
               ]
             },
             "description": "Tiers to search (default: all)"
@@ -320,7 +319,7 @@
     },
     {
       "name": "memory_pin",
-      "description": "Pin a memory or knowledge entry: moves it to the pinned tier where it is always injected into session context and never decays or compacts",
+      "description": "Pin a memory or knowledge entry: marks it sticky in the hot tier where it is always injected into session context and never decays or compacts",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -356,7 +355,7 @@
     },
     {
       "name": "memory_unpin",
-      "description": "Unpin a pinned entry: moves it to the warm tier where the normal decay/compaction lifecycle resumes",
+      "description": "Unpin a pinned entry: clears its sticky flag so it stays in the hot tier as an earned resident and the normal decay/compaction lifecycle resumes",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -422,8 +421,7 @@
             "enum": [
               "hot",
               "warm",
-              "cold",
-              "pinned"
+              "cold"
             ],
             "description": "Restrict to one tier; default all merged"
           },
@@ -465,10 +463,13 @@
             "enum": [
               "hot",
               "warm",
-              "cold",
-              "pinned"
+              "cold"
             ],
             "description": "Restrict to one tier; default all"
+          },
+          "sticky": {
+            "type": "boolean",
+            "description": "When true, list only sticky (pinned) hot entries"
           },
           "content_type": {
             "type": "string",
@@ -536,8 +537,7 @@
                   "enum": [
                     "hot",
                     "warm",
-                    "cold",
-                    "pinned"
+                    "cold"
                   ]
                 }
               },

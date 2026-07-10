@@ -196,17 +196,17 @@ public class MemorySearchHandlerTests
 
         var tiers = hybrid.Calls[0].Tiers;
         Assert.All(tiers, t => Assert.True(t.Type.IsKnowledge));
-        Assert.Equal(4, tiers.Count); // hot/warm/cold/pinned x knowledge
+        Assert.Equal(3, tiers.Count); // hot/warm/cold x knowledge (Task 9: no pinned)
     }
 
     [Fact]
-    public async Task DefaultFilters_IncludeAllEightTablePairs()
+    public async Task DefaultFilters_IncludeAllSixTablePairs()
     {
         var (handler, _, hybrid) = NewFixture();
 
         await handler.ExecuteAsync(Args("""{"query":"q"}"""), CancellationToken.None);
 
-        Assert.Equal(8, hybrid.Calls[0].Tiers.Count);
+        Assert.Equal(6, hybrid.Calls[0].Tiers.Count);
     }
 
     [Fact]
@@ -424,17 +424,17 @@ public class MemorySearchHandlerTests
         Assert.Equal("unknown", row.SessionId);
         Assert.Equal("default", row.ConfigSnapshotId);
 
-        // tiers_searched is the 8 pair names (default: all eight table pairs).
+        // tiers_searched is the 6 pair names (default: all six table pairs).
         using (var tiersDoc = JsonDocument.Parse(row.TiersSearchedJson))
         {
             Assert.Equal(JsonValueKind.Array, tiersDoc.RootElement.ValueKind);
-            Assert.Equal(8, tiersDoc.RootElement.GetArrayLength());
+            Assert.Equal(6, tiersDoc.RootElement.GetArrayLength());
             var names = tiersDoc.RootElement.EnumerateArray()
                 .Select(e => e.GetString()).ToArray();
             Assert.Contains("hot_memory", names);
             Assert.Contains("cold_knowledge", names);
-            Assert.Contains("pinned_memory", names);
-            Assert.Contains("pinned_knowledge", names);
+            Assert.DoesNotContain("pinned_memory", names);
+            Assert.DoesNotContain("pinned_knowledge", names);
         }
 
         // --- assert sync queue payload ---
@@ -452,7 +452,7 @@ public class MemorySearchHandlerTests
         Assert.Equal(7, evt.GetProperty("top_k").GetInt32());
         Assert.Equal(2, evt.GetProperty("result_count").GetInt32());
         Assert.Equal(0.91, evt.GetProperty("top_score").GetDouble(), 6);
-        Assert.Equal(8, evt.GetProperty("tiers_searched").GetArrayLength());
+        Assert.Equal(6, evt.GetProperty("tiers_searched").GetArrayLength());
         Assert.Equal(JsonValueKind.Null, evt.GetProperty("outcome_signal").ValueKind);
         Assert.True(evt.GetProperty("latency_ms").GetDouble() >= 0.0);
         Assert.False(string.IsNullOrEmpty(evt.GetProperty("timestamp").GetString()));
@@ -532,24 +532,11 @@ public class MemorySearchHandlerTests
 
     // ---------------- Task 7: pinned tier filter tests ----------------
 
-    [Fact]
-    public async Task Search_TiersPinnedFilter_OnlySearchesPinnedTables()
-    {
-        var (handler, _, hybrid) = NewFixture();
-
-        await handler.ExecuteAsync(
-            Args("""{"query":"x","tiers":["pinned"]}"""),
-            CancellationToken.None);
-
-        var tiers = hybrid.Calls[0].Tiers;
-        Assert.Equal(2, tiers.Count);
-        Assert.All(tiers, t => Assert.True(t.Tier.IsPinned, "expected only pinned tier"));
-        Assert.Contains(tiers, t => t.Type.IsMemory);
-        Assert.Contains(tiers, t => t.Type.IsKnowledge);
-    }
+    // Tier model v2 (Task 9): "pinned" is no longer a tier, so the pinned-filter
+    // search test is removed. Default search now spans the 6 live tiers only.
 
     [Fact]
-    public async Task Search_DefaultTiers_IncludePinned()
+    public async Task Search_DefaultTiers_AreSixLiveTiers()
     {
         var (handler, _, hybrid) = NewFixture();
 
@@ -558,22 +545,19 @@ public class MemorySearchHandlerTests
             CancellationToken.None);
 
         var tiers = hybrid.Calls[0].Tiers;
-        Assert.Equal(8, tiers.Count);
-        Assert.Contains(tiers, t => t.Tier.IsPinned && t.Type.IsMemory);
-        Assert.Contains(tiers, t => t.Tier.IsPinned && t.Type.IsKnowledge);
+        Assert.Equal(6, tiers.Count);
+        Assert.DoesNotContain(tiers, t => TotalRecall.Infrastructure.Memory.TierNames.TierName(t.Tier) == "pinned");
     }
 
     [Fact]
-    public async Task Search_TiersPinnedString_Accepted_NotThrows()
+    public async Task Search_TiersPinnedString_IsRejected()
     {
-        // Regression guard: "pinned" was previously rejected as invalid tier.
+        // Tier model v2 (Task 9): "pinned" is retired and rejected as invalid.
         var (handler, _, _) = NewFixture();
 
-        var ex = await Record.ExceptionAsync(() =>
+        await Assert.ThrowsAsync<ArgumentException>(() =>
             handler.ExecuteAsync(
                 Args("""{"query":"x","tiers":["pinned"]}"""),
                 CancellationToken.None));
-
-        Assert.Null(ex);
     }
 }

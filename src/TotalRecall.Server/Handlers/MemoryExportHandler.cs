@@ -35,7 +35,7 @@ public sealed class MemoryExportHandler : IToolHandler
             "tiers": {
               "description":"Optional tier filter (array or comma-separated string)",
               "oneOf":[
-                {"type":"array","items":{"type":"string","enum":["hot","warm","cold","pinned"]}},
+                {"type":"array","items":{"type":"string","enum":["hot","warm","cold"]}},
                 {"type":"string"}
               ]
             },

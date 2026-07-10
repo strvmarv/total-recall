@@ -73,7 +73,7 @@ public sealed class RecentCommand : ICliCommand
                         return Fail("--tier requires a value");
                     tier = TierNames.ParseTier(args[++i]);
                     if (tier is null)
-                        return Fail("--tier must be hot, warm, cold, or pinned");
+                        return Fail("--tier must be hot, warm, or cold");
                     break;
                 case "--type":
                     if (i + 1 >= args.Length)

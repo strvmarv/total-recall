@@ -37,7 +37,7 @@ public sealed class UnpinCommand : ICliCommand
 
     public string Name => "unpin";
     public string? Group => "memory";
-    public string Description => "Unpin a pinned entry: moves it to warm where the normal decay/compaction lifecycle resumes";
+    public string Description => "Unpin a pinned entry: clears its sticky flag so it stays in hot as an earned resident and the normal decay/compaction lifecycle resumes";
 
     public Task<int> RunAsync(string[] args)
     {
@@ -134,7 +134,11 @@ public sealed class UnpinCommand : ICliCommand
             }
 
             var (fromTier, fromType, entry) = located.Value;
-            if (!fromTier.IsPinned)
+
+            // Tier model v2 (Task 9): "pinned" is now the sticky flag on hot.
+            // Only a sticky-hot entry may be unpinned; anything else is not
+            // pinned. Mirrors MemoryUnpinHandler.
+            if (!fromTier.IsHot || !store.IsSticky(fromType, id))
             {
                 Console.Error.WriteLine(
                     $"memory unpin: entry {id} is not pinned (tier: {TierNames.TierName(fromTier)})");
@@ -142,9 +146,11 @@ public sealed class UnpinCommand : ICliCommand
             }
             var targetType = toType ?? fromType;
 
-            MoveHelpers.MoveAndReEmbed(store, vec, embedder, entry, Tier.Pinned, fromType, Tier.Warm, targetType);
+            // Clear sticky in place — NO tier move. The entry stays in hot as an
+            // earned resident and resumes the normal decay lifecycle.
+            store.SetSticky(fromType, id, false);
 
-            Console.Out.WriteLine($"unpinned {id} -> warm/{TierNames.ContentTypeName(targetType)}");
+            Console.Out.WriteLine($"unpinned {id} -> hot/{TierNames.ContentTypeName(targetType)}");
             return 0;
         }
         catch (Exception ex)

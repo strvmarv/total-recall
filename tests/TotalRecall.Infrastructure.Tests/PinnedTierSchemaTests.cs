@@ -72,10 +72,7 @@ public sealed class PinnedTierSchemaTests
         Assert.Superset(expected, triggerNames);
     }
 
-    [Fact]
-    public void TableName_Pinned_ReturnsPinnedTables()
-    {
-        Assert.Equal("pinned_memories", MigrationRunner.TableName(Tier.Pinned, ContentType.Memory));
-        Assert.Equal("pinned_knowledge", MigrationRunner.TableName(Tier.Pinned, ContentType.Knowledge));
-    }
+    // Tier model v2 (Task 9): TableName(Tier.Pinned, …) is retired — the pinned
+    // tables are addressed by literal name now (see MigrationRunner.PinnedContentTables).
+    // Migration 16 still creates them (dropped later by TierV2DataMigration.RunOnce).
 }

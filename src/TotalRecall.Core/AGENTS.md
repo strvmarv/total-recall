@@ -56,7 +56,7 @@ type Entry = {
 ```
 
 C# callers access these via `TotalRecall.Core.Tier.Hot`, `TotalRecall.Core.ContentType.Memory`, etc.
-For discriminated union case checks from C#: `tier.IsHot`, `tier.IsWarm`, `tier.IsCold`, `tier.IsPinned`.
+For discriminated union case checks from C#: `tier.IsHot`, `tier.IsWarm`, `tier.IsCold`.
 
 ---
 

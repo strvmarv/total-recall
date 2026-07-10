@@ -358,6 +358,7 @@ public sealed record TierSizesDto(
     [property: JsonPropertyName("warm_knowledge")] int WarmKnowledge,
     [property: JsonPropertyName("cold_memories")] int ColdMemories,
     [property: JsonPropertyName("cold_knowledge")] int ColdKnowledge,
+    // pinned_* = sticky-hot (tier merged in v2); JSON names kept for wire back-compat.
     [property: JsonPropertyName("pinned_memories")] int PinnedMemories,
     [property: JsonPropertyName("pinned_knowledge")] int PinnedKnowledge);
 
@@ -870,6 +871,7 @@ public sealed record HealthComponentDto(
 public sealed record HealthBreakdownDto(
     [property: JsonPropertyName("retrieval")] HealthComponentDto Retrieval,
     [property: JsonPropertyName("capture")] HealthComponentDto Capture,
+    // pinned = sticky-hot (tier merged in v2); JSON name kept for wire back-compat.
     [property: JsonPropertyName("pinned")] HealthComponentDto Pinned,
     [property: JsonPropertyName("kb")] HealthComponentDto Kb);
 

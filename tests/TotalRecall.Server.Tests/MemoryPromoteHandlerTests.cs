@@ -201,28 +201,19 @@ public class MemoryPromoteHandlerTests
         Assert.True(props.TryGetProperty("id", out _));
     }
 
-    // ---------------- Task 3: pinned-tier guards ----------------
+    // Tier model v2 (Task 9): the pinned tier is retired, so the former
+    // "pinned source rejected" guard test is removed (a sticky-hot entry
+    // promotes like any hot entry).
 
     [Fact]
-    public async Task PinnedSource_IsRejected_PointsToUnpin()
+    public async Task PinnedTarget_IsRejected_AsInvalidTier()
     {
-        var (handler, store, _, _) = MakeHandler();
-        store.Seed(Tier.Pinned, ContentType.Memory, MakeEntry("p1"));
-
-        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
-            handler.ExecuteAsync(ParseArgs("""{"id":"p1"}"""), CancellationToken.None));
-        Assert.Contains("memory_unpin", ex.Message);
-        Assert.Empty(store.MoveCalls); // nothing moved — regression guard
-    }
-
-    [Fact]
-    public async Task PinnedTarget_IsRejected_PointsToPin()
-    {
+        // "pinned" is no longer a valid tier target; it is rejected as invalid.
         var (handler, store, _, _) = MakeHandler();
         store.Seed(Tier.Warm, ContentType.Memory, MakeEntry("w1"));
 
         var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
             handler.ExecuteAsync(ParseArgs("""{"id":"w1","tier":"pinned"}"""), CancellationToken.None));
-        Assert.Contains("memory_pin", ex.Message);
+        Assert.Contains("invalid tier", ex.Message);
     }
 }

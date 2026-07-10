@@ -193,10 +193,12 @@ public sealed class InsightsHandler : IToolHandler
     private static NearDuplicateGroupDto[] ComputeNearDuplicates(
         IInsightsContext ctx, double threshold, int limit, CancellationToken ct)
     {
-        // Live set = hot + warm + pinned memory tiers (skip cold archive),
-        // capped at `limit` total entries scanned. Push the cap down to SQL via
-        // a running remainder so we never materialize more rows than we'll keep.
-        var liveTiers = new[] { Tier.Hot, Tier.Warm, Tier.Pinned };
+        // Live set = hot + warm memory tiers (skip cold archive), capped at
+        // `limit` total entries scanned. Push the cap down to SQL via a running
+        // remainder so we never materialize more rows than we'll keep. Tier
+        // model v2 (Task 9): sticky (formerly "pinned") entries live in hot, so
+        // they are already covered by the hot scan.
+        var liveTiers = new[] { Tier.Hot, Tier.Warm };
         var entries = new List<(Tier Tier, Entry Entry)>();
         int remaining = limit;
         foreach (var tier in liveTiers)
@@ -317,7 +319,8 @@ public sealed class InsightsHandler : IToolHandler
     {
         // Across hot/warm/cold memory tiers, list by access_count DESC, keep
         // entries with access_count >= threshold that are NOT already pinned.
-        // (Listing only non-pinned tiers already excludes pinned entries.)
+        // Tier model v2 (Task 9): "already pinned" = sticky-hot, so the hot scan
+        // uses ExcludeSticky to skip entries that are already pinned.
         //
         // Also exclude entries whose content exceeds the pinned-tier cap
         // (tiers.pinned.max_content_chars): memory_pin rejects oversize content,
@@ -328,7 +331,12 @@ public sealed class InsightsHandler : IToolHandler
         foreach (var tier in new[] { Tier.Hot, Tier.Warm, Tier.Cold })
         {
             var rows = ctx.Store.List(tier, ContentType.Memory,
-                new ListEntriesOpts { OrderBy = "access_count DESC", Limit = MaxPinCandidates * 5 });
+                new ListEntriesOpts
+                {
+                    OrderBy = "access_count DESC",
+                    Limit = MaxPinCandidates * 5,
+                    ExcludeSticky = tier.IsHot, // hot-only: skip already-pinned (sticky) rows
+                });
             int kept = 0;
             foreach (var e in rows)
             {
@@ -439,7 +447,7 @@ public sealed class InsightsHandler : IToolHandler
         // Capture (max 25): round(min(1, curatedRatio/0.3)*25) over last 30
         // memories (created order), curated = entry_type in {correction, preference, decision}.
         var recent = new List<Entry>();
-        foreach (var tier in new[] { Tier.Hot, Tier.Warm, Tier.Cold, Tier.Pinned })
+        foreach (var tier in new[] { Tier.Hot, Tier.Warm, Tier.Cold })
             recent.AddRange(ctx.Store.List(tier, ContentType.Memory,
                 new ListEntriesOpts { OrderBy = "created_at DESC", Limit = RecentCaptureWindow }));
         recent = recent
@@ -466,10 +474,11 @@ public sealed class InsightsHandler : IToolHandler
 
         // Pinned (max 20): <= 15 → 20, else max(0, 20-(count-15)).
         // Parity with the client health score, which sums pinned memories AND
-        // pinned knowledge. Use IStore.Count (same mechanism as StatusHandler's
-        // tier sizing) rather than materializing rows via List().Count.
-        var pinnedCount = ctx.Store.Count(Tier.Pinned, ContentType.Memory)
-            + ctx.Store.Count(Tier.Pinned, ContentType.Knowledge);
+        // pinned knowledge. Tier model v2 (Task 9): "pinned" = sticky-hot (tier
+        // merged), so count sticky rows in hot via List(StickyOnly).
+        var pinnedCount =
+            ctx.Store.List(Tier.Hot, ContentType.Memory, new ListEntriesOpts { StickyOnly = true }).Count
+            + ctx.Store.List(Tier.Hot, ContentType.Knowledge, new ListEntriesOpts { StickyOnly = true }).Count;
         int pinnedScore = pinnedCount <= 15 ? 20 : Math.Max(0, 20 - (pinnedCount - 15));
         var pinnedDetail = pinnedCount <= 15
             ? $"{pinnedCount} pinned — within budget"
@@ -513,7 +522,7 @@ public sealed class InsightsHandler : IToolHandler
     }
 
     private static string TierName(Tier tier) =>
-        tier.IsHot ? "hot" : tier.IsWarm ? "warm" : tier.IsCold ? "cold" : "pinned";
+        tier.IsHot ? "hot" : tier.IsWarm ? "warm" : "cold";
 
     private static InsightsContextProvider BuildProductionProvider() =>
         () => ProductionInsightsContext.Open();
@@ -619,7 +628,7 @@ public sealed class InsightsHandler : IToolHandler
         public int TotalKnowledgeChunks()
         {
             var total = 0;
-            foreach (var tier in new[] { Tier.Hot, Tier.Warm, Tier.Cold, Tier.Pinned })
+            foreach (var tier in new[] { Tier.Hot, Tier.Warm, Tier.Cold })
                 total += Store.Count(tier, ContentType.Knowledge);
             return total;
         }

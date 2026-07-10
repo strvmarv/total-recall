@@ -32,12 +32,13 @@ public static class PinnedBlockRenderer
         foreach (var e in pinnedMemories)
         {
             sb.Append("\n- ").Append(e.Content);
-            ids.Add((Tier.Pinned, ContentType.Memory, e.Id));
+            // Tier model v2 (Task 9): sticky entries live in hot (tier merged).
+            ids.Add((Tier.Hot, ContentType.Memory, e.Id));
         }
         foreach (var e in pinnedKnowledge)
         {
             sb.Append("\n- ").Append(e.Content);
-            ids.Add((Tier.Pinned, ContentType.Knowledge, e.Id));
+            ids.Add((Tier.Hot, ContentType.Knowledge, e.Id));
         }
         return (sb.ToString(), ids);
     }

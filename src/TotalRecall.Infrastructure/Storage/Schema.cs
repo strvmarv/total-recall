@@ -43,7 +43,6 @@ public static class MigrationRunner
         if (tier.IsHot) tierStr = "hot";
         else if (tier.IsWarm) tierStr = "warm";
         else if (tier.IsCold) tierStr = "cold";
-        else if (tier.IsPinned) tierStr = "pinned";
         else throw new ArgumentOutOfRangeException(nameof(tier));
 
         string typeStr;
@@ -75,13 +74,16 @@ public static class MigrationRunner
         (Tier.Cold, ContentType.Knowledge),
     };
 
-    /// <summary>The 2 (tier, type) pairs for the pinned tier, created by
-    /// Migration 16. Kept separate from <see cref="AllTablePairs"/> so
-    /// historical migrations are not affected.</summary>
-    internal static readonly (Tier Tier, ContentType Type)[] PinnedTablePairs =
+    /// <summary>The 2 pinned content-table base names, created by Migration 16.
+    /// Kept separate from <see cref="AllTablePairs"/> so historical migrations
+    /// are not affected. Tier model v2 (Task 9): these are hard-coded string
+    /// literals — the <c>Tier.Pinned</c> DU case has been retired, but
+    /// Migration 16 must keep creating these tables on DBs below v16 (Task 6's
+    /// app-layer <c>RunOnce</c> later drops them after moving the rows).</summary>
+    internal static readonly string[] PinnedContentTables =
     {
-        (Tier.Pinned, ContentType.Memory),
-        (Tier.Pinned, ContentType.Knowledge),
+        "pinned_memories",
+        "pinned_knowledge",
     };
 
     private const string SchemaVersionDdl = """
@@ -423,7 +425,7 @@ public static class MigrationRunner
     {
         // Frozen at the 6 pre-pinned pairs: on a fresh DB this migration runs
         // before Migration 16 creates the pinned tables.
-        CleanupOrphanRowsInTransaction(conn, tx, AllTablePairs);
+        CleanupOrphanRowsInTransaction(conn, tx, AllContentTables());
     }
 
     /// <summary>
@@ -439,19 +441,23 @@ public static class MigrationRunner
     {
         ArgumentNullException.ThrowIfNull(conn);
         using var tx = conn.BeginTransaction();
-        CleanupOrphanRowsInTransaction(conn, tx, AllTablePairs.Concat(PinnedTablePairs));
+        CleanupOrphanRowsInTransaction(conn, tx, AllContentTables().Concat(PinnedContentTables));
         tx.Commit();
     }
+
+    /// <summary>The 6 live content-table base names derived from
+    /// <see cref="AllTablePairs"/>.</summary>
+    private static IEnumerable<string> AllContentTables() =>
+        AllTablePairs.Select(p => TableName(p.Tier, p.Type));
 
     private static void CleanupOrphanRowsInTransaction(
         MsSqliteConnection conn,
         Microsoft.Data.Sqlite.SqliteTransaction tx,
-        IEnumerable<(Tier Tier, ContentType Type)> pairs)
+        IEnumerable<string> contentTables)
     {
-        foreach (var (tier, type) in pairs)
+        foreach (var contentTable in contentTables)
         {
-            var contentTable = TableName(tier, type);
-            var vecTable = VecTableName(tier, type);
+            var vecTable = $"{contentTable}_vec";
 
             // Orphan vec rows: rowids present in vec but not in content.
             Exec(conn, tx,
@@ -763,11 +769,10 @@ public static class MigrationRunner
         MsSqliteConnection conn,
         Microsoft.Data.Sqlite.SqliteTransaction tx)
     {
-        foreach (var (tier, type) in PinnedTablePairs)
+        foreach (var tbl in PinnedContentTables)
         {
-            var tbl = TableName(tier, type);
-            var vecTbl = VecTableName(tier, type);
-            var ftsTbl = FtsTableName(tier, type);
+            var vecTbl = $"{tbl}_vec";
+            var ftsTbl = $"{tbl}_fts";
 
             Exec(conn, tx, $$"""
                 CREATE TABLE IF NOT EXISTS {{tbl}} (

@@ -22,15 +22,13 @@ internal static class EntryMapping
         (Tier.Hot,    ContentType.Memory),
         (Tier.Warm,   ContentType.Memory),
         (Tier.Cold,   ContentType.Memory),
-        (Tier.Pinned, ContentType.Memory),
         (Tier.Hot,    ContentType.Knowledge),
         (Tier.Warm,   ContentType.Knowledge),
         (Tier.Cold,   ContentType.Knowledge),
-        (Tier.Pinned, ContentType.Knowledge),
     };
 
     public static string TierName(Tier t) =>
-        t.IsHot ? "hot" : t.IsWarm ? "warm" : t.IsPinned ? "pinned" : "cold";
+        t.IsHot ? "hot" : t.IsWarm ? "warm" : "cold";
 
     public static string ContentTypeName(ContentType c) =>
         c.IsMemory ? "memory" : "knowledge";

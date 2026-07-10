@@ -131,11 +131,26 @@ public sealed class MemoryImportHandler : IToolHandler
             seenContents.Add(content);
 
             Tier tier = Tier.Hot;
+            bool legacyPinned = false;
             if (entryElem.TryGetProperty("tier", out var tierEl)
                 && tierEl.ValueKind == JsonValueKind.String)
             {
-                var parsed = TierNames.ParseTier(tierEl.GetString()!);
-                if (parsed is not null) tier = parsed;
+                var tierStr = tierEl.GetString()!;
+                // Tier model v2 (Task 9): "pinned" is retired (ParseTier → null).
+                // Preserve legacy pinned exports by importing into HOT with
+                // sticky=1 (decay_score defaults to 1.0 on insert), so old pins
+                // survive an export/import round-trip rather than silently
+                // becoming a plain hot entry.
+                if (tierStr == "pinned")
+                {
+                    tier = Tier.Hot;
+                    legacyPinned = true;
+                }
+                else
+                {
+                    var parsed = TierNames.ParseTier(tierStr);
+                    if (parsed is not null) tier = parsed;
+                }
             }
             ContentType ctype = ContentType.Memory;
             if (entryElem.TryGetProperty("content_type", out var ctEl)
@@ -166,6 +181,8 @@ public sealed class MemoryImportHandler : IToolHandler
                 EntryType: EntryType.Imported);
 
             var newId = _store.Insert(tier, ctype, opts);
+            // Legacy pinned exports become sticky-hot (tier merged in v2).
+            if (legacyPinned) _store.SetSticky(ctype, newId, true);
             // TODO(Plan 5+): atomicity gap (carry-forward #9) — a crash
             // between store.Insert and the vector insert leaves the row
             // without an embedding. Same gap MoveHelpers.MoveAndReEmbed

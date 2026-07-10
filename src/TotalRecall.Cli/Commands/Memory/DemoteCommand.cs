@@ -105,11 +105,6 @@ public sealed class DemoteCommand : ICliCommand
             Console.Error.WriteLine("memory demote: cannot demote to hot (use promote instead)");
             return 2;
         }
-        if (toTier.IsPinned)
-        {
-            Console.Error.WriteLine("memory demote: cannot demote to pinned (use 'memory pin' instead)");
-            return 2;
-        }
 
         ContentType? toType = null;
         if (typeStr is not null)
@@ -158,11 +153,6 @@ public sealed class DemoteCommand : ICliCommand
             }
 
             var (fromTier, fromType, entry) = located.Value;
-            if (fromTier.IsPinned)
-            {
-                Console.Error.WriteLine($"memory demote: entry {id} is pinned; use 'memory unpin' to release it first");
-                return 2;
-            }
             var targetType = toType ?? fromType;
 
             // Direction gate: demotion must target a strictly colder tier.

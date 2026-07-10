@@ -209,11 +209,25 @@ public sealed class ImportCommand : ICliCommand
 
                     // Resolve tier / content_type with TS-matching fallbacks.
                     Tier tier = Tier.Hot;
+                    bool legacyPinned = false;
                     if (entryElem.TryGetProperty("tier", out var tierEl)
                         && tierEl.ValueKind == JsonValueKind.String)
                     {
-                        var parsed = TierNames.ParseTier(tierEl.GetString()!);
-                        if (parsed is not null) tier = parsed;
+                        var tierStr = tierEl.GetString()!;
+                        // Tier model v2 (Task 9): "pinned" is retired (ParseTier
+                        // → null). Preserve legacy pinned exports by importing
+                        // into HOT with sticky=1 (decay_score defaults to 1.0),
+                        // so old pins survive an export/import round-trip.
+                        if (tierStr == "pinned")
+                        {
+                            tier = Tier.Hot;
+                            legacyPinned = true;
+                        }
+                        else
+                        {
+                            var parsed = TierNames.ParseTier(tierStr);
+                            if (parsed is not null) tier = parsed;
+                        }
                     }
                     ContentType ctype = ContentType.Memory;
                     if (entryElem.TryGetProperty("content_type", out var ctEl)
@@ -242,6 +256,8 @@ public sealed class ImportCommand : ICliCommand
                         EntryType: EntryType.Imported);
 
                     var newId = store.Insert(tier, ctype, opts);
+                    // Legacy pinned exports become sticky-hot (tier merged in v2).
+                    if (legacyPinned) store.SetSticky(ctype, newId, true);
                     // TODO(Plan 5+): atomicity gap (carry-forward #2).
                     var embedding = embedder!.Embed(content);
                     vec.InsertEmbedding(tier, ctype, newId, embedding);

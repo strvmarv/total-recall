@@ -110,29 +110,20 @@ public class MemoryDemoteHandlerTests
         Assert.Equal("memory_demote", handler.Name);
     }
 
-    // ---------------- Task 3: pinned-tier guards ----------------
+    // Tier model v2 (Task 9): the pinned tier is retired, so the former
+    // "pinned source cannot be demoted" guard test is removed (a sticky-hot
+    // entry demotes like any hot entry once its sticky flag is cleared).
 
     [Fact]
-    public async Task PinnedSource_CannotBeDemoted()
+    public async Task PinnedTarget_IsRejected_AsInvalidTier()
     {
-        var (handler, store, _, _) = MakeHandler();
-        store.Seed(Tier.Pinned, ContentType.Memory, MakeEntry("p1"));
-
-        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
-            handler.ExecuteAsync(ParseArgs("""{"id":"p1","tier":"warm"}"""), CancellationToken.None));
-        Assert.Contains("memory_unpin", ex.Message);
-        Assert.Empty(store.MoveCalls); // nothing moved — critical regression test
-    }
-
-    [Fact]
-    public async Task PinnedTarget_IsRejected_PointsToPin()
-    {
+        // Tier model v2 (Task 9): "pinned" is no longer a valid tier target.
         var (handler, store, _, _) = MakeHandler();
         store.Seed(Tier.Hot, ContentType.Memory, MakeEntry("h1"));
 
         var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
             handler.ExecuteAsync(ParseArgs("""{"id":"h1","tier":"pinned"}"""), CancellationToken.None));
-        Assert.Contains("memory_pin", ex.Message);
+        Assert.Contains("invalid tier", ex.Message);
     }
 
     // ---------------- Phase 6: compaction telemetry ----------------

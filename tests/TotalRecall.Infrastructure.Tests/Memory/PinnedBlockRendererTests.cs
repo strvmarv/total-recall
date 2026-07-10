@@ -44,7 +44,7 @@ public sealed class PinnedBlockRendererTests
         var (block, ids) = PinnedBlockRenderer.Render(new[] { Make("p1", longContent) }, Array.Empty<Entry>());
         Assert.Contains(longContent, block);
         Assert.Single(ids);
-        Assert.Equal((Tier.Pinned, ContentType.Memory, "p1"), ids[0]);
+        Assert.Equal((Tier.Hot, ContentType.Memory, "p1"), ids[0]);
     }
 
     [Fact]

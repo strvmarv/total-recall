@@ -331,12 +331,10 @@ public sealed class SessionLifecycle : ISessionLifecycle
         // I1: StickyOnly hot listing — the ONLY site that injects sticky rows.
         var pinnedMemories = _store.List(Tier.Hot, ContentType.Memory, stickyOpts);
         var pinnedKnowledge = _store.List(Tier.Hot, ContentType.Knowledge, stickyOpts);
-        var (pinnedBlock, pinnedIdsRaw) = PinnedBlockRenderer.Render(pinnedMemories, pinnedKnowledge);
-        // PinnedBlockRenderer still tags ids with Tier.Pinned (renamed in Task 9);
-        // remap to Hot so injection tracking targets the hot rows they now live in.
-        var pinnedIds = pinnedIdsRaw
-            .Select(t => (Tier.Hot, t.Item2, t.Item3))
-            .ToList();
+        var (pinnedBlock, pinnedIds) = PinnedBlockRenderer.Render(pinnedMemories, pinnedKnowledge);
+        // Tier model v2 (Task 9): PinnedBlockRenderer now tags ids with Tier.Hot
+        // (sticky lives in hot), so injection tracking already targets the right
+        // rows — no remap needed.
         var pinnedTokens = pinnedBlock.Length > 0 ? HeuristicEstimateTokens(pinnedBlock) : 0;
 
         // 4. Tier summary.
@@ -1392,11 +1390,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
         // I1: StickyOnly hot listing — the sticky-block source on the refresh path.
         var pinnedMemories = _store.List(Tier.Hot, ContentType.Memory, stickyOpts);
         var pinnedKnowledge = _store.List(Tier.Hot, ContentType.Knowledge, stickyOpts);
-        var (pinnedBlock, pinnedIdsRaw) = PinnedBlockRenderer.Render(pinnedMemories, pinnedKnowledge);
-        // Remap Tier.Pinned → Tier.Hot for injection tracking (see session_start).
-        var pinnedIds = pinnedIdsRaw
-            .Select(t => (Tier.Hot, t.Item2, t.Item3))
-            .ToList();
+        var (pinnedBlock, pinnedIds) = PinnedBlockRenderer.Render(pinnedMemories, pinnedKnowledge);
+        // Tier model v2 (Task 9): renderer tags ids with Tier.Hot (see session_start).
         var pinnedTokens = pinnedBlock.Length > 0 ? HeuristicEstimateTokens(pinnedBlock) : 0;
 
         var ctxResult = BuildContext(hotEntries, new BuildContextOptions
@@ -1660,6 +1655,7 @@ public sealed record TierSummary(
     [property: JsonPropertyName("hot")] int Hot,
     [property: JsonPropertyName("warm")] int Warm,
     [property: JsonPropertyName("cold")] int Cold,
+    // pinned = sticky-hot (tier merged in v2); JSON name kept for wire back-compat.
     [property: JsonPropertyName("pinned")] int Pinned,
     [property: JsonPropertyName("kb")] int Kb,
     [property: JsonPropertyName("collections")] int Collections);

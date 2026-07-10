@@ -75,7 +75,7 @@ public sealed class MemoryStoreHandler : IToolHandler
             "source":      {"type":"string","description":"Source identifier"},
             "visibility":  {"type":"string","enum":["private","team","public"],"description":"Entry visibility: 'private' (default), 'team', or 'public'"},
             "scope":       {"type":"string","description":"Scope for this entry (e.g. user:paul, team:eng, service:bot). Uses configured default if omitted."},
-            "pinned":      {"type":"boolean","description":"Store directly into the pinned tier (always injected, never decays). Mutually exclusive with tier."}
+            "pinned":      {"type":"boolean","description":"Store as sticky in the hot tier (always injected, never decays or compacts). Mutually exclusive with tier."}
           },
           "required": ["content"]
         }
@@ -283,8 +283,6 @@ public sealed class MemoryStoreHandler : IToolHandler
             "hot" => Tier.Hot,
             "warm" => Tier.Warm,
             "cold" => Tier.Cold,
-            "pinned" => throw new ArgumentException(
-                "tier 'pinned' is not valid here; use the pinned:true flag instead"),
             _ => throw new ArgumentException($"Invalid tier: {v}. Must be hot, warm, or cold"),
         };
     }

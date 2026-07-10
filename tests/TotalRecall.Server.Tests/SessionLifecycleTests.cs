@@ -1296,23 +1296,9 @@ public sealed class SessionLifecycleTests
 
     // ---------- Task 8: Warm sweep immunity test ----------
 
-    [Fact]
-    public async Task WarmSweep_NeverTouchesPinned()
-    {
-        var store = new FakeStore();
-        // Dead-weight profile: TimesInjected >= autoDemoteMinInjections=10, AccessCount=0.
-        // If warm sweep accidentally visited pinned entries, it would try to move this.
-        store.Entries[(Tier.Pinned, ContentType.Memory)] = new List<Entry>
-        {
-            MakeEntry("pm1", "pinned dead-weight", accessCount: 0, timesInjected: 20),
-        };
-
-        var lifecycle = BuildLifecycle(store);
-        await lifecycle.EnsureInitializedAsync();
-
-        // No Move calls should involve the Pinned tier as FromTier.
-        Assert.DoesNotContain(store.MoveCalls, c => c.FromTier.IsPinned);
-    }
+    // Tier model v2 (Task 9): the pinned tier is retired. The former
+    // "warm sweep never touches pinned" guard is removed; sticky entries live in
+    // hot and are protected from hot compaction (covered by Task 8 tests).
 
     // ---------- Task 8 / Fix 2: pinned re-injected on RefreshAsync ----------
 

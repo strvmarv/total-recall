@@ -57,28 +57,27 @@ public sealed class UnpinCommandTests : IDisposable
     }
 
     [Fact]
-    public async Task Unpin_MovesToWarm_AndPrints()
+    public async Task Unpin_ClearsSticky_StaysHot_AndPrints()
     {
+        // Tier model v2 (Task 9): unpin clears the sticky flag in place — the
+        // entry stays in hot as an earned resident. NO tier move.
         var (cmd, store, vec, emb) = Build();
-        store.Seed(Tier.Pinned, ContentType.Memory, EntryFactory.Make("p1", "body"));
+        store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make("p1", "body"));
+        store.SetSticky(ContentType.Memory, "p1", true);
 
         var code = await cmd.RunAsync(new[] { "p1" });
 
         Assert.Equal(0, code);
-        Assert.Single(store.MoveCalls);
-        Assert.Equal((Tier.Pinned, ContentType.Memory, Tier.Warm, ContentType.Memory, "p1"), store.MoveCalls[0]);
-        Assert.Single(vec.Deletes);
-        // p1 is seeded first → synthetic rowid 1 in FakeMemoryInfra.FakeStore.
-        Assert.Equal((Tier.Pinned, ContentType.Memory, 1L), vec.Deletes[0]);
-        Assert.Single(emb.Calls);
-        Assert.Single(vec.Inserts);
-        Assert.Equal(Tier.Warm, vec.Inserts[0].Tier);
-        Assert.Contains("unpinned p1 -> warm/memory", _outWriter.ToString());
+        Assert.Empty(store.MoveCalls);
+        Assert.False(store.IsSticky(ContentType.Memory, "p1"));
+        Assert.Empty(vec.Inserts);
+        Assert.Contains("unpinned p1 -> hot/memory", _outWriter.ToString());
     }
 
     [Fact]
     public async Task Unpin_NotPinned_Exit2()
     {
+        // A plain (non-sticky) hot entry is not pinned.
         var (cmd, store, _, _) = Build();
         store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make("h1"));
 
@@ -91,16 +90,18 @@ public sealed class UnpinCommandTests : IDisposable
     }
 
     [Fact]
-    public async Task Unpin_TypeOverride_MovesToKnowledge()
+    public async Task Unpin_TypeOverride_ClearsSticky()
     {
         var (cmd, store, _, _) = Build();
-        store.Seed(Tier.Pinned, ContentType.Memory, EntryFactory.Make("p1"));
+        store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make("p1"));
+        store.SetSticky(ContentType.Memory, "p1", true);
 
         var code = await cmd.RunAsync(new[] { "p1", "--type", "knowledge" });
 
         Assert.Equal(0, code);
-        Assert.Equal((Tier.Pinned, ContentType.Memory, Tier.Warm, ContentType.Knowledge, "p1"), store.MoveCalls[0]);
-        Assert.Contains("unpinned p1 -> warm/knowledge", _outWriter.ToString());
+        Assert.Empty(store.MoveCalls);
+        Assert.False(store.IsSticky(ContentType.Memory, "p1"));
+        Assert.Contains("unpinned p1 -> hot/knowledge", _outWriter.ToString());
     }
 
     [Fact]
