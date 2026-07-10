@@ -9,8 +9,8 @@ open TotalRecall.Core
 type CompactionDecision =
     /// Keep the entry in hot tier.
     | CarryForward
-    /// Promote to warm tier, optionally replacing content with a summary.
-    | Promote of summary: string option
+    /// Compact to warm tier, optionally replacing content with a summary.
+    | Compact of summary: string option
     /// Discard the entry with a reason.
     | Discard of reason: string
 

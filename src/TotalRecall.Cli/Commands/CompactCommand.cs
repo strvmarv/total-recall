@@ -74,7 +74,7 @@ public sealed class CompactCommand : ICliCommand
         {
             var r = HotTierCompactor.Compact(_store, "cli-compact", nowMs,
                 _warmThreshold, _decayConstantHours, compactionLog: null, reason: "manual_compact");
-            output.WriteLine($"compacted: promoted={r.Promoted} carryForward={r.CarryForward}");
+            output.WriteLine($"compacted: compacted={r.Compacted} carryForward={r.CarryForward}");
             return 0;
         }
 
@@ -92,7 +92,7 @@ public sealed class CompactCommand : ICliCommand
             var r = HotTierCompactor.Compact(store, "cli-compact", nowMs,
                 cfg.Compaction.WarmThreshold, cfg.Compaction.DecayHalfLifeHours,
                 compactionLog: null, reason: "manual_compact");
-            output.WriteLine($"compacted: promoted={r.Promoted} carryForward={r.CarryForward}");
+            output.WriteLine($"compacted: compacted={r.Compacted} carryForward={r.CarryForward}");
             return 0;
         }
         finally

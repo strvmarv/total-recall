@@ -11,7 +11,7 @@ namespace TotalRecall.Cli.Tests.Commands;
 public sealed class CompactCommandTests
 {
     [Fact]
-    public async Task Run_PromotesStaleHotEntries_AndReportsCount()
+    public async Task Run_CompactsStaleHotEntries_AndReportsCount()
     {
         var store = new FakeStore();
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -23,7 +23,7 @@ public sealed class CompactCommandTests
         var code = await cmd.RunAsync(new[] { "--run" });
 
         Assert.Equal(0, code);
-        Assert.Contains("promoted=1", outw.ToString());
+        Assert.Contains("compacted=1", outw.ToString());
     }
 
     [Fact]

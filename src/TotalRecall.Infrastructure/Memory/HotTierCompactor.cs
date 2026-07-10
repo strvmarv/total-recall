@@ -1,7 +1,7 @@
 // src/TotalRecall.Infrastructure/Memory/HotTierCompactor.cs
 //
 // Shared heuristic hot→warm compaction. Recalculates decay scores for all
-// hot-tier memory entries and promotes any whose score falls below
+// hot-tier memory entries and compacts any whose score falls below
 // warmThreshold. Used by both the session_end MCP tool and the
 // `total-recall compact --run` CLI verb. Routes through the canonical
 // Decay.calculateDecayScore F# function so the formula lives in one place.
@@ -17,7 +17,7 @@ namespace TotalRecall.Infrastructure.Memory;
 
 public static class HotTierCompactor
 {
-    public sealed record Result(int CarryForward, int Promoted, int Discarded);
+    public sealed record Result(int CarryForward, int Compacted, int Discarded);
 
     public static Result Compact(
         IStore store,
@@ -32,7 +32,7 @@ public static class HotTierCompactor
         ArgumentNullException.ThrowIfNull(store);
 
         var hotEntries = store.List(Tier.Hot, ContentType.Memory);
-        var promoted = 0;
+        var compacted = 0;
 
         foreach (var entry in hotEntries)
         {
@@ -62,12 +62,12 @@ public static class HotTierCompactor
                     DecayScores: new Dictionary<string, double> { [entry.Id] = score },
                     Reason: reason,
                     ConfigSnapshotId: ""));
-                promoted++;
+                compacted++;
             }
             catch (InvalidOperationException) { } // concurrently deleted — skip
         }
 
         var carryForward = store.Count(Tier.Hot, ContentType.Memory);
-        return new Result(carryForward, promoted, Discarded: 0);
+        return new Result(carryForward, compacted, Discarded: 0);
     }
 }

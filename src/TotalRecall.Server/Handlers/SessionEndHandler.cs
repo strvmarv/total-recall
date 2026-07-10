@@ -95,6 +95,6 @@ public sealed class SessionEndHandler : IToolHandler
             _store!, _sessionLifecycle.SessionId, nowMs,
             _warmThreshold, _decayConstantHours, _compactionLog,
             reason: "session_end_decay", ct: ct);
-        return (r.CarryForward, r.Promoted, r.Discarded);
+        return (r.CarryForward, r.Compacted, r.Discarded);
     }
 }

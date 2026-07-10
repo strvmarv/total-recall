@@ -27,7 +27,7 @@ public sealed class HotTierCompactorTests
             metadataJson: "{}", timesInjected: 0);
 
     [Fact]
-    public void Compact_PromotesStaleEntriesBelowThreshold()
+    public void Compact_CompactsStaleEntriesBelowThreshold()
     {
         var store = new InMemoryTestStore();
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -38,14 +38,14 @@ public sealed class HotTierCompactorTests
             store, sessionId: "s1", nowMs: now,
             warmThreshold: 0.5, decayConstantHours: 168, compactionLog: null);
 
-        Assert.Equal(1, result.Promoted);
+        Assert.Equal(1, result.Compacted);
         Assert.Equal(1, result.CarryForward);
         Assert.Equal(1, store.Count(Tier.Warm, ContentType.Memory));
         Assert.Equal(1, store.Count(Tier.Hot, ContentType.Memory));
     }
 
     [Fact]
-    public void Compact_EmptyStore_PromotesNothing()
+    public void Compact_EmptyStore_CompactsNothing()
     {
         var store = new InMemoryTestStore();
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -54,13 +54,13 @@ public sealed class HotTierCompactorTests
             store, sessionId: "s1", nowMs: now,
             warmThreshold: 0.5, decayConstantHours: 168, compactionLog: null);
 
-        Assert.Equal(0, result.Promoted);
+        Assert.Equal(0, result.Compacted);
         Assert.Equal(0, result.CarryForward);
         Assert.Equal(0, store.Count(Tier.Warm, ContentType.Memory));
     }
 
     [Fact]
-    public void Compact_AllFreshEntries_PromotesNothing()
+    public void Compact_AllFreshEntries_CompactsNothing()
     {
         var store = new InMemoryTestStore();
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -71,7 +71,7 @@ public sealed class HotTierCompactorTests
             store, sessionId: "s1", nowMs: now,
             warmThreshold: 0.5, decayConstantHours: 168, compactionLog: null);
 
-        Assert.Equal(0, result.Promoted);
+        Assert.Equal(0, result.Compacted);
         Assert.Equal(2, result.CarryForward);
         Assert.Equal(0, store.Count(Tier.Warm, ContentType.Memory));
         Assert.Equal(2, store.Count(Tier.Hot, ContentType.Memory));
