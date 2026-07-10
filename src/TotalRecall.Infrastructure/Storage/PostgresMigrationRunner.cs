@@ -20,7 +20,7 @@ namespace TotalRecall.Infrastructure.Storage;
 /// </summary>
 public static class PostgresMigrationRunner
 {
-    private const int SchemaVersion = 3;
+    private const int SchemaVersion = 4;
 
     private const string SchemaVersionDdl = """
         CREATE TABLE IF NOT EXISTS _schema_version (
@@ -70,6 +70,19 @@ public static class PostgresMigrationRunner
     private static string EntryTypeColumnDdl(string name) => $$"""
         ALTER TABLE {{name}}
             ADD COLUMN IF NOT EXISTS entry_type TEXT NOT NULL DEFAULT 'Preference'
+        """;
+
+    /// <summary>
+    /// ALTER-column DDL for existing tables upgraded to SchemaVersion 4.
+    /// Adds the <c>sticky</c> column (tier model v2, Task 3). Postgres has a
+    /// single content table per type with a <c>tier</c> column, so unlike
+    /// the SQLite hot-only per-table migration, this adds the column
+    /// unconditionally to both tables (rows outside the hot tier simply
+    /// carry the default <c>FALSE</c>).
+    /// </summary>
+    private static string StickyColumnDdl(string name) => $$"""
+        ALTER TABLE {{name}}
+            ADD COLUMN IF NOT EXISTS sticky BOOLEAN NOT NULL DEFAULT FALSE
         """;
 
     private static string FtsColumnDdl(string name) => $$"""
@@ -265,6 +278,18 @@ public static class PostgresMigrationRunner
                     $"ALTER TABLE {name} ADD COLUMN IF NOT EXISTS times_injected INTEGER NOT NULL DEFAULT 0");
 
             RecordSchemaVersion(conn, tx, 3, now);
+        }
+
+        if (currentVersion < 4)
+        {
+            // v4: add sticky column to content tables (tier model v2, Task 3).
+            foreach (var name in ContentTableNames)
+            {
+                Exec(conn, tx, StickyColumnDdl(name));
+                Exec(conn, tx, $"CREATE INDEX IF NOT EXISTS idx_{name}_sticky ON {name}(sticky)");
+            }
+
+            RecordSchemaVersion(conn, tx, 4, now);
         }
 
         tx.Commit();

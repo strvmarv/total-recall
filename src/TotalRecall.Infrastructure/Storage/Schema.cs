@@ -234,6 +234,8 @@ public static class MigrationRunner
         Migration15_ToolCache,
         // Migration 16: pinned tier content tables (pinned_memories, pinned_knowledge)
         Migration16_PinnedTier,
+        // Migration 17: add sticky column to hot content tables (tier model v2)
+        Migration17_HotStickyColumn,
     };
 
     /// <summary>
@@ -818,6 +820,37 @@ public static class MigrationRunner
                 """);
 
             // No FTS backfill needed (unlike Migration 3): pinned tables are always empty at migration time.
+        }
+    }
+
+    /// <summary>
+    /// Migration 17 — adds a <c>sticky</c> column to the hot tier content
+    /// tables (tier model v2). Sticky is a hot-only concept: warm/cold/pinned
+    /// tables are untouched. <c>ALTER TABLE ... ADD COLUMN</c> is not
+    /// idempotent in SQLite, so this guards on <c>pragma_table_info</c>
+    /// before adding.
+    /// </summary>
+    private static void Migration17_HotStickyColumn(
+        MsSqliteConnection conn,
+        Microsoft.Data.Sqlite.SqliteTransaction tx)
+    {
+        foreach (var (tier, type) in new[]
+                 {
+                     (Tier.Hot, ContentType.Memory),
+                     (Tier.Hot, ContentType.Knowledge),
+                 })
+        {
+            var tbl = TableName(tier, type);
+            // ADD COLUMN is not idempotent in SQLite; guard on pragma_table_info.
+            using (var check = conn.CreateCommand())
+            {
+                check.Transaction = tx;
+                check.CommandText =
+                    $"SELECT COUNT(*) FROM pragma_table_info('{tbl}') WHERE name = 'sticky'";
+                if ((long)check.ExecuteScalar()! == 0L)
+                    Exec(conn, tx, $"ALTER TABLE {tbl} ADD COLUMN sticky INTEGER NOT NULL DEFAULT 0");
+            }
+            Exec(conn, tx, $"CREATE INDEX IF NOT EXISTS idx_{tbl}_sticky ON {tbl}(sticky)");
         }
     }
 
