@@ -468,7 +468,8 @@ public static class ServerComposition
                 cacheStats: toolCacheStore.GetSessionStats,
                 reindexProgress: reindexProgress,
                 binaryDir: AppContext.BaseDirectory,
-                projectScoping: ResolveProjectScoping(cfg));
+                projectScoping: ResolveProjectScoping(cfg),
+                hotMaxContentChars: cfg.Tiers.Hot.MaxContentChars);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
@@ -756,7 +757,8 @@ public static class ServerComposition
                 cacheStats: toolCacheStore.GetSessionStats,
                 reindexProgress: reindexProgress,
                 binaryDir: AppContext.BaseDirectory,
-                projectScoping: ResolveProjectScoping(cfg));
+                projectScoping: ResolveProjectScoping(cfg),
+                hotMaxContentChars: cfg.Tiers.Hot.MaxContentChars);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,

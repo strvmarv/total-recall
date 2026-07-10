@@ -20,7 +20,7 @@ namespace TotalRecall.Infrastructure.Storage;
 /// </summary>
 public static class PostgresMigrationRunner
 {
-    private const int SchemaVersion = 4;
+    private const int SchemaVersion = 5;
 
     private const string SchemaVersionDdl = """
         CREATE TABLE IF NOT EXISTS _schema_version (
@@ -290,6 +290,35 @@ public static class PostgresMigrationRunner
             }
 
             RecordSchemaVersion(conn, tx, 4, now);
+        }
+
+        if (currentVersion < 5)
+        {
+            // v5 (tier model v2, Task 6): merge the pinned tier into hot as a
+            // `sticky` flag, in place. Postgres keeps tier as a COLUMN, so the
+            // move is a lossless SQL UPDATE — rows never leave their table and
+            // the pgvector embedding is preserved (no re-embed needed, unlike
+            // the SQLite six-table layout).
+            //
+            // Order matters and MUST match the SQLite path: hot -> warm FIRST,
+            // then pinned -> hot. Doing it the other way would demote the
+            // freshly-promoted sticky rows back to warm.
+            foreach (var name in ContentTableNames)
+            {
+                Exec(conn, tx, $"UPDATE {name} SET tier = 'warm' WHERE tier = 'hot'");
+                Exec(conn, tx,
+                    $"UPDATE {name} SET tier = 'hot', sticky = TRUE, decay_score = 1.0 WHERE tier = 'pinned'");
+            }
+
+            // Set the shared flag so the SQLite app-layer step (TierV2DataMigration
+            // .RunOnce) is a guaranteed no-op if it ever runs against this store.
+            // Belt-and-suspenders: Step 4's `_store is SqliteStore` guard already
+            // excludes Postgres stores from that path.
+            Exec(conn, tx,
+                "INSERT INTO _meta (key, value) VALUES ('tier_v2_migrated', '1') " +
+                "ON CONFLICT (key) DO UPDATE SET value = '1'");
+
+            RecordSchemaVersion(conn, tx, 5, now);
         }
 
         tx.Commit();

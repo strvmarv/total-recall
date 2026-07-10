@@ -62,6 +62,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
     private readonly bool _projectScoping;
     private readonly ProjectResolver _projectResolver;
     private readonly int _compactionHintThreshold;
+    private readonly int _hotMaxContentChars;
 
     /// <summary>Phase 3 idea 2a — advisory thresholds for RefreshAsync recommendations.</summary>
     private const double SessionRefreshThresholdMinutes = 30;
@@ -93,7 +94,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
         string? binaryDir = null,
         bool projectScoping = true,
         int compactionHintThreshold = 5,
-        ProjectResolver? projectResolver = null)
+        ProjectResolver? projectResolver = null,
+        int hotMaxContentChars = 0)
     {
         ArgumentNullException.ThrowIfNull(importers);
         ArgumentNullException.ThrowIfNull(store);
@@ -118,6 +120,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         _binaryDir = binaryDir;
         _projectScoping = projectScoping;
         _compactionHintThreshold = compactionHintThreshold;
+        _hotMaxContentChars = hotMaxContentChars > 0 ? hotMaxContentChars : 0;
         _projectResolver = projectResolver ?? new ProjectResolver();
     }
 
@@ -265,6 +268,26 @@ public sealed class SessionLifecycle : ISessionLifecycle
         // Plan 4 leaves warmPromotedIds empty.
         var warmPromotedIds = Array.Empty<string>();
         var warmPromoted = 0;
+
+        // 1d. Tier model v2 (Task 6) — one-time data move. Runs here (at
+        // session_start, where an embedder exists for re-embedding) BEFORE the
+        // warm sweep so the sweep sees the merged tier state. SQLite-only:
+        // Postgres does its move as an in-place SQL UPDATE in
+        // PostgresMigrationRunner. Idempotent — the _meta flag makes every
+        // later session a no-op. Never throws through to block session_start.
+        if (_store is SqliteStore ss)
+        {
+            try
+            {
+                TierV2DataMigration.RunOnce(
+                    ss.Connection, _embedder, _compactionLog as CompactionLog);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"total-recall: tier_v2 data migration failed: {ex.Message}");
+            }
+        }
 
         // 2. Warm sweep — synchronous, runs before hot entry listing so the
         // reported count reflects post-sweep state. Eliminates the Task.Run
@@ -422,6 +445,17 @@ public sealed class SessionLifecycle : ISessionLifecycle
         if (bgHints.Count > 0)
         {
             hints = bgHints.Concat(hints).ToList();
+        }
+
+        // Tier model v2 (Task 6, Step 6) — once-per-session sticky visibility.
+        // Sticky-hot is unbounded (grandfathered: the char cap is enforced only
+        // on new writes/promotions), so surface it. Prepended and EXEMPT from
+        // the 5-hint content cap. RunInit runs once per session (cached), so
+        // this is naturally once-per-session.
+        var stickyHints = BuildStickyHints(_store, _hotMaxContentChars);
+        if (stickyHints.Count > 0)
+        {
+            hints = stickyHints.Concat(hints).ToList();
         }
 
         // 8. Last session age (humanized). Prefer usage_events MAX(ts) — that
@@ -1122,6 +1156,65 @@ public sealed class SessionLifecycle : ISessionLifecycle
         }
 
         if (hints.Count > 5) hints.RemoveRange(5, hints.Count - 5);
+        return hints;
+    }
+
+    /// <summary>
+    /// Tier model v2 (Task 6) — builds once-per-session sticky-visibility hints.
+    /// Sticky-hot memories are unbounded (the char cap is enforced only on new
+    /// writes/promotions — pre-existing rows are grandfathered), so we surface:
+    ///   • an oversized-sticky hint listing sticky memories whose content
+    ///     exceeds <paramref name="hotMaxContentChars"/> (candidates to split),
+    ///     emitted only when the cap is configured (&gt; 0);
+    ///   • a total sticky count + approx-token hint, so a large pinned set is
+    ///     visible even when nothing is oversized.
+    /// Returns an empty list when there is no sticky content.
+    /// </summary>
+    public static IReadOnlyList<Hint> BuildStickyHints(IStore store, int hotMaxContentChars)
+    {
+        var stickyOpts = new ListEntriesOpts { StickyOnly = true };
+        var stickyMemories = store.List(Tier.Hot, ContentType.Memory, stickyOpts);
+        var stickyKnowledge = store.List(Tier.Hot, ContentType.Knowledge, stickyOpts);
+
+        var total = stickyMemories.Count + stickyKnowledge.Count;
+        if (total == 0) return Array.Empty<Hint>();
+
+        var hints = new List<Hint>();
+
+        if (hotMaxContentChars > 0)
+        {
+            var oversized = stickyMemories
+                .Concat(stickyKnowledge)
+                .Where(e => e.Content.Length > hotMaxContentChars)
+                .ToList();
+            if (oversized.Count > 0)
+            {
+                var ids = string.Join(", ", oversized.Select(e => e.Id));
+                hints.Add(new Hint
+                {
+                    Priority = 3,
+                    Type = "sticky_oversized",
+                    Summary =
+                        $"{oversized.Count} sticky-hot {(oversized.Count == 1 ? "entry exceeds" : "entries exceed")} "
+                        + $"the {hotMaxContentChars}-char cap (grandfathered). Consider splitting for tighter injection. "
+                        + $"IDs: {ids}",
+                    SuggestedAction = "memory_update",
+                });
+            }
+        }
+
+        var approxTokens = HeuristicEstimateTokens(
+            string.Join(" ", stickyMemories.Concat(stickyKnowledge).Select(e => e.Content)));
+        hints.Add(new Hint
+        {
+            Priority = 4,
+            Type = "sticky_summary",
+            Summary =
+                $"{total} sticky-hot {(total == 1 ? "entry" : "entries")} are always injected "
+                + $"(~{approxTokens} tokens). Sticky is unbounded — review with memory_list if it grows large.",
+            SuggestedAction = null,
+        });
+
         return hints;
     }
 

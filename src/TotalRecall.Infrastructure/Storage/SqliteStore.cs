@@ -56,6 +56,15 @@ public sealed class SqliteStore : IStore, IMetaStore, IDisposable
         _ownsConnection = false;
     }
 
+    /// <summary>
+    /// The underlying SQLite connection. Exposed so app-layer, one-time
+    /// migrations that must run raw SQL enlisted in their own transaction
+    /// (e.g. <see cref="TierV2DataMigration"/>) can borrow it. The store does
+    /// NOT surrender ownership — disposal still follows the constructor's
+    /// ownership rules.
+    /// </summary>
+    public MsSqliteConnection Connection => _conn;
+
     // --- IStore -----------------------------------------------------
 
     public string Insert(Tier tier, ContentType type, InsertEntryOpts opts)
