@@ -19,13 +19,15 @@ namespace TotalRecall.Server.Tests;
 public class MemoryStoreHandlerTests
 {
     private static (MemoryStoreHandler handler, FakeStore store, RecordingFakeEmbedder embedder, FakeVectorSearch vector)
-        MakeHandler(string? id = null)
+        MakeHandler(string? id = null, int? hotMaxContentChars = null)
     {
         var store = new FakeStore();
         if (id is not null) store.NextInsertId = id;
         var embedder = new RecordingFakeEmbedder();
         var vector = new FakeVectorSearch();
-        var handler = new MemoryStoreHandler(store, embedder, vector);
+        var handler = hotMaxContentChars is int hotCap
+            ? new MemoryStoreHandler(store, embedder, vector, hotMaxContentChars: hotCap)
+            : new MemoryStoreHandler(store, embedder, vector);
         return (handler, store, embedder, vector);
     }
 
@@ -94,17 +96,38 @@ public class MemoryStoreHandlerTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_DefaultsTierToHot_TypeToMemory()
+    public async Task ExecuteAsync_DefaultsTierToWarm_TypeToMemory()
     {
+        // Behavior change (tier-model-v2 Task 4): memory_store with no explicit
+        // tier now defaults to Warm, not Hot. Previously asserted Tier.Hot.
         var (handler, store, _, _) = MakeHandler();
         var args = ParseArgs("""{"content":"no tier no type"}""");
 
         await handler.ExecuteAsync(args, CancellationToken.None);
 
         var call = Assert.Single(store.InsertWithEmbeddingCalls);
-        Assert.Equal(Tier.Hot, call.Tier);
+        Assert.Equal(Tier.Warm, call.Tier);
         Assert.Equal(ContentType.Memory, call.Type);
         Assert.Null(call.Opts.MetadataJson);
+    }
+
+    [Fact]
+    public async Task Store_WithNoTier_LandsInWarm()
+    {
+        var (handler, store, _, _) = MakeHandler();
+        await handler.ExecuteAsync(ParseArgs("""{"content":"a new note"}"""), CancellationToken.None);
+
+        var call = Assert.Single(store.InsertWithEmbeddingCalls);
+        Assert.Equal(Tier.Warm, call.Tier);
+    }
+
+    [Fact]
+    public async Task Store_HotOverCap_IsRejected()
+    {
+        var (handler, _, _, _) = MakeHandler(hotMaxContentChars: 1200);
+        var big = new string('x', 1201);
+        await Assert.ThrowsAsync<ArgumentException>(() => handler.ExecuteAsync(
+            ParseArgs($$"""{"content":"{{big}}","tier":"hot"}"""), CancellationToken.None));
     }
 
     [Fact]
@@ -382,8 +405,10 @@ public class MemoryStoreHandlerTests
     }
 
     // M1: Regression anchor — pinned:false must not route to the pinned tier.
+    // Behavior change (tier-model-v2 Task 4): with no explicit tier, the
+    // default is now Warm (was Hot) — updated expectation accordingly.
     [Fact]
-    public async Task Store_PinnedFalse_StoresInHotTier()
+    public async Task Store_PinnedFalse_StoresInWarmTier()
     {
         var (handler, store, _, _) = MakeHandler();
         var args = ParseArgs("""{"content":"x","pinned":false}""");
@@ -391,7 +416,7 @@ public class MemoryStoreHandlerTests
         await handler.ExecuteAsync(args, CancellationToken.None);
 
         var call = Assert.Single(store.InsertWithEmbeddingCalls);
-        Assert.Equal(Tier.Hot, call.Tier);
+        Assert.Equal(Tier.Warm, call.Tier);
     }
 
     // M2: pinned:true with contentType:knowledge lands in (Tier.Pinned, ContentType.Knowledge).

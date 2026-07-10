@@ -135,6 +135,7 @@ public static class ServerComposition
         CompactionLog? compactionLogWriter = null,
         Infrastructure.Sync.SyncBacklogReader? syncBacklog = null,
         int pinnedMaxChars = PinnedTierLimits.DefaultMaxContentChars,
+        int hotMaxChars = 1200,
         ReindexProgress? reindexProgress = null,
         string querySource = "assistant")
     {
@@ -151,7 +152,7 @@ public static class ServerComposition
 
         // ---- Memory (18, +1 assistant-only memory_feedback when a
         //      RetrievalEventLog is wired — see below) ----
-        registry.Register(new MemoryStoreHandler(store, embedder, vectors, scopeDefault, pinnedMaxChars));
+        registry.Register(new MemoryStoreHandler(store, embedder, vectors, scopeDefault, pinnedMaxChars, hotMaxChars));
         registry.Register(new MemorySearchHandler(embedder, hybrid, scopeDefault, retrievalLog, syncQueue, querySource));
         // Assistant-only feedback tool (Task 1.6). Registered immediately after
         // memory_search because it consumes the retrievalId memory_search emits.
@@ -480,6 +481,7 @@ public static class ServerComposition
                 compactionLogWriter: compactionLog,
                 syncBacklog: new Infrastructure.Sync.SyncBacklogReader(conn),
                 pinnedMaxChars: ResolvePinnedMaxChars(cfg),
+                hotMaxChars: cfg.Tiers.Hot.MaxContentChars,
                 reindexProgress: reindexProgress,
                 querySource: querySource);
 
@@ -576,6 +578,7 @@ public static class ServerComposition
                 fileIngester, compactionLog, sessionLifecycle, statusOptions,
                 scopeDefault: ResolveScopeDefault(cfg),
                 pinnedMaxChars: ResolvePinnedMaxChars(cfg),
+                hotMaxChars: cfg.Tiers.Hot.MaxContentChars,
                 querySource: querySource);
 
             return new ServerCompositionHandles(dataSource, registry, store, storageMode);
@@ -769,6 +772,7 @@ public static class ServerComposition
                 compactionLogWriter: compactionLog,
                 syncBacklog: new Infrastructure.Sync.SyncBacklogReader(conn),
                 pinnedMaxChars: ResolvePinnedMaxChars(cfg),
+                hotMaxChars: cfg.Tiers.Hot.MaxContentChars,
                 reindexProgress: reindexProgress,
                 querySource: querySource);
 

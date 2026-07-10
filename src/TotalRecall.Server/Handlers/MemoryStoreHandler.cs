@@ -67,7 +67,7 @@ public sealed class MemoryStoreHandler : IToolHandler
           "type": "object",
           "properties": {
             "content":     {"type":"string","description":"The content to store"},
-            "tier":        {"type":"string","enum":["hot","warm","cold"],"description":"Storage tier (default: hot; use pinned:true for the pinned tier)"},
+            "tier":        {"type":"string","enum":["hot","warm","cold"],"description":"Storage tier (default: warm; use pinned:true for the pinned tier)"},
             "contentType": {"type":"string","enum":["memory","knowledge"],"description":"Content type (default: memory)"},
             "entryType":   {"type":"string","enum":["correction","preference","decision","surfaced","imported","compacted","ingested"],"description":"Entry type"},
             "project":     {"type":"string","description":"Project scope"},
@@ -83,6 +83,11 @@ public sealed class MemoryStoreHandler : IToolHandler
 
     // Matches TS validation.ts MAX_CONTENT_LENGTH.
     private const int MaxContentLength = 100_000;
+
+    // Falls back to the ConfigLoader default (Task 2) when the caller does not
+    // supply an explicit value (e.g. tests, CLI). Production wiring always
+    // passes cfg.Tiers.Hot.MaxContentChars explicitly (see ServerComposition).
+    private const int DefaultHotMaxContentChars = 1200;
 
     private static readonly HashSet<string> ValidEntryTypes = new(StringComparer.Ordinal)
     {
@@ -100,19 +105,22 @@ public sealed class MemoryStoreHandler : IToolHandler
     private readonly IVectorSearch _vectorSearch;
     private readonly string? _scopeDefault;
     private readonly int _pinnedMaxContentChars;
+    private readonly int _hotMaxContentChars;
 
     public MemoryStoreHandler(
         IStore store,
         IEmbedder embedder,
         IVectorSearch vectorSearch,
         string? scopeDefault = null,
-        int pinnedMaxContentChars = PinnedTierLimits.DefaultMaxContentChars)
+        int pinnedMaxContentChars = PinnedTierLimits.DefaultMaxContentChars,
+        int hotMaxContentChars = DefaultHotMaxContentChars)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _embedder = embedder ?? throw new ArgumentNullException(nameof(embedder));
         _vectorSearch = vectorSearch ?? throw new ArgumentNullException(nameof(vectorSearch));
         _scopeDefault = scopeDefault;
         _pinnedMaxContentChars = pinnedMaxContentChars;
+        _hotMaxContentChars = hotMaxContentChars;
     }
 
     public string Name => "memory_store";
@@ -146,6 +154,9 @@ public sealed class MemoryStoreHandler : IToolHandler
             throw new ArgumentException(
                 PinnedTierLimits.ContentLimitMessage(_pinnedMaxContentChars, content.Length));
         var tier = pinned ? Tier.Pinned : ReadTier(args);
+        if (tier.IsHot && content.Length > _hotMaxContentChars)
+            throw new ArgumentException(
+                PinnedTierLimits.HotContentLimitMessage(_hotMaxContentChars, content.Length));
         var contentType = ReadContentType(args);
         var entryType = ReadEntryType(args);
         var project = ReadOptionalString(args, "project");
@@ -245,7 +256,7 @@ public sealed class MemoryStoreHandler : IToolHandler
     private static Tier ReadTier(JsonElement args)
     {
         if (!args.TryGetProperty("tier", out var prop) || prop.ValueKind == JsonValueKind.Null)
-            return Tier.Hot;
+            return Tier.Warm;
         if (prop.ValueKind != JsonValueKind.String)
             throw new ArgumentException("tier must be a string");
         var v = prop.GetString();

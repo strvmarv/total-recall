@@ -35,4 +35,14 @@ public static class PinnedTierLimits
     public static string ContentLimitMessage(int limit, int actual) =>
         $"pinned entries are limited to {limit} characters ({actual} given); " +
         "trim the content or store a concise summary and pin that instead";
+
+    /// <summary>
+    /// Returns the canonical content-limit error message for hot-tier entries.
+    /// Tier-neutral counterpart to <see cref="ContentLimitMessage"/> — used
+    /// wherever a write targets <c>Tier.Hot</c> (including pinned:true writes,
+    /// which route through the pinned tier but still enforce the hot cap).
+    /// </summary>
+    public static string HotContentLimitMessage(int limit, int actual) =>
+        $"hot entries are limited to {limit} characters ({actual} given); " +
+        "store a concise summary instead, or keep it in warm";
 }
