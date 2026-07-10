@@ -25,6 +25,7 @@ using TotalRecall.Core;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Importers;
 using TotalRecall.Infrastructure.Memory;
+using TotalRecall.Infrastructure.Search;
 using TotalRecall.Infrastructure.Skills;
 using TotalRecall.Infrastructure.Storage;
 using TotalRecall.Infrastructure.Telemetry;
@@ -63,6 +64,10 @@ public sealed class SessionLifecycle : ISessionLifecycle
     private readonly ProjectResolver _projectResolver;
     private readonly int _compactionHintThreshold;
     private readonly int _hotMaxContentChars;
+    private readonly IVectorSearch? _vec;
+    private readonly int _promoteMinAccess;
+    private readonly double _promoteThreshold;
+    private readonly Core.Config.CompactionConfig _compactionConfig;
 
     /// <summary>Phase 3 idea 2a — advisory thresholds for RefreshAsync recommendations.</summary>
     private const double SessionRefreshThresholdMinutes = 30;
@@ -95,7 +100,11 @@ public sealed class SessionLifecycle : ISessionLifecycle
         bool projectScoping = true,
         int compactionHintThreshold = 5,
         ProjectResolver? projectResolver = null,
-        int hotMaxContentChars = 0)
+        int hotMaxContentChars = 0,
+        IVectorSearch? vec = null,
+        int promoteMinAccess = 5,
+        double promoteThreshold = 0.7,
+        Core.Config.CompactionConfig? compactionConfig = null)
     {
         ArgumentNullException.ThrowIfNull(importers);
         ArgumentNullException.ThrowIfNull(store);
@@ -122,6 +131,20 @@ public sealed class SessionLifecycle : ISessionLifecycle
         _compactionHintThreshold = compactionHintThreshold;
         _hotMaxContentChars = hotMaxContentChars > 0 ? hotMaxContentChars : 0;
         _projectResolver = projectResolver ?? new ProjectResolver();
+        _vec = vec;
+        _promoteMinAccess = promoteMinAccess > 0 ? promoteMinAccess : 5;
+        _promoteThreshold = promoteThreshold > 0 ? promoteThreshold : 0.7;
+        _compactionConfig = compactionConfig ?? new Core.Config.CompactionConfig(
+            168.0,                          // decayHalfLifeHours
+            0.3,                            // warmThreshold
+            _promoteThreshold,              // promoteThreshold
+            1,                              // warmSweepIntervalDays
+            FSharpOption<double>.None,      // decayHalfLifeCorrection
+            FSharpOption<double>.None,      // decayHalfLifePreference
+            FSharpOption<double>.None,      // decayHalfLifeSurfaced
+            FSharpOption<double>.None,      // decayHalfLifeDecision
+            _autoDemoteMinInjections,       // autoDemoteMinInjections
+            _promoteMinAccess);             // promoteMinAccess
     }
 
     /// <inheritdoc />
@@ -264,11 +287,6 @@ public sealed class SessionLifecycle : ISessionLifecycle
 
         // TODO(Plan 5+): smoke test — eval/smoke-test.ts not yet ported.
 
-        // TODO(Plan 5+): semantic warm→hot promotion driven by detected project.
-        // Plan 4 leaves warmPromotedIds empty.
-        var warmPromotedIds = Array.Empty<string>();
-        var warmPromoted = 0;
-
         // 1d. Tier model v2 (Task 6) — one-time data move. Runs here (at
         // session_start, where an embedder exists for re-embedding) BEFORE the
         // warm sweep so the sweep sees the merged tier state. SQLite-only:
@@ -292,7 +310,9 @@ public sealed class SessionLifecycle : ISessionLifecycle
         // 2. Warm sweep — synchronous, runs before hot entry listing so the
         // reported count reflects post-sweep state. Eliminates the Task.Run
         // thread-race against PeriodicSync on the shared SQLite connection.
-        RunWarmSweep();
+        // Task 7 — access-earned warm→hot promotion happens inside the sweep
+        // (after demotions); the promoted ids feed the hints block below.
+        var (warmPromoted, warmPromotedIds) = RunWarmSweep();
 
         // 3. Hot entries listing — used for both context and hot count.
         // I1 (tier model v2): EXCLUDE sticky rows here — they are injected
@@ -492,16 +512,17 @@ public sealed class SessionLifecycle : ISessionLifecycle
             BackgroundTasks: backgroundTasks);
     }
 
-    private void RunWarmSweep()
+    private (int Promoted, string[] PromotedIds) RunWarmSweep()
     {
         try
         {
             // Phase 2 idea 1c — auto-demote dead-weight hot entries:
             // entries that have been injected many times but never accessed.
-            // I1 (tier model v2): sticky is INCLUDED here for now — sticky-aware
-            // eviction (protecting sticky rows from demotion/eviction) is Task 7.
-            // Task 5 only owns injection sourcing; do NOT add ExcludeSticky here.
-            var allHot = _store.List(Tier.Hot, ContentType.Memory);
+            // Task 7 — sticky rows are protected residents: EXCLUDE them from
+            // the dead-weight candidate set so a sticky-hot row can never be
+            // auto-demoted back to warm.
+            var allHot = _store.List(Tier.Hot, ContentType.Memory,
+                new ListEntriesOpts { ExcludeSticky = true });
             var deadWeights = allHot
                 .Where(e => e.TimesInjected >= _autoDemoteMinInjections && e.AccessCount == 0)
                 .ToList();
@@ -516,31 +537,78 @@ public sealed class SessionLifecycle : ISessionLifecycle
             }
 
             // Existing max-entry enforcement.
-            // I1: includes sticky in the total (sticky rows occupy hot); sticky
-            // eviction immunity is Task 7 — not applied here.
-            var count = _store.Count(Tier.Hot, ContentType.Memory);
-            if (count <= _maxEntries) return;
+            // Task 7 — sticky rows are protected residents that do not consume
+            // the earned budget: count and evict only non-sticky hot rows.
+            var stickyCount = _store.List(Tier.Hot, ContentType.Memory,
+                new ListEntriesOpts { StickyOnly = true }).Count;
+            var count = _store.Count(Tier.Hot, ContentType.Memory) - stickyCount;
 
-            var excess = count - _maxEntries;
-            // I1: eviction candidates include sticky for now (Task 7 adds the
-            // sticky-immunity filter here).
-            var toEvict = _store.List(Tier.Hot, ContentType.Memory,
-                new ListEntriesOpts { OrderBy = "decay_score ASC", Limit = excess });
-
-            // Filter out entries already auto-demoted above
-            var deadWeightIds = new HashSet<string>(deadWeights.Select(e => e.Id));
-            foreach (var entry in toEvict)
+            if (count > _maxEntries)
             {
-                if (deadWeightIds.Contains(entry.Id)) continue;
-                try { _store.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, entry.Id); }
-                catch (InvalidOperationException) { } // entry deleted by concurrent write — skip
+                var excess = count - _maxEntries;
+                var toEvict = _store.List(Tier.Hot, ContentType.Memory,
+                    new ListEntriesOpts { OrderBy = "decay_score ASC", Limit = excess, ExcludeSticky = true });
+
+                // Filter out entries already auto-demoted above
+                var deadWeightIds = new HashSet<string>(deadWeights.Select(e => e.Id));
+                foreach (var entry in toEvict)
+                {
+                    if (deadWeightIds.Contains(entry.Id)) continue;
+                    try { _store.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, entry.Id); }
+                    catch (InvalidOperationException) { } // entry deleted by concurrent write — skip
+                }
             }
+
+            // Task 7 — warm -> earned-hot promotion: access evidence + health
+            // gate. Runs AFTER the demotions above so a just-demoted entry
+            // isn't immediately re-promoted. Both gates must pass:
+            //   access_count >= promote_min_access AND decay_score >= promote_threshold.
+            // The access gate is what stops a brand-new warm entry (decay~1.0,
+            // access_count 0) from being wrongly promoted — the
+            // decay-default-1.0 auto-promotion trap. Memory-only: warm
+            // knowledge never promotes to hot.
+            var promotedIds = new List<string>();
+            if (_embedder is not null && _vec is not null)
+            {
+                var nowMs = _nowMs();
+                var warmCandidates = _store.List(Tier.Warm, ContentType.Memory,
+                    new ListEntriesOpts { OrderBy = "access_count DESC", Limit = _maxEntries });
+                foreach (var e in warmCandidates)
+                {
+                    if (e.AccessCount < _promoteMinAccess) continue;
+                    // I2: cap enforced on promotion — an oversized warm entry
+                    // must not be promoted into hot.
+                    if (_hotMaxContentChars > 0 && e.Content.Length > _hotMaxContentChars) continue;
+
+                    var score = Decay.calculateDecayScore(
+                        e.LastAccessedAt, e.AccessCount, e.EntryType, nowMs,
+                        Decay.decayConstantHours(e.EntryType, _compactionConfig));
+                    if (score < _promoteThreshold) continue;
+
+                    try
+                    {
+                        MoveHelpers.MoveAndReEmbed(_store, _vec, _embedder, e,
+                            Tier.Warm, ContentType.Memory, Tier.Hot, ContentType.Memory);
+                        _store.SetSticky(ContentType.Memory, e.Id, false); // earned, not sticky
+                        promotedIds.Add(e.Id);
+                    }
+                    catch (InvalidOperationException) { }
+                }
+            }
+
+            return (promotedIds.Count, promotedIds.ToArray());
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"total-recall: warm sweep failed: {ex.Message}");
+            return (0, Array.Empty<string>());
         }
     }
+
+    /// <summary>Test seam — exposes the internal warm sweep (promotion +
+    /// sticky-aware demotion/eviction) so unit tests can invoke it directly
+    /// without going through the full session_start/refresh flow.</summary>
+    internal (int Promoted, string[] PromotedIds) RunWarmSweepForTest() => RunWarmSweep();
 
     // -------- helpers (internal so tests can call them directly) --------
 
@@ -1276,7 +1344,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         // 1. Warm sweep
         // I1: before/after hot counts are total occupancy — INCLUDE sticky.
         var beforeHotCount = _store.Count(Tier.Hot, ContentType.Memory);
-        try { RunWarmSweep(); } catch { /* best-effort */ }
+        try { RunWarmSweep(); } catch { /* best-effort */ } // return value unused here
         var afterHotCount = _store.Count(Tier.Hot, ContentType.Memory);
 
         // 2. Re-assemble context.

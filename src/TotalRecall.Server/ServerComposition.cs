@@ -469,7 +469,11 @@ public static class ServerComposition
                 reindexProgress: reindexProgress,
                 binaryDir: AppContext.BaseDirectory,
                 projectScoping: ResolveProjectScoping(cfg),
-                hotMaxContentChars: cfg.Tiers.Hot.MaxContentChars);
+                hotMaxContentChars: cfg.Tiers.Hot.MaxContentChars,
+                vec: vec,
+                promoteMinAccess: cfg.Compaction.PromoteMinAccess,
+                promoteThreshold: cfg.Compaction.PromoteThreshold,
+                compactionConfig: cfg.Compaction);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
@@ -569,7 +573,11 @@ public static class ServerComposition
                 autoDemoteMinInjections: cfg.Compaction.AutoDemoteMinInjections,
                 taskWeight: cfg.Tiers.Hot.TaskWeight,
                 binaryDir: AppContext.BaseDirectory, // reindex stays null — postgres has no local background reindex
-                projectScoping: ResolveProjectScoping(cfg));
+                projectScoping: ResolveProjectScoping(cfg),
+                vec: vec,
+                promoteMinAccess: cfg.Compaction.PromoteMinAccess,
+                promoteThreshold: cfg.Compaction.PromoteThreshold,
+                compactionConfig: cfg.Compaction);
 
             var statusOptions = new StatusOptions(
                 DbPath: connStr,
@@ -758,7 +766,11 @@ public static class ServerComposition
                 reindexProgress: reindexProgress,
                 binaryDir: AppContext.BaseDirectory,
                 projectScoping: ResolveProjectScoping(cfg),
-                hotMaxContentChars: cfg.Tiers.Hot.MaxContentChars);
+                hotMaxContentChars: cfg.Tiers.Hot.MaxContentChars,
+                vec: vec,
+                promoteMinAccess: cfg.Compaction.PromoteMinAccess,
+                promoteThreshold: cfg.Compaction.PromoteThreshold,
+                compactionConfig: cfg.Compaction);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,

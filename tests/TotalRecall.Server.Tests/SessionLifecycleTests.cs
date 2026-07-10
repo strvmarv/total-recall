@@ -56,7 +56,9 @@ public sealed class SessionLifecycleTests
             "{}", timesInjected);               // metadataJson, timesInjected
     }
 
-    private sealed class FakeStore : IStore
+    // internal (not private) so SessionLifecyclePromotionTests (Task 7) can
+    // reuse the same sticky-aware fake rather than duplicating it.
+    internal sealed class FakeStore : IStore
     {
         // Per-(tier, type) entry lists. Test fixtures populate the slots they
         // care about; everything else returns empty.
