@@ -35,7 +35,8 @@ public static class ConfigJsonSerializer
         AppendInt(sb, "token_budget", config.Tiers.Hot.TokenBudget); sb.Append(',');
         AppendDouble(sb, "carry_forward_threshold", config.Tiers.Hot.CarryForwardThreshold); sb.Append(',');
         AppendDouble(sb, "task_weight", config.Tiers.Hot.TaskWeight); sb.Append(',');
-        AppendInt(sb, "compaction_hint_threshold", config.Tiers.Hot.CompactionHintThreshold);
+        AppendInt(sb, "compaction_hint_threshold", config.Tiers.Hot.CompactionHintThreshold); sb.Append(',');
+        AppendInt(sb, "max_content_chars", config.Tiers.Hot.MaxContentChars);
         sb.Append("},\"warm\":{");
         AppendInt(sb, "max_entries", config.Tiers.Warm.MaxEntries); sb.Append(',');
         AppendInt(sb, "retrieval_top_k", config.Tiers.Warm.RetrievalTopK); sb.Append(',');
@@ -53,7 +54,8 @@ public static class ConfigJsonSerializer
         AppendDouble(sb, "warm_threshold", config.Compaction.WarmThreshold); sb.Append(',');
         AppendDouble(sb, "promote_threshold", config.Compaction.PromoteThreshold); sb.Append(',');
         AppendInt(sb, "warm_sweep_interval_days", config.Compaction.WarmSweepIntervalDays); sb.Append(',');
-        AppendInt(sb, "auto_demote_min_injections", config.Compaction.AutoDemoteMinInjections);
+        AppendInt(sb, "auto_demote_min_injections", config.Compaction.AutoDemoteMinInjections); sb.Append(',');
+        AppendInt(sb, "promote_min_access", config.Compaction.PromoteMinAccess);
         sb.Append("},");
 
         // embedding

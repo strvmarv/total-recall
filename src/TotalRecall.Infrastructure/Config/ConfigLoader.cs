@@ -279,7 +279,10 @@ public sealed class ConfigLoader : IConfigLoader
                 : 0.0,
             hot.TryGetValue("compaction_hint_threshold", out var cht)
                 ? Convert.ToInt32(cht)
-                : 5);
+                : 5,
+            hot.TryGetValue("max_content_chars", out var mcc)
+                ? Convert.ToInt32(mcc)
+                : 1200);
 
         var warmCfg = new Core.Config.WarmTierConfig(
             GetInt(warm, "max_entries"),
@@ -357,7 +360,10 @@ public sealed class ConfigLoader : IConfigLoader
             TryGetDouble(compaction, "decay_half_life_decision"),
             compaction.TryGetValue("auto_demote_min_injections", out var admi)
                 ? Convert.ToInt32(admi)
-                : 10);
+                : 10,
+            compaction.TryGetValue("promote_min_access", out var pma)
+                ? Convert.ToInt32(pma)
+                : 5);
 
         var embedding = GetTable(table, "embedding");
         var embeddingCfg = new Core.Config.EmbeddingConfig(

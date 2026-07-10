@@ -7,6 +7,7 @@ token_budget = 4000
 carry_forward_threshold = 0.7
 task_weight = 0.0
 compaction_hint_threshold = 5
+max_content_chars = 1200
 
 [tiers.warm]
 max_entries = 10000
@@ -41,6 +42,7 @@ warm_threshold = 0.3
 promote_threshold = 0.7
 warm_sweep_interval_days = 7
 auto_demote_min_injections = 10
+promote_min_access = 5
 
 # Per-type decay half-lives (hours). Falls back to decay_half_life_hours.
 # decay_half_life_correction = 720   # 30 days
