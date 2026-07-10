@@ -209,7 +209,7 @@ public sealed class ImportCommand : ICliCommand
 
                     // Resolve tier / content_type with TS-matching fallbacks.
                     Tier tier = Tier.Hot;
-                    bool legacyPinned = false;
+                    bool makeSticky = false;
                     if (entryElem.TryGetProperty("tier", out var tierEl)
                         && tierEl.ValueKind == JsonValueKind.String)
                     {
@@ -221,13 +221,24 @@ public sealed class ImportCommand : ICliCommand
                         if (tierStr == "pinned")
                         {
                             tier = Tier.Hot;
-                            legacyPinned = true;
+                            makeSticky = true;
                         }
                         else
                         {
                             var parsed = TierNames.ParseTier(tierStr);
                             if (parsed is not null) tier = parsed;
                         }
+                    }
+
+                    // Tier model v2 (Task 9): a CURRENT (v2) export carries tier
+                    // "hot" plus an explicit `sticky` flag. Honor it so current
+                    // pins survive the round-trip (the legacy tier=="pinned"
+                    // bridge above covers old exports).
+                    if (entryElem.TryGetProperty("sticky", out var stickyEl)
+                        && stickyEl.ValueKind == JsonValueKind.True)
+                    {
+                        tier = Tier.Hot;
+                        makeSticky = true;
                     }
                     ContentType ctype = ContentType.Memory;
                     if (entryElem.TryGetProperty("content_type", out var ctEl)
@@ -256,8 +267,9 @@ public sealed class ImportCommand : ICliCommand
                         EntryType: EntryType.Imported);
 
                     var newId = store.Insert(tier, ctype, opts);
-                    // Legacy pinned exports become sticky-hot (tier merged in v2).
-                    if (legacyPinned) store.SetSticky(ctype, newId, true);
+                    // Pinned entries (legacy tier=="pinned" OR current sticky flag)
+                    // become sticky-hot (tier merged in v2).
+                    if (makeSticky) store.SetSticky(ctype, newId, true);
                     // TODO(Plan 5+): atomicity gap (carry-forward #2).
                     var embedding = embedder!.Embed(content);
                     vec.InsertEmbedding(tier, ctype, newId, embedding);

@@ -529,7 +529,12 @@ public sealed record ExportEntryDto(
     [property: JsonPropertyName("collection_id")] string? CollectionId,
     [property: JsonPropertyName("metadata")] string Metadata,
     [property: JsonPropertyName("tier")] string Tier,
-    [property: JsonPropertyName("content_type")] string ContentType);
+    [property: JsonPropertyName("content_type")] string ContentType,
+    // Tier model v2 (Task 9): sticky-hot is the merged replacement for the
+    // retired pinned tier. `tier` serializes as "hot" for a pinned entry; this
+    // flag carries the pin so export/import round-trips preserve it. Defaults
+    // false; older exports without the field deserialize as non-sticky.
+    [property: JsonPropertyName("sticky")] bool Sticky = false);
 
 public sealed record MemoryExportResultDto(
     [property: JsonPropertyName("version")] int Version,

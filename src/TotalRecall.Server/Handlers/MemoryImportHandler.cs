@@ -131,7 +131,7 @@ public sealed class MemoryImportHandler : IToolHandler
             seenContents.Add(content);
 
             Tier tier = Tier.Hot;
-            bool legacyPinned = false;
+            bool makeSticky = false;
             if (entryElem.TryGetProperty("tier", out var tierEl)
                 && tierEl.ValueKind == JsonValueKind.String)
             {
@@ -144,13 +144,24 @@ public sealed class MemoryImportHandler : IToolHandler
                 if (tierStr == "pinned")
                 {
                     tier = Tier.Hot;
-                    legacyPinned = true;
+                    makeSticky = true;
                 }
                 else
                 {
                     var parsed = TierNames.ParseTier(tierStr);
                     if (parsed is not null) tier = parsed;
                 }
+            }
+
+            // Tier model v2 (Task 9): a CURRENT (v2) export carries tier "hot"
+            // plus an explicit `sticky` flag. Honor it so current pins survive
+            // the round-trip (the legacy tier=="pinned" bridge above covers old
+            // exports). Either path lands the entry in hot with sticky=1.
+            if (entryElem.TryGetProperty("sticky", out var stickyEl)
+                && stickyEl.ValueKind == JsonValueKind.True)
+            {
+                tier = Tier.Hot;
+                makeSticky = true;
             }
             ContentType ctype = ContentType.Memory;
             if (entryElem.TryGetProperty("content_type", out var ctEl)
@@ -182,7 +193,7 @@ public sealed class MemoryImportHandler : IToolHandler
 
             var newId = _store.Insert(tier, ctype, opts);
             // Legacy pinned exports become sticky-hot (tier merged in v2).
-            if (legacyPinned) _store.SetSticky(ctype, newId, true);
+            if (makeSticky) _store.SetSticky(ctype, newId, true);
             // TODO(Plan 5+): atomicity gap (carry-forward #9) — a crash
             // between store.Insert and the vector insert leaves the row
             // without an embedding. Same gap MoveHelpers.MoveAndReEmbed

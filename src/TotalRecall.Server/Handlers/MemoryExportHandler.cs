@@ -75,7 +75,7 @@ public sealed class MemoryExportHandler : IToolHandler
                 foreach (var token in ReadStringList(tEl, "tiers"))
                 {
                     var parsed = TierNames.ParseTier(token)
-                        ?? throw new ArgumentException($"invalid tier '{token}' (expected hot|warm|cold|pinned)");
+                        ?? throw new ArgumentException($"invalid tier '{token}' (expected hot|warm|cold)");
                     tierFilter.Add(parsed);
                 }
             }
@@ -118,7 +118,9 @@ public sealed class MemoryExportHandler : IToolHandler
                     CollectionId: EntryMapping.OptString(e.CollectionId),
                     Metadata: string.IsNullOrEmpty(e.MetadataJson) ? "{}" : e.MetadataJson,
                     Tier: TierNames.TierName(pair.Tier),
-                    ContentType: TierNames.ContentTypeName(pair.Type)));
+                    ContentType: TierNames.ContentTypeName(pair.Type),
+                    // Sticky is hot-only; carries a v2 pin across export/import.
+                    Sticky: pair.Tier.IsHot && _store.IsSticky(pair.Type, e.Id)));
             }
         }
 

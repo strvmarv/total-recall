@@ -149,4 +149,44 @@ public class MemoryExportHandlerTests
         // Release-critical: the entry is sticky (pin preserved across round-trip).
         Assert.True(importStore.IsSticky(ContentType.Memory, "pinned-1"));
     }
+
+    [Fact]
+    public async Task ExportImport_RoundTrips_CurrentStickyHotPins()
+    {
+        // Tier model v2 (Task 9): a CURRENT (v2-created) pin is a sticky-hot
+        // entry. Export must carry a `sticky` flag (tier serializes as "hot"),
+        // and import must re-apply sticky-hot from it — otherwise the pin is
+        // silently dropped on round-trip.
+        var exportStore = new FakeStore();
+        exportStore.SeedList(Tier.Hot, ContentType.Memory, MakeEntry("s1"));
+        exportStore.SetSticky(ContentType.Memory, "s1", true);
+
+        var exportHandler = new MemoryExportHandler(exportStore);
+        var exportResult = await exportHandler.ExecuteAsync(null, CancellationToken.None);
+
+        using var exportDoc = JsonDocument.Parse(exportResult.Content[0].Text);
+        var entries = exportDoc.RootElement.GetProperty("entries");
+        Assert.Equal(1, entries.GetArrayLength());
+        var exported = entries[0];
+        // Sticky entry exports as tier "hot" + sticky=true (no resurrected "pinned").
+        Assert.Equal("hot", exported.GetProperty("tier").GetString());
+        Assert.True(exported.GetProperty("sticky").GetBoolean());
+
+        // Feed the exported JSON into the import handler against a fresh store.
+        var importStore = new FakeStore();
+        importStore.NextInsertId = "s1";
+        var importHandler = new MemoryImportHandler(
+            importStore, new FakeVectorSearch(), new RecordingFakeEmbedder());
+
+        var importArgs = JsonDocument.Parse($"{{\"entries\":{entries.GetRawText()}}}").RootElement.Clone();
+        var importResult = await importHandler.ExecuteAsync(importArgs, CancellationToken.None);
+
+        using var importDoc = JsonDocument.Parse(importResult.Content[0].Text);
+        Assert.Equal(1, importDoc.RootElement.GetProperty("imported_count").GetInt32());
+
+        var call = Assert.Single(importStore.InsertCalls);
+        Assert.True(call.Tier.IsHot, "sticky-hot import should land in hot");
+        // Release-critical: the pin survives the round-trip.
+        Assert.True(importStore.IsSticky(ContentType.Memory, "s1"));
+    }
 }
