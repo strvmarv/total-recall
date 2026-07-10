@@ -17,7 +17,7 @@
               "warm",
               "cold"
             ],
-            "description": "Storage tier (default: hot; use pinned:true for the pinned tier)"
+            "description": "Storage tier (default: warm; use pinned:true for the pinned tier)"
           },
           "contentType": {
             "type": "string",
