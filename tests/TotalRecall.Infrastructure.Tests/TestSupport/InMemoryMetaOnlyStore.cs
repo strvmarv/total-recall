@@ -45,4 +45,6 @@ public sealed class InMemoryMetaOnlyStore : IStore, IMetaStore
     public void Move(Tier fromTier, ContentType fromType, Tier toTier, ContentType toType, string id) => throw NotUsed();
     public string? FindByContent(Tier tier, ContentType type, string content) => throw NotUsed();
     public void UpdateInjectionCounts(IReadOnlyList<(Tier tier, ContentType type, string id)> entries) => throw NotUsed();
+    public void SetSticky(ContentType type, string id, bool sticky) => throw NotUsed();
+    public bool IsSticky(ContentType type, string id) => false;
 }

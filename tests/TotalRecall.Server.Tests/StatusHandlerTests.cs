@@ -59,6 +59,27 @@ public sealed class StatusHandlerTests
             metadata, 0);
     }
 
+    // Tier model v2 (Task 5): the "pinned" status fields now report the
+    // sticky-hot subset. Seed N sticky hot rows so the StickyOnly listing the
+    // handler performs returns that count.
+    private static void SeedStickyHot(FakeStore store, ContentType type, int count)
+    {
+        for (var i = 0; i < count; i++)
+        {
+            var id = $"sticky-{type}-{i}";
+            var e = new Entry(
+                id, "sticky " + i,
+                FSharpOption<string>.None, FSharpOption<string>.None,
+                FSharpOption<SourceTool>.None, FSharpOption<string>.None,
+                ListModule.OfSeq(Array.Empty<string>()),
+                0, 0, 0, 0, 1.0,
+                FSharpOption<string>.None, FSharpOption<string>.None,
+                "", EntryType.Preference, "{}", 0);
+            store.SeedList(Tier.Hot, type, e);
+            store.SetSticky(type, id, true);
+        }
+    }
+
     private static async Task<JsonElement> RunAsync(
         FakeStore store,
         FakeSessionLifecycle lifecycle,
@@ -102,8 +123,9 @@ public sealed class StatusHandlerTests
         store.SeedCount(Tier.Warm, ContentType.Knowledge, 44);
         store.SeedCount(Tier.Cold, ContentType.Memory, 55);
         store.SeedCount(Tier.Cold, ContentType.Knowledge, 66);
-        store.SeedCount(Tier.Pinned, ContentType.Memory, 77);
-        store.SeedCount(Tier.Pinned, ContentType.Knowledge, 88);
+        // pinned_* fields now report the sticky-hot subset (tier model v2).
+        SeedStickyHot(store, ContentType.Memory, 77);
+        SeedStickyHot(store, ContentType.Knowledge, 88);
 
         var root = await RunAsync(store, new FakeSessionLifecycle(), Options());
 
@@ -295,8 +317,8 @@ public sealed class StatusHandlerTests
         store.SeedCount(Tier.Warm, ContentType.Knowledge, 4);
         store.SeedCount(Tier.Cold, ContentType.Memory, 5);
         store.SeedCount(Tier.Cold, ContentType.Knowledge, 6);
-        store.SeedCount(Tier.Pinned, ContentType.Memory, 7);
-        store.SeedCount(Tier.Pinned, ContentType.Knowledge, 8);
+        SeedStickyHot(store, ContentType.Memory, 7);
+        SeedStickyHot(store, ContentType.Knowledge, 8);
         store.SeedListByMetadata(
             Tier.Cold,
             ContentType.Knowledge,
@@ -344,10 +366,10 @@ public sealed class StatusHandlerTests
     public async Task TierSizes_IncludesPinnedCounts()
     {
         var store = new FakeStore();
-        // Seed at least one pinned memory and one pinned knowledge so counts
-        // are non-zero, proving population rather than mere key presence.
-        store.SeedCount(Tier.Pinned, ContentType.Memory, 3);
-        store.SeedCount(Tier.Pinned, ContentType.Knowledge, 7);
+        // Seed sticky-hot rows so the pinned_* fields (sticky-hot subset) are
+        // non-zero, proving population rather than mere key presence.
+        SeedStickyHot(store, ContentType.Memory, 3);
+        SeedStickyHot(store, ContentType.Knowledge, 7);
 
         var root = await RunAsync(store, new FakeSessionLifecycle(), Options());
 

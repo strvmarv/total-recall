@@ -250,4 +250,6 @@ internal sealed class ThrowingOnPinnedListStore : IStore
     public void Move(Tier fromTier, ContentType fromType, Tier toTier, ContentType toType, string id) => _inner.Move(fromTier, fromType, toTier, toType, id);
     public string? FindByContent(Tier tier, ContentType type, string content) => _inner.FindByContent(tier, type, content);
     public void UpdateInjectionCounts(IReadOnlyList<(Tier tier, ContentType type, string id)> entries) => _inner.UpdateInjectionCounts(entries);
+    public void SetSticky(ContentType type, string id, bool sticky) => _inner.SetSticky(type, id, sticky);
+    public bool IsSticky(ContentType type, string id) => _inner.IsSticky(type, id);
 }

@@ -202,6 +202,7 @@ public sealed class PinnedFloorCommand : ICliCommand
 
     private int CountHot()
     {
+        // I1 (tier model v2): total hot occupancy — INCLUDES sticky.
         try
         {
             if (_store is not null) return _store.Count(Tier.Hot, ContentType.Memory);

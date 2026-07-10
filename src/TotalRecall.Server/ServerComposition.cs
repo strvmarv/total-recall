@@ -168,7 +168,9 @@ public static class ServerComposition
         registry.Register(new MemoryDeleteHandler(store, vectors));
         registry.Register(new MemoryPromoteHandler(store, vectors, embedder, compactionLogWriter, syncQueue));
         registry.Register(new MemoryDemoteHandler(store, vectors, embedder, compactionLogWriter, syncQueue));
-        registry.Register(new MemoryPinHandler(store, vectors, embedder, compactionLogWriter, syncQueue, pinnedMaxChars));
+        // Tier model v2 (Task 5): pins now land in hot as sticky rows, so the
+        // pin handler enforces the HOT content cap (not the retired pinned cap).
+        registry.Register(new MemoryPinHandler(store, vectors, embedder, compactionLogWriter, syncQueue, hotMaxChars));
         registry.Register(new MemoryUnpinHandler(store, vectors, embedder, compactionLogWriter, syncQueue));
         registry.Register(new MemoryInspectHandler(store, compactionLog));
         registry.Register(new MemoryHistoryHandler(compactionLog));

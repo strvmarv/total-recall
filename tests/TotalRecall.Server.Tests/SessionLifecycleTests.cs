@@ -74,6 +74,15 @@ public sealed class SessionLifecycleTests
         // Records Move calls for warm-sweep immunity assertions.
         public List<(Tier FromTier, ContentType FromType, Tier ToTier, ContentType ToType, string Id)> MoveCalls { get; } = new();
 
+        // Tier model v2 (Task 5) — sticky is hot-only store-side state.
+        private readonly HashSet<(ContentType, string)> _sticky = new();
+        public void SetSticky(ContentType type, string id, bool sticky)
+        {
+            if (sticky) _sticky.Add((type, id));
+            else _sticky.Remove((type, id));
+        }
+        public bool IsSticky(ContentType type, string id) => _sticky.Contains((type, id));
+
         private List<Entry> Slot(Tier t, ContentType ct)
         {
             if (!Entries.TryGetValue((t, ct), out var list))
@@ -105,6 +114,14 @@ public sealed class SessionLifecycleTests
         public IReadOnlyList<Entry> List(Tier tier, ContentType type, ListEntriesOpts? opts = null)
         {
             var src = Slot(tier, type).AsEnumerable();
+            // Sticky filter (hot-only, mirrors SQLite guard).
+            if (tier.IsHot)
+            {
+                if (opts?.StickyOnly == true)
+                    src = src.Where(e => _sticky.Contains((type, e.Id)));
+                else if (opts?.ExcludeSticky == true)
+                    src = src.Where(e => !_sticky.Contains((type, e.Id)));
+            }
             if (opts?.OrderBy is not null)
             {
                 if (opts.OrderBy.StartsWith("access_count DESC", StringComparison.Ordinal))
@@ -1170,14 +1187,13 @@ public sealed class SessionLifecycleTests
     public async Task SessionInit_PinnedBlock_PrependsContext_AndBudgetsHotTier()
     {
         var store = new FakeStore();
-        store.Entries[(Tier.Pinned, ContentType.Memory)] = new List<Entry>
-        {
-            MakeEntry("pm1", "PINNED-CONTENT"),
-        };
+        // Tier model v2 (Task 5): pins live in hot as sticky rows.
         store.Entries[(Tier.Hot, ContentType.Memory)] = new List<Entry>
         {
+            MakeEntry("pm1", "PINNED-CONTENT"),
             MakeEntry("h1", "HOT-CONTENT"),
         };
+        store.SetSticky(ContentType.Memory, "pm1", true);
 
         var lifecycle = BuildLifecycle(store);
         var result = await lifecycle.EnsureInitializedAsync();
@@ -1194,15 +1210,19 @@ public sealed class SessionLifecycleTests
     public async Task SessionInit_TierSummaryPinned_ReflectsCount()
     {
         var store = new FakeStore();
-        store.Entries[(Tier.Pinned, ContentType.Memory)] = new List<Entry>
+        // Tier model v2 (Task 5): sticky-hot rows drive the Pinned summary.
+        store.Entries[(Tier.Hot, ContentType.Memory)] = new List<Entry>
         {
             MakeEntry("pm1", "pin one"),
             MakeEntry("pm2", "pin two"),
         };
-        store.Entries[(Tier.Pinned, ContentType.Knowledge)] = new List<Entry>
+        store.Entries[(Tier.Hot, ContentType.Knowledge)] = new List<Entry>
         {
             MakeEntry("pk1", "pinned knowledge"),
         };
+        store.SetSticky(ContentType.Memory, "pm1", true);
+        store.SetSticky(ContentType.Memory, "pm2", true);
+        store.SetSticky(ContentType.Knowledge, "pk1", true);
 
         var lifecycle = BuildLifecycle(store);
         var result = await lifecycle.EnsureInitializedAsync();
@@ -1221,10 +1241,11 @@ public sealed class SessionLifecycleTests
         // → ceiling(22 * 0.75) = 17 tokens. 17*2=34 > 10 → hint fires.
         var bigContent = "PINNED " + string.Join(" ", Enumerable.Range(1, 15).Select(i => $"word{i}"));
         var store = new FakeStore();
-        store.Entries[(Tier.Pinned, ContentType.Memory)] = new List<Entry>
+        store.Entries[(Tier.Hot, ContentType.Memory)] = new List<Entry>
         {
             MakeEntry("pm1", bigContent),
         };
+        store.SetSticky(ContentType.Memory, "pm1", true);
 
         var lifecycle = BuildLifecycle(store, tokenBudget: 10);
         var result = await lifecycle.EnsureInitializedAsync();
@@ -1249,25 +1270,25 @@ public sealed class SessionLifecycleTests
     }
 
     [Fact]
-    public async Task SessionInit_PinnedKb_NotCountedInKbField()
+    public async Task SessionInit_StickyKb_CountedInKbAndPinned()
     {
-        // Kb field should only count hot+warm+cold knowledge, not pinned knowledge.
+        // Tier model v2 (Task 5): sticky knowledge lives in HOT, so it counts
+        // toward Kb (hot+warm+cold knowledge) AND toward the Pinned summary
+        // (the sticky-hot subset). Overlap is intentional per the merge.
         var store = new FakeStore();
-        store.Entries[(Tier.Pinned, ContentType.Knowledge)] = new List<Entry>
-        {
-            MakeEntry("pk1", "pinned knowledge"),
-        };
         store.Entries[(Tier.Hot, ContentType.Knowledge)] = new List<Entry>
         {
-            MakeEntry("hk1", "hot knowledge"),
+            MakeEntry("pk1", "pinned knowledge"), // sticky
+            MakeEntry("hk1", "hot knowledge"),    // non-sticky
         };
+        store.SetSticky(ContentType.Knowledge, "pk1", true);
 
         var lifecycle = BuildLifecycle(store);
         var result = await lifecycle.EnsureInitializedAsync();
 
-        // Kb = hot+warm+cold knowledge only (1 hot here)
-        Assert.Equal(1, result.TierSummary.Kb);
-        // Pinned = pinned memory + pinned knowledge (0+1=1)
+        // Kb = total hot knowledge (2) + warm + cold.
+        Assert.Equal(2, result.TierSummary.Kb);
+        // Pinned = sticky-hot subset (1).
         Assert.Equal(1, result.TierSummary.Pinned);
     }
 
@@ -1296,16 +1317,14 @@ public sealed class SessionLifecycleTests
     [Fact]
     public async Task Refresh_PinnedBlock_PrependedToContext()
     {
-        // Seed a pinned memory and a hot memory so both appear in refresh context.
+        // Seed a sticky-hot (pinned) memory and a plain hot memory.
         var store = new FakeStore();
-        store.Entries[(Tier.Pinned, ContentType.Memory)] = new List<Entry>
-        {
-            MakeEntry("pm1", "PINNED-DIRECTIVE"),
-        };
         store.Entries[(Tier.Hot, ContentType.Memory)] = new List<Entry>
         {
+            MakeEntry("pm1", "PINNED-DIRECTIVE"),
             MakeEntry("h1", "HOT-CONTENT"),
         };
+        store.SetSticky(ContentType.Memory, "pm1", true);
 
         var lifecycle = BuildLifecycle(store);
         await lifecycle.EnsureInitializedAsync();
@@ -1327,10 +1346,11 @@ public sealed class SessionLifecycleTests
         // and TokenCount includes the pinned token estimate.
         var bigContent = "PINNED " + string.Join(" ", Enumerable.Range(1, 30).Select(i => $"word{i}"));
         var store = new FakeStore();
-        store.Entries[(Tier.Pinned, ContentType.Memory)] = new List<Entry>
+        store.Entries[(Tier.Hot, ContentType.Memory)] = new List<Entry>
         {
             MakeEntry("pm1", bigContent),
         };
+        store.SetSticky(ContentType.Memory, "pm1", true);
 
         var lifecycle = BuildLifecycle(store, tokenBudget: 10);
         await lifecycle.EnsureInitializedAsync();
@@ -1348,12 +1368,14 @@ public sealed class SessionLifecycleTests
     [Fact]
     public async Task Refresh_PinnedIds_IncludedInInjectionCounts()
     {
-        // Verify that RefreshAsync calls UpdateInjectionCounts with the pinned entry id.
+        // Verify that RefreshAsync calls UpdateInjectionCounts with the sticky
+        // entry id — tracked against Tier.Hot now (sticky rows live in hot).
         var store = new FakeStore();
-        store.Entries[(Tier.Pinned, ContentType.Memory)] = new List<Entry>
+        store.Entries[(Tier.Hot, ContentType.Memory)] = new List<Entry>
         {
             MakeEntry("pm1", "always-follow-rule"),
         };
+        store.SetSticky(ContentType.Memory, "pm1", true);
 
         var lifecycle = BuildLifecycle(store);
         await lifecycle.EnsureInitializedAsync();
@@ -1363,7 +1385,7 @@ public sealed class SessionLifecycleTests
         await lifecycle.RefreshAsync();
 
         Assert.Contains(store.InjectionCountCalls,
-            t => t.tier == Tier.Pinned && t.type == ContentType.Memory && t.id == "pm1");
+            t => t.tier == Tier.Hot && t.type == ContentType.Memory && t.id == "pm1");
     }
 
     // ---------- PinnedLifecycle round-trip ----------
@@ -1373,12 +1395,13 @@ public sealed class SessionLifecycleTests
     {
         const string DirectiveContent = "always use kebab-case for branch names";
 
-        // --- Phase 1: pinned entry IS injected on session init ---
+        // --- Phase 1: sticky-hot (pinned) entry IS injected on session init ---
         var store = new FakeStore();
-        store.Entries[(Tier.Pinned, ContentType.Memory)] = new List<Entry>
+        store.Entries[(Tier.Hot, ContentType.Memory)] = new List<Entry>
         {
             MakeEntry("pin1", DirectiveContent),
         };
+        store.SetSticky(ContentType.Memory, "pin1", true);
 
         var lifecycle1 = BuildLifecycle(store);
         var result1 = await lifecycle1.EnsureInitializedAsync();
@@ -1386,8 +1409,9 @@ public sealed class SessionLifecycleTests
         Assert.Contains("## Pinned directives (always follow)", result1.Context);
         Assert.Contains(DirectiveContent, result1.Context);
 
-        // --- Simulate unpin: move the entry from Pinned → Warm (as the handler does) ---
-        store.Move(Tier.Pinned, ContentType.Memory, Tier.Warm, ContentType.Memory, "pin1");
+        // --- Simulate unpin: clear the sticky flag (as the handler does — the
+        //     entry stays in hot, no tier move). The sticky block must vanish. ---
+        store.SetSticky(ContentType.Memory, "pin1", false);
 
         // --- Phase 2: new session over the same store — pinned block must be absent ---
         var lifecycle2 = BuildLifecycle(store);

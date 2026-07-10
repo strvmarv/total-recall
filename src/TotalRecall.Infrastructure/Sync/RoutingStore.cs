@@ -94,6 +94,14 @@ public sealed class RoutingStore : IStore
     public void UpdateInjectionCounts(IReadOnlyList<(Tier tier, ContentType type, string id)> entries)
         => _local.UpdateInjectionCounts(entries);
 
+    // Tier model v2 (Task 5) — sticky is a local-only hot-tier concept; pins are
+    // never synced to the remote backend (matching pinned-tier local-only policy).
+    public void SetSticky(ContentType type, string id, bool sticky)
+        => _local.SetSticky(type, id, sticky);
+
+    public bool IsSticky(ContentType type, string id)
+        => _local.IsSticky(type, id);
+
     private void EnqueueUpsert(Tier tier, ContentType type, string id)
     {
         // Pinned tier is LOCAL-ONLY: the Cortex remote has no pinned-memory

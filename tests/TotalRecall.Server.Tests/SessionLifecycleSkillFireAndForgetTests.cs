@@ -41,6 +41,8 @@ public sealed class SessionLifecycleSkillFireAndForgetTests
         public void Move(Tier fromTier, ContentType fromType, Tier toTier, ContentType toType, string id) { }
         public string? FindByContent(Tier tier, ContentType type, string content) => null;
         public void UpdateInjectionCounts(IReadOnlyList<(Tier tier, ContentType type, string id)> entries) { }
+        public void SetSticky(ContentType type, string id, bool sticky) { }
+        public bool IsSticky(ContentType type, string id) => false;
     }
 
     private sealed class MinimalCompactionLog : ICompactionLogReader

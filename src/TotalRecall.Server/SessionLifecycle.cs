@@ -272,26 +272,41 @@ public sealed class SessionLifecycle : ISessionLifecycle
         RunWarmSweep();
 
         // 3. Hot entries listing — used for both context and hot count.
-        var hotEntries = _store.List(Tier.Hot, ContentType.Memory);
+        // I1 (tier model v2): EXCLUDE sticky rows here — they are injected
+        // exactly once via the sticky block below (3a). Without ExcludeSticky a
+        // sticky row would double-inject (sticky block AND hot context).
+        var hotEntries = _store.List(Tier.Hot, ContentType.Memory,
+            new ListEntriesOpts { ExcludeSticky = true });
 
-        // 3a. Pinned entries — always injected verbatim, ahead of the hot tier
-        // (spec 2026-06-09). The hot tier gets whatever budget remains.
+        // 3a. Sticky (pinned) entries — always injected verbatim, ahead of the
+        // hot tier. Sourced sticky-first from hot (StickyOnly) rather than the
+        // retired pinned tier. The hot tier gets whatever budget remains.
         // Project-scoping: only inject pins for the current project and globals.
         var pinnedProject = _projectResolver.Resolve(Environment.CurrentDirectory);
-        var pinnedOpts = PinnedScope.OptsFor(pinnedProject, _projectScoping);
-        var pinnedMemories = _store.List(Tier.Pinned, ContentType.Memory, pinnedOpts);
-        var pinnedKnowledge = _store.List(Tier.Pinned, ContentType.Knowledge, pinnedOpts);
-        var (pinnedBlock, pinnedIds) = PinnedBlockRenderer.Render(pinnedMemories, pinnedKnowledge);
+        var stickyOpts = (PinnedScope.OptsFor(pinnedProject, _projectScoping)
+            ?? new ListEntriesOpts()) with { StickyOnly = true };
+        // I1: StickyOnly hot listing — the ONLY site that injects sticky rows.
+        var pinnedMemories = _store.List(Tier.Hot, ContentType.Memory, stickyOpts);
+        var pinnedKnowledge = _store.List(Tier.Hot, ContentType.Knowledge, stickyOpts);
+        var (pinnedBlock, pinnedIdsRaw) = PinnedBlockRenderer.Render(pinnedMemories, pinnedKnowledge);
+        // PinnedBlockRenderer still tags ids with Tier.Pinned (renamed in Task 9);
+        // remap to Hot so injection tracking targets the hot rows they now live in.
+        var pinnedIds = pinnedIdsRaw
+            .Select(t => (Tier.Hot, t.Item2, t.Item3))
+            .ToList();
         var pinnedTokens = pinnedBlock.Length > 0 ? HeuristicEstimateTokens(pinnedBlock) : 0;
 
         // 4. Tier summary.
         var tierSummary = new TierSummary(
+            // I1: total hot occupancy — INCLUDES sticky (sticky rows are hot).
             Hot: _store.Count(Tier.Hot, ContentType.Memory),
             Warm: _store.Count(Tier.Warm, ContentType.Memory)
                 + _store.Count(Tier.Warm, ContentType.Knowledge),
             Cold: _store.Count(Tier.Cold, ContentType.Memory)
                 + _store.Count(Tier.Cold, ContentType.Knowledge),
+            // I1: sticky-hot subset (the merged replacement for pinned tier).
             Pinned: pinnedMemories.Count + pinnedKnowledge.Count,
+            // I1: hot knowledge count INCLUDES sticky knowledge (they are hot).
             Kb: _store.Count(Tier.Hot, ContentType.Knowledge)
                 + _store.Count(Tier.Warm, ContentType.Knowledge)
                 + _store.Count(Tier.Cold, ContentType.Knowledge),
@@ -449,6 +464,9 @@ public sealed class SessionLifecycle : ISessionLifecycle
         {
             // Phase 2 idea 1c — auto-demote dead-weight hot entries:
             // entries that have been injected many times but never accessed.
+            // I1 (tier model v2): sticky is INCLUDED here for now — sticky-aware
+            // eviction (protecting sticky rows from demotion/eviction) is Task 7.
+            // Task 5 only owns injection sourcing; do NOT add ExcludeSticky here.
             var allHot = _store.List(Tier.Hot, ContentType.Memory);
             var deadWeights = allHot
                 .Where(e => e.TimesInjected >= _autoDemoteMinInjections && e.AccessCount == 0)
@@ -463,11 +481,15 @@ public sealed class SessionLifecycle : ISessionLifecycle
                 catch (InvalidOperationException) { }
             }
 
-            // Existing max-entry enforcement
+            // Existing max-entry enforcement.
+            // I1: includes sticky in the total (sticky rows occupy hot); sticky
+            // eviction immunity is Task 7 — not applied here.
             var count = _store.Count(Tier.Hot, ContentType.Memory);
             if (count <= _maxEntries) return;
 
             var excess = count - _maxEntries;
+            // I1: eviction candidates include sticky for now (Task 7 adds the
+            // sticky-immunity filter here).
             var toEvict = _store.List(Tier.Hot, ContentType.Memory,
                 new ListEntriesOpts { OrderBy = "decay_score ASC", Limit = excess });
 
@@ -1011,6 +1033,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
         // Emitted first so the 5-hint content cap never drops it.
         if (compactionHintThreshold > 0)
         {
+            // I1: compaction-hint threshold — includes sticky (total hot
+            // occupancy is the right signal for "hot is full").
             var hotCount = store.Count(Tier.Hot, ContentType.Memory);
             if (hotCount >= compactionHintThreshold)
             {
@@ -1157,12 +1181,15 @@ public sealed class SessionLifecycle : ISessionLifecycle
         }
 
         // 1. Warm sweep
+        // I1: before/after hot counts are total occupancy — INCLUDE sticky.
         var beforeHotCount = _store.Count(Tier.Hot, ContentType.Memory);
         try { RunWarmSweep(); } catch { /* best-effort */ }
         var afterHotCount = _store.Count(Tier.Hot, ContentType.Memory);
 
-        // 2. Re-assemble context
-        var hotEntries = _store.List(Tier.Hot, ContentType.Memory);
+        // 2. Re-assemble context.
+        // I1: EXCLUDE sticky — sticky rows inject once via the sticky block (2a).
+        var hotEntries = _store.List(Tier.Hot, ContentType.Memory,
+            new ListEntriesOpts { ExcludeSticky = true });
 
         // Phase 2 idea 2b — task-aware sort before BuildContext.
         if (taskEmbedding is not null && _taskWeight > 0 && hotEntries.Count > 0)
@@ -1194,14 +1221,21 @@ public sealed class SessionLifecycle : ISessionLifecycle
             hotEntries = sorted;
         }
 
-        // 2a. Pinned entries — re-injected on every refresh so that host re-injection
-        // after compaction never silently drops pins (spec 2026-06-09).
+        // 2a. Sticky (pinned) entries — re-injected on every refresh so that host
+        // re-injection after compaction never silently drops pins. Sourced
+        // sticky-first from hot (StickyOnly), the twin of the session_start block.
         // Project-scoping: only inject pins for the current project and globals.
         var pinnedProject = _projectResolver.Resolve(Environment.CurrentDirectory);
-        var pinnedOpts = PinnedScope.OptsFor(pinnedProject, _projectScoping);
-        var pinnedMemories = _store.List(Tier.Pinned, ContentType.Memory, pinnedOpts);
-        var pinnedKnowledge = _store.List(Tier.Pinned, ContentType.Knowledge, pinnedOpts);
-        var (pinnedBlock, pinnedIds) = PinnedBlockRenderer.Render(pinnedMemories, pinnedKnowledge);
+        var stickyOpts = (PinnedScope.OptsFor(pinnedProject, _projectScoping)
+            ?? new ListEntriesOpts()) with { StickyOnly = true };
+        // I1: StickyOnly hot listing — the sticky-block source on the refresh path.
+        var pinnedMemories = _store.List(Tier.Hot, ContentType.Memory, stickyOpts);
+        var pinnedKnowledge = _store.List(Tier.Hot, ContentType.Knowledge, stickyOpts);
+        var (pinnedBlock, pinnedIdsRaw) = PinnedBlockRenderer.Render(pinnedMemories, pinnedKnowledge);
+        // Remap Tier.Pinned → Tier.Hot for injection tracking (see session_start).
+        var pinnedIds = pinnedIdsRaw
+            .Select(t => (Tier.Hot, t.Item2, t.Item3))
+            .ToList();
         var pinnedTokens = pinnedBlock.Length > 0 ? HeuristicEstimateTokens(pinnedBlock) : 0;
 
         var ctxResult = BuildContext(hotEntries, new BuildContextOptions

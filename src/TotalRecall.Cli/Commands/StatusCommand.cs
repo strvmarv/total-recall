@@ -155,14 +155,19 @@ public sealed class StatusCommand : ICliCommand
 
     private static StatusData Gather(IStore store, IConfigLoader configLoader, string dbPath)
     {
+        // I1 (tier model v2): hot counts INCLUDE sticky (total hot occupancy).
         int hotMem = store.Count(Tier.Hot, ContentType.Memory);
         int hotKnow = store.Count(Tier.Hot, ContentType.Knowledge);
         int warmMem = store.Count(Tier.Warm, ContentType.Memory);
         int warmKnow = store.Count(Tier.Warm, ContentType.Knowledge);
         int coldMem = store.Count(Tier.Cold, ContentType.Memory);
         int coldKnow = store.Count(Tier.Cold, ContentType.Knowledge);
-        int pinnedMem = store.Count(Tier.Pinned, ContentType.Memory);
-        int pinnedKnow = store.Count(Tier.Pinned, ContentType.Knowledge);
+        // I1: Pinned counts now report the sticky-hot subset (merged replacement
+        // for the retired pinned tier; field name kept per Task 9).
+        int pinnedMem = store.List(Tier.Hot, ContentType.Memory,
+            new ListEntriesOpts { StickyOnly = true }).Count;
+        int pinnedKnow = store.List(Tier.Hot, ContentType.Knowledge,
+            new ListEntriesOpts { StickyOnly = true }).Count;
 
         var collectionRows = store.ListByMetadata(
             Tier.Cold, ContentType.Knowledge, CollectionFilter, null);

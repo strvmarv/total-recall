@@ -150,10 +150,11 @@ public sealed class MemoryStoreHandler : IToolHandler
         if (pinned && args.TryGetProperty("tier", out var tierEl)
             && tierEl.ValueKind != JsonValueKind.Null)
             throw new ArgumentException("specify either pinned or tier, not both");
-        if (pinned && content.Length > _pinnedMaxContentChars)
-            throw new ArgumentException(
-                PinnedTierLimits.ContentLimitMessage(_pinnedMaxContentChars, content.Length));
-        var tier = pinned ? Tier.Pinned : ReadTier(args);
+        // Tier model v2 (Task 5): pinned:true now stores into HOT with the
+        // sticky flag set (the pinned tier is retired for new writes). The hot
+        // cap therefore governs pinned writes too — enforced by the tier.IsHot
+        // check below since pinned resolves to Tier.Hot.
+        var tier = pinned ? Tier.Hot : ReadTier(args);
         if (tier.IsHot && content.Length > _hotMaxContentChars)
             throw new ArgumentException(
                 PinnedTierLimits.HotContentLimitMessage(_hotMaxContentChars, content.Length));
@@ -188,6 +189,10 @@ public sealed class MemoryStoreHandler : IToolHandler
         var existingId = _store.FindByContent(tier, contentType, content);
         if (existingId is not null)
         {
+            // Tier model v2 (Task 5): honor pinned:true even on the idempotent
+            // path — mark the existing hot row sticky and refresh decay_score.
+            if (pinned)
+                MarkSticky(contentType, existingId);
             return Task.FromResult(new ToolCallResult
             {
                 Content = new[] { new ToolContent { Type = "text", Text = $"{{\"id\":\"{existingId}\"}}" } },
@@ -222,6 +227,11 @@ public sealed class MemoryStoreHandler : IToolHandler
                 EntryType: EntryType.Preference),
             vector);
 
+        // Tier model v2 (Task 5): pinned:true → mark the new hot row sticky and
+        // normalize decay_score to 1.0 (pins never decay).
+        if (pinned)
+            MarkSticky(contentType, id);
+
         // Match TS wire: content[0].text == JSON.stringify({ id }).
         // Entry ids are ULIDs (or test-supplied strings) — no JSON-unsafe chars.
         var payload = $"{{\"id\":\"{id}\"}}";
@@ -231,6 +241,14 @@ public sealed class MemoryStoreHandler : IToolHandler
             Content = new[] { new ToolContent { Type = "text", Text = payload } },
             IsError = false,
         });
+    }
+
+    // Tier model v2 (Task 5): apply the sticky flag + decay normalization to a
+    // hot row that was stored via pinned:true.
+    private void MarkSticky(ContentType contentType, string id)
+    {
+        _store.SetSticky(contentType, id, true);
+        _store.Update(Tier.Hot, contentType, id, new UpdateEntryOpts { DecayScore = 1.0 });
     }
 
     // ---------- argument parsing helpers ----------

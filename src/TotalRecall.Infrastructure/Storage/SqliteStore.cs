@@ -258,6 +258,29 @@ VALUES
         cmd.ExecuteNonQuery();
     }
 
+    // Tier model v2 (Task 5). Sticky is hot-only: both methods operate on the
+    // hot_* table regardless of caller intent, since only those tables carry
+    // the `sticky` column.
+    public void SetSticky(ContentType type, string id, bool sticky)
+    {
+        var table = MigrationRunner.TableName(Tier.Hot, type);
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = $"UPDATE {table} SET sticky = $sticky WHERE id = $id";
+        cmd.Parameters.AddWithValue("$sticky", sticky ? 1 : 0);
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.ExecuteNonQuery();
+    }
+
+    public bool IsSticky(ContentType type, string id)
+    {
+        var table = MigrationRunner.TableName(Tier.Hot, type);
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = $"SELECT sticky FROM {table} WHERE id = $id";
+        cmd.Parameters.AddWithValue("$id", id);
+        var result = cmd.ExecuteScalar();
+        return result is long l && l != 0L;
+    }
+
     public void Delete(Tier tier, ContentType type, string id)
     {
         var table = MigrationRunner.TableName(tier, type);
@@ -328,6 +351,19 @@ VALUES
         {
             whereClauses.Add("source = $source");
             cmd.Parameters.AddWithValue("$source", opts.Source);
+        }
+
+        // Sticky filter (tier model v2, Task 5). Only hot_* tables carry the
+        // `sticky` column, so this clause is guarded to Tier.Hot — adding it to
+        // a warm/cold query would throw "no such column: sticky" (NM2). Sticky
+        // is NOT part of ORDER BY (single-column allowlist, NM1); sticky-first
+        // ordering is achieved by render order at the call sites.
+        if (tier.IsHot)
+        {
+            if (opts?.StickyOnly == true)
+                whereClauses.Add("sticky = 1");
+            else if (opts?.ExcludeSticky == true)
+                whereClauses.Add("sticky = 0");
         }
 
         if (whereClauses.Count > 0)

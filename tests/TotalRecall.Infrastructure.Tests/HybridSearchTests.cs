@@ -116,6 +116,8 @@ public sealed class HybridSearchTests
         public string? FindByContent(Tier tier, ContentType type, string content)
             => throw new NotImplementedException();
         public void UpdateInjectionCounts(IReadOnlyList<(Tier tier, ContentType type, string id)> entries) => throw new NotImplementedException();
+        public void SetSticky(ContentType type, string id, bool sticky) => throw new NotImplementedException();
+        public bool IsSticky(ContentType type, string id) => false;
     }
 
     // --- helpers ----------------------------------------------------------

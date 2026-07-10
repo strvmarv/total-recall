@@ -88,6 +88,8 @@ public sealed class SessionEndHintCommand : ICliCommand
 
     private int CountHot()
     {
+        // I1 (tier model v2): total hot occupancy for the hint threshold —
+        // INCLUDES sticky (matches SessionLifecycle.GenerateHints).
         if (_store is not null) return _store.Count(Tier.Hot, ContentType.Memory);
 
         var dbPath = ConfigLoader.GetDbPath();

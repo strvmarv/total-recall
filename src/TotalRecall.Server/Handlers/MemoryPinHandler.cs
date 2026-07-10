@@ -69,7 +69,7 @@ public sealed class MemoryPinHandler : IToolHandler
 
     public string Name => "memory_pin";
     public string Description =>
-        "Pin a memory or knowledge entry: moves it to the pinned tier where it is " +
+        "Pin a memory or knowledge entry: marks it sticky in the hot tier where it is " +
         "always injected into session context and never decays or compacts";
     public JsonElement InputSchema => _inputSchema;
 
@@ -105,14 +105,17 @@ public sealed class MemoryPinHandler : IToolHandler
         var (fromTier, fromType, entry) = located;
         var targetType = requestedType ?? fromType;
 
-        var alreadyPinned = fromTier.IsPinned;
-        if (!alreadyPinned && entry.Content.Length > _maxContentChars)
+        // Tier model v2 (Task 5): pinning is now the `sticky` flag on hot, not a
+        // move to the retired pinned tier. The entry must end up in
+        // (Hot, targetType); if it is already exactly there, no move is needed.
+        var alreadyInHotTarget = fromTier.IsHot && fromType.Equals(targetType);
+        var alreadySticky = alreadyInHotTarget && _store.IsSticky(targetType, id);
+        if (!alreadySticky && entry.Content.Length > _maxContentChars)
             throw new ArgumentException(
-                PinnedTierLimits.ContentLimitMessage(_maxContentChars, entry.Content.Length));
+                PinnedTierLimits.HotContentLimitMessage(_maxContentChars, entry.Content.Length));
 
         // Resolve scope/project BEFORE moving so a validation failure leaves
-        // the entry untouched. (Previously this block ran post-move, which
-        // stranded the entry in pinned on error.)
+        // the entry untouched.
         string? effectiveProject = null;
         var clearProject = scope == "global";
         if (scope == "project")
@@ -123,37 +126,42 @@ public sealed class MemoryPinHandler : IToolHandler
                     "scope='project' requires a project argument (the entry has no existing project)");
         }
 
-        if (!alreadyPinned)
+        // Move into hot only when not already resident there (enforces the hot
+        // cap via the check above; re-embeds under the hot vec table).
+        if (!alreadyInHotTarget)
         {
             MoveHelpers.MoveAndReEmbed(
-                _store, _vec, _embedder, entry, fromTier, fromType, Tier.Pinned, targetType);
+                _store, _vec, _embedder, entry, fromTier, fromType, Tier.Hot, targetType);
         }
 
-        // Post-move update: normalize decay_score to 1.0 on fresh moves
-        // (unused for pinned entries — spec data-model section) and apply the
-        // scope choice via the project column. Skip the write entirely when the
-        // entry was already pinned and no scope change was requested, so we
+        // Set the sticky flag (skip the write when already sticky).
+        if (!alreadySticky)
+            _store.SetSticky(targetType, id, true);
+
+        // Post-move update: normalize decay_score to 1.0 on fresh pins and apply
+        // the scope choice via the project column. Skip the write entirely when
+        // the entry was already sticky and no scope change was requested, so we
         // don't spuriously bump updated_at or fire the FTS _fts_au trigger.
-        var needsUpdate = !alreadyPinned || scope is not null;
+        var needsUpdate = !alreadySticky || scope is not null;
         if (needsUpdate)
         {
-            _store.Update(Tier.Pinned, targetType, id, new UpdateEntryOpts
+            _store.Update(Tier.Hot, targetType, id, new UpdateEntryOpts
             {
-                DecayScore = alreadyPinned ? (double?)null : 1.0,
+                DecayScore = alreadySticky ? (double?)null : 1.0,
                 Project = effectiveProject,
                 ClearProject = clearProject,
             });
         }
 
-        // Pinned movements are not synced to Cortex (pinned tier is local-only).
-        if (!alreadyPinned && _compactionLog is not null)
+        // Sticky (pin) movements are not synced to Cortex (local-only policy).
+        if (!alreadySticky && _compactionLog is not null)
         {
             var fromTierName = TierNames.TierName(fromTier);
 
             _compactionLog.LogEvent(new CompactionLogEntry(
                 SessionId: "unknown",
                 SourceTier: fromTierName,
-                TargetTier: "pinned",
+                TargetTier: "hot",
                 SourceEntryIds: new[] { id },
                 TargetEntryId: id,
                 DecayScores: new Dictionary<string, double> { [id] = entry.DecayScore },
@@ -165,7 +173,7 @@ public sealed class MemoryPinHandler : IToolHandler
             Id: id,
             FromTier: TierNames.TierName(fromTier),
             FromContentType: TierNames.ContentTypeName(fromType),
-            ToTier: "pinned",
+            ToTier: "hot",
             ToContentType: TierNames.ContentTypeName(targetType),
             Success: true);
         var jsonText = JsonSerializer.Serialize(dto, JsonContext.Default.MemoryMoveResultDto);

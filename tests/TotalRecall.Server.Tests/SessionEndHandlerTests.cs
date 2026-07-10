@@ -111,6 +111,8 @@ public sealed class SessionEndHandlerTests
             => Slot(tier, type).FirstOrDefault(e => e.Content == content)?.Id;
 
         public void UpdateInjectionCounts(IReadOnlyList<(Tier tier, ContentType type, string id)> entries) { }
+        public void SetSticky(ContentType type, string id, bool sticky) { }
+        public bool IsSticky(ContentType type, string id) => false;
     }
 
     // ---- stub shape (no store) ----

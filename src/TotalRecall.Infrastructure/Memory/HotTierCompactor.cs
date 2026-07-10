@@ -31,6 +31,9 @@ public static class HotTierCompactor
     {
         ArgumentNullException.ThrowIfNull(store);
 
+        // I1 (tier model v2): sticky is INCLUDED here for now. Excluding sticky
+        // from compaction (so pinned rows are never compacted) is Task 8's
+        // compaction fast/deep split — Task 5 only owns injection sourcing.
         var hotEntries = store.List(Tier.Hot, ContentType.Memory);
         var compacted = 0;
 
@@ -67,6 +70,7 @@ public static class HotTierCompactor
             catch (InvalidOperationException) { } // concurrently deleted — skip
         }
 
+        // I1: carry-forward is total hot occupancy — INCLUDES sticky.
         var carryForward = store.Count(Tier.Hot, ContentType.Memory);
         return new Result(carryForward, compacted, Discarded: 0);
     }

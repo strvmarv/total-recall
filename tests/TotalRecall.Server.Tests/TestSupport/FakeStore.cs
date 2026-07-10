@@ -146,12 +146,39 @@ public sealed class FakeStore : IStore
 
     public ListEntriesOpts? LastListOpts { get; private set; }
 
+    // Tier model v2 (Task 5) — sticky is hot-only store-side state, keyed by
+    // (ContentType, id). SetSticky/IsSticky mirror the real store; List honors
+    // StickyOnly/ExcludeSticky for Tier.Hot.
+    private readonly HashSet<(ContentType, string)> _sticky = new();
+
+    public void SetSticky(ContentType type, string id, bool sticky)
+    {
+        if (sticky) _sticky.Add((type, id));
+        else _sticky.Remove((type, id));
+    }
+
+    public bool IsSticky(ContentType type, string id) => _sticky.Contains((type, id));
+
     public IReadOnlyList<Entry> List(Tier tier, ContentType type, ListEntriesOpts? opts = null)
     {
         LastListOpts = opts;
-        if (!ListSlots.TryGetValue((tier, type), out var slot))
-            return Array.Empty<Entry>();
-        IEnumerable<Entry> src = slot;
+        // Prefer an explicit SeedList slot; otherwise fall back to the id-keyed
+        // Entries dict so entries placed/moved via Seed/Move (e.g. by the pin
+        // handler moving an entry into hot) are visible to List too.
+        IEnumerable<Entry> src;
+        if (ListSlots.TryGetValue((tier, type), out var slot))
+            src = slot;
+        else
+            src = Entries.Where(kv => kv.Key.Item1.Equals(tier) && kv.Key.Item2.Equals(type))
+                         .Select(kv => kv.Value);
+        // Sticky filter (hot-only).
+        if (tier.IsHot)
+        {
+            if (opts?.StickyOnly == true)
+                src = src.Where(e => _sticky.Contains((type, e.Id)));
+            else if (opts?.ExcludeSticky == true)
+                src = src.Where(e => !_sticky.Contains((type, e.Id)));
+        }
         if (opts?.ParentId is string pid)
             src = src.Where(e =>
                 Microsoft.FSharp.Core.FSharpOption<string>.get_IsSome(e.ParentId)
@@ -223,8 +250,13 @@ public sealed class FakeStore : IStore
         slot.AddRange(entries);
     }
 
-    public int Count(Tier tier, ContentType type) =>
-        Counts.TryGetValue((tier, type), out var n) ? n : 0;
+    public int Count(Tier tier, ContentType type)
+    {
+        if (Counts.TryGetValue((tier, type), out var n)) return n;
+        // Fall back to id-keyed Entries so entries placed/moved via Seed/Move
+        // (e.g. the pin handler moving into hot) are counted without SeedCount.
+        return Entries.Count(kv => kv.Key.Item1.Equals(tier) && kv.Key.Item2.Equals(type));
+    }
 
     public int CountKnowledgeCollections() =>
         throw new NotImplementedException();

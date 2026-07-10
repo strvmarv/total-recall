@@ -112,14 +112,19 @@ public sealed class StatusHandler : IToolHandler
         ct.ThrowIfCancellationRequested();
 
         var tierSizes = new TierSizesDto(
+            // I1 (tier model v2): hot counts INCLUDE sticky (total hot occupancy).
             HotMemories: _store.Count(Tier.Hot, ContentType.Memory),
             HotKnowledge: _store.Count(Tier.Hot, ContentType.Knowledge),
             WarmMemories: _store.Count(Tier.Warm, ContentType.Memory),
             WarmKnowledge: _store.Count(Tier.Warm, ContentType.Knowledge),
             ColdMemories: _store.Count(Tier.Cold, ContentType.Memory),
             ColdKnowledge: _store.Count(Tier.Cold, ContentType.Knowledge),
-            PinnedMemories: _store.Count(Tier.Pinned, ContentType.Memory),
-            PinnedKnowledge: _store.Count(Tier.Pinned, ContentType.Knowledge));
+            // I1: the Pinned fields now report the sticky-hot subset (the merged
+            // replacement for the retired pinned tier; field name kept per Task 9).
+            PinnedMemories: _store.List(Tier.Hot, ContentType.Memory,
+                new ListEntriesOpts { StickyOnly = true }).Count,
+            PinnedKnowledge: _store.List(Tier.Hot, ContentType.Knowledge,
+                new ListEntriesOpts { StickyOnly = true }).Count);
 
         ct.ThrowIfCancellationRequested();
 
