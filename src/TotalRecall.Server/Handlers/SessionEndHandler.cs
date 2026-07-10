@@ -35,6 +35,8 @@ public sealed class SessionEndHandler : IToolHandler
     private readonly CompactionLog? _compactionLog;
     private readonly double _warmThreshold;
     private readonly double _decayConstantHours;
+    // 0 means "unlimited" (matches SessionLifecycle's hotMaxContentChars convention).
+    private readonly int _hotMaxContentChars;
 
     public SessionEndHandler(
         ISessionLifecycle sessionLifecycle,
@@ -42,7 +44,8 @@ public sealed class SessionEndHandler : IToolHandler
         CompactionLog? compactionLog = null,
         double warmThreshold = 0.3,
         double decayConstantHours = 168,
-        TotalRecall.Infrastructure.Sync.SyncService? syncService = null)
+        TotalRecall.Infrastructure.Sync.SyncService? syncService = null,
+        int hotMaxContentChars = 0)
     {
         _sessionLifecycle = sessionLifecycle
             ?? throw new ArgumentNullException(nameof(sessionLifecycle));
@@ -51,6 +54,7 @@ public sealed class SessionEndHandler : IToolHandler
         _warmThreshold = warmThreshold;
         _decayConstantHours = decayConstantHours;
         _syncService = syncService;
+        _hotMaxContentChars = hotMaxContentChars > 0 ? hotMaxContentChars : 0;
     }
 
     public string Name => "session_end";
@@ -94,7 +98,8 @@ public sealed class SessionEndHandler : IToolHandler
         var r = HotTierCompactor.Compact(
             _store!, _sessionLifecycle.SessionId, nowMs,
             _warmThreshold, _decayConstantHours, _compactionLog,
-            reason: "session_end_decay", ct: ct);
+            reason: "session_end_decay", ct: ct,
+            maxContentChars: _hotMaxContentChars > 0 ? _hotMaxContentChars : int.MaxValue);
         return (r.CarryForward, r.Compacted, r.Discarded);
     }
 }

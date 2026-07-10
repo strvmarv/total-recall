@@ -33,7 +33,17 @@ public sealed class CompactCommandTests
         var cmd = new CompactCommand(outw);
         var code = await cmd.RunAsync(Array.Empty<string>());
         Assert.Equal(0, code);
-        Assert.Contains("Compaction is driven by", outw.ToString());
+        Assert.Contains("deterministic decay-based", outw.ToString());
+    }
+
+    [Fact]
+    public async Task Deep_PrintsHostOrchestratedGuidance()
+    {
+        var outw = new StringWriter();
+        var cmd = new CompactCommand(outw);
+        var code = await cmd.RunAsync(new[] { "--deep" });
+        Assert.Equal(0, code);
+        Assert.Contains("host-orchestrated", outw.ToString());
     }
 
     [Fact]

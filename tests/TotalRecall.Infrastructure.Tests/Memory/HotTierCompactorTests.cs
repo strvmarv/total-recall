@@ -14,9 +14,9 @@ namespace TotalRecall.Infrastructure.Tests.Memory;
 
 public sealed class HotTierCompactorTests
 {
-    private static Entry MakeEntry(string id, long lastAccessedAt) =>
+    private static Entry MakeEntry(string id, long lastAccessedAt, string? content = null) =>
         new Entry(
-            id, id,
+            id, content ?? id,
             FSharpOption<string>.None, FSharpOption<string>.None,
             FSharpOption<SourceTool>.None, FSharpOption<string>.None,
             ListModule.OfSeq(Array.Empty<string>()),
@@ -75,5 +75,36 @@ public sealed class HotTierCompactorTests
         Assert.Equal(2, result.CarryForward);
         Assert.Equal(0, store.Count(Tier.Warm, ContentType.Memory));
         Assert.Equal(2, store.Count(Tier.Hot, ContentType.Memory));
+    }
+
+    [Fact]
+    public void Compact_SkipsStickyRows()
+    {
+        var store = new InMemoryTestStore();
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        store.Seed(Tier.Hot, ContentType.Memory, MakeEntry("sticky", lastAccessedAt: 0));
+        store.SetSticky(ContentType.Memory, "sticky", true);
+        var r = HotTierCompactor.Compact(store, "s1", now,
+            warmThreshold: 0.5, decayConstantHours: 168, compactionLog: null,
+            maxContentChars: 1200);
+        Assert.Equal(0, r.Compacted); // sticky never compacts
+        Assert.Equal(1, store.Count(Tier.Hot, ContentType.Memory));
+    }
+
+    [Fact]
+    public void Compact_SkipsOversizedRows()
+    {
+        var store = new InMemoryTestStore();
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        store.Seed(Tier.Hot, ContentType.Memory,
+            MakeEntry("oversized", lastAccessedAt: 0, content: new string('x', 1300)));
+
+        var r = HotTierCompactor.Compact(store, "s1", now,
+            warmThreshold: 0.5, decayConstantHours: 168, compactionLog: null,
+            maxContentChars: 1200);
+
+        Assert.Equal(0, r.Compacted); // oversized row is skipped, not moved
+        Assert.Equal(1, store.Count(Tier.Hot, ContentType.Memory));
+        Assert.Equal(0, store.Count(Tier.Warm, ContentType.Memory));
     }
 }

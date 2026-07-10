@@ -193,7 +193,7 @@ public static class ServerComposition
 
         // ---- Session (4) ----
         registry.Register(new SessionStartHandler(sessionLifecycle, periodicSync, syncService));
-        registry.Register(new SessionEndHandler(sessionLifecycle, store, compactionLogWriter, syncService: syncService));
+        registry.Register(new SessionEndHandler(sessionLifecycle, store, compactionLogWriter, syncService: syncService, hotMaxContentChars: hotMaxChars));
         registry.Register(new SessionContextHandler(store));
         registry.Register(new SessionRefreshHandler(sessionLifecycle));
 

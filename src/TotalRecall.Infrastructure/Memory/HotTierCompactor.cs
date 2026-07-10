@@ -27,19 +27,37 @@ public static class HotTierCompactor
         double decayConstantHours,
         CompactionLog? compactionLog,
         string reason = "session_end_decay",
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        int maxContentChars = int.MaxValue)
     {
         ArgumentNullException.ThrowIfNull(store);
 
-        // I1 (tier model v2): sticky is INCLUDED here for now. Excluding sticky
-        // from compaction (so pinned rows are never compacted) is Task 8's
-        // compaction fast/deep split — Task 5 only owns injection sourcing.
-        var hotEntries = store.List(Tier.Hot, ContentType.Memory);
+        // Task 8 (tier model v2): sticky rows are pinned residents of the hot
+        // tier and are never compaction candidates — ExcludeSticky filters
+        // them out at the source instead of skipping them one-by-one below.
+        var hotEntries = store.List(Tier.Hot, ContentType.Memory, new ListEntriesOpts { ExcludeSticky = true });
         var compacted = 0;
 
         foreach (var entry in hotEntries)
         {
             ct.ThrowIfCancellationRequested();
+
+            // Task 8: skip rows over the hot char cap rather than moving them —
+            // compaction should not choke on oversized memories. Log the skip
+            // (when a log sink is present) so it's visible in compaction history.
+            if (entry.Content.Length > maxContentChars)
+            {
+                compactionLog?.LogEvent(new CompactionLogEntry(
+                    SessionId: sessionId,
+                    SourceTier: "hot",
+                    TargetTier: null,
+                    SourceEntryIds: [entry.Id],
+                    TargetEntryId: null,
+                    DecayScores: new Dictionary<string, double>(),
+                    Reason: "skip_oversized",
+                    ConfigSnapshotId: ""));
+                continue;
+            }
 
             var score = Decay.calculateDecayScore(
                 entry.LastAccessedAt, entry.AccessCount, entry.EntryType, nowMs, decayConstantHours);
