@@ -127,6 +127,11 @@ public sealed class SessionLifecyclePromotionTests
             && list.Exists(e => e.Id == id)
             ? 1 : 0;
 
+    private static int ExistsInWarm(SessionLifecycleTests.FakeStore store, string id) =>
+        store.Entries.TryGetValue((Tier.Warm, ContentType.Memory), out var list)
+            && list.Exists(e => e.Id == id)
+            ? 1 : 0;
+
     [Fact]
     public void WarmSweep_PromotesHighAccessWarmEntryToHot()
     {
@@ -155,5 +160,65 @@ public sealed class SessionLifecyclePromotionTests
         SeedHot(store, id: "earned1", decay: 0.9);
         lifecycle.RunWarmSweepForTest(); // hot count 2 > max 1
         Assert.Equal(1, ExistsInHot(store, "sticky1")); // sticky survives
+    }
+
+    // Non-vacuous companion to WarmSweep_NeverEvictsStickyHot: forces the
+    // excess-eviction branch to actually run. maxEntries=2 with 3 NON-sticky
+    // hot rows means the non-sticky count (3) alone exceeds the cap, so exactly
+    // one non-sticky row is evicted. The sticky row has the lowest decay of all
+    // and would be evicted first if it were in the candidate pool — it must
+    // survive, and the lowest-decay NON-sticky row must be the one evicted.
+    // (Fails if ExcludeSticky is removed from the toEvict listing: the sticky
+    // row would then be the ASC-first candidate and get evicted.)
+    [Fact]
+    public void WarmSweep_EvictsLowestNonStickyButProtectsSticky()
+    {
+        var (lifecycle, store, _) = MakeLifecycle(maxEntries: 2);
+        SeedStickyHot(store, id: "sticky-low", decay: 0.001); // lowest decay overall, sticky
+        SeedHot(store, id: "nonsticky-lowest", decay: 0.10);  // lowest NON-sticky -> evicted
+        SeedHot(store, id: "nonsticky-mid", decay: 0.50);
+        SeedHot(store, id: "nonsticky-high", decay: 0.90);
+
+        lifecycle.RunWarmSweepForTest(); // non-sticky count 3 > max 2 -> evict 1
+
+        // (a) sticky survives despite lowest decay of all.
+        Assert.Equal(1, ExistsInHot(store, "sticky-low"));
+        // (b) the lowest-decay NON-sticky row is the one evicted (moved to warm).
+        Assert.Equal(0, ExistsInHot(store, "nonsticky-lowest"));
+        Assert.Equal(1, ExistsInWarm(store, "nonsticky-lowest"));
+        // the two higher non-sticky rows stay.
+        Assert.Equal(1, ExistsInHot(store, "nonsticky-mid"));
+        Assert.Equal(1, ExistsInHot(store, "nonsticky-high"));
+    }
+
+    // I2: the hot char cap is enforced on promotion. A warm entry that passes
+    // BOTH promotion gates (access_count and decay) but whose content exceeds
+    // hotMaxContentChars must NOT be promoted; a contrasting under-cap entry
+    // that passes the same gates DOES promote — proving the cap (not another
+    // gate) is what blocks the oversized one.
+    [Fact]
+    public void WarmSweep_DoesNotPromoteWarmEntryExceedingHotCharCap()
+    {
+        const int cap = 50;
+        var (lifecycle, store, _) = MakeLifecycle(
+            promoteMinAccess: 5, promoteThreshold: 0.7, hotMaxContentChars: cap);
+
+        // Oversized: passes both gates (access 6, fresh timestamp -> decay high)
+        // but content length > cap.
+        store.Entries.TryGetValue((Tier.Warm, ContentType.Memory), out var warm);
+        warm ??= new List<Entry>();
+        warm.Add(MakeEntry("too-big", accessCount: 6, lastAccessedAt: NowMs,
+            content: new string('x', cap + 10)));
+        // Under-cap control: same gates, short content -> promotes.
+        warm.Add(MakeEntry("fits", accessCount: 6, lastAccessedAt: NowMs,
+            content: new string('y', cap - 10)));
+        store.Entries[(Tier.Warm, ContentType.Memory)] = warm;
+
+        lifecycle.RunWarmSweepForTest();
+
+        // Oversized stays in warm; under-cap promotes to hot.
+        Assert.Equal(0, ExistsInHot(store, "too-big"));
+        Assert.Equal(1, ExistsInWarm(store, "too-big"));
+        Assert.Equal(1, ExistsInHot(store, "fits"));
     }
 }
