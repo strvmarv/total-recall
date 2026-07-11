@@ -87,6 +87,49 @@ public sealed class VectorSearchTests
     }
 
     [Fact]
+    public void InsertEmbedding_OrphanVecRowAtReusedRowid_DoesNotCollide()
+    {
+        // Regression for the 4.0.0 pin/promote/demote crash
+        // ("UNIQUE constraint failed on hot_memories_vec primary key").
+        // MoveAndReEmbed inserts a content row (acquiring a rowid) then calls
+        // InsertEmbedding on it, but a stale orphan vec row can already occupy
+        // that rowid — accumulated from a pre-fix eviction path that deleted
+        // content without cleaning its vec counterpart. InsertEmbedding must
+        // clear the orphan first, exactly as SqliteStore.InsertWithEmbedding does.
+        var (conn, store, search) = NewFixture();
+        using (conn)
+        {
+            // 1. Seed a row + embedding; capture its rowid.
+            var id0 = InsertContent(store, Tier.Hot, ContentType.Memory, "orig");
+            search.InsertEmbedding(Tier.Hot, ContentType.Memory, id0, UnitE(0));
+            var orphanRowid = store.GetInternalKey(Tier.Hot, ContentType.Memory, id0)!.Value;
+
+            // 2. Delete ONLY the content row, leaving the vec row orphaned at that rowid.
+            using (var del = conn.CreateCommand())
+            {
+                del.CommandText = "DELETE FROM hot_memories WHERE id = $id";
+                del.Parameters.AddWithValue("$id", id0);
+                del.ExecuteNonQuery();
+            }
+
+            // 3. Insert a new content row; SQLite reuses the freed rowid.
+            var id1 = InsertContent(store, Tier.Hot, ContentType.Memory, "reused");
+            Assert.Equal(orphanRowid, store.GetInternalKey(Tier.Hot, ContentType.Memory, id1)!.Value);
+
+            // 4. Re-embedding the reused rowid must NOT throw (orphan replaced).
+            search.InsertEmbedding(Tier.Hot, ContentType.Memory, id1, UnitE(1));
+
+            // 5. The new embedding is the one that answers a query.
+            var results = search.SearchByVector(
+                Tier.Hot, ContentType.Memory, UnitE(1),
+                new VectorSearchOpts(TopK: 1));
+            Assert.Single(results);
+            Assert.Equal(id1, results[0].Id);
+            Assert.Equal(1.0, results[0].Score, precision: 5);
+        }
+    }
+
+    [Fact]
     public void SearchByVector_TopKLimit_RespectsK()
     {
         var (conn, store, search) = NewFixture();

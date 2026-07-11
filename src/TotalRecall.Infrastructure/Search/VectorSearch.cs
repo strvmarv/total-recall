@@ -46,6 +46,23 @@ public sealed class VectorSearch : IVectorSearch
                 $"Entry {entryId} not found in {contentTable}");
         }
 
+        // Remove any orphan vec row at this rowid before inserting. An orphan
+        // exists when a previous content row was deleted without cleaning its
+        // vec counterpart (e.g. the pre-fix write-time eviction path, or a DB
+        // migrated from the legacy TS store). Callers reach here after the
+        // content row already occupies this rowid (ResolveRowid found it), so
+        // the only possible occupant of the vec table at this rowid is an
+        // orphan — deleting it is safe. Without this, MoveAndReEmbed (pin /
+        // promote / demote / import) hits "UNIQUE constraint failed on
+        // <vec> primary key" whenever the moved entry reuses an orphaned rowid.
+        // Mirrors SqliteStore.InsertWithEmbedding's orphan dance.
+        using (var orphanCmd = _conn.CreateCommand())
+        {
+            orphanCmd.CommandText = $"DELETE FROM {vecTable} WHERE rowid = $rowid";
+            orphanCmd.Parameters.AddWithValue("$rowid", rowid.Value);
+            orphanCmd.ExecuteNonQuery();
+        }
+
         using var cmd = _conn.CreateCommand();
         cmd.CommandText =
             $"INSERT INTO {vecTable} (rowid, embedding) VALUES ($rowid, $embedding)";
