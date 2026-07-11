@@ -45,6 +45,19 @@ test('payloadIntact: missing model.onnx is NOT intact', () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('payloadIntact: present-but-corrupt registry.json is NOT intact', () => {
+  // A registry that exists but does not parse is itself a signature of an
+  // interrupted extraction (the file was cut mid-write). Treating it as "no
+  // registry -> ok" would defeat the self-heal guard, so it must be rejected —
+  // distinct from a genuinely-absent registry (ENOENT), which stays intact.
+  const dir = makeTree(64, { sizeBytes: 64 });
+  fs.writeFileSync(path.join(dir, 'models', 'registry.json'), '{ "version": 1, "models": {'); // truncated JSON
+  const r = payloadIntact(dir);
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /registry/i);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('payloadIntact: no registry present is treated as intact (non-model / legacy trees)', () => {
   // Absence of a registry is not evidence of corruption — some trees have no
   // model payload to validate. Must NOT false-positive into a re-download loop.
