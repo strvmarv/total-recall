@@ -6,7 +6,7 @@
 ║  CLIENT: Quaid, Douglas                      ║
 ║  STATUS: MEMORY EXTRACTION IN PROGRESS       ║
 ║                                              ║
-║  > Loading tier: PINNED ......... [OK]       ║
+║  > Loading tier: STICKY ......... [OK]       ║
 ║  > Loading tier: HOT ............ [OK]       ║
 ║  > Loading tier: WARM ........... [OK]       ║
 ║  > Loading tier: COLD ........... [OK]       ║
@@ -55,7 +55,7 @@ Every TUI coding assistant has the same gaps:
 - **Cross-tool** — one memory store shared across Claude Code, Copilot CLI, Cursor, Cline, OpenCode, and Hermes; existing memories auto-import on first run
 - **Built-in web UI** — `total-recall ui` opens a local browser dashboard (Dashboard, Memory, Knowledge Base, Usage, Insights, Eval, Config) for visual memory management without touching the CLI or AI session. Dark/light themes, a keyboard-first ⌘K command palette, and a developer-native *Terminal / Archive* design
 - **Cross-device** — point `TOTAL_RECALL_DB_PATH` at a cloud-synced folder and your memory follows you everywhere
-- **Smarter context, lower token cost** — a four-tier model (Pinned / Hot / Warm / Cold) enforces a 4000-token budget per prompt, so you get relevant context without carrying everything
+- **Smarter context, lower token cost** — a three-tier model (Hot / Warm / Cold, with sticky pins) enforces a 4000-token budget per prompt; new memories land in warm and earn their way into hot, so you get relevant context without carrying everything
 - **Token expenditure tracking** — see exactly what each session costs, broken down by host, project, and time window
 - **Knowledge base** — ingest your docs, READMEs, API references, and architecture notes; retrieved semantically when relevant
 - **Observability** — measure retrieval quality, run benchmarks, and compare config changes with the built-in eval framework
@@ -123,20 +123,22 @@ Every memory has an entry type that tells total-recall what it is and how to tre
 | `Compacted` | Tier compaction generates a summary | Multiple related memories merged into a higher-signal entry |
 | `Ingested` | You ingest a file or directory | Chunks from READMEs, API docs, architecture notes |
 
-**`Correction` and `Preference` entries get priority treatment.** They surface as actionable hints at every session start and carry higher decay scores — they stay in hot tier longer and are less likely to be evicted.
+**`Correction` and `Preference` entries get priority treatment.** They surface as actionable hints at every session start and carry higher decay scores — helping them earn promotion into the hot tier and resist eviction once there.
 
 ---
 
 ## How It Works
 
-### Four-Tier Model
+### Tier Model
 
-total-recall uses a four-tier memory model designed to balance signal density with token cost:
+total-recall uses a three-tier memory model — **Hot / Warm / Cold** — with a **sticky** flag that turns any hot entry into an always-injected pin. New memories land in **Warm** by default and *earn* their way into Hot by proving useful, so the auto-injected context stays high-signal without carrying everything:
 
-- **Pinned** (user-curated, 500 chars per entry) — entries you pin via `memory_pin` (or store-and-pin with `memory_store { pinned: true }`). Always injected verbatim at session start, ahead of the hot tier, under a `## Pinned directives (always follow)` header — never truncated, never decayed, never demoted, never compacted. Oversized content is rejected at the door (configurable via `tiers.pinned.max_content_chars`). The only way out is `memory_unpin` (→ warm). **Project-scoped injection** (default on): untagged pins are global and inject everywhere; a pin tagged with a `project` value (lowercase `owner/repo` slug or folder name) injects only when the detected cwd matches that repo. When no git repo is detected, only global pins inject (fail-closed).
-- **Hot** (up to 50 entries, 4000-token budget) — auto-injected into every prompt. Your most important corrections, preferences, and recently promoted entries are always present without any query. Pinned tokens come off the top of this budget.
-- **Warm** (up to 10K entries) — retrieved semantically per query. When you ask about authentication, relevant auth memories surface automatically. Entries decay over time; unused ones migrate to cold.
+- **Warm** (default landing tier, up to 10K entries) — where new memories go unless you say otherwise. Retrieved semantically per query: when you ask about authentication, relevant auth memories surface automatically. An entry is **promoted to Hot** once it earns it — `access_count ≥ 5` **and** `decay_score ≥ 0.7` (both tunable). Unused entries decay and migrate to Cold.
+- **Hot** (up to 50 entries, 4000-token budget, 1200 chars/entry) — auto-injected into every prompt, no query needed. Populated by earned promotion from warm (and by explicit `tier: "hot"` writes, which are capped at 1200 characters — store a concise summary, not an essay). Sticky tokens come off the top of this budget.
+- **Sticky (pinned)** — a flag on a hot entry, set via `memory_pin` (or store-and-pin with `memory_store { pinned: true }`). Sticky entries are **unbounded**, injected verbatim and first at session start under a `## Pinned directives (always follow)` header, and are **never** truncated, decayed, demoted, evicted, or compacted. `memory_unpin` clears the flag, leaving the entry in hot as a normal earned resident. **Project-scoped injection** (default on): untagged pins are global and inject everywhere; a pin tagged with a `project` value (lowercase `owner/repo` slug or folder name) injects only when the detected cwd matches that repo. When no git repo is detected, only global pins inject (fail-closed).
 - **Cold** (unlimited, hierarchical) — your knowledge base. Ingest entire directories — source trees, documentation, design specs — and they're retrieved when relevant.
+
+> **Upgrading from 3.x?** The old Pinned tier is merged into Hot as the sticky flag, and a one-time migration runs automatically on first `session_start`: existing pins become sticky-hot, previously auto-hot entries move to warm, and the legacy `pinned_*` tables are dropped. The migration is irreversible — back up `~/.total-recall/total-recall.db` first if you want a rollback path.
 
 ### Hybrid Search
 
@@ -155,9 +157,9 @@ For enterprise deployments, swap in a remote embedder (OpenAI, Amazon Bedrock) f
 Every `session_start` call runs the same sequence:
 
 1. **Import sync** — scans all installed host tools (Claude Code, Copilot CLI, Cursor, Cline, OpenCode, Hermes), deduplicates via content hash, and imports new entries.
-2. **Pinned + hot tier assembly** — pinned entries are injected first, verbatim and untruncated, then current hot entries fill the remaining token budget. When `tiers.pinned.project_scoping` is on (default), only global pins and pins tagged to the detected repo are included; if no repo is detected, only global pins inject (fail-closed).
-3. **Hint generation** — surfaces up to 5 high-value warm memories as actionable one-liners: `Correction` and `Preference` entries first, frequently accessed entries (3+ accesses) second, recently promoted entries third. No LLM calls — pure DB queries.
-4. **Tier summary** — counts entries across pinned, hot, warm, cold, and all KB collections (`tierSummary.pinned` included). A `pinned_budget_pressure` hint fires when pins consume over half the token budget (suggested action: `memory_unpin`).
+2. **Sticky + hot tier assembly** — sticky (pinned) entries are injected first, verbatim and untruncated, then current hot entries fill the remaining token budget. When `tiers.pinned.project_scoping` is on (default), only global pins and pins tagged to the detected repo are included; if no repo is detected, only global pins inject (fail-closed).
+3. **Hint generation** — surfaces up to 5 high-value warm memories as actionable one-liners: `Correction` and `Preference` entries first, frequently accessed entries (3+ accesses) second, warm→hot promotion candidates third. No LLM calls — pure DB queries.
+4. **Tier summary** — counts entries across hot, warm, cold, and all KB collections, plus a sticky count (`tierSummary.pinned` is retained for wire compatibility and now reports sticky-hot entries). A `pinned_budget_pressure` hint fires when sticky pins consume over half the token budget (suggested action: `memory_unpin`).
 5. **Session continuity** — reports human-readable time since the last compaction event (proxy for last active session).
 
 Every `session_start` also runs a skill scan: it reads `~/.claude/skills/` plus any directories listed in `[skills] extra_dirs`, persists the content + a locally-computed embedding to a SQLite skill cache, and advertises discovered skills as an `## Available Skills` block in the session context. Scanned skills are invokable on demand via the `skill_get` MCP tool and discoverable via `skill_search` (hybrid semantic + keyword ranking with a usage-decay tie-breaker) — both work entirely offline with no Cortex required. In Cortex mode the scanned skills are also pushed to Cortex, usage events sync back as a multi-machine rollup, and pulled skills from other machines merge into the same local cache.
@@ -248,7 +250,7 @@ All commands are routed through the `/total-recall:commands` skill:
 | `/total-recall:commands promote <id>` | Move entry to higher tier |
 | `/total-recall:commands demote <id>` | Move entry to lower tier |
 | `/total-recall:commands pin <id>` | Pin entry — always injected at session start, never decays |
-| `/total-recall:commands unpin <id>` | Release a pinned entry back to the warm tier |
+| `/total-recall:commands unpin <id>` | Clear an entry's sticky flag (it stays in hot as an earned resident) |
 | `/total-recall:commands history` | Show recent tier movements |
 | `/total-recall:commands lineage <id>` | Show compaction ancestry |
 | `/total-recall:commands export` | Export to portable JSON format |
@@ -282,16 +284,20 @@ The config file lives at `~/.total-recall/config.toml`. All fields have defaults
 # total-recall configuration
 
 [tiers.pinned]
-max_content_chars = 500           # Max characters per pinned entry (oversize rejected, never truncated)
+# The Pinned tier was merged into Hot as a "sticky" flag in 4.0. This section
+# is kept as a deprecated alias — its floor_* / project_scoping fields still
+# drive the per-turn re-injection of sticky pins. max_content_chars no longer
+# applies (sticky entries are unbounded).
 floor_enabled = true              # Per-turn pinned-directive floor (UserPromptSubmit re-injection)
-floor_every_n_turns = 6           # Re-inject the pinned block at least every N user turns
+floor_every_n_turns = 6           # Re-inject the sticky block at least every N user turns
 floor_growth_tokens = 6000        # ...or after ~this many tokens of transcript growth (whichever trips first)
-project_scoping = true            # Scope pinned injection by git repo: repo-tagged pins inject only in their repo; untagged pins are global; fail-closed when no repo detected
+project_scoping = true            # Scope sticky injection by git repo: repo-tagged pins inject only in their repo; untagged pins are global; fail-closed when no repo detected
 
 [tiers.hot]
 max_entries = 50                  # Max entries auto-injected per prompt
-token_budget = 4000               # Max tokens for hot tier injection (pinned tokens come off the top)
+token_budget = 4000               # Max tokens for hot tier injection (sticky pins come off the top)
 carry_forward_threshold = 0.7     # Score threshold to stay in hot
+max_content_chars = 1200          # Max characters per hot entry (oversize rejected — store a summary or keep it in warm); sticky pins are exempt
 
 [tiers.warm]
 max_entries = 10000               # Max entries in warm tier
@@ -307,7 +313,8 @@ lazy_summary_threshold = 5        # Accesses before generating summary
 [compaction]
 decay_half_life_hours = 168       # Score half-life (168h = 1 week)
 warm_threshold = 0.3              # Score below which warm→cold
-promote_threshold = 0.7           # Score above which cold→warm
+promote_threshold = 0.7           # Min decay_score to promote (cold→warm, and warm→hot)
+promote_min_access = 5            # Min access_count for warm→hot promotion (paired with promote_threshold on decay_score)
 warm_sweep_interval_days = 7      # How often to run warm sweep
 
 [search]
@@ -359,7 +366,7 @@ Total Recall Cortex is the shared backend platform that adds team knowledge base
 
 In Cortex mode, the plugin operates as a hybrid:
 - **User memories** are stored locally (fast reads/writes), synced bidirectionally to Cortex every 300 seconds and at session boundaries
-- **Pinned entries are local-only** — Cortex has no pinned-tier support yet, so pins are never pushed, pulled, reconciled, or migrated (`migrate_to_remote` skips them)
+- **Sticky (pinned) entries are local-only** — Cortex has no sticky-pin support yet, so pins are never pushed, pulled, reconciled, or migrated (`migrate_to_remote` skips them)
 - **Global knowledge** (team KB, connector-ingested data) is queried remotely from Cortex
 - **Telemetry** (usage, retrieval events, compaction log) is pushed to Cortex for unified dashboards
 - **Skills** are synced to Cortex so team members share the same skill library
@@ -444,7 +451,7 @@ The MCP server exposes 41 core tools in every backend mode; local SQLite and Cor
 
 †Unavailable in Postgres mode (local SQLite + Cortex modes only).
 
-Pinned tier surface: `memory_pin` moves any entry into the pinned tier (with optional `scope: "project" | "global"`); `memory_unpin` releases it to warm; `memory_store` accepts `pinned: true` to store-and-pin new content; `memory_promote` / `memory_demote` reject pinned as source or target. `pinned` is accepted in the tier filters of `memory_search`, `memory_list`, `memory_recent`, `memory_export`, and `memory_get_all`, and `status` reports pinned counts. **Project-scoped injection** (enabled by `tiers.pinned.project_scoping`, default on): a pin is tagged to a repo by setting its `project` field to the lowercase `owner/repo` slug (e.g. `radancy-pe/rai-ops-cortex`) or bare folder name when no remote is configured — at injection time `ProjectResolver` detects the current repo from cwd (pure filesystem walk) and `PinnedScope.OptsFor` filters accordingly. Untagged (null-project) pins are global and always inject. When no repo is detected the injection is fail-closed to globals only.
+Sticky (pinned) surface: `memory_pin` sets the sticky flag on an entry, moving it into the hot tier (with optional `scope: "project" | "global"`); `memory_unpin` clears the flag, leaving the entry in hot as an earned resident; `memory_store` accepts `pinned: true` to store-and-pin new content directly as sticky-hot; `memory_promote` / `memory_demote` reject a sticky entry as source or target (unpin it first). `memory_list` accepts a `sticky: true` filter, and `status` reports a sticky count (surfaced as `tierSummary.pinned` for wire compatibility). **Project-scoped injection** (enabled by `tiers.pinned.project_scoping`, default on): a pin is tagged to a repo by setting its `project` field to the lowercase `owner/repo` slug (e.g. `radancy-pe/rai-ops-cortex`) or bare folder name when no remote is configured — at injection time `ProjectResolver` detects the current repo from cwd (pure filesystem walk) and `PinnedScope.OptsFor` filters accordingly. Untagged (null-project) pins are global and always inject. When no repo is detected the injection is fail-closed to globals only.
 
 Retrieval-quality feedback: `memory_search` returns `{ retrievalId, results }` and `kb_search` returns a top-level `retrievalId`. The assistant can call `memory_feedback` with that `retrievalId` to confirm whether the retrieval was actually used; un-acted retrievals are inferred as misses after a grace window. This drives the `eval_report` metrics and the web UI's "Retrieval quality" card. `memory_feedback` is intentionally assistant-only — it is not exposed to the web UI.
 
@@ -471,9 +478,9 @@ MCP Server (.NET 8 NativeAOT — C# imperative shell + F# functional core)
 └── TotalRecall.Host             — composition root, AOT entry point, migration guard
 
 Tiers:
-  Pinned (500 chars/entry) → user-pinned; always injected first, never decays or compacts
-  Hot (50 entries)   → auto-injected every prompt
-  Warm (10K entries) → BM25 + cosine hybrid search per query
+  Hot (50 entries, 1200 chars/entry) → auto-injected every prompt; earned from warm by access
+    └─ sticky flag → user-pinned; injected first, unbounded, never decays/compacts/evicts
+  Warm (10K entries, default ingress) → BM25 + cosine hybrid search per query; promotes to hot on merit
   Cold (unlimited)   → hierarchical KB retrieval
 
 Backends (selected by config):
@@ -484,9 +491,9 @@ Backends (selected by config):
 
 **Data flow:**
 
-1. `store` — write a memory, assign tier, embed, persist
+1. `store` — write a memory, assign tier (warm by default), embed, persist
 2. `search` — embed query, BM25 + cosine vector search across all tiers, merge with F# ranking, return results
-3. `compact` — decay scores, promote hot→warm, demote warm→cold
+3. `compact` — decay scores, compact hot→warm (summarize), demote warm→cold; earned warm→hot promotion runs in the warm sweep
 4. `ingest` — chunk files with heading-aware Markdown and regex-based code parsing, embed chunks, store in cold tier
 
 **Local mode:** all state lives in `~/.total-recall/total-recall.db`. The embedding model and the sqlite-vec native extension are bundled with the binary. No network calls required at runtime.
