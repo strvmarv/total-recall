@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 4.0.4 - 2026-07-11
+
+### Fixed
+
+- **Corrupt `registry.json` slipped past the 4.0.3 model-integrity guard.**
+  `payloadIntact` treated *every* failure reading or parsing
+  `models/registry.json` as "no registry → intact", so a registry that was
+  present but truncated/unparseable — itself a signature of the interrupted
+  extraction 4.0.3 guards against — was waved through and the broken tree
+  trusted. Now only a genuinely-absent registry (`ENOENT`) counts as "nothing to
+  validate"; a present-but-unreadable or unparseable `registry.json` is a
+  not-intact failure, so provisioning re-downloads instead of trusting a partial
+  tree. (Follow-up to the 4.0.3 fix, from PR #15 review.)
+
 ## 4.0.3 - 2026-07-10
 
 ### Fixed
