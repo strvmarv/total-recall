@@ -148,11 +148,23 @@ export async function verifyArchiveChecksum(filePath, expectedSha256, archiveNam
 // { ok: false, reason }.
 export function payloadIntact(destDir) {
   const registryPath = path.join(destDir, 'models', 'registry.json');
+  // A genuinely-absent registry (ENOENT) means there is nothing to validate —
+  // legacy / non-model trees. But a registry that is PRESENT yet unreadable or
+  // unparseable is itself a signature of an interrupted extraction (the file was
+  // cut mid-write), so it must NOT be waved through as "intact" — that would
+  // defeat the self-heal guard. Distinguish the two.
+  let raw;
+  try {
+    raw = fs.readFileSync(registryPath, 'utf8');
+  } catch (e) {
+    if (e && e.code === 'ENOENT') return { ok: true }; // no registry -> nothing to validate
+    return { ok: false, reason: `registry.json unreadable: ${e.message}` };
+  }
   let registry;
   try {
-    registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
-  } catch {
-    return { ok: true }; // no registry -> nothing to validate (legacy/non-model tree)
+    registry = JSON.parse(raw);
+  } catch (e) {
+    return { ok: false, reason: `registry.json is corrupt or truncated: ${e.message}` };
   }
   const models = registry && registry.models;
   if (!models || typeof models !== 'object') return { ok: true };
