@@ -108,11 +108,11 @@ Before committing to the schema migration, verify whether `KnowledgeChunk.Label`
 
 **Files:** `src/TotalRecall.Server/Handlers/KbSearchHandler.cs`, `src/TotalRecall.Infrastructure/Sync/IRemoteBackend.cs`, `src/TotalRecall.Infrastructure/Sync/CortexClient.cs` (plugin); `TotalRecall.Cortex.Core/Entities/KnowledgeChunk.cs`, `TotalRecall.Cortex.Api/Controllers/PluginSyncController.cs` (cortex)
 
-### Cortex Pinned-Tier Support
+### Cortex Sticky-Pin Support
 
-rai-ops-cortex must implement the pinned tier server-side; until then pinned is local-only (not synced, not migrated). The plugin gates are deliberate: `RoutingStore` never enqueues pinned upserts/deletes to `sync_queue`, `SyncService` pull/reconcile excludes pinned (remote updates/tombstones can never mutate a local pin), and `migrate_to_remote` silently skips pinned entries. Accepted edge until then: pinning an entry that already exists remotely leaves the remote copy untouched, and a later re-pull can reintroduce it as a separate non-pinned entry. When Cortex implements pinned: lift the RoutingStore/SyncService/MigrateToRemote pinned gates.
+rai-ops-cortex must add sticky-pin support server-side; until then sticky pins are local-only (not synced, not migrated). (As of 4.0 the Pinned tier is merged into Hot as a `sticky` flag, so the sync gates key on the flag rather than a distinct tier.) The plugin gates are deliberate: `RoutingStore` never enqueues sticky upserts/deletes to `sync_queue`, `SyncService` pull/reconcile excludes sticky entries (remote updates/tombstones can never mutate a local pin), and `migrate_to_remote` silently skips sticky entries. Accepted edge until then: pinning an entry that already exists remotely leaves the remote copy untouched, and a later re-pull can reintroduce it as a separate non-sticky entry. When Cortex supports sticky pins: lift the RoutingStore/SyncService/MigrateToRemote sticky gates.
 
-**Files:** `src/TotalRecall.Infrastructure/Sync/RoutingStore.cs`, `src/TotalRecall.Infrastructure/Sync/SyncService.cs`, `src/TotalRecall.Server/Handlers/MigrateToRemoteHandler.cs` (plugin); rai-ops-cortex (server-side pinned tier)
+**Files:** `src/TotalRecall.Infrastructure/Sync/RoutingStore.cs`, `src/TotalRecall.Infrastructure/Sync/SyncService.cs`, `src/TotalRecall.Server/Handlers/MigrateToRemoteHandler.cs` (plugin); rai-ops-cortex (server-side sticky-pin support)
 
 ### Reranker (Cortex-Side)
 
@@ -287,7 +287,7 @@ Shipped as the `insights` MCP tool (`src/TotalRecall.Server/Handlers/InsightsHan
 
 **Follow-ups deferred from this work:**
 
-- **Cross-tier near-duplicate clustering.** v1 near-dup detection is same-tier only (the vec0 search is scoped to one tier table), so identical content split across hot/warm/pinned tiers won't cluster together. A cross-tier pass would compare each live-set entry against the merged set rather than just its own tier.
+- **Cross-tier near-duplicate clustering.** v1 near-dup detection is same-tier only (the vec0 search is scoped to one tier table), so identical content split across hot/warm tiers won't cluster together. A cross-tier pass would compare each live-set entry against the merged set rather than just its own tier.
   **Files:** `src/TotalRecall.Server/Handlers/InsightsHandler.cs` (`ComputeNearDuplicates`)
 - **Eval Compare snapshot picker.** The Eval page's Compare section takes free-text snapshot ids because there is no snapshot-list tool, so users must already know the ids. A snapshot-list capability would let the UI offer a dropdown.
   **Files:** new server handler/tool to enumerate config snapshots, `src/TotalRecall.Web/Api/ToolAllowlist.cs`, `src/TotalRecall.Web/ClientApp/src/pages/Eval.tsx`
