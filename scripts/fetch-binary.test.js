@@ -4,7 +4,54 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { sha256File, getManifestUrl, verifyArchiveChecksum } from './fetch-binary.js';
+import { sha256File, getManifestUrl, verifyArchiveChecksum, payloadIntact } from './fetch-binary.js';
+
+// --- payloadIntact: cheap size-based integrity check of the extracted model ---
+// tree against the registry that ships in it. This is the guard that catches an
+// interrupted/truncated extraction (the 1.5MB-vs-133MB model.onnx bug) which the
+// archive-sha check cannot see because it validates the tarball, not the tree.
+function makeTree(modelBytes, { sizeBytes = 64, withRegistry = true } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tr-payload-'));
+  const modelDir = path.join(dir, 'models', 'bge-small-en-v1.5');
+  fs.mkdirSync(modelDir, { recursive: true });
+  fs.writeFileSync(path.join(modelDir, 'model.onnx'), Buffer.alloc(modelBytes));
+  if (withRegistry) {
+    fs.writeFileSync(path.join(dir, 'models', 'registry.json'), JSON.stringify({
+      version: 1,
+      models: { 'bge-small-en-v1.5': { dimensions: 384, sizeBytes } },
+    }));
+  }
+  return dir;
+}
+
+test('payloadIntact: model.onnx matching registry sizeBytes is intact', () => {
+  const dir = makeTree(64, { sizeBytes: 64 });
+  assert.equal(payloadIntact(dir).ok, true);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('payloadIntact: truncated model.onnx (size mismatch) is NOT intact', () => {
+  const dir = makeTree(10, { sizeBytes: 133093490 }); // extracted 10 bytes of a 133MB model
+  const r = payloadIntact(dir);
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /size/i);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('payloadIntact: missing model.onnx is NOT intact', () => {
+  const dir = makeTree(64, { sizeBytes: 64 });
+  fs.rmSync(path.join(dir, 'models', 'bge-small-en-v1.5', 'model.onnx'));
+  assert.equal(payloadIntact(dir).ok, false);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('payloadIntact: no registry present is treated as intact (non-model / legacy trees)', () => {
+  // Absence of a registry is not evidence of corruption — some trees have no
+  // model payload to validate. Must NOT false-positive into a re-download loop.
+  const dir = makeTree(64, { withRegistry: false });
+  assert.equal(payloadIntact(dir).ok, true);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
 
 test('sha256File computes the hex digest of a file', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tr-sha-'));

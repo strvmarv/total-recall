@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 4.0.3 - 2026-07-10
+
+### Fixed
+
+- **Truncated bundled embedding model was trusted forever, breaking all
+  embedding.** Provisioning treated the engine binary's mere presence as proof
+  the whole extracted tree was intact. If a `tar` extraction was interrupted
+  partway (process killed mid-extract) it could leave the binary present but the
+  ~133 MB `model.onnx` truncated to a fraction of its size — and the fast path
+  trusted that broken tree on every subsequent launch, even stamping a
+  `.verified.json` success marker over it. Every embed (`memory_store`,
+  `memory_search`, pin's re-embed) then failed with "Model 'bge-small-en-v1.5'
+  not found" because `ModelManager` correctly rejected the size-mismatched model
+  and fell back to an empty user dir. The archive sha256 gate could not catch
+  this: it validates the downloaded tarball, not the extracted tree.
+
+  Provisioning now validates the extracted model payload against the `sizeBytes`
+  in the tree's own `models/registry.json` — a cheap `stat`-based size check (no
+  re-hash) run both immediately after extraction (a truncated model is now a
+  retryable failure that never stamps `.verified.json`) and on the present-tree
+  fast path (a previously-broken tree self-heals by re-downloading instead of
+  being trusted indefinitely). This also closes the gap on the unverified
+  background-provisioner path, which extracted with no checksum at all.
+
 ## 4.0.2 - 2026-07-10
 
 ### Documentation
