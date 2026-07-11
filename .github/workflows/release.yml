@@ -202,10 +202,12 @@ jobs:
           node-version: 22
 
       # OIDC trusted publishing requires npm >= 11.5.1; the Node runtime ships an
-      # older npm, so upgrade to latest. npm 12.x requires Node >= 22.22.2 — hence
-      # the Node 22 pin above (Node 20 tripped EBADENGINE on npm@latest).
+      # older npm, so upgrade. Pin to npm 11 (NOT @latest): npm 12 changed
+      # `npm pack --dry-run --json` from an array to an object, breaking the
+      # `jq '.[0].size'` size guard below, and requires Node >= 22.22.2. npm 11
+      # satisfies the OIDC floor, keeps the array schema, and runs on Node 22.
       - name: Upgrade npm for trusted publishing
-        run: npm install -g npm@latest
+        run: npm install -g npm@11
 
       # Fetch the bge-small model so `npm pack` includes it (package.json `files`
       # lists models/, and the files allowlist overrides .gitignore at pack time).
