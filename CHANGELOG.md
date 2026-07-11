@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 4.0.2 - 2026-07-10
+
+### Documentation
+
+- **Docs brought in line with the 4.0 tier model.** README, AGENTS, PRIVACY, and
+  the TODO backlog described the retired four-tier Pinned/Hot/Warm/Cold model.
+  Updated to the three-tier Hot/Warm/Cold model with the sticky flag:
+  warm-default ingress, earned warm→hot promotion (`access_count >= 5` AND
+  `decay_score >= 0.7`), the 1,200-char hot cap (sticky exempt), `unpin` leaving
+  an entry in hot as an earned resident, the deprecated `[tiers.pinned]` alias +
+  new `[tiers.hot] max_content_chars` / `[compaction] promote_min_access` config,
+  and the compaction "compact" terminology. Code-only release — no behavior change.
+
 ## 4.0.1 - 2026-07-10
 
 ### Fixed
