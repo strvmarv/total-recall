@@ -199,9 +199,11 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
 
-      # OIDC trusted publishing requires npm >= 11.5.1; Node 20 ships npm 10.x.
+      # OIDC trusted publishing requires npm >= 11.5.1; the Node runtime ships an
+      # older npm, so upgrade to latest. npm 12.x requires Node >= 22.22.2 — hence
+      # the Node 22 pin above (Node 20 tripped EBADENGINE on npm@latest).
       - name: Upgrade npm for trusted publishing
         run: npm install -g npm@latest
 
