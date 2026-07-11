@@ -76,6 +76,35 @@ test('checksum mismatch is surfaced as a non-retryable failure', async () => {
   assert.equal(r.retryable, false);
 });
 
+test('fast path: present binary with BROKEN payload re-provisions (self-heal)', async () => {
+  // A truncated/interrupted extraction leaves the engine binary present but the
+  // model payload incomplete. Binary-presence alone must NOT be trusted — the
+  // fast path must fall through to a fresh verified download instead of trusting
+  // a permanently-broken tree (the 1.5MB model.onnx bug).
+  let fetched = false;
+  const r = await ensureProvisioned(deps({
+    exists: () => true,
+    payloadIntact: () => false,
+    fetchManifest: async () => { fetched = true; return {
+      version: '3.2.0',
+      artifacts: { 'win-x64': { url: 'https://x/a.tar.gz', sha256: 'abc', sizeBytes: 10 } },
+    }; },
+  }));
+  assert.equal(r.ok, true);
+  assert.equal(fetched, true); // proved it did NOT short-circuit on presence
+});
+
+test('fast path: present binary with intact payload still skips download', async () => {
+  let fetched = false;
+  const r = await ensureProvisioned(deps({
+    exists: () => true,
+    payloadIntact: () => true,
+    fetchManifest: async () => { fetched = true; return {}; },
+  }));
+  assert.equal(r.ok, true);
+  assert.equal(fetched, false);
+});
+
 test('manifest missing our RID fails clearly', async () => {
   const r = await ensureProvisioned(deps({
     fetchManifest: async () => ({ version: '3.2.0', artifacts: {} }),

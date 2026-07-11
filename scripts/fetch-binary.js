@@ -129,6 +129,48 @@ export async function verifyArchiveChecksum(filePath, expectedSha256, archiveNam
   return null;
 }
 
+// Cheap, size-only integrity check of the extracted model payload against the
+// registry that ships inside the same tree (models/registry.json). The
+// archive-sha256 gate proves the *tarball* was byte-perfect, but it stops at the
+// tarball boundary — an extraction interrupted partway (process killed mid-tar)
+// leaves the engine binary present yet the ~133 MB model.onnx truncated, and
+// nothing downstream ever notices. This function is that missing check: it
+// compares each model.onnx's on-disk size to the registry's sizeBytes.
+//
+// A stat() is used deliberately (not a re-hash) so the check is fast enough to
+// run on every launch's fast path — a truncated 1.5 MB model vs the expected
+// 133 MB is caught instantly. Byte-correctness of a full-sized file is already
+// guaranteed upstream by the archive checksum, so size is the right, cheap
+// signal for extraction completeness.
+//
+// Returns { ok: true } when intact (or when there is no registry to check
+// against — absence of a registry is not evidence of corruption), otherwise
+// { ok: false, reason }.
+export function payloadIntact(destDir) {
+  const registryPath = path.join(destDir, 'models', 'registry.json');
+  let registry;
+  try {
+    registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+  } catch {
+    return { ok: true }; // no registry -> nothing to validate (legacy/non-model tree)
+  }
+  const models = registry && registry.models;
+  if (!models || typeof models !== 'object') return { ok: true };
+
+  for (const [name, spec] of Object.entries(models)) {
+    // sizeBytes in the registry is the size of the model.onnx payload file.
+    const expected = spec && spec.sizeBytes;
+    if (typeof expected !== 'number') continue;
+    const modelPath = path.join(destDir, 'models', name, 'model.onnx');
+    let actual = -1;
+    try { actual = fs.statSync(modelPath).size; } catch {}
+    if (actual !== expected) {
+      return { ok: false, reason: `model ${name} size ${actual} != expected ${expected}` };
+    }
+  }
+  return { ok: true };
+}
+
 // Marker written next to the installed binary after a verified download, so a
 // later launch trusts presence + version match and skips re-hashing 90 MB.
 function verifiedMarkerPath(rid) { return path.join(repoRoot, 'binaries', rid, '.verified.json'); }
@@ -240,7 +282,12 @@ export async function ensureBinary({ logPrefix = '[total-recall]', onProgress, e
   }
 
   const binaryPath = getBinaryPath(rid);
-  if (fs.existsSync(binaryPath)) {
+  const destDir = path.dirname(binaryPath);
+  // Present-binary fast path — but only trust it when the model payload is also
+  // intact. A binary present with a truncated/missing model (interrupted prior
+  // extraction) must NOT be trusted forever; fall through to a fresh download so
+  // provisioning self-heals instead of leaving a permanently-broken tree.
+  if (fs.existsSync(binaryPath) && payloadIntact(destDir).ok) {
     let sizeBytes = 0;
     try { sizeBytes = fs.statSync(binaryPath).size; } catch {}
     return { ok: true, path: binaryPath, rid, downloaded: false, sizeBytes };
@@ -254,7 +301,6 @@ export async function ensureBinary({ logPrefix = '[total-recall]', onProgress, e
   }
 
   const url = urlOverride ?? getDownloadUrl(rid, version);
-  const destDir = path.dirname(binaryPath);
 
   // Stage archive download into a fresh tmp file alongside destDir so an
   // abort (Ctrl+C, crash, network failure) cannot leave a partially
@@ -329,6 +375,20 @@ export async function ensureBinary({ logPrefix = '[total-recall]', onProgress, e
     return {
       ok: false,
       error: `archive extracted but ${binaryPath} is missing — archive layout does not match expected binaries/<rid>/ contents`,
+      url,
+    };
+  }
+
+  // The archive was byte-perfect (checksum passed above), but tar can still be
+  // interrupted mid-extraction — leaving the binary present yet the ~133 MB
+  // model.onnx truncated at a block boundary. Validate the extracted payload
+  // before stamping success, so we never write a .verified marker over a broken
+  // tree. Returned as retryable (no checksumMismatch) so the caller re-provisions.
+  const intact = payloadIntact(destDir);
+  if (!intact.ok) {
+    return {
+      ok: false,
+      error: `archive extracted but model payload is incomplete (${intact.reason}) — extraction may have been interrupted`,
       url,
     };
   }

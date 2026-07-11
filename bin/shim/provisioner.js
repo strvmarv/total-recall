@@ -10,10 +10,11 @@
 // pass the real implementations (see makeProductionDeps).
 
 import fs from 'node:fs';
+import path from 'node:path';
 import https from 'node:https';
 import {
   detectRid, getBinaryPath, getManifestUrl,
-  ensureBinary, readVerifiedMarker,
+  ensureBinary, readVerifiedMarker, payloadIntact,
 } from '../../scripts/fetch-binary.js';
 
 // Note on the static import above: ensureProvisioned does NOT reference
@@ -38,17 +39,26 @@ export async function ensureProvisioned(deps) {
   const {
     binaryPath, rid, version,
     exists, fetchManifest, ensureBinary: ensure, onProgress,
+    // Whether the extracted model payload alongside the binary is intact. Defaults
+    // to trusting presence (backward-compatible with callers that don't inject it);
+    // production wires the real size-check so a truncated model self-heals.
+    payloadIntact = () => true,
   } = deps;
 
-  // Fast path — binary present: trust it.
-  // Presence alone is sufficient. A .verified marker matching this version is
-  // the happy path, but its absence (npm tarball ships the binary with no
-  // marker) or a stale-version marker does NOT trigger a re-download: a single
-  // shim process is pinned to one version, so a "present but wrong-version"
-  // binary cannot arise mid-process, and re-verifying a 90 MB tree on every
-  // launch is the cost we deliberately avoid. Since every present-binary case
-  // resolves identically, we skip reading the marker entirely here.
-  if (exists(binaryPath)) {
+  // Fast path — binary present AND model payload intact: trust it.
+  // A .verified marker matching this version is the happy path, but its absence
+  // (npm tarball ships the binary with no marker) or a stale-version marker does
+  // NOT trigger a re-download: a single shim process is pinned to one version, so
+  // a "present but wrong-version" binary cannot arise mid-process, and
+  // re-verifying (re-hashing) a 90 MB tree on every launch is the cost we
+  // deliberately avoid — so we skip the marker entirely here.
+  //
+  // Presence alone is NOT sufficient, though: an extraction interrupted partway
+  // leaves the binary present but the ~133 MB model.onnx truncated, and trusting
+  // presence would pin that broken tree forever. payloadIntact is a cheap
+  // stat-based size check (no re-hash) that lets a truncated/missing model fall
+  // through to a fresh verified download — provisioning self-heals.
+  if (exists(binaryPath) && payloadIntact(binaryPath)) {
     return { ok: true, binaryPath };
   }
 
@@ -94,6 +104,8 @@ export function makeProductionDeps({ onProgress } = {}) {
     binaryPath,
     version: readPackageVersion(),
     exists: (p) => !!p && fs.existsSync(p),
+    // Model payload lives in binaries/<rid>/models/ alongside the binary.
+    payloadIntact: (p) => !!p && payloadIntact(path.dirname(p)).ok,
     readVerifiedMarker,
     fetchManifest: fetchManifestFromRelease,
     ensureBinary,
