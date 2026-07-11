@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 4.0.1 - 2026-07-10
+
+### Fixed
+
+- **Pin/promote/demote crash on databases with legacy vec orphans.**
+  `memory_pin`, `memory_promote`, `memory_demote`, and host import move an
+  entry between tiers and re-embed via `VectorSearch.InsertEmbedding`, which —
+  unlike `SqliteStore.InsertWithEmbedding` — did not clear a pre-existing orphan
+  vec row at the reused rowid. On a DB carrying orphans (accumulated by the
+  pre-4.0 write-time eviction path, or migrated from the legacy TS store), the
+  moved entry's recycled rowid collided: `UNIQUE constraint failed on
+  <tier>_memories_vec primary key`. 4.0.0 exposed this by routing pins into the
+  hot vec table. `InsertEmbedding` now performs the same orphan-delete
+  `InsertWithEmbedding` documents; a regression test seeds an orphan at a reused
+  rowid and asserts the re-embed succeeds.
+
 ## 4.0.0 - 2026-07-10
 
 Tier model v2 — the Pinned tier is merged into Hot as a `sticky` flag, new
