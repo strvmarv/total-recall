@@ -64,6 +64,14 @@ internal sealed class FakeStore : IStore
             if (kvp.Key.Item1.Equals(tier) && kvp.Key.Item2.Equals(type))
                 results.Add(kvp.Value);
         }
+        // Sticky filter (hot-only, tier model v2 Task 5).
+        if (tier.IsHot)
+        {
+            if (opts?.StickyOnly == true)
+                results.RemoveAll(e => !_sticky.Contains((type, e.Id)));
+            else if (opts?.ExcludeSticky == true)
+                results.RemoveAll(e => _sticky.Contains((type, e.Id)));
+        }
         // Honor EntryType filter so commands that push down entry-type
         // predicates (e.g. RecentQuery) get correctly filtered results.
         if (opts?.EntryType is { } et)
@@ -176,6 +184,14 @@ internal sealed class FakeStore : IStore
     public int CountKnowledgeCollections() => throw new NotImplementedException();
 
     public void UpdateInjectionCounts(IReadOnlyList<(Tier tier, ContentType type, string id)> entries) { }
+
+    private readonly HashSet<(ContentType, string)> _sticky = new();
+    public void SetSticky(ContentType type, string id, bool sticky)
+    {
+        if (sticky) _sticky.Add((type, id));
+        else _sticky.Remove((type, id));
+    }
+    public bool IsSticky(ContentType type, string id) => _sticky.Contains((type, id));
 }
 
 internal sealed class FakeVectorSearch : IVectorSearch

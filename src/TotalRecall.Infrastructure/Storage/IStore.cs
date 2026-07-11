@@ -107,6 +107,22 @@ public interface IStore
     /// batch the updates, not loop per-row.
     /// </summary>
     void UpdateInjectionCounts(IReadOnlyList<(Tier tier, ContentType type, string id)> entries);
+
+    /// <summary>
+    /// Tier model v2 (Task 5) — set the <c>sticky</c> flag on a hot-tier entry.
+    /// Sticky is the merged replacement for the retired pinned tier: a sticky
+    /// hot row is always injected verbatim (via the sticky block) and is
+    /// excluded from ordinary hot listings. Sticky is a hot-only concept — only
+    /// the <c>hot_*</c> tables carry the column — so implementations key on
+    /// (type, id) and operate against the hot table.
+    /// </summary>
+    void SetSticky(ContentType type, string id, bool sticky);
+
+    /// <summary>
+    /// Tier model v2 (Task 5) — read the <c>sticky</c> flag of a hot-tier
+    /// entry. Returns <c>false</c> when the row does not exist in hot.
+    /// </summary>
+    bool IsSticky(ContentType type, string id);
 }
 
 /// <summary>
@@ -200,4 +216,18 @@ public sealed record ListEntriesOpts
     /// injection to fail closed when no project is detected.
     /// </summary>
     public bool GlobalOnly { get; init; }
+    /// <summary>
+    /// Tier model v2 (Task 5) — when true, only sticky hot rows are returned
+    /// (<c>WHERE sticky = 1</c>). Sticky is hot-only, so stores apply this
+    /// filter ONLY for <see cref="Tier.Hot"/> queries; on warm/cold it is a
+    /// no-op (the column does not exist there). Mutually exclusive in intent
+    /// with <see cref="ExcludeSticky"/>; if both are set, StickyOnly wins.
+    /// </summary>
+    public bool StickyOnly { get; init; }
+    /// <summary>
+    /// Tier model v2 (Task 5) — when true, sticky hot rows are omitted
+    /// (<c>WHERE sticky = 0</c>) so they are not double-injected alongside the
+    /// sticky block. Hot-only, same guard as <see cref="StickyOnly"/>.
+    /// </summary>
+    public bool ExcludeSticky { get; init; }
 }

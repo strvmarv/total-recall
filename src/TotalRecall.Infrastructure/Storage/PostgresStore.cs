@@ -255,6 +255,35 @@ VALUES
         cmd.ExecuteNonQuery();
     }
 
+    // Tier model v2 (Task 5). Sticky is hot-only; scope both to tier='hot'.
+    public void SetSticky(ContentType type, string id, bool sticky)
+    {
+        var table = TableName(type);
+        var tierStr = TierString(Tier.Hot);
+        using var conn = _dataSource.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            $"UPDATE {table} SET sticky = @sticky WHERE tier = @tier AND id = @id";
+        cmd.Parameters.AddWithValue("@sticky", sticky);
+        cmd.Parameters.AddWithValue("@tier", tierStr);
+        cmd.Parameters.AddWithValue("@id", id);
+        cmd.ExecuteNonQuery();
+    }
+
+    public bool IsSticky(ContentType type, string id)
+    {
+        var table = TableName(type);
+        var tierStr = TierString(Tier.Hot);
+        using var conn = _dataSource.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            $"SELECT sticky FROM {table} WHERE tier = @tier AND id = @id";
+        cmd.Parameters.AddWithValue("@tier", tierStr);
+        cmd.Parameters.AddWithValue("@id", id);
+        var result = cmd.ExecuteScalar();
+        return result is bool b && b;
+    }
+
     public void Delete(Tier tier, ContentType type, string id)
     {
         var table = TableName(type);
@@ -334,6 +363,15 @@ VALUES
             sql.Append(" AND source = @source");
             cmd.Parameters.AddWithValue("@source", opts.Source);
         }
+
+        // Sticky filter (tier model v2, Task 5). Postgres uses a single content
+        // table with a `sticky` boolean column, so no per-tier-table guard is
+        // needed (unlike SQLite where only hot_* carries the column). Sticky is
+        // only ever set on hot rows, so this is effectively hot-scoped anyway.
+        if (opts?.StickyOnly == true)
+            sql.Append(" AND sticky = TRUE");
+        else if (opts?.ExcludeSticky == true)
+            sql.Append(" AND sticky = FALSE");
 
         sql.Append(" ORDER BY ").Append(orderBy);
 
@@ -551,6 +589,8 @@ VALUES
 
     private void EvictHotIfOverLimit(ContentType type)
     {
+        // I1 (tier model v2): count includes sticky; sticky-immune eviction is
+        // Task 7. Task 5 only owns injection sourcing — no sticky guard here yet.
         if (Count(Tier.Hot, type) <= _hotMaxEntries) return;
 
         var table = TableName(type);
@@ -666,7 +706,6 @@ VALUES
         if (tier.IsHot) return "hot";
         if (tier.IsWarm) return "warm";
         if (tier.IsCold) return "cold";
-        if (tier.IsPinned) return "pinned";
         throw new ArgumentOutOfRangeException(nameof(tier));
     }
 

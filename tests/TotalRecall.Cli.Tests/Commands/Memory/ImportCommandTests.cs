@@ -246,4 +246,36 @@ public sealed class ImportCommandTests : IDisposable
         }
         finally { File.Delete(p); }
     }
+
+    [Fact]
+    public async Task ExportImport_RoundTrips_CurrentStickyHotPin()
+    {
+        // Tier model v2 (Task 9): a CURRENT pin is a sticky-hot entry. The CLI
+        // export hand-rolled writer must emit `sticky:true` (tier "hot"), and
+        // import must re-apply sticky-hot — otherwise the pin is dropped on
+        // round-trip. Exercises the real ExportCommand -> ImportCommand path.
+        var exportStore = new FakeStore();
+        exportStore.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make("h1", "pinned rule"));
+        exportStore.SetSticky(ContentType.Memory, "h1", true);
+
+        var exportOut = new StringWriter();
+        var exportCode = await new ExportCommand(exportStore, exportOut).RunAsync(Array.Empty<string>());
+        Assert.Equal(0, exportCode);
+        var json = exportOut.ToString();
+        Assert.Contains("\"sticky\":true", json);
+        Assert.Contains("\"tier\":\"hot\"", json);
+
+        var (importCmd, importStore, _, _, _) = MakeCmd();
+        var p = WriteTempFile(json);
+        try
+        {
+            var code = await importCmd.RunAsync(new[] { p });
+            Assert.Equal(0, code);
+            var call = Assert.Single(importStore.InsertCalls);
+            Assert.True(call.Tier.IsHot, "sticky-hot import should land in hot");
+            // Release-critical: the pin survives the CLI round-trip.
+            Assert.True(importStore.IsSticky(ContentType.Memory, call.NewId));
+        }
+        finally { File.Delete(p); }
+    }
 }

@@ -58,8 +58,10 @@ public sealed class PinCommandTests : IDisposable
     }
 
     [Fact]
-    public async Task Pin_MovesToPinned_AndPrints()
+    public async Task Pin_MovesToHot_MarksSticky_AndPrints()
     {
+        // Tier model v2 (Task 9): pinning moves the entry into HOT and sets the
+        // sticky flag (the retired pinned tier is gone).
         var (cmd, store, vec, emb) = Build();
         store.Seed(Tier.Warm, ContentType.Memory, EntryFactory.Make("w1", "body"));
 
@@ -67,14 +69,16 @@ public sealed class PinCommandTests : IDisposable
 
         Assert.Equal(0, code);
         Assert.Single(store.MoveCalls);
-        Assert.Equal((Tier.Warm, ContentType.Memory, Tier.Pinned, ContentType.Memory, "w1"), store.MoveCalls[0]);
+        Assert.Equal((Tier.Warm, ContentType.Memory, Tier.Hot, ContentType.Memory, "w1"), store.MoveCalls[0]);
+        // Release gate: the entry ends up sticky-hot.
+        Assert.True(store.IsSticky(ContentType.Memory, "w1"));
         Assert.Single(vec.Deletes);
         // w1 is seeded first → synthetic rowid 1 in FakeMemoryInfra.FakeStore.
         Assert.Equal((Tier.Warm, ContentType.Memory, 1L), vec.Deletes[0]);
         Assert.Single(emb.Calls);
         Assert.Equal("body", emb.Calls[0]);
         Assert.Single(vec.Inserts);
-        Assert.Equal(Tier.Pinned, vec.Inserts[0].Tier);
+        Assert.Equal(Tier.Hot, vec.Inserts[0].Tier);
         Assert.Equal("w1", vec.Inserts[0].Id);
         Assert.Contains("pinned w1 (was warm/memory)", _outWriter.ToString());
     }
@@ -83,15 +87,16 @@ public sealed class PinCommandTests : IDisposable
     public async Task Pin_FreshPin_ResetsDecayScoreViaUpdate()
     {
         // Mirrors MemoryPinHandler: a fresh pin normalizes decay_score to 1.0
-        // through a post-move Update against the pinned table.
+        // through a post-move Update against the HOT table.
         var (cmd, store, _, _) = Build();
         store.Seed(Tier.Cold, ContentType.Knowledge, EntryFactory.Make("k1"));
 
         var code = await cmd.RunAsync(new[] { "k1" });
 
         Assert.Equal(0, code);
+        Assert.True(store.IsSticky(ContentType.Knowledge, "k1"));
         var upd = Assert.Single(store.UpdateCalls);
-        Assert.Equal(Tier.Pinned, upd.Tier);
+        Assert.Equal(Tier.Hot, upd.Tier);
         Assert.Equal(ContentType.Knowledge, upd.Type);
         Assert.Equal("k1", upd.Id);
         Assert.Equal(1.0, upd.Opts.DecayScore);
@@ -114,12 +119,13 @@ public sealed class PinCommandTests : IDisposable
     }
 
     [Fact]
-    public async Task Pin_AlreadyPinned_Exit0_NoMove()
+    public async Task Pin_AlreadySticky_Exit0_NoMove()
     {
-        // Idempotent: pinning a pinned entry succeeds without moving, and
-        // with no scope requested it skips the Update write entirely.
+        // Idempotent: pinning an already-sticky hot entry succeeds without
+        // moving, and with no scope requested it skips the Update write entirely.
         var (cmd, store, _, emb) = Build();
-        store.Seed(Tier.Pinned, ContentType.Memory, EntryFactory.Make("p1"));
+        store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make("p1"));
+        store.SetSticky(ContentType.Memory, "p1", true);
 
         var code = await cmd.RunAsync(new[] { "p1" });
 
@@ -127,23 +133,25 @@ public sealed class PinCommandTests : IDisposable
         Assert.Empty(store.MoveCalls);
         Assert.Empty(emb.Calls);
         Assert.Empty(store.UpdateCalls);
-        Assert.Contains("pinned p1 (was pinned/memory)", _outWriter.ToString());
+        Assert.True(store.IsSticky(ContentType.Memory, "p1"));
+        Assert.Contains("pinned p1 (was hot/memory)", _outWriter.ToString());
     }
 
     [Fact]
-    public async Task Pin_AlreadyPinned_ScopeStillApplied()
+    public async Task Pin_AlreadySticky_ScopeStillApplied()
     {
         var (cmd, store, _, _) = Build();
-        store.Seed(Tier.Pinned, ContentType.Memory, EntryFactory.Make("p1", project: "alpha"));
+        store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make("p1", project: "alpha"));
+        store.SetSticky(ContentType.Memory, "p1", true);
 
         var code = await cmd.RunAsync(new[] { "p1", "--scope", "global" });
 
         Assert.Equal(0, code);
         Assert.Empty(store.MoveCalls);
         var upd = Assert.Single(store.UpdateCalls);
-        Assert.Equal((Tier.Pinned, ContentType.Memory, "p1"), (upd.Tier, upd.Type, upd.Id));
+        Assert.Equal((Tier.Hot, ContentType.Memory, "p1"), (upd.Tier, upd.Type, upd.Id));
         Assert.True(upd.Opts.ClearProject);
-        // Already pinned: decay score is left alone.
+        // Already sticky: decay score is left alone.
         Assert.Null(upd.Opts.DecayScore);
     }
 
@@ -225,7 +233,8 @@ public sealed class PinCommandTests : IDisposable
         var code = await cmd.RunAsync(new[] { "h1", "--type", "knowledge" });
 
         Assert.Equal(0, code);
-        Assert.Equal((Tier.Hot, ContentType.Memory, Tier.Pinned, ContentType.Knowledge, "h1"), store.MoveCalls[0]);
+        Assert.Equal((Tier.Hot, ContentType.Memory, Tier.Hot, ContentType.Knowledge, "h1"), store.MoveCalls[0]);
+        Assert.True(store.IsSticky(ContentType.Knowledge, "h1"));
     }
 
     [Fact]

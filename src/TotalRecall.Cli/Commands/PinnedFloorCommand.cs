@@ -180,11 +180,28 @@ public sealed class PinnedFloorCommand : ICliCommand
 
     private static string RenderFrom(IStore store, ListEntriesOpts? opts)
     {
-        var mem = store.List(Tier.Pinned, ContentType.Memory, opts);
-        var know = store.List(Tier.Pinned, ContentType.Knowledge, opts);
+        // Tier model v2 (Task 9): the floor now re-injects sticky-hot directives.
+        // "pinned" is the sticky flag on hot, so list hot with StickyOnly while
+        // preserving the project-scope filter resolved by PinnedScope.
+        var stickyOpts = WithStickyOnly(opts);
+        var mem = store.List(Tier.Hot, ContentType.Memory, stickyOpts);
+        var know = store.List(Tier.Hot, ContentType.Knowledge, stickyOpts);
         var (block, _) = PinnedBlockRenderer.Render(mem, know);
         return block;
     }
+
+    /// <summary>Layer <c>StickyOnly=true</c> onto the project-scope opts from
+    /// <see cref="PinnedScope"/> (which returns null when scoping is off).</summary>
+    private static ListEntriesOpts WithStickyOnly(ListEntriesOpts? opts) =>
+        opts is null
+            ? new ListEntriesOpts { StickyOnly = true }
+            : new ListEntriesOpts
+            {
+                Project = opts.Project,
+                IncludeGlobal = opts.IncludeGlobal,
+                GlobalOnly = opts.GlobalOnly,
+                StickyOnly = true,
+            };
 
     private bool LoadProjectScoping()
     {
@@ -202,6 +219,7 @@ public sealed class PinnedFloorCommand : ICliCommand
 
     private int CountHot()
     {
+        // I1 (tier model v2): total hot occupancy — INCLUDES sticky.
         try
         {
             if (_store is not null) return _store.Count(Tier.Hot, ContentType.Memory);

@@ -135,6 +135,7 @@ public static class ServerComposition
         CompactionLog? compactionLogWriter = null,
         Infrastructure.Sync.SyncBacklogReader? syncBacklog = null,
         int pinnedMaxChars = PinnedTierLimits.DefaultMaxContentChars,
+        int hotMaxChars = 1200,
         ReindexProgress? reindexProgress = null,
         string querySource = "assistant")
     {
@@ -151,7 +152,7 @@ public static class ServerComposition
 
         // ---- Memory (18, +1 assistant-only memory_feedback when a
         //      RetrievalEventLog is wired — see below) ----
-        registry.Register(new MemoryStoreHandler(store, embedder, vectors, scopeDefault, pinnedMaxChars));
+        registry.Register(new MemoryStoreHandler(store, embedder, vectors, scopeDefault, pinnedMaxChars, hotMaxChars));
         registry.Register(new MemorySearchHandler(embedder, hybrid, scopeDefault, retrievalLog, syncQueue, querySource));
         // Assistant-only feedback tool (Task 1.6). Registered immediately after
         // memory_search because it consumes the retrievalId memory_search emits.
@@ -167,7 +168,9 @@ public static class ServerComposition
         registry.Register(new MemoryDeleteHandler(store, vectors));
         registry.Register(new MemoryPromoteHandler(store, vectors, embedder, compactionLogWriter, syncQueue));
         registry.Register(new MemoryDemoteHandler(store, vectors, embedder, compactionLogWriter, syncQueue));
-        registry.Register(new MemoryPinHandler(store, vectors, embedder, compactionLogWriter, syncQueue, pinnedMaxChars));
+        // Tier model v2 (Task 5): pins now land in hot as sticky rows, so the
+        // pin handler enforces the HOT content cap (not the retired pinned cap).
+        registry.Register(new MemoryPinHandler(store, vectors, embedder, compactionLogWriter, syncQueue, hotMaxChars));
         registry.Register(new MemoryUnpinHandler(store, vectors, embedder, compactionLogWriter, syncQueue));
         registry.Register(new MemoryInspectHandler(store, compactionLog));
         registry.Register(new MemoryHistoryHandler(compactionLog));
@@ -190,7 +193,7 @@ public static class ServerComposition
 
         // ---- Session (4) ----
         registry.Register(new SessionStartHandler(sessionLifecycle, periodicSync, syncService));
-        registry.Register(new SessionEndHandler(sessionLifecycle, store, compactionLogWriter, syncService: syncService));
+        registry.Register(new SessionEndHandler(sessionLifecycle, store, compactionLogWriter, syncService: syncService, hotMaxContentChars: hotMaxChars));
         registry.Register(new SessionContextHandler(store));
         registry.Register(new SessionRefreshHandler(sessionLifecycle));
 
@@ -465,7 +468,12 @@ public static class ServerComposition
                 cacheStats: toolCacheStore.GetSessionStats,
                 reindexProgress: reindexProgress,
                 binaryDir: AppContext.BaseDirectory,
-                projectScoping: ResolveProjectScoping(cfg));
+                projectScoping: ResolveProjectScoping(cfg),
+                hotMaxContentChars: cfg.Tiers.Hot.MaxContentChars,
+                vec: vec,
+                promoteMinAccess: cfg.Compaction.PromoteMinAccess,
+                promoteThreshold: cfg.Compaction.PromoteThreshold,
+                compactionConfig: cfg.Compaction);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
@@ -480,6 +488,7 @@ public static class ServerComposition
                 compactionLogWriter: compactionLog,
                 syncBacklog: new Infrastructure.Sync.SyncBacklogReader(conn),
                 pinnedMaxChars: ResolvePinnedMaxChars(cfg),
+                hotMaxChars: cfg.Tiers.Hot.MaxContentChars,
                 reindexProgress: reindexProgress,
                 querySource: querySource);
 
@@ -564,7 +573,11 @@ public static class ServerComposition
                 autoDemoteMinInjections: cfg.Compaction.AutoDemoteMinInjections,
                 taskWeight: cfg.Tiers.Hot.TaskWeight,
                 binaryDir: AppContext.BaseDirectory, // reindex stays null — postgres has no local background reindex
-                projectScoping: ResolveProjectScoping(cfg));
+                projectScoping: ResolveProjectScoping(cfg),
+                vec: vec,
+                promoteMinAccess: cfg.Compaction.PromoteMinAccess,
+                promoteThreshold: cfg.Compaction.PromoteThreshold,
+                compactionConfig: cfg.Compaction);
 
             var statusOptions = new StatusOptions(
                 DbPath: connStr,
@@ -576,6 +589,7 @@ public static class ServerComposition
                 fileIngester, compactionLog, sessionLifecycle, statusOptions,
                 scopeDefault: ResolveScopeDefault(cfg),
                 pinnedMaxChars: ResolvePinnedMaxChars(cfg),
+                hotMaxChars: cfg.Tiers.Hot.MaxContentChars,
                 querySource: querySource);
 
             return new ServerCompositionHandles(dataSource, registry, store, storageMode);
@@ -751,7 +765,12 @@ public static class ServerComposition
                 cacheStats: toolCacheStore.GetSessionStats,
                 reindexProgress: reindexProgress,
                 binaryDir: AppContext.BaseDirectory,
-                projectScoping: ResolveProjectScoping(cfg));
+                projectScoping: ResolveProjectScoping(cfg),
+                hotMaxContentChars: cfg.Tiers.Hot.MaxContentChars,
+                vec: vec,
+                promoteMinAccess: cfg.Compaction.PromoteMinAccess,
+                promoteThreshold: cfg.Compaction.PromoteThreshold,
+                compactionConfig: cfg.Compaction);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
@@ -769,6 +788,7 @@ public static class ServerComposition
                 compactionLogWriter: compactionLog,
                 syncBacklog: new Infrastructure.Sync.SyncBacklogReader(conn),
                 pinnedMaxChars: ResolvePinnedMaxChars(cfg),
+                hotMaxChars: cfg.Tiers.Hot.MaxContentChars,
                 reindexProgress: reindexProgress,
                 querySource: querySource);
 

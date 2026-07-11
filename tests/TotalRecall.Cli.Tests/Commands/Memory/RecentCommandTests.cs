@@ -89,7 +89,7 @@ public sealed class RecentCommandTests : IDisposable
         var cmd = new RecentCommand(new FakeStore());
         var code = await cmd.RunAsync(new[] { "--tier", "bogus" });
         Assert.Equal(2, code);
-        Assert.Contains("hot, warm, cold, or pinned", _errWriter.ToString());
+        Assert.Contains("hot, warm, or cold", _errWriter.ToString());
     }
 
     [Fact]

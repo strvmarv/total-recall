@@ -25,6 +25,7 @@ using TotalRecall.Core;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Importers;
 using TotalRecall.Infrastructure.Memory;
+using TotalRecall.Infrastructure.Search;
 using TotalRecall.Infrastructure.Skills;
 using TotalRecall.Infrastructure.Storage;
 using TotalRecall.Infrastructure.Telemetry;
@@ -62,6 +63,11 @@ public sealed class SessionLifecycle : ISessionLifecycle
     private readonly bool _projectScoping;
     private readonly ProjectResolver _projectResolver;
     private readonly int _compactionHintThreshold;
+    private readonly int _hotMaxContentChars;
+    private readonly IVectorSearch? _vec;
+    private readonly int _promoteMinAccess;
+    private readonly double _promoteThreshold;
+    private readonly Core.Config.CompactionConfig _compactionConfig;
 
     /// <summary>Phase 3 idea 2a — advisory thresholds for RefreshAsync recommendations.</summary>
     private const double SessionRefreshThresholdMinutes = 30;
@@ -93,7 +99,12 @@ public sealed class SessionLifecycle : ISessionLifecycle
         string? binaryDir = null,
         bool projectScoping = true,
         int compactionHintThreshold = 5,
-        ProjectResolver? projectResolver = null)
+        ProjectResolver? projectResolver = null,
+        int hotMaxContentChars = 0,
+        IVectorSearch? vec = null,
+        int promoteMinAccess = 5,
+        double promoteThreshold = 0.7,
+        Core.Config.CompactionConfig? compactionConfig = null)
     {
         ArgumentNullException.ThrowIfNull(importers);
         ArgumentNullException.ThrowIfNull(store);
@@ -118,7 +129,22 @@ public sealed class SessionLifecycle : ISessionLifecycle
         _binaryDir = binaryDir;
         _projectScoping = projectScoping;
         _compactionHintThreshold = compactionHintThreshold;
+        _hotMaxContentChars = hotMaxContentChars > 0 ? hotMaxContentChars : 0;
         _projectResolver = projectResolver ?? new ProjectResolver();
+        _vec = vec;
+        _promoteMinAccess = promoteMinAccess > 0 ? promoteMinAccess : 5;
+        _promoteThreshold = promoteThreshold > 0 ? promoteThreshold : 0.7;
+        _compactionConfig = compactionConfig ?? new Core.Config.CompactionConfig(
+            168.0,                          // decayHalfLifeHours
+            0.3,                            // warmThreshold
+            _promoteThreshold,              // promoteThreshold
+            1,                              // warmSweepIntervalDays
+            FSharpOption<double>.None,      // decayHalfLifeCorrection
+            FSharpOption<double>.None,      // decayHalfLifePreference
+            FSharpOption<double>.None,      // decayHalfLifeSurfaced
+            FSharpOption<double>.None,      // decayHalfLifeDecision
+            _autoDemoteMinInjections,       // autoDemoteMinInjections
+            _promoteMinAccess);             // promoteMinAccess
     }
 
     /// <inheritdoc />
@@ -261,37 +287,67 @@ public sealed class SessionLifecycle : ISessionLifecycle
 
         // TODO(Plan 5+): smoke test — eval/smoke-test.ts not yet ported.
 
-        // TODO(Plan 5+): semantic warm→hot promotion driven by detected project.
-        // Plan 4 leaves warmPromotedIds empty.
-        var warmPromotedIds = Array.Empty<string>();
-        var warmPromoted = 0;
+        // 1d. Tier model v2 (Task 6) — one-time data move. Runs here (at
+        // session_start, where an embedder exists for re-embedding) BEFORE the
+        // warm sweep so the sweep sees the merged tier state. SQLite-only:
+        // Postgres does its move as an in-place SQL UPDATE in
+        // PostgresMigrationRunner. Idempotent — the _meta flag makes every
+        // later session a no-op. Never throws through to block session_start.
+        if (_store is SqliteStore ss)
+        {
+            try
+            {
+                TierV2DataMigration.RunOnce(
+                    ss.Connection, _embedder, _compactionLog as CompactionLog);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"total-recall: tier_v2 data migration failed: {ex.Message}");
+            }
+        }
 
         // 2. Warm sweep — synchronous, runs before hot entry listing so the
         // reported count reflects post-sweep state. Eliminates the Task.Run
         // thread-race against PeriodicSync on the shared SQLite connection.
-        RunWarmSweep();
+        // Task 7 — access-earned warm→hot promotion happens inside the sweep
+        // (after demotions); the promoted ids feed the hints block below.
+        var (warmPromoted, warmPromotedIds) = RunWarmSweep();
 
         // 3. Hot entries listing — used for both context and hot count.
-        var hotEntries = _store.List(Tier.Hot, ContentType.Memory);
+        // I1 (tier model v2): EXCLUDE sticky rows here — they are injected
+        // exactly once via the sticky block below (3a). Without ExcludeSticky a
+        // sticky row would double-inject (sticky block AND hot context).
+        var hotEntries = _store.List(Tier.Hot, ContentType.Memory,
+            new ListEntriesOpts { ExcludeSticky = true });
 
-        // 3a. Pinned entries — always injected verbatim, ahead of the hot tier
-        // (spec 2026-06-09). The hot tier gets whatever budget remains.
+        // 3a. Sticky (pinned) entries — always injected verbatim, ahead of the
+        // hot tier. Sourced sticky-first from hot (StickyOnly) rather than the
+        // retired pinned tier. The hot tier gets whatever budget remains.
         // Project-scoping: only inject pins for the current project and globals.
         var pinnedProject = _projectResolver.Resolve(Environment.CurrentDirectory);
-        var pinnedOpts = PinnedScope.OptsFor(pinnedProject, _projectScoping);
-        var pinnedMemories = _store.List(Tier.Pinned, ContentType.Memory, pinnedOpts);
-        var pinnedKnowledge = _store.List(Tier.Pinned, ContentType.Knowledge, pinnedOpts);
+        var stickyOpts = (PinnedScope.OptsFor(pinnedProject, _projectScoping)
+            ?? new ListEntriesOpts()) with { StickyOnly = true };
+        // I1: StickyOnly hot listing — the ONLY site that injects sticky rows.
+        var pinnedMemories = _store.List(Tier.Hot, ContentType.Memory, stickyOpts);
+        var pinnedKnowledge = _store.List(Tier.Hot, ContentType.Knowledge, stickyOpts);
         var (pinnedBlock, pinnedIds) = PinnedBlockRenderer.Render(pinnedMemories, pinnedKnowledge);
+        // Tier model v2 (Task 9): PinnedBlockRenderer now tags ids with Tier.Hot
+        // (sticky lives in hot), so injection tracking already targets the right
+        // rows — no remap needed.
         var pinnedTokens = pinnedBlock.Length > 0 ? HeuristicEstimateTokens(pinnedBlock) : 0;
 
         // 4. Tier summary.
         var tierSummary = new TierSummary(
+            // I1: total hot occupancy — INCLUDES sticky (sticky rows are hot).
             Hot: _store.Count(Tier.Hot, ContentType.Memory),
             Warm: _store.Count(Tier.Warm, ContentType.Memory)
                 + _store.Count(Tier.Warm, ContentType.Knowledge),
             Cold: _store.Count(Tier.Cold, ContentType.Memory)
                 + _store.Count(Tier.Cold, ContentType.Knowledge),
+            // I1: sticky-hot subset (the merged replacement for pinned tier).
             Pinned: pinnedMemories.Count + pinnedKnowledge.Count,
+            // I1: hot knowledge count INCLUDES sticky knowledge (they are hot).
             Kb: _store.Count(Tier.Hot, ContentType.Knowledge)
                 + _store.Count(Tier.Warm, ContentType.Knowledge)
                 + _store.Count(Tier.Cold, ContentType.Knowledge),
@@ -409,6 +465,17 @@ public sealed class SessionLifecycle : ISessionLifecycle
             hints = bgHints.Concat(hints).ToList();
         }
 
+        // Tier model v2 (Task 6, Step 6) — once-per-session sticky visibility.
+        // Sticky-hot is unbounded (grandfathered: the char cap is enforced only
+        // on new writes/promotions), so surface it. Prepended and EXEMPT from
+        // the 5-hint content cap. RunInit runs once per session (cached), so
+        // this is naturally once-per-session.
+        var stickyHints = BuildStickyHints(_store, _hotMaxContentChars);
+        if (stickyHints.Count > 0)
+        {
+            hints = stickyHints.Concat(hints).ToList();
+        }
+
         // 8. Last session age (humanized). Prefer usage_events MAX(ts) — that
         //    actually tracks session activity per host. Fall back to the
         //    compaction log (last tier movement excl. warm sweep) when no
@@ -443,13 +510,17 @@ public sealed class SessionLifecycle : ISessionLifecycle
             BackgroundTasks: backgroundTasks);
     }
 
-    private void RunWarmSweep()
+    private (int Promoted, string[] PromotedIds) RunWarmSweep()
     {
         try
         {
             // Phase 2 idea 1c — auto-demote dead-weight hot entries:
             // entries that have been injected many times but never accessed.
-            var allHot = _store.List(Tier.Hot, ContentType.Memory);
+            // Task 7 — sticky rows are protected residents: EXCLUDE them from
+            // the dead-weight candidate set so a sticky-hot row can never be
+            // auto-demoted back to warm.
+            var allHot = _store.List(Tier.Hot, ContentType.Memory,
+                new ListEntriesOpts { ExcludeSticky = true });
             var deadWeights = allHot
                 .Where(e => e.TimesInjected >= _autoDemoteMinInjections && e.AccessCount == 0)
                 .ToList();
@@ -463,28 +534,79 @@ public sealed class SessionLifecycle : ISessionLifecycle
                 catch (InvalidOperationException) { }
             }
 
-            // Existing max-entry enforcement
-            var count = _store.Count(Tier.Hot, ContentType.Memory);
-            if (count <= _maxEntries) return;
+            // Existing max-entry enforcement.
+            // Task 7 — sticky rows are protected residents that do not consume
+            // the earned budget: count and evict only non-sticky hot rows.
+            var stickyCount = _store.List(Tier.Hot, ContentType.Memory,
+                new ListEntriesOpts { StickyOnly = true }).Count;
+            var count = _store.Count(Tier.Hot, ContentType.Memory) - stickyCount;
 
-            var excess = count - _maxEntries;
-            var toEvict = _store.List(Tier.Hot, ContentType.Memory,
-                new ListEntriesOpts { OrderBy = "decay_score ASC", Limit = excess });
-
-            // Filter out entries already auto-demoted above
-            var deadWeightIds = new HashSet<string>(deadWeights.Select(e => e.Id));
-            foreach (var entry in toEvict)
+            if (count > _maxEntries)
             {
-                if (deadWeightIds.Contains(entry.Id)) continue;
-                try { _store.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, entry.Id); }
-                catch (InvalidOperationException) { } // entry deleted by concurrent write — skip
+                var excess = count - _maxEntries;
+                var toEvict = _store.List(Tier.Hot, ContentType.Memory,
+                    new ListEntriesOpts { OrderBy = "decay_score ASC", Limit = excess, ExcludeSticky = true });
+
+                // Filter out entries already auto-demoted above
+                var deadWeightIds = new HashSet<string>(deadWeights.Select(e => e.Id));
+                foreach (var entry in toEvict)
+                {
+                    if (deadWeightIds.Contains(entry.Id)) continue;
+                    try { _store.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, entry.Id); }
+                    catch (InvalidOperationException) { } // entry deleted by concurrent write — skip
+                }
             }
+
+            // Task 7 — warm -> earned-hot promotion: access evidence + health
+            // gate. Runs AFTER the demotions above so a just-demoted entry
+            // isn't immediately re-promoted. Both gates must pass:
+            //   access_count >= promote_min_access AND decay_score >= promote_threshold.
+            // The access gate is what stops a brand-new warm entry (decay~1.0,
+            // access_count 0) from being wrongly promoted — the
+            // decay-default-1.0 auto-promotion trap. Memory-only: warm
+            // knowledge never promotes to hot.
+            var promotedIds = new List<string>();
+            if (_embedder is not null && _vec is not null)
+            {
+                var nowMs = _nowMs();
+                var warmCandidates = _store.List(Tier.Warm, ContentType.Memory,
+                    new ListEntriesOpts { OrderBy = "access_count DESC", Limit = _maxEntries });
+                foreach (var e in warmCandidates)
+                {
+                    if (e.AccessCount < _promoteMinAccess) continue;
+                    // I2: cap enforced on promotion — an oversized warm entry
+                    // must not be promoted into hot.
+                    if (_hotMaxContentChars > 0 && e.Content.Length > _hotMaxContentChars) continue;
+
+                    var score = Decay.calculateDecayScore(
+                        e.LastAccessedAt, e.AccessCount, e.EntryType, nowMs,
+                        Decay.decayConstantHours(e.EntryType, _compactionConfig));
+                    if (score < _promoteThreshold) continue;
+
+                    try
+                    {
+                        MoveHelpers.MoveAndReEmbed(_store, _vec, _embedder, e,
+                            Tier.Warm, ContentType.Memory, Tier.Hot, ContentType.Memory);
+                        _store.SetSticky(ContentType.Memory, e.Id, false); // earned, not sticky
+                        promotedIds.Add(e.Id);
+                    }
+                    catch (InvalidOperationException) { }
+                }
+            }
+
+            return (promotedIds.Count, promotedIds.ToArray());
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"total-recall: warm sweep failed: {ex.Message}");
+            return (0, Array.Empty<string>());
         }
     }
+
+    /// <summary>Test seam — exposes the internal warm sweep (promotion +
+    /// sticky-aware demotion/eviction) so unit tests can invoke it directly
+    /// without going through the full session_start/refresh flow.</summary>
+    internal (int Promoted, string[] PromotedIds) RunWarmSweepForTest() => RunWarmSweep();
 
     // -------- helpers (internal so tests can call them directly) --------
 
@@ -1011,6 +1133,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
         // Emitted first so the 5-hint content cap never drops it.
         if (compactionHintThreshold > 0)
         {
+            // I1: compaction-hint threshold — includes sticky (total hot
+            // occupancy is the right signal for "hot is full").
             var hotCount = store.Count(Tier.Hot, ContentType.Memory);
             if (hotCount >= compactionHintThreshold)
             {
@@ -1102,6 +1226,65 @@ public sealed class SessionLifecycle : ISessionLifecycle
     }
 
     /// <summary>
+    /// Tier model v2 (Task 6) — builds once-per-session sticky-visibility hints.
+    /// Sticky-hot memories are unbounded (the char cap is enforced only on new
+    /// writes/promotions — pre-existing rows are grandfathered), so we surface:
+    ///   • an oversized-sticky hint listing sticky memories whose content
+    ///     exceeds <paramref name="hotMaxContentChars"/> (candidates to split),
+    ///     emitted only when the cap is configured (&gt; 0);
+    ///   • a total sticky count + approx-token hint, so a large pinned set is
+    ///     visible even when nothing is oversized.
+    /// Returns an empty list when there is no sticky content.
+    /// </summary>
+    public static IReadOnlyList<Hint> BuildStickyHints(IStore store, int hotMaxContentChars)
+    {
+        var stickyOpts = new ListEntriesOpts { StickyOnly = true };
+        var stickyMemories = store.List(Tier.Hot, ContentType.Memory, stickyOpts);
+        var stickyKnowledge = store.List(Tier.Hot, ContentType.Knowledge, stickyOpts);
+
+        var total = stickyMemories.Count + stickyKnowledge.Count;
+        if (total == 0) return Array.Empty<Hint>();
+
+        var hints = new List<Hint>();
+
+        if (hotMaxContentChars > 0)
+        {
+            var oversized = stickyMemories
+                .Concat(stickyKnowledge)
+                .Where(e => e.Content.Length > hotMaxContentChars)
+                .ToList();
+            if (oversized.Count > 0)
+            {
+                var ids = string.Join(", ", oversized.Select(e => e.Id));
+                hints.Add(new Hint
+                {
+                    Priority = 3,
+                    Type = "sticky_oversized",
+                    Summary =
+                        $"{oversized.Count} sticky-hot {(oversized.Count == 1 ? "entry exceeds" : "entries exceed")} "
+                        + $"the {hotMaxContentChars}-char cap (grandfathered). Consider splitting for tighter injection. "
+                        + $"IDs: {ids}",
+                    SuggestedAction = "memory_update",
+                });
+            }
+        }
+
+        var approxTokens = HeuristicEstimateTokens(
+            string.Join(" ", stickyMemories.Concat(stickyKnowledge).Select(e => e.Content)));
+        hints.Add(new Hint
+        {
+            Priority = 4,
+            Type = "sticky_summary",
+            Summary =
+                $"{total} sticky-hot {(total == 1 ? "entry" : "entries")} are always injected "
+                + $"(~{approxTokens} tokens). Sticky is unbounded — review with memory_list if it grows large.",
+            SuggestedAction = null,
+        });
+
+        return hints;
+    }
+
+    /// <summary>
     /// Format a last-session-age string from a timestamp + now (both unix ms).
     /// Mirrors TS <c>getLastSessionAge</c> in session-tools.ts:76-99.
     /// </summary>
@@ -1157,12 +1340,15 @@ public sealed class SessionLifecycle : ISessionLifecycle
         }
 
         // 1. Warm sweep
+        // I1: before/after hot counts are total occupancy — INCLUDE sticky.
         var beforeHotCount = _store.Count(Tier.Hot, ContentType.Memory);
-        try { RunWarmSweep(); } catch { /* best-effort */ }
+        try { RunWarmSweep(); } catch { /* best-effort */ } // return value unused here
         var afterHotCount = _store.Count(Tier.Hot, ContentType.Memory);
 
-        // 2. Re-assemble context
-        var hotEntries = _store.List(Tier.Hot, ContentType.Memory);
+        // 2. Re-assemble context.
+        // I1: EXCLUDE sticky — sticky rows inject once via the sticky block (2a).
+        var hotEntries = _store.List(Tier.Hot, ContentType.Memory,
+            new ListEntriesOpts { ExcludeSticky = true });
 
         // Phase 2 idea 2b — task-aware sort before BuildContext.
         if (taskEmbedding is not null && _taskWeight > 0 && hotEntries.Count > 0)
@@ -1194,14 +1380,18 @@ public sealed class SessionLifecycle : ISessionLifecycle
             hotEntries = sorted;
         }
 
-        // 2a. Pinned entries — re-injected on every refresh so that host re-injection
-        // after compaction never silently drops pins (spec 2026-06-09).
+        // 2a. Sticky (pinned) entries — re-injected on every refresh so that host
+        // re-injection after compaction never silently drops pins. Sourced
+        // sticky-first from hot (StickyOnly), the twin of the session_start block.
         // Project-scoping: only inject pins for the current project and globals.
         var pinnedProject = _projectResolver.Resolve(Environment.CurrentDirectory);
-        var pinnedOpts = PinnedScope.OptsFor(pinnedProject, _projectScoping);
-        var pinnedMemories = _store.List(Tier.Pinned, ContentType.Memory, pinnedOpts);
-        var pinnedKnowledge = _store.List(Tier.Pinned, ContentType.Knowledge, pinnedOpts);
+        var stickyOpts = (PinnedScope.OptsFor(pinnedProject, _projectScoping)
+            ?? new ListEntriesOpts()) with { StickyOnly = true };
+        // I1: StickyOnly hot listing — the sticky-block source on the refresh path.
+        var pinnedMemories = _store.List(Tier.Hot, ContentType.Memory, stickyOpts);
+        var pinnedKnowledge = _store.List(Tier.Hot, ContentType.Knowledge, stickyOpts);
         var (pinnedBlock, pinnedIds) = PinnedBlockRenderer.Render(pinnedMemories, pinnedKnowledge);
+        // Tier model v2 (Task 9): renderer tags ids with Tier.Hot (see session_start).
         var pinnedTokens = pinnedBlock.Length > 0 ? HeuristicEstimateTokens(pinnedBlock) : 0;
 
         var ctxResult = BuildContext(hotEntries, new BuildContextOptions
@@ -1465,6 +1655,7 @@ public sealed record TierSummary(
     [property: JsonPropertyName("hot")] int Hot,
     [property: JsonPropertyName("warm")] int Warm,
     [property: JsonPropertyName("cold")] int Cold,
+    // pinned = sticky-hot (tier merged in v2); JSON name kept for wire back-compat.
     [property: JsonPropertyName("pinned")] int Pinned,
     [property: JsonPropertyName("kb")] int Kb,
     [property: JsonPropertyName("collections")] int Collections);

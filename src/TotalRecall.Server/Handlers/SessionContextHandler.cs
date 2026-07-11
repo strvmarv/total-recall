@@ -68,8 +68,15 @@ public sealed class SessionContextHandler : IToolHandler
 
         ct.ThrowIfCancellationRequested();
 
-        var hotMemories = _store.List(Tier.Hot, ContentType.Memory);
-        var hotKnowledge = _store.List(Tier.Hot, ContentType.Knowledge);
+        // I1 (tier model v2): EXCLUDE sticky rows. session_context is the
+        // compactor subagent's view of the hot working set; sticky (pinned)
+        // rows must never be handed to the compactor for compaction, so they
+        // are omitted here. Sticky injection happens only via the session_start
+        // / session_refresh sticky block — not through this compactor feed.
+        var hotMemories = _store.List(Tier.Hot, ContentType.Memory,
+            new ListEntriesOpts { ExcludeSticky = true });
+        var hotKnowledge = _store.List(Tier.Hot, ContentType.Knowledge,
+            new ListEntriesOpts { ExcludeSticky = true });
 
         var total = hotMemories.Count + hotKnowledge.Count;
         var contextText = total == 0

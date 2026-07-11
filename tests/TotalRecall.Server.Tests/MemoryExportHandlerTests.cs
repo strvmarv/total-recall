@@ -117,17 +117,50 @@ public class MemoryExportHandlerTests
         Assert.Equal("memory_export", handler.Name);
     }
 
-    // ---------------- Task 7: pinned tier export/import round-trip ----------------
+    // ---------------- Tier model v2 (Task 9): legacy pinned import ----------------
 
     [Fact]
-    public async Task ExportImport_RoundTrips_PinnedEntries()
+    public async Task Import_LegacyPinnedTier_LandsStickyHot()
     {
-        // Seed a pinned memory entry in the export source store.
-        var exportStore = new FakeStore();
-        var pinnedEntry = MakeEntry("pinned-1");
-        exportStore.SeedList(Tier.Pinned, ContentType.Memory, pinnedEntry);
+        // A legacy export carries tier "pinned". ParseTier now returns null for
+        // it, so the import handler's explicit legacy map must land the entry in
+        // HOT with the sticky flag set (decay_score defaults to 1.0), preserving
+        // the old pin across an export/import round-trip.
+        var importStore = new FakeStore();
+        // FakeStore.Insert returns NextInsertId (it doesn't honor opts.Id like the
+        // real store), so pin the returned id to the preserved import id.
+        importStore.NextInsertId = "pinned-1";
+        var importVec = new FakeVectorSearch();
+        var importEmbedder = new RecordingFakeEmbedder();
+        var importHandler = new MemoryImportHandler(importStore, importVec, importEmbedder);
 
-        // Run export handler — should include the pinned entry.
+        var importArgs = JsonDocument.Parse(
+            """{"entries":[{"id":"pinned-1","content":"legacy pin","tier":"pinned","content_type":"memory"}]}""")
+            .RootElement.Clone();
+        var importResult = await importHandler.ExecuteAsync(importArgs, CancellationToken.None);
+
+        using var importDoc = JsonDocument.Parse(importResult.Content[0].Text);
+        Assert.Equal(1, importDoc.RootElement.GetProperty("imported_count").GetInt32());
+
+        var call = Assert.Single(importStore.InsertCalls);
+        Assert.True(call.Tier.IsHot, "legacy pinned import should land in hot");
+        Assert.True(call.Type.IsMemory);
+        Assert.Equal("pinned-1", call.Opts.Id);
+        // Release-critical: the entry is sticky (pin preserved across round-trip).
+        Assert.True(importStore.IsSticky(ContentType.Memory, "pinned-1"));
+    }
+
+    [Fact]
+    public async Task ExportImport_RoundTrips_CurrentStickyHotPins()
+    {
+        // Tier model v2 (Task 9): a CURRENT (v2-created) pin is a sticky-hot
+        // entry. Export must carry a `sticky` flag (tier serializes as "hot"),
+        // and import must re-apply sticky-hot from it — otherwise the pin is
+        // silently dropped on round-trip.
+        var exportStore = new FakeStore();
+        exportStore.SeedList(Tier.Hot, ContentType.Memory, MakeEntry("s1"));
+        exportStore.SetSticky(ContentType.Memory, "s1", true);
+
         var exportHandler = new MemoryExportHandler(exportStore);
         var exportResult = await exportHandler.ExecuteAsync(null, CancellationToken.None);
 
@@ -135,48 +168,25 @@ public class MemoryExportHandlerTests
         var entries = exportDoc.RootElement.GetProperty("entries");
         Assert.Equal(1, entries.GetArrayLength());
         var exported = entries[0];
-        Assert.Equal("pinned-1", exported.GetProperty("id").GetString());
-        Assert.Equal("pinned", exported.GetProperty("tier").GetString());
-        Assert.Equal("memory", exported.GetProperty("content_type").GetString());
+        // Sticky entry exports as tier "hot" + sticky=true (no resurrected "pinned").
+        Assert.Equal("hot", exported.GetProperty("tier").GetString());
+        Assert.True(exported.GetProperty("sticky").GetBoolean());
 
         // Feed the exported JSON into the import handler against a fresh store.
         var importStore = new FakeStore();
-        var importVec = new FakeVectorSearch();
-        var importEmbedder = new RecordingFakeEmbedder();
-        var importHandler = new MemoryImportHandler(importStore, importVec, importEmbedder);
+        importStore.NextInsertId = "s1";
+        var importHandler = new MemoryImportHandler(
+            importStore, new FakeVectorSearch(), new RecordingFakeEmbedder());
 
         var importArgs = JsonDocument.Parse($"{{\"entries\":{entries.GetRawText()}}}").RootElement.Clone();
         var importResult = await importHandler.ExecuteAsync(importArgs, CancellationToken.None);
 
-        // Verify the import result reports 1 imported entry.
         using var importDoc = JsonDocument.Parse(importResult.Content[0].Text);
         Assert.Equal(1, importDoc.RootElement.GetProperty("imported_count").GetInt32());
-        Assert.Equal(0, importDoc.RootElement.GetProperty("skipped_count").GetInt32());
 
-        // Verify the entry was inserted into the pinned tier.
-        Assert.Single(importStore.InsertCalls);
-        var call = importStore.InsertCalls[0];
-        Assert.True(call.Tier.IsPinned, "imported entry should land in pinned tier");
-        Assert.True(call.Type.IsMemory, "imported entry should be ContentType.Memory");
-        Assert.Equal("c-pinned-1", call.Opts.Content);
-        Assert.Equal("pinned-1", call.Opts.Id); // id must round-trip through export/import
-    }
-
-    [Fact]
-    public async Task Export_TierFilterPinned_ReturnsOnlyPinnedEntries()
-    {
-        var (handler, store) = MakeHandler();
-        store.SeedList(Tier.Hot, ContentType.Memory, MakeEntry("hot-1"));
-        store.SeedList(Tier.Pinned, ContentType.Memory, MakeEntry("pinned-1"));
-        store.SeedList(Tier.Pinned, ContentType.Knowledge, MakeEntry("pinned-k1"));
-
-        var result = await handler.ExecuteAsync(
-            ParseArgs("""{"tiers":["pinned"]}"""), CancellationToken.None);
-
-        using var doc = JsonDocument.Parse(result.Content[0].Text);
-        var entries = doc.RootElement.GetProperty("entries");
-        Assert.Equal(2, entries.GetArrayLength());
-        for (int i = 0; i < entries.GetArrayLength(); i++)
-            Assert.Equal("pinned", entries[i].GetProperty("tier").GetString());
+        var call = Assert.Single(importStore.InsertCalls);
+        Assert.True(call.Tier.IsHot, "sticky-hot import should land in hot");
+        // Release-critical: the pin survives the round-trip.
+        Assert.True(importStore.IsSticky(ContentType.Memory, "s1"));
     }
 }

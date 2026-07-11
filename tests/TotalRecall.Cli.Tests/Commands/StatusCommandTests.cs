@@ -41,11 +41,11 @@ public sealed class StatusCommandTests : IDisposable
         {
             _cfg = new Core.Config.TotalRecallConfig(
                 new Core.Config.TiersConfig(
-                    new Core.Config.HotTierConfig(20, 4000, 0.5, 0.0, 5),
+                    new Core.Config.HotTierConfig(20, 4000, 0.5, 0.0, 5, 1200),
                     new Core.Config.WarmTierConfig(1000, 50, 0.3, 90),
                     new Core.Config.ColdTierConfig(500, 50, 1000),
                     FSharpOption<Core.Config.PinnedTierConfig>.None),
-                new Core.Config.CompactionConfig(168.0, 0.3, 0.7, 30, FSharpOption<double>.None, FSharpOption<double>.None, FSharpOption<double>.None, FSharpOption<double>.None, 10),
+                new Core.Config.CompactionConfig(168.0, 0.3, 0.7, 30, FSharpOption<double>.None, FSharpOption<double>.None, FSharpOption<double>.None, FSharpOption<double>.None, 10, 5),
                 new Core.Config.EmbeddingConfig(model, dims,
                     FSharpOption<string>.None,
                     FSharpOption<string>.None,
@@ -131,14 +131,19 @@ public sealed class StatusCommandTests : IDisposable
     public async Task Json_Seeded_ReflectsCountsAndCollections()
     {
         var store = new FakeStore();
-        // 2 hot memories, 1 warm memory, 1 cold knowledge chunk + 2 collections,
-        // 2 pinned memories, 1 pinned knowledge.
+        // Tier model v2 (Task 5): pins are sticky rows in hot. Hot counts INCLUDE
+        // sticky; the pinned_* fields report the sticky-hot subset. So here:
+        // 2 non-sticky + 2 sticky hot memories = 4 hot memory total, 2 pinned;
+        // 1 sticky hot knowledge = 1 pinned knowledge.
         store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: "hm1"));
         store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: "hm2"));
         store.Seed(Tier.Warm, ContentType.Memory, EntryFactory.Make(id: "wm1"));
-        store.Seed(Tier.Pinned, ContentType.Memory, EntryFactory.Make(id: "pm1"));
-        store.Seed(Tier.Pinned, ContentType.Memory, EntryFactory.Make(id: "pm2"));
-        store.Seed(Tier.Pinned, ContentType.Knowledge, EntryFactory.Make(id: "pk1"));
+        store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: "pm1"));
+        store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: "pm2"));
+        store.Seed(Tier.Hot, ContentType.Knowledge, EntryFactory.Make(id: "pk1"));
+        store.SetSticky(ContentType.Memory, "pm1", true);
+        store.SetSticky(ContentType.Memory, "pm2", true);
+        store.SetSticky(ContentType.Knowledge, "pk1", true);
         store.Seed(Tier.Cold, ContentType.Knowledge, EntryFactory.Make(
             id: "coll-a",
             metadataJson: "{\"type\":\"collection\",\"name\":\"Alpha\"}"));
@@ -165,7 +170,7 @@ public sealed class StatusCommandTests : IDisposable
             var root = doc.RootElement;
 
             var tiers = root.GetProperty("tierSizes");
-            Assert.Equal(2, tiers.GetProperty("hot").GetProperty("memory").GetInt32());
+            Assert.Equal(4, tiers.GetProperty("hot").GetProperty("memory").GetInt32());
             Assert.Equal(1, tiers.GetProperty("warm").GetProperty("memory").GetInt32());
             Assert.Equal(3, tiers.GetProperty("cold").GetProperty("knowledge").GetInt32());
             Assert.Equal(2, tiers.GetProperty("pinned").GetProperty("memory").GetInt32());

@@ -94,12 +94,16 @@ public sealed class SessionLifecycleProjectScopeTests : IDisposable
         using (conn)
         {
             // Seed: one global pin, one "o/r" pin, one "o/x" pin (should be excluded).
-            store.Insert(Tier.Pinned, ContentType.Memory,
+            // Tier model v2 (Task 5): pins are sticky rows in the hot tier.
+            store.Insert(Tier.Hot, ContentType.Memory,
                 new InsertEntryOpts("global pin content", Id: "g1"));
-            store.Insert(Tier.Pinned, ContentType.Memory,
+            store.Insert(Tier.Hot, ContentType.Memory,
                 new InsertEntryOpts("current repo pin content", Id: "r1", Project: "o/r"));
-            store.Insert(Tier.Pinned, ContentType.Memory,
+            store.Insert(Tier.Hot, ContentType.Memory,
                 new InsertEntryOpts("other repo pin content", Id: "x1", Project: "o/x"));
+            store.SetSticky(ContentType.Memory, "g1", true);
+            store.SetSticky(ContentType.Memory, "r1", true);
+            store.SetSticky(ContentType.Memory, "x1", true);
 
             // Create a temp repo whose origin resolves to "o/r".
             var repoDir = MakeRepo("main-repo", "https://github.com/o/r.git");
@@ -133,12 +137,16 @@ public sealed class SessionLifecycleProjectScopeTests : IDisposable
         var (conn, store) = NewSqliteFixture();
         using (conn)
         {
-            store.Insert(Tier.Pinned, ContentType.Memory,
+            // Tier model v2 (Task 5): pins are sticky rows in the hot tier.
+            store.Insert(Tier.Hot, ContentType.Memory,
                 new InsertEntryOpts("global pin content", Id: "g1"));
-            store.Insert(Tier.Pinned, ContentType.Memory,
+            store.Insert(Tier.Hot, ContentType.Memory,
                 new InsertEntryOpts("current repo pin content", Id: "r1", Project: "o/r"));
-            store.Insert(Tier.Pinned, ContentType.Memory,
+            store.Insert(Tier.Hot, ContentType.Memory,
                 new InsertEntryOpts("other repo pin content", Id: "x1", Project: "o/x"));
+            store.SetSticky(ContentType.Memory, "g1", true);
+            store.SetSticky(ContentType.Memory, "r1", true);
+            store.SetSticky(ContentType.Memory, "x1", true);
 
             var repoDir = MakeRepo("main-repo2", "https://github.com/o/r.git");
             var resolver = new ProjectResolver();

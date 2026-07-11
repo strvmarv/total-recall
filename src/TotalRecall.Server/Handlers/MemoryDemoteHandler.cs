@@ -74,8 +74,6 @@ public sealed class MemoryDemoteHandler : IToolHandler
             ?? throw new ArgumentException($"invalid tier '{tierStr}' (expected warm|cold)");
         if (toTier.IsHot)
             throw new ArgumentException("cannot demote to hot (use memory_promote instead)");
-        if (toTier.IsPinned) // pinned tier is exclusive to memory_pin / memory_unpin
-            throw new ArgumentException("cannot demote to pinned (use memory_pin instead)");
 
         ContentType? requestedType = null;
         var typeStr = ReadOptionalString(args, "type");
@@ -91,10 +89,15 @@ public sealed class MemoryDemoteHandler : IToolHandler
             ?? throw new ArgumentException($"entry {id} not found");
 
         var (fromTier, fromType, entry) = located;
-        if (fromTier.IsPinned) // pinned tier is exclusive to memory_pin / memory_unpin
-            throw new ArgumentException(
-                $"entry {id} is pinned; use memory_unpin to release it first");
         var targetType = requestedType ?? fromType;
+
+        // Tier model v2 (Task 9): a sticky-hot entry is "pinned" (the merged
+        // replacement for the retired pinned tier). Demoting it would silently
+        // drop the pin (warm has no sticky column), so reject it — the user must
+        // memory_unpin first, mirroring the old Tier.Pinned guard.
+        if (fromTier.IsHot && _store.IsSticky(fromType, id))
+            throw new ArgumentException(
+                $"entry {id} is sticky (pinned); use memory_unpin to release it first");
 
         if (TierNames.WarmthRank(toTier) >= TierNames.WarmthRank(fromTier))
             throw new ArgumentException(

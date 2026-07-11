@@ -18,6 +18,10 @@ public sealed class InMemoryTestStore : IStore
 {
     private readonly Dictionary<(Tier, ContentType), List<Entry>> _store = new();
 
+    // Tier model v2 (Task 5). Sticky is hot-only store-side state, tracked by
+    // (ContentType, id) — never an Entry field. Honored by List for Tier.Hot.
+    private readonly HashSet<(ContentType, string)> _sticky = new();
+
     private List<Entry> Slot(Tier tier, ContentType type)
     {
         if (!_store.TryGetValue((tier, type), out var list))
@@ -31,8 +35,29 @@ public sealed class InMemoryTestStore : IStore
 
     // --- IStore members used by HotTierCompactor ---
 
-    public IReadOnlyList<Entry> List(Tier tier, ContentType type, ListEntriesOpts? opts = null) =>
-        Slot(tier, type).ToList(); // snapshot
+    public IReadOnlyList<Entry> List(Tier tier, ContentType type, ListEntriesOpts? opts = null)
+    {
+        IEnumerable<Entry> src = Slot(tier, type);
+        // Sticky filter (hot-only) — real filtering so Tasks 6/7/8 tests that
+        // rely on ExcludeSticky/StickyOnly don't silently pass by filtering
+        // nothing. Guarded to Tier.Hot to mirror the SQLite store.
+        if (tier.IsHot)
+        {
+            if (opts?.StickyOnly == true)
+                src = src.Where(e => _sticky.Contains((type, e.Id)));
+            else if (opts?.ExcludeSticky == true)
+                src = src.Where(e => !_sticky.Contains((type, e.Id)));
+        }
+        return src.ToList(); // snapshot
+    }
+
+    public void SetSticky(ContentType type, string id, bool sticky)
+    {
+        if (sticky) _sticky.Add((type, id));
+        else _sticky.Remove((type, id));
+    }
+
+    public bool IsSticky(ContentType type, string id) => _sticky.Contains((type, id));
 
     public int Count(Tier tier, ContentType type) =>
         Slot(tier, type).Count;

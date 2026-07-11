@@ -174,14 +174,20 @@ public sealed class PinCommand : ICliCommand
 
             var (fromTier, fromType, entry) = located.Value;
             var targetType = toType ?? fromType;
-            var alreadyPinned = fromTier.IsPinned;
 
-            // Pinned content is injected verbatim every session and never
+            // Tier model v2 (Task 9): pinning is the `sticky` flag on hot, not a
+            // move to the retired pinned tier. The entry must end up in
+            // (Hot, targetType); if it is already exactly there, no move is
+            // needed. Mirrors MemoryPinHandler.
+            var alreadyInHotTarget = fromTier.IsHot && fromType.Equals(targetType);
+            var alreadySticky = alreadyInHotTarget && store.IsSticky(targetType, id);
+
+            // Sticky content is injected verbatim every session and never
             // truncated, so size is enforced at the door — before any move.
-            if (!alreadyPinned && entry.Content.Length > maxContentChars)
+            if (!alreadySticky && entry.Content.Length > maxContentChars)
             {
                 Console.Error.WriteLine(
-                    $"memory pin: {PinnedTierLimits.ContentLimitMessage(maxContentChars, entry.Content.Length)}");
+                    $"memory pin: {PinnedTierLimits.HotContentLimitMessage(maxContentChars, entry.Content.Length)}");
                 return 2;
             }
 
@@ -200,20 +206,26 @@ public sealed class PinCommand : ICliCommand
                 }
             }
 
-            if (!alreadyPinned)
-                MoveHelpers.MoveAndReEmbed(store, vec, embedder, entry, fromTier, fromType, Tier.Pinned, targetType);
+            // Move into hot only when not already resident there (enforces the
+            // hot cap via the check above; re-embeds under the hot vec table).
+            if (!alreadyInHotTarget)
+                MoveHelpers.MoveAndReEmbed(store, vec, embedder, entry, fromTier, fromType, Tier.Hot, targetType);
 
-            // Post-move update: normalize decay_score to 1.0 on fresh pins
-            // (unused for pinned entries) and apply the scope choice via the
-            // project column. Skip the write entirely when the entry was
-            // already pinned and no scope change was requested, so we don't
-            // spuriously bump updated_at. Mirrors MemoryPinHandler.
-            var needsUpdate = !alreadyPinned || scopeStr is not null;
+            // Set the sticky flag (skip the write when already sticky).
+            if (!alreadySticky)
+                store.SetSticky(targetType, id, true);
+
+            // Post-move update: normalize decay_score to 1.0 on fresh pins and
+            // apply the scope choice via the project column. Skip the write
+            // entirely when the entry was already sticky and no scope change was
+            // requested, so we don't spuriously bump updated_at. Mirrors
+            // MemoryPinHandler.
+            var needsUpdate = !alreadySticky || scopeStr is not null;
             if (needsUpdate)
             {
-                store.Update(Tier.Pinned, targetType, id, new UpdateEntryOpts
+                store.Update(Tier.Hot, targetType, id, new UpdateEntryOpts
                 {
-                    DecayScore = alreadyPinned ? (double?)null : 1.0,
+                    DecayScore = alreadySticky ? (double?)null : 1.0,
                     Project = effectiveProject,
                     ClearProject = clearProject,
                 });

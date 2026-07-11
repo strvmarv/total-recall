@@ -42,12 +42,12 @@ public class GlobalOnlyFilterTests
         var (conn, store) = NewSqliteFixture();
         using (conn)
         {
-            store.Insert(Tier.Pinned, ContentType.Memory,
+            store.Insert(Tier.Hot, ContentType.Memory,
                 new InsertEntryOpts("global", Id: "g"));
-            store.Insert(Tier.Pinned, ContentType.Memory,
+            store.Insert(Tier.Hot, ContentType.Memory,
                 new InsertEntryOpts("repo", Id: "r", Project: "o/r"));
 
-            var globals = store.List(Tier.Pinned, ContentType.Memory,
+            var globals = store.List(Tier.Hot, ContentType.Memory,
                 new ListEntriesOpts { GlobalOnly = true });
 
             Assert.Single(globals);
@@ -61,14 +61,14 @@ public class GlobalOnlyFilterTests
         var (conn, store) = NewSqliteFixture();
         using (conn)
         {
-            store.Insert(Tier.Pinned, ContentType.Memory,
+            store.Insert(Tier.Hot, ContentType.Memory,
                 new InsertEntryOpts("global", Id: "g"));
-            store.Insert(Tier.Pinned, ContentType.Memory,
+            store.Insert(Tier.Hot, ContentType.Memory,
                 new InsertEntryOpts("repo", Id: "r", Project: "o/r"));
-            store.Insert(Tier.Pinned, ContentType.Memory,
+            store.Insert(Tier.Hot, ContentType.Memory,
                 new InsertEntryOpts("other", Id: "x", Project: "o/x"));
 
-            var list = store.List(Tier.Pinned, ContentType.Memory,
+            var list = store.List(Tier.Hot, ContentType.Memory,
                 new ListEntriesOpts { Project = "o/r", IncludeGlobal = true });
 
             Assert.Equal(2, list.Count);
@@ -92,12 +92,12 @@ public class GlobalOnlyFilterTests
         {
             var store = new PostgresStore(dataSource, "test-owner", 0);
 
-            store.Insert(Tier.Pinned, ContentType.Memory,
+            store.Insert(Tier.Hot, ContentType.Memory,
                 new InsertEntryOpts("global", Id: "g"));
-            store.Insert(Tier.Pinned, ContentType.Memory,
+            store.Insert(Tier.Hot, ContentType.Memory,
                 new InsertEntryOpts("repo", Id: "r", Project: "o/r"));
 
-            var globals = store.List(Tier.Pinned, ContentType.Memory,
+            var globals = store.List(Tier.Hot, ContentType.Memory,
                 new ListEntriesOpts { GlobalOnly = true });
 
             Assert.Single(globals);

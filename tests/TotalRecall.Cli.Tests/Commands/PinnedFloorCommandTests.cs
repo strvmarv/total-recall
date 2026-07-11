@@ -62,7 +62,8 @@ public sealed class PinnedFloorCommandTests : IDisposable
     public async Task InjectTurn_ClaudeCode_EmitsHookSpecificAdditionalContext()
     {
         var store = new FakeStore();
-        store.Seed(Tier.Pinned, ContentType.Memory, EntryFactory.Make(id: "p1", content: "never delete prod"));
+        store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: "p1", content: "never delete prod"));
+        store.SetSticky(ContentType.Memory, "p1", true);
         PinnedFloorState.Save(_dir, new FloorState("s2", 1, 1, 0, true));
         var outw = new StringWriter();
         var cmd = MakeCmd(store, new StringReader("{\"session_id\":\"s2\",\"transcript_path\":\"/x\"}"), outw);
@@ -79,7 +80,8 @@ public sealed class PinnedFloorCommandTests : IDisposable
     public async Task InjectTurn_CopilotCli_EmitsTopLevelAdditionalContext()
     {
         var store = new FakeStore();
-        store.Seed(Tier.Pinned, ContentType.Memory, EntryFactory.Make(id: "p1", content: "rule"));
+        store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: "p1", content: "rule"));
+        store.SetSticky(ContentType.Memory, "p1", true);
         PinnedFloorState.Save(_dir, new FloorState("s3", 1, 1, 0, true));
         var outw = new StringWriter();
         var cmd = MakeCmd(store, new StringReader("{\"session_id\":\"s3\"}"), outw);
@@ -105,7 +107,8 @@ public sealed class PinnedFloorCommandTests : IDisposable
     public async Task UnknownHost_FailsSafe_EmptyObjectExitZero()
     {
         var store = new FakeStore();
-        store.Seed(Tier.Pinned, ContentType.Memory, EntryFactory.Make(id: "p1", content: "rule"));
+        store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: "p1", content: "rule"));
+        store.SetSticky(ContentType.Memory, "p1", true);
         PinnedFloorState.Save(_dir, new FloorState("s4", 1, 1, 0, true));
         var outw = new StringWriter();
         var cmd = MakeCmd(store, new StringReader("{\"session_id\":\"s4\"}"), outw);
@@ -117,10 +120,10 @@ public sealed class PinnedFloorCommandTests : IDisposable
     [Fact]
     public async Task InjectPath_RenderThrows_FailsSafe_AndDoesNotAdvanceState()
     {
-        // A store whose List(Pinned, Memory) throws simulates a DB error mid-render.
-        // After the reorder fix, Save runs only AFTER a successful render, so a
-        // render failure must leave state untouched (retried next turn).
-        var store = new ThrowingOnPinnedListStore();
+        // A store whose sticky-hot memory List throws simulates a DB error
+        // mid-render. After the reorder fix, Save runs only AFTER a successful
+        // render, so a render failure must leave state untouched (retried next turn).
+        var store = new ThrowingOnStickyHotListStore();
         PinnedFloorState.Save(_dir, new FloorState("s9", 1, 1, 0, true));
         var outw = new StringWriter();
         var cmd = new PinnedFloorCommand(store, _dir, new StringReader("{\"session_id\":\"s9\"}"), outw, Always, _ => null);
@@ -140,12 +143,14 @@ public sealed class PinnedFloorCommandTests : IDisposable
     {
         // Seed: one global pin (no project), one for "o/r", one for "o/x".
         var store = new FakeStore();
-        store.Seed(Tier.Pinned, ContentType.Memory,
+        store.Seed(Tier.Hot, ContentType.Memory,
             EntryFactory.Make(id: "global1", content: "global-directive", project: null));
-        store.Seed(Tier.Pinned, ContentType.Memory,
+        store.Seed(Tier.Hot, ContentType.Memory,
             EntryFactory.Make(id: "or1", content: "or-directive", project: "o/r"));
-        store.Seed(Tier.Pinned, ContentType.Memory,
+        store.Seed(Tier.Hot, ContentType.Memory,
             EntryFactory.Make(id: "ox1", content: "ox-directive", project: "o/x"));
+        foreach (var pid in new[] { "global1", "or1", "ox1" })
+            store.SetSticky(ContentType.Memory, pid, true);
 
         // Create a temp git repo whose origin resolves to "o/r".
         var repo = MakeTempRepo("https://github.com/o/r.git");
@@ -184,12 +189,14 @@ public sealed class PinnedFloorCommandTests : IDisposable
     {
         // Seed: global, "o/r", "o/x".
         var store = new FakeStore();
-        store.Seed(Tier.Pinned, ContentType.Memory,
+        store.Seed(Tier.Hot, ContentType.Memory,
             EntryFactory.Make(id: "global2", content: "global-directive2", project: null));
-        store.Seed(Tier.Pinned, ContentType.Memory,
+        store.Seed(Tier.Hot, ContentType.Memory,
             EntryFactory.Make(id: "or2", content: "or-directive2", project: "o/r"));
-        store.Seed(Tier.Pinned, ContentType.Memory,
+        store.Seed(Tier.Hot, ContentType.Memory,
             EntryFactory.Make(id: "ox2", content: "ox-directive2", project: "o/x"));
+        foreach (var pid in new[] { "global2", "or2", "ox2" })
+            store.SetSticky(ContentType.Memory, pid, true);
 
         var repo = MakeTempRepo("https://github.com/o/r.git");
         try
@@ -224,17 +231,17 @@ public sealed class PinnedFloorCommandTests : IDisposable
 }
 
 /// <summary>
-/// Delegates all IStore calls to a FakeStore, but throws on
-/// List(Tier.Pinned, ContentType.Memory) to simulate a DB error during render.
+/// Delegates all IStore calls to a FakeStore, but throws on the sticky-hot
+/// memory List (Tier.Hot + StickyOnly) to simulate a DB error during render.
 /// </summary>
-internal sealed class ThrowingOnPinnedListStore : IStore
+internal sealed class ThrowingOnStickyHotListStore : IStore
 {
     private readonly FakeStore _inner = new();
 
     public IReadOnlyList<Entry> List(Tier tier, ContentType type, ListEntriesOpts? opts = null)
     {
-        if (tier == Tier.Pinned && type == ContentType.Memory)
-            throw new InvalidOperationException("simulated DB error during pinned-memory list");
+        if (tier == Tier.Hot && type == ContentType.Memory && opts?.StickyOnly == true)
+            throw new InvalidOperationException("simulated DB error during sticky-hot memory list");
         return _inner.List(tier, type, opts);
     }
 
@@ -250,4 +257,6 @@ internal sealed class ThrowingOnPinnedListStore : IStore
     public void Move(Tier fromTier, ContentType fromType, Tier toTier, ContentType toType, string id) => _inner.Move(fromTier, fromType, toTier, toType, id);
     public string? FindByContent(Tier tier, ContentType type, string content) => _inner.FindByContent(tier, type, content);
     public void UpdateInjectionCounts(IReadOnlyList<(Tier tier, ContentType type, string id)> entries) => _inner.UpdateInjectionCounts(entries);
+    public void SetSticky(ContentType type, string id, bool sticky) => _inner.SetSticky(type, id, sticky);
+    public bool IsSticky(ContentType type, string id) => _inner.IsSticky(type, id);
 }

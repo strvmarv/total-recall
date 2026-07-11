@@ -57,9 +57,6 @@ public sealed class RoutingStore : IStore
     public void Delete(Tier tier, ContentType type, string id)
     {
         _local.Delete(tier, type, id);
-        // Pinned ids were never pushed to Cortex (local-only tier), so no
-        // remote delete is needed — skip the enqueue entirely.
-        if (tier.IsPinned) return;
         _syncQueue.Enqueue("memory", "delete", id,
             SyncPayload.Delete(id));
     }
@@ -94,13 +91,16 @@ public sealed class RoutingStore : IStore
     public void UpdateInjectionCounts(IReadOnlyList<(Tier tier, ContentType type, string id)> entries)
         => _local.UpdateInjectionCounts(entries);
 
+    // Tier model v2 (Task 5) — sticky is a local-only hot-tier concept; pins are
+    // never synced to the remote backend (matching pinned-tier local-only policy).
+    public void SetSticky(ContentType type, string id, bool sticky)
+        => _local.SetSticky(type, id, sticky);
+
+    public bool IsSticky(ContentType type, string id)
+        => _local.IsSticky(type, id);
+
     private void EnqueueUpsert(Tier tier, ContentType type, string id)
     {
-        // Pinned tier is LOCAL-ONLY: the Cortex remote has no pinned-memory
-        // support yet, so pinned entries are never pushed. (User decision
-        // 2026-06-09: pinned is local-only; non-destructive to remote.)
-        if (tier.IsPinned) return;
-
         // Best-effort: the caller's local write has already committed by the
         // time we reach this method. A failure to enqueue the cortex-sync
         // payload must NOT surface as a user-visible write error — the

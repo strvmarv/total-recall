@@ -14,6 +14,7 @@ type HotTierConfig = {
     CarryForwardThreshold: float
     TaskWeight: float
     CompactionHintThreshold: int
+    MaxContentChars: int
 }
 
 type WarmTierConfig = {
@@ -56,6 +57,7 @@ type CompactionConfig = {
     DecayHalfLifeSurfaced: float option
     DecayHalfLifeDecision: float option
     AutoDemoteMinInjections: int
+    PromoteMinAccess: int
 }
 
 type EmbeddingConfig = {

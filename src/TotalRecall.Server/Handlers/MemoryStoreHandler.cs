@@ -67,7 +67,7 @@ public sealed class MemoryStoreHandler : IToolHandler
           "type": "object",
           "properties": {
             "content":     {"type":"string","description":"The content to store"},
-            "tier":        {"type":"string","enum":["hot","warm","cold"],"description":"Storage tier (default: hot; use pinned:true for the pinned tier)"},
+            "tier":        {"type":"string","enum":["hot","warm","cold"],"description":"Storage tier (default: warm; use pinned:true for the pinned tier)"},
             "contentType": {"type":"string","enum":["memory","knowledge"],"description":"Content type (default: memory)"},
             "entryType":   {"type":"string","enum":["correction","preference","decision","surfaced","imported","compacted","ingested"],"description":"Entry type"},
             "project":     {"type":"string","description":"Project scope"},
@@ -75,7 +75,7 @@ public sealed class MemoryStoreHandler : IToolHandler
             "source":      {"type":"string","description":"Source identifier"},
             "visibility":  {"type":"string","enum":["private","team","public"],"description":"Entry visibility: 'private' (default), 'team', or 'public'"},
             "scope":       {"type":"string","description":"Scope for this entry (e.g. user:paul, team:eng, service:bot). Uses configured default if omitted."},
-            "pinned":      {"type":"boolean","description":"Store directly into the pinned tier (always injected, never decays). Mutually exclusive with tier."}
+            "pinned":      {"type":"boolean","description":"Store as sticky in the hot tier (always injected, never decays or compacts). Mutually exclusive with tier."}
           },
           "required": ["content"]
         }
@@ -83,6 +83,11 @@ public sealed class MemoryStoreHandler : IToolHandler
 
     // Matches TS validation.ts MAX_CONTENT_LENGTH.
     private const int MaxContentLength = 100_000;
+
+    // Falls back to the ConfigLoader default (Task 2) when the caller does not
+    // supply an explicit value (e.g. tests, CLI). Production wiring always
+    // passes cfg.Tiers.Hot.MaxContentChars explicitly (see ServerComposition).
+    private const int DefaultHotMaxContentChars = 1200;
 
     private static readonly HashSet<string> ValidEntryTypes = new(StringComparer.Ordinal)
     {
@@ -100,19 +105,22 @@ public sealed class MemoryStoreHandler : IToolHandler
     private readonly IVectorSearch _vectorSearch;
     private readonly string? _scopeDefault;
     private readonly int _pinnedMaxContentChars;
+    private readonly int _hotMaxContentChars;
 
     public MemoryStoreHandler(
         IStore store,
         IEmbedder embedder,
         IVectorSearch vectorSearch,
         string? scopeDefault = null,
-        int pinnedMaxContentChars = PinnedTierLimits.DefaultMaxContentChars)
+        int pinnedMaxContentChars = PinnedTierLimits.DefaultMaxContentChars,
+        int hotMaxContentChars = DefaultHotMaxContentChars)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _embedder = embedder ?? throw new ArgumentNullException(nameof(embedder));
         _vectorSearch = vectorSearch ?? throw new ArgumentNullException(nameof(vectorSearch));
         _scopeDefault = scopeDefault;
         _pinnedMaxContentChars = pinnedMaxContentChars;
+        _hotMaxContentChars = hotMaxContentChars;
     }
 
     public string Name => "memory_store";
@@ -142,10 +150,14 @@ public sealed class MemoryStoreHandler : IToolHandler
         if (pinned && args.TryGetProperty("tier", out var tierEl)
             && tierEl.ValueKind != JsonValueKind.Null)
             throw new ArgumentException("specify either pinned or tier, not both");
-        if (pinned && content.Length > _pinnedMaxContentChars)
+        // Tier model v2 (Task 5): pinned:true now stores into HOT with the
+        // sticky flag set (the pinned tier is retired for new writes). The hot
+        // cap therefore governs pinned writes too — enforced by the tier.IsHot
+        // check below since pinned resolves to Tier.Hot.
+        var tier = pinned ? Tier.Hot : ReadTier(args);
+        if (tier.IsHot && content.Length > _hotMaxContentChars)
             throw new ArgumentException(
-                PinnedTierLimits.ContentLimitMessage(_pinnedMaxContentChars, content.Length));
-        var tier = pinned ? Tier.Pinned : ReadTier(args);
+                PinnedTierLimits.HotContentLimitMessage(_hotMaxContentChars, content.Length));
         var contentType = ReadContentType(args);
         var entryType = ReadEntryType(args);
         var project = ReadOptionalString(args, "project");
@@ -177,6 +189,10 @@ public sealed class MemoryStoreHandler : IToolHandler
         var existingId = _store.FindByContent(tier, contentType, content);
         if (existingId is not null)
         {
+            // Tier model v2 (Task 5): honor pinned:true even on the idempotent
+            // path — mark the existing hot row sticky and refresh decay_score.
+            if (pinned)
+                MarkSticky(contentType, existingId);
             return Task.FromResult(new ToolCallResult
             {
                 Content = new[] { new ToolContent { Type = "text", Text = $"{{\"id\":\"{existingId}\"}}" } },
@@ -211,6 +227,11 @@ public sealed class MemoryStoreHandler : IToolHandler
                 EntryType: EntryType.Preference),
             vector);
 
+        // Tier model v2 (Task 5): pinned:true → mark the new hot row sticky and
+        // normalize decay_score to 1.0 (pins never decay).
+        if (pinned)
+            MarkSticky(contentType, id);
+
         // Match TS wire: content[0].text == JSON.stringify({ id }).
         // Entry ids are ULIDs (or test-supplied strings) — no JSON-unsafe chars.
         var payload = $"{{\"id\":\"{id}\"}}";
@@ -220,6 +241,14 @@ public sealed class MemoryStoreHandler : IToolHandler
             Content = new[] { new ToolContent { Type = "text", Text = payload } },
             IsError = false,
         });
+    }
+
+    // Tier model v2 (Task 5): apply the sticky flag + decay normalization to a
+    // hot row that was stored via pinned:true.
+    private void MarkSticky(ContentType contentType, string id)
+    {
+        _store.SetSticky(contentType, id, true);
+        _store.Update(Tier.Hot, contentType, id, new UpdateEntryOpts { DecayScore = 1.0 });
     }
 
     // ---------- argument parsing helpers ----------
@@ -245,7 +274,7 @@ public sealed class MemoryStoreHandler : IToolHandler
     private static Tier ReadTier(JsonElement args)
     {
         if (!args.TryGetProperty("tier", out var prop) || prop.ValueKind == JsonValueKind.Null)
-            return Tier.Hot;
+            return Tier.Warm;
         if (prop.ValueKind != JsonValueKind.String)
             throw new ArgumentException("tier must be a string");
         var v = prop.GetString();
@@ -254,8 +283,6 @@ public sealed class MemoryStoreHandler : IToolHandler
             "hot" => Tier.Hot,
             "warm" => Tier.Warm,
             "cold" => Tier.Cold,
-            "pinned" => throw new ArgumentException(
-                "tier 'pinned' is not valid here; use the pinned:true flag instead"),
             _ => throw new ArgumentException($"Invalid tier: {v}. Must be hot, warm, or cold"),
         };
     }

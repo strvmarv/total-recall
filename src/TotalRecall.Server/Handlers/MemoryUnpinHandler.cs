@@ -66,7 +66,7 @@ public sealed class MemoryUnpinHandler : IToolHandler
 
     public string Name => "memory_unpin";
     public string Description =>
-        "Unpin a pinned entry: moves it to the warm tier where the normal decay/compaction lifecycle resumes";
+        "Unpin a pinned entry: clears its sticky flag so it stays in the hot tier as an earned resident and the normal decay/compaction lifecycle resumes";
     public JsonElement InputSchema => _inputSchema;
 
     public Task<ToolCallResult> ExecuteAsync(JsonElement? arguments, CancellationToken ct)
@@ -94,21 +94,25 @@ public sealed class MemoryUnpinHandler : IToolHandler
         var located = MoveHelpers.Locate(_store, id)
             ?? throw new ArgumentException($"entry {id} not found");
         var (fromTier, fromType, entry) = located;
-        if (!fromTier.IsPinned)
-            throw new ArgumentException(
-                $"entry {id} is not pinned (tier: {TierNames.TierName(fromTier)})");
         var targetType = requestedType ?? fromType;
 
-        MoveHelpers.MoveAndReEmbed(
-            _store, _vec, _embedder, entry, Tier.Pinned, fromType, Tier.Warm, targetType);
+        // Tier model v2 (Task 5): "pinned" is now the sticky flag on hot. Only a
+        // sticky-hot entry may be unpinned; anything else is not pinned.
+        if (!fromTier.IsHot || !_store.IsSticky(fromType, id))
+            throw new ArgumentException(
+                $"entry {id} is not pinned (tier: {TierNames.TierName(fromTier)})");
 
-        // Pinned movements are not synced to Cortex (pinned tier is local-only).
+        // Clear sticky in place — NO tier move. The entry stays in hot as an
+        // earned resident and resumes the normal decay lifecycle.
+        _store.SetSticky(fromType, id, false);
+
+        // Sticky (unpin) movements are not synced to Cortex (local-only policy).
         if (_compactionLog is not null)
         {
             _compactionLog.LogEvent(new CompactionLogEntry(
                 SessionId: "unknown",
-                SourceTier: "pinned",
-                TargetTier: "warm",
+                SourceTier: "hot",
+                TargetTier: "hot",
                 SourceEntryIds: new[] { id },
                 TargetEntryId: id,
                 DecayScores: new Dictionary<string, double> { [id] = entry.DecayScore },
@@ -118,9 +122,9 @@ public sealed class MemoryUnpinHandler : IToolHandler
 
         var dto = new MemoryMoveResultDto(
             Id: id,
-            FromTier: "pinned",
+            FromTier: "hot",
             FromContentType: TierNames.ContentTypeName(fromType),
-            ToTier: "warm",
+            ToTier: "hot",
             ToContentType: TierNames.ContentTypeName(targetType),
             Success: true);
         var jsonText = JsonSerializer.Serialize(dto, JsonContext.Default.MemoryMoveResultDto);

@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 4.0.0 - 2026-07-10
+
+Tier model v2 — the Pinned tier is merged into Hot as a `sticky` flag, new
+memories default to Warm and *earn* their way into Hot by access evidence, and
+existing data is migrated automatically on first `session_start`.
+
+### Changed
+
+- **BREAKING: Pinned tier retired → sticky-hot.** `Tier.Pinned` no longer
+  exists. Pin/unpin (MCP **and** CLI) and `pinned:true` now set/clear a `sticky`
+  flag on Hot. Sticky entries are unbounded, injected first, and never
+  auto-demoted, evicted, or compacted. The `pinned_*` tables are dropped by the
+  migration.
+- **BREAKING: warm-default ingress.** `memory_store` with no tier now defaults
+  to **Warm** (was Hot). Coding-agent prose is already in the conversation
+  context; keeping it out of Hot avoids double-billing the context budget.
+- **Hot per-entry char cap** of **1,200 chars**. Oversized Hot writes are
+  rejected/redirected.
+- **Compaction terminology.** The compaction hot→warm step "promote" is renamed
+  **"compact"** (`CompactionDecision.Compact`, `Result.Compacted`) across code,
+  CLI, and the compactor agent prompt. Tier *promotion* keeps the "promote"
+  name — it is now the only meaning.
+
+### Added
+
+- **Access-earned promotion.** Warm→Hot now requires `access_count >= 5` **AND**
+  `decay_score >= 0.7`, closing the "fresh entry has decay ~1.0" auto-promotion
+  trap. `promote_min_access` config (default `5`).
+- **One-time data migration** on first `session_start`: SQLite runs an
+  app-layer, single-transaction, re-embedding move (old non-sticky hot → warm;
+  legacy `pinned_*` → sticky-hot; then drops `pinned_*`), idempotent via a
+  `_meta` flag; Postgres does the equivalent in-place tier-column `UPDATE`. All
+  columns + embeddings preserved.
+- **Compaction fast/deep split.** CLI `compact` defaults to the fast heuristic;
+  `--deep` documents the host-orchestrated LLM path. The compactor skips sticky
+  rows and guards against oversized entries.
+
+### Migration & back-compat notes
+
+- The migration is **automatic and irreversible** — downgrading after it runs is
+  unsafe. Back up `~/.total-recall/total-recall.db` first if you want a
+  rollback path.
+- `[tiers.pinned]` config still parses (deprecated alias; its `Floor*` fields
+  drive the per-turn re-injection hook, now repointed to sticky-hot).
+- `Pinned`/`PinnedMemories`/`PinnedKnowledge` JSON field names retained
+  (populated from sticky-hot) for host/Web wire compat.
+- Legacy `tier:"pinned"` imports map to sticky-hot; current pins round-trip via
+  a new `sticky` export field.
+
 ## 3.7.0 - 2026-06-25
 
 ### Added

@@ -358,6 +358,7 @@ public sealed record TierSizesDto(
     [property: JsonPropertyName("warm_knowledge")] int WarmKnowledge,
     [property: JsonPropertyName("cold_memories")] int ColdMemories,
     [property: JsonPropertyName("cold_knowledge")] int ColdKnowledge,
+    // pinned_* = sticky-hot (tier merged in v2); JSON names kept for wire back-compat.
     [property: JsonPropertyName("pinned_memories")] int PinnedMemories,
     [property: JsonPropertyName("pinned_knowledge")] int PinnedKnowledge);
 
@@ -528,7 +529,12 @@ public sealed record ExportEntryDto(
     [property: JsonPropertyName("collection_id")] string? CollectionId,
     [property: JsonPropertyName("metadata")] string Metadata,
     [property: JsonPropertyName("tier")] string Tier,
-    [property: JsonPropertyName("content_type")] string ContentType);
+    [property: JsonPropertyName("content_type")] string ContentType,
+    // Tier model v2 (Task 9): sticky-hot is the merged replacement for the
+    // retired pinned tier. `tier` serializes as "hot" for a pinned entry; this
+    // flag carries the pin so export/import round-trips preserve it. Defaults
+    // false; older exports without the field deserialize as non-sticky.
+    [property: JsonPropertyName("sticky")] bool Sticky = false);
 
 public sealed record MemoryExportResultDto(
     [property: JsonPropertyName("version")] int Version,
@@ -870,6 +876,7 @@ public sealed record HealthComponentDto(
 public sealed record HealthBreakdownDto(
     [property: JsonPropertyName("retrieval")] HealthComponentDto Retrieval,
     [property: JsonPropertyName("capture")] HealthComponentDto Capture,
+    // pinned = sticky-hot (tier merged in v2); JSON name kept for wire back-compat.
     [property: JsonPropertyName("pinned")] HealthComponentDto Pinned,
     [property: JsonPropertyName("kb")] HealthComponentDto Kb);
 

@@ -70,7 +70,7 @@ public sealed class ExportCommand : ICliCommand
                         var t = TierNames.ParseTier(token);
                         if (t is null)
                         {
-                            Console.Error.WriteLine($"memory export: invalid tier '{token}' (expected hot|warm|cold|pinned)");
+                            Console.Error.WriteLine($"memory export: invalid tier '{token}' (expected hot|warm|cold)");
                             return 2;
                         }
                         tierFilter.Add(t);
@@ -137,7 +137,7 @@ public sealed class ExportCommand : ICliCommand
         try
         {
             // Gather entries for each filtered (tier, type) pair.
-            var collected = new List<(Tier Tier, ContentType Type, Entry Entry)>();
+            var collected = new List<(Tier Tier, ContentType Type, Entry Entry, bool Sticky)>();
             foreach (var pair in TierNames.AllTablePairs)
             {
                 if (tierFilter is not null && !tierFilter.Contains(pair.Tier)) continue;
@@ -145,7 +145,9 @@ public sealed class ExportCommand : ICliCommand
                 var rows = store.List(pair.Tier, pair.Type, null);
                 foreach (var e in rows)
                 {
-                    collected.Add((pair.Tier, pair.Type, e));
+                    // Sticky is hot-only; carries a v2 pin across export/import.
+                    var sticky = pair.Tier.IsHot && store.IsSticky(pair.Type, e.Id);
+                    collected.Add((pair.Tier, pair.Type, e, sticky));
                 }
             }
 
@@ -186,7 +188,7 @@ public sealed class ExportCommand : ICliCommand
     // ---------- JSON emission (hand-rolled, AOT-safe) ----------
 
     internal static string SerializeEnvelope(
-        IReadOnlyList<(Tier Tier, ContentType Type, Entry Entry)> entries,
+        IReadOnlyList<(Tier Tier, ContentType Type, Entry Entry, bool Sticky)> entries,
         long exportedAt,
         bool pretty)
     {
@@ -209,7 +211,7 @@ public sealed class ExportCommand : ICliCommand
             for (int i = 0; i < entries.Count; i++)
             {
                 if (i > 0) sb.Append(',').Append(nl);
-                AppendEntry(sb, entries[i].Tier, entries[i].Type, entries[i].Entry, pretty, ind2);
+                AppendEntry(sb, entries[i].Tier, entries[i].Type, entries[i].Entry, entries[i].Sticky, pretty, ind2);
             }
             sb.Append(nl).Append(ind1);
         }
@@ -219,7 +221,7 @@ public sealed class ExportCommand : ICliCommand
     }
 
     private static void AppendEntry(
-        StringBuilder sb, Tier tier, ContentType type, Entry e, bool pretty, string indent)
+        StringBuilder sb, Tier tier, ContentType type, Entry e, bool sticky, bool pretty, string indent)
     {
         var nl = pretty ? "\n" : "";
         var kvSep = pretty ? ": " : ":";
@@ -257,7 +259,9 @@ public sealed class ExportCommand : ICliCommand
         sb.Append(sep);
 
         sb.Append(ind); AppendString(sb, "tier"); sb.Append(kvSep); AppendString(sb, TierNames.TierName(tier)); sb.Append(sep);
-        sb.Append(ind); AppendString(sb, "content_type"); sb.Append(kvSep); AppendString(sb, TierNames.ContentTypeName(type));
+        sb.Append(ind); AppendString(sb, "content_type"); sb.Append(kvSep); AppendString(sb, TierNames.ContentTypeName(type)); sb.Append(sep);
+        // Tier model v2 (Task 9): carries a v2 pin (sticky-hot) across round-trip.
+        sb.Append(ind); AppendString(sb, "sticky"); sb.Append(kvSep); sb.Append(sticky ? "true" : "false");
 
         sb.Append(nl); sb.Append(indent); sb.Append('}');
     }
@@ -310,6 +314,6 @@ public sealed class ExportCommand : ICliCommand
 
     private static void PrintUsage(TextWriter w)
     {
-        w.WriteLine("Usage: total-recall memory export [--tiers hot,warm,cold,pinned] [--types memory,knowledge] [--out path] [--pretty]");
+        w.WriteLine("Usage: total-recall memory export [--tiers hot,warm,cold] [--types memory,knowledge] [--out path] [--pretty]");
     }
 }

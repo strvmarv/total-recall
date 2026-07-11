@@ -102,32 +102,51 @@ public sealed class DemoteCommandTests : IDisposable
         Assert.Contains("target must be colder", _errWriter.ToString());
     }
 
-    // ---------------- Task 3: pinned-tier guards ----------------
-
-    [Fact]
-    public async Task PinnedSource_ReturnsExit2_MentionsUnpin()
-    {
-        // Demoting an entry that lives in the pinned tier must be refused;
-        // the user should use memory_unpin / 'memory unpin' instead.
-        var (cmd, store, _, _) = Build();
-        store.Seed(Tier.Pinned, ContentType.Memory, EntryFactory.Make("p1"));
-
-        var code = await cmd.RunAsync(new[] { "p1", "--tier", "cold" });
-
-        Assert.Equal(2, code);
-        Assert.Contains("unpin", _errWriter.ToString(), StringComparison.OrdinalIgnoreCase);
-        Assert.Empty(store.MoveCalls); // nothing moved
-    }
+    // ---------------- Tier model v2: "pinned" is not a tier ----------------
 
     [Fact]
     public async Task PinnedTarget_ReturnsExit2_MentionsPin()
     {
-        // Passing --tier pinned must be rejected before any store lookup;
-        // the user should use memory_pin / 'memory pin' instead.
+        // Tier model v2 (Task 9): "pinned" is no longer a valid tier; passing
+        // --tier pinned is rejected as an invalid tier.
         var (cmd, _, _, _) = Build();
         var code = await cmd.RunAsync(new[] { "abc", "--tier", "pinned" });
 
         Assert.Equal(2, code);
         Assert.Contains("pin", _errWriter.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ---- Tier model v2 (Task 9): sticky-hot ("pinned") demote is rejected ----
+
+    [Fact]
+    public async Task StickyHotSource_ReturnsExit2_MentionsUnpin()
+    {
+        var (cmd, store, vec, _) = Build();
+        store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make("h1"));
+        store.SetSticky(ContentType.Memory, "h1", true);
+
+        var code = await cmd.RunAsync(new[] { "h1", "--tier", "warm" });
+
+        Assert.Equal(2, code);
+        Assert.Contains("unpin", _errWriter.ToString(), StringComparison.OrdinalIgnoreCase);
+        // Nothing moved — entry stays in Hot AND stays sticky.
+        Assert.Empty(store.MoveCalls);
+        Assert.True(store.IsSticky(ContentType.Memory, "h1"));
+    }
+
+    [Fact]
+    public async Task AfterUnpin_NonStickyHot_DemotesToWarm()
+    {
+        // Once sticky is cleared, the plain hot entry demotes normally.
+        var (cmd, store, _, _) = Build();
+        store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make("h1"));
+        store.SetSticky(ContentType.Memory, "h1", true);
+        store.SetSticky(ContentType.Memory, "h1", false); // unpinned
+
+        var code = await cmd.RunAsync(new[] { "h1", "--tier", "warm" });
+
+        Assert.Equal(0, code);
+        Assert.Single(store.MoveCalls);
+        Assert.Equal((Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, "h1"), store.MoveCalls[0]);
     }
 }

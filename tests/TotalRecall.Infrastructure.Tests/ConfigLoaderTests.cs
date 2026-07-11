@@ -576,4 +576,14 @@ public sealed class ConfigLoaderTests : IDisposable
         var cfg = new ConfigLoader().LoadEffectiveConfig();
         Assert.Equal(5, cfg.Tiers.Hot.CompactionHintThreshold);
     }
+
+    // --- tiers.hot.max_content_chars / compaction.promote_min_access ------
+
+    [Fact]
+    public void Defaults_IncludeHotMaxContentCharsAndPromoteMinAccess()
+    {
+        var cfg = new ConfigLoader().LoadDefaults();
+        Assert.Equal(1200, cfg.Tiers.Hot.MaxContentChars);
+        Assert.Equal(5, cfg.Compaction.PromoteMinAccess);
+    }
 }

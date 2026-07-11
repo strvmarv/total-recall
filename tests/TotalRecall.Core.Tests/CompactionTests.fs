@@ -12,8 +12,8 @@ open TotalRecall.Core.Compaction
 let private describeDecision (d: CompactionDecision) : string =
     match d with
     | CarryForward -> "carry_forward"
-    | Promote None -> "promote (no summary)"
-    | Promote (Some _) -> "promote (with summary)"
+    | Compact None -> "compact (no summary)"
+    | Compact (Some _) -> "compact (with summary)"
     | Discard _ -> "discard"
 
 let private sampleEntry : Entry = {
@@ -44,16 +44,16 @@ let compactionTests =
             let d = CarryForward
             Expect.equal (describeDecision d) "carry_forward" "CarryForward should match"
 
-        testCase "Promote with no summary" <| fun _ ->
-            let d = Promote None
-            Expect.equal (describeDecision d) "promote (no summary)" "Promote None should match"
+        testCase "Compact with no summary" <| fun _ ->
+            let d = Compact None
+            Expect.equal (describeDecision d) "compact (no summary)" "Compact None should match"
 
-        testCase "Promote with summary string" <| fun _ ->
-            let d = Promote (Some "key insights")
-            Expect.equal (describeDecision d) "promote (with summary)" "Promote (Some _) should match"
+        testCase "Compact with summary string" <| fun _ ->
+            let d = Compact (Some "key insights")
+            Expect.equal (describeDecision d) "compact (with summary)" "Compact (Some _) should match"
             match d with
-            | Promote (Some s) -> Expect.equal s "key insights" "summary should be extractable"
-            | _ -> failtest "should be Promote (Some _)"
+            | Compact (Some s) -> Expect.equal s "key insights" "summary should be extractable"
+            | _ -> failtest "should be Compact (Some _)"
 
         testCase "Discard with reason" <| fun _ ->
             let d = Discard "duplicate content"
@@ -70,8 +70,8 @@ let compactionTests =
 
         testCase "decision equality is structural" <| fun _ ->
             Expect.equal CarryForward CarryForward "same decisions should be equal"
-            Expect.equal (Promote None) (Promote None) "Promote None equals itself"
-            Expect.equal (Promote (Some "a")) (Promote (Some "a")) "Promote (Some) equality"
-            Expect.notEqual (Promote (Some "a")) (Promote (Some "b")) "different summaries differ"
+            Expect.equal (Compact None) (Compact None) "Compact None equals itself"
+            Expect.equal (Compact (Some "a")) (Compact (Some "a")) "Compact (Some) equality"
+            Expect.notEqual (Compact (Some "a")) (Compact (Some "b")) "different summaries differ"
             Expect.notEqual CarryForward (Discard "x") "different variants differ"
     ]

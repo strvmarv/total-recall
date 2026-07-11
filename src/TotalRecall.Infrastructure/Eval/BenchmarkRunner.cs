@@ -298,7 +298,7 @@ public sealed class BenchmarkRunner
     }
 
     private static string TierName(Tier t) =>
-        t.IsHot ? "hot" : t.IsWarm ? "warm" : t.IsPinned ? "pinned" : "cold";
+        t.IsHot ? "hot" : t.IsWarm ? "warm" : "cold";
 
     // The corpus type field is drawn from a closed set of TS EntryType values
     // which never contain JSON-special characters, so we only need a minimal

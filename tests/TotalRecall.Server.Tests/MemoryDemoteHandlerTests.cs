@@ -110,29 +110,54 @@ public class MemoryDemoteHandlerTests
         Assert.Equal("memory_demote", handler.Name);
     }
 
-    // ---------------- Task 3: pinned-tier guards ----------------
+    // Tier model v2 (Task 9): a sticky-hot entry is "pinned" (merged from the
+    // retired pinned tier). Demoting it must be REJECTED, not silently unpin it.
 
     [Fact]
-    public async Task PinnedSource_CannotBeDemoted()
+    public async Task StickyHotSource_IsRejected_PointsToUnpin()
     {
-        var (handler, store, _, _) = MakeHandler();
-        store.Seed(Tier.Pinned, ContentType.Memory, MakeEntry("p1"));
+        var (handler, store, vec, _) = MakeHandler();
+        store.Seed(Tier.Hot, ContentType.Memory, MakeEntry("h1"));
+        store.SetSticky(ContentType.Memory, "h1", true);
 
         var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
-            handler.ExecuteAsync(ParseArgs("""{"id":"p1","tier":"warm"}"""), CancellationToken.None));
+            handler.ExecuteAsync(ParseArgs("""{"id":"h1","tier":"warm"}"""), CancellationToken.None));
         Assert.Contains("memory_unpin", ex.Message);
-        Assert.Empty(store.MoveCalls); // nothing moved — critical regression test
+        // Nothing moved — the entry stays in Hot AND stays sticky.
+        Assert.Empty(store.MoveCalls);
+        Assert.Empty(vec.DeleteCalls);
+        Assert.True(store.IsSticky(ContentType.Memory, "h1"));
     }
 
     [Fact]
-    public async Task PinnedTarget_IsRejected_PointsToPin()
+    public async Task AfterUnpin_NonStickyHot_DemotesToWarm()
     {
+        // Companion: once sticky is cleared (via memory_unpin), the now-plain
+        // hot entry demotes normally to warm.
+        var (handler, store, _, _) = MakeHandler();
+        store.Seed(Tier.Hot, ContentType.Memory, MakeEntry("h1"));
+        store.SetSticky(ContentType.Memory, "h1", true);
+        store.SetSticky(ContentType.Memory, "h1", false); // memory_unpin cleared it
+
+        var result = await handler.ExecuteAsync(
+            ParseArgs("""{"id":"h1","tier":"warm"}"""), CancellationToken.None);
+
+        using var doc = JsonDocument.Parse(result.Content[0].Text);
+        Assert.Equal("warm", doc.RootElement.GetProperty("to_tier").GetString());
+        Assert.True(doc.RootElement.GetProperty("success").GetBoolean());
+        Assert.Single(store.MoveCalls);
+    }
+
+    [Fact]
+    public async Task PinnedTarget_IsRejected_AsInvalidTier()
+    {
+        // Tier model v2 (Task 9): "pinned" is no longer a valid tier target.
         var (handler, store, _, _) = MakeHandler();
         store.Seed(Tier.Hot, ContentType.Memory, MakeEntry("h1"));
 
         var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
             handler.ExecuteAsync(ParseArgs("""{"id":"h1","tier":"pinned"}"""), CancellationToken.None));
-        Assert.Contains("memory_pin", ex.Message);
+        Assert.Contains("invalid tier", ex.Message);
     }
 
     // ---------------- Phase 6: compaction telemetry ----------------

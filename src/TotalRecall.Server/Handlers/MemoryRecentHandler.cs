@@ -23,7 +23,7 @@ public sealed class MemoryRecentHandler : IToolHandler
           "type": "object",
           "properties": {
             "limit": {"type":"number","description":"Max entries to return (1..200, default 20)"},
-            "tier": {"type":"string","enum":["hot","warm","cold","pinned"],"description":"Restrict to one tier; default all merged"},
+            "tier": {"type":"string","enum":["hot","warm","cold"],"description":"Restrict to one tier; default all merged"},
             "type": {"type":"string","description":"Filter by entry type: correction|preference|decision|surfaced|imported|compacted|ingested"},
             "project": {"type":"string","description":"Filter by exact project name"},
             "order": {"type":"string","enum":["created","updated","accessed"],"description":"Sort field (default created)"},

@@ -7,7 +7,8 @@ const clip = (s: string, n = 96) => (s.length > n ? `${s.slice(0, n - 1)}…` : 
 
 export function PinnedPeek({ refreshKey }: { refreshKey: number }) {
   const { data, error, loading } = useAsync<MemoryListResult>(
-    () => api.tool<MemoryListResult>('memory_list', { tier: 'pinned', limit: 8 }),
+    // Tier model v2: "pinned" is now sticky-hot (tier merged). List sticky entries.
+    () => api.tool<MemoryListResult>('memory_list', { sticky: true, limit: 8 }),
     [refreshKey],
   );
   const empty = !!data && data.entries.length === 0;

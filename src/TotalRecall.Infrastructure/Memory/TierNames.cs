@@ -18,28 +18,28 @@ public static class TierNames
         (Tier.Hot,    ContentType.Memory),
         (Tier.Warm,   ContentType.Memory),
         (Tier.Cold,   ContentType.Memory),
-        (Tier.Pinned, ContentType.Memory),
         (Tier.Hot,    ContentType.Knowledge),
         (Tier.Warm,   ContentType.Knowledge),
         (Tier.Cold,   ContentType.Knowledge),
-        (Tier.Pinned, ContentType.Knowledge),
     };
 
     public static string TierName(Tier t) =>
-        t.IsHot ? "hot" : t.IsWarm ? "warm" : t.IsPinned ? "pinned" : "cold";
+        t.IsHot ? "hot" : t.IsWarm ? "warm" : "cold";
 
     public static string ContentTypeName(ContentType c) =>
         c.IsMemory ? "memory" : "knowledge";
 
     /// <summary>
-    /// Parse "hot"|"warm"|"cold"|"pinned" → Tier. Returns null for unknown values.
+    /// Parse "hot"|"warm"|"cold" → Tier. Returns null for unknown values.
+    /// Tier model v2 (Task 9): "pinned" is retired and now parses to null —
+    /// callers that must preserve legacy pinned exports map it explicitly to
+    /// sticky-hot (see MemoryImportHandler / ImportCommand).
     /// </summary>
     public static Tier? ParseTier(string s) => s switch
     {
         "hot" => Tier.Hot,
         "warm" => Tier.Warm,
         "cold" => Tier.Cold,
-        "pinned" => Tier.Pinned,
         _ => null,
     };
 
@@ -85,13 +85,9 @@ public static class TierNames
         : "Ingested";
 
     /// <summary>
-    /// Tier warmth rank: pinned=3, hot=2, warm=1, cold=0. Pinned ranks above
-    /// hot. Rank 3 exists for ordering/display and as a mathematical backstop
-    /// in the promote/demote direction checks. The promote/demote handlers
-    /// (MCP and CLI) already reject pinned as both source and target; the
-    /// pin/unpin handlers that serve as the only doors in and out of pinned
-    /// are introduced in later tasks.
+    /// Tier warmth rank: hot=2, warm=1, cold=0. Used for ordering/display and
+    /// as a mathematical backstop in the promote/demote direction checks.
     /// </summary>
     public static int WarmthRank(Tier t) =>
-        t.IsPinned ? 3 : t.IsHot ? 2 : t.IsWarm ? 1 : 0;
+        t.IsHot ? 2 : t.IsWarm ? 1 : 0;
 }
