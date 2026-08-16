@@ -98,6 +98,11 @@ of transcript growth. Set `floor_enabled = false` to disable.
 | Copilot CLI | Pending upstream fix | `UserPromptSubmit` → `additionalContext` |
 | Cursor | Layered fallback | session-start + skill-guided `session_refresh` |
 | Kiro | Active | `UserPromptSubmit` command hook → pinned-floor (plain-text STDOUT); `SessionStart` agent hook → `session_start` tool; `Stop` agent hook → capture; `always` steering → persistent `session_start` instruction |
+| Gemini CLI | Active | `BeforeAgent` hook → `hookSpecificOutput.additionalContext`; `SessionStart` hook → `session_start` instruction; `GEMINI.md` → persistent instruction |
+| Cline | MCP tools only | No hooks; `cline_mcp_settings.json` via postinstall |
+| Windsurf | MCP tools only | No hooks; `mcp_config.json` + rules file via postinstall |
+| Zed | MCP tools only | No hooks; `context_servers` in `settings.json` via postinstall |
+| VS Code | MCP tools only | No hooks; `mcp.json` (`servers` key) via postinstall |
 
 ---
 
