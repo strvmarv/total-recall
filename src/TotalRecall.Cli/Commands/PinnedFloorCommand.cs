@@ -4,8 +4,8 @@
 // Per-turn UserPromptSubmit hook backend. Reads the host hook payload from
 // stdin, decides via the adaptive throttle, and on an "inject" turn renders the
 // pinned block live from the DB and emits host-correct additionalContext JSON.
-// FAIL-SAFE: any error prints "{}" and exits 0 — a UserPromptSubmit hook must
-// never block or reject the user's prompt.
+// FAIL-SAFE: any error prints "{}" (JSON-envelope hosts) or "" (kiro) and exits 0
+// — a UserPromptSubmit hook must never block or reject the user's prompt.
 
 using System;
 using System.Collections.Generic;
@@ -105,12 +105,12 @@ public sealed class PinnedFloorCommand : ICliCommand
             }
 
             PinnedFloorState.Save(stateDir, next);
-            output.WriteLine("{}");
+            output.WriteLine(NoOpForHost(host));
             return 0;
         }
         catch
         {
-            try { output.WriteLine("{}"); } catch { }
+            try { output.WriteLine(NoOpForHost(ParseHost(args))); } catch { }
             return 0;
         }
     }
@@ -249,4 +249,6 @@ public sealed class PinnedFloorCommand : ICliCommand
             _ => "{}",
         };
     }
+
+    private static string NoOpForHost(string host) => host == "kiro" ? "" : "{}";
 }
