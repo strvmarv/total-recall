@@ -5,6 +5,76 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 4.1.0 - 2026-08-17
+
+### Added
+
+- **Kiro IDE host support.** Kiro IDE is now a supported host alongside Claude
+  Code, Copilot CLI, Cursor, and OpenCode. The integration uses Kiro's v1 hook
+  schema (`.kiro/hooks/*.json`) with three hooks:
+  - `SessionStart` agent hook — prompts the agent to call `session_start`,
+    loading pinned directives and hot-tier context.
+  - `UserPromptSubmit` command hook — shells out to
+    `total-recall pinned-floor --host kiro` via `npx`, injecting the pinned
+    block as plain-text STDOUT (re-asserted on an adaptive turn-count throttle).
+  - `UserPromptSubmit` agent hook — nudges the agent to call `memory_search`
+    before answering.
+  - `Stop` agent hook — captures corrections, preferences, and decisions via
+    `memory_store`.
+  An `always`-inclusion steering doc (`.kiro/steering/total-recall.md`) ensures
+  the `session_start` instruction is always in context. A workspace-level
+  `.kiro/settings/mcp.json` registers the MCP server for dev use; end users get
+  MCP config via the postinstall script.
+
+### Fixed
+
+- **`PinnedFloorCommand` skip/catch paths emitted `{}` unconditionally.** For
+  Kiro, STDOUT is injected verbatim into context, so `{}` polluted the agent's
+  context on 5 of every 6 turns (default `floor_every_n_turns=6`). The skip and
+  catch paths now emit an empty string for `kiro` (via a `NoOpForHost` helper),
+  keeping `{}` for JSON-envelope hosts.
+
+- **`install-kiro-hooks.js` was not actually non-fatal.** The script had zero
+  `try/catch`; a `readdirSync`/`cpSync` throw could reject the promise and break
+  `npm install`. The entire body is now wrapped in `try/catch`. Additionally,
+  `mergeMcpConfig` now bails on a parse failure of an existing `mcp.json`
+  instead of resetting it to `{mcpServers:{}}` and clobbering the user's other
+  MCP server entries.
+
+- **`isRepoSelf()` used `package.json` name check — blocked all end users.** The
+  check compared `name === "@strvmarv/total-recall"`, which matches both the dev
+  repo and the published tarball inside `node_modules`. This silently disabled
+  MCP config + steering installation for the entire end-user population.
+  Replaced with a path-based check (`!ROOT.split(sep).includes("node_modules")`).
+
+### Changed
+
+- **Install script no longer copies hooks to `~/.kiro/hooks/`.** Hooks are
+  workspace-level only (ship in `.kiro/hooks/` in the npm tarball, activate
+  per-workspace). Copying them user-level caused double-firing with the
+  workspace-level copies. Steering copy is guarded by `isRepoSelf()` to avoid
+  double-fire for dev installs.
+
+- **`.kiro/` added to `package.json` `files[]`.** Without this, the hooks,
+  steering doc, and MCP config were not in the npm tarball.
+
+- **Steering doc terminology aligned with post-4.0 tier model.** Replaced
+  "four-tier memory (Pinned/Hot/Warm/Cold)" with "three-tier memory
+  (Hot/Warm/Cold with a sticky flag)" throughout, matching AGENTS.md.
+
+### Known limitations
+
+- **Token-growth throttle inactive for Kiro.** Kiro's hook payload has no
+  `transcript_path`, so the floor's growth-based trigger cannot estimate
+  transcript bytes. The turn-count trigger (`floor_every_n_turns`) still fires
+  the floor; only the growth arm is dead. Documented in AGENTS.md.
+
+- **Workspace-level hooks don't reach end-user workspaces.** Kiro scans the
+  workspace root's `.kiro/hooks/`, not `node_modules/`. End users get MCP config
+  + steering via the install script; the pinned-floor command hook fires via
+  `npx`. The session-start/retrieve/capture agent hooks are only active in
+  workspaces that vendor `.kiro/hooks/` at their root.
+
 ## 4.0.4 - 2026-07-11
 
 ### Fixed
