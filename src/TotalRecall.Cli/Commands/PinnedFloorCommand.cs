@@ -243,6 +243,9 @@ public sealed class PinnedFloorCommand : ICliCommand
                 "{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":" + c + "}}",
             "copilot-cli" =>
                 "{\"additionalContext\":" + c + "}",
+            // Kiro appends raw STDOUT verbatim to context (no JSON envelope).
+            // Return the plain text so the PS1 wrapper can pass it straight through.
+            "kiro" => additionalContext,
             _ => "{}",
         };
     }

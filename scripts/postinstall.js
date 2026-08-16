@@ -17,6 +17,7 @@
 
 import { ensureBinary } from './fetch-binary.js';
 import { installHermesPlugin } from './install-hermes-plugin.js';
+import { installKiroHooks } from './install-kiro-hooks.js';
 
 const result = await ensureBinary({ logPrefix: '[total-recall:postinstall]' });
 
@@ -32,5 +33,8 @@ if (!result.ok) {
 
 // Install Hermes MemoryProvider plugin if Hermes is detected
 await installHermesPlugin();
+
+// Install Kiro hooks and steering if Kiro is detected
+await installKiroHooks();
 
 process.exit(0);
