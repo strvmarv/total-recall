@@ -59,8 +59,9 @@ function mergeMcpConfig(configPath) {
       config = JSON.parse(readFileSync(configPath, 'utf8'));
       if (!config.mcpServers) config.mcpServers = {};
     } catch {
-      // Corrupt or empty file — start fresh
-      config = { mcpServers: {} };
+      // Corrupt or unreadable — leave it untouched rather than risk destroying user config
+      process.stderr.write(`[total-recall:postinstall] Kiro mcp.json unreadable — leaving it untouched.\n`);
+      return;
     }
   }
 
