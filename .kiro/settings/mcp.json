@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "total-recall": {
+      "command": "node",
+      "args": ["./bin/start.js"],
+      "cwd": "${workspaceFolder}"
+    }
+  }
+}
