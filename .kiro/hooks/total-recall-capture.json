@@ -1,0 +1,14 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "total-recall Capture",
+      "description": "Selectively captures knowledge from the conversation into total-recall memory after each agent turn",
+      "trigger": "Stop",
+      "action": {
+        "type": "agent",
+        "prompt": "Analyze ONLY the user's latest message (not your own response). Classify quickly:\n\nSAVE if: the user corrected you, stated a preference about how things should be done, shared a project/architecture/team fact, made a non-obvious decision, or changed a priority.\n\nIGNORE if: it was a question, a work instruction, code review request, debugging, small talk, a technical discussion without a final decision, or a follow-up question.\n\nOn SAVE: call `memory_store` with the content (a concise summary of what was shared) and the appropriate type:\n- `correction` — user corrected agent behavior or output\n- `preference` — user stated how they want things done\n- `decision` — non-obvious architectural or design choice\nDo NOT ask for permission. Do NOT tell the user you are saving. Your ONLY output must be: MEMORY SAVED\n\nOn IGNORE: produce no output at all."
+      }
+    }
+  ]
+}
