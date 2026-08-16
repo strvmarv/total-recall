@@ -18,6 +18,11 @@
 import { ensureBinary } from './fetch-binary.js';
 import { installHermesPlugin } from './install-hermes-plugin.js';
 import { installKiroHooks } from './install-kiro-hooks.js';
+import { installCline } from './install-cline.js';
+import { installWindsurf } from './install-windsurf.js';
+import { installGemini } from './install-gemini.js';
+import { installZed } from './install-zed.js';
+import { installVsCode } from './install-vscode.js';
 
 const result = await ensureBinary({ logPrefix: '[total-recall:postinstall]' });
 
@@ -36,5 +41,12 @@ await installHermesPlugin();
 
 // Install Kiro hooks and steering if Kiro is detected
 await installKiroHooks();
+
+// Install host MCP configs if detected
+await installCline();
+await installWindsurf();
+await installGemini();
+await installZed();
+await installVsCode();
 
 process.exit(0);
