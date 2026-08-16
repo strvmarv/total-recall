@@ -52,7 +52,7 @@ Every TUI coding assistant has the same gaps:
 ## The Solution
 
 - **Persistent memory** — corrections, preferences, decisions, and project context survive sessions automatically
-- **Cross-tool** — one memory store shared across Claude Code, Copilot CLI, Cursor, Cline, OpenCode, and Hermes; existing memories auto-import on first run
+- **Cross-tool** — one memory store shared across Claude Code, Copilot CLI, Cursor, Cline, OpenCode, Hermes, Gemini CLI, Windsurf, Zed, and VS Code; existing memories auto-import on first run
 - **Built-in web UI** — `total-recall ui` opens a local browser dashboard (Dashboard, Memory, Knowledge Base, Usage, Insights, Eval, Config) for visual memory management without touching the CLI or AI session. Dark/light themes, a keyboard-first ⌘K command palette, and a developer-native *Terminal / Archive* design
 - **Cross-device** — point `TOTAL_RECALL_DB_PATH` at a cloud-synced folder and your memory follows you everywhere
 - **Smarter context, lower token cost** — a three-tier model (Hot / Warm / Cold, with sticky pins) enforces a 4000-token budget per prompt; new memories land in warm and earn their way into hot, so you get relevant context without carrying everything
@@ -182,6 +182,11 @@ Per-host support:
 | Claude Code | Active | `UserPromptSubmit` hook → `additionalContext` |
 | Copilot CLI | Pending upstream fix | Wired the same way, but Copilot CLI currently ignores the returned `additionalContext` |
 | Cursor | Layered fallback | session-start injection + skill-guided `session_refresh` (Cursor's `beforeSubmitPrompt` is block-only and cannot inject context) |
+| Gemini CLI | Active | `BeforeAgent` hook → `hookSpecificOutput.additionalContext` |
+| Cline | MCP tools only | No hooks; MCP server config via postinstall |
+| Windsurf | MCP tools only | No hooks; rules file for session-start instruction |
+| Zed | MCP tools only | No hooks; `context_servers` config via postinstall |
+| VS Code | MCP tools only | No hooks; `servers` config + `~/.copilot/mcp-config.json` |
 
 ---
 
