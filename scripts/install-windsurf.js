@@ -4,7 +4,7 @@
 //
 // Non-fatal: always resolves. If Windsurf isn't present, silently skips.
 
-import { cpSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mergeJsonConfig } from './lib/merge-json-config.js';

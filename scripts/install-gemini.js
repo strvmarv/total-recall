@@ -11,7 +11,6 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { mergeJsonConfig } from './lib/merge-json-config.js';
 import { isRepoSelf, ROOT } from './lib/is-repo-self.js';
 
 const GEMINI_START_MARKER = '<!-- total-recall -->';
