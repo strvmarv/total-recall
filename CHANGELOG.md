@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 4.2.0 - 2026-08-17
+
+### Added
+
+- **Five new host integrations: Cline, Windsurf, Gemini CLI, Zed, and VS Code.**
+  Each host gets a postinstall auto-install script that detects the host's config
+  directory and writes/merges the total-recall MCP server entry (non-clobbering,
+  non-fatal). This brings the supported host count from 6 to 11.
+
+  - **Cline** — detects `~/.vscode/`, writes `cline_mcp_settings.json` (`mcpServers`).
+  - **Windsurf** — detects `~/.codeium/windsurf/`, writes `mcp_config.json`
+    (`mcpServers`) plus a rules file (stripped from the steering doc) for the
+    `session_start` instruction.
+  - **Gemini CLI** — detects `~/.gemini/`, writes `settings.json` with both
+    `mcpServers` and `hooks` entries, plus `GEMINI.md` (marker-based merge that
+    preserves user-saved memories from Gemini CLI's `save_memory` tool).
+  - **Zed** — detects Zed config dir via `process.platform` (macOS/Windows/Linux),
+    writes `settings.json` (`context_servers` key, not `mcpServers`).
+  - **VS Code** — detects VS Code user data dir via `process.platform`, writes
+    `mcp.json` (`servers` key) plus `~/.copilot/mcp-config.json` (`mcpServers`)
+    for Agent Host portability.
+
+- **Gemini CLI full pinned-floor support.** Gemini CLI's `BeforeAgent` hook uses
+  `hookSpecificOutput.additionalContext` — the same JSON shape as Claude Code's
+  `UserPromptSubmit`, but with `BeforeAgent` as the event name. A new `gemini-cli`
+  arm in `PinnedFloorCommand.cs` emits the correct envelope. Gemini CLI's payload
+  includes `transcript_path`, so the token-growth throttle is **active** (unlike
+  Kiro, which lacks `transcript_path`). This is the most complete host integration
+  after Claude Code itself.
+
+- **Shared install helpers extracted** (`scripts/lib/merge-json-config.js`,
+  `scripts/lib/is-repo-self.js`) from the Kiro install script for reuse across all
+  new host install scripts. The `mergeJsonConfig` helper handles non-clobbering
+  merges into JSON config files with different top-level keys (`mcpServers`,
+  `context_servers`, `servers`). The `isRepoSelf` helper uses path-based detection
+  to distinguish dev installs from end-user `node_modules` installs.
+
+### Changed
+
+- **`install-kiro-hooks.js` refactored** to use the shared helpers. No behavioral
+  change — the merge logic and `isRepoSelf` check are identical, just extracted
+  for reuse.
+
+- **Docs updated** (AGENTS.md, README.md, SKILL.md) with the 5 new hosts in the
+  per-host status lines, host compatibility table, and cross-tool list.
+
+### Known limitations
+
+- **Cline, Windsurf, Zed, VS Code:** MCP-tools-only — no pinned floor (none have
+  shell-command hooks for per-turn context injection). Windsurf has a rules file
+  for the session-start instruction.
+- **Gemini CLI capture:** `AfterAgent` hook is command-type only (no agent prompt
+  injection). Capture is encouraged via `GEMINI.md` but not enforced.
+- **VS Code multi-profile:** Only writes to the default profile location.
+- **No install-script tests:** Merge logic is untested at the JS level (consistent
+  with existing codebase patterns).
+
 ## 4.1.0 - 2026-08-17
 
 ### Added
