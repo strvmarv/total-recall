@@ -36,14 +36,13 @@ function kiroHome() {
 
 function isRepoSelf() {
   // When the install script runs inside the total-recall repo itself
-  // (dev install), skip the steering copy to avoid double-fire with the
-  // workspace-level .kiro/steering/. End users have ROOT inside node_modules.
-  try {
-    const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
-    return pkg.name === '@strvmarv/total-recall';
-  } catch {
-    return false;
-  }
+  // (dev install), skip the MCP config write and steering copy to avoid
+  // double-fire with the workspace-level .kiro/. End users have ROOT
+  // inside node_modules, so the path check distinguishes the two cases.
+  // The package.json name check is unreliable because the published
+  // tarball also has name === @strvmarv/total-recall.
+  const path = require('node:path');
+  return !ROOT.split(path.sep).includes('node_modules');
 }
 
 function mergeMcpConfig(configPath) {
