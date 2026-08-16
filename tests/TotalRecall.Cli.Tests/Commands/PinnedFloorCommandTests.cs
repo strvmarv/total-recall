@@ -161,6 +161,49 @@ public sealed class PinnedFloorCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task InjectTurn_GeminiCli_EmitsBeforeAgentAdditionalContext()
+    {
+        var store = new FakeStore();
+        store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: "p1", content: "never delete prod"));
+        store.SetSticky(ContentType.Memory, "p1", true);
+        PinnedFloorState.Save(_dir, new FloorState("g1", 1, 1, 0, true));
+        var outw = new StringWriter();
+        var cmd = MakeCmd(store, new StringReader("{\"session_id\":\"g1\"}"), outw);
+        var code = await cmd.RunAsync(new[] { "--host", "gemini-cli" });
+        Assert.Equal(0, code);
+        using var doc = JsonDocument.Parse(outw.ToString());
+        var ctx = doc.RootElement.GetProperty("hookSpecificOutput").GetProperty("additionalContext").GetString();
+        Assert.Contains("(Reminder)", ctx);
+        Assert.Contains("never delete prod", ctx);
+        // Verify the event name is BeforeAgent (not UserPromptSubmit)
+        var eventName = doc.RootElement.GetProperty("hookSpecificOutput").GetProperty("hookEventName").GetString();
+        Assert.Equal("BeforeAgent", eventName);
+    }
+
+    [Fact]
+    public async Task SkipTurn_GeminiCli_EmitsEmptyObject()
+    {
+        var store = new FakeStore();
+        var outw = new StringWriter();
+        var cmd = MakeCmd(store, new StringReader("{\"session_id\":\"gs1\",\"transcript_path\":\"/x\"}"),
+            outw, _ => 1000);
+        var code = await cmd.RunAsync(new[] { "--host", "gemini-cli" });
+        Assert.Equal(0, code);
+        Assert.Equal("{}", outw.ToString().Trim());
+    }
+
+    [Fact]
+    public async Task MalformedStdin_GeminiCli_FailsSafe_EmptyObjectExitZero()
+    {
+        var store = new FakeStore();
+        var outw = new StringWriter();
+        var cmd = MakeCmd(store, new StringReader("{ not json"), outw);
+        var code = await cmd.RunAsync(new[] { "--host", "gemini-cli" });
+        Assert.Equal(0, code);
+        Assert.Equal("{}", outw.ToString().Trim());
+    }
+
+    [Fact]
     public async Task InjectPath_RenderThrows_FailsSafe_AndDoesNotAdvanceState()
     {
         // A store whose sticky-hot memory List throws simulates a DB error

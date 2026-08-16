@@ -4,7 +4,8 @@
 // Per-turn UserPromptSubmit hook backend. Reads the host hook payload from
 // stdin, decides via the adaptive throttle, and on an "inject" turn renders the
 // pinned block live from the DB and emits host-correct additionalContext JSON.
-// FAIL-SAFE: any error prints "{}" (JSON-envelope hosts) or "" (kiro) and exits 0
+// FAIL-SAFE: any error prints "{}" (JSON-envelope hosts) or "" (kiro) and exits 0.
+// Hosts: claude-code, copilot-cli, kiro (plain text), gemini-cli.
 // — a UserPromptSubmit hook must never block or reject the user's prompt.
 
 using System;
@@ -246,6 +247,10 @@ public sealed class PinnedFloorCommand : ICliCommand
             // Kiro appends raw STDOUT verbatim to context (no JSON envelope).
             // Return the plain text so the PS1 wrapper can pass it straight through.
             "kiro" => additionalContext,
+            // Gemini CLI's BeforeAgent hook uses the same additionalContext field
+            // as Claude Code, but with "BeforeAgent" as the hookEventName.
+            "gemini-cli" =>
+                "{\"hookSpecificOutput\":{\"hookEventName\":\"BeforeAgent\",\"additionalContext\":" + c + "}}",
             _ => "{}",
         };
     }
