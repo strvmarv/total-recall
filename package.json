@@ -28,6 +28,7 @@
     ".copilot-plugin/",
     ".cursor-plugin/",
     ".opencode/",
+    ".kiro/",
     ".mcp.json",
     "README.md",
     "LICENSE",

@@ -1,0 +1,24 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "total-recall Pinned Floor",
+      "description": "Re-asserts pinned directives near the live edge on an adaptive throttle",
+      "trigger": "UserPromptSubmit",
+      "action": {
+        "type": "command",
+        "command": "npx --yes @strvmarv/total-recall pinned-floor --host kiro",
+        "timeout": 60
+      }
+    },
+    {
+      "name": "total-recall Retrieve",
+      "description": "Reminds the agent to search memory before answering questions or starting tasks",
+      "trigger": "UserPromptSubmit",
+      "action": {
+        "type": "agent",
+        "prompt": "Before answering the user's message: if it is a question, task, or involves project context — call `memory_search` with the user's message as the query (warm tier). Use the results to inform your answer. Do NOT search for pure greetings, one-word replies, or messages that are only asking you to run a command. Say nothing to the user about this check."
+      }
+    }
+  ]
+}

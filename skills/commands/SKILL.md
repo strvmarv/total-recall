@@ -97,7 +97,7 @@ of transcript growth. Set `floor_enabled = false` to disable.
 | Claude Code | Active | `UserPromptSubmit` → `additionalContext` |
 | Copilot CLI | Pending upstream fix | `UserPromptSubmit` → `additionalContext` |
 | Cursor | Layered fallback | session-start + skill-guided `session_refresh` |
-| Kiro | Active | `UserPromptSubmit` hook → plain-text STDOUT; `SessionStart` hook → `SKILL.md` injection; `always` steering → persistent instruction |
+| Kiro | Active | `UserPromptSubmit` command hook → pinned-floor (plain-text STDOUT); `SessionStart` agent hook → `session_start` tool; `Stop` agent hook → capture; `always` steering → persistent `session_start` instruction |
 
 ---
 

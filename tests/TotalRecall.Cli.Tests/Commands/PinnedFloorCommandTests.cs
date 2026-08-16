@@ -118,6 +118,49 @@ public sealed class PinnedFloorCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task SkipTurn_Kiro_EmitsEmptyString_NotBraces()
+    {
+        var store = new FakeStore();
+        var outw = new StringWriter();
+        var cmd = MakeCmd(store, new StringReader("{\"session_id\":\"sk1\",\"transcript_path\":\"/x\"}"),
+            outw, _ => 1000);
+        var code = await cmd.RunAsync(new[] { "--host", "kiro" });
+        Assert.Equal(0, code);
+        Assert.Equal("", outw.ToString().Trim());
+        Assert.True(File.Exists(Path.Combine(_dir, PinnedFloorState.FileName("sk1"))));
+    }
+
+    [Fact]
+    public async Task InjectTurn_Kiro_EmitsPlainText_NoJsonEnvelope()
+    {
+        var store = new FakeStore();
+        store.Seed(Tier.Hot, ContentType.Memory, EntryFactory.Make(id: "p1", content: "never delete prod"));
+        store.SetSticky(ContentType.Memory, "p1", true);
+        PinnedFloorState.Save(_dir, new FloorState("ik1", 1, 1, 0, true));
+        var outw = new StringWriter();
+        var cmd = MakeCmd(store, new StringReader("{\"session_id\":\"ik1\"}"), outw);
+        var code = await cmd.RunAsync(new[] { "--host", "kiro" });
+        Assert.Equal(0, code);
+        var output = outw.ToString().Trim();
+        // Must NOT be a JSON envelope — plain text only
+        Assert.DoesNotContain("additionalContext", output);
+        Assert.DoesNotContain("hookSpecificOutput", output);
+        Assert.Contains("(Reminder)", output);
+        Assert.Contains("never delete prod", output);
+    }
+
+    [Fact]
+    public async Task MalformedStdin_Kiro_FailsSafe_EmptyStringExitZero()
+    {
+        var store = new FakeStore();
+        var outw = new StringWriter();
+        var cmd = MakeCmd(store, new StringReader("{ not json"), outw);
+        var code = await cmd.RunAsync(new[] { "--host", "kiro" });
+        Assert.Equal(0, code);
+        Assert.Equal("", outw.ToString().Trim());
+    }
+
+    [Fact]
     public async Task InjectPath_RenderThrows_FailsSafe_AndDoesNotAdvanceState()
     {
         // A store whose sticky-hot memory List throws simulates a DB error

@@ -1,14 +1,17 @@
 #!/usr/bin/env node
-// Installs total-recall hooks and steering into ~/.kiro/ if Kiro is detected.
+// Installs total-recall MCP config and steering into ~/.kiro/ if Kiro is detected.
 //
-// Copies:
-//   hooks/kiro/*.json  -> ~/.kiro/hooks/
-//   .kiro/steering/total-recall.md -> ~/.kiro/steering/
+// Writes:
+//   ~/.kiro/settings/mcp.json  — MCP server registration (merged, non-clobbering)
+//   ~/.kiro/steering/total-recall.md — always-included steering doc
+//
+// Hooks are NOT copied — they ship in the repo's .kiro/hooks/ and activate
+// per-workspace (Kiro's documented activation model).
 //
 // Non-fatal: always resolves. If Kiro isn't present, silently skips.
-// Idempotent: re-running overwrites with the latest version.
+// Idempotent: re-running overwrites steering with the latest version.
 
-import { cpSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
+import { cpSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,39 +34,91 @@ function kiroHome() {
   return null;
 }
 
-export async function installKiroHooks() {
-  const khome = kiroHome();
-  if (!khome) {
-    // Kiro not detected — not an error, just skip
+function isRepoSelf() {
+  // When the install script runs inside the total-recall repo itself
+  // (dev install), skip the MCP config write and steering copy to avoid
+  // double-fire with the workspace-level .kiro/. End users have ROOT
+  // inside node_modules, so the path check distinguishes the two cases.
+  // The package.json name check is unreliable because the published
+  // tarball also has name === @strvmarv/total-recall.
+  const path = require('node:path');
+  return !ROOT.split(path.sep).includes('node_modules');
+}
+
+function mergeMcpConfig(configPath) {
+  const entry = {
+    command: 'npx',
+    args: ['--yes', '@strvmarv/total-recall'],
+    cwd: '${workspaceFolder}'
+  };
+
+  let config = { mcpServers: {} };
+  if (existsSync(configPath)) {
+    try {
+      config = JSON.parse(readFileSync(configPath, 'utf8'));
+      if (!config.mcpServers) config.mcpServers = {};
+    } catch {
+      // Corrupt or unreadable — leave it untouched rather than risk destroying user config
+      process.stderr.write(`[total-recall:postinstall] Kiro mcp.json unreadable — leaving it untouched.\n`);
+      return;
+    }
+  }
+
+  const existing = config.mcpServers['total-recall'];
+  if (existing) {
+    // Preserve user config: only write if the key is missing or malformed
+    if (existing.command === 'npx' &&
+        Array.isArray(existing.args) &&
+        existing.args.includes('@strvmarv/total-recall')) {
+      // Already configured correctly — leave it alone
+      return;
+    }
+    // User has a custom config (different command/fork) — preserve it
+    process.stderr.write('[total-recall:postinstall] Kiro MCP config already has a custom total-recall entry — preserving user config.\n');
     return;
   }
 
-  // --- Hooks ---
-  // Copy the v1 hook JSON files from .kiro/hooks/ in the package to
-  // ~/.kiro/hooks/ so they are active globally across all workspaces.
-  const hooksSrc = join(ROOT, '.kiro', 'hooks');
-  const hooksDest = join(khome, 'hooks');
+  // Key is missing — add it
+  config.mcpServers['total-recall'] = entry;
+  mkdirSync(dirname(configPath), { recursive: true });
+  writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+  process.stderr.write(`[total-recall:postinstall] Kiro MCP config written to ${configPath}\n`);
+}
 
-  if (existsSync(hooksSrc)) {
-    mkdirSync(hooksDest, { recursive: true });
-    const files = readdirSync(hooksSrc).filter(f => f.startsWith('total-recall-') && f.endsWith('.kiro.hook'));
-    for (const file of files) {
-      cpSync(join(hooksSrc, file), join(hooksDest, file), { force: true });
+export async function installKiroHooks() {
+  try {
+    const khome = kiroHome();
+    if (!khome) {
+      // Kiro not detected — not an error, just skip
+      return;
     }
-    if (files.length > 0) {
-      process.stderr.write(`[total-recall:postinstall] Kiro hooks installed to ${hooksDest} (${files.join(', ')})\n`);
+
+    // --- MCP config ---
+    // Write/merge ~/.kiro/settings/mcp.json with the total-recall server entry.
+    // Skip when ROOT is the repo itself (dev install) to avoid same-name MCP
+    // server collision with the workspace-level .kiro/settings/mcp.json.
+    if (!isRepoSelf()) {
+      const mcpConfigPath = join(khome, 'settings', 'mcp.json');
+      mergeMcpConfig(mcpConfigPath);
     }
-  }
 
-  // --- Steering ---
-  // Copy the always-included steering file to ~/.kiro/steering/ so the
-  // agent always receives the session_start instruction in every workspace.
-  const steeringSrc = join(ROOT, '.kiro', 'steering', 'total-recall.md');
-  const steeringDest = join(khome, 'steering');
+    // --- Steering ---
+    // Copy the always-included steering file to ~/.kiro/steering/ so the
+    // agent always receives the session_start instruction in every workspace.
+    // Skip when ROOT is the repo itself (dev install) to avoid double-fire
+    // with the workspace-level .kiro/steering/.
+    if (!isRepoSelf()) {
+      const steeringSrc = join(ROOT, '.kiro', 'steering', 'total-recall.md');
+      const steeringDest = join(khome, 'steering');
 
-  if (existsSync(steeringSrc)) {
-    mkdirSync(steeringDest, { recursive: true });
-    cpSync(steeringSrc, join(steeringDest, 'total-recall.md'), { force: true });
-    process.stderr.write(`[total-recall:postinstall] Kiro steering installed to ${steeringDest}\n`);
+      if (existsSync(steeringSrc)) {
+        mkdirSync(steeringDest, { recursive: true });
+        cpSync(steeringSrc, join(steeringDest, 'total-recall.md'), { force: true });
+        process.stderr.write(`[total-recall:postinstall] Kiro steering installed to ${steeringDest}\n`);
+      }
+    }
+  } catch (e) {
+    // Non-fatal: log and resolve, never reject
+    process.stderr.write(`[total-recall:postinstall] Kiro hook install failed (non-fatal): ${e.message}\n`);
   }
 }
