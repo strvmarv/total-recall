@@ -6,8 +6,8 @@ description: Manage the total-recall memory system and govern automatic capture,
 **IMMEDIATE ACTION REQUIRED — before responding to the user's first message, call the total-recall `session_start` MCP tool. This syncs host imports and loads hot tier context. If `session_start` has already run server-side, the call returns cached results instantly.**
 
 **If `session_start` is blocked by permissions** (e.g., in TUI fullscreen / `dontAsk` mode), do NOT just report the error. Instead:
-1. Tell the user: "total-recall session_start was blocked by permissions. The memory system needs `mcp__plugin_total-recall_total-recall__session_start` allowed to function. You may need to adjust permissions if you want total-recall active this session."
-2. Suggest running `/total-recall:commands setup` to auto-configure permissions
+1. Tell the user: "total-recall session_start was blocked by permissions. Your host's tool-permission settings need to allow total-recall's MCP tools to function (the exact tool name depends on how your host namespaces MCP tools). You may need to adjust permissions if you want total-recall active this session."
+2. On Claude Code, suggest running `/total-recall:commands setup` to auto-configure permissions; other hosts don't have an automated fix yet — point the user at their host's own MCP tool-permission config.
 3. Proceed without memory features for this session — memory unavailability is degraded mode, not fatal
 
 # total-recall
@@ -146,7 +146,7 @@ Print the command reference table below. Do not call any MCP tools.
 
 ### setup
 
-Auto-configure Claude Code permissions so total-recall MCP tools are allowed (required for TUI fullscreen / `dontAsk` permission mode).
+Auto-configure Claude Code permissions so total-recall MCP tools are allowed (required for TUI fullscreen / `dontAsk` permission mode). **This subcommand is Claude Code-specific** — it automates `~/.claude/settings.json`. On other hosts, there is no known automatic fix yet: report that to the user and point them at their host's own MCP tool-permission mechanism instead of attempting these steps.
 
 1. Read `~/.claude/settings.json` (create if it doesn't exist)
 2. Check if `permissions.allow` already contains a rule matching `mcp__plugin_total-recall_total-recall__*` (exact or equivalent glob)

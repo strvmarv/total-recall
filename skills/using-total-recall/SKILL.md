@@ -11,8 +11,8 @@ This skill ensures the total-recall memory system is active for this session.
 
 1. Call the total-recall `session_start` MCP tool now (if it already ran server-side, it returns cached results instantly)
 2. **If `session_start` is blocked by permissions** (e.g., in TUI fullscreen / `dontAsk` mode):
-   - Tell the user: "total-recall session_start was blocked by permissions. The memory system needs `mcp__plugin_total-recall_total-recall__session_start` allowed to function. You may need to adjust permissions if you want total-recall active this session."
-   - Suggest running `/total-recall:commands setup` to auto-configure permissions for future sessions
+   - Tell the user: "total-recall session_start was blocked by permissions. Your host's tool-permission settings need to allow total-recall's MCP tools to function (the exact tool name depends on how your host namespaces MCP tools). You may need to adjust permissions if you want total-recall active this session."
+   - On Claude Code, suggest running `/total-recall:commands setup` to auto-configure permissions for future sessions; other hosts don't have an automated fix yet — point the user at their host's own MCP tool-permission config.
    - Proceed without memory features — this is degraded mode, not fatal
 3. **Announce startup** using the returned data:
    - Report tier summary: pinned, hot, warm, cold, KB counts from `tierSummary`
