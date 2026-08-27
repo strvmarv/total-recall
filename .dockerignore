@@ -6,6 +6,8 @@
 /.git
 /.gitignore
 /node_modules
+/scripts
+!/scripts/fetch-binary.js
 /src
 /tests
 /eval
