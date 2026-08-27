@@ -67,6 +67,6 @@ RUN useradd --uid "$UID" --create-home --shell /usr/sbin/nologin totalrecall \
     && mkdir -p /data \
     && chown "$UID" /data
 
-USER ${UID}
+USER totalrecall
 
 ENTRYPOINT ["node", "bin/start.js"]

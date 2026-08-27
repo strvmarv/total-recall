@@ -72,7 +72,7 @@ export function buildDockerArgs({ args, dataDir, image, uid, gid }) {
   } else if (first === 'ui') {
     const port = parsePort(args);
     if (port == null) {
-      return { ok: false, error: '--port 0 (ephemeral) and invalid ports are not supported in Docker mode; use a fixed port 1-65535.' };
+      return { ok: false, error: 'ephemeral (--port 0) and invalid ports are not supported in Docker mode; use a fixed port 1-65535.' };
     }
     flags.push('-p', `${port}:${port}`);
     const forwarded = stripUiArgs(args.slice(1));

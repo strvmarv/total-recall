@@ -19,7 +19,7 @@ Gatekeeper / MDM signed-binary policy. If `total-recall --version` fails with a
 "killed" / "cannot execute binary" error, run total-recall in a container instead.
 
 The container image (`ghcr.io/strvmarv/total-recall:<version>`) is pulled
-automatically at install time. To use it, point your MCP config at the Docker
+automatically at install time. The pull is best-effort; if it fails (e.g. offline), the wrapper will prompt you to run `docker pull` on first use. To use it, point your MCP config at the Docker
 wrapper instead of the native launcher:
 
 ```json

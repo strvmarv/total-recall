@@ -470,6 +470,15 @@ jobs:
           name: total-recall-linux-arm64
           path: binaries/linux-arm64
 
+      # upload/download-artifact does not preserve the executable bit, so the
+      # binary baked into the image would be mode 0644 and fail to spawn
+      # (EACCES). Restore it before the Dockerfile COPY (mirrors the publish job).
+      - name: Restore executable bit on Linux binaries
+        shell: bash
+        run: |
+          chmod +x binaries/linux-x64/total-recall
+          chmod +x binaries/linux-arm64/total-recall
+
       # The build artifacts do NOT contain models/ (it is seeded only in the
       # publish job). Fetch + seed it here so the image boots instead of failing
       # at first DB open with a "model absent" error.
