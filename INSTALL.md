@@ -12,6 +12,41 @@ Since 0.8.0, total-recall is a **prebuilt .NET 8 NativeAOT binary** wrapped by a
 - **Internet access** — only needed if you install via Claude Code's `/plugin` flow with a `source: github` marketplace entry. In that case `bin/start.js` downloads the matching per-RID archive (~90 MB, includes the bundled embedding model) from GitHub Releases on first launch, verifying it by sha256 against the release `provisioning.manifest.json`. The download runs in-process inside the shim: the MCP connection stays up the entire time, and any tool call during provisioning returns a `{ "status": "not_ready", "phase": "provisioning" }` result — wait a few seconds and retry. Once provisioning finishes the engine starts automatically and memory features become available; no restart required. The npm install path ships all RIDs in the tarball and needs no runtime download.
 - **Intel Mac (`darwin-x64`) is not currently shipped.** Apple Silicon (`osx-arm64`) is. All Apple hardware sold since November 2020 is arm64.
 
+## Docker (for hosts that block the native binary)
+
+Some corporate-managed Macs block execution of the unsigned NativeAOT binary via
+Gatekeeper / MDM signed-binary policy. If `total-recall --version` fails with a
+"killed" / "cannot execute binary" error, run total-recall in a container instead.
+
+The container image (`ghcr.io/strvmarv/total-recall:<version>`) is pulled
+automatically at install time. To use it, point your MCP config at the Docker
+wrapper instead of the native launcher:
+
+```json
+{
+  "mcpServers": {
+    "total-recall": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/start-docker.js"],
+      "cwd": "${CLAUDE_PLUGIN_ROOT}"
+    }
+  }
+}
+```
+
+Your memory data stays in `~/.total-recall` (or `$TOTAL_RECALL_HOME`) — the wrapper
+bind-mounts it into the container, so there is no migration and the same DB/config
+is used whether you run natively or in Docker.
+
+Notes:
+
+- Requires Docker Desktop (or any Docker-compatible runtime) on PATH.
+- `TOTAL_RECALL_DB_PATH` is not supported in Docker mode (the container resolves
+  `~/` against its own filesystem); unset it and use `TOTAL_RECALL_HOME` instead.
+- The web UI (`total-recall ui`) binds `0.0.0.0` inside the container and publishes
+  the port to the host; the bearer token printed at startup is the security boundary.
+- Override the image (e.g. to pin a digest) with `TOTAL_RECALL_DOCKER_IMAGE`.
+
 ## Relocating the database
 
 By default, total-recall stores its SQLite database at `<TOTAL_RECALL_HOME>/total-recall.db` (typically `~/.total-recall/total-recall.db`). Set `TOTAL_RECALL_DB_PATH` to relocate **only** the database file — `config.toml`, the embedding model cache, and export directories stay anchored to `TOTAL_RECALL_HOME`.
