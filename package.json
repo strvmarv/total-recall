@@ -11,7 +11,7 @@
     "prepare": "git config core.hooksPath git-hooks || true",
     "postinstall": "node scripts/postinstall.js",
     "prepublishOnly": "node scripts/verify-binaries.js",
-    "test:shim": "node --test bin/shim/ scripts/fetch-binary.test.js"
+    "test:shim": "node --test bin/shim/ bin/start-docker.test.js scripts/fetch-binary.test.js scripts/pull-docker-image.test.js"
   },
   "files": [
     "bin/",

@@ -23,6 +23,7 @@ import { installWindsurf } from './install-windsurf.js';
 import { installGemini } from './install-gemini.js';
 import { installZed } from './install-zed.js';
 import { installVsCode } from './install-vscode.js';
+import { pullDockerImage } from './pull-docker-image.js';
 
 const result = await ensureBinary({ logPrefix: '[total-recall:postinstall]' });
 
@@ -48,5 +49,8 @@ await installWindsurf();
 await installGemini();
 await installZed();
 await installVsCode();
+
+// Pull the container image for the Docker execution path (best-effort, non-fatal).
+pullDockerImage();
 
 process.exit(0);
