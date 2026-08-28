@@ -35,9 +35,27 @@ fi
 # run if binaries/ is absent — a one-time post-install event, not per-prompt
 # overhead; once present it fast-paths immediately.
 output=$(node "$PLUGIN_ROOT/bin/start.js" pinned-floor --host "$host" 2>/dev/null)
-if [ $? -ne 0 ] || [ -z "$output" ]; then
+rc=$?
+
+# The capture above only proves *something* came back, not that it's a
+# complete, well-formed JSON object. A killed/interrupted child (hook
+# timeout, slow render on a large pinned block, a pipe hiccup) can still
+# flush a partial payload before dying — bash forwards that partial text
+# as if it were whole, which Claude Code then rejects with "Unterminated
+# string". Validate with `node` (already required to run the CLI, unlike
+# `jq` which isn't guaranteed present) before forwarding; anything that
+# doesn't parse falls back to the same no-op as an empty capture.
+if [ "$rc" -ne 0 ] || [ -z "$output" ]; then
   printf '{}\n'
-else
+elif printf '%s' "$output" | node -e '
+let d = "";
+process.stdin.on("data", c => { d += c; });
+process.stdin.on("end", () => {
+  try { JSON.parse(d); process.exit(0); } catch { process.exit(1); }
+});
+' 2>/dev/null; then
   printf '%s\n' "$output"
+else
+  printf '{}\n'
 fi
 exit 0
