@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 4.2.1 - 2026-08-28
+
+### Fixed
+
+- **`pinned-floor` UserPromptSubmit hook could emit invalid/truncated JSON,
+  surfacing as Claude Code's "Unterminated string" error.** `run.sh` only
+  checked that the CLI's captured stdout was non-empty, not that it was
+  complete, valid JSON — a killed or interrupted child (hook timeout, slow
+  render on a large pinned block, a pipe hiccup) could still flush a partial
+  payload, which bash forwarded verbatim. The captured output is now
+  validated with `node` (already a hard dependency of the hook, unlike `jq`)
+  before forwarding: it must parse as a non-null, non-array JSON object, or
+  the hook falls back to `{}` — the same no-op it already used for an empty
+  capture. Also forces `Console.InputEncoding`/`OutputEncoding` to UTF-8 on
+  the generic CLI dispatch path (used by `pinned-floor`), matching the MCP
+  `serve` path's existing UTF-8 stdio contract, to rule out Windows OEM
+  code-page corruption of non-ASCII pinned content on either stream. (#24)
+
 ## 4.2.0 - 2026-08-17
 
 ### Added
