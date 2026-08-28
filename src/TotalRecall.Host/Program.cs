@@ -95,9 +95,13 @@ internal static class Program
         }
 
         // Hook-emitted JSON envelopes (e.g. pinned-floor) can carry non-ASCII
-        // pinned content (em dashes, arrows). Force UTF-8 here too — same
-        // reasoning as RunServeAsync above — so Windows never substitutes the
-        // OS default/OEM code page and mangles the payload.
+        // pinned content (em dashes, arrows), and pinned-floor itself reads
+        // the hook's stdin payload (session id, transcript path, cwd) via
+        // Console.In.ReadToEnd() before parsing it as JSON. Force UTF-8 on
+        // both streams here too — same reasoning as RunServeAsync above —
+        // so Windows never substitutes the OS default/OEM code page and
+        // mangles either direction.
+        Console.InputEncoding = Encoding.UTF8;
         Console.OutputEncoding = Encoding.UTF8;
         return await TotalRecall.Cli.CliApp.RunAsync(args).ConfigureAwait(false);
     }
