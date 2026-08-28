@@ -44,14 +44,20 @@ rc=$?
 # as if it were whole, which Claude Code then rejects with "Unterminated
 # string". Validate with `node` (already required to run the CLI, unlike
 # `jq` which isn't guaranteed present) before forwarding; anything that
-# doesn't parse falls back to the same no-op as an empty capture.
+# isn't a JSON object (partial, or well-formed but non-object like `null`
+# or `[]`) falls back to the same no-op as an empty capture. Chunks are
+# concatenated once via Buffer.concat rather than repeated string `+=`,
+# which is quadratic and this is specifically the large-payload path.
 if [ "$rc" -ne 0 ] || [ -z "$output" ]; then
   printf '{}\n'
 elif printf '%s' "$output" | node -e '
-let d = "";
-process.stdin.on("data", c => { d += c; });
+const chunks = [];
+process.stdin.on("data", c => chunks.push(c));
 process.stdin.on("end", () => {
-  try { JSON.parse(d); process.exit(0); } catch { process.exit(1); }
+  try {
+    const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    process.exit(parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? 0 : 1);
+  } catch { process.exit(1); }
 });
 ' 2>/dev/null; then
   printf '%s\n' "$output"
