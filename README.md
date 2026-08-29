@@ -107,6 +107,8 @@ This works with **Copilot CLI**, **OpenCode**, **Cline**, **Cursor**, **Hermes**
 
 > **Note:** `npx -y @strvmarv/total-recall` does not work due to an [npm bug](https://github.com/npm/cli/issues/3753) with scoped package binaries. Use the global install (`total-recall` command) instead.
 
+> **Blocked by signed-binary policy?** Run total-recall in a container instead — see the "Docker" section of [INSTALL.md](INSTALL.md).
+
 ---
 
 ## What Gets Remembered

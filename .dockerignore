@@ -1,0 +1,39 @@
+# Build context hygiene. The image only needs the Node shim (bin/), the
+# fetch-binary helper (scripts/fetch-binary.js), catalog.json, package.json, and
+# the staged binaries/ tree. Everything else is excluded to keep the buildx
+# context transfer small.
+
+/.git
+/.gitignore
+/node_modules
+/scripts
+!/scripts/fetch-binary.js
+/src
+/tests
+/eval
+/docs
+/skills
+/agents
+/hooks
+/hermes-plugin
+/.claude-plugin
+/.copilot-plugin
+/.cursor-plugin
+/.opencode
+/.kiro
+/.superpowers
+/.mcp.json
+/models
+/*.md
+/LICENSE
+/CHANGELOG.md
+/CONTRIBUTING.md
+/INSTALL.md
+/PRIVACY.md
+/package-lock.json
+/global.json
+
+# Test files are never needed at runtime in the container.
+**/*.test.js
+**/*.test.ts
+**/*.test.tsx
