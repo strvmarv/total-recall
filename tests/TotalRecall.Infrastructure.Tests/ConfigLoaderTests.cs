@@ -535,6 +535,27 @@ public sealed class ConfigLoaderTests : IDisposable
     }
 
     [Fact]
+    public void LoadEffectiveConfig_SkillsSectionPlural_ParsesAutoImportTrue()
+    {
+        // README and docs use [skills] (plural); parser must accept both forms
+        // for auto_import too, same as it already does for extra_dirs.
+        var cfgPath = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(cfgPath, """
+            [skills]
+            auto_import = true
+            """);
+        Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", _tempDir);
+
+        var loader = new ConfigLoader();
+        var cfg = loader.LoadEffectiveConfig(cfgPath);
+
+        Assert.True(Microsoft.FSharp.Core.FSharpOption<TotalRecall.Core.Config.SkillConfig>.get_IsSome(cfg.Skill));
+        var autoImport = cfg.Skill.Value.AutoImport;
+        Assert.True(Microsoft.FSharp.Core.FSharpOption<bool>.get_IsSome(autoImport));
+        Assert.True(autoImport.Value);
+    }
+
+    [Fact]
     public void LoadEffectiveConfig_SkillSection_ParsesAutoImportFalse()
     {
         var cfgPath = Path.Combine(_tempDir, "config.toml");

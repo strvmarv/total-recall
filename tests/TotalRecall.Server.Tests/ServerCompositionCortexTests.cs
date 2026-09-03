@@ -46,7 +46,7 @@ public sealed class ServerCompositionCortexTests
             Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", home);
             File.WriteAllText(Path.Combine(home, "config.toml"), "# no skill section\n");
 
-            var handles = ServerComposition.OpenCortexForTest(
+            using var handles = ServerComposition.OpenCortexForTest(
                 sqliteDbPath: ":memory:",
                 cortexUrl: "https://cortex.test",
                 cortexPat: "tr_test123");
@@ -71,7 +71,7 @@ public sealed class ServerCompositionCortexTests
             Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", home);
             File.WriteAllText(Path.Combine(home, "config.toml"), "[skill]\nauto_import = true\n");
 
-            var handles = ServerComposition.OpenCortexForTest(
+            using var handles = ServerComposition.OpenCortexForTest(
                 sqliteDbPath: ":memory:",
                 cortexUrl: "https://cortex.test",
                 cortexPat: "tr_test123");
@@ -96,7 +96,7 @@ public sealed class ServerCompositionCortexTests
             Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", home);
             File.WriteAllText(Path.Combine(home, "config.toml"), "[skill]\nauto_import = false\n");
 
-            var handles = ServerComposition.OpenCortexForTest(
+            using var handles = ServerComposition.OpenCortexForTest(
                 sqliteDbPath: ":memory:",
                 cortexUrl: "https://cortex.test",
                 cortexPat: "tr_test123");

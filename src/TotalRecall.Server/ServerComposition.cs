@@ -734,10 +734,11 @@ public static class ServerComposition
             // both and is injected into SessionLifecycle so session_start
             // folds skill counts into importSummary.
             //
-            // Auto-import defaults to DISABLED: without [skill] auto_import =
-            // true, uploading every locally-scanned skill duplicates whatever
-            // a host tool (e.g. a Cortex skill-sync plugin) already synced
-            // down globally — this is opt-in, not the safe default.
+            // Auto-import defaults to DISABLED: without [skills] (or legacy
+            // [skill]) auto_import = true, uploading every locally-scanned
+            // skill duplicates whatever a host tool (e.g. a Cortex skill-sync
+            // plugin) already synced down globally — this is opt-in, not the
+            // safe default.
             var autoImportEnabled = false;
             var extraSkillDirs = Array.Empty<string>();
             if (FSharpOption<Core.Config.SkillConfig>.get_IsSome(cfg.Skill))
