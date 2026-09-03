@@ -104,6 +104,10 @@ type ScopeConfig = {
 
 type SkillConfig = {
     ExtraDirs: string [] option
+    /// Whether locally-scanned host-tool skills get uploaded to Cortex
+    /// (cortex storage mode only). None/absent means disabled — auto-import
+    /// must be explicitly opted into; it is not the safe-by-default behavior.
+    AutoImport: bool option
 }
 
 /// Phase 3 idea 2c — tool-result cache settings.

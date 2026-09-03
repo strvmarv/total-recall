@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 4.2.2 - 2026-09-02
+
+### Fixed
+
+- **Cortex storage mode uploaded every locally-scanned skill to Cortex on
+  every `session_start`, with no way to turn it off short of leaving cortex
+  mode entirely.** `~/.claude/skills` and `{project}/.claude/skills` were
+  unconditionally scanned and POSTed to Cortex's `/api/me/skills/import`
+  endpoint, duplicating skills a host tool already synced down from Cortex
+  globally (e.g. a Cortex skill-sync plugin) as separate user-scoped
+  entries. Adds `[skills] auto_import` (bool, **defaults to disabled**) to
+  gate the upload; local scanning and `skill_get`/`skill_search` are
+  unaffected either way. (#27)
+
 ## 4.2.1 - 2026-08-28
 
 ### Fixed

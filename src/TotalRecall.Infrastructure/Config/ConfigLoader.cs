@@ -489,7 +489,8 @@ public sealed class ConfigLoader : IConfigLoader
             && skillObj is TomlTable skillTable)
         {
             var extraDirs = TryGetStringArray(skillTable, "extra_dirs");
-            var skillCfg = new Core.Config.SkillConfig(extraDirs);
+            var autoImport = TryGetBool(skillTable, "auto_import");
+            var skillCfg = new Core.Config.SkillConfig(extraDirs, autoImport);
             skill = FSharpOption<Core.Config.SkillConfig>.Some(skillCfg);
         }
         else

@@ -82,7 +82,15 @@ public sealed class ServerCompositionHandles : IDisposable
     /// </summary>
     public ReindexProgress? ReindexProgress { get; }
 
-    internal ServerCompositionHandles(IDisposable resource, ToolRegistry registry, IStore store, string storageMode = "sqlite", Infrastructure.Sync.PeriodicSync? periodicSync = null, ReindexProgress? reindexProgress = null, System.Threading.CancellationTokenSource? reindexCts = null)
+    /// <summary>
+    /// Whether this composition wired an upload-capable skill client (cortex
+    /// mode with [skill] auto_import = true). False in sqlite/postgres mode,
+    /// and false in cortex mode unless explicitly opted into. Exposed for
+    /// test assertions.
+    /// </summary>
+    public bool SkillAutoImportEnabled { get; }
+
+    internal ServerCompositionHandles(IDisposable resource, ToolRegistry registry, IStore store, string storageMode = "sqlite", Infrastructure.Sync.PeriodicSync? periodicSync = null, ReindexProgress? reindexProgress = null, System.Threading.CancellationTokenSource? reindexCts = null, bool skillAutoImportEnabled = false)
     {
         _resource = resource;
         Registry = registry;
@@ -91,6 +99,7 @@ public sealed class ServerCompositionHandles : IDisposable
         _periodicSync = periodicSync;
         ReindexProgress = reindexProgress;
         _reindexCts = reindexCts;
+        SkillAutoImportEnabled = skillAutoImportEnabled;
     }
 
     public void Dispose()
@@ -719,12 +728,18 @@ public static class ServerComposition
                 syncQueue: syncQueue);
 
             // Plan 2: skill infrastructure — cortex-mode only. Scanner walks
-            // local ~/.claude/skills and {project}/.claude/skills; client POSTs
-            // bundles to the cortex /api/me/skills/import endpoint; the import
-            // service orchestrates both and is injected into SessionLifecycle
-            // so session_start folds skill counts into importSummary.
-            var skillClient = CortexSkillClient.Create(cortexUrl, cortexPat);
-            var skillScanner = new ClaudeCodeSkillScanner();
+            // local ~/.claude/skills and {project}/.claude/skills; when
+            // auto-import is enabled the client POSTs bundles to the cortex
+            // /api/me/skills/import endpoint; the import service orchestrates
+            // both and is injected into SessionLifecycle so session_start
+            // folds skill counts into importSummary.
+            //
+            // Auto-import defaults to DISABLED: without [skills] (or legacy
+            // [skill]) auto_import = true, uploading every locally-scanned
+            // skill duplicates whatever a host tool (e.g. a Cortex skill-sync
+            // plugin) already synced down globally — this is opt-in, not the
+            // safe default.
+            var autoImportEnabled = false;
             var extraSkillDirs = Array.Empty<string>();
             if (FSharpOption<Core.Config.SkillConfig>.get_IsSome(cfg.Skill))
             {
@@ -733,7 +748,15 @@ public static class ServerComposition
                 {
                     extraSkillDirs = skillCfg.ExtraDirs.Value;
                 }
+                if (FSharpOption<bool>.get_IsSome(skillCfg.AutoImport))
+                {
+                    autoImportEnabled = skillCfg.AutoImport.Value;
+                }
             }
+            ISkillClient skillClient = autoImportEnabled
+                ? CortexSkillClient.Create(cortexUrl, cortexPat)
+                : NullSkillClient.Instance;
+            var skillScanner = new ClaudeCodeSkillScanner();
             ICustomDirsSkillScanner? customDirsScanner = extraSkillDirs.Length > 0
                 ? new CustomDirsSkillScanner(extraSkillDirs)
                 : null;
@@ -807,7 +830,7 @@ public static class ServerComposition
             registry.Register(new SkillImportHostHandler(
                 skillImportService, () => Environment.CurrentDirectory));
 
-            return new ServerCompositionHandles(conn, registry, routingStore, storageMode, periodicSync, reindexProgress, reindexCts);
+            return new ServerCompositionHandles(conn, registry, routingStore, storageMode, periodicSync, reindexProgress, reindexCts, skillAutoImportEnabled: autoImportEnabled);
         }
         catch
         {

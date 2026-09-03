@@ -30,6 +30,87 @@ public sealed class ServerCompositionCortexTests
     }
 
     /// <summary>
+    /// The bug this closes: cortex mode unconditionally scanned ~/.claude/skills
+    /// and POSTed every skill found to Cortex's /api/me/skills/import, duplicating
+    /// skills a host tool (e.g. cortex-plugin) already synced down globally. With
+    /// no [skill] section at all, auto-import must default to disabled.
+    /// </summary>
+    [Fact]
+    public void OpenCortex_NoSkillSection_AutoImportDefaultsDisabled()
+    {
+        var home = Path.Combine(Path.GetTempPath(), $"tr-cortex-skill-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(home);
+        var prevHome = Environment.GetEnvironmentVariable("TOTAL_RECALL_HOME");
+        try
+        {
+            Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", home);
+            File.WriteAllText(Path.Combine(home, "config.toml"), "# no skill section\n");
+
+            using var handles = ServerComposition.OpenCortexForTest(
+                sqliteDbPath: ":memory:",
+                cortexUrl: "https://cortex.test",
+                cortexPat: "tr_test123");
+
+            Assert.False(handles.SkillAutoImportEnabled);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", prevHome);
+            try { Directory.Delete(home, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public void OpenCortex_SkillAutoImportTrue_EnablesUpload()
+    {
+        var home = Path.Combine(Path.GetTempPath(), $"tr-cortex-skill-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(home);
+        var prevHome = Environment.GetEnvironmentVariable("TOTAL_RECALL_HOME");
+        try
+        {
+            Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", home);
+            File.WriteAllText(Path.Combine(home, "config.toml"), "[skill]\nauto_import = true\n");
+
+            using var handles = ServerComposition.OpenCortexForTest(
+                sqliteDbPath: ":memory:",
+                cortexUrl: "https://cortex.test",
+                cortexPat: "tr_test123");
+
+            Assert.True(handles.SkillAutoImportEnabled);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", prevHome);
+            try { Directory.Delete(home, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public void OpenCortex_SkillAutoImportFalse_DisablesUpload()
+    {
+        var home = Path.Combine(Path.GetTempPath(), $"tr-cortex-skill-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(home);
+        var prevHome = Environment.GetEnvironmentVariable("TOTAL_RECALL_HOME");
+        try
+        {
+            Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", home);
+            File.WriteAllText(Path.Combine(home, "config.toml"), "[skill]\nauto_import = false\n");
+
+            using var handles = ServerComposition.OpenCortexForTest(
+                sqliteDbPath: ":memory:",
+                cortexUrl: "https://cortex.test",
+                cortexPat: "tr_test123");
+
+            Assert.False(handles.SkillAutoImportEnabled);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", prevHome);
+            try { Directory.Delete(home, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    /// <summary>
     /// Proves the embedder-fingerprint migration is wired into the cortex
     /// composition path (OpenCortexCore), not just sqlite/postgres. We seed a
     /// LOCAL DB that is populated but stamped with a DIFFERENT model, configure

@@ -162,7 +162,7 @@ Every `session_start` call runs the same sequence:
 4. **Tier summary** — counts entries across hot, warm, cold, and all KB collections, plus a sticky count (`tierSummary.pinned` is retained for wire compatibility and now reports sticky-hot entries). A `pinned_budget_pressure` hint fires when sticky pins consume over half the token budget (suggested action: `memory_unpin`).
 5. **Session continuity** — reports human-readable time since the last compaction event (proxy for last active session).
 
-Every `session_start` also runs a skill scan: it reads `~/.claude/skills/` plus any directories listed in `[skills] extra_dirs`, persists the content + a locally-computed embedding to a SQLite skill cache, and advertises discovered skills as an `## Available Skills` block in the session context. Scanned skills are invokable on demand via the `skill_get` MCP tool and discoverable via `skill_search` (hybrid semantic + keyword ranking with a usage-decay tie-breaker) — both work entirely offline with no Cortex required. In Cortex mode the scanned skills are also pushed to Cortex, usage events sync back as a multi-machine rollup, and pulled skills from other machines merge into the same local cache.
+Every `session_start` also runs a skill scan: it reads `~/.claude/skills/` plus any directories listed in `[skills] extra_dirs`, persists the content + a locally-computed embedding to a SQLite skill cache, and advertises discovered skills as an `## Available Skills` block in the session context. Scanned skills are invokable on demand via the `skill_get` MCP tool and discoverable via `skill_search` (hybrid semantic + keyword ranking with a usage-decay tie-breaker) — both work entirely offline with no Cortex required. In Cortex mode, scanning and local `skill_get`/`skill_search` always work the same way; whether scanned skills also get **uploaded** to Cortex (so usage events sync back as a multi-machine rollup and skills pulled from other machines merge into the local cache) is controlled by `[skills] auto_import`, which **defaults to disabled** — uploading local skills is opt-in, since a host tool that already syncs skills down from Cortex (e.g. a Cortex skill-sync plugin) would otherwise have them re-uploaded right back as duplicate user-scoped entries.
 
 ### Pinned-Directive Floor
 
@@ -417,6 +417,15 @@ extra_dirs = [
 ```
 
 Paths can be absolute or `~/`-prefixed. Skills in `extra_dirs` are always advertised from disk — Cortex is not required.
+
+**Uploading local skills to Cortex (`auto_import`):** In Cortex storage mode, scanning `~/.claude/skills/` for local `skill_get`/`skill_search` always happens. Whether those scanned skills are also *uploaded* to Cortex is a separate, opt-in setting:
+
+```toml
+[skills]
+auto_import = true
+```
+
+Defaults to `false` — scanning and local skill lookup work either way, but nothing is uploaded unless you turn this on. This is opt-in because a host tool that already syncs skills down *from* Cortex (e.g. a Cortex skill-sync plugin populating `~/.claude/skills/`) would otherwise have those same skills scanned right back up as duplicate user-scoped entries on every session start.
 
 **Skill format:** Each skill is either a single `.md` file or a directory containing a `SKILL.md` entry point. A minimal single-file skill:
 
