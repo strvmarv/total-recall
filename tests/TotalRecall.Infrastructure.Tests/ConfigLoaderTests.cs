@@ -515,6 +515,61 @@ public sealed class ConfigLoaderTests : IDisposable
         Assert.True(Microsoft.FSharp.Core.FSharpOption<string[]>.get_IsNone(cfg.Skill.Value.ExtraDirs));
     }
 
+    [Fact]
+    public void LoadEffectiveConfig_SkillSection_ParsesAutoImportTrue()
+    {
+        var cfgPath = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(cfgPath, """
+            [skill]
+            auto_import = true
+            """);
+        Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", _tempDir);
+
+        var loader = new ConfigLoader();
+        var cfg = loader.LoadEffectiveConfig(cfgPath);
+
+        Assert.True(Microsoft.FSharp.Core.FSharpOption<TotalRecall.Core.Config.SkillConfig>.get_IsSome(cfg.Skill));
+        var autoImport = cfg.Skill.Value.AutoImport;
+        Assert.True(Microsoft.FSharp.Core.FSharpOption<bool>.get_IsSome(autoImport));
+        Assert.True(autoImport.Value);
+    }
+
+    [Fact]
+    public void LoadEffectiveConfig_SkillSection_ParsesAutoImportFalse()
+    {
+        var cfgPath = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(cfgPath, """
+            [skill]
+            auto_import = false
+            """);
+        Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", _tempDir);
+
+        var loader = new ConfigLoader();
+        var cfg = loader.LoadEffectiveConfig(cfgPath);
+
+        Assert.True(Microsoft.FSharp.Core.FSharpOption<TotalRecall.Core.Config.SkillConfig>.get_IsSome(cfg.Skill));
+        var autoImport = cfg.Skill.Value.AutoImport;
+        Assert.True(Microsoft.FSharp.Core.FSharpOption<bool>.get_IsSome(autoImport));
+        Assert.False(autoImport.Value);
+    }
+
+    [Fact]
+    public void LoadEffectiveConfig_SkillSection_NoAutoImport_AutoImportIsNone()
+    {
+        var cfgPath = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(cfgPath, """
+            [skill]
+            extra_dirs = ["~/my-skills"]
+            """);
+        Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", _tempDir);
+
+        var loader = new ConfigLoader();
+        var cfg = loader.LoadEffectiveConfig(cfgPath);
+
+        Assert.True(Microsoft.FSharp.Core.FSharpOption<TotalRecall.Core.Config.SkillConfig>.get_IsSome(cfg.Skill));
+        Assert.True(Microsoft.FSharp.Core.FSharpOption<bool>.get_IsNone(cfg.Skill.Value.AutoImport));
+    }
+
     // --- tool_cache section tests -----------------------------------------
 
     [Fact]
