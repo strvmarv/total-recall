@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 4.2.3 - 2026-09-04
+
+### Fixed
+
+- **`SessionEnd` hook reported "Hook cancelled" on every `/exit` on Windows
+  (#28).** Claude Code shares a hard-coded 1.5s default budget across all
+  `SessionEnd` hooks, raising it only when a hook's `hooks.json` entry sets
+  an explicit per-hook `timeout` (capped at 60s). This hook's chain
+  (`bash` → `node` → the self-contained .NET engine → SQLite) measures
+  ~1.2-1.3s end-to-end on Windows — right at that default ceiling.
+  Measuring the chain layer-by-layer (against the real, ~250MB production
+  database) attributes the cost almost entirely to process-spawn overhead
+  across three cold-starting runtimes; the SQLite migration-check + hot-tier
+  count the CLI actually performs costs ~15-30ms, not the bulk of it. Adds
+  `"timeout": 10` to the `SessionEnd` entry in `hooks/hooks.json`, matching
+  the issue's own third suggested fix direction ("keep the hook's own work
+  below whatever grace window Claude Code enforces"), plus a regression
+  test (`hooks/hooks.config.test.js`) asserting the timeout stays set and
+  within Claude Code's supported range.
+
 ## 4.2.2 - 2026-09-02
 
 ### Fixed
