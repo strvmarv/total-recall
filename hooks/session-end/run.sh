@@ -9,6 +9,12 @@
 #
 # All logic lives in the CLI (`session-end-hint`); this wrapper only forwards
 # the host flag and must NEVER fail session teardown (exit 0, "{}" on error).
+#
+# Claude Code shares a 1.5s default budget across all SessionEnd hooks and
+# cancels whatever hasn't returned by then; this chain (bash -> node -> the
+# self-contained .NET engine -> SQLite) measures ~1.2-1.3s on Windows, right
+# at that edge. hooks.json's SessionEnd entry sets an explicit `timeout` to
+# raise the budget — see issue #28.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

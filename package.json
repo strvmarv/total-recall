@@ -1,6 +1,6 @@
 {
   "name": "@strvmarv/total-recall",
-  "version": "4.2.2",
+  "version": "4.2.3",
   "description": "Multi-tiered memory and knowledge base plugin for TUI coding assistants",
   "type": "module",
   "main": "bin/start.js",
@@ -11,7 +11,7 @@
     "prepare": "git config core.hooksPath git-hooks || true",
     "postinstall": "node scripts/postinstall.js",
     "prepublishOnly": "node scripts/verify-binaries.js",
-    "test:shim": "node --test bin/shim/ scripts/fetch-binary.test.js"
+    "test:shim": "node --test bin/shim/ scripts/fetch-binary.test.js hooks/hooks.config.test.js"
   },
   "files": [
     "bin/",
