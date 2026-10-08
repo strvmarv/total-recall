@@ -417,6 +417,6 @@ Before opening a pull request:
 4. **Benchmark does not regress** — run `/total-recall:commands eval --compare baseline` and include the output in your PR description if you changed retrieval, scoring, or compaction logic.
 5. **New behavior is tested** — new importers, parsers, and content types all require corresponding test files in the matching `tests/TotalRecall.*.Tests/` project.
 6. **Plugin manifest version sync** — if you're cutting a release, the `version` field must match across all six files: `package.json`, `package-lock.json` (two fields), `.claude-plugin/plugin.json`, `.copilot-plugin/plugin.json`, `.cursor-plugin/plugin.json`, and `hermes-plugin/plugin.yaml`. The canonical list (with exclusions) is the "Version sync" standing rule in `AGENTS.md`. The binary's own version is stamped from the git tag by the release workflow — nothing to edit in-repo.
-7. **No `Co-Authored-By: Claude ...` trailers** in commit messages. Project-wide rule.
+7. **Keep the AI co-author trailer** (`Co-Authored-By: <model> <noreply@anthropic.com>` in Claude Code) on commits a coding agent helped write. Jellyfish uses it to track AI adoption. Project-wide rule; see `AGENTS.md`.
 
 If you're adding a new host tool importer, include the `Detect()` logic rationale in your PR description — false positives will silently corrupt imports for users who don't have the tool installed.
