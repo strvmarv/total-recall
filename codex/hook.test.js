@@ -193,7 +193,12 @@ test('process: session-start prints valid JSON, exits 0, writes nothing to stder
 });
 
 test('process: user-prompt-submit with no provisioned engine prints nothing and exits 0', () => {
-  const r = runHook('user-prompt-submit', { input: payload() });
+  // Run from a tree that has the hook and the floor module but no binaries/, so silence proves "no engine".
+  const tree = copyTree(['codex/hook.js', 'pi/floor.js', 'scripts/fetch-binary.js']);
+  const r = spawnSync(process.execPath, [path.join(tree, 'codex', 'hook.js'), 'user-prompt-submit'], {
+    input: payload(), encoding: 'utf8',
+    env: { ...process.env, TOTAL_RECALL_HOME: tmpDir('tr-codex-trh-') },
+  });
   assert.equal(r.status, 0);
   assert.equal(r.stderr, '');
   assert.equal(r.stdout, '');

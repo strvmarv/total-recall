@@ -44,11 +44,11 @@ function enabledMarketplaces(text) {
   const enabled = new Set();
   let current = null;
   for (const line of text.split(/\r?\n/)) {
-    const header = /^\s*\[plugins\."total-recall@([^"]+)"\]\s*$/.exec(line);
-    if (header) { current = header[1]; continue; }
+    const header = /^\s*\[plugins\.(["'])total-recall@([^"']+)\1\]\s*(?:#.*)?$/.exec(line);
+    if (header) { current = header[2]; continue; }
     if (/^\s*\[/.test(line)) { current = null; continue; }
     if (current !== null) {
-      const flag = /^\s*enabled\s*=\s*(true|false)\b/.exec(line);
+      const flag = /^\s*enabled\s*=\s*(true|false)\b\s*(?:#.*)?$/.exec(line);
       if (flag) { if (flag[1] === 'true') enabled.add(current); current = null; }
     }
   }

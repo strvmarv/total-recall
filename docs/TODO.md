@@ -380,7 +380,7 @@ After a compaction the pinned block that the floor last injected may be gone fro
 ### Codex CLI: unobserved or deferred
 
 - Interactive trust flow (`/hooks` review) and interactive MCP tool approval were not observed (no pseudo-terminal); INSTALL.md follows Codex's documentation there.
-- macOS and Linux are by design only (POSIX shell hooks, `~/.codex`, lowercase proxy variables); run the plugin on both.
+- macOS and Linux were not run: the POSIX assumptions are `~/.codex` resolution, lowercase proxy variables, and Codex substituting the braced `${PLUGIN_ROOT}` through `sh`. Run the plugin on both.
 - `SessionEnd` (3 s clamp, no user-visible output) and `fork` (history already carries the instructions) are deliberately not mapped; revisit if Codex gives `SessionEnd` a visible surface.
 - A first-run tutorial remains deferred for all harnesses (see Onboarding).
 

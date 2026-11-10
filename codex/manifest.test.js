@@ -36,7 +36,7 @@ for (const rel of [
 }
 
 test('version sync: hermes-plugin/plugin.yaml', () => {
-  const m = /^version:\s*(\S+)\s*$/m.exec(readText('hermes-plugin/plugin.yaml'));
+  const m = /^version:\s*["']?([^"'\s]+)["']?\s*$/m.exec(readText('hermes-plugin/plugin.yaml'));
   assert.ok(m, 'plugin.yaml has a top-level version line');
   assert.equal(m[1], pkg.version);
 });

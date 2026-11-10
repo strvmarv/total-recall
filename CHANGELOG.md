@@ -27,9 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   working directory set, and it forwards the environment variables the engine
   needs (Codex otherwise sanitizes the server's environment). Verified end to end
   on Codex 0.162.1 (Windows): hooks, tool calls, floor cadence over a resumed
-  session, store parity between hook and server, update path. Plugin hooks need a
-  one-time trust review (`/hooks`), and `codex exec` needs the tool-approval
-  policy described in INSTALL.md.
+  session, and store parity between hook and server; on update, Codex replaces
+  the old version directory (the shim's re-provisioning after an update was not
+  exercised). Plugin hooks need a one-time trust review (`/hooks`) and `codex exec`
+  needs the tool-approval policy described in INSTALL.md; neither interactive flow
+  was observed, nor macOS/Linux.
 - **Version sync now covers seven files and is tested.** `.codex-plugin/plugin.json`
   joins the release sync, and `codex/manifest.test.js` fails when
   `package.json`, both `package-lock.json` fields, the four plugin manifests and

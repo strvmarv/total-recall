@@ -121,6 +121,17 @@ test('enabled filter: CRLF and indentation are tolerated; false does not enable'
   assert.equal(runBootstrap({ codexHome: home }).out.argv[1], a);
 });
 
+test('enabled filter: trailing comments and single-quoted keys are understood', () => {
+  const home = tmp('home');
+  const a = addTree(home, 'mkA', '4.2.3');
+  addTree(home, 'mkB', '9.9.9');
+  fs.writeFileSync(path.join(home, 'config.toml'), [
+    "[plugins.'total-recall@mkA'] # the one we want", 'enabled = true # on', '',
+    '[plugins."total-recall@mkB"] # off', 'enabled = false # off', '',
+  ].join(String.fromCharCode(10)));
+  assert.equal(runBootstrap({ codexHome: home }).out.argv[1], a);
+});
+
 test('enabled filter: when it would leave nothing, all candidates are used (never exit 1 for that)', () => {
   const home = tmp('home');
   addTree(home, 'mkA', '4.2.3');

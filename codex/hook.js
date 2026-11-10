@@ -163,6 +163,7 @@ async function main() {
     environ: process.env,
     platform: process.platform,
   });
+  process.stdout.on('error', () => undefined); // host closed the pipe early: nothing to do
   if (out) process.stdout.write(out);
 }
 
