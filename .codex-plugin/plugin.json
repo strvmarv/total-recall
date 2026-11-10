@@ -1,0 +1,19 @@
+{
+  "name": "total-recall",
+  "version": "4.2.3",
+  "description": "Multi-tiered memory and knowledge base with semantic search, auto-compaction, and built-in evaluation.",
+  "author": {
+    "name": "strvmarv"
+  },
+  "homepage": "https://github.com/strvmarv/total-recall",
+  "repository": "https://github.com/strvmarv/total-recall",
+  "license": "MIT",
+  "keywords": [
+    "memory",
+    "knowledge-base",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "hooks": "./codex/hooks.json",
+  "mcpServers": "./codex/mcp.json"
+}

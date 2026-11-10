@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Codex CLI harness support.** `codex plugin marketplace add strvmarv/total-recall-marketplace`
+  then `codex plugin add total-recall@strvmarv-total-recall-marketplace` installs total-recall into
+  [Codex CLI](https://developers.openai.com/codex). A new `.codex-plugin/plugin.json`
+  (which takes precedence over `.claude-plugin/plugin.json` for Codex and leaves
+  every other host's files untouched) points Codex at `codex/hooks.json` and
+  `codex/mcp.json`. `codex/hook.js` is a node (not bash) `SessionStart` /
+  `UserPromptSubmit` hook, because Codex runs hook commands through PowerShell on
+  Windows where the Claude hooks' `$CLAUDE_PLUGIN_ROOT` expands to nothing: it
+  injects the same startup instructions plus a short Codex note and re-asserts
+  pinned directives on the turn-count floor trigger by running the provisioned
+  engine directly (the token-growth trigger is not used: a Codex session log
+  grows several times faster than the conversation). `codex/mcp.json` is
+  generated from `codex/bootstrap.cjs` (`node codex/build-mcp.js`): Codex expands
+  no variables in a bundled server's command, so it runs a launcher that finds
+  the installed plugin in Codex's cache and starts `bin/start.js` with no
+  working directory set, and it forwards the environment variables the engine
+  needs (Codex otherwise sanitizes the server's environment). Verified end to end
+  on Codex 0.162.1 (Windows): hooks, tool calls, floor cadence over a resumed
+  session, and store parity between hook and server; on update, Codex replaces
+  the old version directory (the shim's re-provisioning after an update was not
+  exercised). Plugin hooks need a one-time trust review (`/hooks`) and `codex exec`
+  needs the tool-approval policy described in INSTALL.md; neither interactive flow
+  was observed, nor macOS/Linux.
+- **Version sync now covers seven files and is tested.** `.codex-plugin/plugin.json`
+  joins the release sync, and `codex/manifest.test.js` fails when
+  `package.json`, both `package-lock.json` fields, the four plugin manifests and
+  `hermes-plugin/plugin.yaml` disagree.
 - **pi harness support.** `pi install npm:@strvmarv/total-recall` (or
   `pi install git:github.com/strvmarv/total-recall`) installs total-recall into
   [pi](https://pi.dev). A new extension (`pi/extension.js`, declared in

@@ -199,14 +199,17 @@ All workflows currently use `actions/checkout@v4`, `actions/setup-dotnet@v4`, `a
 
 ### Plugin Version Single Source of Truth
 
-**Six** version locations can drift silently:
+**Seven** version locations can drift silently:
 
 1. `package.json` (`version` field)
 2. `package-lock.json` (top-level `version` field AND `packages[""].version` — npm keeps both in sync; the safest edit is a `replace_all` of the old version string)
 3. `.claude-plugin/plugin.json`
 4. `.copilot-plugin/plugin.json`
 5. `.cursor-plugin/plugin.json`
-6. `hermes-plugin/plugin.yaml`
+6. `.codex-plugin/plugin.json`
+7. `hermes-plugin/plugin.yaml`
+
+`codex/manifest.test.js` now fails (in CI's shim-tests job) when any of these disagree, so drift is caught; what remains below is making the sync automatic instead of checked.
 
 Multiple drift incidents were discovered during the 0.7.2 → 0.8.0 cutover:
 
@@ -215,12 +218,12 @@ Multiple drift incidents were discovered during the 0.7.2 → 0.8.0 cutover:
 - `.cursor-plugin/plugin.json` was stale at `0.7.2` for the same reason.
 - `package-lock.json`'s top-level `version` field was drifting independently of `package.json` through beta.4 until the Mac agent's beta.6 lockfile regeneration synced them.
 
-All five JSON sites were synced to `0.8.0-beta.4` in the beta.4 commit, and the standing rule is documented in `AGENTS.md` § "Version sync — six files, one version". The AGENTS.md entry was bumped from "four" to "five" in the 2026-04-09 doc audit when the build agent noticed `package-lock.json` had been drifting, and from "five" to "six" during the 2.1.0 release when `hermes-plugin/plugin.yaml` turned up stuck at `1.4.0` (the 2.0.0 sync had missed the one YAML manifest).
+All five JSON sites were synced to `0.8.0-beta.4` in the beta.4 commit, and the standing rule is documented in `AGENTS.md` § "Version sync — seven files, one version". The AGENTS.md entry was bumped from "four" to "five" in the 2026-04-09 doc audit when the build agent noticed `package-lock.json` had been drifting, and from "five" to "six" during the 2.1.0 release when `hermes-plugin/plugin.yaml` turned up stuck at `1.4.0` (the 2.0.0 sync had missed the one YAML manifest).
 
 Automate the enforcement with either:
 
 - A pre-commit hook that treats `package.json` as authoritative and derives the other manifests' version fields from it (auto-sync). Note `package-lock.json` is tricky to edit safely in a hook — consider running `npm install --package-lock-only --force --os=darwin --cpu=arm64` after the sync to regenerate the lockfile cross-platform (the `--force --os/--cpu` flags are required on npm 11+ to resolve all optional-dep RID variants; a plain `npm install` without them regenerates a single-platform lockfile and breaks every non-host CI matrix leg — this is exactly how beta.1 shipped a broken lockfile that didn't get caught until beta.6).
-- A `dotnet-ci.yml` step that fails if the six versions disagree (safety-net check, no auto-fix).
+- A CI step that fails if the seven versions disagree (safety-net check, no auto-fix). Done: `codex/manifest.test.js` runs in the shim-tests job.
 
 The pre-commit sync eliminates human error at the source. The CI check catches it if the hook is bypassed or never installed. Ideally both.
 
@@ -367,3 +370,20 @@ Sketch (a guess, not a decision): the engine records first-run state (a `_meta` 
 After a compaction the pinned block that the floor last injected may be gone from the transcript, yet the floor's throttle state (keyed by session id) still counts from that injection, so the next floor can be up to `floor_every_n_turns` prompts away. Whether pi keeps the session id across `/compact` is not yet verified (the spike's compaction did not run). Verify, and if the id persists, have the extension reset or force the floor on `session_compact` (this needs a small CLI change, e.g. a reset flag on `pinned-floor`).
 
 **Files:** `pi/extension.js`, `src/TotalRecall.Cli/Commands/PinnedFloorCommand.cs`, `src/TotalRecall.Infrastructure/Memory/PinnedFloorState.cs`
+
+## Follow-ups from the Codex CLI host
+
+### Claude Code `.mcp.json` sets `cwd` to the plugin root
+
+`.mcp.json` runs the server with `"cwd": "${CLAUDE_PLUGIN_ROOT}"`. The engine resolves the current project (project-scoped pins, project-docs ingest) from its working directory (`SessionLifecycle` uses `Environment.CurrentDirectory`), so under Claude Code the server-side `session_start` may resolve project scope against the plugin directory (fail-closed to global pins only). The per-turn floor is unaffected: it takes the cwd from the hook payload. Verify on a real Claude Code session and, if confirmed, drop the `cwd` (the Codex and pi registrations deliberately set none).
+
+### Codex CLI: unobserved or deferred
+
+- Interactive trust flow (`/hooks` review) and interactive MCP tool approval were not observed (no pseudo-terminal); INSTALL.md follows Codex's documentation there.
+- macOS and Linux were not run: the POSIX assumptions are `~/.codex` resolution, lowercase proxy variables, and Codex substituting the braced `${PLUGIN_ROOT}` through `sh`. Run the plugin on both.
+- `SessionEnd` (3 s clamp, no user-visible output) and `fork` (history already carries the instructions) are deliberately not mapped; revisit if Codex gives `SessionEnd` a visible surface.
+- A first-run tutorial remains deferred for all harnesses (see Onboarding).
+
+### Copilot CLI and Cursor CLI parity
+
+The next harnesses in this series. Copilot CLI: re-verify the pinned floor on a current build (upstream ignored `additionalContext` earlier; hooks declared through its own manifest silently did not fire while `.claude-plugin` hooks did). Cursor CLI: hooks have no context-injection point on `beforeSubmitPrompt`, skill invocation is not an event, and `cursor-agent` must be run from PowerShell/cmd on Windows (Git Bash breaks its tool calls).
