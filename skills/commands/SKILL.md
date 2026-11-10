@@ -100,6 +100,7 @@ of transcript growth (where the host exposes a transcript). Set `floor_enabled =
 | Kiro | Active | `UserPromptSubmit` command hook → pinned-floor (plain-text STDOUT); `SessionStart` agent hook → `session_start` tool; `Stop` agent hook → capture; `always` steering → persistent `session_start` instruction |
 | Gemini CLI | Active | `BeforeAgent` hook → `hookSpecificOutput.additionalContext`; `GEMINI.md` → persistent `session_start` instruction |
 | pi | Active (turn-count trigger only) | pi extension: `before_agent_start` → hidden context message; `/total-recall` command |
+| Codex CLI | Active (turn-count trigger only) | `UserPromptSubmit` hook (`codex/hook.js`) → `additionalContext` |
 | Cline | MCP tools only | No hooks; `cline_mcp_settings.json` via postinstall |
 | Windsurf | MCP tools only | No hooks; `mcp_config.json` + rules file via postinstall |
 | Zed | MCP tools only | No hooks; `context_servers` in `settings.json` via postinstall |

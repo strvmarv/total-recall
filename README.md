@@ -52,7 +52,7 @@ Every TUI coding assistant has the same gaps:
 ## The Solution
 
 - **Persistent memory** — corrections, preferences, decisions, and project context survive sessions automatically
-- **Cross-tool** — one memory store shared across Claude Code, Copilot CLI, Cursor, Cline, OpenCode, pi, Hermes, Gemini CLI, Windsurf, Zed, and VS Code; existing memories auto-import on first run
+- **Cross-tool** — one memory store shared across Claude Code, Copilot CLI, Cursor, Cline, OpenCode, pi, Codex CLI, Hermes, Gemini CLI, Windsurf, Zed, and VS Code; existing memories auto-import on first run
 - **Built-in web UI** — `total-recall ui` opens a local browser dashboard (Dashboard, Memory, Knowledge Base, Usage, Insights, Eval, Config) for visual memory management without touching the CLI or AI session. Dark/light themes, a keyboard-first ⌘K command palette, and a developer-native *Terminal / Archive* design
 - **Cross-device** — point `TOTAL_RECALL_DB_PATH` at a cloud-synced folder and your memory follows you everywhere
 - **Smarter context, lower token cost** — a three-tier model (Hot / Warm / Cold, with sticky pins) enforces a 4000-token budget per prompt; new memories land in warm and earn their way into hot, so you get relevant context without carrying everything
@@ -93,6 +93,15 @@ pi install git:github.com/strvmarv/total-recall   # from main
 ```
 
 The extension registers the MCP server, injects the startup instructions, runs the pinned-directive floor, and adds a `/total-recall` command. See [INSTALL.md](INSTALL.md#pi) for details and known gaps.
+
+### Codex CLI
+
+```bash
+codex plugin marketplace add strvmarv/total-recall-marketplace
+codex plugin add total-recall@strvmarv-total-recall-marketplace
+```
+
+Then trust the two hooks once in `/hooks`. The plugin registers the MCP server, injects the startup instructions, and runs the pinned-directive floor. See [INSTALL.md](INSTALL.md#codex-cli) for tool approval, limitations and troubleshooting.
 
 ### npm (Any MCP-Compatible Tool)
 
@@ -193,6 +202,7 @@ Per-host support:
 | Cursor | Layered fallback | session-start injection + skill-guided `session_refresh` (Cursor's `beforeSubmitPrompt` is block-only and cannot inject context) |
 | Gemini CLI | Active | `BeforeAgent` hook → `hookSpecificOutput.additionalContext` |
 | pi | Active (turn-count trigger only) | pi extension: `before_agent_start` → hidden context message; `/total-recall` command |
+| Codex CLI | Active (turn-count trigger only) | `UserPromptSubmit` hook (`codex/hooks.json` → `codex/hook.js`) → `additionalContext` |
 | Cline | MCP tools only | No hooks; MCP server config via postinstall |
 | Windsurf | MCP tools only | No hooks; rules file for session-start instruction |
 | Zed | MCP tools only | No hooks; `context_servers` config via postinstall |
@@ -209,6 +219,7 @@ Per-host support:
 | Cursor | Full | Plugin wrapper, SessionStart hook; run `/total-recall:commands compact` manually — no SessionEnd hook |
 | OpenCode | Full | Plugin wrapper, auto-import from OpenCode project and agent files |
 | pi | Full (known gaps in [INSTALL.md](INSTALL.md#pi): turn-count floor only, no `session_end`, `compact --fast`) | `pi install` package: MCP server, startup instructions, pinned-directive floor, `/total-recall` command |
+| Codex CLI | Full (known gaps in [INSTALL.md](INSTALL.md#codex-cli): turn-count floor only, no `session_end`, hooks need a one-time trust review) | `codex plugin add` plugin: MCP server, startup instructions, pinned-directive floor |
 | Cline | Full | Auto-import from task history; MCP server config required |
 | Hermes | Importer | Auto-import from SOUL.md and skills on first run; no session hooks |
 

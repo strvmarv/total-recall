@@ -177,6 +177,37 @@ The injected instructions also tell the model to run this package's CLI as `node
 
 Known gaps: nothing triggers `session_end` in pi (it is bookkeeping only), the `setup` and `update` subcommands have no pi meaning (use `pi update`), and `compact` defaults to a compactor agent that pi does not have, so use `compact --fast` or let the model make the calls from `session_context`. Subagent children (pi-subagents, pi-herdr-agents) and `--no-session` runs get the MCP tools but no injected instructions, floor, or `/total-recall`.
 
+## Codex CLI
+
+[Codex CLI](https://developers.openai.com/codex) installs total-recall as a plugin from the total-recall marketplace. No `config.toml`, `hooks.json` or `mcp.json` editing is needed:
+
+```bash
+codex plugin marketplace add strvmarv/total-recall-marketplace
+codex plugin add total-recall@strvmarv-total-recall-marketplace
+```
+
+(or browse to it with `/plugins` inside Codex), then start a new session. The git install carries no engine binary: the MCP server downloads and verifies it on first launch (a few seconds), and tools report "provisioning" until it is ready. The plugin resolves through the separate marketplace repo, so this path works once that repo's `ref` points at a release containing `.codex-plugin/` and `codex/`.
+
+**Trust the hooks once.** Codex skips plugin hooks until you review them: open `/hooks` in Codex and trust the two total-recall hooks. A plugin update that changes a bundled script asks for a new review. (`codex exec --dangerously-bypass-hook-trust` skips the review for one invocation; it is meant for automation that already vets its hooks, and the review flow itself has not been observed interactively here, so this follows Codex's documentation.)
+
+**Allow the tools.** Codex asks for approval before calling an MCP tool that is not marked read-only, and none of total-recall's are. In an interactive session you can approve per call. Non-interactive runs (`codex exec`) cannot answer, so the model's `session_start` call is refused with "MCP tool call requires approval, but approval policy is never". To allow every total-recall tool without prompting (this includes the tools that write and delete memories), add to `~/.codex/config.toml`:
+
+```toml
+[plugins."total-recall@strvmarv-total-recall-marketplace".mcp_servers.total-recall]
+default_tools_approval_mode = "approve"
+```
+
+What you get in Codex, at parity with Claude Code unless noted:
+
+- The `total-recall` MCP server, started from the plugin's bundled `codex/mcp.json`. Codex expands no variables in a bundled server's command, so that file runs a small launcher that finds the installed plugin under `~/.codex/plugins/cache/` and starts `bin/start.js` from there; it sets no working directory, so project-scoped pins follow the directory you run Codex in. Codex starts the server with a sanitized environment, so the file forwards the variables the engine needs (`TOTAL_RECALL_*`, `HOME`, `XDG_*`, `CODEX_HOME`, proxy and CA settings); the hook runs with your full environment, and forwarding keeps both on the same store.
+- The same startup instructions and capture / retrieve / feedback rules (`skills/commands/SKILL.md`), delivered by a `SessionStart` hook on `startup`, `resume`, `clear` and `compact` (plus a short note about Codex). Resuming a session (`codex exec resume`, `codex resume`) delivers them again, as under Claude Code.
+- The pinned-directive floor on every prompt (`UserPromptSubmit` hook), on the turn-count trigger only (`floor_every_n_turns`, default 6). The token-growth trigger is not used: a Codex session log is several times larger than the conversation it records (per-turn bookkeeping, reasoning, tool output, the injected text itself), so the byte-growth heuristic would re-inject on most prompts. The floor stays silent until the engine is provisioned. Codex keeps at most about 16,000 tokens of a hook's context before replacing the rest with a preview, so a pinned block beyond roughly 125 default-size pins would lose its tail.
+- The commands skill is listed by Codex as `total-recall:total-recall:commands`; invoke it as `$total-recall:total-recall:commands` or from `/skills`.
+
+Known gaps: no `SessionEnd` compaction nudge (Codex gives that hook 3 seconds and no way to show output to you; the engine's `session_start` hints still report uncompacted entries), and the `setup` and `update` subcommands are Claude Code specific. Windows is the verified platform; macOS and Linux follow the same design but have not been run. A custom `CODEX_HOME` works because the launcher forwards it; a relative one does not (it would resolve against the server's directory, not Codex's).
+
+Updating: run `codex plugin add total-recall@strvmarv-total-recall-marketplace` again (Codex replaces the old version directory), start a new session, and re-trust the hooks if `/hooks` asks. Troubleshooting: `codex plugin list` shows the installed version, `codex mcp list` shows the launcher entry, and a stderr line `total-recall plugin not found under ...` means the plugin is not in Codex's cache for the `CODEX_HOME` the server was given.
+
 ## Cline (VS Code)
 
 Add to your Cline MCP settings:
