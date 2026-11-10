@@ -1,0 +1,33 @@
+{
+  "mcpServers": {
+    "total-recall": {
+      "command": "node",
+      "args": [
+        "-e",
+        "// total-recall Codex MCP launcher. Run as `node -e <this file>` from codex/mcp.json, which\n// embeds it verbatim (codex/build-mcp.js generates that file; do not edit mcp.json by hand).\n//\n// Codex expands no variables in a bundled MCP server's command, args or env, so the plugin\n// root is not available to name bin/start.js. Find the installed plugin in Codex's cache\n// (<home>/plugins/cache/<marketplace>/total-recall/<version>/) instead and hand over to its\n// bin/start.js, which runs the MCP shim exactly as under every other host.\n//\n// No cwd is configured on purpose: the engine resolves the current project (project-scoped\n// pins, project docs) from the working directory it inherits, which must be the session's.\nconst fs = require('node:fs');\nconst path = require('node:path');\nconst os = require('node:os');\nconst { pathToFileURL } = require('node:url');\n\nfunction parseSemver(name) {\n  const m = /^v?(\\d+)\\.(\\d+)\\.(\\d+)(?:-([0-9A-Za-z.-]+))?(?:\\+[0-9A-Za-z.-]+)?$/.exec(name);\n  return m ? { core: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] ? m[4].split('.') : [] } : null;\n}\n\n// Semver precedence: positive when a is newer than b.\nfunction compareSemver(a, b) {\n  for (let i = 0; i < 3; i++) if (a.core[i] !== b.core[i]) return a.core[i] - b.core[i];\n  if (a.pre.length === 0 && b.pre.length === 0) return 0;\n  if (a.pre.length === 0) return 1;\n  if (b.pre.length === 0) return -1;\n  for (let i = 0; i < Math.max(a.pre.length, b.pre.length); i++) {\n    const x = a.pre[i];\n    const y = b.pre[i];\n    if (x === undefined) return -1;\n    if (y === undefined) return 1;\n    const xNum = /^\\d+$/.test(x);\n    const yNum = /^\\d+$/.test(y);\n    if (xNum && yNum) { if (Number(x) !== Number(y)) return Number(x) - Number(y); }\n    else if (xNum) return -1;\n    else if (yNum) return 1;\n    else if (x !== y) return x < y ? -1 : 1;\n  }\n  return 0;\n}\n\n// Marketplaces with `enabled = true` under [plugins.\"total-recall@<marketplace>\"] in config.toml.\nfunction enabledMarketplaces(text) {\n  const enabled = new Set();\n  let current = null;\n  for (const line of text.split(/\\r?\\n/)) {\n    const header = /^\\s*\\[plugins\\.\"total-recall@([^\"]+)\"\\]\\s*$/.exec(line);\n    if (header) { current = header[1]; continue; }\n    if (/^\\s*\\[/.test(line)) { current = null; continue; }\n    if (current !== null) {\n      const flag = /^\\s*enabled\\s*=\\s*(true|false)\\b/.exec(line);\n      if (flag) { if (flag[1] === 'true') enabled.add(current); current = null; }\n    }\n  }\n  return enabled;\n}\n\n// Newest first: a valid version before a non-version name (e.g. \"local\"); two versions by semver\n// precedence; otherwise newer start.js first; the path settles the rest deterministically.\nfunction newestFirst(a, b) {\n  if (a.semver && b.semver) { const c = compareSemver(b.semver, a.semver); if (c !== 0) return c; }\n  else if (a.semver) return -1;\n  else if (b.semver) return 1;\n  if (a.mtime !== b.mtime) return b.mtime - a.mtime;\n  return a.start < b.start ? -1 : a.start > b.start ? 1 : 0;\n}\n\nfunction readDir(dir) {\n  try { return fs.readdirSync(dir); } catch { return []; }\n}\n\n(async () => {\n  const home = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');\n  const cache = path.join(home, 'plugins', 'cache');\n\n  const candidates = [];\n  for (const marketplace of readDir(cache)) {\n    const pluginDir = path.join(cache, marketplace, 'total-recall');\n    for (const version of readDir(pluginDir)) {\n      const start = path.join(pluginDir, version, 'bin', 'start.js');\n      let stat;\n      try { stat = fs.statSync(start); } catch { continue; }\n      candidates.push({ marketplace, start, mtime: stat.mtimeMs, semver: parseSemver(version) });\n    }\n  }\n\n  let enabled = new Set();\n  try { enabled = enabledMarketplaces(fs.readFileSync(path.join(home, 'config.toml'), 'utf8')); } catch { /* absent or unreadable: keep every candidate */ }\n  const filtered = enabled.size > 0 ? candidates.filter((c) => enabled.has(c.marketplace)) : candidates;\n  const pool = filtered.length > 0 ? filtered : candidates;\n\n  if (pool.length === 0) {\n    process.stderr.write(`total-recall plugin not found under ${cache}\\n`);\n    process.exit(1);\n  }\n\n  pool.sort(newestFirst);\n  const start = pool[0].start;\n  process.argv = [process.execPath, start];\n  try {\n    await import(pathToFileURL(start).href);\n  } catch (err) {\n    process.stderr.write(`total-recall failed to start ${start}: ${err && err.stack ? err.stack : err}\\n`);\n    process.exit(1);\n  }\n})();\n"
+      ],
+      "env_vars": [
+        "TOTAL_RECALL_HOME",
+        "TOTAL_RECALL_DB_PATH",
+        "TOTAL_RECALL_CORTEX_URL",
+        "TOTAL_RECALL_CORTEX_PAT",
+        "TOTAL_RECALL_USER_ID",
+        "TOTAL_RECALL_EMBEDDING_API_KEY",
+        "CODEX_HOME",
+        "HOME",
+        "XDG_DATA_HOME",
+        "XDG_CONFIG_HOME",
+        "HERMES_HOME",
+        "NODE_EXTRA_CA_CERTS",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "NO_PROXY",
+        "https_proxy",
+        "http_proxy",
+        "no_proxy",
+        "all_proxy"
+      ],
+      "tool_timeout_sec": 120
+    }
+  }
+}

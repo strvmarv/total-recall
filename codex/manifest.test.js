@@ -75,3 +75,8 @@ test('.gitattributes pins the generated MCP file and its source to LF', () => {
   assert.ok(lines.includes('codex/mcp.json text eol=lf'));
   assert.ok(lines.includes('codex/bootstrap.cjs text eol=lf'));
 });
+
+test('codex manifest: the skills and MCP targets exist', () => {
+  assert.ok(fs.statSync(path.join(root, codexManifest.skills)).isDirectory());
+  assert.ok(fs.statSync(path.join(root, codexManifest.mcpServers)).isFile());
+});
