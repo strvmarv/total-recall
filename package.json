@@ -11,7 +11,7 @@
     "prepare": "git config core.hooksPath git-hooks || true",
     "postinstall": "node scripts/postinstall.js",
     "prepublishOnly": "node scripts/verify-binaries.js",
-    "test:shim": "node --test bin/shim/ scripts/fetch-binary.test.js hooks/hooks.config.test.js"
+    "test:shim": "node --test bin/shim/ pi/ scripts/fetch-binary.test.js hooks/hooks.config.test.js"
   },
   "files": [
     "bin/",
@@ -23,6 +23,7 @@
     "skills/",
     "agents/",
     "hooks/",
+    "pi/",
     "hermes-plugin/",
     ".claude-plugin/",
     ".copilot-plugin/",
@@ -54,6 +55,7 @@
     "knowledge-base",
     "rag",
     "claude-code",
+    "pi-package",
     "copilot-cli",
     "gemini-cli",
     "opencode",
@@ -66,6 +68,11 @@
     "ai-coding",
     "tui"
   ],
+  "pi": {
+    "extensions": [
+      "./pi/extension.js"
+    ]
+  },
   "engines": {
     "node": ">=20.0.0"
   },
