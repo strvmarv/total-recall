@@ -164,7 +164,7 @@ pi install npm:@strvmarv/total-recall
 pi install git:github.com/strvmarv/total-recall
 ```
 
-The package is large (about 360 MB unpacked: the engine binaries for every platform plus the ~133 MB embedding model), so the first install takes a while. `postinstall` fetches the engine for your platform; if it is missing (`--ignore-scripts`, offline install), the MCP server downloads and verifies it on first launch.
+The package is large (about 378 MB unpacked: the engine binaries for every platform plus the ~133 MB embedding model), so the first install takes a while. `postinstall` fetches the engine for your platform; if it is missing (`--ignore-scripts`, offline install), the MCP server downloads and verifies it on first launch.
 
 What you get in pi, at parity with Claude Code unless noted:
 
