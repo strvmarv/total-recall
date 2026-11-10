@@ -349,3 +349,21 @@ The shim supervises and restarts the engine on crash, but currently requires the
 During provisioning the shim returns a minimal `{ "status": "not_ready", "phase": "provisioning" }` result. A follow-up would include download progress (bytes transferred / total, percentage) so the host or skill can surface a real-time progress indicator to the user rather than a plain "still starting" message.
 
 **Files:** `bin/shim/provisioner.js`, `bin/shim/server-surface.js`, `skills/using-total-recall/SKILL.md`
+
+## Onboarding
+
+### First-run tutorial (all harnesses)
+
+New users need to learn how to use memory: what gets stored, what comes back, and how to steer it with pin, forget and search. Today that teaching is the startup announcement plus the `help` command in `skills/commands/SKILL.md`. A guided first-run walkthrough would help on every harness, and matters most for newer ones such as pi, whose users assemble their own setup and have no plugin-marketplace onboarding to lean on.
+
+Sketch (a guess, not a decision): the engine records first-run state (a `_meta` flag set once the tutorial is finished or dismissed), `session_start` reports it, and the shared skill text tells the model to offer a short guided walkthrough. The logic lives in the engine and the skill, not in any host's hooks, so every harness gets it. Open questions: what the walkthrough covers, how a user skips or replays it, and whether it shows in the web UI too. Raised while brainstorming pi host support; brainstorm it as its own design after that lands.
+
+**Files:** `skills/commands/SKILL.md`, `skills/using-total-recall/SKILL.md`, `src/TotalRecall.Server/` (`session_start` handler, `_meta` flag), `src/TotalRecall.Web/` (optional)
+
+## pi host follow-ups
+
+### pi: reset the pinned-floor throttle on `session_compact`
+
+After a compaction the pinned block that the floor last injected may be gone from the transcript, yet the floor's throttle state (keyed by session id) still counts from that injection, so the next floor can be up to `floor_every_n_turns` prompts away. Whether pi keeps the session id across `/compact` is not yet verified (the spike's compaction did not run). Verify, and if the id persists, have the extension reset or force the floor on `session_compact` (this needs a small CLI change, e.g. a reset flag on `pinned-floor`).
+
+**Files:** `pi/extension.js`, `src/TotalRecall.Cli/Commands/PinnedFloorCommand.cs`, `src/TotalRecall.Infrastructure/Memory/PinnedFloorState.cs`

@@ -90,7 +90,7 @@ A `UserPromptSubmit` hook re-injects the pinned block on an adaptive throttle
 (config: `[tiers.pinned] floor_enabled / floor_every_n_turns / floor_growth_tokens`)
 so pinned directives keep being followed in long sessions. It re-asserts when
 either trigger trips since the last injection: N turns elapsed, or ~`growth_tokens`
-of transcript growth. Set `floor_enabled = false` to disable.
+of transcript growth (where the host exposes a transcript). Set `floor_enabled = false` to disable.
 
 | Host | Per-turn floor | Mechanism |
 |------|----------------|-----------|
@@ -99,6 +99,7 @@ of transcript growth. Set `floor_enabled = false` to disable.
 | Cursor | Layered fallback | session-start + skill-guided `session_refresh` |
 | Kiro | Active | `UserPromptSubmit` command hook → pinned-floor (plain-text STDOUT); `SessionStart` agent hook → `session_start` tool; `Stop` agent hook → capture; `always` steering → persistent `session_start` instruction |
 | Gemini CLI | Active | `BeforeAgent` hook → `hookSpecificOutput.additionalContext`; `GEMINI.md` → persistent `session_start` instruction |
+| pi | Active (turn-count trigger only) | pi extension: `before_agent_start` → hidden context message; `/total-recall` command |
 | Cline | MCP tools only | No hooks; `cline_mcp_settings.json` via postinstall |
 | Windsurf | MCP tools only | No hooks; `mcp_config.json` + rules file via postinstall |
 | Zed | MCP tools only | No hooks; `context_servers` in `settings.json` via postinstall |
@@ -271,7 +272,7 @@ Call `kb_remove` with the entry ID. Ask for confirmation first.
 
 Run hot-tier compaction now. Compaction is user-triggered; hints appear at session start, mid-session, and session end to remind you. Two modes:
 
-- **Default (model-driven):** Launches the `total-recall:compactor` agent against current hot tier entries (via `session_context`), then executes its decisions — carry forward, promote with summary, or discard. Reports a one-line summary of what was promoted/discarded.
+- **Default (model-driven):** Launches the `total-recall:compactor` agent against current hot tier entries (via `session_context`), then executes its decisions — carry forward, promote with summary, or discard. Reports a one-line summary of what was promoted/discarded. On hosts without the compactor agent (pi), use `--fast` or make the same carry-forward / promote / discard calls yourself from `session_context`.
 - **`--fast` (heuristic):** Runs `total-recall compact --run` — a deterministic decay-based sweep that promotes hot entries whose decay score falls below `compaction.warm_threshold`. No LLM, fast and cheap.
 
 See the full command body in [`compact.md`](compact.md).
