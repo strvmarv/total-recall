@@ -80,3 +80,23 @@ test('codex manifest: the skills and MCP targets exist', () => {
   assert.ok(fs.statSync(path.join(root, codexManifest.skills)).isDirectory());
   assert.ok(fs.statSync(path.join(root, codexManifest.mcpServers)).isFile());
 });
+
+test('codex hooks file: the two intended events, braced ${PLUGIN_ROOT} only, with explicit context limits', () => {
+  assert.ok(fs.statSync(path.join(root, codexManifest.hooks)).isFile());
+  const { hooks } = readJson(codexManifest.hooks.replace(/^\.\//, ''));
+  assert.deepEqual(Object.keys(hooks).sort(), ['SessionStart', 'UserPromptSubmit']);
+  assert.equal(hooks.SessionStart[0].matcher, 'startup|resume|clear|compact');
+  assert.equal(hooks.SessionStart[0].hooks[0].additionalContextLimit, 6000);
+  assert.equal(hooks.UserPromptSubmit[0].hooks[0].additionalContextLimit, 16000);
+  for (const event of Object.values(hooks)) {
+    for (const group of event) {
+      for (const hook of group.hooks) {
+        assert.equal(hook.type, 'command');
+        assert.ok(hook.command.includes('${PLUGIN_ROOT}'), hook.command);
+        // Codex substitutes only the braced form; an unbraced $NAME reaches the shell (PowerShell on Windows) unexpanded.
+        assert.ok(!/\$(?!\{)[A-Za-z_]+/.test(hook.command), `unbraced variable in: ${hook.command}`);
+        assert.equal(typeof hook.timeout, 'number');
+      }
+    }
+  }
+});
