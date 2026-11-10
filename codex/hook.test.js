@@ -54,11 +54,11 @@ test('session-start: emits the SessionStart envelope with the frontmatter-free s
   assert.ok(text.includes(codexNote(ROOT)));
 });
 
-test('codexNote: names the bundled CLI, tool search and the $-invocation', () => {
+test('codexNote: names the bundled CLI, tool search and the $-invocation with the name Codex actually lists', () => {
   const note = codexNote(ROOT);
   assert.ok(note.includes(path.join(ROOT, 'bin', 'start.js')));
   assert.ok(/tool search/i.test(note));
-  assert.ok(note.includes('$total-recall:commands'));
+  assert.ok(note.includes('$total-recall:total-recall:commands'));
   assert.ok(/may not be on PATH/i.test(note));
 });
 
