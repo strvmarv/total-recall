@@ -168,10 +168,12 @@ The package is large (about 378 MB unpacked: the engine binaries for every platf
 
 What you get in pi, at parity with Claude Code unless noted:
 
-- The `total-recall` MCP server (registered by the extension; a `total-recall` entry you already have in `~/.pi/agent/mcp.json` wins over it). Most tools are reached through pi's `tool_search`; `session_start`, `session_end`, `session_refresh`, `memory_*` and `kb_search` are declared directly.
+- The `total-recall` MCP server (registered by the extension; a `total-recall` entry you already have in `~/.pi/agent/mcp.json` (or the project's `.pi/mcp.json`) wins over it; the pinned floor then follows that entry's plain `TOTAL_RECALL_*` env values, such as `TOTAL_RECALL_HOME`, so it reads the same store, and it stays silent if the entry is remote, disabled, or sets those values with `${VAR}` or `!command`). Most tools are reached through pi's `tool_search`; `session_start`, `session_end`, `session_refresh`, `memory_*` and `kb_search` are declared directly.
 - The same startup instructions and capture / retrieve / feedback rules (`skills/commands/SKILL.md`), injected as a hidden message with your first prompt of a session and again after a compaction.
 - The pinned-directive floor on every prompt, on the turn-count trigger only (`floor_every_n_turns`, default 6). The token-growth trigger is not used in pi: pi creates its session file only after the first message, which would trigger an early floor on turn 2. It stays silent until the engine is provisioned.
 - `/total-recall <subcommand>` (alias `/total-recall:commands`), with tab completion of the subcommands. It asks the model to run the command (`help`, `status`, `search <query>`, `pin <id>`, `forget <query>`, `kb ...`, `compact`, ...), so it works in an interactive or RPC session; in `pi -p "/total-recall help"` pi exits before the model's answer is printed.
+
+The injected instructions also tell the model to run this package's CLI as `node <package>/bin/start.js <args>` (for `compact --run`, `ui`), because a plain `pi install` does not put `total-recall` on your PATH. If you navigate with `/tree` to a point before the instructions were delivered, they are queued again for your next prompt.
 
 Known gaps: nothing triggers `session_end` in pi (it is bookkeeping only), the `setup` and `update` subcommands have no pi meaning (use `pi update`), and `compact` defaults to a compactor agent that pi does not have, so use `compact --fast` or let the model make the calls from `session_context`. Subagent children (pi-subagents, pi-herdr-agents) and `--no-session` runs get the MCP tools but no injected instructions, floor, or `/total-recall`.
 

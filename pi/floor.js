@@ -68,12 +68,13 @@ export function parseFloorOutput(stdout) {
 /**
  * Spawn the engine's floor and resolve with its additionalContext, or undefined.
  * Never rejects. stdin is written and ended (the CLI reads it to EOF), stderr is
- * ignored, the child is killed at `timeoutMs`.
+ * ignored, the child is killed at `timeoutMs`. `env` is layered over the process environment.
  */
 export function runFloor({
   binaryPath,
   payload,
   args = DEFAULT_ARGS,
+  env = {},
   timeoutMs = DEFAULT_TIMEOUT_MS,
   spawn = realSpawn,
 }) {
@@ -90,6 +91,7 @@ export function runFloor({
       const child = spawn(binaryPath, args, {
         stdio: ['pipe', 'pipe', 'ignore'],
         windowsHide: true,
+        env: { ...process.env, ...env },
       });
       child.stdout.setEncoding('utf8');
       let stdout = '';

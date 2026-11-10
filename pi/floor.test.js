@@ -134,3 +134,10 @@ test('runFloor: defaults to the pinned-floor claude-code invocation and a 10 s t
   assert.deepEqual(seen.opts.stdio, ['pipe', 'pipe', 'ignore']);
   assert.equal(seen.opts.windowsHide, true);
 });
+
+test('runFloor: extra env is layered over the process environment', async () => {
+  let seen;
+  const spawn = (cmd, args, opts) => { seen = opts; return realSpawn(process.execPath, [fixture, 'ok'], opts); };
+  await runFloor({ binaryPath: 'X', payload: { session_id: 'sid-1' }, env: { TOTAL_RECALL_HOME: 'D:/store' }, spawn });
+  assert.deepEqual(seen.env, { ...process.env, TOTAL_RECALL_HOME: 'D:/store' });
+});

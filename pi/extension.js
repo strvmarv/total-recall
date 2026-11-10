@@ -21,6 +21,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveEngine as realResolveEngine, runFloor as realRunFloor } from './floor.js';
 import { registerCommands } from './command.js';
+import { resolveUserServer as realResolveUserServer } from './userServer.js';
 
 export const MCP_SERVER_NAME = 'total-recall';
 export const CONTEXT_MESSAGE_TYPE = 'total-recall-context';
@@ -72,7 +73,7 @@ function deliveredInContext(ctx) {
   }
 }
 
-export function createExtension({ rootDir, env, readFile, resolveEngine, runFloor, execPath = process.execPath }) {
+export function createExtension({ rootDir, env, readFile, resolveEngine, runFloor, resolveUserServer, execPath = process.execPath }) {
   const skillPath = path.join(rootDir, 'skills', 'commands', 'SKILL.md');
 
   const loadSkillText = () => {
@@ -81,6 +82,20 @@ export function createExtension({ rootDir, env, readFile, resolveEngine, runFloo
     } catch {
       return '';
     }
+  };
+
+  // pi has no 'total-recall' on PATH after a plain `pi install`, but the instructions name CLI commands
+  // (`compact --run`, `ui`): tell the model how to run this package's own CLI.
+  const cliNote = () => [
+    '',
+    '---',
+    'pi note: the `total-recall` command may not be on PATH in this session. Run the CLI as',
+    `\`node "${path.join(rootDir, 'bin', 'start.js')}" <args>\` (for example \`compact --run\` or \`ui\`), never a bare \`total-recall\`.`,
+  ].join('\n');
+
+  const queuedText = () => {
+    const text = loadSkillText();
+    return text ? `${text}\n${cliNote()}` : undefined;
   };
 
   return (pi) => {
@@ -110,14 +125,22 @@ export function createExtension({ rootDir, env, readFile, resolveEngine, runFloo
       // A reload rebuilds this instance (the queue is lost) but keeps the transcript: skip only when
       // the earlier message is still in context.
       if (event.reason === 'reload' && deliveredInContext(ctx)) return undefined;
-      pending = loadSkillText() || undefined;
+      pending = queuedText();
+      return undefined;
+    });
+
+    // /tree can move the active branch to a point before the instructions were delivered (or past a
+    // compaction that dropped them) without emitting session_start or session_compact.
+    pi.on('session_tree', (_event, ctx) => {
+      if (!hookable(ctx) || deliveredInContext(ctx)) return undefined;
+      pending = queuedText();
       return undefined;
     });
 
     // After a compaction the injected text is gone from the transcript.
     pi.on('session_compact', (_event, ctx) => {
       if (!hookable(ctx)) return undefined;
-      pending = loadSkillText() || undefined;
+      pending = queuedText();
       return undefined;
     });
 
@@ -131,10 +154,15 @@ export function createExtension({ rootDir, env, readFile, resolveEngine, runFloo
         // Re-resolved every prompt: the extension loads before the MCP shim finishes a first-launch download.
         const engine = resolveEngine();
         if (engine) {
-          floor = await runFloor({
-            binaryPath: engine,
-            payload: { session_id: ctx.sessionManager.getSessionId(), cwd: ctx.cwd },
-          });
+          // A hand-configured mcp.json server may point the MCP tools at another store; follow it or stay silent.
+          const user = resolveUserServer(ctx.cwd);
+          if (!user.skip) {
+            floor = await runFloor({
+              binaryPath: engine,
+              payload: { session_id: ctx.sessionManager.getSessionId(), cwd: ctx.cwd },
+              env: user.env,
+            });
+          }
         }
       } catch {
         floor = undefined;
@@ -155,5 +183,6 @@ export default function totalRecallPiExtension(pi) {
     readFile: (p) => fs.readFileSync(p, 'utf8'),
     resolveEngine: realResolveEngine,
     runFloor: realRunFloor,
+    resolveUserServer: (cwd) => realResolveUserServer({ env: process.env, cwd }),
   })(pi);
 }

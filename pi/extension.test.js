@@ -44,6 +44,7 @@ function boot(over = {}) {
     readFile: (p) => { calls.readFile.push(p); return readFile(p); },
     resolveEngine: () => { calls.resolveEngine += 1; return '/engine/total-recall.exe'; },
     runFloor: async (opts) => { calls.runFloor.push(opts); return 'FLOOR-TEXT'; },
+    resolveUserServer: () => ({ skip: false, env: {} }),
     execPath: process.execPath,
     ...over,
   };
@@ -146,7 +147,36 @@ test('floor payload: session_id and cwd only (no transcript_path), binaryPath fr
   assert.deepEqual(calls.runFloor[0], {
     binaryPath: '/engine/total-recall.exe',
     payload: { session_id: 'sid-9', cwd: '/proj' },
+    env: {},
   });
+});
+
+test('review: the floor runs against the store the user-configured mcp.json server uses (env passed through)', async () => {
+  const seenCwd = [];
+  const { fire, calls } = boot({
+    resolveUserServer: (cwd) => { seenCwd.push(cwd); return { skip: false, env: { TOTAL_RECALL_HOME: 'D:/store' } }; },
+  });
+  await fire('before_agent_start', { messageType: 'user', prompt: 'hi' }, ctx());
+  assert.deepEqual(seenCwd, ['/proj']);
+  assert.deepEqual(calls.runFloor[0].env, { TOTAL_RECALL_HOME: 'D:/store' });
+});
+
+test('review: a user server whose store cannot be matched safely silences the floor but not the instructions', async () => {
+  const { fire, calls } = boot({ resolveUserServer: () => ({ skip: true, env: {} }) });
+  const c = ctx();
+  await fire('session_start', { reason: 'startup' }, c);
+  const r = await fire('before_agent_start', { messageType: 'user', prompt: 'hi' }, c);
+  assert.ok(r.message.content.includes(SKILL_BODY_MARK));
+  assert.ok(!r.message.content.includes('FLOOR-TEXT'));
+  assert.equal(calls.runFloor.length, 0);
+});
+
+test('review: a throwing resolveUserServer does not break the prompt', async () => {
+  const { fire } = boot({ resolveUserServer: () => { throw new Error('boom'); } });
+  const c = ctx();
+  await fire('session_start', { reason: 'startup' }, c);
+  const r = await fire('before_agent_start', { messageType: 'user', prompt: 'hi' }, c);
+  assert.ok(r.message.content.includes(SKILL_BODY_MARK));
 });
 
 // ---- RF4: delivery exactly once ----
@@ -228,6 +258,49 @@ test('reasons: session_compact queues the session text again', async () => {
   await fire('session_compact', { reason: 'manual' }, c);
   const r = await fire('before_agent_start', { messageType: 'user', prompt: 'hi' }, c);
   assert.ok(r.message.content.includes(SKILL_BODY_MARK));
+});
+
+
+// ---- review feedback: /tree navigation (Copilot thread) ----
+
+async function treeQueues(branch, over = {}) {
+  const { fire } = boot({ runFloor: async () => undefined, ...over });
+  const c = ctx({ branch });
+  await fire('session_tree', { newLeafId: 'x', oldLeafId: 'y' }, c);
+  const r = await fire('before_agent_start', { messageType: 'user', prompt: 'hi' }, c);
+  return r !== undefined && r.message.content.includes(SKILL_BODY_MARK);
+}
+
+test('session_tree: navigating to a branch without the instructions queues them again', async () => {
+  assert.equal(await treeQueues([msg]), true);
+  assert.equal(await treeQueues([delivered, compaction, msg]), true);
+});
+test('session_tree: a branch that still holds the instructions queues nothing', async () => {
+  assert.equal(await treeQueues([msg, delivered, msg]), false);
+});
+test('session_tree: a subagent child or ephemeral session queues nothing', async () => {
+  assert.equal(await treeQueues([msg], { env: { PI_SUBAGENT_ID: 'c' } }), false);
+  const { fire } = boot({ runFloor: async () => undefined });
+  const c = ctx({ file: undefined });
+  assert.equal(await fire('session_tree', {}, c), undefined);
+  assert.equal(await fire('before_agent_start', { messageType: 'user', prompt: 'hi' }, c), undefined);
+});
+
+// ---- review feedback: the CLI is not on PATH in pi (Copilot thread) ----
+
+test('queued text tells the model how to run this package CLI, because total-recall is not on PATH', async () => {
+  const { fire } = boot({ runFloor: async () => undefined });
+  const c = ctx();
+  await fire('session_start', { reason: 'startup' }, c);
+  const r = await fire('before_agent_start', { messageType: 'user', prompt: 'hi' }, c);
+  assert.ok(r.message.content.includes(path.join(root, 'bin', 'start.js')));
+  assert.match(r.message.content, /not be on PATH/);
+  assert.match(r.message.content, /compact --run/);
+  // and the note is only in the session text, not in floor-only messages
+  const floorOnly = boot({}).fire;
+  const c2 = ctx();
+  const r2 = await floorOnly('before_agent_start', { messageType: 'user', prompt: 'hi' }, c2);
+  assert.equal(r2.message.content, 'FLOOR-TEXT');
 });
 
 // ---- RF5: subagent children and ephemeral sessions ----
