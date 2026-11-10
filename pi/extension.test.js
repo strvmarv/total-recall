@@ -213,6 +213,15 @@ test('reasons: reload with a delivered message after the last compaction does no
   assert.equal(await reloadDelivers([delivered, compaction, delivered, msg]), false);
 });
 
+test('reasons: reload with a getBranch that throws still queues (never breaks the session start)', async () => {
+  const { fire } = boot({ runFloor: async () => undefined });
+  const c = ctx();
+  c.sessionManager.getBranch = () => { throw new Error('boom'); };
+  assert.equal(await fire('session_start', { reason: 'reload' }, c), undefined);
+  const r = await fire('before_agent_start', { messageType: 'user', prompt: 'hi' }, c);
+  assert.ok(r.message.content.includes(SKILL_BODY_MARK));
+});
+
 test('reasons: session_compact queues the session text again', async () => {
   const { fire } = boot({ runFloor: async () => undefined });
   const c = ctx();

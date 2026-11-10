@@ -60,11 +60,16 @@ function stripFrontmatter(text) {
   return text.startsWith('---') ? text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '') : text;
 }
 
-/** True when the branch already holds a delivered context message after the last compaction. */
-function alreadyDelivered(branch) {
-  let lastCompaction = -1;
-  branch.forEach((e, i) => { if (e.type === 'compaction') lastCompaction = i; });
-  return branch.some((e, i) => i > lastCompaction && e.customType === CONTEXT_MESSAGE_TYPE);
+/** True when the branch already holds a delivered context message after the last compaction. A branch that cannot be read counts as not delivered. */
+function deliveredInContext(ctx) {
+  try {
+    const branch = ctx.sessionManager.getBranch();
+    let lastCompaction = -1;
+    branch.forEach((e, i) => { if (e.type === 'compaction') lastCompaction = i; });
+    return branch.some((e, i) => i > lastCompaction && e.customType === CONTEXT_MESSAGE_TYPE);
+  } catch {
+    return false;
+  }
 }
 
 export function createExtension({ rootDir, env, readFile, resolveEngine, runFloor, execPath = process.execPath }) {
@@ -104,7 +109,7 @@ export function createExtension({ rootDir, env, readFile, resolveEngine, runFloo
       if (!hookable(ctx)) return undefined;
       // A reload rebuilds this instance (the queue is lost) but keeps the transcript: skip only when
       // the earlier message is still in context.
-      if (event.reason === 'reload' && alreadyDelivered(ctx.sessionManager.getBranch())) return undefined;
+      if (event.reason === 'reload' && deliveredInContext(ctx)) return undefined;
       pending = loadSkillText() || undefined;
       return undefined;
     });
