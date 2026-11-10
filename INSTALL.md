@@ -164,13 +164,13 @@ pi install npm:@strvmarv/total-recall
 pi install git:github.com/strvmarv/total-recall
 ```
 
-The package is large (about 378 MB unpacked: the engine binaries for every platform plus the ~133 MB embedding model), so the first install takes a while. `postinstall` fetches the engine for your platform; if it is missing (`--ignore-scripts`, offline install), the MCP server downloads and verifies it on first launch.
+The package is large (about 378 MB unpacked: the engine binaries for every platform plus the ~133 MB embedding model), so the first install takes a while. The `npm:` form works once the release that carries pi support is published (npm 4.2.3 predates it); until then use the `git:` form. `postinstall` fetches the engine for your platform and, as for any install of this package, adds a total-recall MCP entry (without overwriting an existing one) to any other supported tool it detects (VS Code, Copilot CLI, Cline, Windsurf, Gemini CLI, Zed, Kiro, Hermes). If the engine is missing (`--ignore-scripts`, offline install), the MCP server downloads and verifies it on first launch.
 
 What you get in pi, at parity with Claude Code unless noted:
 
 - The `total-recall` MCP server (registered by the extension; a `total-recall` entry you already have in `~/.pi/agent/mcp.json` wins over it). Most tools are reached through pi's `tool_search`; `session_start`, `session_end`, `session_refresh`, `memory_*` and `kb_search` are declared directly.
 - The same startup instructions and capture / retrieve / feedback rules (`skills/commands/SKILL.md`), injected as a hidden message with your first prompt of a session and again after a compaction.
-- The pinned-directive floor on every prompt, on the turn-count trigger only (`floor_every_n_turns`, default 6). The token-growth trigger is not available because pi does not expose a Claude-style transcript. It stays silent until the engine is provisioned.
+- The pinned-directive floor on every prompt, on the turn-count trigger only (`floor_every_n_turns`, default 6). The token-growth trigger is not used in pi: pi creates its session file only after the first message, which would trigger an early floor on turn 2. It stays silent until the engine is provisioned.
 - `/total-recall <subcommand>` (alias `/total-recall:commands`), with tab completion of the subcommands. It asks the model to run the command (`help`, `status`, `search <query>`, `pin <id>`, `forget <query>`, `kb ...`, `compact`, ...), so it works in an interactive or RPC session; in `pi -p "/total-recall help"` pi exits before the model's answer is printed.
 
 Known gaps: nothing triggers `session_end` in pi (it is bookkeeping only), the `setup` and `update` subcommands have no pi meaning (use `pi update`), and `compact` defaults to a compactor agent that pi does not have, so use `compact --fast` or let the model make the calls from `session_context`. Subagent children (pi-subagents, pi-herdr-agents) and `--no-session` runs get the MCP tools but no injected instructions, floor, or `/total-recall`.

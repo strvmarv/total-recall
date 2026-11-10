@@ -88,7 +88,8 @@ Or if the marketplace isn't registered:
 ### pi
 
 ```bash
-pi install npm:@strvmarv/total-recall
+pi install npm:@strvmarv/total-recall   # once the release carrying pi support is published
+pi install git:github.com/strvmarv/total-recall   # from main
 ```
 
 The extension registers the MCP server, injects the startup instructions, runs the pinned-directive floor, and adds a `/total-recall` command. See [INSTALL.md](INSTALL.md#pi) for details and known gaps.
@@ -207,7 +208,7 @@ Per-host support:
 | Copilot CLI | Full | Plugin wrapper, session hooks, auto-import from Copilot memory files |
 | Cursor | Full | Plugin wrapper, SessionStart hook; run `/total-recall:commands compact` manually — no SessionEnd hook |
 | OpenCode | Full | Plugin wrapper, auto-import from OpenCode project and agent files |
-| pi | Full | `pi install` package: MCP server, startup instructions, pinned-directive floor (turn-count trigger), `/total-recall` command |
+| pi | Full (known gaps in [INSTALL.md](INSTALL.md#pi): turn-count floor only, no `session_end`, `compact --fast`) | `pi install` package: MCP server, startup instructions, pinned-directive floor, `/total-recall` command |
 | Cline | Full | Auto-import from task history; MCP server config required |
 | Hermes | Importer | Auto-import from SOUL.md and skills on first run; no session hooks |
 
