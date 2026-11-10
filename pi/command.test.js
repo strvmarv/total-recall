@@ -120,3 +120,20 @@ test('registerCommands: only the first word is completed (a prefix with a space 
   registerCommands(pi, { hookable: () => true, skillText: SKILL });
   assert.equal(pi.commands.get('total-recall').getArgumentCompletions('kb se'), null);
 });
+
+// ---- shared-text edits for pi (Task 6) ----
+
+test('SKILL.md: the host table has a pi row describing the turn-count floor', () => {
+  const row = SKILL.split(/\r?\n/).find((l) => /^\| pi \|/.test(l));
+  assert.ok(row, 'pi row present');
+  assert.match(row, /turn-count/);
+  assert.match(row, /before_agent_start/);
+});
+
+test('SKILL.md: the growth-trigger sentence is qualified for hosts without a transcript', () => {
+  assert.match(SKILL, /where the host exposes a transcript/);
+});
+
+test('SKILL.md: compact says what to do on hosts without the compactor agent', () => {
+  assert.match(SKILL, /hosts without the compactor agent/);
+});
