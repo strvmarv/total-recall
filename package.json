@@ -11,7 +11,7 @@
     "prepare": "git config core.hooksPath git-hooks || true",
     "postinstall": "node scripts/postinstall.js",
     "prepublishOnly": "node scripts/verify-binaries.js",
-    "test:shim": "node --test bin/shim/ pi/ scripts/fetch-binary.test.js hooks/hooks.config.test.js"
+    "test:shim": "node --test bin/shim/ pi/ codex/ scripts/fetch-binary.test.js hooks/hooks.config.test.js"
   },
   "files": [
     "bin/",
@@ -24,10 +24,12 @@
     "agents/",
     "hooks/",
     "pi/",
+    "codex/",
     "hermes-plugin/",
     ".claude-plugin/",
     ".copilot-plugin/",
     ".cursor-plugin/",
+    ".codex-plugin/",
     ".opencode/",
     ".kiro/",
     ".mcp.json",
@@ -56,6 +58,7 @@
     "rag",
     "claude-code",
     "pi-package",
+    "codex",
     "copilot-cli",
     "gemini-cli",
     "opencode",
