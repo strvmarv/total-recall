@@ -45,7 +45,7 @@ export function codexNote(rootDir) {
     '---',
     'Codex notes for the instructions above:',
     `- The \`total-recall\` command may not be on PATH in this session. Run the CLI as \`node "${path.join(rootDir, 'bin', 'start.js')}" <args>\` (for example \`compact --run\` or \`ui\`), never a bare \`total-recall\`.`,
-    '- MCP tool schemas are deferred in Codex: find the total-recall tools with tool search before calling `session_start`.',
+    '- If the total-recall MCP tools are not listed directly in this session, find them with tool search before calling `session_start`; if a call is refused for approval, tell the user their Codex tool-approval setting must allow total-recall (INSTALL.md, "Codex CLI").',
     '- Invoke the commands skill as `$total-recall:commands` (or from /skills), not `/total-recall:commands`; advice that is specific to Claude Code (such as `/total-recall:commands setup`) does not apply here.',
   ].join('\n');
 }
