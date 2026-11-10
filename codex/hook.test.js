@@ -2,7 +2,7 @@
 // process tests for the properties only a real process shows (exit code, stderr, stdin handling,
 // and degrading when the floor module cannot be loaded).
 
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -18,6 +18,14 @@ const SKILL = '---\nname: total-recall:commands\ndescription: x\n---\n\nIMMEDIAT
 const ROOT = path.join(path.sep, 'plugins', 'total-recall');
 
 const parseOut = (out) => JSON.parse(out.trim());
+
+const made = [];
+after(() => { for (const d of made) fs.rmSync(d, { recursive: true, force: true }); });
+function tmpDir(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  made.push(dir);
+  return dir;
+}
 
 function deps(over = {}) {
   const calls = { runFloor: [] };
@@ -171,7 +179,7 @@ test('storeEnvStrip: store-determining names are blanked case-insensitively; HOM
 
 function runHook(command, { input, cwd, env } = {}) {
   return spawnSync(process.execPath, [hookPath, command], {
-    input, cwd, encoding: 'utf8', env: { ...process.env, TOTAL_RECALL_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'tr-codex-trh-')), ...env },
+    input, cwd, encoding: 'utf8', env: { ...process.env, TOTAL_RECALL_HOME: tmpDir('tr-codex-trh-'), ...env },
   });
 }
 
@@ -192,7 +200,7 @@ test('process: user-prompt-submit with no provisioned engine prints nothing and 
 });
 
 function copyTree(files) {
-  const tree = fs.mkdtempSync(path.join(os.tmpdir(), 'tr-codex-tree-'));
+  const tree = tmpDir('tr-codex-tree-');
   fs.writeFileSync(path.join(tree, 'package.json'), '{"type":"module"}\n');
   for (const rel of files) {
     fs.mkdirSync(path.dirname(path.join(tree, rel)), { recursive: true });
@@ -219,7 +227,7 @@ function runWithOpenStdin(command) {
     const started = Date.now();
     const child = spawn(process.execPath, [hookPath, command], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, TOTAL_RECALL_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'tr-codex-trh-')) },
+      env: { ...process.env, TOTAL_RECALL_HOME: tmpDir('tr-codex-trh-') },
     });
     let stdout = '';
     let stderr = '';

@@ -5,7 +5,7 @@
 // child process with a Codex-like minimal environment, and reads which fixture start.js the
 // bootstrap handed over to (the fixture prints its argv and cwd).
 
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -23,8 +23,13 @@ const source = lf(fs.readFileSync(sourcePath, 'utf8'));
 /** A fixture start.js valid as both CJS and ESM: no require, no __filename. */
 const FIXTURE = 'console.log(JSON.stringify({ argv: process.argv, cwd: process.cwd() }));\n';
 
+const made = [];
+after(() => { for (const d of made) fs.rmSync(d, { recursive: true, force: true }); });
+
 function tmp(prefix) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `tr-codex-${prefix}-`));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `tr-codex-${prefix}-`));
+  made.push(dir);
+  return dir;
 }
 
 /** Builds <home>/plugins/cache/<mk>/total-recall/<ver>/bin/start.js; returns its path. */
