@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 4.4.0 - 2026-11-11
 
 ### Added
 
@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `adversarial-reviewer` and `counterexample-reviewer` agents, and a `/develop` command for pi
   (`pi/develop.js`). A repository can add a profile at `.github/develop.md` (this one does). The
   skill's tests run in the `test:shim` job.
+
+### Changed
+
+- **Release and CI workflows no longer install clang unconditionally.** The GitHub-hosted Ubuntu
+  images already ship clang 18, so `release.yml` installs it only when missing (and prints
+  `clang --version`), and `dotnet-ci.yml`, which never publishes, drops the step. A package-mirror
+  outage can no longer fail CI or the release.
 
 ## 4.3.0 - 2026-11-10
 
