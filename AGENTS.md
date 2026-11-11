@@ -2,14 +2,14 @@
 
 This file is the operational handbook for AI agents and human contributors working in this repo. For end-user docs see `README.md`; for the contributor onboarding flow see `CONTRIBUTING.md`. This file documents project-wide rules, the release flow, the plugin system, the session lifecycle, the schema migration framework, and the beta dogfood mechanics.
 
-> **State as of 0.9.x:** total-recall is a .NET 8 NativeAOT plugin (C# imperative shell + F# functional core). **Shell: PowerShell (win32) — use PowerShell syntax for all bash commands.** The TypeScript implementation that lived in `src/` through 0.7.x was stripped during the 0.7.2 → 0.8.0 cutover. Anything in this file that mentions `dist/`, `bun`, `tsup`, `vitest`, `publish.yml`, `bin/start.cjs`, or `src/db/schema.ts` is either gone or renamed — see the strip series in `CHANGELOG.md` (commits `87975a7` → `7a8c437`).
+> **State as of 0.9.x:** total-recall is a .NET 10 NativeAOT plugin (C# imperative shell + F# functional core). **Shell: PowerShell (win32) — use PowerShell syntax for all bash commands.** The TypeScript implementation that lived in `src/` through 0.7.x was stripped during the 0.7.2 → 0.8.0 cutover. Anything in this file that mentions `dist/`, `bun`, `tsup`, `vitest`, `publish.yml`, `bin/start.cjs`, or `src/db/schema.ts` is either gone or renamed — see the strip series in `CHANGELOG.md` (commits `87975a7` → `7a8c437`).
 
 ---
 
 ## Quick Reference
 
 ### Project Overview
-.NET 8 NativeAOT MCP server plugin (C# imperative shell + F# functional core) with npm packaging for Claude Code / Copilot CLI / Cursor / Kiro / OpenCode / Codex CLI marketplace distribution. Three-tier memory (Hot/Warm/Cold with a **sticky** flag — new entries default to warm and *earn* promotion to hot by access; sticky pins, set via `memory_pin`/`memory_unpin`, are always injected first and immune to decay/compaction) + hierarchical KB, all local by default (SQLite + sqlite-vec + bundled ONNX), optionally synced to Cortex (sticky pins are local-only, never synced). The single binary also exposes a third surface: a built-in local web UI (`total-recall ui`) serving an embedded React SPA with six sections (Dashboard, Memory, Knowledge Base, Usage, Insights, Config) via `TotalRecall.Web`.
+.NET 10 NativeAOT MCP server plugin (C# imperative shell + F# functional core) with npm packaging for Claude Code / Copilot CLI / Cursor / Kiro / OpenCode / Codex CLI marketplace distribution. Three-tier memory (Hot/Warm/Cold with a **sticky** flag — new entries default to warm and *earn* promotion to hot by access; sticky pins, set via `memory_pin`/`memory_unpin`, are always injected first and immune to decay/compaction) + hierarchical KB, all local by default (SQLite + sqlite-vec + bundled ONNX), optionally synced to Cortex (sticky pins are local-only, never synced). The single binary also exposes a third surface: a built-in local web UI (`total-recall ui`) serving an embedded React SPA with six sections (Dashboard, Memory, Knowledge Base, Usage, Insights, Config) via `TotalRecall.Web`.
 
 ### Layer Diagram
 ```
@@ -115,11 +115,11 @@ total-recall status
 
 ## Build & Release
 
-### .NET 8 NativeAOT, no `dist/`
+### .NET 10 NativeAOT, no `dist/`
 
-The build artifact is a per-platform AOT-published binary at `src/TotalRecall.Host/bin/Release/net8.0/<rid>/publish/total-recall` (Unix) or `total-recall.exe` (Windows). There is no `dist/` directory, no `tsup` build, no `npm run build` script. CI publishes binaries via `.github/workflows/release.yml` and ships them inside the npm tarball under `binaries/<rid>/`.
+The build artifact is a per-platform AOT-published binary at `src/TotalRecall.Host/bin/Release/net10.0/<rid>/publish/total-recall` (Unix) or `total-recall.exe` (Windows). There is no `dist/` directory, no `tsup` build, no `npm run build` script. CI publishes binaries via `.github/workflows/release.yml` and ships them inside the npm tarball under `binaries/<rid>/`.
 
-The .NET SDK is pinned by `global.json` at the repo root (`{"sdk":{"version":"10.0.100","rollForward":"latestFeature"}}`). The pin exists because GitHub-hosted macOS runners ship .NET 10 preview pre-installed and we need every CI matrix leg to use the same SDK regardless of runner pre-installs. .NET 10 SDK builds the `net8.0` target framework cleanly.
+The .NET SDK is pinned by `global.json` at the repo root (`{"sdk":{"version":"10.0.100","rollForward":"latestFeature"}}`). The pin exists because GitHub-hosted macOS runners ship .NET 10 preview pre-installed and we need every CI matrix leg to use the same SDK regardless of runner pre-installs. The projects target `net10.0`, declared once in `Directory.Build.props` at the repo root.
 
 ### ONNX model is fetched at build time (not committed)
 

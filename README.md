@@ -560,7 +560,7 @@ npm wrapper layer (Node, zero runtime dependencies):
     restarts on crash; the MCP connection never drops (no more MCP error -32000 on first
     launch after an update); emits notifications/tools/list_changed once proxying begins.
 
-MCP Server (.NET 8 NativeAOT — C# imperative shell + F# functional core)
+MCP Server (.NET 10 NativeAOT — C# imperative shell + F# functional core)
 ├── TotalRecall.Core (F#)        — pure functions: tokenizer, decay, hybrid ranking, parsers, chunker
 ├── TotalRecall.Infrastructure   — SQLite/Postgres storage, ONNX/remote embedder, importers, migrations
 ├── TotalRecall.Server           — MCP JSON-RPC server, 41 core tool handlers (48–49 with mode-dependent tools), lifecycle
@@ -597,7 +597,7 @@ Backends (selected by config):
 
 These apply only if you're building from source. The prebuilt binary is self-contained — no .NET runtime, no system SQLite, no Bun required.
 
-- **.NET 10 SDK** — pinned by `global.json` at the repo root; builds the `net8.0` NativeAOT target
+- **.NET 10 SDK** — pinned by `global.json` at the repo root; builds the `net10.0` NativeAOT target
 - **npm** — for `npm ci`, which pulls `sqlite-vec` native libs needed by the csproj copy targets
 - **Embedding model** — run `sh scripts/fetch-bge-small.sh` once to fetch + sha256-verify the `bge-small-en-v1.5` ONNX model (~133 MB) into `models/bge-small-en-v1.5/`. The model is no longer committed to the repo (not in Git LFS); release builds fetch and bundle it into the per-RID artifact.
 
@@ -616,7 +616,7 @@ dotnet publish src/TotalRecall.Host/TotalRecall.Host.csproj -c Release -r win-x6
 # (swap win-x64 for your RID: linux-x64, linux-arm64, osx-arm64)
 ```
 
-The publish output lands in `src/TotalRecall.Host/bin/Release/net8.0/<rid>/publish/` with the binary plus all sibling native libs (`libonnxruntime.*`, `libe_sqlite3.*`, `runtimes/vec0.*`) ready to run.
+The publish output lands in `src/TotalRecall.Host/bin/Release/net10.0/<rid>/publish/` with the binary plus all sibling native libs (`libonnxruntime.*`, `libe_sqlite3.*`, `runtimes/vec0.*`) ready to run.
 
 Supported RIDs: `linux-x64`, `linux-arm64`, `osx-arm64`, `win-x64`. Intel Mac (`osx-x64`) is not shipped.
 
@@ -638,7 +638,7 @@ If you're building plugins for TUI coding assistants, start with [superpowers](h
 
 ### Core Technologies
 
-- [.NET 8 / NativeAOT](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/) — single-binary deployment, no runtime dependency
+- [.NET 10 / NativeAOT](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/) — single-binary deployment, no runtime dependency
 - [F# Core](https://learn.microsoft.com/en-us/dotnet/fsharp/) — pure functional core: tokenizer, parsers, decay, hybrid ranking
 - [Microsoft.Data.Sqlite](https://learn.microsoft.com/en-us/dotnet/standard/data/sqlite/) — embedded SQLite with extension loading
 - [sqlite-vec](https://github.com/asg017/sqlite-vec) — vector similarity search in SQLite (loaded as a native extension via `LoadExtension`)

@@ -1,6 +1,6 @@
 # Contributing to total-recall
 
-total-recall is a **.NET 8 NativeAOT** plugin since 0.8.0 — a C# imperative shell + F# functional core, distributed as prebuilt per-platform binaries via npm with a thin Node launcher (`bin/start.js`). The TypeScript implementation that lived in `src/` through 0.7.x was stripped during the 0.7.2 → 0.8.0 cutover (see `CHANGELOG.md` for the strip history). This guide describes the current contributor workflow against the .NET tree.
+total-recall is a **.NET 10 NativeAOT** plugin since 0.8.0 — a C# imperative shell + F# functional core, distributed as prebuilt per-platform binaries via npm with a thin Node launcher (`bin/start.js`). The TypeScript implementation that lived in `src/` through 0.7.x was stripped during the 0.7.2 → 0.8.0 cutover (see `CHANGELOG.md` for the strip history). This guide describes the current contributor workflow against the .NET tree.
 
 ---
 
@@ -8,7 +8,7 @@ total-recall is a **.NET 8 NativeAOT** plugin since 0.8.0 — a C# imperative sh
 
 ### Prerequisites
 
-- **.NET 10 SDK** — pinned by `global.json` at the repo root (`{"sdk":{"version":"10.0.100","rollForward":"latestFeature"}}`). The .NET 10 SDK builds the `net8.0` target framework cleanly. Install from [dotnet.microsoft.com/download](https://dotnet.microsoft.com/download).
+- **.NET 10 SDK** — pinned by `global.json` at the repo root (`{"sdk":{"version":"10.0.100","rollForward":"latestFeature"}}`). The projects target `net10.0`, declared once in `Directory.Build.props` at the repo root. Install from [dotnet.microsoft.com/download](https://dotnet.microsoft.com/download).
 - **Node.js >= 20** — used only by `npm install` to pull the per-platform `sqlite-vec` native extension into `node_modules/`. The Infrastructure csproj's `<Content Include="node_modules/sqlite-vec-<rid>/vec0.*">` step copies the matching variant into the build output.
 - **Model fetch** — run `sh scripts/fetch-bge-small.sh` once before building or running the ONNX integration tests. It downloads + SHA256-verifies the `bge-small-en-v1.5` ONNX model into `models/bge-small-en-v1.5/` (133 MB, not committed).
 - **ClientApp build (optional)** — the React SPA in `src/TotalRecall.Web/ClientApp/` is **not** built by default. `dotnet build` and the full test suite are Node-free. To build the SPA, run `npm ci && npm run build` inside `src/TotalRecall.Web/ClientApp/`, or pass `-p:BuildSpa=true` to `dotnet build`/`dotnet publish`, which runs those commands automatically. Release publishes always include `-p:BuildSpa=true`.
@@ -39,12 +39,12 @@ dotnet publish src/TotalRecall.Host/TotalRecall.Host.csproj \
 # (swap linux-x64 for linux-arm64, osx-arm64, or win-x64)
 ```
 
-The published binary lives at `src/TotalRecall.Host/bin/Release/net8.0/<rid>/publish/total-recall` (or `total-recall.exe` on Windows). Smoke test:
+The published binary lives at `src/TotalRecall.Host/bin/Release/net10.0/<rid>/publish/total-recall` (or `total-recall.exe` on Windows). Smoke test:
 
 ```bash
 SCRATCH=$(mktemp -d)
 TOTAL_RECALL_DB_PATH="$SCRATCH/test.db" \
-  src/TotalRecall.Host/bin/Release/net8.0/linux-x64/publish/total-recall status
+  src/TotalRecall.Host/bin/Release/net10.0/linux-x64/publish/total-recall status
 rm -rf "$SCRATCH"
 ```
 
