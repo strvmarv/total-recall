@@ -30,6 +30,15 @@ public sealed class SessionLifecyclePromotionTests
             new("local", "fake-test-model", "", 3);
     }
 
+    private sealed class ThrowingEmbedder : IEmbedder
+    {
+        // NotSupportedException, not InvalidOperationException: the sweep swallows the
+        // latter per entry, and this test needs the sweep itself to fail.
+        public float[] Embed(string text) => throw new NotSupportedException("embedder down");
+        public EmbedderDescriptor Descriptor { get; } =
+            new("local", "throwing-test-model", "", 3);
+    }
+
     private sealed class FakeVectorSearch : IVectorSearch
     {
         public void InsertEmbedding(Tier tier, ContentType type, string entryId, ReadOnlyMemory<float> embedding) { }
@@ -71,7 +80,8 @@ public sealed class SessionLifecyclePromotionTests
         int promoteMinAccess = 5,
         double promoteThreshold = 0.7,
         int maxEntries = 50,
-        int hotMaxContentChars = 0)
+        int hotMaxContentChars = 0,
+        IEmbedder? embedder = null)
     {
         var store = new SessionLifecycleTests.FakeStore();
         var lifecycle = new SessionLifecycle(
@@ -82,7 +92,7 @@ public sealed class SessionLifecyclePromotionTests
             () => NowMs,
             storageMode: "sqlite",
             maxEntries: maxEntries,
-            embedder: new FakeEmbedder(),
+            embedder: embedder ?? new FakeEmbedder(),
             vec: new FakeVectorSearch(),
             promoteMinAccess: promoteMinAccess,
             promoteThreshold: promoteThreshold,
@@ -220,5 +230,46 @@ public sealed class SessionLifecyclePromotionTests
         Assert.Equal(0, ExistsInHot(store, "too-big"));
         Assert.Equal(1, ExistsInWarm(store, "too-big"));
         Assert.Equal(1, ExistsInHot(store, "fits"));
+    }
+
+    // ---- #47: session_start reports the warm sweep result ----
+
+    [Fact]
+    public async System.Threading.Tasks.Task Init_reports_how_many_entries_the_sweep_demoted()
+    {
+        var (lifecycle, store, _) = MakeLifecycle(maxEntries: 1);
+        SeedHot(store, id: "keep", decay: 0.9);
+        SeedHot(store, id: "evict-1", decay: 0.2);
+        SeedHot(store, id: "evict-2", decay: 0.1);
+
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        Assert.NotNull(result.WarmSweep);
+        Assert.Equal(2, result.WarmSweep!.Demoted);
+        Assert.Equal(0, result.WarmPromoted);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task Init_reports_a_sweep_that_moved_nothing_as_zero_not_null()
+    {
+        var (lifecycle, _, _) = MakeLifecycle();
+
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        Assert.NotNull(result.WarmSweep);
+        Assert.Equal(0, result.WarmSweep!.Demoted);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task Init_reports_null_warm_sweep_when_the_sweep_failed()
+    {
+        var (lifecycle, store, _) = MakeLifecycle(
+            promoteMinAccess: 5, promoteThreshold: 0.7, embedder: new ThrowingEmbedder());
+        SeedWarm(store, id: "promotable", accessCount: 6, lastAccessed: NowMs); // promotion calls Embed -> throws
+
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        Assert.Null(result.WarmSweep);
+        Assert.Equal(0, result.WarmPromoted);
     }
 }

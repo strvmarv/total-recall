@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+
+- **`session_start` reports `project`, `warmSweep` and `projectDocs`.** They were hardcoded to `null`
+  although the work behind them already ran. `project` is the detected project key (the lowercase
+  `owner/repo` slug, or the folder name when there is no remote; `null` outside a git repo), the same
+  value that scopes the injected pins. `warmSweep` is `{demoted}` once the sweep completes (`null` only
+  if it failed). `projectDocs` is `{filesIngested, totalChunks}` when project docs were ingested during
+  the call, otherwise `null`. `smokeTest` and `regressionAlerts` are still not implemented (#47).
+
 ## 4.4.0 - 2026-11-11
 
 ### Added

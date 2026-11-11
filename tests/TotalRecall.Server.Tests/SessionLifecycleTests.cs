@@ -731,6 +731,54 @@ public sealed class SessionLifecycleTests
         Assert.Equal(3, result.ImportSummary[0].KnowledgeImported);
     }
 
+    // ---------- 9b. projectDocs (#47) ----------
+
+    [Fact]
+    public async Task ProjectDocs_ReportsFilesAndChunks_WhenAnImporterIngestedFiles()
+    {
+        var importer = new FakeImporter("project-docs")
+        {
+            KbResult = new ImportResult(3, 0, Array.Empty<string>(), Chunks: 11),
+        };
+        var lifecycle = BuildLifecycle(new FakeStore(), new[] { importer });
+
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        Assert.NotNull(result.ProjectDocs);
+        Assert.Equal(3, result.ProjectDocs!.FilesIngested);
+        Assert.Equal(11, result.ProjectDocs.TotalChunks);
+    }
+
+    [Fact]
+    public async Task ProjectDocs_IsNull_WhenNothingWasIngested()
+    {
+        // A re-run deduplicated by import_log: files skipped, none ingested.
+        var importer = new FakeImporter("project-docs")
+        {
+            KbResult = new ImportResult(0, 3, Array.Empty<string>(), Chunks: 0),
+        };
+        var lifecycle = BuildLifecycle(new FakeStore(), new[] { importer });
+
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        Assert.Null(result.ProjectDocs);
+    }
+
+    [Fact]
+    public async Task ProjectDocs_IsNull_WhenNoImporterReportsChunks()
+    {
+        // Host importers (claude-code, cursor, ...) import entries, not chunked docs.
+        var importer = new FakeImporter("cursor")
+        {
+            KbResult = new ImportResult(5, 0, Array.Empty<string>()),
+        };
+        var lifecycle = BuildLifecycle(new FakeStore(), new[] { importer });
+
+        var result = await lifecycle.EnsureInitializedAsync();
+
+        Assert.Null(result.ProjectDocs);
+    }
+
     // ---------- 10. last session age null ----------
 
     [Fact]

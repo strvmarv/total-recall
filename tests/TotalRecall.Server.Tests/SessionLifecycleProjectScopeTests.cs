@@ -171,4 +171,102 @@ public sealed class SessionLifecycleProjectScopeTests : IDisposable
             }
         }
     }
+
+    // ---- #47: session_start reports the detected project ----
+
+    /// <summary>Runs session init with the process working directory set to <paramref name="dir"/>.</summary>
+    private static async Task<SessionInitResult> InitInAsync(string dir, bool projectScoping, IStore store)
+    {
+        var lifecycle = BuildLifecycle(store, projectScoping, new ProjectResolver());
+        var originalDir = Environment.CurrentDirectory;
+        try
+        {
+            Environment.CurrentDirectory = dir;
+            return await lifecycle.EnsureInitializedAsync();
+        }
+        finally
+        {
+            Environment.CurrentDirectory = originalDir;
+        }
+    }
+
+    [Fact]
+    public async Task Session_start_reports_lowercase_owner_repo_slug_for_repo_with_origin()
+    {
+        var (conn, store) = NewSqliteFixture();
+        using (conn)
+        {
+            var repoDir = MakeRepo("slug-repo", "https://github.com/Owner/Repo.git");
+            var result = await InitInAsync(repoDir, projectScoping: true, store);
+            Assert.Equal("owner/repo", result.Project);
+        }
+    }
+
+    [Fact]
+    public async Task Session_start_reports_lowercase_folder_name_for_repo_without_remote()
+    {
+        var (conn, store) = NewSqliteFixture();
+        using (conn)
+        {
+            var repo = Path.Combine(_tempRoot, "NoRemoteRepo");
+            var git = Path.Combine(repo, ".git");
+            Directory.CreateDirectory(git);
+            File.WriteAllText(Path.Combine(git, "config"), "[core]\n\trepositoryformatversion = 0\n");
+
+            var result = await InitInAsync(repo, projectScoping: true, store);
+            Assert.Equal("noremoterepo", result.Project);
+        }
+    }
+
+    [Fact]
+    public async Task Session_start_reports_null_project_outside_a_git_repo()
+    {
+        var (conn, store) = NewSqliteFixture();
+        using (conn)
+        {
+            var plain = Path.Combine(_tempRoot, "plain-dir");
+            Directory.CreateDirectory(plain);
+            // The temp root must not sit inside a repo, or the test proves nothing.
+            for (var d = new DirectoryInfo(plain); d is not null; d = d.Parent)
+                Assert.False(Directory.Exists(Path.Combine(d.FullName, ".git")) || File.Exists(Path.Combine(d.FullName, ".git")),
+                    $"test temp dir has a .git ancestor: {d.FullName}");
+
+            var result = await InitInAsync(plain, projectScoping: true, store);
+            Assert.Null(result.Project);
+        }
+    }
+
+    [Fact]
+    public async Task Session_start_project_is_the_project_that_scopes_the_injected_pins()
+    {
+        var (conn, store) = NewSqliteFixture();
+        using (conn)
+        {
+            store.Insert(Tier.Hot, ContentType.Memory,
+                new InsertEntryOpts("scoped pin for o/r", Id: "r1", Project: "o/r"));
+            store.Insert(Tier.Hot, ContentType.Memory,
+                new InsertEntryOpts("scoped pin for o/x", Id: "x1", Project: "o/x"));
+            store.SetSticky(ContentType.Memory, "r1", true);
+            store.SetSticky(ContentType.Memory, "x1", true);
+
+            var repoDir = MakeRepo("scope-match", "https://github.com/o/r.git");
+            var result = await InitInAsync(repoDir, projectScoping: true, store);
+
+            Assert.Equal("o/r", result.Project);
+            Assert.Contains("scoped pin for o/r", result.Context);
+            Assert.DoesNotContain("scoped pin for o/x", result.Context);
+        }
+    }
+
+    [Fact]
+    public async Task Session_start_reports_detected_project_even_when_pin_scoping_is_off()
+    {
+        var (conn, store) = NewSqliteFixture();
+        using (conn)
+        {
+            var repoDir = MakeRepo("scoping-off", "https://github.com/o/r.git");
+            var result = await InitInAsync(repoDir, projectScoping: false, store);
+            Assert.Equal("o/r", result.Project);
+        }
+    }
 }

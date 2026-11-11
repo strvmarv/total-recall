@@ -175,6 +175,11 @@ public sealed class SessionLifecycle : ISessionLifecycle
 
     private SessionInitResult RunInit()
     {
+        // Resolve the project once: the same value scopes the injected pins
+        // (step 3a) and is reported as SessionInitResult.Project, so the two
+        // cannot disagree. Null when no git repo is detected.
+        var detectedProject = _projectResolver.Resolve(Environment.CurrentDirectory);
+
         // 0. Usage indexer — best-effort, failures never block session_start.
         //    Runs before the existing importer sweep so quota nudges reflect
         //    the latest data. See token-usage-tracking spec §5.4.
@@ -193,15 +198,25 @@ public sealed class SessionLifecycle : ISessionLifecycle
 
         // 1. Host importer sweep — only invoke importers whose Detect() trips.
         var importSummary = new List<ImportSummaryRow>();
+        // Project docs are the only importer that reports a chunk count; sum
+        // over every importer that does, so the field is not tied to a name.
+        var docsFiles = 0;
+        var docsChunks = 0;
         foreach (var importer in _importers)
         {
             if (!importer.Detect()) continue;
 
             // TODO: importers always get project: null (the "global memories"
-            // path). ProjectResolver exists (used for pin scoping below) but
-            // its result is not passed here.
+            // path). The detected project (detectedProject, reported as
+            // SessionInitResult.Project) is not passed here; see docs/TODO.md,
+            // "Pass the detected project to the host importers".
             var memResult = importer.ImportMemories(project: null);
             var kbResult = importer.ImportKnowledge();
+            if (kbResult.Chunks is int chunks && kbResult.Imported > 0)
+            {
+                docsFiles += kbResult.Imported;
+                docsChunks += chunks;
+            }
 
             importSummary.Add(new ImportSummaryRow(
                 importer.Name,
@@ -314,7 +329,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         // thread-race against PeriodicSync on the shared SQLite connection.
         // Task 7 — access-earned warm→hot promotion happens inside the sweep
         // (after demotions); the promoted ids feed the hints block below.
-        var (warmPromoted, warmPromotedIds) = RunWarmSweep();
+        var (warmPromoted, warmPromotedIds, warmDemoted) = RunWarmSweep();
 
         // 3. Hot entries listing — used for both context and hot count.
         // I1 (tier model v2): EXCLUDE sticky rows here — they are injected
@@ -327,8 +342,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         // hot tier. Sourced sticky-first from hot (StickyOnly) rather than the
         // retired pinned tier. The hot tier gets whatever budget remains.
         // Project-scoping: only inject pins for the current project and globals.
-        var pinnedProject = _projectResolver.Resolve(Environment.CurrentDirectory);
-        var stickyOpts = (PinnedScope.OptsFor(pinnedProject, _projectScoping)
+        var stickyOpts = (PinnedScope.OptsFor(detectedProject, _projectScoping)
             ?? new ListEntriesOpts()) with { StickyOnly = true };
         // I1: StickyOnly hot listing — the ONLY site that injects sticky rows.
         var pinnedMemories = _store.List(Tier.Hot, ContentType.Memory, stickyOpts);
@@ -496,11 +510,11 @@ public sealed class SessionLifecycle : ISessionLifecycle
 
         return new SessionInitResult(
             SessionId: _sessionId,
-            Project: null, // TODO: never populated (pin scoping resolves the project internally via ProjectResolver)
+            Project: detectedProject,
             ImportSummary: importSummary,
-            WarmSweep: null, // TODO: never populated; the sweep runs (RunWarmSweep) and its promotions are in WarmPromoted
+            WarmSweep: warmDemoted is int demoted ? new WarmSweepResult(demoted) : null,
             WarmPromoted: warmPromoted,
-            ProjectDocs: null, // TODO: never populated; project docs are ingested by ProjectDocsImporter (see ImportSummary)
+            ProjectDocs: docsFiles > 0 ? new ProjectDocsResult(docsFiles, docsChunks) : null,
             HotEntryCount: hotEntries.Count,
             Context: context,
             TierSummary: tierSummary,
@@ -514,10 +528,14 @@ public sealed class SessionLifecycle : ISessionLifecycle
             BackgroundTasks: backgroundTasks);
     }
 
-    private (int Promoted, string[] PromotedIds) RunWarmSweep()
+    /// <returns>Promotions, and the number of entries demoted out of hot (dead-weight
+    /// auto-demotion plus over-capacity eviction). <c>Demoted</c> is null when the sweep
+    /// failed before completing.</returns>
+    private (int Promoted, string[] PromotedIds, int? Demoted) RunWarmSweep()
     {
         try
         {
+            var demoted = 0;
             // Phase 2 idea 1c — auto-demote dead-weight hot entries:
             // entries that have been injected many times but never accessed.
             // Task 7 — sticky rows are protected residents: EXCLUDE them from
@@ -534,6 +552,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
                 try
                 {
                     _store.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, entry.Id);
+                    demoted++;
                 }
                 catch (InvalidOperationException) { }
             }
@@ -556,7 +575,11 @@ public sealed class SessionLifecycle : ISessionLifecycle
                 foreach (var entry in toEvict)
                 {
                     if (deadWeightIds.Contains(entry.Id)) continue;
-                    try { _store.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, entry.Id); }
+                    try
+                    {
+                        _store.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, entry.Id);
+                        demoted++;
+                    }
                     catch (InvalidOperationException) { } // entry deleted by concurrent write — skip
                 }
             }
@@ -598,19 +621,19 @@ public sealed class SessionLifecycle : ISessionLifecycle
                 }
             }
 
-            return (promotedIds.Count, promotedIds.ToArray());
+            return (promotedIds.Count, promotedIds.ToArray(), demoted);
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"total-recall: warm sweep failed: {ex.Message}");
-            return (0, Array.Empty<string>());
+            return (0, Array.Empty<string>(), null);
         }
     }
 
     /// <summary>Test seam — exposes the internal warm sweep (promotion +
     /// sticky-aware demotion/eviction) so unit tests can invoke it directly
     /// without going through the full session_start/refresh flow.</summary>
-    internal (int Promoted, string[] PromotedIds) RunWarmSweepForTest() => RunWarmSweep();
+    internal (int Promoted, string[] PromotedIds, int? Demoted) RunWarmSweepForTest() => RunWarmSweep();
 
     // -------- helpers (internal so tests can call them directly) --------
 
@@ -1618,9 +1641,11 @@ public sealed record Hint
 
 /// <summary>
 /// Aggregate result of <see cref="ISessionLifecycle.EnsureInitializedAsync"/>.
-/// Several fields are never populated (Project, WarmSweep, ProjectDocs,
-/// SmokeTest, RegressionAlerts); see the TODOs at the construction site in
-/// <c>EnsureInitializedAsync</c>.
+/// <c>Project</c> is the detected project key (null outside a git repo),
+/// <c>WarmSweep</c> is null only when the sweep failed, and <c>ProjectDocs</c>
+/// is null when no project docs were ingested during the call. SmokeTest and
+/// RegressionAlerts are never populated; see the TODOs at the construction
+/// site in <c>RunInit</c>.
 /// </summary>
 public sealed record SessionInitResult(
     [property: JsonPropertyName("sessionId")] string SessionId,
@@ -1665,11 +1690,13 @@ public sealed record TierSummary(
     [property: JsonPropertyName("kb")] int Kb,
     [property: JsonPropertyName("collections")] int Collections);
 
-// TODO: never populated. The warm sweep runs; its promotion count is reported in WarmPromoted.
+/// <summary>Warm sweep outcome: how many entries were demoted out of hot (promotions are in
+/// <c>WarmPromoted</c>). The sweep result is null only when the sweep failed.</summary>
 public sealed record WarmSweepResult(
     [property: JsonPropertyName("demoted")] int Demoted);
 
-// TODO: never populated. Project docs are ingested by ProjectDocsImporter (see ImportSummary).
+/// <summary>Project docs ingested during this call: files ingested and the chunks they produced.
+/// Null when nothing was ingested (including a re-run deduplicated by import_log).</summary>
 public sealed record ProjectDocsResult(
     [property: JsonPropertyName("filesIngested")] int FilesIngested,
     [property: JsonPropertyName("totalChunks")] int TotalChunks);
