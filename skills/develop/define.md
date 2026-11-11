@@ -31,9 +31,12 @@ Conventions for every step:
    the profile's `base`, else the default branch, checked as in [Loading](profile.md#loading) step 4: a
    name that fails `git check-ref-format --branch <base>` is an invalid profile here (a warning; use the
    default branch). Keep the profile's `ticketStandard` and `templates` for the ticket draft.
-3. Existing issue only: **an open PR that already closes it.** Run `["api","repos/<owner>/<repo>/pulls?state=open&per_page=100"]`
+3. Existing issue only: **an open PR that already closes it.** Run
+   `["api","--paginate","--slurp","repos/<owner>/<repo>/pulls?state=open&per_page=100"]`
    through `ghpin.js run` (`out` = `<dir>/open-prs.json`, as in the Pull-request calls of
-   [Deliver](deliver.md#common-steps)) and read the file. A PR whose body holds `Closes #<n>` already closes
+   [Deliver](deliver.md#common-steps)). `--slurp` joins every page into one JSON array of page arrays, so the
+   file is valid JSON however many open PRs there are. Read **every** page and every PR's body, never only the first
+   page. A PR whose body holds `Closes #<n>` already closes
    the issue: name it and ask (the ask tool) whether to continue or stop. A failed call is blocker 3.
 
 ## Claim

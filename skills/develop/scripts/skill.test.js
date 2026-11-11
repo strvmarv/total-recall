@@ -506,3 +506,15 @@ test('blockers.md: the six blockers are list items, and the procedure names its 
   }
   assert.ok(text.includes('terminal'), 'blockers.md names the terminal-only kinds');
 });
+
+test('define.md: the open-pull-request lookup reads every page (--paginate --slurp) and states no 100 limit', () => {
+  const text = read('define.md');
+  assert.ok(
+    text.includes('["api","--paginate","--slurp","repos/<owner>/<repo>/pulls?state=open&per_page=100"]'),
+    'Fetch step 3 paginates and slurps the open-PR list',
+  );
+  assert.ok(text.includes('open-prs.json'), 'the list lands in open-prs.json');
+  assert.ok(/every\*\* page/.test(text), 'every page is read');
+  assert.ok(!/first 100|only the first 100/i.test(text), 'no first-100 limitation');
+  assert.ok(read('SKILL.md').includes('--slurp'), 'Preflight states the gh version that supports --slurp');
+});
