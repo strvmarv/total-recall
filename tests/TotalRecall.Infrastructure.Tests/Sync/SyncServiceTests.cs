@@ -65,11 +65,52 @@ public sealed class SyncServiceTests
         var svc = new SyncService(local, remote, syncQueue, conn);
         await svc.PullAsync(CancellationToken.None);
 
-        // Verify Insert was called on hot tier with preserved ID
+        // No tier on the wire: the pulled entry lands in warm (default ingress tier)
         local.Received(1).Insert(
-            Tier.Hot,
+            Tier.Warm,
             ContentType.Memory,
             Arg.Is<InsertEntryOpts>(o => o.Id == "remote-1" && o.Content == "remote content"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 1b: the tier from the server is kept when recognised, else warm
+    // -----------------------------------------------------------------------
+    [Theory]
+    [InlineData("hot", "hot")]
+    [InlineData("warm", "warm")]
+    [InlineData("cold", "cold")]
+    [InlineData("pinned", "warm")]
+    [InlineData("bogus", "warm")]
+    public async Task PullAsync_NewEntryTier_KeptWhenRecognisedElseWarm(string wireTier, string expected)
+    {
+        using var conn = OpenAndMigrate();
+        var syncQueue = new SyncQueue(conn);
+        var local = Substitute.For<IStore>();
+        var remote = Substitute.For<IRemoteBackend>();
+
+        var remoteEntry = new SyncEntry(
+            Id: "remote-t",
+            Content: "tiered content",
+            EntryType: "memory",
+            ContentType: "memory",
+            Tags: Array.Empty<string>(),
+            Source: "test",
+            AccessCount: 0,
+            DecayScore: 1.0,
+            CreatedAt: DateTime.UtcNow,
+            UpdatedAt: DateTime.UtcNow,
+            Tier: wireTier);
+
+        remote.GetUserMemoriesModifiedSinceAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(new SyncPullResult(new[] { remoteEntry }, null));
+        local.Get(Arg.Any<Tier>(), ContentType.Memory, "remote-t").Returns((Entry?)null);
+
+        var svc = new SyncService(local, remote, syncQueue, conn);
+        await svc.PullAsync(CancellationToken.None);
+
+        var expectedTier = expected switch { "hot" => Tier.Hot, "cold" => Tier.Cold, _ => Tier.Warm };
+        local.Received(1).Insert(expectedTier, ContentType.Memory,
+            Arg.Is<InsertEntryOpts>(o => o.Id == "remote-t"));
     }
 
     // -----------------------------------------------------------------------
