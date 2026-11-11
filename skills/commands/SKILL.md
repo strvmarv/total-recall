@@ -172,7 +172,7 @@ Call `memory_search` with the query, all tiers enabled, top_k=10. Format results
 ### store <content>
 
 Call `memory_store` with the provided content. Optionally accept flags:
-- `--tier hot|warm|cold` (default: hot)
+- `--tier hot|warm|cold` (default: warm)
 - `--tags tag1,tag2`
 - `--type correction|preference|decision`
 - `--pinned` is not a tier value — to store-and-pin new content use `memory_store` with `pinned: true` (see `### pin`).

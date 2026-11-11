@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Warm is the default tier on every ingress path (#41).** `memory_extract`, `memory_import`,
+  `total-recall memory import` and the Cortex pull still put new entries into Hot when no tier was given,
+  which filled the auto-injected tier with entries that had not earned a place and triggered compaction
+  more often. They now land in Warm and reach Hot only by an explicit `tier: "hot"`, by pinning, or by
+  earned promotion. `memory_extract` also de-duplicates against Warm as well as Hot. An import entry with
+  an unrecognised `tier`, and a pulled entry with an unrecognised or missing one, also falls back to Warm.
+  Explicit tiers and `sticky: true` are honoured as before, and `memory_promote` still defaults to Hot.
+  The `/total-recall:commands store` default now reads warm.
 - **`session_start` reports `project`, `warmSweep` and `projectDocs`.** They were hardcoded to `null`
   although the work behind them already ran. `project` is the detected project key (the lowercase
   `owner/repo` slug, or the folder name when there is no remote; `null` outside a git repo), the same
