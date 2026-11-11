@@ -1,7 +1,7 @@
 {
   "name": "total-recall",
   "description": "Multi-tiered memory and knowledge base for TUI coding assistants",
-  "version": "4.2.3",
+  "version": "4.3.0",
   "author": { "name": "strvmarv" },
   "homepage": "https://github.com/strvmarv/total-recall",
   "repository": "https://github.com/strvmarv/total-recall",
