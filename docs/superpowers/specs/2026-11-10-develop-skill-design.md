@@ -590,8 +590,8 @@ issue links the spec; the PR body links both.
 2. Implement inline, in the main session, with `superpowers:test-driven-development`: one failing
    test, the code that passes it, refactor, next cycle. No subagent per task. Push after each cycle
    (the spec guard does not apply: there is no spec), and every 3 cycles post a `tasks` checkpoint
-   with `cyclesDone`. A resume continues at cycle `cyclesDone + 1`, and the person's running session
-   confirms the earlier cycles' tests still pass before it does.
+   with `cyclesDone`. A resume treats `cyclesDone` as a floor, not the exact position: it starts by
+   checking whether the next cycle's behaviour is already on the branch (section 10).
 3. **Final loop** (≤ 6 rounds) over `git diff origin/<base>...HEAD`, fixes made inline. Push,
    `final-approved` checkpoint.
 
@@ -893,6 +893,14 @@ The script tests simulate the trust paths with fixtures. Items 4 and 5 of this l
 15. Commits and PRs carry no AI attribution unless the repository's own docs ask for one.
 16. A resume the person starts on purpose after a review-cap stop gets a fresh 6 rounds.
 17. The skill assumes a prompt-free host and says so in an advisory, not a check.
+18. Every progress checkpoint carries `pin`, and a re-approval follow-up is pending exactly when the
+    latest progress checkpoint's `pin` differs from the latest counted `defined`.
+19. Checkpoints carry `track`, `spec` and `approvedSha` so a lost pin can be rebuilt (re-pin), and
+    re-define is offered only while no progress exists.
+20. Resume treats `tasksDone` and `cyclesDone` as floors and checks for work already pushed.
+21. A trust or changed-artifact stop posts nothing; the cost is a possible live-run question for up
+    to 24 hours.
+22. Define and Deliver read the profile from the default branch, so they agree on `base`.
 
 ## 21. Not yet verified
 
