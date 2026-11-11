@@ -210,8 +210,8 @@ stop leaves nothing behind: no checkpoint, no worktree, no memory snapshot.
    read at `origin`'s default branch; `<base>` is its `base`, else that default branch. `origin` is
    a fork → stop.
 4. **GitHub account.** Done in this order:
-   1. List the logged-in accounts (`gh auth status`). Test each one's permission on the repository
-      with `GH_TOKEN=$(gh auth token --user <login>) gh api repos/<owner>/<repo> --jq .permissions`
+   1. List the logged-in github.com accounts (`gh auth status --hostname github.com`). Test each one's permission on the repository
+      with `GH_HOST=github.com GH_TOKEN=$(GH_HOST=github.com gh auth token --user <login>) gh api repos/<owner>/<repo> --jq .permissions`
       (a 404 means no access). Qualifying means `admin`, `maintain` or `push`.
    2. Pick: the active account if it qualifies, else the only one that does; with several and no
       preference, take the first and go on (the profile may change it in step 3).
@@ -224,9 +224,9 @@ stop leaves nothing behind: no checkpoint, no worktree, no memory snapshot.
 
    From then on **every** call that talks to GitHub is pinned to that account on that command only,
    so parallel sessions and subagents on the machine are never affected:
-   - `gh`: `GH_TOKEN=$(gh auth token --user <login>) gh ...`;
+   - `gh`: `GH_HOST=github.com GH_TOKEN=$(GH_HOST=github.com gh auth token --user <login>) gh ...` (the host is pinned for the token lookup and for the tool, so an Enterprise `GH_HOST` in the environment can neither pick the account nor redirect `gh api repos/...`);
    - network `git` (`fetch`, `pull`, `push`, `ls-remote`, and `worktree` operations that fetch):
-     `GH_TOKEN=$(gh auth token --user <login>) GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c 'credential.helper=!gh auth git-credential' <command>`.
+     `GH_HOST=github.com GH_TOKEN=$(GH_HOST=github.com gh auth token --user <login>) GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c 'credential.helper=!gh auth git-credential' <command>`.
      The empty `credential.helper=` resets the whole configured chain, url-scoped entries included
      (Git Credential Manager, or the repository's own helper, which would otherwise answer first
      with whichever account it has stored or the active one), and the second restores only the
@@ -242,9 +242,9 @@ stop leaves nothing behind: no checkpoint, no worktree, no memory snapshot.
    enable shell tracing (`set -x`) around a pinned command. The run never runs `gh auth switch`,
    which would change the account for every parallel session on the machine. In PowerShell the
    variable must not outlive the command, and the tool's own exit code must survive the `finally`:
-   `$p = $env:GH_TOKEN; try { $env:GH_TOKEN = (gh auth token --user <login>); ...; $ec = $LASTEXITCODE }
-   finally { $env:GH_TOKEN = $p }; exit $ec`, which restores whatever `GH_TOKEN` held before (unset,
-   if that is what it was) instead of always removing it, or use the Git Bash form. An SSH remote is
+   `$p = $env:GH_TOKEN; $h = $env:GH_HOST; try { $env:GH_HOST = 'github.com'; $env:GH_TOKEN = (gh auth token --user <login>); ...; $ec = $LASTEXITCODE }
+   finally { $env:GH_TOKEN = $p; $env:GH_HOST = $h }; exit $ec`, which restores whatever `GH_TOKEN` and `GH_HOST` held before (unset,
+   if that is what they were) instead of always removing it, or use the Git Bash form. An SSH remote is
    not covered by this (the SSH key decides the identity there): the run notes it and relies on the
    permission test of step 1, which a push cannot prove.
 5. **Reviewers** (review mode `agent` only). An agent named `adversarial-reviewer`, bare or with

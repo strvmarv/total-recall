@@ -198,12 +198,13 @@ once the route is known; "After the PR" skips them.
    tool: use it, do not copy); on a yes, copy only the missing files, then check again that the agents are visible now (pi may need a reload
    first); if they are still absent, or the owner declines, use `review=self`.
 3. **Repository.** A git repository with an `origin` remote on github.com (other hosts are not
-   supported) that `gh` can resolve. `origin` is a fork: stop. The profile is read at `origin`'s
+   supported) that `gh` can resolve, with `gh` 2.48 or later (`gh api --paginate --slurp`, which Define uses to read every open pull request). `origin` is a fork: stop. The profile is read at `origin`'s
    default branch (check 4 step 3), by the rule in [Loading](profile.md#loading), with
    `node <skill dir>/scripts/profile.js parse <markdownFile>`;
    `<base>` is its `base`, else that default branch.
 4. **GitHub account.** In this order:
-   1. List the logged-in accounts (`gh auth status`). Test each one's permission on the repository:
+   1. List the logged-in github.com accounts (`gh auth status --hostname github.com`: an Enterprise
+      account is never a candidate). Test each one's permission on the repository:
       `gh api repos/<owner>/<repo> --jq .permissions` under that account's pin, through
       `ghpin.js run` (a 404 means no access). Qualifying means `admin`, `maintain` or `push`.
    2. Pick: the active account if it qualifies, else the only one that does; with several and no
@@ -222,7 +223,10 @@ once the route is known; "After the PR" skips them.
    command string from `node <skill dir>/scripts/ghpin.js command <jsonFile>`, with
    `{shell, tool, login, args}` (`shell` is `bash` or `powershell`, `tool` is `gh` or `git`); the
    forms are the golden below. A call whose output is kept for later hashing or posting goes through
-   `ghpin.js run` with `{tool, login, args, out?, stdin?}`, which applies the same pinning. Every
+   `ghpin.js run` with `{tool, login, args, out?, stdin?}`, which applies the same pinning. The pin also
+   fixes the host: the token lookup and the tool both run with `GH_HOST=github.com`, whatever `GH_HOST` the
+   environment holds, so `gh api repos/...` never reaches an Enterprise host or a same-named repository there;
+   the PowerShell forms restore the caller's `GH_HOST` afterwards. Every
    subagent prompt that touches GitHub or runs network `git` carries both forms. Network `git` means
    `fetch`, `pull`, `push`, `ls-remote` and `worktree` operations that fetch.
 
@@ -251,26 +255,26 @@ The working tree need not be clean: a run never touches the person's checkout.
 ### Pinned command forms
 
 `ghpin.js command` prints exactly these, one per shell and tool, for `args` `["api", "user"]` and login
-`strvmarv`. In PowerShell the variable must not outlive the command and the tool's own exit code must
+`strvmarv`. In PowerShell the variables (`GH_TOKEN`, `GH_HOST`, and `GIT_TERMINAL_PROMPT` for `git`) must not outlive the command and the tool's own exit code must
 survive the `finally`; the forms do both.
 
 ```json golden:pinned-commands
 [
   {
     "shell": "bash", "tool": "gh", "login": "strvmarv", "args": ["api", "user"],
-    "expect": "t=$(gh auth token --user strvmarv) && [ -n \"$t\" ] && GH_TOKEN=\"$t\" gh api user"
+    "expect": "t=$(GH_HOST=github.com gh auth token --user strvmarv) && [ -n \"$t\" ] && GH_HOST=github.com GH_TOKEN=\"$t\" gh api user"
   },
   {
     "shell": "bash", "tool": "git", "login": "strvmarv", "args": ["api", "user"],
-    "expect": "t=$(gh auth token --user strvmarv) && [ -n \"$t\" ] && GH_TOKEN=\"$t\" GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c 'credential.helper=!gh auth git-credential' api user"
+    "expect": "t=$(GH_HOST=github.com gh auth token --user strvmarv) && [ -n \"$t\" ] && GH_HOST=github.com GH_TOKEN=\"$t\" GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c 'credential.helper=!gh auth git-credential' api user"
   },
   {
     "shell": "powershell", "tool": "gh", "login": "strvmarv", "args": ["api", "user"],
-    "expect": "$e = 1; $p = $env:GH_TOKEN; try { $env:GH_TOKEN = (gh auth token --user strvmarv); if (-not $env:GH_TOKEN) { throw 'no token' }; gh 'api' 'user'; $e = $LASTEXITCODE } finally { $env:GH_TOKEN = $p }; exit $e"
+    "expect": "$e = 1; $p = $env:GH_TOKEN; $h = $env:GH_HOST; try { $env:GH_HOST = 'github.com'; $env:GH_TOKEN = (gh auth token --user strvmarv); if (-not $env:GH_TOKEN) { throw 'no token' }; gh 'api' 'user'; $e = $LASTEXITCODE } finally { $env:GH_TOKEN = $p; $env:GH_HOST = $h }; exit $e"
   },
   {
     "shell": "powershell", "tool": "git", "login": "strvmarv", "args": ["api", "user"],
-    "expect": "$e = 1; $p = $env:GH_TOKEN; $q = $env:GIT_TERMINAL_PROMPT; try { $env:GH_TOKEN = (gh auth token --user strvmarv); if (-not $env:GH_TOKEN) { throw 'no token' }; $env:GIT_TERMINAL_PROMPT = '0'; git -c credential.helper= -c 'credential.helper=!gh auth git-credential' 'api' 'user'; $e = $LASTEXITCODE } finally { $env:GH_TOKEN = $p; $env:GIT_TERMINAL_PROMPT = $q }; exit $e"
+    "expect": "$e = 1; $p = $env:GH_TOKEN; $q = $env:GIT_TERMINAL_PROMPT; $h = $env:GH_HOST; try { $env:GH_HOST = 'github.com'; $env:GH_TOKEN = (gh auth token --user strvmarv); if (-not $env:GH_TOKEN) { throw 'no token' }; $env:GIT_TERMINAL_PROMPT = '0'; git -c credential.helper= -c 'credential.helper=!gh auth git-credential' 'api' 'user'; $e = $LASTEXITCODE } finally { $env:GH_TOKEN = $p; $env:GIT_TERMINAL_PROMPT = $q; $env:GH_HOST = $h }; exit $e"
   }
 ]
 ```

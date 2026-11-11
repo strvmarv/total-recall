@@ -17,6 +17,8 @@ import { isLogin } from './checkpoints.js';
 
 export const SUBCOMMANDS = ['scratch', 'run', 'pick', 'command', 'cleanup'];
 
+// Every pinned call talks to github.com only: a GH_HOST for another host would redirect `gh auth token` and `gh api repos/...`.
+const GITHUB_HOST = 'github.com';
 const MAX_BUFFER = 512 * 1024 * 1024;
 const GIT_CRED_ARGS = ['-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential'];
 
@@ -87,15 +89,15 @@ export function command(shell, tool, login, args) {
   const quote = shell === 'bash' ? quoteBash : quotePowerShell;
   const A = args.map(quote).join(' ');
   if (shell === 'bash') {
-    const pin = `t=$(gh auth token --user ${login}) && [ -n "$t" ] && GH_TOKEN="$t"`;
+    const pin = `t=$(GH_HOST=github.com gh auth token --user ${login}) && [ -n "$t" ] && GH_HOST=github.com GH_TOKEN="$t"`;
     if (tool === 'gh') return `${pin} gh ${A}`;
     return `${pin} GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c 'credential.helper=!gh auth git-credential' ${A}`;
   }
-  const get = `$env:GH_TOKEN = (gh auth token --user ${login}); if (-not $env:GH_TOKEN) { throw 'no token' }`;
+  const get = `$env:GH_HOST = 'github.com'; $env:GH_TOKEN = (gh auth token --user ${login}); if (-not $env:GH_TOKEN) { throw 'no token' }`;
   if (tool === 'gh') {
-    return `$e = 1; $p = $env:GH_TOKEN; try { ${get}; gh ${A}; $e = $LASTEXITCODE } finally { $env:GH_TOKEN = $p }; exit $e`;
+    return `$e = 1; $p = $env:GH_TOKEN; $h = $env:GH_HOST; try { ${get}; gh ${A}; $e = $LASTEXITCODE } finally { $env:GH_TOKEN = $p; $env:GH_HOST = $h }; exit $e`;
   }
-  return `$e = 1; $p = $env:GH_TOKEN; $q = $env:GIT_TERMINAL_PROMPT; try { ${get}; $env:GIT_TERMINAL_PROMPT = '0'; git -c credential.helper= -c 'credential.helper=!gh auth git-credential' ${A}; $e = $LASTEXITCODE } finally { $env:GH_TOKEN = $p; $env:GIT_TERMINAL_PROMPT = $q }; exit $e`;
+  return `$e = 1; $p = $env:GH_TOKEN; $q = $env:GIT_TERMINAL_PROMPT; $h = $env:GH_HOST; try { ${get}; $env:GIT_TERMINAL_PROMPT = '0'; git -c credential.helper= -c 'credential.helper=!gh auth git-credential' ${A}; $e = $LASTEXITCODE } finally { $env:GH_TOKEN = $p; $env:GIT_TERMINAL_PROMPT = $q; $env:GH_HOST = $h }; exit $e`;
 }
 
 // ---- run (no shell) ----
@@ -127,7 +129,7 @@ export function runTool(deps, input) {
   if (out !== undefined && typeof out !== 'string') throw new Error('bad out');
   if (stdin !== undefined && typeof stdin !== 'string') throw new Error('bad stdin');
 
-  const tokenRun = spawn('gh', ['auth', 'token', '--user', login], { maxBuffer: MAX_BUFFER });
+  const tokenRun = spawn('gh', ['auth', 'token', '--user', login], { env: { ...process.env, GH_HOST: GITHUB_HOST }, maxBuffer: MAX_BUFFER });
   const token = text(tokenRun && tokenRun.stdout).trim();
   if (token === '') {
     removeOut(out);
@@ -142,7 +144,7 @@ export function runTool(deps, input) {
     return { ok: false, status: null, httpStatus: null, error: `cannot read stdin file: ${err.code || err.message}`, stderr: '' };
   }
 
-  const env = { ...process.env, GH_TOKEN: token };
+  const env = { ...process.env, GH_HOST: GITHUB_HOST, GH_TOKEN: token };
   let argv = args;
   if (tool === 'git') {
     env.GIT_TERMINAL_PROMPT = '0';

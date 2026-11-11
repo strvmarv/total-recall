@@ -176,12 +176,24 @@ test('command: the pinned-commands golden in SKILL.md matches exactly', () => {
 test('command: arguments are quoted per shell', () => {
   assert.equal(
     command('bash', 'gh', 'strvmarv', ['issue', "it's here"]),
-    `t=$(gh auth token --user strvmarv) && [ -n "$t" ] && GH_TOKEN="$t" gh issue 'it'\\''s here'`,
+    `t=$(GH_HOST=github.com gh auth token --user strvmarv) && [ -n "$t" ] && GH_HOST=github.com GH_TOKEN="$t" gh issue 'it'\\''s here'`,
   );
   assert.ok(command('bash', 'gh', 'strvmarv', ['issue', 'two words']).endsWith(` gh issue 'two words'`));
   assert.ok(command('bash', 'gh', 'strvmarv', ['a/b.c:d=e@f,g+h%i-j_k']).endsWith(' gh a/b.c:d=e@f,g+h%i-j_k'));
   assert.ok(command('bash', 'gh', 'strvmarv', ['*']).endsWith(` gh '*'`));
   assert.ok(command('bash', 'gh', 'strvmarv', ['a;b']).endsWith(` gh 'a;b'`));
+});
+
+test('command: every form pins github.com for the token lookup and the tool, and PowerShell restores GH_HOST', () => {
+  for (const tool of ['gh', 'git']) {
+    const b = command('bash', tool, 'strvmarv', ['api', 'user']);
+    assert.ok(b.startsWith('t=$(GH_HOST=github.com gh auth token --user strvmarv) && [ -n "$t" ] && GH_HOST=github.com GH_TOKEN="$t" '), b);
+    const p = command('powershell', tool, 'strvmarv', ['api', 'user']);
+    assert.ok(p.includes(`$h = $env:GH_HOST;`), p);
+    assert.ok(p.indexOf(`$env:GH_HOST = 'github.com';`) < p.indexOf('gh auth token'), p);
+    assert.ok(p.includes('$env:GH_HOST = $h'), p);
+    assert.ok(p.endsWith('; exit $e'), p);
+  }
 });
 
 test('command: bash git ends with the arguments', () => {
@@ -277,6 +289,25 @@ test('command: the PowerShell gh form keeps the tool exit code', { skip: PS_SKIP
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('command: the PowerShell forms run the token lookup and the tool with GH_HOST=github.com', { skip: PS_SKIP }, () => {
+  const dir = tmpDir();
+  const log = path.join(dir, 'hosts.txt');
+  if (process.platform === 'win32') {
+    const lines = ['@echo off', 'echo %GH_HOST%>>"' + log + '"', 'if "%1"=="auth" (', '  echo tok', '  exit /b 0', ')', 'exit /b 0'];
+    fs.writeFileSync(path.join(dir, 'gh.cmd'), lines.join('\r\n') + '\r\n');
+  } else {
+    const file = path.join(dir, 'gh');
+    fs.writeFileSync(file, ['#!/bin/sh', 'echo "$GH_HOST" >> \'' + log + '\'', 'if [ "$1" = "auth" ]; then echo tok; fi', 'exit 0'].join('\n') + '\n');
+    fs.chmodSync(file, 0o755);
+  }
+  const env = { ...process.env, GH_HOST: 'ghe.example.com', PATH: dir + path.delimiter + process.env.PATH };
+  const r = runPs(PS, command('powershell', 'gh', 'strvmarv', ['api', 'user']), env);
+  assert.equal(r.status, 0, 'stdout=' + r.stdout + ' stderr=' + r.stderr);
+  const seen = fs.readFileSync(log, 'utf8').split(/\r?\n/).filter(Boolean).map((l) => l.trim());
+  assert.deepEqual(seen, ['github.com', 'github.com']);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('command: the PowerShell gh form exits non-zero when gh is not found', { skip: PS_SKIP }, () => {
   const emptyDir = tmpDir();
   const exe = psAbsolute(PS) || PS;
@@ -344,6 +375,23 @@ test('runTool: the child environment carries the parent environment (PATH, a sen
     assert.equal(env.PATH ?? env.Path, process.env.PATH ?? process.env.Path);
     assert.equal(env.GH_TOKEN, 'tok');
   });
+});
+
+test('runTool: the token lookup and the tool both get GH_HOST=github.com, whatever the parent has, and the parent keeps its own', () => {
+  for (const host of ['ghe.example.com', undefined]) {
+    withEnv({ GH_HOST: host }, () => {
+      for (const tool of ['gh', 'git']) {
+        const { spawn, calls } = fakeSpawn(OKTOKEN, { status: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) });
+        runTool({ spawn }, { tool, login: 'strvmarv', args: ['api', 'user'] });
+        assert.equal(calls.length, 2);
+        assert.equal(calls[0].opts.env.GH_HOST, 'github.com', 'token lookup');
+        assert.equal(calls[1].opts.env.GH_HOST, 'github.com', 'tool');
+        assert.equal(calls[1].opts.env.GH_TOKEN, 'tok');
+        assert.equal(calls[0].opts.env.GH_TOKEN, process.env.GH_TOKEN, 'the token lookup does not get the token');
+      }
+      assert.equal(process.env.GH_HOST, host);
+    });
+  }
 });
 
 test('runTool: gh gets the arguments as given; git gets prompt off and the two -c options first', () => {
