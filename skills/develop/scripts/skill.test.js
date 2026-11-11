@@ -65,6 +65,21 @@ const FILES = {
       'position-cases', 'task-count-cases', 'tasks-for-cases', 'live-cases', 'route-cases',
     ],
   },
+  'define.md': {
+    headings: [
+      'Fetch',
+      'Claim',
+      'Worktree',
+      'Brainstorm',
+      'Plan track',
+      'Small track',
+      'Sign-off',
+      'Publish',
+      'Wrap-up',
+      'Rules',
+    ],
+    goldens: [],
+  },
   'tutorial.md': {
     h1: '# develop',
     maxLines: 60,
@@ -374,4 +389,14 @@ test('handoff.md: the sections name the CLIs and the rulings they own', () => {
   assert.ok(reapproval.includes('history.js find'), 'Re-approval names history.js find');
   assert.ok(reapproval.includes('original unavailable'), 'Re-approval covers found:false');
   assert.ok(/\{ok:false[^}]*\}[^\n]*blocker 3/.test(reapproval), 'Re-approval stops with blocker 3 on {ok:false}');
+});
+
+test('define.md: names the hashes, the comment, the original block, the retry cap and the CLIs it runs', () => {
+  const text = read('define.md');
+  for (const term of [
+    'bodyHash', 'acHash', 'defined', 'Original report', 'at most twice', 'body-json', 'write-access',
+    'checkpoints.js format', 'checkpoints.js readback',
+  ]) {
+    assert.ok(text.includes(term), `define.md mentions ${term}`);
+  }
 });
