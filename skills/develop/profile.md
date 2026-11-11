@@ -176,9 +176,10 @@ scratch directory. They are local commands, so the account pin does not change t
 
 Finish runs the `verify` list in order, from the worktree ([Finish and close-out](deliver.md#finish-and-close-out)).
 
-- Each `sh verify` block is one command: its text, exactly as `profile.js parse` returned it, is written to a
-  file in the scratch directory and run as `sh -e <file>` from the worktree, so it stops at the first failing
-  line and is never retyped onto a command line, and the block must exit 0. Write a multi-line block when
+- Each `sh verify` block is one command. `node <skill dir>/scripts/profile.js verify-files <profileFile> <dir>`
+  writes each block byte-exact (its text and one trailing newline, LF only) to `<dir>/verify-<i>.sh`, with `i`
+  counting from 1, and lists the files in order; each listed file is run as `sh -e <file>` from the worktree,
+  so it stops at the first failing line and is never retyped onto a command line, and the file must exit 0. Write a multi-line block when
   later lines depend on earlier ones; write separate blocks for independent checks.
 - A command that fails outside this change is blocker 5.
 - Write each command so that it works on the Node version the repository's CI runs. Prefer unquoted

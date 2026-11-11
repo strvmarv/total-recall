@@ -129,6 +129,7 @@ const HOME = [
   ['handoff.md', 'Re-approval', 'history', ['find']],
   ['deliver.md', 'Common steps', 'route', ['route', 'live', 'position', 'count-tasks', 'count-cycles', 'tasks-for']],
   ['profile.md', 'Loading', 'profile', ['parse']],
+  ['profile.md', 'Verify blocks', 'profile', ['verify-files']],
 ];
 
 // Forbidden provenance strings are built from fragments so this file never contains them.
@@ -366,7 +367,7 @@ test('no file under skills/develop or in the two reviewer agents has a forbidden
 
 test('profile.md: names the path, the default branch and the never-merged PR', () => {
   const text = read('profile.md').replace(/\s+/g, ' ');
-  for (const term of ['.github/develop.md', 'default branch', 'never merged', 'develop-profile/', 'profile.js parse', 'check-ref-format --branch', 'sh -e <file>', 'Node 21', 'gh.account']) {
+  for (const term of ['.github/develop.md', 'default branch', 'never merged', 'develop-profile/', 'profile.js parse', 'profile.js verify-files', 'check-ref-format --branch', 'sh -e <file>', 'Node 21', 'gh.account']) {
     assert.ok(text.includes(term), `profile.md mentions ${term}`);
   }
 });
@@ -457,7 +458,7 @@ test('deliver.md: names the CLIs, the position, the PR keywords and the rulings'
   for (const term of [
     'route.js', 'position', 'Closes #', 'Refs #', 'final-approved',
     'checkpoints.js carry', 'checkpoints.js format', 'checkpoints.js readback', 'history.js find',
-    'pinValid', 'Tracks #', 'sh -e <file>', 'no AI attribution',
+    'pinValid', 'Tracks #', 'profile.js verify-files', 'sh -e <file>', 'no AI attribution',
   ]) {
     assert.ok(text.includes(term), `deliver.md mentions ${term}`);
   }

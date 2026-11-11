@@ -829,7 +829,9 @@ authentication: anyone with write access can change the body, a pin or a checkpo
 
 A pin that fails is a trust failure, terminal report only, with the way out of "re-define" (no progress
 checkpoint) or "re-pin" (one exists; see Re-approval). A counted progress checkpoint with no valid counted pin is
-the same failure.
+the same failure. A progress checkpoint that itself fails validation is a terminal trust failure (blocker 6) only
+while the pin is valid. When the pin fails too, the "re-pin" route runs first, and the re-pin uses only that
+checkpoint's pattern-checked `track`, `spec` and `branch`.
 
 **Integrity,** at every Deliver start and resume, and again before the PR is opened (the same title, body and
 criteria check also runs each time a checkpoint is about to be posted, except a `blocked`, `defined`, `reapproved`

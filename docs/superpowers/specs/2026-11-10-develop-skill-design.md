@@ -158,7 +158,8 @@ When the governing pin fails validation, or no counted pin exists beside any cou
 choice. With no counted progress checkpoint on the issue: **re-define this issue** (Define, which
 posts a new `defined` comment) or **stop**. With one: **re-pin** or **stop**. A re-pin is a
 re-approval (section 11) whose new pin is rebuilt from the latest counted progress checkpoint's
-`track`, `spec` and `branch`. Its `approvedSha` is that checkpoint's copy, or the tip of
+`track`, `spec` and `branch`, each pattern-checked first (nothing else from a checkpoint that itself fails
+validation is used, since its `head` and `approvedSha` may be unreachable). Its `approvedSha` is that checkpoint's copy, or the tip of
 `origin/<branch>` when the copy is unreachable, and the person approves it either way. A re-pin
 always counts as "changed" for Re-approval step 3. A re-define is never offered once progress
 exists. The pin's `branch` is a suggestion: once a checkpoint exists, the checkpoint's `branch`
@@ -549,7 +550,9 @@ back again; a second failure is blocker 6. A `blocked` that fails read-back is n
 in the final report.
 
 **Resume.** The **pin** is the latest counted `defined` or `reapproved` comment; if it fails
-validation, that is a trust failure with the way out of "re-define or re-pin" (section 5). **Progress**
+validation, that is a trust failure with the way out of "re-define or re-pin" (section 5). A progress checkpoint
+that fails validation is a terminal trust failure only while the pin is valid; when the pin fails too, the re-pin
+route of section 5 runs first. **Progress**
 is the latest counted checkpoint among `kickoff`, `plan-approved`, `tasks`, `final-approved`,
 `pr-open`, `closed` and `reapproved`. A `blocked` is informational; its `stage` and `blocker` are shown to the
 person. The checkpoint's `head` must be an ancestor of `origin/<branch>`, which holds because
@@ -752,8 +755,9 @@ blocker 6 in a plain resume and "fetch, merge, back to step 1" in Re-approval.
 
 1. **Docs.** Update the repository's own docs (`AGENTS.md`, `README.md`, `CHANGELOG.md` and the
    like, whichever exist) in this branch where behaviour changed.
-2. **Verify.** Run the profile's verify commands (each block written to a file in the scratch directory and run as
-   `sh -e <file>` from the worktree, never retyped onto a command line), then invoke
+2. **Verify.** Run the profile's verify commands (`profile.js verify-files` writes each block byte-exact to a file
+   in the scratch directory, and each file is run as `sh -e <file>` from the worktree, never retyped onto a
+   command line), then invoke
    `superpowers:verification-before-completion`. Check each acceptance criterion against the
    change and record the result for the PR body.
 3. **Integrity again** (section 9), then the spec guard, then push.
@@ -787,7 +791,7 @@ checkpoint's `pr` URL, and its head repository must be this repository (otherwis
 - PR closed unmerged → report it and ask whether to open a new PR; a person may have closed it on
   purpose, and without a yes the run stops. Opening a new PR is a Deliver write, so on a yes run
   preflight checks 1 and 5 (section 6) first. That one yes also covers recreating the branch from
-  the latest checkpoint's `head` when it is gone from `origin` (fetching `refs/pull/<n>/head` if that commit is not local) (pushing a feature branch is
+  the latest checkpoint's `head` when it is gone from `origin` (fetching `refs/pull/<pr>/head` if that commit is not local) (pushing a feature branch is
   already allowed by blocker 4). Then run pin validation and integrity like any other Deliver
   start. With no mismatch, merge a moved `origin/<base>` as Deliver step 5 does, then go to Finish. A mismatch goes to Re-approval; its `reapproved`
   comment drops `pr`, and the run re-enters Deliver, runs the loops it owes and Finish, and only
@@ -997,7 +1001,8 @@ npm run test:shim
   have write access, else the run stops, naming it. Optional.
 - `ticket.standard`: `on` (default) or `off`.
 - `ticket.template.<type>`: a file under `.github/ISSUE_TEMPLATE/` for `feature`, `bug` or `chore`.
-- `sh verify` blocks: commands Finish runs, in order, each of which must exit 0.
+- `sh verify` blocks: commands Finish runs, in order, each of which must exit 0 (`profile.js verify-files` writes
+  each block to a file and Finish runs `sh -e <file>`).
 
 Unknown keys are ignored, so Stage 2 can add its switches. An invalid profile is blocker 6 in
 Deliver and a warning in Define.
@@ -1144,7 +1149,7 @@ executor's kickoff that carries a `planSha`. Items 4 and 5 of this list also nee
 
 2. How pi resolves two skills of the same name, and whether a pi package can register agents for
    pi-subagents. If it cannot, preflight on pi offers to copy the two agent files into the user's
-   agent directory, on a yes.
+   agent directory, on a yes, never over an existing file.
 3. Claude Code namespaces plugin skills, so `/develop` may need to be `/total-recall:develop`
    (unverified); on pi a bare `/develop` works because the extension registers it.
 4. Whether superpowers' skills behave as section 13 assumes when a host has no dispatch tool.

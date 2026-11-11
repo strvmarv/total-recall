@@ -108,7 +108,8 @@ The routes:
   which posts a new `defined` comment) or **stop**.
 - `repin-or-stop` (the same, with a counted progress checkpoint): offer **re-pin** or **stop**. A
   re-pin is a re-approval (`deliver.md`, Re-approval) whose new pin is rebuilt from the latest counted
-  progress checkpoint's `track`, `spec` and `branch`; its `approvedSha` is that checkpoint's copy, or
+  progress checkpoint's `track`, `spec` and `branch` (each pattern-checked first; its other fields are not used,
+  since they may be unreachable); its `approvedSha` is that checkpoint's copy, or
   the tip of `origin/<branch>` when the copy is unreachable, and the person approves it either way. A
   re-pin always counts as "changed" for Re-approval step 3. A re-define is never offered once progress
   exists. The pin's `branch` is a suggestion: once a checkpoint exists, the checkpoint's `branch`
@@ -188,7 +189,8 @@ once the route is known; "After the PR" skips them.
    (`agents/adversarial-reviewer.md` and `agents/counterexample-reviewer.md` from the package) into the user's
    (pi's global) agent directory, never into the repository, and never over a file of the same name that
    already exists there (a global agent directory may hold an `adversarial-reviewer.md` managed by another
-   tool: use it, do not copy); on a yes, copy only the missing files; if the owner declines, use `review=self`.
+   tool: use it, do not copy); on a yes, copy only the missing files, then check again that the agents are visible now (pi may need a reload
+   first); if they are still absent, or the owner declines, use `review=self`.
 3. **Repository.** A git repository with an `origin` remote on github.com (other hosts are not
    supported) that `gh` can resolve. `origin` is a fork: stop. The profile is read at `origin`'s
    default branch (check 4 step 3), by the rule in [Loading](profile.md#loading), with

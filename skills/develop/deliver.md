@@ -101,7 +101,12 @@ Both tracks, in order. Steps 1 to 6 are the same numbers as the spec.
         `git merge-base --is-ancestor <sha> origin/<branch>` exits 0, with that checkpoint's `branch` (its own sha
         fields only; skip fields it does not carry), run as the conventions above say.
      3. **Validate** each with `checkpoints.js validate` (`{checkpoint, repo, base, reachable}`). A `progress` that fails is
-        a trust failure (blocker 6, terminal report only): tell the person to minimize the bad checkpoint or re-pin.
+        blocker 6 (a terminal trust failure: tell the person to minimize the bad checkpoint) **only when `pinValid`
+        is true**. When the pin itself failed (or the pin is the progress, as a `reapproved` is), do not stop here: go
+        on to `route.js` below, whose `repin-or-stop` route is the recovery. The re-pin takes only the progress
+        checkpoint's pattern-checked `track`, `spec` and `branch` (its `head`, `approvedSha` and `planSha` may be
+        unreachable after a rewritten branch and are not used). A progress checkpoint that fails the pattern check
+        has no usable field at all, and is blocker 6 with the same advice, whatever the pin.
 
      Then run `node <skill dir>/scripts/route.js route <rawCommentsFile> <permissionsFile>
      <stateFile> [bodyFile]` with `stateFile` = `{pinValid, issueState, baseIsDefault}`, all three inputs. `pinValid` is a
@@ -228,10 +233,11 @@ Both tracks.
 
 1. **Docs.** Update the repository's own docs (`AGENTS.md`, `README.md`, `CHANGELOG.md` and the like,
    whichever exist) in this branch where behaviour changed.
-2. **Verify.** Run the profile's verify commands, in order (the `verify` list that
-   `profile.js parse` returned), with the worktree as the working directory. Write each verify block, its text exactly as
-   `profile.js parse` returned it, to its own file in `<dir>` and run `sh -e <file>` from the worktree, so the
-   first failing line stops it and no block text is retyped onto a command line; each must exit 0. A failure outside this change is blocker 5. Then invoke
+2. **Verify.** Run the profile's verify commands, in order, with the worktree as the working directory. Run
+   `node <skill dir>/scripts/profile.js verify-files <profileFile> <dir>` once: it writes each verify block byte-exact
+   to its own file in `<dir>` and lists the files in order. For each listed file, in order, run `sh -e <file>` from
+   the worktree, so the first failing line stops it and no block text is retyped onto a command line; each must
+   exit 0. A failing file is blocker 5 (a failure outside this change). Then invoke
    `superpowers:verification-before-completion`. Check each acceptance criterion against the change
    and record the result for the PR body.
 3. **Integrity again** (step 4 of Common steps), then the spec guard (plan track), then push.

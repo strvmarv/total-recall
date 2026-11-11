@@ -2,8 +2,10 @@
 // parsed and checked. Zero dependencies, ESM, `node:fs` only.
 //
 //   node profile.js parse <markdownFile>
+//   node profile.js verify-files <markdownFile> <dir>
 
 import fs from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isLogin } from './checkpoints.js';
 
@@ -107,7 +109,7 @@ export function parseProfile(markdown) {
 
 // ---- CLI ----
 
-export const SUBCOMMANDS = ['parse'];
+export const SUBCOMMANDS = ['parse', 'verify-files'];
 
 function usage(text) {
   throw new Error(`usage: ${text}`);
@@ -119,11 +121,31 @@ function runParse(args) {
   return parseProfile(fs.readFileSync(markdownFile, 'utf8'));
 }
 
+/**
+ * Writes each verify block of the profile, byte for byte (the parsed text and one trailing LF, UTF-8, no
+ * BOM), to `<dir>/verify-<i>.sh` with `i` counting from 1, and lists the absolute paths in block order. No
+ * profile at all is an empty list; any other parse failure is `parse`'s own error and writes nothing.
+ */
+function runVerifyFiles(args) {
+  const [markdownFile, dir] = args;
+  if (!markdownFile || !dir) usage('verify-files <markdownFile> <dir>');
+  const result = parseProfile(fs.readFileSync(markdownFile, 'utf8'));
+  if (!result.ok) return result.error === 'no-profile' ? { ok: true, files: [] } : result;
+  const files = result.profile.verify.map((command, i) => {
+    const file = path.resolve(dir, `verify-${i + 1}.sh`);
+    fs.writeFileSync(file, `${command}
+`, { encoding: 'utf8' });
+    return file;
+  });
+  return { ok: true, files };
+}
+
 function dispatch(argv) {
   const [cmd, ...rest] = argv;
   if (!SUBCOMMANDS.includes(cmd)) return { ok: false, error: 'unknown subcommand' };
   switch (cmd) {
     case 'parse': return runParse(rest);
+    case 'verify-files': return runVerifyFiles(rest);
     default: return { ok: false, error: 'unknown subcommand' };
   }
 }

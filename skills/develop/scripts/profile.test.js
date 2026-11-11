@@ -138,7 +138,7 @@ test('CLI parse: a missing argument is a usage error with exit 1', () => {
 // ---- SUBCOMMANDS dispatcher ----
 
 test('SUBCOMMANDS dispatcher: every listed name dispatches, an unlisted word is rejected', () => {
-  assert.deepEqual(SUBCOMMANDS, ['parse']);
+  assert.deepEqual(SUBCOMMANDS, ['parse', 'verify-files']);
   for (const name of SUBCOMMANDS) {
     const { parsed } = run([name]);
     assert.notEqual(parsed && parsed.error, 'unknown subcommand', name);
@@ -172,4 +172,68 @@ test('.github/develop.md: the repository profile parses, pins the account and ru
     'dotnet test src/TotalRecall.sln --filter "Category!=Integration"',
     `node --test ${globs.join(' ')}`,
   ]);
+});
+
+// ---- verify-files ----
+
+test('verify-files: this repo profile writes each block byte-exact to verify-<i>.sh (1-based)', () => {
+  const root = path.join(HERE, '..', '..', '..');
+  const profileFile = path.join(root, '.github', 'develop.md');
+  const dir = tmpDir();
+  const { parsed, status } = run(['verify-files', profileFile, dir]);
+  assert.equal(status, 0);
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.files, [path.join(dir, 'verify-1.sh'), path.join(dir, 'verify-2.sh')]);
+  const expected = parseProfile(fs.readFileSync(profileFile, 'utf8')).profile.verify;
+  assert.equal(expected.length, 2);
+  parsed.files.forEach((file, i) => {
+    const bytes = fs.readFileSync(file);
+    assert.equal(bytes.toString('utf8'), `${expected[i]}\n`);
+    assert.ok(!bytes.includes(13), 'LF only');
+    assert.notDeepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf], 'no BOM');
+  });
+  assert.equal(
+    fs.readFileSync(parsed.files[0], 'utf8'),
+    'dotnet test src/TotalRecall.sln --filter "Category!=Integration"\n',
+  );
+});
+
+test('verify-files: a multi-line block from a CRLF profile is written with LF only', () => {
+  const file = writeText(
+    ['```text', 'tr-develop/profile-v1', '```', '', '```sh verify', 'echo a', 'echo "b!" ', '```', ''].join('\r\n'),
+  );
+  const dir = tmpDir();
+  const { parsed } = run(['verify-files', file, dir]);
+  assert.equal(parsed.ok, true);
+  assert.equal(fs.readFileSync(parsed.files[0], 'utf8'), 'echo a\necho "b!"\n');
+});
+
+test('verify-files: a profile with no verify blocks lists no files, and none are written', () => {
+  const file = writeText('```text\ntr-develop/profile-v1\n```\n');
+  const dir = tmpDir();
+  const { parsed } = run(['verify-files', file, dir]);
+  assert.deepEqual(parsed, { ok: true, files: [] });
+  assert.deepEqual(fs.readdirSync(dir), []);
+});
+
+test('verify-files: no profile is an empty list; an invalid profile prints the parse error shape', () => {
+  const none = run(['verify-files', writeText('# nothing here\n'), tmpDir()]);
+  assert.deepEqual(none.parsed, { ok: true, files: [] });
+
+  const invalid = writeText('```text\ntr-develop/profile-v1\nbase: bad base\n```\n');
+  const dir = tmpDir();
+  const result = run(['verify-files', invalid, dir]);
+  assert.deepEqual(result.parsed, { ok: false, error: 'bad-value:base' });
+  assert.equal(result.status, 1);
+  assert.deepEqual(fs.readdirSync(dir), []);
+
+  const empty = writeText('```text\ntr-develop/profile-v1\n```\n\n```sh verify\n\n```\n');
+  assert.deepEqual(run(['verify-files', empty, tmpDir()]).parsed, { ok: false, error: 'bad-value:verify' });
+});
+
+test('verify-files: a missing profile file or a missing argument fails', () => {
+  const missing = run(['verify-files', path.join(tmpDir(), 'absent.md'), tmpDir()]);
+  assert.equal(missing.parsed.ok, false);
+  assert.equal(missing.status, 1);
+  assert.equal(run(['verify-files']).parsed.ok, false);
 });
