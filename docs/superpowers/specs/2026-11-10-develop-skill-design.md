@@ -1,6 +1,14 @@
 # `/develop` on GitHub issues: Stage 1 design
 
-Date: 2026-11-10. Status: draft for review.
+Date: 2026-11-10. Status: draft for the owner's review.
+
+Review status: six reviewer rounds were run (adversarial reviewer alone in rounds 1 to 3, then it and
+the counterexample reviewer together in rounds 4 to 6). Every round returned NO-GO and every finding
+was accepted and fixed; none was rejected. Round 6 reached the cap without a GO. Its findings (a
+missing final-loop row in the position table, integrity and the spec guard reading only
+`origin/<branch>` while an unpushed edit sits in the worktree, routing that keyed on `defined` and
+`kickoff` only, and the order of branch recreation for a closed PR) were fixed afterwards and have
+not been reviewed again.
 
 ## 1. Intent
 
@@ -123,16 +131,18 @@ another repository): say where, and stop. The returned repository must equal `or
 issue is noted: Deliver asks before going on with one (it never reopens it), and a closed issue
 with a counted `pr-open` goes to "After the PR" without asking:
 
-- a **counted** comment (section 9) carries a `tr-develop/v1 phase=defined` or `phase=kickoff` line →
-  **Deliver**, which validates it and fails closed (section 9);
+- a **counted** comment (section 9) carries a `tr-develop/v1` line of any phase (`defined`,
+  `reapproved`, or a progress phase) → **Deliver**, which validates it and fails closed (section 9).
+  An issue is never sent back to Define while any such comment counts;
 - otherwise → **Define**, started from this issue. A `tr-develop/` line in the body or in an
   uncounted comment is ignored and mentioned once; it never routes, and Define rewrites the body.
 
 When the latest counted `defined` comment (the one that governs) fails validation, or no counted
-`defined` survives beside a counted `kickoff`, the person gets a choice. With no counted progress
+pin survives beside a counted progress checkpoint, the person gets a choice. With no counted progress
 checkpoint on the issue: **re-define this issue** (Define, which posts a new `defined` comment) or
 **stop**. With one: **re-pin** (a re-approval, section 11, whose new pin is rebuilt from the latest counted
-progress checkpoint's `track`, `spec`, `approvedSha` and `branch` and the person's fresh approval) or
+progress checkpoint's `track`, `spec` and `branch`, and an `approvedSha` read from the tip of
+`origin/<branch>` when that checkpoint is itself a `reapproved` whose value is unreachable and the person's fresh approval) or
 **stop**. A re-define is never offered once progress exists. The pin's `branch` is a suggestion: once a
 checkpoint exists, the checkpoint's `branch` governs.
 
@@ -453,7 +463,7 @@ in the final report.
 **Resume.** The **pin** is the latest counted `defined` or `reapproved` comment; if it fails
 validation, that is a trust failure with the way out of "re-define or re-pin" (section 5). **Progress**
 is the latest counted checkpoint among `kickoff`, `plan-approved`, `tasks`, `final-approved`,
-`pr-open` and `reapproved`. A `blocked` is informational; its `stage` and `blocker` are shown to the
+`pr-open`, `closed` and `reapproved`. A `blocked` is informational; its `stage` and `blocker` are shown to the
 person. The checkpoint's `head` must be an ancestor of `origin/<branch>`, which holds because
 history is never rewritten. A kickoff posted for a new executor copies forward `planSha`,
 `tasksDone`, `cyclesDone`, every `rounds.*`, `pr` and `deferred` from the progress checkpoint, and
@@ -468,24 +478,31 @@ states what it carries.
 | `pr-open` | "After the PR" (section 11) |
 | `final-approved` | Finish |
 | anything else, plan track, no `planSha` | write the plan |
-| anything else, plan track, `planSha` | task `tasksDone + 1` |
-| anything else, small track | cycle `cyclesDone + 1` (0 when absent) |
+| anything else, plan track, `planSha`, a task beyond `tasksDone` | task `tasksDone + 1` (`tasksDone` is 0 when absent) |
+| anything else, plan track, `planSha`, no task beyond `tasksDone` | the final loop |
+| anything else, small track, a cycle beyond `cyclesDone` | cycle `cyclesDone + 1` (0 when absent) |
+| anything else, small track, no cycle beyond `cyclesDone` | the final loop |
 
 A `kickoff` that carries a `planSha` therefore resumes building and never rewrites the plan. A
-`reapproved` drops `pr` and is never `final-approved`, so it always lands in the last three rows.
+`reapproved` drops `pr` and is never `final-approved`, so it always lands in the last five rows, and
+a `reapproved` that follows a `final-approved` or `pr-open` always reaches the final loop again, even
+for a change to context text only. The tasks of a plan are counted from the plan file at `planSha`
+(its `Task <n>:` headings); the cycles of an approach from its numbered cycles.
 
 **Work pushed after the last checkpoint.** Commits on `origin/<branch>` after the checkpoint's
 `head` are unverified progress, since a task or cycle is pushed when it ends but a checkpoint is
-posted only every few of them. The first task or cycle after a resume starts by checking whether its
+posted only every few of them. Each task or cycle after a resume starts by checking whether its
 behaviour is already there (its tests pass and the commit is on the branch) and, if so, finishes it
-without rewriting it; only then does it count. `tasksDone` and `cyclesDone` are the floor, never
+without rewriting it; this repeats until one is not already present. After a re-approval reset the
+final loop is also told to look for tests left over from the old approach that now pass for the
+wrong reason. `tasksDone` and `cyclesDone` are the floor, never
 the exact position.
 
 **What survives a crash.** `rounds.*` and `deferred` are durable at checkpoints, and a `tasks`
 checkpoint carries the deferred count with the list in its summary. A crash inside a loop restarts
 that loop's count, so a cap holds within an uninterrupted loop and may be exceeded across crashes.
 A resume that a person starts on purpose after a `blocked` with `blocker=1` grants that loop a fresh 6
-rounds, and says so. A counted `kickoff` with no valid counted pin is the trust failure of section 5.
+rounds, and says so. A counted progress checkpoint with no valid counted pin is the trust failure of section 5.
 
 **Routing and resume read counted comments only.** Counted checkpoints are the only ones a run
 resumes from or is stopped by. Uncounted ones are skipped. The next checkpoint's summary may say how many were ignored, by comment
@@ -563,10 +580,13 @@ issue links the spec; the PR body links both.
    "re-pin".
 2. **Concurrency** (section 10).
 3. **Resume or start** (section 10).
-4. **Integrity** (section 9). A mismatch goes straight to Re-approval in this same run when a
+4. **Integrity** (section 9). The spec is checked at `origin/<branch>` and, when a local worktree for
+   the branch exists, at that worktree's HEAD, so a person's unpushed spec edit is a mismatch and
+   goes to Re-approval, never to the guard. A mismatch goes straight to Re-approval in this same run when a
    person with write access is at the keyboard, and the run continues at step 5 afterwards. With
    no one to ask (a headless run) it is a changed-artifact stop: a terminal report, nothing posted.
-5. **Workspace.** A start is a run with no counted `kickoff`; anything else is a resume.
+5. **Workspace.** A start is a run with no counted progress checkpoint (section 10); anything else is a
+   resume.
    - *Start, plan track:* a worktree on the pin's `branch`, tracking `origin/<branch>` (Define
      pushed it). If `origin/<branch>` is ahead of the pin's `approvedSha` (an earlier executor's
      commits whose checkpoints no longer count), ask before going on.
@@ -644,11 +664,11 @@ checkpoint's `pr` URL, and its head repository must be this repository:
   Stage 2.)
 - PR merged → merged close-out: remove the worktree, delete the local branch with `git branch -d`
   (never `-D`), post the `closed` checkpoint, snapshot memory.
-- PR closed unmerged → report it. Opening a new PR is a Deliver write, so it first runs pin
-  validation and integrity like any other Deliver start. A mismatch goes to Re-approval; its
-  `reapproved` comment drops `pr`, and the run then re-enters Deliver, runs the loops it owes and
-  Finish, and only then opens the new PR. A deleted branch is recreated from the latest
-  checkpoint's `head` (asked first: it is an outward action). Without a yes the run stops.
+- PR closed unmerged → report it. Opening a new PR is a Deliver write. First, when the branch is
+  gone from `origin`, recreate it from the latest checkpoint's `head` (asked first: it is an
+  outward action); without a yes the run stops. Then run pin validation and integrity like any
+  other Deliver start. A mismatch goes to Re-approval; its `reapproved` comment drops `pr`, and the
+  run re-enters Deliver, runs the loops it owes and Finish, and only then opens the new PR.
 
 ### Re-approval
 
@@ -658,31 +678,41 @@ at the keyboard. It is **atomic**: the new pin is posted last, in one comment, s
 exists nothing public has changed and a crash just means the next `/develop <n>` starts re-approval
 again. There is no marker for work still owed.
 
-0. Refuse and ask for a fix first if an edit left the criteria markers missing or duplicated, since
-   `acHash` cannot be computed then.
-1. Show what changed, old next to new. The old body is the revision in the issue's edit history
-   (GraphQL `userContentEdits`, paginated, newest first, each holding a full body) that hashes to the
-   pinned `bodyHash` together with the title as of that time, read from the issue's
-   `RenamedTitleEvent`s (`previousTitle`), since a revision holds no title. GitHub lets revisions be
-   deleted, so when none matches, say the original is unavailable and show only the current text.
-   The text shown is the text hashed: compute the new `bodyHash` locally from it. For the spec, show
-   `git diff <approvedSha> origin/<branch> -- <spec>`. This works whoever last edited the body, an
-   outsider included.
-2. Set up a worktree for the branch as Deliver step 5's resume rule says (fetch; reuse, or create
-   from `origin/<branch>`). The person's spec edit, if any, is already a commit on the branch.
-3. Ask for approval. If the approach or the spec changed, run that artifact's reviewer loop on the
-   change first. The orchestrator's fixes to the spec are commits too; they and the plan loop's are
-   exempt from the spec guard (section 9).
-4. Only when progress exists, and only when what the track plans from changed against the
-   **governing pin** (plan track: `approvedSha` or `acHash`; small track: `bodyHash`, since the
-   approach is in the body): run the follow-up. Plan track: re-run the plan loop with the change in
-   scope as a fresh loop (rounds count from 1); completed tasks stand and are not renumbered, so
-   `tasksDone` stays valid. Small track: `cyclesDone` resets to 0 and the new cycles skip behaviour
+0. Refuse and ask for a fix first if an edit left the criteria markers, or on the small track the
+   approach markers, missing or duplicated, since the hash cannot be computed then. Note the pin and
+   the progress checkpoint as they are now.
+1. Set up a worktree for the branch as Deliver step 5's resume rule says (fetch; reuse, or create
+   from `origin/<branch>`); with no progress checkpoint on the small track there is no branch yet,
+   so skip this. Then show what changed, old next to new. The old body is the revision in the
+   issue's edit history (GraphQL `userContentEdits`, paginated, newest first, each holding a full
+   body) that hashes to the pinned `bodyHash` together with the title as of that time, read from the
+   issue's `RenamedTitleEvent`s (`previousTitle`), since a revision holds no title. GitHub lets
+   revisions be deleted, so when none matches, say the original is unavailable and show only the
+   current text. The text shown is the text hashed: compute the new `bodyHash` locally from it. For
+   the spec, show `git diff <approvedSha> <tip> -- <spec>`, where `<tip>` is the worktree's HEAD, so
+   an unpushed commit, a person's or an implementer's, is shown too. This works whoever last edited
+   the body, an outsider included.
+2. Ask for approval. If the approach or the spec changed, run that artifact's reviewer loop on the
+   change first. The orchestrator's fixes to the spec are commits too. The commits shown in step 1,
+   those fixes and the plan loop's are exempt from the spec guard (section 9); a commit made any
+   other way after step 1 is not, and is shown again.
+3. Only when progress exists, and only when what the track plans from changed against the
+   **governing pin** (plan track: the spec's content, `git diff --quiet <old approvedSha> <tip> --
+   <spec>`, or `acHash`; small track: `bodyHash`, since the approach is in the body): run the
+   follow-up. Plan track with a `planSha`: re-run the plan loop with the change in scope as a fresh
+   loop (rounds count from 1). Completed tasks stand and are not renumbered; this is checked by
+   comparing the first `tasksDone` task headings of the new plan with the old, and a difference is a
+   finding the loop must resolve. Plan track with no `planSha`: no loop, the position table's "write
+   the plan" row applies. Small track: `cyclesDone` resets to 0 and the new cycles skip behaviour
    whose tests already pass. A final loop that had run is invalidated: `rounds.final` is dropped and
    its deferred findings are recorded in the summary. A change to context text only, on the plan
    track, needs no loop.
-5. Push (spec guard exempt), then re-fetch and check that the body still hashes to what was shown;
-   otherwise go back to step 1.
+4. Push (the exemptions of step 2 apply). A rejected push (non-fast-forward) is "fetch, merge, back
+   to step 1". Then re-fetch and check that the body still hashes to what was shown; otherwise back
+   to step 1. Going back to step 1 is tried at most twice, so a bot that keeps rewriting the body
+   ends in a stop and not a loop.
+5. Re-read the comments. If the pin or the progress checkpoint differs from what step 0 noted
+   (another writer or a live executor acted meanwhile), start again at step 1.
 6. Post **one** comment. With no progress checkpoint it is a `defined` carrying the new pins.
    Otherwise it is a `reapproved` carrying the pins (`bodyHash`, `acHash`, `track`, `repo`, `base`,
    `spec`, `approvedSha` = the pushed tip after any loop; `branch` is the latest checkpoint's) and the
@@ -691,10 +721,12 @@ again. There is no marker for work still owed.
    earlier pins stay as the audit trail. A **re-pin** is these steps with the pin rebuilt as section 5
    says. The run then continues at the position section 10 derives from it.
 
-On refusal, nothing is written. Offer to restore the earlier text. The run stays stopped.
+On refusal, nothing is written. Offer to restore the earlier text; if an earlier, crashed attempt
+left a rewritten plan file on the branch, reset it to `planSha` in a new commit. The run stays
+stopped.
 
 A deliberate change works the same way: edit the criteria in the issue, or commit an edit to the
-spec on the branch, then run `/develop <n>`.
+spec in the run's worktree (pushed or not), then run `/develop <n>`.
 
 ## 12. Review contract
 
@@ -908,7 +940,8 @@ executor's kickoff that carries a `planSha`. Items 4 and 5 of this list also nee
 3. Trust is by current write access for everyone; `definedBy` has no special authority and the
    assignee plays no part in trust. The whole title and body are pinned by `bodyHash`.
 4. An outsider's issue is tracked in a new issue by default.
-5. Re-approval posts a new `defined` comment; there is no chain of amendment records.
+5. Re-approval posts a new `defined` (no progress yet) or `reapproved` (progress exists) comment;
+   there is no chain of amendment records.
 6. Re-approval also covers the approach and the spec, each after its reviewer loop.
 7. `review=agent|self` is recorded in checkpoints.
 8. Worktrees live under `.claude/worktrees/` on every host.
