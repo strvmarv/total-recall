@@ -6,8 +6,8 @@ name: Release
 # the ubuntu publish job.
 #
 # Intel Mac (osx-x64) is NOT shipped — all modern Apple hardware is arm64.
-# If Intel Mac support is re-added later, either use a macos-14-large
-# Intel runner or cross-compile osx-x64 from macos-14 arm64.
+# If Intel Mac support is re-added later, either use a macos-15-large
+# Intel runner or cross-compile osx-x64 from macos-15 arm64.
 #
 # IMPORTANT: the AOT binary depends on sibling native libs (libe_sqlite3,
 # libonnxruntime, vec0, models/). The matrix job stages the ENTIRE publish
@@ -47,7 +47,7 @@ jobs:
             artifact: total-recall-linux-arm64
             exe: total-recall
           - rid: osx-arm64
-            os: macos-14
+            os: macos-15
             artifact: total-recall-osx-arm64
             exe: total-recall
           - rid: win-x64
