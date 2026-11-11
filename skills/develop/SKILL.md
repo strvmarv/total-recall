@@ -182,8 +182,8 @@ once the route is known; "After the PR" skips them.
    Define; Deliver stops only at a point that needs an answer. On pi the tools are `ask_user`,
    `update_progress`, `Agent`, and `cd <dir> &&` for worktree entry (Hosts). If pi cannot register the
    package's agents for pi-subagents, offer to copy the two agent files (`agents/adversarial-reviewer.md`
-   and `agents/counterexample-reviewer.md` from the package) into the project's agent directory; on a
-   yes, copy them; if the owner declines, use `review=self`.
+   and `agents/counterexample-reviewer.md` from the package) into the user's (pi's global) agent
+   directory, never into the repository; on a yes, copy them; if the owner declines, use `review=self`.
 3. **Repository.** A git repository with an `origin` remote on github.com (other hosts are not
    supported) that `gh` can resolve. `origin` is a fork: stop. The profile is read at `origin`'s
    default branch (check 4 step 3) with `node <skill dir>/scripts/profile.js parse <markdownFile>`;
