@@ -92,9 +92,11 @@ public sealed class SyncService
 
                 if (localEntry == null)
                 {
+                    // A server that omits the tier (or sends one we do not know) gets the
+                    // default ingress tier, warm; hot is earned or explicit.
                     var pullTier = entry.Tier is not null
-                        ? TierNames.ParseTier(entry.Tier) ?? Tier.Hot
-                        : Tier.Hot;
+                        ? TierNames.ParseTier(entry.Tier) ?? Tier.Warm
+                        : Tier.Warm;
                     var opts = new InsertEntryOpts(
                         Content: entry.Content,
                         Source: entry.Source,

@@ -194,7 +194,7 @@ public sealed class ImportCommandTests : IDisposable
     }
 
     [Fact]
-    public async Task InvalidTier_FallsBackToHot()
+    public async Task InvalidTier_FallsBackToWarm()
     {
         var (cmd, store, _, _, _) = MakeCmd();
         var body = "{\"entries\":[{\"id\":\"a\",\"content\":\"alpha\",\"tier\":\"bogus\",\"content_type\":\"memory\"}]}";
@@ -204,7 +204,59 @@ public sealed class ImportCommandTests : IDisposable
             var code = await cmd.RunAsync(new[] { p });
             Assert.Equal(0, code);
             Assert.Single(store.InsertCalls);
-            Assert.Equal(Tier.Hot, store.InsertCalls[0].Tier);
+            Assert.Equal(Tier.Warm, store.InsertCalls[0].Tier);
+        }
+        finally { File.Delete(p); }
+    }
+
+    [Theory]
+    [InlineData("{\"id\":\"a\",\"content\":\"alpha\"}", false)]
+    [InlineData("{\"id\":\"a\",\"content\":\"alpha\",\"content_type\":\"knowledge\"}", true)]
+    public async Task MissingTier_DefaultsToWarm(string entryJson, bool isKnowledge)
+    {
+        var (cmd, store, _, _, _) = MakeCmd();
+        var p = WriteTempFile("{\"entries\":[" + entryJson + "]}");
+        try
+        {
+            var code = await cmd.RunAsync(new[] { p });
+            Assert.Equal(0, code);
+            var call = Assert.Single(store.InsertCalls);
+            Assert.Equal(Tier.Warm, call.Tier);
+            Assert.Equal(isKnowledge ? ContentType.Knowledge : ContentType.Memory, call.Type);
+        }
+        finally { File.Delete(p); }
+    }
+
+    [Theory]
+    [InlineData("{\"id\":\"a\",\"content\":\"alpha\",\"tier\":\"cold\"}", true)]
+    [InlineData("{\"id\":\"a\",\"content\":\"alpha\",\"tier\":\"hot\"}", false)]
+    public async Task ExplicitTier_IsKept(string entryJson, bool isCold)
+    {
+        var (cmd, store, _, _, _) = MakeCmd();
+        var p = WriteTempFile("{\"entries\":[" + entryJson + "]}");
+        try
+        {
+            var code = await cmd.RunAsync(new[] { p });
+            Assert.Equal(0, code);
+            var call = Assert.Single(store.InsertCalls);
+            Assert.Equal(isCold, call.Tier.IsCold);
+            Assert.Equal(!isCold, call.Tier.IsHot);
+        }
+        finally { File.Delete(p); }
+    }
+
+    [Theory]
+    [InlineData("{\"id\":\"a\",\"content\":\"alpha\",\"tier\":\"pinned\"}")]
+    [InlineData("{\"id\":\"a\",\"content\":\"alpha\",\"tier\":\"warm\",\"sticky\":true}")]
+    public async Task PinnedOrSticky_StillLandsInHot(string entryJson)
+    {
+        var (cmd, store, _, _, _) = MakeCmd();
+        var p = WriteTempFile("{\"entries\":[" + entryJson + "]}");
+        try
+        {
+            var code = await cmd.RunAsync(new[] { p });
+            Assert.Equal(0, code);
+            Assert.True(Assert.Single(store.InsertCalls).Tier.IsHot);
         }
         finally { File.Delete(p); }
     }

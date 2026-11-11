@@ -2,11 +2,12 @@
 //
 // Phase 3 idea 2e — MCP handler for the memory_extract tool. The HOST LLM
 // does the extraction work (facts/decisions/corrections from conversation
-// text); this tool only validates and persists. Facts land in the hot tier
-// with a per-fact-type EntryType mapping (fact/action_item map to
-// Surfaced). Dedup matches memory_store: identical content in the target
-// tier is skipped and counted. All facts are validated BEFORE any write so
-// a bad item mid-array cannot leave a partial batch behind.
+// text); this tool only validates and persists. Facts land in the warm tier
+// (the default ingress tier; they earn promotion to hot by access) with a
+// per-fact-type EntryType mapping (fact/action_item map to Surfaced).
+// Dedup skips and counts identical content already stored in warm or hot.
+// All facts are validated BEFORE any write so a bad item mid-array cannot
+// leave a partial batch behind.
 // Infrastructure failures mid-batch leave partial writes: each fact is an
 // independent insert transaction (matches memory_import semantics).
 
@@ -119,7 +120,9 @@ public sealed class MemoryExtractHandler : IToolHandler
         {
             ct.ThrowIfCancellationRequested();
 
-            var existing = _store.FindByContent(Tier.Hot, ContentType.Memory, content);
+            // Dedup across the live tiers: a fact already in Hot or Warm is not stored twice.
+            var existing = _store.FindByContent(Tier.Warm, ContentType.Memory, content)
+                ?? _store.FindByContent(Tier.Hot, ContentType.Memory, content);
             if (existing is not null)
             {
                 duplicates++;
@@ -131,7 +134,7 @@ public sealed class MemoryExtractHandler : IToolHandler
             var metadataJson = $"{{\"entry_type\":\"{entryTypeStr}\"}}";
             var vector = _embedder.Embed(content);
             var id = _store.InsertWithEmbedding(
-                Tier.Hot,
+                Tier.Warm,
                 ContentType.Memory,
                 new InsertEntryOpts(
                     Content: content,

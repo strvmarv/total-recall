@@ -4,8 +4,9 @@
 // src-ts/tools/extra-tools.ts:339-451 (memory_import). Reads an export
 // envelope, dedupes by existing id and by existing content (across all 6
 // tables AND within the current batch), skips malformed entries, then
-// re-embeds and inserts survivors. Invalid (tier, content_type) values
-// fall back to (hot, memory) exactly as the TS version does.
+// re-embeds and inserts survivors. An entry whose tier is missing or
+// invalid falls back to warm (the default ingress tier; hot is earned or
+// explicit), and an invalid content_type falls back to memory.
 
 using System;
 using System.Collections.Generic;
@@ -207,8 +208,9 @@ public sealed class ImportCommand : ICliCommand
                     }
                     seenContents.Add(content);
 
-                    // Resolve tier / content_type with TS-matching fallbacks.
-                    Tier tier = Tier.Hot;
+                    // Resolve tier / content_type. A missing or unrecognised tier falls back
+                    // to warm (the default ingress tier), not hot.
+                    Tier tier = Tier.Warm;
                     bool makeSticky = false;
                     if (entryElem.TryGetProperty("tier", out var tierEl)
                         && tierEl.ValueKind == JsonValueKind.String)

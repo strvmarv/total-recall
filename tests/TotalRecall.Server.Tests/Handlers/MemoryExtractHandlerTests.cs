@@ -65,11 +65,11 @@ public sealed class MemoryExtractHandlerTests
         Assert.All(dto.Entries, e => Assert.NotEmpty(e.Id));
         Assert.Equal(3, dto.Entries.Select(e => e.Id).Distinct().Count());
 
-        // Three InsertWithEmbedding calls, all Hot/Memory
+        // Three InsertWithEmbedding calls, all Warm/Memory (warm is the default ingress tier)
         Assert.Equal(3, store.InsertWithEmbeddingCalls.Count);
         Assert.All(store.InsertWithEmbeddingCalls, c =>
         {
-            Assert.Equal(Tier.Hot, c.Tier);
+            Assert.Equal(Tier.Warm, c.Tier);
             Assert.Equal(ContentType.Memory, c.Type);
         });
 
@@ -122,6 +122,32 @@ public sealed class MemoryExtractHandlerTests
         Assert.Empty(dto.Entries);
 
         // No insert should have been recorded
+        Assert.Empty(store.InsertWithEmbeddingCalls);
+    }
+
+    // -------------------------------------------------------------------------
+    // Test 2b: content already stored in Warm is also a duplicate
+    // -------------------------------------------------------------------------
+    [Fact]
+    public async Task Extract_DuplicateOfWarmEntry_SkipsAndCounts()
+    {
+        var (handler, store, _) = MakeHandler();
+
+        store.Seed(Tier.Warm, ContentType.Memory, EntryBuilder.Build("warm-id", "already in warm"));
+
+        var result = await handler.ExecuteAsync(ParseArgs("""
+            {
+              "source": "test",
+              "facts": [{"type": "fact", "content": "already in warm"}]
+            }
+            """), CancellationToken.None);
+
+        Assert.False(result.IsError);
+        var dto = JsonSerializer.Deserialize(result.Content[0].Text,
+            JsonContext.Default.MemoryExtractResultDto);
+        Assert.NotNull(dto);
+        Assert.Equal(0, dto!.Stored);
+        Assert.Equal(1, dto.DuplicatesSkipped);
         Assert.Empty(store.InsertWithEmbeddingCalls);
     }
 
