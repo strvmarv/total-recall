@@ -83,6 +83,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   growth-trigger sentence is qualified for hosts without a transcript, and
   `compact` says what to do on hosts without the compactor agent.
 
+### Fixed
+
+- **Release workflow: the macOS build runs on `macos-15`.** GitHub no longer serves the `macos-14` image ("The configuration 'macos-14-arm64-us-default' is not supported"), so the first v4.3.0 tag push cancelled the osx-arm64 leg before it started and skipped the npm publish. Nothing was published from that run; v4.3.0 was re-tagged on the fix.
+
 ## 4.2.3 - 2026-09-04
 
 ### Fixed
