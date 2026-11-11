@@ -2,13 +2,11 @@
 
 Date: 2026-11-10. Status: draft for the owner's review.
 
-Review status: six reviewer rounds were run (adversarial reviewer alone in rounds 1 to 3, then it and
-the counterexample reviewer together in rounds 4 to 6). Every round returned NO-GO and every finding
-was accepted and fixed; none was rejected. Round 6 reached the cap without a GO. Its findings (a
-missing final-loop row in the position table, integrity and the spec guard reading only
-`origin/<branch>` while an unpushed edit sits in the worktree, routing that keyed on `defined` and
-`kickoff` only, and the order of branch recreation for a closed PR) were fixed afterwards and have
-not been reviewed again.
+Review status: nine reviewer rounds were run (the adversarial reviewer alone in rounds 1 to 3, then it
+and the counterexample reviewer together in rounds 4 to 9). Rounds 1 to 8 returned NO-GO and every
+finding was accepted and fixed; none was rejected. Round 9 returned GO from both reviewers, with
+minor findings only. The cheap minors were then fixed as wording-level edits, which have not been
+reviewed again; the rest are listed in section 23 as deferred.
 
 ## 1. Intent
 
@@ -129,7 +127,8 @@ another repository): say where, and stop. The returned repository must equal `or
 **Issue entry.** An issue argument names an issue; the issue decides the route. Read the issue
 (title, body, author, labels, assignees, state) and its comments once, before any write. A closed
 issue is noted: Deliver asks before going on with one (it never reopens it), and a closed issue
-with a counted `pr-open` goes to "After the PR" without asking:
+whose latest counted progress is `pr-open` goes to "After the PR" without asking, and the
+reopened-issue question below runs before Deliver step 1:
 
 - a **counted** comment (section 9) carries a `tr-develop/v1` line of any phase (`defined`,
   `reapproved`, or a progress phase) → **Deliver**, which validates it and fails closed (section 9).
@@ -174,7 +173,9 @@ entry by `cd <dir> &&`, absolute paths for file tools).
 
 ## 6. Preflight
 
-Run before any write. On a failure, say what is missing and how to get it, then stop. A preflight
+Run before any write. Checks 3 and 4 run before the first `gh` call, the issue read of section 5
+included; checks 1 and 5 run once the route is known ("After the PR" skips them). On a failure,
+say what is missing and how to get it, then stop. A preflight
 stop leaves nothing behind: no checkpoint, no worktree, no memory snapshot.
 
 1. **Superpowers.** The six skills are available and the installed version is 7 or later. The
@@ -185,7 +186,7 @@ stop leaves nothing behind: no checkpoint, no worktree, no memory snapshot.
    needs no superpowers and skips this check and check 5.
 2. **Dispatch and ask tools.** Decide the review mode: `agent` when a dispatch tool is present,
    else `self` (with the warning of section 5). A host with no way to ask the person a question
-   stops: Define cannot run without one.
+   cannot run Define; Deliver stops only at a point that needs an answer.
 3. **Repository.** A git repository with an `origin` remote that `gh` can resolve. The profile is
    read at `origin`'s default branch; `<base>` is its `base`, else that default branch. `origin` is
    a fork → stop.
@@ -397,8 +398,8 @@ hash. It is accepted.
 - `approvedSha` is 40 hex and reachable from `origin/<branch>`;
 - `bodyHash` and `acHash` are 64 hex.
 
-**Integrity,** at every Deliver start and resume, and again before the PR is opened. Once a counted
-`pr-open` exists none of this runs (except after a yes to a new PR, section 11): the branch may be gone after a merge, so "After the PR"
+**Integrity,** at every Deliver start and resume, and again before the PR is opened. Once the latest
+counted progress is `pr-open` none of this runs (except after a yes to a new PR, section 11): the branch may be gone after a merge, so "After the PR"
 (section 11) works from the PR's own URL and reports an integrity mismatch only as advice:
 
 - the title and body hash to `bodyHash`, and the criteria region to `acHash`; the same check runs
@@ -452,7 +453,7 @@ human-readable summary, then a fenced block holding exactly one line that matche
 | `head` | every phase from `kickoff` on; optional on `blocked` | 40-hex commit already pushed to `origin/<branch>` |
 | `review` | `kickoff` and later | `agent` or `self` (section 12) |
 | `gh` | `kickoff` and later | the posting executor's GitHub login |
-| `planSha` | plan track, from `plan-approved` on | commit of the plan file, refreshed at every `tasks` and `final-approved` so tasks added after approval are counted |
+| `planSha` | plan track, from `plan-approved` on | commit of the plan file, refreshed at every `tasks` and `final-approved` so tasks added after approval are counted; a refresh must keep the first `tasksDone` task headings unchanged, as Re-approval step 3 checks, and a plan edit is pushed before the checkpoint |
 | `plan` | plan track, every checkpoint from `plan-approved` on, kickoffs and `reapproved` included | repository path of the plan file |
 | `tasksDone` | plan track, from `tasks` on | completed plan tasks |
 | `cyclesDone` | small track, from `tasks` on | completed red-green cycles |
@@ -477,7 +478,7 @@ is the latest counted checkpoint among `kickoff`, `plan-approved`, `tasks`, `fin
 `pr-open`, `closed` and `reapproved`. A `blocked` is informational; its `stage` and `blocker` are shown to the
 person. The checkpoint's `head` must be an ancestor of `origin/<branch>`, which holds because
 history is never rewritten. A kickoff posted for a new executor copies forward whichever of `plan`, `planSha`, `tasksDone`,
-`cyclesDone`, `rounds.*`, `pr` and `deferred` the progress checkpoint has, and states what it
+`cyclesDone`, `rounds.*` and `deferred` the progress checkpoint has, and states what it
 carries.
 
 **The position** is derived from the progress checkpoint, never from guessing:
@@ -499,7 +500,8 @@ A `kickoff` that carries a `planSha` therefore resumes building and never rewrit
 a `reapproved` that follows a `final-approved` or `pr-open` always reaches the final loop again, even
 for a change to context text only. The tasks of a plan are counted from the plan file named by the checkpoint's `plan`, at
 `planSha`: its `### Task <n>:` headings outside code fences, a format golden-tested in
-`checkpoints.js`. The cycles of an approach are its `Cycle <n>:` lines. A count of 0, or a plan file
+`checkpoints.js`. When the plan at the tip of `origin/<branch>` keeps the first `tasksDone` headings of
+the `planSha` version, the tip's headings are counted, so a task appended before a crash is not lost. The cycles of an approach are its `Cycle <n>:` lines. A count of 0, or a plan file
 that cannot be found, is blocker 6, and the plan loop and the approach loop each reject a document
 with none.
 
@@ -590,8 +592,9 @@ issue links the spec; the PR body links both.
 
 ### Deliver, common steps
 
-1. **Fetch,** then **read** the issue. When the latest counted progress checkpoint is `pr-open` or
-   `closed`, go to "After the PR" now, before any pin validation, because the branch may be gone.
+1. **Fetch,** then **read** the issue. When the latest counted progress checkpoint is `pr-open`,
+   go to "After the PR" now, before any pin validation, because the branch may be gone; when it is
+   `closed`, report it and stop (the reopened-issue question of section 5 having been asked).
    Otherwise **validate** it (sections 9 and 10). A pin that fails validation is a trust failure
    (terminal report only) with the way out of section 5: "re-define" or "re-pin".
 2. **Concurrency** (section 10).
@@ -619,8 +622,8 @@ issue links the spec; the PR body links both.
      within the spec is blocker 5.
 6. **Kickoff.** Assign the issue to the executor, run the spec guard (plan), push, post the
    `kickoff` checkpoint and read it back. A kickoff is posted again whenever the executor is not
-   the `gh` of the latest counted checkpoint, except when the progress checkpoint is `final-approved` or `pr-open`:
-   the executor is then only assigned, so a signed-off loop is never demoted, and the next checkpoint
+   the `gh` of the latest counted progress checkpoint, except when the progress checkpoint is `final-approved` or `pr-open`:
+   the executor is then only assigned (the guard and push belong to Finish), so a signed-off loop is never demoted, and the next checkpoint
    carries every field. It carries `track` and, on the plan track, `spec` and
    `approvedSha`, copied from the pin.
 
@@ -631,8 +634,10 @@ branch is checked out in the person's own main checkout, stop (terminal report, 
 tell them to switch that checkout off the branch; it is never touched. No worktree (a fresh
 machine): create one from `origin/<branch>`. A clean worktree that is behind is fast-forwarded. A
 dirty one, the usual state after a crash in the middle of a task, is an ask and not a blocker: show
-`git status` and offer to commit the changes as work in progress; it is never reset, stashed or
-cleaned, and a run with no one to ask stops with a terminal report. When the spec at the worktree's
+`git status` and offer two things: commit the changes as work in progress, or continue with the
+untracked files left alone. It is never reset, stashed or cleaned. A person who declines, and a run
+with no one to ask, stop with a terminal report and nothing posted. A dirty worktree that is also
+behind is committed first and then merged, never fast-forwarded over. When the spec at the worktree's
 HEAD differs from `approvedSha` (a net comparison, not a per-commit one) that is an integrity
 mismatch (step 4). Other unpushed commits are pushed after the spec guard. A diverged worktree is
 blocker 6 in a plain resume and "fetch, merge, back to step 1" in Re-approval.
@@ -687,21 +692,22 @@ blocker 6 in a plain resume and "fetch, merge, back to step 1" in Re-approval.
 
 ### After the PR
 
-`/develop <n>` on an issue with a counted `pr-open`. No pin validation and no integrity check
+`/develop <n>` on an issue whose latest counted progress is `pr-open`. No pin validation and no integrity check
 block this route, because the branch may have been deleted by the merge. The PR is found by the
-checkpoint's `pr` URL, and its head repository must be this repository:
+checkpoint's `pr` URL, and its head repository must be this repository (otherwise report it and stop; nothing is written):
 
 - PR open → report its state, and any integrity mismatch as advice, and stop. (Follow-up is
   Stage 2.)
 - PR merged → merged close-out: remove the worktree, delete the local branch with `git branch -d`
   (never `-D`), post the `closed` checkpoint, snapshot memory. Each step tolerates a thing that is
-  already gone, so a crash in the middle just reruns.
+  already gone, so a crash in the middle just reruns. A worktree whose removal git refuses is kept
+  and reported, as section 14 says for a branch.
 - PR closed unmerged → report it and ask whether to open a new PR; a person may have closed it on
   purpose, and without a yes the run stops. Opening a new PR is a Deliver write, so on a yes run
   preflight checks 1 and 5 (section 6) first. That one yes also covers recreating the branch from
-  the latest checkpoint's `head` when it is gone from `origin` (pushing a feature branch is
+  the latest checkpoint's `head` when it is gone from `origin` (fetching `refs/pull/<n>/head` if that commit is not local) (pushing a feature branch is
   already allowed by blocker 4). Then run pin validation and integrity like any other Deliver
-  start. With no mismatch, go straight to Finish. A mismatch goes to Re-approval; its `reapproved`
+  start. With no mismatch, merge a moved `origin/<base>` as Deliver step 5 does, then go to Finish. A mismatch goes to Re-approval; its `reapproved`
   comment drops `pr`, and the run re-enters Deliver, runs the loops it owes and Finish, and only
   then opens the new PR. This route is one row of the routing function in `checkpoints.js` and has
   goldens.
@@ -742,7 +748,7 @@ again. There is no marker for work still owed.
    finding the loop must resolve. Plan track with no `planSha`: no loop, the position table's "write
    the plan" row applies. Small track: `cyclesDone` resets to 0 and the new cycles skip behaviour
    whose tests already pass. A final loop that had run is invalidated: `rounds.final` is dropped and
-   its deferred findings are recorded in the summary. A change to context text only, on the plan
+   its deferred findings are carried into the `deferred` count and listed in the summary. A change to context text only, on the plan
    track, needs no loop.
 4. Push (the exemptions of step 2 apply). A rejected push (non-fast-forward) is "fetch, merge, back
    to step 1". Then re-fetch and check that the body still hashes to what was shown; otherwise back
@@ -752,8 +758,8 @@ again. There is no marker for work still owed.
    (another writer or a live executor acted meanwhile), start again at step 1.
 6. Post **one** comment. With no progress checkpoint it is a `defined` carrying the new pins.
    Otherwise it is a `reapproved` carrying the pins (`bodyHash`, `acHash`, `track`, `repo`, `base`,
-   `spec`, `approvedSha` = the pushed tip after any loop; `branch` is the latest checkpoint's) and the
-   progress (`head`, `plan`, `planSha`, `tasksDone` or `cyclesDone`, the new `rounds.plan`,
+   `spec`, `approvedSha` (plan track) = the pushed tip after any loop; `branch` is the latest checkpoint's) and the
+   progress (`head`, `plan`, `planSha` as it stands after any plan loop, `tasksDone` or `cyclesDone`, the new `rounds.plan`,
    `deferred`, `review`, `gh`), and no `pr`. The summary names what changed and who approved. Read it back. The
    earlier pins stay as the audit trail. A **re-pin** is these steps with the pin rebuilt as section 5
    says. The run then continues at the position section 10 derives from it.
@@ -1023,3 +1029,13 @@ executor's kickoff that carries a `planSha`. Items 4 and 5 of this list also nee
 - The JSON shape each script prints and the full set of golden cases.
 - The host-mapping table for pi.
 - The order of work, provided section 19 is met.
+
+## 23. Deferred findings
+
+Minors from the review that were not changed in this design. The builder may fix them in the files
+that implement it.
+
+- Whether a `blocked` posted by one executor should count when deciding to re-post a kickoff (the
+  text now compares against the latest counted progress checkpoint, which makes it moot).
+- Whether `deferred` should be a list in a field, not a count with the list in the summary.
+- The exact wording of the ask shown for a dirty worktree and for a main checkout on the branch.
