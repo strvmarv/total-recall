@@ -219,9 +219,10 @@ presentation.
      line;
    - fields: the pins above, `definedBy=<login>` and `definedAt` (ISO-8601 UTC). Check them with
      `checkpoints.js validate` (`repo` and `base` from `origin`; build `reachable` as
-     [Deliver](deliver.md#common-steps) step 1 says (`git merge-base --is-ancestor <approvedSha> origin/<branch>`
-     through `ghpin.js run`, plan track; include the sha only when it exits 0, and treat any status other than 0 or 1
-     as blocker 3); the input shape is in [Checkpoints](handoff.md#checkpoints));
+     [Deliver](deliver.md#common-steps) step 1 says (plan track: probe `<approvedSha>` with
+     `rev-parse --verify --quiet <approvedSha>^{commit}` through `ghpin.js run`, where status 1 means absent, so not
+     reachable; on status 0 run `merge-base --is-ancestor <approvedSha> origin/<branch>` the same way and include the sha
+     only when it exits 0; any status other than those, and a merge-base status other than 0 or 1, is blocker 3); the input shape is in [Checkpoints](handoff.md#checkpoints));
    - write the comment: `node <skill dir>/scripts/checkpoints.js format <jsonFile>` with
      `{phase:"defined", fields, summaryFile, outFile, lineFile}`;
    - post `outFile` (`comment-post`), fetch the comment (`comment-body`; its `<id>` is the REST `id` in the

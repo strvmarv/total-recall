@@ -16,10 +16,14 @@ Conventions for every step:
   `ghpin.js run` with `{tool, login, args, out}`. The command arguments (`issue`, `comments`, `edits`,
   `renames`, `comment-post`, `comment-body`, `comment-edit`, `pr-create`, `pr-edit`) are in
   [Trust](handoff.md#trust). Local `git` (`diff`, `status`, `worktree list`) needs no
-  pinning; run it with `git -C <worktree>`. `git merge-base --is-ancestor <sha> origin/<branch>` runs through
-  `ghpin.js run` (`{tool: "git", login, args: ["-C", "<main>", "merge-base", "--is-ancestor", "<sha>", "origin/<branch>"]}`, no shell,
-  no `out`) and only with a `<branch>` and `<sha>` that already passed the pattern check of step 1: its `status` 0 is reachable,
-  1 is not reachable, and any other status (128 for an unfetched commit, say) is tool trouble, blocker 3.
+  pinning; run it with `git -C <worktree>`. Reachability of `<sha>` from `origin/<branch>` is two calls through
+  `ghpin.js run` (`{tool: "git", login, args, ...}`, no shell, no `out`), made only with a `<branch>` and `<sha>` that already passed
+  the pattern check of step 1 (so `<sha>` is 40 lowercase hex). First probe that the commit is in the local store (`git rev-parse --verify --quiet`), with `args`
+  `["-C", "<main>", "rev-parse", "--verify", "--quiet", "<sha>^{commit}"]`: `status` 1 means it is absent (a force-pushed
+  branch leaves the old sha missing in another clone), which counts as not reachable, and the merge-base call is skipped; any
+  status other than 0 or 1 is tool trouble, blocker 3. On `status` 0 run `args`
+  `["-C", "<main>", "merge-base", "--is-ancestor", "<sha>", "origin/<branch>"]`: 0 is reachable, 1 is not reachable, and any
+  other status is tool trouble, blocker 3.
 - Every text that goes to GitHub (a checkpoint, a PR title, a PR body) is written to a file in `<dir>`
   first and sent from that file. Nothing is retyped, piped or redirected. Hashes and checkpoint lines
   come from the scripts, never by hand: `regions.js` hashes, `route.js` decides the route and the
@@ -98,8 +102,8 @@ Both tracks, in order. Steps 1 to 6 are the same numbers as the spec.
         and `planSha` that it carries must be 40 lowercase hex (`^[0-9a-f]{40}$`). A field that fails is a trust
         failure (for the pin, `pinValid` is false), and nothing from that checkpoint is used in a command.
      2. **Reachable.** `reachable` lists each of the checkpoint's own `approvedSha`, `head` and `planSha` for which
-        `git merge-base --is-ancestor <sha> origin/<branch>` exits 0, with that checkpoint's `branch` (its own sha
-        fields only; skip fields it does not carry), run as the conventions above say.
+        is reachable from `origin/<branch>`, with that checkpoint's `branch` (its own sha
+        fields only; skip fields it does not carry), tested as the conventions above say (a commit absent from the local store is not reachable).
      3. **Validate** each with `checkpoints.js validate` (`{checkpoint, repo, base, reachable}`). A `progress` that fails is
         blocker 6 (a terminal trust failure: tell the person to minimize the bad checkpoint) **only when `pinValid`
         is true**. When the pin itself failed (or the pin is the progress, as a `reapproved` is), do not stop here: go

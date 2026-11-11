@@ -471,9 +471,13 @@ before its fields reach a command):
 - `bodyHash` and `acHash` are 64 hex.
 
 The caller computes reachability and passes it as data: `reachable` lists each of the checkpoint's own
-`approvedSha`, `head` and `planSha` (the ones it carries) for which `git merge-base --is-ancestor <sha>
-origin/<branch>` exits 0, run through `ghpin.js run` (no shell): exit 0 is reachable, exit 1 is not, any other
-status is tool trouble (blocker 3). `head` and `planSha` must be in `reachable` on every phase except `closed`,
+`approvedSha`, `head` and `planSha` (the ones it carries) that are reachable from `origin/<branch>`, tested by two
+calls through `ghpin.js run` (no shell) after the pattern check, so each sha is 40 lowercase hex. First `git -C <main>
+rev-parse --verify --quiet <sha>^{commit}`: status 1 means the commit is not in the local store, which counts as not
+reachable (a force-pushed branch leaves the old sha missing in another clone; `merge-base --is-ancestor` would exit 128
+for it, and `git cat-file -e` does too), and the next call is skipped; any status other than 0 or 1 is tool trouble
+(blocker 3). On status 0, `git merge-base --is-ancestor <sha> origin/<branch>`: exit 0 is reachable, exit 1 is not, any
+other status is tool trouble (blocker 3). `head` and `planSha` must be in `reachable` on every phase except `closed`,
 and a `reapproved` carries `head`, so a re-approval is validated with all three listed. The pattern checks
 (`branch`, 40 lowercase hex shas) run first, before any field reaches a command. Progress checkpoints are
 validated the same way as the pin; a progress checkpoint that fails is a terminal-only trust failure (blocker 6).

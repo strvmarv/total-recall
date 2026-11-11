@@ -458,7 +458,7 @@ test('deliver.md: names the CLIs, the position, the PR keywords and the rulings'
   for (const term of [
     'route.js', 'position', 'Closes #', 'Refs #', 'final-approved',
     'checkpoints.js carry', 'checkpoints.js format', 'checkpoints.js readback', 'history.js find',
-    'pinValid', 'Tracks #', 'profile.js verify-files', 'sh -e <file>', 'no AI attribution',
+    'pinValid', 'Tracks #', 'profile.js verify-files', 'sh -e <file>', 'no AI attribution', 'rev-parse --verify --quiet',
   ]) {
     assert.ok(text.includes(term), `deliver.md mentions ${term}`);
   }

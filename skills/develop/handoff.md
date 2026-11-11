@@ -561,10 +561,13 @@ checked.
 `closed` (after a merge the branch may be gone, so `closed` only needs a 40-hex `head`);
 `approvedSha` must be reachable on `defined` and `reapproved`. The caller computes `reachable` first and passes the
 list as data: it lists each of the checkpoint's own `approvedSha`, `head` and `planSha` (skip fields it does not carry)
-for which `git merge-base --is-ancestor <sha> origin/<branch>` exits 0, so a `reapproved` that carries all three
-lists all three. The command runs through `ghpin.js run` with no shell, and only with a `branch` and shas that
-already match their patterns; exit 0 is reachable, exit 1 is not reachable, and any other status (128 for an unfetched
-commit, say) is tool trouble, blocker 3, never "unreachable":
+that are reachable from `origin/<branch>`, so a `reapproved` that carries all three
+lists all three. Both commands run through `ghpin.js run` with no shell, and only with a `branch` and shas that
+already match their patterns (so a sha is 40 lowercase hex). First `rev-parse --verify --quiet <sha>^{commit}` (run as
+`git -C <main>`, no `out`): status 1 means the commit is not in the local store (a force-pushed branch leaves the old sha
+missing in another clone), which counts as not reachable, and the next call is skipped; any status other than 0 or 1 is
+tool trouble, blocker 3. On status 0, `git merge-base --is-ancestor <sha> origin/<branch>`: 0 is reachable, 1 is not
+reachable, and any other status is tool trouble, blocker 3, never "unreachable":
 `node checkpoints.js validate <jsonFile>` takes `{checkpoint, repo, base, reachable}`, where `checkpoint` is
 `{phase, fields}` (the `phase` and `fields` that `select` returned for it), `repo` and `base` are `origin`'s
 repository and the base branch, and `reachable` lists the SHAs found reachable. It prints `{"ok":true}`, or
