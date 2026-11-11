@@ -47,7 +47,8 @@ export function cursorNote(rootDir) {
     '---',
     'Cursor notes for the instructions above:',
     `- The \`total-recall\` command may not be on PATH in this session. Run the CLI as \`node "${path.join(rootDir, 'bin', 'start.js')}" <args>\` (for example \`compact --run\` or \`ui\`), never a bare \`total-recall\`.`,
-    '- If a total-recall tool call is refused for approval, tell the user to approve the total-recall MCP server in Cursor (INSTALL.md, "Cursor").',
+    '- If a total-recall tool call is refused for approval, tell the user to approve the `plugin-total-recall-total-recall` MCP server in Cursor, or to start the Cursor CLI with `--approve-mcps` (INSTALL.md, "Cursor").',
+    '- If the very first `session_start` of a new store fails with a timeout (a large first-time import can outlast Cursor\'s 60 second MCP limit, which a plugin cannot raise), call `session_start` once more: the import is incremental, so the retry is usually much faster.',
   ].join('\n');
 }
 

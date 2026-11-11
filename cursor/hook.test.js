@@ -109,6 +109,9 @@ test('cursorNote: names the bundled CLI, the PATH caveat and the approval pointe
   assert.ok(note.includes(path.join(ROOT, 'bin', 'start.js')));
   assert.ok(/may not be on PATH/i.test(note));
   assert.ok(/approv/i.test(note));
+  assert.ok(note.includes('plugin-total-recall-total-recall'));
+  assert.ok(note.includes('--approve-mcps'));
+  assert.ok(/timeout/i.test(note) && /once more/.test(note));
 });
 
 test('session-start: a missing or unreadable skill file says nothing', async () => {
