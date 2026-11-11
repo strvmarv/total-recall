@@ -827,3 +827,214 @@ never passes through a shell); `<skill>` is the skill directory.
   {"name":"a login that wrote two checkpoints is listed once","comments":[{"id":"IC_dup","createdAt":"2026-11-10T10:91:00Z","authorLogin":"newcomer","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for kickoff.\n\n```\ntr-develop/v1 phase=kickoff branch=feat/x track=small\n```\n"},{"id":"IC_dup2","createdAt":"2026-11-10T10:92:00Z","authorLogin":"newcomer","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for tasks.\n\n```\ntr-develop/v1 phase=tasks branch=feat/x track=small\n```\n"}],"permissions":{},"expect":{"complete":false,"needPermissions":["newcomer"],"counted":[],"checkpoints":[],"latest":null,"pin":null,"progress":null}}
 ]
 ```
+
+## Resume and routing
+
+`skills/develop/scripts/route.js` derives where a run goes next (spec sections 5, 10 and 11): the
+position from the latest progress checkpoint, the task and cycle counts the position needs, the
+24-hour concurrency check and the route an issue takes. Every input is a file that was fetched or
+published; the script prints one JSON object. The goldens at the end of this section are its test
+fixtures.
+
+**Counting.** `route.js count-tasks <planFile>` counts the lines that match `^### Task (\d+):` among
+the lines outside code fences, and `count-cycles <approachFile>` (the file `regions.js approach` wrote)
+those that match `^(?:[-*]\s+)?Cycle (\d+):`. Both anchor at column 0. The count is `sequential` when the
+numbers are exactly 1, 2, 3, ... in file order, with no leading zero, gap, repeat or reordering; zero
+headings is `{count:0, sequential:true}`. The caller treats a count of 0 and a count that is not
+sequential alike: blocker 6. Fences are decided in one place (`regions.js`, `outsideFences`), so a
+`### Task 3:` inside a backtick or tilde fence, including a four-backtick fence around a three-backtick
+block, is ignored, and CRLF text counts like LF.
+
+*Known limit.* A fence nested in a list item at four or more spaces, in a blockquote, or inside a
+multi-line HTML comment is not recognised as a fence. A region marker or a task heading inside one fails
+closed (`duplicate`, `missing`, or an extra count that the planning loop catches). The one exception is
+`normalize`'s task-marker rule, which fails open: a checkbox inside such a fence is stripped, so editing it
+does not change the hash. That is accepted.
+
+**Which plan text counts.** `route.js tasks-for <planShaFile> <tipFile|-> <tasksDone>` prints `{tasks}`.
+The tip of `origin/<branch>` is counted when it is sequential and its first `tasksDone` task headings
+equal the `planSha` version's (same numbers, same heading line), so a task appended before a crash is not
+lost; otherwise the `planSha` version is counted. `tasks` is `null` when the chosen text is not
+sequential or has no tasks. `-` means there is no tip file.
+
+**Concurrency.** `route.js live <rawCommentsFile> <permissionsFile> <nowIso>` runs the counted-comment
+selection of the Trust section first and prints `{complete, needPermissions, live}`. `live` is true
+when a counted checkpoint whose phase is not `defined`, `pr-open`, `blocked` or `closed` was posted less
+than 24 hours before `nowIso` and no later counted checkpoint is `pr-open`, `blocked` or `closed`; a
+date that does not parse never makes a checkpoint live. While `complete` is false `live` is `null`: the
+selection is incomplete, and nothing is acted on until the missing logins are looked up and it is run
+again.
+
+**Position.** `route.js position <jsonFile>` takes `{progress, counts}` and prints `{position}`.
+`progress` is `{phase, fields}` or `null`; `counts` is `{tasks, cycles}`, each a number or `null`, the
+caller having reduced `tasks-for` and `count-cycles` to `null` when the text is not sequential.
+
+| Progress | Position |
+|---|---|
+| none | `start` |
+| `closed` | `terminal` |
+| `pr-open` | `after-the-pr` |
+| `final-approved` | `finish` |
+| plan track, no `planSha` | `write-plan` |
+| plan track, `tasks` null or 0 | `block6` |
+| plan track, `tasksDone` (0 if absent) below `tasks` | `task:<tasksDone+1>` |
+| plan track, otherwise | `final-loop` |
+| small track, `cycles` null or 0 | `block6` |
+| small track, `cyclesDone` (0 if absent) below `cycles` | `cycle:<cyclesDone+1>` |
+| small track, otherwise | `final-loop` |
+
+A `kickoff` that carries a `planSha` resumes building and never rewrites the plan. A `reapproved`
+that follows a `final-approved` has no `pr` and a `tasksDone` equal to the count, so it reaches
+`final-loop`. A progress checkpoint with no `track`, or a counter that is not `^\d+$`, is an error,
+never a guess.
+
+**Route.** `route.js route <rawCommentsFile> <permissionsFile> <stateFile> [bodyFile]` prints
+`{complete, needPermissions, route, askClosed, ignoredMarkers}`. `stateFile` is
+`{pinValid, issueState, baseIsDefault}`: `issueState` is `OPEN`/`CLOSED` as GraphQL returns it or
+`open`/`closed`, and `pinValid` may be omitted when the latest progress is `pr-open` or `closed`,
+which route before any pin validation because the branch may be gone. While `complete` is false,
+`route` is `null` (the pin and progress of an incomplete selection are never acted on). The rules, in
+order:
+
+1. No counted checkpoint at all: `define`.
+2. Latest progress `pr-open`: `after-the-pr`.
+3. Latest progress `closed`: `new-issue-or-stop` when the issue is open and its base is the default
+   branch, else `terminal`.
+4. No pin, or the pin failed validation: `repin-or-stop` when any progress exists, else
+   `redefine-or-stop`.
+5. Otherwise `deliver`, with `askClosed` true when the issue is closed.
+
+`ignoredMarkers` is computed by the script, never supplied: true when a line that starts with
+`tr-develop/` (after trimming) appears in a comment that does not count or in the issue body file. A
+counted comment with a malformed line is not "uncounted" for this purpose. It is reported whatever the
+route, so the next checkpoint's summary can say that markers were ignored.
+
+**Goldens.** `position-cases` (`{name, progress, counts, expect}`) and `position-error-cases`;
+`task-count-cases` (`fn` is `tasks` for `countTasks` or `cycles` for `countCycles`); `tasks-for-cases`;
+`live-cases`; `route-cases` (`writers` is the list of logins with write access).
+
+```json golden:position-cases
+[
+  {"name":"no progress is a start","progress":null,"counts":{"tasks":null,"cycles":null},"expect":"start"},
+  {"name":"closed is terminal","progress":{"phase":"closed","fields":{"track":"plan","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"counts":{"tasks":3,"cycles":null},"expect":"terminal"},
+  {"name":"pr-open is after-the-pr","progress":{"phase":"pr-open","fields":{"track":"plan","planSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","tasksDone":"3"}},"counts":{"tasks":3,"cycles":null},"expect":"after-the-pr"},
+  {"name":"final-approved is finish","progress":{"phase":"final-approved","fields":{"track":"plan","planSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","tasksDone":"3"}},"counts":{"tasks":3,"cycles":null},"expect":"finish"},
+  {"name":"plan track, kickoff with no planSha writes the plan","progress":{"phase":"kickoff","fields":{"track":"plan"}},"counts":{"tasks":null,"cycles":null},"expect":"write-plan"},
+  {"name":"plan track, plan-approved with planSha and no tasksDone is task 1","progress":{"phase":"plan-approved","fields":{"track":"plan","planSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},"counts":{"tasks":3,"cycles":null},"expect":"task:1"},
+  {"name":"plan track, tasks with tasksDone 2 of 5 is task 3","progress":{"phase":"tasks","fields":{"track":"plan","planSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","tasksDone":"2"}},"counts":{"tasks":5,"cycles":null},"expect":"task:3"},
+  {"name":"plan track, tasksDone equal to the count is the final loop","progress":{"phase":"tasks","fields":{"track":"plan","planSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","tasksDone":"5"}},"counts":{"tasks":5,"cycles":null},"expect":"final-loop"},
+  {"name":"plan track, tasksDone beyond the count is the final loop","progress":{"phase":"tasks","fields":{"track":"plan","planSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","tasksDone":"6"}},"counts":{"tasks":5,"cycles":null},"expect":"final-loop"},
+  {"name":"a kickoff carrying planSha resumes a task and never rewrites the plan","progress":{"phase":"kickoff","fields":{"track":"plan","planSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","tasksDone":"1"}},"counts":{"tasks":4,"cycles":null},"expect":"task:2"},
+  {"name":"a kickoff carrying planSha and no tasksDone is task 1, not write-plan","progress":{"phase":"kickoff","fields":{"track":"plan","planSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},"counts":{"tasks":4,"cycles":null},"expect":"task:1"},
+  {"name":"a reapproved after a final-approved (no pr, tasksDone equal to the count) is the final loop","progress":{"phase":"reapproved","fields":{"track":"plan","planSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","tasksDone":"4"}},"counts":{"tasks":4,"cycles":null},"expect":"final-loop"},
+  {"name":"re-approval that crashes before its comment: the earlier tasks checkpoint still gives task 3","progress":{"phase":"tasks","fields":{"track":"plan","planSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","tasksDone":"2"}},"counts":{"tasks":4,"cycles":null},"expect":"task:3"},
+  {"name":"re-approval that crashes after its comment: the reapproved checkpoint gives the final loop","progress":{"phase":"reapproved","fields":{"track":"plan","planSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","tasksDone":"4"}},"counts":{"tasks":4,"cycles":null},"expect":"final-loop"},
+  {"name":"plan track, a task count of 0 is blocker 6","progress":{"phase":"tasks","fields":{"track":"plan","planSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","tasksDone":"0"}},"counts":{"tasks":0,"cycles":null},"expect":"block6"},
+  {"name":"plan track, an unknown task count (not sequential or no plan file) is blocker 6","progress":{"phase":"plan-approved","fields":{"track":"plan","planSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},"counts":{"tasks":null,"cycles":null},"expect":"block6"},
+  {"name":"small track, kickoff with no cyclesDone is cycle 1","progress":{"phase":"kickoff","fields":{"track":"small"}},"counts":{"tasks":null,"cycles":3},"expect":"cycle:1"},
+  {"name":"small track, cyclesDone 1 of 3 is cycle 2","progress":{"phase":"tasks","fields":{"track":"small","cyclesDone":"1"}},"counts":{"tasks":null,"cycles":3},"expect":"cycle:2"},
+  {"name":"small track, cyclesDone equal to the count is the final loop","progress":{"phase":"tasks","fields":{"track":"small","cyclesDone":"3"}},"counts":{"tasks":null,"cycles":3},"expect":"final-loop"},
+  {"name":"small track, a cycle count of 0 is blocker 6","progress":{"phase":"kickoff","fields":{"track":"small"}},"counts":{"tasks":null,"cycles":0},"expect":"block6"},
+  {"name":"small track, an unknown cycle count is blocker 6","progress":{"phase":"kickoff","fields":{"track":"small"}},"counts":{"tasks":null,"cycles":null},"expect":"block6"},
+  {"name":"small track ignores a task count","progress":{"phase":"kickoff","fields":{"track":"small"}},"counts":{"tasks":7,"cycles":2},"expect":"cycle:1"}
+]
+```
+
+```json golden:position-error-cases
+[
+  {"name":"a progress checkpoint with no track","progress":{"phase":"kickoff","fields":{}},"counts":{"tasks":3,"cycles":3}},
+  {"name":"a non-numeric tasksDone","progress":{"phase":"tasks","fields":{"track":"plan","planSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","tasksDone":"x"}},"counts":{"tasks":3,"cycles":null}}
+]
+```
+
+```json golden:task-count-cases
+[
+  {"name":"two tasks outside a fence, a third inside one","fn":"tasks","text":"# Plan\n\n### Task 1: One\n\ntext\n\n### Task 2: Two\n\n```md\n### Task 3: Fenced\n```\n","expect":{"count":2,"sequential":true}},
+  {"name":"tasks inside a four-backtick fence holding a three-backtick block are ignored","fn":"tasks","text":"````md\n```\n### Task 1: In\n```\n### Task 2: Also in\n````\n","expect":{"count":0,"sequential":true}},
+  {"name":"a tilde fence hides tasks","fn":"tasks","text":"### Task 1: One\n\n~~~\n### Task 2: Hidden\n~~~\n","expect":{"count":1,"sequential":true}},
+  {"name":"no tasks","fn":"tasks","text":"# Plan\n\nNothing here.\n","expect":{"count":0,"sequential":true}},
+  {"name":"empty text","fn":"tasks","text":"","expect":{"count":0,"sequential":true}},
+  {"name":"a gap in the numbers","fn":"tasks","text":"### Task 1: One\n\n### Task 3: Three\n","expect":{"count":2,"sequential":false}},
+  {"name":"tasks out of order","fn":"tasks","text":"### Task 2: Two\n\n### Task 1: One\n","expect":{"count":2,"sequential":false}},
+  {"name":"numbering that starts at 0","fn":"tasks","text":"### Task 0: Zero\n\n### Task 1: One\n","expect":{"count":2,"sequential":false}},
+  {"name":"a repeated number","fn":"tasks","text":"### Task 1: One\n\n### Task 1: Again\n","expect":{"count":2,"sequential":false}},
+  {"name":"a leading zero is not the same number","fn":"tasks","text":"### Task 01: One\n","expect":{"count":1,"sequential":false}},
+  {"name":"CRLF text is counted","fn":"tasks","text":"# Plan\r\n\r\n### Task 1: One\r\n\r\n### Task 2: Two\r\n","expect":{"count":2,"sequential":true}},
+  {"name":"an indented or deeper heading is not a task heading","fn":"tasks","text":"### Task 1: One\n  ### Task 2: Indented\n#### Task 3: Deeper\n","expect":{"count":1,"sequential":true}},
+  {"name":"a Cycle line and a bulleted Cycle line","fn":"cycles","text":"Cycle 1: first\n- Cycle 2: second\n","expect":{"count":2,"sequential":true}},
+  {"name":"a star bullet counts too","fn":"cycles","text":"* Cycle 1: first\n* Cycle 2: second\n","expect":{"count":2,"sequential":true}},
+  {"name":"a Cycle line inside a fence is ignored","fn":"cycles","text":"Cycle 1: first\n\n```\nCycle 2: fenced\n```\n","expect":{"count":1,"sequential":true}},
+  {"name":"cycles with a gap","fn":"cycles","text":"Cycle 1: a\nCycle 3: c\n","expect":{"count":2,"sequential":false}},
+  {"name":"no cycles","fn":"cycles","text":"Approach text only.\n","expect":{"count":0,"sequential":true}},
+  {"name":"CRLF cycles are counted","fn":"cycles","text":"Cycle 1: a\r\n- Cycle 2: b\r\n","expect":{"count":2,"sequential":true}},
+  {"name":"an indented Cycle line is not counted","fn":"cycles","text":"Cycle 1: a\n  Cycle 2: nested\n","expect":{"count":1,"sequential":true}}
+]
+```
+
+```json golden:tasks-for-cases
+[
+  {"name":"the tip appended a task: use the tip","planSha":"# Plan\n\n### Task 1: One\n\nbody\n\n### Task 2: Two\n\nbody\n","tip":"# Plan\n\n### Task 1: One\n\nbody\n\n### Task 2: Two\n\nbody\n\n### Task 3: Three\n","tasksDone":2,"expect":3},
+  {"name":"the tip is the same as the planSha version","planSha":"# Plan\n\n### Task 1: One\n\nbody\n\n### Task 2: Two\n\nbody\n","tip":"# Plan\n\n### Task 1: One\n\nbody\n\n### Task 2: Two\n\nbody\n","tasksDone":1,"expect":2},
+  {"name":"the tip rewrote an earlier heading: use the planSha version","planSha":"# Plan\n\n### Task 1: One\n\nbody\n\n### Task 2: Two\n\nbody\n","tip":"# Plan\n\n### Task 1: Uno\n\nbody\n\n### Task 2: Two\n\nbody\n\n### Task 3: Three\n","tasksDone":1,"expect":2},
+  {"name":"the tip rewrote a heading after the done ones: the tip still wins","planSha":"# Plan\n\n### Task 1: One\n\nbody\n\n### Task 2: Two\n\nbody\n","tip":"# Plan\n\n### Task 1: One\n\nbody\n\n### Task 2: Deux\n\nbody\n\n### Task 3: Three\n","tasksDone":1,"expect":3},
+  {"name":"the tip is not sequential: use the planSha version","planSha":"# Plan\n\n### Task 1: One\n\nbody\n\n### Task 2: Two\n\nbody\n","tip":"# Plan\n\n### Task 1: One\n\nbody\n\n### Task 2: Two\n\nbody\n\n### Task 5: Five\n","tasksDone":2,"expect":2},
+  {"name":"the tip dropped a done task: use the planSha version","planSha":"# Plan\n\n### Task 1: One\n\nbody\n\n### Task 2: Two\n\nbody\n","tip":"# Plan\n\n### Task 1: One\n","tasksDone":2,"expect":2},
+  {"name":"the tip is null","planSha":"# Plan\n\n### Task 1: One\n\nbody\n\n### Task 2: Two\n\nbody\n","tip":null,"tasksDone":1,"expect":2},
+  {"name":"the planSha version has none (the tip cannot vouch for tasks that were done)","planSha":"# Plan\n\nNo tasks.\n","tip":"# Plan\n\n### Task 1: One\n\nbody\n\n### Task 2: Two\n\nbody\n","tasksDone":1,"expect":null},
+  {"name":"the planSha version has none and there is no tip","planSha":"# Plan\n\nNo tasks.\n","tip":null,"tasksDone":0,"expect":null},
+  {"name":"the planSha version is not sequential","planSha":"### Task 1: One\n\n### Task 3: Three\n","tip":null,"tasksDone":0,"expect":null},
+  {"name":"tasksDone 0: any sequential tip wins","planSha":"# Plan\n\n### Task 1: One\n\nbody\n\n### Task 2: Two\n\nbody\n","tip":"# Plan\n\n### Task 1: A\n\n### Task 2: B\n\n### Task 3: C\n","tasksDone":0,"expect":3},
+  {"name":"tasksDone 0 and a non-sequential tip with no planSha tasks is null","planSha":"# empty\n","tip":"### Task 2: Two\n","tasksDone":0,"expect":null}
+]
+```
+
+```json golden:live-cases
+[
+  {"name":"a tasks checkpoint 23 hours ago","checkpoints":[{"id":"1","phase":"tasks","createdAt":"2026-11-09T13:00:00Z"}],"now":"2026-11-10T12:00:00Z","expect":true},
+  {"name":"a tasks checkpoint 25 hours ago","checkpoints":[{"id":"1","phase":"tasks","createdAt":"2026-11-09T11:00:00Z"}],"now":"2026-11-10T12:00:00Z","expect":false},
+  {"name":"a tasks checkpoint exactly 24 hours ago is not newer than 24 hours","checkpoints":[{"id":"1","phase":"tasks","createdAt":"2026-11-09T12:00:00Z"}],"now":"2026-11-10T12:00:00Z","expect":false},
+  {"name":"only a defined 1 hour ago","checkpoints":[{"id":"1","phase":"defined","createdAt":"2026-11-10T11:00:00Z"}],"now":"2026-11-10T12:00:00Z","expect":false},
+  {"name":"a tasks 1 hour ago followed by a later blocked","checkpoints":[{"id":"1","phase":"tasks","createdAt":"2026-11-10T11:00:00Z"},{"id":"2","phase":"blocked","createdAt":"2026-11-10T11:30:00Z"}],"now":"2026-11-10T12:00:00Z","expect":false},
+  {"name":"a tasks 1 hour ago followed by a later kickoff","checkpoints":[{"id":"1","phase":"tasks","createdAt":"2026-11-10T11:00:00Z"},{"id":"2","phase":"kickoff","createdAt":"2026-11-10T11:30:00Z"}],"now":"2026-11-10T12:00:00Z","expect":true},
+  {"name":"a tasks 1 hour ago followed by a later pr-open","checkpoints":[{"id":"1","phase":"tasks","createdAt":"2026-11-10T11:00:00Z"},{"id":"2","phase":"pr-open","createdAt":"2026-11-10T11:30:00Z"}],"now":"2026-11-10T12:00:00Z","expect":false},
+  {"name":"a tasks 1 hour ago followed by a later closed","checkpoints":[{"id":"1","phase":"tasks","createdAt":"2026-11-10T11:00:00Z"},{"id":"2","phase":"closed","createdAt":"2026-11-10T11:30:00Z"}],"now":"2026-11-10T12:00:00Z","expect":false},
+  {"name":"a pr-open earlier than a fresh tasks","checkpoints":[{"id":"1","phase":"pr-open","createdAt":"2026-11-10T09:00:00Z"},{"id":"2","phase":"tasks","createdAt":"2026-11-10T11:00:00Z"}],"now":"2026-11-10T12:00:00Z","expect":true},
+  {"name":"a fresh blocked alone","checkpoints":[{"id":"1","phase":"blocked","createdAt":"2026-11-10T11:00:00Z"}],"now":"2026-11-10T12:00:00Z","expect":false},
+  {"name":"a fresh closed alone","checkpoints":[{"id":"1","phase":"closed","createdAt":"2026-11-10T11:00:00Z"}],"now":"2026-11-10T12:00:00Z","expect":false},
+  {"name":"a bad date never makes it live","checkpoints":[{"id":"1","phase":"tasks","createdAt":"yesterday-ish"}],"now":"2026-11-10T12:00:00Z","expect":false},
+  {"name":"a fresh reapproved is a heartbeat","checkpoints":[{"id":"1","phase":"reapproved","createdAt":"2026-11-10T11:00:00Z"}],"now":"2026-11-10T12:00:00Z","expect":true},
+  {"name":"a stale heartbeat followed by a fresh defined is not live","checkpoints":[{"id":"1","phase":"kickoff","createdAt":"2026-11-08T11:00:00Z"},{"id":"2","phase":"defined","createdAt":"2026-11-10T11:00:00Z"}],"now":"2026-11-10T12:00:00Z","expect":false},
+  {"name":"no checkpoints","checkpoints":[],"now":"2026-11-10T12:00:00Z","expect":false}
+]
+```
+
+```json golden:route-cases
+[
+  {"name":"no comments: define","input":{"comments":[],"writers":["alice"],"pinValid":true,"issueState":"open","baseIsDefault":true,"hasUncountedMarkers":false},"expect":{"askClosed":false,"ignoredMarkers":false,"route":"define"}},
+  {"name":"an outsider-only kickoff on an otherwise empty issue: define, and the marker was ignored","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"mallory","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for kickoff.\n\n```\ntr-develop/v1 phase=kickoff branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":true,"issueState":"open","baseIsDefault":true,"hasUncountedMarkers":true},"expect":{"askClosed":false,"ignoredMarkers":true,"route":"define"}},
+  {"name":"only an ordinary counted comment: define","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"just a note"}],"writers":["alice"],"pinValid":true,"issueState":"open","baseIsDefault":true,"hasUncountedMarkers":false},"expect":{"askClosed":false,"ignoredMarkers":false,"route":"define"}},
+  {"name":"a defined only: deliver","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for defined.\n\n```\ntr-develop/v1 phase=defined branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":true,"issueState":"open","baseIsDefault":true,"hasUncountedMarkers":false},"expect":{"askClosed":false,"ignoredMarkers":false,"route":"deliver"}},
+  {"name":"a defined, a kickoff and a tasks: deliver","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for defined.\n\n```\ntr-develop/v1 phase=defined branch=feat/x track=small\n```\n"},{"id":"IC_2","createdAt":"2026-11-10T10:02:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for kickoff.\n\n```\ntr-develop/v1 phase=kickoff branch=feat/x track=small\n```\n"},{"id":"IC_3","createdAt":"2026-11-10T10:03:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for tasks.\n\n```\ntr-develop/v1 phase=tasks branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":true,"issueState":"open","baseIsDefault":true,"hasUncountedMarkers":false},"expect":{"askClosed":false,"ignoredMarkers":false,"route":"deliver"}},
+  {"name":"a deliver route still reports ignored markers","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for defined.\n\n```\ntr-develop/v1 phase=defined branch=feat/x track=small\n```\n"},{"id":"IC_2","createdAt":"2026-11-10T10:02:00Z","authorLogin":"mallory","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for kickoff.\n\n```\ntr-develop/v1 phase=kickoff branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":true,"issueState":"open","baseIsDefault":true,"hasUncountedMarkers":true},"expect":{"askClosed":false,"ignoredMarkers":true,"route":"deliver"}},
+  {"name":"a closed issue with a pin and progress tasks: deliver, ask first","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for defined.\n\n```\ntr-develop/v1 phase=defined branch=feat/x track=small\n```\n"},{"id":"IC_2","createdAt":"2026-11-10T10:02:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for tasks.\n\n```\ntr-develop/v1 phase=tasks branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":true,"issueState":"closed","baseIsDefault":true,"hasUncountedMarkers":false},"expect":{"askClosed":true,"ignoredMarkers":false,"route":"deliver"}},
+  {"name":"a closed issue with only a pin: deliver, ask first","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for defined.\n\n```\ntr-develop/v1 phase=defined branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":true,"issueState":"closed","baseIsDefault":true,"hasUncountedMarkers":false},"expect":{"askClosed":true,"ignoredMarkers":false,"route":"deliver"}},
+  {"name":"latest progress pr-open: after-the-pr","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for defined.\n\n```\ntr-develop/v1 phase=defined branch=feat/x track=small\n```\n"},{"id":"IC_2","createdAt":"2026-11-10T10:02:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for tasks.\n\n```\ntr-develop/v1 phase=tasks branch=feat/x track=small\n```\n"},{"id":"IC_3","createdAt":"2026-11-10T10:03:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for pr-open.\n\n```\ntr-develop/v1 phase=pr-open branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":true,"issueState":"open","baseIsDefault":true,"hasUncountedMarkers":false},"expect":{"askClosed":false,"ignoredMarkers":false,"route":"after-the-pr"}},
+  {"name":"a closed issue whose latest progress is pr-open: after-the-pr without asking","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for defined.\n\n```\ntr-develop/v1 phase=defined branch=feat/x track=small\n```\n"},{"id":"IC_2","createdAt":"2026-11-10T10:02:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for pr-open.\n\n```\ntr-develop/v1 phase=pr-open branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":true,"issueState":"closed","baseIsDefault":true,"hasUncountedMarkers":false},"expect":{"askClosed":false,"ignoredMarkers":false,"route":"after-the-pr"}},
+  {"name":"pr-open routes before pin validation","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for defined.\n\n```\ntr-develop/v1 phase=defined branch=feat/x track=small\n```\n"},{"id":"IC_2","createdAt":"2026-11-10T10:02:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for pr-open.\n\n```\ntr-develop/v1 phase=pr-open branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":false,"issueState":"open","baseIsDefault":true,"hasUncountedMarkers":false},"expect":{"askClosed":false,"ignoredMarkers":false,"route":"after-the-pr"}},
+  {"name":"pr-open with no pin at all still routes to after-the-pr","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for pr-open.\n\n```\ntr-develop/v1 phase=pr-open branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":false,"issueState":"open","baseIsDefault":true,"hasUncountedMarkers":false},"expect":{"askClosed":false,"ignoredMarkers":false,"route":"after-the-pr"}},
+  {"name":"a later blocked does not hide a pr-open","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for defined.\n\n```\ntr-develop/v1 phase=defined branch=feat/x track=small\n```\n"},{"id":"IC_2","createdAt":"2026-11-10T10:02:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for pr-open.\n\n```\ntr-develop/v1 phase=pr-open branch=feat/x track=small\n```\n"},{"id":"IC_3","createdAt":"2026-11-10T10:03:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for blocked.\n\n```\ntr-develop/v1 phase=blocked branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":true,"issueState":"open","baseIsDefault":true,"hasUncountedMarkers":false},"expect":{"askClosed":false,"ignoredMarkers":false,"route":"after-the-pr"}},
+  {"name":"a minimized pr-open does not count","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for defined.\n\n```\ntr-develop/v1 phase=defined branch=feat/x track=small\n```\n"},{"id":"IC_2","createdAt":"2026-11-10T10:02:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for tasks.\n\n```\ntr-develop/v1 phase=tasks branch=feat/x track=small\n```\n"},{"id":"IC_3","createdAt":"2026-11-10T10:03:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":true,"body":"Summary for pr-open.\n\n```\ntr-develop/v1 phase=pr-open branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":true,"issueState":"open","baseIsDefault":true,"hasUncountedMarkers":false},"expect":{"askClosed":false,"ignoredMarkers":false,"route":"deliver"}},
+  {"name":"a pr-open by an outsider does not count","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for defined.\n\n```\ntr-develop/v1 phase=defined branch=feat/x track=small\n```\n"},{"id":"IC_2","createdAt":"2026-11-10T10:02:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for tasks.\n\n```\ntr-develop/v1 phase=tasks branch=feat/x track=small\n```\n"},{"id":"IC_3","createdAt":"2026-11-10T10:03:00Z","authorLogin":"mallory","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for pr-open.\n\n```\ntr-develop/v1 phase=pr-open branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":true,"issueState":"open","baseIsDefault":true,"hasUncountedMarkers":true},"expect":{"askClosed":false,"ignoredMarkers":true,"route":"deliver"}},
+  {"name":"a reapproved after a pr-open is the latest progress: deliver","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for defined.\n\n```\ntr-develop/v1 phase=defined branch=feat/x track=small\n```\n"},{"id":"IC_2","createdAt":"2026-11-10T10:02:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for pr-open.\n\n```\ntr-develop/v1 phase=pr-open branch=feat/x track=small\n```\n"},{"id":"IC_3","createdAt":"2026-11-10T10:03:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for reapproved.\n\n```\ntr-develop/v1 phase=reapproved branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":true,"issueState":"open","baseIsDefault":true,"hasUncountedMarkers":false},"expect":{"askClosed":false,"ignoredMarkers":false,"route":"deliver"}},
+  {"name":"open issue, latest progress closed, base is the default branch: new issue or stop","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for defined.\n\n```\ntr-develop/v1 phase=defined branch=feat/x track=small\n```\n"},{"id":"IC_2","createdAt":"2026-11-10T10:02:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for closed.\n\n```\ntr-develop/v1 phase=closed branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":true,"issueState":"open","baseIsDefault":true,"hasUncountedMarkers":false},"expect":{"askClosed":false,"ignoredMarkers":false,"route":"new-issue-or-stop"}},
+  {"name":"open issue, latest progress closed, base is not the default branch: terminal","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for defined.\n\n```\ntr-develop/v1 phase=defined branch=feat/x track=small\n```\n"},{"id":"IC_2","createdAt":"2026-11-10T10:02:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for closed.\n\n```\ntr-develop/v1 phase=closed branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":true,"issueState":"open","baseIsDefault":false,"hasUncountedMarkers":false},"expect":{"askClosed":false,"ignoredMarkers":false,"route":"terminal"}},
+  {"name":"closed issue, latest progress closed: terminal","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for defined.\n\n```\ntr-develop/v1 phase=defined branch=feat/x track=small\n```\n"},{"id":"IC_2","createdAt":"2026-11-10T10:02:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for closed.\n\n```\ntr-develop/v1 phase=closed branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":true,"issueState":"closed","baseIsDefault":true,"hasUncountedMarkers":false},"expect":{"askClosed":false,"ignoredMarkers":false,"route":"terminal"}},
+  {"name":"closed routes before pin validation","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for defined.\n\n```\ntr-develop/v1 phase=defined branch=feat/x track=small\n```\n"},{"id":"IC_2","createdAt":"2026-11-10T10:02:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for closed.\n\n```\ntr-develop/v1 phase=closed branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":false,"issueState":"open","baseIsDefault":true,"hasUncountedMarkers":false},"expect":{"askClosed":false,"ignoredMarkers":false,"route":"new-issue-or-stop"}},
+  {"name":"a lone counted blocked with no pin: redefine or stop","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for blocked.\n\n```\ntr-develop/v1 phase=blocked branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":true,"issueState":"open","baseIsDefault":true,"hasUncountedMarkers":false},"expect":{"askClosed":false,"ignoredMarkers":false,"route":"redefine-or-stop"}},
+  {"name":"a pin that fails validation with no progress: redefine or stop","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for defined.\n\n```\ntr-develop/v1 phase=defined branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":false,"issueState":"open","baseIsDefault":true,"hasUncountedMarkers":false},"expect":{"askClosed":false,"ignoredMarkers":false,"route":"redefine-or-stop"}},
+  {"name":"a pin plus progress but pinValid false: repin or stop","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for defined.\n\n```\ntr-develop/v1 phase=defined branch=feat/x track=small\n```\n"},{"id":"IC_2","createdAt":"2026-11-10T10:02:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for tasks.\n\n```\ntr-develop/v1 phase=tasks branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":false,"issueState":"open","baseIsDefault":true,"hasUncountedMarkers":false},"expect":{"askClosed":false,"ignoredMarkers":false,"route":"repin-or-stop"}},
+  {"name":"progress with no counted pin: repin or stop","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for kickoff.\n\n```\ntr-develop/v1 phase=kickoff branch=feat/x track=small\n```\n"},{"id":"IC_2","createdAt":"2026-11-10T10:02:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for tasks.\n\n```\ntr-develop/v1 phase=tasks branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":true,"issueState":"open","baseIsDefault":true,"hasUncountedMarkers":false},"expect":{"askClosed":false,"ignoredMarkers":false,"route":"repin-or-stop"}},
+  {"name":"a minimized pin with progress: repin or stop","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":true,"body":"Summary for defined.\n\n```\ntr-develop/v1 phase=defined branch=feat/x track=small\n```\n"},{"id":"IC_2","createdAt":"2026-11-10T10:02:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for tasks.\n\n```\ntr-develop/v1 phase=tasks branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":true,"issueState":"open","baseIsDefault":true,"hasUncountedMarkers":false},"expect":{"askClosed":false,"ignoredMarkers":false,"route":"repin-or-stop"}},
+  {"name":"a closed issue with progress and an invalid pin: repin or stop","input":{"comments":[{"id":"IC_1","createdAt":"2026-11-10T10:01:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for defined.\n\n```\ntr-develop/v1 phase=defined branch=feat/x track=small\n```\n"},{"id":"IC_2","createdAt":"2026-11-10T10:02:00Z","authorLogin":"alice","authorType":"User","editorLogin":null,"editorType":null,"lastEditedAt":null,"isMinimized":false,"body":"Summary for tasks.\n\n```\ntr-develop/v1 phase=tasks branch=feat/x track=small\n```\n"}],"writers":["alice"],"pinValid":false,"issueState":"closed","baseIsDefault":true,"hasUncountedMarkers":false},"expect":{"askClosed":false,"ignoredMarkers":false,"route":"repin-or-stop"}}
+]
+```
