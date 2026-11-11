@@ -392,7 +392,7 @@ To add a schema change:
 These are non-negotiable rules that apply to every commit, every PR, every subagent dispatch:
 
 1. **No `Co-Authored-By: Claude ...` (or any AI co-author) trailers** in commit messages. Project history is attributed solely to human authors. When dispatching subagents that include `git commit` instructions, the prompt MUST explicitly say "do NOT add any Co-Authored-By trailer."
-2. **Spec and plan documents in `docs/superpowers/specs/` and `docs/superpowers/plans/` are NEVER committed.** They live in the working tree only. The brainstorming and writing-plans skills both default to committing them — that default is overridden on this project. Do not auto-commit them.
+2. **Spec and plan documents in `docs/superpowers/specs/` and `docs/superpowers/plans/` ARE committed**, on the feature branch of the change they describe, and reach `main` with that change's PR. The issue for a change holds the ticket (goal, requirements, acceptance criteria, context); the engineering detail lives in the spec and plan. (Before 2026-11 these documents were kept out of git; documents from that period may exist only in a contributor's working tree.)
 3. **Seven-file version sync on every release** (see "Version sync" section above).
 4. **Never delete anything destructively.** This applies broadly: never `git reset --hard` without confirmation, never `git push --force` without confirmation, never delete user data. The `AutoMigrationGuard` follows this principle: it sidelines suspect database files to `<dbPath>.failed-migration-<utc>` instead of deleting them.
 
