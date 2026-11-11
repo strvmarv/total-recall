@@ -32,6 +32,21 @@ const FILES = {
     ],
     goldens: ['routing', 'pinned-commands'],
   },
+  'ticket-standard.md': {
+    headings: [
+      'Is it one ticket',
+      'Problem before solution',
+      'Acceptance criteria',
+      'Scope',
+      'Ready',
+      'Shape by type',
+      'Title, labels and type',
+      'Repository overrides',
+      'Review grades',
+      'Markers',
+    ],
+    goldens: [],
+  },
   'tutorial.md': {
     h1: '# develop',
     maxLines: 60,
@@ -314,4 +329,11 @@ test('SKILL.md: Preflight lists all eight checks in order', () => {
   const pre = section(read('SKILL.md'), 'Preflight');
   const nums = [...pre.matchAll(/^(\d)\. \*\*/gm)].map((m) => Number(m[1]));
   assert.deepEqual(nums, [1, 2, 3, 4, 5, 6, 7, 8]);
+});
+
+test('ticket-standard.md: names the practices, the template path, the marker and the approach limit', () => {
+  const text = read('ticket-standard.md');
+  for (const term of ['INVEST', 'Given/When/Then', '.github/ISSUE_TEMPLATE', '<!-- tr-develop:ac-begin -->', '60 lines']) {
+    assert.ok(text.includes(term), `ticket-standard.md mentions ${term}`);
+  }
 });
