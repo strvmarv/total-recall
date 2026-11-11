@@ -199,7 +199,7 @@ presentation.
      offers types, and `out` set to `<dir>/created.json`. The run result carries no body, so the
      saved file is the only record of the new issue: read it (the Read tool) and take its `number`
      (this is `<n>` from here on, in steps 4, 5 and 8 and in Wrap-up) and its `html_url` (the link
-     to print). A failed call leaves no file and creates no issue;
+     to print). If the call fails the issue may still exist (a lost response): search the repository's newest issues for the title before any retry, and never create a second one;
    - existing: one edit, `["api","-X","PATCH","repos/<owner>/<repo>/issues/<n>","-F","title=@<titleFile>","-F","body=@<bodyFile>"]`.
      Add a label the issue lacks with `POST repos/<owner>/<repo>/issues/<n>/labels`.
 4. **Read it back.** Fetch the issue (`issue`, with `out`), run
