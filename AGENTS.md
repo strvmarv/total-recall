@@ -415,7 +415,7 @@ To add a schema change:
 - **Pinned `gh`/`git`.** Every `gh` and network `git` call runs with the token of the chosen account on that command only (`t=$(gh auth token --user <login>) && [ -n "$t" ] && GH_TOKEN="$t" gh ...`), built by `node skills/develop/scripts/ghpin.js command`, or run through `ghpin.js run`. Never `gh auth switch`: it changes the account for every parallel session on the machine.
 - **Specs and plans are committed.** A run writes its spec and plan under `docs/superpowers/specs/` and `docs/superpowers/plans/` on the feature branch, and they reach `main` with the PR (see the standing rules below).
 - **Profile.** `.github/develop.md` is this repository's profile (`tr-develop/profile-v1`): the GitHub account to use, the ticket standard, and the `sh verify` commands a run executes before it opens a PR. `skills/develop/profile.md` is the format; `profile.test.js` checks the file.
-- **Packaging.** The skill and its two reviewer agents ship in the plugin: `package.json` `files` lists `skills/` and `agents/`, Claude Code discovers both at the plugin root, and the Copilot, Cursor and Codex manifests declare `skills`. Nothing is synced from a hosted service.
+- **Packaging.** The skill and its two reviewer agents ship in the plugin: `package.json` `files` lists `skills/` and `agents/`, Claude Code discovers both at the plugin root, and the Copilot, Cursor and Codex manifests declare `skills`. The skill and its reviewer agents depend on no hosted service.
 
 ---
 

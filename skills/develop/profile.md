@@ -178,10 +178,11 @@ Finish runs the `verify` list in order, from the worktree ([Finish and close-out
   so it stops at the first failing line, and the block must exit 0. Write a multi-line block when
   later lines depend on earlier ones; write separate blocks for independent checks.
 - A command that fails outside this change is blocker 5.
-- Write each command the way the repository's CI runs it. A quoted-glob `node --test` command (for
-  example `node --test "pi/*.test.js"`) needs Node 21 or newer; CI's Node 20 and the package script use
-  the directory form (`node --test pi/`). Use the form that works on the Node version the repository's
-  CI runs.
+- Write each command so that it works on the Node version the repository's CI runs. Prefer unquoted
+  globs, which `sh` expands before Node sees them (`node --test pi/*.test.js`): that works on every
+  Node version. A QUOTED glob handed to `node --test` (`node --test "pi/*.test.js"`) needs Node 21 or
+  newer, because earlier versions do not expand globs themselves; a directory argument
+  (`node --test pi/`) works on Node 20 but is rejected by Node 24.
 - A command must not write outside the worktree (the initialize review asks this of every command).
 - `base` is checked with `git check-ref-format --branch <base>` before it is used in `origin/<base>` or
   `origin/<base>...HEAD` ([Common steps](deliver.md#common-steps), step 1); a name that fails the check

@@ -484,7 +484,9 @@ The plugin ships a `develop` skill (`/develop`) that takes a change from an idea
 - **Define** is interactive: you and the model brainstorm, agree a spec (or a short approach), have it reviewed, and publish a GitHub issue that meets the ticket standard. A `defined` comment pins the issue body the run will build.
 - **Deliver** is hands-off: from that issue it writes a plan, builds with review at every step, verifies, and opens a PR that closes the issue. It then stops. It never merges, rebases or force-pushes, and it works in its own git worktree, so your checkout is untouched.
 
-`/develop 123` (or an issue URL) delivers an existing issue, `/develop <description>` starts a Define, and `/develop initialize` writes the repository profile with you.
+`/develop 123` (or an issue URL) delivers an existing issue, `/develop <description>` starts a Define, and `/develop initialize` writes the repository profile with you. On Claude Code the command may be namespaced by the plugin name (for example `/total-recall:develop`); this is unverified.
+
+A fork is refused (`origin` must not be a fork), and a host with no way to ask you a question cannot run Define.
 
 **Requirements**
 
@@ -502,11 +504,19 @@ t=$(gh auth token --user <login>) && [ -n "$t" ] && GH_TOKEN="$t" gh <args>
 t=$(gh auth token --user <login>) && [ -n "$t" ] && GH_TOKEN="$t" GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c 'credential.helper=!gh auth git-credential' <args>
 ```
 
+The PowerShell forms (the skill picks the form that matches the shell it is running in):
+
+```powershell
+$e = 1; $p = $env:GH_TOKEN; try { $env:GH_TOKEN = (gh auth token --user <login>); if (-not $env:GH_TOKEN) { throw 'no token' }; gh '<arg>' '<arg>'; $e = $LASTEXITCODE } finally { $env:GH_TOKEN = $p }; exit $e
+$e = 1; $p = $env:GH_TOKEN; $q = $env:GIT_TERMINAL_PROMPT; try { $env:GH_TOKEN = (gh auth token --user <login>); if (-not $env:GH_TOKEN) { throw 'no token' }; $env:GIT_TERMINAL_PROMPT = '0'; git -c credential.helper= -c 'credential.helper=!gh auth git-credential' '<arg>' '<arg>'; $e = $LASTEXITCODE } finally { $env:GH_TOKEN = $p; $env:GIT_TERMINAL_PROMPT = $q }; exit $e
+```
+
 **Minimal tool allowlist.** Deliver runs many routine commands, and a plain `gh *` or `git *` permission pattern may not match the pinned forms above (they begin with `t=$(...)`), so either use an auto-accept mode or allow these:
 
 - the skill's own scripts: `node <skill dir>/scripts/ghpin.js scratch`, `node <skill dir>/scripts/ghpin.js run *`, and the other CLIs in that directory (`node <skill dir>/scripts/*.js *`), where `<skill dir>` is the directory that holds the skill's `SKILL.md` (`ghpin.js run` spawns `gh` or `git` with no shell and applies the pin itself);
 - the pinned `gh` and `git` forms shown above, as written;
-- the local `git` calls a run makes in its worktree (`status`, `diff`, `log`, `add`, `commit`, `worktree`, `rev-parse`, `check-ref-format`);
+- the local `git` calls a run makes: `remote get-url origin`, `status`, `diff`, `add`, `commit`, `worktree` (`add`, `list`, `remove`), `branch -d`, `rev-parse`, `check-ref-format`, `show`, `ls-tree` and `merge-base --is-ancestor` (the last three are run through `ghpin.js run`);
+- the network `git` calls, `fetch`, `push` and `ls-remote`, which go through `ghpin.js run` or the pinned `git` form above;
 - the `sh verify` commands of the repository profile.
 
 ---

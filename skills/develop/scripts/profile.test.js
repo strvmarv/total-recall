@@ -159,14 +159,14 @@ test('.github/develop.md: the repository profile parses, pins the account and ru
   assert.equal(result.profile.ghAccount, 'strvmarv');
   assert.equal(result.profile.ticketStandard, 'on');
 
-  // The shim command as `npm run test:shim` lists it, with each directory entry as a quoted glob
-  // (Node 24 rejects directory arguments to `node --test`; the skill's tests sit in scripts/).
+  // The shim command as `npm run test:shim` lists it, with each directory entry as an unquoted glob
+  // that `sh` expands (so no Node version matters; the skill's tests sit in scripts/).
   const shim = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).scripts['test:shim'];
   const entries = shim.replace(/^node --test /, '').split(/\s+/);
   const globs = entries.map((entry) => {
     if (!entry.endsWith('/')) return entry;
     const dir = entry === 'skills/develop/' ? 'skills/develop/scripts/' : entry;
-    return `"${dir}*.test.js"`;
+    return `${dir}*.test.js`;
   });
   assert.deepEqual(result.profile.verify, [
     'dotnet test src/TotalRecall.sln --filter "Category!=Integration"',
