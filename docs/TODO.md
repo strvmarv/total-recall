@@ -399,6 +399,14 @@ Same root cause as the Claude Code `.mcp.json` item above, now with evidence: Co
 - `SessionEnd` (3 s clamp, no user-visible output) and `fork` (history already carries the instructions) are deliberately not mapped; revisit if Codex gives `SessionEnd` a visible surface.
 - A first-run tutorial remains deferred for all harnesses (see Onboarding).
 
-### Cursor CLI parity
+## Follow-ups from the Cursor CLI host
 
-The next harness in this series (Copilot CLI is done). Cursor CLI: hooks have no context-injection point on `beforeSubmitPrompt`, skill invocation is not an event, and `cursor-agent` must be run from PowerShell/cmd on Windows (Git Bash breaks its tool calls).
+### Cursor CLI: unobserved, deferred or fragile
+
+- Live runs stopped when the personal account hit Cursor's free-plan limit (resets 2026-12-07). Unobserved: a subagent run (is its `generation_id` the parent's? an extra counted turn otherwise), parallel tool calls inside Cursor (covered by a real-process race test and a unit test), a non-ASCII workspace path through Cursor's PowerShell stdin to the floor, `/compact` (do the instructions and pins survive?), the unapproved-server refusal text, the marketplace/`/plugins` install path (which manifest does Cursor load from a Claude-format marketplace?), macOS/Linux, the desktop IDE agent (its hook set differs: `beforeSubmitPrompt`/`stop` fire there). Re-run with a Pro account or after the reset.
+- The first `session_start` on a fresh store with a very large other-tool history (about 87 s here) exceeds Cursor's 60 s MCP request limit and a plugin cannot raise it. Options: make the engine's first `session_start` return a "warming" result quickly and finish the import in the background, or move the history import out of `session_start`.
+- The floor depends on `postToolUse` `additional_context`. If a future Cursor CLI fires a context-capable prompt hook (`beforeSubmitPrompt` today cannot inject and never fires in the CLI), move the floor there so turns without a tool are covered too.
+- `hooks/hooks-cursor.json` and the `CURSOR_PLUGIN_ROOT` branches in `hooks/*/run.sh` are dead under the Cursor plugin; remove them if no hand-wired setup needs them.
+- The four hook files (`pi/extension.js` helpers, `codex/hook.js`, `copilot/hook.js`, `cursor/hook.js`) now duplicate `stripFrontmatter`, `readStdin`, `isMain` (and `storeEnvStrip` in two): extract shared host-hook helpers with a design that cannot crash a hook when the shared file is missing (a static import would).
+- A test harness lesson: `cursor-agent login` writes the real `%APPDATA%\Cursor\auth.json`; fingerprint before logging in and prefer a throwaway OS user.
+- Cursor CLI on Windows from Git Bash blocks every tool call (a Cursor bug); contributors run it from PowerShell or cmd.

@@ -262,6 +262,35 @@ Add to your Cline MCP settings:
 
 ## Cursor
 
+Observed on Cursor CLI (`cursor-agent`) **2026.11.10-731fb78**, Windows, with `-p` and interactively. macOS/Linux are **unsupported until observed**: the plugin's MCP server runs in a sanitized environment, and a POSIX server without `HOME` or `USERPROFILE` would make the engine create a literal `~/.total-recall` directory in your project. The Cursor desktop IDE agent, subagents and cloud agents were not tested.
+
+### Option A: local plugin (recommended)
+
+Put a copy of this repository (a `git clone`, or the npm package contents) at `~/.cursor/plugins/local/total-recall` and restart Cursor (or run `Developer: Reload Window`). A symlink only loads when its target resolves inside `~/.cursor/plugins/local`. For one run, `cursor-agent --plugin-dir <checkout>` loads it without copying. The checkout needs the engine binary: either install the npm package (it ships `binaries/`) or let the MCP server download and verify it on first launch (a few seconds; tools return "not ready" and the floor stays silent until it is there).
+
+The marketplace flow (`cursor-agent plugin marketplace add https://github.com/strvmarv/total-recall-marketplace`, then `/plugins`) indexes the existing marketplace, but which manifest Cursor loads from it (`.cursor-plugin/plugin.json` or the Claude one) was **not verified**, so it is not a supported install path yet.
+
+**Approve the server.** Cursor asks before using a plugin's MCP server (it shows as `plugin-total-recall-total-recall`). Interactively, approve it; with `cursor-agent -p`, pass `--approve-mcps`. The unapproved refusal text was not observed.
+
+What you get in Cursor:
+
+- The `total-recall` MCP server from `cursor/mcp.json` (`node ${CURSOR_PLUGIN_ROOT}/bin/start.js`). It has no `cwd`, so Cursor starts it in your workspace and project-scoped pins work server-side (observed), unlike Claude Code and Copilot CLI.
+- The startup instructions (`skills/commands/SKILL.md` plus a short Cursor note), delivered by a `sessionStart` hook (`cursor/hook.js`) as `additional_context`, so the model calls `session_start` itself (observed 3/3 fresh conversations, the whole 18.6 KB intact). The hook runs once per conversation, not again on `--continue`.
+- The pinned-directive floor, on the **first tool call of each user message** (`postToolUse` hook → `additional_context`), on the turn-count trigger only (`floor_every_n_turns`, default 6, counted in tool-using messages): Cursor's CLI never fires a per-prompt hook (`beforeSubmitPrompt`, `stop` and `afterAgentResponse` did not fire, and `beforeSubmitPrompt` cannot add context anyway). Interactively the cadence is exact (the 7th tool-using message injects by default). In `-p` mode Cursor reuses one generation id for the whole conversation, even across `--continue`, so the floor counts once per `-p` conversation.
+- Skills: `commands` and `using-total-recall`.
+
+Known gaps and limits:
+
+- **First `session_start` can time out.** On a fresh store the first call imports your other tools' history and can exceed Cursor's 60 second MCP request limit, which a plugin cannot raise (seen with a very large history: about 87 s). The hook's note tells the model to call it once more; the import is incremental. In `-p` the process exit kills the engine mid-import (both `-p` runs on a cold large store timed out), so on a big history repeat the run or warm the store with one interactive session first.
+- **No custom store.** Cursor starts plugin servers with a sanitized environment, so `TOTAL_RECALL_HOME`, `XDG_*` and `HERMES_HOME` cannot reach the server; the hook ignores them too so the floor and the server agree. Do not combine the plugin with a second hand-configured `total-recall` server (two servers, and the hook would read the default store while the second reads yours); if you need a non-default store, use Option B instead of the plugin. On Windows a `HOME` that differs from `USERPROFILE` (MSYS/Git Bash setups) also splits stores between Cursor (`%USERPROFILE%\.total-recall`) and Claude Code or Copilot CLI (`$HOME/.total-recall`).
+- **Floor only on turns that use a tool**, and a message whose tools all fail does not count. Subagent tool calls cannot be told apart from the parent's.
+- **Compaction.** `preCompact` fires on a manual `/compact` but cannot carry context, and `sessionStart` does not fire again, so nothing re-injects the instructions after a compaction (whether they survive it was not observed). The floor keeps re-asserting the pins.
+- No `SessionEnd` nudge, no first-run tutorial, and the `setup` and `update` subcommands of the commands skill have no Cursor meaning. `hooks/hooks-cursor.json` (Claude-format, runs `bash`) is kept for hand-wired setups and is untested.
+- The engine's importers read your real `~/.claude`, `~/.cursor` and similar directories regardless of a redirected profile on Windows.
+- Contributors: run `cursor-agent` from PowerShell or cmd on Windows. From Git Bash a Cursor CLI bug blocks every tool call.
+
+### Option B: MCP server only (no plugin)
+
 Add to your Cursor MCP config (`.cursor/mcp.json` or global settings):
 
 ```json
@@ -274,10 +303,7 @@ Add to your Cursor MCP config (`.cursor/mcp.json` or global settings):
 }
 ```
 
-For full plugin support (skills + hooks), clone the repo:
-```bash
-git clone https://github.com/strvmarv/total-recall.git
-```
+This requires `npm install -g @strvmarv/total-recall` so the command is on PATH. You get the tools but no startup instructions and no floor. Use it instead of, never together with, the plugin.
 
 ## Verification
 
