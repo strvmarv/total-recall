@@ -5,8 +5,9 @@
 // text); this tool only validates and persists. Facts land in the warm tier
 // (the default ingress tier; they earn promotion to hot by access) with a
 // per-fact-type EntryType mapping (fact/action_item map to Surfaced).
-// Dedup skips and counts identical content already stored in warm or hot. All facts are validated BEFORE any write so
-// a bad item mid-array cannot leave a partial batch behind.
+// Dedup skips and counts identical content already stored in warm or hot.
+// All facts are validated BEFORE any write so a bad item mid-array cannot
+// leave a partial batch behind.
 // Infrastructure failures mid-batch leave partial writes: each fact is an
 // independent insert transaction (matches memory_import semantics).
 

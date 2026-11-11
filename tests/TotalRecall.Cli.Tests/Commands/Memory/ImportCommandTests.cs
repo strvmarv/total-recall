@@ -245,6 +245,22 @@ public sealed class ImportCommandTests : IDisposable
         finally { File.Delete(p); }
     }
 
+    [Theory]
+    [InlineData("{\"id\":\"a\",\"content\":\"alpha\",\"tier\":\"pinned\"}")]
+    [InlineData("{\"id\":\"a\",\"content\":\"alpha\",\"tier\":\"warm\",\"sticky\":true}")]
+    public async Task PinnedOrSticky_StillLandsInHot(string entryJson)
+    {
+        var (cmd, store, _, _, _) = MakeCmd();
+        var p = WriteTempFile("{\"entries\":[" + entryJson + "]}");
+        try
+        {
+            var code = await cmd.RunAsync(new[] { p });
+            Assert.Equal(0, code);
+            Assert.True(Assert.Single(store.InsertCalls).Tier.IsHot);
+        }
+        finally { File.Delete(p); }
+    }
+
     [Fact]
     public async Task SourceTool_RoundTripsFromImportFile()
     {
