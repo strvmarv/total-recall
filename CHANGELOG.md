@@ -5,7 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 4.5.0 - 2026-11-11
+
+### Changed
+
+- **Retargeted from .NET 8 to .NET 10 (#34).** Every project now builds for `net10.0`, declared once in a
+  root `Directory.Build.props`, and the shipped NativeAOT binaries embed the .NET 10 runtime (.NET 8
+  support ended on 10 November 2026). No code or behaviour changes. `Microsoft.Extensions.FileProviders.Embedded`
+  moved to 10.0.5, the release workflow and `scripts/ui-aot-smoke.sh` read the publish output from
+  `bin/Release/net10.0/`, and the docs say .NET 10. Contributors still need the .NET 10 SDK, as before.
 
 ### Fixed
 
