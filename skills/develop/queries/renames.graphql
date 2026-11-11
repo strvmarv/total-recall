@@ -1,0 +1,16 @@
+query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      timelineItems(first: 100, after: $endCursor, itemTypes: [RENAMED_TITLE_EVENT]) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          ... on RenamedTitleEvent {
+            createdAt
+            previousTitle
+            currentTitle
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      comments(first: 100, after: $endCursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          createdAt
+          isMinimized
+          lastEditedAt
+          author { __typename login }
+          editor { __typename login }
+          body
+        }
+      }
+    }
+  }
+}
