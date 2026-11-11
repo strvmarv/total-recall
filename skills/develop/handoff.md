@@ -601,7 +601,7 @@ fails read-back is not retried: say so in the final report.
 1. Select the counted comments (see Trust) and take `progress` from a `complete` pass.
 2. Check integrity (see Trust: Integrity), except for a `blocked`, `defined`, `reapproved` or `closed`
    comment: `defined` and `reapproved` establish the pin the check is against, `closed` is posted when
-   the branch may be gone, and a `blocked` is what a mismatch ends in. For every other checkpoint a
+   the branch may be gone, and posting a `blocked` must not re-enter the check. For every other checkpoint a
    mismatch is not a bare stop: it follows Trust's rule (Re-approval when a person with write access can
    be asked, else blocker 6), so a mid-run edit is caught at the next checkpoint.
 3. For a `kickoff` or a `reapproved`, run `checkpoints.js carry` with that `progress` as `prior`.
@@ -825,7 +825,7 @@ the same failure.
 
 **Integrity,** at every Deliver start and resume, and again before the PR is opened (the same title, body and
 criteria check also runs each time a checkpoint is about to be posted, except a `blocked`, `defined`, `reapproved`
-or `closed`, so a mid-run edit stops the run at the next checkpoint). Once the latest counted progress is
+or `closed`, so a mid-run edit is caught at the next checkpoint). Once the latest counted progress is
 `pr-open` none of it runs, except after a yes to a new PR (see After the PR): the branch may be gone, so that route works from the PR's own URL and
 reports a mismatch only as advice.
 

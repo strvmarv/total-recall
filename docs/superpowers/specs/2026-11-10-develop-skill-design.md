@@ -467,7 +467,7 @@ counted progress is `pr-open` none of this runs (except after a yes to a new PR,
 - the title and body hash to `bodyHash`, and the criteria region to `acHash`; the same check runs
   each time a checkpoint is about to be posted, except a `blocked`, `defined`, `reapproved` or `closed`
   (`defined` and `reapproved` establish the pin the check is against; `closed` is posted when the
-  branch may be gone), so a mid-run edit stops the run at the next checkpoint and not only at the end;
+  branch may be gone), so a mid-run edit is caught at the next checkpoint and not only at the end;
 - plan track: `git diff --quiet <approvedSha> origin/<branch> -- <spec>` exits 0, and the same at a
   worktree's HEAD when one exists (section 11, worktree rules). Exit 1 is a
   changed spec. Any other exit (128 for an unfetched commit, say) is tool trouble, blocker 3, and is
@@ -933,8 +933,8 @@ failed, skip it and say so), post a `blocked` checkpoint whose summary names the
 tried and the options, snapshot memory, mark the active todo `BLOCKED:`, and stop. The `blocked`
 checkpoint carries `stage` and `blocker`, takes `branch=-` when no branch exists yet and omits `head` when none is
 pushed. Where no counted pin or `kickoff` exists on the issue, or the blocker is of the terminal-only kinds
-above, nothing is posted and the terminal report is the record. Posting a `blocked` skips the
-integrity check that other checkpoints run, like `defined`, `reapproved` and `closed`. A blocker raised inside Re-approval posts `blocked` and
+above, nothing is posted and the terminal report is the record. Posting a `blocked`, like a `defined`, `reapproved` or `closed`, skips the
+integrity check that other checkpoints run. A blocker raised inside Re-approval posts `blocked` and
 pushes none of Re-approval's commits.
 
 **Not blockers** (decide, record in the next checkpoint, continue): details the spec leaves open,
@@ -1104,8 +1104,8 @@ executor's kickoff that carries a `planSha`. Items 4 and 5 of this list also nee
     run by `ghpin.js scratch`; a resumed session is a new run, so a revoked collaborator is looked
     up again.
 30. The per-checkpoint integrity check (section 9) is skipped for `blocked`, `defined`, `reapproved` and
-    `closed`: the first three are what a mismatch resolves into or what establishes the pin, and `closed`
-    is posted after the branch may be gone.
+    `closed`: a `blocked` must not re-enter the check, `defined` and `reapproved` establish the pin, and
+    `closed` is posted after the branch may be gone.
 
 ## 21. Not yet verified
 
