@@ -157,8 +157,8 @@ permission map, fetched comments and body files never survive from an earlier ru
 **Scripts are CLIs.** Call `regions.js`, `checkpoints.js`, `counted.js`, `history.js`, `route.js`,
 `args.js`, `ghpin.js` and `profile.js` only as `node <skill dir>/scripts/<name>.js <subcommand>
 <file...>`. The input is a file (JSON, or plain text where stated); the output is exactly one JSON
-object on stdout; a failure prints `{"ok":false,"error":...}` and exits 1. `profile.js parse` printing `no-profile` is
-not a failure: it means the repository has no profile and every default applies
+object on stdout; a failure prints `{"ok":false,"error":...}` and exits 1. `profile.js parse` also prints that shape and exits 1 for
+`no-profile`, but that is not a failure: it means the repository has no profile and every default applies
 ([Loading](profile.md#loading)). `golden.js` and `pages.js`
 are libraries: never call them. **Text is never retyped, redirected or piped.** An issue body, a
 comment list or a plan reaches disk byte-exact through `ghpin.js run`, which spawns `gh` or `git`

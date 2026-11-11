@@ -81,7 +81,7 @@ Both tracks, in order. Steps 1 to 6 are the same numbers as the spec.
      `origin`'s default branch (reuse Preflight's read) and run
      `node <skill dir>/scripts/profile.js parse <profileFile>`, by the rule in
      [Loading](profile.md#loading). An invalid profile is blocker 6 in Deliver; a failed git read or a
-     parse tool failure is blocker 3 (a terminal report, nothing posted). `<base>` is its `base`, else the default branch; check it with
+     parse tool failure is blocker 3 (what is posted follows [At a blocker](blockers.md#at-a-blocker)). `<base>` is its `base`, else the default branch; check it with
      `git check-ref-format --branch <base>` before it is used in `origin/<base>` or
      `origin/<base>...HEAD`, and a failing name is blocker 6.
    - **Read** the issue (`issue`, to a file) and its comments (`comments`, to a file), once. Run
@@ -313,5 +313,5 @@ continues at step 5.
 - The approved spec is read-only for the whole run (the spec guard before every push, plan track).
 - Stage 1 never merges, rebases or force-pushes, and never deletes the remote branch. It never uses
   `git branch -D` or `--force` on a worktree.
-- Commits and PR bodies carry no AI attribution.
+- Commits and PR bodies carry no AI attribution, unless the repository's own `AGENTS.md` or `CONTRIBUTING.md` asks for one.
 - Never run `gh auth switch`, never enable shell tracing (`set -x`) around a pinned command.

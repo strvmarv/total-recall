@@ -143,7 +143,7 @@ Read the profile from `origin`'s default branch only, never from the feature bra
 so a feature branch cannot change the commands its own run trusts. Preflight reads it once and Define
 and Deliver reuse that read, so both see the same file and agree on `base`. Every command below goes
 through `ghpin.js run` (tool `git`, the picked login), which is how its output reaches a file in the
-scratch directory. They are local commands, so the account pin has no effect on them.
+scratch directory. They are local commands, so the account pin does not change their output.
 
 1. **Find it.** Run `["ls-tree","--name-only","origin/<default>","--",".github/develop.md"]` with `out` set to a
    file in the scratch directory. The exit status decides, and no error text is parsed:
@@ -151,9 +151,11 @@ scratch directory. They are local commands, so the account pin has no effect on 
    - exit 0 and a non-empty file: the profile is present, go to step 2;
    - any non-zero exit (an unfetched `origin/<default>` ref, any tool trouble): blocker 3
      ([blockers.md](blockers.md#stop-for-these)) in **both** Define and Deliver, after one safe
-     remediation attempt (fetch `origin` once, then repeat). The report is terminal and nothing is
-     posted. A failed read is never read as "absent": `git` exits 128 both for a missing path and for a
-     missing ref, so only the empty-listing test above says "absent".
+     remediation attempt (fetch `origin` once, then repeat). What is posted follows
+     [At a blocker](blockers.md#at-a-blocker): in Define there is no pin yet, so nothing is posted and the
+     report is terminal. A failed read is never read as "absent": `git show` exits 128 both for a missing
+     path and for a missing ref, and `ls-tree` exits 128 for a missing ref but 0 with an empty listing for
+     a missing path, so only the empty-listing test above says "absent".
 2. **Read it.** Run `["show","origin/<default>:.github/develop.md"]` with `out` set to a profile file in the
    scratch directory (a non-zero exit is blocker 3, as above).
 3. **Parse it.** Run `node <skill dir>/scripts/profile.js parse <profileFile>`. The output is one JSON
@@ -161,8 +163,7 @@ scratch directory. They are local commands, so the account pin has no effect on 
    or `{ok:false, error}`:
    - `{ok:false,error:"no-profile"}` (exit 1): the file has no profile block. Every default applies and
      nothing is reported; this is not a failure.
-   - `{ok:false,error:"bad-value:<key>"}`, or any other error that names the profile's content: an
-     **invalid profile**. It is a warning in Define (say so once and use the defaults) and blocker 6 in
+   - `{ok:false,error:"bad-value:<key>"}`: an **invalid profile**. It is a warning in Define (say so once and use the defaults) and blocker 6 in
      Deliver: Deliver never guesses at commands it was told to run.
    - Anything else is tool trouble, not an invalid profile: a profile file that is missing or cannot be
      read (`ENOENT`, `EACCES`), `usage: ...` or `unknown subcommand`. It is blocker 3 in Define and in

@@ -27,7 +27,7 @@ Conventions for every step:
    [Loading](profile.md#loading) (Preflight may already have done it, so reuse that read). No profile:
    every default applies. An invalid profile is a warning in Define, not a stop: say so and use the
    defaults. A failed git read or a parse tool failure is not an invalid profile: it is blocker 3 in
-   Define too (a terminal report, nothing posted), so Define and Deliver agree on `base`. `<base>` is
+   Define too (a terminal report: Define has no pin yet, so nothing is posted), so Define and Deliver agree on `base`. `<base>` is
    the profile's `base`, else the default branch. Keep the profile's `ticketStandard` and `templates`
    for the ticket draft.
 
