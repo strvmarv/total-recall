@@ -287,6 +287,7 @@ Known gaps and limits:
 - **Compaction.** `preCompact` fires on a manual `/compact` but cannot carry context, and `sessionStart` does not fire again, so nothing re-injects the instructions after a compaction (whether they survive it was not observed). The floor keeps re-asserting the pins.
 - No `SessionEnd` nudge, no first-run tutorial, and the `setup` and `update` subcommands of the commands skill have no Cursor meaning. `hooks/hooks-cursor.json` (Claude-format, runs `bash`) is kept for hand-wired setups and is untested.
 - The engine's importers read your real `~/.claude`, `~/.cursor` and similar directories regardless of a redirected profile on Windows.
+- The startup note tells the model to run this package's CLI (`compact --run`, `ui`) as `node <root>/cursor/cli.js <args>`: the wrapper drops the same store variables as the hook, so those commands use the same database as Cursor's server (a plain `node bin/start.js` from the model's shell would inherit your `TOTAL_RECALL_HOME`/`HOME`).
 - Contributors: run `cursor-agent` from PowerShell or cmd on Windows. From Git Bash a Cursor CLI bug blocks every tool call.
 
 ### Option B: MCP server only (no plugin)

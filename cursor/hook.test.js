@@ -106,7 +106,8 @@ test('session-start: top-level additional_context with the frontmatter-free skil
 
 test('cursorNote: names the bundled CLI, the PATH caveat and the approval pointer', () => {
   const note = cursorNote(ROOT);
-  assert.ok(note.includes(path.join(ROOT, 'bin', 'start.js')));
+  assert.ok(note.includes(path.join(ROOT, 'cursor', 'cli.js')));
+  assert.equal(note.includes(path.join(ROOT, 'bin', 'start.js')), false, 'the CLI is run through the wrapper, never bin/start.js directly');
   assert.ok(/may not be on PATH/i.test(note));
   assert.ok(/approv/i.test(note));
   assert.ok(note.includes('plugin-total-recall-total-recall'));
