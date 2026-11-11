@@ -29,11 +29,12 @@
 //   - db.sizeBytes is read via FileInfo.Length when the file exists, null
 //     otherwise. Does NOT throw on missing file.
 //
-//   - activity is stubbed (TODO Plan 5+) — retrieval/outcome telemetry is
-//     not persisted in the .NET store as of Plan 4.
+//   - activity is stubbed to zeros/null (TODO). Retrieval and outcome
+//     telemetry IS persisted (RetrievalEventLog, memory_feedback) and
+//     eval_report reads it, but this handler does not.
 //
-//   - lastCompaction is stubbed to null (TODO Plan 5+) — the compaction
-//     log read seam lands with the full compaction pipeline in Plan 5+.
+//   - lastCompaction is stubbed to null (TODO). The compaction log is
+//     persisted (CompactionLog) but this handler does not read it.
 //
 //   - lastSessionAge from TS lives in the session_start domain and is
 //     intentionally NOT surfaced here.
@@ -181,17 +182,17 @@ public sealed class StatusHandler : IToolHandler
             Model: _options.EmbeddingModel,
             Dimensions: _options.EmbeddingDimensions);
 
-        // TODO(Plan 5+): retrieval/outcome telemetry is not persisted in
-        // the .NET store yet. Stubbed to zeros/null so the wire shape is
-        // stable for host consumers.
+        // TODO: always zeros/null. Retrieval/outcome telemetry is persisted
+        // (RetrievalEventLog) but not read here; eval_report has the real
+        // numbers. Kept as a stub so the wire shape is stable.
         var activity = new ActivityStatusDto(
             Retrievals7d: 0,
             AvgTopScore7d: null,
             PositiveOutcomes7d: 0,
             NegativeOutcomes7d: 0);
 
-        // TODO(Plan 5+): compaction log read seam lands with the real
-        // compaction pipeline. null = "no compactions recorded".
+        // TODO: always null. CompactionLog is persisted but not read here.
+        // null = "no compactions recorded".
         LastCompactionDto? lastCompaction = null;
 
         // Sync backlog visibility. Best-effort: any read failure (locked DB,

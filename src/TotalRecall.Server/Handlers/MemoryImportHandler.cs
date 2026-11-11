@@ -194,7 +194,7 @@ public sealed class MemoryImportHandler : IToolHandler
             var newId = _store.Insert(tier, ctype, opts);
             // Legacy pinned exports become sticky-hot (tier merged in v2).
             if (makeSticky) _store.SetSticky(ctype, newId, true);
-            // TODO(Plan 5+): atomicity gap (carry-forward #9) — a crash
+            // TODO: atomicity gap (carry-forward #9) — a crash
             // between store.Insert and the vector insert leaves the row
             // without an embedding. Same gap MoveHelpers.MoveAndReEmbed
             // documents. Fix alongside that one.

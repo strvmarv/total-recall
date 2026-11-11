@@ -64,7 +64,7 @@ public static class MoveHelpers
         if (sourceRowid is not null)
             vec.DeleteEmbedding(fromTier, fromType, sourceRowid.Value);
         store.Move(fromTier, fromType, toTier, toType, entry.Id);
-        // TODO(Plan 5+): atomicity gap (carry-forward #9) — a crash between
+        // TODO: atomicity gap (carry-forward #9) — a crash between
         // store.Move and this re-embed leaves the target row without an
         // embedding. Fix by wrapping the full sequence in a single
         // transaction spanning both seams, or by making store.Move take

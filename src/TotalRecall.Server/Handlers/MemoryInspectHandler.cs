@@ -6,7 +6,7 @@
 // returns a full-fat detail DTO. Optional compaction_history is sourced
 // from ICompactionLogReader.GetByTargetEntryId and attached as a
 // CompactionMovementDto when a matching row exists (mirrors what
-// InspectCommand's Plan 5.5 TODO gestured at).
+// the CLI InspectCommand's lineage TODO refers to).
 
 using System;
 using System.Linq;

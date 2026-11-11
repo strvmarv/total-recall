@@ -18,6 +18,8 @@ Config snapshots auto-created on `session_start` and before `config_set`. `eval_
 
 ### ~~Regression Detection~~
 
+> **TypeScript only.** Not ported to the .NET engine; see "Gaps found in the TODO audit".
+
 Compares retrieval metrics between config snapshots at session_start. Alerts when miss rate increases by ≥ `regression.miss_rate_delta` or latency increases by ≥ `regression.latency_ratio`. Configurable thresholds with sensible defaults. Skipped when insufficient data.
 
 ### ~~Additional Host Importers~~
@@ -26,6 +28,8 @@ Added Cursor, Cline, OpenCode, and Hermes importers. Extracted shared utilities 
 
 ### ~~First-Run Smoke Test~~
 
+> **TypeScript only.** Not ported to the .NET engine; see "Gaps found in the TODO audit".
+
 Version-gated smoke test runs on first install and after upgrades. 22-query corpus in `eval/benchmarks/smoke.jsonl` exercises semantic similarity, tier routing, and negative assertions. Results surfaced in `session_start` response as `smokeTest` field. Version tracked in `_meta` table.
 
 ### ~~Post-Ingest Validation Queries~~
@@ -33,6 +37,8 @@ Version-gated smoke test runs on first install and after upgrades. 22-query corp
 Replaced single-chunk identity check with 3-probe validation. Probes sample chunks at 0%, 33%, and 66% through the document via scoped vector search. `IngestFileResult` now includes per-probe details. `IngestDirectoryResult` tracks per-file validation failures.
 
 ### ~~Config Snapshot Auto-Creation~~
+
+> **Partly TypeScript only.** In .NET, `config_set` and `eval_snapshot` create snapshots, but `session_start` does not, and events are logged with the placeholder id `"default"`. See "Gaps found in the TODO audit".
 
 Snapshots auto-created on `session_start` and before `config_set`. Deduplication via SHA-256 hash of recursively key-sorted config JSON. Snapshot IDs threaded through retrieval events and compaction logging.
 
@@ -117,6 +123,33 @@ The Cortex server must add sticky-pin support; until then sticky pins are local-
 ### Reranker (Cortex-Side)
 
 Cross-encoder or Cohere Rerank API pass after pgvector retrieval on the Cortex side, improving KB search quality for plugin queries. Plugin-side reranking (bundled ONNX cross-encoder) is a separate future consideration. Address when retrieval eval metrics show top-K precision is a bottleneck.
+
+## Gaps found in the TODO audit
+
+Found while auditing the `TODO` comments in `src/` (the old `TODO(Plan N)` labels were dropped). Each of these is real; the comments in code now say so.
+
+### Port the TypeScript `session_start` extras to .NET
+
+The first-run smoke test, regression detection and the per-session config snapshot ran in the TypeScript engine and are not implemented in .NET. `SmokeTest` and `RegressionAlerts` are always `null`; no snapshot is made at session start, so retrieval and compaction events carry `ConfigSnapshotId = "default"` and snapshot-based `eval_compare` filtering has nothing to separate. The `regression.*` settings are parsed but unused.
+
+### Populate the unset `session_start` result fields
+
+`Project` (issue #47), `WarmSweep` and `ProjectDocs` are always `null` even though the project is resolved internally, the warm sweep runs (its count is in `WarmPromoted`) and project docs are ingested by `ProjectDocsImporter`. Importers are also always called with `project: null` (`SessionLifecycle.cs`, importer loop).
+
+### `status` returns stub telemetry
+
+`StatusHandler` reports `activity` as zeros and `lastCompaction` as `null`, although `RetrievalEventLog` and `CompactionLog` persist the data and `eval_report` reads it.
+
+### `ModelNotReadyException` has no producer
+
+`ErrorTranslator` handles it, but `OnnxEmbedder` / `ModelManager` never throw it, so hosts never get the structured `model_not_ready` payload that the `using-total-recall` skill describes.
+
+### Smaller open items
+
+- `kb_search`: hierarchical collection matching and `needsSummary` tracking (`KbSearchHandler.cs`); `kb_ingest_dir` ignores its `collection` argument.
+- Atomicity gaps: a crash between the move and the re-embed (`MoveHelpers.cs`) or between insert and embed (`ImportCommand.cs`, `MemoryImportHandler.cs`) leaves a row without an embedding.
+- `McpServer` does not thread a `CancellationToken` through the dispatch loop or into handlers, so `notifications/cancelled` and Ctrl+C cannot interrupt a blocked read or an in-flight call.
+- CLI `memory inspect` prints no compaction history; the `memory_inspect` MCP tool does.
 
 ## Follow-ups deferred from the retrieval-quality feedback loop
 

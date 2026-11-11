@@ -74,7 +74,7 @@ public sealed class KbIngestDirHandler : IToolHandler
         var scope = args.TryGetProperty("scope", out var scopeEl) && scopeEl.ValueKind == JsonValueKind.String
             ? scopeEl.GetString()
             : _scopeDefault;
-        // TODO(Plan 5+): the schema declares a `collection` field for parity
+        // TODO: the schema declares a `collection` field for parity
         // with TS, but the TS implementation at src-ts/tools/kb-tools.ts:111-117
         // does not thread it through ingestDirectory either, so we ignore it
         // here. Revisit when the TS reference starts honouring it.

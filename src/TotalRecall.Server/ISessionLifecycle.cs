@@ -19,12 +19,11 @@ namespace TotalRecall.Server;
 /// session_context tool) returns the cached value cheaply.
 ///
 /// Mirrors the role of <c>runSessionInit</c> in
-/// <c>src-ts/tools/session-tools.ts</c>, scoped down to the Infrastructure
-/// pieces that actually exist in .NET as of Plan 4 (importers, SqliteStore,
-/// CompactionLog read seam). Everything beyond that surface — warm sweep,
-/// semantic warm→hot promotion, project docs auto-ingest, smoke test,
-/// regression detection, project detection — is intentionally stubbed and
-/// marked with <c>TODO(Plan 5+)</c> at each call site.
+/// <c>src-ts/tools/session-tools.ts</c>. It runs the importers (project docs
+/// included), the warm sweep and hot-tier assembly. The smoke test,
+/// regression detection and per-session config snapshot are not implemented;
+/// the matching <c>SessionInitResult</c> fields are always null (see the
+/// TODOs in <c>SessionLifecycle</c>).
 /// </summary>
 public interface ISessionLifecycle
 {

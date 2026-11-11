@@ -270,7 +270,7 @@ public sealed class ImportCommand : ICliCommand
                     // Pinned entries (legacy tier=="pinned" OR current sticky flag)
                     // become sticky-hot (tier merged in v2).
                     if (makeSticky) store.SetSticky(ctype, newId, true);
-                    // TODO(Plan 5+): atomicity gap (carry-forward #2).
+                    // TODO: atomicity gap (carry-forward #2).
                     var embedding = embedder!.Embed(content);
                     vec.InsertEmbedding(tier, ctype, newId, embedding);
                     imported++;
