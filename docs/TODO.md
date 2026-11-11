@@ -132,9 +132,9 @@ Found while auditing the `TODO` comments in `src/` (the old `TODO(Plan N)` label
 
 The first-run smoke test, regression detection and the per-session config snapshot ran in the TypeScript engine and are not implemented in .NET. `SmokeTest` and `RegressionAlerts` are always `null`; no snapshot is made at session start, so retrieval and compaction events carry `ConfigSnapshotId = "default"` and snapshot-based `eval_compare` filtering has nothing to separate. The `regression.*` settings are parsed but unused.
 
-### Populate the unset `session_start` result fields
+### Pass the detected project to the host importers
 
-`Project` (issue #47), `WarmSweep` and `ProjectDocs` are always `null` even though the project is resolved internally, the warm sweep runs (its count is in `WarmPromoted`) and project docs are ingested by `ProjectDocsImporter`. Importers are also always called with `project: null` (`SessionLifecycle.cs`, importer loop).
+`session_start` now reports `project`, `warmSweep` and `projectDocs` (issue #47), but the host importers are still always called with `project: null` (`SessionLifecycle.cs`, importer loop), so imported memories are stored as global. The detected project is available there (`detectedProject`).
 
 ### `status` returns stub telemetry
 

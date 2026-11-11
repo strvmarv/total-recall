@@ -207,8 +207,9 @@ public sealed class SessionLifecycle : ISessionLifecycle
             if (!importer.Detect()) continue;
 
             // TODO: importers always get project: null (the "global memories"
-            // path). ProjectResolver exists (used for pin scoping below) but
-            // its result is not passed here.
+            // path). The detected project (detectedProject, reported as
+            // SessionInitResult.Project) is not passed here; see docs/TODO.md,
+            // "Pass the detected project to the host importers".
             var memResult = importer.ImportMemories(project: null);
             var kbResult = importer.ImportKnowledge();
             if (kbResult.Chunks is int chunks && kbResult.Imported > 0)
@@ -1640,9 +1641,11 @@ public sealed record Hint
 
 /// <summary>
 /// Aggregate result of <see cref="ISessionLifecycle.EnsureInitializedAsync"/>.
-/// Several fields are never populated (Project, WarmSweep, ProjectDocs,
-/// SmokeTest, RegressionAlerts); see the TODOs at the construction site in
-/// <c>EnsureInitializedAsync</c>.
+/// <c>Project</c> is the detected project key (null outside a git repo),
+/// <c>WarmSweep</c> is null only when the sweep failed, and <c>ProjectDocs</c>
+/// is null when no project docs were ingested during the call. SmokeTest and
+/// RegressionAlerts are never populated; see the TODOs at the construction
+/// site in <c>RunInit</c>.
 /// </summary>
 public sealed record SessionInitResult(
     [property: JsonPropertyName("sessionId")] string SessionId,
@@ -1687,11 +1690,13 @@ public sealed record TierSummary(
     [property: JsonPropertyName("kb")] int Kb,
     [property: JsonPropertyName("collections")] int Collections);
 
-// TODO: never populated. The warm sweep runs; its promotion count is reported in WarmPromoted.
+/// <summary>Warm sweep outcome: how many entries were demoted out of hot (promotions are in
+/// <c>WarmPromoted</c>). The sweep result is null only when the sweep failed.</summary>
 public sealed record WarmSweepResult(
     [property: JsonPropertyName("demoted")] int Demoted);
 
-// TODO: never populated. Project docs are ingested by ProjectDocsImporter (see ImportSummary).
+/// <summary>Project docs ingested during this call: files ingested and the chunks they produced.
+/// Null when nothing was ingested (including a re-run deduplicated by import_log).</summary>
 public sealed record ProjectDocsResult(
     [property: JsonPropertyName("filesIngested")] int FilesIngested,
     [property: JsonPropertyName("totalChunks")] int TotalChunks);
