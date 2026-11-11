@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "total-recall": {
+      "command": "node",
+      "args": ["${CURSOR_PLUGIN_ROOT}/bin/start.js"]
+    }
+  }
+}
