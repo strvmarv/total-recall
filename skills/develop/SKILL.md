@@ -34,3 +34,26 @@ description: Use when defining a change or delivering one from a GitHub issue, v
   ["add a retry to the sync command", {"route": "define", "seed": "add a retry to the sync command"}]
 ]
 ```
+
+## Preflight
+
+```json golden:pinned-commands
+[
+  {
+    "shell": "bash", "tool": "gh", "login": "strvmarv", "args": ["api", "user"],
+    "expect": "t=$(gh auth token --user strvmarv) && [ -n \"$t\" ] && GH_TOKEN=\"$t\" gh api user"
+  },
+  {
+    "shell": "bash", "tool": "git", "login": "strvmarv", "args": ["api", "user"],
+    "expect": "t=$(gh auth token --user strvmarv) && [ -n \"$t\" ] && GH_TOKEN=\"$t\" GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c 'credential.helper=!gh auth git-credential' api user"
+  },
+  {
+    "shell": "powershell", "tool": "gh", "login": "strvmarv", "args": ["api", "user"],
+    "expect": "$e = 1; $p = $env:GH_TOKEN; try { $env:GH_TOKEN = (gh auth token --user strvmarv); if (-not $env:GH_TOKEN) { throw 'no token' }; gh 'api' 'user'; $e = $LASTEXITCODE } finally { $env:GH_TOKEN = $p }; exit $e"
+  },
+  {
+    "shell": "powershell", "tool": "git", "login": "strvmarv", "args": ["api", "user"],
+    "expect": "$e = 1; $p = $env:GH_TOKEN; $q = $env:GIT_TERMINAL_PROMPT; try { $env:GH_TOKEN = (gh auth token --user strvmarv); if (-not $env:GH_TOKEN) { throw 'no token' }; $env:GIT_TERMINAL_PROMPT = '0'; git -c credential.helper= -c 'credential.helper=!gh auth git-credential' 'api' 'user'; $e = $LASTEXITCODE } finally { $env:GH_TOKEN = $p; $env:GIT_TERMINAL_PROMPT = $q }; exit $e"
+  }
+]
+```
