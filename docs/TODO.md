@@ -110,9 +110,9 @@ Before committing to the schema migration, verify whether `KnowledgeChunk.Label`
 
 ### Cortex Sticky-Pin Support
 
-rai-ops-cortex must add sticky-pin support server-side; until then sticky pins are local-only (not synced, not migrated). (As of 4.0 the Pinned tier is merged into Hot as a `sticky` flag, so the sync gates key on the flag rather than a distinct tier.) The plugin gates are deliberate: `RoutingStore` never enqueues sticky upserts/deletes to `sync_queue`, `SyncService` pull/reconcile excludes sticky entries (remote updates/tombstones can never mutate a local pin), and `migrate_to_remote` silently skips sticky entries. Accepted edge until then: pinning an entry that already exists remotely leaves the remote copy untouched, and a later re-pull can reintroduce it as a separate non-sticky entry. When Cortex supports sticky pins: lift the RoutingStore/SyncService/MigrateToRemote sticky gates.
+The Cortex server must add sticky-pin support; until then sticky pins are local-only (not synced, not migrated). (As of 4.0 the Pinned tier is merged into Hot as a `sticky` flag, so the sync gates key on the flag rather than a distinct tier.) The plugin gates are deliberate: `RoutingStore` never enqueues sticky upserts/deletes to `sync_queue`, `SyncService` pull/reconcile excludes sticky entries (remote updates/tombstones can never mutate a local pin), and `migrate_to_remote` silently skips sticky entries. Accepted edge until then: pinning an entry that already exists remotely leaves the remote copy untouched, and a later re-pull can reintroduce it as a separate non-sticky entry. When Cortex supports sticky pins: lift the RoutingStore/SyncService/MigrateToRemote sticky gates.
 
-**Files:** `src/TotalRecall.Infrastructure/Sync/RoutingStore.cs`, `src/TotalRecall.Infrastructure/Sync/SyncService.cs`, `src/TotalRecall.Server/Handlers/MigrateToRemoteHandler.cs` (plugin); rai-ops-cortex (server-side sticky-pin support)
+**Files:** `src/TotalRecall.Infrastructure/Sync/RoutingStore.cs`, `src/TotalRecall.Infrastructure/Sync/SyncService.cs`, `src/TotalRecall.Server/Handlers/MigrateToRemoteHandler.cs` (plugin); the Cortex server (sticky-pin support)
 
 ### Reranker (Cortex-Side)
 
@@ -132,7 +132,7 @@ Items identified while building the `memory_feedback` / read-time-inference loop
 
 Retrieval outcomes are recorded in the local `retrieval_events` table only. In cortex mode there is no roll-up of feedback across team members, so retrieval-quality metrics stay per-user/local. A follow-up would sync (anonymized) outcome signals to Cortex and aggregate them server-side.
 
-**Files:** `src/TotalRecall.Infrastructure/Sync/` (new outcome sync), rai-ops-cortex (aggregation endpoint)
+**Files:** `src/TotalRecall.Infrastructure/Sync/` (new outcome sync), the Cortex server (aggregation endpoint)
 
 ### Configurable grace window for miss inference
 
