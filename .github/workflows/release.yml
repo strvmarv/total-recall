@@ -72,9 +72,19 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: Install clang for NativeAOT (Linux)
+      # GitHub-hosted Ubuntu images (x64 and arm64) already ship clang (default 18)
+      # and zlib1g-dev, so install only what is missing. An unconditional
+      # apt-get update would fail the release whenever the package mirror is
+      # unreachable, even though nothing needs to be installed.
+      - name: Ensure clang for NativeAOT (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+        run: |
+          set -euo pipefail
+          if ! command -v clang >/dev/null 2>&1 || ! dpkg -s zlib1g-dev >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y clang zlib1g-dev
+          fi
+          clang --version
 
       # NOTE: the bge-small model is NOT fetched here. dotnet publish does not
       # copy models/ into the publish tree, so a build-leg fetch would never reach

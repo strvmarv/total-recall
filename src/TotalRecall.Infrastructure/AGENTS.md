@@ -248,7 +248,7 @@ yet, so the pinned tier is excluded from every sync path:
 
 Pinning an entry that already exists remotely leaves the remote copy alone (accepted edge:
 a later re-pull can reintroduce it as a separate non-pinned entry). Lifting these gates
-requires a companion rai-ops-cortex change — tracked in `docs/TODO.md`.
+requires a companion Cortex server change — tracked in `docs/TODO.md`.
 
 ---
 
