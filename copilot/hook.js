@@ -39,8 +39,7 @@ export function copilotNote(rootDir) {
     '---',
     'Copilot CLI notes for the instructions above:',
     `- The \`total-recall\` command may not be on PATH in this session. Run the CLI as \`node "${path.join(rootDir, 'bin', 'start.js')}" <args>\` (for example \`compact --run\` or \`ui\`), never a bare \`total-recall\`.`,
-    '- Advice that is specific to Claude Code (such as `/total-recall:commands setup`) does not apply here.',
-    '- If a total-recall tool call is refused for approval, tell the user their Copilot tool-approval setting must allow the total-recall server (INSTALL.md, "Copilot CLI").',
+    '- If a total-recall tool call is refused for approval, tell the user to allow the server, for example by starting Copilot with `--allow-tool=total-recall` (INSTALL.md, "Copilot CLI").',
   ].join('\n');
 }
 

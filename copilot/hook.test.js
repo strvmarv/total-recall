@@ -65,6 +65,8 @@ test('copilotNote: names the bundled CLI, the PATH caveat and the approval point
   assert.ok(note.includes(path.join(ROOT, 'bin', 'start.js')));
   assert.ok(/may not be on PATH/i.test(note));
   assert.ok(/approval/i.test(note));
+  assert.ok(note.includes('--allow-tool=total-recall'));
+  assert.equal(note.includes('does not apply'), false);
 });
 
 test('session-start: a missing or unreadable skill file says nothing', async () => {
