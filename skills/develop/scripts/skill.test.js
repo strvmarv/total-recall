@@ -117,17 +117,18 @@ const LIBRARIES = ['golden.js', 'pages.js'];
 // Whole-token match: the word after a CLI script name must be exactly a subcommand of that script.
 const CLI_RE = /\b(regions|checkpoints|counted|history|route|args|ghpin|profile)\.js[ \t]+([A-Za-z][\w-]*)(?![\w-])/g;
 
-// Task 18's home table: subcommands whose mention must appear in the named file.
+// Task 18's home table: [file, `## ` section, script, subcommands]; each subcommand's mention must
+// appear inside that section of that file.
 const HOME = [
-  ['SKILL.md', 'ghpin', ['scratch', 'pick', 'command', 'run']],
-  ['SKILL.md', 'args', ['parse']],
-  ['define.md', 'regions', ['neutralize', 'fence']],
-  ['handoff.md', 'regions', ['body-json', 'body', 'ac', 'approach']],
-  ['handoff.md', 'checkpoints', ['validate', 'carry', 'format', 'readback']],
-  ['handoff.md', 'counted', ['select', 'write-access', 'permissions']],
-  ['handoff.md', 'history', ['find']],
-  ['deliver.md', 'route', ['route', 'live', 'position', 'count-tasks', 'count-cycles', 'tasks-for']],
-  ['profile.md', 'profile', ['parse']],
+  ['SKILL.md', 'Preflight', 'ghpin', ['scratch', 'pick', 'command', 'run']],
+  ['SKILL.md', 'Issue entry', 'args', ['parse']],
+  ['define.md', 'Plan track', 'regions', ['neutralize', 'fence']],
+  ['handoff.md', 'Hashing and regions', 'regions', ['body-json', 'body', 'ac', 'approach']],
+  ['handoff.md', 'Checkpoints', 'checkpoints', ['validate', 'carry', 'format', 'readback']],
+  ['handoff.md', 'Trust', 'counted', ['select', 'write-access', 'permissions']],
+  ['handoff.md', 'Re-approval', 'history', ['find']],
+  ['deliver.md', 'Common steps', 'route', ['route', 'live', 'position', 'count-tasks', 'count-cycles', 'tasks-for']],
+  ['profile.md', 'Loading', 'profile', ['parse']],
 ];
 
 // Forbidden provenance strings are built from fragments so this file never contains them.
@@ -337,11 +338,11 @@ test('coverage: every subcommand of every CLI is mentioned (active when COMPLETE
   }
 });
 
-test('coverage: each home-table subcommand is mentioned in its file (active when COMPLETE)', { skip: !COMPLETE }, () => {
-  for (const [file, script, subs] of HOME) {
-    const text = read(file);
+test('coverage: each home-table subcommand is mentioned in its section (active when COMPLETE)', { skip: !COMPLETE }, () => {
+  for (const [file, name, script, subs] of HOME) {
+    const text = section(read(file), name);
     const found = new Set([...text.matchAll(CLI_RE)].filter((m) => m[1] === script).map((m) => m[2]));
-    for (const s of subs) assert.ok(found.has(s), `${file} mentions ${script}.js ${s}`);
+    for (const s of subs) assert.ok(found.has(s), `${file} section "${name}" mentions ${script}.js ${s}`);
   }
 });
 

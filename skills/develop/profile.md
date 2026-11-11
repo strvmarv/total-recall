@@ -9,7 +9,8 @@ golden it is tested against.
 
 The profile is the first fenced `text` block of `.github/develop.md` whose first line is the header
 `tr-develop/profile-v1`, followed by `key: value` lines. Each command to run at Finish sits in its own
-`sh verify` block, under a `## Verify` heading:
+`sh verify` block. The `## Verify` heading below is a convention only: the parser takes any `sh verify` block in
+the document:
 
 ````
 ```text
@@ -32,8 +33,8 @@ npm run test:shim
 ```
 ````
 
-- `base`: the branch runs start from and target. Default: the default branch of `origin`. A `base`
-  that is not the default branch is allowed; the PR then says `Refs #<n>` ([Commits and
+- `base`: the branch runs start from and target. Default: the default branch of `origin`. It must match
+  `[A-Za-z0-9][A-Za-z0-9._/-]*`. A `base` that is not the default branch is allowed; the PR then says `Refs #<n>` ([Commits and
   PRs](SKILL.md#commits-and-prs)), because GitHub closes an issue only for a PR merged into the default
   branch.
 - `gh.account`: the logged-in `gh` account to use for this repository ([Preflight](SKILL.md#preflight),
@@ -41,7 +42,8 @@ npm run test:shim
 - `ticket.standard`: `on` (default) or `off`. `off` skips the shape and quality rules of the ticket standard
   ([ticket-standard.md](ticket-standard.md#repository-overrides)).
 - `ticket.template.<type>`: a file under `.github/ISSUE_TEMPLATE/` for `feature`, `bug` or `chore`. It
-  sets the sections of that type's ticket.
+  sets the sections of that type's ticket. The value is a bare file name (no path) ending `.md`, `.yml`
+  or `.yaml`.
 - `sh verify` blocks: the commands Finish runs, in order, each of which must exit 0
   ([Verify blocks](#verify-blocks)).
 
@@ -139,14 +141,16 @@ CRLF line endings. The parser's output, and so the cases below, are the contract
 
 Read the profile from `origin`'s default branch only, never from the feature branch or the worktree
 (`git show origin/<default>:.github/develop.md`, through `ghpin.js run` with `out`), so a feature
-branch cannot change the commands its own run trusts. Preflight reads it once and Define and Deliver
+branch cannot change the commands its own run trusts. If that command fails because the file is absent,
+the profile is absent and every default applies; any other git failure is tool trouble (blocker 3 in
+Deliver, a warning in Define). Preflight reads it once and Define and Deliver
 reuse that read, so both see the same file. Then run
 `node <skill dir>/scripts/profile.js parse <profileFile>`. The output is one JSON object: `{ok:true,
 profile}` with `base`, `ticketStandard`, `templates`, `ghAccount` and `verify`, or `{ok:false, error}`
 (`no-profile`, or `bad-value:<key>`).
 
-- No profile file, or no profile block in it (`no-profile`): every default applies and nothing is
-  reported.
+- No profile file, or no profile block in it: `profile.js parse` prints `{ok:false,error:"no-profile"}`
+  and exits 1, which means every default applies; nothing is reported.
 - An invalid profile is a warning in Define (say so once and use the defaults) and blocker 6 in Deliver
   ([blockers.md](blockers.md#stop-for-these)): Deliver never guesses at commands it was told to run.
 - `<base>` is the profile's `base`, else the default branch of `origin`.
@@ -188,11 +192,13 @@ from `origin`'s default branch, with every GitHub call pinned to the chosen acco
    result is fixed before anything else.
 4. **Review.** One reviewer loop over the file ([review-contract.md](review-contract.md)), with these
    questions in the scope: are the commands what the repository's own CI runs, and does any command
-   write outside the worktree. Triage and re-run until a `GO`, within the 6-round cap.
+   write outside the worktree. Triage and re-run until a `GO`, within the 6-round cap. If the loop reaches the cap without sign-off,
+   the run stops with a terminal report: there is no issue to post a `blocked` checkpoint to.
 5. **Commit and PR.** Commit the file on the branch `develop-profile/<date>` (`<date>` is the day as
-   `YYYY-MM-DD`; if that branch exists, suffix it and say so) with a message that follows the
-   repository's own conventions and carries no AI attribution. Push it and open a PR against the
-   default branch, with the title and body written to files and sent from them. The PR is never
+   `YYYY-MM-DD`; if that branch exists locally or on origin, suffix it and say so) with a message that
+   follows the repository's own conventions. The commit message, the PR title and the PR body carry no
+   AI attribution. Push it and open a PR against the default branch, with the title and body written
+   to files and sent from them. The PR is never
    merged: `/develop` stops after opening it, says where it is, and leaves the merge to the person.
    Until it is merged the profile does not exist for any run, since it is read from the default
    branch only.
