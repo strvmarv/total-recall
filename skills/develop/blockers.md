@@ -9,7 +9,7 @@ This is the single stop list. Stop for the blockers below and for nothing else; 
 3. **Missing access:** credentials, a required tool, push or PR permission, or the tracker, after one safe remediation attempt.
 4. **A destructive, security-sensitive or outward-facing action**, or any side effect outside the worktree, beyond: pushing the feature branch; opening or updating its PR; the issue writes this skill defines; and deleting the local branch of a merged PR with `git branch -d`. Merging, force-pushing, deleting data, changing secrets or permissions, releasing and messaging people all stop here.
 5. **Out-of-scope verification failure,** or a base-merge conflict that cannot be resolved within the spec.
-6. **Pin, trust or integrity failure:** anything [Trust](handoff.md#trust) or [Resume and routing](handoff.md#resume-and-routing) says fails closed. A failure of trust, a failed permission lookup (blocker 3) and a changed-artifact stop with no one to approve it are terminal-only: report them in the terminal and post nothing.
+6. **Pin, trust or integrity failure:** anything [Trust](handoff.md#trust), [Checkpoints](handoff.md#checkpoints) or [Resume and routing](handoff.md#resume-and-routing) says fails closed. A failure of trust, a failed permission lookup (blocker 3) and a changed-artifact stop with no one to approve it are terminal-only: report them in the terminal and post nothing.
 
 ## Decide and continue
 
