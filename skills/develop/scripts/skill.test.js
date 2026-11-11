@@ -366,6 +366,10 @@ test('handoff.md: the sections name the CLIs and the rulings they own', () => {
   const trust = section(text, 'Trust');
   assert.ok(trust.includes('scratch directory'), 'Trust names the per-run scratch directory');
   assert.ok(/resumed session is a new run/.test(trust), 'Trust says a resumed session is a new run');
+  assert.ok(checkpoints.includes('Integrity is not a posting step'), 'Checkpoints says integrity is not a posting step');
+  assert.ok(!checkpoints.includes('stops the run'), 'Checkpoints does not say a mismatch stops the run');
+  assert.ok(!checkpoints.includes('unless the comment is'), 'Checkpoints gives no integrity exemption for one kind of comment');
+  assert.ok(!trust.includes('stops the run at the next checkpoint'), 'Trust does not tie integrity to posting');
   assert.ok(section(text, 'Resume and routing').includes('latest'), 'Resume names latest');
   const reapproval = section(text, 'Re-approval');
   assert.ok(reapproval.includes('history.js find'), 'Re-approval names history.js find');

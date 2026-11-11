@@ -596,16 +596,16 @@ The comparison is the script's, not the reader's. On a failure, edit the comment
 same `outFile` (`comment-edit`) and read it back again; a second failure is blocker 6. A `blocked` that
 fails read-back is not retried: say so in the final report.
 
-**Posting a checkpoint,** in order:
+**Posting a checkpoint,** in order. Integrity is not a posting step: posting a `defined`, `reapproved`,
+`closed` or `blocked` comment never runs it. Integrity is checked at Deliver start and resume and before the
+PR is opened (Trust: Integrity), and a mismatch there goes to Re-approval or is a blocker 6 stop, as Trust says.
 
 1. Select the counted comments (see Trust) and take `progress` from a `complete` pass.
-2. Check integrity, unless the comment is a `blocked` (see Trust: Integrity). A mismatch stops the run
-   at this checkpoint.
-3. For a `kickoff` or a `reapproved`, run `checkpoints.js carry` with that `progress` as `prior`.
-4. Write the summary to a file and run `checkpoints.js format`. The summary may say how many
+2. For a `kickoff` or a `reapproved`, run `checkpoints.js carry` with that `progress` as `prior`.
+3. Write the summary to a file and run `checkpoints.js format`. The summary may say how many
    uncounted checkpoint comments were ignored, by comment id only, never quoting them or a login
    they name.
-5. Post `outFile` with `comment-post`, fetch the new comment, run `checkpoints.js readback`.
+4. Post `outFile` with `comment-post`, fetch the new comment, run `checkpoints.js readback`.
 
 Goldens: `parse-cases` (`{name, body, expect}`), `validate-cases` (`{name, cp, ctx, reachable, expect}`),
 `carry-cases` (`{name, checkpoint, prior, expect}`; a case with no `prior` key is the missing-key case) and
@@ -820,9 +820,8 @@ A pin that fails is a trust failure, terminal report only, with the way out of "
 checkpoint) or "re-pin" (one exists; see Re-approval). A counted progress checkpoint with no valid counted pin is
 the same failure.
 
-**Integrity,** at every Deliver start and resume, and again before the PR is opened (the same title, body and
-criteria check also runs each time a checkpoint is about to be posted, `blocked` excepted, so a mid-run edit stops
-the run at the next checkpoint). Once the latest counted progress is `pr-open` none of it runs, except after a
+**Integrity,** at every Deliver start and resume, and again before the PR is opened; no checkpoint's posting
+runs it (see Checkpoints). Once the latest counted progress is `pr-open` none of it runs, except after a
 yes to a new PR (see After the PR): the branch may be gone, so that route works from the PR's own URL and
 reports a mismatch only as advice.
 
