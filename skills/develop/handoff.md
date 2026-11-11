@@ -1326,7 +1326,7 @@ checkpoint a pin that fails is re-defined instead (Define), never re-pinned.
    no branch yet, so skip this. Then show what changed, old next to new.
    - **The old body.** Fetch the issue, the `edits` and the `renames` through `ghpin.js run`, then run
      `node <skill dir>/scripts/history.js find <editsRawFile> <renamesRawFile> <issueJsonFile> <pinnedBodyHash> <outDir>`
-     with the pin's `bodyHash`. It tries the current body first, then each revision newest first (a revision
+     with the pin's `bodyHash` (pass the literal `none` when there is no usable pin; the page files are then not read). It tries the current body first, then each revision newest first (a revision
      with no `diff`, or deleted, is skipped), against every title in the rename chain, until one pairing
      hashes to the pin. The outcomes:
      - `{found:true}` (with `source` and `editedAt`): `outDir` now holds `old.title` and `old.body`; show them
