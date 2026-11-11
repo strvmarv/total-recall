@@ -596,16 +596,19 @@ The comparison is the script's, not the reader's. On a failure, edit the comment
 same `outFile` (`comment-edit`) and read it back again; a second failure is blocker 6. A `blocked` that
 fails read-back is not retried: say so in the final report.
 
-**Posting a checkpoint,** in order. Integrity is not a posting step: posting a `defined`, `reapproved`,
-`closed` or `blocked` comment never runs it. Integrity is checked at Deliver start and resume and before the
-PR is opened (Trust: Integrity), and a mismatch there goes to Re-approval or is a blocker 6 stop, as Trust says.
+**Posting a checkpoint,** in order:
 
 1. Select the counted comments (see Trust) and take `progress` from a `complete` pass.
-2. For a `kickoff` or a `reapproved`, run `checkpoints.js carry` with that `progress` as `prior`.
-3. Write the summary to a file and run `checkpoints.js format`. The summary may say how many
+2. Check integrity (see Trust: Integrity), except for a `blocked`, `defined`, `reapproved` or `closed`
+   comment: `defined` and `reapproved` establish the pin the check is against, `closed` is posted when
+   the branch may be gone, and a `blocked` is what a mismatch ends in. For every other checkpoint a
+   mismatch is not a bare stop: it follows Trust's rule (Re-approval when a person with write access can
+   be asked, else blocker 6), so a mid-run edit is caught at the next checkpoint.
+3. For a `kickoff` or a `reapproved`, run `checkpoints.js carry` with that `progress` as `prior`.
+4. Write the summary to a file and run `checkpoints.js format`. The summary may say how many
    uncounted checkpoint comments were ignored, by comment id only, never quoting them or a login
    they name.
-4. Post `outFile` with `comment-post`, fetch the new comment, run `checkpoints.js readback`.
+5. Post `outFile` with `comment-post`, fetch the new comment, run `checkpoints.js readback`.
 
 Goldens: `parse-cases` (`{name, body, expect}`), `validate-cases` (`{name, cp, ctx, reachable, expect}`),
 `carry-cases` (`{name, checkpoint, prior, expect}`; a case with no `prior` key is the missing-key case) and
@@ -820,9 +823,10 @@ A pin that fails is a trust failure, terminal report only, with the way out of "
 checkpoint) or "re-pin" (one exists; see Re-approval). A counted progress checkpoint with no valid counted pin is
 the same failure.
 
-**Integrity,** at every Deliver start and resume, and again before the PR is opened; no checkpoint's posting
-runs it (see Checkpoints). Once the latest counted progress is `pr-open` none of it runs, except after a
-yes to a new PR (see After the PR): the branch may be gone, so that route works from the PR's own URL and
+**Integrity,** at every Deliver start and resume, and again before the PR is opened (the same title, body and
+criteria check also runs each time a checkpoint is about to be posted, except a `blocked`, `defined`, `reapproved`
+or `closed`, so a mid-run edit stops the run at the next checkpoint). Once the latest counted progress is
+`pr-open` none of it runs, except after a yes to a new PR (see After the PR): the branch may be gone, so that route works from the PR's own URL and
 reports a mismatch only as advice.
 
 - Fetch the issue to a file, run `regions.js body-json`, then `regions.js body` and `regions.js ac`: the hashes

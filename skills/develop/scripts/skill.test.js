@@ -366,10 +366,9 @@ test('handoff.md: the sections name the CLIs and the rulings they own', () => {
   const trust = section(text, 'Trust');
   assert.ok(trust.includes('scratch directory'), 'Trust names the per-run scratch directory');
   assert.ok(/resumed session is a new run/.test(trust), 'Trust says a resumed session is a new run');
-  assert.ok(checkpoints.includes('Integrity is not a posting step'), 'Checkpoints says integrity is not a posting step');
-  assert.ok(!checkpoints.includes('stops the run'), 'Checkpoints does not say a mismatch stops the run');
-  assert.ok(!checkpoints.includes('unless the comment is'), 'Checkpoints gives no integrity exemption for one kind of comment');
-  assert.ok(!trust.includes('stops the run at the next checkpoint'), 'Trust does not tie integrity to posting');
+  assert.ok(/Check integrity \(see Trust: Integrity\), except for a `blocked`, `defined`, `reapproved` or `closed`/.test(checkpoints.replace(/\s+/g, ' ')), 'Checkpoints runs integrity at posting, exempting blocked, defined, reapproved and closed');
+  assert.ok(!checkpoints.includes('Integrity is not a posting step'), 'Checkpoints does not drop the per-checkpoint integrity check');
+  assert.ok(/except a `blocked`, `defined`, `reapproved`\s+or `closed`/.test(trust), 'Trust names the same four exemptions');
   assert.ok(section(text, 'Resume and routing').includes('latest'), 'Resume names latest');
   const reapproval = section(text, 'Re-approval');
   assert.ok(reapproval.includes('history.js find'), 'Re-approval names history.js find');
