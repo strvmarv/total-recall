@@ -1,6 +1,6 @@
 // cursor/cli.js — run the total-recall CLI (`ui`, `compact --run`, ...) against the SAME store as Cursor's MCP server.
 //
-// Cursor starts a plugin's MCP server with a sanitized environment (no TOTAL_RECALL_*, no XDG_*, no HERMES_HOME, no
+// Cursor starts a plugin's MCP server with a sanitized environment (no TOTAL_RECALL_*, no XDG_DATA_HOME/XDG_CONFIG_HOME, no HERMES_HOME, no
 // HOME on Windows), while a command the model runs in its shell inherits the user's full environment. Run as
 // `node bin/start.js`, such a command could open or modify a different database than the server uses. This wrapper
 // removes the same variables (storeEnvStrip, shared with the floor hook) and then runs bin/start.js with inherited stdio.

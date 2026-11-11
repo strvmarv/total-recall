@@ -34,7 +34,7 @@ test('process: the wrapper runs bin/start.js with the arguments, inherited stdio
   }
   fs.mkdirSync(path.join(tree, 'bin'));
   fs.writeFileSync(path.join(tree, 'bin', 'start.js'), [
-    "const keys = Object.keys(process.env).filter((k) => /^(TOTAL_RECALL_|XDG_|HERMES_HOME$)/i.test(k) || (process.platform === 'win32' && /^HOME$/i.test(k)));",
+    "const keys = Object.keys(process.env).filter((k) => /^(TOTAL_RECALL_|XDG_DATA_HOME$|XDG_CONFIG_HOME$|HERMES_HOME$)/i.test(k) || (process.platform === 'win32' && /^HOME$/i.test(k)));",
     "process.stdout.write(JSON.stringify({ args: process.argv.slice(2), leaked: keys, keep: process.env.KEEP_ME }));",
     "process.exitCode = 7;",
   ].join('\n'));
