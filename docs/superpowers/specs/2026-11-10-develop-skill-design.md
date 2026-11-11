@@ -190,13 +190,26 @@ stop leaves nothing behind: no checkpoint, no worktree, no memory snapshot.
 3. **Repository.** A git repository with an `origin` remote that `gh` can resolve. The profile is
    read at `origin`'s default branch; `<base>` is its `base`, else that default branch. `origin` is
    a fork → stop.
-4. **`gh` account.** Pick the logged-in account (`gh auth status`) whose permission on the
-   repository is `admin`, `maintain` or `write`, preferring the active one, and name it to the
-   person. Every `gh` call of the run, and every subagent prompt that touches GitHub, then sets the
-   account on that command only: `GH_TOKEN=$(gh auth token --user <login>) gh ...`. The run never
-   runs `gh auth switch`, which would change the account for every parallel session on the
-   machine. No account with write access → stop, naming the accounts found. In PowerShell the same
-   is `$env:GH_TOKEN = (gh auth token --user <login>); gh ...`, scoped to the command.
+4. **GitHub account.** Pick the logged-in account (`gh auth status`) whose permission on the
+   repository is `admin`, `maintain` or `write`: the profile's `gh.account` when it names one that
+   qualifies, else the active account if it qualifies, else the only one that does; with several
+   and no preference, ask once. Name it to the person. The profile is read from the default branch
+   after the first fetch, which uses the pick made without it. Then **every** call that talks to
+   GitHub is pinned to that account on that command only, so parallel sessions and subagents on
+   the machine are never affected:
+   - `gh`: `GH_TOKEN=$(gh auth token --user <login>) gh ...`;
+   - network `git` (`fetch`, `pull`, `push`, `ls-remote`, `worktree` operations that fetch):
+     `GH_TOKEN=$(gh auth token --user <login>) git -c credential.helper= -c 'credential.helper=!gh auth git-credential' <command>`.
+     The first `credential.helper=` clears the configured chain (Git Credential Manager, or the
+     repository's own helper, which would otherwise answer with whichever account it has stored or the
+     active one), and the second restores only the `gh` helper, which honours `GH_TOKEN`;
+   - every subagent prompt that touches GitHub or runs network `git` carries both forms.
+
+   The run never runs `gh auth switch`, which would change the account for every parallel session on
+   the machine. No account with write access → stop, naming the accounts found. In PowerShell the
+   same is `$env:GH_TOKEN = (gh auth token --user <login>); ...`, scoped to the command. An SSH
+   remote is not covered by this (the SSH key decides the identity there): the run notes it and
+   relies on the permission check of this step, which a push cannot prove.
 5. **Reviewers** (review mode `agent` only). An agent named `adversarial-reviewer`, bare or with
    the `total-recall:` prefix, is available. Absent → stop with install instructions.
    `counterexample-reviewer` absent is not a stop (section 12). An agent of the right name from
@@ -891,6 +904,7 @@ base: main
 ticket.standard: on
 ticket.template.feature: feature_request.md
 ticket.template.bug: bug_report.yml
+gh.account: strvmarv
 ```
 
 ## Verify
@@ -906,6 +920,8 @@ npm run test:shim
 
 - `base`: the branch runs start from and target. Default: `origin`'s default branch. A `base` that
   is not the default branch is allowed; the PR then says `Refs #<n>` (section 11).
+- `gh.account`: the logged-in `gh` account to use for this repository (section 6, check 4); it must
+  have write access, else the run stops. Optional.
 - `ticket.standard`: `on` (default) or `off`.
 - `ticket.template.<type>`: a file under `.github/ISSUE_TEMPLATE/` for `feature`, `bug` or `chore`.
 - `sh verify` blocks: commands Finish runs, in order, each of which must exit 0.
@@ -949,7 +965,7 @@ In the same PR as the skill:
 - `package.json`: the script tests added to `test:shim`; `"skills": ["./skills/develop"]` added to
   the `pi` block, which today has only `extensions`. Stage 1 registers no pi command: on pi the skill
   is invoked as `/skill:develop`, and whether a bare `/develop` can also work is listed in section 21.
-- `.github/develop.md`: this repository's own profile.
+- `.github/develop.md`: this repository's own profile, naming `gh.account: strvmarv`.
 
 The main checkout holds 19 specs, 28 plans and one handoff under `docs/superpowers/` that were
 never committed. Once the ignore line is gone they show up as untracked files there. Whether to
@@ -989,7 +1005,7 @@ executor's kickoff that carries a `planSha`. Items 4 and 5 of this list also nee
 6. Re-approval also covers the approach and the spec, each after its reviewer loop.
 7. `review=agent|self` is recorded in checkpoints.
 8. Worktrees live under `.claude/worktrees/` on every host.
-9. `gh auth switch` is never run. Every `gh` call sets `GH_TOKEN` inline for the chosen account.
+9. `gh auth switch` is never run. Every `gh` call and every network `git` call is pinned to the chosen account inline (section 6, check 4).
 10. Forks are refused.
 11. The reviewer dependency is met by name; no contract version is declared by the agent.
 12. A second `develop` skill produces a notice, not a stop.
@@ -1007,6 +1023,9 @@ executor's kickoff that carries a `planSha`. Items 4 and 5 of this list also nee
 21. A trust failure, or a changed-artifact stop with no one to approve it, posts nothing; the cost is a possible live-run question for up
     to 24 hours.
 22. Define and Deliver read the profile from the default branch, so they agree on `base`.
+23. Network `git` is pinned to the chosen account as well as `gh`, by clearing the credential-helper
+    chain and using the `gh` helper with an inline `GH_TOKEN`; the profile may name the account
+    (`gh.account`).
 
 ## 21. Not yet verified
 
@@ -1019,7 +1038,13 @@ executor's kickoff that carries a `planSha`. Items 4 and 5 of this list also nee
 3. Whether Claude Code accepts `/develop` for a plugin skill or only `/total-recall:develop`, and
    whether a bare `/develop` works on pi (where skills are `/skill:develop`).
 4. Whether superpowers' skills behave as section 13 assumes when a host has no dispatch tool.
-5. Whether GitHub stores a Markdown body exactly as submitted (it is assumed to), and so whether
+5. Verified 2026-11-10 on Windows: `gh auth git-credential` returns the token of the account named
+   by an inline `GH_TOKEN`, and the active account's token without one (compared by hash, never
+   printed). Still unverified: that a real `git push` over HTTPS with the helper chain cleared
+   authenticates as that account on Windows, macOS and Linux, and that Git Credential Manager can no
+   longer answer first. The build's first tasks check both, with a push to a throwaway branch only
+   with the owner's say-so.
+6. Whether GitHub stores a Markdown body exactly as submitted (it is assumed to), and so whether
    the local hash and the read-back hash agree; and the exact shape of `RenamedTitleEvent` and
    `userContentEdits` pagination.
 
