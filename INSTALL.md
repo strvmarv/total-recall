@@ -4,7 +4,7 @@ This file is designed to be read by AI coding assistants. If you're an LLM helpi
 
 ## What total-recall ships as
 
-Since 0.8.0, total-recall is a **prebuilt .NET 8 NativeAOT binary** wrapped by a tiny Node launcher (`bin/start.js`) that detects the host platform and exec's the right per-RID binary. The npm package ships binaries for `linux-x64`, `linux-arm64`, `osx-arm64`, and `win-x64`. No `dotnet` runtime, no `bun`, and no system SQLite needed — the binary bundles its own `libe_sqlite3`, `libonnxruntime`, `vec0` (sqlite-vec extension), and the `bge-small-en-v1.5` ONNX embedding model (~133 MB).
+Since 0.8.0, total-recall is a **prebuilt .NET 10 NativeAOT binary** wrapped by a tiny Node launcher (`bin/start.js`) that detects the host platform and exec's the right per-RID binary. The npm package ships binaries for `linux-x64`, `linux-arm64`, `osx-arm64`, and `win-x64`. No `dotnet` runtime, no `bun`, and no system SQLite needed — the binary bundles its own `libe_sqlite3`, `libonnxruntime`, `vec0` (sqlite-vec extension), and the `bge-small-en-v1.5` ONNX embedding model (~133 MB).
 
 ## Prerequisites
 

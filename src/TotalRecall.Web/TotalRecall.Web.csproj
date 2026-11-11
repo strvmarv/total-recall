@@ -1,6 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
     <RootNamespace>TotalRecall.Web</RootNamespace>
     <AssemblyName>TotalRecall.Web</AssemblyName>
     <Nullable>enable</Nullable>
@@ -16,7 +15,7 @@
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" Version="8.0.28" />
+    <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" Version="10.0.5" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\TotalRecall.Server\TotalRecall.Server.csproj" />

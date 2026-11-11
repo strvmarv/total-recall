@@ -177,7 +177,7 @@ public class ClaudeCodeSkillScannerTests : IDisposable
 
     private static string FixturesRoot()
     {
-        // bin/Debug/net8.0/ → ../../.. → tests/TotalRecall.Infrastructure.Tests → .. → tests
+        // bin/Debug/net10.0/ → ../../.. → tests/TotalRecall.Infrastructure.Tests → .. → tests
         var path = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "fixtures", "skills");
         return Path.GetFullPath(path);
     }

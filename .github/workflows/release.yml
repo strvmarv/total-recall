@@ -142,7 +142,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "binaries/$RID"
-          cp -a "src/TotalRecall.Host/bin/Release/net8.0/$RID/publish/." "binaries/$RID/"
+          cp -a "src/TotalRecall.Host/bin/Release/net10.0/$RID/publish/." "binaries/$RID/"
           # Strip debug symbols. .pdb (Windows), .dbg (Linux), and .dsym bundles
           # (macOS) are developer-only and never loaded at runtime, yet they were
           # ~half of every release tarball. Harmless when nothing matches; the
@@ -165,7 +165,7 @@ jobs:
         run: |
           $dest = "binaries/$env:RID"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
-          Copy-Item -Recurse -Force "src/TotalRecall.Host/bin/Release/net8.0/$env:RID/publish/*" $dest
+          Copy-Item -Recurse -Force "src/TotalRecall.Host/bin/Release/net10.0/$env:RID/publish/*" $dest
           # Strip debug symbols (see the Unix step) — dev-only, never loaded at
           # runtime, and the bulk of the release/npm payload. The win-x64 publish
           # emits total-recall.pdb (~123 MB).
