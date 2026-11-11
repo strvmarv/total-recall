@@ -9,7 +9,8 @@ with a GitHub issue as the ticket. It has two halves:
 
 - **Define** is interactive. The person and the assistant brainstorm, agree a spec (or, for a small
   change, a short approach), have it reviewed, and publish an issue that meets a written ticket
-  standard and carries a small machine-readable handoff.
+  standard and is pinned by a small machine-readable `defined` comment. Together the issue and that
+  comment are the **handoff**.
 - **Deliver** is hands-off. Starting from that issue, the assistant plans, implements with review at
   every step, opens a PR that closes the issue, and stops.
 
@@ -27,8 +28,8 @@ GitHub repositories, and its own development has no ticket-to-PR workflow.
 **Goals (Stage 1)**
 
 1. `/develop <text>` defines a change and publishes a GitHub issue that meets the ticket standard.
-2. `/develop <n>` on an issue with no handoff runs Define from that issue; on an issue with a
-   handoff it runs Deliver, or resumes it, or reports the PR.
+2. `/develop <n>` on an issue with no counted `defined` comment runs Define from that issue; on one
+   with it, it runs Deliver, or resumes it, or reports the PR.
 3. Deliver ends with an open PR whose body says `Closes #<n>`, after per-task review and a final
    review loop.
 4. A run that stops (crash, blocker, closed laptop) can be resumed by anyone with write access,
@@ -82,8 +83,8 @@ skills/develop/
   profile.md            `.github/develop.md` and `/develop initialize`
   scripts/
     regions.js          extract a marked region from an issue body; normalize; SHA-256
-    handoff.js          parse and validate a handoff block; decide define or deliver
-    checkpoints.js      parse and validate checkpoint lines; pick the resume point
+    checkpoints.js      parse and validate checkpoint lines (including `defined`); decide define or
+                        deliver; pick the resume point
     profile.js          parse and validate a profile
     *.test.js           node --test, driven by the golden blocks in the Markdown files
 agents/
@@ -118,10 +119,14 @@ so and stops.
 **Issue entry.** An issue argument names an issue; the issue decides the route. Read the issue
 (body, author, last editor, labels, assignees, state) and its comments once, before any write:
 
-- the body has any trimmed line starting `tr-develop/` → **Deliver** (which validates it and fails
-  closed, section 9);
-- any comment has a trimmed line starting `tr-develop/v1 phase=kickoff` → **Deliver**;
-- otherwise → **Define**, started from this issue.
+- a **counted** comment (section 9) carries a `tr-develop/v1 phase=defined` or `phase=kickoff` line →
+  **Deliver**, which validates it and fails closed (section 9);
+- otherwise → **Define**, started from this issue. A `tr-develop/` line in the body or in an
+  uncounted comment is ignored and mentioned once; it never routes, and Define rewrites the body.
+
+A counted `defined` comment that is invalid, or an issue whose counted comments hold a `defined`
+none of which validates, gets the choice **re-define this issue** (Define, which posts a new
+`defined` comment) or **stop**.
 
 Tell the person the outcome, with the issue's title and link, before anything is written, so a
 mistyped number is visible.
@@ -144,17 +149,23 @@ entry by `cd <dir> &&`, absolute paths for file tools).
 Run before any write. On a failure, say what is missing and how to get it, then stop. A preflight
 stop leaves nothing behind: no checkpoint, no worktree, no memory snapshot.
 
-1. **Superpowers.** The six skills are available and the installed version is 7 or later. A higher
-   major than tested: warn and continue. Missing or lower: stop with install instructions.
+1. **Superpowers.** The six skills are available and the installed version is 7 or later. The
+   version is read from the plugin manifest of the install the host loaded (on Claude Code the
+   plugin cache's `.claude-plugin/plugin.json`; on pi the manifest above the skills folder it loaded
+   superpowers from). A higher major than tested: warn and continue. Missing or lower: stop with
+   install instructions. Version unreadable: warn and continue in Define, stop in Deliver.
 2. **Dispatch and ask tools.** Decide the review mode: `agent` when a dispatch tool is present,
    else `self` (with the warning of section 5). A host with no way to ask the person a question
    stops: Define cannot run without one.
 3. **Repository.** A git repository with an `origin` remote that `gh` can resolve. `<base>` is the
    profile's `base`, else `origin`'s default branch. `origin` is a fork → stop.
-4. **`gh` account.** `gh api user` succeeds and the active account's permission on the repository
-   is `admin` or `write`. If it is not, and `gh auth status` lists another account, name it and ask
-   whether to switch (`gh auth switch` changes the account for every shell on the machine, so it is
-   never done without a yes, and never mid-run).
+4. **`gh` account.** Pick the logged-in account (`gh auth status`) whose permission on the
+   repository is `admin`, `maintain` or `write`, preferring the active one, and name it to the
+   person. Every `gh` call of the run, and every subagent prompt that touches GitHub, then sets the
+   account on that command only: `GH_TOKEN=$(gh auth token --user <login>) gh ...`. The run never
+   runs `gh auth switch`, which would change the account for every parallel session on the
+   machine. No account with write access → stop, naming the accounts found. In PowerShell the same
+   is `$env:GH_TOKEN = (gh auth token --user <login>); gh ...`, scoped to the command.
 5. **Reviewers** (review mode `agent` only). An agent named `adversarial-reviewer`, bare or with
    the `total-recall:` prefix, is available. Absent → stop with install instructions.
    `counterexample-reviewer` absent is not a stop (section 12). An agent of the right name from
@@ -164,6 +175,9 @@ stop leaves nothing behind: no checkpoint, no worktree, no memory snapshot.
    `info/exclude` (never committed).
 7. **Notice, not a check.** If the session lists another skill named `develop`, say so once, with
    both paths, and continue.
+8. **Advisory.** Deliver needs routine tool calls (git, `gh`, the verify commands) to run without
+   permission prompts. Say once that the README lists the minimal allowlist or an auto-accept mode.
+   It cannot be detected, so it never blocks.
 
 The working tree need not be clean: a run never touches the person's checkout (section 14).
 
@@ -218,7 +232,9 @@ length issue is a minor.
 
 ## 8. The issue after Define
 
-A person reading the issue sees an ordinary ticket. The run reads three things in the body.
+A person reading the issue sees an ordinary ticket. The issue body holds no machine block. What a run
+trusts is a **`defined` comment** (section 10) that a person with write access posted at sign-off;
+the body is checked against hashes recorded in that comment.
 
 **The acceptance-criteria region** (both tracks) sits between two HTML comments, which GitHub does
 not render:
@@ -242,152 +258,174 @@ What changes, where, and the red-green cycles, in a few lines.
 </details>
 ```
 
-The approach is at most 60 lines and 4,000 characters. An approach that does not fit is a sign the
-work belongs on the plan track, and Define moves it there.
+The approach is at most 60 lines and 4,000 characters. One that does not fit belongs on the plan
+track, and Define moves it there. Each region appears exactly once, begin before end; anything else
+fails closed.
 
-**The handoff block** is the last thing in the body, a fenced block whose first line is
-`tr-develop/v1`, then one `key: value` per line:
+**The `defined` comment** carries the pins:
 
 | Key | Track | Value |
 |---|---|---|
 | `track` | both | `plan` or `small` |
 | `repo` | both | `<owner>/<name>` of `origin` |
 | `base` | both | the base branch |
-| `branch` | both | `feat/<slug>` or `fix/<slug>` |
+| `branch` | both | the suggested `feat/<slug>` or `fix/<slug>` (Deliver may suffix it, section 11) |
+| `bodyHash` | both | 64-hex hash of the issue title and the whole body |
 | `acHash` | both | 64-hex hash of the acceptance-criteria region |
 | `spec` | plan | `docs/superpowers/specs/<file>.md` |
 | `approvedSha` | plan | 40-hex commit of the approved spec |
-| `approachHash` | small | 64-hex hash of the approach region |
 | `definedBy` | both | the definer's GitHub login |
 | `definedAt` | both | ISO-8601 UTC |
 
-Unknown keys are ignored. A missing required key, an unknown `track`, an unknown version line, or
-more than one handoff block fails closed (blocker 6).
+`bodyHash` covers everything a person can edit in the ticket, so the approach, the context and the
+title are all pinned. `acHash` is kept beside it only so a stop can say "the acceptance criteria
+changed" rather than "something changed". The plan track's human-readable part links the spec at its
+approved commit: `https://<host>/<repo>/blob/<approvedSha>/<spec>`.
 
-On the plan track the human-readable part links the spec at its approved commit:
-`https://<host>/<repo>/blob/<approvedSha>/<spec>`.
-
-**Each region appears exactly once**, begin before end. Anything else fails closed.
-
-**Hashing.** `regions.js` extracts the lines strictly between a pair of markers, normalizes them
-and prints the SHA-256 of the result. Normalization, in order:
+**Hashing.** `regions.js` normalizes text and prints its SHA-256. For `bodyHash` the input is the
+title, a line feed, then the body. For `acHash` it is the lines strictly between the criteria
+markers. Normalization, in order:
 
 1. Convert line endings to LF.
-2. Remove a task-list marker at the start of a list item (`[ ]`, `[x]`, `[X]`), so ticking a box
-   does not change the hash.
+2. Remove a task-list marker (`[ ]`, `[x]`, `[X]`) after a list bullet or number at the start of a
+   line, at any nesting depth, so ticking a box changes nothing.
 3. Decode HTML entities; map typographic quotes, dashes and ellipses to ASCII.
-4. Remove the characters `*` `_` `{` `}` `[` `]` `#` `|` `-` `+` `<` `>` and backticks.
-5. Remove all whitespace.
+4. Remove emphasis and code marks: `*`, `_` and backticks; and a leading run of `#` or a leading
+   list bullet (`-`, `*`, `+`, `N.`) on a line.
+5. Collapse every run of whitespace to one space and trim.
 
-A change of wording changes the hash; re-wrapping, re-bulleting or ticking a box does not. The hash
-is always computed by the script, never by hand.
+Comparison and sign characters (`<`, `>`, `=`, `+`, `-`), digits and word boundaries survive, so
+`> 5` and `< 5`, `-1` and `1`, and `5 0` and `50` all hash differently. Re-wrapping a line,
+re-bulleting a list and ticking a box do not change a hash. The hash is always computed by the
+script, never by hand. The script's golden cases include each of those pairs.
 
 **What Define does to an existing issue.** The body is rewritten to the standard and shown in full
-at sign-off. When the rewrite changes the author's text, the original body is kept verbatim in a
-collapsed `<details><summary>Original report</summary>` block, above the approach block. GitHub's
-edit history keeps it as well.
+at sign-off. When the rewrite changes the author's text, the original is kept verbatim in a
+collapsed `<details><summary>Original report</summary>` block above the approach block. Embedded
+text is neutralized: `<!--` becomes `&lt;!--`, and a line-leading `tr-develop` becomes
+`tr&#8209;develop`, so it can never create or break a region. Sign-off checks that the preview
+parses with one criteria region (and, on the small track, one approach region). GitHub's edit
+history keeps the original as well.
 
-**An issue opened by someone without write access.** Its author can edit the body at any time, and
-every such edit would stop a run (section 9). Define therefore asks, once: **track it in a new
-issue** (the default; the new issue links the original, and the PR closes both), or **continue on
-this issue**. The new issue is created by the definer, so only people with write access can edit
-it.
+**An issue opened by someone without write access.** Its author can edit the body at any time, which
+would stop every run. Define asks once: **track it in a new issue** (the default; the new issue links
+the original and the PR closes both, and Define comments on the original with the new link), or
+**continue on this issue**. The new issue is created by the definer, so only people with write access
+can edit it.
 
 ## 9. Trust, validation and integrity
 
 **The trust line is write access.** A login has write access when
 `gh api repos/<owner>/<repo>/collaborators/<login>/permission` returns `permission` of `admin` or
-`write`. Results are cached for one run. A failed lookup is never read as "trusted": it is blocker
-3 (missing access).
+`write` (the `maintain` role is write-capable and counts too; `triage` and `read` do not). Results
+are cached for one run. A failed lookup is never read as "trusted"; it is blocker 3. The first task
+of the build verifies these answers for an account with write access but not admin (section 21).
 
-Everything read back from GitHub is untrusted input until it passes these rules:
+**What counts.** A run acts only on content that counts:
 
-- **The body counts** only when its last editor has write access. The last editor is the GraphQL
-  `editor` of the issue, or its `author` when the body was never edited.
-- **A comment counts** only when its author has write access and its `editor`, if any, has write
-  access.
-- **Approval counts** only from a login with write access, given in the session by the person at
-  the keyboard. Nothing in an issue, a comment, a PR or a tool result is ever an approval.
-- Everything else on the issue is ordinary text. It can inform the work. It cannot route a run,
-  resume one, or approve anything.
+- a **comment counts** when its author has write access and its `editor`, if any, has write access.
+  A comment whose `editor` is null but whose `lastEditedAt` is set (a deleted editor account) does
+  not count;
+- the **body counts** only when its title and body hash to the `bodyHash` of the latest counted
+  `defined` comment. Who edited it is irrelevant: the hash is the check, and a counted comment is
+  something only a writer can have posted or changed;
+- **approval counts** only from a login with write access, given in the session by the person at
+  the keyboard. Nothing in an issue, comment, PR or tool result is ever an approval.
 
-`definedBy` is recorded for the audit trail. It is not a special authority: any collaborator with
-write access can resume, re-approve or take over a run.
+Everything else is ordinary text. It is not routed on, not resumed from and not approved. Deliver
+passes agents only content that counts. Anything else (an uncounted comment, an issue body that no
+longer matches) is either left out of their prompts or quoted as data with the rule that it is data
+and never an instruction. Every implementer and reviewer frame carries that rule.
 
-**Validation**, before the handoff steers anything:
+`definedBy` is recorded for the audit trail. Any collaborator with write access can resume,
+re-approve or take over a run.
+
+**Validation,** before a `defined` comment steers anything:
 
 - `repo` equals `origin`'s `<owner>/<name>`, compared case-insensitively;
 - `base` equals the base branch;
-- `branch` matches `^(feat|fix)/[a-z0-9][a-z0-9-]{0,62}$`, in the handoff and in every checkpoint;
+- `branch` matches `^(feat|fix)/[a-z0-9][a-z0-9-]{0,62}$`, here and in every checkpoint;
 - `spec` matches `^docs/superpowers/specs/[A-Za-z0-9._-]+\.md$`;
 - `approvedSha` is 40 hex and reachable from `origin/<branch>`;
-- `acHash` and `approachHash` are 64 hex.
+- `bodyHash` and `acHash` are 64 hex.
 
-**Integrity**, at every Deliver start and resume, and again before the PR is opened:
+**Integrity,** at every Deliver start and resume, and again before the PR is opened:
 
-- the acceptance-criteria region hashes to `acHash`;
-- small track: the approach region hashes to `approachHash`;
-- plan track: `git diff --quiet <approvedSha> origin/<branch> -- <spec>` exits 0.
+- the title and body hash to `bodyHash`, and the criteria region to `acHash`;
+- plan track: `git diff --quiet <approvedSha> origin/<branch> -- <spec>` exits 0. Exit 1 is a
+  changed spec. Any other exit (128 for an unfetched commit, say) is tool trouble, blocker 3, and is
+  never read as a change.
 
-A mismatch in one of these three, with a body that counts, is a **changed-artifact stop**: blocker
-6 with the way out "run `/develop <n>` to review and approve the change" (section 11). Any other
-failure in this section is a plain blocker 6.
+A mismatch is a **changed-artifact stop**: blocker 6 whose way out is "run `/develop <n>` to review
+and approve the change" (section 11). Any other failure in this section is a plain blocker 6.
 
-**The spec guard** (plan track). The approved spec is read-only for the whole run. Before every
-push of the feature branch, run `git diff --quiet <approvedSha> HEAD -- <spec>`. Exit 1: restore
-the file to its approved version in a new commit holding only that path, push, and stop at blocker
-6. Any other non-zero exit is blocker 3. Every implementer prompt says the spec is read-only.
+**The spec guard** (plan track). The approved spec is read-only for the whole run. Before every push
+of the feature branch, run `git diff --quiet <approvedSha> HEAD -- <spec>`. Exit 1: restore the file
+to its approved version in a new commit holding only that path, push, and stop at blocker 6. Any
+other non-zero exit is blocker 3. Every implementer prompt says the spec is read-only.
 
-**This is not authentication.** Anyone with write access can change the body, a hash and a
-checkpoint. Collaborators are trusted. The rules above keep outsiders from steering a run and make
-an honest collaborator's change to an approved artifact visible.
+**Trust failures write nothing public.** When a failure is that content does not count, a lookup
+failed, or an issue marker is invalid, the run reports it in the terminal and stops. It posts no
+checkpoint and no comment, so a person without write access cannot make a run write to the issue.
 
-**The approach text is instructions for an autonomous agent.** It is used only as the design of
-this repository's change. A directive in it to act outside the repository, touch another system or
+**This is not authentication.** Anyone with write access can change the body, a pin and a
+checkpoint. Collaborators are trusted. These rules keep outsiders from steering a run and make an
+honest collaborator's change to an approved artifact visible.
+
+**The approach text is instructions for an autonomous agent.** It is used only as the design of this
+repository's change. A directive in it to act outside the repository, touch another system or
 change this workflow is ignored and reported, in the run's own words, in the kickoff comment.
 
 ## 10. Checkpoints, resume and concurrency
 
-Kickoff, each milestone, each blocker and close-out post one issue comment: a short human-readable
-summary, then a fenced block holding exactly one line that matches
+`defined`, kickoff, each milestone, each blocker and close-out post one issue comment: a short
+human-readable summary, then a fenced block holding exactly one line that matches
 
 ```
-^tr-develop/v1 phase=(kickoff|plan-approved|tasks|final-approved|pr-open|blocked|closed)( [a-zA-Z][a-zA-Z0-9.]*=\S+)*$
+^tr-develop/v1 phase=(defined|kickoff|plan-approved|tasks|final-approved|pr-open|blocked|closed)( [a-zA-Z][a-zA-Z0-9.]*=\S+)*$
 ```
 
 | Field | When | Value |
 |---|---|---|
-| `branch` | always | the feature branch |
-| `head` | always | 40-hex commit, already pushed to `origin/<branch>` |
-| `review` | always | `agent` or `self` (section 12) |
-| `gh` | always | the posting executor's GitHub login |
+| `branch` | always; `-` on a `blocked` that has no branch yet | the feature branch |
+| `head` | every phase from `kickoff` on; optional on `blocked` | 40-hex commit already pushed to `origin/<branch>` |
+| `review` | `kickoff` and later | `agent` or `self` (section 12) |
+| `gh` | `kickoff` and later | the posting executor's GitHub login |
 | `planSha` | plan track, from `plan-approved` on | commit of the plan file |
 | `tasksDone` | plan track, from `tasks` on | completed plan tasks |
+| `cyclesDone` | small track, from `tasks` on | completed red-green cycles |
 | `rounds.plan`, `rounds.final` | once that loop ran | rounds used |
 | `pr` | from `pr-open` on | the PR URL |
 | `deferred` | from `final-approved` on | count; the list is in the summary |
+| `stage` | `blocked` | the stage the run was in (`preflight`, `read`, `workspace`, `plan`, `build`, `final`, `finish`) |
 
-Unknown fields are ignored on read. A comment with more than one matching line is invalid as a
-whole.
+A `defined` comment also carries the pins of section 8 as fields. Unknown fields are ignored on read.
+A comment with more than one matching line is invalid as a whole.
 
-**Read-back.** After posting, read the comment back through the API and check that its raw body
-holds exactly one matching line, equal to the line posted. On a failure, edit the comment in place
-once and read it back again; a second failure is blocker 6. A `blocked` checkpoint that fails
-read-back is not retried: say so in the final report.
+**Read-back.** After posting, read the comment back and check that its raw body holds exactly one
+matching line, equal to the line posted. On a failure, edit the comment in place once and read it
+back again; a second failure is blocker 6. A `blocked` that fails read-back is not retried: say so
+in the final report.
 
-**Resume.** Take the most recent checkpoint that counts (section 9) and is valid. Its `head` must be
-an ancestor of `origin/<branch>`, which holds because history is never rewritten. Continue from the
-next phase or task; round counters resume from `rounds.*`. Checkpoints that do not count or are
-invalid are skipped and listed as ignored in the next checkpoint. A valid `pr-open` that counts
-means the run is past Deliver: go to "After the PR" (section 11).
+**Resume.** Take the most recent counted, valid checkpoint that is not `blocked`; a `blocked` is
+informational and its `stage` is shown to the person. Its `head` must be an ancestor of
+`origin/<branch>`, which holds because history is never rewritten. Continue from the next phase,
+task or cycle. Round counters resume from `rounds.*`, except after a blocker-1 stop: a resume that
+a person starts on purpose after one grants that loop a fresh 6 rounds, and says so. A counted
+`pr-open` means the run is past Deliver: go to "After the PR" (section 11).
 
-**Concurrency.** Any checkpoint newer than 24 hours, counted or not, with no later `pr-open`,
-`blocked` or `closed`, may be a live run: stop and ask before continuing. If the issue is assigned
-to someone other than the current user, ask before reassigning.
+**Routing and resume read counted comments only.** Counted checkpoints are the only ones a run
+resumes from or is stopped by. Uncounted ones are skipped and listed as ignored in the next
+checkpoint, written by the run only when it is already posting one.
 
-**The issue's own state.** Besides these comments, a run changes an issue only by assigning it (to
-the definer at Define, to the executor at kickoff; best effort) and, at Define, by writing its
-body. It sets no status label. GitHub closes the issue when the PR merges.
+**Concurrency.** A counted checkpoint newer than 24 hours, with no later counted `pr-open`,
+`blocked` or `closed`, may be a live run: stop and ask before continuing. Checkpoints are the
+heartbeat, so a run posts one at least every 5 plan tasks or every 3 small-track cycles. If the
+issue is assigned to someone other than the current user, ask before reassigning.
+
+**The issue's own state.** Besides checkpoints, a run changes an issue only by assigning it (to the
+definer at Define, to the executor at kickoff; best effort) and, at Define, by writing its body. It
+sets no status label. GitHub closes the issue when the PR merges.
 
 ## 11. The flows
 
@@ -414,7 +452,7 @@ body. It sets no status label. GitHub closes the issue when the PR merges.
    Nothing is committed on this track.
 7. **Sign-off**, one gate. Present in one message: the spec path (plan) or the approach text
    (small), with what the loop changed; the round count and any deferred findings; and the full
-   issue preview, including the handoff block. Ask for exactly one choice:
+   issue preview and the `defined` comment that will pin it. Ask for exactly one choice:
    1. approve, publish and start Deliver;
    2. approve and publish only;
    3. request changes (ticket text only: redraft and present again; spec or approach: edit, re-run
@@ -424,9 +462,12 @@ body. It sets no status label. GitHub closes the issue when the PR merges.
    Only an explicit 1 or 2 is approval. On approval, re-check that what is about to be published
    is what was shown (the spec commit, the hashes); a mismatch goes back to the presentation.
 8. **Publish.** Plan track: find a free branch name (`git ls-remote`; suffix `-2`, `-3` if taken)
-   and push. Create the issue, or update the existing one in a single edit. Read it back: the
-   handoff parses and validates and both regions hash to the handoff's values. On a failure,
-   rewrite once and re-verify; a second failure is blocker 6. Print the issue link.
+   and push. Create the issue, or update the existing one in a single edit; then read it back and
+   compute `bodyHash` and `acHash` from what GitHub stored (it may normalize the markup). Post the
+   `defined` comment with those values, read the comment back, and check that the stored body still
+   hashes to the comment's `bodyHash`. On a failure, rewrite once and re-verify; a second failure is
+   blocker 6. Print the issue link. A person without write access cannot reach this step: Define
+   runs only under an account that passed preflight check 4.
 9. **Wrap-up.** Snapshot memory (section 16). Choice 1: remove the Define worktree (and the `wip/`
    branch on the small track) and continue with Deliver in this session. Choice 2: the same
    clean-up, then print the issue link and `/develop <n>`.
@@ -436,16 +477,27 @@ issue links the spec; the PR body links both.
 
 ### Deliver, common steps
 
-1. **Read and validate** the issue (sections 9 and 10). A missing or invalid handoff on an issue
-   that was routed here is blocker 6, and its summary gives the way out.
+1. **Read and validate** the issue (sections 9 and 10). A counted `defined` comment that fails
+   validation is a trust failure (terminal report only) with the way out of "re-define this issue"
+   (section 5).
 2. **Concurrency** (section 10).
 3. **Resume or start** (section 10).
 4. **Integrity** (section 9).
-5. **Workspace.** Plan track: a worktree on the handoff's `branch`, tracking `origin/<branch>`.
-   Small track, first run: create the handoff's `branch` from `origin/<base>` and push it at once,
-   so `head` exists on the remote before the kickoff. If the remote branch already exists with no
-   commits of its own, reuse it; with commits of its own, blocker 6. If `origin/<base>` has moved,
-   merge it in (never rebase); a conflict that cannot be resolved within the spec is blocker 5.
+5. **Workspace.** A start is a run with no counted `kickoff`; anything else is a resume.
+   - *Start, plan track:* a worktree on the `defined` comment's `branch`, tracking
+     `origin/<branch>` (Define pushed it).
+   - *Start, small track:* create the branch from `origin/<base>` and push it at once, so `head`
+     exists on the remote before the kickoff. If the name is taken by a branch with commits of its
+     own, suffix it (`-2`, `-3`) and record the name in the kickoff; the branch name is derived, so
+     this is not a change that needs approval. A taken name whose tip is `origin/<base>` or an
+     ancestor of it is reused.
+   - *Resume, either track:* fetch. A local worktree for the branch is reused if it is clean; if it
+     is behind, fast-forward it; if it has unpushed commits, run the spec guard and push them; if
+     it has diverged from `origin/<branch>`, blocker 6. No local worktree (a fresh machine): create
+     one from `origin/<branch>`. The remote branch must contain the latest counted checkpoint's
+     `head`.
+   - If `origin/<base>` has moved, merge it in (never rebase); a conflict that cannot be resolved
+     within the spec is blocker 5.
 6. **Kickoff.** Assign the issue to the executor, run the spec guard (plan), push, post the
    `kickoff` checkpoint and read it back. A kickoff is posted again whenever the executor is not
    the author of the latest one.
@@ -467,7 +519,10 @@ issue links the spec; the PR body links both.
 
 1. Build the todo list: one todo per red-green cycle in the approach, then the closing stages.
 2. Implement inline, in the main session, with `superpowers:test-driven-development`: one failing
-   test, the code that passes it, refactor, next cycle. No subagent per task.
+   test, the code that passes it, refactor, next cycle. No subagent per task. Push after each cycle
+   (the spec guard does not apply: there is no spec), and every 3 cycles post a `tasks` checkpoint
+   with `cyclesDone`. A resume continues at cycle `cyclesDone + 1`, and the person's running session
+   confirms the earlier cycles' tests still pass before it does.
 3. **Final loop** (≤ 6 rounds) over `git diff origin/<base>...HEAD`, fixes made inline. Push,
    `final-approved` checkpoint.
 
@@ -480,11 +535,17 @@ issue links the spec; the PR body links both.
    change and record the result for the PR body.
 3. **Integrity again** (section 9), then the spec guard, then push.
 4. **PR.** Invoke `superpowers:finishing-a-development-branch` with `<base>` supplied and "push and
-   open a PR" selected. Title: the issue's title. Body: `Closes #<n>` (and the original issue, when
-   Define tracked an outsider's issue in a new one), a summary, the acceptance criteria with their
-   results, the spec link at `approvedSha` (plan), and the deferred findings. If an open PR for the
-   branch already exists in this repository, update it.
-5. Commit messages follow the repository's own conventions.
+   open a PR" selected. Title: the issue's title as pinned by `bodyHash`. Body: `Closes #<n>` (and
+   the original issue, when Define tracked an outsider's issue in a new one), a summary, the
+   acceptance criteria with their results, the spec link at `approvedSha` (plan), and the deferred
+   findings. GitHub closes an issue only for a PR merged into the repository's default branch, so
+   when `base` is not the default branch the body says `Refs #<n>` instead and the report tells the
+   person the issue will not close by itself. If an open PR for the branch already exists in this
+   repository, update it.
+5. **Commits and PRs carry no AI attribution.** No co-author trailer, no "generated by" footer, in
+   a commit message or a PR body, unless the repository's own `AGENTS.md` or `CONTRIBUTING.md`
+   asks for one. Commit messages otherwise follow those files' conventions. This overrides the
+   host's default trailer and footer.
 6. **Close-out.** Post the `pr-open` checkpoint with the PR link, snapshot memory, report the PR and
    issue links, and keep the worktree parked until the PR merges. Never merge.
 
@@ -495,21 +556,24 @@ issue links the spec; the PR body links both.
 - PR open → report its state, including any integrity mismatch, and stop. (Follow-up is Stage 2.)
 - PR merged → merged close-out: remove the worktree, delete the local branch with `git branch -d`
   (never `-D`), post the `closed` checkpoint, snapshot memory.
-- PR closed unmerged → report it and stop.
+- PR closed unmerged → report it and offer to open a new PR from the same branch (asked first:
+  it is an outward action) or stop.
 
 ### Re-approval
 
 `/develop <n>` on an issue stopped by a changed-artifact stop (section 9), run by someone with
 write access:
 
-1. Show what changed, old next to new: the criteria or approach from the issue's edit history
-   (GraphQL `userContentEdits`), or the spec's `git diff`.
-2. Criteria only: ask for approval. Approach or spec: run that artifact's reviewer loop on the
-   change first, then ask.
-3. On approval, rewrite the changed value in the handoff block (`acHash`, `approachHash` or
-   `approvedSha`) in one body edit, and post a record comment: a one-line summary, then a fenced
-   line `tr-develop-approve/v1 key=<key> from=<old> to=<new> gh=<login>`. The record is for the
-   audit trail; the body is what a run reads.
+1. Show what changed, old next to new. The old text is the revision in the issue's edit history
+   (GraphQL `userContentEdits`) whose title and body hash to the pinned `bodyHash`; GitHub lets
+   revisions be deleted, so when none matches, say the original is unavailable and show only the
+   current text. For the spec, show `git diff <approvedSha> origin/<branch> -- <spec>`. This works
+   whoever last edited the body, an outsider included.
+2. Criteria or other ticket text only: ask for approval. Approach or spec: run that artifact's
+   reviewer loop on the change first, then ask.
+3. On approval, post a new `defined` comment carrying the new `bodyHash`, `acHash` and, on the
+   plan track, `approvedSha`. The latest counted `defined` comment is the pin. Its summary names
+   what changed and who approved. The earlier `defined` comments stay as the audit trail.
 4. Plan track, when a `plan-approved` checkpoint exists: re-run the plan loop with the change in
    scope before continuing. Completed tasks stand; the final loop judges the whole diff against
    the new spec and criteria.
@@ -580,7 +644,7 @@ read-only tools and both always end with the required ending.
 | O6 | subagent-driven-development reviews tasks with its own reviewer and verdict | the task reviewer is `adversarial-reviewer` in the review-contract frame; its grades map to blocker, major, minor |
 | O7 | subagent-driven-development: one final review, one fix, then the workspace is deleted | the final loop; deferred findings are copied to the `final-approved` checkpoint first |
 | O8 | subagent-driven-development has its own stop conditions | `blockers.md` is the single stop list |
-| O9 | finishing-a-development-branch asks for the base and the finishing option | `<base>` comes from the handoff; "push and open a PR" is chosen; never merge, never delete the branch |
+| O9 | finishing-a-development-branch asks for the base and the finishing option | `<base>` comes from the `defined` comment; "push and open a PR" is chosen; never merge, never delete the branch |
 | O10 | brainstorming and subagent-driven-development create their own todos | `/develop` owns the visible list; one todo per plan task or cycle, created in final order |
 
 ## 14. Blockers, worktrees, progress
@@ -600,11 +664,16 @@ remediation and continue.
    all stop here.
 5. **Out-of-scope verification failure,** or a base-merge conflict that cannot be resolved within
    the spec.
-6. **Handoff, trust or integrity failure:** anything section 9 or 10 says fails closed.
+6. **Pin, trust or integrity failure:** anything section 9 or 10 says fails closed. A failure of
+   trust (content that does not count, a failed lookup) is reported in the terminal only and posts
+   nothing.
 
-**At a blocker:** commit and push work in progress (after the spec guard), post a `blocked`
-checkpoint whose summary names the blocker, what was tried and the options, snapshot memory, mark
-the active todo `BLOCKED:`, and stop.
+**At a blocker:** commit and push work in progress (after the spec guard; if the push is what
+failed, skip it and say so), post a `blocked` checkpoint whose summary names the blocker, what was
+tried and the options, snapshot memory, mark the active todo `BLOCKED:`, and stop. The `blocked`
+checkpoint carries `stage`, takes `branch=-` when no branch exists yet and omits `head` when none is
+pushed. Where no counted `defined` or `kickoff` exists on the issue, or the blocker is a trust
+failure, nothing is posted and the terminal report is the record.
 
 **Not blockers** (decide, record in the next checkpoint, continue): details the spec leaves open,
 triage of findings, plan deviations that stay within the spec, re-running a flaky test, merging a
@@ -644,7 +713,8 @@ npm run test:shim
 ```
 ````
 
-- `base`: the branch runs start from and target. Default: `origin`'s default branch.
+- `base`: the branch runs start from and target. Default: `origin`'s default branch. A `base` that
+  is not the default branch is allowed; the PR then says `Refs #<n>` (section 11).
 - `ticket.standard`: `on` (default) or `off`.
 - `ticket.template.<type>`: a file under `.github/ISSUE_TEMPLATE/` for `feature`, `bug` or `chore`.
 - `sh verify` blocks: commands Finish runs, in order, each of which must exit 0.
@@ -679,12 +749,15 @@ added without a version change.
 
 In the same PR as the skill:
 
-- `.gitignore`: remove the `docs/superpowers/` line.
-- `AGENTS.md`: standing rule 2 becomes "specs and plans are committed, on the feature branch of the
-  change they describe"; new rows in "Where to look"; a short section on the skill.
+- `.gitignore`: remove the `docs/superpowers/` line. Already done on this branch, with the rewrite of
+  `AGENTS.md` standing rule 2; the plan treats both as done and verifies them. Further `AGENTS.md`
+  changes: new rows in "Where to look" and a short section on the skill.
 - `README.md`: the skill, its requirements and its host support.
-- `CHANGELOG.md`: an entry.
-- `package.json`: the script tests added to `test:shim`; the skill added to the `pi` block.
+- `CHANGELOG.md`: an entry under an unreleased heading. This change does not bump the version, so
+  the seven-file version sync is not triggered.
+- `package.json`: the script tests added to `test:shim`; `"skills": ["./skills/develop"]` added to
+  the `pi` block, which today has only `extensions`. Stage 1 registers no pi command: on pi the skill
+  is invoked as `/skill:develop`, and whether a bare `/develop` can also work is listed in section 21.
 - `.github/develop.md`: this repository's own profile.
 
 The main checkout holds 19 specs, 28 plans and one handoff under `docs/superpowers/` that were
@@ -698,37 +771,50 @@ commit them as history or keep them local is the owner's decision and is not par
    opened, with every checkpoint read back.
 3. A second dogfood run on the plan track, stopped mid-task and resumed in a fresh session from
    the issue alone.
-4. Editing a criterion in a published issue stops the next run, and re-approval clears it.
-5. A handoff block pasted into an issue by an account without write access routes to Deliver and
-   stops at blocker 6, having written nothing.
+4. Editing a criterion, or any other ticket text, in a published issue stops the next run, and
+   re-approval clears it. Editing as a person without write access and then having a collaborator
+   tick a box does not make the edited body count.
+5. A `tr-develop/v1` line, or a fake kickoff, posted by an account without write access is ignored:
+   the issue still routes to Define, and nothing is written to it.
+
+Items 1 to 5 of the script tests simulate the trust paths with fixtures. Items 4 and 5 of this list
+also need a second GitHub account without write access, run against a throwaway issue on
+`strvmarv/total-recall` and only with the owner's say-so beforehand; they are manual.
 
 ## 20. Calls made here that the owner did not make
 
 1. Track names are `plan` and `small`.
-2. The handoff carries `branch` on both tracks; the small track creates it at Deliver.
+2. The pins live in a `defined` comment, not in the issue body. The body has no machine block. Its
+   regions are hashed, and routing and resume read counted comments only. This replaces the
+   original's handoff block in the description, to keep an outsider's edit of the body from
+   steering a run.
 3. Trust is by current write access for everyone; `definedBy` has no special authority and the
-   assignee plays no part in trust.
+   assignee plays no part in trust. The whole title and body are pinned by `bodyHash`.
 4. An outsider's issue is tracked in a new issue by default.
-5. Re-approval rewrites the handoff value in the body and posts a record; there is no chain of
-   amendment records.
+5. Re-approval posts a new `defined` comment; there is no chain of amendment records.
 6. Re-approval also covers the approach and the spec, each after its reviewer loop.
 7. `review=agent|self` is recorded in checkpoints.
 8. Worktrees live under `.claude/worktrees/` on every host.
-9. `gh auth switch` is only ever done on a yes at preflight.
+9. `gh auth switch` is never run. Every `gh` call sets `GH_TOKEN` inline for the chosen account.
 10. Forks are refused.
 11. The reviewer dependency is met by name; no contract version is declared by the agent.
 12. A second `develop` skill produces a notice, not a stop.
 13. The approach is capped at 60 lines and 4,000 characters.
 14. `/develop initialize` is in Stage 1, in a minimal form.
+15. Commits and PRs carry no AI attribution unless the repository's own docs ask for one.
+16. A resume the person starts on purpose after a review-cap stop gets a fresh 6 rounds.
+17. The skill assumes a prompt-free host and says so in an advisory, not a check.
 
 ## 21. Not yet verified
 
 1. Whether the collaborator-permission endpoint answers for a caller who has write but not admin
-   access. Verified only as the repository's admin.
+   access. Verified only as the repository's admin. Every trust decision rests on it, so verifying it
+   is the first task of the build, before any code that depends on it.
 2. How pi resolves two skills of the same name, and whether a pi package can register agents for
    pi-subagents. If it cannot, preflight on pi offers to copy the two agent files into the user's
    agent directory, on a yes.
-3. Whether Claude Code accepts `/develop` for a plugin skill or only `/total-recall:develop`.
+3. Whether Claude Code accepts `/develop` for a plugin skill or only `/total-recall:develop`, and
+   whether a bare `/develop` works on pi (where skills are `/skill:develop`).
 4. Whether superpowers' skills behave as section 13 assumes when a host has no dispatch tool.
 
 ## 22. Left to the builder
