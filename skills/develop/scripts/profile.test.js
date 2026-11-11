@@ -151,7 +151,7 @@ test('SUBCOMMANDS dispatcher: every listed name dispatches, an unlisted word is 
 
 // ---- this repository's own profile ----
 
-test('.github/develop.md: the repository profile parses, pins the account and runs both suites', () => {
+test('.github/develop.md: the repository profile parses, pins the account and runs the .NET suite, the shim suites and the catalog guard', () => {
   const root = path.join(HERE, '..', '..', '..');
   const markdown = fs.readFileSync(path.join(root, '.github', 'develop.md'), 'utf8');
   const result = parseProfile(markdown);
@@ -171,6 +171,11 @@ test('.github/develop.md: the repository profile parses, pins the account and ru
   assert.deepEqual(result.profile.verify, [
     'dotnet test src/TotalRecall.sln --filter "Category!=Integration"',
     `node --test ${globs.join(' ')}`,
+    // CI's catalog drift guard: build, then diff `dump-catalog` on stdout (no file written outside the worktree).
+    [
+      'dotnet build src/TotalRecall.Host/TotalRecall.Host.csproj --configuration Release -nologo -v q',
+      'dotnet run --project src/TotalRecall.Host --configuration Release --no-build -- dump-catalog | diff -u catalog.json -',
+    ].join('\n'),
   ]);
 });
 
@@ -183,9 +188,13 @@ test('verify-files: this repo profile writes each block byte-exact to verify-<i>
   const { parsed, status } = run(['verify-files', profileFile, dir]);
   assert.equal(status, 0);
   assert.equal(parsed.ok, true);
-  assert.deepEqual(parsed.files, [path.join(dir, 'verify-1.sh'), path.join(dir, 'verify-2.sh')]);
+  assert.deepEqual(parsed.files, [
+    path.join(dir, 'verify-1.sh'),
+    path.join(dir, 'verify-2.sh'),
+    path.join(dir, 'verify-3.sh'),
+  ]);
   const expected = parseProfile(fs.readFileSync(profileFile, 'utf8')).profile.verify;
-  assert.equal(expected.length, 2);
+  assert.equal(expected.length, 3);
   parsed.files.forEach((file, i) => {
     const bytes = fs.readFileSync(file);
     assert.equal(bytes.toString('utf8'), `${expected[i]}\n`);
