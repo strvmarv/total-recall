@@ -240,7 +240,7 @@ Both tracks.
      - its author has no write access: a `user.type` other than `User` counts as no access and is never
        looked up; otherwise fetch the `permission` of `user.login` (with `out` and `httpStatus`) and run
        `node <skill dir>/scripts/counted.js write-access <permFile> [httpStatus]`, the outsider test of
-       [Define](define.md#draft-the-ticket) (a 404 is no access);
+       [Define](define.md#claim) (a 404 is no access);
      - no counted `tr-develop/v1` line is on it (`comments` for `<original>`, then
        `counted.js select`: no counted line at all, so a kickoff, a `blocked`, a `pr-open` whose PR was
        closed, or a `closed` all count against it).
