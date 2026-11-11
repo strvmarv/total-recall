@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "command": "node \"${PLUGIN_ROOT}/copilot/hook.js\" session-start",
+        "timeoutSec": 15
+      }
+    ],
+    "userPromptSubmitted": [
+      {
+        "type": "command",
+        "command": "node \"${PLUGIN_ROOT}/copilot/hook.js\" user-prompt-submitted",
+        "timeoutSec": 15
+      }
+    ]
+  }
+}

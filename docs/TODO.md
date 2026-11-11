@@ -204,7 +204,7 @@ All workflows currently use `actions/checkout@v4`, `actions/setup-dotnet@v4`, `a
 1. `package.json` (`version` field)
 2. `package-lock.json` (top-level `version` field AND `packages[""].version` — npm keeps both in sync; the safest edit is a `replace_all` of the old version string)
 3. `.claude-plugin/plugin.json`
-4. `.copilot-plugin/plugin.json`
+4. `.github/plugin/plugin.json`
 5. `.cursor-plugin/plugin.json`
 6. `.codex-plugin/plugin.json`
 7. `hermes-plugin/plugin.yaml`

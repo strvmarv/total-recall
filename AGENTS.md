@@ -70,7 +70,7 @@ npm wrapper layer (zero-dep Node):
 | Exception logging | `src/TotalRecall.Infrastructure/Diagnostics/ExceptionLogger.cs` |
 | AOT entry point | `src/TotalRecall.Host/Program.cs` |
 | Benchmark queries | `eval/benchmarks/smoke.jsonl` (22), `eval/benchmarks/retrieval.jsonl` (139) |
-| Plugin manifests | `.claude-plugin/plugin.json`, `.copilot-plugin/plugin.json`, `.cursor-plugin/plugin.json`, `.codex-plugin/plugin.json` |
+| Plugin manifests | `.claude-plugin/plugin.json`, `.github/plugin/plugin.json`, `.cursor-plugin/plugin.json`, `.codex-plugin/plugin.json` |
 
 ### Key Commands (PowerShell — this repo runs on win32)
 ```powershell
@@ -128,7 +128,7 @@ total-recall is a multi-host plugin (Claude Code, Copilot CLI, Cursor, OpenCode,
 1. `package.json`
 2. `package-lock.json` (top-level `version` field AND `packages[""].version` — npm keeps both in sync; the safest edit is a `replace_all` of the old version string)
 3. `.claude-plugin/plugin.json`
-4. `.copilot-plugin/plugin.json`
+4. `.github/plugin/plugin.json`
 5. `.cursor-plugin/plugin.json`
 6. `.codex-plugin/plugin.json` (Codex ignores `.claude-plugin/plugin.json` once this file exists and does not fall back to its version)
 7. `hermes-plugin/plugin.yaml` (the one non-JSON manifest — a plain-text grep for the old version string is the only way it shows up)
