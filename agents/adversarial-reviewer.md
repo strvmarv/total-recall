@@ -22,7 +22,7 @@ The dispatch says "round N of ≤ 6". For N > 1 it also includes the author's tr
 
 - Check every claimed fix against the actual files. Do not take the triage on trust.
 - Read each rebuttal and its evidence. Accept it when the evidence holds; when it does not, repeat the finding and say what the evidence missed.
-- Do not re-raise a finding that was fixed or validly rebutted. Do not introduce new nitpicks late in the loop: a new blocker or major is justified only by something the earlier rounds could not reasonably have caught, or by a defect the latest edit introduced.
+- Do not re-raise a finding that was fixed or validly rebutted. After round 2, raise a new minor only if it is cheap to fix. A new blocker or major is always reportable, however late it appears; mark it as new and say whether an earlier round could have caught it or the latest edit introduced it.
 
 ## What to examine
 
