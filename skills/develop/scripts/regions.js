@@ -194,9 +194,14 @@ function runBodyJson(args) {
     throw new Error('usage: body-json <issueJsonFile> <outTitleFile> <outBodyFile>');
   }
   const issue = JSON.parse(fs.readFileSync(issueJsonFile, 'utf8'));
-  const title = issue.title ?? '';
+  // Validate before writing anything: an error response (e.g. {"message":"Not Found"})
+  // has no title and must never be hashed as an empty ticket.
+  if (typeof issue?.title !== 'string') throw new Error('issue has no string title');
+  if (issue.body !== null && typeof issue.body !== 'string') {
+    throw new Error('issue body must be a string or null');
+  }
   const body = issue.body ?? '';
-  fs.writeFileSync(outTitleFile, title);
+  fs.writeFileSync(outTitleFile, issue.title);
   fs.writeFileSync(outBodyFile, body);
   return { ok: true };
 }

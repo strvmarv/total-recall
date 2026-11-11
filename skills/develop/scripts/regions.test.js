@@ -167,6 +167,47 @@ test('CLI body-json: a REST-shaped issue with CRLF, non-ASCII and a null body ro
   assert.notEqual(titleBuf[0], 0xef); // no UTF-8 BOM
 });
 
+test('CLI body-json: an error response ({"message":"Not Found"}) fails with ok:false, exit 1 and writes no output files', () => {
+  const dir = tmpDir();
+  const issueFile = path.join(dir, 'issue.json');
+  const titleFile = path.join(dir, 'title.txt');
+  const bodyFile = path.join(dir, 'body.txt');
+  fs.writeFileSync(issueFile, JSON.stringify({ message: 'Not Found' }));
+  const { parsed, status } = run(['body-json', issueFile, titleFile, bodyFile]);
+  assert.equal(status, 1);
+  assert.equal(parsed.ok, false);
+  assert.equal(typeof parsed.error, 'string');
+  assert.equal(fs.existsSync(titleFile), false);
+  assert.equal(fs.existsSync(bodyFile), false);
+});
+
+test('CLI body-json: a null body still succeeds and writes an empty body file', () => {
+  const dir = tmpDir();
+  const issueFile = path.join(dir, 'issue.json');
+  const titleFile = path.join(dir, 'title.txt');
+  const bodyFile = path.join(dir, 'body.txt');
+  fs.writeFileSync(issueFile, JSON.stringify({ title: 'Fix login', body: null }));
+  const { parsed, status } = run(['body-json', issueFile, titleFile, bodyFile]);
+  assert.equal(status, 0);
+  assert.deepEqual(parsed, { ok: true });
+  assert.equal(fs.readFileSync(titleFile, 'utf8'), 'Fix login');
+  assert.equal(fs.readFileSync(bodyFile, 'utf8'), '');
+});
+
+test('CLI body-json: a numeric body fails with ok:false, exit 1 and writes no output files', () => {
+  const dir = tmpDir();
+  const issueFile = path.join(dir, 'issue.json');
+  const titleFile = path.join(dir, 'title.txt');
+  const bodyFile = path.join(dir, 'body.txt');
+  fs.writeFileSync(issueFile, JSON.stringify({ title: 'Fix login', body: 42 }));
+  const { parsed, status } = run(['body-json', issueFile, titleFile, bodyFile]);
+  assert.equal(status, 1);
+  assert.equal(parsed.ok, false);
+  assert.equal(typeof parsed.error, 'string');
+  assert.equal(fs.existsSync(titleFile), false);
+  assert.equal(fs.existsSync(bodyFile), false);
+});
+
 // ---- CLI: body ----
 
 test('CLI body: prints a hash equal to bodyHash of the same title and body files', () => {
