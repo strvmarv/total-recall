@@ -1,6 +1,6 @@
 {
   "name": "total-recall",
-  "version": "4.2.3",
+  "version": "4.3.0",
   "description": "Multi-tiered memory and knowledge base with semantic search, auto-compaction, and built-in evaluation.",
   "author": {
     "name": "strvmarv"
