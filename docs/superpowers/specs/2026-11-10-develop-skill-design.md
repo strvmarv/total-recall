@@ -6,7 +6,9 @@ Review status: nine reviewer rounds were run (the adversarial reviewer alone in 
 and the counterexample reviewer together in rounds 4 to 9). Rounds 1 to 8 returned NO-GO and every
 finding was accepted and fixed; none was rejected. Round 9 returned GO from both reviewers, with
 minor findings only. The cheap minors were then fixed as wording-level edits, which have not been
-reviewed again; the rest are listed in section 23 as deferred.
+reviewed again; the rest are listed in section 23 as deferred. This spec was amended once after
+review, by the plan's Task 1, for the pi packaging constraint and the script split; the plan review
+covers that amendment.
 
 ## 1. Intent
 
@@ -88,11 +90,20 @@ skills/develop/
   blockers.md           the stop list and the procedure at a stop
   profile.md            `.github/develop.md` and `/develop initialize`
   scripts/
-    regions.js          extract a marked region from an issue body; normalize; SHA-256
-    checkpoints.js      parse and validate checkpoint lines (including `defined`); decide define or
-                        deliver; pick the resume point
-    profile.js          parse and validate a profile
-    *.test.js           node --test, driven by the golden blocks in the Markdown files
+    golden.js           library: extract golden blocks from a Markdown file (no CLI)
+    pages.js            library: split raw `gh api graphql --paginate` output into JSON pages (no CLI)
+    regions.js          CLI: extract a marked region from an issue body; normalize; SHA-256
+    checkpoints.js      CLI: parse and validate checkpoint lines (including `defined`)
+    counted.js          CLI: which comments count (write access, the permission cache)
+    history.js          CLI: recover the old title and body a pinned hash was computed over
+    route.js            CLI: counting, the position table, routing, the 24-hour liveness test
+    args.js             CLI: parse the `/develop` argument
+    ghpin.js            CLI: the pinned-account command, the scratch directory, byte-exact capture
+    profile.js          CLI: parse and validate a profile
+    *.test.js           node --test, one per script above, driven by the golden blocks in the
+                        Markdown files
+    skill.test.js       node --test over SKILL.md's own golden blocks and structure
+    agents.test.js      node --test over the two agent files' golden blocks and structure
 agents/
   adversarial-reviewer.md
   counterexample-reviewer.md
@@ -102,9 +113,13 @@ Every rule that must be exact (a grammar, a hash, a routing decision) has a `jso
 block in the Markdown file that states it, and the script tests read those blocks. A rule and its
 implementation therefore cannot drift apart without a test failing.
 
-Scripts read their input from files written with the host's file-write tool and print one JSON
-object. They are never fed through a pipe (Windows PowerShell re-encodes piped non-ASCII text).
-The skill runs them as `node <skill directory>/scripts/<name>.js <file>`.
+A GitHub or git call whose output must be hashed or posted later is captured byte-exact by
+`ghpin.js run` (section 9) — never piped or redirected, since Windows PowerShell 5.1 turns `>` into
+UTF-16 with a BOM and a shell pipe re-encodes non-ASCII text. A paginated GraphQL call's raw output
+is read and flattened by the script that uses it (`counted.js`, `history.js`), never pasted as
+JSON; its query lives in a file under `skills/develop/queries/`, passed with `-F query=@file`. Every
+CLI takes its input from a file and prints one JSON object; the skill runs each as
+`node <skill directory>/scripts/<name>.js <subcommand> <file...>`.
 
 ## 5. Routing and hosts
 
@@ -112,7 +127,7 @@ The skill runs them as `node <skill directory>/scripts/<name>.js <file>`.
 
 | `arg` (surrounding whitespace ignored) | Route |
 |---|---|
-| `^#?[1-9]\d*$` | issue `<n>` in the current repository |
+| `^#?[1-9]\d{0,8}$` (nine digits at most) | issue `<n>` in the current repository |
 | `<owner>/<repo>#<n>`, or a URL whose path is `/<owner>/<repo>/issues/<n>` | that issue; `<owner>/<repo>` must equal `origin`'s, else stop and say which repository to launch in |
 | a URL whose path is `/<owner>/<repo>/pull/<n>` | stop: "that is a pull request; give the issue" |
 | empty, `help`, `--help`, `-h`, `?` (any case) | the tutorial |
@@ -125,7 +140,8 @@ missing issue). A response with a `pull_request` key: say so and stop. A 301 (th
 another repository): say where, and stop. The returned repository must equal `origin`'s.
 
 **Issue entry.** An issue argument names an issue; the issue decides the route. Read the issue
-(title, body, author, labels, assignees, state) and its comments once, before any write. A closed
+(REST: `title`, `body`, `user`, `labels`, `assignees`, `state`) and its comments once, before any
+write. A closed
 issue is noted: Deliver asks before going on with one (it never reopens it), and a closed issue
 whose latest counted progress is `pr-open` goes to "After the PR" without asking, and the
 reopened-issue question below runs before Deliver step 1:
@@ -215,15 +231,20 @@ stop leaves nothing behind: no checkpoint, no worktree, no memory snapshot.
      `gh` helper, which honours `GH_TOKEN`. `GIT_TERMINAL_PROMPT=0` makes a helper failure an error
      and not a prompt that hangs an agent;
    - every subagent prompt that touches GitHub or runs network `git` carries both forms.
+   - a call whose output must be saved to a file for later hashing or posting is made through
+     `ghpin.js run` (section 4), which applies this same pinning internally; the inline forms above
+     are for calls whose output is not kept.
 
    The token substitution must not come back empty (an empty `GH_TOKEN` is treated as unset and
    silently falls back to the active account): capture it first and stop if it is empty. Never
    enable shell tracing (`set -x`) around a pinned command. The run never runs `gh auth switch`,
    which would change the account for every parallel session on the machine. In PowerShell the
-   variable must not outlive the command: `try { $env:GH_TOKEN = (gh auth token --user <login>); ... }
-   finally { Remove-Item Env:GH_TOKEN }`, or use the Git Bash form. An SSH remote is not covered by
-   this (the SSH key decides the identity there): the run notes it and relies on the permission test
-   of step 1, which a push cannot prove.
+   variable must not outlive the command, and the tool's own exit code must survive the `finally`:
+   `$p = $env:GH_TOKEN; try { $env:GH_TOKEN = (gh auth token --user <login>); ...; $ec = $LASTEXITCODE }
+   finally { $env:GH_TOKEN = $p }; exit $ec`, which restores whatever `GH_TOKEN` held before (unset,
+   if that is what it was) instead of always removing it, or use the Git Bash form. An SSH remote is
+   not covered by this (the SSH key decides the identity there): the run notes it and relies on the
+   permission test of step 1, which a push cannot prove.
 5. **Reviewers** (review mode `agent` only). An agent named `adversarial-reviewer`, bare or with
    the `total-recall:` prefix, is available. Absent → stop with install instructions.
    `counterexample-reviewer` absent is not a stop (section 12). An agent of the right name from
@@ -235,8 +256,8 @@ stop leaves nothing behind: no checkpoint, no worktree, no memory snapshot.
    both paths, and continue.
 8. **Advisory.** Deliver needs routine tool calls (git, `gh`, the verify commands) to run without
    permission prompts. Say once that the README lists the minimal allowlist, including the pinned
-   `GH_TOKEN=$(...)` forms of check 4, which a plain `gh *` or `git *` pattern may not match, or an
-   auto-accept mode.
+   `GH_TOKEN=$(...)` forms of check 4 and the `ghpin.js run` calls that wrap them, which a plain
+   `gh *` or `git *` pattern may not match, or an auto-accept mode.
    It cannot be detected, so it never blocks.
 
 The working tree need not be clean: a run never touches the person's checkout (section 14).
@@ -320,7 +341,11 @@ What changes, where, and the red-green cycles, in a few lines.
 
 The approach is at most 60 lines and 4,000 characters. One that does not fit belongs on the plan
 track, and Define moves it there. Each region appears exactly once, begin before end; anything else
-fails closed.
+fails closed. A marker is recognized only outside a fenced code block: CommonMark's own fence rules
+decide what counts as a fence (backtick or tilde, closed only by a fence at least as long, so a
+longer fence nested inside a shorter one's content is still content); a marker or a checkbox written
+inside a fence is literal text, never a region boundary or a hashing input. The task-list-marker
+removal of the hashing rule below uses the same rule.
 
 **The `defined` comment** carries the pins:
 
@@ -347,7 +372,8 @@ GitHub's editor or a checkbox tick can change, and (bar one case) nothing that c
 
 1. Convert line endings to LF.
 2. Remove a task-list marker (`[ ]`, `[x]`, `[X]`) when it directly follows a list bullet or
-   number and a space at the start of a line, at any nesting depth.
+   number and a space at the start of a line, at any nesting depth, and outside a fenced code block
+   (section 8's fence rule above); one inside a fence is content, not a marker.
 3. Remove trailing whitespace from every line, and trailing blank lines from the end. The one
    casualty is a Markdown hard break made of two trailing spaces; the ticket standard says to use
    `<br>` for one.
@@ -384,16 +410,22 @@ can edit it.
 `gh api repos/<owner>/<repo>/collaborators/<login>/permission` returns a `role_name` of `admin`,
 `maintain` or `write`, or a `permission` of `admin` or `write` (which covers a custom role built
 on write). `triage`, `read`, `none` and everything else do not. A 404 (not a user, a deleted
-account) means no write access, not an error. Results are cached for one run, and comments are
-resolved newest first. A lookup that fails for a reason other than that (a 403, a 5xx, a rate limit)
-and could decide the outcome is blocker 3, terminal report only. The first task of the build verifies
-these answers for an account with write but not admin access (section 21).
+account) means no write access, not an error. This one-run permission cache lives in a scratch
+directory created fresh at the start of every run by `ghpin.js scratch`; a resumed session is a new
+run with a new directory, so a collaborator whose access was revoked since the last run is looked up
+again. Comments are resolved newest first. A lookup that fails for a reason other than a 404 (a 403,
+a 5xx, a rate limit) fails the whole selection as blocker 3, terminal report only, even when that
+particular lookup might not have decided the outcome — stricter than deciding case by case, and safe,
+since the alternative is guessing. Task 2 of the build verifies these answers for an account
+with write but not admin access, as far as the available accounts allow (section 21).
 
 **What counts.** Comments are read through GraphQL, with pagination, because `editor`, `lastEditedAt`
 and `isMinimized` exist only there. A run acts only on content that counts:
 
-- a **comment counts** when its author has write access and its `editor`, if any, has write access,
-  and it is not minimized. A comment whose `editor` is null but whose `lastEditedAt` is set (a
+- a **comment counts** when its author is a GitHub `User` (by `__typename`) with write access, and
+  its `editor`, if any, is also a `User` with write access, and it is not minimized; a `Bot` or `App`
+  actor's login is never looked up, so it can never alias a human collaborator's login in the
+  permission lookup. A comment whose `editor` is null but whose `lastEditedAt` is set (a
   deleted editor account) does not count. A writer can minimize a wrong checkpoint to retire it, but
   so can others (an organization moderator, say), and an unminimized comment counts again. Comment
   bodies have `\r` removed before any line is matched;
@@ -423,7 +455,8 @@ hash. It is accepted.
   checkpoint may carry `-`);
 - `spec` matches `^docs/superpowers/specs/[A-Za-z0-9._-]+\.md$`, and a checkpoint's `plan` matches
   `^docs/superpowers/plans/[A-Za-z0-9._-]+\.md$` with its `planSha` 40 hex and reachable from
-  `origin/<branch>`;
+  `origin/<branch>` (a `closed` checkpoint's `planSha`, like its `head`, section 10, is exempt from
+  this reachability check: the branch may already be deleted after the merge);
 - `approvedSha` is 40 hex and reachable from `origin/<branch>`;
 - `bodyHash` and `acHash` are 64 hex.
 
@@ -506,9 +539,13 @@ validation, that is a trust failure with the way out of "re-define or re-pin" (s
 is the latest counted checkpoint among `kickoff`, `plan-approved`, `tasks`, `final-approved`,
 `pr-open`, `closed` and `reapproved`. A `blocked` is informational; its `stage` and `blocker` are shown to the
 person. The checkpoint's `head` must be an ancestor of `origin/<branch>`, which holds because
-history is never rewritten. A kickoff posted for a new executor copies forward whichever of `plan`, `planSha`, `tasksDone`,
+history is never rewritten, except on `closed`: the branch may already be deleted after the merge,
+so `closed` is exempt from this reachability check (and from `planSha`'s, section 9) and needs `head`
+only to be 40 hex. A kickoff posted for a new executor copies forward whichever of `plan`, `planSha`, `tasksDone`,
 `cyclesDone`, `rounds.*` and `deferred` the progress checkpoint has, and states what it
-carries.
+carries; this carry-forward is a write-time check against the latest progress checkpoint at the
+moment the kickoff (or a `reapproved`) is posted, never a property read back later from an old
+comment. A `reapproved` carries the progress fields above but never `rounds.final` or `pr`.
 
 **The position** is derived from the progress checkpoint, never from guessing:
 
@@ -529,7 +566,7 @@ A `kickoff` that carries a `planSha` therefore resumes building and never rewrit
 a `reapproved` that follows a `final-approved` or `pr-open` always reaches the final loop again, even
 for a change to context text only. The tasks of a plan are counted from the plan file named by the checkpoint's `plan`, at
 `planSha`: its `### Task <n>:` headings outside code fences, a format golden-tested in
-`checkpoints.js`. When the plan at the tip of `origin/<branch>` keeps the first `tasksDone` headings of
+`route.js`. When the plan at the tip of `origin/<branch>` keeps the first `tasksDone` headings of
 the `planSha` version, the tip's headings are counted, so a task appended before a crash is not lost. The cycles of an approach are its `Cycle <n>:` lines. A count of 0, or a plan file
 that cannot be found, is blocker 6, and the plan loop and the approach loop each reject a document
 with none.
@@ -553,9 +590,10 @@ rounds, and says so. A counted progress checkpoint with no valid counted pin is 
 resumes from or is stopped by. Uncounted ones are skipped. The next checkpoint's summary may say how many were ignored, by comment
 id only, never quoting them or a login they name.
 
-**Concurrency.** A counted checkpoint other than `defined`, newer than 24 hours, with no later counted
-`pr-open`, `blocked` or `closed`, may be a live run: stop and ask before continuing. Checkpoints are the
-heartbeat, so a run posts one at least every 5 plan tasks or every 3 small-track cycles. If the
+**Concurrency.** A counted checkpoint whose phase is a **heartbeat phase** — every counted phase
+except `defined`, `pr-open`, `blocked` and `closed` — newer than 24 hours, with no later counted
+`pr-open`, `blocked` or `closed`, may be a live run: stop and ask before continuing. A run posts a
+heartbeat-phase checkpoint at least every 5 plan tasks or every 3 small-track cycles. If the
 issue is assigned to someone other than the current user, ask before reassigning.
 
 **The issue's own state.** Besides checkpoints, a run changes an issue only by assigning it (to the
@@ -738,7 +776,7 @@ checkpoint's `pr` URL, and its head repository must be this repository (otherwis
   already allowed by blocker 4). Then run pin validation and integrity like any other Deliver
   start. With no mismatch, merge a moved `origin/<base>` as Deliver step 5 does, then go to Finish. A mismatch goes to Re-approval; its `reapproved`
   comment drops `pr`, and the run re-enters Deliver, runs the loops it owes and Finish, and only
-  then opens the new PR. This route is one row of the routing function in `checkpoints.js` and has
+  then opens the new PR. This route is one row of the routing function in `route.js` and has
   goldens.
 
 ### Re-approval
@@ -755,10 +793,13 @@ again. There is no marker for work still owed.
 1. Set up the worktree by the worktree rules (section 11), which here only fetch, reuse or create,
    and fast-forward; they never run the guard, never push and never raise blocker 6, and an unpushed
    or diverged worktree is shown and merged under step 4. With no progress checkpoint on the small
-   track there is no branch yet, so skip this. Then show what changed, old next to new. The old body is the revision in the
-   issue's edit history (GraphQL `userContentEdits`, paginated, newest first, each holding a full
-   body) that hashes to the pinned `bodyHash` together with the title as of that time, read from the
-   issue's `RenamedTitleEvent`s (`previousTitle`), since a revision holds no title. GitHub lets
+   track there is no branch yet, so skip this. Then show what changed, old next to new. The old text
+   is recovered by trying candidate bodies, in order — the issue's current body first, then each
+   revision in its edit history (GraphQL `userContentEdits`, two paginated queries read this history
+   and the issue's `RenamedTitleEvent`s, since a revision holds no title) newest first, skipping any
+   revision with no `diff` — against every title in the rename chain (the title as of that
+   candidate's time, the current title, and every `RenamedTitleEvent`'s `previousTitle` and
+   `currentTitle`), until one pairing hashes to the pinned `bodyHash`. GitHub lets
    revisions be deleted, so when none matches, say the original is unavailable and show only the
    current text. The text shown is the text hashed: compute the new `bodyHash` locally from it. For
    the spec, show `git diff <approvedSha> <tip> -- <spec>`, where `<tip>` is the worktree's HEAD, so
@@ -972,15 +1013,20 @@ added without a version change.
 
 In the same PR as the skill:
 
+- Merge `main` into this branch first (it already holds the Copilot host, merged after this branch
+  was cut); the repository wiring below assumes it.
 - `.gitignore`: remove the `docs/superpowers/` line. Already done on this branch, with the rewrite of
   `AGENTS.md` standing rule 2; the plan treats both as done and verifies them. Further `AGENTS.md`
   changes: new rows in "Where to look" and a short section on the skill.
 - `README.md`: the skill, its requirements and its host support.
 - `CHANGELOG.md`: an entry under an unreleased heading. This change does not bump the version, so
   the seven-file version sync is not triggered.
-- `package.json`: the script tests added to `test:shim`; `"skills": ["./skills/develop"]` added to
-  the `pi` block, which today has only `extensions`. Stage 1 registers no pi command: on pi the skill
-  is invoked as `/skill:develop`, and whether a bare `/develop` can also work is listed in section 21.
+- `package.json`: `test:shim` gains `skills/develop/`; the `pi` block is unchanged and still
+  declares no skills (`pi/package.test.js` forbids a manifest skill, since it would be advertised
+  to subagent children too). Stage 1 registers `/develop` as a pi extension command instead:
+  `pi/develop.js` registers it, and the existing `pi/extension.js` calls it.
+- `pi/develop.js` and its test `pi/develop.test.js`: the `/develop` command registration.
+- `.gitattributes`: pin `.github/develop.md` to `text eol=lf`.
 - `.github/develop.md`: this repository's own profile, naming `gh.account: strvmarv`.
 
 The main checkout holds 19 specs, 28 plans and one handoff under `docs/superpowers/` that were
@@ -1001,7 +1047,7 @@ commit them as history or keep them local is the owner's decision and is not par
    on an issue with no counted `defined` comment it still routes to Define, on one with it the run
    is not disturbed, and nothing is written to the issue.
 
-The script tests simulate the trust paths with fixtures, and `checkpoints.js` has golden cases for
+The script tests simulate the trust paths with fixtures, and `route.js` has golden cases for
 the position table, including a re-approval that crashes before and after its comment, and a new
 executor's kickoff that carries a `planSha`. Items 4 and 5 of this list also need a second GitHub account without write access, run against a throwaway issue on
 `strvmarv/total-recall` and only with the owner's say-so beforehand; they are manual.
@@ -1042,17 +1088,32 @@ executor's kickoff that carries a `planSha`. Items 4 and 5 of this list also nee
 23. Network `git` is pinned to the chosen account as well as `gh`, by clearing the credential-helper
     chain and using the `gh` helper with an inline `GH_TOKEN`; the profile may name the account
     (`gh.account`).
+24. On pi, `/develop` is an extension command, not a manifest skill, because `pi/package.test.js`
+    forbids manifest skills.
+25. The issue-number rule is `[1-9]\d{0,8}` (nine digits at most); longer digit text falls through
+    to "anything else" and seeds a Define.
+26. A comment counts only when its author, and its editor if any, is a GitHub `User` by
+    `__typename`, so a bot or app login can never alias a human collaborator's login in the
+    permission lookup.
+27. Old-text recovery (Re-approval step 1) also tries the current body and every title in the
+    rename chain, skipping revisions with no `diff`.
+28. A failed permission lookup that is not a 404 fails the whole selection as blocker 3, even when
+    that particular lookup might not have decided the outcome.
+29. The one-run permission cache lives in a scratch directory created fresh at the start of every
+    run by `ghpin.js scratch`; a resumed session is a new run, so a revoked collaborator is looked
+    up again.
 
 ## 21. Not yet verified
 
 1. Whether the collaborator-permission endpoint answers for a caller who has write but not admin
    access. Verified only as the repository's admin. Every trust decision rests on it, so verifying it
-   is the first task of the build, before any code that depends on it.
+   is Task 2 of the build, before any code that depends on it, as far as the available accounts
+   allow.
 2. How pi resolves two skills of the same name, and whether a pi package can register agents for
    pi-subagents. If it cannot, preflight on pi offers to copy the two agent files into the user's
    agent directory, on a yes.
-3. Whether Claude Code accepts `/develop` for a plugin skill or only `/total-recall:develop`, and
-   whether a bare `/develop` works on pi (where skills are `/skill:develop`).
+3. Claude Code namespaces plugin skills, so `/develop` may need to be `/total-recall:develop`
+   (unverified); on pi a bare `/develop` works because the extension registers it.
 4. Whether superpowers' skills behave as section 13 assumes when a host has no dispatch tool.
 5. Verified 2026-11-10 on Windows (git 2.56): `gh auth git-credential` returns the token of the
    account named by an inline `GH_TOKEN`, and the active account's token without one (compared by
@@ -1060,7 +1121,7 @@ executor's kickoff that carries a `planSha`. Items 4 and 5 of this list also nee
    own `gh` helper; and `-c credential.helper=` resets the whole chain, url-scoped entries
    included, so only the `gh` helper then runs. Still unverified: that a real `git push` over HTTPS
    with the chain cleared authenticates as that account, and the same behaviour on macOS and Linux.
-   The build's first tasks check both, a push only to a throwaway branch and with the owner's
+   Checking both is owner-run, after the build, on a throwaway branch and only with the owner's
    say-so.
 6. Whether GitHub stores a Markdown body exactly as submitted (it is assumed to), and so whether
    the local hash and the read-back hash agree; and the exact shape of `RenamedTitleEvent` and
