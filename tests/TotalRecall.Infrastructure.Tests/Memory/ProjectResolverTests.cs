@@ -41,8 +41,8 @@ public class ProjectResolverTests : IDisposable
     [Fact]
     public void Resolves_ssh_remote_to_slug()
     {
-        var repo = MakeRepo("myrepo", "git@github.com:radancy-pe/rai-ops-cortex.git");
-        Assert.Equal("radancy-pe/rai-ops-cortex", new ProjectResolver().Resolve(repo));
+        var repo = MakeRepo("myrepo", "git@github.com:acme-org/widget-service.git");
+        Assert.Equal("acme-org/widget-service", new ProjectResolver().Resolve(repo));
     }
 
     [Fact]
