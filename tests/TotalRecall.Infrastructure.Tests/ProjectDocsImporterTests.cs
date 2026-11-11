@@ -153,6 +153,33 @@ public sealed class ProjectDocsImporterTests : IDisposable
     }
 
     [Fact]
+    public void ImportKnowledge_ReportsTotalChunkCountOfIngestedFiles()
+    {
+        var cwd = NewCwd("chunks");
+        WriteFile(Path.Combine(cwd, "README.md"), "# Project\n\nIntro text.\n");
+        WriteFile(Path.Combine(cwd, "AGENTS.md"), "# Agents\n\nInfo here.\n");
+
+        var result = NewImporter(cwd).ImportKnowledge();
+
+        Assert.Equal(2, result.Imported);
+        Assert.NotNull(result.Chunks);
+        Assert.True(result.Chunks >= 2, "each ingested file produces at least one chunk");
+    }
+
+    [Fact]
+    public void ImportKnowledge_DeduplicatedRerun_ReportsZeroChunks()
+    {
+        var cwd = NewCwd("chunks-dup");
+        WriteFile(Path.Combine(cwd, "README.md"), "# R\n\nsome body\n");
+
+        NewImporter(cwd).ImportKnowledge();
+        var second = NewImporter(cwd).ImportKnowledge();
+
+        Assert.Equal(0, second.Imported);
+        Assert.Equal(0, second.Chunks);
+    }
+
+    [Fact]
     public void ImportKnowledge_DocsDirRecursivelyIncluded()
     {
         var cwd = NewCwd("docsrec");

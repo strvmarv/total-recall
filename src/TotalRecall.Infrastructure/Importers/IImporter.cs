@@ -8,11 +8,15 @@ namespace TotalRecall.Infrastructure.Importers;
 /// skipped (typically due to dedupe), plus any non-fatal errors collected
 /// during the run. Mirrors the TS <c>ImportResult</c> shape from
 /// <c>src-ts/importers/importer.ts</c>.
+/// <para><paramref name="Chunks"/> is the number of chunks written for the
+/// imported entries. Only importers that ingest chunked documents (project
+/// docs) set it; it is null for importers that insert whole entries.</para>
 /// </summary>
 public sealed record ImportResult(
     int Imported,
     int Skipped,
-    IReadOnlyList<string> Errors)
+    IReadOnlyList<string> Errors,
+    int? Chunks = null)
 {
     /// <summary>Zero-count, no-error result. Useful as a default for
     /// no-op branches in the 7 host importers.</summary>

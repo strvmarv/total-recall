@@ -198,6 +198,10 @@ public sealed class SessionLifecycle : ISessionLifecycle
 
         // 1. Host importer sweep — only invoke importers whose Detect() trips.
         var importSummary = new List<ImportSummaryRow>();
+        // Project docs are the only importer that reports a chunk count; sum
+        // over every importer that does, so the field is not tied to a name.
+        var docsFiles = 0;
+        var docsChunks = 0;
         foreach (var importer in _importers)
         {
             if (!importer.Detect()) continue;
@@ -207,6 +211,11 @@ public sealed class SessionLifecycle : ISessionLifecycle
             // its result is not passed here.
             var memResult = importer.ImportMemories(project: null);
             var kbResult = importer.ImportKnowledge();
+            if (kbResult.Chunks is int chunks && kbResult.Imported > 0)
+            {
+                docsFiles += kbResult.Imported;
+                docsChunks += chunks;
+            }
 
             importSummary.Add(new ImportSummaryRow(
                 importer.Name,
@@ -504,7 +513,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
             ImportSummary: importSummary,
             WarmSweep: warmDemoted is int demoted ? new WarmSweepResult(demoted) : null,
             WarmPromoted: warmPromoted,
-            ProjectDocs: null, // TODO: never populated; project docs are ingested by ProjectDocsImporter (see ImportSummary)
+            ProjectDocs: docsFiles > 0 ? new ProjectDocsResult(docsFiles, docsChunks) : null,
             HotEntryCount: hotEntries.Count,
             Context: context,
             TierSummary: tierSummary,

@@ -110,6 +110,7 @@ public sealed class ProjectDocsImporter : IImporter
             : _index.CreateCollection(new CreateCollectionOpts(collectionName, _cwd));
 
         var imported = 0;
+        var chunks = 0;
         var skipped = 0;
         var errors = new List<string>();
 
@@ -141,7 +142,7 @@ public sealed class ProjectDocsImporter : IImporter
 
             try
             {
-                _ = _ingester.IngestFile(filePath, collectionId);
+                var ingest = _ingester.IngestFile(filePath, collectionId);
                 _importLog.LogImport(
                     Name,
                     filePath,
@@ -150,6 +151,7 @@ public sealed class ProjectDocsImporter : IImporter
                     Tier.Cold,
                     ContentType.Knowledge);
                 imported++;
+                chunks += ingest.ChunkCount;
             }
             catch (Exception ex)
             {
@@ -157,7 +159,7 @@ public sealed class ProjectDocsImporter : IImporter
             }
         }
 
-        return new ImportResult(imported, skipped, errors);
+        return new ImportResult(imported, skipped, errors, chunks);
     }
 
     // --- helpers ---------------------------------------------------------
