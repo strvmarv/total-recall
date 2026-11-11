@@ -175,6 +175,11 @@ public sealed class SessionLifecycle : ISessionLifecycle
 
     private SessionInitResult RunInit()
     {
+        // Resolve the project once: the same value scopes the injected pins
+        // (step 3a) and is reported as SessionInitResult.Project, so the two
+        // cannot disagree. Null when no git repo is detected.
+        var detectedProject = _projectResolver.Resolve(Environment.CurrentDirectory);
+
         // 0. Usage indexer — best-effort, failures never block session_start.
         //    Runs before the existing importer sweep so quota nudges reflect
         //    the latest data. See token-usage-tracking spec §5.4.
@@ -327,8 +332,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         // hot tier. Sourced sticky-first from hot (StickyOnly) rather than the
         // retired pinned tier. The hot tier gets whatever budget remains.
         // Project-scoping: only inject pins for the current project and globals.
-        var pinnedProject = _projectResolver.Resolve(Environment.CurrentDirectory);
-        var stickyOpts = (PinnedScope.OptsFor(pinnedProject, _projectScoping)
+        var stickyOpts = (PinnedScope.OptsFor(detectedProject, _projectScoping)
             ?? new ListEntriesOpts()) with { StickyOnly = true };
         // I1: StickyOnly hot listing — the ONLY site that injects sticky rows.
         var pinnedMemories = _store.List(Tier.Hot, ContentType.Memory, stickyOpts);
@@ -496,7 +500,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
 
         return new SessionInitResult(
             SessionId: _sessionId,
-            Project: null, // TODO: never populated (pin scoping resolves the project internally via ProjectResolver)
+            Project: detectedProject,
             ImportSummary: importSummary,
             WarmSweep: null, // TODO: never populated; the sweep runs (RunWarmSweep) and its promotions are in WarmPromoted
             WarmPromoted: warmPromoted,
