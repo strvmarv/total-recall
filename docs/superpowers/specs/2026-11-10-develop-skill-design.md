@@ -113,23 +113,31 @@ The skill runs them as `node <skill directory>/scripts/<name>.js <file>`.
 | `initialize` (any case) | write the repository profile (section 15) |
 | anything else | Define, seeded with the text |
 
-GitHub numbers issues and pull requests in one sequence. When `<n>` is a pull request, the run says
-so and stops.
+GitHub numbers issues and pull requests in one sequence. Read the number with the REST issues
+endpoint (GraphQL `issue(number:)` answers NOT_FOUND for a pull request, which would look like a
+missing issue). A response with a `pull_request` key: say so and stop. A 301 (the issue moved to
+another repository): say where, and stop. The returned repository must equal `origin`'s.
 
 **Issue entry.** An issue argument names an issue; the issue decides the route. Read the issue
-(title, body, author, labels, assignees, state) and its comments once, before any write:
+(title, body, author, labels, assignees, state) and its comments once, before any write. A closed
+issue is noted: Deliver asks before going on with one (it never reopens it), and a closed issue
+with a counted `pr-open` goes to "After the PR" without asking:
 
 - a **counted** comment (section 9) carries a `tr-develop/v1 phase=defined` or `phase=kickoff` line →
   **Deliver**, which validates it and fails closed (section 9);
 - otherwise → **Define**, started from this issue. A `tr-develop/` line in the body or in an
   uncounted comment is ignored and mentioned once; it never routes, and Define rewrites the body.
 
-When the latest counted `defined` comment (the one that governs) fails validation, the person gets a
-choice. With no counted progress checkpoint on the issue: **re-define this issue** (Define, which
-posts a new `defined` comment) or **stop**. With one: **re-pin** (a re-approval, section 11, that
-posts a new `defined` with the corrected `repo` or `base` and keeps the checkpoint's branch and
-spec) or **stop**. A re-define is never offered once progress exists, so a pin can never disagree
-with the branch and `head` a checkpoint recorded.
+When the latest counted `defined` comment (the one that governs) fails validation, or no counted
+`defined` survives beside a counted `kickoff`, the person gets a choice. With no counted progress
+checkpoint on the issue: **re-define this issue** (Define, which posts a new `defined` comment) or
+**stop**. With one: **re-pin** (a re-approval, section 11, that rebuilds the pin from the latest
+counted `kickoff`'s `track`, `spec` and `branch` and the person's fresh approval) or **stop**. A
+re-define is never offered once progress exists. The pin's `branch` is a suggestion: once a
+checkpoint exists, the checkpoint's `branch` governs.
+
+A Define that starts on an issue which an open pull request in this repository already closes
+(`Closes #<n>`) asks first, so a lost pin cannot quietly start a second run beside an open PR.
 
 Tell the person the outcome, with the issue's title and link, before anything is written, so a
 mistyped number is visible.
@@ -156,12 +164,14 @@ stop leaves nothing behind: no checkpoint, no worktree, no memory snapshot.
    version is read from the plugin manifest of the install the host loaded (on Claude Code the
    plugin cache's `.claude-plugin/plugin.json`; on pi the manifest above the skills folder it loaded
    superpowers from). A higher major than tested: warn and continue. Missing or lower: stop with
-   install instructions. Version unreadable: warn and continue in Define, stop in Deliver.
+   install instructions. Version unreadable: warn and continue in Define, stop in Deliver. "After the PR" (section 11)
+   needs no superpowers and skips this check and check 5.
 2. **Dispatch and ask tools.** Decide the review mode: `agent` when a dispatch tool is present,
    else `self` (with the warning of section 5). A host with no way to ask the person a question
    stops: Define cannot run without one.
-3. **Repository.** A git repository with an `origin` remote that `gh` can resolve. `<base>` is the
-   profile's `base`, else `origin`'s default branch. `origin` is a fork → stop.
+3. **Repository.** A git repository with an `origin` remote that `gh` can resolve. The profile is
+   read at `origin`'s default branch; `<base>` is its `base`, else that default branch. `origin` is
+   a fork → stop.
 4. **`gh` account.** Pick the logged-in account (`gh auth status`) whose permission on the
    repository is `admin`, `maintain` or `write`, preferring the active one, and name it to the
    person. Every `gh` call of the run, and every subagent prompt that touches GitHub, then sets the
@@ -272,7 +282,7 @@ fails closed.
 | `track` | both | `plan` or `small` |
 | `repo` | both | `<owner>/<name>` of `origin` |
 | `base` | both | the base branch |
-| `branch` | both | the suggested `feat/<slug>` or `fix/<slug>` (Deliver may suffix it, section 11) |
+| `branch` | both | the suggested `feat/<slug>` or `fix/<slug>`, slug at most 50 characters so a suffix fits the branch regex (Deliver may add `-2`, section 11) |
 | `bodyHash` | both | 64-hex hash of the issue title and the whole body |
 | `acHash` | both | 64-hex hash of the acceptance-criteria region |
 | `spec` | plan | `docs/superpowers/specs/<file>.md` |
@@ -286,12 +296,14 @@ changed" rather than "something changed". The plan track's human-readable part l
 approved commit: `https://<host>/<repo>/blob/<approvedSha>/<spec>`.
 
 **Hashing.** `regions.js` normalizes text and prints a SHA-256. The normalization changes only what
-GitHub's editor or a checkbox tick can change, and nothing that could carry meaning:
+GitHub's editor or a checkbox tick can change, and (bar one case) nothing that could carry meaning:
 
 1. Convert line endings to LF.
 2. Remove a task-list marker (`[ ]`, `[x]`, `[X]`) when it directly follows a list bullet or
    number and a space at the start of a line, at any nesting depth.
-3. Remove trailing whitespace from every line, and trailing blank lines from the end.
+3. Remove trailing whitespace from every line, and trailing blank lines from the end. The one
+   casualty is a Markdown hard break made of two trailing spaces; the ticket standard says to use
+   `<br>` for one.
 
 It strips no punctuation, decodes no entity and collapses no whitespace inside a line, so `src/*.ts`
 and `src/.ts`, `max_retries` and `maxretries`, `> 5` and `< 5`, `-1` and `1`, and `5 0` and
@@ -370,7 +382,9 @@ hash. It is accepted.
 `pr-open` exists none of this runs: the branch may be gone after a merge, so "After the PR"
 (section 11) works from the PR's own URL and reports an integrity mismatch only as advice:
 
-- the title and body hash to `bodyHash`, and the criteria region to `acHash`;
+- the title and body hash to `bodyHash`, and the criteria region to `acHash`; the same check runs
+  each time a checkpoint is about to be posted, so a mid-run edit stops the run at the next
+  checkpoint and not only at the end;
 - plan track: `git diff --quiet <approvedSha> origin/<branch> -- <spec>` exits 0. Exit 1 is a
   changed spec. Any other exit (128 for an unfetched commit, say) is tool trouble, blocker 3, and is
   never read as a change.
@@ -409,6 +423,8 @@ human-readable summary, then a fenced block holding exactly one line that matche
 
 | Field | When | Value |
 |---|---|---|
+| `pin` | `kickoff` and later | the id of the counted `defined` comment the run is working under |
+| `track`, `spec`, `approvedSha` | `kickoff` and later (`spec` and `approvedSha`: plan track) | copied from that `defined`, so a pin can be rebuilt; `approvedSha` is updated by a re-approval's follow-up |
 | `branch` | always; `-` on a `blocked` that has no branch yet | the feature branch |
 | `head` | every phase from `kickoff` on; optional on `blocked` | 40-hex commit already pushed to `origin/<branch>` |
 | `review` | `kickoff` and later | `agent` or `self` (section 12) |
@@ -419,7 +435,8 @@ human-readable summary, then a fenced block holding exactly one line that matche
 | `rounds.plan`, `rounds.final` | once that loop ran | rounds used |
 | `pr` | from `pr-open` on | the PR URL |
 | `deferred` | from `final-approved` on | count; the list is in the summary |
-| `stage` | `blocked` | the stage the run was in (`preflight`, `read`, `workspace`, `plan`, `build`, `final`, `finish`) |
+| `stage` | `blocked` | the stage the run was in (`read`, `workspace`, `plan`, `build`, `final`, `finish`) |
+| `blocker` | `blocked` | the blocker number, 1 to 6 (section 14) |
 
 A `defined` comment also carries the pins of section 8 as fields. Unknown fields are ignored on read.
 A comment with more than one matching line is invalid as a whole.
@@ -430,20 +447,31 @@ back again; a second failure is blocker 6. A `blocked` that fails read-back is n
 in the final report.
 
 **Resume.** The pin is the latest counted `defined` comment; if it fails validation, that is a trust
-failure with the way out of "re-define" (section 5). Progress comes from the latest counted
+failure with the way out of "re-define or re-pin" (section 5). Progress comes from the latest counted
 checkpoint that is neither `defined` nor `blocked`; with none, the run is a start. A `blocked` is
-informational and its `stage` is shown to the person. The checkpoint's `head` must be an ancestor of
-`origin/<branch>`, which holds because history is never rewritten. Continue from the next phase,
-task or cycle. A kickoff posted for a new executor copies forward `planSha`, `tasksDone`,
-`cyclesDone`, every `rounds.*`, `pr` and `deferred` from the latest counted checkpoint. Round
-counters resume from `rounds.*`, except after a blocker-1 stop: a resume that a person starts on
-purpose after one grants that loop a fresh 6 rounds, and says so. A re-approved approach resets
-`cyclesDone` to 0 in the next checkpoint: the commits stand, and the new cycles skip behaviour whose
-tests already pass. A counted `defined` that is newer than the latest counted progress checkpoint, when one exists,
-means a re-approval whose follow-up (Re-approval step 4) may not have happened: it runs before
-anything else. A counted `pr-open` means the run is past Deliver: go to "After the PR"
-(section 11). A counted `closed` is terminal: report it and stop. A counted `kickoff` with no valid
-counted `defined` is the same trust failure.
+informational; its `stage` and `blocker` are shown to the person. The checkpoint's `head` must be an
+ancestor of `origin/<branch>`, which holds because history is never rewritten. A kickoff posted for
+a new executor copies forward `pin`, `planSha`, `tasksDone`, `cyclesDone`, every `rounds.*`, `pr`
+and `deferred` from the latest counted progress checkpoint, and states what it carries.
+
+**A follow-up is pending** exactly when the latest counted progress checkpoint's `pin` differs from
+the id of the latest counted `defined`. Nothing else marks it, so no checkpoint order can hide it: a
+new executor's kickoff carries the old `pin` and the follow-up's own checkpoint carries the new
+one. Deliver's order is workspace, kickoff, follow-up (Re-approval step 4), and only then the next
+task, cycle or phase. With no progress checkpoint there is nothing to follow up.
+
+**Work pushed after the last checkpoint.** Commits on `origin/<branch>` after the checkpoint's
+`head` are unverified progress, since a task or cycle is pushed when it ends but a checkpoint is
+posted only every few of them. The first task or cycle after a resume starts by checking whether its
+behaviour is already there (its tests pass and the commit is on the branch) and, if so, finishes it
+without rewriting it; only then does it count. `tasksDone` and `cyclesDone` are the floor, never
+the exact position.
+
+Round counters resume from `rounds.*`, except after a `blocked` with `blocker=1`: a resume that a
+person starts on purpose after one grants that loop a fresh 6 rounds, and says so. A counted
+`pr-open` means the run is past Deliver: go to "After the PR" (section 11). A counted `closed` is
+terminal: report it and stop. A counted `kickoff` with no valid counted `defined` is the trust
+failure of section 5.
 
 **Routing and resume read counted comments only.** Counted checkpoints are the only ones a run
 resumes from or is stopped by. Uncounted ones are skipped. The next checkpoint's summary may say how many were ignored, by comment
@@ -463,13 +491,14 @@ status label. GitHub closes the issue when the PR merges.
 
 ### Define
 
-1. **Fetch** `origin`, read the profile at `origin/<base>`.
+1. **Fetch** `origin`, read the profile at `origin`'s default branch.
 2. **Claim** (existing issue only). Ask first when the issue is assigned to someone else, is
    closed, or was opened by someone without write access (section 8). Then assign it to the current
    user and post one plain comment, with no `tr-develop/` line: "Define started by `<login>` with
    /develop. The description changes only at sign-off."
 3. **Worktree.** Create `wip/develop-<slug>` from `origin/<base>` in its own worktree (section 14),
-   so the spec commit has somewhere to land.
+   so the spec commit has somewhere to land. A `wip/develop-<slug>` branch or worktree left by an
+   earlier run is never reused: suffix the slug and tell the person about the old one.
 4. **Brainstorm.** Invoke `superpowers:brainstorming`, seeded with the argument or the issue, under
    the overrides of section 13. The track follows the last size it states:
    - a project with a written design → **plan** track;
@@ -489,7 +518,9 @@ status label. GitHub closes the issue when the PR merges.
    2. approve and publish only;
    3. request changes (ticket text only: redraft and present again; spec or approach: edit, re-run
       the loop on the change, present again);
-   4. stop and publish nothing.
+   4. stop and publish nothing. On an existing issue this posts one short comment ("Define stopped at
+      sign-off; nothing published"), best effort, and leaves the assignment as it is. A spike's
+      findings outcome posts the same kind of note.
 
    Only an explicit 1 or 2 is approval. On approval, re-check that what is about to be published
    is what was shown (the spec commit, the hashes); a mismatch goes back to the presentation.
@@ -536,7 +567,9 @@ issue links the spec; the PR body links both.
      within the spec is blocker 5.
 6. **Kickoff.** Assign the issue to the executor, run the spec guard (plan), push, post the
    `kickoff` checkpoint and read it back. A kickoff is posted again whenever the executor is not
-   the author of the latest one.
+   the author of the latest one. It carries `pin`, `track` and, on the plan track, `spec` and
+   `approvedSha`; a re-posted kickoff carries the old `pin` while a follow-up is pending.
+7. **Pending follow-up** (section 10), if any: Re-approval step 4, before anything else.
 
 ### Deliver, plan track
 
@@ -595,8 +628,10 @@ checkpoint's `pr` URL, and its head repository must be this repository:
   Stage 2.)
 - PR merged → merged close-out: remove the worktree, delete the local branch with `git branch -d`
   (never `-D`), post the `closed` checkpoint, snapshot memory.
-- PR closed unmerged → report it and offer to open a new PR from the same branch (asked first:
-  it is an outward action) or stop.
+- PR closed unmerged → report it. Opening a new PR is a Deliver write, so it first runs pin
+  validation and integrity like any other Deliver start: a mismatch goes to re-approval, and a
+  deleted branch is recreated from the latest checkpoint's `head` (asked first: it is an outward
+  action). Without that the run stops.
 
 ### Re-approval
 
@@ -615,16 +650,23 @@ write access:
 2. Criteria or other ticket text only: ask for approval. Approach or spec: run that artifact's
    reviewer loop on the change first, then ask.
 3. On approval, re-fetch and check that the body still hashes to what was shown, else go back to
-   step 1. Then post a new `defined` comment carrying the locally computed `bodyHash`, `acHash` and,
-   on the plan track, `approvedSha`. The latest counted `defined` comment is the pin. Its summary names
-   what changed and who approved. The earlier `defined` comments stay as the audit trail.
-4. **Follow-up, then a checkpoint.** Plan track, when a `plan-approved` checkpoint exists: re-run
-   the plan loop with the change in scope, as a fresh loop (its rounds count from 1). Completed
-   tasks stand and are not renumbered, so `tasksDone` stays valid; the final loop judges the whole
-   diff against the new spec and criteria. Small track: `cyclesDone` resets to 0 and the new cycles
-   skip behaviour whose tests already pass. Either way the run then posts a `tasks` checkpoint with
-   the current `planSha`, `tasksDone` or `cyclesDone`, and the new `rounds.plan`. That checkpoint is
-   what marks the follow-up done (section 10).
+   step 1. Then post a new `defined` comment carrying the locally computed `bodyHash`, `acHash`,
+   `track`, `repo`, `base` and, on the plan track, `spec` and `approvedSha`. Its `branch` is the
+   latest counted checkpoint's, when one exists. The latest counted `defined` comment is the pin. Its
+   summary names what changed and who approved. The earlier `defined` comments stay as the audit
+   trail. A **re-pin** (section 5) is the same steps, with the pin rebuilt as step 3 says.
+4. **Follow-up, then a checkpoint.** Only when a progress checkpoint exists; before the first
+   kickoff the new `defined` is all a re-approval needs. The loops run only when what the track
+   plans from changed against the previous pin: on the plan track `approvedSha` or `acHash`, on the
+   small track `bodyHash` (the approach is in the body). Then: plan track, with a `plan-approved` or
+   later checkpoint, re-run the plan loop with the change in scope as a fresh loop (its rounds
+   count from 1); completed tasks stand and are not renumbered, so `tasksDone` stays valid. Small
+   track: `cyclesDone` resets to 0, and the new cycles skip behaviour whose tests already pass.
+   A final loop that had run is invalidated: `rounds.final` is dropped and the final loop runs again
+   from round 1. Then re-post the latest progress checkpoint's own phase (`kickoff` if nothing
+   later exists, else `plan-approved` or `tasks`; `tasks` if the latest was `final-approved`), with
+   the new `pin`, the current `approvedSha` and `planSha`, `tasksDone` or `cyclesDone`, and the new
+   `rounds.*`. That checkpoint, carrying the new `pin`, is what marks the follow-up done.
 5. On refusal, nothing is written. Offer to restore the earlier text. The run stays blocked.
 
 A deliberate change works the same way: edit the criteria in the issue, or commit an edit to the
@@ -718,7 +760,7 @@ remediation and continue.
 **At a blocker:** commit and push work in progress (after the spec guard; if the push is what
 failed, skip it and say so), post a `blocked` checkpoint whose summary names the blocker, what was
 tried and the options, snapshot memory, mark the active todo `BLOCKED:`, and stop. The `blocked`
-checkpoint carries `stage`, takes `branch=-` when no branch exists yet and omits `head` when none is
+checkpoint carries `stage` and `blocker`, takes `branch=-` when no branch exists yet and omits `head` when none is
 pushed. Where no counted `defined` or `kickoff` exists on the issue, or the blocker is blocker 6's trust or
 changed-artifact kind, nothing is posted and the terminal report is the record.
 
@@ -737,8 +779,8 @@ before the first is started. Subagents never touch it.
 
 ## 15. The repository profile
 
-`.github/develop.md`, read from `origin/<base>` only, so a feature branch cannot change the
-commands its own run trusts. It is optional; without it every default applies.
+`.github/develop.md`, read from `origin`'s default branch only, so a feature branch cannot change the
+commands its own run trusts, and Define and Deliver read the same file. It is optional; without it every default applies.
 
 ````
 ```text
