@@ -80,6 +80,16 @@ const FILES = {
     ],
     goldens: [],
   },
+  'deliver.md': {
+    headings: [
+      'Common steps',
+      'Plan track',
+      'Small track',
+      'Finish and close-out',
+      'Merged close-out',
+    ],
+    goldens: [],
+  },
   'tutorial.md': {
     h1: '# develop',
     maxLines: 60,
@@ -389,6 +399,34 @@ test('handoff.md: the sections name the CLIs and the rulings they own', () => {
   assert.ok(reapproval.includes('history.js find'), 'Re-approval names history.js find');
   assert.ok(reapproval.includes('original unavailable'), 'Re-approval covers found:false');
   assert.ok(/\{ok:false[^}]*\}[^\n]*blocker 3/.test(reapproval), 'Re-approval stops with blocker 3 on {ok:false}');
+});
+
+test('deliver.md: the five flow sections come in the spec order', () => {
+  const found = headings(read('deliver.md'));
+  const order = ['Common steps', 'Plan track', 'Small track', 'Finish and close-out', 'Merged close-out'];
+  const at = order.map((h) => found.indexOf(h));
+  assert.ok(at.every((i) => i >= 0), 'all five sections exist');
+  assert.deepEqual([...at].sort((a, b) => a - b), at, 'the five sections are in order');
+});
+
+test('deliver.md: names the CLIs, the position, the PR keywords and the rulings', () => {
+  const text = read('deliver.md');
+  for (const term of [
+    'route.js', 'position', 'Closes #', 'Refs #', 'final-approved',
+    'checkpoints.js carry', 'checkpoints.js format', 'checkpoints.js readback', 'history.js find',
+    'pinValid', 'Tracks #', 'git check-ref-format --branch', 'sh -e -c', 'no AI attribution',
+  ]) {
+    assert.ok(text.includes(term), `deliver.md mentions ${term}`);
+  }
+  assert.ok(/never merge/i.test(text), 'deliver.md says never merge');
+  assert.ok(!text.toLowerCase().includes('co-authored' + '-by'), 'deliver.md has no co-author trailer text');
+});
+
+test('deliver.md: carry runs with the select progress as prior before every kickoff and every reapproved', () => {
+  const text = read('deliver.md').replace(/\s+/g, ' ');
+  assert.ok(/checkpoints\.js carry/.test(text), 'names carry');
+  assert.ok(text.includes('`prior`') && text.includes('before posting'), 'prior is the progress taken before posting');
+  assert.ok(text.includes('every `kickoff` and every `reapproved`'), 'carry before every kickoff and every reapproved');
 });
 
 test('define.md: names the hashes, the comment, the original block, the retry cap and the CLIs it runs', () => {
