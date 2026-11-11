@@ -2,7 +2,7 @@
 //
 // Loaded by pi from the package's `pi` manifest (`pi install npm:@strvmarv/total-recall`).
 // It maps the two Claude Code hooks total-recall has onto pi events, registers the MCP
-// server, and adds a /total-recall command:
+// server, and adds /total-recall and /develop commands:
 //
 //   Claude Code hook                                  pi
 //   SessionStart (inject skills/commands/SKILL.md)    session_start / session_compact -> queued, delivered
@@ -21,6 +21,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveEngine as realResolveEngine, runFloor as realRunFloor } from './floor.js';
 import { registerCommands } from './command.js';
+import { registerDevelop } from './develop.js';
 import { resolveUserServer as realResolveUserServer } from './userServer.js';
 
 export const MCP_SERVER_NAME = 'total-recall';
@@ -75,6 +76,7 @@ function deliveredInContext(ctx) {
 
 export function createExtension({ rootDir, env, readFile, resolveEngine, runFloor, resolveUserServer, execPath = process.execPath }) {
   const skillPath = path.join(rootDir, 'skills', 'commands', 'SKILL.md');
+  const developSkillPath = path.join(rootDir, 'skills', 'develop', 'SKILL.md');
 
   const loadSkillText = () => {
     try {
@@ -112,6 +114,13 @@ export function createExtension({ rootDir, env, readFile, resolveEngine, runFloo
 
     try {
       registerCommands(pi, { hookable, skillText: loadSkillText() });
+    } catch {
+      // The command is a convenience.
+    }
+
+    // Its own guard: neither command registration can disable the other.
+    try {
+      registerDevelop(pi, { hookable, developSkillPath });
     } catch {
       // The command is a convenience.
     }

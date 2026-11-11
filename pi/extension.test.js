@@ -77,12 +77,12 @@ test('mcpServerConfig: deferred, absolute start.js, direct tools, long timeout, 
 
 // ---- registration ----
 
-test('registration: server total-recall and both commands are registered', () => {
+test('registration: server total-recall and the commands (including develop) are registered', () => {
   const { pi } = boot();
   assert.equal(pi.servers.length, 1);
   assert.equal(pi.servers[0][0], MCP_SERVER_NAME);
   assert.equal(MCP_SERVER_NAME, 'total-recall');
-  assert.deepEqual([...pi.commands.keys()], ['total-recall', 'total-recall:commands']);
+  assert.deepEqual([...pi.commands.keys()], ['total-recall', 'total-recall:commands', 'develop']);
 });
 
 test('registration: a throwing registerMcpServer does not throw and commands are still registered', () => {
@@ -98,6 +98,58 @@ test('registration: a throwing registerMcpServer does not throw and commands are
   })(pi));
   assert.ok(handlers.has('cmd:total-recall'));
   assert.ok(handlers.has('session_start'));
+});
+
+test('develop: the handler sends a message naming skills/develop/SKILL.md, not the commands skill', async () => {
+  const { pi } = boot();
+  await pi.commands.get('develop').handler('123', ctx());
+  assert.equal(pi.sent.length, 1);
+  const text = pi.sent[0][0];
+  assert.ok(text.includes(path.join(root, 'skills', 'develop', 'SKILL.md')));
+  assert.ok(!text.includes(path.join(root, 'skills', 'commands', 'SKILL.md')));
+  assert.ok(text.includes('123'));
+});
+
+test('develop: a registerCommands throw does not stop develop from registering', () => {
+  const pi = {
+    commands: new Map(),
+    on() {},
+    registerMcpServer() {},
+    registerCommand: (n, d) => {
+      if (n.startsWith('total-recall')) throw new Error('cannot register ' + n);
+      pi.commands.set(n, d);
+    },
+    sendUserMessage() {},
+  };
+  assert.doesNotThrow(() => createExtension({
+    rootDir: root, env: {}, readFile, resolveEngine: () => null, runFloor: async () => undefined,
+  })(pi));
+  assert.deepEqual([...pi.commands.keys()], ['develop']);
+});
+
+test('develop: a develop registration throw does not stop total-recall from registering', () => {
+  const pi = {
+    commands: new Map(),
+    on() {},
+    registerMcpServer() {},
+    registerCommand: (n, d) => {
+      if (n === 'develop') throw new Error('cannot register develop');
+      pi.commands.set(n, d);
+    },
+    sendUserMessage() {},
+  };
+  assert.doesNotThrow(() => createExtension({
+    rootDir: root, env: {}, readFile, resolveEngine: () => null, runFloor: async () => undefined,
+  })(pi));
+  assert.deepEqual([...pi.commands.keys()], ['total-recall', 'total-recall:commands']);
+});
+
+test('develop: a subagent child (PI_SUBAGENT_ID) gets the not-active notice and nothing is sent', async () => {
+  const { pi } = boot({ env: { PI_SUBAGENT_ID: 'child-1' } });
+  const c = ctx();
+  await pi.commands.get('develop').handler('123', c);
+  assert.deepEqual(pi.sent, []);
+  assert.deepEqual(c.notes, [['develop is not active in this session', 'warning']]);
 });
 
 test('registration: an unreadable SKILL.md at load neither throws nor skips the MCP server', () => {
