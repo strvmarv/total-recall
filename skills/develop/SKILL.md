@@ -157,7 +157,9 @@ permission map, fetched comments and body files never survive from an earlier ru
 **Scripts are CLIs.** Call `regions.js`, `checkpoints.js`, `counted.js`, `history.js`, `route.js`,
 `args.js`, `ghpin.js` and `profile.js` only as `node <skill dir>/scripts/<name>.js <subcommand>
 <file...>`. The input is a file (JSON, or plain text where stated); the output is exactly one JSON
-object on stdout; a failure prints `{"ok":false,"error":...}` and exits 1. `golden.js` and `pages.js`
+object on stdout; a failure prints `{"ok":false,"error":...}` and exits 1. `profile.js parse` printing `no-profile` is
+not a failure: it means the repository has no profile and every default applies
+([Loading](profile.md#loading)). `golden.js` and `pages.js`
 are libraries: never call them. **Text is never retyped, redirected or piped.** An issue body, a
 comment list or a plan reaches disk byte-exact through `ghpin.js run`, which spawns `gh` or `git`
 with no shell and writes the tool's stdout bytes to a file. Text goes back to GitHub only from a
@@ -187,7 +189,8 @@ once the route is known; "After the PR" skips them.
    directory, never into the repository; on a yes, copy them; if the owner declines, use `review=self`.
 3. **Repository.** A git repository with an `origin` remote on github.com (other hosts are not
    supported) that `gh` can resolve. `origin` is a fork: stop. The profile is read at `origin`'s
-   default branch (check 4 step 3) with `node <skill dir>/scripts/profile.js parse <markdownFile>`;
+   default branch (check 4 step 3), by the rule in [Loading](profile.md#loading), with
+   `node <skill dir>/scripts/profile.js parse <markdownFile>`;
    `<base>` is its `base`, else that default branch.
 4. **GitHub account.** In this order:
    1. List the logged-in accounts (`gh auth status`). Test each one's permission on the repository:

@@ -42,8 +42,8 @@ npm run test:shim
 - `ticket.standard`: `on` (default) or `off`. `off` skips the shape and quality rules of the ticket standard
   ([ticket-standard.md](ticket-standard.md#repository-overrides)).
 - `ticket.template.<type>`: a file under `.github/ISSUE_TEMPLATE/` for `feature`, `bug` or `chore`. It
-  sets the sections of that type's ticket. The value is a bare file name (no path) ending `.md`, `.yml`
-  or `.yaml`.
+  sets the sections of that type's ticket. The value is a bare file name (no path) that starts with a
+  letter or digit, continues with letters, digits, `.`, `_` or `-`, and ends `.md`, `.yml` or `.yaml`.
 - `sh verify` blocks: the commands Finish runs, in order, each of which must exit 0
   ([Verify blocks](#verify-blocks)).
 
@@ -139,21 +139,35 @@ CRLF line endings. The parser's output, and so the cases below, are the contract
 
 ## Loading
 
-Read the profile from `origin`'s default branch only, never from the feature branch or the worktree
-(`git show origin/<default>:.github/develop.md`, through `ghpin.js run` with `out`), so a feature
-branch cannot change the commands its own run trusts. If that command fails because the file is absent,
-the profile is absent and every default applies; any other git failure is tool trouble (blocker 3 in
-Deliver, a warning in Define). Preflight reads it once and Define and Deliver
-reuse that read, so both see the same file. Then run
-`node <skill dir>/scripts/profile.js parse <profileFile>`. The output is one JSON object: `{ok:true,
-profile}` with `base`, `ticketStandard`, `templates`, `ghAccount` and `verify`, or `{ok:false, error}`
-(`no-profile`, or `bad-value:<key>`).
+Read the profile from `origin`'s default branch only, never from the feature branch or the worktree,
+so a feature branch cannot change the commands its own run trusts. Preflight reads it once and Define
+and Deliver reuse that read, so both see the same file and agree on `base`. Every command below goes
+through `ghpin.js run` (tool `git`, the picked login), which is how its output reaches a file in the
+scratch directory. They are local commands, so the account pin has no effect on them.
 
-- No profile file, or no profile block in it: `profile.js parse` prints `{ok:false,error:"no-profile"}`
-  and exits 1, which means every default applies; nothing is reported.
-- An invalid profile is a warning in Define (say so once and use the defaults) and blocker 6 in Deliver
-  ([blockers.md](blockers.md#stop-for-these)): Deliver never guesses at commands it was told to run.
-- `<base>` is the profile's `base`, else the default branch of `origin`.
+1. **Find it.** Run `["ls-tree","--name-only","origin/<default>","--",".github/develop.md"]` with `out` set to a
+   file in the scratch directory. The exit status decides, and no error text is parsed:
+   - exit 0 and an empty file: the profile is absent, every default applies and nothing is reported;
+   - exit 0 and a non-empty file: the profile is present, go to step 2;
+   - any non-zero exit (an unfetched `origin/<default>` ref, any tool trouble): blocker 3
+     ([blockers.md](blockers.md#stop-for-these)) in **both** Define and Deliver, after one safe
+     remediation attempt (fetch `origin` once, then repeat). The report is terminal and nothing is
+     posted. A failed read is never read as "absent": `git` exits 128 both for a missing path and for a
+     missing ref, so only the empty-listing test above says "absent".
+2. **Read it.** Run `["show","origin/<default>:.github/develop.md"]` with `out` set to a profile file in the
+   scratch directory (a non-zero exit is blocker 3, as above).
+3. **Parse it.** Run `node <skill dir>/scripts/profile.js parse <profileFile>`. The output is one JSON
+   object: `{ok:true, profile}` with `base`, `ticketStandard`, `templates`, `ghAccount` and `verify`,
+   or `{ok:false, error}`:
+   - `{ok:false,error:"no-profile"}` (exit 1): the file has no profile block. Every default applies and
+     nothing is reported; this is not a failure.
+   - `{ok:false,error:"bad-value:<key>"}`, or any other error that names the profile's content: an
+     **invalid profile**. It is a warning in Define (say so once and use the defaults) and blocker 6 in
+     Deliver: Deliver never guesses at commands it was told to run.
+   - Anything else is tool trouble, not an invalid profile: a profile file that is missing or cannot be
+     read (`ENOENT`, `EACCES`), `usage: ...` or `unknown subcommand`. It is blocker 3 in Define and in
+     Deliver.
+4. `<base>` is the profile's `base`, else the default branch of `origin`.
 
 ## Verify blocks
 
@@ -197,7 +211,7 @@ from `origin`'s default branch, with every GitHub call pinned to the chosen acco
 5. **Commit and PR.** Commit the file on the branch `develop-profile/<date>` (`<date>` is the day as
    `YYYY-MM-DD`; if that branch exists locally or on origin, suffix it and say so) with a message that
    follows the repository's own conventions. The commit message, the PR title and the PR body carry no
-   AI attribution. Push it and open a PR against the default branch, with the title and body written
+   AI attribution unless the repository's own `AGENTS.md` or `CONTRIBUTING.md` asks for one. Push it and open a PR against the default branch, with the title and body written
    to files and sent from them. The PR is never
    merged: `/develop` stops after opening it, says where it is, and leaves the merge to the person.
    Until it is merged the profile does not exist for any run, since it is read from the default

@@ -22,12 +22,14 @@ Conventions for every step:
 ## Fetch
 
 1. Fetch `origin` (`git fetch origin --prune`, pinned, through `ghpin.js run`).
-2. Read the profile at `origin`'s default branch (`git show origin/<default>:.github/develop.md`
-   through `ghpin.js run` with `out`; Preflight may already have done it, so reuse that read) and run
-   `node <skill dir>/scripts/profile.js parse <profileFile>`. No profile: every default applies. An
-   invalid profile is a warning in Define, not a stop: say so and use the defaults. `<base>` is the
-   profile's `base`, else the default branch. Keep the profile's `ticketStandard` and `templates` for
-   the ticket draft.
+2. Read the profile at `origin`'s default branch and run
+   `node <skill dir>/scripts/profile.js parse <profileFile>`, by the rule in
+   [Loading](profile.md#loading) (Preflight may already have done it, so reuse that read). No profile:
+   every default applies. An invalid profile is a warning in Define, not a stop: say so and use the
+   defaults. A failed git read or a parse tool failure is not an invalid profile: it is blocker 3 in
+   Define too (a terminal report, nothing posted), so Define and Deliver agree on `base`. `<base>` is
+   the profile's `base`, else the default branch. Keep the profile's `ticketStandard` and `templates`
+   for the ticket draft.
 
 ## Claim
 

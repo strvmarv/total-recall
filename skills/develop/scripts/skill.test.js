@@ -374,6 +374,10 @@ test('profile.md: names the path, the default branch and the never-merged PR', (
 test('profile.md: Loading and Initialize carry their rulings', () => {
   const loading = section(read('profile.md'), 'Loading').replace(/\s+/g, ' ');
   assert.ok(/warning in Define/.test(loading) && /blocker 6/.test(loading), 'Loading: warning in Define, blocker 6 in Deliver');
+  assert.ok(/ls-tree/.test(loading) && /empty file/.test(loading), 'Loading: the absence test is an empty ls-tree listing');
+  assert.ok(/blocker 3.{0,80}\*\*both\*\* Define and Deliver/.test(loading), 'Loading: a failed read is blocker 3 in both Define and Deliver');
+  assert.ok(/tool trouble/.test(loading) && /blocker 3 in Define and in Deliver/.test(loading), 'Loading: tool trouble is blocker 3 in Define');
+  assert.ok(!/a warning in Define,? and/.test(loading) && !/other git failure/.test(loading), 'Loading: no git failure is a warning');
   const init = section(read('profile.md'), 'Initialize').replace(/\s+/g, ' ');
   for (const term of ['docs', 'workflows', 'issue templates', 'reviewer loop', 'never merged']) {
     assert.ok(init.includes(term), `Initialize mentions ${term}`);

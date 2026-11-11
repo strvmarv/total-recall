@@ -79,8 +79,9 @@ Both tracks, in order. Steps 1 to 6 are the same numbers as the spec.
 1. **Fetch, read, route.**
    - **Fetch** `origin` (`git fetch origin --prune`, pinned, through `ghpin.js run`). Read the profile at
      `origin`'s default branch (reuse Preflight's read) and run
-     `node <skill dir>/scripts/profile.js parse <profileFile>`. An invalid profile is blocker 6 in
-     Deliver. `<base>` is its `base`, else the default branch; check it with
+     `node <skill dir>/scripts/profile.js parse <profileFile>`, by the rule in
+     [Loading](profile.md#loading). An invalid profile is blocker 6 in Deliver; a failed git read or a
+     parse tool failure is blocker 3 (a terminal report, nothing posted). `<base>` is its `base`, else the default branch; check it with
      `git check-ref-format --branch <base>` before it is used in `origin/<base>` or
      `origin/<base>...HEAD`, and a failing name is blocker 6.
    - **Read** the issue (`issue`, to a file) and its comments (`comments`, to a file), once. Run
