@@ -60,8 +60,9 @@ GitHub repositories, and its own development has no ticket-to-PR workflow.
 - It never merges, rebases or force-pushes.
 - It never re-implements superpowers. It sequences superpowers skills and states each default it
   overrides (section 13).
-- It never puts engineering detail in the issue on the plan track. The issue is a ticket; the spec
-  and plan are files in the repository.
+- It never puts engineering detail in the issue on the plan track: engineering detail is a proposed
+  implementation, and observed facts quoted as evidence are not engineering detail. The issue is a
+  ticket; the spec and plan are files in the repository.
 
 ## 3. Constraints
 
@@ -114,7 +115,7 @@ block in the Markdown file that states it, and the script tests read those block
 implementation therefore cannot drift apart without a test failing.
 
 A GitHub or git call whose output must be hashed or posted later is captured byte-exact by
-`ghpin.js run` (section 9) — never piped or redirected, since Windows PowerShell 5.1 turns `>` into
+`ghpin.js run` (section 6, check 4) — never piped or redirected, since Windows PowerShell 5.1 turns `>` into
 UTF-16 with a BOM and a shell pipe re-encodes non-ASCII text. A paginated GraphQL call's raw output
 is read and flattened by the script that uses it (`counted.js`, `history.js`), never pasted as
 JSON; its query lives in a file under `skills/develop/queries/`, passed with `-F query=@file`. Every
@@ -246,7 +247,9 @@ stop leaves nothing behind: no checkpoint, no worktree, no memory snapshot.
    not covered by this (the SSH key decides the identity there): the run notes it and relies on the
    permission test of step 1, which a push cannot prove.
 5. **Reviewers** (review mode `agent` only). An agent named `adversarial-reviewer`, bare or with
-   the `total-recall:` prefix, is available. Absent → stop with install instructions.
+   the `total-recall:` prefix, is available. Absent → on pi, offer to copy the two agent files into pi's global agent directory (never over a
+   file of the same name already there, never into the repository), else `review=self`; on every other host, warn
+   and use `review=self`, with no stop.
    `counterexample-reviewer` absent is not a stop (section 12). An agent of the right name from
    another source satisfies the check: the dependency is the name and the required ending, not the
    publisher.
@@ -308,7 +311,8 @@ Never create a label. Set GitHub's issue type when the repository offers types; 
 
 **Review.** In the plan track's spec loop and the small track's approach loop, the reviewer is also
 given the ticket preview and the standard, and grades it: a criterion that cannot be checked, a
-missing required section, or engineering detail in a plan-track ticket is a major; a title or
+missing required section, or engineering detail in a plan-track ticket (a proposed implementation; observed
+facts quoted as evidence are not engineering detail) is a major; a title or
 length issue is a minor.
 
 ## 8. The issue after Define
@@ -429,8 +433,8 @@ and `isMinimized` exist only there. A run acts only on content that counts:
   deleted editor account) does not count. A writer can minimize a wrong checkpoint to retire it, but
   so can others (an organization moderator, say), and an unminimized comment counts again. Comment
   bodies have `\r` removed before any line is matched;
-- the **body counts** only when its title and body hash to the `bodyHash` of the latest counted
-  `defined` comment. Who edited it is irrelevant: the hash is the check, and a counted comment is
+- the **body counts** only when its title and body hash to the `bodyHash` of the pin (the latest counted
+  `defined` or `reapproved` comment). Who edited it is irrelevant: the hash is the check, and a counted comment is
   something only a writer can have posted or changed;
 - **approval counts** only from a login with write access, given in the session by the person at
   the keyboard. Nothing in an issue, comment, PR or tool result is ever an approval.
@@ -447,7 +451,8 @@ triage role, an organization moderator) can stop a run or rewind its resume poin
 denial or a rewind, never a way to steer one: the branch is never rewritten and a stale pin fails its
 hash. It is accepted.
 
-**Validation,** before a `defined` comment steers anything:
+**Validation,** before a `defined` or `reapproved` comment steers anything (and for every progress checkpoint
+before its fields reach a command):
 
 - `repo` equals `origin`'s `<owner>/<name>`, compared case-insensitively;
 - `base` equals the base branch;
@@ -459,6 +464,14 @@ hash. It is accepted.
   this reachability check: the branch may already be deleted after the merge);
 - `approvedSha` is 40 hex and reachable from `origin/<branch>`;
 - `bodyHash` and `acHash` are 64 hex.
+
+The caller computes reachability and passes it as data: `reachable` lists each of the checkpoint's own
+`approvedSha`, `head` and `planSha` (the ones it carries) for which `git merge-base --is-ancestor <sha>
+origin/<branch>` exits 0, run through `ghpin.js run` (no shell): exit 0 is reachable, exit 1 is not, any other
+status is tool trouble (blocker 3). `head` and `planSha` must be in `reachable` on every phase except `closed`,
+and a `reapproved` carries `head`, so a re-approval is validated with all three listed. The pattern checks
+(`branch`, 40 lowercase hex shas) run first, before any field reaches a command. Progress checkpoints are
+validated the same way as the pin; a progress checkpoint that fails is a terminal-only trust failure (blocker 6).
 
 **Integrity,** at every Deliver start and resume, and again before the PR is opened. Once the latest
 counted progress is `pr-open` none of this runs (except after a yes to a new PR, section 11): the branch may be gone after a merge, so "After the PR"
@@ -642,7 +655,7 @@ status label. GitHub closes the issue when the PR merges.
    is what was shown (the spec commit, the hashes); a mismatch goes back to the presentation.
 8. **Publish.** The hashes are computed locally from the title and body that were previewed and
    approved, never from a re-read. Plan track: find a free branch name (`git ls-remote`; suffix
-   `-2`, `-3` if taken) and push. Create the issue (assigned to the definer), or update the existing
+   `-2`, `-3` if taken, unless the tip is this run's own, its sha equal to the local tip: keep the name) and push. Create the issue (assigned to the definer), or update the existing
    one in a single edit. Read it back and normalize it: it must hash to the local `bodyHash`. A
    difference is GitHub rewriting the markup or someone editing in the window; either way the pin is
    not posted, the difference is shown, and Define goes back to the presentation. Only on a match
@@ -739,7 +752,8 @@ blocker 6 in a plain resume and "fetch, merge, back to step 1" in Re-approval.
 
 1. **Docs.** Update the repository's own docs (`AGENTS.md`, `README.md`, `CHANGELOG.md` and the
    like, whichever exist) in this branch where behaviour changed.
-2. **Verify.** Run the profile's verify commands, then invoke
+2. **Verify.** Run the profile's verify commands (each block written to a file in the scratch directory and run as
+   `sh -e <file>` from the worktree, never retyped onto a command line), then invoke
    `superpowers:verification-before-completion`. Check each acceptance criterion against the
    change and record the result for the PR body.
 3. **Integrity again** (section 9), then the spec guard, then push.
@@ -881,7 +895,7 @@ review: `adversarial-reviewer` and `counterexample-reviewer`, each over the whol
 round, neither running a build. If `counterexample-reviewer` is absent or fails twice in a round,
 `adversarial-reviewer` continues alone and one *Deferred* entry says so.
 
-**Self-review mode** (`review=self`). On a host that cannot dispatch, the session does each review
+**Self-review mode** (`review=self`). On a host that cannot dispatch, or where `adversarial-reviewer` is not available, the session does each review
 itself: it re-reads the artifact against the same frame, writes the same findings and verdict, and
 the loop rules and caps apply unchanged. Per-task review in subagent-driven-development falls back
 to that skill's own no-subagent behaviour. The mode is recorded in every checkpoint's `review`
@@ -976,7 +990,8 @@ npm run test:shim
 ```
 ````
 
-- `base`: the branch runs start from and target. Default: `origin`'s default branch. A `base` that
+- `base`: the branch runs start from and target. Default: `origin`'s default branch. It is checked with
+  `git check-ref-format --branch` before use (a failing name is an invalid profile). A `base` that
   is not the default branch is allowed; the PR then says `Refs #<n>` (section 11).
 - `gh.account`: the logged-in `gh` account to use for this repository (section 6, check 4); it must
   have write access, else the run stops, naming it. Optional.

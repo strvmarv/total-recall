@@ -39,10 +39,10 @@ The final loop reviews `git diff origin/<base>...HEAD`.
 
 ## Self-review mode
 
-`review=self` is for a host that cannot dispatch subagents ([Hosts](SKILL.md#hosts)). The session does each review itself: re-read the artifact against the same frame, write the same findings and the same `VERDICT:` ending, and apply the loop rules and the 6-round cap unchanged. Per-task review in subagent-driven-development falls back to that skill's own no-subagent behaviour. Record the mode in every checkpoint's `review` field and nowhere else.
+`review=self` is for a host that cannot dispatch subagents ([Hosts](SKILL.md#hosts)) and for a host where `adversarial-reviewer` is not available ([Preflight](SKILL.md#preflight), check 5). The session does each review itself: re-read the artifact against the same frame, write the same findings and the same `VERDICT:` ending, and apply the loop rules and the 6-round cap unchanged. Per-task review in subagent-driven-development falls back to that skill's own no-subagent behaviour. Record the mode in every checkpoint's `review` field and nowhere else.
 
 ## Agents
 
-- `adversarial-reviewer` reviews for correctness, simplicity, security and fit with the codebase. It is required in `review=agent` mode; its absence is a preflight stop ([Preflight](SKILL.md#preflight)).
+- `adversarial-reviewer` reviews for correctness, simplicity, security and fit with the codebase. It is required in `review=agent` mode; its absence means `review=self` ([Preflight](SKILL.md#preflight), check 5), not a stop.
 - `counterexample-reviewer` assumes the change is wrong and reports only a defect it can trace to a concrete input or state. Its absence is not a stop.
 - Both have read-only tools and always end with the required ending. An agent of the right name from another source satisfies the check: the dependency is the name and the ending.

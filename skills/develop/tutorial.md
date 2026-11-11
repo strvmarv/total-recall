@@ -31,9 +31,9 @@ A pull request URL is refused: give the issue.
 - A git repository whose `origin` is on github.com and is not a fork.
 - `gh`, logged in to an account with write access to the repository.
 - superpowers 7 or later.
-- A subagent tool for reviews (Claude Code, or pi with pi-subagents and `ask_user`); on a host
-  without one the session reviews its own work.
-- The `adversarial-reviewer` agent, shipped with this plugin.
+- A subagent tool for reviews (Claude Code, or pi with pi-subagents and `ask_user`) and the
+  `adversarial-reviewer` agent, shipped with this plugin; on a host without either, the session
+  reviews its own work.
 - Optional: `.github/develop.md` on the default branch, which sets the base branch, the `gh` account,
   the ticket template and the verify commands the run must pass.
 

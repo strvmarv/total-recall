@@ -432,7 +432,7 @@ Goldens: `normalize-pairs`, `body-pairs`, `region-cases`, `fence-cases`, `limit-
 ## The issue after Define
 
 A person reading the issue sees an ordinary ticket: its body holds no machine block. What a run trusts
-is the latest counted `defined` comment (see Trust), posted at sign-off by a person with write access.
+is the pin (the latest counted `defined` or `reapproved`; see Trust), posted at sign-off by a person with write access.
 The body is checked against the hashes recorded in that comment.
 
 **The criteria region** (both tracks):
@@ -559,13 +559,20 @@ checked.
 
 **Reachability.** `head` and `planSha` must be reachable from the branch tip on every phase except
 `closed` (after a merge the branch may be gone, so `closed` only needs a 40-hex `head`);
-`approvedSha` must be reachable on `defined` and `reapproved`. The caller computes `reachable` with
-`git merge-base --is-ancestor` first and passes the list as data:
+`approvedSha` must be reachable on `defined` and `reapproved`. The caller computes `reachable` first and passes the
+list as data: it lists each of the checkpoint's own `approvedSha`, `head` and `planSha` (skip fields it does not carry)
+for which `git merge-base --is-ancestor <sha> origin/<branch>` exits 0, so a `reapproved` that carries all three
+lists all three. The command runs through `ghpin.js run` with no shell, and only with a `branch` and shas that
+already match their patterns; exit 0 is reachable, exit 1 is not reachable, and any other status (128 for an unfetched
+commit, say) is tool trouble, blocker 3, never "unreachable":
 `node checkpoints.js validate <jsonFile>` takes `{checkpoint, repo, base, reachable}`, where `checkpoint` is
 `{phase, fields}` (the `phase` and `fields` that `select` returned for it), `repo` and `base` are `origin`'s
 repository and the base branch, and `reachable` lists the SHAs found reachable. It prints `{"ok":true}`, or
 `{"ok":false,"error":"missing"|"bad-value","key":...}` (also `bad-input`). A pin or a progress checkpoint that
-fails it is a trust failure (see Trust).
+fails it is a trust failure (see Trust). `checkpoints.js validate` checks a value's pattern and its reachability in
+the same step and cannot report a bad pattern on its own, so the caller checks the patterns first: `branch` matches
+`^(feat|fix)/[a-z0-9][a-z0-9-]{0,62}$` and every sha is 40 lowercase hex, else the checkpoint is a trust failure
+before any field reaches a command.
 
 **Carry-forward** is a separate write-time check, never applied when reading history. Before every
 `kickoff` and every `reapproved`, run `node checkpoints.js carry <jsonFile>`. It takes
@@ -641,6 +648,7 @@ Goldens: `parse-cases` (`{name, body, expect}`), `validate-cases` (`{name, cp, c
   {"name":"defined small track","cp":{"phase":"defined","fields":{"track":"small","repo":"strvmarv/total-recall","base":"main","branch":"fix/y","bodyHash":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","acHash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","definedBy":"strvmarv","definedAt":"2026-11-10T12:34:56Z"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":true}},
   {"name":"defined repo differs only in case","cp":{"phase":"defined","fields":{"track":"plan","repo":"StrVmarv/Total-Recall","base":"main","branch":"feat/x","bodyHash":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","acHash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","definedBy":"jane-doe_acme","definedAt":"2026-11-10T12:34:56Z","spec":"docs/superpowers/specs/2026-11-10-x-design.md","approvedSha":"cccccccccccccccccccccccccccccccccccccccc"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":true}},
   {"name":"reapproved","cp":{"phase":"reapproved","fields":{"track":"plan","repo":"strvmarv/total-recall","base":"main","branch":"feat/x","bodyHash":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","acHash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","definedBy":"jane-doe_acme","definedAt":"2026-11-10T12:34:56Z","spec":"docs/superpowers/specs/2026-11-10-x-design.md","approvedSha":"cccccccccccccccccccccccccccccccccccccccc","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","review":"agent","gh":"strvmarv","deferred":"0","rounds.plan":"2","plan":"docs/superpowers/plans/2026-11-10-x.md","planSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","tasksDone":"1"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":true}},
+  {"name":"reapproved, only approvedSha reachable: head is not","cp":{"phase":"reapproved","fields":{"track":"plan","repo":"strvmarv/total-recall","base":"main","branch":"feat/x","bodyHash":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","acHash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","definedBy":"jane-doe_acme","definedAt":"2026-11-10T12:34:56Z","spec":"docs/superpowers/specs/2026-11-10-x-design.md","approvedSha":"cccccccccccccccccccccccccccccccccccccccc","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","review":"agent","gh":"strvmarv","deferred":"0","rounds.plan":"2","plan":"docs/superpowers/plans/2026-11-10-x.md","planSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","tasksDone":"1"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":false,"error":"bad-value","key":"head"}},
   {"name":"kickoff plan track","cp":{"phase":"kickoff","fields":{"track":"plan","branch":"feat/x","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","review":"agent","gh":"strvmarv","spec":"docs/superpowers/specs/2026-11-10-x-design.md","approvedSha":"cccccccccccccccccccccccccccccccccccccccc"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":true}},
   {"name":"kickoff small track","cp":{"phase":"kickoff","fields":{"track":"small","branch":"fix/y","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","review":"self","gh":"strvmarv"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":true}},
   {"name":"kickoff carrying plan and planSha","cp":{"phase":"kickoff","fields":{"track":"plan","branch":"feat/x","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","review":"agent","gh":"strvmarv","spec":"docs/superpowers/specs/2026-11-10-x-design.md","approvedSha":"cccccccccccccccccccccccccccccccccccccccc","plan":"docs/superpowers/plans/2026-11-10-x.md","planSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","tasksDone":"2"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":true}},
@@ -953,7 +961,7 @@ never passes through a shell); `<skill>` is the skill directory.
 [
   {"name":"issue","args":["api","repos/<owner>/<repo>/issues/<n>"]},
   {"name":"pr-create","args":["api","repos/<owner>/<repo>/pulls","-F","title=@<titleFile>","-F","body=@<bodyFile>","-f","head=<branch>","-f","base=<base>"]},
-  {"name":"pr-edit","args":["api","-X","PATCH","repos/<owner>/<repo>/pulls/<n>","-F","title=@<titleFile>","-F","body=@<bodyFile>"]},
+  {"name":"pr-edit","args":["api","-X","PATCH","repos/<owner>/<repo>/pulls/<pr>","-F","title=@<titleFile>","-F","body=@<bodyFile>"]},
   {"name":"permission","args":["api","repos/<owner>/<repo>/collaborators/<login>/permission"]},
   {"name":"comment-body","args":["api","repos/<owner>/<repo>/issues/comments/<id>","--jq",".body"]},
   {"name":"comment-post","args":["api","repos/<owner>/<repo>/issues/<n>/comments","-F","body=@<commentFile>"]},
@@ -1387,7 +1395,7 @@ repository (otherwise report it and stop; nothing is written). Its three outcome
 - **Closed unmerged.** Report it and ask whether to open a new PR; a person may have closed it on purpose,
   and without a yes the run stops. Opening a new PR is a Deliver write, so on a yes run preflight checks 1 and
   5 first. That one yes also covers recreating the branch from the latest checkpoint's `head` when it is gone
-  from `origin` (fetch `refs/pull/<n>/head` if that commit is not local); pushing a feature branch is already
+  from `origin` (fetch `refs/pull/<pr>/head` if that commit is not local); pushing a feature branch is already
   allowed by blocker 4. Then run pin validation and integrity like any other Deliver start.
   - No mismatch: merge a moved `origin/<base>` as Deliver step 5 does, then go to Finish.
   - A mismatch goes to Re-approval. Its `reapproved` drops `pr`; the run re-enters Deliver, runs the loops it

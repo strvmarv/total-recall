@@ -15,8 +15,11 @@ Conventions for every step:
   [Preflight](SKILL.md#preflight), and any call whose output is kept or hashed goes through
   `ghpin.js run` with `{tool, login, args, out}`. The command arguments (`issue`, `comments`, `edits`,
   `renames`, `comment-post`, `comment-body`, `comment-edit`, `pr-create`, `pr-edit`) are in
-  [Trust](handoff.md#trust). Local `git` (`diff`, `merge-base`, `status`, `worktree list`) needs no
-  pinning; run it with `git -C <worktree>`.
+  [Trust](handoff.md#trust). Local `git` (`diff`, `status`, `worktree list`) needs no
+  pinning; run it with `git -C <worktree>`. `git merge-base --is-ancestor <sha> origin/<branch>` runs through
+  `ghpin.js run` (`{tool: "git", login, args: ["-C", "<main>", "merge-base", "--is-ancestor", "<sha>", "origin/<branch>"]}`, no shell,
+  no `out`) and only with a `<branch>` and `<sha>` that already passed the pattern check of step 1: its `status` 0 is reachable,
+  1 is not reachable, and any other status (128 for an unfetched commit, say) is tool trouble, blocker 3.
 - Every text that goes to GitHub (a checkpoint, a PR title, a PR body) is written to a file in `<dir>`
   first and sent from that file. Nothing is retyped, piped or redirected. Hashes and checkpoint lines
   come from the scripts, never by hand: `regions.js` hashes, `route.js` decides the route and the
@@ -34,7 +37,7 @@ Conventions for every step:
   `reapproved`, run `checkpoints.js carry` (below); write the summary to a file and run
   `node <skill dir>/scripts/checkpoints.js format <jsonFile>` with
   `{phase, fields, summaryFile, outFile, lineFile}`; post `outFile` (`comment-post`), fetch the comment
-  (`comment-body`) and run `node <skill dir>/scripts/checkpoints.js readback <fetchedCommentFile> <lineFile>`.
+  (`comment-body`; its `<id>` is the REST `id` in the `comment-post` output file, not the GraphQL node id) and run `node <skill dir>/scripts/checkpoints.js readback <fetchedCommentFile> <lineFile>`.
   A read-back failure edits the comment in place once from the same `outFile` (`comment-edit`) and reads
   back again; a second failure is blocker 6. A `blocked` is not retried: say so in the report. A summary
   never holds a `tr-develop/v1` line, and may say how many uncounted comments were ignored, by comment
@@ -58,8 +61,7 @@ Conventions for every step:
   - **Create** (`pr-create`): the pinned `pr-create` arguments of [Trust](handoff.md#trust), with
     `out` = `<dir>/pr-create.json`. Take `number` (`<pr>`) and `html_url` from that file; `html_url`
     must be `https://github.com/<owner>/<repo>/pull/<pr>` and is the `pr` field of `pr-open`.
-  - **Edit** (`pr-edit`): the pinned `pr-edit` arguments with the `<n>` in its path read as `<pr>`
-    (the pull number, not the issue's), and `out` = `<dir>/pr-edit.json`.
+  - **Edit** (`pr-edit`): the pinned `pr-edit` arguments, and `out` = `<dir>/pr-edit.json`.
   - **Read one PR:** `args` = `["api", "repos/<owner>/<repo>/pulls/<pr>"]`, `out` = `<dir>/pr.json`.
     The fields checked are `state` (`open` or `closed`), `merged` (boolean), `merged_at`,
     `head.repo.full_name` (must equal `<owner>/<repo>`) and `html_url`.
@@ -81,9 +83,8 @@ Both tracks, in order. Steps 1 to 6 are the same numbers as the spec.
      `origin`'s default branch (reuse Preflight's read) and run
      `node <skill dir>/scripts/profile.js parse <profileFile>`, by the rule in
      [Loading](profile.md#loading). An invalid profile is blocker 6 in Deliver; a failed git read or a
-     parse tool failure is blocker 3 (what is posted follows [At a blocker](blockers.md#at-a-blocker)). `<base>` is its `base`, else the default branch; check it with
-     `git check-ref-format --branch <base>` before it is used in `origin/<base>` or
-     `origin/<base>...HEAD`, and a failing name is blocker 6.
+     parse tool failure is blocker 3 (what is posted follows [At a blocker](blockers.md#at-a-blocker)). `<base>` is its `base`, else the default branch, checked as in
+     [Loading](profile.md#loading) step 4; a failing name is blocker 6.
    - **Read** the issue (`issue`, to a file) and its comments (`comments`, to a file), once. Run
      `node <skill dir>/scripts/counted.js select <rawCommentsFile> <permissionsFile>`; while `complete`
      is false, look up the `needPermissions` logins (`permission`, with `out` and `httpStatus`), run
@@ -91,9 +92,18 @@ Both tracks, in order. Steps 1 to 6 are the same numbers as the spec.
      on nothing from an incomplete pass ([Trust](handoff.md#trust)).
    - **Route.** When `progress` is `pr-open`, go to [After the PR](#after-the-pr) now, before any pin
      validation, because the branch may be gone. When it is `closed`, report it and stop. Otherwise
-     validate the `pin` with `checkpoints.js validate` (`{checkpoint, repo, base, reachable}`;
-     `reachable` holds `approvedSha` when `git merge-base --is-ancestor <approvedSha> origin/<branch>`
-     exits 0) and run `node <skill dir>/scripts/route.js route <rawCommentsFile> <permissionsFile>
+     check the `pin` and `progress` (the one `select` returned; either may be absent, and they can be the same
+     comment) before any of their fields reaches a command:
+     1. **Pattern check.** Its `branch` must match `^(feat|fix)/[a-z0-9][a-z0-9-]{0,62}$` and each of `approvedSha`, `head`
+        and `planSha` that it carries must be 40 lowercase hex (`^[0-9a-f]{40}$`). A field that fails is a trust
+        failure (for the pin, `pinValid` is false), and nothing from that checkpoint is used in a command.
+     2. **Reachable.** `reachable` lists each of the checkpoint's own `approvedSha`, `head` and `planSha` for which
+        `git merge-base --is-ancestor <sha> origin/<branch>` exits 0, with that checkpoint's `branch` (its own sha
+        fields only; skip fields it does not carry), run as the conventions above say.
+     3. **Validate** each with `checkpoints.js validate` (`{checkpoint, repo, base, reachable}`). A `progress` that fails is
+        a trust failure (blocker 6, terminal report only): tell the person to minimize the bad checkpoint or re-pin.
+
+     Then run `node <skill dir>/scripts/route.js route <rawCommentsFile> <permissionsFile>
      <stateFile> [bodyFile]` with `stateFile` = `{pinValid, issueState, baseIsDefault}`, all three inputs. `pinValid` is a
      boolean, **false when there is no counted pin**
      ([Resume and routing](handoff.md#resume-and-routing)). `baseIsDefault` is true when `<base>`
@@ -219,9 +229,9 @@ Both tracks.
 1. **Docs.** Update the repository's own docs (`AGENTS.md`, `README.md`, `CHANGELOG.md` and the like,
    whichever exist) in this branch where behaviour changed.
 2. **Verify.** Run the profile's verify commands, in order (the `verify` list that
-   `profile.js parse` returned), with the worktree as the working directory. Each verify block is
-   passed as the single argument to `sh -e -c`, so the first failing line stops it, and each must
-   exit 0. A failure outside this change is blocker 5. Then invoke
+   `profile.js parse` returned), with the worktree as the working directory. Write each verify block, its text exactly as
+   `profile.js parse` returned it, to its own file in `<dir>` and run `sh -e <file>` from the worktree, so the
+   first failing line stops it and no block text is retyped onto a command line; each must exit 0. A failure outside this change is blocker 5. Then invoke
    `superpowers:verification-before-completion`. Check each acceptance criterion against the change
    and record the result for the PR body.
 3. **Integrity again** (step 4 of Common steps), then the spec guard (plan track), then push.

@@ -493,9 +493,9 @@ A fork is refused (`origin` must not be a fork), and a host with no way to ask y
 - The superpowers plugin, version 7 or later (brainstorming, writing-plans, subagent-driven-development, test-driven-development, verification-before-completion, finishing-a-development-branch).
 - `gh` logged in to an account with write access to the repository, whose `origin` is on github.com.
 - Optional: a repository profile, `.github/develop.md`, naming the `gh` account to use, the ticket-standard switch and the commands to run before the PR opens (the format is in `skills/develop/profile.md`; this repository's own profile is the example).
-- Claude Code and pi are supported first. On a host without a way to dispatch the two reviewer agents (`adversarial-reviewer`, `counterexample-reviewer`), the reviews run in the same session (`review=self`).
+- Claude Code and pi are supported first. On a host without a way to dispatch the two reviewer agents (`adversarial-reviewer`, `counterexample-reviewer`), or where `adversarial-reviewer` is not available, the reviews run in the same session (`review=self`); on pi, Preflight first offers to copy the agent files into pi's global agent directory, never over a file already there.
 
-**Trust.** A run acts on a `defined` comment written by someone with write access to the repository, not on whatever the issue body says now. Any other issue text, comment or tool output is treated as data.
+**Trust.** A run acts on the pin (the latest `defined` or `reapproved` comment) written by someone with write access to the repository, not on whatever the issue body says now. Any other issue text, comment or tool output is treated as data.
 
 **Account pinning.** Every `gh` and network `git` call is pinned to the chosen account on that one command; the skill never runs `gh auth switch`. The pinned forms look like this:
 

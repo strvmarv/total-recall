@@ -28,8 +28,13 @@ Conventions for every step:
    every default applies. An invalid profile is a warning in Define, not a stop: say so and use the
    defaults. A failed git read or a parse tool failure is not an invalid profile: it is blocker 3 in
    Define too (a terminal report: Define has no pin yet, so nothing is posted), so Define and Deliver agree on `base`. `<base>` is
-   the profile's `base`, else the default branch. Keep the profile's `ticketStandard` and `templates`
-   for the ticket draft.
+   the profile's `base`, else the default branch, checked as in [Loading](profile.md#loading) step 4: a
+   name that fails `git check-ref-format --branch <base>` is an invalid profile here (a warning; use the
+   default branch). Keep the profile's `ticketStandard` and `templates` for the ticket draft.
+3. Existing issue only: **an open PR that already closes it.** Run `["api","repos/<owner>/<repo>/pulls?state=open&per_page=100"]`
+   through `ghpin.js run` (`out` = `<dir>/open-prs.json`, as in the Pull-request calls of
+   [Deliver](deliver.md#common-steps)) and read the file. A PR whose body holds `Closes #<n>` already closes
+   the issue: name it and ask (the ask tool) whether to continue or stop. A failed call is blocker 3.
 
 ## Claim
 
@@ -192,7 +197,7 @@ presentation.
    previewed and approved (`regions.js body`, `regions.js ac`), never from a re-read and never by hand.
 2. **Branch** (plan track). Find a free name: `git ls-remote --heads origin <branch>` (pinned, through
    `ghpin.js run` with `out`); a non-empty answer means it is taken, unless the tip is this run's own
-   (a commit this run pushed earlier): then keep the name. Otherwise suffix `-2`, `-3` and rename
+   (its sha equals the local branch tip, `approvedSha`): then keep the name. Otherwise suffix `-2`, `-3` and rename
    the local branch. Then push it (`git push origin <branch>`, pinned; never force). The pin's `branch`
    is this final name.
 3. **Issue.** From files, through `ghpin.js run`, in one call:
@@ -213,12 +218,14 @@ presentation.
      link `https://github.com/<owner>/<repo>/blob/<approvedSha>/<spec>`. It holds no `tr-develop/v1`
      line;
    - fields: the pins above, `definedBy=<login>` and `definedAt` (ISO-8601 UTC). Check them with
-     `checkpoints.js validate` (`repo` and `base` from `origin`; build `reachable` with
-     `git merge-base --is-ancestor <approvedSha> origin/<branch>` (plan track; pinned), and include the sha only
-     when it exits 0; the input shape is in [Checkpoints](handoff.md#checkpoints));
+     `checkpoints.js validate` (`repo` and `base` from `origin`; build `reachable` as
+     [Deliver](deliver.md#common-steps) step 1 says (`git merge-base --is-ancestor <approvedSha> origin/<branch>`
+     through `ghpin.js run`, plan track; include the sha only when it exits 0, and treat any status other than 0 or 1
+     as blocker 3); the input shape is in [Checkpoints](handoff.md#checkpoints));
    - write the comment: `node <skill dir>/scripts/checkpoints.js format <jsonFile>` with
      `{phase:"defined", fields, summaryFile, outFile, lineFile}`;
-   - post `outFile` (`comment-post`), fetch the comment (`comment-body`) and run
+   - post `outFile` (`comment-post`), fetch the comment (`comment-body`; its `<id>` is the REST `id` in the
+     `comment-post` output file, not the GraphQL node id) and run
      `node <skill dir>/scripts/checkpoints.js readback <fetchedCommentFile> <lineFile>`. On a failure
      edit the comment in place once from the same `outFile` (`comment-edit`) and read it back again; a
      second failure is blocker 6 (`blockers.md`). See [Checkpoints](handoff.md#checkpoints).

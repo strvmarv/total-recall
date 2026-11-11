@@ -168,14 +168,17 @@ scratch directory. They are local commands, so the account pin does not change t
    - Anything else is tool trouble, not an invalid profile: a profile file that is missing or cannot be
      read (`ENOENT`, `EACCES`), `usage: ...` or `unknown subcommand`. It is blocker 3 in Define and in
      Deliver.
-4. `<base>` is the profile's `base`, else the default branch of `origin`.
+4. `<base>` is the profile's `base`, else the default branch of `origin`. Check it with
+   `git check-ref-format --branch <base>` before it is used in `origin/<base>` or `origin/<base>...HEAD`; a name
+   that fails is an invalid profile (a warning in Define, which then uses the default branch; blocker 6 in Deliver).
 
 ## Verify blocks
 
 Finish runs the `verify` list in order, from the worktree ([Finish and close-out](deliver.md#finish-and-close-out)).
 
-- Each `sh verify` block is one command: its whole text is passed as the single argument to `sh -e -c`,
-  so it stops at the first failing line, and the block must exit 0. Write a multi-line block when
+- Each `sh verify` block is one command: its text, exactly as `profile.js parse` returned it, is written to a
+  file in the scratch directory and run as `sh -e <file>` from the worktree, so it stops at the first failing
+  line and is never retyped onto a command line, and the block must exit 0. Write a multi-line block when
   later lines depend on earlier ones; write separate blocks for independent checks.
 - A command that fails outside this change is blocker 5.
 - Write each command so that it works on the Node version the repository's CI runs. Prefer unquoted
@@ -184,9 +187,6 @@ Finish runs the `verify` list in order, from the worktree ([Finish and close-out
   newer, because earlier versions do not expand globs themselves; a directory argument
   (`node --test pi/`) works on Node 20 but is rejected by Node 24.
 - A command must not write outside the worktree (the initialize review asks this of every command).
-- `base` is checked with `git check-ref-format --branch <base>` before it is used in `origin/<base>` or
-  `origin/<base>...HEAD` ([Common steps](deliver.md#common-steps), step 1); a name that fails the check
-  is blocker 6.
 
 ## Initialize
 
