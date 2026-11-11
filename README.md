@@ -110,7 +110,7 @@ copilot plugin marketplace add strvmarv/total-recall-marketplace
 copilot plugin install total-recall@strvmarv-total-recall-marketplace
 ```
 
-Then allow the server for non-interactive runs with `--allow-tool=total-recall`. The plugin registers the MCP server, injects the startup instructions, and runs the pinned-directive floor. See [INSTALL.md](INSTALL.md#github-copilot-cli) for tool approval and known gaps.
+This works once the marketplace points at a release that contains `.github/plugin/` and `copilot/` (see the INSTALL.md caveat). Then allow the server for non-interactive runs with `--allow-tool=total-recall`. The plugin registers the MCP server, injects the startup instructions, and runs the pinned-directive floor. See [INSTALL.md](INSTALL.md#github-copilot-cli) for tool approval and known gaps.
 
 ### npm (Any MCP-Compatible Tool)
 

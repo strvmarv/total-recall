@@ -2,8 +2,8 @@
 //
 // Declared in copilot/hooks.json and run by Copilot CLI as `node "${PLUGIN_ROOT}/copilot/hook.js" <command>`.
 // It is the Copilot counterpart of hooks/session-start/run.sh and hooks/user-prompt-submit/run.sh,
-// written in node because Copilot runs a hook `command` through PowerShell on Windows (where the bash
-// scripts' `$CLAUDE_PLUGIN_ROOT` expands to nothing) and `bash` may resolve to WSL.
+// written in node because, on Windows, the bash scripts' unbraced `$CLAUDE_PLUGIN_ROOT` expands to nothing in a Copilot
+// hook `command` (observed; consistent with PowerShell) and `bash` may resolve to WSL.
 //
 //   session-start           print the commands skill (the instructions that make the model call
 //                           session_start) plus a short Copilot note, as sessionStart context

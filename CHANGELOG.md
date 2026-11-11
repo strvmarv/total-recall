@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   skill as `additionalContext`; `userPromptSubmitted` runs `pinned-floor` through the
   provisioned engine, turn-count trigger only). Observed working on Copilot CLI 1.0.98-2
   (Windows, `-p` and interactive). The Claude-format hooks never ran under Copilot on
-  Windows (PowerShell expands `$CLAUDE_PLUGIN_ROOT` to nothing). Known gaps are in INSTALL.md.
+  Windows (the unbraced `$CLAUDE_PLUGIN_ROOT` in their `command` expands to nothing there). Known gaps are in INSTALL.md.
 
 - **Codex CLI harness support.** `codex plugin marketplace add strvmarv/total-recall-marketplace`
   then `codex plugin add total-recall@strvmarv-total-recall-marketplace` installs total-recall into
@@ -60,7 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The Copilot manifest moved from `.copilot-plugin/plugin.json` (which Copilot CLI never read)
+- The Copilot manifest moved from `.copilot-plugin/plugin.json` (not in Copilot CLI's documented manifest lookup, and not read by 1.0.98-2)
   to `.github/plugin/plugin.json`, which Copilot finds before `.claude-plugin/plugin.json`; its
   `hooks` path replaces `hooks/hooks.json` for Copilot. The release version-sync list still
   has seven files (the path changed).

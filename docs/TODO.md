@@ -399,6 +399,6 @@ Same root cause as the Claude Code `.mcp.json` item above, now with evidence: Co
 - `SessionEnd` (3 s clamp, no user-visible output) and `fork` (history already carries the instructions) are deliberately not mapped; revisit if Codex gives `SessionEnd` a visible surface.
 - A first-run tutorial remains deferred for all harnesses (see Onboarding).
 
-### Copilot CLI and Cursor CLI parity
+### Cursor CLI parity
 
-The next harnesses in this series. Copilot CLI: re-verify the pinned floor on a current build (upstream ignored `additionalContext` earlier; hooks declared through its own manifest silently did not fire while `.claude-plugin` hooks did). Cursor CLI: hooks have no context-injection point on `beforeSubmitPrompt`, skill invocation is not an event, and `cursor-agent` must be run from PowerShell/cmd on Windows (Git Bash breaks its tool calls).
+The next harness in this series (Copilot CLI is done). Cursor CLI: hooks have no context-injection point on `beforeSubmitPrompt`, skill invocation is not an event, and `cursor-agent` must be run from PowerShell/cmd on Windows (Git Bash breaks its tool calls).

@@ -158,7 +158,9 @@ What you get in Copilot CLI (observed on GitHub Copilot CLI **1.0.98-2**, Window
 - The pinned-directive floor on every prompt (`userPromptSubmitted` hook → `additionalContext`, which Copilot appends to the user message), on the turn-count trigger only (`floor_every_n_turns`, default 6): the hook payload has no transcript path, so the token-growth trigger is not used. Copilot's hooks documentation says command hooks cannot add context on this event; on the tested build they can, so a later build may change this (`docs/TODO.md` names the documented fallback).
 - Skills: `/total-recall:commands <subcommand>` works as in Claude Code.
 
-The manifest is `.github/plugin/plugin.json` (Copilot's documented lookup finds it before `.claude-plugin/plugin.json`); its `hooks` path replaces the Claude-format `hooks/hooks.json`, which cannot run under Copilot on Windows (hook commands run through PowerShell, where bash's `$CLAUDE_PLUGIN_ROOT` expands to nothing).
+Not observed: a subagent run (the floor skips hook payloads that carry an `agentId`, per Copilot's hooks docs), macOS/Linux, and the interactive approval prompt.
+
+The manifest is `.github/plugin/plugin.json` (Copilot's documented lookup finds it before `.claude-plugin/plugin.json`); its `hooks` path replaces the Claude-format `hooks/hooks.json`, which cannot run under Copilot on Windows (on Windows the unbraced `$CLAUDE_PLUGIN_ROOT` in those hook commands expands to nothing: observed).
 
 Known gaps:
 
