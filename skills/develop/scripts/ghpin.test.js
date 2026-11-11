@@ -6,7 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readGolden } from './golden.js';
-import { qualifies, pickAccount, command, runTool, scratch, SUBCOMMANDS } from './ghpin.js';
+import { qualifies, pickAccount, command, runTool, scratch, cleanup, SUBCOMMANDS } from './ghpin.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SKILL = path.join(HERE, '..', 'SKILL.md');
@@ -586,10 +586,212 @@ test('scratch: creates a fresh absolute directory under the OS temp directory', 
   }
 });
 
+const MARKER = '.develop-scratch';
+const DAY = 24 * 60 * 60 * 1000;
+const NOT_SCRATCH = { ok: false, error: 'not a scratch directory' };
+
+/** Makes a directory directly under the OS temp directory; `marked` adds the marker, `ageDays` back-dates it. */
+function tmpChild(prefix, { marked = false, ageDays = 0 } = {}) {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  if (marked) fs.writeFileSync(path.join(d, MARKER), '');
+  if (ageDays) {
+    const t = new Date(Date.now() - ageDays * DAY);
+    fs.utimesSync(d, t, t);
+  }
+  return d;
+}
+
+function rmAll(...dirs) {
+  for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
+}
+
+/** Tries to create a directory symlink (a junction on Windows); false when the platform does not permit it. */
+function trySymlink(target, link) {
+  try {
+    fs.symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function dropLink(link) {
+  try { fs.unlinkSync(link); } catch { /* ignore */ }
+  try { fs.rmdirSync(link); } catch { /* ignore */ }
+}
+
+test('scratch: writes an empty marker file inside the new directory', () => {
+  const d = scratch();
+  try {
+    const marker = path.join(d, MARKER);
+    assert.ok(fs.statSync(marker).isFile());
+    assert.equal(fs.statSync(marker).size, 0);
+  } finally {
+    rmAll(d);
+  }
+});
+
+test('scratch: prunes an old marked develop- directory of an earlier run', () => {
+  const old = tmpChild('develop-', { marked: true });
+  fs.writeFileSync(path.join(old, 'issue.json'), '{}');
+  const t = new Date(Date.now() - 4 * DAY);
+  fs.utimesSync(old, t, t);
+  const fresh = scratch();
+  try {
+    assert.equal(fs.existsSync(old), false);
+    assert.ok(fs.existsSync(fresh));
+  } finally {
+    rmAll(old, fresh);
+  }
+});
+
+test('scratch: leaves an old unmarked dir, a young marked dir, a non-develop- dir and the new dir', () => {
+  const unmarked = tmpChild('develop-', { ageDays: 10 });
+  const young = tmpChild('develop-', { marked: true, ageDays: 1 });
+  const other = tmpChild('ghpin-test-keep-', { marked: true, ageDays: 10 });
+  const fresh = scratch();
+  try {
+    assert.ok(fs.existsSync(unmarked));
+    assert.ok(fs.existsSync(young));
+    assert.ok(fs.existsSync(other));
+    assert.ok(fs.existsSync(fresh));
+  } finally {
+    rmAll(unmarked, young, other, fresh);
+  }
+});
+
+test('scratch: never prunes through a symlinked develop- entry', () => {
+  const target = tmpChild('ghpin-test-target-', { marked: true });
+  const link = path.join(os.tmpdir(), `develop-link-${process.pid}-${Date.now()}`);
+  if (!trySymlink(target, link)) { rmAll(target); return; }
+  try {
+    const t = new Date(Date.now() - 10 * DAY);
+    try { fs.lutimesSync(link, t, t); } catch { /* best effort */ }
+    const fresh = scratch();
+    try {
+      assert.ok(fs.existsSync(path.join(target, MARKER)));
+      assert.ok(fs.lstatSync(link).isSymbolicLink());
+    } finally {
+      rmAll(fresh);
+    }
+  } finally {
+    dropLink(link);
+    rmAll(target);
+  }
+});
+
+test('cleanup: removes a fresh scratch directory and everything in it', () => {
+  const d = scratch();
+  fs.writeFileSync(path.join(d, 'issue.json'), '{}');
+  fs.mkdirSync(path.join(d, 'sub'));
+  fs.writeFileSync(path.join(d, 'sub', 'x'), 'x');
+  assert.deepEqual(cleanup(d), { ok: true, removed: true });
+  assert.equal(fs.existsSync(d), false);
+});
+
+test('cleanup: a trailing separator is accepted', () => {
+  const d = scratch();
+  try {
+    assert.deepEqual(cleanup(d + path.sep), { ok: true, removed: true });
+    assert.equal(fs.existsSync(d), false);
+  } finally {
+    rmAll(d);
+  }
+});
+
+test('cleanup: a directory that is already gone is ok and not removed', () => {
+  const d = scratch();
+  rmAll(d);
+  assert.deepEqual(cleanup(d), { ok: true, removed: false });
+});
+
+test('cleanup: on Windows the temp directory is compared case-insensitively', () => {
+  if (process.platform !== 'win32') return;
+  const d = scratch();
+  try {
+    const odd = path.join(path.dirname(d).toUpperCase(), path.basename(d));
+    assert.deepEqual(cleanup(odd), { ok: true, removed: true });
+    assert.equal(fs.existsSync(d), false);
+  } finally {
+    rmAll(d);
+  }
+});
+
+test('cleanup: refuses a path outside the temp directory and deletes nothing', () => {
+  const outside = fs.mkdtempSync(path.join(path.dirname(os.tmpdir()), 'develop-outside-'));
+  fs.writeFileSync(path.join(outside, MARKER), '');
+  try {
+    assert.deepEqual(cleanup(outside), NOT_SCRATCH);
+    assert.ok(fs.existsSync(path.join(outside, MARKER)));
+  } finally {
+    rmAll(outside);
+  }
+});
+
+test('cleanup: refuses a nested path inside a scratch directory', () => {
+  const d = scratch();
+  const nested = path.join(d, 'develop-inner');
+  fs.mkdirSync(nested);
+  fs.writeFileSync(path.join(nested, MARKER), '');
+  try {
+    assert.deepEqual(cleanup(nested), NOT_SCRATCH);
+    assert.ok(fs.existsSync(nested));
+  } finally {
+    rmAll(d);
+  }
+});
+
+test('cleanup: refuses a directory without the marker, a wrong prefix, and a marker that is a directory', () => {
+  const noMarker = tmpChild('develop-');
+  const wrongPrefix = tmpChild('ghpin-test-wrong-', { marked: true });
+  const markerDir = tmpChild('develop-');
+  fs.mkdirSync(path.join(markerDir, MARKER));
+  try {
+    for (const d of [noMarker, wrongPrefix, markerDir]) {
+      assert.deepEqual(cleanup(d), NOT_SCRATCH, d);
+      assert.ok(fs.existsSync(d));
+    }
+  } finally {
+    rmAll(noMarker, wrongPrefix, markerDir);
+  }
+});
+
+test('cleanup: refuses ".." traversal even when it lands on a scratch directory', () => {
+  const a = scratch();
+  const b = scratch();
+  try {
+    const viaScratch = [os.tmpdir(), path.basename(a), '..', path.basename(b)].join(path.sep);
+    const viaOther = [os.tmpdir(), 'ghpin-test-nowhere', '..', path.basename(b)].join(path.sep);
+    assert.deepEqual(cleanup(viaScratch), NOT_SCRATCH);
+    assert.deepEqual(cleanup(viaOther), NOT_SCRATCH);
+    assert.ok(fs.existsSync(a));
+    assert.ok(fs.existsSync(b));
+  } finally {
+    rmAll(a, b);
+  }
+});
+
+test('cleanup: refuses a symlink to a scratch directory and deletes nothing', () => {
+  const target = scratch();
+  const link = path.join(os.tmpdir(), `develop-link-${process.pid}-${Date.now()}`);
+  if (!trySymlink(target, link)) { rmAll(target); return; }
+  try {
+    assert.deepEqual(cleanup(link), NOT_SCRATCH);
+    assert.ok(fs.existsSync(path.join(target, MARKER)));
+  } finally {
+    dropLink(link);
+    rmAll(target);
+  }
+});
+
+test('cleanup: refuses non-string and empty input', () => {
+  for (const v of [undefined, null, '', 5, {}, []]) assert.deepEqual(cleanup(v), NOT_SCRATCH);
+});
+
 // ---- CLI ----
 
 test('SUBCOMMANDS dispatcher: every listed name dispatches, an unlisted word is rejected', () => {
-  assert.deepEqual(SUBCOMMANDS, ['scratch', 'run', 'pick', 'command']);
+  assert.deepEqual(SUBCOMMANDS, ['scratch', 'run', 'pick', 'command', 'cleanup']);
   const made = [];
   for (const name of SUBCOMMANDS) {
     const { parsed } = cli([name]);
@@ -623,6 +825,37 @@ test('CLI scratch: two calls give two different absolute temp directories, usabl
     assert.equal(fs.readFileSync(viaJson, 'utf8'), 'hello');
   } finally {
     for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('CLI cleanup: removes the scratch directory named in the JSON file', () => {
+  const made = cli(['scratch']);
+  const d = made.parsed.dir;
+  try {
+    const ok = cli(['cleanup', writeJson({ dir: d })]);
+    assert.equal(ok.status, 0);
+    assert.deepEqual(ok.parsed, { ok: true, removed: true });
+    assert.equal(fs.existsSync(d), false);
+    const again = cli(['cleanup', writeJson({ dir: d })]);
+    assert.equal(again.status, 0);
+    assert.deepEqual(again.parsed, { ok: true, removed: false });
+  } finally {
+    rmAll(d);
+  }
+});
+
+test('CLI cleanup: refuses a non-scratch directory with exit 1 and deletes nothing', () => {
+  const plain = tmpChild('develop-');
+  try {
+    const r = cli(['cleanup', writeJson({ dir: plain })]);
+    assert.equal(r.status, 1);
+    assert.deepEqual(r.parsed, NOT_SCRATCH);
+    assert.ok(fs.existsSync(plain));
+    const bad = cli(['cleanup', writeJson({})]);
+    assert.equal(bad.status, 1);
+    assert.deepEqual(bad.parsed, NOT_SCRATCH);
+  } finally {
+    rmAll(plain);
   }
 });
 

@@ -120,7 +120,7 @@ const CLI_RE = /\b(regions|checkpoints|counted|history|route|args|ghpin|profile)
 // Task 18's home table: [file, `## ` section, script, subcommands]; each subcommand's mention must
 // appear inside that section of that file.
 const HOME = [
-  ['SKILL.md', 'Preflight', 'ghpin', ['scratch', 'pick', 'command', 'run']],
+  ['SKILL.md', 'Preflight', 'ghpin', ['scratch', 'cleanup', 'pick', 'command', 'run']],
   ['SKILL.md', 'Issue entry', 'args', ['parse']],
   ['define.md', 'Plan track', 'regions', ['neutralize', 'fence']],
   ['handoff.md', 'Hashing and regions', 'regions', ['body-json', 'body', 'ac', 'approach']],

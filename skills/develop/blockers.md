@@ -29,7 +29,8 @@ Do these in order:
 2. Post a `blocked` checkpoint ([Checkpoints](handoff.md#checkpoints)). Its summary names the blocker, what was tried and the options. It carries `stage` and `blocker`; it takes `branch=-` when no branch exists yet and omits `head` when none is pushed. Posting a `blocked`, like a `defined`, `reapproved` or `closed`, skips the integrity check that other checkpoints run.
 3. Take a memory snapshot ([Memory](SKILL.md#memory)).
 4. Mark the active todo `BLOCKED:` ([Progress](SKILL.md#progress)).
-5. Stop.
+5. Clean up the scratch directory ([Preflight](SKILL.md#preflight)).
+6. Stop.
 
 Post nothing, and make the terminal report the record, when either holds:
 

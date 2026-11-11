@@ -3,6 +3,7 @@
 // Zero dependencies, ESM.
 //
 //   node ghpin.js scratch
+//   node ghpin.js cleanup <jsonFile>   {dir}
 //   node ghpin.js run <jsonFile>       {tool, login, args, out?, stdin?}
 //   node ghpin.js pick <jsonFile>      {accounts: [{login, perms}], active, profileAccount?}
 //   node ghpin.js command <jsonFile>   {shell, tool, login, args}
@@ -14,7 +15,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { isLogin } from './checkpoints.js';
 
-export const SUBCOMMANDS = ['scratch', 'run', 'pick', 'command'];
+export const SUBCOMMANDS = ['scratch', 'run', 'pick', 'command', 'cleanup'];
 
 const MAX_BUFFER = 512 * 1024 * 1024;
 const GIT_CRED_ARGS = ['-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential'];
@@ -168,9 +169,76 @@ export function runTool(deps, input) {
 
 // ---- scratch ----
 
-/** Creates this run's scratch directory and returns its absolute native path. */
+const SCRATCH_PREFIX = 'develop-';
+const SCRATCH_MARKER = '.develop-scratch';
+const STALE_MS = 3 * 24 * 60 * 60 * 1000;
+
+function sameDir(a, b) {
+  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
+/** True when `full` is a real directory (not a link) that holds the scratch marker file. */
+function isMarkedDir(full) {
+  const st = fs.lstatSync(full);
+  if (st.isSymbolicLink() || !st.isDirectory()) return false;
+  return fs.lstatSync(path.join(full, SCRATCH_MARKER)).isFile();
+}
+
+/**
+ * Creates this run's scratch directory (with its marker file) and returns its absolute native path.
+ * Also prunes scratch directories of earlier crashed runs; pruning is best effort.
+ */
 export function scratch() {
-  return path.resolve(fs.mkdtempSync(path.join(os.tmpdir(), 'develop-')));
+  const dir = path.resolve(fs.mkdtempSync(path.join(os.tmpdir(), SCRATCH_PREFIX)));
+  fs.writeFileSync(path.join(dir, SCRATCH_MARKER), '');
+  try {
+    const root = os.tmpdir();
+    const cutoff = Date.now() - STALE_MS;
+    for (const name of fs.readdirSync(root)) {
+      if (!name.startsWith(SCRATCH_PREFIX)) continue;
+      const full = path.join(root, name);
+      if (sameDir(path.resolve(full), dir)) continue;
+      try {
+        if (isMarkedDir(full) && fs.lstatSync(full).mtimeMs < cutoff) fs.rmSync(full, { recursive: true, force: true });
+      } catch {
+        // best effort: ignore any one entry
+      }
+    }
+  } catch {
+    // best effort: never fail scratch
+  }
+  return dir;
+}
+
+const NOT_SCRATCH = { ok: false, error: 'not a scratch directory' };
+
+/** Removes a scratch directory, and only a scratch directory: a marked real directory directly under the temp directory. */
+export function cleanup(dir) {
+  if (typeof dir !== 'string' || dir === '' || dir.includes('\0')) return NOT_SCRATCH;
+  if (dir.split(/[\\/]/).includes('..')) return NOT_SCRATCH;
+  const resolved = path.resolve(dir);
+  const base = path.basename(resolved);
+  if (!base.startsWith(SCRATCH_PREFIX)) return NOT_SCRATCH;
+  let full;
+  try {
+    const parent = fs.realpathSync.native(path.dirname(resolved));
+    if (!sameDir(parent, fs.realpathSync.native(os.tmpdir()))) return NOT_SCRATCH;
+    full = path.join(parent, base);
+  } catch {
+    return NOT_SCRATCH;
+  }
+  try {
+    fs.lstatSync(full);
+  } catch (err) {
+    return err && err.code === 'ENOENT' ? { ok: true, removed: false } : NOT_SCRATCH;
+  }
+  try {
+    if (!isMarkedDir(full)) return NOT_SCRATCH;
+  } catch {
+    return NOT_SCRATCH;
+  }
+  fs.rmSync(full, { recursive: true, force: true });
+  return { ok: true, removed: true };
 }
 
 // ---- CLI ----
@@ -185,6 +253,7 @@ function dispatch(argv) {
   if (!SUBCOMMANDS.includes(cmd)) return { ok: false, error: 'unknown subcommand' };
   switch (cmd) {
     case 'scratch': return { dir: scratch() };
+    case 'cleanup': return cleanup(readJson(file, 'usage: cleanup <jsonFile>').dir);
     case 'run': return runTool({ spawn: spawnSync }, readJson(file, 'usage: run <jsonFile>'));
     case 'pick': return pickAccount(readJson(file, 'usage: pick <jsonFile>'));
     case 'command': {

@@ -276,7 +276,8 @@ Both tracks.
    unless the repository's own `AGENTS.md` or `CONTRIBUTING.md` asks for one. Commit messages
    otherwise follow those files' conventions. This overrides the host's default trailer and footer.
 6. **Close-out.** Post the `pr-open` checkpoint with the PR link (`pr`, the `html_url` above), snapshot memory, report the PR
-   and issue links, and keep the worktree parked until the PR merges. Never merge.
+   and issue links, and keep the worktree parked until the PR merges. Never merge. Then clean up the
+   scratch directory ([Preflight](SKILL.md#preflight)).
 
 ## Merged close-out
 
@@ -287,6 +288,7 @@ already gone, so a crash in the middle just reruns.
 2. Delete the local branch with `git branch -d <branch>`, from the main checkout (never `-D`).
 3. Post the `closed` checkpoint (`branch`, `head`, `gh`, `pr`); no integrity check runs for it.
 4. Snapshot memory.
+5. Clean up the scratch directory ([Preflight](SKILL.md#preflight)).
 
 A worktree or branch that git refuses to remove is kept and reported.
 
@@ -308,6 +310,8 @@ otherwise report it and stop; nothing is written. `state` and `merged` decide th
   step 5 does and go to [Finish and close-out](#finish-and-close-out). A mismatch goes to
   [Re-approval](#re-approval); its `reapproved` drops `pr`, and the run re-enters Deliver, runs the
   loops it owes and Finish, and only then opens the new PR.
+
+A run that ends here without going on to Finish cleans up the scratch directory ([Preflight](SKILL.md#preflight)).
 
 ## Re-approval
 

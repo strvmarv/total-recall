@@ -255,6 +255,8 @@ Snapshot memory ([Memory](SKILL.md#memory)), then:
    branch stays.
 2. **Choice 2.** The same clean-up, then print the issue link and `/develop <n>`.
 
+When the run ends, clean up the scratch directory ([Preflight](SKILL.md#preflight)).
+
 ## Rules
 
 - Titles and bodies are published from files (`gh api -F title=@file`, `--body-file`) or through
