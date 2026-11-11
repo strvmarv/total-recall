@@ -34,8 +34,8 @@ fi
 BIN=""
 for base in "src/TotalRecall.Host/bin/x64/Release" "src/TotalRecall.Host/bin/Release"; do
   for cand in \
-    "$base/net8.0/$RID/publish/total-recall" \
-    "$base/net8.0/$RID/publish/total-recall.exe"; do
+    "$base/net10.0/$RID/publish/total-recall" \
+    "$base/net10.0/$RID/publish/total-recall.exe"; do
     if [ -f "$cand" ]; then BIN="$cand"; break 2; fi
   done
 done
