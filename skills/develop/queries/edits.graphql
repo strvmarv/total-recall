@@ -1,0 +1,15 @@
+query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      userContentEdits(first: 100, after: $endCursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          editedAt
+          deletedAt
+          diff
+          editor { login }
+        }
+      }
+    }
+  }
+}

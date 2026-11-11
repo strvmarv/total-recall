@@ -20,6 +20,22 @@ test('files ships what the extension reads at runtime', () => {
   for (const dir of ['pi/', 'skills/', 'scripts/', 'bin/']) assert.ok(pkg.files.includes(dir), dir);
 });
 
+test('files ships the develop skill and the reviewer agents it dispatches', () => {
+  assert.ok(pkg.files.includes('skills/'));
+  assert.ok(pkg.files.includes('agents/'));
+  for (const f of [
+    ['skills', 'develop', 'SKILL.md'],
+    ['agents', 'adversarial-reviewer.md'],
+    ['agents', 'counterexample-reviewer.md'],
+  ]) assert.ok(fs.existsSync(path.join(root, ...f)), f.join('/'));
+});
+
+test('the develop skill is reached by the extension command, not by a manifest skill', () => {
+  assert.ok(fs.existsSync(path.join(root, 'skills', 'develop', 'SKILL.md')));
+  assert.equal(pkg.pi.skills, undefined);
+  assert.deepEqual(Object.keys(pkg.pi), ['extensions']);
+});
+
 test('keywords include pi-package (eligibility for the pi package gallery)', () => {
   assert.ok(pkg.keywords.includes('pi-package'));
 });
