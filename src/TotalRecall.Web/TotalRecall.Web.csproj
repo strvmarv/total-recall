@@ -1,6 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
     <RootNamespace>TotalRecall.Web</RootNamespace>
     <AssemblyName>TotalRecall.Web</AssemblyName>
     <Nullable>enable</Nullable>

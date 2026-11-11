@@ -1,0 +1,11 @@
+<Project>
+  <!--
+    The one place the target framework is declared. Every project under src/ and
+    tests/ (C# and F#) inherits it, so moving to a newer .NET is a one-line change
+    here plus the publish-folder paths in .github/workflows/release.yml and
+    scripts/ui-aot-smoke.sh, which name the framework folder.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+</Project>
