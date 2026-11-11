@@ -90,6 +90,14 @@ const FILES = {
     ],
     goldens: [],
   },
+  'review-contract.md': {
+    headings: ['Dispatch frame', 'Loop rules', 'The final loop', 'Self-review mode', 'Agents'],
+    goldens: [],
+  },
+  'blockers.md': {
+    headings: ['Stop for these', 'Decide and continue', 'At a blocker'],
+    goldens: [],
+  },
   'tutorial.md': {
     h1: '# develop',
     maxLines: 60,
@@ -437,4 +445,28 @@ test('define.md: names the hashes, the comment, the original block, the retry ca
   ]) {
     assert.ok(text.includes(term), `define.md mentions ${term}`);
   }
+});
+
+test('review-contract.md: the frame, the cap, the threshold and the required ending', () => {
+  const text = read('review-contract.md');
+  for (const term of ['round N of ≤ 6', '600', 'VERDICT: GO | NO-GO', 'FINDINGS:', 'at most 3 primary agents, each dispatching at most 1 sub-agent', 'review=self']) {
+    assert.ok(text.includes(term), `review-contract.md mentions ${term}`);
+  }
+  const frame = section(text, 'Dispatch frame');
+  const at = ['Scope', 'Constraints', 'Round', 'Fanout', 'Required ending'].map((w) => frame.indexOf(`**${w}`));
+  assert.ok(at.every((i) => i >= 0), 'all five frame parts exist');
+  assert.deepEqual([...at].sort((a, b) => a - b), at, 'the five frame parts are in order');
+  assert.ok(/^1\. \*\*Scope/m.test(frame) && /^5\. \*\*Required ending/m.test(frame), 'the frame parts are numbered 1 to 5');
+});
+
+test('blockers.md: the six blockers are list items, and the procedure names its fields', () => {
+  const text = read('blockers.md');
+  const stop = section(text, 'Stop for these');
+  const nums = [...stop.matchAll(/^(\d)\. /gm)].map((m) => Number(m[1]));
+  assert.deepEqual(nums, [1, 2, 3, 4, 5, 6], 'blockers 1 to 6 are numbered list items in order');
+  const at = section(text, 'At a blocker');
+  for (const term of ['terminal', 'latest', 'stage', 'blocker', 'branch=-', 'head', 'counted.js select', 'BLOCKED:']) {
+    assert.ok(at.includes(term), `At a blocker mentions ${term}`);
+  }
+  assert.ok(text.includes('terminal'), 'blockers.md names the terminal-only kinds');
 });
