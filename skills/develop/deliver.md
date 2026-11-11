@@ -108,7 +108,8 @@ Both tracks, in order. Steps 1 to 6 are the same numbers as the spec.
    `node <skill dir>/scripts/route.js position <jsonFile>` with `{progress, counts:{tasks, cycles}}`.
    - Plan track: `route.js tasks-for <planShaFile> <tipFile|-> <tasksDone>` (the plan at `planSha` and
      at the tip of `origin/<branch>`, each saved with `ghpin.js run` and `git show`; `-` for no tip)
-     gives `tasks`.
+     gives `tasks`. `route.js count-tasks <planFile>` counts a plan's `### Task <n>:` headings (the plan
+     loop uses it, Plan track step 2).
    - Small track: `regions.js approach <bodyFile> <approachFile>`, then
      `node <skill dir>/scripts/route.js count-cycles <approachFile>` gives the cycle count. A count
      that is not `sequential` is `null`.

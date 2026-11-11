@@ -70,7 +70,8 @@ shell command line. The route comes from the output:
 
 ## Issue entry
 
-An issue argument names an issue; the issue decides the route. GitHub numbers issues and pull
+An issue argument (the `issue` route of Routing, from `args.js parse`) names an issue; the issue
+decides the route. GitHub numbers issues and pull
 requests in one sequence, so read the number with the REST issues endpoint (GraphQL `issue(number:)`
 answers NOT_FOUND for a pull request, which would look like a missing issue):
 
@@ -328,3 +329,22 @@ message or a PR body, whoever makes the commit, unless the repository's own `AGE
 `CONTRIBUTING.md` asks for one. This overrides the host's default trailer and footer. Commit messages
 otherwise follow those files' conventions. The PR body says `Closes #<n>` (`Refs #<n>` when `base` is not
 the default branch). Never merge, rebase or force-push.
+
+## Files
+
+Every other file in the skill, relative to this one:
+
+- [define.md](define.md): Define, from fetch to wrap-up.
+- [deliver.md](deliver.md): Deliver, Finish, After the PR and Re-approval.
+- [handoff.md](handoff.md): the issue after Define, hashes, checkpoints, trust, resume.
+- [ticket-standard.md](ticket-standard.md): what a ticket must meet.
+- [review-contract.md](review-contract.md): the reviewer frame and loop rules.
+- [blockers.md](blockers.md): the only stop list.
+- [profile.md](profile.md): `.github/develop.md` and `/develop initialize`.
+- [tutorial.md](tutorial.md): what `/develop` prints for no argument.
+- Scripts, run as CLIs only (Preflight): [args.js](scripts/args.js), [checkpoints.js](scripts/checkpoints.js),
+  [counted.js](scripts/counted.js), [ghpin.js](scripts/ghpin.js), [history.js](scripts/history.js),
+  [profile.js](scripts/profile.js), [regions.js](scripts/regions.js), [route.js](scripts/route.js); the
+  libraries [golden.js](scripts/golden.js) and [pages.js](scripts/pages.js), never called.
+- GraphQL queries: [comments.graphql](queries/comments.graphql), [edits.graphql](queries/edits.graphql),
+  [renames.graphql](queries/renames.graphql).

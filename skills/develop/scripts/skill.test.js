@@ -13,7 +13,7 @@ const AGENTS_DIR = path.join(REPO, 'agents');
 const ORIGIN = 'strvmarv/total-recall';
 
 // Task 18 sets this to true once every skill file exists; it activates the coverage assertions.
-const COMPLETE = false;
+const COMPLETE = true;
 
 // Later tasks add one entry each. Every listed `## ` heading must be present, every listed golden
 // must parse, and every relative link in a listed file must resolve.
@@ -29,6 +29,7 @@ const FILES = {
       'Progress',
       'Memory',
       'Commits and PRs',
+      'Files',
     ],
     goldens: ['routing', 'pinned-commands'],
   },
@@ -97,6 +98,10 @@ const FILES = {
   'blockers.md': {
     headings: ['Stop for these', 'Decide and continue', 'At a blocker'],
     goldens: [],
+  },
+  'profile.md': {
+    headings: ['Format', 'Loading', 'Verify blocks', 'Initialize'],
+    goldens: ['profile-cases'],
   },
   'tutorial.md': {
     h1: '# develop',
@@ -357,6 +362,31 @@ test('no file under skills/develop or in the two reviewer agents has a forbidden
 });
 
 // ---- content of the sections this task writes ----
+
+test('profile.md: names the path, the default branch and the never-merged PR', () => {
+  const text = read('profile.md').replace(/\s+/g, ' ');
+  for (const term of ['.github/develop.md', 'default branch', 'never merged', 'develop-profile/', 'profile.js parse', 'check-ref-format --branch', 'sh -e -c', 'Node 21', 'gh.account']) {
+    assert.ok(text.includes(term), `profile.md mentions ${term}`);
+  }
+});
+
+test('profile.md: Loading and Initialize carry their rulings', () => {
+  const loading = section(read('profile.md'), 'Loading').replace(/\s+/g, ' ');
+  assert.ok(/warning in Define/.test(loading) && /blocker 6/.test(loading), 'Loading: warning in Define, blocker 6 in Deliver');
+  const init = section(read('profile.md'), 'Initialize').replace(/\s+/g, ' ');
+  for (const term of ['docs', 'workflows', 'issue templates', 'reviewer loop', 'never merged']) {
+    assert.ok(init.includes(term), `Initialize mentions ${term}`);
+  }
+});
+
+test('SKILL.md: the Files section links every other file in the skill', () => {
+  const files = outsideFences(section(read('SKILL.md'), 'Files')).join(' ');
+  const linked = new Set([...files.matchAll(/\]\(([^)\s#]+)\)/g)].map((m) => decodeURIComponent(m[1])));
+  const want = walk(SKILL_DIR)
+    .map((f) => path.relative(SKILL_DIR, f).split(path.sep).join('/'))
+    .filter((f) => f !== 'SKILL.md' && !f.endsWith('.test.js') && !f.startsWith('scripts/fixtures/'));
+  for (const f of want) assert.ok(linked.has(f), `SKILL.md Files links ${f}`);
+});
 
 test('SKILL.md: the Preflight section holds the pinned command forms and the CLI rules', () => {
   const pre = section(read('SKILL.md'), 'Preflight');
