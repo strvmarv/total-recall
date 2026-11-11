@@ -47,6 +47,24 @@ const FILES = {
     ],
     goldens: [],
   },
+  'handoff.md': {
+    headings: [
+      'Hashing and regions',
+      'The issue after Define',
+      'Checkpoints',
+      'Trust',
+      'Resume and routing',
+      'Re-approval',
+      'After the PR',
+    ],
+    goldens: [
+      'normalize-pairs', 'body-pairs', 'region-cases', 'fence-cases', 'limit-cases', 'neutralize-cases',
+      'parse-cases', 'validate-cases', 'carry-cases', 'readback-cases',
+      'perm-cases', 'login-cases', 'comment-count-cases', 'pin-cases', 'flatten-cases', 'flatten-fail-cases',
+      'fetch-commands', 'pages-cases', 'history-cases', 'write-access-cases', 'select-cases',
+      'position-cases', 'task-count-cases', 'tasks-for-cases', 'live-cases', 'route-cases',
+    ],
+  },
   'tutorial.md': {
     h1: '# develop',
     maxLines: 60,
@@ -336,4 +354,21 @@ test('ticket-standard.md: names the practices, the template path, the marker and
   for (const term of ['INVEST', 'Given/When/Then', '.github/ISSUE_TEMPLATE', '<!-- tr-develop:ac-begin -->', '60 lines']) {
     assert.ok(text.includes(term), `ticket-standard.md mentions ${term}`);
   }
+});
+
+test('handoff.md: the sections name the CLIs and the rulings they own', () => {
+  const text = read('handoff.md');
+  const checkpoints = section(text, 'Checkpoints');
+  for (const term of ['checkpoints.js carry', 'checkpoints.js format', 'checkpoints.js readback']) {
+    assert.ok(checkpoints.includes(term), `Checkpoints names ${term}`);
+  }
+  assert.ok(checkpoints.includes('before posting'), 'Checkpoints says the prior progress is taken before posting');
+  const trust = section(text, 'Trust');
+  assert.ok(trust.includes('scratch directory'), 'Trust names the per-run scratch directory');
+  assert.ok(/resumed session is a new run/.test(trust), 'Trust says a resumed session is a new run');
+  assert.ok(section(text, 'Resume and routing').includes('latest'), 'Resume names latest');
+  const reapproval = section(text, 'Re-approval');
+  assert.ok(reapproval.includes('history.js find'), 'Re-approval names history.js find');
+  assert.ok(reapproval.includes('original unavailable'), 'Re-approval covers found:false');
+  assert.ok(/\{ok:false[^}]*\}[^\n]*blocker 3/.test(reapproval), 'Re-approval stops with blocker 3 on {ok:false}');
 });
