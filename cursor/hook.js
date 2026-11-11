@@ -156,15 +156,17 @@ async function postToolUse({ stdinText, loadFloor, environ, platform, fsApi, tmp
   const engine = floor.resolveEngine();
   if (!engine) return ''; // nothing is consumed while the engine is not provisioned
 
-  const dir = markerDir({ tmpdir, username, platform, fsApi, getuid });
-  if (!dir) return '';
-  if (!claimGeneration({ dir, conversationId, generationId, now, fsApi })) return '';
-
+  // The workspace: an existing workspace_roots[0], else CURSOR_PROJECT_DIR. Never process.cwd(): Cursor runs plugin
+  // hooks from the plugin install directory (observed), which would scope the floor to the plugin's own repo.
   const root = Array.isArray(payload.workspace_roots) ? payload.workspace_roots[0] : undefined;
   let cwd;
   if (nonBlank(root) && fsApi.existsSync(root)) cwd = root;
   else if (nonBlank(environ.CURSOR_PROJECT_DIR)) cwd = environ.CURSOR_PROJECT_DIR;
-  else cwd = process.cwd();
+  else return ''; // no usable workspace: say nothing and consume no marker
+
+  const dir = markerDir({ tmpdir, username, platform, fsApi, getuid });
+  if (!dir) return '';
+  if (!claimGeneration({ dir, conversationId, generationId, now, fsApi })) return '';
 
   // No transcript_path: it is null in every observed run, so only the every-N-turns trigger applies.
   const text = await floor.runFloor({

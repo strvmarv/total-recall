@@ -89,7 +89,7 @@ const payload = (o = {}) => JSON.stringify({
   conversation_id: UUID_A, generation_id: UUID_B, tool_name: 'Shell', tool_input: { command: 'echo hi' },
   workspace_roots: ['/proj'], hook_event_name: 'postToolUse', transcript_path: null, ...o,
 });
-const post = (over = {}) => deps({ command: POST_TOOL_USE, stdinText: payload(), ...over });
+const post = (over = {}) => deps({ command: POST_TOOL_USE, stdinText: payload(), environ: { CURSOR_PROJECT_DIR: '/proj' }, ...over });
 
 // ---- session-start ----
 
@@ -156,7 +156,7 @@ test('post-tool-use: the engine gets exactly {session_id: conversation_id, cwd},
 });
 
 test('post-tool-use: store-determining environment variables are always blanked for the floor child', async () => {
-  const environ = { TOTAL_RECALL_HOME: '/x', Total_Recall_Cortex_Pat: 'p', XDG_DATA_HOME: '/d', XDG_CONFIG_HOME: '/c', HERMES_HOME: '/h', HOME: 'C:/h', PATH: '/bin' };
+  const environ = { CURSOR_PROJECT_DIR: '/proj', TOTAL_RECALL_HOME: '/x', Total_Recall_Cortex_Pat: 'p', XDG_DATA_HOME: '/d', XDG_CONFIG_HOME: '/c', HERMES_HOME: '/h', HOME: 'C:/h', PATH: '/bin' };
   const { d, calls } = post({ environ, platform: 'win32' });
   await run(d);
   const env = calls.runFloor[0].env;
@@ -182,16 +182,22 @@ test('post-tool-use: a leading BOM on stdin is stripped', async () => {
   assert.deepEqual(parseOut(await run(d)), { additional_context: 'FLOOR TEXT' });
 });
 
-test('post-tool-use: cwd is an existing workspace_roots[0], else CURSOR_PROJECT_DIR, else the process cwd', async () => {
+test('post-tool-use: cwd is an existing workspace_roots[0], else CURSOR_PROJECT_DIR; with neither the floor is skipped and no marker is consumed', async () => {
   const a = post({ fsApi: memFs({ exists: () => true }), environ: { CURSOR_PROJECT_DIR: '/env-dir' } });
   await run(a.d);
   assert.equal(a.calls.runFloor[0].payload.cwd, '/proj');
   const b = post({ fsApi: memFs({ exists: () => false }), environ: { CURSOR_PROJECT_DIR: '/env-dir' } });
   await run(b.d);
   assert.equal(b.calls.runFloor[0].payload.cwd, '/env-dir');
-  const c = post({ fsApi: memFs({ exists: () => false }), environ: {} });
-  await run(c.d);
-  assert.equal(c.calls.runFloor[0].payload.cwd, process.cwd());
+  const fsC = memFs({ exists: () => false });
+  const c = post({ fsApi: fsC, environ: {} });
+  assert.equal(await run(c.d), '');
+  assert.equal(c.calls.runFloor.length, 0);
+  assert.equal(fsC.files.size, 0);
+  assert.equal(fsC.calls.open.length, 0);
+  const blankEnv = post({ fsApi: memFs({ exists: () => false }), environ: { CURSOR_PROJECT_DIR: '  ' } });
+  assert.equal(await run(blankEnv.d), '');
+  assert.equal(blankEnv.calls.runFloor.length, 0);
   const e = post({ stdinText: payload({ workspace_roots: [] }), environ: { CURSOR_PROJECT_DIR: '/env-dir' } });
   await run(e.d);
   assert.equal(e.calls.runFloor[0].payload.cwd, '/env-dir');
@@ -369,7 +375,7 @@ function copyTree(files) {
   }
   return tree;
 }
-const tmpEnv = (dir) => ({ TEMP: dir, TMP: dir, TMPDIR: dir });
+const tmpEnv = (dir) => ({ TEMP: dir, TMP: dir, TMPDIR: dir, CURSOR_PROJECT_DIR: dir });
 const stdinPayload = payload();
 
 test('process: session-start prints valid JSON, exits 0, writes nothing to stderr', () => {

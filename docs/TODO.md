@@ -389,7 +389,7 @@ Same root cause as the Claude Code `.mcp.json` item above, now with evidence: Co
 - macOS and Linux were not run: the POSIX assumptions are the braced `${PLUGIN_ROOT}` substitution through `sh` and `COPILOT_HOME` resolution. The interactive tool-approval prompt and `copilot plugin update` for a git-sourced marketplace were not observed.
 - `/compact` drops the startup instructions from context and fires no hook; only the floor re-asserts pins. Revisit if Copilot adds a compaction hook that can carry context.
 - No `SessionEnd` nudge (Copilot ignores sessionEnd output), no first-run tutorial.
-- `copilot/hook.js` duplicates three small helpers from `codex/hook.js` (`stripFrontmatter`, `readStdin`, `isMain`); extract shared host-hook helpers when a fourth host lands (Cursor is next).
+- `copilot/hook.js` duplicates three small helpers from `codex/hook.js` (`stripFrontmatter`, `readStdin`, `isMain`); extract shared host-hook helpers (tracked under "Follow-ups from the Cursor CLI host").
 - The `COPILOT_CLI` branches in `hooks/*/run.sh` are dead under the Copilot plugin (the manifest's hooks path replaces `hooks/hooks.json`); remove them if no hand-wired setup needs them.
 
 ### Codex CLI: unobserved or deferred
