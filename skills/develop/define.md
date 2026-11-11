@@ -140,8 +140,9 @@ Both tracks. Write it to [ticket-standard.md](ticket-standard.md), and write the
 1. The person approves the approach in chat. It has at least one `Cycle <n>:` line, and it is at most
    60 lines and 4,000 characters; one that does not fit belongs on the plan track, and Define moves
    it there (Plan track).
-2. Draft the ticket (Plan track, Draft the ticket), with the approach in the collapsed block at the
-   bottom of the body, between the approach markers
+2. Draft the ticket (Plan track, Draft the ticket). The pin's `branch` is `feat/<slug>` (`fix/<slug>`
+   for a bug), the name Deliver creates; nothing is created or pushed here. Put the approach in the
+   collapsed block at the bottom of the body, between the approach markers
    ([Markers](ticket-standard.md#markers)). Check it with
    `node <skill dir>/scripts/regions.js approach <bodyFile> <approachFile>` (`ok` with `lines` and
    `chars`; `too-long` means the plan track) and
@@ -173,14 +174,14 @@ Ask for exactly one choice:
 2. approve and publish only;
 3. request changes. Ticket text only: redraft and present again. The spec or the approach: edit it,
    re-run its loop on the change, present again;
-4. stop and publish nothing. On an existing issue post one short comment, best effort ("Define
-   stopped at sign-off; nothing published"), and leave the assignment as it is. The worktree is left
-   where it is and its path is reported; a later Define never reuses it.
+4. stop and publish nothing. On an issue Define claimed (an existing issue, not an outsider's issue
+   tracked in a new one) post one short comment, best effort ("Define stopped at sign-off; nothing
+   published"), and leave the assignment as it is. The worktree is left where it is and its path is
+   reported; a later Define never reuses it.
 
 **Only an explicit 1 or 2, from the person at the keyboard, is approval.** On approval, re-check that
 what is about to be published is what was shown: the spec commit (`git rev-parse HEAD` equals the
-shown `approvedSha`, the tree is clean, and `git diff --quiet <approvedSha> HEAD -- <spec>` exits 0)
-and the hashes (recomputed from the files, equal to the shown ones). A mismatch goes back to the
+shown `approvedSha` and the tree is clean) and the hashes (recomputed from the files, equal to the shown ones). A mismatch goes back to the
 presentation.
 
 ## Publish
@@ -188,13 +189,17 @@ presentation.
 1. **Hashes.** Compute `bodyHash` and `acHash` locally from the title and body files that were
    previewed and approved (`regions.js body`, `regions.js ac`), never from a re-read and never by hand.
 2. **Branch** (plan track). Find a free name: `git ls-remote --heads origin <branch>` (pinned, through
-   `ghpin.js run` with `out`); a non-empty answer means it is taken, so suffix `-2`, `-3` and rename
+   `ghpin.js run` with `out`); a non-empty answer means it is taken, unless the tip is this run's own
+   (a commit this run pushed earlier): then keep the name. Otherwise suffix `-2`, `-3` and rename
    the local branch. Then push it (`git push origin <branch>`, pinned; never force). The pin's `branch`
    is this final name.
 3. **Issue.** From files, through `ghpin.js run`, in one call:
    - new: `["api","repos/<owner>/<repo>/issues","-F","title=@<titleFile>","-F","body=@<bodyFile>","-f","assignees[]=<login>"]`,
      adding `-f labels[]=<name>` for each existing label and `-f type=<name>` when the repository
-     offers types;
+     offers types, and `out` set to `<dir>/created.json`. The run result carries no body, so the
+     saved file is the only record of the new issue: read it (the Read tool) and take its `number`
+     (this is `<n>` from here on, in steps 4, 5 and 8 and in Wrap-up) and its `html_url` (the link
+     to print). A failed call leaves no file and creates no issue;
    - existing: one edit, `["api","-X","PATCH","repos/<owner>/<repo>/issues/<n>","-F","title=@<titleFile>","-F","body=@<bodyFile>"]`.
      Add a label the issue lacks with `POST repos/<owner>/<repo>/issues/<n>/labels`.
 4. **Read it back.** Fetch the issue (`issue`, with `out`), run
@@ -206,8 +211,9 @@ presentation.
      link `https://github.com/<owner>/<repo>/blob/<approvedSha>/<spec>`. It holds no `tr-develop/v1`
      line;
    - fields: the pins above, `definedBy=<login>` and `definedAt` (ISO-8601 UTC). Check them with
-     `checkpoints.js validate` (`approvedSha` reachable from `origin/<branch>`, `repo` and `base` from
-     `origin`);
+     `checkpoints.js validate` (`repo` and `base` from `origin`; build `reachable` with
+     `git merge-base --is-ancestor <approvedSha> origin/<branch>` (plan track; pinned), and include the sha only
+     when it exits 0; the input shape is in [Checkpoints](handoff.md#checkpoints));
    - write the comment: `node <skill dir>/scripts/checkpoints.js format <jsonFile>` with
      `{phase:"defined", fields, summaryFile, outFile, lineFile}`;
    - post `outFile` (`comment-post`), fetch the comment (`comment-body`) and run
@@ -221,8 +227,10 @@ presentation.
 8. Print the issue link.
 
 **Going back to the presentation after a hash mismatch is tried at most twice**, so a bot that keeps
-rewriting the body ends in a stop and not a loop: a further mismatch is blocker 6 (terminal report,
-nothing more posted). A later pass updates the issue already created, not a second one, and posts a
+rewriting the body ends in a stop and not a loop: a further mismatch is blocker 6 (terminal report).
+If no `defined` was posted yet, nothing is posted; if the pin was already posted (the step 6 re-read
+failed), post a `blocked` checkpoint, because a blocker with a counted pin posts `blocked`
+([Checkpoints](handoff.md#checkpoints)). A later pass updates the issue already created, not a second one, and posts a
 new `defined`, which supersedes the earlier pin.
 
 Define runs only under an account that passed preflight check 4, so a person without write access
