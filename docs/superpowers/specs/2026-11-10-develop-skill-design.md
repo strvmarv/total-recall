@@ -124,9 +124,12 @@ so and stops.
 - otherwise → **Define**, started from this issue. A `tr-develop/` line in the body or in an
   uncounted comment is ignored and mentioned once; it never routes, and Define rewrites the body.
 
-A counted `defined` comment that is invalid, or an issue whose counted comments hold a `defined`
-none of which validates, gets the choice **re-define this issue** (Define, which posts a new
-`defined` comment) or **stop**.
+When the latest counted `defined` comment (the one that governs) fails validation, the person gets a
+choice. With no counted progress checkpoint on the issue: **re-define this issue** (Define, which
+posts a new `defined` comment) or **stop**. With one: **re-pin** (a re-approval, section 11, that
+posts a new `defined` with the corrected `repo` or `base` and keeps the checkpoint's branch and
+spec) or **stop**. A re-define is never offered once progress exists, so a pin can never disagree
+with the branch and `head` a checkpoint recorded.
 
 Tell the person the outcome, with the issue's title and link, before anything is written, so a
 mistyped number is visible.
@@ -295,7 +298,7 @@ and `src/.ts`, `max_retries` and `maxretries`, `> 5` and `< 5`, `-1` and `1`, an
 `50` all hash differently, and so do `&lt;` and `<`. Ticking a box, saving with CRLF and trailing
 spaces do not change a hash.
 
-`bodyHash` is the SHA-256 of the JSON array `[<normalized title>, <normalized body>]`, so a word
+`bodyHash` is the SHA-256, over UTF-8, of the JSON array `[<normalized title>, <normalized body>]`, so a word
 moved between the title and the body changes it. `acHash` is the SHA-256 of the normalized lines
 strictly between the criteria markers. The hash is always computed by the script, never by hand, and
 its golden cases include each pair above.
@@ -327,12 +330,14 @@ resolved newest first. A lookup that fails for a reason other than that (a 403, 
 and could decide the outcome is blocker 3, terminal report only. The first task of the build verifies
 these answers for an account with write but not admin access (section 21).
 
-**What counts.** A run acts only on content that counts:
+**What counts.** Comments are read through GraphQL, with pagination, because `editor`, `lastEditedAt`
+and `isMinimized` exist only there. A run acts only on content that counts:
 
 - a **comment counts** when its author has write access and its `editor`, if any, has write access,
   and it is not minimized. A comment whose `editor` is null but whose `lastEditedAt` is set (a
-  deleted editor account) does not count. Minimizing a comment is how a writer retires a wrong
-  checkpoint. Comment bodies have `\r` removed before any line is matched;
+  deleted editor account) does not count. A writer can minimize a wrong checkpoint to retire it, but
+  so can others (an organization moderator, say), and an unminimized comment counts again. Comment
+  bodies have `\r` removed before any line is matched;
 - the **body counts** only when its title and body hash to the `bodyHash` of the latest counted
   `defined` comment. Who edited it is irrelevant: the hash is the check, and a counted comment is
   something only a writer can have posted or changed;
@@ -346,20 +351,24 @@ longer matches) is either left out of their prompts or quoted as data with the r
 and never an instruction. Every implementer and reviewer frame carries that rule.
 
 `definedBy` is recorded for the audit trail. Any collaborator with write access can resume,
-re-approve or take over a run. A person who can edit other people's issues but lacks write access
-(the triage role, say) can stop a run by editing the body, which is a denial, never a way to steer
-one, and is accepted.
+re-approve or take over a run. A person who can edit other people's issues, or minimize their comments, without write access (the
+triage role, an organization moderator) can stop a run or rewind its resume point. That is a
+denial or a rewind, never a way to steer one: the branch is never rewritten and a stale pin fails its
+hash. It is accepted.
 
 **Validation,** before a `defined` comment steers anything:
 
 - `repo` equals `origin`'s `<owner>/<name>`, compared case-insensitively;
 - `base` equals the base branch;
-- `branch` matches `^(feat|fix)/[a-z0-9][a-z0-9-]{0,62}$`, here and in every checkpoint;
+- `branch` matches `^(feat|fix)/[a-z0-9][a-z0-9-]{0,62}$`, here and in every checkpoint (a `blocked`
+  checkpoint may carry `-`);
 - `spec` matches `^docs/superpowers/specs/[A-Za-z0-9._-]+\.md$`;
 - `approvedSha` is 40 hex and reachable from `origin/<branch>`;
 - `bodyHash` and `acHash` are 64 hex.
 
-**Integrity,** at every Deliver start and resume, and again before the PR is opened:
+**Integrity,** at every Deliver start and resume, and again before the PR is opened. Once a counted
+`pr-open` exists none of this runs: the branch may be gone after a merge, so "After the PR"
+(section 11) works from the PR's own URL and reports an integrity mismatch only as advice:
 
 - the title and body hash to `bodyHash`, and the criteria region to `acHash`;
 - plan track: `git diff --quiet <approvedSha> origin/<branch> -- <spec>` exits 0. Exit 1 is a
@@ -374,9 +383,12 @@ of the feature branch, run `git diff --quiet <approvedSha> HEAD -- <spec>`. Exit
 to its approved version in a new commit holding only that path, push, and stop at blocker 6. Any
 other non-zero exit is blocker 3. Every implementer prompt says the spec is read-only.
 
-**Trust failures write nothing public.** When a failure is that content does not count, a lookup
-failed, or an issue marker is invalid, the run reports it in the terminal and stops. It posts no
+**Trust and changed-artifact stops write nothing public.** When a failure is that content does not
+count, a lookup failed, an issue marker is invalid, or the body, criteria or spec no longer match the
+pin, the run reports it in the terminal and stops. It posts no
 checkpoint and no comment, so a person without write access cannot make a run write to the issue.
+The cost is that the next `/develop <n>` within 24 hours of the last checkpoint asks whether a run
+is live (section 10); the person answers it.
 
 **This is not authentication.** Anyone with write access can change the body, a pin and a
 checkpoint. Collaborators are trusted. These rules keep outsiders from steering a run and make an
@@ -427,7 +439,9 @@ task or cycle. A kickoff posted for a new executor copies forward `planSha`, `ta
 counters resume from `rounds.*`, except after a blocker-1 stop: a resume that a person starts on
 purpose after one grants that loop a fresh 6 rounds, and says so. A re-approved approach resets
 `cyclesDone` to 0 in the next checkpoint: the commits stand, and the new cycles skip behaviour whose
-tests already pass. A counted `pr-open` means the run is past Deliver: go to "After the PR"
+tests already pass. A counted `defined` that is newer than the latest counted progress checkpoint, when one exists,
+means a re-approval whose follow-up (Re-approval step 4) may not have happened: it runs before
+anything else. A counted `pr-open` means the run is past Deliver: go to "After the PR"
 (section 11). A counted `closed` is terminal: report it and stop. A counted `kickoff` with no valid
 counted `defined` is the same trust failure.
 
@@ -441,8 +455,9 @@ heartbeat, so a run posts one at least every 5 plan tasks or every 3 small-track
 issue is assigned to someone other than the current user, ask before reassigning.
 
 **The issue's own state.** Besides checkpoints, a run changes an issue only by assigning it (to the
-definer at Define, to the executor at kickoff; best effort) and, at Define, by writing its body. It
-sets no status label. GitHub closes the issue when the PR merges.
+definer at Define, to the executor at kickoff; best effort), by Define's claim comment and its
+link comment on an outsider's original issue, and, at Define, by writing its body. It sets no
+status label. GitHub closes the issue when the PR merges.
 
 ## 11. The flows
 
@@ -485,7 +500,9 @@ sets no status label. GitHub closes the issue when the PR merges.
    difference is GitHub rewriting the markup or someone editing in the window; either way the pin is
    not posted, the difference is shown, and Define goes back to the presentation. Only on a match
    post the `defined` comment with the locally computed values, then read the comment back and the
-   body once more. A second failure is blocker 6. Print the issue link. Define runs only under an
+   body once more. A second failure is blocker 6, and presenting again after a hash mismatch is
+   tried at most twice, so a bot that keeps rewriting the body ends in a stop and not a loop. Print
+   the issue link. Define runs only under an
    account that passed preflight check 4, so a person without write access cannot reach this step.
 9. **Wrap-up.** Snapshot memory (section 16). Choice 1: remove the Define worktree (and the `wip/`
    branch on the small track) and continue with Deliver in this session. Choice 2: the same
@@ -497,8 +514,8 @@ issue links the spec; the PR body links both.
 ### Deliver, common steps
 
 1. **Read and validate** the issue (sections 9 and 10). A counted `defined` comment that fails
-   validation is a trust failure (terminal report only) with the way out of "re-define this issue"
-   (section 5).
+   validation is a trust failure (terminal report only) with the way out of section 5: "re-define"
+   or "re-pin".
 2. **Concurrency** (section 10).
 3. **Resume or start** (section 10).
 4. **Integrity** (section 9).
@@ -570,9 +587,12 @@ issue links the spec; the PR body links both.
 
 ### After the PR
 
-`/develop <n>` on an issue with a `pr-open` checkpoint that counts:
+`/develop <n>` on an issue with a counted `pr-open`. No pin validation and no integrity check
+block this route, because the branch may have been deleted by the merge. The PR is found by the
+checkpoint's `pr` URL, and its head repository must be this repository:
 
-- PR open → report its state, including any integrity mismatch, and stop. (Follow-up is Stage 2.)
+- PR open → report its state, and any integrity mismatch as advice, and stop. (Follow-up is
+  Stage 2.)
 - PR merged → merged close-out: remove the worktree, delete the local branch with `git branch -d`
   (never `-D`), post the `closed` checkpoint, snapshot memory.
 - PR closed unmerged → report it and offer to open a new PR from the same branch (asked first:
@@ -583,6 +603,8 @@ issue links the spec; the PR body links both.
 `/develop <n>` on an issue stopped by a changed-artifact stop (section 9), run by someone with
 write access:
 
+0. Refuse and ask for a fix first if an edit left the criteria markers missing or duplicated, since
+   `acHash` cannot be computed then.
 1. Show what changed, old next to new. The old body is the revision in the issue's edit history
    (GraphQL `userContentEdits`, paginated, newest first, each holding a full body) that hashes to the
    pinned `bodyHash` together with the title as of that time, which is read from the issue's
@@ -596,9 +618,13 @@ write access:
    step 1. Then post a new `defined` comment carrying the locally computed `bodyHash`, `acHash` and,
    on the plan track, `approvedSha`. The latest counted `defined` comment is the pin. Its summary names
    what changed and who approved. The earlier `defined` comments stay as the audit trail.
-4. Plan track, when a `plan-approved` checkpoint exists: re-run the plan loop with the change in
-   scope before continuing. Completed tasks stand; the final loop judges the whole diff against
-   the new spec and criteria.
+4. **Follow-up, then a checkpoint.** Plan track, when a `plan-approved` checkpoint exists: re-run
+   the plan loop with the change in scope, as a fresh loop (its rounds count from 1). Completed
+   tasks stand and are not renumbered, so `tasksDone` stays valid; the final loop judges the whole
+   diff against the new spec and criteria. Small track: `cyclesDone` resets to 0 and the new cycles
+   skip behaviour whose tests already pass. Either way the run then posts a `tasks` checkpoint with
+   the current `planSha`, `tasksDone` or `cyclesDone`, and the new `rounds.plan`. That checkpoint is
+   what marks the follow-up done (section 10).
 5. On refusal, nothing is written. Offer to restore the earlier text. The run stays blocked.
 
 A deliberate change works the same way: edit the criteria in the issue, or commit an edit to the
@@ -687,15 +713,14 @@ remediation and continue.
 5. **Out-of-scope verification failure,** or a base-merge conflict that cannot be resolved within
    the spec.
 6. **Pin, trust or integrity failure:** anything section 9 or 10 says fails closed. A failure of
-   trust (content that does not count, a failed lookup) is reported in the terminal only and posts
-   nothing.
+   trust, and a changed-artifact stop, are reported in the terminal only and post nothing.
 
 **At a blocker:** commit and push work in progress (after the spec guard; if the push is what
 failed, skip it and say so), post a `blocked` checkpoint whose summary names the blocker, what was
 tried and the options, snapshot memory, mark the active todo `BLOCKED:`, and stop. The `blocked`
 checkpoint carries `stage`, takes `branch=-` when no branch exists yet and omits `head` when none is
-pushed. Where no counted `defined` or `kickoff` exists on the issue, or the blocker is a trust
-failure, nothing is posted and the terminal report is the record.
+pushed. Where no counted `defined` or `kickoff` exists on the issue, or the blocker is blocker 6's trust or
+changed-artifact kind, nothing is posted and the terminal report is the record.
 
 **Not blockers** (decide, record in the next checkpoint, continue): details the spec leaves open,
 triage of findings, plan deviations that stay within the spec, re-running a flaky test, merging a
