@@ -806,7 +806,7 @@ test('cleanup: on Windows the temp directory is compared case-insensitively', ()
 });
 
 test('cleanup: refuses a path outside the temp directory and deletes nothing', () => {
-  const outside = fs.mkdtempSync(path.join(path.dirname(os.tmpdir()), 'develop-outside-'));
+  const outside = fs.mkdtempSync(path.join(process.cwd(), 'develop-outside-'));
   fs.writeFileSync(path.join(outside, MARKER), '');
   try {
     assert.deepEqual(cleanup(outside), NOT_SCRATCH);
