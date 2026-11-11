@@ -196,6 +196,7 @@ test('carry-cases golden covers the brief\'s named cases', () => {
   for (const needle of [
     'reapproved omits tasksDone', 'reapproved after final-approved without rounds.final',
     'reapproved replaces rounds.plan', 'kickoff omits planSha', 'kickoff with a null prior',
+    'kickoff omits rounds.final', 'kickoff carries rounds.final',
     'blocked-only history', 'no prior key',
   ]) {
     assert.ok(names.some((n) => n.includes(needle)), `golden case "${needle}"`);

@@ -81,6 +81,9 @@ const NEVER_ON_REAPPROVED = ['rounds.final', 'pr'];
 /** Fields a new executor's `kickoff` or a `reapproved` must carry forward from the latest progress. */
 const CARRY_KEYS = ['plan', 'planSha', 'tasksDone', 'cyclesDone', 'rounds.plan', 'deferred'];
 
+/** A new executor's `kickoff` also resumes the final loop; a `reapproved` invalidates it and never carries it. */
+const KICKOFF_CARRY_KEYS = [...CARRY_KEYS, 'rounds.final'];
+
 /** Order of keys in a formatted line: `branch` first, then these, then unknown keys sorted. */
 const KEY_ORDER = [
   'branch', 'track', 'repo', 'base', 'bodyHash', 'acHash', 'definedBy', 'definedAt',
@@ -234,7 +237,8 @@ export function checkCarry(cp, prior) {
   }
   if (cp.phase !== 'kickoff' && cp.phase !== 'reapproved') return { ok: true };
   if (prior === null) return { ok: true };
-  for (const key of CARRY_KEYS) {
+  const keys = cp.phase === 'kickoff' ? KICKOFF_CARRY_KEYS : CARRY_KEYS;
+  for (const key of keys) {
     if (Object.hasOwn(prior.fields, key) && !Object.hasOwn(cp.fields, key)) {
       return { ok: false, error: 'missing', key };
     }
