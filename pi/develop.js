@@ -3,7 +3,7 @@
 // The skill is not a pi manifest skill (a manifest skill would be advertised to subagent
 // children too), so the extension registers /develop itself. The command implements no
 // behaviour: it sends the model a message that names skills/develop/SKILL.md and carries
-// the arguments verbatim; the skill's Routing section decides what the arguments mean.
+// the arguments verbatim at the end; the skill's Routing section decides what the arguments mean.
 
 /**
  * The user message the command sends: read the skill, follow it, and here are the arguments
@@ -13,9 +13,11 @@ export function developText(args, developSkillPath) {
   const raw = String(args ?? '');
   const head = `Run the develop skill: read ${developSkillPath} and follow it.`;
   if (raw.trim() === '') {
-    return `${head}\nThe command was given no arguments, so follow the skill's route for no arguments: print the tutorial.`;
+    return `${head}\nThe command was given no arguments: run the skill's Routing with an empty argument, which routes to the tutorial.`;
   }
-  return `${head}\nThe arguments follow, verbatim, between the marker lines:\n<<<ARGUMENTS\n${raw}\nARGUMENTS>>>`;
+  // The argument text is the last thing in the message, so no end marker is needed and nothing
+  // inside the arguments can end it early.
+  return `${head}\nThe argument text is everything after this line, to the end of the message, verbatim:\n${raw}`;
 }
 
 /**
