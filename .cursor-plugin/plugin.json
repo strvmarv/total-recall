@@ -2,11 +2,12 @@
   "name": "total-recall",
   "description": "Multi-tiered memory and knowledge base for TUI coding assistants",
   "version": "4.2.3",
+  "author": { "name": "strvmarv" },
+  "homepage": "https://github.com/strvmarv/total-recall",
+  "repository": "https://github.com/strvmarv/total-recall",
+  "license": "MIT",
+  "keywords": ["memory", "knowledge-base", "mcp", "cursor"],
   "skills": "./skills/",
-  "hooks": "./hooks/hooks-cursor.json",
-  "mcpServers": {
-    "total-recall": {
-      "command": "total-recall"
-    }
-  }
+  "hooks": "./cursor/hooks.json",
+  "mcpServers": "./cursor/mcp.json"
 }

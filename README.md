@@ -94,6 +94,10 @@ pi install git:github.com/strvmarv/total-recall   # from main
 
 The extension registers the MCP server, injects the startup instructions, runs the pinned-directive floor, and adds a `/total-recall` command. See [INSTALL.md](INSTALL.md#pi) for details and known gaps.
 
+### Cursor CLI
+
+Copy the repository to `~/.cursor/plugins/local/total-recall` and restart Cursor (Windows; see [INSTALL.md](INSTALL.md#cursor) for approval with `--approve-mcps`, the first-call timeout and other limits). The plugin registers the MCP server, injects the startup instructions, and runs the pinned-directive floor on tool-using turns.
+
 ### Codex CLI
 
 ```bash
@@ -208,7 +212,7 @@ Per-host support:
 |---|---|---|
 | Claude Code | Active | `UserPromptSubmit` hook → `additionalContext` |
 | Copilot CLI | Active (turn-count trigger only) | `userPromptSubmitted` hook (`copilot/hooks.json` → `copilot/hook.js`) → `additionalContext` (observed on 1.0.98-2; Copilot's docs say this event ignores it) |
-| Cursor | Layered fallback | session-start injection + skill-guided `session_refresh` (Cursor's `beforeSubmitPrompt` is block-only and cannot inject context) |
+| Cursor | Active on tool-using turns (turn-count trigger only) | `postToolUse` hook (`cursor/hooks.json` → `cursor/hook.js`) → `additional_context` (Cursor's CLI fires no per-prompt hook, and `beforeSubmitPrompt` cannot inject) |
 | Gemini CLI | Active | `BeforeAgent` hook → `hookSpecificOutput.additionalContext` |
 | pi | Active (turn-count trigger only) | pi extension: `before_agent_start` → hidden context message; `/total-recall` command |
 | Codex CLI | Active (turn-count trigger only) | `UserPromptSubmit` hook (`codex/hooks.json` → `codex/hook.js`) → `additionalContext` |
@@ -225,7 +229,7 @@ Per-host support:
 |---|---|---|
 | Claude Code | Full | Native plugin, session hooks, auto-import |
 | Copilot CLI | Core (known gaps in [INSTALL.md](INSTALL.md#github-copilot-cli): turn-count floor only, no `session_end`, server-side project scope, nothing re-injected after `/compact`) | `copilot plugin install` plugin: MCP server, startup instructions, pinned-directive floor, auto-import from Copilot memory files |
-| Cursor | Full | Plugin wrapper, SessionStart hook; run `/total-recall:commands compact` manually — no SessionEnd hook |
+| Cursor | Core (known gaps in [INSTALL.md](INSTALL.md#cursor): floor only on tool-using turns, the first `session_start` can hit Cursor's 60 s MCP limit, no custom store, no `session_end`, Windows only so far) | Local plugin: MCP server (workspace cwd), startup instructions, pinned-directive floor |
 | OpenCode | Full | Plugin wrapper, auto-import from OpenCode project and agent files |
 | pi | Full (known gaps in [INSTALL.md](INSTALL.md#pi): turn-count floor only, no `session_end`, `compact --fast`) | `pi install` package: MCP server, startup instructions, pinned-directive floor, `/total-recall` command |
 | Codex CLI | Full (known gaps in [INSTALL.md](INSTALL.md#codex-cli): turn-count floor only, no `session_end`, hooks need a one-time trust review) | `codex plugin add` plugin: MCP server, startup instructions, pinned-directive floor |

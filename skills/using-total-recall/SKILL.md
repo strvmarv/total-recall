@@ -110,7 +110,7 @@ per-turn pinned floor (where the host supports it — see the capability matrix 
 Additionally: when the user makes a **significant task switch** (a clearly new
 piece of work), call `session_refresh` once. This re-prepends the pinned block
 and refreshes hot-tier context near the current generation point. On hosts
-without a per-turn floor (e.g. Cursor) this is the primary way pinned directives
+without a per-turn floor (for example Cline or Windsurf) this is the primary way pinned directives
 stay salient — so do it on task switches there especially.
 
 ### Session End

@@ -96,7 +96,7 @@ of transcript growth (where the host exposes a transcript). Set `floor_enabled =
 |------|----------------|-----------|
 | Claude Code | Active | `UserPromptSubmit` → `additionalContext` |
 | Copilot CLI | Active (turn-count trigger only) | `userPromptSubmitted` hook (`copilot/hook.js`) → `additionalContext` |
-| Cursor | Layered fallback | session-start + skill-guided `session_refresh` |
+| Cursor | Active on tool-using turns (turn-count trigger only) | `postToolUse` hook (`cursor/hook.js`) → `additional_context` |
 | Kiro | Active | `UserPromptSubmit` command hook → pinned-floor (plain-text STDOUT); `SessionStart` agent hook → `session_start` tool; `Stop` agent hook → capture; `always` steering → persistent `session_start` instruction |
 | Gemini CLI | Active | `BeforeAgent` hook → `hookSpecificOutput.additionalContext`; `GEMINI.md` → persistent `session_start` instruction |
 | pi | Active (turn-count trigger only) | pi extension: `before_agent_start` → hidden context message; `/total-recall` command |
