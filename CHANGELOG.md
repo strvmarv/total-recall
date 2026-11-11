@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Copilot CLI host support.** `copilot plugin install` now gives Copilot CLI the startup
+  instructions and the per-turn pinned-directive floor, not just the tools. New
+  `copilot/hooks.json` + `copilot/hook.js` (node hooks: `sessionStart` injects the commands
+  skill as `additionalContext`; `userPromptSubmitted` runs `pinned-floor` through the
+  provisioned engine, turn-count trigger only). Observed working on Copilot CLI 1.0.98-2
+  (Windows, `-p` and interactive). The Claude-format hooks never ran under Copilot on
+  Windows (PowerShell expands `$CLAUDE_PLUGIN_ROOT` to nothing). Known gaps are in INSTALL.md.
+
 - **Codex CLI harness support.** `codex plugin marketplace add strvmarv/total-recall-marketplace`
   then `codex plugin add total-recall@strvmarv-total-recall-marketplace` installs total-recall into
   [Codex CLI](https://developers.openai.com/codex). A new `.codex-plugin/plugin.json`
@@ -51,6 +59,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pi-package` npm keyword and the `pi/` directory in the published files.
 
 ### Changed
+
+- The Copilot manifest moved from `.copilot-plugin/plugin.json` (which Copilot CLI never read)
+  to `.github/plugin/plugin.json`, which Copilot finds before `.claude-plugin/plugin.json`; its
+  `hooks` path replaces `hooks/hooks.json` for Copilot. The release version-sync list still
+  has seven files (the path changed).
 
 - `skills/commands/SKILL.md`: the pinned-floor host table gains a `pi` row, the
   growth-trigger sentence is qualified for hosts without a transcript, and

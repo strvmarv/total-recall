@@ -138,6 +138,37 @@ This requires `npm install -g @strvmarv/total-recall` (or `@beta`) so the `total
 
 ## GitHub Copilot CLI
 
+### Option A: Plugin install (recommended)
+
+[Copilot CLI](https://docs.github.com/en/copilot/concepts/agents/about-copilot-cli) installs total-recall as a plugin from the total-recall marketplace. No `mcp-config.json` or hooks editing is needed:
+
+```bash
+copilot plugin marketplace add strvmarv/total-recall-marketplace
+copilot plugin install total-recall@strvmarv-total-recall-marketplace
+```
+
+Then start a new session. The git install carries no engine binary: the MCP server downloads and verifies it on first launch (a few seconds), and tools return a "not ready" result until it is there; the pinned-directive floor stays silent until then. This works once `strvmarv/total-recall-marketplace` points at a release that contains `.github/plugin/` and `copilot/`; until it does, install from a checkout instead (`copilot plugin marketplace add <path-to-a-marketplace-repo>`, or `copilot --plugin-dir <checkout>` for one session).
+
+**Allow the tools.** Copilot asks for approval before an MCP tool call. Interactively you can approve per call; non-interactively (`copilot -p`) a call that is not allowed is refused ("blocked by permissions") and `session_start` never runs. Allow just this server with `--allow-tool=total-recall` (add it to the command line or alias; avoid `--allow-all-tools`).
+
+What you get in Copilot CLI (observed on GitHub Copilot CLI **1.0.98-2**, Windows, with `-p` and interactively; macOS/Linux are unobserved):
+
+- The `total-recall` MCP server from the plugin's `.mcp.json`, the same file Claude Code uses (Copilot always prefers a root `.mcp.json` over a manifest `mcpServers` block).
+- The startup instructions and capture / retrieve / feedback rules (`skills/commands/SKILL.md`), delivered by a `sessionStart` hook (`copilot/hook.js`) so the model calls `session_start`. Copilot starts the session lazily, with the first prompt.
+- The pinned-directive floor on every prompt (`userPromptSubmitted` hook → `additionalContext`, which Copilot appends to the user message), on the turn-count trigger only (`floor_every_n_turns`, default 6): the hook payload has no transcript path, so the token-growth trigger is not used. Copilot's hooks documentation says command hooks cannot add context on this event; on the tested build they can, so a later build may change this (`docs/TODO.md` names the documented fallback).
+- Skills: `/total-recall:commands <subcommand>` works as in Claude Code.
+
+The manifest is `.github/plugin/plugin.json` (Copilot's documented lookup finds it before `.claude-plugin/plugin.json`); its `hooks` path replaces the Claude-format `hooks/hooks.json`, which cannot run under Copilot on Windows (hook commands run through PowerShell, where bash's `$CLAUDE_PLUGIN_ROOT` expands to nothing).
+
+Known gaps:
+
+- **Server-side project scope.** Copilot starts the server in the plugin directory, so `session_start` resolves the project from there and injects only global pins and the plugin's own project docs, while the floor (which uses the session directory from the hook payload) also includes pins scoped to your repo. A session-directory workaround was rejected because Copilot's session record keeps the original directory after a resume from another one.
+- **Compaction.** `/compact` fires no hook and its summary can drop the startup instructions and the pins; the floor re-asserts the pins on its schedule, but the instructions are not re-injected until the next session.
+- No `SessionEnd` compaction nudge, no first-run tutorial, and the `setup` and `update` subcommands of the commands skill have no Copilot meaning (use `copilot plugin update total-recall@strvmarv-total-recall-marketplace`).
+- The engine's importers read your real `~/.claude`, `~/.copilot` and similar directories regardless of a redirected profile on Windows, so a throwaway test setup still imports your real memories into its own store.
+
+### Option B: MCP server only
+
 Add to your Copilot CLI MCP config (`~/.copilot/mcp-config.json`):
 
 ```json
@@ -149,6 +180,8 @@ Add to your Copilot CLI MCP config (`~/.copilot/mcp-config.json`):
   }
 }
 ```
+
+This requires `npm install -g @strvmarv/total-recall` so the command is on PATH; you get the tools but no startup instructions and no floor.
 
 ## OpenCode
 

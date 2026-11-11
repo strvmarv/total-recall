@@ -103,6 +103,15 @@ codex plugin add total-recall@strvmarv-total-recall-marketplace
 
 Then trust the two hooks once in `/hooks`. The plugin registers the MCP server, injects the startup instructions, and runs the pinned-directive floor. See [INSTALL.md](INSTALL.md#codex-cli) for tool approval, limitations and troubleshooting.
 
+### Copilot CLI
+
+```bash
+copilot plugin marketplace add strvmarv/total-recall-marketplace
+copilot plugin install total-recall@strvmarv-total-recall-marketplace
+```
+
+Then allow the server for non-interactive runs with `--allow-tool=total-recall`. The plugin registers the MCP server, injects the startup instructions, and runs the pinned-directive floor. See [INSTALL.md](INSTALL.md#github-copilot-cli) for tool approval and known gaps.
+
 ### npm (Any MCP-Compatible Tool)
 
 ```bash
@@ -198,7 +207,7 @@ Per-host support:
 | Host | Per-turn floor | Mechanism |
 |---|---|---|
 | Claude Code | Active | `UserPromptSubmit` hook → `additionalContext` |
-| Copilot CLI | Pending upstream fix | Wired the same way, but Copilot CLI currently ignores the returned `additionalContext` |
+| Copilot CLI | Active (turn-count trigger only) | `userPromptSubmitted` hook (`copilot/hooks.json` → `copilot/hook.js`) → `additionalContext` (observed on 1.0.98-2; Copilot's docs say this event ignores it) |
 | Cursor | Layered fallback | session-start injection + skill-guided `session_refresh` (Cursor's `beforeSubmitPrompt` is block-only and cannot inject context) |
 | Gemini CLI | Active | `BeforeAgent` hook → `hookSpecificOutput.additionalContext` |
 | pi | Active (turn-count trigger only) | pi extension: `before_agent_start` → hidden context message; `/total-recall` command |
@@ -215,7 +224,7 @@ Per-host support:
 | Platform | Support | Notes |
 |---|---|---|
 | Claude Code | Full | Native plugin, session hooks, auto-import |
-| Copilot CLI | Full | Plugin wrapper, session hooks, auto-import from Copilot memory files |
+| Copilot CLI | Core (known gaps in [INSTALL.md](INSTALL.md#github-copilot-cli): turn-count floor only, no `session_end`, server-side project scope, nothing re-injected after `/compact`) | `copilot plugin install` plugin: MCP server, startup instructions, pinned-directive floor, auto-import from Copilot memory files |
 | Cursor | Full | Plugin wrapper, SessionStart hook; run `/total-recall:commands compact` manually — no SessionEnd hook |
 | OpenCode | Full | Plugin wrapper, auto-import from OpenCode project and agent files |
 | pi | Full (known gaps in [INSTALL.md](INSTALL.md#pi): turn-count floor only, no `session_end`, `compact --fast`) | `pi install` package: MCP server, startup instructions, pinned-directive floor, `/total-recall` command |

@@ -377,6 +377,21 @@ After a compaction the pinned block that the floor last injected may be gone fro
 
 `.mcp.json` runs the server with `"cwd": "${CLAUDE_PLUGIN_ROOT}"`. The engine resolves the current project (project-scoped pins, project-docs ingest) from its working directory (`SessionLifecycle` uses `Environment.CurrentDirectory`), so under Claude Code the server-side `session_start` may resolve project scope against the plugin directory (fail-closed to global pins only). The per-turn floor is unaffected: it takes the cwd from the hook payload. Verify on a real Claude Code session and, if confirmed, drop the `cwd` (the Codex and pi registrations deliberately set none).
 
+## Follow-ups from the Copilot CLI host
+
+### Copilot CLI: session directory for the MCP server
+
+Same root cause as the Claude Code `.mcp.json` item above, now with evidence: Copilot starts the server in the plugin directory, so server-side `session_start` never injects pins scoped to the user's repo while the floor does (observed 2026-11-10). Copilot records the session directory in `session-state/<id>/workspace.yaml`, but the file keeps the original directory after `--continue` from another one, so a shim `chdir` was rejected. Revisit if Copilot exposes the session cwd to MCP servers; `cwd: "."` resolves to the session directory in Copilot but would have to live in the shared `.mcp.json`.
+
+### Copilot CLI: unobserved, deferred or fragile
+
+- The floor relies on `userPromptSubmitted` command hooks adding `additionalContext`, which Copilot's hooks docs say is ignored. If a future build drops it, move the floor to `userPromptTransformed` `modifiedTransformedPrompt` (documented, observed working) and re-run the cadence check.
+- macOS and Linux were not run: the POSIX assumptions are the braced `${PLUGIN_ROOT}` substitution through `sh` and `COPILOT_HOME` resolution. The interactive tool-approval prompt and `copilot plugin update` for a git-sourced marketplace were not observed.
+- `/compact` drops the startup instructions from context and fires no hook; only the floor re-asserts pins. Revisit if Copilot adds a compaction hook that can carry context.
+- No `SessionEnd` nudge (Copilot ignores sessionEnd output), no first-run tutorial.
+- `copilot/hook.js` duplicates three small helpers from `codex/hook.js` (`stripFrontmatter`, `readStdin`, `isMain`); extract shared host-hook helpers when a fourth host lands (Cursor is next).
+- The `COPILOT_CLI` branches in `hooks/*/run.sh` are dead under the Copilot plugin (the manifest's hooks path replaces `hooks/hooks.json`); remove them if no hand-wired setup needs them.
+
 ### Codex CLI: unobserved or deferred
 
 - Interactive trust flow (`/hooks` review) and interactive MCP tool approval were not observed (no pseudo-terminal); INSTALL.md follows Codex's documentation there.
