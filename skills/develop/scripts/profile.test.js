@@ -148,3 +148,28 @@ test('SUBCOMMANDS dispatcher: every listed name dispatches, an unlisted word is 
   assert.equal(bad.status, 1);
   assert.deepEqual(run([]).parsed, { ok: false, error: 'unknown subcommand' });
 });
+
+// ---- this repository's own profile ----
+
+test('.github/develop.md: the repository profile parses, pins the account and runs both suites', () => {
+  const root = path.join(HERE, '..', '..', '..');
+  const markdown = fs.readFileSync(path.join(root, '.github', 'develop.md'), 'utf8');
+  const result = parseProfile(markdown);
+  assert.equal(result.ok, true);
+  assert.equal(result.profile.ghAccount, 'strvmarv');
+  assert.equal(result.profile.ticketStandard, 'on');
+
+  // The shim command as `npm run test:shim` lists it, with each directory entry as a quoted glob
+  // (Node 24 rejects directory arguments to `node --test`; the skill's tests sit in scripts/).
+  const shim = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).scripts['test:shim'];
+  const entries = shim.replace(/^node --test /, '').split(/\s+/);
+  const globs = entries.map((entry) => {
+    if (!entry.endsWith('/')) return entry;
+    const dir = entry === 'skills/develop/' ? 'skills/develop/scripts/' : entry;
+    return `"${dir}*.test.js"`;
+  });
+  assert.deepEqual(result.profile.verify, [
+    'dotnet test src/TotalRecall.sln --filter "Category!=Integration"',
+    `node --test ${globs.join(' ')}`,
+  ]);
+});

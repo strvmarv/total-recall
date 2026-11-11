@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- **`develop` skill.** `/develop` defines a change as a reviewed GitHub issue (brainstorm, spec or
+  approach, two reviewer agents, a ticket that meets the ticket standard, pinned by a `defined`
+  comment) and delivers it hands-off as a pull request (plan, build with review at every step,
+  verify, open the PR, stop). It never merges. Every `gh` and network `git` call is pinned to the
+  chosen account on that command only, and a run trusts a `defined` comment by a user with write
+  access, not the issue body. Ships as `skills/develop/` with its zero-dependency Node scripts, the
+  `adversarial-reviewer` and `counterexample-reviewer` agents, and a `/develop` command for pi
+  (`pi/develop.js`). A repository can add a profile at `.github/develop.md` (this one does). The
+  skill's tests run in the `test:shim` job.
+
 ## 4.3.0 - 2026-11-10
 
 ### Added
