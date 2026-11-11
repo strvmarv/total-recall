@@ -1105,10 +1105,24 @@ executor's kickoff that carries a `planSha`. Items 4 and 5 of this list also nee
 
 ## 21. Not yet verified
 
-1. Whether the collaborator-permission endpoint answers for a caller who has write but not admin
-   access. Verified only as the repository's admin. Every trust decision rests on it, so verifying it
-   is Task 2 of the build, before any code that depends on it, as far as the available accounts
-   allow.
+1. Verified 2026-11-10 against `strvmarv/total-recall` (public). The admin account (`strvmarv`)
+   querying `GET /repos/{owner}/{repo}/collaborators/{username}/permission` for itself gets `200`
+   `{"permission":"admin","role_name":"admin"}`; the same admin querying a real GitHub login that is
+   not a collaborator (`ghost`, GitHub's placeholder account, id 10137) also gets `200`
+   `{"permission":"read","role_name":"read"}` (the repository's public default); the same admin
+   querying a login that resolves to no GitHub account at all (`this-user-does-not-exist-zz`) gets
+   `404`. The second logged-in account (`paul-marvin_radancy`, a real login with no collaborator
+   access to this repository) gets `403 Forbidden` from this endpoint for every target tried —
+   itself, `ghost`, and the nonexistent login alike — so a caller without at least collaborator-level
+   access never reaches the "does this login exist" check at all, and a 403 at the caller boundary can
+   mask what would otherwise have been a 404 for the target. **Still open:** a caller token with write
+   but not admin access was not available to test, so whether such a caller gets
+   `{"permission":"write","role_name":"write"}` for itself, as section 9's trust line assumes, remains
+   unverified.
+
+   Every trust decision rests on this endpoint, so verifying it was Task 2 of the build, before any
+   code that depends on it, as far as the available accounts allow.
+
 2. How pi resolves two skills of the same name, and whether a pi package can register agents for
    pi-subagents. If it cannot, preflight on pi offers to copy the two agent files into the user's
    agent directory, on a yes.
@@ -1123,9 +1137,29 @@ executor's kickoff that carries a `planSha`. Items 4 and 5 of this list also nee
    with the chain cleared authenticates as that account, and the same behaviour on macOS and Linux.
    Checking both is owner-run, after the build, on a throwaway branch and only with the owner's
    say-so.
-6. Whether GitHub stores a Markdown body exactly as submitted (it is assumed to), and so whether
-   the local hash and the read-back hash agree; and the exact shape of `RenamedTitleEvent` and
-   `userContentEdits` pagination.
+6. Verified 2026-11-10 against `cli/cli` (public), read-only, over three edited issues (cli/cli#16,
+   #73, #84; 15, 5 and 13 edits respectively) and one never-edited issue (cli/cli#46). `userContentEdits`
+   nodes are ordered newest-first by default (`first:` returns the N most recent edits; `last:` returns
+   the N oldest — fetching `first:2` of a 13-edit connection does **not** reach the oldest entry, which
+   matters for any code that assumes a small `first:` page contains the original text). For all three
+   edited issues the newest node's `diff` (fetched with `first:1`) was byte-identical to the issue's
+   current `body`, and the oldest node (fetched with `last:1`) had an `editedAt` exactly equal to the
+   issue's `createdAt`, holding what reads as the original text — so for these three issues `editedAt`
+   marks when that node's text became (and, until superseded, stayed) current, the newest revision
+   equals the current body, and the oldest revision is the original text; whether this always holds is
+   not established beyond these three samples. `userContentEdits` was **not** `null` for the
+   never-edited issue (cli/cli#46): it returned a non-null connection with `totalCount:0` and
+   `nodes:[]`. Whether the field can ever be `null` itself was not observed either way. `diff` was a
+   non-null string in every one of the 11 edit nodes fetched across cli/cli#16, #73 and #84; `deletedAt`
+   was requested on a subset of those (cli/cli#16's two newest and all five of cli/cli#73's) and was
+   always `null`. A non-null `deletedAt` or a null `diff` did not appear in anything fetched, and
+   whether either ever does is not established from the issues available. `RenamedTitleEvent` (via
+   `timelineItems(itemTypes:[RENAMED_TITLE_EVENT])`, found on cli/cli#68, #73, #74, #75, #77) carries
+   `previousTitle`, `currentTitle` and `createdAt` and no body text; cli/cli#73 has both edits and a
+   rename. The field named `diff` on `UserContentEdit` is, in every node observed, the full body text
+   as it stood after that edit, never a line-oriented patch. **Still open:** whether GitHub stores a
+   Markdown body exactly as submitted, and so whether a local hash and the read-back hash agree, needs
+   a write and was not checked by this read-only task.
 
 ## 22. Left to the builder
 
