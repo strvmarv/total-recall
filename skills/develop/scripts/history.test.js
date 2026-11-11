@@ -221,3 +221,70 @@ test('CLI find: a missing argument is {ok:false}', () => {
   assert.equal(status, 1);
   assert.equal(parsed.ok, false);
 });
+
+// ---- an unusable pin is {found:false} before any page is read (a re-pin with no usable pin proceeds) ----
+
+const GARBAGE_PAGES = [{ errors: [{ message: 'boom' }] }];
+
+for (const [label, pin] of [['not 64 hex', 'nothex'], ['absent', undefined], ['null', null], ['empty', ''], ['uppercase hex', 'A'.repeat(64)]]) {
+  test(`findRevision: a pin that is ${label} is {found:false} even when the pages are garbage`, () => {
+    assert.deepEqual(findRevision(GARBAGE_PAGES, GARBAGE_PAGES, { title: 'T', body: 'b' }, pin), { found: false });
+    assert.deepEqual(findRevision(undefined, undefined, { title: 'T', body: 'b' }, pin), { found: false });
+  });
+}
+
+test('findRevision: a valid pin with garbage pages still throws (fails closed)', () => {
+  assert.throws(() => findRevision(GARBAGE_PAGES, GARBAGE_PAGES, { title: 'T', body: 'b' }, bodyHash('T', 'b')), /history/);
+});
+
+test('CLI find: a non-hex pin with page files that do not exist is {found:false}, exit 0, nothing written', () => {
+  const dir = tmpDir();
+  const outDir = path.join(dir, 'out');
+  const { parsed, status } = run(['find', path.join(dir, 'no-edits.json'), path.join(dir, 'no-renames.json'), path.join(dir, 'no-issue.json'), 'nothex', outDir]);
+  assert.equal(status, 0);
+  assert.deepEqual(parsed, { found: false });
+  assert.equal(fs.existsSync(outDir), false);
+});
+
+test('CLI find: the literal none is the no-pin value, with unreadable and garbage page files', () => {
+  const dir = tmpDir();
+  const garbage = path.join(dir, 'garbage.json');
+  fs.writeFileSync(garbage, 'not json at all');
+  for (const files of [[path.join(dir, 'x'), path.join(dir, 'y'), path.join(dir, 'z')], [garbage, garbage, garbage]]) {
+    const { parsed, status } = run(['find', ...files, 'none', path.join(dir, 'out')]);
+    assert.equal(status, 0);
+    assert.deepEqual(parsed, { found: false });
+  }
+});
+
+test('CLI find: none with no outDir at all is still {found:false}', () => {
+  const dir = tmpDir();
+  const { parsed, status } = run(['find', path.join(dir, 'x'), path.join(dir, 'y'), path.join(dir, 'z'), 'none']);
+  assert.equal(status, 0);
+  assert.deepEqual(parsed, { found: false });
+});
+
+test('CLI find: an absent pin (three file arguments only, or an empty pin) is {found:false} without reading pages', () => {
+  const dir = tmpDir();
+  const files = [path.join(dir, 'x'), path.join(dir, 'y'), path.join(dir, 'z')];
+  for (const args of [['find', ...files], ['find', ...files, ''], ['find', ...files, '', path.join(dir, 'out')]]) {
+    const { parsed, status } = run(args);
+    assert.equal(status, 0, JSON.stringify(args));
+    assert.deepEqual(parsed, { found: false });
+  }
+});
+
+test('CLI find: a valid pin with an unreadable page file is still {ok:false} exit 1', () => {
+  const dir = tmpDir();
+  const issueFile = path.join(dir, 'issue.json');
+  fs.writeFileSync(issueFile, JSON.stringify({ title: 'T', body: 'b' }));
+  const { parsed, status } = run(['find', path.join(dir, 'missing.json'), path.join(FIXTURES, 'renames-pages.json'), issueFile, bodyHash('T', 'b'), path.join(dir, 'out')]);
+  assert.equal(status, 1);
+  assert.equal(parsed.ok, false);
+});
+
+test('CLI find: a valid pin with no outDir is a usage error, ok:false', () => {
+  const { parsed, status } = run(['find', 'a', 'b', 'c', bodyHash('T', 'b')]);
+  assert.equal(status, 1);
+  assert.equal(parsed.ok, false);
+});

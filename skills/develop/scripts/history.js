@@ -1,7 +1,9 @@
 // skills/develop/scripts/history.js — recovers the text a pinned `bodyHash` was computed over
 // (spec section 11, Re-approval step 1). Zero dependencies, ESM, `node:fs` only.
 //
-//   node history.js find <editsRawFile> <renamesRawFile> <issueJsonFile> <pinnedBodyHash> <outDir>
+//   node history.js find <editsRawFile> <renamesRawFile> <issueJsonFile> <pinnedBodyHash|none> <outDir>
+//
+// `none` (or an absent, empty or non-64-hex pin) prints {found:false} without reading any file.
 //
 // The raw files are the output of `gh api graphql --paginate` for `queries/edits.graphql` and
 // `queries/renames.graphql`; the issue file is the REST `issue` read (for the current title and body).
@@ -107,13 +109,14 @@ function titleChain(at, currentTitle, events) {
  * hex is `{found:false}` (a re-pin with no usable pin must still proceed). Pages that fail closed throw.
  */
 export function findRevision(editsPages, renamePages, current, pinnedBodyHash) {
+  // An unusable pin is decided first: it must not depend on the pages being readable.
+  if (typeof pinnedBodyHash !== 'string' || !HASH_RE.test(pinnedBodyHash)) return { found: false };
   const revs = revisions(editsPages);
   const events = renameEvents(renamePages);
   if (!isObject(current) || typeof current.title !== 'string'
     || (current.body !== null && current.body !== undefined && typeof current.body !== 'string')) {
     throw new Error('history: current issue needs a string title and a string or null body');
   }
-  if (typeof pinnedBodyHash !== 'string' || !HASH_RE.test(pinnedBodyHash)) return { found: false };
 
   const candidates = [{ source: 'current', editedAt: null, at: Number.NaN, body: current.body ?? '' }];
   for (const r of revs) candidates.push({ source: 'revision', editedAt: r.editedAt, at: r.at, body: r.diff });
@@ -143,6 +146,10 @@ function readIssue(file) {
 
 function runFind(args) {
   const [editsFile, renamesFile, issueFile, pinned, outDir] = args;
+  // No usable pin (absent, the literal `none`, or not 64 lowercase hex) is "original unavailable":
+  // answer before reading any file, so a re-pin proceeds even when the history fetch failed.
+  const fileArgs = args.length >= 3;
+  if (fileArgs && (pinned === undefined || !HASH_RE.test(pinned))) return { found: false };
   if (!editsFile || !renamesFile || !issueFile || pinned === undefined || !outDir) {
     throw new Error('usage: find <editsRawFile> <renamesRawFile> <issueJsonFile> <pinnedBodyHash> <outDir>');
   }

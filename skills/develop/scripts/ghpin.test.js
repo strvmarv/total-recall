@@ -678,3 +678,69 @@ test('CLI run: validation failures only (the real gh is never spawned here)', ()
   assert.equal(none.status, 1);
   assert.equal(none.parsed.ok, false);
 });
+
+// ---- runTool: the profile read through git (ls-tree and show against origin/main) ----
+
+const GIT_CRED_PREFIX = ['-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential'];
+const PROFILE_READS = [
+  ['ls-tree', '--name-only', 'origin/main', '--', '.github/develop.md'],
+  ['show', 'origin/main:.github/develop.md'],
+];
+
+test('runTool (git profile reads): credential -c options precede the subcommand and no shell is used', () => {
+  for (const args of PROFILE_READS) {
+    const { spawn, calls } = fakeSpawn(OKTOKEN, { status: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) });
+    const r = runTool({ spawn }, { tool: 'git', login: 'strvmarv', args });
+    assert.equal(r.ok, true);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].cmd, 'git');
+    assert.deepEqual(calls[1].args, [...GIT_CRED_PREFIX, ...args]);
+    assert.equal(calls[1].args.indexOf(args[0]), GIT_CRED_PREFIX.length);
+    assert.ok(!calls[1].opts.shell);
+    assert.equal(calls[1].opts.env.GIT_TERMINAL_PROMPT, '0');
+  }
+});
+
+test('runTool (git profile reads): exit 0 with empty stdout writes an empty (zero-byte) out file, replacing a stale one', () => {
+  for (const args of PROFILE_READS) {
+    const dir = tmpDir();
+    const out = path.join(dir, 'profile.out');
+    fs.writeFileSync(out, 'stale');
+    const { spawn } = fakeSpawn(OKTOKEN, { status: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) });
+    const r = runTool({ spawn }, { tool: 'git', login: 'strvmarv', args, out });
+    assert.equal(r.ok, true);
+    assert.equal(r.status, 0);
+    assert.equal(fs.existsSync(out), true);
+    assert.equal(fs.statSync(out).size, 0);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('runTool (git profile reads): exit 0 with output writes the bytes exactly (CRLF, BOM-looking bytes, no trailing newline)', () => {
+  for (const args of PROFILE_READS) {
+    const dir = tmpDir();
+    const out = path.join(dir, 'profile.out');
+    const bytes = Buffer.from([0xef, 0xbb, 0xbf, 0x74, 0x72, 0x0d, 0x0a, 0xc3, 0xa9, 0x0a, 0x78]);
+    const { spawn } = fakeSpawn(OKTOKEN, { status: 0, stdout: bytes, stderr: Buffer.alloc(0) });
+    const r = runTool({ spawn }, { tool: 'git', login: 'strvmarv', args, out });
+    assert.equal(r.ok, true);
+    assert.deepEqual(fs.readFileSync(out), bytes);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('runTool (git profile reads): a non-zero exit removes the out file and reports the status', () => {
+  for (const args of PROFILE_READS) {
+    const dir = tmpDir();
+    const out = path.join(dir, 'profile.out');
+    fs.writeFileSync(out, 'stale');
+    const { spawn } = fakeSpawn(OKTOKEN, { status: 128, stdout: Buffer.from('partial'), stderr: Buffer.from('fatal: path \'.github/develop.md\' does not exist in \'origin/main\'') });
+    const r = runTool({ spawn }, { tool: 'git', login: 'strvmarv', args, out });
+    assert.equal(r.ok, false);
+    assert.equal(r.status, 128);
+    assert.equal(r.httpStatus, null);
+    assert.match(r.stderr, /does not exist/);
+    assert.equal(fs.existsSync(out), false);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
