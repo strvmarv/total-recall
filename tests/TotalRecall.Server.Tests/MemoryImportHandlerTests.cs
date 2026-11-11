@@ -50,6 +50,46 @@ public class MemoryImportHandlerTests
         Assert.Equal(ContentType.Knowledge, store.InsertCalls[1].Type);
     }
 
+    [Theory]
+    [InlineData("""{"content":"no tier"}""", false)]
+    [InlineData("""{"content":"bogus tier","tier":"bogus"}""", false)]
+    [InlineData("""{"content":"no tier kb","content_type":"knowledge"}""", true)]
+    public async Task MissingOrUnrecognisedTier_DefaultsToWarm(string entryJson, bool isKnowledge)
+    {
+        var (handler, store, vec, _) = MakeHandler();
+
+        await handler.ExecuteAsync(ParseArgs("{\"entries\":[" + entryJson + "]}"), CancellationToken.None);
+
+        var call = Assert.Single(store.InsertCalls);
+        Assert.Equal(Tier.Warm, call.Tier);
+        Assert.Equal(isKnowledge ? ContentType.Knowledge : ContentType.Memory, call.Type);
+        Assert.Equal(Tier.Warm, Assert.Single(vec.InsertCalls).Tier);
+    }
+
+    [Fact]
+    public async Task ExplicitColdTier_IsKept()
+    {
+        var (handler, store, _, _) = MakeHandler();
+
+        await handler.ExecuteAsync(
+            ParseArgs("""{"entries":[{"content":"archived","tier":"cold"}]}"""),
+            CancellationToken.None);
+
+        Assert.Equal(Tier.Cold, Assert.Single(store.InsertCalls).Tier);
+    }
+
+    [Theory]
+    [InlineData("""{"content":"legacy pin","tier":"pinned"}""")]
+    [InlineData("""{"content":"sticky pin","tier":"warm","sticky":true}""")]
+    public async Task PinnedOrSticky_StillLandsInHot(string entryJson)
+    {
+        var (handler, store, _, _) = MakeHandler();
+
+        await handler.ExecuteAsync(ParseArgs("{\"entries\":[" + entryJson + "]}"), CancellationToken.None);
+
+        Assert.Equal(Tier.Hot, Assert.Single(store.InsertCalls).Tier);
+    }
+
     [Fact]
     public async Task Dedup_ByContent_WithinBatch()
     {

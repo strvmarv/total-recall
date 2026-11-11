@@ -130,7 +130,9 @@ public sealed class MemoryImportHandler : IToolHandler
             }
             seenContents.Add(content);
 
-            Tier tier = Tier.Hot;
+            // Warm is the default ingress tier: an entry with no (or an
+            // unrecognised) tier earns its way into hot rather than starting there.
+            Tier tier = Tier.Warm;
             bool makeSticky = false;
             if (entryElem.TryGetProperty("tier", out var tierEl)
                 && tierEl.ValueKind == JsonValueKind.String)
