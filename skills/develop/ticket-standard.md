@@ -17,7 +17,9 @@ Test the change against INVEST: independent, negotiable, valuable, estimable, sm
 - Say who is affected, what they cannot do today, and why it matters.
 - Name the outcome wanted.
 - Leave the mechanism to the spec (plan track) or the approach (small track). A plan-track ticket
-  carries no engineering detail: no file names, function names, schema or design choices.
+  carries no proposed implementation: no files or functions to change, no schema changes, no design
+  choices. Observed facts quoted as evidence are not engineering detail: error text, stack traces,
+  and paths in Steps to reproduce, Environment and version, Evidence or Context are allowed.
 
 ## Acceptance criteria
 
@@ -79,7 +81,7 @@ preview and this standard, and grades the ticket.
 |---|---|
 | A required section is missing | major |
 | A criterion cannot be checked | major |
-| Engineering detail in a plan-track ticket | major |
+| A proposed implementation (mechanism, the engineering detail) in a plan-track ticket. Observed facts quoted as evidence are not engineering detail | major |
 | A title issue (over 80 characters, not an outcome, against the repository's convention) | minor |
 | A length issue | minor |
 
