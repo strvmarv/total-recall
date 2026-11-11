@@ -5,9 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 4.3.0 - 2026-11-10
 
 ### Added
+
+- **Cursor CLI host support.** Cursor now gets the startup instructions, the pinned-directive
+  floor and a working MCP server, not just the skills. New `cursor/hooks.json` + `cursor/hook.js`
+  (node hooks: `sessionStart` injects the commands skill as `additional_context`; `postToolUse` runs
+  `pinned-floor` through the provisioned engine on the first tool call of each user message, turn-count
+  trigger only, because Cursor's CLI fires no per-prompt hook) and `cursor/mcp.json` (`node
+  ${CURSOR_PLUGIN_ROOT}/bin/start.js`, no `cwd`, so the server starts in the workspace and project-scoped
+  pins work). The old Cursor wiring ran a bare `total-recall` command (not on PATH) and a bash hook whose
+  unbraced `$CURSOR_PLUGIN_ROOT` is empty in Cursor's PowerShell. Observed on cursor-agent
+  2026.11.10 (Windows, `-p` and interactive); known gaps are in INSTALL.md.
+
+- **Copilot CLI host support.** `copilot plugin install` now gives Copilot CLI the startup
+  instructions and the per-turn pinned-directive floor, not just the tools. New
+  `copilot/hooks.json` + `copilot/hook.js` (node hooks: `sessionStart` injects the commands
+  skill as `additionalContext`; `userPromptSubmitted` runs `pinned-floor` through the
+  provisioned engine, turn-count trigger only). Observed working on Copilot CLI 1.0.98-2
+  (Windows, `-p` and interactive). The Claude-format hooks never ran under Copilot on
+  Windows (the unbraced `$CLAUDE_PLUGIN_ROOT` in their `command` expands to nothing there). Known gaps are in INSTALL.md.
 
 - **Codex CLI harness support.** `codex plugin marketplace add strvmarv/total-recall-marketplace`
   then `codex plugin add total-recall@strvmarv-total-recall-marketplace` installs total-recall into
@@ -52,9 +70,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `.cursor-plugin/plugin.json` now declares `hooks` and `mcpServers` paths under `cursor/`, which
+  replace Cursor's default discovery of `hooks/hooks.json`; `hooks/hooks-cursor.json` is kept for
+  hand-wired setups with its variable braced (still untested).
+
+- The Copilot manifest moved from `.copilot-plugin/plugin.json` (not in Copilot CLI's documented manifest lookup, and not read by 1.0.98-2)
+  to `.github/plugin/plugin.json`, which Copilot finds before `.claude-plugin/plugin.json`; its
+  `hooks` path replaces `hooks/hooks.json` for Copilot. The release version-sync list still
+  has seven files (the path changed).
+
 - `skills/commands/SKILL.md`: the pinned-floor host table gains a `pi` row, the
   growth-trigger sentence is qualified for hosts without a transcript, and
   `compact` says what to do on hosts without the compactor agent.
+
+### Fixed
+
+- **Release workflow: the macOS build runs on `macos-15`.** GitHub no longer serves the `macos-14` image ("The configuration 'macos-14-arm64-us-default' is not supported"), so the first v4.3.0 tag push cancelled the osx-arm64 leg before it started and skipped the npm publish. Nothing was published from that run; v4.3.0 was re-tagged on the fix.
 
 ## 4.2.3 - 2026-09-04
 

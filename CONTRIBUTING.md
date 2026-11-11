@@ -367,7 +367,7 @@ The MCP bootstrap shim (`bin/shim/`) has its own Node test suite using the built
 npm run test:shim
 ```
 
-This runs `node --test bin/shim/ scripts/fetch-binary.test.js` — no .NET SDK or built binary required. Run this when changing anything under `bin/shim/`, `bin/start.js`, or `scripts/fetch-binary.js`.
+This runs `node --test bin/shim/ pi/ codex/ copilot/ cursor/ scripts/fetch-binary.test.js hooks/hooks.config.test.js` — no .NET SDK or built binary required. Run this when changing anything under `bin/shim/`, `bin/start.js`, or `scripts/fetch-binary.js`.
 
 ### Regenerating catalog.json
 
@@ -416,7 +416,7 @@ Before opening a pull request:
 3. **AOT publish smoke test** (if you touched anything in the publish path) — `dotnet publish src/TotalRecall.Host/TotalRecall.Host.csproj -c Release -r linux-x64 -p:PublishAot=true` produces a binary that runs `status` against a scratch DB without errors.
 4. **Benchmark does not regress** — run `/total-recall:commands eval --compare baseline` and include the output in your PR description if you changed retrieval, scoring, or compaction logic.
 5. **New behavior is tested** — new importers, parsers, and content types all require corresponding test files in the matching `tests/TotalRecall.*.Tests/` project.
-6. **Plugin manifest version sync** — if you're cutting a release, the `version` field must match across all seven files: `package.json`, `package-lock.json` (two fields), `.claude-plugin/plugin.json`, `.copilot-plugin/plugin.json`, `.cursor-plugin/plugin.json`, `.codex-plugin/plugin.json`, and `hermes-plugin/plugin.yaml`. `codex/manifest.test.js` checks them. The canonical list (with exclusions) is the "Version sync" standing rule in `AGENTS.md`. The binary's own version is stamped from the git tag by the release workflow — nothing to edit in-repo.
+6. **Plugin manifest version sync** — if you're cutting a release, the `version` field must match across all seven files: `package.json`, `package-lock.json` (two fields), `.claude-plugin/plugin.json`, `.github/plugin/plugin.json`, `.cursor-plugin/plugin.json`, `.codex-plugin/plugin.json`, and `hermes-plugin/plugin.yaml`. `codex/manifest.test.js` checks them. The canonical list (with exclusions) is the "Version sync" standing rule in `AGENTS.md`. The binary's own version is stamped from the git tag by the release workflow — nothing to edit in-repo.
 7. **No `Co-Authored-By: Claude ...` trailers** in commit messages. Project-wide rule.
 
 If you're adding a new host tool importer, include the `Detect()` logic rationale in your PR description — false positives will silently corrupt imports for users who don't have the tool installed.

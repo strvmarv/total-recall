@@ -94,6 +94,10 @@ pi install git:github.com/strvmarv/total-recall   # from main
 
 The extension registers the MCP server, injects the startup instructions, runs the pinned-directive floor, and adds a `/total-recall` command. See [INSTALL.md](INSTALL.md#pi) for details and known gaps.
 
+### Cursor CLI
+
+Copy the repository to `~/.cursor/plugins/local/total-recall` and restart Cursor (Windows; see [INSTALL.md](INSTALL.md#cursor) for approval with `--approve-mcps`, the first-call timeout and other limits). The plugin registers the MCP server, injects the startup instructions, and runs the pinned-directive floor on tool-using turns.
+
 ### Codex CLI
 
 ```bash
@@ -102,6 +106,15 @@ codex plugin add total-recall@strvmarv-total-recall-marketplace
 ```
 
 Then trust the two hooks once in `/hooks`. The plugin registers the MCP server, injects the startup instructions, and runs the pinned-directive floor. See [INSTALL.md](INSTALL.md#codex-cli) for tool approval, limitations and troubleshooting.
+
+### Copilot CLI
+
+```bash
+copilot plugin marketplace add strvmarv/total-recall-marketplace
+copilot plugin install total-recall@strvmarv-total-recall-marketplace
+```
+
+This works once the marketplace points at a release that contains `.github/plugin/` and `copilot/` (see the INSTALL.md caveat). Then allow the server for non-interactive runs with `--allow-tool=total-recall`. The plugin registers the MCP server, injects the startup instructions, and runs the pinned-directive floor. See [INSTALL.md](INSTALL.md#github-copilot-cli) for tool approval and known gaps.
 
 ### npm (Any MCP-Compatible Tool)
 
@@ -198,8 +211,8 @@ Per-host support:
 | Host | Per-turn floor | Mechanism |
 |---|---|---|
 | Claude Code | Active | `UserPromptSubmit` hook → `additionalContext` |
-| Copilot CLI | Pending upstream fix | Wired the same way, but Copilot CLI currently ignores the returned `additionalContext` |
-| Cursor | Layered fallback | session-start injection + skill-guided `session_refresh` (Cursor's `beforeSubmitPrompt` is block-only and cannot inject context) |
+| Copilot CLI | Active (turn-count trigger only) | `userPromptSubmitted` hook (`copilot/hooks.json` → `copilot/hook.js`) → `additionalContext` (observed on 1.0.98-2; Copilot's docs say this event ignores it) |
+| Cursor | Active on tool-using turns (turn-count trigger only) | `postToolUse` hook (`cursor/hooks.json` → `cursor/hook.js`) → `additional_context` (Cursor's CLI fires no per-prompt hook, and `beforeSubmitPrompt` cannot inject) |
 | Gemini CLI | Active | `BeforeAgent` hook → `hookSpecificOutput.additionalContext` |
 | pi | Active (turn-count trigger only) | pi extension: `before_agent_start` → hidden context message; `/total-recall` command |
 | Codex CLI | Active (turn-count trigger only) | `UserPromptSubmit` hook (`codex/hooks.json` → `codex/hook.js`) → `additionalContext` |
@@ -215,8 +228,8 @@ Per-host support:
 | Platform | Support | Notes |
 |---|---|---|
 | Claude Code | Full | Native plugin, session hooks, auto-import |
-| Copilot CLI | Full | Plugin wrapper, session hooks, auto-import from Copilot memory files |
-| Cursor | Full | Plugin wrapper, SessionStart hook; run `/total-recall:commands compact` manually — no SessionEnd hook |
+| Copilot CLI | Core (known gaps in [INSTALL.md](INSTALL.md#github-copilot-cli): turn-count floor only, no `session_end`, server-side project scope, nothing re-injected after `/compact`) | `copilot plugin install` plugin: MCP server, startup instructions, pinned-directive floor, auto-import from Copilot memory files |
+| Cursor | Core (known gaps in [INSTALL.md](INSTALL.md#cursor): floor only on tool-using turns, the first `session_start` can hit Cursor's 60 s MCP limit, no custom store, no `session_end`, Windows only so far) | Local plugin: MCP server (workspace cwd), startup instructions, pinned-directive floor |
 | OpenCode | Full | Plugin wrapper, auto-import from OpenCode project and agent files |
 | pi | Full (known gaps in [INSTALL.md](INSTALL.md#pi): turn-count floor only, no `session_end`, `compact --fast`) | `pi install` package: MCP server, startup instructions, pinned-directive floor, `/total-recall` command |
 | Codex CLI | Full (known gaps in [INSTALL.md](INSTALL.md#codex-cli): turn-count floor only, no `session_end`, hooks need a one-time trust review) | `codex plugin add` plugin: MCP server, startup instructions, pinned-directive floor |

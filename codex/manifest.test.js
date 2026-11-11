@@ -26,7 +26,7 @@ test('version sync: package-lock.json packages[""].version', () => {
 
 for (const rel of [
   '.claude-plugin/plugin.json',
-  '.copilot-plugin/plugin.json',
+  '.github/plugin/plugin.json',
   '.cursor-plugin/plugin.json',
   '.codex-plugin/plugin.json',
 ]) {

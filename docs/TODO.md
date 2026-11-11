@@ -204,7 +204,7 @@ All workflows currently use `actions/checkout@v4`, `actions/setup-dotnet@v4`, `a
 1. `package.json` (`version` field)
 2. `package-lock.json` (top-level `version` field AND `packages[""].version` — npm keeps both in sync; the safest edit is a `replace_all` of the old version string)
 3. `.claude-plugin/plugin.json`
-4. `.copilot-plugin/plugin.json`
+4. `.github/plugin/plugin.json`
 5. `.cursor-plugin/plugin.json`
 6. `.codex-plugin/plugin.json`
 7. `hermes-plugin/plugin.yaml`
@@ -377,6 +377,21 @@ After a compaction the pinned block that the floor last injected may be gone fro
 
 `.mcp.json` runs the server with `"cwd": "${CLAUDE_PLUGIN_ROOT}"`. The engine resolves the current project (project-scoped pins, project-docs ingest) from its working directory (`SessionLifecycle` uses `Environment.CurrentDirectory`), so under Claude Code the server-side `session_start` may resolve project scope against the plugin directory (fail-closed to global pins only). The per-turn floor is unaffected: it takes the cwd from the hook payload. Verify on a real Claude Code session and, if confirmed, drop the `cwd` (the Codex and pi registrations deliberately set none).
 
+## Follow-ups from the Copilot CLI host
+
+### Copilot CLI: session directory for the MCP server
+
+Same root cause as the Claude Code `.mcp.json` item above, now with evidence: Copilot starts the server in the plugin directory, so server-side `session_start` never injects pins scoped to the user's repo while the floor does (observed 2026-11-10). Copilot records the session directory in `session-state/<id>/workspace.yaml`, but the file keeps the original directory after `--continue` from another one, so a shim `chdir` was rejected. Revisit if Copilot exposes the session cwd to MCP servers; `cwd: "."` resolves to the session directory in Copilot but would have to live in the shared `.mcp.json`.
+
+### Copilot CLI: unobserved, deferred or fragile
+
+- The floor relies on `userPromptSubmitted` command hooks adding `additionalContext`, which Copilot's hooks docs say is ignored. If a future build drops it, move the floor to `userPromptTransformed` `modifiedTransformedPrompt` (documented, observed working) and re-run the cadence check.
+- macOS and Linux were not run: the POSIX assumptions are the braced `${PLUGIN_ROOT}` substitution through `sh` and `COPILOT_HOME` resolution. The interactive tool-approval prompt and `copilot plugin update` for a git-sourced marketplace were not observed.
+- `/compact` drops the startup instructions from context and fires no hook; only the floor re-asserts pins. Revisit if Copilot adds a compaction hook that can carry context.
+- No `SessionEnd` nudge (Copilot ignores sessionEnd output), no first-run tutorial.
+- `copilot/hook.js` duplicates three small helpers from `codex/hook.js` (`stripFrontmatter`, `readStdin`, `isMain`); extract shared host-hook helpers (tracked under "Follow-ups from the Cursor CLI host").
+- The `COPILOT_CLI` branches in `hooks/*/run.sh` are dead under the Copilot plugin (the manifest's hooks path replaces `hooks/hooks.json`); remove them if no hand-wired setup needs them.
+
 ### Codex CLI: unobserved or deferred
 
 - Interactive trust flow (`/hooks` review) and interactive MCP tool approval were not observed (no pseudo-terminal); INSTALL.md follows Codex's documentation there.
@@ -384,6 +399,14 @@ After a compaction the pinned block that the floor last injected may be gone fro
 - `SessionEnd` (3 s clamp, no user-visible output) and `fork` (history already carries the instructions) are deliberately not mapped; revisit if Codex gives `SessionEnd` a visible surface.
 - A first-run tutorial remains deferred for all harnesses (see Onboarding).
 
-### Copilot CLI and Cursor CLI parity
+## Follow-ups from the Cursor CLI host
 
-The next harnesses in this series. Copilot CLI: re-verify the pinned floor on a current build (upstream ignored `additionalContext` earlier; hooks declared through its own manifest silently did not fire while `.claude-plugin` hooks did). Cursor CLI: hooks have no context-injection point on `beforeSubmitPrompt`, skill invocation is not an event, and `cursor-agent` must be run from PowerShell/cmd on Windows (Git Bash breaks its tool calls).
+### Cursor CLI: unobserved, deferred or fragile
+
+- Live runs stopped when the personal account hit Cursor's free-plan limit (resets 2026-12-07). Unobserved: a subagent run (is its `generation_id` the parent's? an extra counted turn otherwise), parallel tool calls inside Cursor (covered by a real-process race test and a unit test), a non-ASCII workspace path through Cursor's PowerShell stdin to the floor, `/compact` (do the instructions and pins survive?), the unapproved-server refusal text, the marketplace/`/plugins` install path (which manifest does Cursor load from a Claude-format marketplace?), macOS/Linux, the desktop IDE agent (its hook set differs: `beforeSubmitPrompt`/`stop` fire there). Re-run with a Pro account or after the reset.
+- The first `session_start` on a fresh store with a very large other-tool history (about 87 s here) exceeds Cursor's 60 s MCP request limit and a plugin cannot raise it. Options: make the engine's first `session_start` return a "warming" result quickly and finish the import in the background, or move the history import out of `session_start`.
+- The floor depends on `postToolUse` `additional_context`. If a future Cursor CLI fires a context-capable prompt hook (`beforeSubmitPrompt` today cannot inject and never fires in the CLI), move the floor there so turns without a tool are covered too.
+- `hooks/hooks-cursor.json` and the `CURSOR_PLUGIN_ROOT` branches in `hooks/*/run.sh` are dead under the Cursor plugin; remove them if no hand-wired setup needs them.
+- The four hook files (`pi/extension.js` helpers, `codex/hook.js`, `copilot/hook.js`, `cursor/hook.js`) now duplicate `stripFrontmatter`, `readStdin`, `isMain` (and `storeEnvStrip` in two): extract shared host-hook helpers with a design that cannot crash a hook when the shared file is missing (a static import would).
+- A test harness lesson: `cursor-agent login` writes the real `%APPDATA%\Cursor\auth.json`; fingerprint before logging in and prefer a throwaway OS user.
+- Cursor CLI on Windows from Git Bash blocks every tool call (a Cursor bug); contributors run it from PowerShell or cmd.
