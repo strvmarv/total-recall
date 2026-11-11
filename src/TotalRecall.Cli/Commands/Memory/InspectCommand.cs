@@ -127,8 +127,9 @@ public sealed class InspectCommand : ICliCommand
             {
                 Render(tier, type, entry);
             }
-            // TODO(Plan 5.5): enrich with lineage when the log reader
-            // exposes ancestry lookups keyed by entry id.
+            // TODO: this CLI verb prints no compaction history. The
+            // memory_inspect MCP tool (MemoryInspectHandler) already
+            // attaches it via ICompactionLogReader.GetByTargetEntryId.
             return 0;
         }
         catch (Exception ex)

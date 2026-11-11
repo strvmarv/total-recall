@@ -8,9 +8,10 @@
 // is a known, recoverable state — not a server error — so the translator
 // does NOT log it to stderr.
 //
-// TODO(Plan 5+): wire OnnxEmbedder + ModelManager to throw this exception
-// for missing/downloading/failed/corrupted model states. Task 4.5 only
-// introduces the type so Server can handle it; the producers stay untouched.
+// TODO: nothing throws this yet. ErrorTranslator handles it, but
+// OnnxEmbedder and ModelManager do not produce it for the missing /
+// downloading / failed / corrupted states, so hosts never see the
+// structured model_not_ready payload.
 
 namespace TotalRecall.Infrastructure.Embedding;
 

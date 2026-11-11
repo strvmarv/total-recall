@@ -7,9 +7,9 @@
 // collection id. The more elaborate TS features are deliberately stubbed:
 //
 //   - Hierarchical collection matching via collection summaries
-//     (TS kb-tools.ts:128-154) — Plan 5+.
+//     (TS kb-tools.ts:128-154) — not implemented.
 //   - Access-count tracking on hit + `needsSummary` threshold
-//     (TS kb-tools.ts:169-188) — Plan 5+. We always return needsSummary=false
+//     (TS kb-tools.ts:169-188) — not implemented. We always return needsSummary=false
 //     and hierarchicalMatch=null to preserve the TS wire shape.
 //
 // Phase 5: retrieval telemetry. If a RetrievalEventLog and/or SyncQueue are
@@ -152,7 +152,7 @@ public sealed class KbSearchHandler : IToolHandler
         var searchResults = _hybridSearch.Search(ColdKnowledgeOnly, query, vector, opts);
         stopwatch.Stop();
 
-        // TODO(Plan 5+): hierarchical collection matching
+        // TODO: hierarchical collection matching
         // (port src-ts/tools/kb-tools.ts:128-154). We currently never
         // populate hierarchicalMatch — callers always see null.
 
@@ -222,9 +222,9 @@ public sealed class KbSearchHandler : IToolHandler
                     timestampUtc: nowUtc));
         }
 
-        // TODO(Plan 5+): collection access-count tracking + needsSummary
-        // threshold (port src-ts/tools/kb-tools.ts:169-188). Plan 4 always
-        // reports needsSummary=false to preserve the TS wire shape.
+        // TODO: collection access-count tracking + needsSummary threshold
+        // (port src-ts/tools/kb-tools.ts:169-188). Always reports
+        // needsSummary=false to preserve the TS wire shape.
 
         var dtos = new MemorySearchResultDto[searchResults.Count];
         for (var i = 0; i < searchResults.Count; i++)

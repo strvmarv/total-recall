@@ -4,11 +4,10 @@
 // stub. This handler INTENTIONALLY does not perform any mechanical
 // compaction work:
 //
-//   - The mechanical compaction operations (warm sweep, decay-based
-//     eviction, promote/demote scoring) live in the SessionLifecycle
-//     stubs carried forward from Plan 5 (the 8 TODOs that were
-//     deferred per spec Flow 2). Those stubs must be filled before a
-//     real compact_now can be implemented.
+//   - The mechanical compaction operations already exist elsewhere: the
+//     warm sweep runs from SessionLifecycle.RunWarmSweep (session_start),
+//     and the decay-based hot -> warm sweep is HotTierCompactor, run by
+//     the CLI `compact --run`. This handler does not call either.
 //
 //   - Per spec Flow 2, compaction is HOST-ORCHESTRATED: the server
 //     exposes session_context + memory_promote/demote/store/delete as

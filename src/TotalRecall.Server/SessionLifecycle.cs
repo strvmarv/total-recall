@@ -1,11 +1,12 @@
 // src/TotalRecall.Server/SessionLifecycle.cs
 //
-// Plan 4 Task 4.3 — port of src-ts/tools/session-tools.ts runSessionInit,
-// scoped to the Infrastructure pieces that exist in .NET as of Plan 4:
-// host importers, IStore, and a CompactionLog read seam. Everything
-// else (warm sweep, semantic promote, project docs ingest, smoke test,
-// regression detection, project detection, config snapshot) is stubbed
-// with `TODO(Plan 5+)` markers at each would-be call site.
+// Port of src-ts/tools/session-tools.ts runSessionInit. Runs the host
+// importers (including project-docs ingest), the tier v2 data move, the
+// warm sweep, and sticky/hot context assembly. NOT implemented in the
+// .NET engine: the first-run smoke test, regression detection, and the
+// per-session config snapshot; their result fields are always null (see
+// the TODOs at the call sites below and docs/TODO.md, "Gaps found in the
+// TODO audit").
 //
 // Wire shape returned by EnsureInitializedAsync is consumed by Task 4.10's
 // session_start handler. The shape is registered with JsonContext so the
@@ -196,9 +197,9 @@ public sealed class SessionLifecycle : ISessionLifecycle
         {
             if (!importer.Detect()) continue;
 
-            // TODO(Plan 5+): pass detected project name once project detection
-            // lands. The Plan 4 stub passes null which matches the importer's
-            // own "global memories" path.
+            // TODO: importers always get project: null (the "global memories"
+            // path). ProjectResolver exists (used for pin scoping below) but
+            // its result is not passed here.
             var memResult = importer.ImportMemories(project: null);
             var kbResult = importer.ImportKnowledge();
 
@@ -282,10 +283,11 @@ public sealed class SessionLifecycle : ISessionLifecycle
             skillsBlock = BuildSkillsBlock(cortexList, localExtraSkills);
         }
 
-        // TODO(Plan 5+): project docs auto-ingest — ProjectDocsImporter exists
-        // in Infrastructure but Plan 4 explicitly excludes it from session init.
+        // Project docs auto-ingest is not a separate step: ProjectDocsImporter
+        // is one of the importers in the loop above (see ServerComposition).
 
-        // TODO(Plan 5+): smoke test — eval/smoke-test.ts not yet ported.
+        // TODO: first-run smoke test (version-gated, eval/benchmarks/smoke.jsonl)
+        // is not implemented in .NET; SmokeTest in the result is always null.
 
         // 1d. Tier model v2 (Task 6) — one-time data move. Runs here (at
         // session_start, where an embedder exists for re-embedding) BEFORE the
@@ -484,26 +486,28 @@ public sealed class SessionLifecycle : ISessionLifecycle
                         ?? _compactionLog.GetLastTimestampExcludingReason("warm_sweep_decay");
         var lastSessionAge = FormatLastSessionAge(lastAgeMs, _nowMs());
 
-        // TODO(Plan 5+): regression detection — checkRegressions from
-        // src-ts/eval/regression.ts not yet ported. Leave alerts null.
+        // TODO: regression detection (compare against the previous config
+        // snapshot using regression.miss_rate_delta / latency_ratio) is not
+        // implemented in .NET; RegressionAlerts is always null.
 
-        // TODO(Plan 5+): config snapshot creation — createConfigSnapshot
-        // from src-ts/config.ts not yet ported. Snapshot id stays null.
+        // TODO: no config snapshot is created at session start, so there is
+        // no session snapshot id; retrieval and compaction events are logged
+        // with the placeholder ConfigSnapshotId "default".
 
         return new SessionInitResult(
             SessionId: _sessionId,
-            Project: null, // TODO(Plan 5+): detectProject() not ported
+            Project: null, // TODO: never populated (pin scoping resolves the project internally via ProjectResolver)
             ImportSummary: importSummary,
-            WarmSweep: null, // TODO(Plan 5+): warm sweep not ported
+            WarmSweep: null, // TODO: never populated; the sweep runs (RunWarmSweep) and its promotions are in WarmPromoted
             WarmPromoted: warmPromoted,
-            ProjectDocs: null, // TODO(Plan 5+): project docs auto-ingest not in scope
+            ProjectDocs: null, // TODO: never populated; project docs are ingested by ProjectDocsImporter (see ImportSummary)
             HotEntryCount: hotEntries.Count,
             Context: context,
             TierSummary: tierSummary,
             Hints: hints,
             LastSessionAge: lastSessionAge,
-            SmokeTest: null, // TODO(Plan 5+): smoke test not ported
-            RegressionAlerts: null, // TODO(Plan 5+): regression detection not ported
+            SmokeTest: null, // TODO: smoke test not implemented in .NET
+            RegressionAlerts: null, // TODO: regression detection not implemented in .NET
             Storage: _storageMode,
             HotContextTruncated: hotContextTruncated,
             SessionAgeHint: null, // fresh session, no hint needed
@@ -1614,8 +1618,9 @@ public sealed record Hint
 
 /// <summary>
 /// Aggregate result of <see cref="ISessionLifecycle.EnsureInitializedAsync"/>.
-/// Plan 4 leaves several fields stubbed; see the field-level remarks for the
-/// <c>TODO(Plan 5+)</c> markers.
+/// Several fields are never populated (Project, WarmSweep, ProjectDocs,
+/// SmokeTest, RegressionAlerts); see the TODOs at the construction site in
+/// <c>EnsureInitializedAsync</c>.
 /// </summary>
 public sealed record SessionInitResult(
     [property: JsonPropertyName("sessionId")] string SessionId,
@@ -1660,21 +1665,21 @@ public sealed record TierSummary(
     [property: JsonPropertyName("kb")] int Kb,
     [property: JsonPropertyName("collections")] int Collections);
 
-// TODO(Plan 5+): populate when warm sweep lands.
+// TODO: never populated. The warm sweep runs; its promotion count is reported in WarmPromoted.
 public sealed record WarmSweepResult(
     [property: JsonPropertyName("demoted")] int Demoted);
 
-// TODO(Plan 5+): populate when project docs auto-ingest lands.
+// TODO: never populated. Project docs are ingested by ProjectDocsImporter (see ImportSummary).
 public sealed record ProjectDocsResult(
     [property: JsonPropertyName("filesIngested")] int FilesIngested,
     [property: JsonPropertyName("totalChunks")] int TotalChunks);
 
-// TODO(Plan 5+): populate when smoke test lands.
+// TODO: never populated; the smoke test is not implemented in .NET.
 public sealed record SmokeTestResult(
     [property: JsonPropertyName("passed")] bool Passed,
     [property: JsonPropertyName("notes")] string? Notes);
 
-// TODO(Plan 5+): populate when regression detection lands.
+// TODO: never populated; regression detection is not implemented in .NET.
 public sealed record RegressionAlert(
     [property: JsonPropertyName("kind")] string Kind,
     [property: JsonPropertyName("message")] string Message);

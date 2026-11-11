@@ -90,7 +90,7 @@ public sealed class McpServer
     /// client sends <c>notifications/initialized</c>.</summary>
     public void SetOnInitialized(Func<Task>? onInitialized) => _onInitialized = onInitialized;
 
-    // TODO(Plan 6+): thread a CancellationToken through this dispatch loop so
+    // TODO: thread a CancellationToken through this dispatch loop so
     // Ctrl+C / SIGTERM from Host/Program.cs can interrupt a blocking
     // Console.In.ReadLineAsync() instead of waiting for the next message.
     // Discovered during 6.3a review — Program.cs wires CancelKeyPress to a
@@ -148,7 +148,7 @@ public sealed class McpServer
                         WriteResult(id, HandleToolsList());
                         break;
                     case "tools/call":
-                        // TODO(Task 4.12+): thread a real CancellationToken from
+                        // TODO: thread a real CancellationToken from
                         // the dispatch loop so notifications/cancelled can unwind
                         // in-flight handlers. For now handlers receive None and
                         // run to completion.
