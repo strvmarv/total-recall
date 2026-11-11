@@ -254,9 +254,10 @@ Snapshot memory ([Memory](SKILL.md#memory)), then:
    small track, the `wip/develop-<slug>` branch (`git branch -d`, kept and reported if it refuses).
    Continue with Deliver in this session (`deliver.md`). On the plan track the pushed `feat/<slug>`
    branch stays.
-2. **Choice 2.** The same clean-up, then print the issue link and `/develop <n>`.
+2. **Choice 2.** The same clean-up, then print the issue link and `/develop <n>`. Define ends here, so
+   clean up the scratch directory ([Preflight](SKILL.md#preflight)).
 
-When the run ends, clean up the scratch directory ([Preflight](SKILL.md#preflight)).
+After Choice 1 the scratch directory stays for Deliver, which uses the same `<dir>` and cleans it up at its end.
 
 ## Rules
 

@@ -156,9 +156,10 @@ notes so it survives context compaction. A resumed session is a new run with a n
 permission map, fetched comments and body files never survive from an earlier run.
 
 When the run ends, run `node <skill dir>/scripts/ghpin.js cleanup <jsonFile>` with the run's `{dir}`: after the
-final report of a Define or Deliver run, after posting a `blocked`, and before a terminal stop or the tutorial
+final report of a Deliver run or of a Define run that ends at Choice 2 (a Define run that continues into Deliver keeps the directory), after posting a `blocked`, and before a terminal stop or the tutorial
 route. The directory holds issue text and the permission map. A crashed run's directory is pruned by a later
-`scratch` after 3 days. `cleanup` removes nothing but a marked scratch directory.
+`scratch` once nothing in it has changed for 3 days. `cleanup` removes nothing but a marked scratch directory, and
+keeps the marker until everything else is gone, so a failed cleanup can be retried.
 
 **Scripts are CLIs.** Call `regions.js`, `checkpoints.js`, `counted.js`, `history.js`, `route.js`,
 `args.js`, `ghpin.js` and `profile.js` only as `node <skill dir>/scripts/<name>.js <subcommand>

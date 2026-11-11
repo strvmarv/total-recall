@@ -185,6 +185,30 @@ function isMarkedDir(full) {
 }
 
 /**
+ * Newest mtime among the directory, its marker and every direct child. A directory's own mtime moves only
+ * when entries are added or removed, so a live run that rewrites files in place must count through its children.
+ */
+function newestMtimeMs(full) {
+  let newest = fs.lstatSync(full).mtimeMs;
+  const note = (p) => {
+    try {
+      newest = Math.max(newest, fs.lstatSync(p).mtimeMs);
+    } catch {
+      // ignore: an entry that cannot be read does not count
+    }
+  };
+  note(path.join(full, SCRATCH_MARKER));
+  let names = [];
+  try {
+    names = fs.readdirSync(full);
+  } catch {
+    // ignore
+  }
+  for (const name of names) note(path.join(full, name));
+  return newest;
+}
+
+/**
  * Creates this run's scratch directory (with its marker file) and returns its absolute native path.
  * Also prunes scratch directories of earlier crashed runs; pruning is best effort.
  */
@@ -199,7 +223,7 @@ export function scratch() {
       const full = path.join(root, name);
       if (sameDir(path.resolve(full), dir)) continue;
       try {
-        if (isMarkedDir(full) && fs.lstatSync(full).mtimeMs < cutoff) fs.rmSync(full, { recursive: true, force: true });
+        if (isMarkedDir(full) && newestMtimeMs(full) < cutoff) fs.rmSync(full, { recursive: true, force: true });
       } catch {
         // best effort: ignore any one entry
       }
@@ -212,8 +236,13 @@ export function scratch() {
 
 const NOT_SCRATCH = { ok: false, error: 'not a scratch directory' };
 
-/** Removes a scratch directory, and only a scratch directory: a marked real directory directly under the temp directory. */
-export function cleanup(dir) {
+/**
+ * Removes a scratch directory, and only a scratch directory: a marked real directory directly under the temp directory.
+ * Everything but the marker goes first and the marker last, so a partial failure leaves a directory that a retry
+ * (or a later prune) still recognises. `deps.rm` is a test seam for the delete function.
+ */
+export function cleanup(dir, deps = {}) {
+  const rm = deps.rm || fs.rmSync;
   if (typeof dir !== 'string' || dir === '' || dir.includes('\0')) return NOT_SCRATCH;
   if (dir.split(/[\\/]/).includes('..')) return NOT_SCRATCH;
   const resolved = path.resolve(dir);
@@ -237,8 +266,32 @@ export function cleanup(dir) {
   } catch {
     return NOT_SCRATCH;
   }
-  fs.rmSync(full, { recursive: true, force: true });
-  return { ok: true, removed: true };
+  const opts = { recursive: true, force: true };
+  let left = 0;
+  try {
+    for (const name of fs.readdirSync(full)) {
+      if (name === SCRATCH_MARKER) continue;
+      try {
+        rm(path.join(full, name), opts);
+      } catch {
+        left += 1;
+      }
+    }
+    if (left === 0) {
+      rm(path.join(full, SCRATCH_MARKER), opts);
+      rm(full, opts);
+      return { ok: true, removed: true };
+    }
+  } catch {
+    left = left || 1;
+    try {
+      // the marker may already be gone when removing the empty directory failed: restore it for a retry
+      if (fs.existsSync(full) && !fs.existsSync(path.join(full, SCRATCH_MARKER))) fs.writeFileSync(path.join(full, SCRATCH_MARKER), '');
+    } catch {
+      // best effort
+    }
+  }
+  return { ok: false, error: `could not remove ${resolved} fully`, left };
 }
 
 // ---- CLI ----

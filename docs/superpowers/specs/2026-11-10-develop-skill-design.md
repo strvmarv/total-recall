@@ -422,7 +422,7 @@ again. The directory holds issue text and the permission map, so the run removes
 (`ghpin.js cleanup <jsonFile>` with `{dir}`): it deletes only a real directory (not a link) directly under
 the OS temp directory, named `develop-*`, that holds the `.develop-scratch` marker `scratch` writes, and
 answers `not a scratch directory` for anything else. `scratch` also prunes marked directories of earlier
-crashed runs that are older than 3 days, best effort. Comments are resolved newest first. A lookup that fails for a reason other than a 404 (a 403,
+crashed runs in which nothing (the directory, the marker, any direct child) has changed for 3 days, best effort. `cleanup` deletes the marker last and keeps it when anything failed, so a retry still works. Comments are resolved newest first. A lookup that fails for a reason other than a 404 (a 403,
 a 5xx, a rate limit) fails the whole selection as blocker 3, terminal report only, even when that
 particular lookup might not have decided the outcome — stricter than deciding case by case, and safe,
 since the alternative is guessing. Task 2 of the build verifies these answers for an account

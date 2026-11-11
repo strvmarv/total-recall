@@ -635,7 +635,7 @@ test('scratch: prunes an old marked develop- directory of an earlier run', () =>
   const old = tmpChild('develop-', { marked: true });
   fs.writeFileSync(path.join(old, 'issue.json'), '{}');
   const t = new Date(Date.now() - 4 * DAY);
-  fs.utimesSync(old, t, t);
+  for (const p of [path.join(old, 'issue.json'), path.join(old, MARKER), old]) fs.utimesSync(p, t, t);
   const fresh = scratch();
   try {
     assert.equal(fs.existsSync(old), false);
@@ -687,6 +687,94 @@ test('cleanup: removes a fresh scratch directory and everything in it', () => {
   fs.writeFileSync(path.join(d, 'sub', 'x'), 'x');
   assert.deepEqual(cleanup(d), { ok: true, removed: true });
   assert.equal(fs.existsSync(d), false);
+});
+
+test('scratch: an old directory with a recently touched direct child file is not pruned', () => {
+  const live = tmpChild('develop-', { marked: true });
+  const file = path.join(live, 'perm.json');
+  fs.writeFileSync(file, '{}');
+  const old = new Date(Date.now() - 4 * DAY);
+  fs.utimesSync(live, old, old);
+  fs.utimesSync(path.join(live, MARKER), old, old);
+  const fresh = scratch();
+  try {
+    assert.ok(fs.existsSync(live));
+    assert.ok(fs.existsSync(file));
+  } finally {
+    rmAll(live, fresh);
+  }
+});
+
+test('scratch: an old directory whose every entry is old is pruned', () => {
+  const stale = tmpChild('develop-', { marked: true });
+  const file = path.join(stale, 'perm.json');
+  fs.writeFileSync(file, '{}');
+  const old = new Date(Date.now() - 4 * DAY);
+  fs.utimesSync(file, old, old);
+  fs.utimesSync(path.join(stale, MARKER), old, old);
+  fs.utimesSync(stale, old, old);
+  const fresh = scratch();
+  try {
+    assert.equal(fs.existsSync(stale), false);
+  } finally {
+    rmAll(stale, fresh);
+  }
+});
+
+test('cleanup: a failed child deletion keeps the marker, reports it, and a retry finishes the job', () => {
+  const d = scratch();
+  try {
+    fs.writeFileSync(path.join(d, 'a.json'), '{}');
+    fs.writeFileSync(path.join(d, 'locked.json'), '{}');
+    fs.mkdirSync(path.join(d, 'sub'));
+    fs.writeFileSync(path.join(d, 'sub', 'x'), 'x');
+    const failing = (p, o) => {
+      if (path.basename(p) === 'locked.json') throw new Error('EPERM');
+      fs.rmSync(p, o);
+    };
+    const r = cleanup(d, { rm: failing });
+    assert.deepEqual(r, { ok: false, error: `could not remove ${path.resolve(d)} fully`, left: 1 });
+    assert.ok(fs.existsSync(path.join(d, MARKER)));
+    assert.ok(fs.existsSync(path.join(d, 'locked.json')));
+    assert.equal(fs.existsSync(path.join(d, 'a.json')), false);
+    assert.equal(fs.existsSync(path.join(d, 'sub')), false);
+    assert.deepEqual(cleanup(d), { ok: true, removed: true });
+    assert.equal(fs.existsSync(d), false);
+  } finally {
+    rmAll(d);
+  }
+});
+
+test('cleanup: a failure while removing the marker or directory also reports and leaves a retryable state', () => {
+  const d = scratch();
+  try {
+    const failing = (p, o) => {
+      if (path.basename(p) === MARKER) throw new Error('EPERM');
+      fs.rmSync(p, o);
+    };
+    const r = cleanup(d, { rm: failing });
+    assert.equal(r.ok, false);
+    assert.ok(fs.existsSync(path.join(d, MARKER)));
+    assert.deepEqual(cleanup(d), { ok: true, removed: true });
+  } finally {
+    rmAll(d);
+  }
+});
+
+test('cleanup: if the empty directory cannot be removed after the marker, the marker is restored', () => {
+  const d = scratch();
+  try {
+    const real = fs.realpathSync.native(d);
+    const failing = (p, o) => {
+      if (path.resolve(p) === real) throw new Error('EBUSY');
+      fs.rmSync(p, o);
+    };
+    assert.equal(cleanup(d, { rm: failing }).ok, false);
+    assert.ok(fs.existsSync(path.join(d, MARKER)));
+    assert.deepEqual(cleanup(d), { ok: true, removed: true });
+  } finally {
+    rmAll(d);
+  }
 });
 
 test('cleanup: a trailing separator is accepted', () => {
