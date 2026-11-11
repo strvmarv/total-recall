@@ -319,7 +319,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         // thread-race against PeriodicSync on the shared SQLite connection.
         // Task 7 — access-earned warm→hot promotion happens inside the sweep
         // (after demotions); the promoted ids feed the hints block below.
-        var (warmPromoted, warmPromotedIds) = RunWarmSweep();
+        var (warmPromoted, warmPromotedIds, warmDemoted) = RunWarmSweep();
 
         // 3. Hot entries listing — used for both context and hot count.
         // I1 (tier model v2): EXCLUDE sticky rows here — they are injected
@@ -502,7 +502,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
             SessionId: _sessionId,
             Project: detectedProject,
             ImportSummary: importSummary,
-            WarmSweep: null, // TODO: never populated; the sweep runs (RunWarmSweep) and its promotions are in WarmPromoted
+            WarmSweep: warmDemoted is int demoted ? new WarmSweepResult(demoted) : null,
             WarmPromoted: warmPromoted,
             ProjectDocs: null, // TODO: never populated; project docs are ingested by ProjectDocsImporter (see ImportSummary)
             HotEntryCount: hotEntries.Count,
@@ -518,10 +518,14 @@ public sealed class SessionLifecycle : ISessionLifecycle
             BackgroundTasks: backgroundTasks);
     }
 
-    private (int Promoted, string[] PromotedIds) RunWarmSweep()
+    /// <returns>Promotions, and the number of entries demoted out of hot (dead-weight
+    /// auto-demotion plus over-capacity eviction). <c>Demoted</c> is null when the sweep
+    /// failed before completing.</returns>
+    private (int Promoted, string[] PromotedIds, int? Demoted) RunWarmSweep()
     {
         try
         {
+            var demoted = 0;
             // Phase 2 idea 1c — auto-demote dead-weight hot entries:
             // entries that have been injected many times but never accessed.
             // Task 7 — sticky rows are protected residents: EXCLUDE them from
@@ -538,6 +542,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
                 try
                 {
                     _store.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, entry.Id);
+                    demoted++;
                 }
                 catch (InvalidOperationException) { }
             }
@@ -560,7 +565,11 @@ public sealed class SessionLifecycle : ISessionLifecycle
                 foreach (var entry in toEvict)
                 {
                     if (deadWeightIds.Contains(entry.Id)) continue;
-                    try { _store.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, entry.Id); }
+                    try
+                    {
+                        _store.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, entry.Id);
+                        demoted++;
+                    }
                     catch (InvalidOperationException) { } // entry deleted by concurrent write — skip
                 }
             }
@@ -602,19 +611,19 @@ public sealed class SessionLifecycle : ISessionLifecycle
                 }
             }
 
-            return (promotedIds.Count, promotedIds.ToArray());
+            return (promotedIds.Count, promotedIds.ToArray(), demoted);
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"total-recall: warm sweep failed: {ex.Message}");
-            return (0, Array.Empty<string>());
+            return (0, Array.Empty<string>(), null);
         }
     }
 
     /// <summary>Test seam — exposes the internal warm sweep (promotion +
     /// sticky-aware demotion/eviction) so unit tests can invoke it directly
     /// without going through the full session_start/refresh flow.</summary>
-    internal (int Promoted, string[] PromotedIds) RunWarmSweepForTest() => RunWarmSweep();
+    internal (int Promoted, string[] PromotedIds, int? Demoted) RunWarmSweepForTest() => RunWarmSweep();
 
     // -------- helpers (internal so tests can call them directly) --------
 
