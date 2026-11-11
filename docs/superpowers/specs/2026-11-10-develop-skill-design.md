@@ -22,7 +22,7 @@ with a GitHub issue as the ticket. It has two halves:
 - **Deliver** is hands-off. Starting from that issue, the assistant plans, implements with review at
   every step, opens a PR that closes the issue, and stops.
 
-The idea comes from the `develop` skill in Radancy's internal cortex-plugin, which does this on
+The idea comes from the `develop` skill in an employer's internal plugin, which does this on
 Jira. That tool is internal to one business. This is a clean redesign for GitHub, written fresh:
 it keeps the ideas that proved themselves there (reviewer loops, a fixed blocker list, checkpoint
 comments that make a run resumable) and rewrites the tracker layer, the text and the validators. No
@@ -1135,7 +1135,7 @@ executor's kickoff that carries a `planSha`. Items 4 and 5 of this list also nee
    not a collaborator (`ghost`, GitHub's placeholder account, id 10137) also gets `200`
    `{"permission":"read","role_name":"read"}` (the repository's public default); the same admin
    querying a login that resolves to no GitHub account at all (`this-user-does-not-exist-zz`) gets
-   `404`. The second logged-in account (`paul-marvin_radancy`, a real login with no collaborator
+   `404`. The second logged-in account (a real login with no collaborator
    access to this repository) gets `403 Forbidden` from this endpoint for every target tried —
    itself, `ghost`, and the nonexistent login alike — so a caller without at least collaborator-level
    access never reaches the "does this login exist" check at all, and a 403 at the caller boundary can
