@@ -146,7 +146,8 @@ public static class ServerComposition
         int pinnedMaxChars = PinnedTierLimits.DefaultMaxContentChars,
         int hotMaxChars = 1200,
         ReindexProgress? reindexProgress = null,
-        string querySource = "assistant")
+        string querySource = "assistant",
+        Infrastructure.Eval.SessionConfigSnapshot? configSnapshot = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(vectors);
@@ -461,6 +462,13 @@ public static class ServerComposition
             // Constructed before SessionLifecycle so the delegate can be passed in.
             var retrievalLog = new RetrievalEventLog(conn);
 
+            // The session's config snapshot id, shared by SessionLifecycle
+            // (pins it at session_start) and the handlers that log events.
+            // Serializes the in-process config the server actually runs with.
+            var configSnapshot = new Infrastructure.Eval.SessionConfigSnapshot(
+                new Infrastructure.Eval.ConfigSnapshotStore(conn),
+                ConfigJsonSerializer.Serialize(cfg));
+
             var sessionLifecycle = new SessionLifecycle(
                 importers, store, compactionLog,
                 usageIndexer: usageIndexer,
@@ -482,7 +490,8 @@ public static class ServerComposition
                 vec: vec,
                 promoteMinAccess: cfg.Compaction.PromoteMinAccess,
                 promoteThreshold: cfg.Compaction.PromoteThreshold,
-                compactionConfig: cfg.Compaction);
+                compactionConfig: cfg.Compaction,
+                configSnapshot: configSnapshot);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
@@ -499,7 +508,8 @@ public static class ServerComposition
                 pinnedMaxChars: ResolvePinnedMaxChars(cfg),
                 hotMaxChars: cfg.Tiers.Hot.MaxContentChars,
                 reindexProgress: reindexProgress,
-                querySource: querySource);
+                querySource: querySource,
+                configSnapshot: configSnapshot);
 
             registry.Register(new UsageStatusHandler(usageQuery));
 
@@ -773,6 +783,13 @@ public static class ServerComposition
             // Constructed before SessionLifecycle so the delegate can be passed in.
             var retrievalLog = new RetrievalEventLog(conn);
 
+            // The session's config snapshot id, shared by SessionLifecycle
+            // (pins it at session_start) and the handlers that log events.
+            // Serializes the in-process config the server actually runs with.
+            var configSnapshot = new Infrastructure.Eval.SessionConfigSnapshot(
+                new Infrastructure.Eval.ConfigSnapshotStore(conn),
+                ConfigJsonSerializer.Serialize(cfg));
+
             var sessionLifecycle = new SessionLifecycle(
                 importers, routingStore, compactionLog,
                 usageIndexer: usageIndexer,
@@ -793,7 +810,8 @@ public static class ServerComposition
                 vec: vec,
                 promoteMinAccess: cfg.Compaction.PromoteMinAccess,
                 promoteThreshold: cfg.Compaction.PromoteThreshold,
-                compactionConfig: cfg.Compaction);
+                compactionConfig: cfg.Compaction,
+                configSnapshot: configSnapshot);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
@@ -813,7 +831,8 @@ public static class ServerComposition
                 pinnedMaxChars: ResolvePinnedMaxChars(cfg),
                 hotMaxChars: cfg.Tiers.Hot.MaxContentChars,
                 reindexProgress: reindexProgress,
-                querySource: querySource);
+                querySource: querySource,
+                configSnapshot: configSnapshot);
 
             registry.Register(new UsageStatusHandler(usageQuery));
 
