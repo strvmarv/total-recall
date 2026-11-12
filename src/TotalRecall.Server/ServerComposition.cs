@@ -388,6 +388,45 @@ public static class ServerComposition
         return detector.Check;
     }
 
+    /// <summary>
+    /// Builds the version-gated first-run smoke test for <c>SessionLifecycle</c>.
+    /// <paramref name="meta"/> is the store whose <c>_meta</c> holds the record: the
+    /// local SQLite store in sqlite and cortex modes (cortex's lifecycle store is a
+    /// <c>RoutingStore</c>, which is not an <see cref="IMetaStore"/>), the Postgres
+    /// store in postgres mode. Postgres <c>_meta</c> is shared by every machine on
+    /// the database, so <paramref name="shared"/> keys the record by machine name;
+    /// otherwise one machine's pass would hide the test everywhere else. The run
+    /// reuses the session's embedder against an isolated throwaway database and the
+    /// bundled <c>eval/</c> files, resolved when it runs so a missing file is
+    /// reported by the gate rather than failing composition. <paramref name="run"/>,
+    /// <paramref name="machineName"/> and <paramref name="evalDir"/> are test seams.
+    /// </summary>
+    internal static Func<SmokeTestResult?> BuildSmokeTest(
+        IMetaStore meta,
+        string version,
+        bool shared,
+        IEmbedder? embedder = null,
+        Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<Infrastructure.Eval.BenchmarkResult>>? run = null,
+        string? machineName = null,
+        string? evalDir = null)
+    {
+        var key = shared
+            ? $"{SmokeTestGate.MetaKey}:{machineName ?? Environment.MachineName}"
+            : SmokeTestGate.MetaKey;
+
+        System.Threading.Tasks.Task<Infrastructure.Eval.BenchmarkResult> DefaultRun(System.Threading.CancellationToken ct)
+        {
+            if (embedder is null) throw new InvalidOperationException("no embedder is available for the smoke test");
+            var start = evalDir ?? AppContext.BaseDirectory;
+            var opts = new Infrastructure.Eval.BenchmarkOptions(
+                Infrastructure.Eval.EvalPaths.ResolveFrom(start, "corpus", "memories.jsonl"),
+                Infrastructure.Eval.EvalPaths.ResolveFrom(start, "benchmarks", "smoke.jsonl"));
+            return Infrastructure.Eval.IsolatedBenchmark.RunAsync(opts, embedder, ct);
+        }
+
+        return new SmokeTestGate(meta, version, run ?? DefaultRun, key).RunIfNeeded;
+    }
+
     private static ServerCompositionHandles OpenSqlite(Core.Config.TotalRecallConfig cfg, string? dbPath, string storageMode = "sqlite", string querySource = "assistant")
     {
         var resolvedDbPath = dbPath ?? ConfigLoader.GetDbPath();
@@ -515,7 +554,8 @@ public static class ServerComposition
                 promoteThreshold: cfg.Compaction.PromoteThreshold,
                 compactionConfig: cfg.Compaction,
                 configSnapshot: configSnapshot,
-                regressionCheck: BuildRegressionCheck(conn, retrievalLog, configSnapshot, cfg));
+                regressionCheck: BuildRegressionCheck(conn, retrievalLog, configSnapshot, cfg),
+                smokeTest: BuildSmokeTest(store, McpServer.ResolveServerVersion(), shared: false, embedder: embedder));
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
@@ -620,7 +660,9 @@ public static class ServerComposition
                 vec: vec,
                 promoteMinAccess: cfg.Compaction.PromoteMinAccess,
                 promoteThreshold: cfg.Compaction.PromoteThreshold,
-                compactionConfig: cfg.Compaction);
+                compactionConfig: cfg.Compaction,
+                // Postgres _meta is shared across machines: the record is per machine.
+                smokeTest: BuildSmokeTest(store, McpServer.ResolveServerVersion(), shared: true, embedder: embedder));
 
             var statusOptions = new StatusOptions(
                 DbPath: connStr,
@@ -836,7 +878,10 @@ public static class ServerComposition
                 promoteThreshold: cfg.Compaction.PromoteThreshold,
                 compactionConfig: cfg.Compaction,
                 configSnapshot: configSnapshot,
-                regressionCheck: BuildRegressionCheck(conn, retrievalLog, configSnapshot, cfg));
+                regressionCheck: BuildRegressionCheck(conn, retrievalLog, configSnapshot, cfg),
+                // The lifecycle store here is a RoutingStore (not an IMetaStore): the
+                // record lives in the local SQLite store.
+                smokeTest: BuildSmokeTest(localStore, McpServer.ResolveServerVersion(), shared: false, embedder: embedder));
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
