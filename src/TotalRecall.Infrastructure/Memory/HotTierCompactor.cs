@@ -28,7 +28,8 @@ public static class HotTierCompactor
         CompactionLog? compactionLog,
         string reason = "session_end_decay",
         CancellationToken ct = default,
-        int maxContentChars = int.MaxValue)
+        int maxContentChars = int.MaxValue,
+        string configSnapshotId = "")
     {
         ArgumentNullException.ThrowIfNull(store);
 
@@ -55,7 +56,7 @@ public static class HotTierCompactor
                     TargetEntryId: null,
                     DecayScores: new Dictionary<string, double>(),
                     Reason: "skip_oversized",
-                    ConfigSnapshotId: ""));
+                    ConfigSnapshotId: configSnapshotId));
                 continue;
             }
 
@@ -82,7 +83,7 @@ public static class HotTierCompactor
                     TargetEntryId: null,
                     DecayScores: new Dictionary<string, double> { [entry.Id] = score },
                     Reason: reason,
-                    ConfigSnapshotId: ""));
+                    ConfigSnapshotId: configSnapshotId));
                 compacted++;
             }
             catch (InvalidOperationException) { } // concurrently deleted — skip

@@ -49,6 +49,7 @@ public sealed class MemoryPinHandler : IToolHandler
     // Intentionally retained but currently unused: pinned tier movements are not synced to
     // Cortex (local-only); kept for ctor-signature stability and future use.
     private readonly SyncQueue? _syncQueue;
+    private readonly TotalRecall.Infrastructure.Eval.SessionConfigSnapshot? _configSnapshot;
     private readonly int _maxContentChars;
 
     public MemoryPinHandler(
@@ -57,13 +58,15 @@ public sealed class MemoryPinHandler : IToolHandler
         IEmbedder embedder,
         CompactionLog? compactionLog = null,
         SyncQueue? syncQueue = null,
-        int maxContentChars = PinnedTierLimits.DefaultMaxContentChars)
+        int maxContentChars = PinnedTierLimits.DefaultMaxContentChars,
+        TotalRecall.Infrastructure.Eval.SessionConfigSnapshot? configSnapshot = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _vec = vec ?? throw new ArgumentNullException(nameof(vec));
         _embedder = embedder ?? throw new ArgumentNullException(nameof(embedder));
         _compactionLog = compactionLog;
         _syncQueue = syncQueue;
+        _configSnapshot = configSnapshot;
         _maxContentChars = maxContentChars;
     }
 
@@ -166,7 +169,7 @@ public sealed class MemoryPinHandler : IToolHandler
                 TargetEntryId: id,
                 DecayScores: new Dictionary<string, double> { [id] = entry.DecayScore },
                 Reason: "manual_pin",
-                ConfigSnapshotId: "default"));
+                ConfigSnapshotId: _configSnapshot?.Resolve() ?? "default"));
         }
 
         var dto = new MemoryMoveResultDto(

@@ -223,4 +223,21 @@ public class MemoryDemoteHandlerTests
 
         Assert.NotEqual(true, result.IsError);
     }
+
+    [Fact]
+    public async Task CompactionEvent_CarriesTheSessionConfigSnapshotId()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+        var (holder, snapshotId) = TotalRecall.Server.Tests.TestSupport.ConfigSnapshotTestSupport.NewHolder(conn);
+        var store = new FakeStore();
+        store.Seed(Tier.Warm, ContentType.Memory, MakeEntry("w1"));
+        var handler = new MemoryDemoteHandler(store, new FakeVectorSearch(), new RecordingFakeEmbedder(),
+            new CompactionLog(conn), configSnapshot: holder);
+
+        await handler.ExecuteAsync(ParseArgs("""{"id":"w1"}"""), CancellationToken.None);
+
+        Assert.Equal(new[] { snapshotId },
+            TotalRecall.Server.Tests.TestSupport.ConfigSnapshotTestSupport.CompactionSnapshotIds(conn));
+    }
 }

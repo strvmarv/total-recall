@@ -21,6 +21,7 @@ using Microsoft.FSharp.Collections;
 using Microsoft.FSharp.Core;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Storage;
+using TotalRecall.Infrastructure.Telemetry;
 using TotalRecall.Server.Handlers;
 using TotalRecall.Server.Tests.TestSupport;
 using Xunit;
@@ -276,5 +277,26 @@ public sealed class SessionEndHandlerTests
         using var doc = JsonDocument.Parse(result.Content[0].Text);
         Assert.Equal(0, doc.RootElement.GetProperty("promoted").GetInt32());
         Assert.Equal(0, doc.RootElement.GetProperty("carryForward").GetInt32());
+    }
+
+    [Fact]
+    public async Task Compaction_EventsCarryTheSessionConfigSnapshotId()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+        var (holder, snapshotId) = TotalRecall.Server.Tests.TestSupport.ConfigSnapshotTestSupport.NewHolder(conn);
+        var store = new FakeStore();
+        store.Entries[(Tier.Hot, ContentType.Memory)] = new List<Entry>
+        {
+            MakeEntry("stale", "stale", lastAccessedAt: 0),
+        };
+        var handler = new SessionEndHandler(
+            new FakeSessionLifecycle { SessionIdValue = "s1" }, store, new CompactionLog(conn),
+            warmThreshold: 0.5, decayConstantHours: 168, configSnapshot: holder);
+
+        await handler.ExecuteAsync(null, CancellationToken.None);
+
+        Assert.Equal(new[] { snapshotId },
+            TotalRecall.Server.Tests.TestSupport.ConfigSnapshotTestSupport.CompactionSnapshotIds(conn));
     }
 }

@@ -173,4 +173,21 @@ public class MemoryUnpinHandlerTests
         var items = syncQueue.Drain(limit: 10);
         Assert.Empty(items);
     }
+
+    [Fact]
+    public async Task CompactionEvent_CarriesTheSessionConfigSnapshotId()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+        var (holder, snapshotId) = TotalRecall.Server.Tests.TestSupport.ConfigSnapshotTestSupport.NewHolder(conn);
+        var store = new FakeStore();
+        var id = SeedStickyHot(store, "unpin me");
+        var handler = new MemoryUnpinHandler(store, new FakeVectorSearch(), new RecordingFakeEmbedder(),
+            compactionLog: new CompactionLog(conn), configSnapshot: holder);
+
+        await handler.ExecuteAsync(ParseArgs($$"""{"id":"{{id}}"}"""), CancellationToken.None);
+
+        Assert.Equal(new[] { snapshotId },
+            TotalRecall.Server.Tests.TestSupport.ConfigSnapshotTestSupport.CompactionSnapshotIds(conn));
+    }
 }

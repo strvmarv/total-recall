@@ -176,12 +176,12 @@ public static class ServerComposition
         registry.Register(new MemoryGetAllHandler(store));
         registry.Register(new MemoryUpdateHandler(store, embedder, vectors));
         registry.Register(new MemoryDeleteHandler(store, vectors));
-        registry.Register(new MemoryPromoteHandler(store, vectors, embedder, compactionLogWriter, syncQueue));
-        registry.Register(new MemoryDemoteHandler(store, vectors, embedder, compactionLogWriter, syncQueue));
+        registry.Register(new MemoryPromoteHandler(store, vectors, embedder, compactionLogWriter, syncQueue, configSnapshot));
+        registry.Register(new MemoryDemoteHandler(store, vectors, embedder, compactionLogWriter, syncQueue, configSnapshot));
         // Tier model v2 (Task 5): pins now land in hot as sticky rows, so the
         // pin handler enforces the HOT content cap (not the retired pinned cap).
-        registry.Register(new MemoryPinHandler(store, vectors, embedder, compactionLogWriter, syncQueue, hotMaxChars));
-        registry.Register(new MemoryUnpinHandler(store, vectors, embedder, compactionLogWriter, syncQueue));
+        registry.Register(new MemoryPinHandler(store, vectors, embedder, compactionLogWriter, syncQueue, hotMaxChars, configSnapshot));
+        registry.Register(new MemoryUnpinHandler(store, vectors, embedder, compactionLogWriter, syncQueue, configSnapshot));
         registry.Register(new MemoryInspectHandler(store, compactionLog));
         registry.Register(new MemoryHistoryHandler(compactionLog));
         registry.Register(new MemoryRecentHandler(store, scopeDefault));
@@ -203,7 +203,7 @@ public static class ServerComposition
 
         // ---- Session (4) ----
         registry.Register(new SessionStartHandler(sessionLifecycle, periodicSync, syncService));
-        registry.Register(new SessionEndHandler(sessionLifecycle, store, compactionLogWriter, syncService: syncService, hotMaxContentChars: hotMaxChars));
+        registry.Register(new SessionEndHandler(sessionLifecycle, store, compactionLogWriter, syncService: syncService, hotMaxContentChars: hotMaxChars, configSnapshot: configSnapshot));
         registry.Register(new SessionContextHandler(store));
         registry.Register(new SessionRefreshHandler(sessionLifecycle));
 
