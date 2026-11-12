@@ -22,9 +22,8 @@ namespace TotalRecall.Server;
 /// <c>src-ts/tools/session-tools.ts</c>. It runs the importers (project docs
 /// included), the warm sweep and hot-tier assembly, pins the per-session
 /// config snapshot, and reports retrieval regressions against the previous
-/// snapshot. The first-run smoke test is not implemented; the matching
-/// <c>SessionInitResult.SmokeTest</c> field is always null (see the TODO in
-/// <c>SessionLifecycle</c>).
+/// snapshot. It also runs the version-gated first-run smoke test and reports it
+/// in <c>SessionInitResult.SmokeTest</c> (null when it is not due or is skipped).
 /// </summary>
 public interface ISessionLifecycle
 {

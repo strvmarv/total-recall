@@ -26,7 +26,7 @@ Added Cursor, Cline, OpenCode, and Hermes importers. Extracted shared utilities 
 
 ### ~~First-Run Smoke Test~~
 
-> **TypeScript only.** Not ported to the .NET engine; see "Gaps found in the TODO audit".
+> **.NET.** Implemented in `SmokeTestGate` (issue #51): synchronous at the end of `session_start`, cancelled between steps after 20 s, fixed 0.8 exact-match threshold, isolated ephemeral database, version recorded only after a completed run. See `AGENTS.md`, "What happens on `session_start`", step 5.
 
 Version-gated smoke test runs on first install and after upgrades. 22-query corpus in `eval/benchmarks/smoke.jsonl` exercises semantic similarity, tier routing, and negative assertions. Results surfaced in `session_start` response as `smokeTest` field. Version tracked in `_meta` table.
 
@@ -126,9 +126,9 @@ Cross-encoder or Cohere Rerank API pass after pgvector retrieval on the Cortex s
 
 Found while auditing the `TODO` comments in `src/` (the old `TODO(Plan N)` labels were dropped). Each of these is real; the comments in code now say so.
 
-### Port the TypeScript `session_start` extras to .NET
+### ~~Port the TypeScript `session_start` extras to .NET~~
 
-The first-run smoke test ran in the TypeScript engine and is not implemented in .NET: `SmokeTest` is always `null`. (The per-session config snapshot is implemented: events carry its id, so snapshot-based `eval_compare` filtering separates periods. Regression detection is implemented: `regressionAlerts` is populated from the `regression.*` settings.)
+Done. The per-session config snapshot is implemented (events carry its id, so snapshot-based `eval_compare` filtering separates periods), regression detection populates `regressionAlerts` from the `regression.*` settings, and the first-run smoke test populates `smokeTest` (issue #51).
 
 ### Pass the detected project to the host importers
 

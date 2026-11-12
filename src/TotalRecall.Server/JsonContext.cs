@@ -18,7 +18,8 @@
 //     and TR's TS handlers return `null` — not `undefined` — for stubbed
 //     optional fields (e.g. StatusHandler's lastCompaction, SessionInit's
 //     smokeTest/regressionAlerts, and warmSweep/projectDocs/project when
-//     there is nothing to report). Emitting literal
+//     there is nothing to report; smokeTest is null whenever the
+//     version-gated smoke test is not due). Emitting literal
 //     `null` keeps the .NET server byte-compatible with the TS wire shape.
 //     Fields that TS deliberately leaves `undefined` (e.g. ModelNotReadyPayload.hint)
 //     still need omission — they carry a per-field
