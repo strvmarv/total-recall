@@ -531,4 +531,25 @@ public class KbSearchHandlerTests
 
         Assert.Equal("assistant", log.GetEvents(new RetrievalEventQuery()).Single().QuerySource);
     }
+
+    [Fact]
+    public async Task KbSearch_RetrievalEvent_CarriesTheSessionConfigSnapshotId()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+        var snapshots = new TotalRecall.Infrastructure.Eval.ConfigSnapshotStore(conn);
+        var holder = new TotalRecall.Infrastructure.Eval.SessionConfigSnapshot(snapshots, "{\"a\":1}");
+        var log = new RetrievalEventLog(conn);
+        var hybrid = new RecordingFakeHybridSearch { NextResult = new[] { MakeResult("kb-1") } };
+        var handler = new KbSearchHandler(
+            new RecordingFakeEmbedder(), hybrid,
+            remote: null, scopeDefault: null,
+            retrievalLog: log, syncQueue: null, configSnapshot: holder);
+
+        await handler.ExecuteAsync(Args("""{"query":"q"}"""), CancellationToken.None);
+
+        var row = log.GetEvents(new RetrievalEventQuery()).Single();
+        Assert.Equal(snapshots.GetLatest()!.Id, row.ConfigSnapshotId);
+        Assert.NotEqual("default", row.ConfigSnapshotId);
+    }
 }

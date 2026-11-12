@@ -71,6 +71,7 @@ public sealed class KbSearchHandler : IToolHandler
     private readonly RetrievalEventLog? _retrievalLog;
     private readonly SyncQueue? _syncQueue;
     private readonly string _querySource;
+    private readonly TotalRecall.Infrastructure.Eval.SessionConfigSnapshot? _configSnapshot;
 
     public KbSearchHandler(
         IEmbedder embedder,
@@ -79,7 +80,8 @@ public sealed class KbSearchHandler : IToolHandler
         string? scopeDefault = null,
         RetrievalEventLog? retrievalLog = null,
         SyncQueue? syncQueue = null,
-        string querySource = "assistant")
+        string querySource = "assistant",
+        TotalRecall.Infrastructure.Eval.SessionConfigSnapshot? configSnapshot = null)
     {
         _embedder = embedder ?? throw new ArgumentNullException(nameof(embedder));
         _hybridSearch = hybridSearch ?? throw new ArgumentNullException(nameof(hybridSearch));
@@ -88,6 +90,7 @@ public sealed class KbSearchHandler : IToolHandler
         _retrievalLog = retrievalLog;
         _syncQueue = syncQueue;
         _querySource = querySource;
+        _configSnapshot = configSnapshot;
     }
 
     public string Name => "kb_search";
@@ -206,7 +209,7 @@ public sealed class KbSearchHandler : IToolHandler
                     QuerySource: _querySource,
                     Results: resultItems,
                     TiersSearched: tiersSearched,
-                    ConfigSnapshotId: "default",  // Phase 5 MVT: placeholder.
+                    ConfigSnapshotId: _configSnapshot?.Resolve() ?? "default",
                     LatencyMs: (long)latencyMs));
             }
 
