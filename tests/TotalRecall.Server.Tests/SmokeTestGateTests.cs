@@ -145,4 +145,110 @@ public sealed class SmokeTestGateTests
         Assert.NotNull(gate.RunIfNeeded());
         Assert.Equal("4.6.0", meta.GetMeta("smoke_test_version:box-a"));
     }
+
+    [Fact]
+    public void ThrowingRunner_ReportsFailureWithReason_RecordsNothing_NeverThrows()
+    {
+        var meta = new DictMetaStore();
+        var gate = new SmokeTestGate(meta, "4.6.0",
+            _ => throw new System.IO.FileNotFoundException("benchmark corpus not found: eval/corpus/memories.jsonl"));
+
+        var result = gate.RunIfNeeded();
+
+        Assert.NotNull(result);
+        Assert.False(result!.Passed);
+        Assert.Contains("could not run", result.Notes);
+        Assert.Contains("corpus not found", result.Notes);
+        Assert.Null(meta.GetMeta(SmokeTestGate.MetaKey));
+    }
+
+    [Fact]
+    public void FaultedTask_IsTreatedLikeAThrow()
+    {
+        var meta = new DictMetaStore();
+        var gate = new SmokeTestGate(meta, "4.6.0",
+            _ => Task.FromException<BenchmarkResult>(new InvalidOperationException("embedder failed")));
+
+        var result = gate.RunIfNeeded();
+
+        Assert.False(result!.Passed);
+        Assert.Contains("embedder failed", result.Notes);
+        Assert.Null(meta.GetMeta(SmokeTestGate.MetaKey));
+    }
+
+    [Fact]
+    public void RunnerThatHonoursTheTokenPastTheCap_ReportsTimeout_RecordsNothing()
+    {
+        var meta = new DictMetaStore();
+        var gate = new SmokeTestGate(meta, "4.6.0",
+            async ct =>
+            {
+                await Task.Delay(Timeout.Infinite, ct);
+                return Result(1.0);
+            },
+            timeout: TimeSpan.FromMilliseconds(50));
+
+        var result = gate.RunIfNeeded();
+
+        Assert.NotNull(result);
+        Assert.False(result!.Passed);
+        Assert.Contains("did not finish", result.Notes);
+        Assert.Null(meta.GetMeta(SmokeTestGate.MetaKey));
+    }
+
+    [Fact]
+    public void SynchronousRunnerThatPollsTheTokenBetweenSteps_IsCancelledAtTheCap()
+    {
+        // BenchmarkRunner is synchronous and checks the token between embeds, so
+        // the cap must reach a runner that never awaits.
+        var meta = new DictMetaStore();
+        var gate = new SmokeTestGate(meta, "4.6.0",
+            ct =>
+            {
+                while (true)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    Thread.Sleep(5);
+                }
+            },
+            timeout: TimeSpan.FromMilliseconds(50));
+
+        var result = gate.RunIfNeeded();
+
+        Assert.False(result!.Passed);
+        Assert.Contains("did not finish", result.Notes);
+        Assert.Null(meta.GetMeta(SmokeTestGate.MetaKey));
+    }
+
+    [Fact]
+    public void FailingVersionWrite_KeepsTheRealResult()
+    {
+        var meta = new DictMetaStore { ThrowOnSet = true };
+        var gate = new SmokeTestGate(meta, "4.6.0", new CountingRunner().Run(Result(19.0 / 22)));
+
+        var result = gate.RunIfNeeded();
+
+        Assert.NotNull(result);
+        Assert.True(result!.Passed);
+    }
+
+    [Fact]
+    public void FailingVersionRead_ReportsFailureAndNeverThrows()
+    {
+        var gate = new SmokeTestGate(new ThrowingReadMetaStore(), "4.6.0", new CountingRunner().Run(Result(1.0)));
+
+        var result = gate.RunIfNeeded();
+
+        // The gate cannot tell whether a run is owed; staying silent is wrong
+        // only if it throws, so it reports and moves on.
+        Assert.NotNull(result);
+        Assert.False(result!.Passed);
+    }
+
+    private sealed class ThrowingReadMetaStore : IMetaStore
+    {
+        public string? GetMeta(string key) => throw new InvalidOperationException("database is locked");
+        public void SetMeta(string key, string value) { }
+        public void DeleteMeta(string key) { }
+    }
 }

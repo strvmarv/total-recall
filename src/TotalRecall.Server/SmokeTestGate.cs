@@ -32,32 +32,81 @@ public sealed class SmokeTestGate
     private readonly string _version;
     private readonly Func<CancellationToken, Task<BenchmarkResult>> _run;
     private readonly string _metaKey;
+    private readonly TimeSpan _timeout;
+
+    /// <summary>Default cap on one smoke run.</summary>
+    public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(20);
 
     public SmokeTestGate(
         IMetaStore meta,
         string version,
         Func<CancellationToken, Task<BenchmarkResult>> run,
-        string metaKey = MetaKey)
+        string metaKey = MetaKey,
+        TimeSpan? timeout = null)
     {
         _meta = meta ?? throw new ArgumentNullException(nameof(meta));
         _version = version ?? throw new ArgumentNullException(nameof(version));
         _run = run ?? throw new ArgumentNullException(nameof(run));
         _metaKey = metaKey;
+        _timeout = timeout ?? DefaultTimeout;
     }
 
     /// <summary>
     /// Runs the smoke test when none has completed for this version. Returns
-    /// null when it is skipped.
+    /// null when it is skipped. Never throws: a run that cannot complete (it
+    /// throws, a bundled file is missing, or the cap cancels it) is reported as
+    /// <c>passed=false</c> with the reason and records nothing, so the next
+    /// session_start tries again.
     /// </summary>
     public SmokeTestResult? RunIfNeeded()
     {
-        // An unstamped build cannot be gated: skip rather than run every session.
-        if (string.IsNullOrWhiteSpace(_version) || _version == UnknownVersion) return null;
-        if (string.Equals(_meta.GetMeta(_metaKey), _version, StringComparison.Ordinal)) return null;
+        try
+        {
+            // An unstamped build cannot be gated: skip rather than run every session.
+            if (string.IsNullOrWhiteSpace(_version) || _version == UnknownVersion) return null;
+            if (string.Equals(_meta.GetMeta(_metaKey), _version, StringComparison.Ordinal)) return null;
 
-        var result = _run(CancellationToken.None).GetAwaiter().GetResult();
-        _meta.SetMeta(_metaKey, _version);
-        return Map(result);
+            BenchmarkResult result;
+            using (var cts = new CancellationTokenSource())
+            {
+                // The runner is cooperative: it checks the token between steps, so a
+                // step already in progress (a model load, one embed) can overshoot.
+                // Awaiting the task, not abandoning it, keeps the shared embedder and
+                // the temp database free of a background run.
+                cts.CancelAfter(_timeout);
+                try
+                {
+                    result = _run(cts.Token).GetAwaiter().GetResult();
+                }
+                catch (OperationCanceledException) when (cts.IsCancellationRequested)
+                {
+                    return new SmokeTestResult(false,
+                        $"smoke test did not finish within {_timeout.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture)} s and was cancelled");
+                }
+            }
+
+            var mapped = Map(result);
+            RecordVersion();
+            return mapped;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"total-recall: smoke test could not run: {ex.Message}");
+            return new SmokeTestResult(false, $"smoke test could not run: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Records the version after a completed run. A write failure (for example a
+    /// locked database) is logged and never turns the real result into a failure.
+    /// </summary>
+    private void RecordVersion()
+    {
+        try { _meta.SetMeta(_metaKey, _version); }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"total-recall: could not record the smoke test version: {ex.Message}");
+        }
     }
 
     private static SmokeTestResult Map(BenchmarkResult r)
