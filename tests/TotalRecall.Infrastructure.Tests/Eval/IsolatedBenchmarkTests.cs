@@ -4,7 +4,9 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using TotalRecall.Infrastructure.Config;
+using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Eval;
+using TotalRecall.Infrastructure.Tests.TestSupport;
 using Xunit;
 
 namespace TotalRecall.Infrastructure.Tests.Eval;
@@ -41,6 +43,73 @@ public sealed class IsolatedBenchmarkTests
         IsolatedBenchmark.DeleteDbFiles(baseName);
 
         foreach (var p in paths) Assert.False(File.Exists(p), $"should be deleted: {p}");
+    }
+
+    // The smoke test at session_start reuses the session's already-loaded
+    // embedder: the overload that takes one must use it, must not dispose it
+    // (the session keeps using it), and must still run in a throwaway DB.
+    private sealed class TrackingEmbedder : IEmbedder, IDisposable
+    {
+        private readonly FakeEmbedder _inner = new();
+        public int EmbedCalls;
+        public bool Disposed;
+        public EmbedderDescriptor Descriptor => _inner.Descriptor;
+        public float[] Embed(string text) { EmbedCalls++; return _inner.Embed(text); }
+        public void Dispose() => Disposed = true;
+    }
+
+    [Fact]
+    public async Task RunAsync_WithSuppliedEmbedder_UsesItLeavesItUsableAndCleansUpTempDb()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "tr-iso-supplied-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var corpus = Path.Combine(dir, "corpus.jsonl");
+            var bench = Path.Combine(dir, "bench.jsonl");
+            File.WriteAllText(corpus, string.Join("\n", new[]
+            {
+                "{\"content\":\"pnpm is the preferred package manager\",\"type\":\"correction\",\"tags\":[]}",
+                "{\"content\":\"vitest is the test runner\",\"type\":\"preference\",\"tags\":[]}",
+            }));
+            File.WriteAllText(bench, string.Join("\n", new[]
+            {
+                "{\"query\":\"package manager\",\"expected_content_contains\":\"pnpm\",\"expected_tier\":\"warm\"}",
+                "{\"query\":\"test runner\",\"expected_content_contains\":\"vitest\",\"expected_tier\":\"warm\"}",
+            }));
+
+            var embedder = new TrackingEmbedder();
+            var tempBefore = TempBenchmarkDbCount();
+
+            var result = await IsolatedBenchmark.RunAsync(
+                new BenchmarkOptions(corpus, bench), embedder, CancellationToken.None);
+
+            Assert.Equal(2, result.TotalQueries);
+            Assert.True(embedder.EmbedCalls >= 4, "2 corpus entries + 2 queries go through the supplied embedder");
+            Assert.False(embedder.Disposed, "the session's embedder must stay alive");
+            Assert.Equal(384, embedder.Embed("still usable").Length);
+
+            // Only the seeded corpus is searchable, and the throwaway DB is gone.
+            var corpusContents = BenchmarkRunner.ParseCorpus(corpus).Select(c => c.Content).ToHashSet();
+            foreach (var d in result.Details)
+                if (d.TopResult is not null) Assert.Contains(d.TopResult, corpusContents);
+            Assert.Equal(tempBefore, TempBenchmarkDbCount());
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { /* best-effort */ }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_WithSuppliedEmbedder_WhenTheRunnerThrows_StillCleansUpTempDb()
+    {
+        var tempBefore = TempBenchmarkDbCount();
+
+        await Assert.ThrowsAsync<FileNotFoundException>(() => IsolatedBenchmark.RunAsync(
+            new BenchmarkOptions("/nope/corpus.jsonl", "/nope/bench.jsonl"), new TrackingEmbedder(), CancellationToken.None));
+
+        Assert.Equal(tempBefore, TempBenchmarkDbCount());
     }
 
     // Integration: actually runs the benchmark end-to-end against the bundled

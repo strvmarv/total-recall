@@ -35,10 +35,28 @@ public static class IsolatedBenchmark
     /// Execute the benchmark against a fresh temp DB and discard it afterward.
     /// Matches the <c>EvalBenchmarkExecutor</c> / CLI executor delegate shape.
     /// </summary>
-    public static async Task<BenchmarkResult> RunAsync(BenchmarkOptions opts, CancellationToken ct)
+    public static Task<BenchmarkResult> RunAsync(BenchmarkOptions opts, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(opts);
+        return RunCoreAsync(opts, static () => EmbedderFactory.CreateProduction(), ct);
+    }
 
+    /// <summary>
+    /// Same isolated run, but with the embedder the caller already has (the
+    /// session's, for the first-run smoke test) so a second copy of the model is
+    /// not loaded. The embedder is borrowed: it is never disposed here.
+    /// </summary>
+    public static Task<BenchmarkResult> RunAsync(
+        BenchmarkOptions opts, IEmbedder embedder, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(opts);
+        ArgumentNullException.ThrowIfNull(embedder);
+        return RunCoreAsync(opts, () => embedder, ct);
+    }
+
+    private static async Task<BenchmarkResult> RunCoreAsync(
+        BenchmarkOptions opts, Func<IEmbedder> embedderFactory, CancellationToken ct)
+    {
         var dbPath = NewTempDbPath();
         // Pooling off so Dispose releases the file handle and the temp DB
         // (plus WAL/SHM sidecars) can be deleted immediately afterward.
@@ -50,7 +68,7 @@ public static class IsolatedBenchmark
             var vec = new VectorSearch(conn);
             var fts = new FtsSearch(conn);
             var hybrid = new HybridSearch(vec, fts, store);
-            var embedder = EmbedderFactory.CreateProduction();
+            var embedder = embedderFactory();
             var runner = new BenchmarkRunner(store, vec, hybrid, embedder);
             return await runner.RunAsync(opts, ct).ConfigureAwait(false);
         }
