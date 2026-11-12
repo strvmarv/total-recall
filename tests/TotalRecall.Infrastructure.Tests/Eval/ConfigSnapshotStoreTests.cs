@@ -75,4 +75,35 @@ public sealed class ConfigSnapshotStoreTests
             Assert.Equal("n1", rows[2].Name);
         }
     }
+
+    // Timestamps are milliseconds, so two snapshots created back to back can share
+    // one. "Latest" and a name lookup must then pick the one inserted last, not an
+    // arbitrary row.
+    [Fact]
+    public void SameMillisecondSnapshots_LatestAndByNameResolveToTheLastInserted()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            void Insert(string id, string? name, string cfg)
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText =
+                    "INSERT INTO config_snapshots (id, name, timestamp, config) VALUES ($id, $n, 1000, $c)";
+                cmd.Parameters.AddWithValue("$id", id);
+                cmd.Parameters.AddWithValue("$n", (object?)name ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$c", cfg);
+                cmd.ExecuteNonQuery();
+            }
+
+            // Ids chosen so that id order would pick the FIRST row: only insertion
+            // order picks the second.
+            Insert("zzz-first", "baseline", "{\"a\":1}");
+            Insert("aaa-second", "baseline", "{\"a\":2}");
+
+            Assert.Equal("aaa-second", store.GetLatest()!.Id);
+            Assert.Equal("aaa-second", store.ResolveRef("latest"));
+            Assert.Equal("aaa-second", store.GetByName("baseline")!.Id);
+        }
+    }
 }

@@ -136,7 +136,9 @@ public sealed class ServerCompositionReindexTests
                 // The worker was actually started: it eventually leaves Idle. With a
                 // 50ms/row embedder it cannot have COMPLETED 40 rows by now, so the
                 // observed live state proves the re-embed is running off the boot path.
-                WaitForStatePastIdle(progress!, TimeSpan.FromSeconds(5));
+                // 30 s: only a ceiling for a starved CI thread pool; the worker normally
+                // leaves Idle in milliseconds, and the loop returns as soon as it does.
+                WaitForStatePastIdle(progress!, TimeSpan.FromSeconds(30));
 
                 // Cancel so the slow worker stops promptly and releases the DB.
                 cts!.Cancel();
