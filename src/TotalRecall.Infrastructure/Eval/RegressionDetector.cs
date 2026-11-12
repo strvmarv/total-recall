@@ -30,7 +30,11 @@ public sealed class RegressionDetector
     /// <summary>How many of the newest snapshot rows are searched for the session's row and its predecessor.</summary>
     private const int SnapshotWindow = 20;
 
-    /// <summary>Newest events read per snapshot, so a long history cannot slow session start.</summary>
+    /// <summary>
+    /// Newest events read per snapshot. Bounds the rows loaded and scored, not the rows
+    /// scanned: retrieval_events has no config_snapshot_id index, so a read filters the
+    /// timestamp index.
+    /// </summary>
     private const int EventCap = 1000;
 
     /// <summary>Only assistant-loop retrievals carry feedback, so only they are compared (as eval_report does).</summary>
