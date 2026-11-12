@@ -26,9 +26,10 @@
 //   - Phase 5: if a RetrievalEventLog and/or SyncQueue are injected, the
 //     handler now logs a local retrieval event and enqueues a matching
 //     SyncRetrievalEvent for cortex push after each search. Both sinks are
-//     optional, preserving the sqlite-only composition path. SessionId and
-//     ConfigSnapshotId remain placeholders until a future phase plumbs real
-//     session context. See TS memory-tools.ts:189-204.
+//     optional, preserving the sqlite-only composition path. ConfigSnapshotId is
+//     the session's snapshot id (SessionConfigSnapshot), "default" when none is
+//     wired; SessionId remains the "unknown" placeholder. See TS
+//     memory-tools.ts:189-204.
 //
 //   - Validation throws ArgumentException, matching MemoryStoreHandler, so
 //     ErrorTranslator (Task 4.5) can wrap failures into MCP tool-error shape.

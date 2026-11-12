@@ -38,7 +38,7 @@ Replaced single-chunk identity check with 3-probe validation. Probes sample chun
 
 ### ~~Config Snapshot Auto-Creation~~
 
-> **Partly TypeScript only.** In .NET, `config_set` and `eval_snapshot` create snapshots, but `session_start` does not, and events are logged with the placeholder id `"default"`. See "Gaps found in the TODO audit".
+> **.NET.** `session_start` pins a snapshot of the running config (`SessionConfigSnapshot`) and retrieval and compaction events carry its id. The CLI `config set` and `eval_snapshot` also create snapshots; the MCP `config_set` does not. Postgres mode keeps the placeholder id.
 
 Snapshots auto-created on `session_start` and before `config_set`. Deduplication via SHA-256 hash of recursively key-sorted config JSON. Snapshot IDs threaded through retrieval events and compaction logging.
 
@@ -130,7 +130,7 @@ Found while auditing the `TODO` comments in `src/` (the old `TODO(Plan N)` label
 
 ### Port the TypeScript `session_start` extras to .NET
 
-The first-run smoke test, regression detection and the per-session config snapshot ran in the TypeScript engine and are not implemented in .NET. `SmokeTest` and `RegressionAlerts` are always `null`; no snapshot is made at session start, so retrieval and compaction events carry `ConfigSnapshotId = "default"` and snapshot-based `eval_compare` filtering has nothing to separate. The `regression.*` settings are parsed but unused.
+The first-run smoke test and regression detection ran in the TypeScript engine and are not implemented in .NET. `SmokeTest` and `RegressionAlerts` are always `null`, and the `regression.*` settings are parsed but unused. (The per-session config snapshot is implemented: events carry its id, so snapshot-based `eval_compare` filtering separates periods.)
 
 ### Pass the detected project to the host importers
 

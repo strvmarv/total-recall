@@ -340,7 +340,7 @@ The root cause is Windows Defender mid-scanning the freshly-extracted `total-rec
 7. **Tier summary** — counts entries across all tiers and KB collections, returned as `tierSummary` in the response.
 8. **Hint generation** — `GenerateHints()` surfaces up to 5 high-value warm memories: corrections and preferences (priority 1), frequently accessed entries with `access_count >= 3` (priority 2), and warm→hot promotion candidates (priority 3). Each hint is truncated to 120 chars. No LLM calls — DB queries only.
 9. **Session continuity** — `GetLastSessionAge()` returns human-readable relative time since last compaction event (proxy for last session). Returns `null` for first-time users.
-10. **Config snapshot** — *not implemented at session start.* No snapshot is created and no session snapshot id exists; retrieval and compaction events are logged with the placeholder `ConfigSnapshotId` `"default"`. Snapshots are still created by `eval_snapshot` and by `config_set` (`pre-change:<key>`).
+10. **Config snapshot** — `SessionConfigSnapshot` (`src/TotalRecall.Infrastructure/Eval/`, one per sqlite/cortex server composition) creates or reuses a snapshot of the in-process config via `ConfigSnapshotStore.CreateSnapshot` (reused when the config JSON equals the latest row). `session_start` pins it, and it also resolves lazily, so an event logged before `session_start` still gets a real id. Every retrieval event (`memory_search`, `kb_search`) and compaction event (promote, demote, pin, unpin, session-end hot-tier compaction) carries that id as `ConfigSnapshotId`. Postgres mode has no snapshot store and keeps the `"default"` placeholder; `TierV2DataMigration` and the CLI `compact` path log with no session id (`""`). Session snapshots are unnamed; a later named request for the same config (`eval_snapshot`, CLI `config set`) names the reused row. Only fields `ConfigJsonSerializer` writes count: changing a setting it omits does not create a new snapshot.
 11. **Regression detection** — *not implemented in the .NET engine.* The `regression.miss_rate_delta` / `regression.latency_ratio` settings are parsed and persisted but nothing consumes them, and the `regressionAlerts` field is always `null`.
 
 ### Pinned-directive floor (per-turn re-injection)
@@ -357,7 +357,7 @@ The root cause is Windows Defender mid-scanning the freshly-extracted `total-rec
 
 ### Config persistence
 
-`config_set` writes to `~/.total-recall/config.toml` via `Tomlyn`. Changes are merged with existing user config and take effect immediately in the current session. Before writing, `config_set` auto-creates a config snapshot named `pre-change:<key>` so retrieval metrics from before and after can be compared with `eval_compare`.
+`config_set` writes to `~/.total-recall/config.toml` via `Tomlyn`. Changes are merged with existing user config and take effect on the next session (the running server keeps the config it loaded). The CLI `total-recall config set` auto-creates a config snapshot named `pre-change:<key>` first so retrieval metrics from before and after can be compared with `eval_compare`; the MCP `config_set` tool does not snapshot (call `eval_snapshot` first).
 
 ### Eval system
 
@@ -377,7 +377,7 @@ The root cause is Windows Defender mid-scanning the freshly-extracted `total-rec
 
 ### Handler dependencies and the composition root
 
-There is no `ToolContext` object (a leftover from the TypeScript design). Each handler receives its dependencies (store, embedder, config, session lifecycle, event logs) through its constructor, wired in `ServerComposition.BuildRegistry()`; see `src/TotalRecall.Server/Handlers/AGENTS.md`. Retrieval events currently log the placeholder `ConfigSnapshotId` `"default"`.
+There is no `ToolContext` object (a leftover from the TypeScript design). Each handler receives its dependencies (store, embedder, config, session lifecycle, event logs) through its constructor, wired in `ServerComposition.BuildRegistry()`; see `src/TotalRecall.Server/Handlers/AGENTS.md`. Handlers that log retrieval or compaction events take the shared `SessionConfigSnapshot` and tag events with its id (`"default"` or `""` only when it is absent or the store fails).
 
 The composition root in `src/TotalRecall.Host/Program.cs` wires up all dependencies (storage, embedder, importers, MCP server, migration guard) and is the AOT entry point. The 51 MCP handlers live in `src/TotalRecall.Server/Handlers/` — one file per handler.
 

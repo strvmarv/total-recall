@@ -3,10 +3,10 @@
 // Port of src-ts/tools/session-tools.ts runSessionInit. Runs the host
 // importers (including project-docs ingest), the tier v2 data move, the
 // warm sweep, and sticky/hot context assembly. NOT implemented in the
-// .NET engine: the first-run smoke test, regression detection, and the
-// per-session config snapshot; their result fields are always null (see
-// the TODOs at the call sites below and docs/TODO.md, "Gaps found in the
-// TODO audit").
+// .NET engine: the first-run smoke test and regression detection; their
+// result fields are always null (see the TODOs at the call sites below and
+// docs/TODO.md, "Gaps found in the TODO audit"). The per-session config
+// snapshot is pinned at session_start (SessionConfigSnapshot).
 //
 // Wire shape returned by EnsureInitializedAsync is consumed by Task 4.10's
 // session_start handler. The shape is registered with JsonContext so the
