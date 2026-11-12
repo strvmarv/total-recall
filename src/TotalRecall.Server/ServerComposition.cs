@@ -146,7 +146,8 @@ public static class ServerComposition
         int pinnedMaxChars = PinnedTierLimits.DefaultMaxContentChars,
         int hotMaxChars = 1200,
         ReindexProgress? reindexProgress = null,
-        string querySource = "assistant")
+        string querySource = "assistant",
+        Infrastructure.Eval.SessionConfigSnapshot? configSnapshot = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(vectors);
@@ -162,7 +163,7 @@ public static class ServerComposition
         // ---- Memory (18, +1 assistant-only memory_feedback when a
         //      RetrievalEventLog is wired — see below) ----
         registry.Register(new MemoryStoreHandler(store, embedder, vectors, scopeDefault, pinnedMaxChars, hotMaxChars));
-        registry.Register(new MemorySearchHandler(embedder, hybrid, scopeDefault, retrievalLog, syncQueue, querySource));
+        registry.Register(new MemorySearchHandler(embedder, hybrid, scopeDefault, retrievalLog, syncQueue, querySource, configSnapshot));
         // Assistant-only feedback tool (Task 1.6). Registered immediately after
         // memory_search because it consumes the retrievalId memory_search emits.
         // Both production paths (sqlite + cortex) wire a RetrievalEventLog, so
@@ -175,12 +176,12 @@ public static class ServerComposition
         registry.Register(new MemoryGetAllHandler(store));
         registry.Register(new MemoryUpdateHandler(store, embedder, vectors));
         registry.Register(new MemoryDeleteHandler(store, vectors));
-        registry.Register(new MemoryPromoteHandler(store, vectors, embedder, compactionLogWriter, syncQueue));
-        registry.Register(new MemoryDemoteHandler(store, vectors, embedder, compactionLogWriter, syncQueue));
+        registry.Register(new MemoryPromoteHandler(store, vectors, embedder, compactionLogWriter, syncQueue, configSnapshot));
+        registry.Register(new MemoryDemoteHandler(store, vectors, embedder, compactionLogWriter, syncQueue, configSnapshot));
         // Tier model v2 (Task 5): pins now land in hot as sticky rows, so the
         // pin handler enforces the HOT content cap (not the retired pinned cap).
-        registry.Register(new MemoryPinHandler(store, vectors, embedder, compactionLogWriter, syncQueue, hotMaxChars));
-        registry.Register(new MemoryUnpinHandler(store, vectors, embedder, compactionLogWriter, syncQueue));
+        registry.Register(new MemoryPinHandler(store, vectors, embedder, compactionLogWriter, syncQueue, hotMaxChars, configSnapshot));
+        registry.Register(new MemoryUnpinHandler(store, vectors, embedder, compactionLogWriter, syncQueue, configSnapshot));
         registry.Register(new MemoryInspectHandler(store, compactionLog));
         registry.Register(new MemoryHistoryHandler(compactionLog));
         registry.Register(new MemoryRecentHandler(store, scopeDefault));
@@ -191,7 +192,7 @@ public static class ServerComposition
         registry.Register(new MemoryExtractHandler(store, embedder, scopeDefault));
 
         // ---- KB (8) ----
-        registry.Register(new KbSearchHandler(embedder, hybrid, remoteBackend, scopeDefault, retrievalLog, syncQueue, querySource));
+        registry.Register(new KbSearchHandler(embedder, hybrid, remoteBackend, scopeDefault, retrievalLog, syncQueue, querySource, configSnapshot));
         registry.Register(new KbIngestFileHandler(fileIngester, scopeDefault));
         registry.Register(new KbIngestDirHandler(fileIngester, scopeDefault));
         registry.Register(new KbListCollectionsHandler(store));
@@ -202,7 +203,7 @@ public static class ServerComposition
 
         // ---- Session (4) ----
         registry.Register(new SessionStartHandler(sessionLifecycle, periodicSync, syncService));
-        registry.Register(new SessionEndHandler(sessionLifecycle, store, compactionLogWriter, syncService: syncService, hotMaxContentChars: hotMaxChars));
+        registry.Register(new SessionEndHandler(sessionLifecycle, store, compactionLogWriter, syncService: syncService, hotMaxContentChars: hotMaxChars, configSnapshot: configSnapshot));
         registry.Register(new SessionContextHandler(store));
         registry.Register(new SessionRefreshHandler(sessionLifecycle));
 
@@ -461,6 +462,13 @@ public static class ServerComposition
             // Constructed before SessionLifecycle so the delegate can be passed in.
             var retrievalLog = new RetrievalEventLog(conn);
 
+            // The session's config snapshot id, shared by SessionLifecycle
+            // (pins it at session_start) and the handlers that log events.
+            // Serializes the in-process config the server actually runs with.
+            var configSnapshot = new Infrastructure.Eval.SessionConfigSnapshot(
+                new Infrastructure.Eval.ConfigSnapshotStore(conn),
+                ConfigJsonSerializer.Serialize(cfg));
+
             var sessionLifecycle = new SessionLifecycle(
                 importers, store, compactionLog,
                 usageIndexer: usageIndexer,
@@ -482,7 +490,8 @@ public static class ServerComposition
                 vec: vec,
                 promoteMinAccess: cfg.Compaction.PromoteMinAccess,
                 promoteThreshold: cfg.Compaction.PromoteThreshold,
-                compactionConfig: cfg.Compaction);
+                compactionConfig: cfg.Compaction,
+                configSnapshot: configSnapshot);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
@@ -499,7 +508,8 @@ public static class ServerComposition
                 pinnedMaxChars: ResolvePinnedMaxChars(cfg),
                 hotMaxChars: cfg.Tiers.Hot.MaxContentChars,
                 reindexProgress: reindexProgress,
-                querySource: querySource);
+                querySource: querySource,
+                configSnapshot: configSnapshot);
 
             registry.Register(new UsageStatusHandler(usageQuery));
 
@@ -773,6 +783,13 @@ public static class ServerComposition
             // Constructed before SessionLifecycle so the delegate can be passed in.
             var retrievalLog = new RetrievalEventLog(conn);
 
+            // The session's config snapshot id, shared by SessionLifecycle
+            // (pins it at session_start) and the handlers that log events.
+            // Serializes the in-process config the server actually runs with.
+            var configSnapshot = new Infrastructure.Eval.SessionConfigSnapshot(
+                new Infrastructure.Eval.ConfigSnapshotStore(conn),
+                ConfigJsonSerializer.Serialize(cfg));
+
             var sessionLifecycle = new SessionLifecycle(
                 importers, routingStore, compactionLog,
                 usageIndexer: usageIndexer,
@@ -793,7 +810,8 @@ public static class ServerComposition
                 vec: vec,
                 promoteMinAccess: cfg.Compaction.PromoteMinAccess,
                 promoteThreshold: cfg.Compaction.PromoteThreshold,
-                compactionConfig: cfg.Compaction);
+                compactionConfig: cfg.Compaction,
+                configSnapshot: configSnapshot);
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
@@ -813,7 +831,8 @@ public static class ServerComposition
                 pinnedMaxChars: ResolvePinnedMaxChars(cfg),
                 hotMaxChars: cfg.Tiers.Hot.MaxContentChars,
                 reindexProgress: reindexProgress,
-                querySource: querySource);
+                querySource: querySource,
+                configSnapshot: configSnapshot);
 
             registry.Register(new UsageStatusHandler(usageQuery));
 

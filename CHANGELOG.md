@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+
+- **Retrieval and compaction events carry a real config snapshot id (#49).** `session_start` created no snapshot, so every `memory_search`, `kb_search`, promote, demote, pin, unpin and session-end compaction event was logged with the placeholder `"default"` (or `""`), and `eval_compare` and `eval_report`'s `config_snapshot` filter had nothing to separate. The sqlite and cortex servers now snapshot the config they run with (reusing the latest snapshot when the config is unchanged) and tag each event with its id, so periods before and after a config change can be compared. A snapshot only reflects the settings the config serializer writes. Postgres mode, the one-time tier migration and the CLI `compact` path keep the placeholder. Existing events are not rewritten. When a named snapshot (`eval_snapshot <name>`, CLI `config set`) is requested for a config that matches the unnamed session snapshot, the name is now attached to that row.
+
 ## 4.5.0 - 2026-11-11
 
 ### Changed

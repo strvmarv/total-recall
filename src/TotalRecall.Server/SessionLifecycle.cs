@@ -3,10 +3,10 @@
 // Port of src-ts/tools/session-tools.ts runSessionInit. Runs the host
 // importers (including project-docs ingest), the tier v2 data move, the
 // warm sweep, and sticky/hot context assembly. NOT implemented in the
-// .NET engine: the first-run smoke test, regression detection, and the
-// per-session config snapshot; their result fields are always null (see
-// the TODOs at the call sites below and docs/TODO.md, "Gaps found in the
-// TODO audit").
+// .NET engine: the first-run smoke test and regression detection; their
+// result fields are always null (see the TODOs at the call sites below and
+// docs/TODO.md, "Gaps found in the TODO audit"). The per-session config
+// snapshot is pinned at session_start (SessionConfigSnapshot).
 //
 // Wire shape returned by EnsureInitializedAsync is consumed by Task 4.10's
 // session_start handler. The shape is registered with JsonContext so the
@@ -69,6 +69,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
     private readonly int _promoteMinAccess;
     private readonly double _promoteThreshold;
     private readonly Core.Config.CompactionConfig _compactionConfig;
+    private readonly TotalRecall.Infrastructure.Eval.SessionConfigSnapshot? _configSnapshot;
 
     /// <summary>Phase 3 idea 2a — advisory thresholds for RefreshAsync recommendations.</summary>
     private const double SessionRefreshThresholdMinutes = 30;
@@ -105,7 +106,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
         IVectorSearch? vec = null,
         int promoteMinAccess = 5,
         double promoteThreshold = 0.7,
-        Core.Config.CompactionConfig? compactionConfig = null)
+        Core.Config.CompactionConfig? compactionConfig = null,
+        TotalRecall.Infrastructure.Eval.SessionConfigSnapshot? configSnapshot = null)
     {
         ArgumentNullException.ThrowIfNull(importers);
         ArgumentNullException.ThrowIfNull(store);
@@ -133,6 +135,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         _hotMaxContentChars = hotMaxContentChars > 0 ? hotMaxContentChars : 0;
         _projectResolver = projectResolver ?? new ProjectResolver();
         _vec = vec;
+        _configSnapshot = configSnapshot;
         _promoteMinAccess = promoteMinAccess > 0 ? promoteMinAccess : 5;
         _promoteThreshold = promoteThreshold > 0 ? promoteThreshold : 0.7;
         _compactionConfig = compactionConfig ?? new Core.Config.CompactionConfig(
@@ -504,9 +507,11 @@ public sealed class SessionLifecycle : ISessionLifecycle
         // snapshot using regression.miss_rate_delta / latency_ratio) is not
         // implemented in .NET; RegressionAlerts is always null.
 
-        // TODO: no config snapshot is created at session start, so there is
-        // no session snapshot id; retrieval and compaction events are logged
-        // with the placeholder ConfigSnapshotId "default".
+        // Pin the session's config snapshot now (creates it, or reuses the
+        // latest row when the config is unchanged). Best effort: Resolve()
+        // returns null on a store failure and never throws, and the handlers
+        // that log events resolve it again on demand.
+        _configSnapshot?.Resolve();
 
         return new SessionInitResult(
             SessionId: _sessionId,

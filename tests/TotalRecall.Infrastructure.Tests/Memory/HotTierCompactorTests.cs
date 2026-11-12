@@ -7,6 +7,7 @@ using Microsoft.FSharp.Core;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Memory;
 using TotalRecall.Infrastructure.Storage;
+using TotalRecall.Infrastructure.Telemetry;
 using TotalRecall.Infrastructure.Tests.TestSupport;
 using Xunit;
 
@@ -106,5 +107,28 @@ public sealed class HotTierCompactorTests
         Assert.Equal(0, r.Compacted); // oversized row is skipped, not moved
         Assert.Equal(1, store.Count(Tier.Hot, ContentType.Memory));
         Assert.Equal(0, store.Count(Tier.Warm, ContentType.Memory));
+    }
+
+    [Fact]
+    public void Compact_LogsTheGivenConfigSnapshotId_OnBothEventKinds()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+        var store = new InMemoryTestStore();
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        store.Seed(Tier.Hot, ContentType.Memory, MakeEntry("stale", lastAccessedAt: 0));
+        store.Seed(Tier.Hot, ContentType.Memory, MakeEntry("big", lastAccessedAt: now, content: new string('x', 50)));
+
+        HotTierCompactor.Compact(
+            store, sessionId: "s1", nowMs: now,
+            warmThreshold: 0.5, decayConstantHours: 168, compactionLog: new CompactionLog(conn),
+            maxContentChars: 10, configSnapshotId: "snap-7");
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT reason, config_snapshot_id FROM compaction_log ORDER BY reason";
+        using var reader = cmd.ExecuteReader();
+        var rows = new List<(string, string)>();
+        while (reader.Read()) rows.Add((reader.GetString(0), reader.GetString(1)));
+        Assert.Equal(new[] { ("session_end_decay", "snap-7"), ("skip_oversized", "snap-7") }, rows);
     }
 }

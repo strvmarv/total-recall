@@ -38,19 +38,22 @@ public sealed class MemoryDemoteHandler : IToolHandler
     private readonly IEmbedder _embedder;
     private readonly CompactionLog? _compactionLog;
     private readonly SyncQueue? _syncQueue;
+    private readonly TotalRecall.Infrastructure.Eval.SessionConfigSnapshot? _configSnapshot;
 
     public MemoryDemoteHandler(
         IStore store,
         IVectorSearch vec,
         IEmbedder embedder,
         CompactionLog? compactionLog = null,
-        SyncQueue? syncQueue = null)
+        SyncQueue? syncQueue = null,
+        TotalRecall.Infrastructure.Eval.SessionConfigSnapshot? configSnapshot = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _vec = vec ?? throw new ArgumentNullException(nameof(vec));
         _embedder = embedder ?? throw new ArgumentNullException(nameof(embedder));
         _compactionLog = compactionLog;
         _syncQueue = syncQueue;
+        _configSnapshot = configSnapshot;
     }
 
     public string Name => "memory_demote";
@@ -122,7 +125,7 @@ public sealed class MemoryDemoteHandler : IToolHandler
                 TargetEntryId: id,
                 DecayScores: new Dictionary<string, double> { [id] = entry.DecayScore },
                 Reason: "manual_demote",
-                ConfigSnapshotId: "default"));
+                ConfigSnapshotId: _configSnapshot?.Resolve() ?? "default"));
 
             _syncQueue?.Enqueue("compaction", "push", null,
                 CompactionSyncPayload.Event(

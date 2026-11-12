@@ -37,6 +37,7 @@ public sealed class SessionEndHandler : IToolHandler
     private readonly double _decayConstantHours;
     // 0 means "unlimited" (matches SessionLifecycle's hotMaxContentChars convention).
     private readonly int _hotMaxContentChars;
+    private readonly TotalRecall.Infrastructure.Eval.SessionConfigSnapshot? _configSnapshot;
 
     public SessionEndHandler(
         ISessionLifecycle sessionLifecycle,
@@ -45,7 +46,8 @@ public sealed class SessionEndHandler : IToolHandler
         double warmThreshold = 0.3,
         double decayConstantHours = 168,
         TotalRecall.Infrastructure.Sync.SyncService? syncService = null,
-        int hotMaxContentChars = 0)
+        int hotMaxContentChars = 0,
+        TotalRecall.Infrastructure.Eval.SessionConfigSnapshot? configSnapshot = null)
     {
         _sessionLifecycle = sessionLifecycle
             ?? throw new ArgumentNullException(nameof(sessionLifecycle));
@@ -55,6 +57,7 @@ public sealed class SessionEndHandler : IToolHandler
         _decayConstantHours = decayConstantHours;
         _syncService = syncService;
         _hotMaxContentChars = hotMaxContentChars > 0 ? hotMaxContentChars : 0;
+        _configSnapshot = configSnapshot;
     }
 
     public string Name => "session_end";
@@ -99,7 +102,8 @@ public sealed class SessionEndHandler : IToolHandler
             _store!, _sessionLifecycle.SessionId, nowMs,
             _warmThreshold, _decayConstantHours, _compactionLog,
             reason: "session_end_decay", ct: ct,
-            maxContentChars: _hotMaxContentChars > 0 ? _hotMaxContentChars : int.MaxValue);
+            maxContentChars: _hotMaxContentChars > 0 ? _hotMaxContentChars : int.MaxValue,
+            configSnapshotId: _configSnapshot?.Resolve() ?? "");
         return (r.CarryForward, r.Compacted, r.Discarded);
     }
 }

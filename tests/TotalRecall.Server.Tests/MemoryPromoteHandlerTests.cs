@@ -216,4 +216,21 @@ public class MemoryPromoteHandlerTests
             handler.ExecuteAsync(ParseArgs("""{"id":"w1","tier":"pinned"}"""), CancellationToken.None));
         Assert.Contains("invalid tier", ex.Message);
     }
+
+    [Fact]
+    public async Task CompactionEvent_CarriesTheSessionConfigSnapshotId()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+        var (holder, snapshotId) = TotalRecall.Server.Tests.TestSupport.ConfigSnapshotTestSupport.NewHolder(conn);
+        var store = new FakeStore();
+        store.Seed(Tier.Warm, ContentType.Memory, MakeEntry("w1", "body"));
+        var handler = new MemoryPromoteHandler(store, new FakeVectorSearch(), new RecordingFakeEmbedder(),
+            new CompactionLog(conn), configSnapshot: holder);
+
+        await handler.ExecuteAsync(ParseArgs("""{"id":"w1"}"""), CancellationToken.None);
+
+        Assert.Equal(new[] { snapshotId },
+            TotalRecall.Server.Tests.TestSupport.ConfigSnapshotTestSupport.CompactionSnapshotIds(conn));
+    }
 }

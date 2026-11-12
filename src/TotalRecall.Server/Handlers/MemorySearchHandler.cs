@@ -26,9 +26,10 @@
 //   - Phase 5: if a RetrievalEventLog and/or SyncQueue are injected, the
 //     handler now logs a local retrieval event and enqueues a matching
 //     SyncRetrievalEvent for cortex push after each search. Both sinks are
-//     optional, preserving the sqlite-only composition path. SessionId and
-//     ConfigSnapshotId remain placeholders until a future phase plumbs real
-//     session context. See TS memory-tools.ts:189-204.
+//     optional, preserving the sqlite-only composition path. ConfigSnapshotId is
+//     the session's snapshot id (SessionConfigSnapshot), "default" when none is
+//     wired; SessionId remains the "unknown" placeholder. See TS
+//     memory-tools.ts:189-204.
 //
 //   - Validation throws ArgumentException, matching MemoryStoreHandler, so
 //     ErrorTranslator (Task 4.5) can wrap failures into MCP tool-error shape.
@@ -77,6 +78,7 @@ public sealed class MemorySearchHandler : IToolHandler
     private readonly RetrievalEventLog? _retrievalLog;
     private readonly SyncQueue? _syncQueue;
     private readonly string _querySource;
+    private readonly TotalRecall.Infrastructure.Eval.SessionConfigSnapshot? _configSnapshot;
 
     public MemorySearchHandler(
         IEmbedder embedder,
@@ -84,7 +86,8 @@ public sealed class MemorySearchHandler : IToolHandler
         string? scopeDefault = null,
         RetrievalEventLog? retrievalLog = null,
         SyncQueue? syncQueue = null,
-        string querySource = "assistant")
+        string querySource = "assistant",
+        TotalRecall.Infrastructure.Eval.SessionConfigSnapshot? configSnapshot = null)
     {
         _embedder = embedder ?? throw new ArgumentNullException(nameof(embedder));
         _hybridSearch = hybridSearch ?? throw new ArgumentNullException(nameof(hybridSearch));
@@ -92,6 +95,7 @@ public sealed class MemorySearchHandler : IToolHandler
         _retrievalLog = retrievalLog;
         _syncQueue = syncQueue;
         _querySource = querySource;
+        _configSnapshot = configSnapshot;
     }
 
     public string Name => "memory_search";
@@ -221,7 +225,7 @@ public sealed class MemorySearchHandler : IToolHandler
                     QuerySource: _querySource,
                     Results: resultItems,
                     TiersSearched: tiersSearched,
-                    ConfigSnapshotId: "default",  // Phase 5 MVT: placeholder.
+                    ConfigSnapshotId: _configSnapshot?.Resolve() ?? "default",
                     LatencyMs: (long)latencyMs));
             }
 

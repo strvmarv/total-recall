@@ -213,8 +213,8 @@ Flow:
 | `RetrievalEventLog` | `retrieval_events` | Per-search retrieval events with score, tier, and outcome signal |
 
 **Retrieval event logging**: `memory_search` and `kb_search` handlers call `LogRetrievalEvent()`
-after each search. Pass `ctx.ConfigSnapshotId` (set by `session_start`) so events are tagged to
-the active config snapshot. Each event records a `query_source` (`assistant` / `web-ui` / `cli`)
+after each search. They pass `SessionConfigSnapshot.Resolve()` (pinned by `session_start`, resolved
+lazily otherwise) so events are tagged to the session's config snapshot. Each event records a `query_source` (`assistant` / `web-ui` / `cli`)
 so metrics can be scoped to assistant traffic; the search handlers return the logged event's
 `retrievalId`, and `memory_feedback` calls `UpdateOutcome()` to mark whether it was used.
 

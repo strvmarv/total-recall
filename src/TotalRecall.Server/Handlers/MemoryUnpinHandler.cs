@@ -49,19 +49,22 @@ public sealed class MemoryUnpinHandler : IToolHandler
     // Intentionally retained but currently unused: pinned tier movements are not synced to
     // Cortex (local-only); kept for ctor-signature stability and future use.
     private readonly SyncQueue? _syncQueue;
+    private readonly TotalRecall.Infrastructure.Eval.SessionConfigSnapshot? _configSnapshot;
 
     public MemoryUnpinHandler(
         IStore store,
         IVectorSearch vec,
         IEmbedder embedder,
         CompactionLog? compactionLog = null,
-        SyncQueue? syncQueue = null)
+        SyncQueue? syncQueue = null,
+        TotalRecall.Infrastructure.Eval.SessionConfigSnapshot? configSnapshot = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _vec = vec ?? throw new ArgumentNullException(nameof(vec));
         _embedder = embedder ?? throw new ArgumentNullException(nameof(embedder));
         _compactionLog = compactionLog;
         _syncQueue = syncQueue;
+        _configSnapshot = configSnapshot;
     }
 
     public string Name => "memory_unpin";
@@ -117,7 +120,7 @@ public sealed class MemoryUnpinHandler : IToolHandler
                 TargetEntryId: id,
                 DecayScores: new Dictionary<string, double> { [id] = entry.DecayScore },
                 Reason: "manual_unpin",
-                ConfigSnapshotId: "default"));
+                ConfigSnapshotId: _configSnapshot?.Resolve() ?? "default"));
         }
 
         var dto = new MemoryMoveResultDto(

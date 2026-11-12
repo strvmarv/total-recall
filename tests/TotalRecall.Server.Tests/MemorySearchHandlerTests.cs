@@ -560,4 +560,54 @@ public class MemorySearchHandlerTests
                 Args("""{"query":"x","tiers":["pinned"]}"""),
                 CancellationToken.None));
     }
+
+    // ---------------- config snapshot id on retrieval events ----------------
+
+    [Fact]
+    public async Task RetrievalEvent_CarriesTheSessionConfigSnapshotId()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+        var snapshots = new TotalRecall.Infrastructure.Eval.ConfigSnapshotStore(conn);
+        var holder = new TotalRecall.Infrastructure.Eval.SessionConfigSnapshot(snapshots, "{\"a\":1}");
+        var retrievalLog = new RetrievalEventLog(conn);
+        var handler = new MemorySearchHandler(
+            new RecordingFakeEmbedder(), new RecordingFakeHybridSearch(),
+            retrievalLog: retrievalLog, configSnapshot: holder);
+
+        // No session_start ran: the lazy holder still gives the event a real id.
+        await handler.ExecuteAsync(Args("""{"query":"before session start"}"""), CancellationToken.None);
+
+        var row = retrievalLog.GetEvents(new RetrievalEventQuery()).Single();
+        Assert.Equal(snapshots.GetLatest()!.Id, row.ConfigSnapshotId);
+        Assert.NotEqual("default", row.ConfigSnapshotId);
+    }
+
+    [Fact]
+    public async Task RetrievalEvent_FallsBackToThePlaceholder_WhenTheSnapshotIsUnavailable()
+    {
+        using var conn = SqliteConnection.Open(":memory:");
+        MigrationRunner.RunMigrations(conn);
+        var holder = new TotalRecall.Infrastructure.Eval.SessionConfigSnapshot(
+            new ThrowingSnapshotStore(), "{}", _ => { });
+        var retrievalLog = new RetrievalEventLog(conn);
+        var handler = new MemorySearchHandler(
+            new RecordingFakeEmbedder(), new RecordingFakeHybridSearch(),
+            retrievalLog: retrievalLog, configSnapshot: holder);
+
+        await handler.ExecuteAsync(Args("""{"query":"q"}"""), CancellationToken.None);
+
+        Assert.Equal("default", retrievalLog.GetEvents(new RetrievalEventQuery()).Single().ConfigSnapshotId);
+    }
+
+    private sealed class ThrowingSnapshotStore : TotalRecall.Infrastructure.Eval.IConfigSnapshotStore
+    {
+        public string CreateSnapshot(string configJson, string? name = null) => throw new InvalidOperationException("locked");
+        public TotalRecall.Infrastructure.Eval.ConfigSnapshotRow? GetLatest() => null;
+        public TotalRecall.Infrastructure.Eval.ConfigSnapshotRow? GetById(string id) => null;
+        public TotalRecall.Infrastructure.Eval.ConfigSnapshotRow? GetByName(string name) => null;
+        public System.Collections.Generic.IReadOnlyList<TotalRecall.Infrastructure.Eval.ConfigSnapshotRow> ListRecent(int limit)
+            => Array.Empty<TotalRecall.Infrastructure.Eval.ConfigSnapshotRow>();
+        public string? ResolveRef(string nameOrId) => null;
+    }
 }
