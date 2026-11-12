@@ -73,6 +73,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
     private readonly Core.Config.CompactionConfig _compactionConfig;
     private readonly TotalRecall.Infrastructure.Eval.SessionConfigSnapshot? _configSnapshot;
     private readonly Func<IReadOnlyList<TotalRecall.Infrastructure.Eval.RegressionFinding>?>? _regressionCheck;
+    private readonly Func<SmokeTestResult?>? _smokeTest;
 
     /// <summary>Phase 3 idea 2a — advisory thresholds for RefreshAsync recommendations.</summary>
     private const double SessionRefreshThresholdMinutes = 30;
@@ -111,7 +112,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
         double promoteThreshold = 0.7,
         Core.Config.CompactionConfig? compactionConfig = null,
         TotalRecall.Infrastructure.Eval.SessionConfigSnapshot? configSnapshot = null,
-        Func<IReadOnlyList<TotalRecall.Infrastructure.Eval.RegressionFinding>?>? regressionCheck = null)
+        Func<IReadOnlyList<TotalRecall.Infrastructure.Eval.RegressionFinding>?>? regressionCheck = null,
+        Func<SmokeTestResult?>? smokeTest = null)
     {
         ArgumentNullException.ThrowIfNull(importers);
         ArgumentNullException.ThrowIfNull(store);
@@ -141,6 +143,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         _vec = vec;
         _configSnapshot = configSnapshot;
         _regressionCheck = regressionCheck;
+        _smokeTest = smokeTest;
         _promoteMinAccess = promoteMinAccess > 0 ? promoteMinAccess : 5;
         _promoteThreshold = promoteThreshold > 0 ? promoteThreshold : 0.7;
         _compactionConfig = compactionConfig ?? new Core.Config.CompactionConfig(
@@ -308,9 +311,6 @@ public sealed class SessionLifecycle : ISessionLifecycle
 
         // Project docs auto-ingest is not a separate step: ProjectDocsImporter
         // is one of the importers in the loop above (see ServerComposition).
-
-        // TODO: first-run smoke test (version-gated, eval/benchmarks/smoke.jsonl)
-        // is not implemented in .NET; SmokeTest in the result is always null.
 
         // 1d. Tier model v2 (Task 6) — one-time data move. Runs here (at
         // session_start, where an embedder exists for re-embedding) BEFORE the
@@ -518,6 +518,10 @@ public sealed class SessionLifecycle : ISessionLifecycle
         // failure here must never fail session_start.
         var regressionAlerts = RunRegressionCheck();
 
+        // First-run smoke test (version-gated; see SmokeTestGate). Runs last, once
+        // the imports are done, and never fails session_start.
+        var smokeTest = RunSmokeTest();
+
         return new SessionInitResult(
             SessionId: _sessionId,
             Project: detectedProject,
@@ -530,12 +534,44 @@ public sealed class SessionLifecycle : ISessionLifecycle
             TierSummary: tierSummary,
             Hints: hints,
             LastSessionAge: lastSessionAge,
-            SmokeTest: null, // TODO: smoke test not implemented in .NET
+            SmokeTest: smokeTest,
             RegressionAlerts: regressionAlerts,
             Storage: _storageMode,
             HotContextTruncated: hotContextTruncated,
             SessionAgeHint: null, // fresh session, no hint needed
             BackgroundTasks: backgroundTasks);
+    }
+
+    /// <summary>
+    /// Runs the injected version-gated smoke test. Null when none is wired, when
+    /// it is not due, or when this session is not in a state to measure the local
+    /// embedder: a background re-embed that has not finished (it competes for the
+    /// CPU and the vectors are mid-change) or an embedder that is not the bundled
+    /// 384-dimension local model (a remote one would blow the time cap, and the
+    /// isolated database's vector tables are fixed at 384). Best effort: a failure
+    /// here must never fail session_start.
+    /// </summary>
+    private SmokeTestResult? RunSmokeTest()
+    {
+        if (_smokeTest is null) return null;
+        try
+        {
+            // A reindex object exists only when one was started; it is finished
+            // only once Completed or Failed (Idle covers the startup window).
+            if (_reindexProgress is not null
+                && _reindexProgress.State is ReindexProgress.Phase.Idle or ReindexProgress.Phase.Running)
+                return null;
+            if (_embedder is not null
+                && !(string.Equals(_embedder.Descriptor.Provider, "local", StringComparison.Ordinal)
+                     && _embedder.Descriptor.Dimensions == 384))
+                return null;
+            return _smokeTest();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[total-recall] smoke test failed: {ex.Message}");
+            return null;
+        }
     }
 
     /// <summary>
@@ -1753,7 +1789,9 @@ public sealed record ProjectDocsResult(
     [property: JsonPropertyName("filesIngested")] int FilesIngested,
     [property: JsonPropertyName("totalChunks")] int TotalChunks);
 
-// TODO: never populated; the smoke test is not implemented in .NET.
+/// <summary>First-run smoke test outcome: <c>Passed</c> and a short human-readable
+/// <c>Notes</c> (the exact-match rate and threshold, or why it could not finish).
+/// The whole field is null when the test is not due or was skipped.</summary>
 public sealed record SmokeTestResult(
     [property: JsonPropertyName("passed")] bool Passed,
     [property: JsonPropertyName("notes")] string? Notes);
