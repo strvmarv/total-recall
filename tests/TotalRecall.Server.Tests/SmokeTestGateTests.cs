@@ -251,4 +251,18 @@ public sealed class SmokeTestGateTests
         public void SetMeta(string key, string value) { }
         public void DeleteMeta(string key) { }
     }
+
+    [Fact]
+    public void ZeroQueriesRan_IsAnInabilityToRun_RecordsNothing()
+    {
+        // An empty or truncated smoke.jsonl yields 0 queries: not a threshold miss.
+        var meta = new DictMetaStore();
+        var gate = new SmokeTestGate(meta, "4.6.0", new CountingRunner().Run(Result(0.0, total: 0)));
+
+        var result = gate.RunIfNeeded();
+
+        Assert.False(result!.Passed);
+        Assert.Contains("no smoke queries ran", result.Notes);
+        Assert.Null(meta.GetMeta(SmokeTestGate.MetaKey));
+    }
 }

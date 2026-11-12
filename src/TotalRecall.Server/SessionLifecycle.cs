@@ -547,8 +547,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
     /// embedder: a background re-embed that has not finished (it competes for the
     /// CPU and the vectors are mid-change) or an embedder that is not the bundled
     /// 384-dimension local model (a remote one would blow the time cap, and the
-    /// isolated database's vector tables are fixed at 384). Best effort: a failure
-    /// here must never fail session_start.
+    /// isolated database's vector tables are fixed at 384). A failure here is reported
+    /// as <c>passed=false</c> with the reason and never fails session_start.
     /// </summary>
     private SmokeTestResult? RunSmokeTest()
     {
@@ -569,7 +569,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[total-recall] smoke test failed: {ex.Message}");
-            return null;
+            return new SmokeTestResult(false, $"smoke test could not run: {ex.Message}");
         }
     }
 

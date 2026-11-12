@@ -62,7 +62,8 @@ public sealed class IsolatedBenchmarkTests
     public async Task RunAsync_WithSuppliedEmbedder_UsesItLeavesItUsableAndCleansUpTempDb()
     {
         var dir = Path.Combine(Path.GetTempPath(), "tr-iso-supplied-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(dir);
+        var scratch = Path.Combine(dir, "scratch");
+        Directory.CreateDirectory(scratch);
         try
         {
             var corpus = Path.Combine(dir, "corpus.jsonl");
@@ -79,21 +80,21 @@ public sealed class IsolatedBenchmarkTests
             }));
 
             var embedder = new TrackingEmbedder();
-            var tempBefore = TempBenchmarkDbCount();
 
             var result = await IsolatedBenchmark.RunAsync(
-                new BenchmarkOptions(corpus, bench), embedder, CancellationToken.None);
+                new BenchmarkOptions(corpus, bench), embedder, scratch, CancellationToken.None);
 
             Assert.Equal(2, result.TotalQueries);
             Assert.True(embedder.EmbedCalls >= 4, "2 corpus entries + 2 queries go through the supplied embedder");
             Assert.False(embedder.Disposed, "the session's embedder must stay alive");
             Assert.Equal(384, embedder.Embed("still usable").Length);
 
-            // Only the seeded corpus is searchable, and the throwaway DB is gone.
+            // Only the seeded corpus is searchable, and the throwaway DB (with its
+            // WAL/SHM sidecars) is gone from the directory it was created in.
             var corpusContents = BenchmarkRunner.ParseCorpus(corpus).Select(c => c.Content).ToHashSet();
             foreach (var d in result.Details)
                 if (d.TopResult is not null) Assert.Contains(d.TopResult, corpusContents);
-            Assert.Equal(tempBefore, TempBenchmarkDbCount());
+            Assert.Empty(Directory.GetFileSystemEntries(scratch));
         }
         finally
         {
@@ -104,12 +105,20 @@ public sealed class IsolatedBenchmarkTests
     [Fact]
     public async Task RunAsync_WithSuppliedEmbedder_WhenTheRunnerThrows_StillCleansUpTempDb()
     {
-        var tempBefore = TempBenchmarkDbCount();
+        var scratch = Path.Combine(Path.GetTempPath(), "tr-iso-throw-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(scratch);
+        try
+        {
+            await Assert.ThrowsAsync<FileNotFoundException>(() => IsolatedBenchmark.RunAsync(
+                new BenchmarkOptions("/nope/corpus.jsonl", "/nope/bench.jsonl"),
+                new TrackingEmbedder(), scratch, CancellationToken.None));
 
-        await Assert.ThrowsAsync<FileNotFoundException>(() => IsolatedBenchmark.RunAsync(
-            new BenchmarkOptions("/nope/corpus.jsonl", "/nope/bench.jsonl"), new TrackingEmbedder(), CancellationToken.None));
-
-        Assert.Equal(tempBefore, TempBenchmarkDbCount());
+            Assert.Empty(Directory.GetFileSystemEntries(scratch));
+        }
+        finally
+        {
+            try { Directory.Delete(scratch, recursive: true); } catch { /* best-effort */ }
+        }
     }
 
     // Integration: actually runs the benchmark end-to-end against the bundled

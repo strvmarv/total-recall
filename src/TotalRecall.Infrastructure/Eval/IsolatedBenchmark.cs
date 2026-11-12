@@ -54,10 +54,24 @@ public static class IsolatedBenchmark
         return RunCoreAsync(opts, () => embedder, ct);
     }
 
-    private static async Task<BenchmarkResult> RunCoreAsync(
-        BenchmarkOptions opts, Func<IEmbedder> embedderFactory, CancellationToken ct)
+    /// <summary>
+    /// Test seam: the supplied-embedder run with the throwaway database created
+    /// under <paramref name="tempDirectory"/>, so a test can assert nothing is left
+    /// behind without racing other runs in the shared system temp directory.
+    /// </summary>
+    internal static Task<BenchmarkResult> RunAsync(
+        BenchmarkOptions opts, IEmbedder embedder, string tempDirectory, CancellationToken ct)
     {
-        var dbPath = NewTempDbPath();
+        ArgumentNullException.ThrowIfNull(opts);
+        ArgumentNullException.ThrowIfNull(embedder);
+        ArgumentException.ThrowIfNullOrEmpty(tempDirectory);
+        return RunCoreAsync(opts, () => embedder, ct, tempDirectory);
+    }
+
+    private static async Task<BenchmarkResult> RunCoreAsync(
+        BenchmarkOptions opts, Func<IEmbedder> embedderFactory, CancellationToken ct, string? tempDirectory = null)
+    {
+        var dbPath = NewTempDbPath(tempDirectory);
         // Pooling off so Dispose releases the file handle and the temp DB
         // (plus WAL/SHM sidecars) can be deleted immediately afterward.
         var conn = SqliteConnection.Open(dbPath, pooling: false);
@@ -80,8 +94,8 @@ public static class IsolatedBenchmark
     }
 
     /// <summary>A unique throwaway DB path under the system temp directory.</summary>
-    internal static string NewTempDbPath()
-        => Path.Combine(Path.GetTempPath(), $"tr-benchmark-{Guid.NewGuid():N}.db");
+    internal static string NewTempDbPath(string? directory = null)
+        => Path.Combine(directory ?? Path.GetTempPath(), $"tr-benchmark-{Guid.NewGuid():N}.db");
 
     /// <summary>Delete a SQLite db file and its <c>-wal</c>/<c>-shm</c> sidecars (best-effort).</summary>
     internal static void DeleteDbFiles(string dbPath)

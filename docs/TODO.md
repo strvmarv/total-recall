@@ -26,7 +26,7 @@ Added Cursor, Cline, OpenCode, and Hermes importers. Extracted shared utilities 
 
 ### ~~First-Run Smoke Test~~
 
-> **.NET.** Implemented in `SmokeTestGate` (issue #51): synchronous at the end of `session_start`, 20 s cap, fixed 0.8 exact-match threshold, isolated ephemeral database, version recorded only after a completed run. See `AGENTS.md`, "What happens on `session_start`", step 5.
+> **.NET.** Implemented in `SmokeTestGate` (issue #51): synchronous at the end of `session_start`, cancelled between steps after 20 s, fixed 0.8 exact-match threshold, isolated ephemeral database, version recorded only after a completed run. See `AGENTS.md`, "What happens on `session_start`", step 5.
 
 Version-gated smoke test runs on first install and after upgrades. 22-query corpus in `eval/benchmarks/smoke.jsonl` exercises semantic similarity, tier routing, and negative assertions. Results surfaced in `session_start` response as `smokeTest` field. Version tracked in `_meta` table.
 

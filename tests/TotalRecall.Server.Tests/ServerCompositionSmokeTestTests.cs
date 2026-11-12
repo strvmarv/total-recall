@@ -96,4 +96,37 @@ public sealed class ServerCompositionSmokeTestTests
         Assert.Contains("could not run", result.Notes);
         Assert.Null(meta.GetMeta("smoke_test_version"));
     }
+
+    [Fact]
+    public void DefaultRunner_RunsTheBundledFilesAgainstTheSuppliedEmbedder_AndRecordsTheVersion()
+    {
+        // No `run` injected: eval/corpus/memories.jsonl and eval/benchmarks/smoke.jsonl
+        // are resolved under evalDir and run through IsolatedBenchmark with the
+        // supplied embedder, so a wrong path segment or wiring fails here.
+        var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "tr-eval-" + Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(System.IO.Path.Combine(dir, "eval", "corpus"));
+        System.IO.Directory.CreateDirectory(System.IO.Path.Combine(dir, "eval", "benchmarks"));
+        try
+        {
+            System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "eval", "corpus", "memories.jsonl"),
+                "{\"content\":\"pnpm is the preferred package manager\",\"type\":\"correction\",\"tags\":[]}\n");
+            System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "eval", "benchmarks", "smoke.jsonl"),
+                "{\"query\":\"package manager\",\"expected_content_contains\":\"pnpm\",\"expected_tier\":\"warm\"}\n");
+            var embedder = new TotalRecall.Server.Tests.TestSupport.RecordingFakeEmbedder();
+            var meta = new DictMetaStore();
+            var smoke = ServerComposition.BuildSmokeTest(meta, "4.6.0", shared: false, embedder: embedder, evalDir: dir);
+
+            var result = smoke();
+
+            Assert.NotNull(result);
+            Assert.True(result!.Passed, result.Notes);
+            Assert.Contains("1 queries", result.Notes);
+            Assert.True(embedder.Calls.Count >= 2, "corpus and query go through the supplied embedder");
+            Assert.Equal("4.6.0", meta.GetMeta("smoke_test_version"));
+        }
+        finally
+        {
+            try { System.IO.Directory.Delete(dir, recursive: true); } catch { /* best-effort */ }
+        }
+    }
 }

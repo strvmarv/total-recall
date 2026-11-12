@@ -99,10 +99,11 @@ public sealed class SessionLifecycleSmokeTestTests
     }
 
     [Fact]
-    public async Task ThrowingSmokeTest_LeavesSmokeTestNull_AndSessionStartSucceeds()
+    public async Task ThrowingSmokeTest_ReportsFailureWithReason_AndSessionStartSucceeds()
     {
         var (result, _) = await Run(() => throw new InvalidOperationException("boom"));
-        Assert.Null(result.SmokeTest);
+        Assert.False(result.SmokeTest!.Passed);
+        Assert.Contains("boom", result.SmokeTest.Notes);
         Assert.False(string.IsNullOrEmpty(result.SessionId));
     }
 

@@ -85,6 +85,11 @@ public sealed class SmokeTestGate
                 }
             }
 
+            // An empty or truncated bundled smoke.jsonl runs no queries: that is a
+            // broken bundle, not a threshold miss, so nothing is recorded.
+            if (result.TotalQueries <= 0)
+                return new SmokeTestResult(false, "smoke test could not run: no smoke queries ran (the bundled benchmark file is empty)");
+
             var mapped = Map(result);
             RecordVersion();
             return mapped;
