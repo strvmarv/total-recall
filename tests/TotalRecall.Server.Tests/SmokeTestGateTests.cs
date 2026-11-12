@@ -82,4 +82,67 @@ public sealed class SmokeTestGateTests
         var gate = new SmokeTestGate(new DictMetaStore(), "4.6.0", new CountingRunner().Run(Result(0.8, total: 10)));
         Assert.True(gate.RunIfNeeded()!.Passed);
     }
+
+    [Fact]
+    public void VersionAlreadyRecorded_SkipsWithoutRunning()
+    {
+        var meta = new DictMetaStore();
+        meta.SetMeta(SmokeTestGate.MetaKey, "4.6.0");
+        var runner = new CountingRunner();
+        var gate = new SmokeTestGate(meta, "4.6.0", runner.Run(Result(1.0)));
+
+        Assert.Null(gate.RunIfNeeded());
+        Assert.Equal(0, runner.Calls);
+    }
+
+    [Fact]
+    public void SecondCallOnSameVersion_DoesNotRunAgain()
+    {
+        var meta = new DictMetaStore();
+        var runner = new CountingRunner();
+        var gate = new SmokeTestGate(meta, "4.6.0", runner.Run(Result(1.0)));
+
+        Assert.NotNull(gate.RunIfNeeded());
+        Assert.Null(gate.RunIfNeeded());
+        Assert.Equal(1, runner.Calls);
+    }
+
+    [Fact]
+    public void RecordedVersionDiffers_RunsAgainAndRecordsTheNewVersion()
+    {
+        var meta = new DictMetaStore();
+        meta.SetMeta(SmokeTestGate.MetaKey, "4.5.0");
+        var runner = new CountingRunner();
+        var gate = new SmokeTestGate(meta, "4.6.0", runner.Run(Result(1.0)));
+
+        Assert.NotNull(gate.RunIfNeeded());
+        Assert.Equal(1, runner.Calls);
+        Assert.Equal("4.6.0", meta.GetMeta(SmokeTestGate.MetaKey));
+    }
+
+    [Theory]
+    [InlineData("unknown")]
+    [InlineData("")]
+    public void UnresolvedVersion_SkipsAndRecordsNothing(string version)
+    {
+        var meta = new DictMetaStore();
+        var runner = new CountingRunner();
+        var gate = new SmokeTestGate(meta, version, runner.Run(Result(1.0)));
+
+        Assert.Null(gate.RunIfNeeded());
+        Assert.Equal(0, runner.Calls);
+        Assert.Null(meta.GetMeta(SmokeTestGate.MetaKey));
+    }
+
+    [Fact]
+    public void CustomMetaKey_IsUsedForTheGate()
+    {
+        var meta = new DictMetaStore();
+        meta.SetMeta(SmokeTestGate.MetaKey, "4.6.0"); // another machine's record
+        var runner = new CountingRunner();
+        var gate = new SmokeTestGate(meta, "4.6.0", runner.Run(Result(1.0)), metaKey: "smoke_test_version:box-a");
+
+        Assert.NotNull(gate.RunIfNeeded());
+        Assert.Equal("4.6.0", meta.GetMeta("smoke_test_version:box-a"));
+    }
 }

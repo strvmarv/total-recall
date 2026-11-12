@@ -25,6 +25,9 @@ public sealed class SmokeTestGate
     /// <summary>Minimum exact-match rate for a pass (the TypeScript engine's threshold).</summary>
     public const double PassThreshold = 0.8;
 
+    /// <summary><c>McpServer.ResolveServerVersion</c> returns this when no version can be read.</summary>
+    public const string UnknownVersion = "unknown";
+
     private readonly IMetaStore _meta;
     private readonly string _version;
     private readonly Func<CancellationToken, Task<BenchmarkResult>> _run;
@@ -48,6 +51,10 @@ public sealed class SmokeTestGate
     /// </summary>
     public SmokeTestResult? RunIfNeeded()
     {
+        // An unstamped build cannot be gated: skip rather than run every session.
+        if (string.IsNullOrWhiteSpace(_version) || _version == UnknownVersion) return null;
+        if (string.Equals(_meta.GetMeta(_metaKey), _version, StringComparison.Ordinal)) return null;
+
         var result = _run(CancellationToken.None).GetAwaiter().GetResult();
         _meta.SetMeta(_metaKey, _version);
         return Map(result);
