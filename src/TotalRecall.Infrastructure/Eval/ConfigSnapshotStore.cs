@@ -108,7 +108,7 @@ public sealed class ConfigSnapshotStore : IConfigSnapshotStore
     {
         using var cmd = _conn.CreateCommand();
         cmd.CommandText =
-            "SELECT id, name, timestamp, config FROM config_snapshots ORDER BY timestamp DESC LIMIT 1";
+            "SELECT id, name, timestamp, config FROM config_snapshots ORDER BY timestamp DESC, rowid DESC LIMIT 1";
         return ReadOne(cmd);
     }
 
@@ -127,7 +127,7 @@ public sealed class ConfigSnapshotStore : IConfigSnapshotStore
         ArgumentNullException.ThrowIfNull(name);
         using var cmd = _conn.CreateCommand();
         cmd.CommandText =
-            "SELECT id, name, timestamp, config FROM config_snapshots WHERE name = $name ORDER BY timestamp DESC LIMIT 1";
+            "SELECT id, name, timestamp, config FROM config_snapshots WHERE name = $name ORDER BY timestamp DESC, rowid DESC LIMIT 1";
         cmd.Parameters.AddWithValue("$name", name);
         return ReadOne(cmd);
     }
@@ -137,7 +137,7 @@ public sealed class ConfigSnapshotStore : IConfigSnapshotStore
         if (limit <= 0) return Array.Empty<ConfigSnapshotRow>();
         using var cmd = _conn.CreateCommand();
         cmd.CommandText =
-            "SELECT id, name, timestamp, config FROM config_snapshots ORDER BY timestamp DESC LIMIT $limit";
+            "SELECT id, name, timestamp, config FROM config_snapshots ORDER BY timestamp DESC, rowid DESC LIMIT $limit";
         cmd.Parameters.AddWithValue("$limit", limit);
 
         var rows = new List<ConfigSnapshotRow>();
