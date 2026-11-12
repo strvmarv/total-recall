@@ -3,10 +3,12 @@
 // Port of src-ts/tools/session-tools.ts runSessionInit. Runs the host
 // importers (including project-docs ingest), the tier v2 data move, the
 // warm sweep, and sticky/hot context assembly. NOT implemented in the
-// .NET engine: the first-run smoke test and regression detection; their
-// result fields are always null (see the TODOs at the call sites below and
-// docs/TODO.md, "Gaps found in the TODO audit"). The per-session config
-// snapshot is pinned at session_start (SessionConfigSnapshot).
+// .NET engine: the first-run smoke test; its result field is always null (see
+// the TODO at the call site below and docs/TODO.md, "Gaps found in the TODO
+// audit"). The per-session config snapshot is pinned at session_start
+// (SessionConfigSnapshot), and retrieval regressions against the previous
+// snapshot are reported in regressionAlerts (RegressionDetector, supplied as
+// the optional regressionCheck delegate).
 //
 // Wire shape returned by EnsureInitializedAsync is consumed by Task 4.10's
 // session_start handler. The shape is registered with JsonContext so the
@@ -1692,9 +1694,10 @@ public sealed record Hint
 /// Aggregate result of <see cref="ISessionLifecycle.EnsureInitializedAsync"/>.
 /// <c>Project</c> is the detected project key (null outside a git repo),
 /// <c>WarmSweep</c> is null only when the sweep failed, and <c>ProjectDocs</c>
-/// is null when no project docs were ingested during the call. SmokeTest and
-/// RegressionAlerts are never populated; see the TODOs at the construction
-/// site in <c>RunInit</c>.
+/// is null when no project docs were ingested during the call. SmokeTest is
+/// never populated (see the TODO at the construction site in <c>RunInit</c>).
+/// RegressionAlerts is null unless the regression check found a miss-rate or
+/// latency regression against the previous config snapshot.
 /// </summary>
 public sealed record SessionInitResult(
     [property: JsonPropertyName("sessionId")] string SessionId,

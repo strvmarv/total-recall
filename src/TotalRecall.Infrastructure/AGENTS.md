@@ -25,7 +25,7 @@ No reflection, no dynamic code generation. All JSON via source-generated `JsonCo
 | `Migration/` | `MigrationRunner`, `PostgresMigrationRunner` | Sequential schema migration framework |
 | `Json/` | `JsonContext` (Infrastructure-level) | Source-generated JSON for Infrastructure DTOs |
 | `Memory/` | Memory-specific helpers | Memory operation utilities |
-| `Eval/` | Eval query services | Retrieval quality metrics |
+| `Eval/` | Eval query services, `RegressionDetector` / `RegressionOptions` | Retrieval quality metrics; session-start regression detection (see "Regression detection" in the root `AGENTS.md`) |
 
 ---
 

@@ -369,7 +369,7 @@ initial_backfill_days = 30        # Days of usage history to backfill on first s
 [regression]
 miss_rate_delta = 0.1             # Alert if miss rate increased by this much vs. previous snapshot
 latency_ratio = 2.0               # Alert if latency increased by this factor vs. previous snapshot
-min_events = 20                   # Minimum retrieval events required before regression check runs
+min_events = 10                   # Minimum retrieval events required on each side before the regression check runs
 
 [embedding]
 model = "bge-small-en-v1.5"      # Embedding model name

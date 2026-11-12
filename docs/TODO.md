@@ -18,8 +18,6 @@ Config snapshots auto-created on `session_start` and before `config_set`. `eval_
 
 ### ~~Regression Detection~~
 
-> **TypeScript only.** Not ported to the .NET engine; see "Gaps found in the TODO audit".
-
 Compares retrieval metrics between config snapshots at session_start. Alerts when miss rate increases by ≥ `regression.miss_rate_delta` or latency increases by ≥ `regression.latency_ratio`. Configurable thresholds with sensible defaults. Skipped when insufficient data.
 
 ### ~~Additional Host Importers~~
@@ -130,7 +128,7 @@ Found while auditing the `TODO` comments in `src/` (the old `TODO(Plan N)` label
 
 ### Port the TypeScript `session_start` extras to .NET
 
-The first-run smoke test and regression detection ran in the TypeScript engine and are not implemented in .NET. `SmokeTest` and `RegressionAlerts` are always `null`, and the `regression.*` settings are parsed but unused. (The per-session config snapshot is implemented: events carry its id, so snapshot-based `eval_compare` filtering separates periods.)
+The first-run smoke test ran in the TypeScript engine and is not implemented in .NET: `SmokeTest` is always `null`. (The per-session config snapshot is implemented: events carry its id, so snapshot-based `eval_compare` filtering separates periods. Regression detection is implemented: `regressionAlerts` is populated from the `regression.*` settings.)
 
 ### Pass the detected project to the host importers
 
