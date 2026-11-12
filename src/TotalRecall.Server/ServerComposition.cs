@@ -365,6 +365,29 @@ public static class ServerComposition
         return (progress, cts);
     }
 
+    /// <summary>
+    /// Builds the session-start regression check: this session's config snapshot
+    /// against the previous one, scored with the config's regression thresholds
+    /// and the warm similarity threshold. Local (sqlite-backed) modes only;
+    /// Postgres has no snapshot store and passes no check.
+    /// </summary>
+    internal static Func<IReadOnlyList<Infrastructure.Eval.RegressionFinding>?> BuildRegressionCheck(
+        Microsoft.Data.Sqlite.SqliteConnection conn,
+        RetrievalEventLog retrievalLog,
+        Infrastructure.Eval.SessionConfigSnapshot configSnapshot,
+        Core.Config.TotalRecallConfig cfg,
+        Func<long>? nowMs = null)
+    {
+        var detector = new Infrastructure.Eval.RegressionDetector(
+            new Infrastructure.Eval.ConfigSnapshotStore(conn),
+            retrievalLog,
+            configSnapshot,
+            Infrastructure.Eval.RegressionOptions.FromConfig(cfg.Regression),
+            cfg.Tiers.Warm.SimilarityThreshold,
+            nowMs);
+        return detector.Check;
+    }
+
     private static ServerCompositionHandles OpenSqlite(Core.Config.TotalRecallConfig cfg, string? dbPath, string storageMode = "sqlite", string querySource = "assistant")
     {
         var resolvedDbPath = dbPath ?? ConfigLoader.GetDbPath();
@@ -491,7 +514,8 @@ public static class ServerComposition
                 promoteMinAccess: cfg.Compaction.PromoteMinAccess,
                 promoteThreshold: cfg.Compaction.PromoteThreshold,
                 compactionConfig: cfg.Compaction,
-                configSnapshot: configSnapshot);
+                configSnapshot: configSnapshot,
+                regressionCheck: BuildRegressionCheck(conn, retrievalLog, configSnapshot, cfg));
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,
@@ -811,7 +835,8 @@ public static class ServerComposition
                 promoteMinAccess: cfg.Compaction.PromoteMinAccess,
                 promoteThreshold: cfg.Compaction.PromoteThreshold,
                 compactionConfig: cfg.Compaction,
-                configSnapshot: configSnapshot);
+                configSnapshot: configSnapshot,
+                regressionCheck: BuildRegressionCheck(conn, retrievalLog, configSnapshot, cfg));
 
             var statusOptions = new StatusOptions(
                 DbPath: resolvedDbPath,

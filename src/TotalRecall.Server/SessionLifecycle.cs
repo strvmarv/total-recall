@@ -3,10 +3,12 @@
 // Port of src-ts/tools/session-tools.ts runSessionInit. Runs the host
 // importers (including project-docs ingest), the tier v2 data move, the
 // warm sweep, and sticky/hot context assembly. NOT implemented in the
-// .NET engine: the first-run smoke test and regression detection; their
-// result fields are always null (see the TODOs at the call sites below and
-// docs/TODO.md, "Gaps found in the TODO audit"). The per-session config
-// snapshot is pinned at session_start (SessionConfigSnapshot).
+// .NET engine: the first-run smoke test; its result field is always null (see
+// the TODO at the call site below and docs/TODO.md, "Gaps found in the TODO
+// audit"). The per-session config snapshot is pinned at session_start
+// (SessionConfigSnapshot), and retrieval regressions against the previous
+// snapshot are reported in regressionAlerts (RegressionDetector, supplied as
+// the optional regressionCheck delegate).
 //
 // Wire shape returned by EnsureInitializedAsync is consumed by Task 4.10's
 // session_start handler. The shape is registered with JsonContext so the
@@ -70,6 +72,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
     private readonly double _promoteThreshold;
     private readonly Core.Config.CompactionConfig _compactionConfig;
     private readonly TotalRecall.Infrastructure.Eval.SessionConfigSnapshot? _configSnapshot;
+    private readonly Func<IReadOnlyList<TotalRecall.Infrastructure.Eval.RegressionFinding>?>? _regressionCheck;
 
     /// <summary>Phase 3 idea 2a — advisory thresholds for RefreshAsync recommendations.</summary>
     private const double SessionRefreshThresholdMinutes = 30;
@@ -107,7 +110,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
         int promoteMinAccess = 5,
         double promoteThreshold = 0.7,
         Core.Config.CompactionConfig? compactionConfig = null,
-        TotalRecall.Infrastructure.Eval.SessionConfigSnapshot? configSnapshot = null)
+        TotalRecall.Infrastructure.Eval.SessionConfigSnapshot? configSnapshot = null,
+        Func<IReadOnlyList<TotalRecall.Infrastructure.Eval.RegressionFinding>?>? regressionCheck = null)
     {
         ArgumentNullException.ThrowIfNull(importers);
         ArgumentNullException.ThrowIfNull(store);
@@ -136,6 +140,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         _projectResolver = projectResolver ?? new ProjectResolver();
         _vec = vec;
         _configSnapshot = configSnapshot;
+        _regressionCheck = regressionCheck;
         _promoteMinAccess = promoteMinAccess > 0 ? promoteMinAccess : 5;
         _promoteThreshold = promoteThreshold > 0 ? promoteThreshold : 0.7;
         _compactionConfig = compactionConfig ?? new Core.Config.CompactionConfig(
@@ -503,15 +508,15 @@ public sealed class SessionLifecycle : ISessionLifecycle
                         ?? _compactionLog.GetLastTimestampExcludingReason("warm_sweep_decay");
         var lastSessionAge = FormatLastSessionAge(lastAgeMs, _nowMs());
 
-        // TODO: regression detection (compare against the previous config
-        // snapshot using regression.miss_rate_delta / latency_ratio) is not
-        // implemented in .NET; RegressionAlerts is always null.
-
         // Pin the session's config snapshot now (creates it, or reuses the
         // latest row when the config is unchanged). Best effort: Resolve()
         // returns null on a store failure and never throws, and the handlers
         // that log events resolve it again on demand.
         _configSnapshot?.Resolve();
+
+        // Retrieval regressions against the previous snapshot. Best effort: a
+        // failure here must never fail session_start.
+        var regressionAlerts = RunRegressionCheck();
 
         return new SessionInitResult(
             SessionId: _sessionId,
@@ -526,11 +531,52 @@ public sealed class SessionLifecycle : ISessionLifecycle
             Hints: hints,
             LastSessionAge: lastSessionAge,
             SmokeTest: null, // TODO: smoke test not implemented in .NET
-            RegressionAlerts: null, // TODO: regression detection not implemented in .NET
+            RegressionAlerts: regressionAlerts,
             Storage: _storageMode,
             HotContextTruncated: hotContextTruncated,
             SessionAgeHint: null, // fresh session, no hint needed
             BackgroundTasks: backgroundTasks);
+    }
+
+    /// <summary>
+    /// Runs the injected regression check and maps its findings to alerts.
+    /// Null when there is no check, nothing was found, or the check threw.
+    /// </summary>
+    private IReadOnlyList<RegressionAlert>? RunRegressionCheck()
+    {
+        if (_regressionCheck is null) return null;
+        try
+        {
+            var findings = _regressionCheck();
+            if (findings is null || findings.Count == 0) return null;
+            var alerts = new List<RegressionAlert>(findings.Count);
+            foreach (var f in findings) alerts.Add(ToAlert(f));
+            return alerts;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[total-recall] regression check failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static RegressionAlert ToAlert(TotalRecall.Infrastructure.Eval.RegressionFinding f)
+    {
+        var inv = CultureInfo.InvariantCulture;
+        string message;
+        if (f.Kind == TotalRecall.Infrastructure.Eval.RegressionFinding.MissRate)
+        {
+            message = $"Miss rate rose from {(f.Previous * 100).ToString("0.#", inv)}% to "
+                + $"{(f.Current * 100).ToString("0.#", inv)}% (+{(f.Delta * 100).ToString("0.#", inv)} points; "
+                + $"threshold {(f.Threshold * 100).ToString("0.#", inv)} points)";
+        }
+        else
+        {
+            message = $"Average retrieval latency rose from {f.Previous.ToString("0", inv)} ms to "
+                + $"{f.Current.ToString("0", inv)} ms ({f.Delta.ToString("0.0", inv)}x; "
+                + $"threshold {f.Threshold.ToString("0.0", inv)}x)";
+        }
+        return new RegressionAlert(f.Kind, message, f.Previous, f.Current, f.Delta, f.Threshold);
     }
 
     /// <returns>Promotions, and the number of entries demoted out of hot (dead-weight
@@ -1648,9 +1694,10 @@ public sealed record Hint
 /// Aggregate result of <see cref="ISessionLifecycle.EnsureInitializedAsync"/>.
 /// <c>Project</c> is the detected project key (null outside a git repo),
 /// <c>WarmSweep</c> is null only when the sweep failed, and <c>ProjectDocs</c>
-/// is null when no project docs were ingested during the call. SmokeTest and
-/// RegressionAlerts are never populated; see the TODOs at the construction
-/// site in <c>RunInit</c>.
+/// is null when no project docs were ingested during the call. SmokeTest is
+/// never populated (see the TODO at the construction site in <c>RunInit</c>).
+/// RegressionAlerts is null unless the regression check found a miss-rate or
+/// latency regression against the previous config snapshot.
 /// </summary>
 public sealed record SessionInitResult(
     [property: JsonPropertyName("sessionId")] string SessionId,
@@ -1711,10 +1758,20 @@ public sealed record SmokeTestResult(
     [property: JsonPropertyName("passed")] bool Passed,
     [property: JsonPropertyName("notes")] string? Notes);
 
-// TODO: never populated; regression detection is not implemented in .NET.
+/// <summary>
+/// One retrieval regression since the previous config snapshot. <c>Kind</c> is
+/// <c>miss_rate</c> or <c>latency</c>; <c>Previous</c> and <c>Current</c> are the
+/// metric values (a 0..1 rate, or milliseconds); <c>Delta</c> is the absolute rise
+/// for <c>miss_rate</c> and the current/previous ratio for <c>latency</c>;
+/// <c>Threshold</c> is the configured limit that was crossed.
+/// </summary>
 public sealed record RegressionAlert(
     [property: JsonPropertyName("kind")] string Kind,
-    [property: JsonPropertyName("message")] string Message);
+    [property: JsonPropertyName("message")] string Message,
+    [property: JsonPropertyName("previous")] double? Previous = null,
+    [property: JsonPropertyName("current")] double? Current = null,
+    [property: JsonPropertyName("delta")] double? Delta = null,
+    [property: JsonPropertyName("threshold")] double? Threshold = null);
 
 // ---------- Phase 1 Step 4: Refresh DTOs ----------
 

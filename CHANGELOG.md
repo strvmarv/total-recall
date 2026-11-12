@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- **`session_start` reports retrieval regressions (#50).** `regressionAlerts` was always `null`. The sqlite and cortex servers now compare the retrieval metrics under this session's config snapshot with those of the nearest older snapshot that has `assistant`-source events, and report an alert when the miss rate rose by at least `regression.miss_rate_delta` (default 0.1) or average latency rose by at least `regression.latency_ratio` times (default 2.0). Each side needs at least `regression.min_events` (default 10) events with a resolved outcome; events still inside the 60-minute feedback window are not counted. An alert is `{kind: "miss_rate"|"latency", message, previous, current, delta, threshold}`. The field stays `null` when there is nothing to compare, no threshold is crossed, or detection fails (a failure never fails `session_start`). A changed config starts a snapshot with no events, so the alert first appears in a later session that reuses it, once it has enough events. Postgres mode reports none. The first-run smoke test is still not implemented.
+
 ### Fixed
 
 - **Retrieval and compaction events carry a real config snapshot id (#49).** `session_start` created no snapshot, so every `memory_search`, `kb_search`, promote, demote, pin, unpin and session-end compaction event was logged with the placeholder `"default"` (or `""`), and `eval_compare` and `eval_report`'s `config_snapshot` filter had nothing to separate. The sqlite and cortex servers now snapshot the config they run with (reusing the latest snapshot when the config is unchanged) and tag each event with its id, so periods before and after a config change can be compared. A snapshot only reflects the settings the config serializer writes. Postgres mode, the one-time tier migration and the CLI `compact` path keep the placeholder. Existing events are not rewritten. When a named snapshot (`eval_snapshot <name>`, CLI `config set`) is requested for a config that matches the unnamed session snapshot, the name is now attached to that row.

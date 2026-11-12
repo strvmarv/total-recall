@@ -381,10 +381,13 @@ public sealed class ConfigLoader : IConfigLoader
         FSharpOption<Core.Config.RegressionConfig> regression;
         if (table.TryGetValue("regression", out var regObj) && regObj is TomlTable regTable)
         {
+            // Lenient: a value that is not a number (or a min_events that is not a
+            // whole number in int range) is ignored so RegressionOptions falls back
+            // to the shipped default, instead of failing the whole config load.
             var regCfg = new Core.Config.RegressionConfig(
-                TryGetDouble(regTable, "miss_rate_delta"),
-                TryGetDouble(regTable, "latency_ratio"),
-                TryGetInt(regTable, "min_events"));
+                TryGetNumberLenient(regTable, "miss_rate_delta"),
+                TryGetNumberLenient(regTable, "latency_ratio"),
+                TryGetWholeNumberLenient(regTable, "min_events"));
             regression = FSharpOption<Core.Config.RegressionConfig>.Some(regCfg);
         }
         else
@@ -566,6 +569,23 @@ public sealed class ConfigLoader : IConfigLoader
         table.TryGetValue(key, out var value)
             ? FSharpOption<double>.Some(Convert.ToDouble(value))
             : FSharpOption<double>.None;
+
+    /// <summary>A TOML float or integer, else None (never throws).</summary>
+    private static FSharpOption<double> TryGetNumberLenient(TomlTable table, string key) =>
+        table.TryGetValue(key, out var value)
+            ? value switch
+            {
+                double d => FSharpOption<double>.Some(d),
+                long l => FSharpOption<double>.Some(l),
+                _ => FSharpOption<double>.None,
+            }
+            : FSharpOption<double>.None;
+
+    /// <summary>A TOML integer that fits an int, else None (never throws).</summary>
+    private static FSharpOption<int> TryGetWholeNumberLenient(TomlTable table, string key) =>
+        table.TryGetValue(key, out var value) && value is long l && l >= int.MinValue && l <= int.MaxValue
+            ? FSharpOption<int>.Some((int)l)
+            : FSharpOption<int>.None;
 
     private static FSharpOption<int> TryGetInt(TomlTable table, string key) =>
         table.TryGetValue(key, out var value)
