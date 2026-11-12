@@ -9,7 +9,8 @@
 // normalization (stable key order) is the caller's responsibility. This
 // keeps the store AOT-trivial — no reflection, no object walking — and
 // still satisfies the "don't insert a fresh row if nothing changed"
-// invariant so long as callers use a stable serializer.
+// invariant so long as callers use a stable serializer. A reused row that
+// is still unnamed takes the name the caller passes (never overwritten).
 
 using System;
 using System.Collections.Generic;
@@ -34,6 +35,10 @@ public interface IConfigSnapshotStore
     /// <summary>
     /// Insert a new snapshot row, or return the id of the latest row if
     /// its <c>config</c> column byte-equals <paramref name="configJson"/>.
+    /// When the latest row is reused and is still unnamed, a non-null
+    /// <paramref name="name"/> is stored on it (an existing name is never
+    /// overwritten), so a session's unnamed snapshot still resolves by the
+    /// name a later <c>eval_snapshot</c> or <c>config set</c> asks for.
     /// Callers wanting semantic dedup should normalize the JSON (stable
     /// key order) before calling.
     /// </summary>
@@ -68,6 +73,19 @@ public sealed class ConfigSnapshotStore : IConfigSnapshotStore
         var latest = GetLatest();
         if (latest is not null && string.Equals(latest.ConfigJson, configJson, StringComparison.Ordinal))
         {
+            // A reused row that is still unnamed takes the requested name, so a
+            // session's unnamed snapshot does not swallow the name that
+            // eval_snapshot or `config set` (pre-change:<key>) asks for. An
+            // existing name is never overwritten.
+            if (name is not null && latest.Name is null)
+            {
+                using var nameCmd = _conn.CreateCommand();
+                nameCmd.CommandText =
+                    "UPDATE config_snapshots SET name = $name WHERE id = $id AND name IS NULL";
+                nameCmd.Parameters.AddWithValue("$name", name);
+                nameCmd.Parameters.AddWithValue("$id", latest.Id);
+                nameCmd.ExecuteNonQuery();
+            }
             return latest.Id;
         }
 
