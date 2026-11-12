@@ -57,6 +57,9 @@ public sealed record CompactionHealthMetrics(
 /// <summary>
 /// Aggregate retrieval-quality metrics computed by <see cref="Metrics.Compute"/>.
 /// All numeric fields are zeroed when there are no events to score.
+/// <c>TotalEvents</c> counts every event passed in; <c>ScoredEvents</c> counts
+/// only those with a resolved outcome (pending recent events are excluded), the
+/// set the rates and the average latency are computed over.
 /// </summary>
 public sealed record MetricsReport(
     double Precision,
@@ -69,7 +72,8 @@ public sealed record MetricsReport(
     IReadOnlyDictionary<string, ContentTypeMetrics> ByContentType,
     IReadOnlyList<MissEntry> TopMisses,
     IReadOnlyList<MissEntry> FalsePositives,
-    CompactionHealthMetrics CompactionHealth);
+    CompactionHealthMetrics CompactionHealth,
+    int ScoredEvents = 0);
 
 /// <summary>
 /// Pure-math metric aggregator. Read-only — produces a <see cref="MetricsReport"/>
@@ -106,7 +110,8 @@ public static class Metrics
                 ByContentType: new Dictionary<string, ContentTypeMetrics>(),
                 TopMisses: Array.Empty<MissEntry>(),
                 FalsePositives: Array.Empty<MissEntry>(),
-                CompactionHealth: ComputeCompactionHealth(compaction));
+                CompactionHealth: ComputeCompactionHealth(compaction),
+                ScoredEvents: 0);
         }
 
         // Resolve each event's outcome at read time; pending (recent NULL) events
@@ -185,7 +190,8 @@ public static class Metrics
             ByContentType: byContentType,
             TopMisses: topMisses,
             FalsePositives: falsePositives,
-            CompactionHealth: ComputeCompactionHealth(compaction));
+            CompactionHealth: ComputeCompactionHealth(compaction),
+            ScoredEvents: scored.Count);
     }
 
     // Read-time outcome resolution. true = hit, false = miss, null = pending (excluded).

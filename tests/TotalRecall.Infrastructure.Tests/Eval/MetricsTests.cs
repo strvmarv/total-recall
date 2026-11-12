@@ -62,6 +62,28 @@ public sealed class MetricsTests
     private const long Grace = 60 * 60 * 1000L; // 60 min
 
     [Fact]
+    public void Compute_ScoredEvents_CountsOnlyEventsWithAResolvedOutcome()
+    {
+        var events = new[]
+        {
+            Ev(outcomeUsed: true, ts: Now - 2 * Grace, topScore: 0.9),   // used
+            Ev(outcomeUsed: false, ts: Now - 10, topScore: 0.9),         // explicit miss
+            Ev(outcomeUsed: null, ts: Now - 2 * Grace, topScore: 0.9),   // aged NULL -> miss
+            Ev(outcomeUsed: null, ts: Now - 10, topScore: 0.9),          // pending -> excluded
+        };
+        var r = Metrics.Compute(events, 0.5, Now, Grace);
+        Assert.Equal(4, r.TotalEvents);
+        Assert.Equal(3, r.ScoredEvents);
+    }
+
+    [Fact]
+    public void Compute_ScoredEvents_IsZeroWhenThereAreNoEvents()
+    {
+        var r = Metrics.Compute(Array.Empty<RetrievalEventRow>(), 0.5, Now, Grace);
+        Assert.Equal(0, r.ScoredEvents);
+    }
+
+    [Fact]
     public void Compute_UsedTrue_CountsAsHit()
     {
         var events = new[] { Ev(outcomeUsed: true, ts: Now - 2 * Grace, topScore: 0.9) };
