@@ -468,3 +468,47 @@ test('cacheVerifiedInstall: a store that throws or reports failure is not an err
   assert.equal(gate({ store: () => { throw new Error('disk full'); } }).result, false);
   assert.equal(gate({ store: () => false }).result, false);
 });
+
+// --- cache: findings from review ---
+
+test('cache: an entry replaced by another process while it is being hashed is not deleted', async () => {
+  const dataDir = tmpDir();
+  store(dataDir, makeArchive('old bytes'));
+  const entry = path.join(versionDirOf(dataDir), ARCHIVE);
+  const replacement = makeArchive('re-cut bytes');
+  // The hash of the old bytes comes back after another process stored a different archive.
+  const hashFile = async (file) => {
+    const oldHash = await sha256File(file);
+    assert.equal(store(dataDir, replacement), true);
+    return `${oldHash.slice(0, 63)}${oldHash.endsWith('0') ? '1' : '0'}`; // differs from the sidecar the restore read
+  };
+  const t = makeRestore();
+  const r = await restoreFromCache({ dataDir, ...t.args, hashFile });
+  assert.equal(r.restored, false);
+  assert.equal(t.calls.extract, 0);
+  assert.equal(fs.readFileSync(entry, 'utf8'), 're-cut bytes', 'the new entry survives');
+  assert.equal(fs.existsSync(`${entry}.sha256`), true);
+});
+
+test('cache: a restore never rejects, whatever it is given', async () => {
+  const dataDir = tmpDir();
+  store(dataDir, makeArchive());
+  for (const bad of [{ version: undefined }, { archiveName: null }, { version: 4 }, { destDir: undefined }]) {
+    const t = makeRestore();
+    const r = await restoreFromCache({ dataDir, ...t.args, ...bad });
+    assert.equal(r.restored, false, JSON.stringify(Object.keys(bad)));
+  }
+  // an injected step that throws after the checks (the payload check, the marker) is a miss too
+  const t = makeRestore({ payloadIntact: () => { throw new Error('boom'); } });
+  assert.equal((await restoreFromCache({ dataDir, ...t.args })).restored, false);
+  assert.equal(fs.existsSync(path.join(versionDirOf(dataDir), ARCHIVE)), true, 'a throw is not proof the entry is bad');
+});
+
+test('cache: storing with a non-string version or archive name is a failed store, not an error', () => {
+  const dataDir = tmpDir();
+  const archive = makeArchive();
+  for (const bad of [{ version: undefined }, { version: 4 }, { archiveName: undefined }, { archiveName: null }]) {
+    assert.equal(store(dataDir, archive, bad), false, JSON.stringify(Object.keys(bad)));
+  }
+  assert.equal(fs.existsSync(path.join(dataDir, 'cache')), false, 'nothing was created');
+});

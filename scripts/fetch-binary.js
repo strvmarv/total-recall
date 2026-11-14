@@ -240,7 +240,8 @@ function defaultStatOps() {
 
 function cachePaths(dataDir, version, archiveName) {
   if (typeof dataDir !== 'string' || !path.isAbsolute(dataDir)) return null;
-  if (!SAFE_SEGMENT.test(String(version)) || !SAFE_SEGMENT.test(String(archiveName))) return null;
+  if (typeof version !== 'string' || typeof archiveName !== 'string') return null;
+  if (!SAFE_SEGMENT.test(version) || !SAFE_SEGMENT.test(archiveName)) return null;
   const root = path.join(dataDir, 'cache');
   const versionsRoot = path.join(root, 'binaries');
   const versionDir = path.join(versionsRoot, version);
@@ -326,14 +327,23 @@ export function storeInCache({ dataDir, version, archiveName, archivePath, sha25
  * the binary, runs the model-payload check, makes the binary executable and writes the marker.
  * Resolves { restored: true, path } or { restored: false, reason }; never rejects.
  *
- * The entry is deleted only when it is proven bad (its bytes do not match the recorded sha256, it
- * leaves no binary, or its model payload fails the check). Anything environmental (`tar` missing,
- * a read-only plugin directory, an entry another process is replacing) is a miss that keeps it.
+ * The entry is deleted only when it is proven bad (its bytes do not match the recorded sha256 and
+ * nobody replaced it meanwhile, it leaves no binary, or its model payload fails the check). Anything
+ * environmental (`tar` missing, a read-only plugin directory, an entry another process is replacing,
+ * a step that throws) is a miss that keeps it.
  */
-export async function restoreFromCache({
+export async function restoreFromCache(args) {
+  try {
+    return await restoreFromCacheChecked(args || {});
+  } catch (e) {
+    return { restored: false, reason: `unexpected error: ${(e && e.message) || e}` };
+  }
+}
+
+async function restoreFromCacheChecked({
   dataDir, version, archiveName, destDir, binaryPath,
   extract, payloadIntact: intact, chmod, writeMarker,
-  platform = process.platform, statOps = defaultStatOps(),
+  platform = process.platform, statOps = defaultStatOps(), hashFile = sha256File,
 }) {
   const miss = (reason) => ({ restored: false, reason });
   const p = cachePaths(dataDir, version, archiveName);
@@ -344,9 +354,23 @@ export async function restoreFromCache({
   try { recorded = fs.readFileSync(p.sidecar, 'utf8').trim().toLowerCase(); } catch { return miss('no complete cache entry'); }
   if (!SHA256_HEX.test(recorded)) { removeEntry(p); return miss('the recorded checksum is malformed'); }
 
+  let before;
+  try { const st = fs.statSync(p.archive); before = { size: st.size, mtimeMs: st.mtimeMs }; } catch { return miss('the cache entry could not be read'); }
   let actual;
-  try { actual = await sha256File(p.archive); } catch { return miss('the cache entry could not be read'); }
-  if (actual.toLowerCase() !== recorded) { removeEntry(p); return miss('the cached archive does not match its recorded checksum'); }
+  try { actual = await hashFile(p.archive); } catch { return miss('the cache entry could not be read'); }
+  if (actual.toLowerCase() !== recorded) {
+    // Delete only if this is still the entry that was read: another process may have stored a new
+    // archive (and sidecar) while this one was being hashed, and that one must survive.
+    let unchanged = false;
+    try {
+      const now = fs.statSync(p.archive);
+      unchanged = fs.readFileSync(p.sidecar, 'utf8').trim().toLowerCase() === recorded
+        && now.size === before.size && now.mtimeMs === before.mtimeMs;
+    } catch {}
+    if (!unchanged) return miss('the cache entry changed while it was being checked');
+    removeEntry(p);
+    return miss('the cached archive does not match its recorded checksum');
+  }
 
   try {
     fs.mkdirSync(destDir, { recursive: true });
