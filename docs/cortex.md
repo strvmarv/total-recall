@@ -9,7 +9,7 @@ In Cortex mode, the plugin operates as a hybrid:
 - **Telemetry** (usage, retrieval events, compaction log) is pushed to Cortex for unified dashboards
 - **Skills** are synced to Cortex so team members share the same skill library
 
-Configure in your `config.toml`:
+Configure in your [`config.toml`](configuration.md) (`~/.total-recall/config.toml`):
 
 ```toml
 [storage]

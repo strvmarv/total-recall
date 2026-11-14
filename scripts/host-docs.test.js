@@ -1,5 +1,6 @@
-// scripts/host-docs.test.js — guards the install instructions: INSTALL.md (the agent runbook), the
-// per-harness pages in docs/hosts/, and the facts they carry that go stale.
+// scripts/host-docs.test.js — guards the user documentation: INSTALL.md (the agent runbook), the
+// per-harness pages in docs/hosts/ and the facts they carry that go stale; and the README (its shape,
+// what it must hold, that every page under docs/ is reachable from it) and the tool reference.
 //
 // Every check is a function of a `tree` ({read(path), list(dir)}), so the same check runs on the real
 // repository and, with one deliberate defect, on an in-memory copy to prove it can fail. No dependencies.
@@ -251,13 +252,26 @@ export function checkLinks(tree) {
   return problems;
 }
 
-/** Rule 4: the example status line in INSTALL.md is the one in the commands skill. */
-export function checkStatusLine(tree) {
+/** The example status line the commands skill gives, or null. */
+function skillStatusLine(tree) {
   const skill = tree.read('skills/commands/SKILL.md');
   const m = skill === null ? null : /^\s*>\s*(total-recall loaded — .+)$/m.exec(skill);
-  if (!m) return ['skills/commands/SKILL.md has no "total-recall loaded — ..." example status line'];
+  return m ? m[1] : null;
+}
+
+/** The body of INSTALL.md's "## Step 4" section, or null. */
+function step4Body(tree) {
   const install = tree.read('INSTALL.md');
-  return install !== null && install.includes(m[1]) ? [] : [`INSTALL.md does not contain the status line "${m[1]}"`];
+  const m = install === null ? null : /^## Step 4\b[^\n]*\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(install);
+  return m ? m[1] : null;
+}
+
+/** Rule 4: the example status line in INSTALL.md is the one in the commands skill. */
+export function checkStatusLine(tree) {
+  const line = skillStatusLine(tree);
+  if (line === null) return ['skills/commands/SKILL.md has no "total-recall loaded — ..." example status line'];
+  const install = tree.read('INSTALL.md');
+  return install !== null && install.includes(line) ? [] : [`INSTALL.md does not contain the status line "${line}"`];
 }
 
 /** Rules 5 and 6: the "Ask first" paragraph above any npm-running install, and the tool list it names. */
@@ -318,9 +332,9 @@ export function checkCheckPrompt(tree) {
   const problems = [];
   const install = tree.read('INSTALL.md');
   if (install !== null) {
-    const m = /^## Step 4\b[^\n]*\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(install);
-    if (!m) problems.push('INSTALL.md has no "## Step 4" section');
-    else if (!fencedBlocks(m[1]).some((b) => b.body.includes('Check that total-recall is working: call its status tool'))) {
+    const body = step4Body(tree);
+    if (body === null) problems.push('INSTALL.md has no "## Step 4" section');
+    else if (!fencedBlocks(body).some((b) => b.body.includes('Check that total-recall is working: call its status tool'))) {
       problems.push('INSTALL.md Step 4 holds no fenced check prompt');
     }
   }
@@ -355,10 +369,9 @@ export const INSTALL_PARTS = ['Let your assistant install it', 'Claude Code', 'p
 
 /** The check prompt held by INSTALL.md Step 4, or null. */
 function checkPromptText(tree) {
-  const install = tree.read('INSTALL.md');
-  const m = install === null ? null : /^## Step 4\b[^\n]*\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(install);
-  if (!m) return null;
-  const block = fencedBlocks(m[1]).find((b) => b.body.includes('Check that total-recall is working'));
+  const body = step4Body(tree);
+  if (body === null) return null;
+  const block = fencedBlocks(body).find((b) => b.body.includes('Check that total-recall is working'));
   return block ? block.body.split('\n').slice(1, -1).join('\n').trim() : null;
 }
 
@@ -395,12 +408,13 @@ export function checkReadmeContent(tree) {
   const prompt = checkPromptText(tree);
   if (prompt === null) problems.push('INSTALL.md Step 4 holds no check prompt to compare with');
   else if (!readme.includes(prompt)) problems.push('README.md does not hold the check prompt of INSTALL.md Step 4, word for word');
-  const skill = tree.read('skills/commands/SKILL.md');
-  const status = skill === null ? null : /^\s*>\s*(total-recall loaded — .+)$/m.exec(skill);
-  if (!status) problems.push('skills/commands/SKILL.md has no example status line to compare with');
-  else if (!readme.includes(status[1])) problems.push(`README.md does not hold the status line "${status[1]}"`);
-  const running = readme.split('\n').filter((l) => NPM_RUNNING.test(l));
-  if (running.length !== 1 || !running[0].includes('pi install npm:')) {
+  const status = skillStatusLine(tree);
+  if (status === null) problems.push('skills/commands/SKILL.md has no example status line to compare with');
+  else if (!readme.includes(status)) problems.push(`README.md does not hold the status line "${status}"`);
+  // Count matches, line by line (so a match cannot span a newline), not matching lines.
+  const every = new RegExp(NPM_RUNNING.source, 'g');
+  const running = readme.split('\n').flatMap((l) => [...l.matchAll(every)].map((m) => l.slice(m.index)));
+  if (running.length !== 1 || !/^pi\s+install npm:/.test(running[0])) {
     problems.push(`README.md must hold exactly one npm-running command, the "pi install npm:" line; found ${running.length}: ${JSON.stringify(running)}`);
   }
   if (/\bnpx\b/.test(readme)) problems.push('README.md mentions npx');
@@ -434,7 +448,7 @@ export function checkToolReference(tree) {
   if (!Array.isArray(tools)) return ['catalog.json has no "tools" list'];
   const problems = [];
   for (const tool of tools) if (!page.includes(`\`${tool.name}\``)) problems.push(`docs/tools.md does not list the tool \`${tool.name}\``);
-  if (!page.includes(`${tools.length} in SQLite mode`)) problems.push(`docs/tools.md does not say "${tools.length} in SQLite mode"`);
+  if (!new RegExp(`(?<!\\d)${tools.length} in SQLite mode`).test(page)) problems.push(`docs/tools.md does not say "${tools.length} in SQLite mode"`);
   return problems;
 }
 
@@ -586,7 +600,12 @@ function validReadme() {
     '',
     '### Claude Code',
     '',
-    'See [the page](docs/hosts/claude-code.md).',
+    '```sh',
+    'claude plugin marketplace add strvmarv/total-recall-marketplace',
+    'claude plugin install total-recall@strvmarv-total-recall-marketplace',
+    '```',
+    '',
+    'See [the page](docs/hosts/claude-code.md). Others use the npm package plus configuration.',
     '',
     '### pi',
     '',
@@ -911,6 +930,12 @@ defect('no npm-running line at all', checkReadmeContent, (f) => { f['README.md']
 defect('one npm-running line that is not the pi line', checkReadmeContent, (f) => {
   f['README.md'] = f['README.md'].replace('pi install npm:@strvmarv/total-recall', 'npm install -g @strvmarv/total-recall');
 }, /exactly one npm-running command/);
+defect('a second command on the pi line', checkReadmeContent, (f) => {
+  f['README.md'] = f['README.md'].replace('pi install npm:@strvmarv/total-recall', 'pi install npm:@strvmarv/total-recall && npm install -g @strvmarv/total-recall');
+}, /exactly one npm-running command/);
+defect('a prose line that only names the pi command beside another install', checkReadmeContent, (f) => {
+  f['README.md'] = f['README.md'].replace('pi install npm:@strvmarv/total-recall', 'Or `npm install -g x` (not `pi install npm:`)');
+}, /exactly one npm-running command/);
 defect('an npx line', checkReadmeContent, (f) => { f['README.md'] += '\nUse npx -y x\n'; }, /mentions npx/);
 
 // ---------------------------------------------------------------------------------------------
@@ -951,5 +976,6 @@ defect('a tool in the catalog that the reference does not list', checkToolRefere
 defect('usage_status does not stand in for status', checkToolReference, (f) => {
   f['docs/tools.md'] = '# MCP tools\n\n2 in SQLite mode: `usage_status`.\n';
 }, /does not list the tool `status`/);
+defect('a longer number does not stand in for the count', checkToolReference, (f) => { f['docs/tools.md'] = f['docs/tools.md'].replace('2 in', '12 in'); }, /does not say "2 in SQLite mode"/);
 defect('the SQLite count is off by one', checkToolReference, (f) => { f['docs/tools.md'] = f['docs/tools.md'].replace('2 in', '3 in'); }, /does not say "2 in SQLite mode"/);
 defect('a catalog with no tools list', checkToolReference, (f) => { f['catalog.json'] = '[]'; }, /no "tools" list/);
