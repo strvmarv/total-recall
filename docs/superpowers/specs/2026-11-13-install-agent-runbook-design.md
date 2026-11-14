@@ -36,8 +36,7 @@ Line numbers are `INSTALL.md` at `main` (6b0378a).
    the slash-command checks exist only in some hosts.
 5. **Missing harnesses.** No section for Gemini CLI, Kiro, Windsurf, Zed, VS Code or Hermes, all of
    which `postinstall` configures and all but Kiro the README lists (the README does not mention
-   Kiro). The Cline section (L246-261) omits the npm
-   step and the file path. The OpenCode pointer (L190) is a relative path to `.opencode/INSTALL.md`,
+   Kiro). The Cline section (L246-261) omits the npm step and the file path. The OpenCode pointer (L190) is a relative path to `.opencode/INSTALL.md`,
    which shows an `mcpServers` block; a working OpenCode 1.16.2 config uses a top-level `mcp` key.
 6. **Preamble.** 76 lines about relocating the database (L15-90) come before the first install step.
 7. **Stale conditionals** (L150, L202, L224): "works once a release contains ...". pi support shipped
@@ -56,8 +55,8 @@ Line numbers are `INSTALL.md` at `main` (6b0378a).
 - The user can confirm the install in the next session on every install path, and the agent can
   confirm it before the session ends wherever the install location is known, without `total-recall`
   on PATH.
-- Every harness the README lists as supported has one page: how to install, what the user must do, how
-  to verify, what you get, known gaps, and what the statements rest on.
+- Every harness the package supports (the README's list, plus Kiro) has one page: how to install,
+  what the user must do, how to verify, what you get, known gaps, and what the statements rest on.
 - Facts that go stale are checked by a test in the existing shim test job, so the next drift fails CI.
 - Nothing useful in today's `INSTALL.md` is lost; it moves.
 
