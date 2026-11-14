@@ -394,7 +394,7 @@ export function checkClinePath(tree) {
   const need = {
     'docs/hosts/cline.md': ['~/.cline/data', 'saoudrizwan.claude-dev', 'CLINE_HOME'],
     'docs/npm-postinstall.md': ['~/.cline/data', 'saoudrizwan.claude-dev', 'CLINE_HOME'],
-    'docs/platforms.md': ['~/.cline/data', 'saoudrizwan.claude-dev'],
+    'docs/platforms.md': ['~/.cline/data', 'saoudrizwan.claude-dev', 'CLINE_HOME'],
   };
   for (const [page, tokens] of Object.entries(need)) {
     const text = tree.read(page);
@@ -866,7 +866,7 @@ function validFiles() {
     'docs/tools.md': '# MCP tools\n\n2 in SQLite mode: `status`, `usage_status`.\n',
     'catalog.json': JSON.stringify({ tools: [{ name: 'status' }, { name: 'usage_status' }] }),
     'docs/npm-postinstall.md': `# Postinstall\n\n${TOOLS.join(', ')}\n\n${CLINE_TOKENS.join(' ')}\n`,
-    'docs/platforms.md': `# Platforms\n\n| Cline | ${CLINE_TOKENS.slice(0, 2).join(' ')} |\n`,
+    'docs/platforms.md': `# Platforms\n\n| Cline | ${CLINE_TOKENS.join(' ')} |\n`,
     'docs/database-location.md': '# Relocating the database\n',
     'docs/first-run.md': '# First run\n',
     'PRIVACY.md': '# Privacy Policy\n\nSee [First run](docs/first-run.md).\n',
@@ -1076,12 +1076,12 @@ for (const [page, phrase] of [
 ]) {
   defect(`${page} says "${phrase.slice(0, 40)}..."`, checkClinePath, (f) => { f[page] += `\n${phrase}\n`; }, new RegExp(`${page.replace(/[./]/g, '\\$&')}: .*stale`));
 }
-for (const page of ['docs/hosts/cline.md', 'docs/npm-postinstall.md']) {
+for (const page of ['docs/hosts/cline.md', 'docs/npm-postinstall.md', 'docs/platforms.md']) {
   for (const token of CLINE_TOKENS) {
     defect(`${page} does not name ${token}`, checkClinePath, (f) => { f[page] = f[page].replace(token, ''); }, new RegExp(`${page.replace(/[./]/g, '\\$&')} does not name`));
   }
 }
-defect('docs/platforms.md does not name the Cline location', checkClinePath, (f) => { f['docs/platforms.md'] = '# Platforms\n'; }, /docs\/platforms\.md does not name/);
+defect('docs/platforms.md names none of the Cline locations', checkClinePath, (f) => { f['docs/platforms.md'] = '# Platforms\n'; }, /docs\/platforms\.md does not name/);
 defect('docs/platforms.md is missing', checkClinePath, (f) => { delete f['docs/platforms.md']; }, /docs\/platforms\.md is missing/);
 
 test('rule 7 holds on the repository', () => assert.deepEqual(checkHookNotes(repoTree()), []));

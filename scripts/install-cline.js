@@ -6,14 +6,16 @@
 //   <VS Code User dir>/globalStorage/saoudrizwan.claude-dev/
 //       settings/cline_mcp_settings.json                        when that extension folder exists (older layout)
 //
-// These are the files the repository's Cline importer reads. Cline is detected by the
+// The first is the file the repository's Cline importer reads; the second matches the importer only on
+// Linux (the importer's older path is a Linux path on every OS; VS Code's User directory is per OS).
+// Cline is detected by the
 // directories it creates, never by ~/.vscode (that is VS Code's own directory).
 // CLINE_HOME is an explicit override: the directory that holds cline_mcp_settings.json
 // itself; it is written (and created) without a detection check, and nothing else is.
 //
 // Non-fatal: always resolves. If Cline isn't present, silently skips.
 
-import { existsSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mergeJsonConfig } from './lib/merge-json-config.js';
@@ -22,6 +24,8 @@ import { recordChange } from './lib/change-log.js';
 import { vscodeUserDir } from './lib/vscode-user-dir.js';
 
 const FILE = 'cline_mcp_settings.json';
+
+const isDirectory = (p) => statSync(p, { throwIfNoEntry: false })?.isDirectory() === true;
 
 /** The settings files to write, in order. */
 function clineTargets() {
@@ -33,13 +37,13 @@ function clineTargets() {
 
   if (home) {
     const data = join(home, '.cline', 'data');
-    if (existsSync(data)) targets.push(join(data, 'settings', FILE));
+    if (isDirectory(data)) targets.push(join(data, 'settings', FILE));
   }
 
   const userDir = vscodeUserDir();
   if (userDir) {
     const extension = join(userDir, 'globalStorage', 'saoudrizwan.claude-dev');
-    if (existsSync(extension)) targets.push(join(extension, 'settings', FILE));
+    if (isDirectory(extension)) targets.push(join(extension, 'settings', FILE));
   }
 
   return targets;

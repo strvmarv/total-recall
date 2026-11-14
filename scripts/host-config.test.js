@@ -936,6 +936,20 @@ test('Cline: an entry already at the package version is not rewritten and has no
   assert.equal(fs.readFileSync(p.newFile, 'utf8'), before);
 });
 
+test('Cline: a ~/.cline/data or extension "directory" that is a regular file is not Cline, so nothing is reported', () => {
+  let p;
+  const r = runPostinstall(({ home }) => {
+    p = clinePaths(home);
+    fs.mkdirSync(path.dirname(p.newDir), { recursive: true });
+    fs.writeFileSync(p.newDir, ''); // ~/.cline/data is a file
+    fs.mkdirSync(path.dirname(p.legacyDir), { recursive: true });
+    fs.writeFileSync(p.legacyDir, '');
+    return { VSCODE_USER_DIR: p.vsUser };
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(clineLines(r), []);
+});
+
 test('Cline: a file written by an earlier install under ~/.vscode is left as it is', () => {
   let p, before;
   const r = runPostinstall(({ home }) => {
