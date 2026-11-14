@@ -225,3 +225,67 @@ test('mutation: permissions: write-all on another job is caught', () => {
   assert.notEqual(mutated, REAL);
   assert.ok(checkAttestationPermissionScope(mutated).some((p) => /build job/.test(p)));
 });
+
+// ---- immutable releases: a prerelease is created as a draft and published after its assets are attached ----
+//
+// This repository has immutable releases, which lock assets once a release is published. A stable
+// release uploads its assets before publishing (softprops/action-gh-release does that itself), but a
+// prerelease stays published by default, so the upload is refused ("Cannot upload asset ... to an
+// immutable release"; this broke v4.7.0-beta.1). A prerelease must therefore be a draft while the
+// assets are attached and be published by a later step.
+
+const PRERELEASE_EXPR = "contains(github.ref_name, '-')";
+const PUBLISH_STEP = 'Publish the prerelease';
+
+function checkPrereleaseIsPublishedAfterAttach(text) {
+  const problems = [];
+  const steps = publishSteps(text);
+  const attachIdx = steps.findIndex((s) => s.name === ATTACH);
+  if (attachIdx < 0) return [`no "${ATTACH}" step`];
+  const attach = steps[attachIdx].text;
+  if (!new RegExp(`^ +prerelease: \\$\\{\\{ ${PRERELEASE_EXPR.replace(/[()]/g, '\\$&')} \\}\\}$`, 'm').test(attach)) {
+    problems.push('the attach step does not set prerelease from the tag');
+  }
+  if (!new RegExp(`^ +draft: \\$\\{\\{ ${PRERELEASE_EXPR.replace(/[()]/g, '\\$&')} \\}\\}$`, 'm').test(attach)) {
+    problems.push('the attach step does not create a prerelease as a draft, so its assets cannot be uploaded to an immutable release');
+  }
+  const publishIdx = steps.findIndex((s) => s.name === PUBLISH_STEP);
+  if (publishIdx < 0) return [...problems, `no "${PUBLISH_STEP}" step`];
+  const publish = steps[publishIdx].text;
+  if (publishIdx < attachIdx) problems.push('the draft is published before the assets are attached');
+  if (!new RegExp(`^        if: ${PRERELEASE_EXPR.replace(/[()]/g, '\\$&')}$`, 'm').test(publish)) problems.push('the publish step does not run only for prereleases');
+  if (!/^        id: attach_release$/m.test(attach)) problems.push('the attach step has no id: attach_release, so its release id cannot be passed on');
+  if (!/gh api --method PATCH "repos\/\$GITHUB_REPOSITORY\/releases\/\$RELEASE_ID" -F draft=false/.test(publish)) problems.push('the publish step does not PATCH the release with draft=false by its id');
+  if (!/^          RELEASE_ID: \$\{\{ steps\.attach_release\.outputs\.id \}\}$/m.test(publish)) problems.push('the release id reaches the publish step other than through env: RELEASE_ID');
+  const run = /run: (.*)/.exec(publish);
+  if (run && run[1].includes('${{')) problems.push('the publish step interpolates an expression into the shell');
+  if (/continue-on-error:/.test(publish)) problems.push('the publish step ignores its own failure');
+  return problems;
+}
+
+test('release.yml: a prerelease is created as a draft and published after its assets are attached', () => {
+  assert.deepEqual(checkPrereleaseIsPublishedAfterAttach(REAL), []);
+});
+
+test('mutation: an attach step that no longer drafts a prerelease is caught', () => {
+  const mutated = REAL.replace(/^ +draft: .*\n/m, '');
+  assert.notEqual(mutated, REAL);
+  assert.ok(checkPrereleaseIsPublishedAfterAttach(mutated).some((p) => /as a draft/.test(p)));
+});
+
+test('mutation: a missing or misplaced publish step is caught', () => {
+  const step = publishSteps(REAL).find((s) => s.name === PUBLISH_STEP);
+  assert.ok(step, 'the real workflow has the publish step');
+  assert.ok(checkPrereleaseIsPublishedAfterAttach(REAL.replace(step.text, '')).some((p) => /no "Publish the prerelease" step/.test(p)));
+  const before = REAL.replace(step.text, '').replace(/(      - name: Attach archives to GitHub release\n)/, `${step.text.replace(/\n*$/, '\n')}\n$1`);
+  assert.ok(checkPrereleaseIsPublishedAfterAttach(before).some((p) => /before the assets are attached/.test(p)));
+});
+
+test('mutation: a publish step that also runs for stable releases or interpolates the tag is caught', () => {
+  const noIf = REAL.replace(/^        if: contains\(github\.ref_name, '-'\)\n/m, '');
+  assert.notEqual(noIf, REAL);
+  assert.ok(checkPrereleaseIsPublishedAfterAttach(noIf).some((p) => /only for prereleases/.test(p)));
+  const inline = REAL.replace('releases/$RELEASE_ID"', 'releases/${{ steps.attach_release.outputs.id }}"');
+  assert.notEqual(inline, REAL);
+  assert.ok(checkPrereleaseIsPublishedAfterAttach(inline).length > 0);
+});
