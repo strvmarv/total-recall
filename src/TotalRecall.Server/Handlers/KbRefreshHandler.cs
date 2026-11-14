@@ -1,7 +1,7 @@
 // src/TotalRecall.Server/Handlers/KbRefreshHandler.cs
 //
 // Plan 6 Task 6.0b — ports `kb refresh` (Cli/Commands/Kb/RefreshCommand.cs)
-// to MCP. Parity port of src-ts/tools/kb-tools.ts:218-290 (kb_refresh).
+// to MCP.
 //
 // Looks up the collection root, deletes all child entries + the root +
 // vector embeddings, then re-ingests from metadata.source_path via

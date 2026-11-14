@@ -1,7 +1,7 @@
 // src/TotalRecall.Server/Handlers/KbRemoveHandler.cs
 //
 // Plan 6 Task 6.0b — ports `kb remove` (Cli/Commands/Kb/RemoveCommand.cs)
-// to MCP. Parity port of src-ts/tools/kb-tools.ts:198-216 (kb_remove).
+// to MCP.
 //
 // Always cascades: enumerates all cold_knowledge rows, deletes any whose
 // ParentId == id OR CollectionId == id (excluding the target itself), then

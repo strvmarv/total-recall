@@ -1,7 +1,6 @@
 // src/TotalRecall.Server/Handlers/KbListCollectionsHandler.cs
 //
 // Plan 6 Task 6.0b — ports `kb list` (Cli/Commands/Kb/ListCommand.cs) to MCP.
-// Also a parity port of src-ts/tools/kb-tools.ts:193-196 (kb_list_collections).
 //
 // Reads collection roots via IStore.ListByMetadata({type:"collection"})
 // from cold_knowledge, then computes per-collection document/chunk counts in

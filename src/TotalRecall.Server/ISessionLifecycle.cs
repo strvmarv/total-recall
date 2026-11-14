@@ -18,8 +18,7 @@ namespace TotalRecall.Server;
 /// (regardless of caller — initialized notification, session_start tool,
 /// session_context tool) returns the cached value cheaply.
 ///
-/// Mirrors the role of <c>runSessionInit</c> in
-/// <c>src-ts/tools/session-tools.ts</c>. It runs the importers (project docs
+/// It runs the importers (project docs
 /// included), the warm sweep and hot-tier assembly, pins the per-session
 /// config snapshot, and reports retrieval regressions against the previous
 /// snapshot. It also runs the version-gated first-run smoke test and reports it

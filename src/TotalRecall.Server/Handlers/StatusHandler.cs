@@ -1,7 +1,6 @@
 // src/TotalRecall.Server/Handlers/StatusHandler.cs
 //
-// Plan 4 Task 4.11 — ports the structured portion of the `status` branch
-// of src-ts/tools/system-tools.ts to the .NET Server. The TS handler does
+// Plan 4 Task 4.11 — the structured portion of the `status` tool. The original TS handler does
 // considerably more than what Plan 4 needs (activity telemetry, last
 // compaction, last session age); those sections are either stubbed or
 // intentionally omitted per the task scope and marked below.
@@ -69,7 +68,7 @@ public sealed record StatusOptions(
 /// </summary>
 public sealed class StatusHandler : IToolHandler
 {
-    // Mirror of src-ts/tools/system-tools.ts — status takes no inputs.
+    // status takes no inputs.
     private static readonly JsonElement _inputSchema = JsonDocument.Parse("""
         {"type":"object","properties":{},"required":[]}
         """).RootElement.Clone();

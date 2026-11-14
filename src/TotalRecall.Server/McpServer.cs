@@ -1,7 +1,7 @@
 // src/TotalRecall.Server/McpServer.cs
 //
 // Minimal stdio JSON-RPC server implementing the MCP 2024-11-05 wire protocol
-// surface that the TypeScript server (src-ts/tools/registry.ts) exposes, plus
+// surface that the original TypeScript server exposed, plus
 // the baseline SDK-provided methods:
 //
 //   Requests:        initialize, shutdown, ping, tools/list, tools/call

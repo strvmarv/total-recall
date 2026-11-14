@@ -1,7 +1,6 @@
 // src/TotalRecall.Server/Handlers/KbSummarizeHandler.cs
 //
-// Plan 6 Task 6.0b — parity port of src-ts/tools/kb-tools.ts:298-309
-// (kb_summarize). This tool was never ported during Plan 5; the SKILL.md
+// Plan 6 Task 6.0b — the kb_summarize tool. It was never ported during Plan 5; the SKILL.md
 // `kb search` `needsSummary: true` conditional has been pointing at a
 // missing tool until now. Plan 6 closes the gap.
 //

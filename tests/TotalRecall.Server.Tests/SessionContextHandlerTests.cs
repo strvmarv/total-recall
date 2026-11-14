@@ -3,7 +3,7 @@
 // Plan 4 Task 4.10 — unit tests for SessionContextHandler. Uses
 // FakeStore's ListSlots seeding (added alongside Task 4.10) to
 // drop pre-built F# Entry rows into the hot tier slots. Line-format
-// assertions mirror src-ts/tools/session-tools.ts:376-380.
+// assertions cover the session_context output format.
 
 namespace TotalRecall.Server.Tests;
 

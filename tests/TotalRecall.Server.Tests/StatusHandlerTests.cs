@@ -3,7 +3,7 @@
 // Plan 4 Task 4.11 — unit tests for StatusHandler. Uses FakeStore's
 // Counts and ListByMetadataSlots seeding (added alongside Task 4.11) to
 // drop pre-built tier sizes and collection rows. Exercises the JSON wire
-// shape described in src-ts/tools/system-tools.ts, scoped to the Plan 4
+// shape of the original TS status tool, scoped to the Plan 4
 // subset (tierSizes, knowledgeBase, db, embedding, activity stub,
 // lastCompaction stub).
 

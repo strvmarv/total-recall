@@ -1,8 +1,7 @@
 // src/TotalRecall.Server/Handlers/MemoryStoreHandler.cs
 //
-// Plan 4 Task 4.6 — first real IToolHandler. Ports the `memory_store` branch
-// of src-ts/tools/memory-tools.ts (plus src-ts/memory/store.ts) to the .NET
-// Server. The handler validates MCP arguments, invokes the embedder to warm
+// Plan 4 Task 4.6 — first real IToolHandler, for the `memory_store` tool.
+// The handler validates MCP arguments, invokes the embedder to warm
 // and produce a query vector, then calls IStore.InsertWithEmbedding to
 // persist the metadata row and the vec0 embedding row inside a single
 // transaction.
@@ -59,8 +58,7 @@ namespace TotalRecall.Server.Handlers;
 /// </summary>
 public sealed class MemoryStoreHandler : IToolHandler
 {
-    // Mirror of src-ts/tools/memory-tools.ts:25-44. Parsed once into a
-    // JsonDocument and cloned so the root element survives disposal-free
+    // Parsed once into a JsonDocument and cloned so the root element survives disposal-free
     // reuse across tools/list calls.
     private static readonly JsonElement _inputSchema = JsonDocument.Parse("""
         {

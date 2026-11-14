@@ -1,8 +1,6 @@
 // src/TotalRecall.Server/Handlers/MemoryUpdateHandler.cs
 //
-// Plan 4 Task 4.8 — ports the `memory_update` branch of
-// src-ts/tools/memory-tools.ts (plus src-ts/memory/update.ts) to the
-// .NET Server. Resolves the target row by iterating the 6 (tier, type)
+// Handler for the `memory_update` tool. Resolves the target row by iterating the 6 (tier, type)
 // pairs (same trick as MemoryGetHandler), then forwards the provided
 // fields to IStore.Update. If `content` is supplied the handler
 // re-embeds and replaces the vec0 row via Delete + Insert, matching
@@ -39,7 +37,6 @@ namespace TotalRecall.Server.Handlers;
 /// </summary>
 public sealed class MemoryUpdateHandler : IToolHandler
 {
-    // Mirror of src-ts/tools/memory-tools.ts:80-93.
     private static readonly JsonElement _inputSchema = JsonDocument.Parse("""
         {
           "type": "object",

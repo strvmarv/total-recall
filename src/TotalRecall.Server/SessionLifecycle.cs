@@ -1,6 +1,6 @@
 // src/TotalRecall.Server/SessionLifecycle.cs
 //
-// Port of src-ts/tools/session-tools.ts runSessionInit. Runs the host
+// Runs the host
 // importers (including project-docs ingest), the tier v2 data move, the
 // warm sweep, and sticky/hot context assembly. The per-session config snapshot
 // is pinned at session_start (SessionConfigSnapshot), and retrieval regressions

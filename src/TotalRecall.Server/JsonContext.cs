@@ -203,9 +203,8 @@ public sealed record ModelNotReadyPayload(
 
 // ---------- Task 4.7: memory_search result payload ----------
 //
-// DTOs serialized by MemorySearchHandler. Field names match the TS
-// reference (src-ts/memory/search.ts SearchResult shape) exactly so the
-// MCP wire output is byte-compatible: `entry`, `score`, `tier`,
+// DTOs serialized by MemorySearchHandler. Field names match the original TS
+// SearchResult shape exactly so the MCP wire output is byte-compatible: `entry`, `score`, `tier`,
 // `content_type`, `rank`. The `entry` object mirrors the fields TS
 // exposes on a memory/knowledge row.
 
@@ -232,7 +231,7 @@ public sealed record MemoryFeedbackResultDto(
 
 // ---------- Task 4.8: memory_get result payload ----------
 //
-// Wire shape matches src-ts/memory/get.ts: `{tier, content_type, entry}`.
+// Wire shape: `{tier, content_type, entry}`.
 // Handler returns JSON `null` if no row matches across the 6 tables.
 public sealed record MemoryGetResultDto(
     [property: JsonPropertyName("tier")] string Tier,
@@ -253,8 +252,7 @@ public sealed record MemoryGetAllResultDto(
 
 // ---------- Task 4.9: kb_search / kb_ingest_file / kb_ingest_dir payloads ----------
 //
-// kb_search wire shape mirrors src-ts/tools/kb-tools.ts:190 —
-// `{results, hierarchicalMatch, needsSummary}`. KbSearchHandler
+// kb_search wire shape: `{results, hierarchicalMatch, needsSummary}`. KbSearchHandler
 // hand-assembles this envelope (rather than using a source-gen DTO) so the
 // `hierarchicalMatch: null` sentinel survives JsonContext's
 // DefaultIgnoreCondition=WhenWritingNull and stays byte-compatible with
@@ -324,9 +322,8 @@ public sealed record SessionContextResultDto(
 
 // ---------- Task 4.11: status payload ----------
 //
-// Structured status shape returned by StatusHandler. Mirrors (a scoped
-// subset of) src-ts/tools/system-tools.ts:53-135. Plan 4 scope covers
-// tierSizes, knowledgeBase, db, embedding, activity (stub), and
+// Structured status shape returned by StatusHandler (a scoped subset of the original
+// TS shape). Plan 4 scope covers tierSizes, knowledgeBase, db, embedding, activity (stub), and
 // lastCompaction (stub). Last-session-age lives in the session_start
 // domain and is intentionally NOT surfaced here.
 public sealed record StatusResultDto(
@@ -573,8 +570,8 @@ public sealed record MemoryListResultDto(
 //
 // Wire shapes for the 4 KB-admin MCP handlers added in Plan 6 Task 6.0b
 // (kb_list_collections, kb_refresh, kb_remove, kb_summarize). These mirror
-// the corresponding CLI command outputs (and src-ts/tools/kb-tools.ts for
-// kb_summarize, which is a parity port that never landed in Plan 5).
+// the corresponding CLI command outputs (and the original TS kb_summarize tool,
+// which is a parity port that never landed in Plan 5).
 
 public sealed record KbCollectionDto(
     [property: JsonPropertyName("id")] string Id,
@@ -604,8 +601,8 @@ public sealed record KbSummarizeResultDto(
     [property: JsonPropertyName("collection")] string Collection,
     [property: JsonPropertyName("summarized")] bool Summarized);
 
-// kb_summarize not-found wire shape — matches the TS error string from
-// src-ts/tools/kb-tools.ts:298-309 exactly so MCP clients that key off
+// kb_summarize not-found wire shape — matches the original TS error string
+// exactly so MCP clients that key off
 // the error text keep working post-port.
 public sealed record KbErrorDto(
     [property: JsonPropertyName("error")] string Error);
