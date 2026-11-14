@@ -23,6 +23,7 @@ import { installWindsurf } from './install-windsurf.js';
 import { installGemini } from './install-gemini.js';
 import { installZed } from './install-zed.js';
 import { installVsCode } from './install-vscode.js';
+import { runHostConfig } from './lib/host-config.js';
 
 const result = await ensureBinary({ logPrefix: '[total-recall:postinstall]' });
 
@@ -36,17 +37,17 @@ if (!result.ok) {
   );
 }
 
-// Install Hermes MemoryProvider plugin if Hermes is detected
-await installHermesPlugin();
-
-// Install Kiro hooks and steering if Kiro is detected
-await installKiroHooks();
-
-// Install host MCP configs if detected
-await installCline();
-await installWindsurf();
-await installGemini();
-await installZed();
-await installVsCode();
+// Configure the other tools that are detected on the machine, then report what
+// was written (stderr summary plus <dataDir>/postinstall.log).
+// TOTAL_RECALL_SKIP_HOST_CONFIG=1 skips all of them; the engine step above still ran.
+await runHostConfig([
+  installHermesPlugin,
+  installKiroHooks,
+  installCline,
+  installWindsurf,
+  installGemini,
+  installZed,
+  installVsCode,
+]);
 
 process.exit(0);
