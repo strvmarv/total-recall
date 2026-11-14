@@ -364,6 +364,17 @@ export async function restoreFromCache({
   return { restored: true, path: binaryPath };
 }
 
+/**
+ * The one rule for what may enter the cache: an archive that was verified against the release
+ * manifest's checksum (so one downloaded without a manifest, on the install-time path, never is),
+ * extracted with its engine binary present, and whose model payload passed the integrity check.
+ * `store` does the storing; a failure there is not an error.
+ */
+export function cacheVerifiedInstall({ expectedSha256, extracted, payloadOk, store }) {
+  if (expectedSha256 == null || !extracted || !payloadOk) return false;
+  try { return store() === true; } catch { return false; }
+}
+
 function httpGetFollowRedirects(url, redirectsLeft = 5) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, (res) => {
@@ -525,71 +536,84 @@ export async function ensureBinary({ logPrefix = '[total-recall]', onProgress, e
     };
   }
 
-  // NEVER extract an unverified archive when a checksum was supplied. Opt-in:
-  // callers that pass no expectedSha256 (postinstall, runProvision) skip this.
-  if (expectedSha256 != null) {
-    const bad = await verifyArchiveChecksum(tmpArchivePath, expectedSha256, archiveName);
-    if (bad) {
-      try { fs.rmSync(tmpArchivePath, { force: true }); } catch {}
-      return { ...bad, url };
-    }
-  }
-
+  // The downloaded archive is kept until the last exit path (the finally below), so it can be stored
+  // in the cache after it has been verified, extracted and checked.
   try {
-    extractArchive(tmpArchivePath, destDir);
-  } catch (e) {
-    try { fs.rmSync(tmpArchivePath, { force: true }); } catch {}
-    return {
-      ok: false,
-      error: `extract failed: ${e.message}`,
-      url,
-    };
-  } finally {
-    try { fs.rmSync(tmpArchivePath, { force: true }); } catch {}
-  }
+    // NEVER extract an unverified archive when a checksum was supplied. Opt-in:
+    // callers that pass no expectedSha256 (postinstall, runProvision) skip this.
+    if (expectedSha256 != null) {
+      const bad = await verifyArchiveChecksum(tmpArchivePath, expectedSha256, archiveName);
+      if (bad) {
+        return { ...bad, url };
+      }
+    }
 
-  if (!fs.existsSync(binaryPath)) {
-    return {
-      ok: false,
-      error: `archive extracted but ${binaryPath} is missing — archive layout does not match expected binaries/<rid>/ contents`,
-      url,
-    };
-  }
-
-  // The archive was byte-perfect (checksum passed above), but tar can still be
-  // interrupted mid-extraction — leaving the binary present yet the ~133 MB
-  // model.onnx truncated at a block boundary. Validate the extracted payload
-  // before stamping success, so we never write a .verified marker over a broken
-  // tree. Returned as retryable (no checksumMismatch) so the caller re-provisions.
-  const intact = payloadIntact(destDir);
-  if (!intact.ok) {
-    return {
-      ok: false,
-      error: `archive extracted but model payload is incomplete (${intact.reason}) — extraction may have been interrupted`,
-      url,
-    };
-  }
-
-  // Restore executable bit. tar preserves modes but some CI runners
-  // strip them on upload/download round-trips, and unzip on Unix
-  // normalizes to 0644. Force 0755 on the main binary; siblings are
-  // libraries that don't need it.
-  if (platform !== 'win32') {
     try {
-      fs.chmodSync(binaryPath, 0o755);
+      extractArchive(tmpArchivePath, destDir);
     } catch (e) {
       return {
         ok: false,
-        error: `could not chmod +x ${binaryPath}: ${e.message}`,
+        error: `extract failed: ${e.message}`,
         url,
       };
     }
+
+    if (!fs.existsSync(binaryPath)) {
+      return {
+        ok: false,
+        error: `archive extracted but ${binaryPath} is missing — archive layout does not match expected binaries/<rid>/ contents`,
+        url,
+      };
+    }
+
+    // The archive was byte-perfect (checksum passed above), but tar can still be
+    // interrupted mid-extraction — leaving the binary present yet the ~133 MB
+    // model.onnx truncated at a block boundary. Validate the extracted payload
+    // before stamping success, so we never write a .verified marker over a broken
+    // tree. Returned as retryable (no checksumMismatch) so the caller re-provisions.
+    const intact = payloadIntact(destDir);
+    if (!intact.ok) {
+      return {
+        ok: false,
+        error: `archive extracted but model payload is incomplete (${intact.reason}) — extraction may have been interrupted`,
+        url,
+      };
+    }
+
+    // Restore executable bit. tar preserves modes but some CI runners
+    // strip them on upload/download round-trips, and unzip on Unix
+    // normalizes to 0644. Force 0755 on the main binary; siblings are
+    // libraries that don't need it.
+    if (platform !== 'win32') {
+      try {
+        fs.chmodSync(binaryPath, 0o755);
+      } catch (e) {
+        return {
+          ok: false,
+          error: `could not chmod +x ${binaryPath}: ${e.message}`,
+          url,
+        };
+      }
+    }
+
+    // Keep the verified archive for later reinstalls (best-effort; see cacheVerifiedInstall). It must
+    // still exist here, which is why it is removed only by the outer finally.
+    cacheVerifiedInstall({
+      expectedSha256,
+      extracted: true, // the binary exists (checked above)
+      payloadOk: true, // the payload check passed (above)
+      store: () => storeInCache({
+        dataDir: resolveDataDir(process.env), version, archiveName, archivePath: tmpArchivePath, sha256: expectedSha256,
+      }),
+    });
+
+    if (expectedSha256 != null) writeVerifiedMarker(rid, version, expectedSha256);
+
+    process.stderr.write(`${logPrefix} Installed at ${binaryPath}\n`);
+    return { ok: true, path: binaryPath, rid, downloaded: true, sizeBytes: received };
+  } finally {
+    try { fs.rmSync(tmpArchivePath, { force: true }); } catch {}
   }
-
-  if (expectedSha256 != null) writeVerifiedMarker(rid, version, expectedSha256);
-
-  process.stderr.write(`${logPrefix} Installed at ${binaryPath}\n`);
-  return { ok: true, path: binaryPath, rid, downloaded: true, sizeBytes: received };
 }
 
 // Background provisioning ----------------------------------------------------

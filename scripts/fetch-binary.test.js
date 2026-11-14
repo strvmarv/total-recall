@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   sha256File, getManifestUrl, verifyArchiveChecksum, payloadIntact,
-  resolveDataDir, storeInCache, restoreFromCache,
+  resolveDataDir, storeInCache, restoreFromCache, cacheVerifiedInstall,
 } from './fetch-binary.js';
 
 // --- payloadIntact: cheap size-based integrity check of the extracted model ---
@@ -433,4 +433,38 @@ test('cache: a malformed sidecar is deleted with its archive', async () => {
   assert.equal((await restoreFromCache({ dataDir, ...t.args })).restored, false);
   assert.equal(fs.existsSync(entry), false);
   assert.equal(fs.existsSync(`${entry}.sha256`), false);
+});
+
+// --- cache: the only gate that decides whether an installed archive may be cached ---
+
+function gate(over = {}) {
+  let stored = 0;
+  const result = cacheVerifiedInstall({
+    expectedSha256: 'a'.repeat(64), extracted: true, payloadOk: true,
+    store: () => { stored++; return true; },
+    ...over,
+  });
+  return { result, stored };
+}
+
+test('cacheVerifiedInstall: an archive verified against the manifest, extracted with its binary and payload intact is stored', () => {
+  assert.deepEqual(gate(), { result: true, stored: 1 });
+});
+
+test('cacheVerifiedInstall: an archive downloaded with no manifest checksum is never stored', () => {
+  assert.deepEqual(gate({ expectedSha256: null }), { result: false, stored: 0 });
+  assert.deepEqual(gate({ expectedSha256: undefined }), { result: false, stored: 0 });
+});
+
+test('cacheVerifiedInstall: an archive that failed to extract or has no binary is never stored', () => {
+  assert.deepEqual(gate({ extracted: false }), { result: false, stored: 0 });
+});
+
+test('cacheVerifiedInstall: an archive whose model payload failed the check is never stored', () => {
+  assert.deepEqual(gate({ payloadOk: false }), { result: false, stored: 0 });
+});
+
+test('cacheVerifiedInstall: a store that throws or reports failure is not an error', () => {
+  assert.equal(gate({ store: () => { throw new Error('disk full'); } }).result, false);
+  assert.equal(gate({ store: () => false }).result, false);
 });
