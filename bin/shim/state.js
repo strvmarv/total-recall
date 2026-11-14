@@ -7,9 +7,15 @@
 // Only `proxying` is "ready" (tool calls are forwarded to the live engine).
 
 export class ShimState {
-  constructor() {
+  // `now` is the clock (ms since the epoch); injectable so a test can move time.
+  constructor({ now = Date.now } = {}) {
     this.phase = 'init';
     this.detail = {};
+    this._now = now;
+  }
+
+  now() {
+    return this._now();
   }
 
   set(phase, detail = {}) {
