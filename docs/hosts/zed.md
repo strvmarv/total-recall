@@ -2,7 +2,7 @@
 
 ## Install
 
-No stop condition. The install script configures Zed in `settings.json` inside Zed's settings directory (`~/Library/Application Support/Zed` on macOS, `%APPDATA%\Zed` on Windows, `~/.config/zed` elsewhere, or the directory in `$ZED_SETTINGS`), only when that directory exists. Zed's key is `context_servers`, not `mcpServers`.
+No stop condition. The install script configures Zed in `settings.json` inside Zed's settings directory (`~/Library/Application Support/Zed` on macOS, `%APPDATA%\Zed` on Windows, `~/.config/zed` elsewhere, or the directory in `$ZED_SETTINGS`), only when `ZED_SETTINGS` is set or the default directory exists. Zed's key is `context_servers`, not `mcpServers`.
 
 ### Path 1: the plain install (recommended)
 
@@ -12,7 +12,7 @@ No stop condition. The install script configures Zed in `settings.json` inside Z
 npm install -g @strvmarv/total-recall
 ```
 
-Then read Zed's `settings.json` and confirm the `total-recall` entry under `context_servers`. If it is missing (the install script leaves a file it cannot parse as strict JSON, for example one with comments, untouched), take the step of path 2.
+Then read Zed's `settings.json` and confirm the `total-recall` entry under `context_servers`. If it is missing (the install script leaves a file it cannot parse as strict JSON, for example one with comments, untouched), take the step of path 2 (that step only; do not run the skip-form install again).
 
 ### Path 2: nothing else touched
 
@@ -33,7 +33,7 @@ Then, **Ask first**: add the entry to `context_servers` in Zed's `settings.json`
 }
 ```
 
-Add only this entry and keep the rest of the file. If a `total-recall` entry is already there that this install did not just write (the `npx` entry the install script writes counts as written by it), stop and ask the user.
+Add only this entry and keep the rest of the file. On Path 1, an `npx` entry that the install script just wrote is accepted. Any other `total-recall` entry that is already there, and any existing entry on Path 2 (the script did not run), means stop and ask the user.
 
 Nothing on either path tells the model to call `session_start`; see User steps.
 

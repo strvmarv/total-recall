@@ -2,7 +2,7 @@
 
 ## Install
 
-No stop condition. Hermes has no MCP entry to write: total-recall is a Hermes memory provider. The install script copies the `hermes-plugin/` directory into Hermes's plugins directory and switches the memory provider. It needs a Hermes home with a `config.yaml` (`$HERMES_HOME`, else `~/.hermes`, on Windows also `%APPDATA%\hermes`).
+No stop condition. Hermes has no MCP entry to write: total-recall is a Hermes memory provider. The install script copies the `hermes-plugin/` directory into Hermes's plugins directory and switches the memory provider. It runs when `$HERMES_HOME` is set, or when a Hermes home with a `config.yaml` exists (`~/.hermes`, on Windows also `%APPDATA%\hermes`).
 
 ### Path 1: the plain install (recommended)
 
@@ -44,11 +44,15 @@ The check prompt in `INSTALL.md`, Step 4, does not apply here: Hermes's model is
 
 ## What you get
 
-- A Hermes memory provider: Hermes's `memory` tool keeps its name and schema, and its writes go to total-recall's MCP server instead of the local `MEMORY.md` and `USER.md` files (from `hermes-plugin/memory_tool_schema.py`).
+A Hermes memory provider, from `hermes-plugin/provider.py` and `hermes-plugin/memory_tool_schema.py` (read, not run):
+
+- Hermes's `memory` tool keeps its name and schema, and its add, replace, remove and read actions go to total-recall's MCP server instead of the local `MEMORY.md` and `USER.md` files.
+- The provider starts the total-recall MCP server itself and calls `session_start` when a Hermes session begins, and `session_end` when it ends.
+- It adds the hot-tier context (`session_context`) to the system prompt, searches memory (`memory_search`, top 5) for each turn's query, and stores each turn as a `surfaced` entry tagged `hermes-turn`.
 
 ## Known gaps
 
-- No MCP tools for the model, no hooks and no pinned-directive floor.
+- The model is given the one `memory` tool, not total-recall's MCP tools. No per-turn pinned-directive floor was found in `hermes-plugin/`.
 - The install script can copy the plugin and leave the provider unset (no `hermes` command on PATH, or the command fails).
 
 ## Evidence

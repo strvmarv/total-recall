@@ -20,7 +20,7 @@ The marketplace flow (`cursor-agent plugin marketplace add https://github.com/st
 
 ### MCP server only (no plugin)
 
-Not run: this path was not exercised on any machine.
+Not run for this page: this path comes from the earlier `INSTALL.md` and was not exercised here.
 
 This gives the tools and nothing else: no startup instructions, no floor. Use it instead of the plugin, never together with it (two servers, and the hook would read the default store while the second reads yours).
 

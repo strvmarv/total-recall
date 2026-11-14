@@ -12,7 +12,7 @@ No stop condition. The install script configures VS Code in `mcp.json` inside th
 npm install -g @strvmarv/total-recall
 ```
 
-Then read VS Code's `mcp.json` and confirm the `total-recall` entry under `servers`. If it is missing, take step 1 of path 2.
+Then read VS Code's `mcp.json` and confirm the `total-recall` entry under `servers`. If it is missing, take step 1 of path 2 (that step only; do not run the skip-form install again).
 
 ### Path 2: nothing else touched
 
@@ -45,7 +45,7 @@ Then each step below is its own choice for the user; the agent takes the ones th
 }
 ```
 
-Add only the items above and keep the rest of the file. If a `total-recall` entry is already there that this install did not just write (the `npx` entry the install script writes counts as written by it), stop and ask the user.
+Add only the items above and keep the rest of the file. On Path 1, an `npx` entry that the install script just wrote is accepted. Any other `total-recall` entry that is already there, and any existing entry on Path 2 (the script did not run), means stop and ask the user.
 
 Nothing on either path tells the model to call `session_start`; see User steps.
 

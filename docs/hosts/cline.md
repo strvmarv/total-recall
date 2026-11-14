@@ -2,7 +2,7 @@
 
 ## Install
 
-No stop condition. **The entry the install script writes may not be the file Cline reads.** The script writes `cline_mcp_settings.json` in `~/.vscode/` (or `$CLINE_HOME`) whenever that directory exists. The repository's own Cline importer reads Cline's settings from `~/.cline/data/settings/cline_mcp_settings.json` and, for older installs, from VS Code's `globalStorage/saoudrizwan.claude-dev/settings/` (`ClineImporter.cs`). So the written entry is not evidence that Cline is configured, and on both paths below the entry is added through Cline's own command.
+No stop condition. **The entry the install script writes may not be the file Cline reads.** The script writes `cline_mcp_settings.json` in `~/.vscode/` (or `$CLINE_HOME`) whenever that directory exists. The repository's own Cline importer reads Cline's settings from `~/.cline/data/settings/cline_mcp_settings.json` and, for older installs, from `~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`, a fixed path on every operating system (`ClineImporter.cs`). So the written entry is not evidence that Cline is configured, and on both paths below the entry is added through Cline's own command.
 
 ### Path 1: the plain install (recommended)
 
@@ -20,7 +20,7 @@ The form that skips the install script:
 npm install -g --ignore-scripts @strvmarv/total-recall
 ```
 
-On both paths the entry is added the same way, by the user (see User steps). The entry:
+On both paths the entry is added the same way, by the user (see User steps). Nothing on either path tells the model to call `session_start`; see User steps. The entry:
 
 ```json
 {
@@ -35,7 +35,7 @@ On both paths the entry is added the same way, by the user (see User steps). The
 ## User steps
 
 1. In VS Code, open the Command Palette and run "Cline: MCP Settings".
-2. In the file that opens, add the `total-recall` entry above to `mcpServers`, keeping what is already there.
+2. In the file that opens, add the `total-recall` entry above to `mcpServers`, keeping what is already there. If a `total-recall` entry is already in that file, do not add a second one; stop and tell the agent.
 3. Add the startup instructions to your harness's persistent instructions file. The text is the body, below its front matter, of [`.kiro/steering/total-recall.md`](https://raw.githubusercontent.com/strvmarv/total-recall/main/.kiro/steering/total-recall.md); its "Sticky directives" paragraph describes Kiro's hook and does not apply here.
 
 ## Verify

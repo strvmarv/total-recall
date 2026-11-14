@@ -30,9 +30,10 @@ Then add this entry to OpenCode's config, `~/.config/opencode/opencode.jsonc` (t
 }
 ```
 
-Optional: **Ask first**, then copy the package's skills into OpenCode's plugins directory, from the installed package (`<npm root -g>/@strvmarv/total-recall/skills/`, located with `npm root -g`) or from a checkout (`skills/`). This step is from the earlier OpenCode guide and was not run:
+Optional: **Ask first**, then copy the package's skills into OpenCode's plugins directory. Run it from the package root (`<npm root -g>/@strvmarv/total-recall`, located with `npm root -g`) or from a checkout. This step is from the earlier OpenCode guide and was not run:
 
 ```sh
+mkdir -p ~/.opencode/plugins/total-recall
 cp -r skills/ ~/.opencode/plugins/total-recall/skills/
 ```
 
@@ -56,8 +57,8 @@ In the next session, the user pastes the check prompt from `INSTALL.md`, Step 4.
 
 ## Known gaps
 
-- No hooks, no pinned-directive floor and no startup instructions: MCP tools only. The instructions are a user step.
-- The earlier OpenCode guide also described an `npx` entry and a source-checkout entry. They are not carried here: an `npx` entry runs whatever copy is already installed (see [What the install script changes](../npm-postinstall.md#the-npx-entries)).
+- This install adds no hook, no pinned-directive floor and no startup instructions: it configures MCP tools only, and the instructions are a user step. Whether OpenCode reads the optional skills copy was not observed.
+- The earlier OpenCode guide also described an `npx` entry and a source-checkout entry. They are not carried here: an `npx` entry runs an already-installed copy in preference to fetching the latest release (see [What the install script changes](../npm-postinstall.md#the-npx-entries)), and the checkout entry was not observed in OpenCode's `mcp` form.
 
 ## Evidence
 

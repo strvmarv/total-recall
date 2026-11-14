@@ -2,7 +2,7 @@
 
 ## Install
 
-No stop condition. Gemini CLI is configured through `~/.gemini/settings.json` (or `$GEMINI_HOME/settings.json`) and `GEMINI.md` in the same directory; the install script does that only when that directory exists.
+No stop condition. Gemini CLI is configured through `~/.gemini/settings.json` (or `$GEMINI_HOME/settings.json`) and `GEMINI.md` in the same directory; the install script does that only when `GEMINI_HOME` is set or `~/.gemini` exists.
 
 ### Path 1: the plain install (recommended)
 
@@ -12,7 +12,7 @@ No stop condition. Gemini CLI is configured through `~/.gemini/settings.json` (o
 npm install -g @strvmarv/total-recall
 ```
 
-It writes the MCP entry and the `BeforeAgent` hook to `settings.json` and a marked block to `GEMINI.md`, and changes other tools too, as the paragraph above says. Then read `settings.json` and confirm the `total-recall` entry under `mcpServers` and the hook named `total-recall Pinned Floor` under `hooks.BeforeAgent`, and read `GEMINI.md` and confirm the block between `<!-- total-recall -->` and `<!-- /total-recall -->`. For anything missing, take the matching step of path 2 (the install script leaves a `settings.json` that it cannot parse as strict JSON, for example one with comments, untouched, and logs that on stderr).
+It writes the MCP entry and the `BeforeAgent` hook to `settings.json` and a marked block to `GEMINI.md`, and changes other tools too, as the paragraph above says. Then read `settings.json` and confirm the `total-recall` entry under `mcpServers` and the hook named `total-recall Pinned Floor` under `hooks.BeforeAgent`, and read `GEMINI.md` and confirm the block between `<!-- total-recall -->` and `<!-- /total-recall -->`. For anything missing, take the matching step of path 2 (that step only; do not run the skip-form install again) (the install script leaves a `settings.json` that it cannot parse as strict JSON, for example one with comments, untouched, and logs that on stderr).
 
 ### Path 2: nothing else touched
 
@@ -45,7 +45,7 @@ Then each step below is its own choice for the user; the agent takes the ones th
 ```
 3. **Ask first**: add the startup instructions. Take the body of `<npm root -g>/@strvmarv/total-recall/.kiro/steering/total-recall.md` below its front matter, and insert it in `~/.gemini/GEMINI.md` between a line `<!-- total-recall -->` and a line `<!-- /total-recall -->`. Append the block; never replace the file.
 
-Add only the items above and keep the rest of the file. If a `total-recall` entry is already there that this install did not just write (the `npx` entry the install script writes counts as written by it), stop and ask the user.
+Add only the items above and keep the rest of the file. On Path 1, an `npx` entry that the install script just wrote is accepted. Any other `total-recall` entry that is already there, and any existing entry on Path 2 (the script did not run), means stop and ask the user.
 
 ## User steps
 

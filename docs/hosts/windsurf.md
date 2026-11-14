@@ -2,7 +2,7 @@
 
 ## Install
 
-No stop condition. The install script configures Windsurf in `~/.codeium/windsurf/` (or `$WINDSURF_HOME`), only when that directory exists; the rules file is skipped when the package is a git checkout.
+No stop condition. The install script configures Windsurf in `~/.codeium/windsurf/` (or `$WINDSURF_HOME`), only when `WINDSURF_HOME` is set or that directory exists; the rules file is skipped when the package is a git checkout.
 
 ### Path 1: the plain install (recommended)
 
@@ -12,7 +12,7 @@ No stop condition. The install script configures Windsurf in `~/.codeium/windsur
 npm install -g @strvmarv/total-recall
 ```
 
-Then read `~/.codeium/windsurf/mcp_config.json` and confirm the `total-recall` entry under `mcpServers`, and check that `~/.codeium/windsurf/rules/total-recall.md` exists. For anything missing, take the matching step of path 2.
+Then read `~/.codeium/windsurf/mcp_config.json` and confirm the `total-recall` entry under `mcpServers`, and check that `~/.codeium/windsurf/rules/total-recall.md` exists. For anything missing, take the matching step of path 2 (that step only; do not run the skip-form install again).
 
 ### Path 2: nothing else touched
 
@@ -36,7 +36,7 @@ Then each step below is its own choice for the user; the agent takes the ones th
 ```
 2. **Ask first**: write the startup instructions as a rules file. Take `<npm root -g>/@strvmarv/total-recall/.kiro/steering/total-recall.md`, drop its YAML front matter (the first `---` block), and save the rest as `~/.codeium/windsurf/rules/total-recall.md`, creating the directory if needed.
 
-Add only the items above and keep the rest of the file. If a `total-recall` entry is already there that this install did not just write (the `npx` entry the install script writes counts as written by it), stop and ask the user.
+Add only the items above and keep the rest of the file. On Path 1, an `npx` entry that the install script just wrote is accepted. Any other `total-recall` entry that is already there, and any existing entry on Path 2 (the script did not run), means stop and ask the user.
 
 ## User steps
 

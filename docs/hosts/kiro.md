@@ -2,7 +2,7 @@
 
 ## Install
 
-No stop condition. The install script configures Kiro through `~/.kiro/settings/mcp.json` and `~/.kiro/steering/total-recall.md` (or under `$KIRO_HOME`), only when that directory exists and the package is installed under `node_modules` (not from a git checkout). It does **not** copy the hooks; those are per workspace (see User steps).
+No stop condition. The install script configures Kiro through `~/.kiro/settings/mcp.json` and `~/.kiro/steering/total-recall.md` (or under `$KIRO_HOME`), only when `KIRO_HOME` is set or `~/.kiro` exists, and the package is installed under `node_modules` (not from a git checkout). It does **not** copy the hooks; those are per workspace (see User steps).
 
 ### Path 1: the plain install (recommended)
 
@@ -12,7 +12,7 @@ No stop condition. The install script configures Kiro through `~/.kiro/settings/
 npm install -g @strvmarv/total-recall
 ```
 
-Then read `~/.kiro/settings/mcp.json` and confirm the `total-recall` entry under `mcpServers`, and check that `~/.kiro/steering/total-recall.md` exists. For anything missing, take the matching step of path 2.
+Then read `~/.kiro/settings/mcp.json` and confirm the `total-recall` entry under `mcpServers`, and check that `~/.kiro/steering/total-recall.md` exists. For anything missing, take the matching step of path 2 (that step only; do not run the skip-form install again).
 
 ### Path 2: nothing else touched
 
@@ -37,7 +37,7 @@ Then each step below is its own choice for the user; the agent takes the ones th
 ```
 2. **Ask first**: copy `<npm root -g>/@strvmarv/total-recall/.kiro/steering/total-recall.md` whole (with its front matter, which marks it always-included) to `~/.kiro/steering/total-recall.md`, creating the directory if needed.
 
-Add only the items above and keep the rest of the file. If a `total-recall` entry is already there that this install did not just write (the `npx` entry the install script writes counts as written by it), stop and ask the user.
+Add only the items above and keep the rest of the file. On Path 1, an `npx` entry that the install script just wrote is accepted. Any other `total-recall` entry that is already there, and any existing entry on Path 2 (the script did not run), means stop and ask the user.
 
 ## User steps
 
