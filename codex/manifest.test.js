@@ -1,10 +1,11 @@
 // codex/manifest.test.js — guards the Codex plugin manifest, the packaging that ships it,
-// and the release version sync across every manifest in the repo.
+// and the release version sync (delegated to scripts/sync-version.js).
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -14,31 +15,14 @@ const readJson = (rel) => JSON.parse(readText(rel));
 const pkg = readJson('package.json');
 const codexManifest = readJson('.codex-plugin/plugin.json');
 
-// ---- release version sync (AGENTS.md "Version sync": every manifest carries package.json's version) ----
+// ---- release version sync ----
+// The list of version files lives in scripts/sync-version.js (AGENTS.md "Version sync"); its own
+// tests are in scripts/sync-version.test.js. This one runs the real check on this repository:
+// every version field equals package.json's, and no tracked plugin manifest is missing from the list.
 
-test('version sync: package-lock.json top-level version', () => {
-  assert.equal(readJson('package-lock.json').version, pkg.version);
-});
-
-test('version sync: package-lock.json packages[""].version', () => {
-  assert.equal(readJson('package-lock.json').packages[''].version, pkg.version);
-});
-
-for (const rel of [
-  '.claude-plugin/plugin.json',
-  '.github/plugin/plugin.json',
-  '.cursor-plugin/plugin.json',
-  '.codex-plugin/plugin.json',
-]) {
-  test(`version sync: ${rel}`, () => {
-    assert.equal(readJson(rel).version, pkg.version);
-  });
-}
-
-test('version sync: hermes-plugin/plugin.yaml', () => {
-  const m = /^version:\s*["']?([^"'\s]+)["']?\s*$/m.exec(readText('hermes-plugin/plugin.yaml'));
-  assert.ok(m, 'plugin.yaml has a top-level version line');
-  assert.equal(m[1], pkg.version);
+test('version sync: every version file carries package.json\'s version', () => {
+  const r = spawnSync(process.execPath, [path.join(root, 'scripts', 'sync-version.js'), '--check'], { cwd: root, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr || r.stdout);
 });
 
 // ---- the Codex manifest ----
