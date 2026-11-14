@@ -176,15 +176,24 @@ a check fails.
    the "Import sync" step of `docs/how-it-works.md`, one clause per tool, each checked first against
    its importer under `src/TotalRecall.Infrastructure/Importers/` (for example the Copilot CLI
    importer reads session `plan.md` files, not "memory files") and written as the importer has it.
-10. `PRIVACY.md` (a root file the README now links) has three statements that the README and
-    `docs/first-run.md` contradict: the engine archive is "~22 MB" (about 100 MB); "no cloud sync"
-    and "your text is never sent to an embedding API" (true by default; not when Cortex, Postgres or
-    a remote embedder is configured, which the README documents). Correct those three statements,
-    each with the qualifier "by default" and one sentence naming the opt-in configurations. No other
-    change to `PRIVACY.md`.
+   One clause is written for each of the six tools the step names, and the `Imported` example cell
+   in "What Gets Remembered" ("Copilot snippets, Cursor history") is reworded to agree with them.
 9. The web UI has seven sections (the README is right; `Eval` exists under
    `src/TotalRecall.Web/ClientApp/src/pages/`). No change; listed so the reviewer does not "fix" it
    from `AGENTS.md`, which says six.
+10. `PRIVACY.md` (a root file the README now links) makes unqualified statements that the README
+    and `docs/first-run.md` contradict. The correction is defined by claim, not by count:
+    - the engine archive size ("~22 MB") becomes about 100 MB;
+    - every statement that no data is transmitted, that there is no telemetry, usage analytics,
+      cloud sync or remote copy, or that text is never sent to an embedding service, gets the
+      qualifier "by default" (the Summary, "Nothing else", "Embeddings and AI processing", and the
+      later sections that repeat them);
+    - one short paragraph is added under "What data leaves your machine" naming the opt-in
+      configurations, each as the README has it: a Postgres backend, Cortex (memory sync, telemetry
+      and skills pushed to the Cortex instance the user configures) and a remote embedder (OpenAI,
+      Bedrock);
+    - the "last updated" date, if the file has one, changes.
+    Nothing else in `PRIVACY.md` changes.
 
 ### References that must follow
 
@@ -195,7 +204,8 @@ a check fails.
 - `AGENTS.md` "WHERE TO LOOK": one row for the user documentation (`README.md` front door,
   `docs/*.md` reference pages, the check); and its one reference to a README section that moves
   (`(README, "Verifying a release")` in the release flow) is repointed to
-  `docs/verifying-a-release.md`. No other `AGENTS.md` change.
+  `docs/verifying-a-release.md`. No other `AGENTS.md` change. `docs/TODO.md` holds the same reference
+  once: repoint it too.
 - `CONTRIBUTING.md`: if it links a README section that moves, repoint it (the builder greps).
 - `docs/hosts/*.md`, `INSTALL.md` and `docs/npm-postinstall.md` are not edited, except a link that
   pointed into a README section that moves (the builder greps; none is known).
