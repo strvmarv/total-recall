@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SHIM_TEST_TARGETS } from '../scripts/run-shim-tests.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const readText = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
@@ -62,7 +63,7 @@ test('package.json ships the manifest and hooks and runs the copilot tests', () 
   assert.ok(pkg.files.includes('copilot/'));
   assert.ok(pkg.files.includes('.github/plugin/'));
   assert.equal(pkg.files.includes('.copilot-plugin/'), false);
-  assert.match(pkg.scripts['test:shim'], /\bcopilot\//);
+  assert.ok(SHIM_TEST_TARGETS.includes('copilot/'));
 });
 
 test('.mcp.json (shared with Claude Code, and read by Copilot) keeps its shape', () => {

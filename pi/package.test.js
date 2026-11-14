@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SHIM_TEST_TARGETS } from '../scripts/run-shim-tests.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -41,6 +42,6 @@ test('keywords include pi-package (eligibility for the pi package gallery)', () 
 });
 
 test('test:shim runs the pi tests and no dependency was added', () => {
-  assert.ok(pkg.scripts['test:shim'].includes(' pi/ '));
+  assert.ok(SHIM_TEST_TARGETS.includes('pi/'));
   assert.equal(pkg.dependencies, undefined);
 });

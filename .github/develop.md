@@ -13,15 +13,16 @@ gh.account: strvmarv
 ## Verify
 
 The .NET suite, without the integration category, then the shim suites, then the catalog drift guard. The second
-command lists a glob for every directory that `npm run test:shim` lists. The globs are unquoted so that `sh` expands them, which
-works on every Node version (a quoted glob handed to `node --test` needs Node 21 or newer, and CI runs Node 20).
+command is `npm run test:shim`, which runs `scripts/run-shim-tests.js`: the one list of the Node test files (`SHIM_TEST_TARGETS`),
+handed to `node --test` as explicit files so that it works on Node 20 and later (a directory argument fails on Node 24, a quoted glob
+needs Node 21 or newer, and CI runs Node 20).
 
 ```sh verify
 dotnet test src/TotalRecall.sln --filter "Category!=Integration"
 ```
 
 ```sh verify
-node --test bin/shim/*.test.js pi/*.test.js codex/*.test.js skills/develop/scripts/*.test.js copilot/*.test.js cursor/*.test.js scripts/fetch-binary.test.js scripts/sync-version.test.js scripts/release-workflow.test.js scripts/host-docs.test.js scripts/host-config.test.js hooks/hooks.config.test.js
+npm run test:shim
 ```
 
 The catalog drift guard that CI runs after the build: `catalog.json` must equal what `dump-catalog` prints, so a

@@ -99,6 +99,11 @@ test('importing the module runs nothing', () => {
   assert.equal(r.stdout.trim(), 'imported');
 });
 
+test('the package script runs this runner, so no Node version and no shell decides what is run', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8'));
+  assert.equal(pkg.scripts['test:shim'], 'node scripts/run-shim-tests.js');
+});
+
 test('every real target expands to at least one test file', () => {
   for (const target of SHIM_TEST_TARGETS) {
     assert.ok(expandTargets([target], { root: REPO }).length >= 1, target);

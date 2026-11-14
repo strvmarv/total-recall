@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SHIM_TEST_TARGETS } from '../scripts/run-shim-tests.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const readText = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
@@ -68,7 +69,7 @@ test('hooks/hooks-cursor.json (hand-wired setups) uses only the braced plugin ro
 test('package.json ships the manifest, hooks and MCP file and runs the cursor tests', () => {
   assert.ok(pkg.files.includes('cursor/'));
   assert.ok(pkg.files.includes('.cursor-plugin/'));
-  assert.match(pkg.scripts['test:shim'], /\bcursor\//);
+  assert.ok(SHIM_TEST_TARGETS.includes('cursor/'));
 });
 
 test('.mcp.json (shared with Claude Code) keeps its shape', () => {
