@@ -36,7 +36,7 @@ The form that skips the install script. The install script configures nothing fo
 npm install -g --ignore-scripts @strvmarv/total-recall
 ```
 
-Ask the user which Cursor MCP config to use: the project's `.cursor/mcp.json` or their global Cursor MCP config; do not guess, and warn that a project file may be committed. Then add this entry to `mcpServers` in that file, creating the file or the `mcpServers` key if it is missing. Add only this entry and keep the rest of the file; if a `total-recall` entry is already there that this install did not just write, stop and ask the user.
+Ask the user which Cursor MCP config to use: the project's `.cursor/mcp.json` (in the workspace root) or their global Cursor MCP config, and state the full path you will edit before you edit it; do not guess, and warn that a project file may be committed. Then add this entry to `mcpServers` in that file, creating the file or the `mcpServers` key if it is missing. Add only this entry and keep the rest of the file; if a `total-recall` entry is already there that this install did not just write, stop and ask the user.
 
 ```json
 {
@@ -53,7 +53,7 @@ Nothing on this path tells the model to call `session_start`; see User steps.
 ## User steps
 
 1. Restart Cursor (or run `Developer: Reload Window`) so it reads the plugin or the MCP config.
-2. Plugin path: approve the server. (Whether a hand-written MCP-only entry needs approval was not observed.) Cursor asks before using a plugin's MCP server (it shows as `plugin-total-recall-total-recall`). Interactively, approve it. With `cursor-agent -p`, the user passes `--approve-mcps` on their own command line. The refusal text for an unapproved server was not observed.
+2. Plugin path: approve the server. On the MCP-only path whether approval is needed was not observed: tell the user that if the server shows as unapproved or disabled, they approve it. Cursor asks before using a plugin's MCP server (it shows as `plugin-total-recall-total-recall`). Interactively, approve it. With `cursor-agent -p`, the user passes `--approve-mcps` on their own command line. The refusal text for an unapproved server was not observed.
 3. MCP-only path: this is a user step; do not write the file yourself. Fetch the file linked here and give the user the text to add to your harness's persistent instructions file. The text is the body, below its front matter, of [`.kiro/steering/total-recall.md`](https://raw.githubusercontent.com/strvmarv/total-recall/main/.kiro/steering/total-recall.md); its "Sticky directives" paragraph describes Kiro's hook and does not apply here.
 4. First session on a store with a large history: the first `session_start` can exceed Cursor's 60 second MCP request limit (see Known gaps); the user may need to ask the model to call it once more.
 
@@ -67,7 +67,7 @@ node "$HOME/.cursor/plugins/local/total-recall/bin/start.js" --version
 
 Expected: `total-recall <version>`; the first run downloads the engine. The directory is the one the install step creates.
 
-MCP-only path, now: `total-recall --version` should print the version that `npm view @strvmarv/total-recall version` reports, and the Cursor MCP config should hold the `total-recall` entry. A bare `total-recall` on PATH can be an older copy than the one another harness runs.
+MCP-only path, now: `total-recall --version` should print the version that `npm view @strvmarv/total-recall version` reports, and the Cursor MCP config you edited should hold the `total-recall` entry and still parse (see Rules in `INSTALL.md`); that shows presence, not that Cursor can start it. A bare `total-recall` on PATH can be an older copy than the one another harness runs.
 
 In the next session, the user pastes the check prompt from `INSTALL.md`, Step 4.
 

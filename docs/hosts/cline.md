@@ -37,7 +37,7 @@ On Path 1 the script may also have written an `npx` entry to the file it uses (`
 ## User steps
 
 1. In VS Code, open the Command Palette and run "Cline: MCP Settings".
-2. In the file that opens, add the `total-recall` entry above to `mcpServers`, keeping what is already there. If a `total-recall` entry is already in that file, do not add a second one: the user decides whether to replace it. The agent only supplies text and never edits that file.
+2. In the file that opens, add the `total-recall` entry above to `mcpServers`, keeping what is already there (if `mcpServers` already exists, add only the `"total-recall": {...}` member inside it). The agent does not search this file: the user looks for an existing entry. If a `total-recall` entry is already in that file, do not add a second one: the user decides whether to replace it. The agent only supplies text and never edits that file.
 3. This is a user step; do not write the file yourself. Fetch the file linked here and give the user the text to add to your harness's persistent instructions file. The text is the body, below its front matter, of [`.kiro/steering/total-recall.md`](https://raw.githubusercontent.com/strvmarv/total-recall/main/.kiro/steering/total-recall.md); its "Sticky directives" paragraph describes Kiro's hook and does not apply here.
 
 ## Verify

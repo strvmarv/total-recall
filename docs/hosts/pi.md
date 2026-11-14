@@ -26,11 +26,11 @@ Straight from git:
 pi install git:github.com/strvmarv/total-recall
 ```
 
-pi runs the package install for a `git:` package too, so the same install script runs and the paragraph above applies. No skip form was observed for the `git:` form. A git install holds the engine for this platform only.
+pi runs the package install for a `git:` package too, so the same install script runs and the paragraph above applies. No skip form was observed for the `git:` form: on a no to it, use the npm skip form above instead, or leave the step to the user. A git install holds the engine for this platform only.
 
 ## User steps
 
-1. Start a new pi session. Running `/reload` in the open session is an alternative (from pi's documentation, not run).
+1. Start a new pi session (the path the check below relies on). `/reload` in the open session may also work (from pi's documentation, untested; do not assert it).
 
 ## Verify
 
