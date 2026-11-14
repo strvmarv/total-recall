@@ -1,7 +1,6 @@
 // src/TotalRecall.Infrastructure/Eval/ConfigSnapshotStore.cs
 //
-// Read/write seam on top of the config_snapshots table (createConfigSnapshot and
-// resolveSnapshotId).
+// Read/write seam on top of the config_snapshots table.
 //
 // Dedup: the TS implementation hashes the config via sortKeysDeep -> sha256.
 // The .NET port compares the raw configJson strings verbatim; semantic

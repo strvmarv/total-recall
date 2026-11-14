@@ -1,6 +1,6 @@
 // src/TotalRecall.Infrastructure/Config/ConfigWriter.cs
 //
-// The write path for the user config.toml (setNestedKey, saveUserConfig).
+// The write path for the user config.toml.
 // Used by the `config set` CLI verb.
 //
 // AOT note: Tomlyn's Toml.FromModel / reflection-based projection is NOT

@@ -21,7 +21,7 @@ public sealed class SqliteDbPathException : Exception
 }
 
 /// <summary>
-/// Loads <see cref="Core.Config.TotalRecallConfig"/> from TOML sources (<c>getDataDir</c>, <c>loadConfig</c>).
+/// Loads <see cref="Core.Config.TotalRecallConfig"/> from TOML sources.
 ///
 /// Loads an embedded <c>defaults.toml</c> resource and optionally deep-merges a
 /// user-supplied <c>config.toml</c> over it. Parsing uses Tomlyn's syntax-tree
