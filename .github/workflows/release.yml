@@ -218,6 +218,7 @@ jobs:
       contents: write
       deployments: write
       id-token: write
+      attestations: write
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -471,3 +472,13 @@ jobs:
             release-assets/provisioning.manifest.json
           prerelease: ${{ contains(github.ref_name, '-') }}
           fail_on_unmatched_files: true
+
+      - name: Attest release assets
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            release-assets/total-recall-linux-x64.tar.gz
+            release-assets/total-recall-linux-arm64.tar.gz
+            release-assets/total-recall-osx-arm64.tar.gz
+            release-assets/total-recall-win-x64.tar.gz
+            release-assets/provisioning.manifest.json
