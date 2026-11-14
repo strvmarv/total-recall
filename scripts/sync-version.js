@@ -17,9 +17,10 @@ import { fileURLToPath } from 'node:url';
 // the publish step takes the text after the LAST '-', up to the first '.', as the npm dist-tag. So the
 // prerelease must start with a letter (a purely numeric tag is not a valid npm tag), hold no further '-',
 // and its first identifier must be usable as a tag: npm refuses a tag that is a valid SemVer range
-// (`x`, `v1`), and `latest` would publish a prerelease as the stable release.
+// (`x`, `v1`, `vx`, `vv1`: any run of v's before an x or a number), and `latest` would publish a
+// prerelease as the stable release.
 const VERSION_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([A-Za-z][0-9A-Za-z]*)(?:\.(?:0|[1-9]\d*|[0-9]*[A-Za-z][0-9A-Za-z]*))*)?$/;
-const UNUSABLE_DIST_TAG_RE = /^(?:[xX]|[vV]\d+|latest)$/i;
+const UNUSABLE_DIST_TAG_RE = /^(?:v*x|v+\d+|latest)$/i;
 
 export function isValidVersion(version) {
   if (typeof version !== 'string') return false;
@@ -168,14 +169,17 @@ export function syncVersions({ root, version }) {
     edits.push({ file, original, text });
   }
   // Stage every changed file next to its target, then rename them all: a write error (a read-only
-  // directory, a full disk) leaves every file as it was and no temporary file behind.
+  // directory, a full disk) leaves every file as it was and no temporary file behind. Only a failure of
+  // the final renames can leave some files updated; the error then lists them.
   const staged = [];
   const cleanup = () => { for (const t of staged) fs.rmSync(t.tmp, { force: true }); };
   for (const { file, original, text } of edits) {
     if (text === original) continue;
-    const tmp = `${path.join(root, file)}.tmp-${process.pid}`;
+    const target = path.join(root, file);
+    const tmp = `${target}.tmp-${process.pid}`;
     try {
       fs.writeFileSync(tmp, text);
+      fs.chmodSync(tmp, fs.statSync(target).mode & 0o7777); // the replacement keeps the original's mode
     } catch (e) {
       fs.rmSync(tmp, { force: true });
       cleanup();

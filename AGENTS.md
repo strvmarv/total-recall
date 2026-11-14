@@ -136,7 +136,7 @@ total-recall is a multi-host plugin (Claude Code, Copilot CLI, Cursor, OpenCode,
 - `.claude-plugin/plugin.json` was stuck on `0.7.2` through the entire TS→.NET cutover (beta.1 → beta.3) until the build agent caught it during the beta.4 audit
 - `hermes-plugin/plugin.yaml` was stuck on `1.4.0` through the 2.0.0 release — the v2.0.0 sync repaired the plugin.json drift but missed the one YAML manifest (caught during the 2.1.0 release)
 
-**On every release run `node scripts/sync-version.js <version>`** (for example `4.7.0` or `4.7.0-beta.1`). It sets the version in ALL of these, in one step, and writes nothing if any of them cannot be updated:
+**On every release run `node scripts/sync-version.js <version>`** (for example `4.7.0` or `4.7.0-beta.1`). It sets the version in ALL of these, in one step. It locates and stages every change first, so a field it cannot find or a file it cannot write changes nothing (a failure of the final renames, which is very unlikely, is reported with the files already updated):
 
 1. `package.json`
 2. `package-lock.json` (top-level `version` field AND `packages[""].version`; the command edits those two by position, so another lockfile entry that happens to share the version string is left alone, and it never regenerates the lockfile)
@@ -146,7 +146,7 @@ total-recall is a multi-host plugin (Claude Code, Copilot CLI, Cursor, OpenCode,
 6. `.codex-plugin/plugin.json` (Codex ignores `.claude-plugin/plugin.json` once this file exists and does not fall back to its version)
 7. `hermes-plugin/plugin.yaml` (the one non-JSON manifest)
 
-The list lives in one place, `VERSION_FILES` in `scripts/sync-version.js`. The version must be `X.Y.Z` or `X.Y.Z-<prerelease>` where the prerelease starts with a letter, holds no further `-` and has no `+build` part, and its first identifier is not `x`, `v<number>` or `latest` (the publish step uses the text after the last `-`, up to the first `.`, as the npm dist-tag: npm refuses a tag that is a valid version range such as `x` or `v1`, an all-numeric tag is not valid, and `latest` would publish a prerelease as the stable release). `node scripts/sync-version.js --check` verifies the seven files against `package.json` and also fails on any tracked `plugin.json` or `plugin.yaml` that is not in the list, so a new host manifest cannot be added without being versioned.
+The list lives in one place, `VERSION_FILES` in `scripts/sync-version.js`. The version must be `X.Y.Z` or `X.Y.Z-<prerelease>` where the prerelease starts with a letter, holds no further `-` and has no `+build` part, and its first identifier is not `latest` or a valid version range (`x`, `v1`, `vx`, `vv1`, …) (the publish step uses the text after the last `-`, up to the first `.`, as the npm dist-tag: npm refuses a tag that is a valid version range, an all-numeric tag is not valid, and `latest` would publish a prerelease as the stable release). `node scripts/sync-version.js --check` verifies the seven files against `package.json` and also fails on any tracked `plugin.json` or `plugin.yaml` that is not in the list, so a new host manifest cannot be added without being versioned.
 
 `.opencode/` uses `INSTALL.md` (no versioned manifest) so it is exempt, but any version references in that doc should still be reviewed.
 

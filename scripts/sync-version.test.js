@@ -427,7 +427,7 @@ test('script: a symlinked directory still runs the command', { skip: !canSymlink
 });
 
 // prerelease first identifiers that npm cannot use as a dist-tag
-for (const bad of ['4.7.0-x', '4.7.0-X', '4.7.0-v1', '4.7.0-V2.1', '4.7.0-latest', '4.7.0-latest.1']) {
+for (const bad of ['4.7.0-x', '4.7.0-X', '4.7.0-v1', '4.7.0-V2.1', '4.7.0-latest', '4.7.0-latest.1', '4.7.0-vx', '4.7.0-vX', '4.7.0-vv1', '4.7.0-vvx', '4.7.0-Latest']) {
   test(`syncVersions: rejects ${bad} (not usable as an npm dist-tag)`, () => {
     const dir = makeTree('4.6.0');
     const before = snapshot(dir);
@@ -462,4 +462,18 @@ test('syncVersions: a write failure part-way leaves every file unchanged', { ski
   assert.deepEqual(snapshot(dir), before);
   const strays = ALL_FILES.flatMap((f) => fs.readdirSync(path.dirname(path.join(dir, f))).filter((n) => n.includes('.tmp')));
   assert.deepEqual(strays, [], 'no temp files are left behind');
+});
+
+test('syncVersions: keeps the file mode of every file it rewrites', { skip: process.platform === 'win32' }, () => {
+  const dir = makeTree('4.6.0');
+  fs.chmodSync(path.join(dir, 'package.json'), 0o600);
+  fs.chmodSync(path.join(dir, 'hermes-plugin/plugin.yaml'), 0o640);
+  const oldMask = process.umask(0o022);
+  try {
+    assert.equal(syncVersions({ root: dir, version: '4.7.0' }).ok, true);
+  } finally {
+    process.umask(oldMask);
+  }
+  assert.equal(fs.statSync(path.join(dir, 'package.json')).mode & 0o777, 0o600);
+  assert.equal(fs.statSync(path.join(dir, 'hermes-plugin/plugin.yaml')).mode & 0o777, 0o640);
 });
