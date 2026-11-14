@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -9,8 +9,13 @@ import {
 
 const P = '[total-recall:postinstall]';
 
+const made = [];
+after(() => { for (const d of made) fs.rmSync(d, { recursive: true, force: true }); });
+
 function tmp(prefix = 'tr-hostcfg-') {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  made.push(dir);
+  return dir;
 }
 
 // --- change-log: the recorder, the summary text and the append-only log ---
@@ -466,4 +471,19 @@ test('a failing step of another tool (Zed) is a failed line too', () => {
   });
   assert.equal(r.status, 0, r.stderr);
   assert.ok(lines(r).some((l) => /^Zed: failed: /.test(l)), r.stderr);
+});
+
+// --- the documentation names the summary, the log and the skip switch ---
+
+test('docs/npm-postinstall.md describes the summary, the log file and TOTAL_RECALL_SKIP_HOST_CONFIG', () => {
+  const doc = fs.readFileSync(path.join(REPO, 'docs', 'npm-postinstall.md'), 'utf8');
+  assert.ok(doc.includes('TOTAL_RECALL_SKIP_HOST_CONFIG'));
+  assert.ok(doc.includes('postinstall.log'));
+  assert.match(doc, /TOTAL_RECALL_HOME/);
+});
+
+test('docs/npm-postinstall.md no longer says that a failed Hermes copy ends the script', () => {
+  const doc = fs.readFileSync(path.join(REPO, 'docs', 'npm-postinstall.md'), 'utf8');
+  assert.ok(!/not wrapped and ends the script/.test(doc));
+  assert.ok(!/except the Hermes file copy/.test(doc));
 });
