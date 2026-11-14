@@ -1067,6 +1067,11 @@ defect('npm-postinstall.md does not name a tool', checkDisclosure, (f) => {
 // Rule 7: the names the hook scripts cite
 // ---------------------------------------------------------------------------------------------
 
+/** Escapes every regular-expression metacharacter, the backslash included. */
+function escapeRegExp(text) {
+  return text.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+}
+
 test('the Cline pages hold on the repository', () => assert.deepEqual(checkClinePath(repoTree()), []));
 for (const [page, phrase] of [
   ['docs/hosts/cline.md', 'The entry the install script writes may not be the file Cline reads.'],
@@ -1074,11 +1079,11 @@ for (const [page, phrase] of [
   ['docs/npm-postinstall.md', 'so the written entry is not evidence that Cline is configured'],
   ['docs/hosts/cline.md', 'The path mismatch above is a known problem in the install script.'],
 ]) {
-  defect(`${page} says "${phrase.slice(0, 40)}..."`, checkClinePath, (f) => { f[page] += `\n${phrase}\n`; }, new RegExp(`${page.replace(/[./]/g, '\\$&')}: .*stale`));
+  defect(`${page} says "${phrase.slice(0, 40)}..."`, checkClinePath, (f) => { f[page] += `\n${phrase}\n`; }, new RegExp(`^${escapeRegExp(page)}: .*stale`));
 }
 for (const page of ['docs/hosts/cline.md', 'docs/npm-postinstall.md', 'docs/platforms.md']) {
   for (const token of CLINE_TOKENS) {
-    defect(`${page} does not name ${token}`, checkClinePath, (f) => { f[page] = f[page].replace(token, ''); }, new RegExp(`${page.replace(/[./]/g, '\\$&')} does not name`));
+    defect(`${page} does not name ${token}`, checkClinePath, (f) => { f[page] = f[page].replace(token, ''); }, new RegExp(`^${escapeRegExp(page)} does not name`));
   }
 }
 defect('docs/platforms.md names none of the Cline locations', checkClinePath, (f) => { f['docs/platforms.md'] = '# Platforms\n'; }, /docs\/platforms\.md does not name/);
