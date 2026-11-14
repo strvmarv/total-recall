@@ -804,3 +804,33 @@ test('the host pages that name the entry say it is pinned and refreshed', () => 
     assert.match(text, /pinned to the installed version/, page);
   }
 });
+
+// --- vscodeUserDir: VS Code's User directory, shared by the VS Code and Cline steps ---
+
+import { vscodeUserDir } from './lib/vscode-user-dir.js';
+
+test('vscodeUserDir: VSCODE_USER_DIR wins, then the platform default', () => {
+  const home = '/h';
+  assert.equal(vscodeUserDir({ env: { VSCODE_USER_DIR: '/custom' }, platform: 'darwin', home }), '/custom');
+  assert.equal(vscodeUserDir({ env: {}, platform: 'darwin', home }), path.join(home, 'Library', 'Application Support', 'Code', 'User'));
+  assert.equal(vscodeUserDir({ env: {}, platform: 'linux', home }), path.join(home, '.config', 'Code', 'User'));
+  assert.equal(vscodeUserDir({ env: {}, platform: 'freebsd', home }), path.join(home, '.config', 'Code', 'User'));
+  assert.equal(vscodeUserDir({ env: { APPDATA: '/a' }, platform: 'win32', home }), path.join('/a', 'Code', 'User'));
+});
+
+test('vscodeUserDir: no home gives null (after the override), and Windows without APPDATA gives null', () => {
+  assert.equal(vscodeUserDir({ env: {}, platform: 'linux', home: '' }), null);
+  assert.equal(vscodeUserDir({ env: {}, platform: 'darwin', home: undefined }), null);
+  assert.equal(vscodeUserDir({ env: { VSCODE_USER_DIR: '/custom' }, platform: 'linux', home: '' }), '/custom');
+  assert.equal(vscodeUserDir({ env: {}, platform: 'win32', home: '/h' }), null);
+});
+
+test('vscodeUserDir: with no arguments it reads the process environment, platform and home', () => {
+  const saved = process.env.VSCODE_USER_DIR;
+  process.env.VSCODE_USER_DIR = '/from-env';
+  try {
+    assert.equal(vscodeUserDir(), '/from-env');
+  } finally {
+    if (saved === undefined) delete process.env.VSCODE_USER_DIR; else process.env.VSCODE_USER_DIR = saved;
+  }
+});
