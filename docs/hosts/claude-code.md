@@ -22,13 +22,13 @@ If the `claude` command is not found or either command exits non-zero, stop. The
 /plugin install total-recall@strvmarv-total-recall-marketplace
 ```
 
-The plugin path changes nothing outside Claude Code (the two commands update Claude Code's own plugin registry), so there is nothing else to report there. After the install, offer the permission rule. **Ask first**: tell the user that the rule `mcp__plugin_total-recall_total-recall__*` lets Claude Code call every total-recall tool without asking each time, including the tools that write and delete memories. On a yes, make the edit the `setup` section of `skills/commands/SKILL.md` describes: add that one rule to `permissions.allow` in `~/.claude/settings.json` (under `$CLAUDE_CONFIG_DIR` instead of `~/.claude` if that is set, the same place the plugin directory is under), create the file if it is missing, and change nothing else in it. Check the file without printing it:
+The plugin path changes nothing outside Claude Code (the two commands update Claude Code's own plugin registry), so there is nothing else to report there. After the install, offer the permission rule. **Ask first**: tell the user that the rule `mcp__plugin_total-recall_total-recall__*` lets Claude Code call every total-recall tool without asking each time, including the tools that write and delete memories. On a yes, make the edit the `setup` section of `skills/commands/SKILL.md` describes: add that one rule to `permissions.allow` in `~/.claude/settings.json` (under `$CLAUDE_CONFIG_DIR` instead of `~/.claude` if that is set, the same place the plugin directory is under), create the file if it is missing, and change nothing else in it. Check the file without printing it (use `%USERPROFILE%`-style paths in PowerShell, or `$HOME` as written, and `$env:CLAUDE_CONFIG_DIR` instead of `~/.claude` if that is set):
 
 ```sh
-node -e "const j=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')); const a=j.permissions&&j.permissions.allow; console.log(Array.isArray(a) ? (a.includes(process.argv[2]) ? 'present' : 'absent, ' + a.length + ' items') : 'no allow array')" ~/.claude/settings.json 'mcp__plugin_total-recall_total-recall__*'
+node -e "const fs=require('fs'); const f=process.argv[1]; if (fs.existsSync(f)===false) { console.log('missing') } else { try { const j=JSON.parse(fs.readFileSync(f,'utf8').replace(/^\uFEFF/,'')); const a=j && j.permissions && j.permissions.allow; console.log(Array.isArray(a) ? (a.includes(process.argv[2]) ? 'present' : 'absent, ' + a.length + ' items') : 'no allow array') } catch (e) { console.log('unreadable') } }" "$HOME/.claude/settings.json" 'mcp__plugin_total-recall_total-recall__*'
 ```
 
-If it prints `present`, do nothing. If it prints `absent`, insert the string as the first item of the `permissions.allow` array by text insertion (with a comma after it if the count is above 0), following the edit rules in `INSTALL.md` (backup first, parse check after). If the file does not exist, create it holding exactly `{"permissions":{"allow":["mcp__plugin_total-recall_total-recall__*"]}}`. If it cannot be parsed as JSON (for example it has comments), or has no `allow` array, do not edit: tell the user to run `/total-recall:commands setup` themselves. Do not print the file; the rules in `INSTALL.md` override the skill's read-and-write-back method. On a no, tell the user that in a permission mode that never asks (TUI fullscreen, `dontAsk`) the total-recall tools are blocked until they run `/total-recall:commands setup` themselves. The rule names the plugin's tools, so it applies to this path only.
+If it prints `present`, do nothing. If it prints `absent`, insert the string as the first item of the `permissions.allow` array by text insertion (with a comma after it if the count is above 0), following the edit rules in `INSTALL.md` (copy first, parse check after). If it prints `missing`, create the file holding exactly `{"permissions":{"allow":["mcp__plugin_total-recall_total-recall__*"]}}`. If it prints `unreadable` (for example the file has comments) or `no allow array`, do not edit: tell the user to run `/total-recall:commands setup` themselves. Do not run the edit if you cannot place it without printing the other rules.
 
 ### MCP server only (no plugin)
 
@@ -46,7 +46,7 @@ The form that skips the install script changes nothing else. The install script 
 npm install -g --ignore-scripts @strvmarv/total-recall
 ```
 
-Then add this entry to the `mcpServers` object that is a direct child of the root of `~/.claude.json` (not one under `projects`), creating it if it is missing. If `CLAUDE_CONFIG_DIR` is set, where Claude Code keeps this file was not checked: tell the user, ask which file to use, and do not count a search of `~/.claude.json` as a pass. Claude Code itself rewrites this file, so a running session may overwrite the edit (inferred, not observed): make the edit by insertion, tell the user to restart Claude Code, and check the entry again in the next session. Add only this entry and keep the rest of the file; if a `total-recall` entry is already there that this install did not just write, stop and ask the user.
+Then give the user this entry to add; this is a User step, not yours to edit. Claude Code rewrites `~/.claude.json` itself and the file also holds other sensitive content. The entry goes in the `mcpServers` object that is a direct child of the file's root (not one under `projects`), which the user creates if it is missing. If `CLAUDE_CONFIG_DIR` is set, where Claude Code keeps this file was not checked: tell the user and ask which file they mean. If the user already has a `total-recall` entry there, they keep it and tell you.
 
 ```json
 {
@@ -64,7 +64,7 @@ Nothing on this path tells the model to call `session_start`. Add the startup in
 
 1. Plugin path: start a new Claude Code session; MCP tools and hooks appear only in a new session.
 2. Plugin path, if the allow rule was declined: tell the user that, in a mode that never asks, the tools stay blocked until they run `/total-recall:commands setup` and restart the session.
-3. MCP-only path: restart Claude Code so it reads `~/.claude.json` (inferred, not observed).
+3. MCP-only path: add the entry above to `~/.claude.json`, then restart Claude Code so it reads the file (inferred, not observed), and tell the agent when done.
 4. MCP-only path: nothing delivers the startup instructions. This is a user step; do not write the file yourself. Fetch the file linked here and give the user the text to add to your harness's persistent instructions file. The text is the body, below its front matter, of [`.kiro/steering/total-recall.md`](https://raw.githubusercontent.com/strvmarv/total-recall/main/.kiro/steering/total-recall.md); its "Sticky directives" paragraph describes Kiro's hook and does not apply here.
 
 ## Verify
@@ -78,7 +78,7 @@ node ~/.claude/plugins/cache/strvmarv-total-recall-marketplace/total-recall/<ver
 
 `<version>` is the directory the first command lists (if more than one is listed, use the newest and tell the user). Expected: `total-recall <version>`, which is also the version `npm view @strvmarv/total-recall version` reports unless the default branch is ahead of the last release. This proves the engine and the plugin files, not that Claude Code has the plugin enabled: report that as pending until the next session. The first run downloads and verifies the engine (about 100 MB), so it can take a while; a later run answers at once. If `CLAUDE_CONFIG_DIR` is set, the plugin directory is under it instead of `~/.claude`.
 
-MCP-only path, now: `total-recall --version` should print the version that `npm view @strvmarv/total-recall version` reports; search `~/.claude.json` for the `total-recall` entry (see Rules in `INSTALL.md`). A bare `total-recall` on PATH can be an older copy than the one another harness runs.
+MCP-only path, now: `total-recall --version` should print the version that `npm view @strvmarv/total-recall version` reports. After the user says they added the entry, run the read command from Rules in `INSTALL.md` on `~/.claude.json` with the key `mcpServers`; `total-recall present: true` is a check, anything else is pending. A bare `total-recall` on PATH can be an older copy than the one another harness runs.
 
 In the next session, the user pastes the check prompt from `INSTALL.md`, Step 4, and should see the tier counts and the database path.
 

@@ -38,7 +38,7 @@ hermes config set memory.provider total-recall
 
 ## Verify
 
-Now (both marked not run): confirm that `<hermes home>/plugins/total-recall` exists and that `memory.provider` is `total-recall` in Hermes's `config.yaml`; for either that is missing, take the matching step of path 2. `total-recall --version` should print the version that `npm view @strvmarv/total-recall version` reports. A bare `total-recall` on PATH can be an older copy than the one another harness runs.
+Now (both marked not run): confirm that `<hermes home>/plugins/total-recall` exists and, with a count-only search such as `grep -c 'provider: total-recall' <hermes home>/config.yaml`, that `memory.provider` is `total-recall` in Hermes's `config.yaml` (the file may hold API keys: never print it); for either that is missing, take the matching step of path 2. `total-recall --version` should print the version that `npm view @strvmarv/total-recall version` reports. A bare `total-recall` on PATH can be an older copy than the one another harness runs.
 
 The check prompt in `INSTALL.md`, Step 4, does not apply here: Hermes's model is given a single `memory` tool, with the same name and schema as Hermes's built-in memory tool, and not total-recall's MCP tools. The check is the one in User steps.
 
