@@ -199,6 +199,234 @@ export function writeVerifiedMarker(rid, version, sha256) {
   try { fs.writeFileSync(verifiedMarkerPath(rid), JSON.stringify({ version, sha256 })); } catch { /* best-effort */ }
 }
 
+// ---- cache of verified engine archives (issue #65) -------------------------
+//
+// The engine and its model live under <plugin root>/binaries/<rid>/, which belongs to one plugin
+// install. A reinstall at the same version, or a second host installing it, would download the
+// whole archive again. So a verified archive is also kept under the engine's data directory:
+//
+//   <dataDir>/cache/binaries/<version>/<archive name>
+//   <dataDir>/cache/binaries/<version>/<archive name>.sha256     (written last: it marks a complete entry)
+//
+// Every helper takes the data directory, the destination and each side-effecting step as an
+// argument, so the logic is tested over temp directories. Nothing here ever throws into the caller:
+// the cache is an optimisation, and any trouble means "miss".
+
+// A version or archive name is joined into a path, so it must be a plain file name.
+const SAFE_SEGMENT = /^[0-9A-Za-z][0-9A-Za-z._+-]*$/;
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+/**
+ * The engine's data directory, by the rule of ConfigLoader.GetDataDir: a non-empty TOTAL_RECALL_HOME
+ * as it is, else `.total-recall` under HOME (when HOME is set at all, even empty), else under
+ * USERPROFILE. Returns null unless the result is absolute, so an unknown or relative location
+ * (Cursor and Codex strip HOME, for one) just means "no cache".
+ */
+export function resolveDataDir(env = process.env) {
+  let dir;
+  if (env.TOTAL_RECALL_HOME) {
+    dir = env.TOTAL_RECALL_HOME;
+  } else {
+    const base = env.HOME ?? env.USERPROFILE;
+    if (base === undefined || base === null) return null;
+    dir = path.join(base, '.total-recall');
+  }
+  return path.isAbsolute(dir) ? dir : null;
+}
+
+function defaultStatOps() {
+  return { lstat: fs.lstatSync, uid: typeof process.getuid === 'function' ? process.getuid() : undefined };
+}
+
+function cachePaths(dataDir, version, archiveName) {
+  if (typeof dataDir !== 'string' || !path.isAbsolute(dataDir)) return null;
+  if (typeof version !== 'string' || typeof archiveName !== 'string') return null;
+  if (!SAFE_SEGMENT.test(version) || !SAFE_SEGMENT.test(archiveName)) return null;
+  const root = path.join(dataDir, 'cache');
+  const versionsRoot = path.join(root, 'binaries');
+  const versionDir = path.join(versionsRoot, version);
+  const archive = path.join(versionDir, archiveName);
+  return { root, versionsRoot, versionDir, archive, sidecar: `${archive}.sha256` };
+}
+
+// cache/ must be a real directory that only its owner can write to. On Windows there is no uid or
+// mode model to check, so only "a real directory" applies.
+function cacheRootTrusted(root, statOps) {
+  let st;
+  try { st = statOps.lstat(root); } catch { return false; }
+  if (st.isSymbolicLink() || !st.isDirectory()) return false;
+  if (statOps.uid === undefined) return true;
+  return st.uid === statOps.uid && (st.mode & 0o022) === 0;
+}
+
+function removeEntry(p) {
+  try { fs.rmSync(p.archive, { force: true }); } catch {}
+  try { fs.rmSync(p.sidecar, { force: true }); } catch {}
+}
+
+const STALE_TEMP_MS = 60 * 60 * 1000;
+
+// Best-effort tidy-up after a successful store: the cache holds one version (so it does not grow
+// with every release) and no leftover temporary files from crashed stores. A temporary file under
+// an hour old may belong to a store running in another process, so it is left alone.
+function pruneCache(p, keepVersion) {
+  try {
+    for (const name of fs.readdirSync(p.versionsRoot)) {
+      if (name !== keepVersion) fs.rmSync(path.join(p.versionsRoot, name), { recursive: true, force: true });
+    }
+  } catch {}
+  try {
+    const cutoff = Date.now() - STALE_TEMP_MS;
+    for (const name of fs.readdirSync(p.versionDir)) {
+      if (!name.includes('.tmp-')) continue;
+      const file = path.join(p.versionDir, name);
+      try { if (fs.statSync(file).mtimeMs < cutoff) fs.rmSync(file, { force: true }); } catch {}
+    }
+  } catch {}
+}
+
+/**
+ * Keeps a verified archive for later reinstalls. Returns true when it was stored; never throws.
+ * `sha256` is the checksum the archive was verified against.
+ */
+export function storeInCache({ dataDir, version, archiveName, archivePath, sha256, statOps = defaultStatOps() }) {
+  const p = cachePaths(dataDir, version, archiveName);
+  if (!p || !SHA256_HEX.test(String(sha256).toLowerCase())) return false;
+  let tmp = null;
+  let tmpSidecar = null;
+  try {
+    // The data directory keeps the default permissions (the engine may create it later anyway);
+    // only cache/ and what is below it is owner-only.
+    fs.mkdirSync(dataDir, { recursive: true });
+    try { fs.mkdirSync(p.root, { mode: 0o700 }); } catch (e) { if (!e || e.code !== 'EEXIST') throw e; }
+    if (!cacheRootTrusted(p.root, statOps)) return false;
+    fs.mkdirSync(p.versionDir, { recursive: true, mode: 0o700 });
+
+    const unique = `${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
+    tmp = path.join(p.versionDir, `${archiveName}.tmp-${unique}`);
+    fs.copyFileSync(archivePath, tmp, fs.constants.COPYFILE_EXCL);
+    fs.chmodSync(tmp, 0o600);
+    // An old sidecar must never pair with the new archive, so it goes first; the new one is last.
+    fs.rmSync(p.sidecar, { force: true });
+    fs.renameSync(tmp, p.archive);
+    tmp = null;
+    tmpSidecar = path.join(p.versionDir, `${archiveName}.sha256.tmp-${unique}`);
+    fs.writeFileSync(tmpSidecar, `${String(sha256).toLowerCase()}\n`, { mode: 0o600, flag: 'wx' });
+    fs.renameSync(tmpSidecar, p.sidecar);
+    tmpSidecar = null;
+    pruneCache(p, version);
+    return true;
+  } catch {
+    for (const f of [tmp, tmpSidecar]) { if (f) { try { fs.rmSync(f, { force: true }); } catch {} } }
+    return false;
+  }
+}
+
+/**
+ * Restores the engine from a cached archive: checks the entry, extracts it into `destDir`, requires
+ * the binary, runs the model-payload check, makes the binary executable and writes the marker.
+ * Resolves { restored: true, path } or { restored: false, reason }; never rejects.
+ *
+ * The entry is deleted only when it is proven bad (its bytes do not match the recorded sha256 and
+ * nobody replaced it meanwhile, it leaves no binary, or its model payload fails the check). Anything
+ * environmental (`tar` missing, a read-only plugin directory, an entry another process is replacing,
+ * a step that throws) is a miss that keeps it.
+ */
+export async function restoreFromCache(args) {
+  try {
+    return await restoreFromCacheChecked(args || {});
+  } catch (e) {
+    return { restored: false, reason: `unexpected error: ${(e && e.message) || e}` };
+  }
+}
+
+async function restoreFromCacheChecked({
+  dataDir, version, archiveName, destDir, binaryPath,
+  extract, payloadIntact: intact, chmod, writeMarker,
+  platform = process.platform, statOps = defaultStatOps(), hashFile = sha256File,
+}) {
+  const miss = (reason) => ({ restored: false, reason });
+  const p = cachePaths(dataDir, version, archiveName);
+  if (!p) return miss('no usable cache location');
+  if (!cacheRootTrusted(p.root, statOps)) return miss('the cache directory is not trusted');
+
+  let recorded;
+  try { recorded = fs.readFileSync(p.sidecar, 'utf8').trim().toLowerCase(); } catch { return miss('no complete cache entry'); }
+  if (!SHA256_HEX.test(recorded)) { removeEntry(p); return miss('the recorded checksum is malformed'); }
+
+  let before;
+  try { const st = fs.statSync(p.archive); before = { size: st.size, mtimeMs: st.mtimeMs }; } catch { return miss('the cache entry could not be read'); }
+  let actual;
+  try { actual = await hashFile(p.archive); } catch { return miss('the cache entry could not be read'); }
+  if (actual.toLowerCase() !== recorded) {
+    // Delete only if this is still the entry that was read: another process may have stored a new
+    // archive (and sidecar) while this one was being hashed, and that one must survive.
+    let unchanged = false;
+    try {
+      const now = fs.statSync(p.archive);
+      unchanged = fs.readFileSync(p.sidecar, 'utf8').trim().toLowerCase() === recorded
+        && now.size === before.size && now.mtimeMs === before.mtimeMs;
+    } catch {}
+    if (!unchanged) return miss('the cache entry changed while it was being checked');
+    removeEntry(p);
+    return miss('the cached archive does not match its recorded checksum');
+  }
+
+  try {
+    fs.mkdirSync(destDir, { recursive: true });
+    extract(p.archive, destDir);
+  } catch (e) {
+    return miss(`extract failed: ${e && e.message}`);
+  }
+  if (!fs.existsSync(binaryPath)) { removeEntry(p); return miss('the cached archive leaves no engine binary'); }
+  const ok = intact(destDir);
+  if (!ok || !ok.ok) { removeEntry(p); return miss(`the cached archive's model payload is incomplete (${ok && ok.reason})`); }
+  if (platform !== 'win32') {
+    try { chmod(binaryPath, 0o755); } catch (e) { return miss(`could not make the engine executable: ${e && e.message}`); }
+  }
+  try { writeMarker(recorded); } catch { /* best-effort, like a fresh install */ }
+  return { restored: true, path: binaryPath };
+}
+
+/**
+ * The one rule for what may enter the cache: an archive that was verified against the release
+ * manifest's checksum (so one downloaded without a manifest, on the install-time path, never is),
+ * extracted with its engine binary present, and whose model payload passed the integrity check.
+ * `store` does the storing; a failure there is not an error.
+ */
+export function cacheVerifiedInstall({ expectedSha256, extracted, payloadOk, store }) {
+  if (expectedSha256 == null || !extracted || !payloadOk) return false;
+  try { return store() === true; } catch { return false; }
+}
+
+/**
+ * Restores this install's engine from the cache, for the shim's provisioner. Resolves
+ * { restored: true, path } or { restored: false, reason }; never rejects.
+ */
+export async function restoreCachedEngine({ logPrefix = '[total-recall]' } = {}) {
+  try {
+    const rid = detectRid(process.platform, process.arch);
+    if (!rid) return { restored: false, reason: 'unsupported platform' };
+    const version = getVersion();
+    const binaryPath = getBinaryPath(rid);
+    const r = await restoreFromCache({
+      dataDir: resolveDataDir(process.env),
+      version,
+      archiveName: getArchiveName(rid),
+      destDir: path.dirname(binaryPath),
+      binaryPath,
+      extract: extractArchive,
+      payloadIntact,
+      chmod: fs.chmodSync,
+      writeMarker: (sha256) => writeVerifiedMarker(rid, version, sha256),
+    });
+    if (r.restored) process.stderr.write(`${logPrefix} Restored the engine v${version} from the local cache\n`);
+    return r;
+  } catch (e) {
+    return { restored: false, reason: String((e && e.message) || e) };
+  }
+}
+
 function httpGetFollowRedirects(url, redirectsLeft = 5) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, (res) => {
@@ -360,71 +588,84 @@ export async function ensureBinary({ logPrefix = '[total-recall]', onProgress, e
     };
   }
 
-  // NEVER extract an unverified archive when a checksum was supplied. Opt-in:
-  // callers that pass no expectedSha256 (postinstall, runProvision) skip this.
-  if (expectedSha256 != null) {
-    const bad = await verifyArchiveChecksum(tmpArchivePath, expectedSha256, archiveName);
-    if (bad) {
-      try { fs.rmSync(tmpArchivePath, { force: true }); } catch {}
-      return { ...bad, url };
-    }
-  }
-
+  // The downloaded archive is kept until the last exit path (the finally below), so it can be stored
+  // in the cache after it has been verified, extracted and checked.
   try {
-    extractArchive(tmpArchivePath, destDir);
-  } catch (e) {
-    try { fs.rmSync(tmpArchivePath, { force: true }); } catch {}
-    return {
-      ok: false,
-      error: `extract failed: ${e.message}`,
-      url,
-    };
-  } finally {
-    try { fs.rmSync(tmpArchivePath, { force: true }); } catch {}
-  }
+    // NEVER extract an unverified archive when a checksum was supplied. Opt-in:
+    // callers that pass no expectedSha256 (postinstall, runProvision) skip this.
+    if (expectedSha256 != null) {
+      const bad = await verifyArchiveChecksum(tmpArchivePath, expectedSha256, archiveName);
+      if (bad) {
+        return { ...bad, url };
+      }
+    }
 
-  if (!fs.existsSync(binaryPath)) {
-    return {
-      ok: false,
-      error: `archive extracted but ${binaryPath} is missing — archive layout does not match expected binaries/<rid>/ contents`,
-      url,
-    };
-  }
-
-  // The archive was byte-perfect (checksum passed above), but tar can still be
-  // interrupted mid-extraction — leaving the binary present yet the ~133 MB
-  // model.onnx truncated at a block boundary. Validate the extracted payload
-  // before stamping success, so we never write a .verified marker over a broken
-  // tree. Returned as retryable (no checksumMismatch) so the caller re-provisions.
-  const intact = payloadIntact(destDir);
-  if (!intact.ok) {
-    return {
-      ok: false,
-      error: `archive extracted but model payload is incomplete (${intact.reason}) — extraction may have been interrupted`,
-      url,
-    };
-  }
-
-  // Restore executable bit. tar preserves modes but some CI runners
-  // strip them on upload/download round-trips, and unzip on Unix
-  // normalizes to 0644. Force 0755 on the main binary; siblings are
-  // libraries that don't need it.
-  if (platform !== 'win32') {
     try {
-      fs.chmodSync(binaryPath, 0o755);
+      extractArchive(tmpArchivePath, destDir);
     } catch (e) {
       return {
         ok: false,
-        error: `could not chmod +x ${binaryPath}: ${e.message}`,
+        error: `extract failed: ${e.message}`,
         url,
       };
     }
+
+    if (!fs.existsSync(binaryPath)) {
+      return {
+        ok: false,
+        error: `archive extracted but ${binaryPath} is missing — archive layout does not match expected binaries/<rid>/ contents`,
+        url,
+      };
+    }
+
+    // The archive was byte-perfect (checksum passed above), but tar can still be
+    // interrupted mid-extraction — leaving the binary present yet the ~133 MB
+    // model.onnx truncated at a block boundary. Validate the extracted payload
+    // before stamping success, so we never write a .verified marker over a broken
+    // tree. Returned as retryable (no checksumMismatch) so the caller re-provisions.
+    const intact = payloadIntact(destDir);
+    if (!intact.ok) {
+      return {
+        ok: false,
+        error: `archive extracted but model payload is incomplete (${intact.reason}) — extraction may have been interrupted`,
+        url,
+      };
+    }
+
+    // Restore executable bit. tar preserves modes but some CI runners
+    // strip them on upload/download round-trips, and unzip on Unix
+    // normalizes to 0644. Force 0755 on the main binary; siblings are
+    // libraries that don't need it.
+    if (platform !== 'win32') {
+      try {
+        fs.chmodSync(binaryPath, 0o755);
+      } catch (e) {
+        return {
+          ok: false,
+          error: `could not chmod +x ${binaryPath}: ${e.message}`,
+          url,
+        };
+      }
+    }
+
+    // Keep the verified archive for later reinstalls (best-effort; see cacheVerifiedInstall). It must
+    // still exist here, which is why it is removed only by the outer finally.
+    cacheVerifiedInstall({
+      expectedSha256,
+      extracted: true, // the binary exists (checked above)
+      payloadOk: true, // the payload check passed (above)
+      store: () => storeInCache({
+        dataDir: resolveDataDir(process.env), version, archiveName, archivePath: tmpArchivePath, sha256: expectedSha256,
+      }),
+    });
+
+    if (expectedSha256 != null) writeVerifiedMarker(rid, version, expectedSha256);
+
+    process.stderr.write(`${logPrefix} Installed at ${binaryPath}\n`);
+    return { ok: true, path: binaryPath, rid, downloaded: true, sizeBytes: received };
+  } finally {
+    try { fs.rmSync(tmpArchivePath, { force: true }); } catch {}
   }
-
-  if (expectedSha256 != null) writeVerifiedMarker(rid, version, expectedSha256);
-
-  process.stderr.write(`${logPrefix} Installed at ${binaryPath}\n`);
-  return { ok: true, path: binaryPath, rid, downloaded: true, sizeBytes: received };
 }
 
 // Background provisioning ----------------------------------------------------

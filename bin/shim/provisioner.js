@@ -14,7 +14,7 @@ import path from 'node:path';
 import https from 'node:https';
 import {
   detectRid, getBinaryPath, getManifestUrl,
-  ensureBinary, readVerifiedMarker, payloadIntact,
+  ensureBinary, readVerifiedMarker, payloadIntact, restoreCachedEngine,
 } from '../../scripts/fetch-binary.js';
 
 // Note on the static import above: ensureProvisioned does NOT reference
@@ -43,6 +43,9 @@ export async function ensureProvisioned(deps) {
     // to trusting presence (backward-compatible with callers that don't inject it);
     // production wires the real size-check so a truncated model self-heals.
     payloadIntact = () => true,
+    // Restores the engine from the per-user cache of verified archives. Injected like every other
+    // I/O step; the default is "no cache", which leaves existing callers unchanged.
+    restoreFromCache = async () => ({ restored: false }),
   } = deps;
 
   // Fast path — binary present AND model payload intact: trust it.
@@ -61,6 +64,15 @@ export async function ensureProvisioned(deps) {
   if (exists(binaryPath) && payloadIntact(binaryPath)) {
     return { ok: true, binaryPath };
   }
+
+  // Missing or broken. Before touching the network, try the cache of archives that an earlier
+  // install already downloaded and verified against the release manifest: it works offline, and a
+  // reinstall at the same version (or a second host) needs no download. A cache that throws, or
+  // answers anything but a successful restore, is just a miss.
+  try {
+    const restored = await restoreFromCache();
+    if (restored && restored.restored === true) return { ok: true, binaryPath };
+  } catch { /* a cache problem never blocks provisioning */ }
 
   // Missing — fetch the manifest and download.
   let manifest;
@@ -109,6 +121,7 @@ export function makeProductionDeps({ onProgress } = {}) {
     readVerifiedMarker,
     fetchManifest: fetchManifestFromRelease,
     ensureBinary,
+    restoreFromCache: () => restoreCachedEngine({ logPrefix: '[total-recall:shim]' }),
     // Only attach onProgress when a callback was actually supplied, so the deps
     // object never carries an explicit `onProgress: undefined` key.
     ...(typeof onProgress === 'function' ? { onProgress } : {}),
