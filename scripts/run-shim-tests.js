@@ -98,11 +98,14 @@ export function main(argv, { root = REPO_ROOT, targets = SHIM_TEST_TARGETS, stdi
 // Run as a command, not when imported. Both paths are resolved, so a symlinked checkout or script
 // still runs (a gate that exits 0 without running would fail open).
 function isMainModule() {
-  try {
-    return !!process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));
-  } catch {
-    return false;
+  const self = fs.realpathSync(fileURLToPath(import.meta.url));
+  // `node scripts/run-shim-tests` (no extension) leaves argv[1] without `.js`.
+  for (const candidate of [process.argv[1], `${process.argv[1]}.js`]) {
+    try {
+      if (candidate && fs.realpathSync(candidate) === self) return true;
+    } catch { /* not a file; try the next */ }
   }
+  return false;
 }
 
 if (isMainModule()) process.exitCode = main(process.argv.slice(2));
