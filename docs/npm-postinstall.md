@@ -2,7 +2,7 @@
 
 Installing the package with scripts enabled (`npm install -g @strvmarv/total-recall`, and also `pi install npm:` or `pi install git:` for pi, which were observed to run it) runs `scripts/postinstall.js`. It first makes sure the engine for the platform is present: the npm package already ships it, so this does nothing there, and a failure is only a warning (the engine is then downloaded on first launch, see [Provisioning on first launch](first-run.md#provisioning-on-first-launch)). It then looks for each tool below and, for the ones it finds on the machine, **writes files outside the package**, without asking.
 
-Every step is skipped when its tool is not found. Every step except the Hermes file copy is wrapped so that a failure is logged to stderr with the prefix `[total-recall:postinstall]` and the script goes on; a failure of the Hermes copy is not wrapped and ends the script (read from the code, not run).
+Every step is skipped when its tool is not found. Every step is wrapped so that a failure is logged to stderr with the prefix `[total-recall:postinstall]`, listed in the summary below, and the script goes on. The script always exits 0.
 
 ## What it changes
 
@@ -29,6 +29,24 @@ When the package is not installed under a `node_modules` directory (a git checko
 
 The paths and what each step writes are read from `scripts/postinstall.js` and `scripts/install-*.js`; this page was not produced by running them on every tool.
 
+## What it reports
+
+When the script has finished with the other tools it prints one summary on stderr: a line for each file it wrote and for each step that failed (a heading counts the entries), giving the tool, what it did and the full path.
+
+```text
+[total-recall:postinstall] Other tools (4 entries):
+[total-recall:postinstall]   Gemini CLI: rewrote /home/me/.gemini/settings.json
+[total-recall:postinstall]   Gemini CLI: added BeforeAgent hook (runs on every prompt) in /home/me/.gemini/settings.json
+[total-recall:postinstall]   Hermes: added /home/me/.hermes/plugins/total-recall
+[total-recall:postinstall]   Hermes: switched memory.provider to total-recall (hermes config set)
+```
+
+The actions are `added` (the file did not exist), `rewrote` (an existing file was changed or rewritten, including one that only gained an entry), `overwrote` (a steering or rules file or a plugin directory that was already there), `switched` (the Hermes memory provider) and `failed` (a step that threw, with the message). Gemini CLI's `settings.json` is rewritten on every run, so it is listed on every run; its MCP entry and its hook get a line of their own only when they are newly added. An entry that is kept, and a file that does not parse, are not listed. When nothing was written and nothing failed, the summary is one line: `No changes were made to other tools.`
+
+npm often hides stderr for a global install, so the same lines are also appended to `postinstall.log` in the data directory: `$TOTAL_RECALL_HOME` when that is set, else `~/.total-recall`. Each entry has a heading with the UTC date and time and the package version. The log is only ever appended to, so a later install that changes nothing leaves the record of an earlier one in place, and a run that wrote nothing and failed nothing adds no entry. If the data directory cannot be found or written, the summary is still printed and the install goes on.
+
+This was checked by running the install script from a copy of the package against throwaway home directories and a stand-in `hermes` command, not against the real tools.
+
 ## The npx entries
 
 Every MCP entry above is `npx --yes @strvmarv/total-recall`, with **no version**. `npx` runs a copy of the package that is already installed before it fetches one, so an older global install can answer instead of the latest release. Observed: with a global 4.0.4 installed while the latest release was 4.7.0, the unversioned command ran 4.0.4, while `npx --yes @strvmarv/total-recall@4.7.0` ran 4.7.0 and served 50 tools. Keep the global install current, or pin a version in the entry.
@@ -37,7 +55,13 @@ To see what is installed without running anything, use `npm ls -g @strvmarv/tota
 
 ## How to skip it
 
-Install without running the script:
+To keep the engine step but leave every other tool alone, set `TOTAL_RECALL_SKIP_HOST_CONFIG=1` (exactly `1`) for the install. The script then writes no file of another tool, runs no `hermes` command, adds nothing to `postinstall.log`, and prints one line saying the other tools were skipped:
+
+```sh
+TOTAL_RECALL_SKIP_HOST_CONFIG=1 npm install -g @strvmarv/total-recall
+```
+
+Or install without running the script at all:
 
 ```sh
 npm install -g --ignore-scripts @strvmarv/total-recall

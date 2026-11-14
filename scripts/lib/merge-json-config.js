@@ -5,14 +5,16 @@
 // configPath  — absolute path to the JSON config file
 // key         — the top-level key (e.g. "mcpServers", "context_servers", "servers")
 // entry       — the server config object for "total-recall"
-// label       — host name for stderr log messages (e.g. "Cline", "Windsurf")
+// label       — host name for stderr log messages and the install summary (e.g. "Cline", "Windsurf")
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { recordChange } from './change-log.js';
 
 export function mergeJsonConfig(configPath, key, entry, label) {
   let config = {};
-  if (existsSync(configPath)) {
+  const existed = existsSync(configPath);
+  if (existed) {
     try {
       config = JSON.parse(readFileSync(configPath, 'utf8'));
     } catch {
@@ -36,5 +38,7 @@ export function mergeJsonConfig(configPath, key, entry, label) {
   config[key]['total-recall'] = entry;
   mkdirSync(dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+  // Recorded only after the write succeeded: a failed write throws before this line.
+  recordChange(label, existed ? 'rewrote' : 'added', configPath);
   process.stderr.write(`[total-recall:postinstall] ${label} MCP config written to ${configPath}\n`);
 }

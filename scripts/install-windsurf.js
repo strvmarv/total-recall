@@ -9,6 +9,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mergeJsonConfig } from './lib/merge-json-config.js';
 import { isRepoSelf, ROOT } from './lib/is-repo-self.js';
+import { recordChange } from './lib/change-log.js';
 
 function windsurfHome() {
   const env = process.env.WINDSURF_HOME;
@@ -53,13 +54,17 @@ export async function installWindsurf() {
       const rulesDir = join(whome, 'rules');
 
       if (existsSync(steeringSrc)) {
+        const rulesFile = join(rulesDir, 'total-recall.md');
+        const existed = existsSync(rulesFile);
         mkdirSync(rulesDir, { recursive: true });
         const content = stripFrontMatter(readFileSync(steeringSrc, 'utf8'));
-        writeFileSync(join(rulesDir, 'total-recall.md'), content);
+        writeFileSync(rulesFile, content);
+        recordChange('Windsurf', existed ? 'overwrote' : 'added', rulesFile);
         process.stderr.write(`[total-recall:postinstall] Windsurf rules installed to ${rulesDir}\n`);
       }
     }
   } catch (e) {
+    recordChange('Windsurf', 'failed', e.message);
     process.stderr.write(`[total-recall:postinstall] Windsurf install failed (non-fatal): ${e.message}\n`);
   }
 }

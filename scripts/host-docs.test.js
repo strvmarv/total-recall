@@ -281,7 +281,7 @@ export function checkDisclosure(tree) {
   const code = postinstall === null ? '' : postinstall.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const modules = [...code.matchAll(/(?:from|import|require)\s*\(?\s*['"]\.\/([\w./-]+)\.(?:c|m)?js['"]/g)]
     .map((m) => m[1].split('/').pop())
-    .filter((m) => m !== 'fetch-binary');
+    .filter((m) => m !== 'fetch-binary' && m !== 'host-config');
   const known = Object.keys(MODULE_TOOLS);
   for (const f of tree.list('scripts')) {
     const m = /^(install-[\w-]+)\.js$/.exec(f);
@@ -679,7 +679,8 @@ function validFiles() {
     'PRIVACY.md': '# Privacy Policy\n\nSee [First run](docs/first-run.md).\n',
     '.opencode/INSTALL.md': `# OpenCode\n\nSee ${BLOB}docs/hosts/opencode.md\n`,
     'skills/commands/SKILL.md': `# Commands\n\n     > ${STATUS}\n`,
-    'scripts/postinstall.js': Object.keys(MODULE_TOOLS).map((m) => `import { x } from './${m}.js';`).join('\n') + '\n',
+    'scripts/postinstall.js': Object.keys(MODULE_TOOLS).map((m) => `import { x } from './${m}.js';`).join('\n')
+      + "\nimport { runHostConfig } from './lib/host-config.js';\n",
     'codex/hook.js': "const a = '(INSTALL.md, \"Codex CLI\")';\n",
     'copilot/hook.js': "const a = '(INSTALL.md, \"Copilot CLI\")';\n",
     'cursor/hook.js': "const a = '(INSTALL.md, \"Cursor\")';\n",
@@ -835,6 +836,10 @@ defect('a require of a cjs module in postinstall.js', checkDisclosure, (f) => {
 defect('a postinstall import from a subdirectory', checkDisclosure, (f) => {
   f['scripts/postinstall.js'] += "import { y } from './lib/install-z.js';\n";
 }, /install-z/);
+
+defect('an unlisted install module imported next to host-config', checkDisclosure, (f) => {
+  f['scripts/postinstall.js'] += "import { y } from './install-new-host.js';\n";
+}, /install-new-host/);
 defect('npm with a flag that takes a value and no paragraph', checkDisclosure, (f) => {
   f['docs/hosts/zed.md'] = '# Zed\n\n## Install\n\nRun npm --prefix ~/x install -g y first.\n\n## User steps\n\n## Verify\n\n## What you get\n\n## Known gaps\n\n## Evidence\n';
 }, /zed\.md: no "\*\*Ask first\.\*\*" paragraph above the first/);

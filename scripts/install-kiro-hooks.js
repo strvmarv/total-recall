@@ -16,6 +16,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mergeJsonConfig } from './lib/merge-json-config.js';
 import { isRepoSelf, ROOT } from './lib/is-repo-self.js';
+import { recordChange } from './lib/change-log.js';
 
 function kiroHome() {
   const env = process.env.KIRO_HOME;
@@ -49,12 +50,16 @@ export async function installKiroHooks() {
       const steeringDest = join(khome, 'steering');
 
       if (existsSync(steeringSrc)) {
+        const steeringFile = join(steeringDest, 'total-recall.md');
+        const existed = existsSync(steeringFile);
         mkdirSync(steeringDest, { recursive: true });
-        cpSync(steeringSrc, join(steeringDest, 'total-recall.md'), { force: true });
+        cpSync(steeringSrc, steeringFile, { force: true });
+        recordChange('Kiro', existed ? 'overwrote' : 'added', steeringFile);
         process.stderr.write(`[total-recall:postinstall] Kiro steering installed to ${steeringDest}\n`);
       }
     }
   } catch (e) {
+    recordChange('Kiro', 'failed', e.message);
     process.stderr.write(`[total-recall:postinstall] Kiro hook install failed (non-fatal): ${e.message}\n`);
   }
 }

@@ -12,6 +12,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { isRepoSelf, ROOT } from './lib/is-repo-self.js';
+import { recordChange } from './lib/change-log.js';
 
 const GEMINI_START_MARKER = '<!-- total-recall -->';
 const GEMINI_END_MARKER = '<!-- /total-recall -->';
@@ -60,6 +61,7 @@ function mergeGeminiMd(filePath) {
       const before = existing.slice(0, startIdx);
       const after = existing.slice(endIdx + GEMINI_END_MARKER.length);
       writeFileSync(filePath, before + section + after);
+      recordChange('Gemini CLI', 'rewrote', filePath);
       process.stderr.write(`[total-recall:postinstall] Gemini GEMINI.md updated at ${filePath}\n`);
       return;
     }
@@ -67,14 +69,17 @@ function mergeGeminiMd(filePath) {
 
   // Append a new section
   const updated = existing.trimEnd() + '\n\n' + section + '\n';
+  const existed = existsSync(filePath);
   writeFileSync(filePath, updated);
+  recordChange('Gemini CLI', existed ? 'rewrote' : 'added', filePath);
   process.stderr.write(`[total-recall:postinstall] Gemini GEMINI.md written to ${filePath}\n`);
 }
 
 function mergeGeminiSettings(configPath) {
   // Single read-modify-write for both mcpServers and hooks.
   let config = {};
-  if (existsSync(configPath)) {
+  const existed = existsSync(configPath);
+  if (existed) {
     try {
       config = JSON.parse(readFileSync(configPath, 'utf8'));
     } catch {
@@ -86,7 +91,9 @@ function mergeGeminiSettings(configPath) {
   // --- mcpServers ---
   if (!config.mcpServers) config.mcpServers = {};
   const existingServer = config.mcpServers['total-recall'];
+  let serverAdded = false;
   if (!existingServer) {
+    serverAdded = true;
     config.mcpServers['total-recall'] = {
       command: 'npx',
       args: ['--yes', '@strvmarv/total-recall']
@@ -112,7 +119,9 @@ function mergeGeminiSettings(configPath) {
 
   if (!config.hooks.BeforeAgent) config.hooks.BeforeAgent = { hooks: [] };
   const beforeAgentHooks = config.hooks.BeforeAgent.hooks || [];
+  let hookAdded = false;
   if (!beforeAgentHooks.some(h => h.name === 'total-recall Pinned Floor')) {
+    hookAdded = true;
     beforeAgentHooks.push(beforeAgentHook);
     config.hooks.BeforeAgent.hooks = beforeAgentHooks;
   }
@@ -120,6 +129,10 @@ function mergeGeminiSettings(configPath) {
   // Write the merged config (mcpServers + hooks) in a single write
   mkdirSync(dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+  // The file is rewritten on every run; the entry and the hook are reported only when newly added.
+  recordChange('Gemini CLI', existed ? 'rewrote' : 'added', configPath);
+  if (serverAdded) recordChange('Gemini CLI', 'added', `MCP entry in ${configPath}`);
+  if (hookAdded) recordChange('Gemini CLI', 'added', `BeforeAgent hook (runs on every prompt) in ${configPath}`);
   process.stderr.write(`[total-recall:postinstall] Gemini settings.json written to ${configPath}\n`);
 }
 
@@ -138,6 +151,7 @@ export async function installGemini() {
       mergeGeminiMd(geminiMdPath);
     }
   } catch (e) {
+    recordChange('Gemini CLI', 'failed', e.message);
     process.stderr.write(`[total-recall:postinstall] Gemini install failed (non-fatal): ${e.message}\n`);
   }
 }

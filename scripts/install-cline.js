@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mergeJsonConfig } from './lib/merge-json-config.js';
+import { recordChange } from './lib/change-log.js';
 
 function clineHome() {
   const env = process.env.CLINE_HOME;
@@ -33,6 +34,7 @@ export async function installCline() {
       args: ['--yes', '@strvmarv/total-recall']
     }, 'Cline');
   } catch (e) {
+    recordChange('Cline', 'failed', e.message);
     process.stderr.write(`[total-recall:postinstall] Cline install failed (non-fatal): ${e.message}\n`);
   }
 }
