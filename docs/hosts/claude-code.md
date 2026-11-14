@@ -58,7 +58,7 @@ Nothing on this path tells the model to call `session_start`. Add the startup in
 
 1. Plugin path: start a new Claude Code session; MCP tools and hooks appear only in a new session.
 2. Plugin path, if the allow rule was declined and the session runs in a mode that never asks: run `/total-recall:commands setup`, then restart the session.
-3. MCP-only path: restart Claude Code so it reads `~/.claude.json`.
+3. MCP-only path: restart Claude Code so it reads `~/.claude.json` (inferred, not observed).
 4. MCP-only path: nothing delivers the startup instructions, so add them to your harness's persistent instructions file. The text is the body, below its front matter, of [`.kiro/steering/total-recall.md`](https://raw.githubusercontent.com/strvmarv/total-recall/main/.kiro/steering/total-recall.md); its "Sticky directives" paragraph describes Kiro's hook and does not apply here.
 
 ## Verify
@@ -84,7 +84,7 @@ Plugin path:
 - The startup instructions and the capture, retrieve and feedback rules, delivered by a `SessionStart` hook (`startup`, `resume`, `clear`, `compact`) from `hooks/hooks.json`.
 - The pinned-directive floor on every prompt (`UserPromptSubmit` hook), by the adaptive throttle described in `AGENTS.md`.
 - A `SessionEnd` hook for bookkeeping.
-- The skills `commands` (`/total-recall:commands <subcommand>`), `using-total-recall` and `develop`.
+- The skill `commands` (`/total-recall:commands <subcommand>`). The plugin's `skills/` directory also holds `using-total-recall` and `develop` (read from the directory listing, not run).
 - Updates: run `/plugin` and update `total-recall` from the `strvmarv-total-recall-marketplace` marketplace, then `/reload-plugins`.
 
 MCP-only path: the MCP tools and nothing else.

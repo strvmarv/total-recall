@@ -1,4 +1,4 @@
-# What the npm install script changes
+# What the install script changes
 
 Installing the package with scripts enabled (`npm install -g @strvmarv/total-recall`, and also `pi install npm:` or `pi install git:` for pi, which were observed to run it) runs `scripts/postinstall.js`. It first makes sure the engine for the platform is present: the npm package already ships it, so this does nothing there, and a failure is only a warning (the engine is then downloaded on first launch, see [Provisioning on first launch](first-run.md#provisioning-on-first-launch)). It then looks for each tool below and, for the ones it finds on the machine, **writes files outside the package**, without asking.
 

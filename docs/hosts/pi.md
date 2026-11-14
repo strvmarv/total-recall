@@ -54,7 +54,7 @@ At parity with Claude Code unless noted:
 - The pinned-directive floor on every prompt, on the turn-count trigger only (`floor_every_n_turns`, default 6). The token-growth trigger is not used in pi: pi creates its session file only after the first message, which would trigger an early floor on turn 2. It stays silent until the engine is provisioned.
 - `/total-recall <subcommand>` (alias `/total-recall:commands`), with tab completion. It asks the model to run the command, so it works in an interactive or RPC session; in `pi -p "/total-recall help"` pi exits before the model's answer is printed.
 
-The injected instructions tell the model to run this package's CLI as `node <package>/bin/start.js <args>` (for `compact --run`, `ui`), because a plain pi install does not put `total-recall` on PATH.
+The injected instructions tell the model to run this package's CLI as `node <package>/bin/start.js <args>` (for `compact --run`, `ui`), because a plain pi install does not put `total-recall` on PATH. If you navigate with `/tree` to a point before the instructions were delivered, they are queued again for the next prompt.
 
 ## Known gaps
 
@@ -71,4 +71,4 @@ Observed on pi 1.5.2, macOS arm64, `HOME` redirected to a throwaway directory ho
 - `npm_config_ignore_scripts=true pi install npm:@strvmarv/total-recall` installed to the same directory; the install script did not run (no Gemini file written); `binaries/` held all four platforms and `node <directory>/bin/start.js --version` printed `total-recall 4.7.0`.
 - `pi install git:github.com/strvmarv/total-recall` installed to `~/.pi/agent/git/github.com/strvmarv/total-recall`; the install script ran (it wrote the MCP entry and the hook to `.gemini/settings.json`, and no `GEMINI.md`); `binaries/` held this platform only; `--version` printed `total-recall 4.7.0`.
 
-The session that produced this page ran total-recall 4.7.0 through the pi package: the instructions were injected, `session_start` returned normally and the smoke test passed. The extension behaviour above is from `AGENTS.md` and the earlier `INSTALL.md`, which record observations on Windows; the package size is from a Windows measurement of 4.2.3.
+The session that produced this page ran total-recall 4.7.0 through the pi package: the instructions were injected, `session_start` returned normally and the smoke test passed. The extension behaviour above is from `AGENTS.md` and the earlier `INSTALL.md`; `AGENTS.md` records the floor-call timing as measured on Windows, and the package size is from a Windows measurement of 4.2.3.

@@ -20,6 +20,8 @@ The marketplace flow (`cursor-agent plugin marketplace add https://github.com/st
 
 ### MCP server only (no plugin)
 
+Not run: this path was not exercised on any machine.
+
 This gives the tools and nothing else: no startup instructions, no floor. Use it instead of the plugin, never together with it (two servers, and the hook would read the default store while the second reads yours).
 
 **Ask first.** This install runs the package's install script, which may change other tools on the machine: Hermes, Kiro, Cline, Windsurf, Gemini CLI, Zed, VS Code and Copilot CLI's MCP config. Beyond adding an MCP entry it can switch Hermes's memory provider and add a Gemini CLI hook that runs on every prompt. Tell the user this and get a yes before running it. The detail is in [What the install script changes](https://raw.githubusercontent.com/strvmarv/total-recall/main/docs/npm-postinstall.md).
@@ -51,7 +53,7 @@ Nothing on this path tells the model to call `session_start`; see User steps.
 ## User steps
 
 1. Restart Cursor (or run `Developer: Reload Window`) so it reads the plugin or the MCP config.
-2. Approve the server. Cursor asks before using a plugin's MCP server (it shows as `plugin-total-recall-total-recall`). Interactively, approve it. With `cursor-agent -p`, the user passes `--approve-mcps` on their own command line. The refusal text for an unapproved server was not observed.
+2. Plugin path: approve the server. Cursor asks before using a plugin's MCP server (it shows as `plugin-total-recall-total-recall`). Interactively, approve it. With `cursor-agent -p`, the user passes `--approve-mcps` on their own command line. The refusal text for an unapproved server was not observed.
 3. MCP-only path: add the startup instructions to your harness's persistent instructions file. The text is the body, below its front matter, of [`.kiro/steering/total-recall.md`](https://raw.githubusercontent.com/strvmarv/total-recall/main/.kiro/steering/total-recall.md); its "Sticky directives" paragraph describes Kiro's hook and does not apply here.
 4. First session on a store with a large history: the first `session_start` can exceed Cursor's 60 second MCP request limit (see Known gaps); the user may need to ask the model to call it once more.
 
