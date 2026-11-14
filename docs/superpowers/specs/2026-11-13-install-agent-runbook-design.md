@@ -1,6 +1,6 @@
 # INSTALL.md as an agent runbook, with one page per harness
 
-Date: 2026-11-13. Base: `main` at v4.7.0. Docs change with one small test file and three string edits.
+Date: 2026-11-13. Base: `main` at v4.7.0. Docs change with one small test file; no product code changes.
 
 ## Intent
 
@@ -74,9 +74,7 @@ Line numbers are `INSTALL.md` at `main` (6b0378a).
 
 - A page that claims more than was observed. A confident instruction that nobody ran is the failure
   this change exists to remove.
-- The same per-harness steps in two places. One exception is stated in the design: the OpenCode
-  file that ships in the npm package repeats the config block of the OpenCode page, and the test
-  holds the two equal.
+- The same per-harness steps in two places.
 - An agent led to change tools the user did not ask about without the user being told first.
 
 ## Approaches
@@ -124,7 +122,10 @@ Written to the agent in the second person, plain imperative steps, no background
    - a step marked **Ask first** changes other tools on the machine or grants a permission: tell the
      user what it changes and get a yes before running it; on a no, use the alternative the page
      gives or leave the step to the user;
-   - do not report success until Verify has passed; if a step fails, report the failure and stop.
+   - do not report success until Verify has passed; if a step fails, report the failure and stop:
+     never retry it with `sudo`, `--force` or any other escalation;
+   - when you read or edit a config file, touch only the `total-recall` entry and never print the
+     file's other contents.
 3. **Before you start.** Stop conditions and requirements: supported platforms (`linux-x64`,
    `linux-arm64`, `osx-arm64`, `win-x64`; an Intel Mac is not supported: stop and tell the user),
    Node.js 20 or later, internet access for the engine download where a page says so.
@@ -134,8 +135,9 @@ Written to the agent in the second person, plain imperative steps, no background
    is expected to know which harness it is running in; the step says to ask the user if it does not,
    and gives no recognition hints. If the harness is not listed, use the generic MCP page.
 5. **Step 2: fetch that page and follow its Install section.**
-6. **Step 3: verify now.** Run the page's version check, where the page gives one, and compare it
-   with the version just installed. State that a bare `total-recall` on PATH can be an older copy
+6. **Step 3: verify now.** Run the checks the page's Verify section gives for this session (the
+   version check, compared with the version just installed, and on some pages a check that the
+   harness was configured), where it gives any. State that a bare `total-recall` on PATH can be an older copy
    than the one the harness runs.
 7. **Step 4: hand over.** Relay the page's User steps to the user, in order. Tell them to start a new
    session (MCP tools appear only then), what they should see, and give them the check the page
@@ -162,7 +164,8 @@ Every page has these headings, in this order (a heading with nothing to say hold
   the user's yes is marked **Ask first**.
 - `## User steps`: what only the user can do (approve a server, trust hooks, restart, type a slash
   command), in order, each a single instruction the agent can relay.
-- `## Verify`: the version check the agent can run now, or a plain statement that there is none for
+- `## Verify`: the checks the agent can run now (the version check, and where the rules below
+  require it a check that the harness was configured), or a plain statement that there is none for
   this path, and what the user should see in the next session.
 - `## What you get`: MCP tools, startup instructions, the pinned-directive floor, commands, as they
   apply to this harness.
@@ -176,7 +179,7 @@ Content sources, per page. The builder writes from these and adds nothing that i
 |---|---|
 | `claude-code` | `INSTALL.md` L106-137 and L12 (provisioning on first launch); `skills/commands/SKILL.md` (`setup`, `update`); observations below |
 | `pi` | `INSTALL.md` L192-213; `AGENTS.md` (pi paragraph of "Pinned-directive floor"); observations below |
-| `codex-cli` | `INSTALL.md` L215-244; `AGENTS.md` "Codex CLI host" |
+| `codex-cli` | `INSTALL.md` L215-244; `AGENTS.md` "Codex CLI host"; `codex/bootstrap.cjs` header comment (the plugin cache layout) |
 | `copilot-cli` | `INSTALL.md` L139-186; `AGENTS.md` "Copilot CLI host" |
 | `cursor` | `INSTALL.md` L263-307; `AGENTS.md` "Cursor CLI host" |
 | `gemini-cli` | `scripts/install-gemini.js`; `AGENTS.md` (Gemini CLI in "Per-host status") |
@@ -217,9 +220,14 @@ Rules for the pages:
   harness's `scripts/install-*.js` writes, with `"command": "total-recall"` and no `args` in place of
   the `npx` form, because the global command was just installed. Where the script does more than
   write an entry, the second path lists each action as its own step so the user can take or leave
-  it: a rules or steering file (copied from the installed package; `npm root -g` locates it, marked
-  not run), and the Gemini hook (the command the script writes, with `total-recall` in place of
-  `npx --yes @strvmarv/total-recall`). Hermes has no MCP entry to write: its script copies the
+  it. The agent performs the ones the user takes; they are edits to the user's own config, so each
+  is **Ask first**. A rules or steering file is written the way the script writes it, from the
+  installed package (`npm root -g` locates it, marked not run): Kiro's steering file copied whole;
+  Windsurf's rules file as the body without the front matter; for Gemini CLI the body inserted as a
+  marked block in `GEMINI.md`, never replacing the file. The Gemini hook is the command the script
+  writes, with `total-recall` in place of `npx --yes @strvmarv/total-recall`. The VS Code page offers
+  the `~/.copilot/mcp-config.json` entry the script also writes as one of these steps. Hermes has no
+  MCP entry to write: its script copies the
   `hermes-plugin/` directory into Hermes's plugins and switches the memory provider, so its second
   path is those two actions done by hand. `other-mcp` uses the same entry form.
 - **Kiro hooks.** `postinstall` writes the MCP entry and the steering file and does not copy the
@@ -231,14 +239,13 @@ Rules for the pages:
   file that tells the model to call `session_start` (pi's extension and Hermes's provider deliver it
   whether or not `postinstall` ran; the plain install writes a rules or steering file for Windsurf,
   Gemini CLI and Kiro). Such a path says that nothing will tell the model to call `session_start`,
-  and adding the instruction is a **User step**. On the skip path of Windsurf, Gemini CLI and Kiro
-  the step that copies the rules or steering file (above) is that User step, and the only mechanism
-  the page gives. On every other such path the text is the body of `.kiro/steering/total-recall.md` below its
-  front matter, which is what `postinstall` installs for Windsurf and Gemini CLI; the page links it by
-  absolute raw URL, does not restate it, and notes that its "Sticky directives" paragraph describes
-  Kiro's hook. The page names the file to put it in only where a source names one (the Windsurf rules
-  directory, `GEMINI.md`, the Kiro steering directory); otherwise it says "your harness's persistent
-  instructions file".
+  and says what to add. On the skip path of Windsurf, Gemini CLI and Kiro the step that writes the
+  rules or steering file (above) is the answer, and the only mechanism the page gives. On every
+  other such path adding it is a **User step**: the text is the body of
+  `.kiro/steering/total-recall.md` below its front matter, which is what `postinstall` installs for
+  Windsurf and Gemini CLI; the page links it by absolute raw URL, does not restate it, notes that
+  its "Sticky directives" paragraph describes Kiro's hook, and calls the destination "your harness's
+  persistent instructions file" because no source names one for these paths.
 - **Claude Code** leads with the shell commands (marketplace add, then install), then gives the slash
   commands as the same two steps for a user to type. After the install the agent offers the allow
   rule, **Ask first**, on the plugin path only (the rule names the plugin's tools): it says that the
@@ -258,14 +265,19 @@ Rules for the pages:
   proves the engine, not the entry: `postinstall` skips silently when the directory is absent, when
   the config file has comments it cannot parse, or when a different `total-recall` entry exists.
   After the plain install those pages have the agent read the file the script writes and confirm
-  the `total-recall` entry, and fall back to the hand-written entry if it is absent.
+  the `total-recall` entry (the `npx` entry the script wrote is accepted), and fall back to the
+  hand-written entry if it is absent. The Copilot CLI page's MCP-only option does the same, because
+  the VS Code module writes `~/.copilot/mcp-config.json` when VS Code's user directory exists. Two
+  pages differ. Cline: the entry in `~/.vscode/cline_mcp_settings.json` is not evidence that Cline is
+  configured (see the Cline rule below), so the page says so and the manual steps are the path.
+  Hermes: see the Hermes rule below.
 - **Hand-written entries, everywhere.** Add only the named entry, keep the rest of the file, and if
-  a `total-recall` entry already exists, stop and ask the user.
+  a `total-recall` entry that this install did not just write already exists, stop and ask the user.
 - **Approval flags.** Copilot CLI's `--allow-tool=total-recall` and Cursor's `--approve-mcps` are
   User steps; the agent never writes them into a config, alias or shell profile.
 - **Where the skip form costs nothing.** On `pi`, `opencode`, `other-mcp` and the MCP-only options
-  `postinstall` configures nothing for the harness being installed, and the page says so beside the
-  skip form. The pi skip form is marked "POSIX shell; not run on Windows".
+  (Copilot CLI's excepted, above) `postinstall` configures nothing for the harness being installed,
+  and the page says so beside the skip form. The pi skip form is marked "POSIX shell; not run on Windows".
 - **Codex CLI.** Editing `~/.codex/config.toml` to set `default_tools_approval_mode = "approve"` is
   **Ask first**, with the same wording about write and delete tools. `--dangerously-bypass-hook-trust`
   is mentioned as information only; the page never tells the agent to use it. Trusting the hooks in
@@ -275,12 +287,18 @@ Rules for the pages:
   not be the file Cline reads. It gives the manual steps from today's section, with the npm step.
 - **OpenCode.** The page gives the config in the `mcp` form observed below and marks the `skills/`
   copy step as needing a checkout. `.opencode/INSTALL.md` ships in the npm package (`package.json`
-  `files`) and `docs/` does not, so it cannot be only a link: it is cut to the install command, the
-  same config block as the page, and the page's absolute URL for everything else. This is the one
-  place steps are repeated; the test holds the two config blocks equal.
-- **Hermes.** Its model is given one tool, `memory` (`hermes-plugin/`), not total-recall's MCP tools,
-  so the check prompt cannot work there. The page gives its own check: `total-recall status` from the
-  shell, and a prompt that asks the assistant to read back from memory, both marked not run.
+  `files`). It becomes a pointer: one line saying what it is and the page's absolute URL, with no
+  command and no config block, so no step is repeated and no install command sits outside the
+  disclosure rule.
+- **Hermes.** Its model is given one tool, `memory`, with the same name and schema as Hermes's
+  built-in memory tool (`hermes-plugin/memory_tool_schema.py`), not total-recall's MCP tools. So the
+  check prompt cannot work there, and a memory read-back passes whichever provider is active. The
+  script can also copy the plugin and leave the provider unset (when the `hermes` CLI is not on PATH
+  or the command fails). The page's checks, both marked not run: now, the agent confirms that
+  Hermes's plugins directory holds `total-recall` and that `memory.provider` is `total-recall` in
+  Hermes's config, and falls back to the by-hand actions if either is missing; in the next session,
+  the user asks Hermes to remember a phrase of their choosing, then runs
+  `total-recall memory recent` and sees it.
 
 ### What postinstall changes
 
@@ -353,7 +371,11 @@ script honours. The page also states:
   runs a copy that is already installed (for example an older global install) instead of fetching
   the latest release." No other README change.
 - `codex/hook.js`, `copilot/hook.js`, `cursor/hook.js` each inject a note citing
-  `INSTALL.md, "<section>"`: cite the harness page instead, and update any test that pins the string.
+  `INSTALL.md, "Codex CLI"`, `INSTALL.md, "Copilot CLI"` and `INSTALL.md, "Cursor"`. The scripts are
+  not edited: a change to a bundled Codex script makes Codex ask every user for a new hook trust
+  review and skip the hooks until then (`INSTALL.md` L226), which a documentation pointer does not
+  justify. Instead the harness table in `INSTALL.md` names those three harnesses exactly "Codex CLI",
+  "Copilot CLI" and "Cursor", so each citation still leads to the right row and its page.
 - `AGENTS.md` "WHERE TO LOOK": add a row for the harness pages. No other `AGENTS.md` change.
 
 ### The check that keeps it true
@@ -380,9 +402,10 @@ fails when:
 6. the tools named in `npm-postinstall.md`, or in that sentence on any page, differ from the
    `install-*.js` modules that `scripts/postinstall.js` imports (Copilot CLI counts as named by the
    VS Code module);
-7. a hook note in `codex/hook.js`, `copilot/hook.js` or `cursor/hook.js` does not cite its own
-   harness page (`docs/hosts/<id>.md`), or cites a path that is not in the tree;
-8. the config block in `.opencode/INSTALL.md` differs from the one in `docs/hosts/opencode.md`.
+7. the name a hook note cites in `codex/hook.js`, `copilot/hook.js` or `cursor/hook.js`
+   (`INSTALL.md, "<name>"`) is not a harness name in the `INSTALL.md` table;
+8. `.opencode/INSTALL.md` contains a fenced block, or does not link `docs/hosts/opencode.md` by
+   absolute URL.
 
 A limit of rule 6, stated so nobody relies on more: it catches a new `install-*.js` module, not a
 tool added inside an existing module (as Copilot CLI's config is inside the VS Code module).
