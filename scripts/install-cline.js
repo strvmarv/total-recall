@@ -1,6 +1,15 @@
 #!/usr/bin/env node
-// Installs total-recall MCP config into ~/.vscode/cline_mcp_settings.json
-// if Cline (VS Code extension) is detected.
+// Installs total-recall MCP config for Cline, into the settings file of each Cline
+// installation found on the machine:
+//
+//   ~/.cline/data/settings/cline_mcp_settings.json              when ~/.cline/data exists (current layout)
+//   <VS Code User dir>/globalStorage/saoudrizwan.claude-dev/
+//       settings/cline_mcp_settings.json                        when that extension folder exists (older layout)
+//
+// These are the files the repository's Cline importer reads. Cline is detected by the
+// directories it creates, never by ~/.vscode (that is VS Code's own directory).
+// CLINE_HOME is an explicit override: the directory that holds cline_mcp_settings.json
+// itself; it is written (and created) without a detection check, and nothing else is.
 //
 // Non-fatal: always resolves. If Cline isn't present, silently skips.
 
@@ -10,29 +19,49 @@ import { join } from 'node:path';
 import { mergeJsonConfig } from './lib/merge-json-config.js';
 import { npxEntry } from './lib/package-spec.js';
 import { recordChange } from './lib/change-log.js';
+import { vscodeUserDir } from './lib/vscode-user-dir.js';
 
-function clineHome() {
-  const env = process.env.CLINE_HOME;
-  if (env) return env;
+const FILE = 'cline_mcp_settings.json';
+
+/** The settings files to write, in order. */
+function clineTargets() {
+  const override = process.env.CLINE_HOME;
+  if (override) return [join(override, FILE)];
 
   const home = process.env.USERPROFILE || homedir();
-  if (!home) return null;
+  const targets = [];
 
-  const vscodeDir = join(home, '.vscode');
-  if (existsSync(vscodeDir)) return vscodeDir;
+  if (home) {
+    const data = join(home, '.cline', 'data');
+    if (existsSync(data)) targets.push(join(data, 'settings', FILE));
+  }
 
-  return null;
+  const userDir = vscodeUserDir();
+  if (userDir) {
+    const extension = join(userDir, 'globalStorage', 'saoudrizwan.claude-dev');
+    if (existsSync(extension)) targets.push(join(extension, 'settings', FILE));
+  }
+
+  return targets;
 }
 
 export async function installCline() {
+  let targets = [];
   try {
-    const chome = clineHome();
-    if (!chome) return;
-
-    const configPath = join(chome, 'cline_mcp_settings.json');
-    mergeJsonConfig(configPath, 'mcpServers', npxEntry(), 'Cline');
+    targets = clineTargets();
   } catch (e) {
     recordChange('Cline', 'failed', e.message);
     process.stderr.write(`[total-recall:postinstall] Cline install failed (non-fatal): ${e.message}\n`);
+    return;
+  }
+
+  // One try/catch per target, so a file that cannot be written does not stop the other.
+  for (const configPath of targets) {
+    try {
+      mergeJsonConfig(configPath, 'mcpServers', npxEntry(), 'Cline');
+    } catch (e) {
+      recordChange('Cline', 'failed', `${configPath}: ${e.message}`);
+      process.stderr.write(`[total-recall:postinstall] Cline install failed for ${configPath} (non-fatal): ${e.message}\n`);
+    }
   }
 }
