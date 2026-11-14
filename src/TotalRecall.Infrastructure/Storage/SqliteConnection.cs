@@ -10,10 +10,9 @@ namespace TotalRecall.Infrastructure.Storage;
 /// the sqlite-vec extension loaded and the standard total-recall pragmas
 /// applied.
 ///
-/// Mirrors <c>src-ts/db/connection.ts</c> which calls
-/// <c>sqlite-vec.load(db)</c> right after opening the bun:sqlite database.
-/// The .NET equivalent is <see cref="MsSqliteConnection.EnableExtensions"/>
-/// followed by <see cref="MsSqliteConnection.LoadExtension(string)"/>.
+/// The sqlite-vec extension is loaded right after the database is opened, using
+/// <see cref="MsSqliteConnection.EnableExtensions"/> followed by
+/// <see cref="MsSqliteConnection.LoadExtension(string)"/>.
 /// </summary>
 public static class SqliteConnection
 {

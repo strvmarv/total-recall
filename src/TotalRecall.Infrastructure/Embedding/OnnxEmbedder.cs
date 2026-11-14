@@ -16,8 +16,6 @@ namespace TotalRecall.Infrastructure.Embedding;
 /// ONNX-runtime backed text embedder. Lazily loads the ONNX model and the
 /// WordPiece vocabulary on first use, then runs inference, CLS-pools (takes
 /// the token-0 hidden state), and L2-normalizes the result.
-///
-/// Ports <c>src-ts/embedding/embedder.ts</c>.
 /// </summary>
 public sealed class OnnxEmbedder : IEmbedder, IDisposable
 {

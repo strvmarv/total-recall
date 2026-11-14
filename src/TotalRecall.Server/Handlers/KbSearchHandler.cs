@@ -1,7 +1,6 @@
 // src/TotalRecall.Server/Handlers/KbSearchHandler.cs
 //
-// Plan 4 Task 4.9 — ports the `kb_search` branch of src-ts/tools/kb-tools.ts
-// (lines 120-191) to the .NET Server. The Plan 4 scope is the SIMPLE
+// Handler for the `kb_search` tool. The Plan 4 scope is the SIMPLE
 // knowledge-base search: embed the query, run hybrid search scoped to
 // (cold, knowledge), and optionally post-filter by a caller-supplied
 // collection id. The more elaborate TS features are deliberately stubbed:
@@ -43,7 +42,7 @@ namespace TotalRecall.Server.Handlers;
 /// </summary>
 public sealed class KbSearchHandler : IToolHandler
 {
-    // Mirror of src-ts/tools/kb-tools.ts:37-48. Note: TS uses `top_k`
+    // Note: the original TS server uses `top_k`
     // (snake_case) for this tool, unlike `memory_search`'s `topK`. We match
     // TS exactly so the MCP wire contract stays byte-compatible.
     private static readonly JsonElement _inputSchema = JsonDocument.Parse("""
@@ -142,7 +141,7 @@ public sealed class KbSearchHandler : IToolHandler
         ct.ThrowIfCancellationRequested();
 
         // Match TS: when a collection filter is present, request topK*2 so
-        // the post-filter has headroom (src-ts/tools/kb-tools.ts:162).
+        // the post-filter has headroom.
         var requestTopK = collection is not null ? topK * 2 : topK;
 
         var opts = new HybridSearchOpts(
@@ -156,8 +155,7 @@ public sealed class KbSearchHandler : IToolHandler
         stopwatch.Stop();
 
         // TODO: hierarchical collection matching
-        // (port src-ts/tools/kb-tools.ts:128-154). We currently never
-        // populate hierarchicalMatch — callers always see null.
+        // We currently never populate hierarchicalMatch — callers always see null.
 
         if (collection is not null)
         {
@@ -226,8 +224,7 @@ public sealed class KbSearchHandler : IToolHandler
         }
 
         // TODO: collection access-count tracking + needsSummary threshold
-        // (port src-ts/tools/kb-tools.ts:169-188). Always reports
-        // needsSummary=false to preserve the TS wire shape.
+        // Always reports needsSummary=false to preserve the TS wire shape.
 
         var dtos = new MemorySearchResultDto[searchResults.Count];
         for (var i = 0; i < searchResults.Count; i++)

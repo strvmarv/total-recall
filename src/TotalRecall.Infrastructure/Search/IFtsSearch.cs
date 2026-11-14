@@ -12,8 +12,7 @@ namespace TotalRecall.Infrastructure.Search;
 public sealed record FtsSearchResult(string Id, double Score);
 
 /// <summary>
-/// Options for an FTS5 query. Mirrors <c>FtsSearchOpts</c> in
-/// <c>src-ts/search/fts-search.ts</c>.
+/// Options for an FTS5 query.
 /// </summary>
 public sealed record FtsSearchOpts(int TopK);
 
@@ -21,7 +20,6 @@ public sealed record FtsSearchOpts(int TopK);
 /// FTS5 full-text search seam over the <c>{tbl}_fts</c> virtual tables
 /// created in Migration 3 of
 /// <see cref="TotalRecall.Infrastructure.Storage.MigrationRunner"/>.
-/// Ports <c>src-ts/search/fts-search.ts</c>.
 /// </summary>
 public interface IFtsSearch
 {

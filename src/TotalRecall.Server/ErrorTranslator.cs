@@ -19,7 +19,7 @@
 //      is intentionally NOT echoed back, because it may carry secrets,
 //      file paths, connection strings, or other PII.
 //
-// JSON shape divergence from TS: src-ts/tools/error-translate.ts uses
+// JSON shape divergence from the original TypeScript server, which used
 // `JSON.stringify(obj, null, 2)` (2-space indented). We emit compact
 // single-line JSON via the source-generated JsonContext to keep AOT
 // reflection-free. MCP hosts parse the payload whitespace-agnostic, so

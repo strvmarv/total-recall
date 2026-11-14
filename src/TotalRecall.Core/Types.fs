@@ -2,9 +2,8 @@ namespace TotalRecall.Core
 
 // Shared types for the pure logic layer. No I/O, no framework dependencies.
 //
-// Mirrors (but does not re-use) the types in src-ts/types.ts. We deliberately
-// do NOT share types with Infrastructure — Core is a closed language that only
-// depends on the F# standard library and its own modules.
+// We deliberately do NOT share types with Infrastructure — Core is a closed
+// language that only depends on the F# standard library and its own modules.
 
 type Tier =
     | Hot

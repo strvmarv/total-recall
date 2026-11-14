@@ -1,7 +1,6 @@
 // src/TotalRecall.Server/Handlers/KbIngestFileHandler.cs
 //
-// Plan 4 Task 4.9 — ports the `kb_ingest_file` branch of
-// src-ts/tools/kb-tools.ts (lines 102-109) to the .NET Server. The handler
+// Handler for the `kb_ingest_file` tool. The handler
 // validates the `path` argument, calls IFileIngester.IngestFile(path,
 // collection), and serializes the result as JSON. File existence is checked
 // up front so callers get a clean ArgumentException instead of an

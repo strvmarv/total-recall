@@ -1,7 +1,6 @@
 module TotalRecall.Core.Chunker
 
 // File-extension-based chunking dispatcher.
-// Ported from src-ts/ingestion/chunker.ts.
 //
 // Dispatches to:
 //   - parseMarkdown for .md, .mdx, .markdown

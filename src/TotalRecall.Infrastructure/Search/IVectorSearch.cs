@@ -12,15 +12,13 @@ namespace TotalRecall.Infrastructure.Search;
 public sealed record VectorSearchResult(string Id, double Score);
 
 /// <summary>
-/// Options for a vector KNN query. Mirrors <c>VectorSearchOpts</c> in
-/// <c>src-ts/search/vector-search.ts</c>.
+/// Options for a vector KNN query.
 /// </summary>
 public sealed record VectorSearchOpts(int TopK, double? MinScore = null);
 
 /// <summary>
 /// Vector search seam over the <c>vec0</c> virtual tables created in
 /// Migration 1 of <see cref="TotalRecall.Infrastructure.Storage.MigrationRunner"/>.
-/// Ports <c>src-ts/search/vector-search.ts</c>.
 ///
 /// Embeddings are passed as <see cref="ReadOnlyMemory{T}"/> rather than
 /// <see cref="ReadOnlySpan{T}"/> because interface methods in net8.0 cannot

@@ -1,7 +1,6 @@
 // src/TotalRecall.Infrastructure/Embedding/ModelNotReadyException.cs
 //
-// Plan 4 Task 4.5 — strongly-typed exception that mirrors the TS
-// `ModelNotReadyError` (src-ts/embedding/errors.ts). The .NET server's
+// Strongly-typed exception for an unavailable embedding model. The .NET server's
 // ErrorTranslator special-cases this exception type to return a friendly
 // MCP payload that tells the host *why* the embedding model is unavailable
 // and (optionally) how far along a download is. Producing this exception

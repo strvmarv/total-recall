@@ -24,8 +24,7 @@ namespace TotalRecall.Infrastructure.Importers;
 ///
 /// The §-delimiter in MEMORY.md / USER.md is a paragraph separator on its
 /// own line: <c>\n§\n</c>. Each non-empty piece becomes an independent
-/// warm/memory entry with summary = piece[0..200]. Mirrors
-/// <c>src-ts/importers/hermes.ts</c> bit-for-bit.
+/// warm/memory entry with summary = piece[0..200].
 /// </summary>
 public sealed class HermesImporter : IImporter
 {

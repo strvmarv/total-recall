@@ -7,8 +7,7 @@ namespace TotalRecall.Infrastructure.Tests;
 /// <summary>
 /// Integration tests for <see cref="MigrationRunner"/>. These exercise the
 /// full 3-migration schema against a fresh <c>:memory:</c> database and
-/// assert the resulting table topology matches the TS reference
-/// (<c>src-ts/db/schema.ts</c>).
+/// assert the resulting table topology matches the original TS schema.
 /// </summary>
 [Trait("Category", "Integration")]
 public sealed class SchemaTests

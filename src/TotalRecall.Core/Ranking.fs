@@ -2,8 +2,8 @@ module TotalRecall.Core.Ranking
 
 // Hybrid search ranking math. Combines vector similarity and FTS scores.
 //
-// Ported from src-ts/memory/search.ts line 83:
-//   const fusedScore = scores.vectorScore + ftsWeight * scores.ftsScore;
+// Fused score:
+//   fusedScore = vectorScore + ftsWeight * ftsScore
 //
 // This is an additive boost — the FTS score is added to the vector score,
 // scaled by ftsWeight. Note this is NOT a convex combination: the fused

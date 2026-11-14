@@ -1,8 +1,7 @@
 // src/TotalRecall.Infrastructure/Config/ConfigWriter.cs
 //
-// Plan 5 Task 5.8 — the write path for the user config.toml. Ports
-// src-ts/config.ts:31-59 (setNestedKey) and src-ts/config.ts:61-73
-// (saveUserConfig). Used by the `config set` CLI verb.
+// The write path for the user config.toml.
+// Used by the `config set` CLI verb.
 //
 // AOT note: Tomlyn's Toml.FromModel / reflection-based projection is NOT
 // trim-safe. Rather than gamble on its surface being reachable after
@@ -34,9 +33,8 @@ public static class ConfigWriter
     /// <summary>
     /// Sets a nested key on <paramref name="table"/> by dotted path.
     /// Creates intermediate <see cref="TomlTable"/>s as needed. Overwrites
-    /// any existing scalar at an intermediate segment with a fresh table
-    /// (mirrors <c>src-ts/config.ts:45-49</c>). Rejects unsafe keys at every
-    /// segment. Mutates and returns <paramref name="table"/>.
+    /// any existing scalar at an intermediate segment with a fresh table.
+    /// Rejects unsafe keys at every segment. Mutates and returns <paramref name="table"/>.
     /// </summary>
     /// <exception cref="ArgumentException">If any segment is an unsafe key.</exception>
     public static TomlTable SetNestedKey(TomlTable table, string dottedKey, object value)

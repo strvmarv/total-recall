@@ -17,8 +17,7 @@ namespace TotalRecall.Infrastructure.Importers;
 ///
 /// Differs from the other six importers: they write individual entries via
 /// <c>IStore.Insert</c>, whereas this one produces a collection ->
-/// document -> chunk tree in cold/knowledge. Mirrors
-/// <c>src-ts/importers/project-docs.ts</c>.
+/// document -> chunk tree in cold/knowledge.
 ///
 /// TS-parity quirk: the <c>import_log.target_entry_id</c> for each file is
 /// the collection id (not the document id), matching the TS reference's

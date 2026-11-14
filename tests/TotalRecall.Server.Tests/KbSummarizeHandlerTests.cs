@@ -1,5 +1,4 @@
 // Plan 6 Task 6.0b — KbSummarizeHandler contract tests.
-// Covers the parity port of src-ts/tools/kb-tools.ts:298-309.
 
 using System;
 using System.Text.Json;

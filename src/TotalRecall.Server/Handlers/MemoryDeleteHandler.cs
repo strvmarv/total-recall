@@ -1,8 +1,6 @@
 // src/TotalRecall.Server/Handlers/MemoryDeleteHandler.cs
 //
-// Plan 4 Task 4.8 — ports the `memory_delete` branch of
-// src-ts/tools/memory-tools.ts (plus src-ts/memory/delete.ts) to the
-// .NET Server. Locates the row via an AllTablePairs sweep, then deletes
+// Handler for the `memory_delete` tool. Locates the row via an AllTablePairs sweep, then deletes
 // the corresponding vec0 embedding row and the metadata row — in that
 // order.
 //
@@ -39,7 +37,6 @@ namespace TotalRecall.Server.Handlers;
 /// </summary>
 public sealed class MemoryDeleteHandler : IToolHandler
 {
-    // Mirror of src-ts/tools/memory-tools.ts:95-104.
     private static readonly JsonElement _inputSchema = JsonDocument.Parse("""
         {
           "type": "object",

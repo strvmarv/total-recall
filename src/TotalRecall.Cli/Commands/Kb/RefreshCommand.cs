@@ -1,8 +1,7 @@
 // src/TotalRecall.Cli/Commands/Kb/RefreshCommand.cs
 //
-// Plan 5 Task 5.7 — `total-recall kb refresh <collection_id>`. Ports
-// src-ts/tools/kb-tools.ts:218-290 (kb_refresh). Reads the collection's
-// metadata.source_path, deletes all its children + the collection row +
+// Plan 5 Task 5.7 — `total-recall kb refresh <collection_id>`.
+// Reads the collection's metadata.source_path, deletes all its children + the collection row +
 // corresponding vector embeddings, then re-ingests the source via
 // IFileIngester.IngestFile or IFileIngester.IngestDirectory.
 

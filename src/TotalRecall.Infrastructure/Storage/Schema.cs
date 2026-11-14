@@ -7,8 +7,7 @@ using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 namespace TotalRecall.Infrastructure.Storage;
 
 /// <summary>
-/// Schema migration runner. Ports <c>src-ts/db/schema.ts</c> — a 3-migration
-/// initial schema consisting of:
+/// Schema migration runner: a 3-migration initial schema consisting of:
 ///   1. Content tables (hot/warm/cold × memory/knowledge = 6) + vec0 virtual
 ///      tables + per-table indexes + system tables + system indexes.
 ///   2. <c>_meta</c> key-value store + <c>benchmark_candidates</c>.
@@ -34,8 +33,7 @@ public static class MigrationRunner
 
     /// <summary>
     /// Returns the canonical content-table name for the given
-    /// <see cref="Tier"/> / <see cref="ContentType"/> pair. Mirrors
-    /// <c>tableName()</c> in <c>src-ts/types.ts</c>.
+    /// <see cref="Tier"/> / <see cref="ContentType"/> pair.
     /// </summary>
     internal static string TableName(Tier tier, ContentType type)
     {

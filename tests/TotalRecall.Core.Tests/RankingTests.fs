@@ -4,7 +4,7 @@ open Expecto
 open TotalRecall.Core
 
 // Tests for TotalRecall.Core.Ranking.hybridScore.
-// Formula (from src-ts/memory/search.ts): vector + ftsWeight * fts.
+// Formula: vector + ftsWeight * fts.
 
 [<Tests>]
 let rankingTests =

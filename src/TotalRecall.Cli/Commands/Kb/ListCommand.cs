@@ -1,7 +1,6 @@
 // src/TotalRecall.Cli/Commands/Kb/ListCommand.cs
 //
-// Plan 5 Task 5.7 — `total-recall kb list [--json]`. Ports
-// src-ts/tools/kb-tools.ts:193-196 (kb_list_collections), delegating to
+// Plan 5 Task 5.7 — `total-recall kb list [--json]`. Delegates to
 // IStore.ListByMetadata({type:"collection"}).
 //
 // For each collection we compute document/chunk counts by doing ONE sweep

@@ -62,7 +62,7 @@ let decayTests =
             let now = 1_000_000_000L
             let weight et =
                 Decay.calculateDecayScore now 0 et now 24.0
-            // Per src-ts/memory/decay.ts TYPE_WEIGHTS:
+            // Expected type weights:
             // correction: 1.5, preference: 1.3, decision: 1.0,
             // surfaced: 0.8, imported: 1.1, compacted: 1.0, ingested: 0.9
             Expect.floatClose Accuracy.medium (weight Correction) 1.5

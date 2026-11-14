@@ -7,9 +7,8 @@ using System.Security.Cryptography;
 namespace TotalRecall.Infrastructure.Embedding;
 
 /// <summary>
-/// Resolves and validates model directories on disk. Ports the lookup and
-/// validation subset of <c>src-ts/embedding/model-manager.ts</c>. Download
-/// logic is intentionally deferred (Task 3.8+).
+/// Resolves and validates model directories on disk (lookup and validation only).
+/// Download logic is intentionally deferred (Task 3.8+).
 /// </summary>
 public sealed class ModelManager
 {

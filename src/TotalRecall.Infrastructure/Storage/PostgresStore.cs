@@ -399,8 +399,7 @@ VALUES
 
     public int CountKnowledgeCollections()
     {
-        // Mirrors src-ts/tools/session-tools.ts: collections live in
-        // cold knowledge only, NULL collection_ids excluded.
+        // Collections live in cold knowledge only, NULL collection_ids excluded.
         using var conn = _dataSource.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText =

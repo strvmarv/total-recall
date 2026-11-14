@@ -1,7 +1,6 @@
 // src/TotalRecall.Server/Handlers/SessionContextHandler.cs
 //
-// Plan 4 Task 4.10 — ports the `session_context` branch of
-// src-ts/tools/session-tools.ts to the .NET Server. Lists the hot-tier
+// Handler for the `session_context` tool. Lists the hot-tier
 // memory and knowledge entries, formats them as "- {content}[ tags]
 // ( project: ...)" lines, and returns `{entryCount, context}`.
 //
@@ -40,8 +39,7 @@ namespace TotalRecall.Server.Handlers;
 /// </summary>
 public sealed class SessionContextHandler : IToolHandler
 {
-    // Mirror of src-ts/tools/session-tools.ts:120-125 — session_context
-    // takes no inputs.
+    // session_context takes no inputs.
     private static readonly JsonElement _inputSchema = JsonDocument.Parse("""
         {"type":"object","properties":{},"required":[]}
         """).RootElement.Clone();

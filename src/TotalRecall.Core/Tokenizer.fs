@@ -1,6 +1,6 @@
 module TotalRecall.Core.Tokenizer
 
-// WordPiece tokenizer ported from src-ts/embedding/tokenizer.ts.
+// WordPiece tokenizer.
 //
 // Pure function over input text → list of token IDs. The implementation
 // mirrors the TS algorithm exactly (Plan 2 Option-A pivot — TS is the

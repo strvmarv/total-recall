@@ -1,8 +1,6 @@
 // src/TotalRecall.Server/Handlers/MemorySearchHandler.cs
 //
-// Plan 4 Task 4.7 — ports the `memory_search` branch of
-// src-ts/tools/memory-tools.ts (plus src-ts/memory/search.ts) to the .NET
-// Server. The handler validates MCP arguments, embeds the query, runs a
+// Handler for the `memory_search` tool. The handler validates MCP arguments, embeds the query, runs a
 // hybrid (vector + FTS) search across the requested tier/type pairs, and
 // returns the results as a JSON array in the MCP response envelope.
 //
@@ -56,7 +54,6 @@ namespace TotalRecall.Server.Handlers;
 /// </summary>
 public sealed class MemorySearchHandler : IToolHandler
 {
-    // Mirror of src-ts/tools/memory-tools.ts:46-67.
     private static readonly JsonElement _inputSchema = JsonDocument.Parse("""
         {
           "type": "object",
@@ -262,7 +259,7 @@ public sealed class MemorySearchHandler : IToolHandler
         return prop.GetString() ?? throw new ArgumentException($"{name} must be a string");
     }
 
-    // Mirrors TS validateOptionalNumber in src-ts/tools/validation.ts. Two
+    // Mirrors the original TS validateOptionalNumber. Two
     // flavours — an int-returning one for topK (which must be integral) and
     // a double-returning one for minScore (which is a [0,1] ratio).
     private static int? ReadOptionalInt(JsonElement args, string name, int min, int max)

@@ -1,7 +1,6 @@
 // src/TotalRecall.Server/Handlers/KbIngestDirHandler.cs
 //
-// Plan 4 Task 4.9 — ports the `kb_ingest_dir` branch of
-// src-ts/tools/kb-tools.ts (lines 111-118) to the .NET Server. The handler
+// Handler for the `kb_ingest_dir` tool. The handler
 // validates the `path` and optional `glob` arguments, calls
 // IFileIngester.IngestDirectory, and serializes the result as JSON.
 //
@@ -75,9 +74,9 @@ public sealed class KbIngestDirHandler : IToolHandler
             ? scopeEl.GetString()
             : _scopeDefault;
         // TODO: the schema declares a `collection` field for parity
-        // with TS, but the TS implementation at src-ts/tools/kb-tools.ts:111-117
-        // does not thread it through ingestDirectory either, so we ignore it
-        // here. Revisit when the TS reference starts honouring it.
+        // with TS, but the TS implementation does not thread it through
+        // ingestDirectory either, so we ignore it here. Revisit when the TS reference
+        // starts honouring it.
 
         ct.ThrowIfCancellationRequested();
 

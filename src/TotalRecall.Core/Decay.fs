@@ -5,7 +5,7 @@ open TotalRecall.Core.Config
 
 // Decay score calculation. Pure function over entry metadata.
 //
-// Ported from src-ts/memory/decay.ts. The formula:
+// The formula:
 //
 //   timeFactor = exp(-hoursSinceAccess / decayConstantHours)
 //   freqFactor = 1 + log2(1 + accessCount)

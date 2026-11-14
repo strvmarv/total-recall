@@ -1,8 +1,6 @@
 // src/TotalRecall.Infrastructure/Eval/ConfigSnapshotStore.cs
 //
-// Plan 5 Task 5.3b — read/write seam on top of the config_snapshots
-// table. Ports src-ts/config.ts:91-113 (createConfigSnapshot) and
-// src-ts/tools/eval-tools.ts:85-96 (resolveSnapshotId).
+// Read/write seam on top of the config_snapshots table.
 //
 // Dedup: the TS implementation hashes the config via sortKeysDeep -> sha256.
 // The .NET port compares the raw configJson strings verbatim; semantic

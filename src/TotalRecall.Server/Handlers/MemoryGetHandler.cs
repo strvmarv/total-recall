@@ -1,8 +1,6 @@
 // src/TotalRecall.Server/Handlers/MemoryGetHandler.cs
 //
-// Plan 4 Task 4.8 — ports the `memory_get` branch of
-// src-ts/tools/memory-tools.ts (plus src-ts/memory/get.ts) to the .NET
-// Server. TS exposes a single `id` argument and searches all tables for
+// Handler for the `memory_get` tool. TS exposes a single `id` argument and searches all tables for
 // the first row that matches. The .NET IStore API is tier-aware,
 // so this handler iterates the 6 (tier, type) pairs and returns the
 // first hit.
@@ -31,7 +29,6 @@ namespace TotalRecall.Server.Handlers;
 /// </summary>
 public sealed class MemoryGetHandler : IToolHandler
 {
-    // Mirror of src-ts/tools/memory-tools.ts:69-78.
     private static readonly JsonElement _inputSchema = JsonDocument.Parse("""
         {
           "type": "object",

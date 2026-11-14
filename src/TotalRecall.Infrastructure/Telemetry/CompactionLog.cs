@@ -8,9 +8,8 @@ using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 namespace TotalRecall.Infrastructure.Telemetry;
 
 /// <summary>
-/// Single-row write payload for <see cref="CompactionLog.LogEvent"/>. Mirrors
-/// the <c>logCompactionEvent</c> shape in <c>src-ts/compaction/compactor.ts</c>
-/// — the four analytic fields default to <c>null</c> because the TS writer
+/// Single-row write payload for <see cref="CompactionLog.LogEvent"/>. The four
+/// analytic fields default to <c>null</c> because the original TS writer
 /// always inserts them as NULL; downstream analytics fills them in via a
 /// later UPDATE that we have not yet ported.
 /// </summary>
@@ -42,8 +41,7 @@ public sealed record CompactionAnalyticsRow(
 /// <summary>
 /// Full-row projection of a <c>compaction_log</c> entry used by Plan 5
 /// Task 5.5's <c>memory history</c> and <c>memory lineage</c> CLI verbs.
-/// Mirrors the shape emitted by <c>memory_history</c> in
-/// <c>src-ts/tools/extra-tools.ts</c>. Parsed JSON columns
+/// Mirrors the shape emitted by <c>memory_history</c>. Parsed JSON columns
 /// (<c>source_entry_ids</c>, <c>decay_scores</c>) fall back to empty
 /// collections on malformed input, matching the TS
 /// <c>try { JSON.parse } catch { [] }</c> behavior.
@@ -206,8 +204,7 @@ public sealed class CompactionLog : ICompactionLogReader
     /// <summary>
     /// Parses a JSON string array (e.g. <c>["a","b"]</c>) into a list.
     /// Returns an empty list on null/malformed input, matching the TS
-    /// <c>try { JSON.parse } catch { [] }</c> semantics at
-    /// <c>src-ts/tools/extra-tools.ts:247-250</c>.
+    /// <c>try { JSON.parse } catch { [] }</c> semantics.
     /// </summary>
     internal static IReadOnlyList<string> ParseStringArray(string? json)
     {

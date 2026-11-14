@@ -58,9 +58,8 @@ let loadTokenizerFixtures () : TokenizerFixtureFile =
     { Entries = entries.ToArray() }
 
 let loadVocab () : Map<string, int> =
-    // Read the vocab from tokenizer.json's model.vocab subtree (matches how
-    // src-ts/embedding/embedder.ts loads it). vocab.txt is NOT tracked in
-    // git; extracting it ad-hoc is a Task 2.1 temporary hack that should
+    // Read the vocab from tokenizer.json's model.vocab subtree. vocab.txt is NOT
+    // tracked in git; extracting it ad-hoc is a Task 2.1 temporary hack that should
     // NOT be repeated here.
     let tokenizerJsonPath =
         Path.Combine(findWorktreeRoot(), "models", "bge-small-en-v1.5", "tokenizer.json")

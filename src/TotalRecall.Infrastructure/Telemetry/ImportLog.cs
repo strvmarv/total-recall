@@ -32,8 +32,7 @@ public interface IImportLog
 }
 
 /// <summary>
-/// Append-only writer for the <c>import_log</c> table. Ports
-/// <c>src-ts/importers/import-utils.ts</c>: provides a content-hash helper, a
+/// Append-only writer for the <c>import_log</c> table: provides a content-hash helper, a
 /// dedupe lookup, and an INSERT-OR-IGNORE writer keyed on a stable
 /// MD5(sourceTool:sourcePath:contentHash) id.
 ///

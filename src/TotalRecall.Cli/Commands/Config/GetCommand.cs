@@ -1,8 +1,7 @@
 // src/TotalRecall.Cli/Commands/Config/GetCommand.cs
 //
-// Plan 5 Task 5.8 — `total-recall config get [key] [--json]`. Ports
-// src-ts/tools/system-tools.ts:136-149 (config_get). With no key, prints
-// the full merged config. With a dotted key, walks the merged TomlTable
+// Plan 5 Task 5.8 — `total-recall config get [key] [--json]`.
+// With no key, prints the full merged config. With a dotted key, walks the merged TomlTable
 // and prints {key, value}. Missing keys go to stderr with exit 1.
 //
 // Walks the raw TomlTable (via IConfigLoader.LoadEffectiveTable) rather
