@@ -35,10 +35,11 @@ Line numbers are `INSTALL.md` at `main` (6b0378a).
    (`total-recall: initialized · X memories imported · ...`) appears nowhere else in the repository;
    the slash-command checks exist only in some hosts.
 5. **Missing harnesses.** No section for Gemini CLI, Kiro, Windsurf, Zed, VS Code or Hermes, all of
-   which the README lists and `postinstall` configures. The Cline section (L246-261) omits the npm
+   which `postinstall` configures and all but Kiro the README lists (the README does not mention
+   Kiro). The Cline section (L246-261) omits the npm
    step and the file path. The OpenCode pointer (L190) is a relative path to `.opencode/INSTALL.md`,
    which shows an `mcpServers` block; a working OpenCode 1.16.2 config uses a top-level `mcp` key.
-6. **Preamble.** 85 lines about relocating the database (L15-90) come before the first install step.
+6. **Preamble.** 76 lines about relocating the database (L15-90) come before the first install step.
 7. **Stale conditionals** (L150, L202, L224): "works once a release contains ...". pi support shipped
    in 4.3.0. The marketplace entry now points at the repository URL with no ref.
 8. **No warning on MCP-only installs** for Claude Code (L123-137), Cline and OpenCode that nothing
@@ -64,7 +65,7 @@ Line numbers are `INSTALL.md` at `main` (6b0378a).
 
 - Changing what `postinstall` does, or the `npx` entries it writes. This change documents them.
 - Restructuring `README.md` (the next ticket). Here the README changes only where its links would
-  break and where three lines state install facts this change makes false.
+  break and where four lines state install facts this change makes false.
 - A pinned or tagged install URL, a new install command, or marketplace changes.
 - New uninstall or update guides. Existing update and troubleshooting text moves with its harness.
 - Running installs for harnesses that are not available. Statements about them carry their source.
@@ -73,7 +74,9 @@ Line numbers are `INSTALL.md` at `main` (6b0378a).
 
 - A page that claims more than was observed. A confident instruction that nobody ran is the failure
   this change exists to remove.
-- The same per-harness steps in two places.
+- The same per-harness steps in two places. One exception is stated in the design: the OpenCode
+  file that ships in the npm package repeats the config block of the OpenCode page, and the test
+  holds the two equal.
 - An agent led to change tools the user did not ask about without the user being told first.
 
 ## Approaches
@@ -134,10 +137,14 @@ Written to the agent in the second person, plain imperative steps, no background
 6. **Step 3: verify now.** Run the page's version check, where the page gives one, and compare it
    with the version just installed. State that a bare `total-recall` on PATH can be an older copy
    than the one the harness runs.
-7. **Step 4: hand over.** Tell the user to start a new session (MCP tools appear only then), what
-   they should see, and give them a prompt to paste that makes the assistant check the install.
-8. **Step 5: report.** What was installed and where, the version, anything changed outside this
-   harness, any step left to the user, and any known gap the page lists that affects them.
+7. **Step 4: hand over.** Relay the page's User steps to the user, in order. Tell them to start a new
+   session (MCP tools appear only then), what they should see, and give them the check the page
+   names: the prompt to paste, or the page's own check where the model cannot call total-recall's
+   tools.
+8. **Step 5: report.** State one of two outcomes: "verified now" (Step 3 passed) or "installed;
+   verification is pending in your next session" (the page gave no immediate check). Then what was
+   installed and where, the version, anything changed outside this harness, any step left to the
+   user, and any known gap the page lists that affects them.
 
 `INSTALL.md` contains no install command and no total-recall version number.
 
@@ -219,11 +226,14 @@ Rules for the pages:
   hooks (`scripts/install-kiro-hooks.js`, header comment). The page says so, and gives copying the
   package's `.kiro/hooks/` into a workspace's `.kiro/hooks/` as a User step, attributed to that
   comment and marked not run.
-- **Paths where nothing installs the `session_start` instruction** (no hook, no rules file, no
-  steering file: the MCP-only options, Cline, Zed, VS Code, `other-mcp`, and the skip-form path of
-  any harness) say that nothing will tell the model to call `session_start`. A path where the install
-  does write a rules or steering file (the plain install for Windsurf, Gemini CLI and Kiro) says that
-  instead. Adding the instruction is a **User step**. The text is the body of `.kiro/steering/total-recall.md` below its
+- **Paths where nothing delivers the `session_start` instruction.** The condition, judged per path
+  from its sources: the path ends with no hook, extension, provider plugin, rules file or steering
+  file that tells the model to call `session_start` (pi's extension and Hermes's provider deliver it
+  whether or not `postinstall` ran; the plain install writes a rules or steering file for Windsurf,
+  Gemini CLI and Kiro). Such a path says that nothing will tell the model to call `session_start`,
+  and adding the instruction is a **User step**. On the skip path of Windsurf, Gemini CLI and Kiro
+  the step that copies the rules or steering file (above) is that User step, and the only mechanism
+  the page gives. On every other such path the text is the body of `.kiro/steering/total-recall.md` below its
   front matter, which is what `postinstall` installs for Windsurf and Gemini CLI; the page links it by
   absolute raw URL, does not restate it, and notes that its "Sticky directives" paragraph describes
   Kiro's hook. The page names the file to put it in only where a source names one (the Windsurf rules
@@ -244,6 +254,18 @@ Rules for the pages:
   `total-recall --version`. A path with neither says there is no immediate check and that
   verification happens in the next session. The builder may add a location from a harness's own
   documentation, marked "from its documentation, not run".
+- **Verify that the harness was configured, on the harnesses npm configures.** The version check
+  proves the engine, not the entry: `postinstall` skips silently when the directory is absent, when
+  the config file has comments it cannot parse, or when a different `total-recall` entry exists.
+  After the plain install those pages have the agent read the file the script writes and confirm
+  the `total-recall` entry, and fall back to the hand-written entry if it is absent.
+- **Hand-written entries, everywhere.** Add only the named entry, keep the rest of the file, and if
+  a `total-recall` entry already exists, stop and ask the user.
+- **Approval flags.** Copilot CLI's `--allow-tool=total-recall` and Cursor's `--approve-mcps` are
+  User steps; the agent never writes them into a config, alias or shell profile.
+- **Where the skip form costs nothing.** On `pi`, `opencode`, `other-mcp` and the MCP-only options
+  `postinstall` configures nothing for the harness being installed, and the page says so beside the
+  skip form. The pi skip form is marked "POSIX shell; not run on Windows".
 - **Codex CLI.** Editing `~/.codex/config.toml` to set `default_tools_approval_mode = "approve"` is
   **Ask first**, with the same wording about write and delete tools. `--dangerously-bypass-hook-trust`
   is mentioned as information only; the page never tells the agent to use it. Trusting the hooks in
@@ -251,10 +273,14 @@ Rules for the pages:
 - The Cline page states where `postinstall` writes (`~/.vscode/cline_mcp_settings.json`) and that the
   repository's own importer reads Cline's settings from a different location, so the written entry may
   not be the file Cline reads. It gives the manual steps from today's section, with the npm step.
-- The OpenCode page and `.opencode/INSTALL.md` give the config in the `mcp` form observed below, and
-  mark the `skills/` copy step as needing a checkout. `.opencode/INSTALL.md` ships in the npm package
-  (`package.json` `files`) and `docs/` does not, so it stays self-contained and links the page by
-  absolute URL.
+- **OpenCode.** The page gives the config in the `mcp` form observed below and marks the `skills/`
+  copy step as needing a checkout. `.opencode/INSTALL.md` ships in the npm package (`package.json`
+  `files`) and `docs/` does not, so it cannot be only a link: it is cut to the install command, the
+  same config block as the page, and the page's absolute URL for everything else. This is the one
+  place steps are repeated; the test holds the two config blocks equal.
+- **Hermes.** Its model is given one tool, `memory` (`hermes-plugin/`), not total-recall's MCP tools,
+  so the check prompt cannot work there. The page gives its own check: `total-recall status` from the
+  shell, and a prompt that asks the assistant to read back from memory, both marked not run.
 
 ### What postinstall changes
 
@@ -308,16 +334,19 @@ script honours. The page also states:
 - **Next session, by the user.** On a harness that delivers the startup instructions, the assistant
   should give a short total-recall status line; `INSTALL.md` quotes the example from
   `skills/commands/SKILL.md`, "Session Start" (`total-recall loaded ...`) as an example, not as
-  exact text. The firm check on every path is the check prompt, which asks the assistant to call the
-  `status` tool and report the tier counts and the database path.
+  exact text. The firm check, wherever the model can call total-recall's tools, is the check prompt,
+  which asks the assistant to call the `status` tool and report the tier counts and the database
+  path. Where it cannot (Hermes), the page gives its own check.
 - `INSTALL.md` Step 4 holds the check prompt once; pages refer to it.
 
 ### References that must follow the move
 
 - `README.md` links to `INSTALL.md#pi`, `#cursor`, `#codex-cli`, `#github-copilot-cli` (two each) and
   `#relocating-the-database` (one): repoint to the new pages.
-- Three README lines state install facts this change makes false or dangling, and are corrected
-  here. L91: drop the comment "once the release carrying pi support is published". L117: drop the
+- Four README lines state install facts this change makes false or dangling, and are corrected
+  here. L137: the sentence that the `mcpServers` block "works with" Copilot CLI, OpenCode, Cline,
+  Cursor and Hermes drops OpenCode and Hermes and links their pages, because OpenCode uses an `mcp`
+  key and Hermes has no MCP entry. L91: drop the comment "once the release carrying pi support is published". L117: drop the
   sentence "This works once the marketplace points at a release ... (see the INSTALL.md caveat)".
   L139: replace the note that `npx` "does not work due to an npm bug" (the linked issue is unrelated,
   and `npx` was observed working) with: "prefer the global install. `npx -y @strvmarv/total-recall`
@@ -351,7 +380,12 @@ fails when:
 6. the tools named in `npm-postinstall.md`, or in that sentence on any page, differ from the
    `install-*.js` modules that `scripts/postinstall.js` imports (Copilot CLI counts as named by the
    VS Code module);
-7. a hook note cites a documentation path that does not exist.
+7. a hook note in `codex/hook.js`, `copilot/hook.js` or `cursor/hook.js` does not cite its own
+   harness page (`docs/hosts/<id>.md`), or cites a path that is not in the tree;
+8. the config block in `.opencode/INSTALL.md` differs from the one in `docs/hosts/opencode.md`.
+
+A limit of rule 6, stated so nobody relies on more: it catches a new `install-*.js` module, not a
+tool added inside an existing module (as Copilot CLI's config is inside the VS Code module).
 
 Each rule is developed test-first: the test fails against today's tree for the reason named, then the
 document change makes it pass.
