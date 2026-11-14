@@ -6,7 +6,7 @@
 
 **Architecture:** Documentation only, plus one zero-dependency Node test. The test is written first as pure check functions over file text (the pattern of `scripts/release-workflow.test.js`): each check returns a list of problems, runs on the real tree, and is also run on a defective copy to prove it can fail. The documents are then written until every check returns nothing.
 
-**Tech Stack:** Markdown; Node 20 built-ins (`node:test`, `node:assert/strict`, `node:fs`, `node:path`, `node:url`), ESM, no dependencies.
+**Tech Stack:** Markdown; Node 20 built-ins (`node:test`, `node:assert/strict`, `node:fs`, `node:os`, `node:path`, `node:url`), ESM, no dependencies.
 
 **Spec:** `docs/superpowers/specs/2026-11-13-install-agent-runbook-design.md`. It is read-only for the whole run. Every page statement comes from the sources that spec names for the page; where this plan and the spec differ, the spec wins.
 
@@ -21,7 +21,11 @@
 - Repository base URLs, exact: raw `https://raw.githubusercontent.com/strvmarv/total-recall/main/` and blob `https://github.com/strvmarv/total-recall/blob/main/`.
 - Harness ids and display names, in this order: `claude-code` "Claude Code", `pi` "pi", `codex-cli` "Codex CLI", `copilot-cli` "Copilot CLI", `cursor` "Cursor", `gemini-cli` "Gemini CLI", `kiro` "Kiro", `opencode` "OpenCode", `cline` "Cline", `windsurf` "Windsurf", `zed` "Zed", `vscode` "VS Code", `hermes` "Hermes", `other-mcp` "Any other MCP client". "Codex CLI", "Copilot CLI" and "Cursor" must be spelled exactly so: three hook scripts cite them.
 - Page headings, exactly these six `##` headings in this order and no other `##` heading: `Install`, `User steps`, `Verify`, `What you get`, `Known gaps`, `Evidence`. A section with nothing to say holds `None known.`
-- The disclosure paragraph: on any page where the text `npm install` or `pi install` appears anywhere (in a fenced block or in prose), a paragraph that begins `**Ask first.**` stands above its first appearance. The paragraph itself does not contain either string; it says "this install". It names every tool the install script may change (Hermes, Kiro, Cline, Windsurf, Gemini CLI, Zed, VS Code, Copilot CLI), says that it switches Hermes's memory provider and adds a Gemini CLI hook that runs on every prompt, and links `https://raw.githubusercontent.com/strvmarv/total-recall/main/docs/npm-postinstall.md`.
+- The disclosure paragraph: on any page where the text `npm install` or `pi install` appears anywhere as whole words (in a fenced block or in prose; "pi installs" does not count), a paragraph that begins `**Ask first.**` stands above its first appearance. The paragraph itself does not contain either string; it says "this install". It names every tool the install script may change (Hermes, Kiro, Cline, Windsurf, Gemini CLI, Zed, VS Code, Copilot CLI), says that it switches Hermes's memory provider and adds a Gemini CLI hook that runs on every prompt, and links `https://raw.githubusercontent.com/strvmarv/total-recall/main/docs/npm-postinstall.md`.
+- Hand-written entries, on every page and path: add only the named entry, keep the rest of the file, and if a `total-recall` entry that this install did not just write already exists, stop and ask the user.
+- A path where nothing delivers the `session_start` instruction (no hook, extension, provider plugin, rules file or steering file tells the model to call it) says so and says what to add. On the skip path of Windsurf, Gemini CLI and Kiro the step that writes the rules or steering file is the answer. On every other such path (the MCP-only options of Claude Code, Copilot CLI and Cursor; Zed, VS Code, Cline, OpenCode, other-mcp) it is a User step that links `https://raw.githubusercontent.com/strvmarv/total-recall/main/.kiro/steering/total-recall.md`, worded as the spec's rule "Paths where nothing delivers the `session_start` instruction" requires.
+- Where the skip form costs nothing: on `pi`, `opencode`, `other-mcp` and the MCP-only options of Claude Code and Cursor (not Copilot CLI's), the page says beside the skip form that the install script configures nothing for the harness being installed.
+- An MCP-only option's Verify is `total-recall --version` (expected to equal `npm view @strvmarv/total-recall version`), the entry read back from the config file, and a reference to the check prompt.
 - Skip forms, exact: `npm install -g --ignore-scripts @strvmarv/total-recall` and `npm_config_ignore_scripts=true pi install npm:@strvmarv/total-recall` (the pi form is marked "POSIX shell; not run on Windows"). No skip form is given for `pi install git:`; the page says none was observed.
 - The check prompt, exact, held once in `INSTALL.md` Step 4: `Check that total-recall is working: call its status tool and tell me the tier counts and the database path.` A page's Verify section refers to "the check prompt in `INSTALL.md`, Step 4" and does not restate it. The Hermes page gives its own check instead.
 - `INSTALL.md` prose must not contain the literal strings `npm install`, `pi install`, `plugin install` or `plugin add` (rule 2 scans the whole file); it says "an install that runs npm" where it needs to.
@@ -32,7 +36,7 @@
 
 Failure modes the spec implies that the rule checks would not catch unless a test pins them. Each is pinned in Task 1.
 
-1. A link or URL inside a fenced block or an inline code span is not a link: it must not be checked, and a broken one there must not fail the build.
+1. A Markdown link (`[text](target)`) inside a fenced block or an inline code span is not a link: it must not be checked, and a broken one there must not fail the build. A repository URL is checked wherever it appears.
 2. Two headings with the same text get GitHub's `-1`, `-2` anchor suffixes; an anchor to the second must resolve and an anchor to a third that does not exist must not.
 3. A file saved with CRLF line endings must parse the same as one with LF.
 4. A URL followed by `)`, `.`, `,` or a backtick in prose must be read without that character.
@@ -47,20 +51,20 @@ Failure modes the spec implies that the rule checks would not catch unless a tes
 
 **Interfaces:**
 - Produces (all exported from the test file's module scope as plain functions; later tasks only run the file):
-  - `repoTree()` and `memoryTree(files: Record<string,string>)` build a `tree`; both normalise CRLF to LF in `read`, so every helper and check sees LF only.
+  - `normalise(text: string): string` turns CRLF into LF. `repoTree(root = the parent of scripts/)` and `memoryTree(files: Record<string,string>)` build a `tree`; the `read` of both returns `normalise(...)` of the file, so every helper and check sees LF only. The helpers themselves do not normalise.
   - `stripCode(md: string): string` replaces fenced blocks and inline code spans with spaces of equal length.
   - `fencedBlocks(md: string): {index: number, body: string}[]` with `index` the offset of the opening fence.
   - `slugify(text: string): string` GitHub's heading anchor: lowercase, drop every character that is not a letter, digit, space, hyphen or underscore, spaces to hyphens.
   - `headings(md: string): {level: number, text: string, slug: string}[]` ATX headings outside fences, with `-1`, `-2` suffixes on repeats.
   - `links(md: string): string[]` targets of `[text](target)` and `![alt](target)` outside code.
   - `repoPaths(md: string): string[]` the path after either repository base URL, wherever it appears (prose, inline code or a fence: a URL is checked everywhere); trailing `)`, `.`, `,`, backtick and `#fragment` removed.
-  - Constants `HARNESSES` (`{id, name}[]`, the order of Global Constraints), `PAGE_HEADINGS`, `TOOLS` (the eight tool names), `MODULE_TOOLS` (`install-hermes-plugin` → Hermes; `install-kiro-hooks` → Kiro; `install-cline` → Cline; `install-windsurf` → Windsurf; `install-gemini` → Gemini CLI; `install-zed` → Zed; `install-vscode` → VS Code and Copilot CLI).
+  - Constants `HARNESSES` (`{id, name}[]`, the order of Global Constraints), `PAGE_HEADINGS`, `MODULE_TOOLS` (`install-hermes-plugin` → Hermes; `install-kiro-hooks` → Kiro; `install-cline` → Cline; `install-windsurf` → Windsurf; `install-gemini` → Gemini CLI; `install-zed` → Zed; `install-vscode` → VS Code and Copilot CLI), and `TOOLS`, computed as the flattened values of `MODULE_TOOLS` (eight names), never written out a second time.
   - Checks, each `(tree) => string[]` where `tree` is `{read(path): string|null, list(dir): string[]}` and the result is a list of problems, empty when the rule holds:
     - `checkPages(tree)` rule 1: every harness has `docs/hosts/<id>.md` with exactly `PAGE_HEADINGS` as its `##` headings in order; `docs/hosts/` holds no other `.md`; the `INSTALL.md` table rows (`| <name> | <raw url> |`) are exactly `HARNESSES` in order.
-    - `checkNoStaleFacts(tree)` rule 2: `INSTALL.md` contains none of `npm install`, `pi install`, `plugin install`, `plugin add`, and no `\d+\.\d+\.\d+` token; no harness page and not `.opencode/INSTALL.md` contains `@beta`, or `0.7.2` or `0.8.<digits or x>` as a whole version token (not preceded by a digit or a dot). `docs/first-run.md` is not scanned.
+    - `checkNoStaleFacts(tree)` rule 2: `INSTALL.md` has no match for `INSTALL_COMMAND` (`/\b(?:npm|pi|plugin) install\b|\bplugin add\b/`, so "pi installs" and "plugin installed" do not match), and no `\d+\.\d+\.\d+` token; no harness page and not `.opencode/INSTALL.md` contains `@beta`, or `0.7.2` or `0.8.<digits or x>` as a whole version token (not preceded by a digit or a dot). `docs/first-run.md` is not scanned.
     - `checkLinks(tree)` rule 3: for `INSTALL.md`, `README.md`, `docs/hosts/*.md`, `docs/npm-postinstall.md`, `docs/database-location.md`, `docs/first-run.md`: each must exist; every relative link resolves to a file in the tree, and its `#anchor`, when the target is Markdown, to a heading slug there. For `INSTALL.md`, `docs/hosts/*.md` and `.opencode/INSTALL.md`: every `repoPaths` entry is a file in the tree.
     - `checkStatusLine(tree)` rule 4: the first line of `skills/commands/SKILL.md` matching `^\s*>\s*(total-recall loaded — .+)$` is found, and `INSTALL.md` contains that captured text.
-    - `checkDisclosure(tree)` rules 5 and 6: for each harness page whose text contains `npm install` or `pi install` anywhere (fenced or inline), the page text above the first occurrence has a paragraph starting `**Ask first.**` that contains every name in `TOOLS`, the words `memory provider` and `hook`, and the raw URL of `docs/npm-postinstall.md`; the modules imported by `scripts/postinstall.js` as `./install-*.js` are exactly the keys of `MODULE_TOOLS`; `docs/npm-postinstall.md` contains every name in `TOOLS`.
+    - `checkDisclosure(tree)` rules 5 and 6: for each harness page whose text matches `NPM_RUNNING` (`/\b(?:npm|pi) install\b/`) anywhere (fenced or inline), the page text above the first match has a paragraph starting `**Ask first.**` that contains every name in `TOOLS`, the words `memory provider` and `hook`, and the raw URL of `docs/npm-postinstall.md`; the modules imported by `scripts/postinstall.js` as `./install-*.js` are exactly the keys of `MODULE_TOOLS`; `docs/npm-postinstall.md` contains every name in `TOOLS`.
     - `checkHookNotes(tree)` rule 7: every `INSTALL.md, "<name>"` citation in `codex/hook.js`, `copilot/hook.js`, `cursor/hook.js` (at least one per file) names a harness in the `INSTALL.md` table.
     - `checkOpenCodePointer(tree)` rule 8: `.opencode/INSTALL.md` has no fenced block and its `repoPaths` include `docs/hosts/opencode.md`.
 
@@ -77,8 +81,21 @@ test('headings: repeated text gets -1, -2 suffixes', () => {
 });
 test('parsing: CRLF input gives the same headings and links as LF', () => {
   const lf = '# T\n\n## Install\n\n[x](y.md#install)\n';
-  assert.deepEqual(headings(lf.replace(/\n/g, '\r\n')), headings(lf));
-  assert.deepEqual(links(lf.replace(/\n/g, '\r\n')), links(lf));
+  const crlf = lf.replace(/\n/g, '\r\n');
+  assert.equal(normalise(crlf), lf);
+  const read = memoryTree({ 'a.md': crlf }).read('a.md');
+  assert.deepEqual(headings(read), headings(lf));
+  assert.deepEqual(links(read), links(lf));
+});
+test('repoTree: read returns LF for a file saved with CRLF', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'host-docs-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'a.md'), '# T\r\n\r\n## Install\r\n');
+    assert.equal(repoTree(dir).read('a.md'), '# T\n\n## Install\n');
+    assert.equal(repoTree(dir).read('missing.md'), null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 test('repoPaths: trailing punctuation and fragments are dropped', () => {
   const base = 'https://raw.githubusercontent.com/strvmarv/total-recall/main/';
@@ -92,6 +109,8 @@ test('stale versions: a harness version is not the forbidden 0.8.x', () => {
 });
 ```
 
+  One more helper test pins the word boundary: `NPM_RUNNING` and `INSTALL_COMMAND` do not match `pi installs total-recall as a pi package` or `the plugin installed`, and do match `pi install npm:x`, `npm install -g x`, `claude plugin install x` (`INSTALL_COMMAND` only) and `codex plugin add x` (`INSTALL_COMMAND` only).
+
   `memoryTree` builds a `tree` from an object; `repoTree()` builds one that reads the repository (root = the parent of `scripts/`). Add one more helper test: a `memoryTree` whose page text uses CRLF passes `checkPages` and `checkDisclosure` exactly as the LF version does.
 
 - [ ] **Step 2: Write the rule tests.** For each check, two tests: `rule N holds on the repository` (`assert.deepEqual(check(repoTree()), [])`) and `rule N fails on a defect`, which builds a `memoryTree` from a minimal valid set and one defect, and asserts a non-empty result naming the defect. Defects, one test each:
@@ -99,7 +118,7 @@ test('stale versions: a harness version is not the forbidden 0.8.x', () => {
   - rule 2: `npm install -g x` inside `INSTALL.md`; `total-recall 4.7.0` inside `INSTALL.md`; `@beta` on a harness page; `0.8.0` inside `.opencode/INSTALL.md`.
   - rule 3: a link to `docs/hosts/nope.md`; an anchor `#no-such-heading`; a raw URL in `INSTALL.md` to `docs/hosts/nope.md`.
   - rule 4: an `INSTALL.md` without the status line.
-  - rules 5 and 6: a page whose `**Ask first.**` paragraph omits `Zed`; a page whose paragraph stands below the command; a page with `npm install -g` only in prose and no paragraph; a `postinstall.js` importing `./install-newtool.js`.
+  - rules 5 and 6: a page whose `**Ask first.**` paragraph omits `Zed`; a page whose paragraph stands below the command; a page with `npm install -g` only in prose and no paragraph; a `postinstall.js` importing `./install-newtool.js`; a `docs/npm-postinstall.md` that does not name `Windsurf`.
   - rule 7: a hook note citing `INSTALL.md, "Codex"`.
   - rule 8: an `.opencode/INSTALL.md` containing a fenced block; one with no link to the OpenCode page.
 
@@ -156,9 +175,9 @@ git commit -m "docs: move the database, first-run and postinstall material out o
 - Consumes: the page headings, the disclosure paragraph and the skip forms of Global Constraints; `docs/npm-postinstall.md`, `docs/first-run.md#provisioning-on-first-launch`.
 - Produces: five pages. `docs/hosts/copilot-cli.md` and `docs/hosts/cursor.md` are link targets for `README.md` in Task 6.
 
-- [ ] **Step 1: `claude-code.md`.** Install: the two shell commands (`claude plugin marketplace add strvmarv/total-recall-marketplace`, then `claude plugin install total-recall@strvmarv-total-recall-marketplace`), then the same two as slash commands for a user to type; then the allow-rule offer, **Ask first**, plugin path only, worded as the spec's Claude Code rule requires; then the MCP-only option with the disclosure paragraph, the plain form first and the skip form second, and the statement that nothing delivers the `session_start` instruction on that path. Verify: `node ~/.claude/plugins/cache/strvmarv-total-recall-marketplace/total-recall/<version>/bin/start.js --version`, with the first-run download explained. Evidence: the Claude Code 2.1.301 observation, and "the first session after the install was not observed".
+- [ ] **Step 1: `claude-code.md`.** Install: the two shell commands (`claude plugin marketplace add strvmarv/total-recall-marketplace`, then `claude plugin install total-recall@strvmarv-total-recall-marketplace`), then the same two as slash commands for a user to type; then the allow-rule offer, **Ask first**, plugin path only, worded as the spec's Claude Code rule requires; then the MCP-only option with the disclosure paragraph, the plain form first and the skip form second (with the "configures nothing for Claude Code" note), the hand-written entry under the guard of Global Constraints, the statement that nothing delivers the `session_start` instruction on that path, and that instruction as a User step. Verify (plugin path): `node ~/.claude/plugins/cache/strvmarv-total-recall-marketplace/total-recall/<version>/bin/start.js --version`, with the first-run download explained; the MCP-only option's Verify is the one in Global Constraints. Evidence: the Claude Code 2.1.301 observation, and "the first session after the install was not observed".
 - [ ] **Step 2: `pi.md`.** Install: disclosure paragraph, then `pi install npm:@strvmarv/total-recall` (**Ask first**), the skip form, and `pi install git:github.com/strvmarv/total-recall` (also **Ask first**, with "no skip form was observed"). Say beside the skip form that the install script configures nothing for pi itself. Verify: `node ~/.pi/agent/npm/node_modules/@strvmarv/total-recall/bin/start.js --version` (npm) and `node ~/.pi/agent/git/github.com/strvmarv/total-recall/bin/start.js --version` (git). User steps: start a new pi session (`/reload` is given as an alternative, marked "from pi's documentation, not run"). Known gaps and What you get from `INSTALL.md` L192-213, without the stale "once the release ... is published" sentence. Evidence: the three `pi install` observations.
-- [ ] **Step 3: `codex-cli.md`, `copilot-cli.md`, `cursor.md`.** Carry `INSTALL.md` L215-244, L139-186 and L263-307 into the six sections, keeping each "observed on ... Windows" attribution in Evidence. Remove the stale conditionals (L150, L224) and say instead what the marketplace entry is. Apply the spec's rules: Codex's `config.toml` edit is **Ask first**, the hook-trust bypass flag is information only, `/hooks` trust is a User step; Copilot's `--allow-tool=total-recall` and Cursor's `--approve-mcps` are User steps; Cursor's Install opens with the macOS/Linux stop for the plugin path and offers only the MCP-only option there, marked not run; the Copilot MCP-only option reads `~/.copilot/mcp-config.json` after the plain install and accepts an `npx` entry. The MCP-only option on the Copilot and Cursor pages (the Codex section has none) mentions the global npm install, so each gets the disclosure paragraph above it, the plain form then the skip form, the hand-written-entry rule (add only the entry; stop and ask if one exists that this install did not write), the statement that nothing delivers the `session_start` instruction, and that instruction as a User step worded as on the Zed page (Task 4). The Cursor page says beside the skip form that the install script configures nothing for Cursor; the Copilot page does not (the script can write its MCP config). Verify directories: Codex `<CODEX_HOME or ~/.codex>/plugins/cache/<marketplace>/total-recall/<version>/` (from `codex/bootstrap.cjs`), Copilot `~/.copilot/installed-plugins/strvmarv-total-recall-marketplace/total-recall/` (observed), Cursor `~/.cursor/plugins/local/total-recall/`.
+- [ ] **Step 3: `codex-cli.md`, `copilot-cli.md`, `cursor.md`.** Carry `INSTALL.md` L215-244, L139-186 and L263-307 into the six sections, keeping each "observed on ... Windows" attribution in Evidence. Remove the stale conditionals (L150, L224) and say instead what the marketplace entry is. Apply the spec's rules: Codex's `config.toml` edit is **Ask first**, the hook-trust bypass flag is information only, `/hooks` trust is a User step; Copilot's `--allow-tool=total-recall` and Cursor's `--approve-mcps` are User steps; Cursor's Install opens with the macOS/Linux stop for the plugin path and offers only the MCP-only option there, marked not run; the Copilot MCP-only option reads `~/.copilot/mcp-config.json` after the plain install and accepts an `npx` entry. The MCP-only option on the Copilot and Cursor pages (the Codex section has none) mentions the global npm install, so each gets the disclosure paragraph above it, the plain form then the skip form, the hand-written-entry rule (add only the entry; stop and ask if one exists that this install did not write), the statement that nothing delivers the `session_start` instruction, and that instruction as a User step worded as on the Zed page (Task 4). The Cursor page says beside the skip form that the install script configures nothing for Cursor; the Copilot page does not (the script can write its MCP config). Cursor's plugin path gives a `git clone` of the repository into `~/.cursor/plugins/local/total-recall` as its command and says the engine is downloaded and verified on the server's first launch (from `INSTALL.md` L269: not exercised inside Cursor). The "npm package contents" alternative of L269 is not offered on the plugin path, so no npm-running install stands above the disclosure paragraph. Verify directories: Codex `<CODEX_HOME or ~/.codex>/plugins/cache/<marketplace>/total-recall/<version>/` (from `codex/bootstrap.cjs`), Copilot `~/.copilot/installed-plugins/strvmarv-total-recall-marketplace/total-recall/` (observed), Cursor `~/.cursor/plugins/local/total-recall/`.
 - [ ] **Step 4: Run.**
 
 Run: `node --test scripts/host-docs.test.js`
@@ -179,7 +198,7 @@ git commit -m "docs: add install pages for Claude Code, pi, Codex CLI, Copilot C
 
 **Interfaces:**
 - Consumes: Global Constraints; `docs/npm-postinstall.md`.
-- Produces: seven pages with one shape. Install: the disclosure paragraph; path 1 `npm install -g @strvmarv/total-recall` (**Ask first**), then "read `<the file the script writes>` and confirm the `total-recall` entry; if it is absent use path 2"; path 2 the npm skip form, then the hand-written entry (the script's file, key and shape, with `"command": "total-recall"` and no `args`), then each extra action the script performs as its own optional **Ask first** step. Verify, on each of the seven: `total-recall --version` (expected to equal `npm view @strvmarv/total-recall version`); the configured check (read the file the script writes and confirm the `total-recall` entry, with path 2 as the fallback; Cline and Hermes differ, below); and a reference to the check prompt.
+- Produces: seven pages with one shape. Install: the disclosure paragraph; path 1 `npm install -g @strvmarv/total-recall` (**Ask first**), then "read `<the file the script writes>` and confirm the `total-recall` entry; if it is absent, add the hand-written entry of path 2" (the entry only, under the guard of Global Constraints; the skip-form install is not run again); path 2 the npm skip form, then the hand-written entry (the script's file, key and shape, with `"command": "total-recall"` and no `args`), then each extra action the script performs as its own optional **Ask first** step. Verify, on each of the seven: `total-recall --version` (expected to equal `npm view @strvmarv/total-recall version`); the configured check (read the file the script writes and confirm the `total-recall` entry, with the hand-written entry of path 2 as the fallback; Cline and Hermes differ, below); and a reference to the check prompt (Hermes: its own check, Step 4, in place of the check prompt).
 
 - [ ] **Step 1: `gemini-cli.md`, `kiro.md`, `windsurf.md`.** Path 2 extras, written the way each script writes them: Gemini CLI, the marked block inserted into `GEMINI.md` (never replacing the file) and the `BeforeAgent` hook with `total-recall pinned-floor --host gemini-cli`; Windsurf, the rules file as the steering body without front matter; Kiro, the steering file copied whole. The installed package is located with `npm root -g`, marked not run. Kiro: the hooks are not installed by the script; copying the package's `.kiro/hooks/` into a workspace's `.kiro/hooks/` is a User step, attributed to the script's header comment, not run. These three pages do not say "nothing delivers the instruction" for path 1; on path 2 the rules or steering step is the answer.
 - [ ] **Step 2: `zed.md`, `vscode.md`.** No rules file exists for these: both paths say that nothing delivers the `session_start` instruction, and that adding it is a User step, linking `https://raw.githubusercontent.com/strvmarv/total-recall/main/.kiro/steering/total-recall.md` (the body below its front matter; its "Sticky directives" paragraph describes Kiro's hook) for "your harness's persistent instructions file". The VS Code page offers the `~/.copilot/mcp-config.json` entry as an optional path 2 step. Zed Evidence: the entry observed in `~/Library/Application Support/Zed/settings.json`.
@@ -202,6 +221,7 @@ git commit -m "docs: add install pages for the harnesses the npm install configu
 **Files:**
 - Create: `docs/hosts/opencode.md`, `docs/hosts/other-mcp.md`
 - Modify: `.opencode/INSTALL.md` (whole file replaced)
+- Read: `INSTALL.md` L92-103 and L188-190, `.opencode/INSTALL.md`, and the spec's "Rules for the pages", "Content sources" and "Observations"
 
 **Interfaces:**
 - Consumes: Global Constraints; `docs/npm-postinstall.md`.
@@ -218,7 +238,7 @@ git commit -m "docs: add install pages for the harnesses the npm install configu
 ```
 
   in `~/.config/opencode/opencode.jsonc`, added as a hand-written entry (add only this entry; stop and ask if one exists). The `skills/` copy is a step that copies from the installed package or a checkout, not run. Nothing delivers the `session_start` instruction: User step, as on the Zed page. Evidence: the OpenCode 1.16.2 config observed.
-- [ ] **Step 2: `other-mcp.md`.** From `INSTALL.md` L92-103 without version numbers or `@beta`: disclosure, plain then skip form, the generic `mcpServers` entry with `"command": "total-recall"`, the `session_start` User step.
+- [ ] **Step 2: `other-mcp.md`.** From `INSTALL.md` L92-103 without version numbers or `@beta`: disclosure, plain then skip form, the "configures nothing for this harness" note beside the skip form, the generic `mcpServers` entry with `"command": "total-recall"` under the hand-written-entry guard, the `session_start` User step, and the MCP-only Verify of Global Constraints.
 - [ ] **Step 3: Replace `.opencode/INSTALL.md`** with a title, one sentence saying the OpenCode instructions live on the page, and the page's blob URL `https://github.com/strvmarv/total-recall/blob/main/docs/hosts/opencode.md`. No fenced block, no command.
 - [ ] **Step 4: Run.**
 
