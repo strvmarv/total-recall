@@ -246,7 +246,7 @@ once the route is known; "After the PR" skips them.
 7. **Notice, not a check.** If the session lists another skill named `develop`, say so once, with both
    paths, and continue.
 8. **Advisory.** Deliver needs routine tool calls (git, `gh`, the verify commands) to run without
-   permission prompts. Say once that the README lists the minimal allowlist, including the pinned
+   permission prompts. Say once that `docs/develop.md` in the total-recall repository lists the minimal allowlist, including the pinned
    `GH_TOKEN=$(...)` forms of check 4 and the `ghpin.js run` calls that wrap them, which a plain `gh *`
    or `git *` pattern may not match, or an auto-accept mode. It cannot be detected, so it never blocks.
 

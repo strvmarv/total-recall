@@ -187,7 +187,7 @@ Implemented in the MCP bootstrap shim: the shim provisioner downloads the engine
 
 ### ~~Signed Releases~~
 
-Implemented in `release.yml` (issue #64). The publish job attests the four platform archives and `provisioning.manifest.json` with `actions/attest@v4` (GitHub artifact attestations, signed through sigstore), before they are attached to the GitHub Release; a failed attestation stops the release assets from being published. Users verify with `gh attestation verify <file> --repo strvmarv/total-recall` (README, "Verifying a release"). `scripts/release-workflow.test.js` pins the step, its position and the permission. Not done: the shim does not enforce attestations (that would need a sigstore verifier, and the shim stays zero-dependency), and there are no cosign signatures or SBOMs. Windows Authenticode signing is a separate entry below.
+Implemented in `release.yml` (issue #64). The publish job attests the four platform archives and `provisioning.manifest.json` with `actions/attest@v4` (GitHub artifact attestations, signed through sigstore), before they are attached to the GitHub Release; a failed attestation stops the release assets from being published. Users verify with `gh attestation verify <file> --repo strvmarv/total-recall` (`docs/verifying-a-release.md`). `scripts/release-workflow.test.js` pins the step, its position and the permission. Not done: the shim does not enforce attestations (that would need a sigstore verifier, and the shim stays zero-dependency), and there are no cosign signatures or SBOMs. Windows Authenticode signing is a separate entry below.
 
 ### ~~Binary Cache Survives Plugin Reinstall~~
 

@@ -1,11 +1,13 @@
-// scripts/host-docs.test.js — guards the install instructions: INSTALL.md (the agent runbook), the
-// per-harness pages in docs/hosts/, and the facts they carry that go stale.
+// scripts/host-docs.test.js — guards the user documentation: INSTALL.md (the agent runbook), the
+// per-harness pages in docs/hosts/ and the facts they carry that go stale; and the README (its shape,
+// what it must hold, that every page under docs/ is reachable from it) and the tool reference.
 //
 // Every check is a function of a `tree` ({read(path), list(dir)}), so the same check runs on the real
 // repository and, with one deliberate defect, on an in-memory copy to prove it can fail. No dependencies.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -153,6 +155,8 @@ const safeDecode = (s) => {
   }
 };
 const exists = (tree, p) => tree.read(p) !== null || tree.list(p).length > 0;
+/** Top-level pages under docs/, without the backlog file. */
+const docPages = (tree) => tree.list('docs').filter((n) => n.endsWith('.md') && n !== 'TODO.md').map((n) => `docs/${n}`);
 const hostPages = (tree) => tree.list('docs/hosts').filter((n) => n.endsWith('.md')).map((n) => `docs/hosts/${n}`);
 
 /** The rows `| <name> | <raw url> |` of INSTALL.md's harness table. */
@@ -219,7 +223,7 @@ export function checkLinks(tree) {
   const problems = [];
   const fixed = ['INSTALL.md', 'README.md', 'docs/npm-postinstall.md', 'docs/database-location.md', 'docs/first-run.md'];
   for (const p of fixed) if (tree.read(p) === null) problems.push(`${p} is missing`);
-  const files = [...new Set([...fixed, ...hostPages(tree), '.opencode/INSTALL.md'])];
+  const files = [...new Set([...fixed, ...docPages(tree), ...hostPages(tree), '.opencode/INSTALL.md', 'PRIVACY.md'])];
   for (const p of files) {
     const text = tree.read(p);
     if (text === null) continue;
@@ -248,13 +252,26 @@ export function checkLinks(tree) {
   return problems;
 }
 
-/** Rule 4: the example status line in INSTALL.md is the one in the commands skill. */
-export function checkStatusLine(tree) {
+/** The example status line the commands skill gives, or null. */
+function skillStatusLine(tree) {
   const skill = tree.read('skills/commands/SKILL.md');
   const m = skill === null ? null : /^\s*>\s*(total-recall loaded — .+)$/m.exec(skill);
-  if (!m) return ['skills/commands/SKILL.md has no "total-recall loaded — ..." example status line'];
+  return m ? m[1] : null;
+}
+
+/** The body of INSTALL.md's "## Step 4" section, or null. */
+function step4Body(tree) {
   const install = tree.read('INSTALL.md');
-  return install !== null && install.includes(m[1]) ? [] : [`INSTALL.md does not contain the status line "${m[1]}"`];
+  const m = install === null ? null : /^## Step 4\b[^\n]*\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(install);
+  return m ? m[1] : null;
+}
+
+/** Rule 4: the example status line in INSTALL.md is the one in the commands skill. */
+export function checkStatusLine(tree) {
+  const line = skillStatusLine(tree);
+  if (line === null) return ['skills/commands/SKILL.md has no "total-recall loaded — ..." example status line'];
+  const install = tree.read('INSTALL.md');
+  return install !== null && install.includes(line) ? [] : [`INSTALL.md does not contain the status line "${line}"`];
 }
 
 /** Rules 5 and 6: the "Ask first" paragraph above any npm-running install, and the tool list it names. */
@@ -315,9 +332,9 @@ export function checkCheckPrompt(tree) {
   const problems = [];
   const install = tree.read('INSTALL.md');
   if (install !== null) {
-    const m = /^## Step 4\b[^\n]*\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(install);
-    if (!m) problems.push('INSTALL.md has no "## Step 4" section');
-    else if (!fencedBlocks(m[1]).some((b) => b.body.includes('Check that total-recall is working: call its status tool'))) {
+    const body = step4Body(tree);
+    if (body === null) problems.push('INSTALL.md has no "## Step 4" section');
+    else if (!fencedBlocks(body).some((b) => b.body.includes('Check that total-recall is working: call its status tool'))) {
       problems.push('INSTALL.md Step 4 holds no fenced check prompt');
     }
   }
@@ -340,6 +357,102 @@ export function checkOpenCodePointer(tree) {
   const problems = [];
   if (fencedBlocks(text).length > 0) problems.push('.opencode/INSTALL.md holds a fenced block; it must only point at docs/hosts/opencode.md');
   if (!repoPaths(text).includes('docs/hosts/opencode.md')) problems.push('.opencode/INSTALL.md does not link docs/hosts/opencode.md');
+  return problems;
+}
+
+// The README: a front door. Its shape, what it must hold, and what it must link.
+export const README_MAX_LINES = 200;
+// sha256 of the README's first fenced block (the banner) as it was at e3359b6.
+export const BANNER_SHA256 = '449d75829e464db5e29d66bdf7dd1d99c3a06388649447c2b46ef3386087bac0';
+export const README_SECTIONS = ['Install', 'Check that it works', 'Use it', 'How it works', 'Documentation', 'Privacy', 'Contributing', 'Credits', 'License'];
+export const INSTALL_PARTS = ['Let your assistant install it', 'Claude Code', 'pi', 'Other harnesses'];
+
+/** The check prompt held by INSTALL.md Step 4, or null. */
+function checkPromptText(tree) {
+  const body = step4Body(tree);
+  if (body === null) return null;
+  const block = fencedBlocks(body).find((b) => b.body.includes('Check that total-recall is working'));
+  return block ? block.body.split('\n').slice(1, -1).join('\n').trim() : null;
+}
+
+/** Rules 10 and 11: the README stays short, keeps its banner, and keeps its sections in order. */
+export function checkReadmeShape(tree) {
+  const readme = tree.read('README.md');
+  if (readme === null) return ['README.md is missing'];
+  const problems = [];
+  const lines = readme.replace(/\n$/, '').split('\n').length;
+  if (lines > README_MAX_LINES) problems.push(`README.md has ${lines} lines, more than ${README_MAX_LINES}`);
+  const first = fencedBlocks(readme)[0];
+  if (!first) problems.push('README.md has no banner (no fenced block)');
+  else if (first.index !== 0) problems.push('README.md does not open with the banner (something stands above the first fenced block)');
+  else if (crypto.createHash('sha256').update(first.body).digest('hex') !== BANNER_SHA256) problems.push('README.md: the banner (the first fenced block) has changed');
+  const hs = headings(readme);
+  const titles = hs.filter((h) => h.level === 1).map((h) => h.text);
+  if (titles.join('|') !== 'total-recall') problems.push(`README.md: the "#" headings are [${titles.join(', ')}], expected [total-recall]`);
+  const sections = hs.filter((h) => h.level === 2).map((h) => h.text);
+  if (sections.join('|') !== README_SECTIONS.join('|')) {
+    problems.push(`README.md: the "##" headings are [${sections.join(', ')}], expected [${README_SECTIONS.join(', ')}]`);
+  }
+  const start = hs.findIndex((h) => h.level === 2 && h.text === 'Install');
+  const parts = [];
+  for (let i = start + 1; start >= 0 && i < hs.length && hs[i].level !== 2; i++) if (hs[i].level === 3) parts.push(hs[i].text);
+  if (parts.join('|') !== INSTALL_PARTS.join('|')) {
+    problems.push(`README.md: the "###" headings under Install are [${parts.join(', ')}], expected [${INSTALL_PARTS.join(', ')}]`);
+  }
+  return problems;
+}
+
+/** Rules 12 and 14: the README holds the install prompt, the check prompt and the status line, and one npm-running command. */
+export function checkReadmeContent(tree) {
+  const readme = tree.read('README.md');
+  if (readme === null) return ['README.md is missing'];
+  const problems = [];
+  if (!readme.includes(`${RAW}INSTALL.md`)) problems.push(`README.md does not hold the install prompt's address ${RAW}INSTALL.md`);
+  const prompt = checkPromptText(tree);
+  if (prompt === null) problems.push('INSTALL.md Step 4 holds no check prompt to compare with');
+  else if (!readme.includes(prompt)) problems.push('README.md does not hold the check prompt of INSTALL.md Step 4, word for word');
+  const status = skillStatusLine(tree);
+  if (status === null) problems.push('skills/commands/SKILL.md has no example status line to compare with');
+  else if (!readme.includes(status)) problems.push(`README.md does not hold the status line "${status}"`);
+  // Count matches, line by line (so a match cannot span a newline), not matching lines.
+  const every = new RegExp(NPM_RUNNING.source, 'g');
+  const running = readme.split('\n').flatMap((l) => [...l.matchAll(every)].map((m) => l.slice(m.index)));
+  if (running.length !== 1 || !/^pi\s+install npm:/.test(running[0])) {
+    problems.push(`README.md must hold exactly one npm-running command, the "pi install npm:" line; found ${running.length}: ${JSON.stringify(running)}`);
+  }
+  if (/\bnpx\b/.test(readme)) problems.push('README.md mentions npx');
+  return problems;
+}
+
+/** Rule 13: every documentation page is linked from the README. */
+export function checkDocsReachable(tree) {
+  const readme = tree.read('README.md');
+  if (readme === null) return ['README.md is missing'];
+  const linked = new Set(
+    links(readme)
+      .filter((l) => !/^[a-z][a-z0-9+.-]*:/i.test(l))
+      .map((l) => path.posix.normalize(safeDecode(l.split('#')[0]))),
+  );
+  return [...docPages(tree), ...hostPages(tree)].filter((p) => !linked.has(p)).map((p) => `README.md does not link ${p}`);
+}
+
+/** Rule 15: the tool reference names every tool in the catalog and states its count. */
+export function checkToolReference(tree) {
+  const raw = tree.read('catalog.json');
+  const page = tree.read('docs/tools.md');
+  if (raw === null) return ['catalog.json is missing'];
+  if (page === null) return ['docs/tools.md is missing'];
+  let tools;
+  try {
+    tools = JSON.parse(raw).tools;
+  } catch {
+    return ['catalog.json does not parse'];
+  }
+  if (!Array.isArray(tools)) return ['catalog.json has no "tools" list'];
+  const problems = [];
+  const prose = stripFences(page);
+  for (const tool of tools) if (!prose.includes(`\`${tool.name}\``)) problems.push(`docs/tools.md does not list the tool \`${tool.name}\``);
+  if (!new RegExp(`(?<!\\d)${tools.length} in SQLite mode`).test(prose)) problems.push(`docs/tools.md does not say "${tools.length} in SQLite mode"`);
   return problems;
 }
 
@@ -474,6 +587,69 @@ function validPage(h) {
 
 const STATUS = 'total-recall loaded — 2 pinned, 3 hot, 12 warm, 5 cold, 2 KB collections. Storage: cortex. Last session: 2 hours ago.';
 
+const BANNER = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8').replace(/\r\n/g, '\n').match(/^(`{3,})[^\n]*\n[\s\S]*?^\1[ \t]*$/m)?.[0] ?? '';
+const CHECK_PROMPT = 'Check that total-recall is working: call its status tool and tell me the tier counts and the database path.';
+
+function validReadme() {
+  return [
+    BANNER,
+    '',
+    '# total-recall',
+    '',
+    '## Install',
+    '',
+    '### Let your assistant install it',
+    '',
+    `> Install it: fetch and follow ${RAW}INSTALL.md`,
+    '',
+    '### Claude Code',
+    '',
+    '```sh',
+    'claude plugin marketplace add strvmarv/total-recall-marketplace',
+    'claude plugin install total-recall@strvmarv-total-recall-marketplace',
+    '```',
+    '',
+    'See [the page](docs/hosts/claude-code.md). Others use the npm package plus configuration.',
+    '',
+    '### pi',
+    '',
+    '```sh',
+    'pi install npm:@strvmarv/total-recall',
+    '```',
+    '',
+    'See [pi](docs/hosts/pi.md#install).',
+    '',
+    '### Other harnesses',
+    '',
+    ...HARNESSES.filter((h) => h.id !== 'claude-code' && h.id !== 'pi').map((h) => `- [${h.name}](docs/hosts/${h.id}.md)`),
+    '',
+    '## Check that it works',
+    '',
+    `Example: ${STATUS}`,
+    '',
+    '```',
+    CHECK_PROMPT,
+    '```',
+    '',
+    '## Use it',
+    '',
+    '## How it works',
+    '',
+    '## Documentation',
+    '',
+    '[first run](docs/first-run.md), [script](docs/npm-postinstall.md), [db](docs/database-location.md), [tools](docs/tools.md)',
+    '',
+    '## Privacy',
+    '',
+    '## Contributing',
+    '',
+    '## Credits',
+    '',
+    '## License',
+    '',
+  ].join('\n');
+}
+
 function validFiles() {
   const files = {
     'INSTALL.md': [
@@ -494,10 +670,13 @@ function validFiles() {
       ...HARNESSES.map((h) => `| ${h.name} | ${RAW}docs/hosts/${h.id}.md |`),
       '',
     ].join('\n'),
-    'README.md': '# R\n\nSee [pi](docs/hosts/pi.md#install) and [first run](docs/first-run.md).\n',
+    'README.md': validReadme(),
+    'docs/tools.md': '# MCP tools\n\n2 in SQLite mode: `status`, `usage_status`.\n',
+    'catalog.json': JSON.stringify({ tools: [{ name: 'status' }, { name: 'usage_status' }] }),
     'docs/npm-postinstall.md': `# Postinstall\n\n${TOOLS.join(', ')}\n`,
     'docs/database-location.md': '# Relocating the database\n',
     'docs/first-run.md': '# First run\n',
+    'PRIVACY.md': '# Privacy Policy\n\nSee [First run](docs/first-run.md).\n',
     '.opencode/INSTALL.md': `# OpenCode\n\nSee ${BLOB}docs/hosts/opencode.md\n`,
     'skills/commands/SKILL.md': `# Commands\n\n     > ${STATUS}\n`,
     'scripts/postinstall.js': Object.keys(MODULE_TOOLS).map((m) => `import { x } from './${m}.js';`).join('\n') + '\n',
@@ -509,7 +688,7 @@ function validFiles() {
   return files;
 }
 
-const CHECKS = { checkPages, checkNoStaleFacts, checkLinks, checkStatusLine, checkDisclosure, checkHookNotes, checkOpenCodePointer, checkCheckPrompt };
+const CHECKS = { checkPages, checkNoStaleFacts, checkLinks, checkStatusLine, checkDisclosure, checkHookNotes, checkOpenCodePointer, checkCheckPrompt, checkReadmeShape, checkReadmeContent, checkDocsReachable, checkToolReference };
 
 test('the valid in-memory tree passes every check', () => {
   const tree = memoryTree(validFiles());
@@ -574,6 +753,7 @@ test('rule 3 holds on the repository', () => assert.deepEqual(checkLinks(repoTre
 defect('a link to a missing page', checkLinks, (f) => { f['README.md'] += '\n[x](docs/hosts/nope.md)\n'; }, /docs\/hosts\/nope\.md.*does not exist/);
 defect('an anchor with no heading', checkLinks, (f) => { f['README.md'] += '\n[x](docs/first-run.md#no-such-heading)\n'; }, /no heading "#no-such-heading"/);
 defect('a repository URL to a missing page', checkLinks, (f) => { f['INSTALL.md'] += `\n${RAW}docs/hosts/nope.md\n`; }, /docs\/hosts\/nope\.md.*does not exist/);
+defect('a broken link in the privacy policy', checkLinks, (f) => { f['PRIVACY.md'] = f['PRIVACY.md'].replace('docs/first-run.md', 'docs/nope.md'); }, /PRIVACY\.md: the link "docs\/nope\.md"/);
 defect('a link from a page to a file that moved', checkLinks, (f) => { f['docs/hosts/pi.md'] += '\n[db](../database-location-old.md)\n'; }, /database-location-old\.md/);
 
 test('rule 3: a broken link inside a code span or fence is not reported', () => {
@@ -712,3 +892,101 @@ defect('the OpenCode file holds a fenced block', checkOpenCodePointer, (f) => {
 defect('the OpenCode file does not link the page', checkOpenCodePointer, (f) => {
   f['.opencode/INSTALL.md'] = '# OpenCode\n\nSee the docs.\n';
 }, /does not link docs\/hosts\/opencode\.md/);
+
+// ---------------------------------------------------------------------------------------------
+// Rules 10 and 11: the README's shape
+// ---------------------------------------------------------------------------------------------
+
+test('rules 10 and 11 hold on the repository', () => assert.deepEqual(checkReadmeShape(repoTree()), []));
+test('rule 10: a README of exactly 200 lines passes', () => {
+  const files = validFiles();
+  const have = files['README.md'].replace(/\n$/, '').split('\n').length;
+  files['README.md'] = files['README.md'].replace(/\n$/, '') + '\n' + 'x\n'.repeat(README_MAX_LINES - have);
+  assert.equal(files['README.md'].replace(/\n$/, '').split('\n').length, README_MAX_LINES);
+  assert.deepEqual(checkReadmeShape(memoryTree(files)), []);
+});
+defect('a README of 201 lines', checkReadmeShape, (f) => {
+  const have = f['README.md'].replace(/\n$/, '').split('\n').length;
+  f['README.md'] = f['README.md'].replace(/\n$/, '') + '\n' + 'x\n'.repeat(README_MAX_LINES + 1 - have);
+}, /has 201 lines/);
+defect('a second top-level heading', checkReadmeShape, (f) => { f['README.md'] = f['README.md'].replace('## Install', '# The Problem\n\nx\n\n## Install'); }, /the "#" headings are \[total-recall, The Problem\]/);
+defect('a line above the banner', checkReadmeShape, (f) => { f['README.md'] = `# total-recall\n\n${f['README.md']}`; }, /does not open with the banner/);
+defect('a banner with one changed character', checkReadmeShape, (f) => { f['README.md'] = f['README.md'].replace('REKALL', 'RECALL'); }, /banner .* has changed/);
+defect('Use it before Check that it works', checkReadmeShape, (f) => {
+  f['README.md'] = f['README.md'].replace('## Use it\n\n', '').replace('## Check that it works', '## Use it\n\n## Check that it works');
+}, /the "##" headings are/);
+defect('a missing Privacy section', checkReadmeShape, (f) => { f['README.md'] = f['README.md'].replace('## Privacy\n\n', ''); }, /the "##" headings are/);
+defect('pi before Claude Code', checkReadmeShape, (f) => {
+  f['README.md'] = f['README.md'].replace('### Claude Code', '### TMP').replace('### pi', '### Claude Code').replace('### TMP', '### pi');
+}, /the "###" headings under Install are/);
+test('rule 11: a heading inside a fenced block is not a section', () => {
+  const files = validFiles();
+  files['README.md'] = files['README.md'].replace('## Use it\n', '## Use it\n\n```md\n## Fake\n```\n');
+  assert.deepEqual(checkReadmeShape(memoryTree(files)), []);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Rules 12 and 14: what the README must and must not hold
+// ---------------------------------------------------------------------------------------------
+
+test('rules 12 and 14 hold on the repository', () => assert.deepEqual(checkReadmeContent(repoTree()), []));
+defect('the install prompt address is missing', checkReadmeContent, (f) => { f['README.md'] = f['README.md'].replace(`${RAW}INSTALL.md`, 'the install file'); }, /install prompt's address/);
+defect('the check prompt is reworded', checkReadmeContent, (f) => { f['README.md'] = f['README.md'].replace('tier counts', 'tier sizes'); }, /check prompt of INSTALL\.md Step 4/);
+defect('the status line is missing', checkReadmeContent, (f) => { f['README.md'] = f['README.md'].replace(STATUS, 'a status line'); }, /does not hold the status line/);
+defect('a second npm-running line', checkReadmeContent, (f) => { f['README.md'] += '\nnpm install -g @strvmarv/total-recall\n'; }, /exactly one npm-running command/);
+defect('no npm-running line at all', checkReadmeContent, (f) => { f['README.md'] = f['README.md'].replace('pi install npm:@strvmarv/total-recall', 'see the page'); }, /exactly one npm-running command/);
+defect('one npm-running line that is not the pi line', checkReadmeContent, (f) => {
+  f['README.md'] = f['README.md'].replace('pi install npm:@strvmarv/total-recall', 'npm install -g @strvmarv/total-recall');
+}, /exactly one npm-running command/);
+defect('a second command on the pi line', checkReadmeContent, (f) => {
+  f['README.md'] = f['README.md'].replace('pi install npm:@strvmarv/total-recall', 'pi install npm:@strvmarv/total-recall && npm install -g @strvmarv/total-recall');
+}, /exactly one npm-running command/);
+defect('a prose line that only names the pi command beside another install', checkReadmeContent, (f) => {
+  f['README.md'] = f['README.md'].replace('pi install npm:@strvmarv/total-recall', 'Or `npm install -g x` (not `pi install npm:`)');
+}, /exactly one npm-running command/);
+defect('an npx line', checkReadmeContent, (f) => { f['README.md'] += '\nUse npx -y x\n'; }, /mentions npx/);
+
+// ---------------------------------------------------------------------------------------------
+// Rule 13: every page is reachable from the README
+// ---------------------------------------------------------------------------------------------
+
+test('rule 13 holds on the repository', () => assert.deepEqual(checkDocsReachable(repoTree()), []));
+defect('a new docs page that the README does not link', checkDocsReachable, (f) => { f['docs/extra.md'] = '# x\n'; }, /does not link docs\/extra\.md/);
+defect('a harness page that the README does not link', checkDocsReachable, (f) => {
+  f['README.md'] = f['README.md'].replace('- [Zed](docs/hosts/zed.md)\n', '');
+}, /does not link docs\/hosts\/zed\.md/);
+test('rule 13: the backlog, specs, plans, images and non-Markdown files need no link', () => {
+  const files = validFiles();
+  files['docs/TODO.md'] = '# todo\n';
+  files['docs/superpowers/specs/a.md'] = '# a\n';
+  files['docs/images/x.png'] = 'png';
+  files['docs/ascii.txt'] = 'x';
+  assert.deepEqual(checkDocsReachable(memoryTree(files)), []);
+});
+
+test('rule 3: a broken link in a new docs page is reported, one in docs/TODO.md is not', () => {
+  const files = validFiles();
+  files['docs/TODO.md'] = '# todo\n\n[x](nope.md)\n';
+  assert.deepEqual(checkLinks(memoryTree(files)), []);
+  files['docs/how-it-works.md'] = '# how\n\n[x](nope.md)\n';
+  assert.ok(checkLinks(memoryTree(files)).some((p) => /docs\/how-it-works\.md.*docs\/nope\.md/.test(p)));
+});
+
+// ---------------------------------------------------------------------------------------------
+// Rule 15: the tool reference
+// ---------------------------------------------------------------------------------------------
+
+test('rule 15 holds on the repository', () => assert.deepEqual(checkToolReference(repoTree()), []));
+defect('a tool in the catalog that the reference does not list', checkToolReference, (f) => {
+  f['catalog.json'] = JSON.stringify({ tools: [{ name: 'status' }, { name: 'usage_status' }, { name: 'insights' }] });
+  f['docs/tools.md'] = f['docs/tools.md'].replace('2 in', '3 in');
+}, /does not list the tool `insights`/);
+defect('a tool named only inside a fenced block', checkToolReference, (f) => {
+  f['docs/tools.md'] = '# MCP tools\n\n2 in SQLite mode: `usage_status`.\n\n```\nremoved: `status`\n```\n';
+}, /does not list the tool `status`/);
+defect('usage_status does not stand in for status', checkToolReference, (f) => {
+  f['docs/tools.md'] = '# MCP tools\n\n2 in SQLite mode: `usage_status`.\n';
+}, /does not list the tool `status`/);
+defect('a longer number does not stand in for the count', checkToolReference, (f) => { f['docs/tools.md'] = f['docs/tools.md'].replace('2 in', '12 in'); }, /does not say "2 in SQLite mode"/);
+defect('the SQLite count is off by one', checkToolReference, (f) => { f['docs/tools.md'] = f['docs/tools.md'].replace('2 in', '3 in'); }, /does not say "2 in SQLite mode"/);
+defect('a catalog with no tools list', checkToolReference, (f) => { f['catalog.json'] = '[]'; }, /no "tools" list/);

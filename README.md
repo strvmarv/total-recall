@@ -33,638 +33,119 @@
 
 **Persistent, cross-tool memory for AI coding assistants.**
 
-Your AI forgets everything when the session ends. Preferences, decisions, project context, corrections — gone. total-recall fixes that: a shared memory layer that persists across sessions, tools, and devices.
+Your AI assistant forgets everything when the session ends. total-recall keeps your corrections, preferences, decisions and project knowledge in one local store and gives them back to every supported tool, session after session. Everything is local by default: SQLite, a bundled embedding model, no external services and no API keys. Teams can point the same binary at Postgres or Cortex.
 
----
+## Install
 
-## The Problem
+Requires Node.js 20 or later, on Linux (x64 or arm64), macOS (Apple Silicon) or Windows (x64). Intel Macs are not supported.
 
-Every TUI coding assistant has the same gaps:
+### Let your assistant install it
 
-- **No memory between sessions** — every new session starts from zero, repeating the same context
-- **Siloed by tool** — switching between Claude Code and Copilot CLI means starting from scratch
-- **Single-machine** — your context doesn't follow you across devices
-- **Context bloat** — stuffing everything into a `CLAUDE.md` wastes tokens every prompt
-- **No token visibility** — no way to know what your AI sessions actually cost
-
----
-
-## The Solution
-
-- **Persistent memory** — corrections, preferences, decisions, and project context survive sessions automatically
-- **Cross-tool** — one memory store shared across Claude Code, Copilot CLI, Cursor, Cline, OpenCode, pi, Codex CLI, Hermes, Gemini CLI, Windsurf, Zed, and VS Code; existing memories auto-import on first run
-- **Built-in web UI** — `total-recall ui` opens a local browser dashboard (Dashboard, Memory, Knowledge Base, Usage, Insights, Eval, Config) for visual memory management without touching the CLI or AI session. Dark/light themes, a keyboard-first ⌘K command palette, and a developer-native *Terminal / Archive* design
-- **Cross-device** — point `TOTAL_RECALL_DB_PATH` at a cloud-synced folder and your memory follows you everywhere
-- **Smarter context, lower token cost** — a three-tier model (Hot / Warm / Cold, with sticky pins) enforces a 4000-token budget per prompt; new memories land in warm and earn their way into hot, so you get relevant context without carrying everything
-- **Token expenditure tracking** — see exactly what each session costs, broken down by host, project, and time window
-- **Knowledge base** — ingest your docs, READMEs, API references, and architecture notes; retrieved semantically when relevant
-- **Observability** — measure retrieval quality, run benchmarks, and compare config changes with the built-in eval framework
-
-By default, all state is local: SQLite + vector embeddings, no external services, no API keys. For teams, configure a shared Postgres/pgvector backend and remote embedder — same binary, just config.
-
----
-
-## Quick Start
-
-### Self-Install (Paste Into Any AI Coding Assistant)
+Paste this into any AI coding assistant:
 
 > Install the total-recall memory plugin: fetch and follow the instructions at https://raw.githubusercontent.com/strvmarv/total-recall/main/INSTALL.md
 
-That's it. Your AI assistant will read the instructions and install total-recall for its platform.
+The assistant reads the runbook, follows the page for its own harness, asks before it changes anything outside that harness, and tells you what to check afterwards.
 
 ### Claude Code
 
-```
-/plugin install total-recall@strvmarv-total-recall-marketplace
+```sh
+claude plugin marketplace add strvmarv/total-recall-marketplace
+claude plugin install total-recall@strvmarv-total-recall-marketplace
 ```
 
-Or if the marketplace isn't registered:
-
-```
-/plugin marketplace add strvmarv/total-recall-marketplace
-/plugin install total-recall@strvmarv-total-recall-marketplace
-```
+Inside a session the same two steps are `/plugin marketplace add strvmarv/total-recall-marketplace` and `/plugin install total-recall@strvmarv-total-recall-marketplace`. Details, permissions and known gaps: [Claude Code](docs/hosts/claude-code.md).
 
 ### pi
 
-```bash
-pi install npm:@strvmarv/total-recall
-pi install git:github.com/strvmarv/total-recall   # from main
-```
-
-The extension registers the MCP server, injects the startup instructions, runs the pinned-directive floor, and adds a `/total-recall` command. See [the pi page](docs/hosts/pi.md) for details and known gaps.
-
-### Cursor CLI
-
-Copy the repository to `~/.cursor/plugins/local/total-recall` and restart Cursor (Windows; see [the Cursor page](docs/hosts/cursor.md) for approval with `--approve-mcps`, the first-call timeout and other limits). The plugin registers the MCP server, injects the startup instructions, and runs the pinned-directive floor on tool-using turns.
-
-### Codex CLI
-
-```bash
-codex plugin marketplace add strvmarv/total-recall-marketplace
-codex plugin add total-recall@strvmarv-total-recall-marketplace
-```
-
-Then trust the two hooks once in `/hooks`. The plugin registers the MCP server, injects the startup instructions, and runs the pinned-directive floor. See [the Codex CLI page](docs/hosts/codex-cli.md) for tool approval, limitations and troubleshooting.
-
-### Copilot CLI
-
-```bash
-copilot plugin marketplace add strvmarv/total-recall-marketplace
-copilot plugin install total-recall@strvmarv-total-recall-marketplace
-```
-
-Allow the server for non-interactive runs with `--allow-tool=total-recall`. The plugin registers the MCP server, injects the startup instructions, and runs the pinned-directive floor. See [the Copilot CLI page](docs/hosts/copilot-cli.md) for tool approval and known gaps.
-
-### npm (Any MCP-Compatible Tool)
-
-```bash
-npm install -g @strvmarv/total-recall
-```
-
-Then add to your tool's MCP config:
-
-```json
-{
-  "mcpServers": {
-    "total-recall": {
-      "command": "total-recall"
-    }
-  }
-}
-```
-
-This works with **Copilot CLI**, **Cline**, **Cursor**, and any other MCP-compatible tool. OpenCode registers servers under an `mcp` key (see [its page](docs/hosts/opencode.md)) and Hermes has no MCP entry (see [its page](docs/hosts/hermes.md)). The `total-recall ui` command is available independently of MCP configuration — it is a local management surface, not a host tool.
-
-> **Note:** prefer the global install. `npx -y @strvmarv/total-recall` runs a copy that is already installed (for example an older global install) instead of fetching the latest release.
-
----
-
-## What Gets Remembered
-
-Every memory has an entry type that tells total-recall what it is and how to treat it.
-
-| Entry Type | Stored When | Example |
-|---|---|---|
-| `Correction` | You fix a mistake the AI made | `"Use Array.from() not spread for NodeList — spread fails in our build target"` |
-| `Preference` | You state a style or workflow preference | `"Always use const over let unless reassignment is needed"` |
-| `Decision` | You make an architecture or design choice | `"Using Zustand for state — Redux was overkill for this app size"` |
-| `Surfaced` | The AI captures context automatically | Key facts, constraints, or project-specific patterns noticed during work |
-| `Imported` | First-run import from another tool | Your existing Claude Code memories, Copilot snippets, Cursor history |
-| `Compacted` | Tier compaction generates a summary | Multiple related memories merged into a higher-signal entry |
-| `Ingested` | You ingest a file or directory | Chunks from READMEs, API docs, architecture notes |
-
-**`Correction` and `Preference` entries get priority treatment.** They surface as actionable hints at every session start and carry higher decay scores — helping them earn promotion into the hot tier and resist eviction once there.
-
----
-
-## How It Works
-
-### Tier Model
-
-total-recall uses a three-tier memory model — **Hot / Warm / Cold** — with a **sticky** flag that turns any hot entry into an always-injected pin. New memories land in **Warm** by default and *earn* their way into Hot by proving useful, so the auto-injected context stays high-signal without carrying everything:
-
-- **Warm** (default landing tier, up to 10K entries) — where new memories go unless you say otherwise: `memory_store`, `memory_extract`, `memory_import` / `total-recall memory import` (for entries without a recognised `tier`) and Cortex pulls that omit the tier all land here. Retrieved semantically per query: when you ask about authentication, relevant auth memories surface automatically. An entry is **promoted to Hot** once it earns it — `access_count ≥ 5` **and** `decay_score ≥ 0.7` (both tunable). Unused entries decay and migrate to Cold.
-- **Hot** (up to 50 entries, 4000-token budget, 1200 chars/entry) — auto-injected into every prompt, no query needed. Populated by earned promotion from warm (and by explicit `tier: "hot"` writes, which are capped at 1200 characters — store a concise summary, not an essay). Sticky tokens come off the top of this budget.
-- **Sticky (pinned)** — a flag on a hot entry, set via `memory_pin` (or store-and-pin with `memory_store { pinned: true }`). Sticky entries are **unbounded**, injected verbatim and first at session start under a `## Pinned directives (always follow)` header, and are **never** truncated, decayed, demoted, evicted, or compacted. `memory_unpin` clears the flag, leaving the entry in hot as a normal earned resident. **Project-scoped injection** (default on): untagged pins are global and inject everywhere; a pin tagged with a `project` value (lowercase `owner/repo` slug or folder name) injects only when the detected cwd matches that repo. When no git repo is detected, only global pins inject (fail-closed).
-- **Cold** (unlimited, hierarchical) — your knowledge base. Ingest entire directories — source trees, documentation, design specs — and they're retrieved when relevant.
-
-> **Upgrading from 3.x?** The old Pinned tier is merged into Hot as the sticky flag, and a one-time migration runs automatically on first `session_start`: existing pins become sticky-hot, previously auto-hot entries move to warm, and the legacy `pinned_*` tables are dropped. The migration is irreversible — back up `~/.total-recall/total-recall.db` first if you want a rollback path.
-
-### Hybrid Search
-
-Retrieval combines **BM25 full-text search** and **cosine vector similarity**, merged by a pure F# ranking function. You get keyword precision when you search by exact terms and semantic recall when you describe what you need in natural language. The BM25/vector weight is tunable via `[search] fts_weight`.
-
-### Embeddings
-
-All memories are embedded with [bge-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5) (384 dimensions, CLS pooling, with an asymmetric query prefix for searches), running locally via ONNX — no API calls, no network dependency. The model (~133 MB) is fetched and sha256-verified at release build time and ships bundled inside the npm/release artifact; there is no runtime HuggingFace download. If the bundled model is absent, the binary fails fast with a clear error rather than fetching anything.
-
-If you swap the local embedder, existing vectors are in the old model's space. By default (`embedding.on_model_change = "auto"`) the **sqlite** and **cortex** backends re-embed their local index automatically — a one-time re-embed that runs **in the background** after launch, not on the startup path. The server stays fully usable while it runs; local semantic retrieval is degraded until it finishes, and progress is reported through `session_start`/`status` (you'll see a "re-index in progress (N/M)" notice). It's batched and resumable, so restarting mid-re-index picks up where it left off rather than starting over. This also covers a pre-existing index that was never fingerprint-stamped (e.g. an older cortex database): if it holds vectors but carries no fingerprint, it is re-embedded too rather than silently left in a stale model space. Set `on_model_change = "warn"` to run with the stale vectors (degraded retrieval, recurring warning) or `"block"` to refuse to start. **Postgres** can't auto-migrate: under `auto` it stops with an actionable error — re-ingest into a fresh database or use `"warn"`. For **cortex**, only the local vector index is re-embedded (the remote re-embeds independently); `total-recall reindex-embeddings` runs the same re-embed offline for `warn`/`block` deferrals and manual re-embeds.
-
-For enterprise deployments, swap in a remote embedder (OpenAI, Amazon Bedrock) for higher-dimensional vectors and finer-grained retrieval across shared team knowledge.
-
-### Session Start
-
-Every `session_start` call runs the same sequence:
-
-1. **Import sync** — scans all installed host tools (Claude Code, Copilot CLI, Cursor, Cline, OpenCode, Hermes), deduplicates via content hash, and imports new entries.
-2. **Sticky + hot tier assembly** — sticky (pinned) entries are injected first, verbatim and untruncated, then current hot entries fill the remaining token budget. When `tiers.pinned.project_scoping` is on (default), only global pins and pins tagged to the detected repo are included; if no repo is detected, only global pins inject (fail-closed).
-3. **Hint generation** — surfaces up to 5 high-value warm memories as actionable one-liners: `Correction` and `Preference` entries first, frequently accessed entries (3+ accesses) second, warm→hot promotion candidates third. No LLM calls — pure DB queries.
-4. **Tier summary** — counts entries across hot, warm, cold, and all KB collections, plus a sticky count (`tierSummary.pinned` is retained for wire compatibility and now reports sticky-hot entries). A `pinned_budget_pressure` hint fires when sticky pins consume over half the token budget (suggested action: `memory_unpin`).
-5. **Session continuity** — reports human-readable time since the last compaction event (proxy for last active session).
-
-Every `session_start` also runs a skill scan: it reads `~/.claude/skills/` plus any directories listed in `[skills] extra_dirs`, persists the content + a locally-computed embedding to a SQLite skill cache, and advertises discovered skills as an `## Available Skills` block in the session context. Scanned skills are invokable on demand via the `skill_get` MCP tool and discoverable via `skill_search` (hybrid semantic + keyword ranking with a usage-decay tie-breaker) — both work entirely offline with no Cortex required. In Cortex mode, scanning and local `skill_get`/`skill_search` always work the same way; whether scanned skills also get **uploaded** to Cortex (so usage events sync back as a multi-machine rollup and skills pulled from other machines merge into the local cache) is controlled by `[skills] auto_import`, which **defaults to disabled** — uploading local skills is opt-in, since a host tool that already syncs skills down from Cortex (e.g. a Cortex skill-sync plugin) would otherwise have them re-uploaded right back as duplicate user-scoped entries.
-
-### Pinned-Directive Floor
-
-Pinned directives are injected once at `session_start`, but in a long session they drift far enough up the transcript that the model stops honoring them. The **pinned floor** re-asserts the pinned block near the live edge on an adaptive throttle, so your pins keep being followed all session long.
-
-A per-turn `UserPromptSubmit` hook runs before each prompt and re-injects the pinned block when **either** trigger trips since the last injection:
-
-- `floor_every_n_turns` user turns have elapsed (default 6), **or**
-- ~`floor_growth_tokens` of transcript growth has accumulated (default 6000).
-
-The first turn of a session seeds the throttle and skips (the block was just injected at session start). The re-injected block is rendered verbatim — identical to the session-start block — and prefixed with a short reminder line. Project scoping applies here too: the hook reads the cwd from the hook payload and filters pins by the detected repo (same fail-closed semantics as session start). The hook is **fail-safe: it never blocks or rejects a prompt**. Disable it entirely with `floor_enabled = false`.
-
-Per-host support:
-
-| Host | Per-turn floor | Mechanism |
-|---|---|---|
-| Claude Code | Active | `UserPromptSubmit` hook → `additionalContext` |
-| Copilot CLI | Active (turn-count trigger only) | `userPromptSubmitted` hook (`copilot/hooks.json` → `copilot/hook.js`) → `additionalContext` (observed on 1.0.98-2; Copilot's docs say this event ignores it) |
-| Cursor | Active on tool-using turns (turn-count trigger only) | `postToolUse` hook (`cursor/hooks.json` → `cursor/hook.js`) → `additional_context` (Cursor's CLI fires no per-prompt hook, and `beforeSubmitPrompt` cannot inject) |
-| Gemini CLI | Active | `BeforeAgent` hook → `hookSpecificOutput.additionalContext` |
-| pi | Active (turn-count trigger only) | pi extension: `before_agent_start` → hidden context message; `/total-recall` command |
-| Codex CLI | Active (turn-count trigger only) | `UserPromptSubmit` hook (`codex/hooks.json` → `codex/hook.js`) → `additionalContext` |
-| Cline | MCP tools only | No hooks; MCP server config via postinstall |
-| Windsurf | MCP tools only | No hooks; rules file for session-start instruction |
-| Zed | MCP tools only | No hooks; `context_servers` config via postinstall |
-| VS Code | MCP tools only | No hooks; `servers` config + `~/.copilot/mcp-config.json` |
-
----
-
-## Supported Platforms
-
-| Platform | Support | Notes |
-|---|---|---|
-| Claude Code | Full | Native plugin, session hooks, auto-import |
-| Copilot CLI | Core (known gaps on [the Copilot CLI page](docs/hosts/copilot-cli.md): turn-count floor only, no `session_end`, server-side project scope, nothing re-injected after `/compact`) | `copilot plugin install` plugin: MCP server, startup instructions, pinned-directive floor, auto-import from Copilot memory files |
-| Cursor | Core (known gaps on [the Cursor page](docs/hosts/cursor.md): floor only on tool-using turns, the first `session_start` can hit Cursor's 60 s MCP limit, no custom store, no `session_end`, Windows only so far) | Local plugin: MCP server (workspace cwd), startup instructions, pinned-directive floor |
-| OpenCode | Full | Plugin wrapper, auto-import from OpenCode project and agent files |
-| pi | Full (known gaps on [the pi page](docs/hosts/pi.md): turn-count floor only, no `session_end`, `compact --fast`) | `pi install` package: MCP server, startup instructions, pinned-directive floor, `/total-recall` command |
-| Codex CLI | Full (known gaps on [the Codex CLI page](docs/hosts/codex-cli.md): turn-count floor only, no `session_end`, hooks need a one-time trust review) | `codex plugin add` plugin: MCP server, startup instructions, pinned-directive floor |
-| Cline | Full | Auto-import from task history; MCP server config required |
-| Hermes | Importer | Auto-import from SOUL.md and skills on first run; no session hooks |
-
----
-
-## Web UI
-
-total-recall ships a built-in local web UI — a third surface alongside the MCP server (AI assistant integration) and the CLI (`total-recall status`, `total-recall eval`, etc.). It is a React SPA served directly from the single NativeAOT binary, no separate install or Node required.
-
-**Design.** The UI has a developer-native *Terminal / Archive* identity: a monospace-forward type system (self-hosted **JetBrains Mono** + **IBM Plex Sans** — bundled into the binary, no CDN, fully offline), a fixed **left navigation rail**, a faint ruled-grid backdrop, and an amber phosphor accent. It ships **dark and light themes** with a toggle — your choice persists, and on first visit it follows your OS preference. A **⌘K / Ctrl-K command palette** jumps to any page and runs live search across memories and the knowledge base, so the whole UI is reachable from the keyboard.
-
-![total-recall web UI — Dashboard, dark theme](docs/images/web-ui-dashboard.png)
-
-```bash
-total-recall ui                  # serve on http://localhost:5577 and open the browser
-total-recall ui --port 5600      # custom port
-total-recall ui --no-open        # suppress auto-open (e.g. remote / headless)
-total-recall ui --host 0.0.0.0   # bind all interfaces (warns about exposure)
-total-recall ui --token <tok>    # supply a fixed token instead of a per-launch random one
-total-recall ui --smoke          # CI mode: start, GET /api/health, exit 0/1
-```
-
-The server binds **loopback only** (`localhost`) by default. Every launch generates a fresh ephemeral bearer token that is injected directly into the served HTML, so opening the URL in a browser is sufficient — no copy-paste of credentials. A Host-header allowlist mitigates DNS-rebinding.
-
-**Seven sections** are available in the left navigation rail:
-
-| Section | What it shows |
-|---|---|
-| Dashboard | Tier composition, retrieval quality, token usage, recent activity, trend sparklines |
-| Memory | Browse, search, filter, promote/demote/pin/delete individual entries |
-| Knowledge Base | List collections, search, ingest files/directories, refresh or remove collections |
-| Usage | Token expenditure by host, project, model, and time window; per-session breakdown |
-| ✨ Insights | Memory-health score with an expandable breakdown, plus actionable cards computed server-side from your local store (no LLM): merge near-duplicate memories, promote high-use entries to pinned, surface retrieval gaps, and tune the similarity threshold from a recall curve |
-| Eval | Run the retrieval benchmark, review hit/miss/MRR with per-tier & per-content-type breakdowns and top misses, grow the benchmark from real retrieval misses, and compare config snapshots |
-| Config | Edit a safe subset of tuning knobs (validated, persisted via `config_set`); storage & embedding shown read-only |
-
-**Cost figures** in the Usage section are **client-side estimates** derived from a bundled model pricing table. They are not billed amounts.
-
-The SPA build is **opt-in** (`-p:BuildSpa=true` triggers `npm ci && npm run build` in `ClientApp/` and embeds the Vite output in the assembly). Default `dotnet build` and all tests are Node-free — the binary falls back to a placeholder page when built without the SPA. Release builds always include the SPA.
-
----
-
-## Commands
-
-All commands are routed through the `/total-recall:commands` skill:
-
-| Command | Description |
-|---|---|
-| `/total-recall:commands help` | Show command reference table |
-| `/total-recall:commands status` | Dashboard overview |
-| `/total-recall:commands search <query>` | Semantic search across all tiers |
-| `/total-recall:commands store <content>` | Manually store a memory |
-| `/total-recall:commands forget <query>` | Find and delete entries |
-| `/total-recall:commands inspect <id>` | Deep dive on single entry with compaction history |
-| `/total-recall:commands promote <id>` | Move entry to higher tier |
-| `/total-recall:commands demote <id>` | Move entry to lower tier |
-| `/total-recall:commands pin <id>` | Pin entry — always injected at session start, never decays |
-| `/total-recall:commands unpin <id>` | Clear an entry's sticky flag (it stays in hot as an earned resident) |
-| `/total-recall:commands history` | Show recent tier movements |
-| `/total-recall:commands lineage <id>` | Show compaction ancestry |
-| `/total-recall:commands export` | Export to portable JSON format |
-| `/total-recall:commands import <file>` | Import from export file |
-| `/total-recall:commands ingest <path>` | Add files or directories to knowledge base |
-| `/total-recall:commands kb search <query>` | Search knowledge base |
-| `/total-recall:commands kb list` | List KB collections |
-| `/total-recall:commands kb refresh <id>` | Re-ingest a collection |
-| `/total-recall:commands kb remove <id>` | Remove KB entry |
-| `/total-recall:commands compact` | Force compaction |
-| `/total-recall:commands eval` | Retrieval quality metrics |
-| `/total-recall:commands eval --benchmark` | Run synthetic benchmark |
-| `/total-recall:commands eval --compare <name>` | Compare metrics between two config snapshots |
-| `/total-recall:commands eval --snapshot <name>` | Manually create a named config snapshot |
-| `/total-recall:commands eval --grow` | Review and accept/reject benchmark candidates from retrieval misses |
-| `/total-recall:commands config get <key>` | Read config value |
-| `/total-recall:commands config set <key> <val>` | Update config |
-| `/total-recall:commands import-host` | Re-run import sync from all host tools |
-
-Memory capture, retrieval, and compaction run automatically in the background — see the "Automatic Behavior" section of the `/total-recall:commands` skill.
-
-> **Note:** `/total-recall:commands` is implemented as a Claude Code skill (at `skills/commands/SKILL.md`), not as a slash-command file under `commands/`. The skill handles all `<subcommand>` arguments internally.
-
----
-
-## Configuration
-
-The config file lives at `~/.total-recall/config.toml`. All fields have defaults — you only need to override what you want to change.
-
-```toml
-# total-recall configuration
-
-[tiers.pinned]
-# The Pinned tier was merged into Hot as a "sticky" flag in 4.0. This section
-# is kept as a deprecated alias — its floor_* / project_scoping fields still
-# drive the per-turn re-injection of sticky pins. max_content_chars no longer
-# applies (sticky entries are unbounded).
-floor_enabled = true              # Per-turn pinned-directive floor (UserPromptSubmit re-injection)
-floor_every_n_turns = 6           # Re-inject the sticky block at least every N user turns
-floor_growth_tokens = 6000        # ...or after ~this many tokens of transcript growth (whichever trips first)
-project_scoping = true            # Scope sticky injection by git repo: repo-tagged pins inject only in their repo; untagged pins are global; fail-closed when no repo detected
-
-[tiers.hot]
-max_entries = 50                  # Max entries auto-injected per prompt
-token_budget = 4000               # Max tokens for hot tier injection (sticky pins come off the top)
-carry_forward_threshold = 0.7     # Score threshold to stay in hot
-max_content_chars = 1200          # Max characters per hot entry (oversize rejected — store a summary or keep it in warm); sticky pins are exempt
-
-[tiers.warm]
-max_entries = 10000               # Max entries in warm tier
-retrieval_top_k = 5               # Results returned per search
-similarity_threshold = 0.65       # Min cosine similarity for retrieval
-cold_decay_days = 30              # Days before unused warm entries decay to cold
-
-[tiers.cold]
-chunk_max_tokens = 512            # Max tokens per knowledge base chunk
-chunk_overlap_tokens = 50         # Overlap between adjacent chunks
-lazy_summary_threshold = 5        # Accesses before generating summary
-
-[compaction]
-decay_half_life_hours = 168       # Score half-life (168h = 1 week)
-warm_threshold = 0.3              # Score below which warm→cold
-promote_threshold = 0.7           # Min decay_score to promote (cold→warm, and warm→hot)
-promote_min_access = 5            # Min access_count for warm→hot promotion (paired with promote_threshold on decay_score)
-warm_sweep_interval_days = 7      # How often to run warm sweep
-
-[search]
-fts_weight = 0.3                  # BM25 weight in hybrid ranking (0.0 = vector only, 1.0 = FTS only)
-
-[scope]
-default = "user"                  # Default scope for new entries (e.g., "user", "team")
-
-[usage]
-initial_backfill_days = 30        # Days of usage history to backfill on first sync
-
-[regression]
-miss_rate_delta = 0.1             # Alert if miss rate increased by this much vs. previous snapshot
-latency_ratio = 2.0               # Alert if latency increased by this factor vs. previous snapshot
-min_events = 10                   # Minimum retrieval events required on each side before the regression check runs
-
-[embedding]
-model = "bge-small-en-v1.5"      # Embedding model name
-dimensions = 384                  # Embedding dimensions
-# provider = "local"              # "local" (default) | "openai" | "bedrock"
-# endpoint = "https://api.openai.com/v1"   # OpenAI-compatible base URL
-# bedrock_region = "us-east-1"             # Bedrock only
-# bedrock_model = "cohere.embed-v4:0"      # Bedrock model ID
-# api_key = ""                             # or set TOTAL_RECALL_EMBEDDING_API_KEY env var
-
-# --- Skills (optional) ---
-# [skills]
-# extra_dirs = [
-#   "~/my-skills",
-#   "/path/to/team-skills"
-# ]
-
-# --- Remote storage (optional) ---
-# [storage]
-# connection_string = "Host=localhost;Database=total_recall;Username=tr;Password=changeme"
-
-# --- User identity (optional, Postgres only) ---
-# [user]
-# user_id = "alice"               # or set TOTAL_RECALL_USER_ID env var
-```
-
-**Relocating the database:** set `TOTAL_RECALL_DB_PATH` to an absolute path or `~/`-prefixed path. See [Relocating the database](docs/database-location.md) for cloud-sync and shared-workspace guidance.
-
-**Switching to Postgres:** uncomment the `[storage]` section with your connection string. The binary auto-detects the backend — no code changes, no flag. Pair with `[embedding] provider = "bedrock"` or `"openai"` for remote embeddings. Run `migrate_to_remote` to copy local memories to the shared database with re-embedding.
-
-### Connecting to Cortex
-
-Total Recall Cortex is the shared backend platform that adds team knowledge bases, connectors (Jira, Confluence, GitHub), chat/RAG, and a React UI on top of the plugin's memory layer.
-
-In Cortex mode, the plugin operates as a hybrid:
-- **User memories** are stored locally (fast reads/writes), synced bidirectionally to Cortex every 300 seconds and at session boundaries
-- **Sticky (pinned) entries are local-only** — Cortex has no sticky-pin support yet, so pins are never pushed, pulled, reconciled, or migrated (`migrate_to_remote` skips them)
-- **Global knowledge** (team KB, connector-ingested data) is queried remotely from Cortex
-- **Telemetry** (usage, retrieval events, compaction log) is pushed to Cortex for unified dashboards
-- **Skills** are synced to Cortex so team members share the same skill library
-
-Configure in your `config.toml`:
-
-```toml
-[storage]
-mode = "cortex"
-
-[cortex]
-url = "https://your-cortex-instance.example.com"
-pat = "tr_your_personal_access_token"
-sync_interval_seconds = 300       # Background sync interval (default: 300)
-```
-
-Or via environment variables:
-
-```bash
-export TOTAL_RECALL_CORTEX_URL="https://your-cortex-instance.example.com"
-export TOTAL_RECALL_CORTEX_PAT="tr_your_personal_access_token"
-```
-
-Generate a PAT from the Cortex web UI under Settings → Personal Access Tokens.
-
-**Offline resilience:** If Cortex is unreachable, the plugin continues working locally. A persistent sync queue buffers outbound changes and flushes automatically when connectivity is restored.
-
-### Skills
-
-total-recall can advertise custom skills at every `session_start` so your AI assistant knows which workflows are available. Skills are discovered from two places:
-
-- **`~/.claude/skills/`** — the standard Claude Code user skills directory (always scanned)
-- **`extra_dirs`** — additional directories you configure, scanned on every session start regardless of whether Cortex is available
-
-Configure extra skill directories in `~/.total-recall/config.toml`:
-
-```toml
-[skills]
-extra_dirs = [
-  "~/my-custom-skills",
-  "/path/to/shared/team-skills"
-]
-```
-
-Paths can be absolute or `~/`-prefixed. Skills in `extra_dirs` are always advertised from disk — Cortex is not required.
-
-**Uploading local skills to Cortex (`auto_import`):** In Cortex storage mode, scanning `~/.claude/skills/` for local `skill_get`/`skill_search` always happens. Whether those scanned skills are also *uploaded* to Cortex is a separate, opt-in setting:
-
-```toml
-[skills]
-auto_import = true
-```
-
-Defaults to `false` — scanning and local skill lookup work either way, but nothing is uploaded unless you turn this on. This is opt-in because a host tool that already syncs skills down *from* Cortex (e.g. a Cortex skill-sync plugin populating `~/.claude/skills/`) would otherwise have those same skills scanned right back up as duplicate user-scoped entries on every session start.
-
-**Skill format:** Each skill is either a single `.md` file or a directory containing a `SKILL.md` entry point. A minimal single-file skill:
-
-```markdown
----
-name: my-skill
-description: Does something useful
----
-
-Full skill content here...
-```
-
-A bundle (directory with supporting files) uses the same frontmatter in its `SKILL.md`, and can include scripts, templates, or reference files alongside it.
-
-**Merge behavior:** When Cortex is configured and reachable, the session context block merges cortex-stored skills with locally-scanned `extra_dirs` skills, deduplicating by name (Cortex entries take precedence). When Cortex is unavailable or not configured, only local skills appear.
-
-### The `develop` skill
-
-The plugin ships a `develop` skill (`/develop`) that takes a change from an idea to an open pull request, with a GitHub issue as the ticket.
-
-- **Define** is interactive: you and the model brainstorm, agree a spec (or a short approach), have it reviewed, and publish a GitHub issue that meets the ticket standard. A `defined` comment pins the issue body the run will build.
-- **Deliver** is hands-off: from that issue it writes a plan, builds with review at every step, verifies, and opens a PR that closes the issue. It then stops. It never merges, rebases or force-pushes, and it works in its own git worktree, so your checkout is untouched.
-
-`/develop 123` (or an issue URL) delivers an existing issue, `/develop <description>` starts a Define, and `/develop initialize` writes the repository profile with you. On Claude Code the command may be namespaced by the plugin name (for example `/total-recall:develop`); this is unverified.
-
-A fork is refused (`origin` must not be a fork), and a host with no way to ask you a question cannot run Define.
-
-**Requirements**
-
-- The superpowers plugin, version 7 or later (brainstorming, writing-plans, subagent-driven-development, test-driven-development, verification-before-completion, finishing-a-development-branch).
-- `gh` 2.48 or later (Define reads every open pull request with `gh api --paginate --slurp`), logged in to a github.com account with write access to the repository, whose `origin` is on github.com.
-- Optional: a repository profile, `.github/develop.md`, naming the `gh` account to use, the ticket-standard switch and the commands to run before the PR opens (the format is in `skills/develop/profile.md`; this repository's own profile is the example).
-- Claude Code and pi are supported first. On a host without a way to dispatch the two reviewer agents (`adversarial-reviewer`, `counterexample-reviewer`), or where `adversarial-reviewer` is not available, the reviews run in the same session (`review=self`); on pi, Preflight first offers to copy the agent files into pi's global agent directory, never over a file already there.
-
-**Trust.** A run acts on the pin (the latest `defined` or `reapproved` comment) written by someone with write access to the repository, not on whatever the issue body says now. Any other issue text, comment or tool output is treated as data.
-
-**Account pinning.** Every `gh` and network `git` call is pinned to the chosen account on that one command; the skill never runs `gh auth switch`. Both the token lookup and the tool run with `GH_HOST=github.com`, so an Enterprise `GH_HOST` in the environment cannot redirect them. The pinned forms look like this:
-
 ```sh
-t=$(GH_HOST=github.com gh auth token --user <login>) && [ -n "$t" ] && GH_HOST=github.com GH_TOKEN="$t" gh <args>
-t=$(GH_HOST=github.com gh auth token --user <login>) && [ -n "$t" ] && GH_HOST=github.com GH_TOKEN="$t" GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c 'credential.helper=!gh auth git-credential' <args>
+pi install npm:@strvmarv/total-recall
 ```
 
-The PowerShell forms (the skill picks the form that matches the shell it is running in):
+This runs the package's install script, which can also configure other tools it finds on the machine ([what it changes](docs/npm-postinstall.md)). The form that skips it, the git form and known gaps: [pi](docs/hosts/pi.md).
 
-```powershell
-$e = 1; $p = $env:GH_TOKEN; $h = $env:GH_HOST; try { $env:GH_HOST = 'github.com'; $env:GH_TOKEN = (gh auth token --user <login>); if (-not $env:GH_TOKEN) { throw 'no token' }; gh '<arg>' '<arg>'; $e = $LASTEXITCODE } finally { $env:GH_TOKEN = $p; $env:GH_HOST = $h }; exit $e
-$e = 1; $p = $env:GH_TOKEN; $q = $env:GIT_TERMINAL_PROMPT; $h = $env:GH_HOST; try { $env:GH_HOST = 'github.com'; $env:GH_TOKEN = (gh auth token --user <login>); if (-not $env:GH_TOKEN) { throw 'no token' }; $env:GIT_TERMINAL_PROMPT = '0'; git -c credential.helper= -c 'credential.helper=!gh auth git-credential' '<arg>' '<arg>'; $e = $LASTEXITCODE } finally { $env:GH_TOKEN = $p; $env:GIT_TERMINAL_PROMPT = $q; $env:GH_HOST = $h }; exit $e
+### Other harnesses
+
+Each page gives the commands, what must be asked of you first, and how to check the result.
+
+| Harness | How it installs | Page |
+|---|---|---|
+| Codex CLI | Plugin from the total-recall marketplace; trust its hooks once | [Codex CLI](docs/hosts/codex-cli.md) |
+| Copilot CLI | Plugin from the total-recall marketplace | [Copilot CLI](docs/hosts/copilot-cli.md) |
+| Cursor | Local plugin (Windows only so far); MCP server only elsewhere | [Cursor](docs/hosts/cursor.md) |
+| Gemini CLI | npm package: MCP server, a per-prompt hook and a `GEMINI.md` block | [Gemini CLI](docs/hosts/gemini-cli.md) |
+| Kiro | npm package: MCP server and a steering file; hooks per workspace | [Kiro](docs/hosts/kiro.md) |
+| OpenCode | npm package plus an `mcp` entry added by hand | [OpenCode](docs/hosts/opencode.md) |
+| Cline | npm package plus an entry in Cline's MCP settings | [Cline](docs/hosts/cline.md) |
+| Windsurf | npm package: MCP server and a rules file | [Windsurf](docs/hosts/windsurf.md) |
+| Zed | npm package: a context server entry | [Zed](docs/hosts/zed.md) |
+| VS Code | npm package: an `mcp.json` entry | [VS Code](docs/hosts/vscode.md) |
+| Hermes | npm package: a memory provider plugin | [Hermes](docs/hosts/hermes.md) |
+| Any other MCP client | npm package plus an `mcpServers` entry | [Other MCP clients](docs/hosts/other-mcp.md) |
+
+## Check that it works
+
+Start a new session: MCP tools appear only in a new session. Where the harness delivers the startup instructions, the assistant opens with a short status line like this one:
+
+> total-recall loaded — 2 pinned, 3 hot, 12 warm, 5 cold, 2 KB collections. Storage: cortex. Last session: 2 hours ago.
+
+Then paste this to check it end to end:
+
+```
+Check that total-recall is working: call its status tool and tell me the tier counts and the database path.
 ```
 
-**Minimal tool allowlist.** Deliver runs many routine commands, and a plain `gh *` or `git *` permission pattern may not match the pinned forms above (they begin with `t=$(...)`), so either use an auto-accept mode or allow these:
+[First run](docs/first-run.md) says what happens the first time. If nothing appears, see your harness's page under [Install](#install); [Hermes](docs/hosts/hermes.md) has its own check.
 
-- the skill's own scripts: `node <skill dir>/scripts/ghpin.js scratch`, `node <skill dir>/scripts/ghpin.js run *`, and the other CLIs in that directory (`node <skill dir>/scripts/*.js *`), where `<skill dir>` is the directory that holds the skill's `SKILL.md` (`ghpin.js run` spawns `gh` or `git` with no shell and applies the pin itself);
-- the pinned `gh` and `git` forms shown above, as written;
-- the local `git` calls a run makes: `remote get-url origin`, `status`, `diff`, `add`, `commit`, `worktree` (`add`, `list`, `remove`), `branch -d`, `rev-parse`, `check-ref-format`, `show`, `ls-tree`, `merge-base --is-ancestor` and the reachability probe `rev-parse --verify --quiet` (the last four are run through `ghpin.js run`);
-- the network `git` calls, `fetch`, `push` and `ls-remote`, which go through `ghpin.js run` or the pinned `git` form above;
-- the `sh verify` commands of the repository profile.
+## Use it
 
----
+- **It remembers without being asked.** Where the harness delivers the startup instructions ([Supported platforms](docs/platforms.md)), corrections, preferences and decisions are stored as you work, and relevant memories are retrieved for each question. You can also ask the assistant to remember something, or run `/total-recall:commands store <content>`. See [what gets remembered](docs/how-it-works.md#what-gets-remembered).
+- **Pin what must always be followed.** `/total-recall:commands pin <id>` makes an entry a pinned directive: injected first at session start and never decayed. See [the tier model](docs/how-it-works.md#tier-model).
+- **Give it your docs.** `/total-recall:commands ingest <path>` adds files or a directory to the knowledge base, retrieved when relevant. See the `ingest` and `kb` rows in [Commands](docs/commands.md).
+- **Commands.** `/total-recall:commands help` lists them all: search, forget, inspect, promote, compact, eval and more. The form differs by harness (on pi it is `/total-recall <subcommand>`): see [Supported platforms](docs/platforms.md) and [Commands](docs/commands.md).
+- **Web UI.** Where the global npm package is installed, `total-recall ui` opens a local dashboard for memories, the knowledge base, token usage and retrieval quality. On a plugin install or in pi, where `total-recall` is not on your PATH, ask the assistant for the command for your install. See [Web UI](docs/web-ui.md).
+- **The `develop` skill.** `/develop` takes a change from an idea to a pull request: Define turns the idea into a reviewed GitHub issue, and Deliver turns the issue into a pull request. It never merges. See [the develop skill](docs/develop.md).
 
-## Developer Reference
+## How it works
 
-The MCP server exposes 41 core tools in every backend mode; local SQLite and Cortex modes add usage, cache, skill, and feedback tools (49 and 50 total, respectively). All tool names follow the pattern `<domain>_<action>`.
+New memories land in the **warm** tier, where they are searched for every question with a mix of keyword and vector search. Entries that prove useful earn a place in the small **hot** tier, which is injected at session start within a token budget. **Sticky** pins are hot entries you mark by hand: they are injected first, in full, and re-asserted during long sessions where the harness supports it. The **cold** tier holds the knowledge base built from the files you ingest, and memories that decay out of warm. Embeddings come from a model that ships with the binary and runs locally. The full explanation is in [How total-recall works](docs/how-it-works.md).
 
-| Category | Tools |
+## Documentation
+
+| Page | What it covers |
 |---|---|
-| Session | `session_start`, `session_end`, `session_context`, `session_refresh` |
-| Memory | `memory_store`, `memory_get`, `memory_get_all`, `memory_update`, `memory_delete`, `memory_inspect`, `memory_search`, `memory_list`, `memory_recent`, `memory_extract`, `memory_feedback`† |
-| Tier management | `memory_promote`, `memory_demote`, `memory_pin`, `memory_unpin`, `memory_history`, `memory_lineage` |
-| Import / Export | `memory_export`, `memory_import`, `import_host` |
-| Knowledge base | `kb_ingest_file`, `kb_ingest_dir`, `kb_search`, `kb_list_collections`, `kb_refresh`, `kb_remove`, `kb_summarize`, `kb_resolve` |
-| Compaction | `compact_now` |
-| Eval | `eval_report`, `eval_benchmark`, `eval_compare`, `eval_snapshot`, `eval_grow` |
-| Config | `config_get`, `config_set` |
-| Status & Usage | `status`, `usage_status`† |
-| Cache | `cache_check`†, `cache_store`† |
-| Migration | `migrate_to_remote` |
-| Skills† | `skill_search`, `skill_get`, `skill_list`, `skill_import_host`, `skill_delete` *(skill_delete: Cortex mode only)* |
+| [INSTALL.md](INSTALL.md) | The install runbook an assistant follows |
+| [Supported platforms](docs/platforms.md) | What an install delivers on each harness |
+| [First run](docs/first-run.md) | Provisioning, the first session, upgrading from 0.7.x |
+| [How total-recall works](docs/how-it-works.md) | Entry types, tiers, search, embeddings, session start, the pinned floor |
+| [Commands](docs/commands.md) | Every `/total-recall:commands` subcommand |
+| [Web UI](docs/web-ui.md) | The local dashboard and its sections |
+| [Configuration](docs/configuration.md) | `config.toml`, Postgres, remote embedders |
+| [Relocating the database](docs/database-location.md) | Cloud-synced and shared databases |
+| [Connecting to Cortex](docs/cortex.md) | The shared backend for teams |
+| [Skills](docs/skills.md) | Advertising your own skills at session start |
+| [The develop skill](docs/develop.md) | Requirements, trust, account pinning, tool allowlist |
+| [MCP tools](docs/tools.md) | The tool reference |
+| [Architecture](docs/architecture.md) | Layers, data flow, backends, core technologies |
+| [What the install script changes](docs/npm-postinstall.md) | Other tools that installing the npm package can configure |
+| [Verifying a release](docs/verifying-a-release.md) | Checking a download's build attestation |
+| [Building from source](docs/building.md) | Prerequisites and the build |
+| [PRIVACY.md](PRIVACY.md) | What is stored and what can leave the machine |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | The contributor guide |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
 
-†Unavailable in Postgres mode (local SQLite + Cortex modes only).
+## Privacy
 
-Sticky (pinned) surface: `memory_pin` sets the sticky flag on an entry, moving it into the hot tier (with optional `scope: "project" | "global"`); `memory_unpin` clears the flag, leaving the entry in hot as an earned resident; `memory_store` accepts `pinned: true` to store-and-pin new content directly as sticky-hot; `memory_promote` / `memory_demote` reject a sticky entry as source or target (unpin it first). `memory_list` accepts a `sticky: true` filter, and `status` reports a sticky count (surfaced as `tierSummary.pinned` for wire compatibility). **Project-scoped injection** (enabled by `tiers.pinned.project_scoping`, default on): a pin is tagged to a repo by setting its `project` field to the lowercase `owner/repo` slug (e.g. `acme-org/widget-service`) or bare folder name when no remote is configured — at injection time `ProjectResolver` detects the current repo from cwd (pure filesystem walk) and `PinnedScope.OptsFor` filters accordingly. Untagged (null-project) pins are global and always inject. When no repo is detected the injection is fail-closed to globals only.
-
-Retrieval-quality feedback: `memory_search` returns `{ retrievalId, results }` and `kb_search` returns a top-level `retrievalId`. The assistant can call `memory_feedback` with that `retrievalId` to confirm whether the retrieval was actually used; un-acted retrievals are inferred as misses after a grace window. This drives the `eval_report` metrics and the web UI's "Retrieval quality" card. `memory_feedback` is intentionally assistant-only — it is not exposed to the web UI.
-
-Handler implementations live in `src/TotalRecall.Server/Handlers/<ToolName>Handler.cs`. Tool wiring: `src/TotalRecall.Server/ServerComposition.cs → BuildRegistry()`.
-
----
-
-## Architecture
-
-```
-npm wrapper layer (Node, zero runtime dependencies):
-  bin/start.js (MCP bootstrap shim) — comes up instantly; answers initialize/ping/tools/list
-    from catalog.json before the engine is ready; provisions (sha256-verified download via
-    release provisioning.manifest.json) + spawns + proxies the engine; supervises and
-    restarts on crash; the MCP connection never drops (no more MCP error -32000 on first
-    launch after an update); emits notifications/tools/list_changed once proxying begins.
-
-MCP Server (.NET 10 NativeAOT — C# imperative shell + F# functional core)
-├── TotalRecall.Core (F#)        — pure functions: tokenizer, decay, hybrid ranking, parsers, chunker
-├── TotalRecall.Infrastructure   — SQLite/Postgres storage, ONNX/remote embedder, importers, migrations
-├── TotalRecall.Server           — MCP JSON-RPC server, 41 core tool handlers (48–49 with mode-dependent tools), lifecycle
-├── TotalRecall.Web              — embedded ASP.NET Core minimal API + React SPA (the web UI)
-├── TotalRecall.Cli              — CLI commands (status, eval, kb, memory, config, migrate, ui)
-└── TotalRecall.Host             — composition root, AOT entry point, migration guard
-
-Tiers:
-  Hot (50 entries, 1200 chars/entry) → auto-injected every prompt; earned from warm by access
-    └─ sticky flag → user-pinned; injected first, unbounded, never decays/compacts/evicts
-  Warm (10K entries, default ingress) → BM25 + cosine hybrid search per query; promotes to hot on merit
-  Cold (unlimited)   → hierarchical KB retrieval
-
-Backends (selected by config):
-  Local:    SQLite + sqlite-vec + bundled ONNX embedder (default, zero config)
-  Postgres: Postgres/pgvector + HNSW indexes + tsvector FTS + per-user visibility
-  Cortex:   Local SQLite + write-local-then-enqueue sync to Cortex; remote queries for global KB
-```
-
-**Data flow:**
-
-1. `store` — write a memory, assign tier (warm by default), embed, persist
-2. `search` — embed query, BM25 + cosine vector search across all tiers, merge with F# ranking, return results
-3. `compact` — decay scores, compact hot→warm (summarize), demote warm→cold; earned warm→hot promotion runs in the warm sweep
-4. `ingest` — chunk files with heading-aware Markdown and regex-based code parsing, embed chunks, store in cold tier
-
-**Local mode:** all state lives in `~/.total-recall/total-recall.db`. The embedding model and the sqlite-vec native extension are bundled with the binary. No network calls required at runtime.
-
-**Cortex mode:** user memories write locally first for low latency. A `RoutingStore` wraps every write: persist locally, enqueue to `sync_queue`. A background sync loop flushes the queue to Cortex every `sync_interval_seconds` (default: 300) and at session boundaries. Global knowledge (team KB, connectors) is read directly from Cortex.
-
----
-
-## Verifying a release
-
-Each GitHub Release carries a build attestation (GitHub artifact attestations, signed through sigstore) for its four platform archives and for `provisioning.manifest.json`, produced by this repository's `release.yml`. To check a file you downloaded from a release:
-
-```bash
-gh auth login    # once: `gh attestation verify` needs an authenticated GitHub CLI
-gh attestation verify total-recall-linux-x64.tar.gz --repo strvmarv/total-recall
-```
-
-Use the archive for your platform (`total-recall-<rid>.tar.gz`) or `provisioning.manifest.json`. To also require that the attestation came from this repository's release workflow, add `--signer-workflow strvmarv/total-recall/.github/workflows/release.yml`.
-
-Only releases published after attestations were added carry them. The plugin's own launcher does not check attestations: before it extracts a download it verifies only the sha256 listed in `provisioning.manifest.json`, so the attestation is for people who want to verify what they run, not something the install enforces.
-
----
-
-## Prerequisites
-
-These apply only if you're building from source. The prebuilt binary is self-contained — no .NET runtime, no system SQLite, no Bun required.
-
-- **.NET 10 SDK** — pinned by `global.json` at the repo root; builds the `net10.0` NativeAOT target
-- **npm** — for `npm ci`, which pulls `sqlite-vec` native libs needed by the csproj copy targets
-- **Embedding model** — run `sh scripts/fetch-bge-small.sh` once to fetch + sha256-verify the `bge-small-en-v1.5` ONNX model (~133 MB) into `models/bge-small-en-v1.5/`. The model is no longer committed to the repo (not in Git LFS); release builds fetch and bundle it into the per-RID artifact.
-
----
-
-## Installation from Source
-
-```bash
-git clone https://github.com/strvmarv/total-recall.git
-cd total-recall
-sh scripts/fetch-bge-small.sh              # fetch + sha256-verify the ONNX model (~133 MB)
-npm ci                                     # pulls sqlite-vec native libs into node_modules/
-dotnet build src/TotalRecall.sln
-dotnet test src/TotalRecall.sln --filter "Category!=Integration"   # ~1000 tests
-dotnet publish src/TotalRecall.Host/TotalRecall.Host.csproj -c Release -r win-x64 -p:PublishAot=true
-# (swap win-x64 for your RID: linux-x64, linux-arm64, osx-arm64)
-```
-
-The publish output lands in `src/TotalRecall.Host/bin/Release/net10.0/<rid>/publish/` with the binary plus all sibling native libs (`libonnxruntime.*`, `libe_sqlite3.*`, `runtimes/vec0.*`) ready to run.
-
-Supported RIDs: `linux-x64`, `linux-arm64`, `osx-arm64`, `win-x64`. Intel Mac (`osx-x64`) is not shipped.
-
----
+Everything stays on your machine by default. Data leaves it only if you configure a Postgres backend, Cortex or a remote embedder, and when a plugin install downloads the engine from GitHub Releases on first launch. The detail is in [PRIVACY.md](PRIVACY.md).
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor guide, including how to add a new host importer, extend the chunking pipeline, or add a new MCP tool handler.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the contributor guide, including how to add a host importer, extend the chunking pipeline or add an MCP tool handler.
 
----
+## Credits
 
-## Built With & Inspired By
-
-### [superpowers](https://github.com/obra/superpowers) by [obra](https://github.com/obra)
-
-total-recall's plugin architecture, skill format, hook system, multi-platform wrapper pattern, and development philosophy are directly inspired by and modeled after the **superpowers** plugin. superpowers demonstrated that a zero-dependency, markdown-driven skill system could fundamentally improve how AI coding assistants behave — total-recall extends that same philosophy to memory and knowledge management.
-
-If you're building plugins for TUI coding assistants, start with [superpowers](https://github.com/obra/superpowers). It's the foundation this ecosystem needs.
-
-### Core Technologies
-
-- [.NET 10 / NativeAOT](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/) — single-binary deployment, no runtime dependency
-- [F# Core](https://learn.microsoft.com/en-us/dotnet/fsharp/) — pure functional core: tokenizer, parsers, decay, hybrid ranking
-- [Microsoft.Data.Sqlite](https://learn.microsoft.com/en-us/dotnet/standard/data/sqlite/) — embedded SQLite with extension loading
-- [sqlite-vec](https://github.com/asg017/sqlite-vec) — vector similarity search in SQLite (loaded as a native extension via `LoadExtension`)
-- [Microsoft.ML.OnnxRuntime](https://onnxruntime.ai/docs/get-started/with-csharp.html) — local ML inference, AOT-compatible
-- [Microsoft.ML.Tokenizers](https://learn.microsoft.com/en-us/dotnet/api/microsoft.ml.tokenizers) — canonical BERT BasicTokenization + WordPiece
-- [bge-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5) — sentence embeddings (384d, CLS pooling)
-- Hand-rolled JSON-RPC stdio MCP server in `TotalRecall.Server` (no SDK dependency)
-- [Spectre.Console](https://spectreconsole.net/) — CLI rendering for `total-recall status` / `eval` / `kb list`
-
----
+total-recall's plugin architecture, skill format, hook system and multi-platform wrapper pattern are modeled after [superpowers](https://github.com/obra/superpowers) by [obra](https://github.com/obra). If you are building plugins for coding assistants, start there. The technologies total-recall is built with are listed under [Architecture](docs/architecture.md#core-technologies).
 
 ## License
 
-MIT — see [LICENSE](LICENSE)
+MIT. See [LICENSE](LICENSE).
