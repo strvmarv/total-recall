@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The install script now writes the Cline entry where Cline reads it, and only when Cline is installed (#85).** It used to write `~/.vscode/cline_mcp_settings.json`, a file Cline does not read, whenever the `~/.vscode` directory existed (which is VS Code's own, so any VS Code user got the file). It now finds Cline by its directories and writes `settings/cline_mcp_settings.json` in `~/.cline/data` and in the `saoudrizwan.claude-dev` folder under VS Code's `globalStorage` when they exist (the first is the file the Cline importer reads; the second matches the importer only on Linux), with the same pin and refresh rules as the other tools. `CLINE_HOME` is still an explicit override (the directory that holds the file itself, created if missing). A `~/.vscode/cline_mcp_settings.json` from an earlier install is left in place and can be deleted. `docs/hosts/cline.md`, `docs/npm-postinstall.md` and `docs/platforms.md` describe it, and the documentation check keeps them from claiming otherwise. Cline loading the written file was not observed.
 - **The web UI has seven sections, not six (#79).** The commands skill and `AGENTS.md` said six and left out Eval; both now list all seven, as `docs/web-ui.md` does.
 - **`PRIVACY.md` no longer ties the first-launch engine download to Claude Code alone (#79).** The Copilot CLI, Codex CLI and Cursor plugin installs download the engine the same way; the disclosure now says "a git-sourced plugin install" and names the four.
 

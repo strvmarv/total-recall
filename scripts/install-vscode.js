@@ -11,28 +11,7 @@ import { join } from 'node:path';
 import { mergeJsonConfig } from './lib/merge-json-config.js';
 import { npxEntry } from './lib/package-spec.js';
 import { recordChange } from './lib/change-log.js';
-
-function vscodeUserDir() {
-  const env = process.env.VSCODE_USER_DIR;
-  if (env) return env;
-
-  const home = process.env.USERPROFILE || homedir();
-  if (!home) return null;
-
-  // Platform-specific user data directory
-  if (process.platform === 'darwin') {
-    return join(home, 'Library', 'Application Support', 'Code', 'User');
-  }
-
-  if (process.platform === 'win32') {
-    const appdata = process.env.APPDATA;
-    if (appdata) return join(appdata, 'Code', 'User');
-    return null;
-  }
-
-  // Linux / other
-  return join(home, '.config', 'Code', 'User');
-}
+import { vscodeUserDir } from './lib/vscode-user-dir.js';
 
 export async function installVsCode() {
   try {

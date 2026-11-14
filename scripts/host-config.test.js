@@ -804,3 +804,176 @@ test('the host pages that name the entry say it is pinned and refreshed', () => 
     assert.match(text, /pinned to the installed version/, page);
   }
 });
+
+// --- vscodeUserDir: VS Code's User directory, shared by the VS Code and Cline steps ---
+
+import { vscodeUserDir } from './lib/vscode-user-dir.js';
+
+test('vscodeUserDir: VSCODE_USER_DIR wins, then the platform default', () => {
+  const home = '/h';
+  assert.equal(vscodeUserDir({ env: { VSCODE_USER_DIR: '/custom' }, platform: 'darwin', home }), '/custom');
+  assert.equal(vscodeUserDir({ env: {}, platform: 'darwin', home }), path.join(home, 'Library', 'Application Support', 'Code', 'User'));
+  assert.equal(vscodeUserDir({ env: {}, platform: 'linux', home }), path.join(home, '.config', 'Code', 'User'));
+  assert.equal(vscodeUserDir({ env: {}, platform: 'freebsd', home }), path.join(home, '.config', 'Code', 'User'));
+  assert.equal(vscodeUserDir({ env: { APPDATA: '/a' }, platform: 'win32', home }), path.join('/a', 'Code', 'User'));
+});
+
+test('vscodeUserDir: no home gives null (after the override), and Windows without APPDATA gives null', () => {
+  assert.equal(vscodeUserDir({ env: {}, platform: 'linux', home: '' }), null);
+  assert.equal(vscodeUserDir({ env: {}, platform: 'darwin', home: null }), null);
+  assert.equal(vscodeUserDir({ env: { VSCODE_USER_DIR: '/custom' }, platform: 'linux', home: '' }), '/custom');
+  assert.equal(vscodeUserDir({ env: {}, platform: 'win32', home: '/h' }), null);
+});
+
+test('vscodeUserDir: with no arguments it reads the process environment, platform and home', () => {
+  const saved = process.env.VSCODE_USER_DIR;
+  process.env.VSCODE_USER_DIR = '/from-env';
+  try {
+    assert.equal(vscodeUserDir(), '/from-env');
+  } finally {
+    if (saved === undefined) delete process.env.VSCODE_USER_DIR; else process.env.VSCODE_USER_DIR = saved;
+  }
+});
+
+// --- Cline: the entry goes where Cline's own directories are, and nowhere when Cline is not installed ---
+
+const clineLines = (r) => lines(r).filter((l) => l.startsWith('Cline:'));
+
+/** Paths for a sandbox home: Cline's new-layout and legacy settings files. */
+function clinePaths(home) {
+  const vsUser = path.join(home, 'vsuser');
+  return {
+    vsUser,
+    newDir: path.join(home, '.cline', 'data'),
+    newFile: path.join(home, '.cline', 'data', 'settings', 'cline_mcp_settings.json'),
+    legacyDir: path.join(vsUser, 'globalStorage', 'saoudrizwan.claude-dev'),
+    legacyFile: path.join(vsUser, 'globalStorage', 'saoudrizwan.claude-dev', 'settings', 'cline_mcp_settings.json'),
+    strayFile: path.join(home, '.vscode', 'cline_mcp_settings.json'),
+  };
+}
+
+test('Cline, new layout: ~/.cline/data exists, so its settings file gets the pinned entry', () => {
+  let p;
+  const r = runPostinstall(({ home }) => { p = clinePaths(home); fs.mkdirSync(p.newDir, { recursive: true }); return { VSCODE_USER_DIR: p.vsUser }; });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(clineLines(r), [`Cline: added ${p.newFile}`]);
+  assert.deepEqual(entryIn(p.newFile), ENTRY);
+  assert.ok(!fs.existsSync(p.legacyFile));
+});
+
+test('Cline, legacy layout: the extension folder under VS Code globalStorage exists, so its settings file gets the entry', () => {
+  let p;
+  const r = runPostinstall(({ home }) => { p = clinePaths(home); fs.mkdirSync(p.legacyDir, { recursive: true }); return { VSCODE_USER_DIR: p.vsUser }; });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(clineLines(r), [`Cline: added ${p.legacyFile}`]);
+  assert.deepEqual(entryIn(p.legacyFile), ENTRY);
+  assert.ok(!fs.existsSync(p.newFile));
+});
+
+test('Cline, both layouts: both settings files get the entry', () => {
+  let p;
+  const r = runPostinstall(({ home }) => {
+    p = clinePaths(home); fs.mkdirSync(p.newDir, { recursive: true }); fs.mkdirSync(p.legacyDir, { recursive: true });
+    return { VSCODE_USER_DIR: p.vsUser };
+  });
+  assert.deepEqual(clineLines(r), [`Cline: added ${p.newFile}`, `Cline: added ${p.legacyFile}`]);
+  assert.deepEqual(entryIn(p.newFile), ENTRY);
+  assert.deepEqual(entryIn(p.legacyFile), ENTRY);
+});
+
+test('Cline is not installed: ~/.vscode, ~/.cline without data and a User directory without the extension folder write nothing', () => {
+  let p;
+  const r = runPostinstall(({ home }) => {
+    p = clinePaths(home);
+    fs.mkdirSync(path.join(home, '.vscode'), { recursive: true });
+    fs.mkdirSync(path.join(home, '.cline'), { recursive: true }); // no data inside
+    fs.mkdirSync(path.join(p.vsUser, 'globalStorage', 'other.extension'), { recursive: true }); // no saoudrizwan.claude-dev
+    return { VSCODE_USER_DIR: p.vsUser };
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(clineLines(r), []);
+  assert.ok(!fs.existsSync(p.strayFile));
+  assert.ok(!fs.existsSync(p.newFile));
+  assert.ok(!fs.existsSync(p.legacyFile));
+});
+
+test('Cline: CLINE_HOME is an explicit override: only $CLINE_HOME/cline_mcp_settings.json is written, even when Cline\'s directories exist', () => {
+  let p, file;
+  const r = runPostinstall(({ home }) => {
+    p = clinePaths(home); fs.mkdirSync(p.newDir, { recursive: true }); fs.mkdirSync(p.legacyDir, { recursive: true });
+    file = path.join(home, 'override', 'cline_mcp_settings.json');
+    return { CLINE_HOME: path.dirname(file), VSCODE_USER_DIR: p.vsUser };
+  });
+  assert.deepEqual(clineLines(r), [`Cline: added ${file}`]);
+  assert.ok(!fs.existsSync(p.newFile));
+  assert.ok(!fs.existsSync(p.legacyFile));
+});
+
+test('Cline: existing entries follow the same rules as the other tools in both settings files', () => {
+  let p;
+  const r = runPostinstall(({ home }) => {
+    p = clinePaths(home);
+    fs.mkdirSync(p.newDir, { recursive: true }); fs.mkdirSync(p.legacyDir, { recursive: true });
+    writeJson(p.newFile, { mcpServers: { 'total-recall': ENTRY_BARE, keep: { command: 'y' } } }); // own older form: refreshed
+    writeJson(p.legacyFile, { mcpServers: { 'total-recall': { command: 'node', args: ['/x/start.js'] } } }); // custom: left alone
+    return { VSCODE_USER_DIR: p.vsUser };
+  });
+  assert.deepEqual(clineLines(r), [`Cline: rewrote ${p.newFile}`]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(p.newFile, 'utf8')), { mcpServers: { 'total-recall': ENTRY, keep: { command: 'y' } } });
+  assert.deepEqual(entryIn(p.legacyFile), { command: 'node', args: ['/x/start.js'] });
+  assert.match(r.stderr, /Cline already has a custom total-recall entry/);
+});
+
+test('Cline: an entry already at the package version is not rewritten and has no line', () => {
+  let p, before;
+  const r = runPostinstall(({ home }) => {
+    p = clinePaths(home); fs.mkdirSync(p.newDir, { recursive: true });
+    writeJson(p.newFile, { mcpServers: { 'total-recall': ENTRY } });
+    before = fs.readFileSync(p.newFile, 'utf8');
+    return { VSCODE_USER_DIR: p.vsUser };
+  });
+  assert.deepEqual(clineLines(r), []);
+  assert.equal(fs.readFileSync(p.newFile, 'utf8'), before);
+});
+
+test('Cline: a ~/.cline/data or extension "directory" that is a regular file is not Cline, so nothing is reported', () => {
+  let p;
+  const r = runPostinstall(({ home }) => {
+    p = clinePaths(home);
+    fs.mkdirSync(path.dirname(p.newDir), { recursive: true });
+    fs.writeFileSync(p.newDir, ''); // ~/.cline/data is a file
+    fs.mkdirSync(path.dirname(p.legacyDir), { recursive: true });
+    fs.writeFileSync(p.legacyDir, '');
+    return { VSCODE_USER_DIR: p.vsUser };
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(clineLines(r), []);
+});
+
+test('Cline: a file written by an earlier install under ~/.vscode is left as it is', () => {
+  let p, before;
+  const r = runPostinstall(({ home }) => {
+    p = clinePaths(home); fs.mkdirSync(p.newDir, { recursive: true });
+    writeJson(p.strayFile, { mcpServers: { 'total-recall': ENTRY_BARE } });
+    before = fs.readFileSync(p.strayFile, 'utf8');
+    return { VSCODE_USER_DIR: p.vsUser };
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(fs.readFileSync(p.strayFile, 'utf8'), before);
+});
+
+test('Cline: one unwritable target is a failed line with its path, the other is still written, exit 0', () => {
+  let p;
+  const r = runPostinstall(({ home }) => {
+    p = clinePaths(home);
+    fs.mkdirSync(p.newDir, { recursive: true });
+    fs.writeFileSync(path.join(p.newDir, 'settings'), ''); // a regular file where the settings directory should be
+    fs.mkdirSync(p.legacyDir, { recursive: true });
+    return { VSCODE_USER_DIR: p.vsUser };
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const got = clineLines(r);
+  assert.ok(got.some((l) => l.startsWith(`Cline: failed: ${p.newFile}: `)), got.join('\n'));
+  assert.ok(got.includes(`Cline: added ${p.legacyFile}`), got.join('\n'));
+  assert.deepEqual(entryIn(p.legacyFile), ENTRY);
+});

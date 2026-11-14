@@ -12,7 +12,7 @@ What an install delivers on each harness. Each row says only what that harness's
 | [Gemini CLI](hosts/gemini-cli.md) | Yes | Yes (a block in `GEMINI.md`) | Yes (`BeforeAgent` hook; the token-growth trigger is active) | Not stated on the page | Configured by the npm install script or by hand. |
 | [Kiro](hosts/kiro.md) | Yes | Yes (always-included steering file) | Only with the workspace hooks copied; turn-count trigger only | Not stated on the page | The install script does not copy the hooks; they are per workspace. |
 | [OpenCode](hosts/opencode.md) | Yes (local MCP command under the `mcp` key) | No (a user step) | No | Optional skills copy (whether OpenCode reads it was not observed) | Configured by hand. |
-| [Cline](hosts/cline.md) | Yes | No (a user step) | No | Not stated on the page | The entry is added through Cline's own "MCP Settings" by the user; the install script writes a file that may not be the one Cline reads. |
+| [Cline](hosts/cline.md) | Yes | No (a user step) | No | Not stated on the page | The install script writes the entry to the settings file under `~/.cline/data` and under VS Code's `saoudrizwan.claude-dev` folder when they exist (`CLINE_HOME` overrides both and is created if missing); for a Cline it did not find, the user adds it through Cline's own "MCP Settings". |
 | [Windsurf](hosts/windsurf.md) | Yes | Yes (rules file) | No | Not stated on the page | Configured by the npm install script or by hand. |
 | [Zed](hosts/zed.md) | Yes (context server) | No (a user step) | No | Not stated on the page | Configured by the npm install script or by hand. |
 | [VS Code](hosts/vscode.md) | Yes | No (a user step) | No | Not stated on the page | Configured by the npm install script or by hand. |

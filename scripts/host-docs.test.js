@@ -382,6 +382,29 @@ export function checkDisclosure(tree) {
   return problems;
 }
 
+/**
+ * Cline pages: the install script writes the Cline entry where Cline's directories are (`~/.cline/data`, the
+ * `saoudrizwan.claude-dev` folder under VS Code's globalStorage) or to `CLINE_HOME`. The Cline page and the
+ * install-script page name all three; the platforms table names the two locations; none keeps the old claim
+ * that the entry may not be in the file Cline reads.
+ */
+export function checkClinePath(tree) {
+  const problems = [];
+  const stale = [/may not be the file Cline reads/, /may not be the one Cline reads/, /not evidence that Cline is configured/, /path mismatch/i];
+  const need = {
+    'docs/hosts/cline.md': ['~/.cline/data', 'saoudrizwan.claude-dev', 'CLINE_HOME'],
+    'docs/npm-postinstall.md': ['~/.cline/data', 'saoudrizwan.claude-dev', 'CLINE_HOME'],
+    'docs/platforms.md': ['~/.cline/data', 'saoudrizwan.claude-dev', 'CLINE_HOME'],
+  };
+  for (const [page, tokens] of Object.entries(need)) {
+    const text = tree.read(page);
+    if (text === null) { problems.push(`${page} is missing`); continue; }
+    for (const t of tokens) if (!text.includes(t)) problems.push(`${page} does not name ${t}`);
+    for (const re of stale) if (re.test(text)) problems.push(`${page}: stale wording ${re} (the script writes where Cline reads)`);
+  }
+  return problems;
+}
+
 /** Rule 7: the names the hook scripts cite are rows of the INSTALL.md table. */
 export function checkHookNotes(tree) {
   const problems = [];
@@ -752,6 +775,8 @@ function validPage(h) {
   ].join('\n');
 }
 
+const CLINE_TOKENS = ['`~/.cline/data`', '`saoudrizwan.claude-dev`', '`CLINE_HOME`'];
+
 const STATUS = 'total-recall loaded — 2 pinned, 3 hot, 12 warm, 5 cold, 2 KB collections. Storage: cortex. Last session: 2 hours ago.';
 
 const BANNER = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8').replace(/\r\n/g, '\n').match(/^(`{3,})[^\n]*\n[\s\S]*?^\1[ \t]*$/m)?.[0] ?? '';
@@ -804,7 +829,7 @@ function validReadme() {
     '',
     '## Documentation',
     '',
-    '[first run](docs/first-run.md), [script](docs/npm-postinstall.md), [db](docs/database-location.md), [tools](docs/tools.md)',
+    '[first run](docs/first-run.md), [script](docs/npm-postinstall.md), [db](docs/database-location.md), [tools](docs/tools.md), [platforms](docs/platforms.md)',
     '',
     '## Privacy',
     '',
@@ -840,7 +865,8 @@ function validFiles() {
     'README.md': validReadme(),
     'docs/tools.md': '# MCP tools\n\n2 in SQLite mode: `status`, `usage_status`.\n',
     'catalog.json': JSON.stringify({ tools: [{ name: 'status' }, { name: 'usage_status' }] }),
-    'docs/npm-postinstall.md': `# Postinstall\n\n${TOOLS.join(', ')}\n`,
+    'docs/npm-postinstall.md': `# Postinstall\n\n${TOOLS.join(', ')}\n\n${CLINE_TOKENS.join(' ')}\n`,
+    'docs/platforms.md': `# Platforms\n\n| Cline | ${CLINE_TOKENS.join(' ')} |\n`,
     'docs/database-location.md': '# Relocating the database\n',
     'docs/first-run.md': '# First run\n',
     'PRIVACY.md': '# Privacy Policy\n\nSee [First run](docs/first-run.md).\n',
@@ -853,10 +879,11 @@ function validFiles() {
     'cursor/hook.js': "const a = '(INSTALL.md, \"Cursor\")';\n",
   };
   for (const h of HARNESSES) files[`docs/hosts/${h.id}.md`] = validPage(h);
+  files['docs/hosts/cline.md'] += `\n${CLINE_TOKENS.join(' ')}\n`;
   return files;
 }
 
-const CHECKS = { checkPages, checkNoStaleFacts, checkLinks, checkStatusLine, checkDisclosure, checkHookNotes, checkOpenCodePointer, checkCheckPrompt, checkReadmeShape, checkReadmeContent, checkDocsReachable, checkToolReference };
+const CHECKS = { checkPages, checkNoStaleFacts, checkLinks, checkStatusLine, checkDisclosure, checkClinePath, checkHookNotes, checkOpenCodePointer, checkCheckPrompt, checkReadmeShape, checkReadmeContent, checkDocsReachable, checkToolReference };
 
 test('the valid in-memory tree passes every check', () => {
   const tree = memoryTree(validFiles());
@@ -1039,6 +1066,28 @@ defect('npm-postinstall.md does not name a tool', checkDisclosure, (f) => {
 // ---------------------------------------------------------------------------------------------
 // Rule 7: the names the hook scripts cite
 // ---------------------------------------------------------------------------------------------
+
+/** Escapes every regular-expression metacharacter, the backslash included. */
+function escapeRegExp(text) {
+  return text.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+}
+
+test('the Cline pages hold on the repository', () => assert.deepEqual(checkClinePath(repoTree()), []));
+for (const [page, phrase] of [
+  ['docs/hosts/cline.md', 'The entry the install script writes may not be the file Cline reads.'],
+  ['docs/platforms.md', 'the install script writes a file that may not be the one Cline reads'],
+  ['docs/npm-postinstall.md', 'so the written entry is not evidence that Cline is configured'],
+  ['docs/hosts/cline.md', 'The path mismatch above is a known problem in the install script.'],
+]) {
+  defect(`${page} says "${phrase.slice(0, 40)}..."`, checkClinePath, (f) => { f[page] += `\n${phrase}\n`; }, new RegExp(`^${escapeRegExp(page)}: .*stale`));
+}
+for (const page of ['docs/hosts/cline.md', 'docs/npm-postinstall.md', 'docs/platforms.md']) {
+  for (const token of CLINE_TOKENS) {
+    defect(`${page} does not name ${token}`, checkClinePath, (f) => { f[page] = f[page].replace(token, ''); }, new RegExp(`^${escapeRegExp(page)} does not name`));
+  }
+}
+defect('docs/platforms.md names none of the Cline locations', checkClinePath, (f) => { f['docs/platforms.md'] = '# Platforms\n'; }, /docs\/platforms\.md does not name/);
+defect('docs/platforms.md is missing', checkClinePath, (f) => { delete f['docs/platforms.md']; }, /docs\/platforms\.md is missing/);
 
 test('rule 7 holds on the repository', () => assert.deepEqual(checkHookNotes(repoTree()), []));
 defect('a hook note cites a name that is not a row', checkHookNotes, (f) => {
