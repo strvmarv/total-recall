@@ -62,9 +62,20 @@ export function normalise(text) {
 const FENCE = /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1[ \t]*$|(?![\s\S]))/gm;
 const blank = (s) => s.replace(/[^\n]/g, ' ');
 
-/** The text with HTML comments blanked (newlines kept). A comment that is never closed is left as it is. */
-function stripComments(md) {
-  return md.replace(/<!--[\s\S]*?-->/g, blank);
+const CODE_SPAN = /`[^`\n]*`/g;
+
+/**
+ * The text with HTML comments blanked (newlines kept). A comment that is never closed is left as it is. The
+ * comments are found in `scan`, a same-length copy of the text (code blanked, say), so a `<!--` there opens none.
+ */
+function stripComments(md, scan = md) {
+  let out = '';
+  let last = 0;
+  for (const m of scan.matchAll(/<!--[\s\S]*?-->/g)) {
+    out += md.slice(last, m.index) + blank(m[0]);
+    last = m.index + m[0].length;
+  }
+  return out + md.slice(last);
 }
 
 /** The text with fenced blocks blanked (newlines kept), so offsets and line numbers hold. */
@@ -74,7 +85,7 @@ function stripFences(md) {
 
 /** The text with fenced blocks, inline code spans and HTML comments blanked (a `<!--` in code opens no comment). */
 export function stripCode(md) {
-  return stripComments(stripFences(md).replace(/`[^`\n]*`/g, blank));
+  return stripComments(stripFences(md).replace(CODE_SPAN, blank));
 }
 
 export function fencedBlocks(md) {
@@ -90,20 +101,51 @@ export function slugify(text) {
     .replace(/ /g, '-');
 }
 
-/** ATX headings outside fences, with GitHub's -1, -2 suffix on repeated text. */
+const ATX = /^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/;
+const SETEXT_UNDERLINE = /^ {0,3}(=+|-+)[ \t]*$/;
+// A line that starts some other block, so a Setext underline below it does not make it a heading.
+const BLOCK_START = /^(?: {4}|\t)|^ {0,3}(?:#|[-*+](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|[|>]|<)/;
+
+/**
+ * Headings outside fences and HTML comments, in document order, with GitHub's -1, -2 suffix on repeated text:
+ * ATX (`# T`), Setext (`T` over `===` or `---`, the paragraph lines above it joined) and `<h1>` to `<h6>`.
+ * A `---` line is a Setext underline only under paragraph text (not after a blank line, a list item, a table
+ * row, a quote or a heading), and a leading front-matter block is skipped.
+ */
 export function headings(md) {
+  const unfenced = stripFences(md);
+  const plain = stripComments(unfenced, unfenced.replace(CODE_SPAN, blank)).split('\n');
+  if (plain[0] === '---') {
+    const end = plain.indexOf('---', 1);
+    if (end > 0) for (let k = 0; k <= end; k++) plain[k] = '';
+  }
+  const found = [];
+  plain.forEach((line, i) => {
+    const atx = ATX.exec(line);
+    if (atx) {
+      found.push({ line: i, level: atx[1].length, text: atx[2].trim() });
+      return;
+    }
+    const underline = SETEXT_UNDERLINE.exec(line);
+    if (!underline) return;
+    let start = i;
+    while (start > 0 && plain[start - 1].trim() !== '' && !SETEXT_UNDERLINE.test(plain[start - 1]) && !ATX.test(plain[start - 1])) start--;
+    if (start === i || BLOCK_START.test(plain[start])) return;
+    found.push({ line: start, level: underline[1][0] === '=' ? 1 : 2, text: plain.slice(start, i).map((l) => l.trim()).join(' ') });
+  });
+  const code = stripCode(md);
+  for (const m of code.matchAll(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1\s*>/gi)) {
+    const text = m[2].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+    found.push({ line: code.slice(0, m.index).split('\n').length - 1, level: Number(m[1]), text });
+  }
+  found.sort((a, b) => a.line - b.line);
   const seen = new Map();
-  const out = [];
-  for (const line of stripFences(md).split('\n')) {
-    const m = /^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/.exec(line);
-    if (!m) continue;
-    const text = m[2].trim();
+  return found.map(({ level, text }) => {
     const base = slugify(text);
     const n = seen.get(base) ?? 0;
     seen.set(base, n + 1);
-    out.push({ level: m[1].length, text, slug: n === 0 ? base : `${base}-${n}` });
-  }
-  return out;
+    return { level, text, slug: n === 0 ? base : `${base}-${n}` };
+  });
 }
 
 /**
@@ -538,6 +580,56 @@ test('headings: repeated text gets -1, -2 suffixes', () => {
     ['a', 'option-b-mcp-only', 'option-b-mcp-only-1']);
 });
 
+const shape = (md) => headings(md).map((h) => [h.level, h.text, h.slug]);
+
+test('headings: Setext headings, with level, text and anchor', () => {
+  assert.deepEqual(shape('Title\n=====\n\nSub `it`\n-----   \n\n  Third\n   ---\n'), [
+    [1, 'Title', 'title'],
+    [2, 'Sub `it`', 'sub-it'],
+    [2, 'Third', 'third'],
+  ]);
+});
+
+test('headings: a Setext heading may span lines, and a later one is not merged into an earlier one', () => {
+  assert.deepEqual(shape('One\ntwo\n---\nNext\n---\n'), [[2, 'One two', 'one-two'], [2, 'Next', 'next']]);
+});
+
+test('headings: a --- that is not a Setext underline is not a heading', () => {
+  assert.deepEqual(shape('para\n\n---\n\n# H\n'), [[1, 'H', 'h']]);
+  assert.deepEqual(shape('## A\n---\n'), [[2, 'A', 'a']]);
+  assert.deepEqual(shape('- item\n---\n'), []);
+  assert.deepEqual(shape('- item\ncontinued\n---\n'), []);
+  assert.deepEqual(shape('| a |\n---\n'), []);
+  assert.deepEqual(shape('> quote\n---\n'), []);
+  assert.deepEqual(shape('---\n\ntext\n'), []);
+});
+
+test('headings: front matter is not a Setext heading', () => {
+  assert.deepEqual(shape('---\nname: x\ndescription: y\n---\n\n# T\n'), [[1, 'T', 't']]);
+});
+
+test('headings: <h1> to <h6>, with attributes, nested tags and line breaks inside', () => {
+  assert.deepEqual(shape('<h1 align="center">The <b>name</b></h1>\n\n<h2>\n  Two\n</h2>\n<H3>Three</H3>\n<h1><img src="x.png"></h1>\n'), [
+    [1, 'The name', 'the-name'],
+    [2, 'Two', 'two'],
+    [3, 'Three', 'three'],
+    [1, '', ''],
+  ]);
+});
+
+test('headings: a heading inside a fence, an HTML comment or a code span is not a heading', () => {
+  const md = '# T\n\n<!--\n# Hidden\nHidden\n---\n<h2>hidden</h2>\n-->\n\n`<h2>code</h2>`\n\n```\n<h2>fenced</h2>\n```\n';
+  assert.deepEqual(shape(md), [[1, 'T', 't']]);
+});
+
+test('headings: a <!-- in a code span opens no comment, so the headings below it are kept', () => {
+  assert.deepEqual(shape('# Uses `<!--`\n\n## Next\n\n<!-- real -->\n'), [[1, 'Uses `<!--`', 'uses---'], [2, 'Next', 'next']]);
+});
+
+test('headings: the three kinds are numbered together in document order', () => {
+  assert.deepEqual(headings('# A\n\nA\n---\n\n<h2>A</h2>\n').map((h) => h.slug), ['a', 'a-1', 'a-2']);
+});
+
 test('headings: a shell comment inside a fence is not a heading', () => {
   assert.deepEqual(headings('# T\n\n```sh\n# not a heading\n```\n').map((h) => h.text), ['T']);
 });
@@ -964,6 +1056,13 @@ defect('a missing Privacy section', checkReadmeShape, (f) => { f['README.md'] = 
 defect('pi before Claude Code', checkReadmeShape, (f) => {
   f['README.md'] = f['README.md'].replace('### Claude Code', '### TMP').replace('### pi', '### Claude Code').replace('### TMP', '### pi');
 }, /the "###" headings under Install are/);
+defect('a Setext section in the README', checkReadmeShape, (f) => { f['README.md'] = f['README.md'].replace('## Use it\n', 'Extra\n-----\n\n## Use it\n'); }, /the "##" headings are/);
+defect('an <h1> in the README', checkReadmeShape, (f) => { f['README.md'] = f['README.md'].replace('## Install', '<h1>Another</h1>\n\n## Install'); }, /the "#" headings are \[total-recall, Another\]/);
+test('rule 11: a Setext-looking --- after a blank line, and a heading in a comment, are not sections', () => {
+  const files = validFiles();
+  files['README.md'] = files['README.md'].replace('## Use it\n', '## Use it\n\n---\n\n<!--\n## Fake\n-->\n');
+  assert.deepEqual(checkReadmeShape(memoryTree(files)), []);
+});
 test('rule 11: a heading inside a fenced block is not a section', () => {
   const files = validFiles();
   files['README.md'] = files['README.md'].replace('## Use it\n', '## Use it\n\n```md\n## Fake\n```\n');
