@@ -47,7 +47,7 @@ export const MODULE_TOOLS = {
 export const TOOLS = [...new Set(Object.values(MODULE_TOOLS).flat())];
 // A command that runs an install: what INSTALL.md must not hold, and what needs the disclosure above it.
 const INSTALL_COMMAND = /\b(?:npm|pnpm)(?:\s+-\S+(?:\s+[^-\s]\S*)?)*\s+(?:i|install|add)\b|\byarn\s+(?:global\s+)?add\b|\b(?:pi|plugin)\s+(?:i|install)\b|\bplugin\s+(?:marketplace\s+)?add\b|\bnpx\b/;
-const NPM_RUNNING = /\b(?:npm|pnpm)(?:\s+-\S+(?:\s+[^-\s]\S*)?)*\s+(?:i|install|add)\b|\byarn\s+(?:global\s+)?add\b|\bpi\s+(?:i|install)\b/;
+const NPM_RUNNING = /\b(?:npm|pnpm)(?:\s+-\S+(?:\s+[^-\s]\S*)?)*\s+(?:i|install|add)\b|\byarn\s+(?:global\s+)?add\b|\bpi\s+(?:i|install)\b/i;
 const STALE_VERSION = /(?<![\d.])0\.(?:7\.2|8\.(?:\d+|x))(?!\d)/;
 
 // ---------------------------------------------------------------------------------------------
@@ -57,6 +57,11 @@ const STALE_VERSION = /(?<![\d.])0\.(?:7\.2|8\.(?:\d+|x))(?!\d)/;
 /** CRLF to LF. */
 export function normalise(text) {
   return text.replace(/\r\n/g, '\n');
+}
+
+/** A line that ends in a backslash is joined to the next one with one space (as a shell reads it). */
+export function joinContinuations(text) {
+  return text.replace(/\\\n[ \t]*/g, ' ');
 }
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1[ \t]*$|(?![\s\S]))/gm;
@@ -353,9 +358,10 @@ export function checkDisclosure(tree) {
     const p = `docs/hosts/${h.id}.md`;
     const text = tree.read(p);
     if (text === null) continue;
-    const first = NPM_RUNNING.exec(text);
+    const joined = joinContinuations(text);
+    const first = NPM_RUNNING.exec(joined);
     if (!first) continue;
-    const above = text.slice(0, first.index);
+    const above = joined.slice(0, first.index);
     const para = above.split(/\n[ \t]*\n/).find((x) => x.trimStart().startsWith('**Ask first.**'));
     if (!para) {
       problems.push(`${p}: no "**Ask first.**" paragraph above the first "${first[0]}"`);
@@ -456,7 +462,7 @@ export function checkReadmeShape(tree) {
   return problems;
 }
 
-/** Rules 12 and 14: the README holds the install prompt, the check prompt and the status line, and one npm-running command. */
+/** Rules 12 and 14: the README holds the install prompt, the check prompt and the status line, and one npm-running command (any case, a backslash continuation joined). */
 export function checkReadmeContent(tree) {
   const readme = tree.read('README.md');
   if (readme === null) return ['README.md is missing'];
@@ -469,9 +475,9 @@ export function checkReadmeContent(tree) {
   if (status === null) problems.push('skills/commands/SKILL.md has no example status line to compare with');
   else if (!readme.includes(status)) problems.push(`README.md does not hold the status line "${status}"`);
   // Count matches, line by line (so a match cannot span a newline), not matching lines.
-  const every = new RegExp(NPM_RUNNING.source, 'g');
-  const running = readme.split('\n').flatMap((l) => [...l.matchAll(every)].map((m) => l.slice(m.index)));
-  if (running.length !== 1 || !/^pi\s+install npm:/.test(running[0])) {
+  const every = new RegExp(NPM_RUNNING.source, 'gi');
+  const running = joinContinuations(readme).split('\n').flatMap((l) => [...l.matchAll(every)].map((m) => l.slice(m.index)));
+  if (running.length !== 1 || !/^pi\s+install\s+npm:/.test(running[0])) {
     problems.push(`README.md must hold exactly one npm-running command, the "pi install npm:" line; found ${running.length}: ${JSON.stringify(running)}`);
   }
   if (/\bnpx\b/.test(readme)) problems.push('README.md mentions npx');
@@ -667,6 +673,16 @@ test('command patterns: whole words only', () => {
   }
   for (const s of ['pi install npm:x', 'npm install -g x']) assert.ok(NPM_RUNNING.test(s) && INSTALL_COMMAND.test(s), s);
   for (const s of ['claude plugin install x', 'codex plugin add x']) assert.ok(!NPM_RUNNING.test(s) && INSTALL_COMMAND.test(s), s);
+});
+
+test('command patterns: the case of the command does not matter', () => {
+  for (const s of ['NPM INSTALL -g x', 'Npm i x', 'PNPM Add x', 'Pi Install npm:x', 'YARN ADD x']) assert.ok(NPM_RUNNING.test(s), s);
+});
+
+test('joinContinuations: a backslash at the end of a line joins it to the next, and nothing else changes', () => {
+  assert.equal(joinContinuations('npm \\\n   install -g x\nnext\n'), 'npm  install -g x\nnext\n');
+  assert.equal(joinContinuations('a\\\nb\\\n\\\nc'), 'a b  c');
+  assert.equal(joinContinuations('no continuation\n\nhere'), 'no continuation\n\nhere');
 });
 
 test('stale versions: a harness version is not the forbidden 0.8.x', () => {
@@ -978,6 +994,12 @@ defect('npm with a flag that takes a value and no paragraph', checkDisclosure, (
 defect('a postinstall import that is not named install-*', checkDisclosure, (f) => {
   f['scripts/postinstall.js'] += "import { z } from './setup-continue.js';\n";
 }, /setup-continue/);
+defect('an npm install continued on the next line and no paragraph', checkDisclosure, (f) => {
+  f['docs/hosts/zed.md'] = '# Zed\n\n## Install\n\nRun npm \\\n  install -g x first.\n\n## User steps\n\n## Verify\n\n## What you get\n\n## Known gaps\n\n## Evidence\n';
+}, /zed\.md: no "\*\*Ask first\.\*\*" paragraph above the first/);
+defect('an upper-case NPM INSTALL and no paragraph', checkDisclosure, (f) => {
+  f['docs/hosts/zed.md'] = '# Zed\n\n## Install\n\nRun NPM INSTALL -g x first.\n\n## User steps\n\n## Verify\n\n## What you get\n\n## Known gaps\n\n## Evidence\n';
+}, /zed\.md: no "\*\*Ask first\.\*\*" paragraph above the first/);
 defect('npm with a flag before the subcommand and no paragraph', checkDisclosure, (f) => {
   f['docs/hosts/zed.md'] = '# Zed\n\n## Install\n\nRun npm -g install x first.\n\n## User steps\n\n## Verify\n\n## What you get\n\n## Known gaps\n\n## Evidence\n';
 }, /zed\.md: no "\*\*Ask first\.\*\*" paragraph above the first/);
@@ -1088,6 +1110,16 @@ defect('a second command on the pi line', checkReadmeContent, (f) => {
 defect('a prose line that only names the pi command beside another install', checkReadmeContent, (f) => {
   f['README.md'] = f['README.md'].replace('pi install npm:@strvmarv/total-recall', 'Or `npm install -g x` (not `pi install npm:`)');
 }, /exactly one npm-running command/);
+defect('an npm install continued on the next line', checkReadmeContent, (f) => { f['README.md'] += '\nnpm \\\n  install -g @strvmarv/total-recall\n'; }, /exactly one npm-running command/);
+defect('an upper-case NPM INSTALL', checkReadmeContent, (f) => { f['README.md'] += '\nNPM INSTALL -g @strvmarv/total-recall\n'; }, /exactly one npm-running command/);
+defect('a pi install that is not lower case', checkReadmeContent, (f) => {
+  f['README.md'] = f['README.md'].replace('pi install npm:@strvmarv/total-recall', 'PI INSTALL npm:@strvmarv/total-recall');
+}, /exactly one npm-running command/);
+test('rule 14: the pi install line may itself be continued onto the next line', () => {
+  const files = validFiles();
+  files['README.md'] = files['README.md'].replace('pi install npm:@strvmarv/total-recall', 'pi install \\\n  npm:@strvmarv/total-recall');
+  assert.deepEqual(checkReadmeContent(memoryTree(files)), []);
+});
 defect('an npx line', checkReadmeContent, (f) => { f['README.md'] += '\nUse npx -y x\n'; }, /mentions npx/);
 
 // ---------------------------------------------------------------------------------------------
