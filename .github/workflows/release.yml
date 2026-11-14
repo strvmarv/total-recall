@@ -32,8 +32,31 @@ permissions:
   deployments: write
 
 jobs:
+  # Fail fast, before four platform builds, when the tag and the version files disagree.
+  # package.json (and so the npm package) carries the version in the repository, while the
+  # engine binary's version is stamped from the tag: a mismatch would ship two versions in one
+  # release. The tag reaches the shell through env, never as an interpolated expression.
+  check-version:
+    name: Check version files match the tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+
+      - name: Check every version file against the tag
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: node scripts/sync-version.js --check --expect "${REF_NAME#v}"
+
   build:
     name: Build ${{ matrix.rid }}
+    needs: check-version
     strategy:
       fail-fast: false
       matrix:

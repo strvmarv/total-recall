@@ -21,7 +21,7 @@ dotnet test src/TotalRecall.sln --filter "Category!=Integration"
 ```
 
 ```sh verify
-node --test bin/shim/*.test.js pi/*.test.js codex/*.test.js skills/develop/scripts/*.test.js copilot/*.test.js cursor/*.test.js scripts/fetch-binary.test.js hooks/hooks.config.test.js
+node --test bin/shim/*.test.js pi/*.test.js codex/*.test.js skills/develop/scripts/*.test.js copilot/*.test.js cursor/*.test.js scripts/fetch-binary.test.js scripts/sync-version.test.js hooks/hooks.config.test.js
 ```
 
 The catalog drift guard that CI runs after the build: `catalog.json` must equal what `dump-catalog` prints, so a
