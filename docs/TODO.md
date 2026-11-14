@@ -189,11 +189,9 @@ Implemented in the MCP bootstrap shim: the shim provisioner downloads the engine
 
 Implemented in `release.yml` (issue #64). The publish job attests the four platform archives and `provisioning.manifest.json` with `actions/attest@v4` (GitHub artifact attestations, signed through sigstore), before they are attached to the GitHub Release; a failed attestation stops the release assets from being published. Users verify with `gh attestation verify <file> --repo strvmarv/total-recall` (README, "Verifying a release"). `scripts/release-workflow.test.js` pins the step, its position and the permission. Not done: the shim does not enforce attestations (that would need a sigstore verifier, and the shim stays zero-dependency), and there are no cosign signatures or SBOMs. Windows Authenticode signing is a separate entry below.
 
-### Binary Cache Survives Plugin Reinstall
+### ~~Binary Cache Survives Plugin Reinstall~~
 
-`ensureBinary()` currently caches into `${CLAUDE_PLUGIN_ROOT}/binaries/<rid>/`, which gets wiped when the plugin directory is recreated (e.g., `claude /plugin update`). Consider caching into a stable shared location (e.g. `~/.total-recall/binaries/<version>/<rid>/`) and symlinking/copying into the plugin tree. Avoids re-downloading on plugin reinstall when the version hasn't changed.
-
-**Files:** `scripts/fetch-binary.js`
+Implemented in `scripts/fetch-binary.js` and `bin/shim/provisioner.js` (issue #65). A verified engine archive is kept in `<dataDir>/cache/binaries/<version>/` (with a sha256 sidecar) and restored before the shim fetches the release manifest, so a same-version reinstall or a second host needs no download and works offline. It caches the archive, not the extracted tree, and the plugin-tree layout and every `getBinaryPath()` consumer are unchanged. See `AGENTS.md`, "`.mcp.json` invocation", for the rules (what may be cached, when an entry is deleted, the owner-only and ownership checks). Not done: running the engine straight from the cache, restoring on the install-time (`postinstall`) path, and a command to clear the cache.
 
 ### Intel Mac (osx-x64) Support
 
