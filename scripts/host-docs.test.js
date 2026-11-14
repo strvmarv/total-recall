@@ -57,7 +57,7 @@ export function normalise(text) {
   return text.replace(/\r\n/g, '\n');
 }
 
-const FENCE = /^(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^\1[ \t]*$|(?![\s\S]))/gm;
+const FENCE = /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1[ \t]*$|(?![\s\S]))/gm;
 const blank = (s) => s.replace(/[^\n]/g, ' ');
 
 /** The text with fenced blocks blanked (newlines kept), so offsets and line numbers hold. */
@@ -106,8 +106,8 @@ export function links(md) {
 
 /** The repository path after either base URL, wherever the URL appears (prose, code or a fence). */
 export function repoPaths(md) {
-  const re = /https:\/\/(?:raw\.githubusercontent\.com\/strvmarv\/total-recall\/main|github\.com\/strvmarv\/total-recall\/blob\/main)\/([^\s)\]>"'`]+)/g;
-  return [...md.matchAll(re)].map((m) => m[1].replace(/#.*$/, '').replace(/[.,;:]+$/, ''));
+  const re = /https:\/\/(?:raw\.githubusercontent\.com\/strvmarv\/total-recall\/main|github\.com\/strvmarv\/total-recall\/blob\/main)\/([^\s)\]>"'`*]+)/g;
+  return [...md.matchAll(re)].map((m) => m[1].replace(/#.*$/, '').replace(/[.,;:_]+$/, ''));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -145,6 +145,13 @@ export function memoryTree(files) {
   };
 }
 
+const safeDecode = (s) => {
+  try {
+    return decodeURI(s);
+  } catch {
+    return s;
+  }
+};
 const exists = (tree, p) => tree.read(p) !== null || tree.list(p).length > 0;
 const hostPages = (tree) => tree.list('docs/hosts').filter((n) => n.endsWith('.md')).map((n) => `docs/hosts/${n}`);
 
@@ -217,14 +224,14 @@ export function checkLinks(tree) {
     for (const target of links(text)) {
       if (/^[a-z][a-z0-9+.-]*:/i.test(target)) continue;
       const [rel, anchor] = target.split('#');
-      const resolved = rel === '' ? p : path.posix.normalize(path.posix.join(dir, decodeURI(rel)));
+      const resolved = rel === '' ? p : path.posix.normalize(path.posix.join(dir, safeDecode(rel)));
       if (!exists(tree, resolved)) {
         problems.push(`${p}: the link "${target}" points at ${resolved}, which does not exist`);
         continue;
       }
       if (anchor && resolved.endsWith('.md')) {
         const body = tree.read(resolved);
-        if (body !== null && !headings(body).some((h) => h.slug === decodeURI(anchor).toLowerCase())) {
+        if (body !== null && !headings(body).some((h) => h.slug === safeDecode(anchor).toLowerCase())) {
           problems.push(`${p}: the link "${target}" has no heading "#${anchor}" in ${resolved}`);
         }
       }
@@ -529,6 +536,26 @@ test('rule 3: a broken link inside a code span or fence is not reported', () => 
   const files = validFiles();
   files['README.md'] += '\n`[x](docs/nope.md)`\n\n```\n[y](docs/nope2.md)\n```\n';
   assert.deepEqual(checkLinks(memoryTree(files)), []);
+});
+
+test('rule 3: a repository URL in a fenced block is checked, and a malformed escape does not crash', () => {
+  const files = validFiles();
+  const fence = '`'.repeat(3);
+  files['INSTALL.md'] += `\n${fence}sh\ncurl ${RAW}docs/hosts/nope.md\n${fence}\n`;
+  assert.ok(checkLinks(memoryTree(files)).some((p) => /nope\.md.*does not exist/.test(p)));
+  const bad = validFiles();
+  bad['README.md'] += '\n[x](docs/100%.md)\n';
+  assert.ok(checkLinks(memoryTree(bad)).some((p) => /100%\.md/.test(p)));
+});
+
+test('indented fences are fences', () => {
+  const md = 'a\n\n  ```sh\n  [no](x.md)\n  ```\n';
+  assert.equal(fencedBlocks(md).length, 1);
+  assert.deepEqual(links(md), []);
+});
+
+test('repoPaths: a URL wrapped in bold or italics loses the markers', () => {
+  assert.deepEqual(repoPaths(`**${RAW}docs/first-run.md** and _${RAW}docs/hosts/pi.md_`), ['docs/first-run.md', 'docs/hosts/pi.md']);
 });
 
 test('rule 3: a repeated heading gets a -1 anchor that resolves, and a -2 that does not', () => {
