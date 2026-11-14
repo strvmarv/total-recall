@@ -820,7 +820,7 @@ test('vscodeUserDir: VSCODE_USER_DIR wins, then the platform default', () => {
 
 test('vscodeUserDir: no home gives null (after the override), and Windows without APPDATA gives null', () => {
   assert.equal(vscodeUserDir({ env: {}, platform: 'linux', home: '' }), null);
-  assert.equal(vscodeUserDir({ env: {}, platform: 'darwin', home: undefined }), null);
+  assert.equal(vscodeUserDir({ env: {}, platform: 'darwin', home: null }), null);
   assert.equal(vscodeUserDir({ env: { VSCODE_USER_DIR: '/custom' }, platform: 'linux', home: '' }), '/custom');
   assert.equal(vscodeUserDir({ env: {}, platform: 'win32', home: '/h' }), null);
 });
