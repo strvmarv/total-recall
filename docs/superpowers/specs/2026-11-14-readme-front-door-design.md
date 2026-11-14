@@ -187,11 +187,14 @@ a check fails.
     - every statement that no data is transmitted, that there is no telemetry, usage analytics,
       cloud sync or remote copy, or that text is never sent to an embedding service, gets the
       qualifier "by default" (the Summary, "Nothing else", "Embeddings and AI processing", and the
-      later sections that repeat them);
+      later sections that repeat them), and so do the statements that the data lives in a local
+      SQLite database and that embeddings are computed locally, which Postgres and a remote embedder
+      change. Statements already scoped to one thing (the engine download, the web UI) stay as they
+      are, and the Summary's count of "two narrow, opt-in cases" is reworded to point at the section;
     - one short paragraph is added under "What data leaves your machine" naming the opt-in
-      configurations, each as the README has it: a Postgres backend, Cortex (memory sync, telemetry
-      and skills pushed to the Cortex instance the user configures) and a remote embedder (OpenAI,
-      Bedrock);
+      configurations, each as the README has it: a Postgres backend, Cortex (memory sync and
+      telemetry to the Cortex instance the user configures; team knowledge base queries; skills only
+      when `[skills] auto_import` is on) and a remote embedder (OpenAI, Bedrock);
     - the "last updated" date, if the file has one, changes.
     Nothing else in `PRIVACY.md` changes.
 
