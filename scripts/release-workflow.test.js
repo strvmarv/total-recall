@@ -108,3 +108,78 @@ test('mutation: an attestation before the manifest is generated is caught', () =
   const early = REAL.replace(step, '').replace(/(      - name: Generate provisioning manifest\n)/, `${step.replace(/\n*$/, '\n')}\n$1`);
   assert.ok(checkAttestOrdering(early).some((p) => /before the manifest is generated/.test(p)));
 });
+
+// ---- Cycle 3: every attached file is attested, and only publish may write attestations ----
+
+/** The lines of a `key: |` block scalar inside a step's text (the block ends at the first less-indented line). */
+function blockLines(stepText, key) {
+  const m = new RegExp(`^( +)${key}: \\|\\n((?:\\1 +.*\\n?)+)`, 'm').exec(stepText);
+  return m ? m[2].split('\n').map((l) => l.trim()).filter(Boolean) : null;
+}
+
+function checkEveryAttachedFileIsASubject(text) {
+  const steps = publishSteps(text);
+  const attach = steps.find((s) => s.name === ATTACH);
+  const attest = steps.find((s) => /uses: actions\/attest@v4\b/.test(s.text));
+  if (!attach) return [`no "${ATTACH}" step`];
+  if (!attest) return ['no actions/attest@v4 step'];
+  const attached = blockLines(attach.text, 'files');
+  const subjects = blockLines(attest.text, 'subject-path');
+  if (!attached || attached.length === 0) return ['the attach step lists no files'];
+  if (!subjects) return ['the attestation step has no subject-path list'];
+  return attached.filter((f) => !subjects.includes(f)).map((f) => `${f} is attached to the release but is not an attestation subject`);
+}
+
+/** Jobs (and the workflow itself) whose permissions grant attestations: write, other than publish. */
+function checkAttestationPermissionScope(text) {
+  const problems = [];
+  const top = /^permissions:\n((?:  .*\n)+)/m.exec(text);
+  if (top && /attestations: write/.test(top[1])) problems.push('the workflow-level permissions grant attestations: write');
+  const names = [...text.matchAll(/^  ([a-z][a-z-]*):\n/gm)].map((m) => m[1]);
+  for (const name of names) {
+    const job = jobBlock(text, name);
+    const grants = jobPermissions(job).includes('attestations: write');
+    if (name === 'publish' && !grants) problems.push('the publish job does not have attestations: write');
+    if (name !== 'publish' && grants) problems.push(`the ${name} job has attestations: write`);
+  }
+  return problems;
+}
+
+test('release.yml: every file attached to the release is an attestation subject', () => {
+  assert.deepEqual(checkEveryAttachedFileIsASubject(REAL), []);
+});
+
+test('release.yml: attestations: write is granted to the publish job and to no other job', () => {
+  assert.deepEqual(checkAttestationPermissionScope(REAL), []);
+});
+
+test('mutation: an attached file that is dropped from subject-path is caught', () => {
+  const mutated = REAL.replace(/(subject-path: \|\n(?: +release-assets\/.*\n)*?) +release-assets\/provisioning\.manifest\.json\n/, '$1');
+  assert.notEqual(mutated, REAL);
+  assert.ok(checkEveryAttachedFileIsASubject(mutated).some((p) => /provisioning\.manifest\.json/.test(p)));
+});
+
+test('mutation: a new attached file with no attestation is caught', () => {
+  const mutated = REAL.replace(/(          files: \|\n(?: +release-assets\/.*\n)+)/, '$1            release-assets/extra.bin\n');
+  assert.notEqual(mutated, REAL);
+  assert.ok(checkEveryAttachedFileIsASubject(mutated).some((p) => /extra\.bin/.test(p)));
+});
+
+test('mutation: attestations: write added to the build job is caught', () => {
+  const mutated = REAL.replace(/(  build:\n    name: .*\n)/, '$1    permissions:\n      attestations: write\n');
+  assert.notEqual(mutated, REAL);
+  assert.ok(checkAttestationPermissionScope(mutated).some((p) => /build job/.test(p)));
+});
+
+test('mutation: attestations: write at workflow level is caught', () => {
+  const mutated = REAL.replace(/^permissions:\n/m, 'permissions:\n  attestations: write\n');
+  assert.notEqual(mutated, REAL);
+  assert.ok(checkAttestationPermissionScope(mutated).some((p) => /workflow-level/.test(p)));
+});
+
+test('mutation: attestations: write removed from the publish job is caught', () => {
+  const mutated = REAL.replace(/^      attestations: write\n/m, '');
+  assert.notEqual(mutated, REAL);
+  assert.ok(checkAttestationPermissionScope(mutated).some((p) => /publish job does not/.test(p)));
+  assert.ok(checkAttestStepExists(mutated).some((p) => /attestations: write/.test(p)));
+});
