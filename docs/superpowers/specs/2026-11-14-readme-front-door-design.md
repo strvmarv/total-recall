@@ -31,8 +31,8 @@ forms, an MCP tool table, the architecture and the build instructions. The audit
 
 ## Non-goals
 
-- No change to product code, hook scripts, `INSTALL.md` or the pages under `docs/hosts/` (except the
-  two links named under "References that must follow").
+- No change to product code, hook scripts, `INSTALL.md` or the pages under `docs/hosts/` (except a
+  link into a README section that moves, if the builder's grep finds one; none is known).
 - No rewrite of the reference content: it moves, with the listed corrections, and is not re-audited
   line by line.
 - No new documentation site, generator or dependency.
@@ -91,9 +91,9 @@ Sections, in this order. Headings are exact; the test checks their order.
    - pins: `pin` for a rule that must always be followed;
    - the knowledge base: `ingest <path>`;
    - commands: `/total-recall:commands help`, link `docs/commands.md`;
-   - the web UI: ask the assistant to open it (`/total-recall:commands ui`), or run
-     `total-recall ui` where the global npm package is installed (a plugin install does not put
-     `total-recall` on PATH); link `docs/web-ui.md` (the screenshot moves there);
+   - the web UI: `total-recall ui` where the global npm package is installed; on a plugin install,
+     where `total-recall` is not on PATH, ask the assistant for the command for your install; link
+     `docs/web-ui.md` (the screenshot moves there);
    - the `develop` skill: one paragraph (Define turns an idea into a reviewed issue, Deliver turns the
      issue into a pull request and never merges), link `docs/develop.md`.
 6. **`## How it works`**: at most 150 words: warm is where new memories land and are searched per
@@ -102,11 +102,12 @@ Sections, in this order. Headings are exact; the test checks their order.
    `docs/how-it-works.md`.
 7. **`## Documentation`**: a table linking every `docs/*.md` page except `docs/TODO.md` (the new
    pages below and the existing `docs/database-location.md`, `docs/first-run.md` and
-   `docs/npm-postinstall.md`), and `INSTALL.md`, `CONTRIBUTING.md`, `CHANGELOG.md`.
-8. **`## Privacy`** (three lines: local by default; what leaves the machine only when Postgres,
-   Cortex or a remote embedder is configured; the engine archive is downloaded from GitHub Releases
-   on a plugin install's first launch. Every statement is taken from today's README, `AGENTS.md` and
-   `docs/first-run.md`; nothing else is claimed, in particular nothing about telemetry), **`## Contributing`**, **`## Credits`** (the
+   `docs/npm-postinstall.md`), and `INSTALL.md`, `PRIVACY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`.
+   The harness pages are linked from `## Install`, not repeated here.
+8. **`## Privacy`** (two or three lines: everything is local by default; data leaves the machine
+   only when Postgres, Cortex or a remote embedder is configured, and for the engine download on a
+   plugin install's first launch; a link to `PRIVACY.md`, which holds the detail. Nothing else is
+   claimed here), **`## Contributing`**, **`## Credits`** (the
    superpowers paragraph, shortened; the technology list moves to `docs/architecture.md`),
    **`## License`**.
 
@@ -170,8 +171,17 @@ a check fails.
    harness (linking its page), what the install delivers (MCP tools; startup instructions; the pinned
    floor; commands), each cell taken from that page's "What you get" and "Known gaps". The "Full" and
    "Core" grades are dropped, because no page defines them. No new claim is made: a cell says only
-   what the page says. The auto-import notes of today's rows are kept where
-   `docs/how-it-works.md` (session start, import sync) does not already say them.
+   what the page says. Today's rows also say what is imported from each tool (Copilot CLI, OpenCode,
+   Cline, Hermes); no harness page says that, so those notes do not go into the table. They go into
+   the "Import sync" step of `docs/how-it-works.md`, one clause per tool, each checked first against
+   its importer under `src/TotalRecall.Infrastructure/Importers/` (for example the Copilot CLI
+   importer reads session `plan.md` files, not "memory files") and written as the importer has it.
+10. `PRIVACY.md` (a root file the README now links) has three statements that the README and
+    `docs/first-run.md` contradict: the engine archive is "~22 MB" (about 100 MB); "no cloud sync"
+    and "your text is never sent to an embedding API" (true by default; not when Cortex, Postgres or
+    a remote embedder is configured, which the README documents). Correct those three statements,
+    each with the qualifier "by default" and one sentence naming the opt-in configurations. No other
+    change to `PRIVACY.md`.
 9. The web UI has seven sections (the README is right; `Eval` exists under
    `src/TotalRecall.Web/ClientApp/src/pages/`). No change; listed so the reviewer does not "fix" it
    from `AGENTS.md`, which says six.
@@ -183,7 +193,9 @@ a check fails.
   `docs/develop.md` in the total-recall repository. These are skill prose files, not hook scripts, so
   no host asks for a new trust review; `skills/develop/scripts/*.test.js` must still pass.
 - `AGENTS.md` "WHERE TO LOOK": one row for the user documentation (`README.md` front door,
-  `docs/*.md` reference pages, the check). No other `AGENTS.md` change.
+  `docs/*.md` reference pages, the check); and its one reference to a README section that moves
+  (`(README, "Verifying a release")` in the release flow) is repointed to
+  `docs/verifying-a-release.md`. No other `AGENTS.md` change.
 - `CONTRIBUTING.md`: if it links a README section that moves, repoint it (the builder greps).
 - `docs/hosts/*.md`, `INSTALL.md` and `docs/npm-postinstall.md` are not edited, except a link that
   pointed into a README section that moves (the builder greps; none is known).
