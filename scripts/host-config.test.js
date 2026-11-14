@@ -492,3 +492,73 @@ test('docs/npm-postinstall.md no longer says that a failed Hermes copy ends the 
   assert.ok(!/not wrapped and ends the script/.test(doc));
   assert.ok(!/except the Hermes file copy/.test(doc));
 });
+
+// --- package-spec: the pinned spec, the script's own entry form and what to do with an existing entry ---
+
+import {
+  pinnedSpec, npxEntry, isOwnNpxEntry, hookCommand, isOwnHookCommand, decide,
+} from './lib/package-spec.js';
+
+const NAME = '@strvmarv/total-recall';
+
+test('pinnedSpec: the version is added only for an installed package with a valid version', () => {
+  assert.equal(pinnedSpec({ version: '4.8.0', repoSelf: false }), `${NAME}@4.8.0`);
+  assert.equal(pinnedSpec({ version: '4.8.0-beta.1', repoSelf: false }), `${NAME}@4.8.0-beta.1`);
+  assert.equal(pinnedSpec({ version: '4.8.0', repoSelf: true }), NAME);
+  for (const bad of [undefined, null, '', 'unknown', 'x', 'latest', '4.8', '4.8.0+build', '4.8.0 && rm', '^4.8.0']) {
+    assert.equal(pinnedSpec({ version: bad, repoSelf: false }), NAME, JSON.stringify(bad));
+  }
+});
+
+test('npxEntry: command, args and then the extra keys, in that order', () => {
+  const entry = npxEntry({ cwd: '${workspaceFolder}' }, { version: '9.8.7', repoSelf: false });
+  assert.deepEqual(entry, { command: 'npx', args: ['--yes', `${NAME}@9.8.7`], cwd: '${workspaceFolder}' });
+  assert.deepEqual(Object.keys(entry), ['command', 'args', 'cwd']);
+  assert.deepEqual(npxEntry({}, { version: '9.8.7', repoSelf: true }), { command: 'npx', args: ['--yes', NAME] });
+});
+
+test('isOwnNpxEntry: exactly npx --yes <name>, bare or with a valid version', () => {
+  const own = (args, command = 'npx') => isOwnNpxEntry({ command, args });
+  assert.equal(own(['--yes', NAME]), true);
+  assert.equal(own(['--yes', `${NAME}@4.7.0`]), true);
+  assert.equal(own(['--yes', `${NAME}@4.8.0-beta.1`]), true);
+  assert.equal(isOwnNpxEntry({ command: 'npx', args: ['--yes', NAME], cwd: '/x' }), true); // other keys do not matter
+  assert.equal(own(['-y', NAME]), false);
+  assert.equal(own(['--yes', NAME, '--x']), false);
+  assert.equal(own(['--yes', `${NAME}@latest`]), false);
+  assert.equal(own(['--yes', `${NAME}@^4`]), false);
+  assert.equal(own(['--yes', `${NAME}@4.8.0+build`]), false);
+  assert.equal(own(['--yes', '@other/pkg']), false);
+  assert.equal(own(['--yes', NAME], 'node'), false);
+  assert.equal(isOwnNpxEntry(null), false);
+  assert.equal(isOwnNpxEntry({ command: 'npx' }), false);
+});
+
+test('hookCommand / isOwnHookCommand: the Gemini floor command with and without a version', () => {
+  assert.equal(hookCommand({ version: '9.8.7', repoSelf: false }), `npx --yes ${NAME}@9.8.7 pinned-floor --host gemini-cli`);
+  assert.equal(hookCommand({ version: '9.8.7', repoSelf: true }), `npx --yes ${NAME} pinned-floor --host gemini-cli`);
+  assert.equal(isOwnHookCommand(`npx --yes ${NAME} pinned-floor --host gemini-cli`), true);
+  assert.equal(isOwnHookCommand(`npx --yes ${NAME}@4.7.0 pinned-floor --host gemini-cli`), true);
+  assert.equal(isOwnHookCommand(`npx --yes ${NAME}@latest pinned-floor --host gemini-cli`), false);
+  assert.equal(isOwnHookCommand(`npx --yes ${NAME} pinned-floor --host gemini-cli --extra`), false);
+  assert.equal(isOwnHookCommand('my-own-script'), false);
+  assert.equal(isOwnHookCommand(undefined), false);
+});
+
+test('decide: keep, refresh or custom for an existing entry', () => {
+  const spec = `${NAME}@9.8.7`;
+  const e = (args, command = 'npx') => ({ command, args });
+  assert.equal(decide(e(['--yes', NAME]), spec), 'refresh');
+  assert.equal(decide(e(['--yes', `${NAME}@4.7.0`]), spec), 'refresh');
+  assert.equal(decide(e(['--yes', spec]), spec), 'keep');
+  assert.equal(decide(e(['-y', NAME]), spec), 'keep'); // the bare name among other arguments is kept as before
+  assert.equal(decide(e(['--yes', NAME, '--x']), spec), 'keep');
+  assert.equal(decide(e(['--yes', `${NAME}@latest`]), spec), 'custom');
+  assert.equal(decide(e(['--yes', `${NAME}@4.7.0`, '--x']), spec), 'custom');
+  assert.equal(decide(e(['--yes', '@other/pkg']), spec), 'custom');
+  assert.equal(decide(e(['--yes', NAME], 'node'), spec), 'custom');
+  assert.equal(decide({ command: 'npx' }, spec), 'custom');
+  // an unversioned spec (git checkout, no valid version) never refreshes
+  assert.equal(decide(e(['--yes', NAME]), NAME), 'keep');
+  assert.equal(decide(e(['--yes', `${NAME}@4.7.0`]), NAME), 'keep');
+});

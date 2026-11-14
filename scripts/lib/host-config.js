@@ -6,23 +6,11 @@
 //
 // Never throws: a report that cannot be written must not fail an install.
 
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { resolveDataDir } from '../fetch-binary.js';
+import { packageVersion } from './package-spec.js';
 import { appendLog, formatLogEntry, formatSummary, recordChange, takeChanges } from './change-log.js';
 
 const PREFIX = '[total-recall:postinstall]';
-
-function packageVersion() {
-  try {
-    const here = dirname(fileURLToPath(import.meta.url));
-    const v = JSON.parse(readFileSync(join(here, '..', '..', 'package.json'), 'utf8')).version;
-    return typeof v === 'string' && v ? v : 'unknown';
-  } catch {
-    return 'unknown';
-  }
-}
 
 export async function runHostConfig(installers, { env = process.env, stderr = process.stderr, version } = {}) {
   try {
