@@ -1,5 +1,6 @@
 // Shared helper: merge a total-recall server entry into a JSON config file.
-// Non-clobbering: if the key already has a total-recall entry, leaves it alone.
+// Non-clobbering: if the key already has a total-recall entry, an entry in exactly the script's own
+// form is moved to the version being installed (see package-spec.js) and any other entry is left alone.
 // Non-fatal: on parse failure of an existing file, bails and logs.
 //
 // configPath  — absolute path to the JSON config file
