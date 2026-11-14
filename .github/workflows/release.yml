@@ -218,6 +218,7 @@ jobs:
       contents: write
       deployments: write
       id-token: write
+      attestations: write
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -459,6 +460,22 @@ jobs:
           echo "--- manifest ---"
           cat release-assets/provisioning.manifest.json
           node -e "JSON.parse(require('fs').readFileSync('release-assets/provisioning.manifest.json','utf8'))"
+
+      # Attest the five release assets (the four platform archives and the manifest that
+      # carries their sha256) so a user can check with `gh attestation verify` that this
+      # repository's CI built them. This step runs before the assets are attached and has no
+      # `if:` or `continue-on-error:`, so a failed attestation stops the release before any
+      # asset is published. Only the GitHub Release assets are gated: `npm publish` ran earlier
+      # in this job, because the archives are staged after the npm pack.
+      - name: Attest release assets
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            release-assets/total-recall-linux-x64.tar.gz
+            release-assets/total-recall-linux-arm64.tar.gz
+            release-assets/total-recall-osx-arm64.tar.gz
+            release-assets/total-recall-win-x64.tar.gz
+            release-assets/provisioning.manifest.json
 
       - name: Attach archives to GitHub release
         uses: softprops/action-gh-release@v3

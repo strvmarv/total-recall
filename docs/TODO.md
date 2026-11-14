@@ -185,12 +185,9 @@ Items identified during the 0.7.2 TS → 0.8.0 .NET cutover but deferred out of 
 
 Implemented in the MCP bootstrap shim: the shim provisioner downloads the engine archive and verifies it by sha256 against `provisioning.manifest.json` (generated and attached to each GitHub Release by `release.yml`) before extracting. A `.verified.json` marker next to the binary keeps steady-state startup instant (no re-hash on every launch). Reject-on-mismatch with clear error included.
 
-### Signed Releases
+### ~~Signed Releases~~
 
-Beyond checksums, consider sigstore/cosign signatures or gh-release's built-in provenance so users can verify binaries were built by CI and not tampered with in transit.
-
-**Files:** `.github/workflows/release.yml`, `scripts/fetch-binary.js`
-**Depends on:** Checksum verification landing first.
+Implemented in `release.yml` (issue #64). The publish job attests the four platform archives and `provisioning.manifest.json` with `actions/attest@v4` (GitHub artifact attestations, signed through sigstore), before they are attached to the GitHub Release; a failed attestation stops the release assets from being published. Users verify with `gh attestation verify <file> --repo strvmarv/total-recall` (README, "Verifying a release"). `scripts/release-workflow.test.js` pins the step, its position and the permission. Not done: the shim does not enforce attestations (that would need a sigstore verifier, and the shim stays zero-dependency), and there are no cosign signatures or SBOMs. Windows Authenticode signing is a separate entry below.
 
 ### Binary Cache Survives Plugin Reinstall
 
@@ -204,11 +201,9 @@ Dropped in `v0.8.0-beta.2` to get the release matrix green (the `macos-13` runne
 
 **Files:** `.github/workflows/release.yml`, `scripts/fetch-binary.js`, `bin/start.js`
 
-### npm publish --provenance
+### ~~npm publish --provenance~~
 
-Requires adding `id-token: write` to the `publish` job's `permissions` block in `release.yml`, then passing `--provenance` to the `npm publish` step. Gives users an sigstore attestation trail. The old `publish.yml` that this repo deleted during the TS strip had this pattern; restore it on the new `release.yml`.
-
-**Files:** `.github/workflows/release.yml`
+Implemented in `release.yml`: the `publish` job has `id-token: write` and runs `npm publish --provenance` (with and without `--tag`, for prereleases and stable releases) under npm trusted publishing. Confirmed in issue #64.
 
 ### release.yml Dry-Run Step
 
@@ -222,11 +217,9 @@ Add `npm publish --dry-run` before the real publish so tarball shape regressions
 
 **Files:** `.github/workflows/dotnet-ci.yml`
 
-### Node.js 24 Migration in Workflows
+### ~~Node.js 24 Migration in Workflows~~
 
-All workflows currently use `actions/checkout@v4`, `actions/setup-dotnet@v4`, `actions/setup-node@v4` which run on Node.js 20. GitHub Actions will force Node.js 24 on June 2nd, 2026 and remove Node.js 20 entirely on September 16th, 2026. Migrate when the action versions publish Node-24-compatible releases, or set `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` to opt in early.
-
-**Files:** `.github/workflows/release.yml`, `.github/workflows/dotnet-ci.yml`
+Done. Every action used in `release.yml` and `dotnet-ci.yml` has the Node 24 action runtime (`runs.using: node24` in its `action.yml`, checked in issue #64): `actions/checkout@v5`, `actions/setup-node@v5`, `actions/setup-dotnet@v5`, `actions/upload-artifact@v6`, `actions/download-artifact@v7`, `actions/attest@v4` and `softprops/action-gh-release@v3`. The `node-version: 20` and `22` settings in the workflows are the Node versions the project's own scripts run on, not the action runtime.
 
 ### ~~Plugin Version Single Source of Truth~~
 
