@@ -159,18 +159,10 @@ test('.github/develop.md: the repository profile parses, pins the account and ru
   assert.equal(result.profile.ghAccount, 'strvmarv');
   assert.equal(result.profile.ticketStandard, 'on');
 
-  // The shim command as `npm run test:shim` lists it, with each directory entry as an unquoted glob
-  // that `sh` expands (so no Node version matters; the skill's tests sit in scripts/).
-  const shim = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).scripts['test:shim'];
-  const entries = shim.replace(/^node --test /, '').split(/\s+/);
-  const globs = entries.map((entry) => {
-    if (!entry.endsWith('/')) return entry;
-    const dir = entry === 'skills/develop/' ? 'skills/develop/scripts/' : entry;
-    return `${dir}*.test.js`;
-  });
+  // The shim suites run through `npm run test:shim`, whose runner holds the one list of test files.
   assert.deepEqual(result.profile.verify, [
     'dotnet test src/TotalRecall.sln --filter "Category!=Integration"',
-    `node --test ${globs.join(' ')}`,
+    'npm run test:shim',
     // CI's catalog drift guard: build, then diff `dump-catalog` on stdout (no file written outside the worktree).
     [
       'dotnet build src/TotalRecall.Host/TotalRecall.Host.csproj --configuration Release -nologo -v q',

@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { SHIM_TEST_TARGETS } from '../scripts/run-shim-tests.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const readText = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
@@ -49,8 +50,8 @@ test('package.json ships the Codex files and runs their tests', () => {
   assert.ok(pkg.files.includes('codex/'));
   assert.ok(pkg.files.includes('.codex-plugin/'));
   assert.ok(pkg.keywords.includes('codex'));
-  assert.ok(pkg.scripts['test:shim'].includes(' codex/ '));
-  assert.ok(pkg.scripts['test:shim'].includes(' pi/ '));
+  assert.ok(SHIM_TEST_TARGETS.includes('codex/'));
+  assert.ok(SHIM_TEST_TARGETS.includes('pi/'));
   assert.equal(pkg.dependencies, undefined);
 });
 

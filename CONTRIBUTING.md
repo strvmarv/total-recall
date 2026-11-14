@@ -367,7 +367,7 @@ The MCP bootstrap shim (`bin/shim/`) has its own Node test suite using the built
 npm run test:shim
 ```
 
-This runs the Node tests listed in the `test:shim` script of `package.json` (the `bin/shim/`, `pi/`, `codex/`, `copilot/`, `cursor/` and `skills/develop/` directories plus `scripts/fetch-binary.test.js`, `scripts/sync-version.test.js`, `scripts/release-workflow.test.js`, `scripts/host-docs.test.js` and `hooks/hooks.config.test.js`) — no .NET SDK or built binary required. Run this when changing anything under `bin/shim/`, `bin/start.js`, `scripts/fetch-binary.js`, `scripts/sync-version.js` or `.github/workflows/release.yml`.
+This runs the Node tests listed in `SHIM_TEST_TARGETS` in `scripts/run-shim-tests.js` (the directories and files it names; add a new test file there when it sits outside them) — no .NET SDK or built binary required. The runner hands `node --test` explicit file paths, so the command works on Node 20 and later (`node --test <directory>` fails on Node 24), and extra options go after `--`, for example `npm run test:shim -- --test-name-pattern=<name>`. The `develop` profile runs the same command. Run this when changing anything under `bin/shim/`, `bin/start.js`, `scripts/fetch-binary.js`, `scripts/sync-version.js` or `.github/workflows/release.yml`.
 
 ### Regenerating catalog.json
 
