@@ -452,7 +452,7 @@ export function checkToolReference(tree) {
   const problems = [];
   const prose = stripFences(page);
   for (const tool of tools) if (!prose.includes(`\`${tool.name}\``)) problems.push(`docs/tools.md does not list the tool \`${tool.name}\``);
-  if (!new RegExp(`(?<!\\d)${tools.length} in SQLite mode`).test(page)) problems.push(`docs/tools.md does not say "${tools.length} in SQLite mode"`);
+  if (!new RegExp(`(?<!\\d)${tools.length} in SQLite mode`).test(prose)) problems.push(`docs/tools.md does not say "${tools.length} in SQLite mode"`);
   return problems;
 }
 
@@ -676,6 +676,7 @@ function validFiles() {
     'docs/npm-postinstall.md': `# Postinstall\n\n${TOOLS.join(', ')}\n`,
     'docs/database-location.md': '# Relocating the database\n',
     'docs/first-run.md': '# First run\n',
+    'PRIVACY.md': '# Privacy Policy\n\nSee [First run](docs/first-run.md).\n',
     '.opencode/INSTALL.md': `# OpenCode\n\nSee ${BLOB}docs/hosts/opencode.md\n`,
     'skills/commands/SKILL.md': `# Commands\n\n     > ${STATUS}\n`,
     'scripts/postinstall.js': Object.keys(MODULE_TOOLS).map((m) => `import { x } from './${m}.js';`).join('\n') + '\n',
@@ -752,6 +753,7 @@ test('rule 3 holds on the repository', () => assert.deepEqual(checkLinks(repoTre
 defect('a link to a missing page', checkLinks, (f) => { f['README.md'] += '\n[x](docs/hosts/nope.md)\n'; }, /docs\/hosts\/nope\.md.*does not exist/);
 defect('an anchor with no heading', checkLinks, (f) => { f['README.md'] += '\n[x](docs/first-run.md#no-such-heading)\n'; }, /no heading "#no-such-heading"/);
 defect('a repository URL to a missing page', checkLinks, (f) => { f['INSTALL.md'] += `\n${RAW}docs/hosts/nope.md\n`; }, /docs\/hosts\/nope\.md.*does not exist/);
+defect('a broken link in the privacy policy', checkLinks, (f) => { f['PRIVACY.md'] = f['PRIVACY.md'].replace('docs/first-run.md', 'docs/nope.md'); }, /PRIVACY\.md: the link "docs\/nope\.md"/);
 defect('a link from a page to a file that moved', checkLinks, (f) => { f['docs/hosts/pi.md'] += '\n[db](../database-location-old.md)\n'; }, /database-location-old\.md/);
 
 test('rule 3: a broken link inside a code span or fence is not reported', () => {

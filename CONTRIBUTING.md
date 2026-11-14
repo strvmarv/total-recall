@@ -396,7 +396,7 @@ Once the MCP server is running and connected to your coding assistant, use the e
 /total-recall:commands eval --compare baseline   # Compare current config against saved baseline
 ```
 
-Real query misses captured as benchmark candidates are added to the benchmark suite with the `eval_grow` tool or the CLI (`total-recall eval grow list`, then `total-recall eval grow resolve --accept <ids> --reject <ids>`); the commands skill has no subcommand for it.
+Real query misses captured as benchmark candidates are added to the benchmark suite with the `eval_grow` tool or the CLI (`total-recall eval grow list`, then `total-recall eval grow resolve --accept <id1,id2,...> --reject <id1,id2,...>`); the commands skill has no subcommand for it.
 
 Or run the benchmark CLI directly (without MCP):
 

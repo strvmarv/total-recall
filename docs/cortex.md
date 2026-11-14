@@ -6,7 +6,7 @@ In Cortex mode, the plugin operates as a hybrid:
 - **User memories** are stored locally (fast reads/writes), synced bidirectionally to Cortex every 300 seconds and at session boundaries. Knowledge base entries you ingest locally, including the project docs ingested at session start, are pushed to Cortex the same way
 - **Sticky (pinned) entries are local-only** — Cortex has no sticky-pin support yet, so pins are never pushed, pulled, reconciled, or migrated (`migrate_to_remote` skips them)
 - **Global knowledge** (team KB, connector-ingested data) is queried remotely from Cortex
-- **Telemetry** (usage, retrieval events, compaction log) is pushed to Cortex for unified dashboards
+- **Telemetry** (usage, skill usage, retrieval events, compaction log) is pushed to Cortex for unified dashboards
 - **Skills** are synced to Cortex so team members share the same skill library (your local skills are uploaded only when `[skills] auto_import` is on; see [Skills](skills.md))
 
 Configure in your [`config.toml`](configuration.md) (`~/.total-recall/config.toml`):
