@@ -236,11 +236,9 @@ A pre-commit auto-sync hook was considered and dropped: a release agent running 
 
 History (the reason this exists): `.copilot-plugin/plugin.json` was stuck at `0.1.0` across many releases; `.claude-plugin/plugin.json` and `.cursor-plugin/plugin.json` stayed on `0.7.2` through the strip series while `package.json` advanced to `0.8.0-beta.3`; `package-lock.json`'s top-level `version` drifted until the beta.6 lockfile regeneration; and `hermes-plugin/plugin.yaml` stayed on `1.4.0` through the 2.0.0 release.
 
-### Scrub Stale TS References in .NET Source Comments
+### ~~Scrub Stale TS References in .NET Source Comments~~
 
-89 files under `src/TotalRecall.*/` carry comments like `// ported from src-ts/embedding/tokenizer.ts` or `// mirrors src-ts/db/entries.ts`. These are historical documentation that now point at paths deleted in commit `87975a7`. Not broken, just stale. Replace with a shorter note ("ported from the original TypeScript implementation — see git history before 87975a7 for archaeology") or delete the lineage references entirely. The same pass should also scrub the `bun:sqlite` reference in `src/TotalRecall.Infrastructure/Storage/SqliteConnection.cs:13–15`.
-
-**Files:** 89 `.cs` / `.fs` files across `src/TotalRecall.*/`, plus `src/TotalRecall.Infrastructure/Storage/SqliteConnection.cs`.
+Done (issue #66). The 132 lines in 86 `.cs`/`.fs` files under `src/` and `tests/` (the entry's 89 was an old count) that named the deleted TypeScript implementation (`src-ts/...`) or `bun:sqlite`, including the `SqliteConnection` summary, were deleted when they only said where code came from and rewritten without the old path when they also explained behaviour. Only comment lines changed. `StaleLineageReferenceTests` (`tests/TotalRecall.Infrastructure.Tests`) now fails, naming file and line, if either string comes back into a `.cs` or `.fs` file under `src/` or `tests/`. Other lineage wording that names neither string (for example "Plan 5 Task 5.3a" or "the TS implementation") was left alone.
 
 ### Windows install robustness: retry-on-EPERM upstream in Claude Code
 
