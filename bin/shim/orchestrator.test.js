@@ -130,6 +130,9 @@ test('retry: a call while waiting for the next try gets phase provisioning with 
   assert.equal(payload.phase, 'provisioning');
   assert.equal(payload.attempt, 1);
   assert.equal(payload.error, 'HTTP 404 for manifest');
+  assert.ok(payload.retryInSeconds > 0 && payload.retryInSeconds <= 60, `retryInSeconds ${payload.retryInSeconds}`);
+  assert.equal('nextRetryAt' in payload, false);
+  assert.match(payload.hint, /try again by itself/);
   shim.stop();
 });
 
@@ -146,6 +149,20 @@ test('retry: a running retry has no nextRetryAt before any progress tick; a tick
   assert.equal(shim._state.detail.attempt, 2);
   assert.equal(shim._state.detail.error, 'first failure');
   assert.equal(shim._state.detail.bytes, 10);
+  release();
+  shim.stop();
+});
+
+test('retry: a call during a running retry keeps phase provisioning when a real progress tick arrives', async () => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const { shim, calls, call } = scripted([RETRYABLE('first failure'), () => gate.then(() => ({ ok: true }))], { delays: [5] });
+  await waitFor(() => calls.n === 2);
+  calls.onProgress[1]({ bytes: 10, total: 100, phase: 'downloading' });
+  const payload = JSON.parse((await call()).content[0].text);
+  assert.equal(payload.phase, 'provisioning');
+  assert.equal(payload.attempt, 2);
+  assert.equal(payload.error, 'first failure');
   release();
   shim.stop();
 });
