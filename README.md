@@ -88,15 +88,15 @@ Or if the marketplace isn't registered:
 ### pi
 
 ```bash
-pi install npm:@strvmarv/total-recall   # once the release carrying pi support is published
+pi install npm:@strvmarv/total-recall
 pi install git:github.com/strvmarv/total-recall   # from main
 ```
 
-The extension registers the MCP server, injects the startup instructions, runs the pinned-directive floor, and adds a `/total-recall` command. See [INSTALL.md](INSTALL.md#pi) for details and known gaps.
+The extension registers the MCP server, injects the startup instructions, runs the pinned-directive floor, and adds a `/total-recall` command. See [the pi page](docs/hosts/pi.md) for details and known gaps.
 
 ### Cursor CLI
 
-Copy the repository to `~/.cursor/plugins/local/total-recall` and restart Cursor (Windows; see [INSTALL.md](INSTALL.md#cursor) for approval with `--approve-mcps`, the first-call timeout and other limits). The plugin registers the MCP server, injects the startup instructions, and runs the pinned-directive floor on tool-using turns.
+Copy the repository to `~/.cursor/plugins/local/total-recall` and restart Cursor (Windows; see [the Cursor page](docs/hosts/cursor.md) for approval with `--approve-mcps`, the first-call timeout and other limits). The plugin registers the MCP server, injects the startup instructions, and runs the pinned-directive floor on tool-using turns.
 
 ### Codex CLI
 
@@ -105,7 +105,7 @@ codex plugin marketplace add strvmarv/total-recall-marketplace
 codex plugin add total-recall@strvmarv-total-recall-marketplace
 ```
 
-Then trust the two hooks once in `/hooks`. The plugin registers the MCP server, injects the startup instructions, and runs the pinned-directive floor. See [INSTALL.md](INSTALL.md#codex-cli) for tool approval, limitations and troubleshooting.
+Then trust the two hooks once in `/hooks`. The plugin registers the MCP server, injects the startup instructions, and runs the pinned-directive floor. See [the Codex CLI page](docs/hosts/codex-cli.md) for tool approval, limitations and troubleshooting.
 
 ### Copilot CLI
 
@@ -114,7 +114,7 @@ copilot plugin marketplace add strvmarv/total-recall-marketplace
 copilot plugin install total-recall@strvmarv-total-recall-marketplace
 ```
 
-This works once the marketplace points at a release that contains `.github/plugin/` and `copilot/` (see the INSTALL.md caveat). Then allow the server for non-interactive runs with `--allow-tool=total-recall`. The plugin registers the MCP server, injects the startup instructions, and runs the pinned-directive floor. See [INSTALL.md](INSTALL.md#github-copilot-cli) for tool approval and known gaps.
+Allow the server for non-interactive runs with `--allow-tool=total-recall`. The plugin registers the MCP server, injects the startup instructions, and runs the pinned-directive floor. See [the Copilot CLI page](docs/hosts/copilot-cli.md) for tool approval and known gaps.
 
 ### npm (Any MCP-Compatible Tool)
 
@@ -134,9 +134,9 @@ Then add to your tool's MCP config:
 }
 ```
 
-This works with **Copilot CLI**, **OpenCode**, **Cline**, **Cursor**, **Hermes**, and any other MCP-compatible tool. The `total-recall ui` command is available independently of MCP configuration — it is a local management surface, not a host tool.
+This works with **Copilot CLI**, **Cline**, **Cursor**, and any other MCP-compatible tool. OpenCode registers servers under an `mcp` key (see [its page](docs/hosts/opencode.md)) and Hermes has no MCP entry (see [its page](docs/hosts/hermes.md)). The `total-recall ui` command is available independently of MCP configuration — it is a local management surface, not a host tool.
 
-> **Note:** `npx -y @strvmarv/total-recall` does not work due to an [npm bug](https://github.com/npm/cli/issues/3753) with scoped package binaries. Use the global install (`total-recall` command) instead.
+> **Note:** prefer the global install. `npx -y @strvmarv/total-recall` runs a copy that is already installed (for example an older global install) instead of fetching the latest release.
 
 ---
 
@@ -228,11 +228,11 @@ Per-host support:
 | Platform | Support | Notes |
 |---|---|---|
 | Claude Code | Full | Native plugin, session hooks, auto-import |
-| Copilot CLI | Core (known gaps in [INSTALL.md](INSTALL.md#github-copilot-cli): turn-count floor only, no `session_end`, server-side project scope, nothing re-injected after `/compact`) | `copilot plugin install` plugin: MCP server, startup instructions, pinned-directive floor, auto-import from Copilot memory files |
-| Cursor | Core (known gaps in [INSTALL.md](INSTALL.md#cursor): floor only on tool-using turns, the first `session_start` can hit Cursor's 60 s MCP limit, no custom store, no `session_end`, Windows only so far) | Local plugin: MCP server (workspace cwd), startup instructions, pinned-directive floor |
+| Copilot CLI | Core (known gaps on [the Copilot CLI page](docs/hosts/copilot-cli.md): turn-count floor only, no `session_end`, server-side project scope, nothing re-injected after `/compact`) | `copilot plugin install` plugin: MCP server, startup instructions, pinned-directive floor, auto-import from Copilot memory files |
+| Cursor | Core (known gaps on [the Cursor page](docs/hosts/cursor.md): floor only on tool-using turns, the first `session_start` can hit Cursor's 60 s MCP limit, no custom store, no `session_end`, Windows only so far) | Local plugin: MCP server (workspace cwd), startup instructions, pinned-directive floor |
 | OpenCode | Full | Plugin wrapper, auto-import from OpenCode project and agent files |
-| pi | Full (known gaps in [INSTALL.md](INSTALL.md#pi): turn-count floor only, no `session_end`, `compact --fast`) | `pi install` package: MCP server, startup instructions, pinned-directive floor, `/total-recall` command |
-| Codex CLI | Full (known gaps in [INSTALL.md](INSTALL.md#codex-cli): turn-count floor only, no `session_end`, hooks need a one-time trust review) | `codex plugin add` plugin: MCP server, startup instructions, pinned-directive floor |
+| pi | Full (known gaps on [the pi page](docs/hosts/pi.md): turn-count floor only, no `session_end`, `compact --fast`) | `pi install` package: MCP server, startup instructions, pinned-directive floor, `/total-recall` command |
+| Codex CLI | Full (known gaps on [the Codex CLI page](docs/hosts/codex-cli.md): turn-count floor only, no `session_end`, hooks need a one-time trust review) | `codex plugin add` plugin: MCP server, startup instructions, pinned-directive floor |
 | Cline | Full | Auto-import from task history; MCP server config required |
 | Hermes | Importer | Auto-import from SOUL.md and skills on first run; no session hooks |
 
@@ -396,7 +396,7 @@ dimensions = 384                  # Embedding dimensions
 # user_id = "alice"               # or set TOTAL_RECALL_USER_ID env var
 ```
 
-**Relocating the database:** set `TOTAL_RECALL_DB_PATH` to an absolute path or `~/`-prefixed path. See [INSTALL.md](INSTALL.md#relocating-the-database) for cloud-sync and shared-workspace guidance.
+**Relocating the database:** set `TOTAL_RECALL_DB_PATH` to an absolute path or `~/`-prefixed path. See [Relocating the database](docs/database-location.md) for cloud-sync and shared-workspace guidance.
 
 **Switching to Postgres:** uncomment the `[storage]` section with your connection string. The binary auto-detects the backend — no code changes, no flag. Pair with `[embedding] provider = "bedrock"` or `"openai"` for remote embeddings. Run `migrate_to_remote` to copy local memories to the shared database with re-embedding.
 
