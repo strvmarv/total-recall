@@ -11,7 +11,7 @@
     "prepare": "git config core.hooksPath git-hooks || true",
     "postinstall": "node scripts/postinstall.js",
     "prepublishOnly": "node scripts/verify-binaries.js",
-    "test:shim": "node --test bin/shim/ pi/ codex/ skills/develop/ copilot/ cursor/ scripts/fetch-binary.test.js scripts/sync-version.test.js scripts/release-workflow.test.js hooks/hooks.config.test.js"
+    "test:shim": "node --test bin/shim/ pi/ codex/ skills/develop/ copilot/ cursor/ scripts/fetch-binary.test.js scripts/sync-version.test.js scripts/release-workflow.test.js scripts/host-docs.test.js hooks/hooks.config.test.js"
   },
   "files": [
     "bin/",
