@@ -13,8 +13,8 @@ namespace TotalRecall.Infrastructure.Importers;
 /// Imports memory + knowledge entries from a Claude Code installation.
 /// Scans <c>{basePath}/projects/*/memory/*.md</c> (excluding the
 /// <c>MEMORY.md</c> index file) for per-project memories and
-/// <c>{basePath}/CLAUDE.md</c> for top-level knowledge. Mirrors
-/// <c>src-ts/importers/claude-code.ts</c> bit-for-bit — including the
+/// <c>{basePath}/CLAUDE.md</c> for top-level knowledge. Behaviour matches the
+/// original TypeScript importer bit-for-bit — including the
 /// quirk that per-project <c>CLAUDE.md</c> files are COUNTED by
 /// <see cref="Scan"/> but only the top-level <c>CLAUDE.md</c> is actually
 /// imported by <see cref="ImportKnowledge"/>.

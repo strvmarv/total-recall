@@ -29,8 +29,7 @@ namespace TotalRecall.Infrastructure.Importers;
 ///       {projectPath}/.cursorrules                  (cold/knowledge, tags=[cursorrules, legacy])
 ///       {projectPath}/.cursor/rules/*.mdc           (cold/knowledge, tags=[cursor-rule], frontmatter parsed)
 ///
-/// Mirrors <c>src-ts/importers/cursor.ts</c> bit-for-bit. The state.vscdb
-/// is opened with a separate <see cref="SqliteConnection"/> in read-only
+/// The state.vscdb is opened with a separate <see cref="SqliteConnection"/> in read-only
 /// mode (NOT through <see cref="Storage.SqliteConnection.Open"/>, which
 /// loads sqlite-vec — that extension is unnecessary here).
 /// </summary>

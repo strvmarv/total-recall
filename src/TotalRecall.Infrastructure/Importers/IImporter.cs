@@ -6,8 +6,7 @@ namespace TotalRecall.Infrastructure.Importers;
 /// <summary>
 /// Result of an importer's import call: how many entries were inserted vs.
 /// skipped (typically due to dedupe), plus any non-fatal errors collected
-/// during the run. Mirrors the TS <c>ImportResult</c> shape from
-/// <c>src-ts/importers/importer.ts</c>.
+/// during the run.
 /// <para><paramref name="Chunks"/> is the number of chunks written for the
 /// imported entries. Only importers that ingest chunked documents (project
 /// docs) set it; it is null for importers that insert whole entries.</para>
@@ -35,8 +34,7 @@ public sealed record ImporterScanResult(
 
 /// <summary>
 /// Common interface for the 7 host-tool importers (Claude Code, Copilot
-/// CLI, Opencode, Cursor, Cline, Hermes, ProjectDocs). Mirrors the TS
-/// <c>HostImporter</c> shape from <c>src-ts/importers/importer.ts</c>.
+/// CLI, Opencode, Cursor, Cline, Hermes, ProjectDocs).
 ///
 /// Concrete implementations take their dependencies (<c>IStore</c>,
 /// <c>IEmbedder</c>, <c>IVectorSearch</c>, <c>ImportLog</c>) via

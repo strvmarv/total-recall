@@ -10,8 +10,7 @@ namespace TotalRecall.Infrastructure.Tests.Config;
 /// <summary>
 /// Unit tests for <see cref="ConfigWriter"/>. Exercises <c>SetNestedKey</c>
 /// mutation semantics and <c>SaveUserOverride</c> file I/O against a temp
-/// directory per test. Mirrors the TS semantics in
-/// <c>src-ts/config.ts</c> (setNestedKey, saveUserConfig).
+/// directory per test.
 /// </summary>
 public sealed class ConfigWriterTests : IDisposable
 {

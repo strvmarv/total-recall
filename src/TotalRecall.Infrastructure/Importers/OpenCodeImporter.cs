@@ -28,7 +28,6 @@ namespace TotalRecall.Infrastructure.Importers;
 /// in read-only mode (NOT through <see cref="Storage.SqliteConnection.Open"/>,
 /// which loads sqlite-vec — that extension is unnecessary here). Failures to
 /// open or query the DB are swallowed and yield an empty project list.
-/// Mirrors <c>src-ts/importers/opencode.ts</c> bit-for-bit.
 /// </summary>
 public sealed class OpenCodeImporter : IImporter
 {

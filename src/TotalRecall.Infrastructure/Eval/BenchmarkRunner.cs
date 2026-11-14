@@ -1,7 +1,5 @@
 // src/TotalRecall.Infrastructure/Eval/BenchmarkRunner.cs
 //
-// Plan 5 Task 5.3a — port of src-ts/eval/benchmark-runner.ts.
-//
 // Seeds a corpus of memories into the warm tier (using the same
 // SqliteStore + VectorSearch insert pattern as MemoryStoreHandler), runs
 // each benchmark query through HybridSearch with topK=3, tallies match

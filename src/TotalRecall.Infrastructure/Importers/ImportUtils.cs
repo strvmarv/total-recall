@@ -30,8 +30,7 @@ public sealed record ImportFileOutcome(
     string? Error = null);
 
 /// <summary>
-/// Parsed frontmatter block from a markdown file. Mirrors the TS
-/// <c>Frontmatter</c> interface in <c>src-ts/importers/import-utils.ts</c>.
+/// Parsed frontmatter block from a markdown file.
 /// All fields are optional because importers parse a wide variety of files.
 /// </summary>
 public sealed record Frontmatter(
@@ -49,10 +48,8 @@ public sealed record FrontmatterParseResult(
     string Content);
 
 /// <summary>
-/// Static helpers shared by the 7 host importers. Ports the subset of
-/// <c>src-ts/importers/import-utils.ts</c> that isn't already covered by
-/// <c>TotalRecall.Infrastructure.Telemetry.ImportLog</c> (which owns the
-/// content-hash / dedupe / log-write helpers from the TS module).
+/// Static helpers shared by the 7 host importers. The content-hash / dedupe /
+/// log-write helpers live in <c>TotalRecall.Infrastructure.Telemetry.ImportLog</c>.
 /// </summary>
 public static class ImportUtils
 {

@@ -12,8 +12,7 @@ using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 namespace TotalRecall.Infrastructure.Storage;
 
 /// <summary>
-/// Tier-aware CRUD over the 6 content tables. Ports
-/// <c>src-ts/db/entries.ts</c> to C# using <see cref="Microsoft.Data.Sqlite"/>
+/// Tier-aware CRUD over the 6 content tables, using <see cref="Microsoft.Data.Sqlite"/>
 /// with parameterized queries. Table names are resolved from the F# Core
 /// <see cref="Tier"/> / <see cref="ContentType"/> DUs via
 /// <see cref="MigrationRunner.TableName"/>.
@@ -401,8 +400,7 @@ VALUES
 
     public int CountKnowledgeCollections()
     {
-        // Mirrors src-ts/tools/session-tools.ts: collections live in
-        // cold_knowledge only, NULL collection_ids excluded.
+        // Collections live in cold_knowledge only, NULL collection_ids excluded.
         using var cmd = _conn.CreateCommand();
         cmd.CommandText =
             "SELECT COUNT(DISTINCT collection_id) FROM cold_knowledge WHERE collection_id IS NOT NULL";

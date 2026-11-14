@@ -8,8 +8,8 @@ using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 namespace TotalRecall.Infrastructure.Search;
 
 /// <summary>
-/// FTS5-backed implementation of <see cref="IFtsSearch"/>. Ports
-/// <c>src-ts/search/fts-search.ts</c> line-for-line, including:
+/// FTS5-backed implementation of <see cref="IFtsSearch"/>, following the original
+/// TypeScript implementation line-for-line, including:
 /// <list type="bullet">
 ///   <item>The phrase-query sanitizer (split on whitespace, wrap each
 ///     word in double quotes, escape internal quotes by doubling).</item>
@@ -117,9 +117,6 @@ LIMIT $k";
     /// whitespace-separated token is wrapped in double quotes, and any
     /// internal double quotes are escaped by doubling (FTS5's convention).
     /// Empty / whitespace-only input returns the empty string.
-    ///
-    /// Mirrors <c>sanitizeFtsQuery</c> in
-    /// <c>src-ts/search/fts-search.ts</c>.
     /// </summary>
     internal static string SanitizeFtsQuery(string query)
     {

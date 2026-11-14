@@ -8,8 +8,8 @@ using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 namespace TotalRecall.Infrastructure.Search;
 
 /// <summary>
-/// sqlite-vec-backed implementation of <see cref="IVectorSearch"/>. Ports
-/// <c>src-ts/search/vector-search.ts</c> line-for-line, including the
+/// sqlite-vec-backed implementation of <see cref="IVectorSearch"/>, following the
+/// original TypeScript implementation line-for-line, including the
 /// <c>oversample = topK * 2</c> prefetch and the
 /// <c>WHERE embedding MATCH ? AND k = ?</c> KNN-constraint syntax required by
 /// vec0 (a plain <c>LIMIT</c> is rejected by the virtual table).

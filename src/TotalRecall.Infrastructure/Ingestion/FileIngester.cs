@@ -35,8 +35,7 @@ public sealed record IngestDirectoryResult(
 /// <summary>
 /// Orchestrates <see cref="Chunker.chunkFile"/> +
 /// <see cref="HierarchicalIndex.AddDocumentToCollection"/> +
-/// <see cref="IngestValidator.ValidateChunks"/>. Ports
-/// <c>src-ts/ingestion/ingest.ts</c>.
+/// <see cref="IngestValidator.ValidateChunks"/>.
 ///
 /// The ingestable extension set, the chunker options (maxTokens=512,
 /// overlapTokens=50), the parent-directory auto-collection behaviour, the
@@ -254,7 +253,7 @@ public sealed class FileIngester : IFileIngester
 
     internal static bool MatchesGlob(string filename, string glob)
     {
-        // Matches src-ts/ingestion/ingest.ts: only *.ext or exact filename.
+        // Only *.ext or an exact filename is supported.
         if (glob.StartsWith("*.", StringComparison.Ordinal))
         {
             var ext = glob.Substring(1);

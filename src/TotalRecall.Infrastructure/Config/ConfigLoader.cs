@@ -21,8 +21,7 @@ public sealed class SqliteDbPathException : Exception
 }
 
 /// <summary>
-/// Loads <see cref="Core.Config.TotalRecallConfig"/> from TOML sources. Ports
-/// <c>src-ts/config.ts</c> (<c>getDataDir</c>, <c>loadConfig</c>).
+/// Loads <see cref="Core.Config.TotalRecallConfig"/> from TOML sources (<c>getDataDir</c>, <c>loadConfig</c>).
 ///
 /// Loads an embedded <c>defaults.toml</c> resource and optionally deep-merges a
 /// user-supplied <c>config.toml</c> over it. Parsing uses Tomlyn's syntax-tree
@@ -57,7 +56,6 @@ public sealed class ConfigLoader : IConfigLoader
     /// <summary>
     /// Returns the data directory for total-recall. Honors
     /// <c>TOTAL_RECALL_HOME</c> if set, otherwise <c>$HOME/.total-recall</c>.
-    /// Direct port of <c>getDataDir()</c> in <c>src-ts/config.ts</c>.
     /// </summary>
     public static string GetDataDir()
     {
@@ -70,8 +68,7 @@ public sealed class ConfigLoader : IConfigLoader
     }
 
     /// <summary>
-    /// Resolve the SQLite database file path. Port of <c>getDbPath()</c> in
-    /// <c>src-ts/config.ts</c>.
+    /// Resolve the SQLite database file path.
     ///
     /// Precedence:
     /// <list type="number">

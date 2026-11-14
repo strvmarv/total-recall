@@ -4,8 +4,7 @@ using Xunit;
 namespace TotalRecall.Infrastructure.Tests;
 
 /// <summary>
-/// Unit tests for <see cref="ImportUtils.ParseFrontmatter"/>, porting the
-/// behaviour of <c>src-ts/importers/import-utils.ts</c>. Pure string-in /
+/// Unit tests for <see cref="ImportUtils.ParseFrontmatter"/>. Pure string-in /
 /// string-out — no DB, no file I/O, not marked Integration.
 /// </summary>
 public class ImportUtilsTests

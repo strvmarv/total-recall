@@ -165,7 +165,7 @@ public sealed class ConfigLoaderTests : IDisposable
     public void LoadEffectiveConfig_UnsafeKey_Skipped()
     {
         // Unsafe top-level keys from the user config must be dropped by the
-        // MergeTables safe-key filter (mirrors src-ts/config.ts isSafeKey).
+        // MergeTables safe-key filter.
         var userPath = Path.Combine(_tempDir, "config.toml");
         File.WriteAllText(userPath, """
             __proto__ = "evil"

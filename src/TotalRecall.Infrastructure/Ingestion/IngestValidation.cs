@@ -25,8 +25,8 @@ public sealed record ValidationResult(bool Passed, IReadOnlyList<ProbeResult> Pr
 /// <summary>
 /// Post-ingest sanity check: embeds a handful of the chunks we just wrote and
 /// confirms that a cold/knowledge vector search can find them back within the
-/// same collection with a score above <c>PROBE_MIN_SCORE</c>. Ports
-/// <c>src-ts/ingestion/ingest-validation.ts</c> line-for-line, including the
+/// same collection with a score above <c>PROBE_MIN_SCORE</c>. Follows the original
+/// TypeScript implementation line-for-line, including the
 /// (largely dead) <c>parent_id === collectionId</c> branch in the scope filter
 /// so TS and .NET produce identical results against identical databases.
 /// </summary>

@@ -10,8 +10,7 @@ using TotalRecall.Infrastructure.Telemetry;
 namespace TotalRecall.Infrastructure.Ingestion;
 
 /// <summary>
-/// Options for <see cref="HierarchicalIndex.CreateCollection"/>. Mirrors the
-/// <c>CreateCollectionOpts</c> shape from <c>src-ts/ingestion/hierarchical-index.ts</c>.
+/// Options for <see cref="HierarchicalIndex.CreateCollection"/>.
 /// </summary>
 public sealed record CreateCollectionOpts(string Name, string SourcePath);
 
@@ -44,8 +43,7 @@ public sealed record CollectionEntry(Entry Entry, string Name);
 
 /// <summary>
 /// Builds collection -> document -> chunk trees in the cold/knowledge tier.
-/// Ports <c>src-ts/ingestion/hierarchical-index.ts</c>. The tree relationship
-/// uses <c>parent_id</c> (chunk -> document) and <c>collection_id</c>
+/// The tree relationship uses <c>parent_id</c> (chunk -> document) and <c>collection_id</c>
 /// (chunk/document -> collection); the metadata JSON carries a
 /// <c>type</c> discriminator (<c>collection</c> | <c>document</c> | <c>chunk</c>).
 ///

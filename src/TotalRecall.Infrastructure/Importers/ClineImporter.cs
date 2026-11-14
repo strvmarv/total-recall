@@ -24,7 +24,7 @@ namespace TotalRecall.Infrastructure.Importers;
 ///   {globalRulesPath}/*.md|*.txt      ~/Documents/Cline/Rules (warm/knowledge, raw text)
 ///   {globalRulesFallback}/*.md|*.txt  ~/Cline/Rules            (warm/knowledge, raw text)
 ///
-/// Mirrors <c>src-ts/importers/cline.ts</c> bit-for-bit, with one
+/// Behaviour matches the original TypeScript importer bit-for-bit, with one
 /// deviation: <c>globalRulesPath</c> and <c>globalRulesFallback</c> are
 /// constructor parameters (the TS hardcodes them) so tests can stay
 /// hermetic without touching the real <c>~/Documents</c> directory.

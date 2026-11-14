@@ -7,8 +7,7 @@ using TotalRecall.Infrastructure.Storage;
 namespace TotalRecall.Infrastructure.Search;
 
 /// <summary>
-/// Options for <see cref="HybridSearch.Search"/>. Mirrors the options bag
-/// accepted by <c>searchMemory</c> in <c>src-ts/memory/search.ts</c>.
+/// Options for <see cref="HybridSearch.Search"/>.
 /// <para>
 /// <see cref="MinScore"/> is propagated to the vector seam only (matching
 /// the TS reference which does not pass minScore to FTS).
@@ -26,8 +25,7 @@ public sealed record HybridSearchOpts(
 
 /// <summary>
 /// Orchestration layer that fuses vector and FTS5 search across one or more
-/// (tier, type) pairs. Ports <c>searchMemory</c> from
-/// <c>src-ts/memory/search.ts</c>.
+/// (tier, type) pairs.
 ///
 /// <para>
 /// Each underlying seam is queried with <c>topK * 2</c> (oversampling) so

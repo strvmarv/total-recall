@@ -1,7 +1,7 @@
 // src/TotalRecall.Infrastructure/Eval/Metrics.cs
 //
-// Plan 5 Task 5.3a — port of src-ts/eval/metrics.ts (the read/compute side
-// only). Pure math over the existing RetrievalEventRow + CompactionAnalyticsRow
+// The read/compute side of the eval metrics. Pure math over the existing
+// RetrievalEventRow + CompactionAnalyticsRow
 // projections from TotalRecall.Infrastructure.Telemetry. No I/O, no
 // candidate-write side effects (Task 5.3b owns the write path on top of
 // these read shapes).
@@ -78,8 +78,7 @@ public sealed record MetricsReport(
 /// <summary>
 /// Pure-math metric aggregator. Read-only — produces a <see cref="MetricsReport"/>
 /// from a list of retrieval events plus optional compaction rows. No DB,
-/// no filesystem, no logging. Mirrors <c>computeMetrics</c> in
-/// <c>src-ts/eval/metrics.ts</c>.
+/// no filesystem, no logging.
 /// </summary>
 public static class Metrics
 {

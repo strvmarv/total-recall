@@ -1,6 +1,6 @@
 // src/TotalRecall.Infrastructure/Eval/BenchmarkCandidates.cs
 //
-// Plan 5 Task 5.3a — partial port of src-ts/eval/benchmark-candidates.ts.
+// Benchmark candidates captured from retrieval misses.
 // Only the read side and the upsert-from-misses helper are landed in 5.3a;
 // the resolve+write-to-retrieval.jsonl path used by `eval grow` is deferred
 // to Task 5.3b.
@@ -177,7 +177,6 @@ ON CONFLICT(query_text) DO UPDATE SET
     /// <summary>
     /// Flip <c>status</c> for accepted/rejected rows, build benchmark corpus
     /// entries from the accepted rows, and append them to <paramref name="benchmarkFilePath"/>.
-    /// Ports <c>resolveCandidates</c> in <c>src-ts/eval/benchmark-candidates.ts</c>.
     /// Missing accept ids are silently skipped (matches TS).
     /// </summary>
     public CandidateResolveResult Resolve(

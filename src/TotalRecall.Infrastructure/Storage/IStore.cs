@@ -5,8 +5,7 @@ using TotalRecall.Core;
 namespace TotalRecall.Infrastructure.Storage;
 
 /// <summary>
-/// CRUD seam over the 6 tier-aware content tables. Mirrors the surface
-/// exported by <c>src-ts/db/entries.ts</c>. Plan 4's handlers fake against
+/// CRUD seam over the 6 tier-aware content tables. Plan 4's handlers fake against
 /// this interface; production wiring uses <see cref="SqliteStore"/>.
 /// </summary>
 public interface IStore
@@ -62,9 +61,8 @@ public interface IStore
 
     /// <summary>
     /// Count distinct non-null <c>collection_id</c> values across the
-    /// <c>cold_knowledge</c> table. Mirrors the TS query in
-    /// <c>src-ts/tools/session-tools.ts</c>'s tier-summary block, which only
-    /// inspects cold_knowledge (collections live in cold by convention).
+    /// <c>cold_knowledge</c> table. Only cold_knowledge is inspected (collections live
+    /// in cold by convention).
     /// </summary>
     int CountKnowledgeCollections();
 
@@ -126,8 +124,7 @@ public interface IStore
 }
 
 /// <summary>
-/// Options for <see cref="IStore.Insert"/>. Mirrors <c>InsertEntryOpts</c>
-/// in <c>src-ts/db/entries.ts</c>.
+/// Options for <see cref="IStore.Insert"/>.
 /// </summary>
 public sealed record InsertEntryOpts(
     string Content,

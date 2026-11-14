@@ -1,7 +1,6 @@
 // src/TotalRecall.Infrastructure/Eval/ComparisonMetrics.cs
 //
-// Plan 5 Task 5.3b — port of computeComparisonMetrics from
-// src-ts/eval/metrics.ts:229-316. Pure math over two RetrievalEventRow
+// Pure math over two RetrievalEventRow
 // lists. Uses MetricsReport.Compute for the before/after aggregates and
 // then produces per-tier, per-content-type, and query-level diffs
 // following the TS algorithm exactly (union of keys, per-pair delta,
@@ -52,8 +51,7 @@ public sealed record ComparisonResult(
     string? Warning);
 
 /// <summary>
-/// Pure before/after metrics diff. Ports <c>computeComparisonMetrics</c>
-/// from <c>src-ts/eval/metrics.ts</c>. Produces a full <see cref="ComparisonResult"/>
+/// Pure before/after metrics diff. Produces a full <see cref="ComparisonResult"/>
 /// in one call, delegating the per-side aggregation to
 /// <see cref="Metrics.Compute"/>.
 /// </summary>

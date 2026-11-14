@@ -68,7 +68,7 @@ public sealed record RetrievalEventRow(
 
 /// <summary>
 /// Append-only writer (with one in-place outcome update) and reader for the
-/// <c>retrieval_events</c> table. Ports <c>src-ts/eval/event-logger.ts</c>.
+/// <c>retrieval_events</c> table.
 /// Borrows a non-owning <see cref="MsSqliteConnection"/>.
 /// </summary>
 public sealed class RetrievalEventLog

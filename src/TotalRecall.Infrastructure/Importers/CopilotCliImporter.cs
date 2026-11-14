@@ -22,7 +22,6 @@ namespace TotalRecall.Infrastructure.Importers;
 ///
 /// Unlike <see cref="ClaudeCodeImporter"/>, no frontmatter parsing is
 /// performed: <c>plan.md</c> content is inserted verbatim with no tags.
-/// Mirrors <c>src-ts/importers/copilot-cli.ts</c> bit-for-bit.
 /// </summary>
 public sealed class CopilotCliImporter : IImporter
 {
