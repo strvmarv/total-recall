@@ -5,23 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## 4.7.0-beta.2 - 2026-11-14
+## 4.7.0 - 2026-11-14
 
-Everything in 4.7.0-beta.1, plus the fix below. 4.7.0-beta.1 is on npm, but its GitHub release has no assets (see Fixed), so use 4.7.0-beta.2.
-
-### Fixed
-
-- **A prerelease could not be attached to a GitHub release (found with 4.7.0-beta.1).** This repository has immutable releases, which lock a release's assets once it is published. A stable release uploads its assets before it is published, but a prerelease is published first by default, so the upload failed with "Cannot upload asset ... to an immutable release" and left `v4.7.0-beta.1` as a published prerelease with no archives and no manifest (npm and the attestation had already succeeded). The release workflow now creates a prerelease as a draft and publishes it, by release id, in a following step; `scripts/release-workflow.test.js` pins both.
-
-## 4.7.0-beta.1 - 2026-11-14
-
-Published to npm (`beta`) with a signed provenance statement, but its GitHub release is empty; see 4.7.0-beta.2.
+The first stable release with the release attestation, the engine archive cache and the one-command version bump. It was validated on the prereleases 4.7.0-beta.1 and 4.7.0-beta.2 (npm `beta`); 4.7.0-beta.1's GitHub release has no assets, so use 4.7.0-beta.2 or 4.7.0.
 
 ### Added
 
 - **A reinstall of the same version no longer downloads the engine again (#65).** The engine and its model live under the plugin's own `binaries/<rid>/`, so removing and reinstalling the plugin, or a second host installing the same version, downloaded the whole archive again, with every tool call answering "not ready" until it finished and no way to start offline. The archive that was verified against the release manifest is now also kept in `<data dir>/cache/binaries/<version>/` (the engine's data directory: `TOTAL_RECALL_HOME`, else `~/.total-recall`) with a sha256 sidecar, and the shim restores from it before it fetches the manifest, so it works offline. Only archives verified against the manifest are cached, only after they extracted with their binary and passed the model-payload check; the cache keeps one version; `cache/` is owner-only and an entry in a directory another user owns or can write to is ignored; and any cache problem is a miss, never an error. A restore re-hashes the entry, runs the same binary, `chmod` and payload checks as a download, and deletes the entry only when it is proven bad. A release asset re-cut at the same version is not refreshed while its cache entry exists. If the data directory is created by this, it gets the default permissions; only `cache/` is made owner-only.
 - **Release archives and the provisioning manifest carry a build attestation (#64).** The shim verified a download against the sha256 in `provisioning.manifest.json`, which shows the download matches the manifest but not that this repository's CI built it, because both are published together. The publish job of `release.yml` now runs `actions/attest@v4` (GitHub artifact attestations, signed through sigstore) over the four platform archives and the manifest, before they are attached to the GitHub Release and with no way to skip it, so a failed attestation stops the release assets from being published. Verify a download with `gh attestation verify <file> --repo strvmarv/total-recall` (README, "Verifying a release"). The shim still checks only the sha256. `scripts/release-workflow.test.js` (in `test:shim`) fails if an attached asset is not attested, if the step moves out of place or can be skipped, or if `attestations: write` is granted to any job but publish. Only releases published after this change carry attestations, and `npm publish` still runs before the archives are staged.
 - **A release version bump is one command, and a mismatch fails the release (#62).** The version lived in seven files (eight fields) that a release agent updated by hand, and a missed one shipped a stale manifest. `node scripts/sync-version.js <version>` now sets all of them at once, staging every change before replacing any file (the two `package-lock.json` fields are edited by position, with no `npm install`), and `--check` verifies them against `package.json` and fails on any tracked `plugin.json`/`plugin.yaml` outside the list. The release workflow gained a `check-version` job that runs `--check --expect` against the git tag before any binary is built, so a tag that differs from `package.json` never reaches a build or the npm publish. The version must be `X.Y.Z` or `X.Y.Z-<prerelease>` with a letter-first prerelease, no further `-` or `+build` part, and a first identifier that is not `latest` or a valid version range such as `x` or `v1`, because the publish step derives the npm dist-tag from the text after the last `-`.
+
+### Changed
+
+- **Comments that pointed at the deleted TypeScript implementation were removed or rewritten (#66).** 132 comment lines in 86 files named `src-ts/...` or `bun:sqlite`. Only comment lines changed, and a guard test (`StaleLineageReferenceTests`) fails if either string comes back into a `.cs` or `.fs` file under `src/` or `tests/`.
+
+### Fixed
+
+- **A prerelease could not be attached to a GitHub release (found with 4.7.0-beta.1).** This repository has immutable releases, which lock a release's assets once it is published. A stable release uploads its assets before it is published, but a prerelease is published first by default, so the upload failed with "Cannot upload asset ... to an immutable release" and left `v4.7.0-beta.1` as a published prerelease with no archives and no manifest (npm and the attestation had already succeeded). The release workflow now creates a prerelease as a draft and publishes it, by release id, in a following step; `scripts/release-workflow.test.js` pins both.
 
 ## 4.6.0 - 2026-11-12
 
