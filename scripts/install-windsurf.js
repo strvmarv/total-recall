@@ -8,6 +8,7 @@ import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mergeJsonConfig } from './lib/merge-json-config.js';
+import { npxEntry } from './lib/package-spec.js';
 import { isRepoSelf, ROOT } from './lib/is-repo-self.js';
 import { recordChange } from './lib/change-log.js';
 
@@ -41,10 +42,7 @@ export async function installWindsurf() {
 
     // --- MCP config ---
     const configPath = join(whome, 'mcp_config.json');
-    mergeJsonConfig(configPath, 'mcpServers', {
-      command: 'npx',
-      args: ['--yes', '@strvmarv/total-recall']
-    }, 'Windsurf');
+    mergeJsonConfig(configPath, 'mcpServers', npxEntry(), 'Windsurf');
 
     // --- Rules file ---
     // Copy the steering doc (stripped of YAML front matter) as a Windsurf

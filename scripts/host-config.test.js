@@ -8,6 +8,8 @@ import {
 } from './lib/change-log.js';
 
 const P = '[total-recall:postinstall]';
+const NAME = '@strvmarv/total-recall';
+const VERSION = '9.8.7'; // the version the temp package copy carries
 
 const made = [];
 after(() => { for (const d of made) fs.rmSync(d, { recursive: true, force: true }); });
@@ -183,9 +185,13 @@ export async function ensureBinary() {
 }
 `;
 
-function makePackage() {
+/**
+ * A temp copy of the package. `version` is written into its package.json (`null` removes the field);
+ * `underNodeModules: false` makes it look like a git checkout (isRepoSelf() is then true).
+ */
+function makePackage({ version = VERSION, underNodeModules = true } = {}) {
   const root = tmp('tr-pkg-');
-  const pkg = path.join(root, 'node_modules', '@strvmarv', 'total-recall');
+  const pkg = underNodeModules ? path.join(root, 'node_modules', '@strvmarv', 'total-recall') : path.join(root, 'total-recall');
   fs.mkdirSync(pkg, { recursive: true });
   fs.cpSync(path.join(REPO, 'scripts'), path.join(pkg, 'scripts'), {
     recursive: true,
@@ -195,7 +201,9 @@ function makePackage() {
   fs.writeFileSync(path.join(pkg, 'scripts', 'fetch-binary.js'), STUB_FETCH);
   fs.cpSync(path.join(REPO, 'hermes-plugin'), path.join(pkg, 'hermes-plugin'), { recursive: true });
   fs.cpSync(path.join(REPO, '.kiro', 'steering'), path.join(pkg, '.kiro', 'steering'), { recursive: true });
-  fs.copyFileSync(path.join(REPO, 'package.json'), path.join(pkg, 'package.json'));
+  const manifest = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8'));
+  if (version === null) delete manifest.version; else manifest.version = version;
+  fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify(manifest, null, 2));
   return pkg;
 }
 
@@ -203,8 +211,8 @@ function makePackage() {
  * Runs the package's postinstall.js in a fresh sandbox. `setup({ home })` creates what the case needs
  * (tool directories) and returns the environment variables that point the installers at them.
  */
-function runPostinstall(setup = () => ({})) {
-  const pkg = makePackage();
+function runPostinstall(setup = () => ({}), pkgOptions) {
+  const pkg = makePackage(pkgOptions);
   const home = tmp('tr-home-');
   const bin = tmp('tr-bin-');
   const hermesLog = path.join(bin, 'hermes-calls.txt');
@@ -261,7 +269,8 @@ function lines(r) {
   return r.stderr.split('\n').filter((l) => l.startsWith(`${P}   `)).map((l) => l.slice(`${P}   `.length));
 }
 
-const ENTRY = { command: 'npx', args: ['--yes', '@strvmarv/total-recall'] };
+const ENTRY = { command: 'npx', args: ['--yes', `${NAME}@${VERSION}`] }; // what the script writes now
+const ENTRY_BARE = { command: 'npx', args: ['--yes', NAME] }; // what it wrote before
 
 function writeJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -378,7 +387,7 @@ test('Windsurf: the rules file is added, or overwrote, and holds the steering te
 });
 
 const GEMINI_SETTINGS = {
-  mcpServers: { 'total-recall': ENTRY },
+  mcpServers: { 'total-recall': ENTRY_BARE },
   hooks: {
     BeforeAgent: {
       hooks: [{
@@ -499,8 +508,6 @@ import {
   pinnedSpec, npxEntry, isOwnNpxEntry, hookCommand, isOwnHookCommand, decide,
 } from './lib/package-spec.js';
 
-const NAME = '@strvmarv/total-recall';
-
 test('pinnedSpec: the version is added only for an installed package with a valid version', () => {
   assert.equal(pinnedSpec({ version: '4.8.0', repoSelf: false }), `${NAME}@4.8.0`);
   assert.equal(pinnedSpec({ version: '4.8.0-beta.1', repoSelf: false }), `${NAME}@4.8.0-beta.1`);
@@ -561,4 +568,134 @@ test('decide: keep, refresh or custom for an existing entry', () => {
   // an unversioned spec (git checkout, no valid version) never refreshes
   assert.equal(decide(e(['--yes', NAME]), NAME), 'keep');
   assert.equal(decide(e(['--yes', `${NAME}@4.7.0`]), NAME), 'keep');
+});
+
+// --- pinned entries: new, refreshed, kept, custom, and the cases that must not pin ---
+
+const PINNED = `${NAME}@${VERSION}`;
+
+function entryIn(file, key = 'mcpServers') {
+  return JSON.parse(fs.readFileSync(file, 'utf8'))[key]['total-recall'];
+}
+
+test('every tool that goes through mergeJsonConfig writes a new entry pinned to the package version', () => {
+  const f = {};
+  const r = runPostinstall(({ home }) => {
+    for (const k of ['cline', 'kiro', 'ws', 'zed', 'vs']) { f[k] = path.join(home, k); fs.mkdirSync(f[k]); }
+    return { CLINE_HOME: f.cline, KIRO_HOME: f.kiro, WINDSURF_HOME: f.ws, ZED_SETTINGS: f.zed, VSCODE_USER_DIR: f.vs };
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(entryIn(path.join(f.cline, 'cline_mcp_settings.json')), ENTRY);
+  assert.deepEqual(entryIn(path.join(f.ws, 'mcp_config.json')), ENTRY);
+  assert.deepEqual(entryIn(path.join(f.zed, 'settings.json'), 'context_servers'), ENTRY);
+  assert.deepEqual(entryIn(path.join(f.vs, 'mcp.json'), 'servers'), ENTRY);
+  assert.deepEqual(entryIn(path.join(r.home, '.copilot', 'mcp-config.json')), ENTRY);
+  const kiro = entryIn(path.join(f.kiro, 'settings', 'mcp.json'));
+  assert.deepEqual(kiro, { ...ENTRY, cwd: '${workspaceFolder}' });
+  assert.deepEqual(Object.keys(kiro), ['command', 'args', 'cwd']);
+});
+
+test('an entry in the script\'s own older form is refreshed to the package version: other keys and the rest of the file stay', () => {
+  for (const old of [[ '--yes', NAME ], [ '--yes', `${NAME}@4.0.4` ]]) {
+    let file;
+    const r = runPostinstall(({ home }) => {
+      file = path.join(home, 'cline', 'cline_mcp_settings.json');
+      writeJson(file, { other: [1, 2], mcpServers: { 'total-recall': { command: 'npx', args: old, alwaysAllow: ['x'] }, keep: { command: 'y' } } });
+      return { CLINE_HOME: path.dirname(file) };
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(lines(r), [`Cline: rewrote ${file}`]);
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {
+      other: [1, 2],
+      mcpServers: { 'total-recall': { command: 'npx', args: ['--yes', PINNED], alwaysAllow: ['x'] }, keep: { command: 'y' } },
+    });
+  }
+});
+
+test('Kiro, Windsurf, Zed and VS Code entries in the own bare form are refreshed too', () => {
+  const f = {};
+  const r = runPostinstall(({ home }) => {
+    f.kiro = path.join(home, 'kiro'); f.ws = path.join(home, 'ws'); f.zed = path.join(home, 'zed'); f.vs = path.join(home, 'vs');
+    writeJson(path.join(f.kiro, 'settings', 'mcp.json'), { mcpServers: { 'total-recall': { ...ENTRY_BARE, cwd: '${workspaceFolder}' } } });
+    writeJson(path.join(f.ws, 'mcp_config.json'), { mcpServers: { 'total-recall': ENTRY_BARE } });
+    writeJson(path.join(f.zed, 'settings.json'), { context_servers: { 'total-recall': ENTRY_BARE } });
+    writeJson(path.join(f.vs, 'mcp.json'), { servers: { 'total-recall': ENTRY_BARE } });
+    writeJson(path.join(home, '.copilot', 'mcp-config.json'), { mcpServers: { 'total-recall': ENTRY_BARE } });
+    return { KIRO_HOME: f.kiro, WINDSURF_HOME: f.ws, ZED_SETTINGS: f.zed, VSCODE_USER_DIR: f.vs };
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(entryIn(path.join(f.kiro, 'settings', 'mcp.json')), { ...ENTRY, cwd: '${workspaceFolder}' });
+  assert.deepEqual(entryIn(path.join(f.ws, 'mcp_config.json')), ENTRY);
+  assert.deepEqual(entryIn(path.join(f.zed, 'settings.json'), 'context_servers'), ENTRY);
+  assert.deepEqual(entryIn(path.join(f.vs, 'mcp.json'), 'servers'), ENTRY);
+  assert.deepEqual(entryIn(path.join(r.home, '.copilot', 'mcp-config.json')), ENTRY);
+  const got = lines(r);
+  assert.ok(got.includes(`Copilot CLI: rewrote ${path.join(r.home, '.copilot', 'mcp-config.json')}`), got.join('\n'));
+});
+
+test('an entry already pinned to the package version is not rewritten and has no summary line', () => {
+  let file, before;
+  const r = runPostinstall(({ home }) => {
+    file = path.join(home, 'cline', 'cline_mcp_settings.json');
+    writeJson(file, { mcpServers: { 'total-recall': ENTRY } });
+    before = fs.readFileSync(file, 'utf8');
+    return { CLINE_HOME: path.dirname(file) };
+  });
+  assert.deepEqual(lines(r), []);
+  assert.equal(fs.readFileSync(file, 'utf8'), before);
+});
+
+test('the bare name among other arguments is kept silently; any other form is custom and gets the existing line', () => {
+  const cases = [
+    { entry: { command: 'npx', args: ['-y', NAME] }, custom: false },
+    { entry: { command: 'npx', args: ['--yes', NAME, '--x'] }, custom: false },
+    { entry: { command: 'node', args: ['/x/start.js'] }, custom: true },
+    { entry: { command: 'npx', args: ['--yes', '@other/pkg'] }, custom: true },
+    { entry: { command: 'npx', args: ['--yes', `${NAME}@latest`] }, custom: true },
+    { entry: { command: 'npx', args: ['--yes', `${NAME}@4.0.4`, '--x'] }, custom: true },
+  ];
+  for (const { entry, custom } of cases) {
+    let file, before;
+    const r = runPostinstall(({ home }) => {
+      file = path.join(home, 'cline', 'cline_mcp_settings.json');
+      writeJson(file, { mcpServers: { 'total-recall': entry } });
+      before = fs.readFileSync(file, 'utf8');
+      return { CLINE_HOME: path.dirname(file) };
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(lines(r), [], JSON.stringify(entry));
+    assert.equal(fs.readFileSync(file, 'utf8'), before, JSON.stringify(entry));
+    assert.equal(/already has a custom total-recall entry/.test(r.stderr), custom, JSON.stringify(entry));
+  }
+});
+
+test('a git checkout, a missing version and an invalid version write the bare name and change no existing entry', () => {
+  const variants = [
+    { label: 'git checkout', opts: { underNodeModules: false } },
+    { label: 'missing version', opts: { version: null } },
+    { label: 'invalid version', opts: { version: 'x' } },
+  ];
+  for (const { label, opts } of variants) {
+    let fresh, pinned, bare;
+    const r = runPostinstall(({ home }) => {
+      fresh = path.join(home, 'cline');
+      pinned = path.join(home, 'ws', 'mcp_config.json');
+      bare = path.join(home, 'zed', 'settings.json');
+      writeJson(pinned, { mcpServers: { 'total-recall': { command: 'npx', args: ['--yes', `${NAME}@4.0.4`] } } });
+      writeJson(bare, { context_servers: { 'total-recall': ENTRY_BARE } });
+      return { CLINE_HOME: fresh, WINDSURF_HOME: path.dirname(pinned), ZED_SETTINGS: path.dirname(bare) };
+    }, opts);
+    assert.equal(r.status, 0, `${label}: ${r.stderr}`);
+    assert.deepEqual(entryIn(path.join(fresh, 'cline_mcp_settings.json')), ENTRY_BARE, label);
+    assert.deepEqual(entryIn(pinned), { command: 'npx', args: ['--yes', `${NAME}@4.0.4`] }, label); // kept, silently
+    assert.deepEqual(entryIn(bare, 'context_servers'), ENTRY_BARE, label);
+    assert.ok(!/custom total-recall entry/.test(r.stderr), `${label}: ${r.stderr}`);
+  }
+});
+
+test('in a git checkout the Kiro step writes no MCP entry at all', () => {
+  let kiro;
+  const r = runPostinstall(({ home }) => { kiro = path.join(home, 'kiro'); fs.mkdirSync(kiro); return { KIRO_HOME: kiro }; }, { underNodeModules: false });
+  assert.deepEqual(fs.readdirSync(kiro), []);
+  assert.deepEqual(lines(r), []);
 });

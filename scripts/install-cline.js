@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mergeJsonConfig } from './lib/merge-json-config.js';
+import { npxEntry } from './lib/package-spec.js';
 import { recordChange } from './lib/change-log.js';
 
 function clineHome() {
@@ -29,10 +30,7 @@ export async function installCline() {
     if (!chome) return;
 
     const configPath = join(chome, 'cline_mcp_settings.json');
-    mergeJsonConfig(configPath, 'mcpServers', {
-      command: 'npx',
-      args: ['--yes', '@strvmarv/total-recall']
-    }, 'Cline');
+    mergeJsonConfig(configPath, 'mcpServers', npxEntry(), 'Cline');
   } catch (e) {
     recordChange('Cline', 'failed', e.message);
     process.stderr.write(`[total-recall:postinstall] Cline install failed (non-fatal): ${e.message}\n`);

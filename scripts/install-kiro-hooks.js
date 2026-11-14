@@ -15,6 +15,7 @@ import { cpSync, mkdirSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mergeJsonConfig } from './lib/merge-json-config.js';
+import { npxEntry } from './lib/package-spec.js';
 import { isRepoSelf, ROOT } from './lib/is-repo-self.js';
 import { recordChange } from './lib/change-log.js';
 
@@ -39,11 +40,7 @@ export async function installKiroHooks() {
     if (!isRepoSelf()) {
       // --- MCP config ---
       const mcpConfigPath = join(khome, 'settings', 'mcp.json');
-      mergeJsonConfig(mcpConfigPath, 'mcpServers', {
-        command: 'npx',
-        args: ['--yes', '@strvmarv/total-recall'],
-        cwd: '${workspaceFolder}'
-      }, 'Kiro');
+      mergeJsonConfig(mcpConfigPath, 'mcpServers', npxEntry({ cwd: '${workspaceFolder}' }), 'Kiro');
 
       // --- Steering ---
       const steeringSrc = join(ROOT, '.kiro', 'steering', 'total-recall.md');

@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mergeJsonConfig } from './lib/merge-json-config.js';
+import { npxEntry } from './lib/package-spec.js';
 import { recordChange } from './lib/change-log.js';
 
 function vscodeUserDir() {
@@ -43,10 +44,7 @@ export async function installVsCode() {
 
     // --- VS Code mcp.json (uses "servers" key, NOT "mcpServers") ---
     const mcpConfigPath = join(userDir, 'mcp.json');
-    mergeJsonConfig(mcpConfigPath, 'servers', {
-      command: 'npx',
-      args: ['--yes', '@strvmarv/total-recall']
-    }, 'VS Code');
+    mergeJsonConfig(mcpConfigPath, 'servers', npxEntry(), 'VS Code');
 
     // --- ~/.copilot/mcp-config.json (for Agent Host portability) ---
     // Uses standard "mcpServers" key. The mergeJsonConfig helper's
@@ -56,10 +54,7 @@ export async function installVsCode() {
     if (home) {
       const copilotDir = join(home, '.copilot');
       const copilotConfigPath = join(copilotDir, 'mcp-config.json');
-      mergeJsonConfig(copilotConfigPath, 'mcpServers', {
-        command: 'npx',
-        args: ['--yes', '@strvmarv/total-recall']
-      }, 'Copilot CLI');
+      mergeJsonConfig(copilotConfigPath, 'mcpServers', npxEntry(), 'Copilot CLI');
     }
   } catch (e) {
     recordChange('VS Code', 'failed', e.message);
