@@ -478,6 +478,7 @@ jobs:
             release-assets/provisioning.manifest.json
 
       - name: Attach archives to GitHub release
+        id: attach_release
         uses: softprops/action-gh-release@v3
         with:
           files: |
@@ -487,4 +488,17 @@ jobs:
             release-assets/total-recall-win-x64.tar.gz
             release-assets/provisioning.manifest.json
           prerelease: ${{ contains(github.ref_name, '-') }}
+          # This repository has immutable releases, which lock assets once a release is published.
+          # A stable release uploads its assets before it is published, but a prerelease stays
+          # published by default, so its upload is refused (v4.7.0-beta.1 failed that way). Create a
+          # prerelease as a draft here and publish it in the next step.
+          draft: ${{ contains(github.ref_name, '-') }}
           fail_on_unmatched_files: true
+
+      - name: Publish the prerelease
+        if: contains(github.ref_name, '-')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.attach_release.outputs.id }}
+        # By release id, not by tag: a draft is not always found through its tag.
+        run: gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false

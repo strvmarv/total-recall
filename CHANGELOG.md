@@ -5,7 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 4.7.0-beta.2 - 2026-11-14
+
+Everything in 4.7.0-beta.1, plus the fix below. 4.7.0-beta.1 is on npm, but its GitHub release has no assets (see Fixed), so use 4.7.0-beta.2.
+
+### Fixed
+
+- **A prerelease could not be attached to a GitHub release (found with 4.7.0-beta.1).** This repository has immutable releases, which lock a release's assets once it is published. A stable release uploads its assets before it is published, but a prerelease is published first by default, so the upload failed with "Cannot upload asset ... to an immutable release" and left `v4.7.0-beta.1` as a published prerelease with no archives and no manifest (npm and the attestation had already succeeded). The release workflow now creates a prerelease as a draft and publishes it, by release id, in a following step; `scripts/release-workflow.test.js` pins both.
+
 ## 4.7.0-beta.1 - 2026-11-14
+
+Published to npm (`beta`) with a signed provenance statement, but its GitHub release is empty; see 4.7.0-beta.2.
 
 ### Added
 
