@@ -6,15 +6,15 @@ You are an AI assistant installing total-recall for the user you are working wit
 
 - Follow only the page for the harness you are running in (Step 1). Do not run another harness's steps.
 - A step marked **User** is done by the user. Say exactly what they need to do, then wait or stop. Never claim you did it.
-- A step marked **Ask first** changes other tools on the machine, edits the user's configuration beyond adding the `total-recall` entry, or grants a permission. Tell the user what it changes and get a yes before you run it. On a no, use the alternative the page gives, or leave the step to the user.
-- Do not report success until the Verify section of your page has passed. If a step fails, report the failure and stop. Never retry it with `sudo`, `--force` or any other escalation.
-- When you read or edit a configuration file, touch only the `total-recall` entry and never print the file's other contents.
+- A step marked **Ask first** changes other tools on the machine, edits the user's configuration beyond adding the `total-recall` entry, or grants a permission. Tell the user what it changes and get a yes before you run it. The user asking you to install total-recall is not that yes. On a no, use the alternative the page gives, or leave the step to the user.
+- Do not report success until the checks your page asks you to run now have passed. A check the page says only the user can run, or that waits for the next session, is pending, not failed: report it as pending. If a step fails, report the failure and stop. Never retry it with `sudo`, `--force` or any other escalation.
+- When you read or edit a configuration file, touch only the `total-recall` entry and never print the file's other contents. Read it with a targeted search for `total-recall` (for example `grep -n total-recall <file>`, or `Select-String` in PowerShell), not by dumping it. Edit it by inserting text, never by parsing and rewriting the file, so comments and formatting survive; if you cannot do that safely, leave the edit to the user and give them the text.
 
 ## Before you start
 
-- Supported platforms: `linux-x64`, `linux-arm64`, `osx-arm64` and `win-x64`. An Intel Mac is not supported: stop and tell the user.
+- Supported platforms: `linux-x64`, `linux-arm64`, `osx-arm64` and `win-x64`. An Intel Mac is not supported: stop and tell the user. `node -p "process.platform + ' ' + process.arch"` prints yours.
 - Node.js 20 or later.
-- Internet access, where your harness's page says the engine is downloaded on first launch.
+- Internet access.
 
 ## Step 1: find your harness's page
 
@@ -41,7 +41,7 @@ If your harness is not listed, use the last row.
 
 ## Step 2: follow the page's Install section
 
-Fetch your harness's page at its address and run its Install section, in order. Respect each **Ask first** and **User** mark. Do not skip ahead to Verify.
+Fetch your harness's page at its address and run its Install section, in order. Respect each **Ask first** and **User** mark. Do not skip ahead to Verify. Where the page offers more than one path, use the one marked recommended unless the user asked for another, and say which you used. The page's **Ask first** paragraph already lists what an install may change; fetch the document it links only if you need more detail to answer the user.
 
 ## Step 3: verify now
 
@@ -49,10 +49,10 @@ Run the checks in the page's Verify section for this session, where it gives any
 
 ## Step 4: hand over to the user
 
-Relay the page's **User** steps to the user, in order. Tell them:
+Relay the page's **User** steps for the path you installed, in order. Tell them:
 
 - to start a new session, because MCP tools appear only in a new session;
-- what they should see. On a harness that delivers the startup instructions the assistant gives a short status line. This is an example, not exact text: `total-recall loaded — 2 pinned, 3 hot, 12 warm, 5 cold, 2 KB collections. Storage: cortex. Last session: 2 hours ago.`
+- what they should see. If your page says your harness delivers the startup instructions, the assistant gives a short status line. This is an example, not exact text: `total-recall loaded — 2 pinned, 3 hot, 12 warm, 5 cold, 2 KB collections. Storage: cortex. Last session: 2 hours ago.`
 - the check to run: paste this prompt into the new session, wherever the assistant can call total-recall's tools. Where it cannot, the page gives its own check.
 
 ```
@@ -63,8 +63,8 @@ Check that total-recall is working: call its status tool and tell me the tier co
 
 Tell the user what you verified in this session and nothing more:
 
-- the engine version, if the version check passed;
+- the version, if the version check passed;
 - the harness's entry, if a configured check passed, or that it is left to the user;
 - or "installed; verification is pending in your next session", if the page gave no immediate check.
 
-Then say what was installed and where, the version, anything changed outside this harness, each step left to the user, and any known gap on the page that affects them.
+Then say what was installed and where (the page names the location), the version, each step left to the user, and any known gap on the page that affects them. For anything outside this harness that an install may have changed, say that it may have changed and name the tools; do not say it changed unless you inspected it. If only part of the page's checks could run, say which passed and which are pending, and do not write "installed successfully" unless every check you were asked to run now passed. If the new session shows no total-recall tools, the entry may not resolve `total-recall` on the harness's PATH: report that instead of editing further.

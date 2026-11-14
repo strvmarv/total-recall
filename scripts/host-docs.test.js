@@ -44,8 +44,8 @@ export const MODULE_TOOLS = {
 };
 export const TOOLS = [...new Set(Object.values(MODULE_TOOLS).flat())];
 // A command that runs an install: what INSTALL.md must not hold, and what needs the disclosure above it.
-const INSTALL_COMMAND = /\b(?:npm|pi|plugin) install\b|\bplugin add\b/;
-const NPM_RUNNING = /\b(?:npm|pi) install\b/;
+const INSTALL_COMMAND = /\b(?:npm|pnpm)\s+(?:i|install|add)\b|\byarn\s+(?:global\s+)?add\b|\b(?:pi|plugin)\s+(?:i|install)\b|\bplugin\s+(?:marketplace\s+)?add\b|\bnpx\b/;
+const NPM_RUNNING = /\b(?:npm|pnpm)\s+(?:i|install|add)\b|\byarn\s+(?:global\s+)?add\b|\bpi\s+(?:i|install)\b/;
 const STALE_VERSION = /(?<![\d.])0\.(?:7\.2|8\.(?:\d+|x))(?!\d)/;
 
 // ---------------------------------------------------------------------------------------------
@@ -198,8 +198,11 @@ export function checkNoStaleFacts(tree) {
   if (install !== null) {
     const cmd = INSTALL_COMMAND.exec(install);
     if (cmd) problems.push(`INSTALL.md holds an install command ("${cmd[0]}")`);
-    const ver = /\d+\.\d+\.\d+/.exec(install);
+    const ver = /\b\d+\.\d+(?:\.\d+)?\b/.exec(install);
     if (ver) problems.push(`INSTALL.md holds a version number ("${ver[0]}")`);
+    if (install.includes('@beta')) problems.push('INSTALL.md mentions @beta');
+    const stale = STALE_VERSION.exec(install);
+    if (stale) problems.push(`INSTALL.md holds the stale version ${stale[0]}`);
   }
   for (const p of [...hostPages(tree), '.opencode/INSTALL.md']) {
     const text = tree.read(p);
@@ -258,8 +261,12 @@ export function checkStatusLine(tree) {
 export function checkDisclosure(tree) {
   const problems = [];
   const postinstall = tree.read('scripts/postinstall.js');
-  const modules = postinstall === null ? [] : [...postinstall.matchAll(/from '\.\/(install-[\w-]+)\.js'/g)].map((m) => m[1]);
+  const modules = postinstall === null ? [] : [...postinstall.matchAll(/['"]\.\/(install-[\w-]+)\.js['"]/g)].map((m) => m[1]);
   const known = Object.keys(MODULE_TOOLS);
+  for (const f of tree.list('scripts')) {
+    const m = /^(install-[\w-]+)\.js$/.exec(f);
+    if (m && !known.includes(m[1])) problems.push(`scripts/${f} exists, but MODULE_TOOLS does not list ${m[1]}`);
+  }
   for (const m of modules) if (!known.includes(m)) problems.push(`scripts/postinstall.js imports ${m}, which MODULE_TOOLS does not list`);
   for (const k of known) if (!modules.includes(k)) problems.push(`MODULE_TOOLS lists ${k}, which scripts/postinstall.js does not import`);
 
@@ -296,6 +303,26 @@ export function checkHookNotes(tree) {
     const cited = text === null ? [] : [...text.matchAll(/INSTALL\.md, "([^"]+)"/g)].map((m) => m[1]);
     if (cited.length === 0) problems.push(`${p} cites no INSTALL.md name`);
     for (const c of cited) if (!names.has(c)) problems.push(`${p} cites INSTALL.md, "${c}", which is not a row of the INSTALL.md table`);
+  }
+  return problems;
+}
+
+/** Rule 9: the check prompt is in INSTALL.md Step 4, and every page that refers to a step refers to that one. */
+export function checkCheckPrompt(tree) {
+  const problems = [];
+  const install = tree.read('INSTALL.md');
+  if (install !== null) {
+    const m = /^## Step 4\b[^\n]*\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(install);
+    if (!m) problems.push('INSTALL.md has no "## Step 4" section');
+    else if (!fencedBlocks(m[1]).some((b) => b.body.includes('Check that total-recall is working: call its status tool'))) {
+      problems.push('INSTALL.md Step 4 holds no fenced check prompt');
+    }
+  }
+  for (const p of hostPages(tree)) {
+    const text = tree.read(p) ?? '';
+    for (const r of text.matchAll(/`INSTALL\.md`, Step (\d+)/g)) {
+      if (r[1] !== '4') problems.push(`${p} refers to INSTALL.md, Step ${r[1]}, but the check prompt is in Step 4`);
+    }
   }
   return problems;
 }
@@ -422,7 +449,7 @@ function validPage(h) {
     '',
     '## Verify',
     '',
-    'Run it.',
+    'Run it. Then the check prompt in `INSTALL.md`, Step 4.',
     '',
     '## What you get',
     '',
@@ -448,6 +475,14 @@ function validFiles() {
       '',
       `Example: ${STATUS}`,
       '',
+      '## Step 4: hand over',
+      '',
+      '```',
+      'Check that total-recall is working: call its status tool and tell me the tier counts and the database path.',
+      '```',
+      '',
+      '## Step 5: report',
+      '',
       '| Harness | Page |',
       '|---|---|',
       ...HARNESSES.map((h) => `| ${h.name} | ${RAW}docs/hosts/${h.id}.md |`),
@@ -468,7 +503,7 @@ function validFiles() {
   return files;
 }
 
-const CHECKS = { checkPages, checkNoStaleFacts, checkLinks, checkStatusLine, checkDisclosure, checkHookNotes, checkOpenCodePointer };
+const CHECKS = { checkPages, checkNoStaleFacts, checkLinks, checkStatusLine, checkDisclosure, checkHookNotes, checkOpenCodePointer, checkCheckPrompt };
 
 test('the valid in-memory tree passes every check', () => {
   const tree = memoryTree(validFiles());
@@ -519,6 +554,9 @@ defect('the table has thirteen rows', checkPages, (f) => {
 test('rule 2 holds on the repository', () => assert.deepEqual(checkNoStaleFacts(repoTree()), []));
 defect('an install command in INSTALL.md', checkNoStaleFacts, (f) => { f['INSTALL.md'] += '\nRun npm install -g x\n'; }, /INSTALL\.md holds an install command/);
 defect('a version number in INSTALL.md', checkNoStaleFacts, (f) => { f['INSTALL.md'] += '\ntotal-recall 4.7.0\n'; }, /INSTALL\.md holds a version number/);
+defect('@beta in INSTALL.md', checkNoStaleFacts, (f) => { f['INSTALL.md'] += '\nUse @strvmarv/total-recall@beta\n'; }, /INSTALL\.md mentions @beta/);
+defect('a short version in INSTALL.md', checkNoStaleFacts, (f) => { f['INSTALL.md'] += '\nexpected: total-recall 4.7\n'; }, /INSTALL\.md holds a version number/);
+defect('npx or pnpm in INSTALL.md', checkNoStaleFacts, (f) => { f['INSTALL.md'] += '\nRun npx --yes x\n'; }, /INSTALL\.md holds an install command/);
 defect('@beta on a page', checkNoStaleFacts, (f) => { f['docs/hosts/pi.md'] += '\nUse @beta\n'; }, /pi\.md mentions @beta/);
 defect('0.8.0 in the packaged OpenCode file', checkNoStaleFacts, (f) => { f['.opencode/INSTALL.md'] += '\nSince 0.8.0\n'; }, /\.opencode\/INSTALL\.md holds the stale version 0\.8\.0/);
 
@@ -594,6 +632,15 @@ defect('a command only in prose, with no paragraph', checkDisclosure, (f) => {
 defect('the paragraph does not link the reference', checkDisclosure, (f) => {
   f['docs/hosts/pi.md'] = f['docs/hosts/pi.md'].replace(`See ${RAW}docs/npm-postinstall.md.`, '');
 }, /pi\.md: the "Ask first" paragraph does not link/);
+defect('npm i with two spaces and no paragraph', checkDisclosure, (f) => {
+  f['docs/hosts/zed.md'] = '# Zed\n\n## Install\n\nRun npm  i -g x first.\n\n## User steps\n\n## Verify\n\n## What you get\n\n## Known gaps\n\n## Evidence\n';
+}, /zed\.md: no "\*\*Ask first\.\*\*" paragraph above the first/);
+defect('a double-quoted import in postinstall.js', checkDisclosure, (f) => {
+  f['scripts/postinstall.js'] += 'import { y } from "./install-newtool.js";\n';
+}, /install-newtool/);
+defect('an install module that postinstall.js does not import', checkDisclosure, (f) => {
+  f['scripts/install-cursor.js'] = '// new module\n';
+}, /scripts\/install-cursor\.js exists/);
 defect('postinstall.js imports a module MODULE_TOOLS does not list', checkDisclosure, (f) => {
   f['scripts/postinstall.js'] += "import { y } from './install-newtool.js';\n";
 }, /install-newtool/);
@@ -609,6 +656,21 @@ test('rule 7 holds on the repository', () => assert.deepEqual(checkHookNotes(rep
 defect('a hook note cites a name that is not a row', checkHookNotes, (f) => {
   f['codex/hook.js'] = "const a = '(INSTALL.md, \"Codex\")';\n";
 }, /codex\/hook\.js cites INSTALL\.md, "Codex"/);
+
+// ---------------------------------------------------------------------------------------------
+// Rule 9: the check prompt and the step the pages refer to
+// ---------------------------------------------------------------------------------------------
+
+test('rule 9 holds on the repository', () => assert.deepEqual(checkCheckPrompt(repoTree()), []));
+defect('a step is inserted and the prompt moves to Step 5', checkCheckPrompt, (f) => {
+  f['INSTALL.md'] = f['INSTALL.md'].replace('## Step 5: report', '## Step 6: report').replace('## Step 4: hand over\n', '## Step 4: inserted step\n\nText.\n\n## Step 5: hand over\n');
+}, /Step 4 holds no fenced check prompt/);
+defect('the check prompt is deleted', checkCheckPrompt, (f) => {
+  f['INSTALL.md'] = f['INSTALL.md'].replace('Check that total-recall is working: call its status tool', 'Check things');
+}, /holds no fenced check prompt/);
+defect('a page refers to Step 5', checkCheckPrompt, (f) => {
+  f['docs/hosts/pi.md'] = f['docs/hosts/pi.md'].replace('Step 4', 'Step 5');
+}, /pi\.md refers to INSTALL\.md, Step 5/);
 
 // ---------------------------------------------------------------------------------------------
 // Rule 8: the packaged OpenCode pointer

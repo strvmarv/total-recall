@@ -13,7 +13,7 @@ codex plugin add total-recall@strvmarv-total-recall-marketplace
 
 The marketplace entry is the repository URL with no ref, so the install takes the default branch, which contains `.codex-plugin/` and `codex/`. The install carries no engine binary: the MCP server downloads and verifies it on first launch for the version in that tree's `package.json` (a few seconds), and tools report "provisioning" until it is ready.
 
-Optional: let every total-recall tool run without a per-call approval. Codex asks for approval before calling an MCP tool that is not marked read-only, and none of total-recall's are. **Ask first**: tell the user that this setting lets Codex call every total-recall tool without asking each time, including the tools that write and delete memories. On a yes, add this to `~/.codex/config.toml`, keeping everything else in the file:
+Optional: let every total-recall tool run without a per-call approval. Codex asks for approval before calling an MCP tool that is not marked read-only, and none of total-recall's are. **Ask first**: tell the user that this setting lets Codex call every total-recall tool without asking each time, including the tools that write and delete memories. On a yes, add this to `~/.codex/config.toml`, keeping everything else in the file. If that table is already in the file, leave it; if it is there with a different `default_tools_approval_mode`, stop and ask the user.
 
 ```toml
 [plugins."total-recall@strvmarv-total-recall-marketplace".mcp_servers.total-recall]
@@ -36,6 +36,8 @@ Codex keeps the plugin in its cache. Now:
 ls "${CODEX_HOME:-$HOME/.codex}/plugins/cache/"*/total-recall/
 node "${CODEX_HOME:-$HOME/.codex}/plugins/cache/<marketplace>/total-recall/<version>/bin/start.js" --version
 ```
+
+This is for a POSIX shell. In PowerShell, use `$env:CODEX_HOME` when it is set, else `$HOME\.codex`, for the same two commands (`Get-ChildItem` for the first).
 
 `<marketplace>` and `<version>` are the directories the first command lists (the layout is `<home>/plugins/cache/<marketplace>/total-recall/<version>/`, from `codex/bootstrap.cjs`). Expected: `total-recall <version>`; the first run downloads the engine. `codex plugin list` shows the installed version and `codex mcp list` shows the launcher entry (from the earlier `INSTALL.md`, not run here).
 

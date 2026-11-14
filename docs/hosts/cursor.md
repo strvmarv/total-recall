@@ -2,7 +2,7 @@
 
 ## Install
 
-**Stop on macOS and Linux for the plugin path.** macOS and Linux are unsupported until observed: the plugin's MCP server runs in a sanitized environment, and a POSIX server without `HOME` or `USERPROFILE` would make the engine create a literal `~/.total-recall` directory in the user's project. On macOS or Linux skip "Local plugin" and use "MCP server only", which is marked not run.
+**The plugin path is not supported on macOS and Linux.** Tell the user that the plugin they asked for cannot be installed there, and ask whether to continue with the "MCP server only" option below instead. macOS and Linux are unsupported until observed for the plugin: the plugin's MCP server runs in a sanitized environment, and a POSIX server without `HOME` or `USERPROFILE` would make the engine create a literal `~/.total-recall` directory in the user's project. On macOS or Linux skip "Local plugin" and use "MCP server only", which is marked not run.
 
 Observed on Cursor CLI (`cursor-agent`) 2026.11.10-731fb78, Windows, with `-p` and interactively. The Cursor desktop IDE agent, subagents and cloud agents were not tested.
 
@@ -24,7 +24,7 @@ Not run for this page: this path comes from the earlier `INSTALL.md` and was not
 
 This gives the tools and nothing else: no startup instructions, no floor. Use it instead of the plugin, never together with it (two servers, and the hook would read the default store while the second reads yours).
 
-**Ask first.** This install runs the package's install script, which may change other tools on the machine: Hermes, Kiro, Cline, Windsurf, Gemini CLI, Zed, VS Code and Copilot CLI's MCP config. Beyond adding an MCP entry it can switch Hermes's memory provider and add a Gemini CLI hook that runs on every prompt. Tell the user this and get a yes before running it. The detail is in [What the install script changes](https://raw.githubusercontent.com/strvmarv/total-recall/main/docs/npm-postinstall.md).
+**Ask first.** This install runs the package's install script, which may change other tools on the machine: Hermes, Kiro, Cline, Windsurf, Gemini CLI, Zed, VS Code and Copilot CLI's MCP config. Beyond adding an MCP entry it can switch Hermes's memory provider and add a Gemini CLI hook that runs on every prompt. Tell the user this and get a yes before running it; the user asking you to install total-recall is not that yes. On a no, use the form that skips the install script, given below. The detail is in [What the install script changes](https://raw.githubusercontent.com/strvmarv/total-recall/main/docs/npm-postinstall.md).
 
 ```sh
 npm install -g @strvmarv/total-recall
@@ -36,7 +36,7 @@ The form that skips the install script. The install script configures nothing fo
 npm install -g --ignore-scripts @strvmarv/total-recall
 ```
 
-Then add this entry to `mcpServers` in Cursor's MCP config (`.cursor/mcp.json`, or the global settings). Add only this entry and keep the rest of the file; if a `total-recall` entry is already there that this install did not just write, stop and ask the user.
+Ask the user which Cursor MCP config to use: the project's `.cursor/mcp.json` or their global Cursor MCP config; do not guess, and warn that a project file may be committed. Then add this entry to `mcpServers` in that file, creating the file or the `mcpServers` key if it is missing. Add only this entry and keep the rest of the file; if a `total-recall` entry is already there that this install did not just write, stop and ask the user.
 
 ```json
 {
@@ -53,8 +53,8 @@ Nothing on this path tells the model to call `session_start`; see User steps.
 ## User steps
 
 1. Restart Cursor (or run `Developer: Reload Window`) so it reads the plugin or the MCP config.
-2. Plugin path: approve the server. Cursor asks before using a plugin's MCP server (it shows as `plugin-total-recall-total-recall`). Interactively, approve it. With `cursor-agent -p`, the user passes `--approve-mcps` on their own command line. The refusal text for an unapproved server was not observed.
-3. MCP-only path: add the startup instructions to your harness's persistent instructions file. The text is the body, below its front matter, of [`.kiro/steering/total-recall.md`](https://raw.githubusercontent.com/strvmarv/total-recall/main/.kiro/steering/total-recall.md); its "Sticky directives" paragraph describes Kiro's hook and does not apply here.
+2. Plugin path: approve the server. (Whether a hand-written MCP-only entry needs approval was not observed.) Cursor asks before using a plugin's MCP server (it shows as `plugin-total-recall-total-recall`). Interactively, approve it. With `cursor-agent -p`, the user passes `--approve-mcps` on their own command line. The refusal text for an unapproved server was not observed.
+3. MCP-only path: this is a user step; do not write the file yourself. Fetch the file linked here and give the user the text to add to your harness's persistent instructions file. The text is the body, below its front matter, of [`.kiro/steering/total-recall.md`](https://raw.githubusercontent.com/strvmarv/total-recall/main/.kiro/steering/total-recall.md); its "Sticky directives" paragraph describes Kiro's hook and does not apply here.
 4. First session on a store with a large history: the first `session_start` can exceed Cursor's 60 second MCP request limit (see Known gaps); the user may need to ask the model to call it once more.
 
 ## Verify
@@ -91,6 +91,7 @@ MCP-only path: the tools, no startup instructions, no floor.
 - **Compaction.** `preCompact` fires on a manual `/compact` but cannot carry context, and `sessionStart` does not fire again, so nothing re-injects the instructions after a compaction (whether they survive it was not observed). The floor keeps re-asserting the pins.
 - No `SessionEnd` nudge, no first-run tutorial, and the `setup` and `update` subcommands of the commands skill have no Cursor meaning. `hooks/hooks-cursor.json` (Claude-format, runs `bash`) is kept for hand-wired setups and is untested.
 - The engine's importers read your real `~/.claude`, `~/.cursor` and similar directories regardless of a redirected profile on Windows.
+- MCP-only path: whether the sanitized environment hazard in the stop paragraph applies to a hand-written entry was not observed. If the user finds a literal `~/.total-recall` directory in a project, report it. A bare `total-recall` must resolve on the PATH of the Cursor process; if the server does not start, the user can give the absolute path from `command -v total-recall` (inferred, not observed).
 - Contributors: run `cursor-agent` from PowerShell or cmd on Windows. From Git Bash a Cursor CLI bug blocks every tool call.
 
 ## Evidence

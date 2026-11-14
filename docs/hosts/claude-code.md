@@ -6,7 +6,7 @@ No stop condition: Claude Code is the primary host.
 
 ### Plugin (recommended)
 
-The plugin gives Claude Code the MCP server, the startup instructions, the per-prompt pinned-directive floor and the `/total-recall:commands` skill. Run both commands in a shell:
+The plugin gives Claude Code the MCP server, the startup instructions, the per-prompt pinned-directive floor and the `/total-recall:commands` skill. Tell the user that these two commands add a third-party marketplace and enable an MCP server and hooks, one of which runs on every prompt; the user's request to install the plugin covers them. Run both commands in a shell:
 
 ```sh
 claude plugin marketplace add strvmarv/total-recall-marketplace
@@ -15,20 +15,20 @@ claude plugin install total-recall@strvmarv-total-recall-marketplace
 
 The marketplace entry is the repository URL with no ref, so the install takes the default branch. It carries no engine binary: the first launch downloads and verifies it for the version in that tree's `package.json` (see [first run](../first-run.md#provisioning-on-first-launch)).
 
-The same two steps are slash commands the user can type inside a Claude Code session instead:
+If the `claude` command is not available to you, the user types the same two steps as slash commands inside a Claude Code session (a User step), and you continue at Verify:
 
 ```
 /plugin marketplace add strvmarv/total-recall-marketplace
 /plugin install total-recall@strvmarv-total-recall-marketplace
 ```
 
-After the install, offer the permission rule. **Ask first**: tell the user that the rule `mcp__plugin_total-recall_total-recall__*` lets Claude Code call every total-recall tool without asking each time, including the tools that write and delete memories. On a yes, make the edit the `setup` section of `skills/commands/SKILL.md` describes: add that one rule to `permissions.allow` in `~/.claude/settings.json`, create the file if it is missing, and change nothing else in it. On a no, tell the user that in a permission mode that never asks (TUI fullscreen, `dontAsk`) the total-recall tools are blocked until they run `/total-recall:commands setup` themselves. The rule names the plugin's tools, so it applies to this path only.
+After the install, offer the permission rule. **Ask first**: tell the user that the rule `mcp__plugin_total-recall_total-recall__*` lets Claude Code call every total-recall tool without asking each time, including the tools that write and delete memories. On a yes, make the edit the `setup` section of `skills/commands/SKILL.md` describes: add that one rule to `permissions.allow` in `~/.claude/settings.json` (under `$CLAUDE_CONFIG_DIR` instead of `~/.claude` if that is set, the same place the plugin directory is under), create the file if it is missing, and change nothing else in it. If the rule is already there, do nothing. If the file does not parse as JSON, stop and tell the user. Do not print the file. On a no, tell the user that in a permission mode that never asks (TUI fullscreen, `dontAsk`) the total-recall tools are blocked until they run `/total-recall:commands setup` themselves. The rule names the plugin's tools, so it applies to this path only.
 
 ### MCP server only (no plugin)
 
 This gives the tools and nothing else: no hooks, no startup instructions, no floor, no skills.
 
-**Ask first.** This install runs the package's install script, which may change other tools on the machine: Hermes, Kiro, Cline, Windsurf, Gemini CLI, Zed, VS Code and Copilot CLI's MCP config. Beyond adding an MCP entry it can switch Hermes's memory provider and add a Gemini CLI hook that runs on every prompt. Tell the user this and get a yes before running it. The detail is in [What the install script changes](https://raw.githubusercontent.com/strvmarv/total-recall/main/docs/npm-postinstall.md).
+**Ask first.** This install runs the package's install script, which may change other tools on the machine: Hermes, Kiro, Cline, Windsurf, Gemini CLI, Zed, VS Code and Copilot CLI's MCP config. Beyond adding an MCP entry it can switch Hermes's memory provider and add a Gemini CLI hook that runs on every prompt. Tell the user this and get a yes before running it; the user asking you to install total-recall is not that yes. On a no, use the form that skips the install script, given below. The detail is in [What the install script changes](https://raw.githubusercontent.com/strvmarv/total-recall/main/docs/npm-postinstall.md).
 
 ```sh
 npm install -g @strvmarv/total-recall
@@ -40,7 +40,7 @@ The form that skips the install script changes nothing else. The install script 
 npm install -g --ignore-scripts @strvmarv/total-recall
 ```
 
-Then add this entry to `mcpServers` in `~/.claude.json`. Add only this entry and keep the rest of the file; if a `total-recall` entry is already there that this install did not just write, stop and ask the user.
+Then add this entry to `mcpServers` in `~/.claude.json`. Claude Code itself rewrites this file, so make the edit when no Claude Code session is writing to it (inferred, not observed). Add only this entry and keep the rest of the file; if a `total-recall` entry is already there that this install did not just write, stop and ask the user.
 
 ```json
 {
@@ -57,9 +57,9 @@ Nothing on this path tells the model to call `session_start`. Add the startup in
 ## User steps
 
 1. Plugin path: start a new Claude Code session; MCP tools and hooks appear only in a new session.
-2. Plugin path, if the allow rule was declined and the session runs in a mode that never asks: run `/total-recall:commands setup`, then restart the session.
+2. Plugin path, if the allow rule was declined: tell the user that, in a mode that never asks, the tools stay blocked until they run `/total-recall:commands setup` and restart the session.
 3. MCP-only path: restart Claude Code so it reads `~/.claude.json` (inferred, not observed).
-4. MCP-only path: nothing delivers the startup instructions, so add them to your harness's persistent instructions file. The text is the body, below its front matter, of [`.kiro/steering/total-recall.md`](https://raw.githubusercontent.com/strvmarv/total-recall/main/.kiro/steering/total-recall.md); its "Sticky directives" paragraph describes Kiro's hook and does not apply here.
+4. MCP-only path: nothing delivers the startup instructions. This is a user step; do not write the file yourself. Fetch the file linked here and give the user the text to add to your harness's persistent instructions file. The text is the body, below its front matter, of [`.kiro/steering/total-recall.md`](https://raw.githubusercontent.com/strvmarv/total-recall/main/.kiro/steering/total-recall.md); its "Sticky directives" paragraph describes Kiro's hook and does not apply here.
 
 ## Verify
 
@@ -70,7 +70,7 @@ ls ~/.claude/plugins/cache/strvmarv-total-recall-marketplace/total-recall/
 node ~/.claude/plugins/cache/strvmarv-total-recall-marketplace/total-recall/<version>/bin/start.js --version
 ```
 
-`<version>` is the directory the first command lists. Expected: `total-recall <version>`. The first run downloads and verifies the engine (about 100 MB), so it can take a while; a later run answers at once. If `CLAUDE_CONFIG_DIR` is set, the plugin directory is under it instead of `~/.claude`.
+`<version>` is the directory the first command lists (if more than one is listed, use the newest and tell the user). Expected: `total-recall <version>`, which is also the version `npm view @strvmarv/total-recall version` reports unless the default branch is ahead of the last release. This proves the engine and the plugin files, not that Claude Code has the plugin enabled: report that as pending until the next session. The first run downloads and verifies the engine (about 100 MB), so it can take a while; a later run answers at once. If `CLAUDE_CONFIG_DIR` is set, the plugin directory is under it instead of `~/.claude`.
 
 MCP-only path, now: `total-recall --version` should print the version that `npm view @strvmarv/total-recall version` reports; read `~/.claude.json` and confirm the `total-recall` entry. A bare `total-recall` on PATH can be an older copy than the one another harness runs.
 

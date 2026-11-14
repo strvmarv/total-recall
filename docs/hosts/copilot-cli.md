@@ -21,7 +21,7 @@ To install from a checkout instead (from the earlier `INSTALL.md`, not run): `co
 
 This gives the tools and nothing else: no startup instructions and no floor.
 
-**Ask first.** This install runs the package's install script, which may change other tools on the machine: Hermes, Kiro, Cline, Windsurf, Gemini CLI, Zed, VS Code and Copilot CLI's MCP config. Beyond adding an MCP entry it can switch Hermes's memory provider and add a Gemini CLI hook that runs on every prompt. Tell the user this and get a yes before running it. The detail is in [What the install script changes](https://raw.githubusercontent.com/strvmarv/total-recall/main/docs/npm-postinstall.md). The script can write Copilot CLI's own MCP config (`~/.copilot/mcp-config.json`) when VS Code's user directory exists.
+**Ask first.** This install runs the package's install script, which may change other tools on the machine: Hermes, Kiro, Cline, Windsurf, Gemini CLI, Zed, VS Code and Copilot CLI's MCP config. Beyond adding an MCP entry it can switch Hermes's memory provider and add a Gemini CLI hook that runs on every prompt. Tell the user this and get a yes before running it; the user asking you to install total-recall is not that yes. On a no, use the form that skips the install script, given below. The detail is in [What the install script changes](https://raw.githubusercontent.com/strvmarv/total-recall/main/docs/npm-postinstall.md). The script can write Copilot CLI's own MCP config (`~/.copilot/mcp-config.json`) when VS Code's user directory exists.
 
 ```sh
 npm install -g @strvmarv/total-recall
@@ -55,7 +55,7 @@ Nothing on this path tells the model to call `session_start`; see User steps.
 
 1. Start a new Copilot CLI session.
 2. Allow the tools. Copilot asks for approval before an MCP tool call. Interactively the user can approve per call. Non-interactively (`copilot -p`) a call that is not allowed is refused ("blocked by permissions") and `session_start` never runs. Allow just this server by adding `--allow-tool=total-recall` to the command line or an alias of the user's own choosing (avoid `--allow-all-tools`).
-3. MCP-only path: add the startup instructions to your harness's persistent instructions file. The text is the body, below its front matter, of [`.kiro/steering/total-recall.md`](https://raw.githubusercontent.com/strvmarv/total-recall/main/.kiro/steering/total-recall.md); its "Sticky directives" paragraph describes Kiro's hook and does not apply here.
+3. MCP-only path: this is a user step; do not write the file yourself. Fetch the file linked here and give the user the text to add to your harness's persistent instructions file. The text is the body, below its front matter, of [`.kiro/steering/total-recall.md`](https://raw.githubusercontent.com/strvmarv/total-recall/main/.kiro/steering/total-recall.md); its "Sticky directives" paragraph describes Kiro's hook and does not apply here.
 
 ## Verify
 

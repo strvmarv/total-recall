@@ -6,7 +6,7 @@ No stop condition. The install script configures Windsurf in `~/.codeium/windsur
 
 ### Path 1: the plain install (recommended)
 
-**Ask first.** This install runs the package's install script, which may change other tools on the machine: Hermes, Kiro, Cline, Windsurf, Gemini CLI, Zed, VS Code and Copilot CLI's MCP config. Beyond adding an MCP entry it can switch Hermes's memory provider and add a Gemini CLI hook that runs on every prompt. Tell the user this and get a yes before running it. The detail is in [What the install script changes](https://raw.githubusercontent.com/strvmarv/total-recall/main/docs/npm-postinstall.md).
+**Ask first.** This install runs the package's install script, which may change other tools on the machine: Hermes, Kiro, Cline, Windsurf, Gemini CLI, Zed, VS Code and Copilot CLI's MCP config. Beyond adding an MCP entry it can switch Hermes's memory provider and add a Gemini CLI hook that runs on every prompt. Tell the user this and get a yes before running it; the user asking you to install total-recall is not that yes. On a no, use the form that skips the install script, given below. The detail is in [What the install script changes](https://raw.githubusercontent.com/strvmarv/total-recall/main/docs/npm-postinstall.md).
 
 ```sh
 npm install -g @strvmarv/total-recall
@@ -36,7 +36,7 @@ Then each step below is its own choice for the user; the agent takes the ones th
 ```
 2. **Ask first**: write the startup instructions as a rules file. Take `<npm root -g>/@strvmarv/total-recall/.kiro/steering/total-recall.md`, drop its YAML front matter (the first `---` block), and save the rest as `~/.codeium/windsurf/rules/total-recall.md`, creating the directory if needed.
 
-Add only the items above and keep the rest of the file. On Path 1, an `npx` entry that the install script just wrote is accepted. Any other `total-recall` entry that is already there, and any existing entry on Path 2 (the script did not run), means stop and ask the user.
+Add only the items above and keep the rest of the file. On Path 1, and for a fallback step after it, an `npx` entry that the install script just wrote is accepted. Any other `total-recall` entry that is already there, and any existing entry on Path 2 proper (the script did not run), means stop and ask the user.
 
 ## User steps
 
