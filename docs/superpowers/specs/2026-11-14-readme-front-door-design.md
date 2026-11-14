@@ -11,7 +11,9 @@ table, a full `config.toml`, the Cortex and skills configuration, the `develop` 
 forms, an MCP tool table, the architecture and the build instructions. The audit of 2026-11-13 found:
 
 - the first screen after the banner is "The Problem" and "The Solution"; the install prompt is line 71;
-- install is split into seven `###` sections of unequal weight, with no route for nine other harnesses;
+- install is split into seven `###` sections of unequal weight; nine supported harnesses have no
+  section, and five of them (Gemini CLI, Kiro, Windsurf, Zed, VS Code) have no route to their
+  instructions at all;
 - nothing tells a new user what they should see in their first session, or how to check it works;
 - "using it" is spread over four sections; the `develop` skill sits under "Configuration";
 - several statements are wrong (below), because reference detail in a README is not checked by anything.
@@ -59,6 +61,8 @@ Sections, in this order. Headings are exact; the test checks their order.
    local by default (SQLite, a bundled embedding model, no API keys), with Postgres or Cortex as
    options for teams.
 3. **`## Install`**
+   - one line of requirements directly under the heading (Node.js 20 or later; Linux x64 or arm64,
+     macOS on Apple Silicon, Windows x64; an Intel Mac is not supported), from `INSTALL.md`;
    - `### Let your assistant install it`: the pasted prompt, unchanged
      (`Install the total-recall memory plugin: fetch and follow the instructions at
      https://raw.githubusercontent.com/strvmarv/total-recall/main/INSTALL.md`), one sentence saying
@@ -80,25 +84,29 @@ Sections, in this order. Headings are exact; the test checks their order.
    instructions the assistant opens with a short status line (the example from
    `skills/commands/SKILL.md`, the same one `INSTALL.md` quotes); then the check prompt of
    `INSTALL.md` Step 4, word for word; a link to `docs/first-run.md` for what the first run does and
-   to the harness's page if nothing appears.
+   to the harness's page if nothing appears or where that page gives its own check (Hermes).
 5. **`## Use it`**: short entries, each one to three lines with a link:
    - what is remembered without being asked (corrections, preferences, decisions), and that saying
      "remember that..." works too;
    - pins: `pin` for a rule that must always be followed;
    - the knowledge base: `ingest <path>`;
    - commands: `/total-recall:commands help`, link `docs/commands.md`;
-   - the web UI: `total-recall ui`, link `docs/web-ui.md` (the screenshot moves there);
+   - the web UI: ask the assistant to open it (`/total-recall:commands ui`), or run
+     `total-recall ui` where the global npm package is installed (a plugin install does not put
+     `total-recall` on PATH); link `docs/web-ui.md` (the screenshot moves there);
    - the `develop` skill: one paragraph (Define turns an idea into a reviewed issue, Deliver turns the
      issue into a pull request and never merges), link `docs/develop.md`.
 6. **`## How it works`**: at most 150 words: warm is where new memories land and are searched per
    query, hot is the small set injected at session start, sticky pins are always injected first,
    cold is the knowledge base; hybrid keyword and vector search; a local embedding model. Link
    `docs/how-it-works.md`.
-7. **`## Documentation`**: a table linking every page under `docs/` named below (and `INSTALL.md`,
-   `CONTRIBUTING.md`, `CHANGELOG.md`).
-8. **`## Privacy`** (three lines: local by default, what leaves the machine only when Postgres,
-   Cortex or a remote embedder is configured, no telemetry to the authors; every statement taken from
-   today's README and `AGENTS.md`, nothing new claimed), **`## Contributing`**, **`## Credits`** (the
+7. **`## Documentation`**: a table linking every `docs/*.md` page except `docs/TODO.md` (the new
+   pages below and the existing `docs/database-location.md`, `docs/first-run.md` and
+   `docs/npm-postinstall.md`), and `INSTALL.md`, `CONTRIBUTING.md`, `CHANGELOG.md`.
+8. **`## Privacy`** (three lines: local by default; what leaves the machine only when Postgres,
+   Cortex or a remote embedder is configured; the engine archive is downloaded from GitHub Releases
+   on a plugin install's first launch. Every statement is taken from today's README, `AGENTS.md` and
+   `docs/first-run.md`; nothing else is claimed, in particular nothing about telemetry), **`## Contributing`**, **`## Credits`** (the
    superpowers paragraph, shortened; the technology list moves to `docs/architecture.md`),
    **`## License`**.
 
@@ -108,7 +116,8 @@ The README holds no `npx` entry, no configuration block (the generic `mcpServers
 ### New pages under `docs/`
 
 Each takes the named README section whole, with its heading levels raised so the page title is the
-`#` heading, and with the corrections listed under "Corrections". Line numbers are the README at
+`#` heading, with relative links and the image path rewritten for the page's place under `docs/`
+(the widened link rule catches a miss), and with the corrections listed under "Corrections". Line numbers are the README at
 `e3359b6`.
 
 | Page | From README |
@@ -126,6 +135,8 @@ Each takes the named README section whole, with its heading levels raised so the
 | `docs/verifying-a-release.md` | "Verifying a release" L596-607 |
 | `docs/building.md` | "Prerequisites" L611-617; "Installation from Source" L621-636 |
 
+"Quick Start" (L67-139) is replaced by `## Install`: its Codex CLI, Copilot CLI, Cursor and npm
+blocks and the `npx` note already live in `docs/hosts/` and `docs/npm-postinstall.md` (#75).
 "The Problem" and "The Solution" (L40-63) are not moved: the pitch and "Use it" replace them. Any
 fact in them that the pitch drops and that exists nowhere else (the 4000-token budget, the list of
 tools memories are imported from) is in `docs/how-it-works.md` already; the builder checks each bullet
@@ -143,18 +154,24 @@ a check fails.
 3. `[scope] default` is `"user:local"`, not `"user"`.
 4. `[usage] initial_backfill_days` is not read by the code; remove the key.
 5. Commands: add `setup`, `recent`, `update`, `ui`; `compact` takes `[--fast]`; remove
-   `eval --grow` (the CLI has none; the `eval_grow` MCP tool exists and stays in the tool table).
+   `eval --grow`: the commands skill (`skills/commands/SKILL.md`, `eval`) defines no `--grow`. The
+   `eval_grow` MCP tool stays in the tool table, and the page may point to the CLI form
+   `total-recall eval grow list|resolve`, which exists.
 6. "~1000 tests" in the build instructions: drop the number.
 7. "auto-injected into every prompt" (hot tier, in "The Solution", the tier model and the
    architecture block): the hot tier is assembled and injected at `session_start` (`AGENTS.md`,
    "What happens on `session_start`", step 6), and the pinned block is re-asserted by the floor. Say
-   "injected at session start" where the text moves.
-8. `docs/platforms.md`: the OpenCode row says "Full | Plugin wrapper" and the Hermes row says
-   "Importer ... no session hooks". `docs/hosts/opencode.md` (MCP tools only, configuration by hand)
-   and `docs/hosts/hermes.md` (a memory provider that calls `session_start` and `session_end`) say
-   otherwise and are sourced. Rewrite the two rows from those pages and add rows for the harnesses the
-   table lacks (Gemini CLI, Kiro, Windsurf, Zed, VS Code), each taken from its page's "What you get"
-   and linking the page. No new claim is made: a cell says only what the page says.
+   "injected at session start" where the text moves. The same wording is in the `config.toml`
+   comment `max_entries = 50 # Max entries auto-injected per prompt` (L337): change it too.
+8. `docs/platforms.md`: the table disagrees with the harness pages in several rows (OpenCode "Full |
+   Plugin wrapper" against a page that says MCP tools only; Hermes "Importer ... no session hooks"
+   against a memory provider that calls `session_start` and `session_end`; Cline "Full" against "MCP
+   tools only"). Rebuild the table with one row per harness page, in the order of `INSTALL.md`: the
+   harness (linking its page), what the install delivers (MCP tools; startup instructions; the pinned
+   floor; commands), each cell taken from that page's "What you get" and "Known gaps". The "Full" and
+   "Core" grades are dropped, because no page defines them. No new claim is made: a cell says only
+   what the page says. The auto-import notes of today's rows are kept where
+   `docs/how-it-works.md` (session start, import sync) does not already say them.
 9. The web UI has seven sections (the README is right; `Eval` exists under
    `src/TotalRecall.Web/ClientApp/src/pages/`). No change; listed so the reviewer does not "fix" it
    from `AGENTS.md`, which says six.
@@ -178,31 +195,33 @@ Added to `scripts/host-docs.test.js`, test-first, in the style of the existing r
 the tree that returns problems, a test on the repository, and a defect test per sub-rule):
 
 10. `README.md` has at most 200 lines (the target is about 150; the budget leaves room), and its
-    first fenced block contains `REKALL INC.`.
+    first fenced block equals the banner: the test holds the sha256 of that block as it is at
+    `e3359b6` and compares.
 11. The README's `##` headings are exactly `Install`, `Check that it works`, `Use it`,
     `How it works`, `Documentation`, `Privacy`, `Contributing`, `Credits`, `License`, in that order;
     under `Install` the `###` headings are `Let your assistant install it`, `Claude Code`, `pi`,
     `Other harnesses`, in that order.
 12. The README contains the install prompt's URL
-    (`https://raw.githubusercontent.com/strvmarv/total-recall/main/INSTALL.md`) and the check prompt
-    that `INSTALL.md` Step 4 holds, word for word.
+    (`https://raw.githubusercontent.com/strvmarv/total-recall/main/INSTALL.md`), the check prompt
+    that `INSTALL.md` Step 4 holds, word for word, and the example status line of
+    `skills/commands/SKILL.md` (existing rule 4, extended to `README.md`).
 13. Every `docs/*.md` file except `docs/TODO.md`, and every `docs/hosts/*.md` file, is linked from
     `README.md` (so a page cannot be added and left unreachable).
 14. The README holds no command that runs an npm install other than the one `pi install` line (the
     existing `NPM_RUNNING` pattern; exactly one match, and it is the `pi install npm:` line), and no
     `npx`.
-15. Every tool name in `catalog.json` appears in `docs/tools.md`, and the three counts `docs/tools.md`
-    states for core, SQLite and Cortex modes match: the SQLite count equals the number of tools in
-    `catalog.json`. (The core and Cortex counts are not derivable from `catalog.json`; the test checks
-    only the one that is.)
+15. Every tool name in `catalog.json` appears in `docs/tools.md` as a code span (`` `name` ``, so
+    `status` is not satisfied by `usage_status`), and `docs/tools.md` holds the sentence form
+    "N in SQLite mode" where N equals the number of tools in `catalog.json`. Only that count is
+    checked: the core and Cortex counts are not derivable from `catalog.json`.
 
 The existing link rule (rule 3) is widened from its fixed list to every `docs/*.md` except
 `docs/TODO.md`, so the new pages' links and anchors are checked too.
 
 ### Review before the PR
 
-Besides the usual review: a reviewer compares the README at `e3359b6` with the new README plus the
-new pages, section by section, and reports any paragraph, table row, command or number that exists in
+Besides the usual review: a reviewer compares the README at `e3359b6` with the new README plus
+everything under `docs/` (the new pages and `docs/hosts/`), section by section, and reports any paragraph, table row, command or number that exists in
 neither (lost content), and any number or name that differs without being in "Corrections".
 
 ## Constraints
