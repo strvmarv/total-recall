@@ -55,7 +55,7 @@ In the next session, the user pastes the check prompt from `INSTALL.md`, Step 4.
 - No hooks, no pinned-directive floor and no startup instructions: MCP tools only (from `AGENTS.md`). The instructions are a user step.
 - The path mismatch above is a known problem in the install script.
 - On Windows npm installs `total-recall` as a `.cmd` shim. Whether Cline starts a bare `total-recall` there was not observed; if the server does not start, the user can give the full path of `total-recall.cmd` (from `where.exe total-recall` in PowerShell, where plain `where` is another command; JSON needs the backslashes doubled; never change PowerShell's execution policy, report instead) as the command.
-- The plain install writes its entry with `npx --yes @strvmarv/total-recall`, with no version (see [What the install script changes](../npm-postinstall.md#the-npx-entries)).
+- The plain install writes its entry with `npx --yes @strvmarv/total-recall@<version>`, pinned to the installed version, and a later install refreshes an entry in exactly that form (see [What the install script changes](../npm-postinstall.md#the-npx-entries)).
 
 ## Evidence
 

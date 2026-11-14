@@ -38,7 +38,7 @@ For steps 1 and 2 the file is `$GEMINI_HOME/settings.json` if `GEMINI_HOME` is s
   }
 }
 ```
-2. **Ask first**: add the floor hook, which runs on every prompt. The shape is an object `BeforeAgent` holding a `hooks` array (as the install script writes it); add this, merging into an existing `hooks` or `BeforeAgent` rather than replacing it, and adding the item to an existing `hooks` array. If `BeforeAgent` is already an array, stop and ask the user. The command is the one the install script writes, with `total-recall` in place of `npx --yes @strvmarv/total-recall`:
+2. **Ask first**: add the floor hook, which runs on every prompt. The shape is an object `BeforeAgent` holding a `hooks` array (as the install script writes it); add this, merging into an existing `hooks` or `BeforeAgent` rather than replacing it, and adding the item to an existing `hooks` array. If `BeforeAgent` is already an array, stop and ask the user. The command is the one the install script writes, with `total-recall` in place of `npx --yes @strvmarv/total-recall@<version>` (the script writes the version it was installed at):
 ```json
 {
   "hooks": {
@@ -57,7 +57,7 @@ For steps 1 and 2 the file is `$GEMINI_HOME/settings.json` if `GEMINI_HOME` is s
 ```
 3. **Ask first**: add the startup instructions. Take the body of `<npm root -g>/@strvmarv/total-recall/.kiro/steering/total-recall.md` below its front matter (the first `---` block at the top of the file), and put it in `GEMINI.md` in the same directory as `settings.json`, between a line `<!-- total-recall -->` and a line `<!-- /total-recall -->`. Create the file if it is missing; append the block if the markers are not there; if they are, replace only what is between them. Never replace the rest of the file.
 
-Add only the items above and keep the rest of the file. On Path 1, and for a fallback step after it, an `npx` entry that the install script just wrote is accepted. Any other `total-recall` entry that is already there, and any existing entry on Path 2 proper (the script did not run), means stop and ask the user.
+Add only the items above and keep the rest of the file. On Path 1, and for a fallback step after it, an `npx` entry in the script's own form (`npx --yes @strvmarv/total-recall`, with or without `@<version>`) is accepted. Any other `total-recall` entry that is already there, and any existing entry on Path 2 proper (the script did not run), means stop and ask the user.
 
 ## User steps
 
@@ -65,7 +65,7 @@ Add only the items above and keep the rest of the file. On Path 1, and for a fal
 
 ## Verify
 
-Now: `total-recall --version` should print the version that `npm view @strvmarv/total-recall version` reports. A bare `total-recall` on PATH can be an older copy than the one another harness runs. Then the configured check described under Install (the entry, the hook and the `GEMINI.md` block). If the user declines a fallback step, report that check as not passed and the entry, hook or block as left to them with the snippet. This proves the global install and the files, not that Gemini CLI runs the same copy (its entry uses `npx`). Where `total-recall` is not on your PATH after the install, run `bin/start.js` under `npm root -g` instead.
+Now: `total-recall --version` should print the version that `npm view @strvmarv/total-recall version` reports. A bare `total-recall` on PATH can be an older copy than the one another harness runs. Then the configured check described under Install (the entry, the hook and the `GEMINI.md` block). If the user declines a fallback step, report that check as not passed and the entry, hook or block as left to them with the snippet. This proves the global install and the files, not that Gemini CLI runs the same copy (its entry uses `npx` with the installed version pinned, which an older copy cannot answer). Where `total-recall` is not on your PATH after the install, run `bin/start.js` under `npm root -g` instead.
 
 In the next session, the user pastes the check prompt from `INSTALL.md`, Step 4.
 
@@ -77,7 +77,7 @@ In the next session, the user pastes the check prompt from `INSTALL.md`, Step 4.
 
 ## Known gaps
 
-- The plain install writes the entries with `npx --yes @strvmarv/total-recall`, with no version, so an older installed copy can answer instead of the latest release (see [What the install script changes](../npm-postinstall.md#the-npx-entries)).
+- The plain install writes the entry and the hook pinned to the installed version (`npx --yes @strvmarv/total-recall@<version>`), so an older installed copy cannot answer instead of it, and a later install refreshes the entry and the hook when they are in exactly the form the script writes (see [What the install script changes](../npm-postinstall.md#the-npx-entries)).
 - A `total-recall` MCP entry that is already in `settings.json` is kept, but the hook is still added when it is missing and a file that parses is always rewritten at two-space indentation.
 
 ## Evidence

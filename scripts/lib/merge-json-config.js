@@ -1,15 +1,17 @@
 // Shared helper: merge a total-recall server entry into a JSON config file.
-// Non-clobbering: if the key already has a total-recall entry, leaves it alone.
+// Non-clobbering: if the key already has a total-recall entry, an entry in exactly the script's own
+// form is moved to the version being installed (see package-spec.js) and any other entry is left alone.
 // Non-fatal: on parse failure of an existing file, bails and logs.
 //
 // configPath  — absolute path to the JSON config file
 // key         — the top-level key (e.g. "mcpServers", "context_servers", "servers")
-// entry       — the server config object for "total-recall"
+// entry       — the server config object for "total-recall" (npxEntry() from package-spec.js)
 // label       — host name for stderr log messages and the install summary (e.g. "Cline", "Windsurf")
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { recordChange } from './change-log.js';
+import { decide } from './package-spec.js';
 
 export function mergeJsonConfig(configPath, key, entry, label) {
   let config = {};
@@ -25,12 +27,17 @@ export function mergeJsonConfig(configPath, key, entry, label) {
 
   const existing = config[key]?.['total-recall'];
   if (existing) {
-    if (existing.command === 'npx' &&
-        Array.isArray(existing.args) &&
-        existing.args.includes('@strvmarv/total-recall')) {
-      return; // already configured correctly
+    // An entry in exactly the script's own form is moved to the version being installed; an npx
+    // entry that holds the package name among other arguments is kept; anything else is the user's.
+    const verdict = decide(existing, entry.args[1]);
+    if (verdict === 'custom') {
+      process.stderr.write(`[total-recall:postinstall] ${label} already has a custom total-recall entry — preserving user config.\n`);
     }
-    process.stderr.write(`[total-recall:postinstall] ${label} already has a custom total-recall entry — preserving user config.\n`);
+    if (verdict !== 'refresh') return;
+    existing.args = [...entry.args];
+    writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+    recordChange(label, 'rewrote', configPath);
+    process.stderr.write(`[total-recall:postinstall] ${label} MCP entry updated in ${configPath}\n`);
     return;
   }
 

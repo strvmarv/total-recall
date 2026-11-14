@@ -37,7 +37,7 @@ Then each step below is its own choice for the user; the agent takes the ones th
 ```
 2. **Ask first**: copy `<npm root -g>/@strvmarv/total-recall/.kiro/steering/total-recall.md` whole (with its front matter, which marks it always-included) to `~/.kiro/steering/total-recall.md`, creating the directory if needed.
 
-Add only the items above and keep the rest of the file. On Path 1, and for a fallback step after it, an `npx` entry that the install script just wrote is accepted. Any other `total-recall` entry that is already there, and any existing entry on Path 2 proper (the script did not run), means stop and ask the user.
+Add only the items above and keep the rest of the file. On Path 1, and for a fallback step after it, an `npx` entry in the script's own form (`npx --yes @strvmarv/total-recall`, with or without `@<version>`) is accepted. Any other `total-recall` entry that is already there, and any existing entry on Path 2 proper (the script did not run), means stop and ask the user.
 
 ## User steps
 
@@ -60,7 +60,7 @@ In the next session, the user pastes the check prompt from `INSTALL.md`, Step 4.
 
 - Without the workspace hooks there is no floor and no capture hook; only the steering file's instruction remains.
 - The token-growth throttle is inactive for Kiro (the payload lacks `transcript_path`); the floor runs on the turn count only.
-- The workspace hooks and the plain install's entry run `npx --yes @strvmarv/total-recall`, with no version (see [What the install script changes](../npm-postinstall.md#the-npx-entries)).
+- The plain install's entry is `npx --yes @strvmarv/total-recall@<version>`, pinned to the installed version and refreshed by a later install. The static workspace hooks you copy from `.kiro/hooks/` still run `npx --yes @strvmarv/total-recall` with no version, because the script does not write them (see [What the install script changes](../npm-postinstall.md#the-npx-entries)).
 
 ## Evidence
 
