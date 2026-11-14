@@ -62,14 +62,19 @@ export function normalise(text) {
 const FENCE = /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1[ \t]*$|(?![\s\S]))/gm;
 const blank = (s) => s.replace(/[^\n]/g, ' ');
 
+/** The text with HTML comments blanked (newlines kept). A comment that is never closed is left as it is. */
+function stripComments(md) {
+  return md.replace(/<!--[\s\S]*?-->/g, blank);
+}
+
 /** The text with fenced blocks blanked (newlines kept), so offsets and line numbers hold. */
 function stripFences(md) {
   return md.replace(FENCE, blank);
 }
 
-/** The text with fenced blocks and inline code spans blanked. */
+/** The text with fenced blocks, inline code spans and HTML comments blanked (a `<!--` in code opens no comment). */
 export function stripCode(md) {
-  return stripFences(md).replace(/`[^`\n]*`/g, blank);
+  return stripComments(stripFences(md).replace(/`[^`\n]*`/g, blank));
 }
 
 export function fencedBlocks(md) {
@@ -474,6 +479,15 @@ test('stripCode: fenced blocks and inline code are blanked, newlines kept', () =
   assert.equal(out.split('\n').length, md.split('\n').length);
   assert.ok(!out.includes('b') && !out.includes('x') && !out.includes('js'));
   assert.ok(out.includes('a') && out.includes('z'));
+});
+
+test('stripCode: an HTML comment is blanked, newlines kept, and a <!-- in a code span opens nothing', () => {
+  const md = 'a <!-- one -->\n<!--\n[x](y.md)\n-->\nz `<!--` [kept](k.md)\n';
+  const out = stripCode(md);
+  assert.equal(out.length, md.length);
+  assert.equal(out.split('\n').length, md.split('\n').length);
+  assert.ok(!out.includes('one') && !out.includes('y.md'));
+  assert.deepEqual(links(md), ['k.md']);
 });
 
 test('fencedBlocks: finds each fence with its offset', () => {
@@ -986,6 +1000,10 @@ defect('a new docs page that the README does not link', checkDocsReachable, (f) 
 defect('a harness page that the README does not link', checkDocsReachable, (f) => {
   f['README.md'] = f['README.md'].replace('- [Zed](docs/hosts/zed.md)\n', '');
 }, /does not link docs\/hosts\/zed\.md/);
+defect('the only README link to a page sits in an HTML comment', checkDocsReachable, (f) => {
+  f['docs/extra.md'] = '# x\n';
+  f['README.md'] += '\n<!-- [extra](docs/extra.md) -->\n\n<!--\n- [extra again](docs/extra.md)\n-->\n';
+}, /does not link docs\/extra\.md/);
 test('rule 13: a page linked only through <a href> or a reference definition counts as linked', () => {
   const files = validFiles();
   files['docs/extra.md'] = '# x\n';
