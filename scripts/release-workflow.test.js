@@ -17,11 +17,19 @@ function jobBlock(text, name) {
   return m ? m[1] : null;
 }
 
-/** The job's own `permissions:` mapping (job level, 4-space indent), as a list of `key: value` strings. */
+/**
+ * The job's own `permissions:` mapping (job level, 4-space indent), as a list of `key: value` strings.
+ * Comment lines inside the block are ignored; `permissions: write-all` is returned as `write-all`
+ * because it grants every permission, attestations included.
+ */
 function jobPermissions(job) {
-  const m = /^    permissions:\n((?:      [a-z-]+: \w+\n)+)/m.exec(job);
-  return m ? m[1].split('\n').map((l) => l.trim()).filter(Boolean) : [];
+  const flat = /^    permissions: (write-all)\s*$/m.exec(job);
+  if (flat) return [flat[1]];
+  const m = /^    permissions:\n((?:      (?:[a-z-]+: \w+|#.*)\n)+)/m.exec(job);
+  return m ? m[1].split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')) : [];
 }
+
+const grantsAttestations = (perms) => perms.includes('attestations: write') || perms.includes('write-all');
 
 // ---- Cycle 1: the publish job attests the release assets ----
 
@@ -30,7 +38,7 @@ function checkAttestStepExists(text) {
   const publish = jobBlock(text, 'publish');
   if (!publish) return ['release.yml has no publish job'];
   if (!/uses: actions\/attest@v4\b/.test(publish)) problems.push('the publish job has no actions/attest@v4 step');
-  if (!jobPermissions(publish).includes('attestations: write')) problems.push('the publish job does not have attestations: write');
+  if (!grantsAttestations(jobPermissions(publish))) problems.push('the publish job does not have attestations: write');
   return problems;
 }
 
@@ -40,7 +48,7 @@ test('release.yml: the publish job attests the release assets and may write atte
 
 // ---- Cycle 2: the attestation gates the release, and cannot be skipped ----
 
-const STEP_START = /^      - name: /m;
+const STEP_START = /^      - /m; // every step is a `- ` list item at 6 spaces, whatever its first key is
 
 /** The publish job's steps as [{name, text}] in order. */
 function publishSteps(text) {
@@ -50,7 +58,7 @@ function publishSteps(text) {
   if (i < 0) return [];
   const body = publish.slice(i + '\n    steps:\n'.length);
   return body.split(new RegExp(`(?=${STEP_START.source})`, 'm')).filter((c) => STEP_START.test(c)).map((c) => ({
-    name: /^      - name: (.*)$/m.exec(c)[1].trim(),
+    name: (/^(?:      - |        )name: (.*)$/m.exec(c) ?? [])[1]?.trim() ?? '',
     text: c,
   }));
 }
@@ -71,8 +79,13 @@ function checkAttestOrdering(text) {
   if (generate >= 0 && attest < generate) problems.push('the attestation runs before the manifest is generated');
   if (attach >= 0 && attest > attach) problems.push('the attestation runs after the assets are attached');
   const body = steps[attest].text;
-  if (/^\s+if:/m.test(body)) problems.push('the attestation step has an if: condition and can be skipped');
-  if (/^\s+continue-on-error:/m.test(body)) problems.push('the attestation step sets continue-on-error, so its failure is ignored');
+  if (/^(?:      - |        )if:/m.test(body)) problems.push('the attestation step has an if: condition and can be skipped');
+  if (/^(?:      - |        )continue-on-error:/m.test(body)) problems.push('the attestation step sets continue-on-error, so its failure is ignored');
+  if (attach >= 0) {
+    const attachText = steps[attach].text;
+    if (/^(?:      - |        )if:/m.test(attachText)) problems.push('the attach step has an if: condition, so assets can be attached after a failed attestation');
+    if (/^(?:      - |        )continue-on-error:/m.test(attachText)) problems.push('the attach step sets continue-on-error, so a failure there is ignored');
+  }
   return problems;
 }
 
@@ -138,7 +151,7 @@ function checkAttestationPermissionScope(text) {
   const names = [...text.matchAll(/^  ([a-z][a-z-]*):\n/gm)].map((m) => m[1]);
   for (const name of names) {
     const job = jobBlock(text, name);
-    const grants = jobPermissions(job).includes('attestations: write');
+    const grants = grantsAttestations(jobPermissions(job));
     if (name === 'publish' && !grants) problems.push('the publish job does not have attestations: write');
     if (name !== 'publish' && grants) problems.push(`the ${name} job has attestations: write`);
   }
@@ -182,4 +195,33 @@ test('mutation: attestations: write removed from the publish job is caught', () 
   assert.notEqual(mutated, REAL);
   assert.ok(checkAttestationPermissionScope(mutated).some((p) => /publish job does not/.test(p)));
   assert.ok(checkAttestStepExists(mutated).some((p) => /attestations: write/.test(p)));
+});
+
+// ---- gaps found in review: harder-to-spot ways to defeat the checks ----
+
+test('mutation: an if: written as the first key of the attest step is caught', () => {
+  const mutated = REAL.replace('      - name: Attest release assets\n        uses: actions/attest@v4\n',
+    '      - if: always()\n        name: Attest release assets\n        uses: actions/attest@v4\n');
+  assert.notEqual(mutated, REAL);
+  assert.ok(checkAttestOrdering(mutated).some((p) => /if: condition/.test(p)));
+});
+
+test('mutation: an if: or continue-on-error on the attach step is caught', () => {
+  for (const line of ['if: always()', 'continue-on-error: true']) {
+    const mutated = REAL.replace('        uses: softprops/action-gh-release@v3\n', `        uses: softprops/action-gh-release@v3\n        ${line}\n`);
+    assert.notEqual(mutated, REAL);
+    assert.ok(checkAttestOrdering(mutated).some((p) => /attach step/.test(p)), line);
+  }
+});
+
+test('mutation: a comment inside another job\'s permissions block does not hide attestations: write', () => {
+  const mutated = REAL.replace(/(  build:\n    name: .*\n)/, '$1    permissions:\n      contents: read\n      # keep this tight\n      attestations: write\n');
+  assert.notEqual(mutated, REAL);
+  assert.ok(checkAttestationPermissionScope(mutated).some((p) => /build job/.test(p)));
+});
+
+test('mutation: permissions: write-all on another job is caught', () => {
+  const mutated = REAL.replace(/(  build:\n    name: .*\n)/, '$1    permissions: write-all\n');
+  assert.notEqual(mutated, REAL);
+  assert.ok(checkAttestationPermissionScope(mutated).some((p) => /build job/.test(p)));
 });
