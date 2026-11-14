@@ -36,7 +36,7 @@ function line(c) {
 export function formatSummary(list) {
   if (list.length === 0) return `${PREFIX} No changes were made to other tools.`;
   const n = list.length;
-  return [`${PREFIX} Changed other tools (${n} change${n === 1 ? '' : 's'}):`, ...list.map(line)].join('\n');
+  return [`${PREFIX} Other tools (${n} ${n === 1 ? 'entry' : 'entries'}):`, ...list.map(line)].join('\n');
 }
 
 /** A log entry: a heading with the UTC date, time and package version, then the summary. */

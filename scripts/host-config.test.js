@@ -37,7 +37,7 @@ test('formatSummary: one line per change with tool, action and path', () => {
     { tool: 'Gemini CLI', action: 'rewrote', detail: '/g/settings.json' },
   ]);
   assert.equal(text, [
-    `${P} Changed other tools (2 changes):`,
+    `${P} Other tools (2 entries):`,
     `${P}   Zed: added /z/settings.json`,
     `${P}   Gemini CLI: rewrote /g/settings.json`,
   ].join('\n'));
@@ -238,15 +238,19 @@ test('postinstall.js: no other tool detected prints the one-line answer, runs th
 });
 
 test('postinstall.js: TOTAL_RECALL_SKIP_HOST_CONFIG=1 still runs the engine step, exits 0 and leaves every other tool alone', () => {
+  let hermesHome;
   const r = runPostinstall(({ home }) => {
     fs.mkdirSync(path.join(home, '.gemini'), { recursive: true });
-    return { TOTAL_RECALL_SKIP_HOST_CONFIG: '1' };
+    hermesHome = path.join(home, 'hermes'); // detected, so the fake hermes would be called if the switch failed
+    fs.mkdirSync(hermesHome);
+    return { TOTAL_RECALL_SKIP_HOST_CONFIG: '1', HERMES_HOME: hermesHome };
   });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(fs.readFileSync(r.marker, 'utf8'), 'ran');
   assert.match(r.stderr, /TOTAL_RECALL_SKIP_HOST_CONFIG=1/);
   assert.deepEqual(fs.readdirSync(path.join(r.home, '.gemini')), []);
   assert.equal(r.hermesCalls(), '');
+  assert.deepEqual(fs.readdirSync(hermesHome), []);
   assert.equal(r.log(), null);
 });
 
@@ -269,6 +273,7 @@ test('Cline: a new settings file is added, an existing one is rewrote, both with
   const r = runPostinstall(({ home }) => { file = path.join(home, 'cline', 'cline_mcp_settings.json'); return { CLINE_HOME: path.dirname(file) }; });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(lines(r), [`Cline: added ${file}`]);
+  assert.ok(r.stderr.trimEnd().split('\n').pop().startsWith(P), 'the summary is the last output');
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).mcpServers['total-recall'], ENTRY);
 
   const r2 = runPostinstall(({ home }) => {

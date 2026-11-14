@@ -91,7 +91,7 @@ async function installHermesPluginUnguarded() {
       recordChange('Hermes', 'switched', 'memory.provider to total-recall (hermes config set)');
       process.stderr.write('[total-recall:postinstall] Hermes memory provider configured\n');
     } catch (e) {
-      recordChange('Hermes', 'failed', `hermes config set memory.provider total-recall: ${e.message}`);
+      recordChange('Hermes', 'failed', e.message);
       process.stderr.write(`[total-recall:postinstall] Config update partially failed: ${e.message}\n`);
     }
   }

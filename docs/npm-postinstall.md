@@ -31,10 +31,10 @@ The paths and what each step writes are read from `scripts/postinstall.js` and `
 
 ## What it reports
 
-When the script has finished with the other tools it prints one summary on stderr: a line for each file it wrote and for each step that failed, giving the tool, what it did and the full path.
+When the script has finished with the other tools it prints one summary on stderr: a line for each file it wrote and for each step that failed (a heading counts the entries), giving the tool, what it did and the full path.
 
 ```text
-[total-recall:postinstall] Changed other tools (4 changes):
+[total-recall:postinstall] Other tools (4 entries):
 [total-recall:postinstall]   Gemini CLI: rewrote /home/me/.gemini/settings.json
 [total-recall:postinstall]   Gemini CLI: added BeforeAgent hook (runs on every prompt) in /home/me/.gemini/settings.json
 [total-recall:postinstall]   Hermes: added /home/me/.hermes/plugins/total-recall
