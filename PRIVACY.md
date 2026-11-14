@@ -49,26 +49,26 @@ The embedding model (`bge-small-en-v1.5`, ~133 MB) is fetched and sha256-verifie
 Three optional configurations send data off your machine, to a system you choose and configure:
 
 - **A Postgres backend** (`[storage] connection_string`): memories and knowledge are stored in that database instead of the local SQLite file.
-- **Cortex** (`[storage] mode = "cortex"`): memories are synced to the Cortex instance you configure, telemetry (usage, retrieval events, the compaction log) is pushed to it, team knowledge base queries go to it, and your skills are uploaded only when `[skills] auto_import` is on.
+- **Cortex** (`[storage] mode = "cortex"`): memories and the knowledge base entries you ingest (including the project docs ingested at session start) are synced to the Cortex instance you configure, telemetry (usage, retrieval events, the compaction log) is pushed to it, team knowledge base queries go to it, and your skills are uploaded only when `[skills] auto_import` is on.
 - **A remote embedder** (`[embedding] provider = "openai"` or `"bedrock"`): the text to embed is sent to that service.
 
 See [Configuration](docs/configuration.md) and [Connecting to Cortex](docs/cortex.md).
 
 ### 5. Nothing else
 
-By default there is no telemetry, no crash reporting, no usage analytics, no cloud sync, and no account system. The plugin does not phone home.
+By default there is no telemetry, no crash reporting, no usage analytics, no cloud sync and no account system, and the plugin does not phone home.
 
 ---
 
 ## Embeddings and AI processing
 
-By default, vector embeddings are computed **locally** using the bundled ONNX runtime and `bge-small-en-v1.5` model, and your text is not sent to an embedding API or any remote model service. That changes only if you configure a remote embedder (above).
+By default, vector embeddings are computed **locally** using the bundled ONNX runtime and `bge-small-en-v1.5` model, and your text is not sent to an embedding API or any remote model service. That changes if you configure a remote embedder (above); with Cortex, synced content and knowledge base queries are processed by the Cortex instance.
 
 ---
 
 ## Data you ingest from other tools
 
-On `session_start`, total-recall scans known memory locations for Claude Code, Copilot CLI, Cursor, Cline, OpenCode, and Hermes and imports entries it hasn't seen before. This import is local filesystem access only — no network calls are made by default (with a Postgres or Cortex backend, imported entries are stored or synced like any other memory). Imported entries are deduplicated via content hash in an `import_log` table.
+On `session_start`, total-recall scans known memory locations for Claude Code, Copilot CLI, Cursor, Cline, OpenCode, and Hermes and imports entries it hasn't seen before. This import is local filesystem access only — no network calls are made by default (with a Postgres or Cortex backend, imported entries are stored or synced like any other memory, and with a remote embedder their text is sent to it to be embedded). Imported entries are deduplicated via content hash in an `import_log` table.
 
 ---
 
@@ -88,7 +88,7 @@ To delete only memories while keeping config:
 rm ~/.total-recall/total-recall.db
 ```
 
-By default there is no remote copy to request deletion of. If you configured Postgres or Cortex, the copy there is deleted in that system.
+By default there is no remote copy to request deletion of. The commands above do not remove a copy in Postgres or Cortex; delete it in that system.
 
 ---
 

@@ -95,20 +95,20 @@ Then paste this to check it end to end:
 Check that total-recall is working: call its status tool and tell me the tier counts and the database path.
 ```
 
-[First run](docs/first-run.md) says what happens the first time. If nothing appears, or your harness has its own check (Hermes), see its page above.
+[First run](docs/first-run.md) says what happens the first time. If nothing appears, see your harness's page under [Install](#install); [Hermes](docs/hosts/hermes.md) has its own check.
 
 ## Use it
 
-- **It remembers without being asked.** Corrections, preferences and decisions are stored as you work, and relevant memories are retrieved for each question. You can also ask the assistant to remember something, or run `/total-recall:commands store <content>`. See [what gets remembered](docs/how-it-works.md#what-gets-remembered).
-- **Pin what must always be followed.** `/total-recall:commands pin <id>` makes an entry a pinned directive: injected first in every session and never decayed. See [the tier model](docs/how-it-works.md#tier-model).
-- **Give it your docs.** `/total-recall:commands ingest <path>` adds files or a directory to the knowledge base, retrieved when relevant.
-- **Commands.** `/total-recall:commands help` lists them all: search, forget, inspect, promote, compact, eval and more (on pi the command is `/total-recall <subcommand>`). See [Commands](docs/commands.md).
-- **Web UI.** `total-recall ui` opens a local dashboard for memories, the knowledge base, token usage and retrieval quality, where the global npm package is installed. On a plugin install, where `total-recall` is not on your PATH, ask the assistant for the command for your install. See [Web UI](docs/web-ui.md).
+- **It remembers without being asked.** Where the harness delivers the startup instructions ([Supported platforms](docs/platforms.md)), corrections, preferences and decisions are stored as you work, and relevant memories are retrieved for each question. You can also ask the assistant to remember something, or run `/total-recall:commands store <content>`. See [what gets remembered](docs/how-it-works.md#what-gets-remembered).
+- **Pin what must always be followed.** `/total-recall:commands pin <id>` makes an entry a pinned directive: injected first at session start and never decayed. See [the tier model](docs/how-it-works.md#tier-model).
+- **Give it your docs.** `/total-recall:commands ingest <path>` adds files or a directory to the knowledge base, retrieved when relevant. See the `ingest` and `kb` rows in [Commands](docs/commands.md).
+- **Commands.** `/total-recall:commands help` lists them all: search, forget, inspect, promote, compact, eval and more. The form differs by harness (on pi it is `/total-recall <subcommand>`): see [Supported platforms](docs/platforms.md) and [Commands](docs/commands.md).
+- **Web UI.** Where the global npm package is installed, `total-recall ui` opens a local dashboard for memories, the knowledge base, token usage and retrieval quality. On a plugin install, where `total-recall` is not on your PATH, ask the assistant for the command for your install. See [Web UI](docs/web-ui.md).
 - **The `develop` skill.** `/develop` takes a change from an idea to a pull request: Define turns the idea into a reviewed GitHub issue, and Deliver turns the issue into a pull request. It never merges. See [the develop skill](docs/develop.md).
 
 ## How it works
 
-New memories land in the **warm** tier, where they are searched for every question with a mix of keyword and vector search. Entries that prove useful earn a place in the small **hot** tier, which is injected at session start within a token budget. **Sticky** pins are hot entries you mark by hand: they are injected first, in full, and re-asserted during long sessions where the harness supports it. The **cold** tier is the knowledge base built from the files you ingest. Embeddings come from a model that ships with the binary and runs locally. The full explanation is in [How total-recall works](docs/how-it-works.md).
+New memories land in the **warm** tier, where they are searched for every question with a mix of keyword and vector search. Entries that prove useful earn a place in the small **hot** tier, which is injected at session start within a token budget. **Sticky** pins are hot entries you mark by hand: they are injected first, in full, and re-asserted during long sessions where the harness supports it. The **cold** tier holds the knowledge base built from the files you ingest, and memories that decay out of warm. Embeddings come from a model that ships with the binary and runs locally. The full explanation is in [How total-recall works](docs/how-it-works.md).
 
 ## Documentation
 
@@ -130,6 +130,8 @@ New memories land in the **warm** tier, where they are searched for every questi
 | [What the install script changes](docs/npm-postinstall.md) | Other tools that installing the npm package can configure |
 | [Verifying a release](docs/verifying-a-release.md) | Checking a download's build attestation |
 | [Building from source](docs/building.md) | Prerequisites and the build |
+| [PRIVACY.md](PRIVACY.md) | What is stored and what can leave the machine |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | The contributor guide |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 
 ## Privacy
@@ -142,7 +144,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the contributor guide, including how 
 
 ## Credits
 
-total-recall's plugin architecture, skill format, hook system and multi-platform wrapper pattern are modeled after [superpowers](https://github.com/obra/superpowers) by [obra](https://github.com/obra). If you are building plugins for coding assistants, start there. The technologies it is built with are listed under [Architecture](docs/architecture.md#core-technologies).
+total-recall's plugin architecture, skill format, hook system and multi-platform wrapper pattern are modeled after [superpowers](https://github.com/obra/superpowers) by [obra](https://github.com/obra). If you are building plugins for coding assistants, start there. The technologies total-recall is built with are listed under [Architecture](docs/architecture.md#core-technologies).
 
 ## License
 
