@@ -10,6 +10,7 @@ import { execSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { recordChange } from './lib/change-log.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -45,6 +46,16 @@ function hermesCli() {
 }
 
 export async function installHermesPlugin() {
+  // Like the other installers, a failure here is reported and never ends the install script.
+  try {
+    await installHermesPluginUnguarded();
+  } catch (e) {
+    recordChange('Hermes', 'failed', e.message);
+    process.stderr.write(`[total-recall:postinstall] Hermes install failed (non-fatal): ${e.message}\n`);
+  }
+}
+
+async function installHermesPluginUnguarded() {
   const hhome = hermesHome();
   if (!hhome) {
     // Hermes not detected — not an error, just skip
@@ -66,8 +77,10 @@ export async function installHermesPlugin() {
     return;
   }
 
+  const existed = existsSync(dest);
   mkdirSync(dest, { recursive: true });
   cpSync(src, dest, { recursive: true, force: true });
+  recordChange('Hermes', existed ? 'overwrote' : 'added', dest);
 
   process.stderr.write(`[total-recall:postinstall] Hermes plugin installed to ${dest}\n`);
 
@@ -75,8 +88,10 @@ export async function installHermesPlugin() {
   if (hermes) {
     try {
       execSync(`${hermes} config set memory.provider total-recall`, { stdio: 'ignore' });
+      recordChange('Hermes', 'switched', 'memory.provider to total-recall (hermes config set)');
       process.stderr.write('[total-recall:postinstall] Hermes memory provider configured\n');
     } catch (e) {
+      recordChange('Hermes', 'failed', `hermes config set memory.provider total-recall: ${e.message}`);
       process.stderr.write(`[total-recall:postinstall] Config update partially failed: ${e.message}\n`);
     }
   }

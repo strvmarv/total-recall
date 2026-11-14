@@ -203,7 +203,7 @@ function runPostinstall(setup = () => ({})) {
   const home = tmp('tr-home-');
   const bin = tmp('tr-bin-');
   const hermesLog = path.join(bin, 'hermes-calls.txt');
-  fs.writeFileSync(path.join(bin, 'hermes'), `#!/bin/sh\necho "$@" >> "${hermesLog}"\necho /fake/hermes/config.yaml\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'hermes'), `#!/bin/sh\necho "$@" >> "${hermesLog}"\nif [ "$1 $2" = "config set" ] && [ -n "$FAKE_HERMES_FAIL_SET" ]; then exit 1; fi\necho /fake/hermes/config.yaml\n`, { mode: 0o755 });
   const marker = path.join(home, 'engine-marker');
   const extraEnv = setup({ home }) ?? {};
   const r = spawnSync(process.execPath, [path.join(pkg, 'scripts', 'postinstall.js')], {
@@ -302,12 +302,12 @@ test('VS Code and the Copilot CLI entry it also writes are two lines, the second
 test('a kept total-recall entry and a file that does not parse record nothing', () => {
   let zedFile;
   const r = runPostinstall(({ home }) => {
-    const ws = path.join(home, 'ws');
-    writeJson(path.join(ws, 'mcp_config.json'), { mcpServers: { 'total-recall': ENTRY } });
+    const cline = path.join(home, 'cline');
+    writeJson(path.join(cline, 'cline_mcp_settings.json'), { mcpServers: { 'total-recall': ENTRY } });
     const zed = path.join(home, 'zed'); fs.mkdirSync(zed);
     zedFile = path.join(zed, 'settings.json');
     fs.writeFileSync(zedFile, '{ // a comment\n}');
-    return { WINDSURF_HOME: ws, ZED_SETTINGS: zed };
+    return { CLINE_HOME: cline, ZED_SETTINGS: zed };
   });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(lines(r), []);
@@ -329,4 +329,141 @@ test('a write that fails is a failed line (never added), the other tools are sti
   assert.ok(!got.some((l) => /^Cline: added/.test(l)), got.join('\n'));
   assert.ok(got.includes(`Zed: added ${path.join(zedDir, 'settings.json')}`), got.join('\n'));
   assert.match(r.log(), /Cline: failed: /);
+});
+
+// --- the remaining writes: steering, rules, Gemini CLI, Hermes ---
+
+const STEERING = fs.readFileSync(path.join(REPO, '.kiro', 'steering', 'total-recall.md'), 'utf8');
+/** The steering doc without its YAML front matter, as Windsurf's rules file and the GEMINI.md block hold it. */
+const STEERING_BODY = STEERING.startsWith('---\n') ? STEERING.slice(STEERING.indexOf('\n---\n', 4) + 5) : STEERING;
+
+test('Kiro: the steering file is added, or overwrote when it was already there', () => {
+  let kiro;
+  const r = runPostinstall(({ home }) => { kiro = path.join(home, 'kiro'); fs.mkdirSync(kiro); return { KIRO_HOME: kiro }; });
+  assert.deepEqual(lines(r), [`Kiro: added ${path.join(kiro, 'settings', 'mcp.json')}`, `Kiro: added ${path.join(kiro, 'steering', 'total-recall.md')}`]);
+  assert.equal(fs.readFileSync(path.join(kiro, 'steering', 'total-recall.md'), 'utf8'), STEERING);
+
+  const r2 = runPostinstall(({ home }) => {
+    kiro = path.join(home, 'kiro');
+    fs.mkdirSync(path.join(kiro, 'steering'), { recursive: true });
+    fs.writeFileSync(path.join(kiro, 'steering', 'total-recall.md'), 'old');
+    return { KIRO_HOME: kiro };
+  });
+  assert.ok(lines(r2).includes(`Kiro: overwrote ${path.join(kiro, 'steering', 'total-recall.md')}`), r2.stderr);
+});
+
+test('Windsurf: the rules file is added, or overwrote, and holds the steering text without its front matter', () => {
+  let ws;
+  const r = runPostinstall(({ home }) => { ws = path.join(home, 'ws'); fs.mkdirSync(ws); return { WINDSURF_HOME: ws }; });
+  assert.deepEqual(lines(r), [`Windsurf: added ${path.join(ws, 'mcp_config.json')}`, `Windsurf: added ${path.join(ws, 'rules', 'total-recall.md')}`]);
+  assert.equal(fs.readFileSync(path.join(ws, 'rules', 'total-recall.md'), 'utf8'), STEERING_BODY);
+
+  const r2 = runPostinstall(({ home }) => {
+    ws = path.join(home, 'ws');
+    fs.mkdirSync(path.join(ws, 'rules'), { recursive: true });
+    fs.writeFileSync(path.join(ws, 'rules', 'total-recall.md'), 'old');
+    return { WINDSURF_HOME: ws };
+  });
+  assert.ok(lines(r2).includes(`Windsurf: overwrote ${path.join(ws, 'rules', 'total-recall.md')}`), r2.stderr);
+});
+
+const GEMINI_SETTINGS = {
+  mcpServers: { 'total-recall': ENTRY },
+  hooks: {
+    BeforeAgent: {
+      hooks: [{
+        type: 'command',
+        command: 'npx --yes @strvmarv/total-recall pinned-floor --host gemini-cli',
+        timeout: 60000,
+        name: 'total-recall Pinned Floor',
+      }],
+    },
+  },
+};
+
+test('Gemini CLI, fresh: the settings file, the MCP entry, the per-prompt hook and GEMINI.md are separate lines', () => {
+  let g;
+  const r = runPostinstall(({ home }) => { g = path.join(home, 'gemini'); fs.mkdirSync(g); return { GEMINI_HOME: g }; });
+  assert.equal(r.status, 0, r.stderr);
+  const settings = path.join(g, 'settings.json');
+  assert.deepEqual(lines(r), [
+    `Gemini CLI: added ${settings}`,
+    `Gemini CLI: added MCP entry in ${settings}`,
+    `Gemini CLI: added BeforeAgent hook (runs on every prompt) in ${settings}`,
+    `Gemini CLI: added ${path.join(g, 'GEMINI.md')}`,
+  ]);
+  // characterization: what is written is what it was before this change
+  assert.equal(fs.readFileSync(settings, 'utf8'), JSON.stringify(GEMINI_SETTINGS, null, 2) + '\n');
+  const md = fs.readFileSync(path.join(g, 'GEMINI.md'), 'utf8');
+  assert.ok(md.includes(`<!-- total-recall -->\n${STEERING_BODY}\n<!-- /total-recall -->`));
+});
+
+test('Gemini CLI, already configured: settings.json and GEMINI.md are still rewritten, so they are still reported', () => {
+  let g;
+  const r = runPostinstall(({ home }) => {
+    g = path.join(home, 'gemini');
+    writeJson(path.join(g, 'settings.json'), GEMINI_SETTINGS);
+    fs.writeFileSync(path.join(g, 'GEMINI.md'), `# mine\n\n<!-- total-recall -->\nold\n<!-- /total-recall -->\n`);
+    return { GEMINI_HOME: g };
+  });
+  assert.deepEqual(lines(r), [`Gemini CLI: rewrote ${path.join(g, 'settings.json')}`, `Gemini CLI: rewrote ${path.join(g, 'GEMINI.md')}`]);
+  assert.ok(fs.readFileSync(path.join(g, 'GEMINI.md'), 'utf8').startsWith('# mine'));
+});
+
+test('Hermes: the plugin copy and the memory provider switch are two lines, and hermes was asked to switch', () => {
+  let hh;
+  const r = runPostinstall(({ home }) => { hh = path.join(home, 'hermes'); fs.mkdirSync(hh); return { HERMES_HOME: hh }; });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(lines(r), [
+    `Hermes: added ${path.join(hh, 'plugins', 'total-recall')}`,
+    'Hermes: switched memory.provider to total-recall (hermes config set)',
+  ]);
+  assert.match(r.hermesCalls(), /config set memory\.provider total-recall/);
+  // characterization: the plugin directory holds the shipped files
+  assert.deepEqual(fs.readdirSync(path.join(hh, 'plugins', 'total-recall')).sort(), fs.readdirSync(path.join(REPO, 'hermes-plugin')).sort());
+});
+
+test('Hermes: a plugin directory that was already there is overwrote', () => {
+  let hh;
+  const r = runPostinstall(({ home }) => {
+    hh = path.join(home, 'hermes');
+    fs.mkdirSync(path.join(hh, 'plugins', 'total-recall'), { recursive: true });
+    return { HERMES_HOME: hh };
+  });
+  assert.ok(lines(r).includes(`Hermes: overwrote ${path.join(hh, 'plugins', 'total-recall')}`), r.stderr);
+});
+
+test('Hermes: a failed config set is a failed line after the copy line', () => {
+  const r = runPostinstall(({ home }) => {
+    const hh = path.join(home, 'hermes'); fs.mkdirSync(hh);
+    return { HERMES_HOME: hh, FAKE_HERMES_FAIL_SET: '1' };
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const got = lines(r);
+  assert.match(got[0], /^Hermes: added /);
+  assert.match(got[1], /^Hermes: failed: /);
+  assert.ok(!got.some((l) => l.startsWith('Hermes: switched')), got.join('\n'));
+});
+
+test('Hermes: a failing plugin copy is a failed line, the other tools are still configured, the summary prints, exit 0', () => {
+  let g;
+  const r = runPostinstall(({ home }) => {
+    const notADir = path.join(home, 'a-file'); fs.writeFileSync(notADir, '');
+    g = path.join(home, 'gemini'); fs.mkdirSync(g);
+    return { HERMES_HOME: notADir, GEMINI_HOME: g };
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const got = lines(r);
+  assert.match(got[0], /^Hermes: failed: /);
+  assert.ok(got.includes(`Gemini CLI: added ${path.join(g, 'settings.json')}`), got.join('\n'));
+  assert.match(r.log(), /Hermes: failed: /);
+});
+
+test('a failing step of another tool (Zed) is a failed line too', () => {
+  const r = runPostinstall(({ home }) => {
+    const notADir = path.join(home, 'a-file'); fs.writeFileSync(notADir, '');
+    return { ZED_SETTINGS: notADir };
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(lines(r).some((l) => /^Zed: failed: /.test(l)), r.stderr);
 });
