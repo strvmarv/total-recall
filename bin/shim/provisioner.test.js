@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ensureProvisioned } from './provisioner.js';
+import { ensureProvisioned, makeProductionDeps } from './provisioner.js';
 
 function deps(overrides = {}) {
   return {
@@ -111,4 +111,74 @@ test('manifest missing our RID fails clearly', async () => {
   }));
   assert.equal(r.ok, false);
   assert.match(r.error, /no artifact/i);
+});
+
+// --- restoring from the cache of verified archives (issue #65) ---
+
+test('cache: a restore happens before the manifest is fetched, so it works with no network', async () => {
+  let fetched = false;
+  let downloaded = false;
+  const r = await ensureProvisioned(deps({
+    restoreFromCache: async () => ({ restored: true }),
+    fetchManifest: async () => { fetched = true; throw new Error('ENOTFOUND'); },
+    ensureBinary: async () => { downloaded = true; return { ok: true, path: 'x' }; },
+  }));
+  assert.equal(r.ok, true);
+  assert.equal(r.binaryPath, '/fake/binaries/win-x64/total-recall.exe');
+  assert.equal(fetched, false);
+  assert.equal(downloaded, false);
+});
+
+test('cache: a miss falls through to the normal manifest fetch and verified download', async () => {
+  let fetched = false;
+  let downloaded = false;
+  const r = await ensureProvisioned(deps({
+    restoreFromCache: async () => ({ restored: false, reason: 'no complete cache entry' }),
+    fetchManifest: async () => { fetched = true; return deps().fetchManifest(); },
+    ensureBinary: async () => { downloaded = true; return { ok: true, path: '/fake/binaries/win-x64/total-recall.exe' }; },
+  }));
+  assert.equal(r.ok, true);
+  assert.equal(fetched, true);
+  assert.equal(downloaded, true);
+});
+
+test('cache: a restore that throws or rejects counts as a miss', async () => {
+  for (const restoreFromCache of [async () => { throw new Error('boom'); }, () => { throw new Error('sync boom'); }, async () => undefined]) {
+    let downloaded = false;
+    const r = await ensureProvisioned(deps({
+      restoreFromCache,
+      ensureBinary: async () => { downloaded = true; return { ok: true, path: '/fake/binaries/win-x64/total-recall.exe' }; },
+    }));
+    assert.equal(r.ok, true);
+    assert.equal(downloaded, true);
+  }
+});
+
+test('cache: a present, intact binary never consults the cache', async () => {
+  let consulted = false;
+  const r = await ensureProvisioned(deps({
+    exists: () => true,
+    restoreFromCache: async () => { consulted = true; return { restored: true }; },
+  }));
+  assert.equal(r.ok, true);
+  assert.equal(consulted, false);
+});
+
+test('cache: a binary with a broken payload is restored from the cache before any download', async () => {
+  let downloaded = false;
+  let restored = 0;
+  const r = await ensureProvisioned(deps({
+    exists: () => true,
+    payloadIntact: () => false,
+    restoreFromCache: async () => { restored++; return { restored: true }; },
+    ensureBinary: async () => { downloaded = true; return { ok: true, path: 'x' }; },
+  }));
+  assert.equal(r.ok, true);
+  assert.equal(restored, 1);
+  assert.equal(downloaded, false);
+});
+
+test('cache: the production dependencies include a restore step', () => {
+  const d = makeProductionDeps();
+  assert.equal(typeof d.restoreFromCache, 'function');
 });

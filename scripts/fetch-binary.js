@@ -375,6 +375,34 @@ export function cacheVerifiedInstall({ expectedSha256, extracted, payloadOk, sto
   try { return store() === true; } catch { return false; }
 }
 
+/**
+ * Restores this install's engine from the cache, for the shim's provisioner. Resolves
+ * { restored: true, path } or { restored: false, reason }; never rejects.
+ */
+export async function restoreCachedEngine({ logPrefix = '[total-recall]' } = {}) {
+  try {
+    const rid = detectRid(process.platform, process.arch);
+    if (!rid) return { restored: false, reason: 'unsupported platform' };
+    const version = getVersion();
+    const binaryPath = getBinaryPath(rid);
+    const r = await restoreFromCache({
+      dataDir: resolveDataDir(process.env),
+      version,
+      archiveName: getArchiveName(rid),
+      destDir: path.dirname(binaryPath),
+      binaryPath,
+      extract: extractArchive,
+      payloadIntact,
+      chmod: fs.chmodSync,
+      writeMarker: (sha256) => writeVerifiedMarker(rid, version, sha256),
+    });
+    if (r.restored) process.stderr.write(`${logPrefix} Restored the engine v${version} from the local cache\n`);
+    return r;
+  } catch (e) {
+    return { restored: false, reason: String((e && e.message) || e) };
+  }
+}
+
 function httpGetFollowRedirects(url, redirectsLeft = 5) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, (res) => {
