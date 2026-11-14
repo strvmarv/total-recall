@@ -58,7 +58,7 @@ In the next session, the user pastes the check prompt from `INSTALL.md`, Step 4.
 ## Known gaps
 
 - This install adds no hook, no pinned-directive floor and no startup instructions: it configures MCP tools only, and the instructions are a user step. Whether OpenCode reads the optional skills copy was not observed.
-- The earlier OpenCode guide also described an `npx` entry and a source-checkout entry. They are not carried here: an `npx` entry runs an already-installed copy in preference to fetching the latest release (see [What the install script changes](../npm-postinstall.md#the-npx-entries)), and the checkout entry was not observed in OpenCode's `mcp` form.
+- The earlier OpenCode guide also described an `npx` entry and a source-checkout entry. They are not carried here: an unversioned `npx` entry runs an already-installed copy in preference to fetching the latest release, and a version in the entry would have to be kept in step by hand (see [What the install script changes](../npm-postinstall.md#the-npx-entries)), and the checkout entry was not observed in OpenCode's `mcp` form.
 
 ## Evidence
 

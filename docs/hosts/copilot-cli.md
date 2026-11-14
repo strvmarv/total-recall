@@ -35,7 +35,7 @@ npm install -g --ignore-scripts @strvmarv/total-recall
 
 Then check `~/.copilot/mcp-config.json` for the `total-recall` entry with the read command in Rules in `INSTALL.md` and take the first case that applies, judged from what the search shows:
 
-- After the plain install, the file has a `total-recall` entry: it is most likely the `npx --yes @strvmarv/total-recall` entry the install script writes (its form is not something the read command shows, so report it as unchecked). Leave it and tell the user it is there.
+- After the plain install, the file has a `total-recall` entry: it is most likely the `npx --yes @strvmarv/total-recall@<version>` entry the install script writes, pinned to the installed version (an install made before the version was pinned wrote it without one; its form is not something the read command shows, so report it as unchecked). Leave it and tell the user it is there.
 - The file has no `total-recall` entry: add the entry below to `mcpServers`, keeping the rest of the file.
 - Any other existing `total-recall` entry, or any existing entry after the skip form: this install did not write it, so stop and ask the user.
 

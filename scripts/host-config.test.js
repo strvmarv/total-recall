@@ -769,3 +769,38 @@ test('Gemini CLI: a git checkout and a missing or invalid version write the bare
     assert.deepEqual(bare.saved(), GEMINI_SETTINGS_BARE, label);
   }
 });
+
+// --- the documentation says the entries are pinned, and when they are refreshed ---
+
+const ENTRY_PAGES = ['cline', 'copilot-cli', 'kiro', 'windsurf', 'zed', 'gemini-cli', 'vscode', 'opencode']
+  .map((h) => path.join('docs', 'hosts', `${h}.md`));
+
+test('no page that describes the script\'s entry says it has no version (Kiro\'s static workspace hooks aside)', () => {
+  for (const page of ['docs/npm-postinstall.md', ...ENTRY_PAGES]) {
+    const text = fs.readFileSync(path.join(REPO, page), 'utf8');
+    for (const line of text.split('\n')) {
+      if (/\bno version\b|\bunversioned\b|\bwithout a version\b/i.test(line)) {
+        // Allowed: Kiro's static workspace hooks, a git checkout or an unreadable version (which write no version
+        // by design), entries from an earlier release, and OpenCode's reason for not carrying an unversioned entry.
+        assert.ok(/workspace hooks|git checkout|`node_modules`|earlier release|an unversioned `npx` entry/.test(line), `${page}: ${line.slice(0, 120)}`);
+      }
+    }
+  }
+});
+
+test('docs/npm-postinstall.md states the pin, the refresh rule, the other forms and how to hold a version', () => {
+  const doc = fs.readFileSync(path.join(REPO, 'docs', 'npm-postinstall.md'), 'utf8');
+  assert.match(doc, /pinned to the version of the package that was installed/);
+  assert.match(doc, /exactly the form the script writes/);
+  assert.match(doc, /any other entry is left alone/i);
+  assert.match(doc, /TOTAL_RECALL_SKIP_HOST_CONFIG=1[^\n]*(keep|hold) a version|(keep|hold) a version[^\n]*TOTAL_RECALL_SKIP_HOST_CONFIG=1/);
+  assert.match(doc, /rewrites the whole file/);
+  assert.match(doc, /with comments[^\n]*not refreshed|not refreshed[^\n]*with comments/);
+});
+
+test('the host pages that name the entry say it is pinned and refreshed', () => {
+  for (const page of ['cline', 'kiro', 'windsurf', 'zed', 'gemini-cli', 'vscode'].map((h) => path.join('docs', 'hosts', `${h}.md`))) {
+    const text = fs.readFileSync(path.join(REPO, page), 'utf8');
+    assert.match(text, /pinned to the installed version/, page);
+  }
+});

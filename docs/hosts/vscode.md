@@ -45,7 +45,7 @@ Then each step below is its own choice for the user; the agent takes the ones th
 }
 ```
 
-Add only the items above and keep the rest of the file. On Path 1, and for a fallback step after it, an `npx` entry that the install script just wrote is accepted. Any other `total-recall` entry that is already there, and any existing entry on Path 2 proper (the script did not run), means stop and ask the user.
+Add only the items above and keep the rest of the file. On Path 1, and for a fallback step after it, an `npx` entry in the script's own form (`npx --yes @strvmarv/total-recall`, with or without `@<version>`) is accepted. Any other `total-recall` entry that is already there, and any existing entry on Path 2 proper (the script did not run), means stop and ask the user.
 
 Nothing on either path tells the model to call `session_start`; see User steps.
 
@@ -67,7 +67,7 @@ In the next session, the user pastes the check prompt from `INSTALL.md`, Step 4.
 ## Known gaps
 
 - No hooks, no pinned-directive floor and no startup instructions: MCP tools only (from `AGENTS.md`). The instructions are a user step.
-- The plain install writes the entries with `npx --yes @strvmarv/total-recall`, with no version (see [What the install script changes](../npm-postinstall.md#the-npx-entries)).
+- The plain install writes the entries with `npx --yes @strvmarv/total-recall@<version>`, pinned to the installed version, and a later install refreshes an entry in exactly that form (see [What the install script changes](../npm-postinstall.md#the-npx-entries)).
 
 ## Evidence
 
