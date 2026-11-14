@@ -37,5 +37,5 @@ A pull request URL is refused: give the issue.
 - Optional: `.github/develop.md` on the default branch, which sets the base branch, the `gh` account,
   the ticket template and the verify commands the run must pass.
 
-Deliver runs many routine git, `gh` and test commands. The README lists the minimal allowlist, or use
+Deliver runs many routine git, `gh` and test commands. `docs/develop.md` in the total-recall repository lists the minimal allowlist, or use
 an auto-accept mode.
