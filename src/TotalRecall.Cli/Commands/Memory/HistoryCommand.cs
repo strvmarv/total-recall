@@ -1,7 +1,6 @@
 // src/TotalRecall.Cli/Commands/Memory/HistoryCommand.cs
 //
 // Plan 5 Task 5.5 — `total-recall memory history [--limit N] [--json]`.
-// Ports the `memory_history` tool at src-ts/tools/extra-tools.ts:238-277.
 // Read-only on compaction_log; no embedder / vector search needed.
 
 using System;

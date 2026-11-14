@@ -1,9 +1,8 @@
 // src/TotalRecall.Cli/Commands/Memory/PromoteCommand.cs
 //
 // Plan 5 Task 5.4 — `total-recall memory promote <id> [--tier hot|warm]
-// [--type memory|knowledge]`. Ports src-ts/memory/promote-demote.ts's
-// promoteEntry into a CLI verb. Direction-gated: promotion must target a
-// strictly warmer tier than the source. See MoveHelpers.cs for the shared
+// [--type memory|knowledge]`.
+// Direction-gated: promotion must target a strictly warmer tier than the source. See MoveHelpers.cs for the shared
 // locate/move/re-embed plumbing.
 
 using System;

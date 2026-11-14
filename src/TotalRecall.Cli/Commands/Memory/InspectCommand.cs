@@ -1,8 +1,7 @@
 // src/TotalRecall.Cli/Commands/Memory/InspectCommand.cs
 //
-// Plan 5 Task 5.4 — `total-recall memory inspect <id> [--json]`. Ports
-// src-ts/memory/get.ts's read path into a CLI verb that renders the full
-// field set for a single entry. Sweeps all 6 (tier, type) tables to
+// Plan 5 Task 5.4 — `total-recall memory inspect <id> [--json]`.
+// A CLI verb that renders the full field set for a single entry. Sweeps all 6 (tier, type) tables to
 // locate the entry (no --tier flag required).
 //
 // Two rendering modes:

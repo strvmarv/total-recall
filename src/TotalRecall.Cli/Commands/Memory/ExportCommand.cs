@@ -1,8 +1,8 @@
 // src/TotalRecall.Cli/Commands/Memory/ExportCommand.cs
 //
 // Plan 5 Task 5.6 — `total-recall memory export [--tiers ...] [--types ...]
-// [--out path] [--pretty]`. Ports src-ts/tools/extra-tools.ts:294-337
-// (memory_export). Default emits the envelope to stdout; --out writes it to
+// [--out path] [--pretty]`.
+// Default emits the envelope to stdout; --out writes it to
 // a file. Each entry carries its originating (tier, content_type) so that
 // `memory import` can restore rows to their original location.
 

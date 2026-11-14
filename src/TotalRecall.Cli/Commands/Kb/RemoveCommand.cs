@@ -1,8 +1,7 @@
 // src/TotalRecall.Cli/Commands/Kb/RemoveCommand.cs
 //
-// Plan 5 Task 5.7 — `total-recall kb remove <id> [--cascade] [--yes]`. Ports
-// src-ts/tools/kb-tools.ts:198-216 (kb_remove). Always deletes the target
-// entry; with --cascade, enumerates all cold_knowledge rows and deletes any
+// Plan 5 Task 5.7 — `total-recall kb remove <id> [--cascade] [--yes]`.
+// Always deletes the target entry; with --cascade, enumerates all cold_knowledge rows and deletes any
 // whose ParentId == id OR CollectionId == id first.
 //
 // Refuses non-interactive removal without --yes to avoid accidental data

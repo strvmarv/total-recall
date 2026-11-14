@@ -1,8 +1,7 @@
 // src/TotalRecall.Cli/Commands/Memory/LineageCommand.cs
 //
 // Plan 5 Task 5.5 — `total-recall memory lineage <id> [--json]`.
-// Ports buildLineage() at src-ts/tools/extra-tools.ts:129-164 and the
-// handler at :280-292. Recurses on compaction_log target/source links,
+// Recurses on compaction_log target/source links,
 // depth-capped at 10 to match TS behavior (handles cycles defensively).
 
 using System;
@@ -23,7 +22,7 @@ namespace TotalRecall.Cli.Commands.Memory;
 
 public sealed class LineageCommand : ICliCommand
 {
-    // Max recursion depth — matches src-ts/tools/extra-tools.ts:134.
+    // Max recursion depth, matching the original TS behaviour.
     internal const int MaxDepth = 10;
 
     private readonly ICompactionLogReader? _reader;

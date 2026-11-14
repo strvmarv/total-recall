@@ -1,8 +1,7 @@
 // src/TotalRecall.Cli/Commands/Config/SetCommand.cs
 //
 // Plan 5 Task 5.8 — `total-recall config set <key> <value> [--no-snapshot]`.
-// Ports src-ts/tools/system-tools.ts:151-173 (config_set) and
-// src-ts/config.ts:61-73 (saveUserConfig). Flow:
+// Flow:
 //   1) Coerce the raw <value> string to bool/long/double/string.
 //   2) Optionally snapshot the current effective config into config_snapshots
 //      with name "pre-change:<key>" — skipped gracefully if the DB doesn't

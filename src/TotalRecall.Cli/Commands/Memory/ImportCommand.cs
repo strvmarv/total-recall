@@ -1,8 +1,7 @@
 // src/TotalRecall.Cli/Commands/Memory/ImportCommand.cs
 //
-// Plan 5 Task 5.6 — `total-recall memory import <path> [--dry-run]`. Ports
-// src-ts/tools/extra-tools.ts:339-451 (memory_import). Reads an export
-// envelope, dedupes by existing id and by existing content (across all 6
+// Plan 5 Task 5.6 — `total-recall memory import <path> [--dry-run]`.
+// Reads an export envelope, dedupes by existing id and by existing content (across all 6
 // tables AND within the current batch), skips malformed entries, then
 // re-embeds and inserts survivors. An entry whose tier is missing or
 // invalid falls back to warm (the default ingress tier; hot is earned or

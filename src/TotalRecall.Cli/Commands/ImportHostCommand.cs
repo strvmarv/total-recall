@@ -1,8 +1,7 @@
 // src/TotalRecall.Cli/Commands/ImportHostCommand.cs
 //
 // Plan 5 Task 5.9 — `total-recall import-host [--source N] [--json]`.
-// Ports src-ts/tools/import-tools.ts to the .NET CLI. Iterates all 7
-// Infrastructure IImporter implementations, detects + scans + imports
+// Iterates all 7 Infrastructure IImporter implementations, detects + scans + imports
 // memories/knowledge from each.
 //
 // Default output: Spectre table summarizing per-tool detection, scan
