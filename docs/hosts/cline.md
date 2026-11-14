@@ -2,7 +2,7 @@
 
 ## Install
 
-No stop condition. **The entry the install script writes may not be the file Cline reads.** The script writes `cline_mcp_settings.json` in `~/.vscode/` (or `$CLINE_HOME`) whenever that directory exists. The repository's own Cline importer reads Cline's settings from `~/.cline/data/settings/cline_mcp_settings.json` and, for older installs, from `~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`, a fixed path on every operating system (`ClineImporter.cs`). So the written entry is not evidence that Cline is configured, and on both paths below the entry is added through Cline's own command.
+No stop condition. **The entry the install script writes may not be the file Cline reads.** The script writes `cline_mcp_settings.json` in `$CLINE_HOME` when it is set, or else in `~/.vscode/` when that directory exists. The repository's own Cline importer reads Cline's settings from `~/.cline/data/settings/cline_mcp_settings.json` and, for older installs, from `~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`, a fixed path on every operating system (`ClineImporter.cs`). So the written entry is not evidence that Cline is configured, and on both paths below the entry is added through Cline's own command.
 
 ### Path 1: the plain install (recommended)
 

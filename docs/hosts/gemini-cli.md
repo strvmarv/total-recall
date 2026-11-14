@@ -12,7 +12,7 @@ No stop condition. Gemini CLI is configured through `~/.gemini/settings.json` (o
 npm install -g @strvmarv/total-recall
 ```
 
-It writes the MCP entry and the `BeforeAgent` hook to `settings.json` and a marked block to `GEMINI.md`, and changes other tools too, as the paragraph above says. Then read `settings.json` and confirm the `total-recall` entry under `mcpServers` and the hook named `total-recall Pinned Floor` under `hooks.BeforeAgent`, and read `GEMINI.md` and confirm the block between `<!-- total-recall -->` and `<!-- /total-recall -->`. For anything missing, take the matching step of path 2 (that step only; do not run the skip-form install again) (the install script leaves a `settings.json` that it cannot parse as strict JSON, for example one with comments, untouched, and logs that on stderr).
+It writes the MCP entry and the `BeforeAgent` hook to `settings.json` and a marked block to `GEMINI.md`, and changes other tools too, as the paragraph above says. Then read `settings.json` and confirm the `total-recall` entry under `mcpServers` and the hook named `total-recall Pinned Floor` under `hooks.BeforeAgent`, and read `GEMINI.md` and confirm the block between `<!-- total-recall -->` and `<!-- /total-recall -->`. For anything missing, take the matching step of path 2 (that step only; do not run the skip-form install again). The install script leaves a `settings.json` that it cannot parse as strict JSON, for example one with comments, untouched, and logs that on stderr.
 
 ### Path 2: nothing else touched
 

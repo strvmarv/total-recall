@@ -18,7 +18,7 @@ You are an AI assistant installing total-recall for the user you are working wit
 
 ## Step 1: find your harness's page
 
-You are expected to know which harness you are running in. If you do not, ask the user. Find it in the table and fetch the page at its address.
+You are expected to know which harness you are running in. If you do not, ask the user. Find it in the table.
 
 | Harness | Page |
 |---|---|
@@ -41,11 +41,11 @@ If your harness is not listed, use the last row.
 
 ## Step 2: follow the page's Install section
 
-Fetch the page and run its Install section, in order. Respect each **Ask first** and **User** mark. Do not skip ahead to Verify.
+Fetch your harness's page at its address and run its Install section, in order. Respect each **Ask first** and **User** mark. Do not skip ahead to Verify.
 
 ## Step 3: verify now
 
-Run the checks in the page's Verify section for this session, where it gives any. They usually include a version check, and on some pages a check that your harness was configured. A bare `total-recall` on the PATH can be an older copy than the one your harness runs, so use the command the page gives. If the page gives no check you can run now, say so: verification is then pending until the next session.
+Run the checks in the page's Verify section for this session, where it gives any. They usually include a version check, whose printed version you compare with the version the page says to expect, and on some pages a check that your harness was configured. A bare `total-recall` on the PATH can be an older copy than the one your harness runs, so use the command the page gives. If the page gives no check you can run now, say so: verification is then pending until the next session.
 
 ## Step 4: hand over to the user
 
