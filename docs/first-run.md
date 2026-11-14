@@ -8,7 +8,7 @@ total-recall is a prebuilt .NET 10 NativeAOT engine wrapped by a small Node laun
 
 The npm package ships the engine for all four platforms, so an install through npm needs no download at run time.
 
-A git-sourced plugin install (which is what the marketplace entry gives Claude Code) fetches the repository without `binaries/`, and git runs no install script, so the first launch downloads the engine. `bin/start.js` fetches the archive for the platform (about 100 MB, which includes the embedding model; 97 to 101 MB was observed for 4.7.0) from GitHub Releases and checks its sha256 against the release `provisioning.manifest.json`. The download runs inside the launcher: the MCP connection stays up the whole time, and any tool call meanwhile returns `{ "status": "not_ready", "phase": "provisioning" }`. Wait a few seconds and retry. When provisioning finishes the engine starts by itself and memory features come up with no restart. A verified archive is kept under `<data dir>/cache/binaries/<version>/`, so a reinstall of the same version does not download it again.
+A git-sourced plugin install (which is what the marketplace entry gives Claude Code) fetches the repository without `binaries/`, and git runs no install script, so the first launch downloads the engine. `bin/start.js` fetches the archive for the platform (about 100 MB, which includes the embedding model; 97 to 101 MB was observed for 4.7.0) from GitHub Releases and checks its sha256 against the release `provisioning.manifest.json`. The download runs inside the launcher: the MCP connection stays up the whole time, and any tool call meanwhile returns `{ "status": "not_ready", "phase": "provisioning" }`. Wait a few seconds and retry. When provisioning finishes the engine starts by itself and memory features come up with no restart.
 
 ## What happens on first run
 
@@ -25,7 +25,7 @@ If you are upgrading from 0.7.x (TypeScript) to 0.8.x (.NET), the `AutoMigration
 
 - Detects an existing TS-format database by the absence of the `.NET` schema marker.
 - Renames the existing `total-recall.db` to `total-recall.db.ts-backup`. The original is **never deleted**.
-- Runs the .NET MigrationRunner against a fresh database, then re-imports the TS data with re-embedding (the .NET tokenizer is canonical BERT BasicTokenization, slightly more accurate than the earlier hand-rolled WordPiece; see `docs/superpowers/specs/2026-04-07-rewrite-language-evaluation.md`).
+- Runs the .NET MigrationRunner against a fresh database, then re-imports the TS data with re-embedding (the .NET tokenizer is canonical BERT BasicTokenization, slightly more accurate than the earlier hand-rolled WordPiece).
 - If the migration is interrupted partway and both `total-recall.db` and `total-recall.db.ts-backup` are on disk, the next launch's guard handles all 5 partial-state cases automatically (since 0.8.0-beta.7).
 
 To move the database to another location, see [Relocating the database](database-location.md).
