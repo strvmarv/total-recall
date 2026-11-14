@@ -13,6 +13,7 @@ import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { isRepoSelf, ROOT } from './lib/is-repo-self.js';
 import { recordChange } from './lib/change-log.js';
+import { npxEntry, hookCommand, isOwnHookCommand, pinnedSpec, decide } from './lib/package-spec.js';
 
 const GEMINI_START_MARKER = '<!-- total-recall -->';
 const GEMINI_END_MARKER = '<!-- /total-recall -->';
@@ -92,18 +93,20 @@ function mergeGeminiSettings(configPath) {
   if (!config.mcpServers) config.mcpServers = {};
   const existingServer = config.mcpServers['total-recall'];
   let serverAdded = false;
+  let serverRefreshed = false;
   if (!existingServer) {
     serverAdded = true;
-    config.mcpServers['total-recall'] = {
-      command: 'npx',
-      args: ['--yes', '@strvmarv/total-recall']
-    };
-  } else if (existingServer.command === 'npx' &&
-             Array.isArray(existingServer.args) &&
-             existingServer.args.includes('@strvmarv/total-recall')) {
-    // Already configured correctly — leave it alone
+    config.mcpServers['total-recall'] = npxEntry();
   } else {
-    process.stderr.write(`[total-recall:postinstall] Gemini already has a custom total-recall MCP entry — preserving user config.\n`);
+    // Same rules as the other tools: the script's own form is moved to the version being installed,
+    // an npx entry that holds the package name among other arguments is kept, anything else is custom.
+    const verdict = decide(existingServer, pinnedSpec());
+    if (verdict === 'refresh') {
+      existingServer.args = ['--yes', pinnedSpec()];
+      serverRefreshed = true;
+    } else if (verdict === 'custom') {
+      process.stderr.write(`[total-recall:postinstall] Gemini already has a custom total-recall MCP entry — preserving user config.\n`);
+    }
   }
 
   // --- hooks ---
@@ -112,7 +115,7 @@ function mergeGeminiSettings(configPath) {
   // BeforeAgent hook — shells out to the pinned floor
   const beforeAgentHook = {
     type: 'command',
-    command: 'npx --yes @strvmarv/total-recall pinned-floor --host gemini-cli',
+    command: hookCommand(),
     timeout: 60000,
     name: 'total-recall Pinned Floor'
   };
@@ -120,19 +123,28 @@ function mergeGeminiSettings(configPath) {
   if (!config.hooks.BeforeAgent) config.hooks.BeforeAgent = { hooks: [] };
   const beforeAgentHooks = config.hooks.BeforeAgent.hooks || [];
   let hookAdded = false;
-  if (!beforeAgentHooks.some(h => h.name === 'total-recall Pinned Floor')) {
+  let hookRefreshed = false;
+  const existingHook = beforeAgentHooks.find(h => h.name === 'total-recall Pinned Floor');
+  if (!existingHook) {
     hookAdded = true;
     beforeAgentHooks.push(beforeAgentHook);
     config.hooks.BeforeAgent.hooks = beforeAgentHooks;
+  } else if (isOwnHookCommand(existingHook.command) && pinnedSpec() !== '@strvmarv/total-recall' &&
+             existingHook.command !== beforeAgentHook.command) {
+    // The script's own command, with no version or another one: move it to the version being installed.
+    existingHook.command = beforeAgentHook.command;
+    hookRefreshed = true;
   }
 
   // Write the merged config (mcpServers + hooks) in a single write
   mkdirSync(dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
-  // The file is rewritten on every run; the entry and the hook are reported only when newly added.
+  // The file is rewritten on every run; the entry and the hook are reported only when added or refreshed.
   recordChange('Gemini CLI', existed ? 'rewrote' : 'added', configPath);
   if (serverAdded) recordChange('Gemini CLI', 'added', `MCP entry in ${configPath}`);
   if (hookAdded) recordChange('Gemini CLI', 'added', `BeforeAgent hook (runs on every prompt) in ${configPath}`);
+  if (serverRefreshed) recordChange('Gemini CLI', 'rewrote', `MCP entry in ${configPath}`);
+  if (hookRefreshed) recordChange('Gemini CLI', 'rewrote', `BeforeAgent hook in ${configPath}`);
   process.stderr.write(`[total-recall:postinstall] Gemini settings.json written to ${configPath}\n`);
 }
 

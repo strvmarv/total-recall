@@ -386,19 +386,21 @@ test('Windsurf: the rules file is added, or overwrote, and holds the steering te
   assert.ok(lines(r2).includes(`Windsurf: overwrote ${path.join(ws, 'rules', 'total-recall.md')}`), r2.stderr);
 });
 
-const GEMINI_SETTINGS = {
-  mcpServers: { 'total-recall': ENTRY_BARE },
-  hooks: {
-    BeforeAgent: {
-      hooks: [{
-        type: 'command',
-        command: 'npx --yes @strvmarv/total-recall pinned-floor --host gemini-cli',
-        timeout: 60000,
-        name: 'total-recall Pinned Floor',
-      }],
+/** Gemini CLI's settings.json as the script writes it, for an MCP entry and a hook command. */
+function geminiSettings({ args, command }) {
+  return {
+    mcpServers: { 'total-recall': { command: 'npx', args } },
+    hooks: {
+      BeforeAgent: {
+        hooks: [{ type: 'command', command, timeout: 60000, name: 'total-recall Pinned Floor' }],
+      },
     },
-  },
-};
+  };
+}
+const HOOK_BARE = `npx --yes ${NAME} pinned-floor --host gemini-cli`;
+const HOOK_PINNED = `npx --yes ${NAME}@${VERSION} pinned-floor --host gemini-cli`;
+const GEMINI_SETTINGS = geminiSettings({ args: ['--yes', `${NAME}@${VERSION}`], command: HOOK_PINNED });
+const GEMINI_SETTINGS_BARE = geminiSettings({ args: ['--yes', NAME], command: HOOK_BARE });
 
 test('Gemini CLI, fresh: the settings file, the MCP entry, the per-prompt hook and GEMINI.md are separate lines', () => {
   let g;
@@ -411,13 +413,13 @@ test('Gemini CLI, fresh: the settings file, the MCP entry, the per-prompt hook a
     `Gemini CLI: added BeforeAgent hook (runs on every prompt) in ${settings}`,
     `Gemini CLI: added ${path.join(g, 'GEMINI.md')}`,
   ]);
-  // characterization: what is written is what it was before this change
+  // characterization: the same file as before, with the version added to the entry and the hook
   assert.equal(fs.readFileSync(settings, 'utf8'), JSON.stringify(GEMINI_SETTINGS, null, 2) + '\n');
   const md = fs.readFileSync(path.join(g, 'GEMINI.md'), 'utf8');
   assert.ok(md.includes(`<!-- total-recall -->\n${STEERING_BODY}\n<!-- /total-recall -->`));
 });
 
-test('Gemini CLI, already configured: settings.json and GEMINI.md are still rewritten, so they are still reported', () => {
+test('Gemini CLI, already configured and current: settings.json and GEMINI.md are still rewritten, so they are still reported, with no entry or hook line', () => {
   let g;
   const r = runPostinstall(({ home }) => {
     g = path.join(home, 'gemini');
@@ -698,4 +700,72 @@ test('in a git checkout the Kiro step writes no MCP entry at all', () => {
   const r = runPostinstall(({ home }) => { kiro = path.join(home, 'kiro'); fs.mkdirSync(kiro); return { KIRO_HOME: kiro }; }, { underNodeModules: false });
   assert.deepEqual(fs.readdirSync(kiro), []);
   assert.deepEqual(lines(r), []);
+});
+
+// --- Gemini CLI: the MCP entry and the hook are pinned and refreshed by the same rules ---
+
+function runGemini(settings, pkgOptions, { extraSetup } = {}) {
+  let g;
+  const r = runPostinstall(({ home }) => {
+    g = path.join(home, 'gemini');
+    if (settings !== undefined) writeJson(path.join(g, 'settings.json'), settings); else fs.mkdirSync(g, { recursive: true });
+    if (extraSetup) extraSetup(g);
+    return { GEMINI_HOME: g };
+  }, pkgOptions);
+  const file = path.join(g, 'settings.json');
+  return { r, file, got: lines(r), saved: () => JSON.parse(fs.readFileSync(file, 'utf8')) };
+}
+
+test('Gemini CLI: an entry and a hook in the own bare form are refreshed, with one line each besides the settings.json line', () => {
+  const { r, file, got, saved } = runGemini(GEMINI_SETTINGS_BARE);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(got.slice(0, 3), [
+    `Gemini CLI: rewrote ${file}`,
+    `Gemini CLI: rewrote MCP entry in ${file}`,
+    `Gemini CLI: rewrote BeforeAgent hook in ${file}`,
+  ]);
+  assert.deepEqual(saved(), GEMINI_SETTINGS);
+});
+
+test('Gemini CLI: an older pinned entry and hook are refreshed, and other hooks and keys stay', () => {
+  const old = geminiSettings({ args: ['--yes', `${NAME}@4.0.4`], command: `npx --yes ${NAME}@4.0.4 pinned-floor --host gemini-cli` });
+  old.theme = 'dark';
+  old.hooks.BeforeAgent.hooks.unshift({ type: 'command', command: 'echo mine', name: 'mine' });
+  const { got, file, saved } = runGemini(old);
+  assert.deepEqual(got.slice(0, 3), [`Gemini CLI: rewrote ${file}`, `Gemini CLI: rewrote MCP entry in ${file}`, `Gemini CLI: rewrote BeforeAgent hook in ${file}`]);
+  const after = saved();
+  assert.equal(after.theme, 'dark');
+  assert.deepEqual(after.hooks.BeforeAgent.hooks[0], { type: 'command', command: 'echo mine', name: 'mine' });
+  assert.equal(after.hooks.BeforeAgent.hooks[1].command, HOOK_PINNED);
+  assert.deepEqual(after.mcpServers['total-recall'].args, ['--yes', `${NAME}@${VERSION}`]);
+});
+
+test('Gemini CLI: a custom hook command is left alone, and the bare name among other arguments is kept silently', () => {
+  const custom = geminiSettings({ args: ['-y', NAME], command: 'my-own-floor --x' });
+  const { got, file, saved } = runGemini(custom);
+  assert.deepEqual(got.slice(0, 1), [`Gemini CLI: rewrote ${file}`]);
+  assert.ok(!got.some((l) => /MCP entry|BeforeAgent hook/.test(l)), got.join('\n'));
+  assert.deepEqual(saved(), custom);
+});
+
+test('Gemini CLI: any other MCP entry form is custom, gets the existing line and is left alone', () => {
+  for (const args of [['--yes', `${NAME}@latest`], ['--yes', '@other/pkg']]) {
+    const settings = geminiSettings({ args, command: HOOK_PINNED });
+    const { r, got, saved } = runGemini(settings);
+    assert.match(r.stderr, /Gemini already has a custom total-recall MCP entry/);
+    assert.ok(!got.some((l) => /MCP entry/.test(l)), got.join('\n'));
+    assert.deepEqual(saved().mcpServers['total-recall'].args, args);
+  }
+});
+
+test('Gemini CLI: a git checkout and a missing or invalid version write the bare entry and hook and change nothing that exists', () => {
+  for (const [label, opts] of [['git checkout', { underNodeModules: false }], ['missing version', { version: null }], ['invalid version', { version: 'x' }]]) {
+    const fresh = runGemini(undefined, opts);
+    assert.deepEqual(fresh.saved(), GEMINI_SETTINGS_BARE, label);
+    const kept = runGemini(GEMINI_SETTINGS, opts); // an existing pinned entry and hook stay as they are
+    assert.deepEqual(kept.saved(), GEMINI_SETTINGS, label);
+    assert.ok(!kept.got.some((l) => /MCP entry|BeforeAgent hook/.test(l)), `${label}: ${kept.got.join('\n')}`);
+    const bare = runGemini(GEMINI_SETTINGS_BARE, opts);
+    assert.deepEqual(bare.saved(), GEMINI_SETTINGS_BARE, label);
+  }
 });
