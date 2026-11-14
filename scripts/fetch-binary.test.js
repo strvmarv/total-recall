@@ -277,3 +277,160 @@ test('cache: version and archive names that would leave the cache directory are 
   assert.equal((await restoreFromCache({ dataDir, ...t.args })).restored, false);
   assert.equal(fs.existsSync(path.join(dataDir, 'evil')), false);
 });
+
+// --- cache: pruning, unwritable locations, interrupted writes, restore failures ---
+
+const versionDirOf = (dataDir, v = VERSION) => path.join(dataDir, 'cache', 'binaries', v);
+const canChmodTests = !isWin && typeof process.getuid === 'function' && process.getuid() !== 0;
+
+test('cache: storing a new version removes the other versions\' archives', () => {
+  const dataDir = tmpDir();
+  store(dataDir, makeArchive('old'), { version: '4.5.0' });
+  store(dataDir, makeArchive('older'), { version: '4.4.0' });
+  assert.equal(store(dataDir, makeArchive('new')), true);
+  assert.deepEqual(fs.readdirSync(path.join(dataDir, 'cache', 'binaries')), [VERSION]);
+});
+
+test('cache: storing sweeps temporary files over an hour old and leaves fresh ones alone', () => {
+  const dataDir = tmpDir();
+  store(dataDir, makeArchive('first'));
+  const dir = versionDirOf(dataDir);
+  const stale = path.join(dir, `${ARCHIVE}.tmp-1-abc`);
+  const fresh = path.join(dir, `${ARCHIVE}.tmp-2-def`);
+  fs.writeFileSync(stale, 'x');
+  fs.writeFileSync(fresh, 'y');
+  const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  fs.utimesSync(stale, old, old);
+  assert.equal(store(dataDir, makeArchive('second')), true);
+  assert.equal(fs.existsSync(stale), false, 'a stale temporary file is removed');
+  assert.equal(fs.existsSync(fresh), true, 'a recent one may belong to a store in progress');
+});
+
+test('cache: storing again replaces the entry and its checksum together', async () => {
+  const dataDir = tmpDir();
+  store(dataDir, makeArchive('first'));
+  const second = makeArchive('second');
+  assert.equal(store(dataDir, second), true);
+  const t = makeRestore();
+  assert.equal((await restoreFromCache({ dataDir, ...t.args })).restored, true);
+  assert.deepEqual(t.calls.marker, [second.sha256]);
+});
+
+test('cache: an unwritable location is a failed store, not an error', { skip: !canChmodTests }, () => {
+  const parent = tmpDir();
+  const dataDir = path.join(parent, '.total-recall');
+  fs.mkdirSync(dataDir);
+  fs.chmodSync(dataDir, 0o555);
+  try {
+    assert.equal(store(dataDir, makeArchive()), false);
+  } finally {
+    fs.chmodSync(dataDir, 0o755);
+  }
+  assert.deepEqual(fs.readdirSync(dataDir), []);
+});
+
+test('cache: a failure while storing leaves no entry and no temporary file', { skip: !canChmodTests }, () => {
+  const dataDir = tmpDir();
+  store(dataDir, makeArchive('first'));
+  const dir = versionDirOf(dataDir);
+  const before = fs.readdirSync(dir).sort();
+  fs.chmodSync(dir, 0o555); // the version directory cannot take a new file
+  try {
+    assert.equal(store(dataDir, makeArchive('second')), false);
+  } finally {
+    fs.chmodSync(dir, 0o700);
+  }
+  assert.deepEqual(fs.readdirSync(dir).sort(), before);
+});
+
+test('cache: everything the shim creates under cache/ is owner-only, and the data directory keeps its default mode', { skip: !canChmodTests }, () => {
+  const parent = tmpDir();
+  const dataDir = path.join(parent, 'fresh');
+  const oldMask = process.umask(0o022);
+  try {
+    assert.equal(store(dataDir, makeArchive()), true);
+  } finally {
+    process.umask(oldMask);
+  }
+  const mode = (p) => fs.statSync(p).mode & 0o777;
+  assert.equal(mode(dataDir), 0o755, 'the data directory is created with the default mode');
+  for (const p of [path.join(dataDir, 'cache'), path.join(dataDir, 'cache', 'binaries'), versionDirOf(dataDir)]) {
+    assert.equal(mode(p), 0o700, p);
+  }
+  assert.equal(mode(path.join(versionDirOf(dataDir), ARCHIVE)), 0o600);
+});
+
+test('cache: a restored archive that leaves no binary is deleted from the cache', async () => {
+  const dataDir = tmpDir();
+  store(dataDir, makeArchive());
+  const t = makeRestore({ extract: () => {} }); // extracts nothing
+  const r = await restoreFromCache({ dataDir, ...t.args });
+  assert.equal(r.restored, false);
+  assert.equal(fs.existsSync(path.join(versionDirOf(dataDir), ARCHIVE)), false);
+});
+
+test('cache: a restored archive whose model payload fails the check is deleted from the cache', async () => {
+  const dataDir = tmpDir();
+  store(dataDir, makeArchive());
+  const t = makeRestore({ payloadIntact: () => ({ ok: false, reason: 'model size 1 != expected 2' }) });
+  const r = await restoreFromCache({ dataDir, ...t.args });
+  assert.equal(r.restored, false);
+  assert.match(r.reason, /payload/);
+  assert.equal(fs.existsSync(path.join(versionDirOf(dataDir), ARCHIVE)), false);
+  assert.deepEqual(t.calls.marker, [], 'no marker is written over a broken tree');
+});
+
+test('cache: an extraction that throws (no tar, a read-only plugin directory) keeps the entry', async () => {
+  const dataDir = tmpDir();
+  store(dataDir, makeArchive());
+  const t = makeRestore({ extract: () => { throw new Error('spawn tar ENOENT'); } });
+  const r = await restoreFromCache({ dataDir, ...t.args });
+  assert.equal(r.restored, false);
+  assert.match(r.reason, /extract failed/);
+  assert.equal(fs.existsSync(path.join(versionDirOf(dataDir), ARCHIVE)), true);
+  assert.equal((await restoreFromCache({ dataDir, ...makeRestore().args })).restored, true, 'and it still works afterwards');
+});
+
+test('cache: a chmod failure keeps the entry', async () => {
+  const dataDir = tmpDir();
+  store(dataDir, makeArchive());
+  const t = makeRestore({ chmod: () => { throw new Error('EPERM'); } });
+  const r = await restoreFromCache({ dataDir, ...t.args });
+  assert.equal(r.restored, false);
+  assert.equal(fs.existsSync(path.join(versionDirOf(dataDir), ARCHIVE)), true);
+});
+
+test('cache: an entry another process removes while it is read is a miss that leaves things alone', async () => {
+  const dataDir = tmpDir();
+  store(dataDir, makeArchive());
+  const entry = path.join(versionDirOf(dataDir), ARCHIVE);
+  // the sidecar is there, the archive is gone: a prune or a replacement in progress elsewhere
+  fs.rmSync(entry);
+  const t = makeRestore();
+  const r = await restoreFromCache({ dataDir, ...t.args });
+  assert.equal(r.restored, false);
+  assert.equal(t.calls.extract, 0);
+  assert.equal(fs.existsSync(`${entry}.sha256`), true, 'the sidecar is not deleted on a read error');
+});
+
+test('cache: a 0644 binary comes back executable through the real chmod', { skip: isWin }, async () => {
+  const dataDir = tmpDir();
+  store(dataDir, makeArchive());
+  const t = makeRestore({
+    extract: (a, dir) => fs.writeFileSync(path.join(dir, 'total-recall'), 'binary', { mode: 0o644 }),
+    chmod: fs.chmodSync,
+  });
+  assert.equal((await restoreFromCache({ dataDir, ...t.args })).restored, true);
+  assert.equal(fs.statSync(t.binaryPath).mode & 0o111, 0o111);
+});
+
+test('cache: a malformed sidecar is deleted with its archive', async () => {
+  const dataDir = tmpDir();
+  store(dataDir, makeArchive());
+  const entry = path.join(versionDirOf(dataDir), ARCHIVE);
+  fs.writeFileSync(`${entry}.sha256`, 'not a checksum');
+  const t = makeRestore();
+  assert.equal((await restoreFromCache({ dataDir, ...t.args })).restored, false);
+  assert.equal(fs.existsSync(entry), false);
+  assert.equal(fs.existsSync(`${entry}.sha256`), false);
+});

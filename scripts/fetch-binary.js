@@ -263,6 +263,27 @@ function removeEntry(p) {
   try { fs.rmSync(p.sidecar, { force: true }); } catch {}
 }
 
+const STALE_TEMP_MS = 60 * 60 * 1000;
+
+// Best-effort tidy-up after a successful store: the cache holds one version (so it does not grow
+// with every release) and no leftover temporary files from crashed stores. A temporary file under
+// an hour old may belong to a store running in another process, so it is left alone.
+function pruneCache(p, keepVersion) {
+  try {
+    for (const name of fs.readdirSync(p.versionsRoot)) {
+      if (name !== keepVersion) fs.rmSync(path.join(p.versionsRoot, name), { recursive: true, force: true });
+    }
+  } catch {}
+  try {
+    const cutoff = Date.now() - STALE_TEMP_MS;
+    for (const name of fs.readdirSync(p.versionDir)) {
+      if (!name.includes('.tmp-')) continue;
+      const file = path.join(p.versionDir, name);
+      try { if (fs.statSync(file).mtimeMs < cutoff) fs.rmSync(file, { force: true }); } catch {}
+    }
+  } catch {}
+}
+
 /**
  * Keeps a verified archive for later reinstalls. Returns true when it was stored; never throws.
  * `sha256` is the checksum the archive was verified against.
@@ -292,6 +313,7 @@ export function storeInCache({ dataDir, version, archiveName, archivePath, sha25
     fs.writeFileSync(tmpSidecar, `${String(sha256).toLowerCase()}\n`, { mode: 0o600, flag: 'wx' });
     fs.renameSync(tmpSidecar, p.sidecar);
     tmpSidecar = null;
+    pruneCache(p, version);
     return true;
   } catch {
     for (const f of [tmp, tmpSidecar]) { if (f) { try { fs.rmSync(f, { force: true }); } catch {} } }
