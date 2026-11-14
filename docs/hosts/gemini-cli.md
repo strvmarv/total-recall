@@ -8,13 +8,13 @@ No stop condition. Gemini CLI is configured through `~/.gemini/settings.json` (o
 
 **Ask first.** This install runs the package's install script, which may change other tools on the machine: Hermes, Kiro, Cline, Windsurf, Gemini CLI, Zed, VS Code and Copilot CLI's MCP config. Beyond adding an MCP entry it can switch Hermes's memory provider and add a Gemini CLI hook that runs on every prompt. Tell the user this and get a yes before running it; the user asking you to install total-recall is not that yes. On a no, use the form that skips the install script, given below. The detail is in [What the install script changes](https://raw.githubusercontent.com/strvmarv/total-recall/main/docs/npm-postinstall.md).
 
-Before running it, search `settings.json` for `total-recall` (see Install in the runbook for how to read a file). If an entry is already there, tell the user that the install keeps it but still adds the hook, and ask again.
+Before running it, search `settings.json` for `total-recall` (see Rules in `INSTALL.md` for how to read a file). If an entry is already there, tell the user that the install keeps it but still adds the hook, and ask again.
 
 ```sh
 npm install -g @strvmarv/total-recall
 ```
 
-It writes the MCP entry and the `BeforeAgent` hook to `settings.json` and a marked block to `GEMINI.md`, and changes other tools too, as the paragraph above says. Then read `settings.json` and confirm the `total-recall` entry under `mcpServers` and the hook named `total-recall Pinned Floor` under `hooks.BeforeAgent.hooks`, and read `GEMINI.md` and confirm the block between `<!-- total-recall -->` and `<!-- /total-recall -->`. For anything missing, take the matching step of path 2 (that step only; do not run the skip-form install again). The install script leaves a `settings.json` that it cannot parse as strict JSON, for example one with comments, untouched, and logs that on stderr.
+It writes the MCP entry and the `BeforeAgent` hook to `settings.json` and a marked block to `GEMINI.md`, and changes other tools too, as the paragraph above says. Then search `settings.json` for the `total-recall` entry and for the hook named `total-recall Pinned Floor`, and search `GEMINI.md` for the two markers `<!-- total-recall -->` and `<!-- /total-recall -->` (see Rules in `INSTALL.md`; a search shows presence, so report where they sit as unverified). For anything missing, take the matching step of path 2 (that step only; do not run the skip-form install again). The install script leaves a `settings.json` that it cannot parse as strict JSON, for example one with comments, untouched, and logs that on stderr.
 
 ### Path 2: nothing else touched
 
@@ -24,9 +24,9 @@ The form that skips the install script:
 npm install -g --ignore-scripts @strvmarv/total-recall
 ```
 
-Then each step below is its own choice for the user; the agent takes the ones the user accepts. The installed package is located with `npm root -g` (the package is `<npm root -g>/@strvmarv/total-recall`; not run).
+Then each step below is its own choice for the user and needs its own yes, even if the user approved the install script earlier; the agent takes the ones the user accepts. The installed package is located with `npm root -g` (the package is `<npm root -g>/@strvmarv/total-recall`; not run).
 
-For steps 1 and 2 the file is `$GEMINI_HOME/settings.json` if `GEMINI_HOME` is set, else `~/.gemini/settings.json`. Edit it by inserting text so that its comments and other content survive; never parse and rewrite it. If you cannot do that safely, leave the step to the user and give them the snippet.
+For steps 1 and 2 the file is `$GEMINI_HOME/settings.json` if `GEMINI_HOME` is set, else `~/.gemini/settings.json`. Edit it by inserting text so that its comments and other content survive; never parse and rewrite it. If the file has comments, or already has an `mcpServers` or `hooks` key you cannot insert into safely, leave the step to the user and give them the snippet.
 
 1. **Ask first**: add the MCP entry to `mcpServers`, creating the file if it is missing.
 ```json
@@ -38,7 +38,7 @@ For steps 1 and 2 the file is `$GEMINI_HOME/settings.json` if `GEMINI_HOME` is s
   }
 }
 ```
-2. **Ask first**: add the floor hook, which runs on every prompt. The shape is an object `BeforeAgent` holding a `hooks` array (as the install script writes it); add this, merging into an existing `hooks` or `BeforeAgent` rather than replacing it, and adding the item to an existing `hooks` array. The command is the one the install script writes, with `total-recall` in place of `npx --yes @strvmarv/total-recall`:
+2. **Ask first**: add the floor hook, which runs on every prompt. The shape is an object `BeforeAgent` holding a `hooks` array (as the install script writes it); add this, merging into an existing `hooks` or `BeforeAgent` rather than replacing it, and adding the item to an existing `hooks` array. If `BeforeAgent` is already an array, stop and ask the user. The command is the one the install script writes, with `total-recall` in place of `npx --yes @strvmarv/total-recall`:
 ```json
 {
   "hooks": {

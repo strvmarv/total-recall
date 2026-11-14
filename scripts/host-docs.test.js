@@ -44,8 +44,8 @@ export const MODULE_TOOLS = {
 };
 export const TOOLS = [...new Set(Object.values(MODULE_TOOLS).flat())];
 // A command that runs an install: what INSTALL.md must not hold, and what needs the disclosure above it.
-const INSTALL_COMMAND = /\b(?:npm|pnpm)\s+(?:i|install|add)\b|\byarn\s+(?:global\s+)?add\b|\b(?:pi|plugin)\s+(?:i|install)\b|\bplugin\s+(?:marketplace\s+)?add\b|\bnpx\b/;
-const NPM_RUNNING = /\b(?:npm|pnpm)\s+(?:i|install|add)\b|\byarn\s+(?:global\s+)?add\b|\bpi\s+(?:i|install)\b/;
+const INSTALL_COMMAND = /\b(?:npm|pnpm)(?:\s+-\S+)*\s+(?:i|install|add)\b|\byarn\s+(?:global\s+)?add\b|\b(?:pi|plugin)\s+(?:i|install)\b|\bplugin\s+(?:marketplace\s+)?add\b|\bnpx\b/;
+const NPM_RUNNING = /\b(?:npm|pnpm)(?:\s+-\S+)*\s+(?:i|install|add)\b|\byarn\s+(?:global\s+)?add\b|\bpi\s+(?:i|install)\b/;
 const STALE_VERSION = /(?<![\d.])0\.(?:7\.2|8\.(?:\d+|x))(?!\d)/;
 
 // ---------------------------------------------------------------------------------------------
@@ -261,7 +261,7 @@ export function checkStatusLine(tree) {
 export function checkDisclosure(tree) {
   const problems = [];
   const postinstall = tree.read('scripts/postinstall.js');
-  const modules = postinstall === null ? [] : [...postinstall.matchAll(/['"]\.\/(install-[\w-]+)\.js['"]/g)].map((m) => m[1]);
+  const modules = postinstall === null ? [] : [...postinstall.matchAll(/['"]\.\/([\w-]+)\.m?js['"]/g)].map((m) => m[1]).filter((m) => m !== 'fetch-binary');
   const known = Object.keys(MODULE_TOOLS);
   for (const f of tree.list('scripts')) {
     const m = /^(install-[\w-]+)\.js$/.exec(f);
@@ -322,6 +322,9 @@ export function checkCheckPrompt(tree) {
     const text = tree.read(p) ?? '';
     for (const r of text.matchAll(/`INSTALL\.md`, Step (\d+)/g)) {
       if (r[1] !== '4') problems.push(`${p} refers to INSTALL.md, Step ${r[1]}, but the check prompt is in Step 4`);
+    }
+    if (p !== 'docs/hosts/hermes.md' && !/`INSTALL\.md`, Step 4/.test(text)) {
+      problems.push(`${p} does not send the user to the check prompt in INSTALL.md, Step 4`);
     }
   }
   return problems;
@@ -638,6 +641,12 @@ defect('npm i with two spaces and no paragraph', checkDisclosure, (f) => {
 defect('a double-quoted import in postinstall.js', checkDisclosure, (f) => {
   f['scripts/postinstall.js'] += 'import { y } from "./install-newtool.js";\n';
 }, /install-newtool/);
+defect('a postinstall import that is not named install-*', checkDisclosure, (f) => {
+  f['scripts/postinstall.js'] += "import { z } from './setup-continue.js';\n";
+}, /setup-continue/);
+defect('npm with a flag before the subcommand and no paragraph', checkDisclosure, (f) => {
+  f['docs/hosts/zed.md'] = '# Zed\n\n## Install\n\nRun npm -g install x first.\n\n## User steps\n\n## Verify\n\n## What you get\n\n## Known gaps\n\n## Evidence\n';
+}, /zed\.md: no "\*\*Ask first\.\*\*" paragraph above the first/);
 defect('an install module that postinstall.js does not import', checkDisclosure, (f) => {
   f['scripts/install-cursor.js'] = '// new module\n';
 }, /scripts\/install-cursor\.js exists/);
@@ -668,6 +677,9 @@ defect('a step is inserted and the prompt moves to Step 5', checkCheckPrompt, (f
 defect('the check prompt is deleted', checkCheckPrompt, (f) => {
   f['INSTALL.md'] = f['INSTALL.md'].replace('Check that total-recall is working: call its status tool', 'Check things');
 }, /holds no fenced check prompt/);
+defect('a page drops the check prompt reference', checkCheckPrompt, (f) => {
+  f['docs/hosts/pi.md'] = f['docs/hosts/pi.md'].replace(' Then the check prompt in `INSTALL.md`, Step 4.', '');
+}, /pi\.md does not send the user to the check prompt/);
 defect('a page refers to Step 5', checkCheckPrompt, (f) => {
   f['docs/hosts/pi.md'] = f['docs/hosts/pi.md'].replace('Step 4', 'Step 5');
 }, /pi\.md refers to INSTALL\.md, Step 5/);

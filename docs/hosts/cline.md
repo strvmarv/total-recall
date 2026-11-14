@@ -20,7 +20,9 @@ The form that skips the install script:
 npm install -g --ignore-scripts @strvmarv/total-recall
 ```
 
-On Path 1 the script may also have written an `npx` entry to the file it uses (`~/.vscode/cline_mcp_settings.json`); that is not the file Cline reads and can be left alone. On both paths the entry is added the same way, by the user (see User steps). Nothing on either path tells the model to call `session_start`; see User steps. The entry:
+### Both paths
+
+On Path 1 the script may also have written an `npx` entry to the file it uses (`~/.vscode/cline_mcp_settings.json`); that is not the file Cline reads and can be left alone; tell the user it may be there. On both paths the entry is added the same way, by the user (see User steps). Nothing on either path tells the model to call `session_start`; see User steps. The entry:
 
 ```json
 {
@@ -35,12 +37,12 @@ On Path 1 the script may also have written an `npx` entry to the file it uses (`
 ## User steps
 
 1. In VS Code, open the Command Palette and run "Cline: MCP Settings".
-2. In the file that opens, add the `total-recall` entry above to `mcpServers`, keeping what is already there. If a `total-recall` entry is already in that file, do not add a second one; tell the agent, who asks the user before changing it.
+2. In the file that opens, add the `total-recall` entry above to `mcpServers`, keeping what is already there. If a `total-recall` entry is already in that file, do not add a second one: the user decides whether to replace it. The agent only supplies text and never edits that file.
 3. This is a user step; do not write the file yourself. Fetch the file linked here and give the user the text to add to your harness's persistent instructions file. The text is the body, below its front matter, of [`.kiro/steering/total-recall.md`](https://raw.githubusercontent.com/strvmarv/total-recall/main/.kiro/steering/total-recall.md); its "Sticky directives" paragraph describes Kiro's hook and does not apply here.
 
 ## Verify
 
-Now: `total-recall --version` should print the version that `npm view @strvmarv/total-recall version` reports. A bare `total-recall` on PATH can be an older copy than the one another harness runs. There is no check the agent can run that the entry is in the file Cline reads; the user's "Cline: MCP Settings" file shows it. Report the entry as pending with the user.
+Now: `total-recall --version` should print the version that `npm view @strvmarv/total-recall version` reports. A bare `total-recall` on PATH can be an older copy than the one another harness runs. There is no check the agent can run that the entry is in the file Cline reads; the user's "Cline: MCP Settings" file shows it. Report the entry as pending with the user. If `total-recall --version` is not found or differs, report and stop; the user can open a new terminal or fix PATH. The startup status line appears only after the user completes User step 3; without it, the check prompt is the test.
 
 In the next session, the user pastes the check prompt from `INSTALL.md`, Step 4.
 
@@ -52,7 +54,7 @@ In the next session, the user pastes the check prompt from `INSTALL.md`, Step 4.
 
 - No hooks, no pinned-directive floor and no startup instructions: MCP tools only (from `AGENTS.md`). The instructions are a user step.
 - The path mismatch above is a known problem in the install script.
-- On Windows npm installs `total-recall` as a `.cmd` shim. Whether Cline starts a bare `total-recall` there was not observed; if the server does not start, the user can give the full path of `total-recall.cmd` (from `where total-recall`) as the command.
+- On Windows npm installs `total-recall` as a `.cmd` shim. Whether Cline starts a bare `total-recall` there was not observed; if the server does not start, the user can give the full path of `total-recall.cmd` (from `where.exe total-recall` in PowerShell, where plain `where` is another command; JSON needs the backslashes doubled; never change PowerShell's execution policy, report instead) as the command.
 - The plain install writes its entry with `npx --yes @strvmarv/total-recall`, with no version (see [What the install script changes](../npm-postinstall.md#the-npx-entries)).
 
 ## Evidence

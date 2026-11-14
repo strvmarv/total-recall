@@ -43,9 +43,9 @@ node ~/.pi/agent/git/github.com/strvmarv/total-recall/bin/start.js --version
 
 The first line is for the `npm:` form and the second for the `git:` form. Expected: `total-recall <version>`, the version `npm view @strvmarv/total-recall version` reports (or the default branch's, for `git:`). For the `git:` form the expected version is the `version` in the repository's `package.json` on its default branch. If the printed version differs from what is expected, report it and stop. A bare `total-recall` on PATH can be an older copy than the one pi runs (observed: 4.0.4 on PATH while pi ran 4.7.0), and a plain pi install does not put `total-recall` on PATH at all.
 
-Then check that pi will use this package's server: search `~/.pi/agent/mcp.json` and the project's `.pi/mcp.json` for a `total-recall` entry (see Install for how to read a file). If there is one, it overrides the extension's server: tell the user, and report the server check as pending. The version check proves the package, not that pi loaded it.
+Then check that pi will use this package's server: search the user's `mcp.json` (`~/.pi/agent/mcp.json`, or under `$PI_CODING_AGENT_DIR` if that is set) and the `.pi/mcp.json` of the directory pi runs in for `total[-_.]recall` (see Rules in `INSTALL.md`). A missing file means no entry. Any hit is a possible override of the extension's server: do not read further, tell the user, and report the server check as pending. The version check proves the package, not that pi loaded it.
 
-In the next session, the user pastes the check prompt from `INSTALL.md`, Step 4.
+In the next session, the user pastes the check prompt from `INSTALL.md`, Step 4. In pi the `status` tool it asks for is one of those reached through `tool_search`; that is expected.
 
 ## What you get
 

@@ -13,7 +13,7 @@ codex plugin add total-recall@strvmarv-total-recall-marketplace
 
 The marketplace entry is the repository URL with no ref, so the install takes the default branch, which contains `.codex-plugin/` and `codex/`. The install carries no engine binary: the MCP server downloads and verifies it on first launch for the version in that tree's `package.json` (a few seconds), and tools report "provisioning" until it is ready.
 
-Optional: let every total-recall tool run without a per-call approval. Codex asks for approval before calling an MCP tool that is not marked read-only, and none of total-recall's are. **Ask first**: tell the user that this setting lets Codex call every total-recall tool without asking each time, including the tools that write and delete memories. On a yes, add this to `~/.codex/config.toml`, keeping everything else in the file. If that table is already in the file, leave it; if it is there with a different `default_tools_approval_mode`, stop and ask the user.
+Optional: let every total-recall tool run without a per-call approval. Codex asks for approval before calling an MCP tool that is not marked read-only, and none of total-recall's are. **Ask first**: tell the user that this setting lets Codex call every total-recall tool without asking each time, including the tools that write and delete memories. On a yes, add this to the `config.toml` in Codex's home (`$CODEX_HOME`, else `~/.codex`), keeping everything else in the file. If that table is already in the file, leave it; if it is there with a different `default_tools_approval_mode`, stop and ask the user.
 
 ```toml
 [plugins."total-recall@strvmarv-total-recall-marketplace".mcp_servers.total-recall]

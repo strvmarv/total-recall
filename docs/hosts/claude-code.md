@@ -15,14 +15,14 @@ claude plugin install total-recall@strvmarv-total-recall-marketplace
 
 The marketplace entry is the repository URL with no ref, so the install takes the default branch. It carries no engine binary: the first launch downloads and verifies it for the version in that tree's `package.json` (see [first run](../first-run.md#provisioning-on-first-launch)).
 
-If the `claude` command is not available to you, the user types the same two steps as slash commands inside a Claude Code session (a User step), and you continue at Verify:
+If the `claude` command is not found or either command exits non-zero, stop. The user can type the same two steps as slash commands inside a Claude Code session (a User step); wait for them to say both have run, then make the permission offer below and continue at Verify:
 
 ```
 /plugin marketplace add strvmarv/total-recall-marketplace
 /plugin install total-recall@strvmarv-total-recall-marketplace
 ```
 
-After the install, offer the permission rule. **Ask first**: tell the user that the rule `mcp__plugin_total-recall_total-recall__*` lets Claude Code call every total-recall tool without asking each time, including the tools that write and delete memories. On a yes, make the edit the `setup` section of `skills/commands/SKILL.md` describes: add that one rule to `permissions.allow` in `~/.claude/settings.json` (under `$CLAUDE_CONFIG_DIR` instead of `~/.claude` if that is set, the same place the plugin directory is under), create the file if it is missing, and change nothing else in it. If the rule is already there, do nothing. If the file does not parse as JSON, stop and tell the user. Do not print the file. On a no, tell the user that in a permission mode that never asks (TUI fullscreen, `dontAsk`) the total-recall tools are blocked until they run `/total-recall:commands setup` themselves. The rule names the plugin's tools, so it applies to this path only.
+The plugin path changes nothing outside Claude Code (the two commands update Claude Code's own plugin registry), so there is nothing else to report there. After the install, offer the permission rule. **Ask first**: tell the user that the rule `mcp__plugin_total-recall_total-recall__*` lets Claude Code call every total-recall tool without asking each time, including the tools that write and delete memories. On a yes, make the edit the `setup` section of `skills/commands/SKILL.md` describes: add that one rule to `permissions.allow` in `~/.claude/settings.json` (under `$CLAUDE_CONFIG_DIR` instead of `~/.claude` if that is set, the same place the plugin directory is under), create the file if it is missing, and change nothing else in it. Check for the rule with a count of that exact string (`grep -c 'mcp__plugin_total-recall_total-recall__\*' <file>`, or the PowerShell equivalent); if it is already there, do nothing. Otherwise insert the string as the first item of the `permissions.allow` array by text insertion. If the file has no `permissions` object with an `allow` array, or you cannot insert safely, do not edit: tell the user to run `/total-recall:commands setup` themselves. Do not print the file; the rules in `INSTALL.md` override the skill's read-and-write-back method. On a no, tell the user that in a permission mode that never asks (TUI fullscreen, `dontAsk`) the total-recall tools are blocked until they run `/total-recall:commands setup` themselves. The rule names the plugin's tools, so it applies to this path only.
 
 ### MCP server only (no plugin)
 
@@ -40,7 +40,7 @@ The form that skips the install script changes nothing else. The install script 
 npm install -g --ignore-scripts @strvmarv/total-recall
 ```
 
-Then add this entry to `mcpServers` in `~/.claude.json`. Claude Code itself rewrites this file, so make the edit when no Claude Code session is writing to it (inferred, not observed). Add only this entry and keep the rest of the file; if a `total-recall` entry is already there that this install did not just write, stop and ask the user.
+Then add this entry to `mcpServers` in `~/.claude.json`. Claude Code itself rewrites this file, so a running session may overwrite the edit (inferred, not observed): make the edit by insertion, tell the user to restart Claude Code, and check the entry again in the next session. If `CLAUDE_CONFIG_DIR` is set, where this file lives was not checked. Add only this entry and keep the rest of the file; if a `total-recall` entry is already there that this install did not just write, stop and ask the user.
 
 ```json
 {
@@ -72,7 +72,7 @@ node ~/.claude/plugins/cache/strvmarv-total-recall-marketplace/total-recall/<ver
 
 `<version>` is the directory the first command lists (if more than one is listed, use the newest and tell the user). Expected: `total-recall <version>`, which is also the version `npm view @strvmarv/total-recall version` reports unless the default branch is ahead of the last release. This proves the engine and the plugin files, not that Claude Code has the plugin enabled: report that as pending until the next session. The first run downloads and verifies the engine (about 100 MB), so it can take a while; a later run answers at once. If `CLAUDE_CONFIG_DIR` is set, the plugin directory is under it instead of `~/.claude`.
 
-MCP-only path, now: `total-recall --version` should print the version that `npm view @strvmarv/total-recall version` reports; read `~/.claude.json` and confirm the `total-recall` entry. A bare `total-recall` on PATH can be an older copy than the one another harness runs.
+MCP-only path, now: `total-recall --version` should print the version that `npm view @strvmarv/total-recall version` reports; search `~/.claude.json` for the `total-recall` entry (see Rules in `INSTALL.md`). A bare `total-recall` on PATH can be an older copy than the one another harness runs.
 
 In the next session, the user pastes the check prompt from `INSTALL.md`, Step 4, and should see the tier counts and the database path.
 
