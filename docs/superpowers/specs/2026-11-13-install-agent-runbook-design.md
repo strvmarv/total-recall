@@ -118,7 +118,8 @@ Written to the agent in the second person, plain imperative steps, no background
    - follow only the page for the harness you are running in; do not run another harness's steps;
    - a step marked **User** is done by the user: say exactly what they need to do, then wait or stop;
      never claim you did it;
-   - a step marked **Ask first** changes other tools on the machine or grants a permission: tell the
+   - a step marked **Ask first** changes other tools on the machine, edits the user's configuration
+     beyond adding the `total-recall` entry, or grants a permission: tell the
      user what it changes and get a yes before running it; on a no, use the alternative the page
      gives or leave the step to the user;
    - do not report success until Verify has passed; if a step fails, report the failure and stop:
@@ -142,8 +143,10 @@ Written to the agent in the second person, plain imperative steps, no background
    session (MCP tools appear only then), what they should see, and give them the check the page
    names: the prompt to paste, or the page's own check where the model cannot call total-recall's
    tools.
-8. **Step 5: report.** State one of two outcomes: "verified now" (Step 3 passed) or "installed;
-   verification is pending in your next session" (the page gave no immediate check). Then what was
+8. **Step 5: report.** State what was verified in this session and nothing more: the engine version
+   if the version check passed; the harness's entry if a configured check passed, or that it is left
+   to the user; or "installed; verification is pending in your next session" if the page gave no
+   immediate check. Then what was
    installed and where, the version, anything changed outside this harness, any step left to the
    user, and any known gap the page lists that affects them.
 
@@ -158,6 +161,8 @@ Every page has these headings, in this order (a heading with nothing to say hold
 
 - `## Install`: opens with any stop condition its source states for this harness (for example
   Cursor: "macOS/Linux are unsupported until observed"), so the agent meets it before a command.
+  Cursor's stop is about the plugin's server, so it applies to the plugin path: on macOS and Linux
+  the page stops that path and offers only the MCP-only option, marked not run.
   Then the commands the agent runs, in order, in fenced blocks. Where more than one path exists
   (plugin, MCP only), the recommended one first, each stating what it gives up. A step that needs
   the user's yes is marked **Ask first**.
@@ -199,7 +204,9 @@ Rules for the pages:
   version in that tree's `package.json`.
 - **Any install that runs npm** changes other tools: `npm install`, and every form of `pi install`
   (pi runs `npm install` for a `git:` package too; both forms observed below). Before such a command
-  the page names, in one sentence, the tools that may be changed (Hermes, Kiro, Cline, Windsurf,
+  the page names, in one sentence, the tools that may be changed and the two changes that go beyond
+  an MCP entry: switching Hermes's memory provider, and a Gemini CLI hook that runs on every prompt
+  (Hermes, Kiro, Cline, Windsurf,
   Gemini CLI, Zed, VS Code, and Copilot CLI's MCP config), links
   [What postinstall changes](#what-postinstall-changes) by absolute raw URL for the detail, and marks
   the command **Ask first**. The agent has what it needs to ask without another fetch.
@@ -207,13 +214,14 @@ Rules for the pages:
   pi: `npm_config_ignore_scripts=true pi install npm:@strvmarv/total-recall` (observed below); no
   skip form was observed for `pi install git:`, and the page says so. The npm package ships the
   engines for all four platforms, so skipping the script loses nothing else on an npm install. Only a
-  git-sourced install has no engine until first launch, when the launcher downloads and verifies it.
+  git-sourced plugin install, where no npm script runs, has no engine until first launch, when the
+  launcher downloads and verifies it.
 - **Which form comes first.** On every page with an npm path the plain form comes first, marked
   **Ask first**, and the skip form second. The owner decided this for the harnesses that only npm
   configures; applying it to `pi`, `opencode`, `other-mcp` and the MCP-only options is this spec's
   call, for one rule everywhere.
 - **Harnesses that only npm configures** (`gemini-cli`, `kiro`, `windsurf`, `zed`, `vscode`, `hermes`,
-  `cline`). Recommended path: `npm install -g @strvmarv/total-recall`, **Ask first**. Second path, for
+  `cline`; Cline's second path differs, see the Cline rule). Recommended path: `npm install -g @strvmarv/total-recall`, **Ask first**. Second path, for
   a user who wants nothing else touched: `npm install -g --ignore-scripts @strvmarv/total-recall`,
   then a hand-written entry for this harness only. The entry is the file, key and shape that
   harness's `scripts/install-*.js` writes, with `"command": "total-recall"` and no `args` in place of
@@ -283,9 +291,10 @@ Rules for the pages:
   `/hooks` is a User step.
 - The Cline page states where `postinstall` writes (`~/.vscode/cline_mcp_settings.json`) and that the
   repository's own importer reads Cline's settings from a different location, so the written entry may
-  not be the file Cline reads. It gives the manual steps from today's section, with the npm step.
+  not be the file Cline reads. It gives the manual steps from today's section, with the npm step:
+  the entry is added through Cline's own "MCP Settings" command, as a User step, on both paths.
 - **OpenCode.** The page gives the config in the `mcp` form observed below and marks the `skills/`
-  copy step as needing a checkout. `.opencode/INSTALL.md` ships in the npm package (`package.json`
+  copy step as copying from the installed package or a checkout, not run. `.opencode/INSTALL.md` ships in the npm package (`package.json`
   `files`). It becomes a pointer: one line saying what it is and the page's absolute URL, with no
   command and no config block, so no step is repeated and no install command sits outside the
   disclosure rule.
@@ -322,8 +331,10 @@ script honours. The page also states:
 
 - the entries start the server as `npx --yes @strvmarv/total-recall` with no version;
 - that this works (observed below), and that `npx` runs a copy that is already installed before it
-  fetches one (observed below: a global 4.0.4 ran while `latest` was 4.7.0), with the check
-  `npx --yes @strvmarv/total-recall --version`;
+  fetches one (observed below: a global 4.0.4 ran while `latest` was 4.7.0). The check it gives for
+  "which copy would run" changes nothing: `npm ls -g @strvmarv/total-recall`. It says that
+  `npx --yes @strvmarv/total-recall --version` also answers it, but downloads the package and runs
+  `postinstall` when no copy is installed (npm's default; not observed);
 - how to skip all of it: the skip forms above;
 - which rows are skipped when the package is installed from a git checkout (the scripts skip some
   steps there; the builder reads which from the scripts).
@@ -416,8 +427,9 @@ document change makes it pass.
 
 Besides the usual review, the final review includes a dry run: a reviewer agent is given only the text
 of `INSTALL.md` and the one page its harness would fetch, for Claude Code, pi, Gemini CLI, Cursor on
-macOS and Cline on Windows, and reports any step where it would have to guess, would run something the page did not ask
-for, or could not tell whether a step was the user's. No install is run. A step that fails the dry run
+macOS (expected: the plugin path stops and the MCP-only option is offered) and Cline on Windows, and
+reports any step where it would have to guess, would run something the page did not ask for, or
+could not tell whether a step was the user's. No install is run. A step that fails the dry run
 is a finding like any other.
 
 ## Observations this design rests on
