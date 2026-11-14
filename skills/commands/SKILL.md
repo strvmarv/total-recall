@@ -298,7 +298,7 @@ Launch the built-in web management UI. This is a CLI command, not an MCP tool �
 total-recall ui
 ```
 
-Optionally pass flags: `--port N` (default 5577), `--no-open` (skip browser auto-open), `--host H` (bind address, default `localhost`), `--smoke` (CI probe: start, check `/api/health`, exit 0/1). The UI provides six sections: Dashboard · Memory · Knowledge Base · Usage · Insights · Config. The access token is embedded in the served page — no manual credential setup needed.
+Optionally pass flags: `--port N` (default 5577), `--no-open` (skip browser auto-open), `--host H` (bind address, default `localhost`), `--smoke` (CI probe: start, check `/api/health`, exit 0/1). The UI provides seven sections: Dashboard · Memory · Knowledge Base · Usage · Insights · Eval · Config. The access token is embedded in the served page — no manual credential setup needed.
 
 ### import-host [source]
 

@@ -47,7 +47,7 @@ export const MODULE_TOOLS = {
 export const TOOLS = [...new Set(Object.values(MODULE_TOOLS).flat())];
 // A command that runs an install: what INSTALL.md must not hold, and what needs the disclosure above it.
 const INSTALL_COMMAND = /\b(?:npm|pnpm)(?:\s+-\S+(?:\s+[^-\s]\S*)?)*\s+(?:i|install|add)\b|\byarn\s+(?:global\s+)?add\b|\b(?:pi|plugin)\s+(?:i|install)\b|\bplugin\s+(?:marketplace\s+)?add\b|\bnpx\b/;
-const NPM_RUNNING = /\b(?:npm|pnpm)(?:\s+-\S+(?:\s+[^-\s]\S*)?)*\s+(?:i|install|add)\b|\byarn\s+(?:global\s+)?add\b|\bpi\s+(?:i|install)\b/;
+const NPM_RUNNING = /\b(?:npm|pnpm)(?:\s+-\S+(?:\s+[^-\s]\S*)?)*\s+(?:i|install|add)\b|\byarn\s+(?:global\s+)?add\b|\bpi\s+(?:i|install)\b/i;
 const STALE_VERSION = /(?<![\d.])0\.(?:7\.2|8\.(?:\d+|x))(?!\d)/;
 
 // ---------------------------------------------------------------------------------------------
@@ -59,17 +59,38 @@ export function normalise(text) {
   return text.replace(/\r\n/g, '\n');
 }
 
+/** A line that ends in a backslash is joined to the next one with one space (as a shell reads it). */
+export function joinContinuations(text) {
+  return text.replace(/\\\n[ \t]*/g, ' ');
+}
+
 const FENCE = /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1[ \t]*$|(?![\s\S]))/gm;
 const blank = (s) => s.replace(/[^\n]/g, ' ');
+
+const CODE_SPAN = /`[^`\n]*`/g;
+
+/**
+ * The text with HTML comments blanked (newlines kept). A comment that is never closed is left as it is. The
+ * comments are found in `scan`, a same-length copy of the text (code blanked, say), so a `<!--` there opens none.
+ */
+function stripComments(md, scan = md) {
+  let out = '';
+  let last = 0;
+  for (const m of scan.matchAll(/<!--[\s\S]*?-->/g)) {
+    out += md.slice(last, m.index) + blank(m[0]);
+    last = m.index + m[0].length;
+  }
+  return out + md.slice(last);
+}
 
 /** The text with fenced blocks blanked (newlines kept), so offsets and line numbers hold. */
 function stripFences(md) {
   return md.replace(FENCE, blank);
 }
 
-/** The text with fenced blocks and inline code spans blanked. */
+/** The text with fenced blocks, inline code spans and HTML comments blanked (a `<!--` in code opens no comment). */
 export function stripCode(md) {
-  return stripFences(md).replace(/`[^`\n]*`/g, blank);
+  return stripComments(stripFences(md).replace(CODE_SPAN, blank));
 }
 
 export function fencedBlocks(md) {
@@ -85,25 +106,71 @@ export function slugify(text) {
     .replace(/ /g, '-');
 }
 
-/** ATX headings outside fences, with GitHub's -1, -2 suffix on repeated text. */
+const ATX = /^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/;
+const SETEXT_UNDERLINE = /^ {0,3}(=+|-+)[ \t]*$/;
+// A line that starts some other block, so a Setext underline below it does not make it a heading.
+const BLOCK_START = /^(?: {4}|\t)|^ {0,3}(?:#|[-*+](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|[|>]|<|\[[^\]\n]+\]:)/;
+
+/**
+ * Headings outside fences and HTML comments, in document order, with GitHub's -1, -2 suffix on repeated text:
+ * ATX (`# T`), Setext (`T` over `===` or `---`, the paragraph lines above it joined) and `<h1>` to `<h6>`.
+ * A `---` line is a Setext underline only under paragraph text (not after a blank line, a list item, a table
+ * row, a quote or a heading), and a leading front-matter block is skipped.
+ */
 export function headings(md) {
+  const unfenced = stripFences(md);
+  const plain = stripComments(unfenced, unfenced.replace(CODE_SPAN, blank)).split('\n');
+  if (plain[0] === '---') {
+    const end = plain.indexOf('---', 1);
+    if (end > 0) for (let k = 0; k <= end; k++) plain[k] = '';
+  }
+  const found = [];
+  plain.forEach((line, i) => {
+    const atx = ATX.exec(line);
+    if (atx) {
+      found.push({ line: i, level: atx[1].length, text: atx[2].trim() });
+      return;
+    }
+    const underline = SETEXT_UNDERLINE.exec(line);
+    if (!underline) return;
+    let start = i;
+    while (start > 0 && plain[start - 1].trim() !== '' && !SETEXT_UNDERLINE.test(plain[start - 1]) && !ATX.test(plain[start - 1])) start--;
+    if (start === i || BLOCK_START.test(plain[start])) return;
+    found.push({ line: start, level: underline[1][0] === '=' ? 1 : 2, text: plain.slice(start, i).map((l) => l.trim()).join(' ') });
+  });
+  const code = stripCode(md);
+  for (const m of code.matchAll(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1\s*>/gi)) {
+    let inner = m[2];
+    // Strip tags until none is left, so a tag rebuilt by the removal of another does not survive.
+    for (let before = ''; before !== inner; ) {
+      before = inner;
+      inner = inner.replace(/<[^>]*>/g, '');
+    }
+    const text = inner.replace(/\s+/g, ' ').trim();
+    found.push({ line: code.slice(0, m.index).split('\n').length - 1, level: Number(m[1]), text });
+  }
+  found.sort((a, b) => a.line - b.line);
   const seen = new Map();
-  const out = [];
-  for (const line of stripFences(md).split('\n')) {
-    const m = /^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/.exec(line);
-    if (!m) continue;
-    const text = m[2].trim();
+  return found.map(({ level, text }) => {
     const base = slugify(text);
     const n = seen.get(base) ?? 0;
     seen.set(base, n + 1);
-    out.push({ level: m[1].length, text, slug: n === 0 ? base : `${base}-${n}` });
-  }
-  return out;
+    return { level, text, slug: n === 0 ? base : `${base}-${n}` };
+  });
 }
 
-/** Targets of `[text](target)` and `![alt](target)`, outside code. */
+/**
+ * Targets, outside code, of `[text](target)` and `![alt](target)`, then of `<img src>` and `<a href>` (quoted values only),
+ * then of reference definitions (`[ref]: target`, up to three spaces of indent; a footnote `[^1]: text` is not one).
+ * The last two are matched loosely: a line that starts `[word]: text` counts as a definition, and the first quoted
+ * `src` or `href` in a tag wins.
+ */
 export function links(md) {
-  return [...stripCode(md).matchAll(/\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)].map((m) => m[1]);
+  const text = stripCode(md);
+  const inline = [...text.matchAll(/\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)].map((m) => m[1]);
+  const html = [...text.matchAll(/<(?:img|a)\b[^>]*?\s(?:src|href)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)].map((m) => m[1] ?? m[2]);
+  const refs = [...text.matchAll(/^ {0,3}\[(?!\^)[^\]\n]+\]:[ \t]*(?:<([^>\n]*)>|(\S+))/gm)].map((m) => m[1] ?? m[2]);
+  return [...inline, ...html, ...refs].filter(Boolean);
 }
 
 /** The repository path after either base URL, wherever the URL appears (prose, code or a fence). */
@@ -299,9 +366,10 @@ export function checkDisclosure(tree) {
     const p = `docs/hosts/${h.id}.md`;
     const text = tree.read(p);
     if (text === null) continue;
-    const first = NPM_RUNNING.exec(text);
+    const joined = joinContinuations(text);
+    const first = NPM_RUNNING.exec(joined);
     if (!first) continue;
-    const above = text.slice(0, first.index);
+    const above = joined.slice(0, first.index);
     const para = above.split(/\n[ \t]*\n/).find((x) => x.trimStart().startsWith('**Ask first.**'));
     if (!para) {
       problems.push(`${p}: no "**Ask first.**" paragraph above the first "${first[0]}"`);
@@ -402,7 +470,7 @@ export function checkReadmeShape(tree) {
   return problems;
 }
 
-/** Rules 12 and 14: the README holds the install prompt, the check prompt and the status line, and one npm-running command. */
+/** Rules 12 and 14: the README holds the install prompt, the check prompt and the status line, and one npm-running command (any case, a backslash continuation joined). */
 export function checkReadmeContent(tree) {
   const readme = tree.read('README.md');
   if (readme === null) return ['README.md is missing'];
@@ -415,9 +483,9 @@ export function checkReadmeContent(tree) {
   if (status === null) problems.push('skills/commands/SKILL.md has no example status line to compare with');
   else if (!readme.includes(status)) problems.push(`README.md does not hold the status line "${status}"`);
   // Count matches, line by line (so a match cannot span a newline), not matching lines.
-  const every = new RegExp(NPM_RUNNING.source, 'g');
-  const running = readme.split('\n').flatMap((l) => [...l.matchAll(every)].map((m) => l.slice(m.index)));
-  if (running.length !== 1 || !/^pi\s+install npm:/.test(running[0])) {
+  const every = new RegExp(NPM_RUNNING.source, 'gi');
+  const running = joinContinuations(readme).split('\n').flatMap((l) => [...l.matchAll(every)].map((m) => l.slice(m.index)));
+  if (running.length !== 1 || !/^pi\s+install\s+npm:/.test(running[0])) {
     problems.push(`README.md must hold exactly one npm-running command, the "pi install npm:" line; found ${running.length}: ${JSON.stringify(running)}`);
   }
   if (/\bnpx\b/.test(readme)) problems.push('README.md mentions npx');
@@ -469,6 +537,19 @@ test('stripCode: fenced blocks and inline code are blanked, newlines kept', () =
   assert.ok(out.includes('a') && out.includes('z'));
 });
 
+test('stripCode: a comment that is never closed is left as it is', () => {
+  assert.equal(stripCode('<!-- x\n[a](b.md)'), '<!-- x\n[a](b.md)');
+});
+
+test('stripCode: an HTML comment is blanked, newlines kept, and a <!-- in a code span opens nothing', () => {
+  const md = 'a <!-- one -->\n<!--\n[x](y.md)\n-->\nz `<!--` [kept](k.md)\n';
+  const out = stripCode(md);
+  assert.equal(out.length, md.length);
+  assert.equal(out.split('\n').length, md.split('\n').length);
+  assert.ok(!out.includes('one') && !out.includes('y.md'));
+  assert.deepEqual(links(md), ['k.md']);
+});
+
 test('fencedBlocks: finds each fence with its offset', () => {
   const md = 'x\n\n```sh\nnpm i\n```\n\n~~~\nplain\n~~~\n';
   const blocks = fencedBlocks(md);
@@ -492,9 +573,85 @@ test('links: a badge that wraps an image gives both targets', () => {
   assert.deepEqual(links('[![badge](img.svg)](https://x.example/y)'), ['img.svg', 'https://x.example/y']);
 });
 
+test('links: <img src>, <a href> and reference definitions give their targets', () => {
+  const md = [
+    '<img src="a.png" alt="x"> and <a class="c" href=\'b.md\'>b</a> and <abbr href="no.md">n</abbr>',
+    '',
+    '[text][r] and [other]',
+    '',
+    '[r]: c.md "Title"',
+    '[other]: <d.md>',
+    '   [e]: e.md#top',
+    '    [indented]: no.md',
+    '',
+  ].join('\n');
+  assert.deepEqual(links(md), ['a.png', 'b.md', 'c.md', 'd.md', 'e.md#top']);
+});
+
+test('links: a footnote definition is not a link, and none of the new forms count inside code', () => {
+  const md = 'a[^1]\n\n[^1]: a note with words\n\n`<a href="no.md">`\n\n```html\n<img src="no.png">\n[x]: no.md\n```\n';
+  assert.deepEqual(links(md), []);
+});
+
 test('headings: repeated text gets -1, -2 suffixes', () => {
   assert.deepEqual(headings('# A\n\n## Option B: MCP only\n\n## Option B: MCP only\n').map((h) => h.slug),
     ['a', 'option-b-mcp-only', 'option-b-mcp-only-1']);
+});
+
+const shape = (md) => headings(md).map((h) => [h.level, h.text, h.slug]);
+
+test('headings: Setext headings, with level, text and anchor', () => {
+  assert.deepEqual(shape('Title\n=====\n\nSub `it`\n-----   \n\n  Third\n   ---\n'), [
+    [1, 'Title', 'title'],
+    [2, 'Sub `it`', 'sub-it'],
+    [2, 'Third', 'third'],
+  ]);
+});
+
+test('headings: a Setext heading may span lines, and a later one is not merged into an earlier one', () => {
+  assert.deepEqual(shape('One\ntwo\n---\nNext\n---\n'), [[2, 'One two', 'one-two'], [2, 'Next', 'next']]);
+});
+
+test('headings: a --- that is not a Setext underline is not a heading', () => {
+  assert.deepEqual(shape('para\n\n---\n\n# H\n'), [[1, 'H', 'h']]);
+  assert.deepEqual(shape('## A\n---\n'), [[2, 'A', 'a']]);
+  assert.deepEqual(shape('- item\n---\n'), []);
+  assert.deepEqual(shape('- item\ncontinued\n---\n'), []);
+  assert.deepEqual(shape('| a |\n---\n'), []);
+  assert.deepEqual(shape('> quote\n---\n'), []);
+  assert.deepEqual(shape('[a]: b.md\n---\n'), []);
+  assert.deepEqual(shape('---\n\ntext\n'), []);
+});
+
+test('headings: front matter is not a Setext heading', () => {
+  assert.deepEqual(shape('---\nname: x\ndescription: y\n---\n\n# T\n'), [[1, 'T', 't']]);
+});
+
+test('headings: <h1> to <h6>, with attributes, nested tags and line breaks inside', () => {
+  assert.deepEqual(shape('<h1 align="center">The <b>name</b></h1>\n\n<h2>\n  Two\n</h2>\n<H3>Three</H3>\n<h1><img src="x.png"></h1>\n'), [
+    [1, 'The name', 'the-name'],
+    [2, 'Two', 'two'],
+    [3, 'Three', 'three'],
+    [1, '', ''],
+  ]);
+});
+
+test('headings: no tag is left in the text of an <h2>', () => {
+  assert.deepEqual(shape('<h2>a <b>b</b> <scr<i>ipt>c</h2>\n'), [[2, 'a b ipt>c', 'a-b-iptc']]);
+  assert.ok(!/<[a-z]/i.test(headings('<h2><<i>script>x</h2>\n')[0].text));
+});
+
+test('headings: a heading inside a fence, an HTML comment or a code span is not a heading', () => {
+  const md = '# T\n\n<!--\n# Hidden\nHidden\n---\n<h2>hidden</h2>\n-->\n\n`<h2>code</h2>`\n\n```\n<h2>fenced</h2>\n```\n';
+  assert.deepEqual(shape(md), [[1, 'T', 't']]);
+});
+
+test('headings: a <!-- in a code span opens no comment, so the headings below it are kept', () => {
+  assert.deepEqual(shape('# Uses `<!--`\n\n## Next\n\n<!-- real -->\n'), [[1, 'Uses `<!--`', 'uses---'], [2, 'Next', 'next']]);
+});
+
+test('headings: the three kinds are numbered together in document order', () => {
+  assert.deepEqual(headings('# A\n\nA\n---\n\n<h2>A</h2>\n').map((h) => h.slug), ['a', 'a-1', 'a-2']);
 });
 
 test('headings: a shell comment inside a fence is not a heading', () => {
@@ -534,6 +691,16 @@ test('command patterns: whole words only', () => {
   }
   for (const s of ['pi install npm:x', 'npm install -g x']) assert.ok(NPM_RUNNING.test(s) && INSTALL_COMMAND.test(s), s);
   for (const s of ['claude plugin install x', 'codex plugin add x']) assert.ok(!NPM_RUNNING.test(s) && INSTALL_COMMAND.test(s), s);
+});
+
+test('command patterns: the case of the command does not matter', () => {
+  for (const s of ['NPM INSTALL -g x', 'Npm i x', 'PNPM Add x', 'Pi Install npm:x', 'YARN ADD x']) assert.ok(NPM_RUNNING.test(s), s);
+});
+
+test('joinContinuations: a backslash at the end of a line joins it to the next, and nothing else changes', () => {
+  assert.equal(joinContinuations('npm \\\n   install -g x\nnext\n'), 'npm  install -g x\nnext\n');
+  assert.equal(joinContinuations('a\\\nb\\\n\\\nc'), 'a b  c');
+  assert.equal(joinContinuations('no continuation\n\nhere'), 'no continuation\n\nhere');
 });
 
 test('stale versions: a harness version is not the forbidden 0.8.x', () => {
@@ -756,6 +923,10 @@ defect('an anchor with no heading', checkLinks, (f) => { f['README.md'] += '\n[x
 defect('a repository URL to a missing page', checkLinks, (f) => { f['INSTALL.md'] += `\n${RAW}docs/hosts/nope.md\n`; }, /docs\/hosts\/nope\.md.*does not exist/);
 defect('a broken link in the privacy policy', checkLinks, (f) => { f['PRIVACY.md'] = f['PRIVACY.md'].replace('docs/first-run.md', 'docs/nope.md'); }, /PRIVACY\.md: the link "docs\/nope\.md"/);
 defect('a link from a page to a file that moved', checkLinks, (f) => { f['docs/hosts/pi.md'] += '\n[db](../database-location-old.md)\n'; }, /database-location-old\.md/);
+defect('an <img src> to a missing file', checkLinks, (f) => { f['README.md'] += '\n<img src="docs/images/nope.png" alt="x">\n'; }, /README\.md: the link "docs\/images\/nope\.png".*does not exist/);
+defect('an <a href> to a missing page', checkLinks, (f) => { f['README.md'] += '\n<a href="docs/nope.md">x</a>\n'; }, /README\.md: the link "docs\/nope\.md".*does not exist/);
+defect('a reference definition for a missing page', checkLinks, (f) => { f['README.md'] += '\n[the page][p]\n\n[p]: docs/nope.md "t"\n'; }, /README\.md: the link "docs\/nope\.md".*does not exist/);
+defect('a reference definition with an anchor that has no heading', checkLinks, (f) => { f['README.md'] += '\n[p]: docs/first-run.md#nope\n'; }, /no heading "#nope"/);
 
 test('rule 3: a broken link inside a code span or fence is not reported', () => {
   const files = validFiles();
@@ -846,6 +1017,12 @@ defect('npm with a flag that takes a value and no paragraph', checkDisclosure, (
 defect('a postinstall import that is not named install-*', checkDisclosure, (f) => {
   f['scripts/postinstall.js'] += "import { z } from './setup-continue.js';\n";
 }, /setup-continue/);
+defect('an npm install continued on the next line and no paragraph', checkDisclosure, (f) => {
+  f['docs/hosts/zed.md'] = '# Zed\n\n## Install\n\nRun npm \\\n  install -g x first.\n\n## User steps\n\n## Verify\n\n## What you get\n\n## Known gaps\n\n## Evidence\n';
+}, /zed\.md: no "\*\*Ask first\.\*\*" paragraph above the first/);
+defect('an upper-case NPM INSTALL and no paragraph', checkDisclosure, (f) => {
+  f['docs/hosts/zed.md'] = '# Zed\n\n## Install\n\nRun NPM INSTALL -g x first.\n\n## User steps\n\n## Verify\n\n## What you get\n\n## Known gaps\n\n## Evidence\n';
+}, /zed\.md: no "\*\*Ask first\.\*\*" paragraph above the first/);
 defect('npm with a flag before the subcommand and no paragraph', checkDisclosure, (f) => {
   f['docs/hosts/zed.md'] = '# Zed\n\n## Install\n\nRun npm -g install x first.\n\n## User steps\n\n## Verify\n\n## What you get\n\n## Known gaps\n\n## Evidence\n';
 }, /zed\.md: no "\*\*Ask first\.\*\*" paragraph above the first/);
@@ -924,6 +1101,13 @@ defect('a missing Privacy section', checkReadmeShape, (f) => { f['README.md'] = 
 defect('pi before Claude Code', checkReadmeShape, (f) => {
   f['README.md'] = f['README.md'].replace('### Claude Code', '### TMP').replace('### pi', '### Claude Code').replace('### TMP', '### pi');
 }, /the "###" headings under Install are/);
+defect('a Setext section in the README', checkReadmeShape, (f) => { f['README.md'] = f['README.md'].replace('## Use it\n', 'Extra\n-----\n\n## Use it\n'); }, /the "##" headings are/);
+defect('an <h1> in the README', checkReadmeShape, (f) => { f['README.md'] = f['README.md'].replace('## Install', '<h1>Another</h1>\n\n## Install'); }, /the "#" headings are \[total-recall, Another\]/);
+test('rule 11: a Setext-looking --- after a blank line, and a heading in a comment, are not sections', () => {
+  const files = validFiles();
+  files['README.md'] = files['README.md'].replace('## Use it\n', '## Use it\n\n---\n\n<!--\n## Fake\n-->\n');
+  assert.deepEqual(checkReadmeShape(memoryTree(files)), []);
+});
 test('rule 11: a heading inside a fenced block is not a section', () => {
   const files = validFiles();
   files['README.md'] = files['README.md'].replace('## Use it\n', '## Use it\n\n```md\n## Fake\n```\n');
@@ -949,6 +1133,16 @@ defect('a second command on the pi line', checkReadmeContent, (f) => {
 defect('a prose line that only names the pi command beside another install', checkReadmeContent, (f) => {
   f['README.md'] = f['README.md'].replace('pi install npm:@strvmarv/total-recall', 'Or `npm install -g x` (not `pi install npm:`)');
 }, /exactly one npm-running command/);
+defect('an npm install continued on the next line', checkReadmeContent, (f) => { f['README.md'] += '\nnpm \\\n  install -g @strvmarv/total-recall\n'; }, /exactly one npm-running command/);
+defect('an upper-case NPM INSTALL', checkReadmeContent, (f) => { f['README.md'] += '\nNPM INSTALL -g @strvmarv/total-recall\n'; }, /exactly one npm-running command/);
+defect('a second, upper-case pi install beside the allowed line', checkReadmeContent, (f) => {
+  f['README.md'] += '\nPI INSTALL npm:@strvmarv/total-recall\n';
+}, /exactly one npm-running command/);
+test('rule 14: the pi install line may itself be continued onto the next line', () => {
+  const files = validFiles();
+  files['README.md'] = files['README.md'].replace('pi install npm:@strvmarv/total-recall', 'pi install \\\n  npm:@strvmarv/total-recall');
+  assert.deepEqual(checkReadmeContent(memoryTree(files)), []);
+});
 defect('an npx line', checkReadmeContent, (f) => { f['README.md'] += '\nUse npx -y x\n'; }, /mentions npx/);
 
 // ---------------------------------------------------------------------------------------------
@@ -960,6 +1154,17 @@ defect('a new docs page that the README does not link', checkDocsReachable, (f) 
 defect('a harness page that the README does not link', checkDocsReachable, (f) => {
   f['README.md'] = f['README.md'].replace('- [Zed](docs/hosts/zed.md)\n', '');
 }, /does not link docs\/hosts\/zed\.md/);
+defect('the only README link to a page sits in an HTML comment', checkDocsReachable, (f) => {
+  f['docs/extra.md'] = '# x\n';
+  f['README.md'] += '\n<!-- [extra](docs/extra.md) -->\n\n<!--\n- [extra again](docs/extra.md)\n-->\n';
+}, /does not link docs\/extra\.md/);
+test('rule 13: a page linked only through <a href> or a reference definition counts as linked', () => {
+  const files = validFiles();
+  files['docs/extra.md'] = '# x\n';
+  files['docs/more.md'] = '# y\n';
+  files['README.md'] += '\n<a href="docs/extra.md">extra</a>\n\n[more][m]\n\n[m]: docs/more.md\n';
+  assert.deepEqual(checkDocsReachable(memoryTree(files)), []);
+});
 test('rule 13: the backlog, specs, plans, images and non-Markdown files need no link', () => {
   const files = validFiles();
   files['docs/TODO.md'] = '# todo\n';
