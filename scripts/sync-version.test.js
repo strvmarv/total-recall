@@ -397,3 +397,69 @@ test('release.yml: build needs check-version, so no binary is built and nothing 
   // publish already needs build, so the gate holds transitively
   assert.match(jobBlock('publish'), /^    needs: build$/m);
 });
+
+// ---- final-loop findings ----
+
+const SCRIPT = fileURLToPath(new URL('./sync-version.js', import.meta.url));
+const canSymlink = process.platform !== 'win32';
+
+test('script: a symlinked path still runs the command (a gate must not fail open)', { skip: !canSymlink }, () => {
+  const dir = makeTree('4.6.0');
+  const linkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tr-syncver-link-'));
+  const link = path.join(linkDir, 'sv.js');
+  fs.symlinkSync(SCRIPT, link);
+  const bad = spawnSync(process.execPath, [link, '--check', '--expect', '9.9.9', '--root', dir, '--no-git'], { encoding: 'utf8' });
+  assert.equal(bad.status, 1, `exit ${bad.status}, stdout ${bad.stdout}`);
+  assert.match(bad.stderr, /version check failed/);
+  const ok = spawnSync(process.execPath, [link, '--check', '--root', dir, '--no-git'], { encoding: 'utf8' });
+  assert.equal(ok.status, 0);
+  assert.match(ok.stdout, /agree/);
+});
+
+test('script: a symlinked directory still runs the command', { skip: !canSymlink }, () => {
+  const dir = makeTree('4.6.0');
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'tr-syncver-link-'));
+  const linkedScripts = path.join(parent, 'scripts');
+  fs.symlinkSync(path.dirname(SCRIPT), linkedScripts);
+  const r = spawnSync(process.execPath, [path.join(linkedScripts, 'sync-version.js'), '4.7.0', '--root', dir, '--no-git'], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(read(dir, 'package.json')).version, '4.7.0');
+});
+
+// prerelease first identifiers that npm cannot use as a dist-tag
+for (const bad of ['4.7.0-x', '4.7.0-X', '4.7.0-v1', '4.7.0-V2.1', '4.7.0-latest', '4.7.0-latest.1']) {
+  test(`syncVersions: rejects ${bad} (not usable as an npm dist-tag)`, () => {
+    const dir = makeTree('4.6.0');
+    const before = snapshot(dir);
+    const r = syncVersions({ root: dir, version: bad });
+    assert.equal(r.ok, false);
+    assert.deepEqual(snapshot(dir), before);
+  });
+}
+
+for (const good of ['4.7.0-rc.0', '4.7.0-beta.1', '4.7.0-alpha', '4.7.0-next.3', '4.7.0-xy', '4.7.0-v1a']) {
+  test(`syncVersions: accepts ${good}`, () => {
+    const dir = makeTree('4.6.0');
+    assert.equal(syncVersions({ root: dir, version: good }).ok, true);
+  });
+}
+
+// writes are staged: a failure while writing leaves every file as it was
+const canChmod = process.platform !== 'win32' && typeof process.getuid === 'function' && process.getuid() !== 0;
+
+test('syncVersions: a write failure part-way leaves every file unchanged', { skip: !canChmod }, () => {
+  const dir = makeTree('4.6.0');
+  const before = snapshot(dir);
+  const locked = path.join(dir, 'hermes-plugin');
+  fs.chmodSync(locked, 0o555); // the last file's directory cannot take a new file
+  try {
+    const r = syncVersions({ root: dir, version: '4.7.0' });
+    assert.equal(r.ok, false);
+    assert.match(r.error, /hermes-plugin/);
+  } finally {
+    fs.chmodSync(locked, 0o755);
+  }
+  assert.deepEqual(snapshot(dir), before);
+  const strays = ALL_FILES.flatMap((f) => fs.readdirSync(path.dirname(path.join(dir, f))).filter((n) => n.includes('.tmp')));
+  assert.deepEqual(strays, [], 'no temp files are left behind');
+});

@@ -11,15 +11,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 // SemVer 2.0 without build metadata, narrowed by what the release workflow does with the string:
-// the publish step takes everything after the LAST '-' as the npm dist-tag, so the prerelease must
-// start with a letter (a purely numeric tag is not a valid npm tag) and must hold no further '-'.
-const VERSION_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[A-Za-z][0-9A-Za-z]*(?:\.(?:0|[1-9]\d*|[0-9]*[A-Za-z][0-9A-Za-z]*))*)?$/;
+// the publish step takes the text after the LAST '-', up to the first '.', as the npm dist-tag. So the
+// prerelease must start with a letter (a purely numeric tag is not a valid npm tag), hold no further '-',
+// and its first identifier must be usable as a tag: npm refuses a tag that is a valid SemVer range
+// (`x`, `v1`), and `latest` would publish a prerelease as the stable release.
+const VERSION_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([A-Za-z][0-9A-Za-z]*)(?:\.(?:0|[1-9]\d*|[0-9]*[A-Za-z][0-9A-Za-z]*))*)?$/;
+const UNUSABLE_DIST_TAG_RE = /^(?:[xX]|[vV]\d+|latest)$/i;
 
 export function isValidVersion(version) {
-  return typeof version === 'string' && VERSION_RE.test(version);
+  if (typeof version !== 'string') return false;
+  const m = VERSION_RE.exec(version);
+  return m !== null && !(m[4] !== undefined && UNUSABLE_DIST_TAG_RE.test(m[4]));
 }
 
 // ---- the version files ----
@@ -146,7 +151,7 @@ export function checkVersions({ root, listManifests, expect }) {
  */
 export function syncVersions({ root, version }) {
   if (!isValidVersion(version)) {
-    return { ok: false, error: `invalid version ${JSON.stringify(version)}: expected X.Y.Z or X.Y.Z-<letter-first prerelease>, without build metadata` };
+    return { ok: false, error: `invalid version ${JSON.stringify(version)}: expected X.Y.Z or X.Y.Z-<prerelease> (no build metadata; the prerelease starts with a letter, has no further '-', and its first identifier becomes the npm dist-tag, so it cannot be x, v<number> or latest)` };
   }
   const edits = [];
   for (const { file, fields } of VERSION_FILES) {
@@ -162,10 +167,30 @@ export function syncVersions({ root, version }) {
     }
     edits.push({ file, original, text });
   }
-  const changed = [];
+  // Stage every changed file next to its target, then rename them all: a write error (a read-only
+  // directory, a full disk) leaves every file as it was and no temporary file behind.
+  const staged = [];
+  const cleanup = () => { for (const t of staged) fs.rmSync(t.tmp, { force: true }); };
   for (const { file, original, text } of edits) {
     if (text === original) continue;
-    fs.writeFileSync(path.join(root, file), text);
+    const tmp = `${path.join(root, file)}.tmp-${process.pid}`;
+    try {
+      fs.writeFileSync(tmp, text);
+    } catch (e) {
+      fs.rmSync(tmp, { force: true });
+      cleanup();
+      return { ok: false, error: `${file}: cannot write (${e.code ?? e.message}); no file was changed` };
+    }
+    staged.push({ file, tmp });
+  }
+  const changed = [];
+  for (const { file, tmp } of staged) {
+    try {
+      fs.renameSync(tmp, path.join(root, file));
+    } catch (e) {
+      cleanup();
+      return { ok: false, error: `${file}: cannot replace (${e.code ?? e.message}); already updated: ${changed.join(', ') || 'none'}` };
+    }
     changed.push(file);
   }
   return { ok: true, changed };
@@ -220,7 +245,17 @@ export function main(argv, defaultRoot = path.resolve(path.dirname(fileURLToPath
   };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+// Run as a command, not when imported. Both paths are resolved, so a symlinked checkout or script
+// still runs (a gate that exits 0 without running would fail open).
+function isMainModule() {
+  try {
+    return !!process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
   const r = main(process.argv.slice(2));
   if (r.out) process.stdout.write(r.out);
   if (r.err) process.stderr.write(r.err);

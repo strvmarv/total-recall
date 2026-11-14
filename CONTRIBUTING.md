@@ -106,7 +106,7 @@ scripts/fetch-binary.js           — download helper (shared by postinstall + s
 scripts/postinstall.js            — npm postinstall hook (delegates to fetch-binary)
 scripts/verify-binaries.js        — prepublishOnly safety check (4 RIDs present)
 .github/workflows/dotnet-ci.yml   — push/PR CI: dotnet build + test + shim tests + catalog drift guard
-.github/workflows/release.yml     — v* tag CI: 4-platform AOT matrix + npm publish + GitHub Release
+.github/workflows/release.yml     — v* tag CI: version check, then 4-platform AOT matrix + npm publish + GitHub Release
                                     (also generates and attaches provisioning.manifest.json)
 ```
 
