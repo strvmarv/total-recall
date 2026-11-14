@@ -101,9 +101,16 @@ export function headings(md) {
   return out;
 }
 
-/** Targets of `[text](target)` and `![alt](target)`, outside code. */
+/**
+ * Targets, outside code, of `[text](target)` and `![alt](target)`, then of `<img src>` and `<a href>`, then of
+ * reference definitions (`[ref]: target`, up to three spaces of indent; a footnote `[^1]: text` is not one).
+ */
 export function links(md) {
-  return [...stripCode(md).matchAll(/\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)].map((m) => m[1]);
+  const text = stripCode(md);
+  const inline = [...text.matchAll(/\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)].map((m) => m[1]);
+  const html = [...text.matchAll(/<(?:img|a)\b[^>]*?\s(?:src|href)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)].map((m) => m[1] ?? m[2]);
+  const refs = [...text.matchAll(/^ {0,3}\[(?!\^)[^\]\n]+\]:[ \t]*(?:<([^>\n]*)>|(\S+))/gm)].map((m) => m[1] ?? m[2]);
+  return [...inline, ...html, ...refs].filter(Boolean);
 }
 
 /** The repository path after either base URL, wherever the URL appears (prose, code or a fence). */
@@ -492,6 +499,26 @@ test('links: a badge that wraps an image gives both targets', () => {
   assert.deepEqual(links('[![badge](img.svg)](https://x.example/y)'), ['img.svg', 'https://x.example/y']);
 });
 
+test('links: <img src>, <a href> and reference definitions give their targets', () => {
+  const md = [
+    '<img src="a.png" alt="x"> and <a class="c" href=\'b.md\'>b</a> and <abbr href="no.md">n</abbr>',
+    '',
+    '[text][r] and [other]',
+    '',
+    '[r]: c.md "Title"',
+    '[other]: <d.md>',
+    '   [e]: e.md#top',
+    '    [indented]: no.md',
+    '',
+  ].join('\n');
+  assert.deepEqual(links(md), ['a.png', 'b.md', 'c.md', 'd.md', 'e.md#top']);
+});
+
+test('links: a footnote definition is not a link, and none of the new forms count inside code', () => {
+  const md = 'a[^1]\n\n[^1]: a note with words\n\n`<a href="no.md">`\n\n```html\n<img src="no.png">\n[x]: no.md\n```\n';
+  assert.deepEqual(links(md), []);
+});
+
 test('headings: repeated text gets -1, -2 suffixes', () => {
   assert.deepEqual(headings('# A\n\n## Option B: MCP only\n\n## Option B: MCP only\n').map((h) => h.slug),
     ['a', 'option-b-mcp-only', 'option-b-mcp-only-1']);
@@ -755,6 +782,10 @@ defect('an anchor with no heading', checkLinks, (f) => { f['README.md'] += '\n[x
 defect('a repository URL to a missing page', checkLinks, (f) => { f['INSTALL.md'] += `\n${RAW}docs/hosts/nope.md\n`; }, /docs\/hosts\/nope\.md.*does not exist/);
 defect('a broken link in the privacy policy', checkLinks, (f) => { f['PRIVACY.md'] = f['PRIVACY.md'].replace('docs/first-run.md', 'docs/nope.md'); }, /PRIVACY\.md: the link "docs\/nope\.md"/);
 defect('a link from a page to a file that moved', checkLinks, (f) => { f['docs/hosts/pi.md'] += '\n[db](../database-location-old.md)\n'; }, /database-location-old\.md/);
+defect('an <img src> to a missing file', checkLinks, (f) => { f['README.md'] += '\n<img src="docs/images/nope.png" alt="x">\n'; }, /README\.md: the link "docs\/images\/nope\.png".*does not exist/);
+defect('an <a href> to a missing page', checkLinks, (f) => { f['README.md'] += '\n<a href="docs/nope.md">x</a>\n'; }, /README\.md: the link "docs\/nope\.md".*does not exist/);
+defect('a reference definition for a missing page', checkLinks, (f) => { f['README.md'] += '\n[the page][p]\n\n[p]: docs/nope.md "t"\n'; }, /README\.md: the link "docs\/nope\.md".*does not exist/);
+defect('a reference definition with an anchor that has no heading', checkLinks, (f) => { f['README.md'] += '\n[p]: docs/first-run.md#nope\n'; }, /no heading "#nope"/);
 
 test('rule 3: a broken link inside a code span or fence is not reported', () => {
   const files = validFiles();
@@ -955,6 +986,13 @@ defect('a new docs page that the README does not link', checkDocsReachable, (f) 
 defect('a harness page that the README does not link', checkDocsReachable, (f) => {
   f['README.md'] = f['README.md'].replace('- [Zed](docs/hosts/zed.md)\n', '');
 }, /does not link docs\/hosts\/zed\.md/);
+test('rule 13: a page linked only through <a href> or a reference definition counts as linked', () => {
+  const files = validFiles();
+  files['docs/extra.md'] = '# x\n';
+  files['docs/more.md'] = '# y\n';
+  files['README.md'] += '\n<a href="docs/extra.md">extra</a>\n\n[more][m]\n\n[m]: docs/more.md\n';
+  assert.deepEqual(checkDocsReachable(memoryTree(files)), []);
+});
 test('rule 13: the backlog, specs, plans, images and non-Markdown files need no link', () => {
   const files = validFiles();
   files['docs/TODO.md'] = '# todo\n';
