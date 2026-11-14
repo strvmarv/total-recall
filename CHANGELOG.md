@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- **A release version bump is one command, and a mismatch fails the release (#62).** The version lived in seven files (eight fields) that a release agent updated by hand, and a missed one shipped a stale manifest. `node scripts/sync-version.js <version>` now sets all of them at once, all-or-nothing (the two `package-lock.json` fields are edited by position, with no `npm install`), and `--check` verifies them against `package.json` and fails on any tracked `plugin.json`/`plugin.yaml` outside the list. The release workflow gained a `check-version` job that runs `--check --expect` against the git tag before any binary is built, so a tag that differs from `package.json` never reaches a build or the npm publish. The version must be `X.Y.Z` or `X.Y.Z-<prerelease>` with a letter-first prerelease and no further `-` or `+build` part, because the publish step derives the npm dist-tag from the text after the last `-`.
+
 ## 4.6.0 - 2026-11-12
 
 ### Added
