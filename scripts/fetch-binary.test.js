@@ -4,7 +4,10 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { sha256File, getManifestUrl, verifyArchiveChecksum, payloadIntact } from './fetch-binary.js';
+import {
+  sha256File, getManifestUrl, verifyArchiveChecksum, payloadIntact,
+  resolveDataDir, storeInCache, restoreFromCache,
+} from './fetch-binary.js';
 
 // --- payloadIntact: cheap size-based integrity check of the extracted model ---
 // tree against the registry that ships in it. This is the guard that catches an
@@ -110,4 +113,167 @@ test('verifyArchiveChecksum: read failure is a plain error, NOT checksumMismatch
   assert.equal(r.ok, false);
   assert.notEqual(r.checksumMismatch, true); // a missing file may be retried; a mismatch may not
   assert.match(r.error, /checksum read failed/i);
+});
+
+
+// --- the cache of verified engine archives (issue #65) ---
+//
+// The helpers take the data directory, the destination and every side-effecting step as arguments,
+// so these tests run over temp directories and never touch the real plugin tree.
+
+const VERSION = '4.6.0';
+const ARCHIVE = 'total-recall-linux-x64.tar.gz';
+const isWin = process.platform === 'win32';
+
+function tmpDir(prefix = 'tr-cache-') {
+  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+}
+
+function makeArchive(content = 'engine archive bytes') {
+  const dir = tmpDir('tr-archive-');
+  const file = path.join(dir, ARCHIVE);
+  fs.writeFileSync(file, content);
+  return { file, sha256: crypto.createHash('sha256').update(content).digest('hex') };
+}
+
+/** A restore target with spies for every injected step; `extract` unpacks a fake engine tree. */
+function makeRestore(overrides = {}) {
+  const destDir = tmpDir('tr-dest-');
+  const binaryPath = path.join(destDir, 'total-recall');
+  const calls = { extract: 0, chmod: [], marker: [] };
+  return {
+    destDir, binaryPath, calls,
+    args: {
+      version: VERSION, archiveName: ARCHIVE, destDir, binaryPath,
+      extract: (archivePath, dir) => {
+        calls.extract++;
+        fs.writeFileSync(path.join(dir, 'total-recall'), 'binary');
+      },
+      payloadIntact: () => ({ ok: true }),
+      chmod: (p, mode) => { calls.chmod.push([p, mode]); },
+      writeMarker: (sha) => { calls.marker.push(sha); },
+      platform: 'linux',
+      ...overrides,
+    },
+  };
+}
+
+const store = (dataDir, archive, extra = {}) =>
+  storeInCache({ dataDir, version: VERSION, archiveName: ARCHIVE, archivePath: archive.file, sha256: archive.sha256, ...extra });
+
+test('resolveDataDir: a non-empty TOTAL_RECALL_HOME is used as it is', () => {
+  const home = path.resolve(path.sep, 'x');
+  assert.equal(resolveDataDir({ TOTAL_RECALL_HOME: home, HOME: path.resolve(path.sep, 'h') }), home);
+});
+
+test('resolveDataDir: otherwise .total-recall under HOME, then USERPROFILE', () => {
+  const h = path.resolve(path.sep, 'h');
+  const u = path.resolve(path.sep, 'u');
+  assert.equal(resolveDataDir({ HOME: h }), path.join(h, '.total-recall'));
+  assert.equal(resolveDataDir({ TOTAL_RECALL_HOME: '', HOME: h, USERPROFILE: u }), path.join(h, '.total-recall'));
+  assert.equal(resolveDataDir({ USERPROFILE: u }), path.join(u, '.total-recall'));
+});
+
+test('resolveDataDir: unknown or relative locations give null, so the cache is skipped', () => {
+  assert.equal(resolveDataDir({}), null);
+  assert.equal(resolveDataDir({ HOME: '' , USERPROFILE: path.resolve(path.sep, 'u') }), null, 'an empty HOME wins over USERPROFILE, as in the engine, and is relative');
+  assert.equal(resolveDataDir({ TOTAL_RECALL_HOME: 'relative/dir', HOME: path.resolve(path.sep, 'h') }), null);
+  assert.equal(resolveDataDir({ HOME: 'relative' }), null);
+});
+
+test('cache: a stored archive is restored without downloading, executable, with its marker', async () => {
+  const dataDir = tmpDir();
+  const archive = makeArchive();
+  assert.equal(store(dataDir, archive), true);
+  const t = makeRestore();
+  const r = await restoreFromCache({ dataDir, ...t.args });
+  assert.equal(r.restored, true);
+  assert.ok(fs.existsSync(t.binaryPath));
+  assert.deepEqual(t.calls.chmod, [[t.binaryPath, 0o755]]);
+  assert.deepEqual(t.calls.marker, [archive.sha256]);
+  // the cache keeps the entry for the next reinstall
+  assert.equal((await restoreFromCache({ dataDir, ...makeRestore().args })).restored, true);
+});
+
+test('cache: tampered bytes no longer match the recorded sha256, so the entry is deleted', async () => {
+  const dataDir = tmpDir();
+  store(dataDir, makeArchive());
+  const entry = path.join(dataDir, 'cache', 'binaries', VERSION, ARCHIVE);
+  fs.writeFileSync(entry, 'something else');
+  const t = makeRestore();
+  const r = await restoreFromCache({ dataDir, ...t.args });
+  assert.equal(r.restored, false);
+  assert.equal(t.calls.extract, 0, 'a tampered archive is never extracted');
+  assert.equal(fs.existsSync(entry), false);
+  assert.equal(fs.existsSync(`${entry}.sha256`), false);
+});
+
+test('cache: an archive stored for another version is never used', async () => {
+  const dataDir = tmpDir();
+  store(dataDir, makeArchive(), { version: '4.5.0' });
+  const t = makeRestore();
+  assert.equal((await restoreFromCache({ dataDir, ...t.args })).restored, false);
+  assert.equal(t.calls.extract, 0);
+  assert.ok(fs.existsSync(path.join(dataDir, 'cache', 'binaries', '4.5.0', ARCHIVE)), 'the other version is untouched');
+});
+
+test('cache: an entry with no sidecar checksum is a miss that leaves the entry alone', async () => {
+  const dataDir = tmpDir();
+  store(dataDir, makeArchive());
+  const entry = path.join(dataDir, 'cache', 'binaries', VERSION, ARCHIVE);
+  fs.rmSync(`${entry}.sha256`);
+  const t = makeRestore();
+  assert.equal((await restoreFromCache({ dataDir, ...t.args })).restored, false);
+  assert.equal(t.calls.extract, 0);
+  assert.ok(fs.existsSync(entry));
+});
+
+test('cache: a cache directory owned by someone else is not used and nothing is stored in it', async () => {
+  const dataDir = tmpDir();
+  const archive = makeArchive();
+  store(dataDir, archive);
+  const foreign = { lstat: (p) => ({ ...fs.lstatSync(p), isSymbolicLink: () => false, isDirectory: () => true, uid: 4242, mode: 0o40700 }), uid: 1000 };
+  const t = makeRestore();
+  assert.equal((await restoreFromCache({ dataDir, ...t.args, statOps: foreign })).restored, false);
+  assert.equal(t.calls.extract, 0);
+  assert.equal(store(dataDir, archive, { statOps: foreign }), false);
+});
+
+test('cache: a symbolic-link or group/other-writable cache directory is not used', async () => {
+  const dataDir = tmpDir();
+  store(dataDir, makeArchive());
+  const mine = (over) => ({ lstat: (p) => ({ isSymbolicLink: () => false, isDirectory: () => true, uid: 1000, mode: 0o40700, ...over }), uid: 1000 });
+  for (const over of [{ isSymbolicLink: () => true }, { mode: 0o40770 }, { mode: 0o40707 }, { mode: 0o40777 }]) {
+    const t = makeRestore();
+    assert.equal((await restoreFromCache({ dataDir, ...t.args, statOps: mine(over) })).restored, false, JSON.stringify(Object.keys(over)));
+    assert.equal(t.calls.extract, 0);
+  }
+  // sanity: the same stat shape without the problem is trusted
+  assert.equal((await restoreFromCache({ dataDir, ...makeRestore().args, statOps: mine({}) })).restored, true);
+});
+
+test('cache: an unusable data directory skips the cache without throwing', async () => {
+  const archive = makeArchive();
+  assert.equal(store(null, archive), false);
+  assert.equal(store('relative/dir', archive), false);
+  const t = makeRestore();
+  assert.equal((await restoreFromCache({ dataDir: null, ...t.args })).restored, false);
+});
+
+test('cache: a data directory that does not exist yet is created, and only cache/ is added to it', async () => {
+  const parent = tmpDir();
+  const dataDir = path.join(parent, 'fresh', '.total-recall');
+  assert.equal(store(dataDir, makeArchive()), true);
+  assert.deepEqual(fs.readdirSync(dataDir), ['cache']);
+  assert.equal((await restoreFromCache({ dataDir, ...makeRestore().args })).restored, true);
+});
+
+test('cache: version and archive names that would leave the cache directory are refused', async () => {
+  const dataDir = tmpDir();
+  const archive = makeArchive();
+  assert.equal(store(dataDir, archive, { version: '../evil' }), false);
+  assert.equal(store(dataDir, archive, { archiveName: '../evil.tar.gz' }), false);
+  const t = makeRestore({ version: '../evil' });
+  assert.equal((await restoreFromCache({ dataDir, ...t.args })).restored, false);
+  assert.equal(fs.existsSync(path.join(dataDir, 'evil')), false);
 });

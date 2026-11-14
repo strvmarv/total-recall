@@ -199,6 +199,149 @@ export function writeVerifiedMarker(rid, version, sha256) {
   try { fs.writeFileSync(verifiedMarkerPath(rid), JSON.stringify({ version, sha256 })); } catch { /* best-effort */ }
 }
 
+// ---- cache of verified engine archives (issue #65) -------------------------
+//
+// The engine and its model live under <plugin root>/binaries/<rid>/, which belongs to one plugin
+// install. A reinstall at the same version, or a second host installing it, would download the
+// whole archive again. So a verified archive is also kept under the engine's data directory:
+//
+//   <dataDir>/cache/binaries/<version>/<archive name>
+//   <dataDir>/cache/binaries/<version>/<archive name>.sha256     (written last: it marks a complete entry)
+//
+// Every helper takes the data directory, the destination and each side-effecting step as an
+// argument, so the logic is tested over temp directories. Nothing here ever throws into the caller:
+// the cache is an optimisation, and any trouble means "miss".
+
+// A version or archive name is joined into a path, so it must be a plain file name.
+const SAFE_SEGMENT = /^[0-9A-Za-z][0-9A-Za-z._+-]*$/;
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+/**
+ * The engine's data directory, by the rule of ConfigLoader.GetDataDir: a non-empty TOTAL_RECALL_HOME
+ * as it is, else `.total-recall` under HOME (when HOME is set at all, even empty), else under
+ * USERPROFILE. Returns null unless the result is absolute, so an unknown or relative location
+ * (Cursor and Codex strip HOME, for one) just means "no cache".
+ */
+export function resolveDataDir(env = process.env) {
+  let dir;
+  if (env.TOTAL_RECALL_HOME) {
+    dir = env.TOTAL_RECALL_HOME;
+  } else {
+    const base = env.HOME ?? env.USERPROFILE;
+    if (base === undefined || base === null) return null;
+    dir = path.join(base, '.total-recall');
+  }
+  return path.isAbsolute(dir) ? dir : null;
+}
+
+function defaultStatOps() {
+  return { lstat: fs.lstatSync, uid: typeof process.getuid === 'function' ? process.getuid() : undefined };
+}
+
+function cachePaths(dataDir, version, archiveName) {
+  if (typeof dataDir !== 'string' || !path.isAbsolute(dataDir)) return null;
+  if (!SAFE_SEGMENT.test(String(version)) || !SAFE_SEGMENT.test(String(archiveName))) return null;
+  const root = path.join(dataDir, 'cache');
+  const versionsRoot = path.join(root, 'binaries');
+  const versionDir = path.join(versionsRoot, version);
+  const archive = path.join(versionDir, archiveName);
+  return { root, versionsRoot, versionDir, archive, sidecar: `${archive}.sha256` };
+}
+
+// cache/ must be a real directory that only its owner can write to. On Windows there is no uid or
+// mode model to check, so only "a real directory" applies.
+function cacheRootTrusted(root, statOps) {
+  let st;
+  try { st = statOps.lstat(root); } catch { return false; }
+  if (st.isSymbolicLink() || !st.isDirectory()) return false;
+  if (statOps.uid === undefined) return true;
+  return st.uid === statOps.uid && (st.mode & 0o022) === 0;
+}
+
+function removeEntry(p) {
+  try { fs.rmSync(p.archive, { force: true }); } catch {}
+  try { fs.rmSync(p.sidecar, { force: true }); } catch {}
+}
+
+/**
+ * Keeps a verified archive for later reinstalls. Returns true when it was stored; never throws.
+ * `sha256` is the checksum the archive was verified against.
+ */
+export function storeInCache({ dataDir, version, archiveName, archivePath, sha256, statOps = defaultStatOps() }) {
+  const p = cachePaths(dataDir, version, archiveName);
+  if (!p || !SHA256_HEX.test(String(sha256).toLowerCase())) return false;
+  let tmp = null;
+  let tmpSidecar = null;
+  try {
+    // The data directory keeps the default permissions (the engine may create it later anyway);
+    // only cache/ and what is below it is owner-only.
+    fs.mkdirSync(dataDir, { recursive: true });
+    try { fs.mkdirSync(p.root, { mode: 0o700 }); } catch (e) { if (!e || e.code !== 'EEXIST') throw e; }
+    if (!cacheRootTrusted(p.root, statOps)) return false;
+    fs.mkdirSync(p.versionDir, { recursive: true, mode: 0o700 });
+
+    const unique = `${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
+    tmp = path.join(p.versionDir, `${archiveName}.tmp-${unique}`);
+    fs.copyFileSync(archivePath, tmp, fs.constants.COPYFILE_EXCL);
+    fs.chmodSync(tmp, 0o600);
+    // An old sidecar must never pair with the new archive, so it goes first; the new one is last.
+    fs.rmSync(p.sidecar, { force: true });
+    fs.renameSync(tmp, p.archive);
+    tmp = null;
+    tmpSidecar = path.join(p.versionDir, `${archiveName}.sha256.tmp-${unique}`);
+    fs.writeFileSync(tmpSidecar, `${String(sha256).toLowerCase()}\n`, { mode: 0o600, flag: 'wx' });
+    fs.renameSync(tmpSidecar, p.sidecar);
+    tmpSidecar = null;
+    return true;
+  } catch {
+    for (const f of [tmp, tmpSidecar]) { if (f) { try { fs.rmSync(f, { force: true }); } catch {} } }
+    return false;
+  }
+}
+
+/**
+ * Restores the engine from a cached archive: checks the entry, extracts it into `destDir`, requires
+ * the binary, runs the model-payload check, makes the binary executable and writes the marker.
+ * Resolves { restored: true, path } or { restored: false, reason }; never rejects.
+ *
+ * The entry is deleted only when it is proven bad (its bytes do not match the recorded sha256, it
+ * leaves no binary, or its model payload fails the check). Anything environmental (`tar` missing,
+ * a read-only plugin directory, an entry another process is replacing) is a miss that keeps it.
+ */
+export async function restoreFromCache({
+  dataDir, version, archiveName, destDir, binaryPath,
+  extract, payloadIntact: intact, chmod, writeMarker,
+  platform = process.platform, statOps = defaultStatOps(),
+}) {
+  const miss = (reason) => ({ restored: false, reason });
+  const p = cachePaths(dataDir, version, archiveName);
+  if (!p) return miss('no usable cache location');
+  if (!cacheRootTrusted(p.root, statOps)) return miss('the cache directory is not trusted');
+
+  let recorded;
+  try { recorded = fs.readFileSync(p.sidecar, 'utf8').trim().toLowerCase(); } catch { return miss('no complete cache entry'); }
+  if (!SHA256_HEX.test(recorded)) { removeEntry(p); return miss('the recorded checksum is malformed'); }
+
+  let actual;
+  try { actual = await sha256File(p.archive); } catch { return miss('the cache entry could not be read'); }
+  if (actual.toLowerCase() !== recorded) { removeEntry(p); return miss('the cached archive does not match its recorded checksum'); }
+
+  try {
+    fs.mkdirSync(destDir, { recursive: true });
+    extract(p.archive, destDir);
+  } catch (e) {
+    return miss(`extract failed: ${e && e.message}`);
+  }
+  if (!fs.existsSync(binaryPath)) { removeEntry(p); return miss('the cached archive leaves no engine binary'); }
+  const ok = intact(destDir);
+  if (!ok || !ok.ok) { removeEntry(p); return miss(`the cached archive's model payload is incomplete (${ok && ok.reason})`); }
+  if (platform !== 'win32') {
+    try { chmod(binaryPath, 0o755); } catch (e) { return miss(`could not make the engine executable: ${e && e.message}`); }
+  }
+  try { writeMarker(recorded); } catch { /* best-effort, like a fresh install */ }
+  return { restored: true, path: binaryPath };
+}
+
 function httpGetFollowRedirects(url, redirectsLeft = 5) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, (res) => {
