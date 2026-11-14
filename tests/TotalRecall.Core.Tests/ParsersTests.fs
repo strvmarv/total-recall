@@ -5,7 +5,6 @@ open TotalRecall.Core
 open TotalRecall.Core.Parsers
 
 // Tests for the regex-based code and markdown parsers.
-// Ported from src-ts/ingestion/code-parser.ts and markdown-parser.ts.
 // Verifies basic shape; not exhaustive — sufficient for the F# port to
 // be confidence-checked against representative inputs.
 

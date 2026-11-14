@@ -10,8 +10,8 @@ open TotalRecall.Core
 // the F# Tokenizer port matches the EXISTING TS WordPieceTokenizer's output,
 // not Microsoft.ML.Tokenizers's. The fixture at
 // tests/fixtures/embeddings/tokenizer-reference.json is the spike's
-// 544-pair (input, tokenIds) record produced by running the TS tokenizer
-// (src-ts/embedding/tokenizer.ts) over a representative corpus.
+// 544-pair (input, tokenIds) record produced by running the original TS
+// tokenizer over a representative corpus.
 //
 // The F# port must match those numbers byte-for-byte. The "tokenizer
 // correctness" question (whether TS or Microsoft is closer to the model's

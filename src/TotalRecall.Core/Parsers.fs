@@ -1,7 +1,6 @@
 module TotalRecall.Core.Parsers
 
-// Regex-based code and markdown parsers ported from
-// src-ts/ingestion/code-parser.ts and src-ts/ingestion/markdown-parser.ts.
+// Regex-based code and markdown parsers.
 //
 // Pure functions over input text and options.
 
