@@ -140,7 +140,13 @@ export function headings(md) {
   });
   const code = stripCode(md);
   for (const m of code.matchAll(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1\s*>/gi)) {
-    const text = m[2].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+    let inner = m[2];
+    // Strip tags until none is left, so a tag rebuilt by the removal of another does not survive.
+    for (let before = ''; before !== inner; ) {
+      before = inner;
+      inner = inner.replace(/<[^>]*>/g, '');
+    }
+    const text = inner.replace(/\s+/g, ' ').trim();
     found.push({ line: code.slice(0, m.index).split('\n').length - 1, level: Number(m[1]), text });
   }
   found.sort((a, b) => a.line - b.line);
@@ -628,6 +634,11 @@ test('headings: <h1> to <h6>, with attributes, nested tags and line breaks insid
     [3, 'Three', 'three'],
     [1, '', ''],
   ]);
+});
+
+test('headings: no tag is left in the text of an <h2>', () => {
+  assert.deepEqual(shape('<h2>a <b>b</b> <scr<i>ipt>c</h2>\n'), [[2, 'a b ipt>c', 'a-b-iptc']]);
+  assert.ok(!/<[a-z]/i.test(headings('<h2><<i>script>x</h2>\n')[0].text));
 });
 
 test('headings: a heading inside a fence, an HTML comment or a code span is not a heading', () => {
