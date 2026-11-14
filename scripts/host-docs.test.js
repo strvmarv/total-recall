@@ -44,8 +44,8 @@ export const MODULE_TOOLS = {
 };
 export const TOOLS = [...new Set(Object.values(MODULE_TOOLS).flat())];
 // A command that runs an install: what INSTALL.md must not hold, and what needs the disclosure above it.
-const INSTALL_COMMAND = /\b(?:npm|pnpm)(?:\s+-\S+)*\s+(?:i|install|add)\b|\byarn\s+(?:global\s+)?add\b|\b(?:pi|plugin)\s+(?:i|install)\b|\bplugin\s+(?:marketplace\s+)?add\b|\bnpx\b/;
-const NPM_RUNNING = /\b(?:npm|pnpm)(?:\s+-\S+)*\s+(?:i|install|add)\b|\byarn\s+(?:global\s+)?add\b|\bpi\s+(?:i|install)\b/;
+const INSTALL_COMMAND = /\b(?:npm|pnpm)(?:\s+-\S+(?:\s+[^-\s]\S*)?)*\s+(?:i|install|add)\b|\byarn\s+(?:global\s+)?add\b|\b(?:pi|plugin)\s+(?:i|install)\b|\bplugin\s+(?:marketplace\s+)?add\b|\bnpx\b/;
+const NPM_RUNNING = /\b(?:npm|pnpm)(?:\s+-\S+(?:\s+[^-\s]\S*)?)*\s+(?:i|install|add)\b|\byarn\s+(?:global\s+)?add\b|\bpi\s+(?:i|install)\b/;
 const STALE_VERSION = /(?<![\d.])0\.(?:7\.2|8\.(?:\d+|x))(?!\d)/;
 
 // ---------------------------------------------------------------------------------------------
@@ -261,7 +261,10 @@ export function checkStatusLine(tree) {
 export function checkDisclosure(tree) {
   const problems = [];
   const postinstall = tree.read('scripts/postinstall.js');
-  const modules = postinstall === null ? [] : [...postinstall.matchAll(/['"]\.\/([\w-]+)\.m?js['"]/g)].map((m) => m[1]).filter((m) => m !== 'fetch-binary');
+  const code = postinstall === null ? '' : postinstall.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const modules = [...code.matchAll(/(?:from|import|require)\s*\(?\s*['"]\.\/([\w./-]+)\.(?:c|m)?js['"]/g)]
+    .map((m) => m[1].split('/').pop())
+    .filter((m) => m !== 'fetch-binary');
   const known = Object.keys(MODULE_TOOLS);
   for (const f of tree.list('scripts')) {
     const m = /^(install-[\w-]+)\.js$/.exec(f);
@@ -641,6 +644,20 @@ defect('npm i with two spaces and no paragraph', checkDisclosure, (f) => {
 defect('a double-quoted import in postinstall.js', checkDisclosure, (f) => {
   f['scripts/postinstall.js'] += 'import { y } from "./install-newtool.js";\n';
 }, /install-newtool/);
+test('a relative path in a comment of postinstall.js is not an import', () => {
+  const files = validFiles();
+  files['scripts/postinstall.js'] += "// see './notes.js' and /* './other.js' */\n";
+  assert.deepEqual(checkDisclosure(memoryTree(files)), []);
+});
+defect('a require of a cjs module in postinstall.js', checkDisclosure, (f) => {
+  f['scripts/postinstall.js'] += "const x = require('./install-newtool.cjs');\n";
+}, /install-newtool/);
+defect('a postinstall import from a subdirectory', checkDisclosure, (f) => {
+  f['scripts/postinstall.js'] += "import { y } from './lib/install-z.js';\n";
+}, /install-z/);
+defect('npm with a flag that takes a value and no paragraph', checkDisclosure, (f) => {
+  f['docs/hosts/zed.md'] = '# Zed\n\n## Install\n\nRun npm --prefix ~/x install -g y first.\n\n## User steps\n\n## Verify\n\n## What you get\n\n## Known gaps\n\n## Evidence\n';
+}, /zed\.md: no "\*\*Ask first\.\*\*" paragraph above the first/);
 defect('a postinstall import that is not named install-*', checkDisclosure, (f) => {
   f['scripts/postinstall.js'] += "import { z } from './setup-continue.js';\n";
 }, /setup-continue/);

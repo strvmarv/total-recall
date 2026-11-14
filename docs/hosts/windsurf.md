@@ -12,7 +12,7 @@ No stop condition. The install script configures Windsurf in `~/.codeium/windsur
 npm install -g @strvmarv/total-recall
 ```
 
-Then read `~/.codeium/windsurf/mcp_config.json` and confirm the `total-recall` entry under `mcpServers`, and check that `~/.codeium/windsurf/rules/total-recall.md` exists. For anything missing, take the matching step of path 2 (that step only; do not run the skip-form install again).
+Then search `~/.codeium/windsurf/mcp_config.json` for the `total-recall` entry (see Rules in `INSTALL.md`), and check that `~/.codeium/windsurf/rules/total-recall.md` exists. For anything missing, take the matching step of path 2 (that step only; do not run the skip-form install again).
 
 ### Path 2: nothing else touched
 

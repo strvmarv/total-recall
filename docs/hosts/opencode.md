@@ -46,7 +46,7 @@ Nothing on this path tells the model to call `session_start`; see User steps.
 
 ## Verify
 
-Now: `total-recall --version` should print the version that `npm view @strvmarv/total-recall version` reports. A bare `total-recall` on PATH can be an older copy than the one another harness runs. Read OpenCode's config and confirm the `total-recall` entry under `mcp`.
+Now: `total-recall --version` should print the version that `npm view @strvmarv/total-recall version` reports. A bare `total-recall` on PATH can be an older copy than the one another harness runs. Search OpenCode's config for the `total-recall` entry (see Rules in `INSTALL.md`).
 
 In the next session, the user pastes the check prompt from `INSTALL.md`, Step 4.
 

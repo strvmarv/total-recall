@@ -33,7 +33,7 @@ The form that skips the install script:
 npm install -g --ignore-scripts @strvmarv/total-recall
 ```
 
-Then read `~/.copilot/mcp-config.json` and take the first case that applies:
+Then search `~/.copilot/mcp-config.json` for the `total-recall` entry (see Rules in `INSTALL.md`) and take the first case that applies, judged from what the search shows:
 
 - After the plain install, the file has a `total-recall` entry that runs `npx --yes @strvmarv/total-recall`: that is the entry the install script writes, so leave it.
 - The file has no `total-recall` entry: add the entry below to `mcpServers`, keeping the rest of the file.

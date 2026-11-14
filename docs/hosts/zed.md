@@ -12,7 +12,7 @@ No stop condition. The install script configures Zed in `settings.json` inside Z
 npm install -g @strvmarv/total-recall
 ```
 
-Then read Zed's `settings.json` and confirm the `total-recall` entry under `context_servers`. If it is missing (the install script leaves a file it cannot parse as strict JSON, for example one with comments, untouched), take the step of path 2 (that step only; do not run the skip-form install again).
+Then search Zed's `settings.json` for the `total-recall` entry (see Rules in `INSTALL.md`). If it is missing (the install script leaves a file it cannot parse as strict JSON, for example one with comments, untouched), take the step of path 2 (that step only; do not run the skip-form install again).
 
 ### Path 2: nothing else touched
 
