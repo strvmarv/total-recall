@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- **`INSTALL.md` is now a runbook an AI agent can follow to a verified install (#74).** The old file mixed install commands for every harness with release guidance that had gone stale (it told readers that stable was 0.7.2 and to use `@beta`, and expected 0.8.0). `INSTALL.md` now holds only the procedure and a table of harnesses, at the same URL, so a prompt that was already pasted keeps working. The per-harness instructions moved to one page each under `docs/hosts/` (Claude Code, pi, Codex CLI, Copilot CLI, Cursor, Gemini CLI, Kiro, OpenCode, Cline, Windsurf, Zed, VS Code, Hermes and any other MCP client). Each page separates what the agent runs, what only the user can do and how to check the install, and says what was observed and what was not. An install that runs npm now tells the user first what the install script may change in other tools (including switching Hermes's memory provider and adding a Gemini CLI hook that runs on every prompt), and gives the form that skips it. The detail is in `docs/npm-postinstall.md`. The database-relocation and first-run material moved to `docs/database-location.md` and `docs/first-run.md`, `.opencode/INSTALL.md` is now a pointer to the OpenCode page, and four README lines about installing were corrected.
+- **A test keeps the install instructions true.** `scripts/host-docs.test.js` runs in `npm run test:shim` and fails when a harness has no page or the wrong headings, when `INSTALL.md` holds an install command or a version number, when a link or an address points at a missing file or heading, when an install that runs npm lacks its disclosure paragraph, when the example status line no longer matches the commands skill, or when a name cited by a hook script is no longer in the table.
+
 ## 4.7.0 - 2026-11-14
 
 The first stable release with the release attestation, the engine archive cache and the one-command version bump. It was validated on the prereleases 4.7.0-beta.1 and 4.7.0-beta.2 (npm `beta`); 4.7.0-beta.1's GitHub release has no assets, so use 4.7.0-beta.2 or 4.7.0.

@@ -66,6 +66,7 @@ npm wrapper layer (zero-dep Node):
 | `develop` skill (define a change as a reviewed GitHub issue, deliver it as a PR) | `skills/develop/` (`SKILL.md`, `define.md`, `deliver.md`, `handoff.md`, `profile.md`, `queries/`) |
 | `develop` scripts and their tests (zero-dep Node CLIs, one JSON object on stdout) | `skills/develop/scripts/*.js`, `*.test.js`; run in `test:shim` |
 | Version bump (the seven version files, one command) and its guard | `scripts/sync-version.js` (`<version>` writes, `--check [--expect <v>]` verifies), `scripts/sync-version.test.js`; the tag gate is the `check-version` job in `.github/workflows/release.yml` |
+| Install instructions (agent runbook, one page per harness) and their drift check | `INSTALL.md`, `docs/hosts/`, `docs/npm-postinstall.md`, `scripts/host-docs.test.js` |
 | `develop` reviewer agents | `agents/adversarial-reviewer.md`, `agents/counterexample-reviewer.md` |
 | pi `/develop` command | `pi/develop.js`, `pi/develop.test.js` |
 | Project-scoped pin injection | `src/TotalRecall.Infrastructure/Memory/ProjectResolver.cs`, `ProjectKey.cs`, `PinnedScope.cs` |
