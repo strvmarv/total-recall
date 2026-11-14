@@ -194,15 +194,18 @@ function makePackage() {
   return pkg;
 }
 
-/** Runs the package's postinstall.js in a fresh sandbox. `env` adds to a minimal environment. */
-function runPostinstall(extraEnv = {}, { prepare } = {}) {
+/**
+ * Runs the package's postinstall.js in a fresh sandbox. `setup({ home })` creates what the case needs
+ * (tool directories) and returns the environment variables that point the installers at them.
+ */
+function runPostinstall(setup = () => ({})) {
   const pkg = makePackage();
   const home = tmp('tr-home-');
   const bin = tmp('tr-bin-');
   const hermesLog = path.join(bin, 'hermes-calls.txt');
   fs.writeFileSync(path.join(bin, 'hermes'), `#!/bin/sh\necho "$@" >> "${hermesLog}"\necho /fake/hermes/config.yaml\n`, { mode: 0o755 });
   const marker = path.join(home, 'engine-marker');
-  if (prepare) prepare({ home });
+  const extraEnv = setup({ home }) ?? {};
   const r = spawnSync(process.execPath, [path.join(pkg, 'scripts', 'postinstall.js')], {
     encoding: 'utf8',
     env: {
@@ -213,9 +216,11 @@ function runPostinstall(extraEnv = {}, { prepare } = {}) {
       ...extraEnv,
     },
   });
+  const logFile = path.join(extraEnv.TOTAL_RECALL_HOME ?? path.join(home, '.total-recall'), 'postinstall.log');
   return {
-    ...r, pkg, home, marker, hermesCalls: () => (fs.existsSync(hermesLog) ? fs.readFileSync(hermesLog, 'utf8') : ''),
-    log: () => { const f = path.join(extraEnv.TOTAL_RECALL_HOME ?? path.join(home, '.total-recall'), 'postinstall.log'); return fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null; },
+    ...r, pkg, home, marker,
+    hermesCalls: () => (fs.existsSync(hermesLog) ? fs.readFileSync(hermesLog, 'utf8') : ''),
+    log: () => (fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8') : null),
   };
 }
 
@@ -228,8 +233,9 @@ test('postinstall.js: no other tool detected prints the one-line answer, runs th
 });
 
 test('postinstall.js: TOTAL_RECALL_SKIP_HOST_CONFIG=1 still runs the engine step, exits 0 and leaves every other tool alone', () => {
-  const r = runPostinstall({ TOTAL_RECALL_SKIP_HOST_CONFIG: '1' }, {
-    prepare: ({ home }) => { fs.mkdirSync(path.join(home, '.gemini'), { recursive: true }); },
+  const r = runPostinstall(({ home }) => {
+    fs.mkdirSync(path.join(home, '.gemini'), { recursive: true });
+    return { TOTAL_RECALL_SKIP_HOST_CONFIG: '1' };
   });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(fs.readFileSync(r.marker, 'utf8'), 'ran');
@@ -237,4 +243,90 @@ test('postinstall.js: TOTAL_RECALL_SKIP_HOST_CONFIG=1 still runs the engine step
   assert.deepEqual(fs.readdirSync(path.join(r.home, '.gemini')), []);
   assert.equal(r.hermesCalls(), '');
   assert.equal(r.log(), null);
+});
+
+// --- what each installer records (through the real postinstall.js) ---
+
+/** The summary lines of a run as `Tool: action detail` strings (the prefix and indent removed). */
+function lines(r) {
+  return r.stderr.split('\n').filter((l) => l.startsWith(`${P}   `)).map((l) => l.slice(`${P}   `.length));
+}
+
+const ENTRY = { command: 'npx', args: ['--yes', '@strvmarv/total-recall'] };
+
+function writeJson(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(value, null, 2));
+}
+
+test('Cline: a new settings file is added, an existing one is rewrote, both with the path', () => {
+  let file;
+  const r = runPostinstall(({ home }) => { file = path.join(home, 'cline', 'cline_mcp_settings.json'); return { CLINE_HOME: path.dirname(file) }; });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(lines(r), [`Cline: added ${file}`]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).mcpServers['total-recall'], ENTRY);
+
+  const r2 = runPostinstall(({ home }) => {
+    file = path.join(home, 'cline', 'cline_mcp_settings.json');
+    writeJson(file, { mcpServers: { other: { command: 'x' } } });
+    return { CLINE_HOME: path.dirname(file) };
+  });
+  assert.deepEqual(lines(r2), [`Cline: rewrote ${file}`]);
+});
+
+test('Zed, Windsurf and Kiro MCP entries are reported with the tool name and path', () => {
+  const dirs = {};
+  const r = runPostinstall(({ home }) => {
+    dirs.zed = path.join(home, 'zed'); dirs.ws = path.join(home, 'ws'); dirs.kiro = path.join(home, 'kiro');
+    for (const d of Object.values(dirs)) fs.mkdirSync(d);
+    return { ZED_SETTINGS: dirs.zed, WINDSURF_HOME: dirs.ws, KIRO_HOME: dirs.kiro };
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const got = lines(r);
+  assert.ok(got.includes(`Zed: added ${path.join(dirs.zed, 'settings.json')}`), got.join('\n'));
+  assert.ok(got.includes(`Windsurf: added ${path.join(dirs.ws, 'mcp_config.json')}`), got.join('\n'));
+  assert.ok(got.includes(`Kiro: added ${path.join(dirs.kiro, 'settings', 'mcp.json')}`), got.join('\n'));
+});
+
+test('VS Code and the Copilot CLI entry it also writes are two lines, the second named "Copilot CLI"', () => {
+  let vs, copilot;
+  const r = runPostinstall(({ home }) => {
+    vs = path.join(home, 'vscode-user'); fs.mkdirSync(vs);
+    copilot = path.join(home, '.copilot', 'mcp-config.json');
+    return { VSCODE_USER_DIR: vs };
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(lines(r), [`VS Code: added ${path.join(vs, 'mcp.json')}`, `Copilot CLI: added ${copilot}`]);
+});
+
+test('a kept total-recall entry and a file that does not parse record nothing', () => {
+  let zedFile;
+  const r = runPostinstall(({ home }) => {
+    const ws = path.join(home, 'ws');
+    writeJson(path.join(ws, 'mcp_config.json'), { mcpServers: { 'total-recall': ENTRY } });
+    const zed = path.join(home, 'zed'); fs.mkdirSync(zed);
+    zedFile = path.join(zed, 'settings.json');
+    fs.writeFileSync(zedFile, '{ // a comment\n}');
+    return { WINDSURF_HOME: ws, ZED_SETTINGS: zed };
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(lines(r), []);
+  assert.match(r.stderr, /No changes were made to other tools\./);
+  assert.equal(r.log(), null);
+  assert.equal(fs.readFileSync(zedFile, 'utf8'), '{ // a comment\n}'); // untouched
+});
+
+test('a write that fails is a failed line (never added), the other tools are still configured, exit is 0', () => {
+  let zedDir;
+  const r = runPostinstall(({ home }) => {
+    const notADir = path.join(home, 'a-file'); fs.writeFileSync(notADir, '');
+    zedDir = path.join(home, 'zed'); fs.mkdirSync(zedDir);
+    return { CLINE_HOME: path.join(notADir, 'sub'), ZED_SETTINGS: zedDir };
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const got = lines(r);
+  assert.ok(got.some((l) => /^Cline: failed: /.test(l)), got.join('\n'));
+  assert.ok(!got.some((l) => /^Cline: added/.test(l)), got.join('\n'));
+  assert.ok(got.includes(`Zed: added ${path.join(zedDir, 'settings.json')}`), got.join('\n'));
+  assert.match(r.log(), /Cline: failed: /);
 });

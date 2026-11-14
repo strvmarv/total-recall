@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mergeJsonConfig } from './lib/merge-json-config.js';
+import { recordChange } from './lib/change-log.js';
 
 function zedConfigDir() {
   const env = process.env.ZED_SETTINGS;
@@ -51,6 +52,7 @@ export async function installZed() {
       args: ['--yes', '@strvmarv/total-recall']
     }, 'Zed');
   } catch (e) {
+    recordChange('Zed', 'failed', e.message);
     process.stderr.write(`[total-recall:postinstall] Zed install failed (non-fatal): ${e.message}\n`);
   }
 }

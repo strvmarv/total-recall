@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mergeJsonConfig } from './lib/merge-json-config.js';
+import { recordChange } from './lib/change-log.js';
 
 function vscodeUserDir() {
   const env = process.env.VSCODE_USER_DIR;
@@ -58,9 +59,10 @@ export async function installVsCode() {
       mergeJsonConfig(copilotConfigPath, 'mcpServers', {
         command: 'npx',
         args: ['--yes', '@strvmarv/total-recall']
-      }, 'VS Code (Copilot)');
+      }, 'Copilot CLI');
     }
   } catch (e) {
+    recordChange('VS Code', 'failed', e.message);
     process.stderr.write(`[total-recall:postinstall] VS Code install failed (non-fatal): ${e.message}\n`);
   }
 }
