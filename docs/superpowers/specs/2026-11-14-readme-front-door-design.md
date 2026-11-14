@@ -72,7 +72,8 @@ Sections, in this order. Headings are exact; the test checks their order.
    - `### Other harnesses`: a table with one row for each of the other twelve pages (Codex CLI,
      Copilot CLI, Cursor, Gemini CLI, Kiro, OpenCode, Cline, Windsurf, Zed, VS Code, Hermes, any other
      MCP client), in the order of `INSTALL.md`: the harness, how it installs in a few words (plugin;
-     local plugin, Windows only; `npm install -g` plus configuration; memory provider), and the link
+     local plugin, Windows only; npm package plus configuration; memory provider; written without
+     the literal install command, see rule 14), and the link
      to its page. No install command for these appears in the README: the page has it, with the
      question the user must be asked first.
 4. **`## Check that it works`**: start a new session; on a harness that delivers the startup
@@ -101,8 +102,8 @@ Sections, in this order. Headings are exact; the test checks their order.
    superpowers paragraph, shortened; the technology list moves to `docs/architecture.md`),
    **`## License`**.
 
-The README holds no `npx` entry, no configuration block other than nothing at all (the generic
-`mcpServers` block moves out: `docs/hosts/other-mcp.md` has it), no tool table and no command table.
+The README holds no `npx` entry, no configuration block (the generic `mcpServers` block moves out:
+`docs/hosts/other-mcp.md` has it), no tool table and no command table.
 
 ### New pages under `docs/`
 
