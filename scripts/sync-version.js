@@ -21,31 +21,42 @@ export function isValidVersion(version) {
 // One entry per file; each entry lists the fields that carry the version. `read` returns the
 // current value of the field, or null when the file does not carry it.
 
-const jsonField = (name, pick) => ({
+// A field is located by position, never by a global string replace: another entry in the same file
+// (a dependency in the lockfile, say) may carry the same version string and must stay untouched.
+const replaceValue = (re, version) => (text) => (re.test(text) ? text.replace(re, (_m, pre, _old, post) => pre + version + post) : null);
+
+const jsonField = (name, pick, re) => ({
   name,
   read(text) {
     try { const v = pick(JSON.parse(text)); return typeof v === 'string' ? v : null; } catch { return null; }
   },
+  write: (text, version) => replaceValue(re, version)(text),
 });
 
 const topLevel = (o) => o.version;
 const lockRoot = (o) => o.packages?.['']?.version;
 
+// the top-level key sits at the first indent level; the lockfile root is packages[""], before any nested object
+const TOP_RE = /^(  "version"[ \t]*:[ \t]*")([^"\r\n]*)(")/m;
+const LOCK_ROOT_RE = /("packages"\s*:\s*\{\s*""\s*:\s*\{[^{}]*?"version"\s*:\s*")([^"\r\n]*)(")/;
+const YAML_RE = /^(version:[ \t]*["']?)([^"'\s#]+)(["']?[ \t]*(?:#.*)?)$/m;
+
 const yamlField = {
   name: 'version',
   read(text) {
-    const m = /^version:[ \t]*["']?([^"'\s#]+)["']?[ \t]*(?:#.*)?$/m.exec(text);
-    return m ? m[1] : null;
+    const m = YAML_RE.exec(text);
+    return m ? m[2] : null;
   },
+  write: (text, version) => replaceValue(YAML_RE, version)(text),
 };
 
 export const VERSION_FILES = [
-  { file: 'package.json', fields: [jsonField('version', topLevel)] },
-  { file: 'package-lock.json', fields: [jsonField('version', topLevel), jsonField('packages[""].version', lockRoot)] },
-  { file: '.claude-plugin/plugin.json', fields: [jsonField('version', topLevel)] },
-  { file: '.github/plugin/plugin.json', fields: [jsonField('version', topLevel)] },
-  { file: '.cursor-plugin/plugin.json', fields: [jsonField('version', topLevel)] },
-  { file: '.codex-plugin/plugin.json', fields: [jsonField('version', topLevel)] },
+  { file: 'package.json', fields: [jsonField('version', topLevel, TOP_RE)] },
+  { file: 'package-lock.json', fields: [jsonField('version', topLevel, TOP_RE), jsonField('packages[""].version', lockRoot, LOCK_ROOT_RE)] },
+  { file: '.claude-plugin/plugin.json', fields: [jsonField('version', topLevel, TOP_RE)] },
+  { file: '.github/plugin/plugin.json', fields: [jsonField('version', topLevel, TOP_RE)] },
+  { file: '.cursor-plugin/plugin.json', fields: [jsonField('version', topLevel, TOP_RE)] },
+  { file: '.codex-plugin/plugin.json', fields: [jsonField('version', topLevel, TOP_RE)] },
   { file: 'hermes-plugin/plugin.yaml', fields: [yamlField] },
 ];
 
@@ -87,4 +98,36 @@ export function checkVersions({ root }) {
     }
   }
   return { ok: problems.length === 0, problems };
+}
+
+/**
+ * Sets every version field (package.json included) to `version`.
+ * All edits are computed and verified first; nothing is written unless every one of them succeeds.
+ * Returns {ok, changed} or {ok:false, error}.
+ */
+export function syncVersions({ root, version }) {
+  if (!isValidVersion(version)) {
+    return { ok: false, error: `invalid version ${JSON.stringify(version)}: expected X.Y.Z or X.Y.Z-<letter-first prerelease>, without build metadata` };
+  }
+  const edits = [];
+  for (const { file, fields } of VERSION_FILES) {
+    const original = readText(root, file);
+    if (original === null) return { ok: false, error: `${file}: file is missing` };
+    let text = original;
+    for (const f of fields) {
+      const next = f.write(text, version);
+      if (next === null || f.read(next) !== version) {
+        return { ok: false, error: `${file}: cannot locate the ${f.name} field to update` };
+      }
+      text = next;
+    }
+    edits.push({ file, original, text });
+  }
+  const changed = [];
+  for (const { file, original, text } of edits) {
+    if (text === original) continue;
+    fs.writeFileSync(path.join(root, file), text);
+    changed.push(file);
+  }
+  return { ok: true, changed };
 }

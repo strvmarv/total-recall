@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { checkVersions } from './sync-version.js';
+import { checkVersions, syncVersions } from './sync-version.js';
 
 // A throwaway tree that holds the seven version files (eight version fields) at one version.
 // The formatting mimics the real files: 2-space JSON, a lockfile whose root entry sits under
@@ -112,4 +112,94 @@ test('checkVersions: package.json without a version is a problem', () => {
 test('checkVersions: accepts a prerelease whose first identifier starts with a letter', () => {
   const dir = makeTree('4.7.0-beta.1');
   assert.deepEqual(checkVersions({ root: dir }), { ok: true, problems: [] });
+});
+
+// ---- Cycle 2: write mode ----
+
+const ALL_FILES = [
+  'package.json',
+  'package-lock.json',
+  '.claude-plugin/plugin.json',
+  '.github/plugin/plugin.json',
+  '.cursor-plugin/plugin.json',
+  '.codex-plugin/plugin.json',
+  'hermes-plugin/plugin.yaml',
+];
+const snapshot = (dir) => Object.fromEntries(ALL_FILES.map((f) => [f, read(dir, f)]));
+
+test('syncVersions: sets all eight fields, package.json included', () => {
+  const dir = makeTree('4.6.0');
+  const r = syncVersions({ root: dir, version: '4.7.0' });
+  assert.equal(r.ok, true);
+  assert.deepEqual([...r.changed].sort(), [...ALL_FILES].sort());
+  assert.deepEqual(checkVersions({ root: dir }), { ok: true, problems: [] });
+  assert.equal(JSON.parse(read(dir, 'package.json')).version, '4.7.0');
+  const lock = JSON.parse(read(dir, 'package-lock.json'));
+  assert.equal(lock.version, '4.7.0');
+  assert.equal(lock.packages[''].version, '4.7.0');
+});
+
+test('syncVersions: changes nothing but the version value, and leaves a colliding lockfile entry alone', () => {
+  const dir = makeTree('4.6.0');
+  const before = snapshot(dir);
+  syncVersions({ root: dir, version: '4.7.0-beta.1' });
+  const after = snapshot(dir);
+  for (const f of ALL_FILES) {
+    if (f === 'package-lock.json') continue;
+    assert.equal(after[f], before[f].replace('4.6.0', '4.7.0-beta.1'), f);
+  }
+  // the lockfile: two fields change, the dependency entry that shares the old version string does not
+  const lines = after['package-lock.json'].split('\n');
+  const was = before['package-lock.json'].split('\n');
+  const diff = lines.map((l, i) => (l === was[i] ? null : i)).filter((i) => i !== null);
+  assert.equal(diff.length, 2);
+  assert.match(after['package-lock.json'], /"node_modules\/dep": \{\n      "version": "4\.6\.0"/);
+});
+
+test('syncVersions: running it again with the same version changes no file', () => {
+  const dir = makeTree('4.6.0');
+  syncVersions({ root: dir, version: '4.7.0' });
+  const before = snapshot(dir);
+  const r = syncVersions({ root: dir, version: '4.7.0' });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.changed, []);
+  assert.deepEqual(snapshot(dir), before);
+});
+
+for (const bad of ['4.7', 'v4.7.0', '4.7.0-', '4.7.0-1', '4.7.0-beta-x', '4.7.0+build', '', undefined]) {
+  test(`syncVersions: rejects ${JSON.stringify(bad)} and writes nothing`, () => {
+    const dir = makeTree('4.6.0');
+    const before = snapshot(dir);
+    const r = syncVersions({ root: dir, version: bad });
+    assert.equal(r.ok, false);
+    assert.match(r.error, /invalid version/);
+    assert.deepEqual(snapshot(dir), before);
+  });
+}
+
+test('syncVersions: writes nothing when one file cannot be patched', () => {
+  const dir = makeTree('4.6.0');
+  write(dir, 'hermes-plugin/plugin.yaml', 'name: total-recall\n');
+  const before = snapshot(dir);
+  const r = syncVersions({ root: dir, version: '4.7.0' });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /hermes-plugin\/plugin\.yaml/);
+  assert.deepEqual(snapshot(dir), before);
+});
+
+test('syncVersions: writes nothing when a file is missing', () => {
+  const dir = makeTree('4.6.0');
+  fs.rmSync(path.join(dir, '.codex-plugin/plugin.json'));
+  const before = Object.fromEntries(ALL_FILES.filter((f) => f !== '.codex-plugin/plugin.json').map((f) => [f, read(dir, f)]));
+  const r = syncVersions({ root: dir, version: '4.7.0' });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /\.codex-plugin\/plugin\.json/);
+  for (const [f, text] of Object.entries(before)) assert.equal(read(dir, f), text);
+});
+
+test('syncVersions: preserves CRLF line endings and a YAML trailing comment', () => {
+  const dir = makeTree('4.6.0');
+  write(dir, 'hermes-plugin/plugin.yaml', 'name: total-recall\r\nversion: "4.6.0" # keep\r\ndescription: d\r\n');
+  syncVersions({ root: dir, version: '4.7.0' });
+  assert.equal(read(dir, 'hermes-plugin/plugin.yaml'), 'name: total-recall\r\nversion: "4.7.0" # keep\r\ndescription: d\r\n');
 });
