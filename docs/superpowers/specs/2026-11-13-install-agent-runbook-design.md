@@ -52,8 +52,9 @@ Line numbers are `INSTALL.md` at `main` (6b0378a).
   and reaches them in one more fetch.
 - The agent runs only what it can run, hands the user the steps only a person can do, and says what an
   install will change on the machine before it changes it.
-- The agent can confirm the install before the session ends, and the user can confirm it in the next
-  session, on every install path, without `total-recall` on PATH.
+- The user can confirm the install in the next session on every install path, and the agent can
+  confirm it before the session ends wherever the install location is known, without `total-recall`
+  on PATH.
 - Every harness the README lists as supported has one page: how to install, what the user must do, how
   to verify, what you get, known gaps, and what the statements rest on.
 - Facts that go stale are checked by a test in the existing shim test job, so the next drift fails CI.
@@ -96,6 +97,14 @@ project of its own and does not fix the document people are told to use today.
 B was chosen by the author of this spec on the owner's instruction to proceed with the direction
 agreed in conversation (rewrite `INSTALL.md` in place, per-harness detail under `docs/hosts/`).
 
+## Decided by the owner
+
+- The work is two tickets: this one first, the README restructure next.
+- Harnesses whose only install mechanism is `npm install -g` recommend the plain install, after the
+  user has been told what it changes and has said yes. The quiet path is given second.
+- On Claude Code the installing agent offers to add the allow rule for total-recall's tools, and adds
+  it only on a yes.
+
 ## Design
 
 ### `INSTALL.md` (the runbook)
@@ -108,8 +117,9 @@ Written to the agent in the second person, plain imperative steps, no background
    - follow only the page for the harness you are running in; do not run another harness's steps;
    - a step marked **User** is done by the user: say exactly what they need to do, then wait or stop;
      never claim you did it;
-   - before any step a page marks as changing the machine beyond this harness, tell the user what it
-     changes and get a yes;
+   - a step marked **Ask first** changes other tools on the machine or grants a permission: tell the
+     user what it changes and get a yes before running it; on a no, use the alternative the page
+     gives or leave the step to the user;
    - do not report success until Verify has passed; if a step fails, report the failure and stop.
 3. **Before you start.** Stop conditions and requirements: supported platforms (`linux-x64`,
    `linux-arm64`, `osx-arm64`, `win-x64`; an Intel Mac is not supported: stop and tell the user),
@@ -119,9 +129,9 @@ Written to the agent in the second person, plain imperative steps, no background
    (`https://raw.githubusercontent.com/strvmarv/total-recall/main/docs/hosts/<id>.md`). If the harness
    is not listed, use the generic MCP page. If unsure which harness this is, ask the user.
 5. **Step 2: fetch that page and follow its Install section.**
-6. **Step 3: verify now.** Run the page's version check and compare it with the version just
-   installed. State that a bare `total-recall` on PATH can be an older copy than the one the harness
-   runs.
+6. **Step 3: verify now.** Run the page's version check, where the page gives one, and compare it
+   with the version just installed. State that a bare `total-recall` on PATH can be an older copy
+   than the one the harness runs.
 7. **Step 4: hand over.** Tell the user to start a new session (MCP tools appear only then), what
    they should see, and give them a prompt to paste that makes the assistant check the install.
 8. **Step 5: report.** What was installed and where, the version, anything changed outside this
@@ -137,11 +147,12 @@ Ids: `claude-code`, `pi`, `codex-cli`, `copilot-cli`, `cursor`, `gemini-cli`, `k
 Every page has these headings, in this order (a heading with nothing to say holds "None known."):
 
 - `## Install`: the commands the agent runs, in order, in fenced blocks. Where more than one path
-  exists (plugin, MCP only), the recommended one first, each stating what it gives up.
+  exists (plugin, MCP only), the recommended one first, each stating what it gives up. A step that
+  needs the user's yes is marked **Ask first**.
 - `## User steps`: what only the user can do (approve a server, trust hooks, restart, type a slash
   command), in order, each a single instruction the agent can relay.
-- `## Verify`: the version check the agent can run now, and what the user should see in the next
-  session.
+- `## Verify`: the version check the agent can run now, or a plain statement that there is none for
+  this path, and what the user should see in the next session.
 - `## What you get`: MCP tools, startup instructions, the pinned-directive floor, commands, as they
   apply to this harness.
 - `## Known gaps`
@@ -174,14 +185,44 @@ Rules for the pages:
   marketplace install takes the default branch, and the engine is downloaded on first launch for the
   version in that tree's `package.json`.
 - A page whose Install uses `npm install` (including `pi install npm:`) says, before the command, that
-  it changes other tools, links [What postinstall changes](#what-postinstall-changes), and gives the
-  form that skips it (`--ignore-scripts`; the engine is then downloaded on first launch).
-- A path with no hooks (MCP only, and every harness in the "MCP tools only" rows of the README's floor
-  table) says that nothing will tell the model to call `session_start`, and gives the instruction text
-  to add to the harness's rules file. The text is the one `postinstall` already installs for Windsurf
-  and Gemini (`.kiro/steering/total-recall.md`); the page points at it and does not restate it.
-- Claude Code leads with the shell commands (marketplace add, then install), then gives the slash
-  commands as the same two steps for a user to type.
+  it changes other tools, links [What postinstall changes](#what-postinstall-changes), marks the
+  command **Ask first**, and gives the form that skips it (`--ignore-scripts`; the engine is then
+  downloaded on first launch).
+- **Harnesses that only npm configures** (`gemini-cli`, `kiro`, `windsurf`, `zed`, `vscode`, `hermes`,
+  `cline`). Recommended path: `npm install -g @strvmarv/total-recall`, **Ask first**. Second path, for
+  a user who wants nothing else touched: `npm install -g --ignore-scripts @strvmarv/total-recall`,
+  then a hand-written entry for this harness only. The entry is the file, key and shape that
+  harness's `scripts/install-*.js` writes, with `"command": "total-recall"` and no `args` in place of
+  the `npx` form, because the global command was just installed. Where the script does more than
+  write an entry (Hermes's provider switch, a rules or steering file, the Gemini hook), the second
+  path lists each as its own step so the user can take or leave it. `other-mcp` uses the same entry
+  form.
+- **Kiro hooks.** `postinstall` writes the MCP entry and the steering file and does not copy the
+  hooks (`scripts/install-kiro-hooks.js`, header comment). The page says so, and gives copying the
+  package's `.kiro/hooks/` into a workspace's `.kiro/hooks/` as a User step, attributed to that
+  comment and marked not run.
+- **Paths with no hooks** (the MCP-only options, and every harness in the "MCP tools only" rows of the
+  README's floor table) say that nothing will tell the model to call `session_start`. Adding the
+  instruction is a **User step**. The text is the body of `.kiro/steering/total-recall.md` below its
+  front matter, which is what `postinstall` installs for Windsurf and Gemini CLI; the page links it by
+  absolute raw URL, does not restate it, and notes that its "Sticky directives" paragraph describes
+  Kiro's hook. The page names the file to put it in only where a source names one (the Windsurf rules
+  directory, `GEMINI.md`, the Kiro steering directory); otherwise it says "your harness's persistent
+  instructions file".
+- **Claude Code** leads with the shell commands (marketplace add, then install), then gives the slash
+  commands as the same two steps for a user to type. After the install the agent offers the allow
+  rule, **Ask first**: it says that the rule lets Claude Code call total-recall's tools without
+  asking each time, and on a yes makes the edit the `setup` section of `skills/commands/SKILL.md`
+  describes (add the one rule to `permissions.allow` in `~/.claude/settings.json`, create the file if
+  it is missing, change nothing else). On a no, it tells the user that in a mode that never asks the
+  tools are blocked until they run `/total-recall:commands setup`.
+- **Verify now needs a known location.** A page gives `node <directory>/bin/start.js --version` only
+  with a directory that is in the sources or in the observations below: Claude Code's plugin cache,
+  pi's npm and git package directories, Copilot CLI's `installed-plugins` directory, Codex's plugin
+  cache (`AGENTS.md`), Cursor's local plugin directory. The global npm path uses
+  `total-recall --version`. A path with neither says there is no immediate check and that
+  verification happens in the next session. The builder may add a location from a harness's own
+  documentation, marked "from its documentation, not run".
 - The Cline page states where `postinstall` writes (`~/.vscode/cline_mcp_settings.json`) and that the
   repository's own importer reads Cline's settings from a different location, so the written entry may
   not be the file Cline reads. It gives the manual steps from today's section, with the npm step.
@@ -302,6 +343,11 @@ the config and data directories redirected, unless it says otherwise.
 - **`npx`.** `npx --yes @strvmarv/total-recall@4.7.0` with install scripts disabled answered
   `initialize`, listed 50 tools and started the engine. `npx --yes @strvmarv/total-recall` (no
   version) ran the global 4.0.4. Not observed: Windows, and `npx` with install scripts enabled.
+- **Copilot CLI 1.0.83.** On this machine (not a throwaway) the installed plugin is at
+  `~/.copilot/installed-plugins/strvmarv-total-recall-marketplace/total-recall/`.
+- **pi git packages.** On this machine another git-sourced pi package lives at
+  `~/.pi/agent/git/github.com/<owner>/<repo>`; a `git:` install of total-recall is expected at the
+  same layout (inferred, not observed for total-recall).
 - **Zed.** `~/Library/Application Support/Zed/settings.json` on this machine (not a throwaway) holds a
   `total-recall` entry `{"command":"npx","args":["--yes","@strvmarv/total-recall"]}`, as
   `scripts/install-zed.js` writes it.
