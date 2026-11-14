@@ -8,13 +8,13 @@ No stop condition. Gemini CLI is configured through `~/.gemini/settings.json` (o
 
 **Ask first.** This install runs the package's install script, which may change other tools on the machine: Hermes, Kiro, Cline, Windsurf, Gemini CLI, Zed, VS Code and Copilot CLI's MCP config. Beyond adding an MCP entry it can switch Hermes's memory provider and add a Gemini CLI hook that runs on every prompt. Tell the user this and get a yes before running it; the user asking you to install total-recall is not that yes. On a no, use the form that skips the install script, given below. The detail is in [What the install script changes](https://raw.githubusercontent.com/strvmarv/total-recall/main/docs/npm-postinstall.md).
 
-Before running it, search `settings.json` for `total-recall` (see Rules in `INSTALL.md` for how to read a file). If an entry is already there, tell the user that the install keeps it but still adds the hook, and ask again.
+Before running it, check `settings.json` for a `total-recall` entry with the read command in Rules in `INSTALL.md` (key `mcpServers`). If an entry is already there, tell the user that the install keeps it but still adds the hook, and ask again.
 
 ```sh
 npm install -g @strvmarv/total-recall
 ```
 
-It writes the MCP entry and the `BeforeAgent` hook to `settings.json` and a marked block to `GEMINI.md`, and changes other tools too, as the paragraph above says. Then search `settings.json` for the `total-recall` entry and for the hook named `total-recall Pinned Floor`, and search `GEMINI.md` for the two markers `<!-- total-recall -->` and `<!-- /total-recall -->` (see Rules in `INSTALL.md`; a search shows presence, so report where they sit as unverified). For anything missing, take the matching step of path 2 (that step only; do not run the skip-form install again). The install script leaves a `settings.json` that it cannot parse as strict JSON, for example one with comments, untouched, and logs that on stderr.
+It writes the MCP entry and the `BeforeAgent` hook to `settings.json` and a marked block to `GEMINI.md`, and changes other tools too, as the paragraph above says. Then check `settings.json` for the `total-recall` entry and for the hook named `total-recall Pinned Floor`, and count in `GEMINI.md` the two markers `<!-- total-recall -->` and `<!-- /total-recall -->` (see Rules in `INSTALL.md`; a search shows presence, so report where they sit as unverified). For anything missing, take the matching step of path 2 (that step only; do not run the skip-form install again). The install script leaves a `settings.json` that it cannot parse as strict JSON, for example one with comments, untouched, and logs that on stderr.
 
 ### Path 2: nothing else touched
 

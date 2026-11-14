@@ -12,7 +12,7 @@ No stop condition. The install script configures VS Code in `mcp.json` inside th
 npm install -g @strvmarv/total-recall
 ```
 
-Then search VS Code's `mcp.json` for the `total-recall` entry (see Rules in `INSTALL.md`). If it is missing, take step 1 of path 2 (that step only; do not run the skip-form install again).
+Then check VS Code's `mcp.json` for the `total-recall` entry with the read command in Rules in `INSTALL.md`. If it is missing, take step 1 of path 2 (that step only; do not run the skip-form install again).
 
 ### Path 2: nothing else touched
 
