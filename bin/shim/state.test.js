@@ -61,6 +61,14 @@ test('waiting for a retry: the hint says the shim retries by itself, and how soo
   assert.notEqual(hint, DEFAULT_HINT);
 });
 
+test('waiting with no time left says a moment, not 0 s', () => {
+  const t = 5_000;
+  const s = new ShimState({ now: () => t });
+  s.set('provisioning', { attempt: 2, error: 'boom', nextRetryAt: t });
+  assert.match(payloadOf(s).hint, /in a moment/);
+  assert.doesNotMatch(payloadOf(s).hint, /0 s/);
+});
+
 test('a retry that is running says so, without a time', () => {
   const s = new ShimState();
   s.set('provisioning', { attempt: 2, error: 'boom' });

@@ -33,7 +33,7 @@ export function runShim(opts) {
   const surface = new ServerSurface({ catalog, serverName, serverVersion, protocolVersion });
   let proxy = null;
   let restarts = 0;
-  let stopped = false;      // set by stop(): nothing may start or be scheduled afterwards
+  let stopped = false;      // set by stop(): no provisioning try, retry or engine start follows from it
   let retryTimer = null;
 
   const toHarness = (msg) => writeMessage(stdout, msg);
@@ -128,7 +128,7 @@ export function runShim(opts) {
     }
     const delay = provisionRetryDelaysMs[n - 1];
     if (delay === undefined) {
-      state.set('provisioning-failed', { error, retryable: false, gaveUp: true, attempts: n });
+      state.set('provisioning-failed', { error, retryable: false, gaveUp: true });
       stderr.write(`[total-recall:shim] provisioning gave up after ${n} tries\n`);
       return;
     }

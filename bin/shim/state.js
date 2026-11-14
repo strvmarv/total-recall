@@ -51,13 +51,14 @@ export class ShimState {
   // that "retry in a moment" is never said about a state that does not change.
   _hint(payload) {
     if (this.phase === 'provisioning-failed') {
-      return `total-recall could not set itself up (${payload.error}) and will not try again by itself. `
+      return `total-recall could not set itself up (${payload.error ?? 'unknown error'}) and will not try again by itself. `
         + 'Restart the MCP host to try again.';
     }
     if (this.phase === 'provisioning' && payload.error) {
       if (payload.retryInSeconds !== undefined) {
+        const when = payload.retryInSeconds > 0 ? `in about ${payload.retryInSeconds} s` : 'in a moment';
         return `The engine download failed (${payload.error}). total-recall will try again by itself `
-          + `in about ${payload.retryInSeconds} s; retry this tool call after that.`;
+          + `${when}; retry this tool call after that.`;
       }
       return `The engine download failed earlier (${payload.error}); total-recall is trying again now. `
         + 'Retry this tool call in a few seconds.';

@@ -195,13 +195,17 @@ test('retry: a throw from provision is a retryable failure', async () => {
 });
 
 test('retry: when every delay is used the shim gives up with the last error and tries no more', async () => {
-  const { shim, calls } = scripted([RETRYABLE('first'), RETRYABLE('second'), RETRYABLE('last')], { delays: [5, 5] });
+  const { shim, calls, call } = scripted([RETRYABLE('first'), RETRYABLE('second'), RETRYABLE('last')], { delays: [5, 5] });
   await waitFor(() => shim._state.phase === 'provisioning-failed');
   await settle();
   assert.equal(calls.n, 3);
   assert.equal(shim._state.detail.error, 'last');
   assert.equal(shim._state.detail.gaveUp, true);
   assert.equal(shim._state.detail.retryable, false);
+  const payload = JSON.parse((await call()).content[0].text);
+  assert.equal(payload.phase, 'provisioning-failed');
+  assert.equal(payload.gaveUp, true);
+  assert.match(payload.hint, /will not try again/);
   shim.stop();
 });
 
