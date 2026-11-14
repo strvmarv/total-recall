@@ -109,7 +109,7 @@ export function slugify(text) {
 const ATX = /^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/;
 const SETEXT_UNDERLINE = /^ {0,3}(=+|-+)[ \t]*$/;
 // A line that starts some other block, so a Setext underline below it does not make it a heading.
-const BLOCK_START = /^(?: {4}|\t)|^ {0,3}(?:#|[-*+](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|[|>]|<)/;
+const BLOCK_START = /^(?: {4}|\t)|^ {0,3}(?:#|[-*+](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|[|>]|<|\[[^\]\n]+\]:)/;
 
 /**
  * Headings outside fences and HTML comments, in document order, with GitHub's -1, -2 suffix on repeated text:
@@ -154,8 +154,10 @@ export function headings(md) {
 }
 
 /**
- * Targets, outside code, of `[text](target)` and `![alt](target)`, then of `<img src>` and `<a href>`, then of
- * reference definitions (`[ref]: target`, up to three spaces of indent; a footnote `[^1]: text` is not one).
+ * Targets, outside code, of `[text](target)` and `![alt](target)`, then of `<img src>` and `<a href>` (quoted values only),
+ * then of reference definitions (`[ref]: target`, up to three spaces of indent; a footnote `[^1]: text` is not one).
+ * The last two are matched loosely: a line that starts `[word]: text` counts as a definition, and the first quoted
+ * `src` or `href` in a tag wins.
  */
 export function links(md) {
   const text = stripCode(md);
@@ -529,6 +531,10 @@ test('stripCode: fenced blocks and inline code are blanked, newlines kept', () =
   assert.ok(out.includes('a') && out.includes('z'));
 });
 
+test('stripCode: a comment that is never closed is left as it is', () => {
+  assert.equal(stripCode('<!-- x\n[a](b.md)'), '<!-- x\n[a](b.md)');
+});
+
 test('stripCode: an HTML comment is blanked, newlines kept, and a <!-- in a code span opens nothing', () => {
   const md = 'a <!-- one -->\n<!--\n[x](y.md)\n-->\nz `<!--` [kept](k.md)\n';
   const out = stripCode(md);
@@ -607,6 +613,7 @@ test('headings: a --- that is not a Setext underline is not a heading', () => {
   assert.deepEqual(shape('- item\ncontinued\n---\n'), []);
   assert.deepEqual(shape('| a |\n---\n'), []);
   assert.deepEqual(shape('> quote\n---\n'), []);
+  assert.deepEqual(shape('[a]: b.md\n---\n'), []);
   assert.deepEqual(shape('---\n\ntext\n'), []);
 });
 
@@ -1112,8 +1119,8 @@ defect('a prose line that only names the pi command beside another install', che
 }, /exactly one npm-running command/);
 defect('an npm install continued on the next line', checkReadmeContent, (f) => { f['README.md'] += '\nnpm \\\n  install -g @strvmarv/total-recall\n'; }, /exactly one npm-running command/);
 defect('an upper-case NPM INSTALL', checkReadmeContent, (f) => { f['README.md'] += '\nNPM INSTALL -g @strvmarv/total-recall\n'; }, /exactly one npm-running command/);
-defect('a pi install that is not lower case', checkReadmeContent, (f) => {
-  f['README.md'] = f['README.md'].replace('pi install npm:@strvmarv/total-recall', 'PI INSTALL npm:@strvmarv/total-recall');
+defect('a second, upper-case pi install beside the allowed line', checkReadmeContent, (f) => {
+  f['README.md'] += '\nPI INSTALL npm:@strvmarv/total-recall\n';
 }, /exactly one npm-running command/);
 test('rule 14: the pi install line may itself be continued onto the next line', () => {
   const files = validFiles();
