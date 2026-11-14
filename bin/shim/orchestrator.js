@@ -10,6 +10,12 @@ import { ShimState } from './state.js';
 import { ServerSurface } from './server-surface.js';
 import { EngineProxy } from './engine-proxy.js';
 
+// Waits before each retry of a failed provisioning: 5, 10, 20, 40 seconds, then 60 seconds 19 times,
+// 23 waits for 24 tries and 1215 seconds of waiting in all (time spent inside a try is extra). It
+// outlasts the minutes between a version bump landing on the default branch and the release being
+// published, the window in which a first launch finds no engine archive for its version.
+export const PROVISION_RETRY_DELAYS_MS = [5, 10, 20, 40, ...Array(19).fill(60)].map((s) => s * 1000);
+
 export function runShim(opts) {
   const {
     stdin, stdout, catalog,
@@ -18,12 +24,17 @@ export function runShim(opts) {
     engineCommand, engineArgs,
     stderr = process.stderr,
     maxRestarts = 5,
+    // Waits (ms) before each retry of a failed provisioning; its length bounds the tries.
+    provisionRetryDelaysMs = PROVISION_RETRY_DELAYS_MS,
+    now,                  // optional clock (ms) shared with the readiness state, for tests
   } = opts;
 
-  const state = new ShimState();
+  const state = new ShimState({ now });
   const surface = new ServerSurface({ catalog, serverName, serverVersion, protocolVersion });
   let proxy = null;
   let restarts = 0;
+  let stopped = false;      // set by stop(): no provisioning try, retry or engine start follows from it
+  let retryTimer = null;
 
   const toHarness = (msg) => writeMessage(stdout, msg);
 
@@ -85,24 +96,58 @@ export function runShim(opts) {
     t.unref?.();
   }
 
-  // Provision, then start the engine.
-  state.set('provisioning');
-  Promise.resolve()
-    .then(() => provision((p) => state.set('provisioning', p)))
-    .then((r) => {
-      if (r && r.ok) { startEngine(); return; }
-      // `retryable` is recorded into the not_ready payload for the agent/skill to
-      // see; this release does NOT auto-retry provisioning (recovery is model-
-      // driven — the agent re-calls the tool). TODO: if automatic provisioning
-      // retry is ever added, READ this flag back from state.detail here rather
-      // than re-deriving it.
-      state.set('provisioning-failed', { error: r ? r.error : 'unknown', retryable: r ? r.retryable : false });
-      stderr.write(`[total-recall:shim] provisioning failed: ${r ? r.error : 'unknown'}\n`);
-    })
-    .catch((e) => {
-      state.set('provisioning-failed', { error: e.message, retryable: true });
+  // Provision, then start the engine. A failure that can clear up (the release for this version is
+  // not published yet, a network fault) is retried by this shim after a growing wait, so a first
+  // launch heals by itself instead of staying failed until the MCP host is restarted.
+  //
+  // `attempt` is the number of the try now running, and while the shim waits it is the number of the
+  // try that just failed; the first try carries no attempt and no error.
+  async function attempt(n, lastError) {
+    if (stopped) return;
+    const base = n === 1 ? {} : { attempt: n, error: lastError };
+    state.set('provisioning', base);
+
+    let live = true;       // a late progress tick of a finished try must not rewrite the state
+    let r;
+    try {
+      r = await provision((p) => { if (live && !stopped) state.set('provisioning', { ...base, ...p }); });
+    } catch (e) {
+      r = { ok: false, error: e.message, retryable: true };
+    }
+    live = false;
+    if (stopped) return;
+
+    if (r && r.ok) { startEngine(); return; }
+
+    const error = r ? r.error : 'unknown';
+    stderr.write(`[total-recall:shim] provisioning failed: ${error}\n`);
+    // `retryable` is defined only on a failure; anything that is not exactly true is final.
+    if (!r || r.retryable !== true) {
+      state.set('provisioning-failed', { error, retryable: false });
+      return;
+    }
+    const delay = provisionRetryDelaysMs[n - 1];
+    if (delay === undefined) {
+      state.set('provisioning-failed', { error, retryable: false, gaveUp: true });
+      stderr.write(`[total-recall:shim] provisioning gave up after ${n} tries\n`);
+      return;
+    }
+    state.set('provisioning', { attempt: n, error, nextRetryAt: state.now() + delay });
+    stderr.write(`[total-recall:shim] provisioning will be tried again in ${Math.round(delay / 1000)}s\n`);
+    retryTimer = setTimeout(() => { retryTimer = null; run(n + 1, error); }, delay);
+    retryTimer.unref?.();
+  }
+
+  // Nothing escapes `attempt` as a rejection: an unexpected throw (outside `provision`, which has
+  // its own try) is a final failure, never a retry.
+  function run(n, lastError) {
+    attempt(n, lastError).catch((e) => {
+      if (stopped) return;
+      state.set('provisioning-failed', { error: e.message, retryable: false });
       stderr.write(`[total-recall:shim] provisioning error: ${e.message}\n`);
     });
+  }
+  run(1);
 
   // Harness inbound loop. If the harness closes stdin (it disconnected), tear
   // down so we don't leak a zombie shim + orphaned engine child.
@@ -120,6 +165,8 @@ export function runShim(opts) {
   }, () => stop());
 
   function stop() {
+    stopped = true;
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
     try { rl.close(); } catch { /* best-effort */ }
     if (proxy) proxy.stop();
   }
