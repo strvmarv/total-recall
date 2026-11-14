@@ -235,6 +235,7 @@ test('mutation: permissions: write-all on another job is caught', () => {
 // assets are attached and be published by a later step.
 
 const PRERELEASE_EXPR = "contains(github.ref_name, '-')";
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const PUBLISH_STEP = 'Publish the prerelease';
 
 function checkPrereleaseIsPublishedAfterAttach(text) {
@@ -243,17 +244,17 @@ function checkPrereleaseIsPublishedAfterAttach(text) {
   const attachIdx = steps.findIndex((s) => s.name === ATTACH);
   if (attachIdx < 0) return [`no "${ATTACH}" step`];
   const attach = steps[attachIdx].text;
-  if (!new RegExp(`^ +prerelease: \\$\\{\\{ ${PRERELEASE_EXPR.replace(/[()]/g, '\\$&')} \\}\\}$`, 'm').test(attach)) {
+  if (!new RegExp(`^ +prerelease: \\$\\{\\{ ${escapeRegExp(PRERELEASE_EXPR)} \\}\\}$`, 'm').test(attach)) {
     problems.push('the attach step does not set prerelease from the tag');
   }
-  if (!new RegExp(`^ +draft: \\$\\{\\{ ${PRERELEASE_EXPR.replace(/[()]/g, '\\$&')} \\}\\}$`, 'm').test(attach)) {
+  if (!new RegExp(`^ +draft: \\$\\{\\{ ${escapeRegExp(PRERELEASE_EXPR)} \\}\\}$`, 'm').test(attach)) {
     problems.push('the attach step does not create a prerelease as a draft, so its assets cannot be uploaded to an immutable release');
   }
   const publishIdx = steps.findIndex((s) => s.name === PUBLISH_STEP);
   if (publishIdx < 0) return [...problems, `no "${PUBLISH_STEP}" step`];
   const publish = steps[publishIdx].text;
   if (publishIdx < attachIdx) problems.push('the draft is published before the assets are attached');
-  if (!new RegExp(`^        if: ${PRERELEASE_EXPR.replace(/[()]/g, '\\$&')}$`, 'm').test(publish)) problems.push('the publish step does not run only for prereleases');
+  if (!new RegExp(`^        if: ${escapeRegExp(PRERELEASE_EXPR)}$`, 'm').test(publish)) problems.push('the publish step does not run only for prereleases');
   if (!/^        id: attach_release$/m.test(attach)) problems.push('the attach step has no id: attach_release, so its release id cannot be passed on');
   if (!/gh api --method PATCH "repos\/\$GITHUB_REPOSITORY\/releases\/\$RELEASE_ID" -F draft=false/.test(publish)) problems.push('the publish step does not PATCH the release with draft=false by its id');
   if (!/^          RELEASE_ID: \$\{\{ steps\.attach_release\.outputs\.id \}\}$/m.test(publish)) problems.push('the release id reaches the publish step other than through env: RELEASE_ID');
