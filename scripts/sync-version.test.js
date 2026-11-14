@@ -363,3 +363,37 @@ test('script: runs as a CLI and exits with the result code', () => {
   const bad = spawnSync(process.execPath, [script, '--check', '--expect', '9.9.9', '--root', dir, '--no-git'], { encoding: 'utf8' });
   assert.equal(bad.status, 1);
 });
+
+// ---- Cycle 5: the release workflow refuses a tag that does not match the version files ----
+// No YAML parser (the repo has no dependencies for this), so the workflow is checked as text.
+
+const releaseYml = fs.readFileSync(fileURLToPath(new URL('../.github/workflows/release.yml', import.meta.url)), 'utf8');
+const jobBlock = (name) => {
+  const m = new RegExp(`^  ${name}:\\n([\\s\\S]*?)(?=^  [a-z][a-z-]*:\\n|(?![\\s\\S]))`, 'm').exec(releaseYml);
+  return m ? m[1] : null;
+};
+
+test('release.yml: a check-version job runs the tag check on ubuntu with bash', () => {
+  const job = jobBlock('check-version');
+  assert.ok(job, 'release.yml has a check-version job');
+  assert.match(job, /runs-on: ubuntu-latest/);
+  assert.match(job, /actions\/checkout@/);
+  assert.match(job, /actions\/setup-node@/);
+  assert.match(job, /shell: bash/);
+  assert.match(job, /node scripts\/sync-version\.js --check --expect "\$\{REF_NAME#v\}"/);
+});
+
+test('release.yml: the ref name reaches the check through env and is never interpolated into the shell', () => {
+  const job = jobBlock('check-version');
+  assert.match(job, /env:\n\s+REF_NAME: \$\{\{ github\.ref_name \}\}/);
+  const run = /run: (.*)/.exec(job)[1];
+  assert.ok(!run.includes('${{'), `run line interpolates an expression: ${run}`);
+});
+
+test('release.yml: build needs check-version, so no binary is built and nothing is published on a mismatch', () => {
+  const build = jobBlock('build');
+  assert.ok(build, 'release.yml has a build job');
+  assert.match(build, /^    needs: check-version$/m);
+  // publish already needs build, so the gate holds transitively
+  assert.match(jobBlock('publish'), /^    needs: build$/m);
+});
