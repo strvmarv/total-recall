@@ -103,7 +103,7 @@ Check that total-recall is working: call its status tool and tell me the tier co
 - **Pin what must always be followed.** `/total-recall:commands pin <id>` makes an entry a pinned directive: injected first at session start and never decayed. See [the tier model](docs/how-it-works.md#tier-model).
 - **Give it your docs.** `/total-recall:commands ingest <path>` adds files or a directory to the knowledge base, retrieved when relevant. See the `ingest` and `kb` rows in [Commands](docs/commands.md).
 - **Commands.** `/total-recall:commands help` lists them all: search, forget, inspect, promote, compact, eval and more. The form differs by harness (on pi it is `/total-recall <subcommand>`): see [Supported platforms](docs/platforms.md) and [Commands](docs/commands.md).
-- **Web UI.** Where the global npm package is installed, `total-recall ui` opens a local dashboard for memories, the knowledge base, token usage and retrieval quality. On a plugin install, where `total-recall` is not on your PATH, ask the assistant for the command for your install. See [Web UI](docs/web-ui.md).
+- **Web UI.** Where the global npm package is installed, `total-recall ui` opens a local dashboard for memories, the knowledge base, token usage and retrieval quality. On a plugin install or in pi, where `total-recall` is not on your PATH, ask the assistant for the command for your install. See [Web UI](docs/web-ui.md).
 - **The `develop` skill.** `/develop` takes a change from an idea to a pull request: Define turns the idea into a reviewed GitHub issue, and Deliver turns the issue into a pull request. It never merges. See [the develop skill](docs/develop.md).
 
 ## How it works

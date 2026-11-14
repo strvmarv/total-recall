@@ -1,6 +1,6 @@
 # MCP tools
 
-The MCP server exposes 42 core tools in every backend mode; local SQLite and Cortex modes add usage, cache, skill, and feedback tools (50 in SQLite mode and 51 in Cortex mode). All tool names follow the pattern `<domain>_<action>`.
+The MCP server exposes 42 core tools in every backend mode; local SQLite and Cortex modes add usage, cache, skill, and feedback tools (50 in SQLite mode and 51 in Cortex mode). Most tool names follow the pattern `<domain>_<action>` (`status` and `insights` do not).
 
 | Category | Tools |
 |---|---|

@@ -36,7 +36,7 @@ All commands are routed through the `/total-recall:commands` skill:
 | `/total-recall:commands update` | Update the plugin to the latest version |
 | `/total-recall:commands ui` | Open the built-in web UI (`total-recall ui`) |
 
-Benchmark candidates captured from retrieval misses are reviewed with the `eval_grow` tool or the CLI (`total-recall eval grow list` and `total-recall eval grow resolve`); the commands skill has no subcommand for it.
+Benchmark candidates captured from retrieval misses are reviewed (accepted or rejected) with the `eval_grow` tool or the CLI (`total-recall eval grow list` and `total-recall eval grow resolve`); the commands skill has no subcommand for it.
 
 Memory capture, retrieval, and compaction run automatically in the background — see the "Automatic Behavior" section of the `/total-recall:commands` skill.
 

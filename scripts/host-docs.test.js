@@ -223,7 +223,7 @@ export function checkLinks(tree) {
   const problems = [];
   const fixed = ['INSTALL.md', 'README.md', 'docs/npm-postinstall.md', 'docs/database-location.md', 'docs/first-run.md'];
   for (const p of fixed) if (tree.read(p) === null) problems.push(`${p} is missing`);
-  const files = [...new Set([...fixed, ...docPages(tree), ...hostPages(tree), '.opencode/INSTALL.md'])];
+  const files = [...new Set([...fixed, ...docPages(tree), ...hostPages(tree), '.opencode/INSTALL.md', 'PRIVACY.md'])];
   for (const p of files) {
     const text = tree.read(p);
     if (text === null) continue;
@@ -384,8 +384,11 @@ export function checkReadmeShape(tree) {
   if (lines > README_MAX_LINES) problems.push(`README.md has ${lines} lines, more than ${README_MAX_LINES}`);
   const first = fencedBlocks(readme)[0];
   if (!first) problems.push('README.md has no banner (no fenced block)');
+  else if (first.index !== 0) problems.push('README.md does not open with the banner (something stands above the first fenced block)');
   else if (crypto.createHash('sha256').update(first.body).digest('hex') !== BANNER_SHA256) problems.push('README.md: the banner (the first fenced block) has changed');
   const hs = headings(readme);
+  const titles = hs.filter((h) => h.level === 1).map((h) => h.text);
+  if (titles.join('|') !== 'total-recall') problems.push(`README.md: the "#" headings are [${titles.join(', ')}], expected [total-recall]`);
   const sections = hs.filter((h) => h.level === 2).map((h) => h.text);
   if (sections.join('|') !== README_SECTIONS.join('|')) {
     problems.push(`README.md: the "##" headings are [${sections.join(', ')}], expected [${README_SECTIONS.join(', ')}]`);
@@ -447,7 +450,8 @@ export function checkToolReference(tree) {
   }
   if (!Array.isArray(tools)) return ['catalog.json has no "tools" list'];
   const problems = [];
-  for (const tool of tools) if (!page.includes(`\`${tool.name}\``)) problems.push(`docs/tools.md does not list the tool \`${tool.name}\``);
+  const prose = stripFences(page);
+  for (const tool of tools) if (!prose.includes(`\`${tool.name}\``)) problems.push(`docs/tools.md does not list the tool \`${tool.name}\``);
   if (!new RegExp(`(?<!\\d)${tools.length} in SQLite mode`).test(page)) problems.push(`docs/tools.md does not say "${tools.length} in SQLite mode"`);
   return problems;
 }
@@ -903,6 +907,8 @@ defect('a README of 201 lines', checkReadmeShape, (f) => {
   const have = f['README.md'].replace(/\n$/, '').split('\n').length;
   f['README.md'] = f['README.md'].replace(/\n$/, '') + '\n' + 'x\n'.repeat(README_MAX_LINES + 1 - have);
 }, /has 201 lines/);
+defect('a second top-level heading', checkReadmeShape, (f) => { f['README.md'] = f['README.md'].replace('## Install', '# The Problem\n\nx\n\n## Install'); }, /the "#" headings are \[total-recall, The Problem\]/);
+defect('a line above the banner', checkReadmeShape, (f) => { f['README.md'] = `# total-recall\n\n${f['README.md']}`; }, /does not open with the banner/);
 defect('a banner with one changed character', checkReadmeShape, (f) => { f['README.md'] = f['README.md'].replace('REKALL', 'RECALL'); }, /banner .* has changed/);
 defect('Use it before Check that it works', checkReadmeShape, (f) => {
   f['README.md'] = f['README.md'].replace('## Use it\n\n', '').replace('## Check that it works', '## Use it\n\n## Check that it works');
@@ -973,6 +979,9 @@ defect('a tool in the catalog that the reference does not list', checkToolRefere
   f['catalog.json'] = JSON.stringify({ tools: [{ name: 'status' }, { name: 'usage_status' }, { name: 'insights' }] });
   f['docs/tools.md'] = f['docs/tools.md'].replace('2 in', '3 in');
 }, /does not list the tool `insights`/);
+defect('a tool named only inside a fenced block', checkToolReference, (f) => {
+  f['docs/tools.md'] = '# MCP tools\n\n2 in SQLite mode: `usage_status`.\n\n```\nremoved: `status`\n```\n';
+}, /does not list the tool `status`/);
 defect('usage_status does not stand in for status', checkToolReference, (f) => {
   f['docs/tools.md'] = '# MCP tools\n\n2 in SQLite mode: `usage_status`.\n';
 }, /does not list the tool `status`/);

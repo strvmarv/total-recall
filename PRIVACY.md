@@ -49,7 +49,7 @@ The embedding model (`bge-small-en-v1.5`, ~133 MB) is fetched and sha256-verifie
 Three optional configurations send data off your machine, to a system you choose and configure:
 
 - **A Postgres backend** (`[storage] connection_string`): memories and knowledge are stored in that database instead of the local SQLite file.
-- **Cortex** (`[storage] mode = "cortex"`): memories and the knowledge base entries you ingest (including the project docs ingested at session start) are synced to the Cortex instance you configure, telemetry (usage, retrieval events, the compaction log) is pushed to it, team knowledge base queries go to it, and your skills are uploaded only when `[skills] auto_import` is on.
+- **Cortex** (`[storage] mode = "cortex"`): memories and the knowledge base entries you ingest (including the project docs ingested at session start) are synced to the Cortex instance you configure, telemetry (usage, skill usage, retrieval events, the compaction log) is pushed to it, team knowledge base queries go to it, and your skills are uploaded only when `[skills] auto_import` is on.
 - **A remote embedder** (`[embedding] provider = "openai"` or `"bedrock"`): the text to embed is sent to that service.
 
 See [Configuration](docs/configuration.md) and [Connecting to Cortex](docs/cortex.md).
