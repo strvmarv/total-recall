@@ -40,11 +40,18 @@ Since the MCP bootstrap shim (`bin/start.js`) stays connected while it provision
 { "status": "not_ready", "phase": "<phase>", "hint": "total-recall is still starting up; retry in a moment." }
 ```
 
+While the shim is retrying a failed download the payload also carries `attempt`, `error` and `retryInSeconds`, and the hint says so:
+
+```json
+{ "status": "not_ready", "phase": "provisioning", "attempt": 2, "error": "could not fetch provisioning manifest: HTTP 404 for manifest", "retryInSeconds": 35, "hint": "The engine download failed (...). total-recall will try again by itself in about 35 s; retry this tool call after that." }
+```
+
 The key phases you will actually see:
 
 | phase | What it means | What to do |
 |---|---|---|
-| `provisioning` | First launch after a plugin update — the shim is downloading and sha256-verifying the engine binary from GitHub Releases. | Wait 5–10 seconds and retry the tool call. Self-heals; the connection stays up. |
+| `provisioning` | First launch after a plugin update — the shim is downloading and sha256-verifying the engine binary from GitHub Releases. With `attempt`, `error` and `retryInSeconds` it is waiting to retry a failed download (for example the release for this version is not published yet); the shim retries by itself for about 20 minutes. | Wait 5–10 seconds (or `retryInSeconds`) and retry the tool call. Self-heals; the connection stays up. |
+| `provisioning-failed` | The engine could not be downloaded and the shim will not try again: the failure cannot be retried (checksum mismatch, no archive for this platform) or every try failed (`gaveUp: true`). | Do not keep retrying: tell the user what `error` says and that the MCP host must be restarted to try again. |
 | `engine-restarting` | The engine crashed and the shim is restarting it. | Retry shortly (5–10 s). After repeated failures the shim reports `engine-failed`. |
 | `engine-failed` | Engine could not be started after several attempts. | Surface the phase to the user and suggest restarting the MCP host. |
 
