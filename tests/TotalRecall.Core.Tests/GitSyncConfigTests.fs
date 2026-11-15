@@ -47,6 +47,9 @@ let defaultTests =
         testCase "an https remote is accepted and a remote is trimmed" <| fun _ ->
             Expect.equal (remote (RawStr "https://github.com/alice/x.git")).Remote (Some "https://github.com/alice/x.git") "https"
             Expect.equal (remote (RawStr "  git@h:o/r.git \n")).Remote (Some "git@h:o/r.git") "trimmed"
+            Expect.equal (remote (RawStr "\u00a0h:o/r.git\u2028")).Remote (Some "h:o/r.git") "non-ASCII whitespace at the ends is trimmed"
+            Expect.equal (remote (RawStr null)).Remote None "a null string is an empty string"
+            Expect.equal (branch (RawStr null)).Branch None "a null branch is not usable"
     ]
 
 [<Tests>]
@@ -59,7 +62,7 @@ let remoteTests =
                 Expect.isEmpty c.Warnings "no warning"
 
         testCase "a remote that cannot be used is not set, with a warning" <| fun _ ->
-            for v in [ "-oProxyCommand=x"; "a b"; "a\tb"; "a\u0000b"; "\u007fx"; "-" ] do
+            for v in [ "-oProxyCommand=x"; "a b"; "a\tb"; "a\u0000b"; "\u007fx"; "-"; "a\u00a0b"; "a\u2028b" ] do
                 let c = remote (RawStr v)
                 Expect.isNone c.Remote (sprintf "%A" v)
                 Expect.equal c.Warnings [ "git_sync.remote: not a usable repository address; treated as not set" ] (sprintf "%A" v)
@@ -220,6 +223,11 @@ let warningOrderTests =
                   "git_sync.session_end_seconds"; "git_sync.delete_guard_percent" ] "order"
             for w in (norm r).Warnings do
                 Expect.isFalse (w.Contains "\n") "one line"
+
+        testCase "a bad max sits between soft and stall in the order" <| fun _ ->
+            let r : RawGitSync = { absent with SoftRaw = long 0; MaxRaw = long 0; StallRaw = long 0 }
+            let keys = (norm r).Warnings |> List.map (fun w -> w.Substring(0, w.IndexOf ':'))
+            Expect.equal keys [ "git_sync.session_start_soft_seconds"; "git_sync.session_start_max_seconds"; "git_sync.session_start_stall_seconds" ] "order"
     ]
 
 // ------------------------------------------------------------------------------------------------
@@ -257,6 +265,15 @@ let private genRawGitSync : Gen<RawGitSync> =
 
 let private inRange (lo: int) (hi: int) (n: int) = n >= lo && n <= hi
 
+/// Strings that are mostly near-valid names, so both outcomes of the rules are exercised.
+let private genText : Gen<string> =
+    let alphabet = [| 'a'; 'b'; 'Z'; '0'; '.'; '_'; '/'; '-'; ' '; '\t'; '\u00a0'; '\u0000'; '\u00e9'; ':'; '@' |]
+    Gen.oneof
+        [ Gen.elements [ ""; "main"; "dev/sync-1.x"; "a.lock"; "feature/.x"; "-x"; "a b"; "git@h:o/r.git"; " h:o/r.git " ]
+          Gen.listOfLength 3 (Gen.elements alphabet) |> Gen.map (fun cs -> System.String(List.toArray cs))
+          Gen.choose (1, 12) |> Gen.map (fun n -> System.String('a', n))
+          Gen.sized (fun n -> Gen.listOfLength (min n 12) (Gen.elements alphabet)) |> Gen.map (fun cs -> System.String(List.toArray cs)) ]
+
 [<Tests>]
 let totalityTests =
     testList "GitSyncSettings totality" [
@@ -269,7 +286,18 @@ let totalityTests =
                 && inRange 1 3600 c.SessionStartStallSeconds && inRange 1 3600 c.SessionEndSeconds
                 && c.SessionStartSoftSeconds <= c.SessionStartMaxSeconds
                 && inRange 0 100 c.DeleteGuardPercent
-                && (match c.Remote with Some s -> isUsableRemote s | None -> true)
-                && (match c.Branch with Some s -> isUsableBranch s | None -> true)
                 && c.Warnings |> List.forall (fun w -> not (w.Contains "\n"))))
+
+        // An independent statement of the spec's rules (not the predicates normalise uses), asserted both ways.
+        testPropertyWithConfig { FsCheckConfig.defaultConfig with maxTest = 2000 }
+            "remote and branch follow the spec's rules in both directions"
+            (Prop.forAll (Arb.fromGen genText) (fun s ->
+                let branchOk =
+                    System.Text.RegularExpressions.Regex.IsMatch(s, "^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$")
+                    && not (s.Contains "..") && not (s.Contains "//") && not (s.EndsWith "/") && not (s.EndsWith ".")
+                    && s.Split('/') |> Array.forall (fun p -> not (p.StartsWith ".") && not (p.EndsWith ".lock"))
+                let t = s.Trim()
+                let remoteOk = t <> "" && not (t.StartsWith "-") && not (t |> Seq.exists (fun c -> System.Char.IsWhiteSpace c || System.Char.IsControl c))
+                (branch (RawStr s)).Branch = (if branchOk then Some s else None)
+                && (remote (RawStr s)).Remote = (if remoteOk then Some t else None)))
     ]

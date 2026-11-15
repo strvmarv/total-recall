@@ -237,11 +237,14 @@ module GitSyncSettings =
         && s.Length <= 100
         && isAlnum s.[0]
         && (s |> Seq.forall (fun c -> isAlnum c || c = '.' || c = '_' || c = '/' || c = '-'))
-        && not (s.Contains "..")
-        && not (s.Contains "//")
-        && not (s.EndsWith "/")
-        && not (s.EndsWith ".")
-        && (s.Split('/') |> Array.forall (fun part -> not (part.StartsWith ".") && not (part.EndsWith ".lock")))
+        && not (s.Contains("..", System.StringComparison.Ordinal))
+        && not (s.Contains("//", System.StringComparison.Ordinal))
+        && not (s.EndsWith("/", System.StringComparison.Ordinal))
+        && not (s.EndsWith(".", System.StringComparison.Ordinal))
+        && (s.Split('/')
+            |> Array.forall (fun part ->
+                not (part.StartsWith(".", System.StringComparison.Ordinal))
+                && not (part.EndsWith(".lock", System.StringComparison.Ordinal))))
 
     /// An integer key in `lo..hi`: the value, a description of the problem (without the "using" part) and
     /// whether the value was explicit and valid.
@@ -256,8 +259,13 @@ module GitSyncSettings =
         problem |> Option.map (fun p -> sprintf "git_sync.%s: %s; using %d" key p used)
 
     let normalise (raw: RawGitSync) : GitSyncConfig =
+        // a null string (only a hand-built caller can make one) is treated as an empty string
+        let orEmpty (v: GitRawValue) : GitRawValue =
+            match v with
+            | RawStr s when isNull s -> RawStr ""
+            | other -> other
         let remote, remoteWarn =
-            match raw.RemoteRaw with
+            match orEmpty raw.RemoteRaw with
             | RawAbsent -> None, None
             | RawStr s ->
                 let t = s.Trim()
@@ -267,7 +275,7 @@ module GitSyncSettings =
             | other ->
                 None, Some (sprintf "git_sync.remote: expected a string, got %s; treated as not set" (described other))
         let branch, branchWarn =
-            match raw.BranchRaw with
+            match orEmpty raw.BranchRaw with
             | RawAbsent -> Some DefaultBranch, None
             | RawStr s when isUsableBranch s -> Some s, None
             | RawStr _ -> None, Some "git_sync.branch: not a usable branch name; treated as not set"
@@ -288,7 +296,7 @@ module GitSyncSettings =
                 DefaultIntervalSeconds,
                 Some (sprintf "git_sync.interval_seconds: expected an integer, got %s; using %d" (described other) DefaultIntervalSeconds)
         let sessionStart, sessionStartWarn =
-            match raw.SessionStartRaw with
+            match orEmpty raw.SessionStartRaw with
             | RawAbsent -> Blocking, None
             | RawStr "blocking" -> Blocking, None
             | RawStr "background" -> Background, None
