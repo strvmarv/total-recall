@@ -280,13 +280,13 @@ Run hot-tier compaction now. Compaction is user-triggered; hints appear at sessi
 
 See the full command body in [`compact.md`](compact.md).
 
-### eval [--benchmark] [--compare <name>] [--snapshot <name>]
+### eval [--benchmark] [--compare <name>] [--snapshot <name>] | grow [list|resolve]
 
 - No flags: call `eval_report` for live retrieval quality metrics (7-day rolling)
 - `--benchmark`: call `eval_benchmark` for synthetic benchmark results
 - `--compare <name>`: call `eval_compare` to compare against a saved baseline
 - `--snapshot <name>`: call `eval_snapshot` to save current config as a named baseline
-- `grow` (`eval grow list` or `eval grow resolve`): call `eval_grow` with `action` `list` to show the pending benchmark candidates, or `resolve` with `accept` and/or `reject` (candidate ids from the list) to accept or reject them; `benchmark` optionally names the benchmark JSONL. A candidate that holds a secret, PII or a configured sensitive term stays pending. CLI: `total-recall eval grow list` and `total-recall eval grow resolve --accept <id1,id2> --reject <id1,id2>`
+- `grow` (`eval grow list` or `eval grow resolve`): call `eval_grow` with `action` `list` to show the pending benchmark candidates, or `resolve` with `accept` and/or `reject` (candidate ids from the list) to accept or reject them; `benchmark` optionally names the benchmark JSONL. An accepted candidate whose query or content holds a secret, PII or a configured sensitive term is blocked and stays pending. CLI: `total-recall eval grow list` and `total-recall eval grow resolve --accept <id1,id2> --reject <id1,id2>`
 
 ### config [get|set] <key> [value]
 
