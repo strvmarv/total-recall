@@ -71,7 +71,8 @@ default_ttl_seconds = 600
 
 # --- Git sync (optional) ---
 # Sync memories across your machines through a private git repository you own.
-# Nothing is read from this table yet; the values below are the defaults.
+# Sync is not available yet: this table is read and checked, but nothing uses it.
+# The values below are the defaults.
 # [git_sync]
 # remote = "git@github.com:you/total-recall-sync.git"
 # branch = "main"

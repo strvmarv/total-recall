@@ -774,6 +774,43 @@ public sealed class ConfigLoaderTests : IDisposable
     }
 
     [Fact]
+    public void GitSync_ArrayOfTables_IsNone_AndTheLoadSucceeds()
+    {
+        var userPath = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(userPath, "[[git_sync]]\nremote = \"x\"\n");
+        var cfg = new ConfigLoader().LoadEffectiveConfig(userPath);
+        Assert.True(FSharpOption<Core.Config.GitSyncConfig>.get_IsNone(cfg.GitSync));
+    }
+
+    [Fact]
+    public void GitSync_EmptyTable_IsSomeDefaults()
+    {
+        var c = LoadGitSync("[git_sync]\n");
+        Assert.True(FSharpOption<string>.get_IsNone(c.Remote));
+        Assert.Equal("main", c.Branch.Value);
+        Assert.Equal(300, c.IntervalSeconds);
+        Assert.Empty(c.Warnings);
+    }
+
+    [Fact]
+    public void GitSync_DateAndSubTableValues_AreWrongTypeWarnings()
+    {
+        var c = LoadGitSync("[git_sync]\nremote = 2026-01-01\n\n[git_sync.branch]\nx = 1\n");
+        Assert.True(FSharpOption<string>.get_IsNone(c.Remote));
+        Assert.True(FSharpOption<string>.get_IsNone(c.Branch));
+        Assert.True(Warned(c, "remote"));
+        Assert.True(Warned(c, "branch"));
+    }
+
+    [Fact]
+    public void GitSync_InlineTable_IsRead()
+    {
+        var c = LoadGitSync("git_sync = { remote = \"git@h:o/r.git\", interval_seconds = 60 }\n");
+        Assert.Equal("git@h:o/r.git", c.Remote.Value);
+        Assert.Equal(60, c.IntervalSeconds);
+    }
+
+    [Fact]
     public void GitSync_Interval_ZeroDisables_SmallIsRaised()
     {
         var zero = LoadGitSync("[git_sync]\ninterval_seconds = 0\n");
