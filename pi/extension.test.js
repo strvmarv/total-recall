@@ -15,16 +15,22 @@ const readFile = (p) => fs.readFileSync(p, 'utf8');
 const SKILL_BODY_MARK = '# total-recall'; // first heading after the frontmatter
 
 function ctx(o = {}) {
-  const { branch = [], id = 'sid-1', idle = true, hasUI = false } = o;
+  const { branch = [], id = 'sid-1', idle = true, hasUI = false, parent } = o;
   const file = 'file' in o ? o.file : '/s.jsonl'; // an explicit undefined means an ephemeral session
   const notes = [];
+  const sessionManager = { getSessionId: () => id, getSessionFile: () => file, getBranch: () => branch };
+  // `header` picks what getHeader does: a header (naming `parent`, when given), none, or a throw.
+  // Left out, the session manager has no getHeader at all, as before pi-subagents children were handled.
+  if (o.header === 'missing') sessionManager.getHeader = () => null;
+  else if (o.header === 'throws') sessionManager.getHeader = () => { throw new Error('no header'); };
+  else if (parent !== undefined || o.header === 'present') sessionManager.getHeader = () => ({ type: 'session', parentSession: parent });
   return {
     notes,
     cwd: '/proj',
     hasUI,
     isIdle: () => idle,
     ui: { notify: (m, l) => notes.push([m, l]) },
-    sessionManager: { getSessionId: () => id, getSessionFile: () => file, getBranch: () => branch },
+    sessionManager,
   };
 }
 
@@ -384,6 +390,192 @@ for (const [label, over, file] of [
     assert.equal(c.notes[0][1], 'warning');
   });
 }
+
+// ---- pi-subagents children: a session whose parent session is live in this process ----
+
+/** A parent and a child extension instance that share one set of live session files, as in one pi process. */
+function family(over = {}) {
+  const liveSessions = new Set();
+  return { liveSessions, parent: boot({ liveSessions, ...over }), child: boot({ liveSessions, ...over }) };
+}
+const PROMPT = { messageType: 'user', prompt: 'hi' };
+
+test('child: a session whose parent session file is live gets no hook work, no message, no notice and refusing commands', async () => {
+  const { parent, child } = family();
+  const pc = ctx({ file: '/p.jsonl', hasUI: true });
+  await parent.fire('session_start', { reason: 'startup' }, pc);
+  const cc = ctx({ file: '/c.jsonl', parent: '/p.jsonl', hasUI: true });
+  child.calls.readFile.length = 0;
+  assert.equal(await child.fire('session_start', { reason: 'startup' }, cc), undefined);
+  assert.equal(await child.fire('session_compact', { reason: 'manual' }, cc), undefined);
+  assert.equal(await child.fire('session_tree', {}, cc), undefined);
+  assert.equal(await child.fire('before_agent_start', PROMPT, cc), undefined);
+  assert.equal(child.calls.readFile.length, 0);
+  assert.equal(child.calls.resolveEngine, 0);
+  assert.equal(child.calls.runFloor.length, 0);
+  assert.equal(child.calls.stamps.length, 0);
+  assert.equal(child.calls.runWhatsNew.length, 0);
+  assert.equal(child.pi.servers.length, 1); // the MCP server stays registered: a child may use the tools
+  await child.pi.commands.get('total-recall').handler('help', cc);
+  await child.pi.commands.get('develop').handler('123', cc);
+  assert.equal(child.pi.sent.length, 0);
+  assert.deepEqual(cc.notes.map((n) => n[1]), ['warning', 'warning']);
+  // the parent itself still gets the instructions, and its notice
+  const r = await parent.fire('before_agent_start', PROMPT, pc);
+  assert.match(r.message.content, /total-recall/);
+  assert.equal(parent.calls.runWhatsNew.length, 1);
+});
+
+/** A user session is "hooked" when its first prompt carries the instructions. */
+async function getsInstructions(instance, c) {
+  const r = await instance.fire('before_agent_start', PROMPT, c);
+  return r !== undefined && /total-recall/.test(r.message.content);
+}
+
+test('replacement: a fork whose header names its parent still gets everything once the old session shut down', async () => {
+  const liveSessions = new Set();
+  const old = boot({ liveSessions });
+  const oldCtx = ctx({ file: '/a.jsonl', hasUI: true });
+  await old.fire('session_start', { reason: 'startup' }, oldCtx);
+  await old.fire('session_shutdown', { reason: 'fork' }, oldCtx); // pi tears the old session down first
+  const fork = boot({ liveSessions });
+  const forkCtx = ctx({ file: '/b.jsonl', parent: '/a.jsonl', hasUI: true });
+  await fork.fire('session_start', { reason: 'fork' }, forkCtx);
+  assert.equal(await getsInstructions(fork, forkCtx), true);
+  assert.equal(fork.calls.runWhatsNew.length, 1);
+  await fork.pi.commands.get('develop').handler('123', forkCtx);
+  assert.equal(fork.pi.sent.length, 1);
+});
+
+test('replacement: /new, /resume and /reload after the old session shut down stay hooked', async () => {
+  const liveSessions = new Set();
+  // A replacement's header may name a session that has just shut down (one it was once forked from): only
+  // the shutdown handler keeps such a replacement from being taken for a child.
+  let open = { instance: boot({ liveSessions }), ctx: ctx({ file: '/a.jsonl' }), file: '/a.jsonl' };
+  await open.instance.fire('session_start', { reason: 'startup' }, open.ctx);
+  for (const [reason, file, parent] of [
+    ['new', '/b.jsonl', undefined],
+    ['resume', '/c.jsonl', '/a.jsonl'], // a session once forked from the one that has just shut down
+    ['reload', '/c.jsonl', '/a.jsonl'], // the same session again: its header still names the first one
+    ['resume', '/d.jsonl', '/c.jsonl'], // forked from the one that has just shut down
+  ]) {
+    await open.instance.fire('session_shutdown', { reason }, open.ctx);
+    assert.equal(liveSessions.has(open.file), false, `${reason}: the old session left the set`);
+    const instance = boot({ liveSessions });
+    const c = ctx({ file, parent });
+    await instance.fire('session_start', { reason }, c);
+    assert.equal(await getsInstructions(instance, c), true, reason);
+    open = { instance, ctx: c, file };
+  }
+  await open.instance.fire('session_shutdown', { reason: 'quit' }, open.ctx);
+  assert.equal(liveSessions.size, 0);
+});
+
+test('child: a child stays skipped when it takes another prompt after its parent shut down', async () => {
+  const { parent, child, liveSessions } = family();
+  const pc = ctx({ file: '/p.jsonl' });
+  await parent.fire('session_start', { reason: 'startup' }, pc);
+  const cc = ctx({ file: '/c.jsonl', parent: '/p.jsonl' });
+  await child.fire('session_start', { reason: 'startup' }, cc);
+  await parent.fire('session_shutdown', { reason: 'new' }, pc);
+  assert.equal(liveSessions.has('/p.jsonl'), false);
+  assert.equal(await child.fire('before_agent_start', PROMPT, cc), undefined);
+  assert.equal(child.calls.runFloor.length, 0);
+});
+
+test('shutdown: removes the file captured at session_start, even when ctx is stale or throws', async () => {
+  const liveSessions = new Set();
+  const a = boot({ liveSessions });
+  await a.fire('session_start', { reason: 'startup' }, ctx({ file: '/a.jsonl' }));
+  assert.deepEqual([...liveSessions], ['/a.jsonl']);
+  assert.doesNotThrow(() => a.pi.handlers.get('session_shutdown')({ reason: 'quit' }, { get sessionManager() { throw new Error('stale ctx'); } }));
+  assert.equal(liveSessions.size, 0);
+  // and a shutdown with nothing recorded is harmless
+  const b = boot({ liveSessions });
+  assert.doesNotThrow(() => b.pi.handlers.get('session_shutdown')({ reason: 'quit' }, undefined));
+});
+
+test('child: a skipped child still counts as a parent, so its own persisted child is skipped too', async () => {
+  const liveSessions = new Set();
+  const root = boot({ liveSessions });
+  const child = boot({ liveSessions });
+  const grandchild = boot({ liveSessions });
+  await root.fire('session_start', { reason: 'startup' }, ctx({ file: '/r.jsonl' }));
+  const cc = ctx({ file: '/c.jsonl', parent: '/r.jsonl' });
+  await child.fire('session_start', { reason: 'startup' }, cc);
+  const gc = ctx({ file: '/g.jsonl', parent: '/c.jsonl', hasUI: true });
+  assert.equal(await grandchild.fire('session_start', { reason: 'startup' }, gc), undefined);
+  assert.equal(await grandchild.fire('before_agent_start', PROMPT, gc), undefined);
+  assert.equal(grandchild.calls.runWhatsNew.length, 0);
+});
+
+for (const header of ['missing', 'throws', undefined]) {
+  test(`child: a session manager whose header is ${header ?? 'not offered at all'} is the user's session and never breaks the start`, async () => {
+    const liveSessions = new Set(['/p.jsonl']);
+    const s = boot({ liveSessions });
+    const c = ctx({ file: '/s.jsonl', header });
+    assert.doesNotThrow(() => s.pi.handlers.get('session_start')({ reason: 'startup' }, c));
+    assert.equal(await getsInstructions(s, c), true);
+  });
+}
+
+test('child: a header with no parent, or a parent that is not live, is the user\'s session', async () => {
+  const liveSessions = new Set(['/other.jsonl']);
+  for (const parent of [undefined, '/closed.jsonl', '']) {
+    const s = boot({ liveSessions });
+    const c = ctx({ file: '/s.jsonl', parent, header: 'present' });
+    await s.fire('session_start', { reason: 'startup' }, c);
+    assert.equal(await getsInstructions(s, c), true, String(parent));
+  }
+});
+
+test('child: PI_SUBAGENT_ID and a missing session file are still skipped when the live set is in play', async () => {
+  const liveSessions = new Set(['/p.jsonl']);
+  const marked = boot({ liveSessions, env: { PI_SUBAGENT_ID: 'x' } });
+  const mc = ctx({ file: '/m.jsonl' });
+  await marked.fire('session_start', { reason: 'startup' }, mc);
+  assert.equal(await marked.fire('before_agent_start', PROMPT, mc), undefined);
+  const ephemeral = boot({ liveSessions });
+  const ec = ctx({ file: undefined });
+  await ephemeral.fire('session_start', { reason: 'startup' }, ec);
+  assert.equal(await ephemeral.fire('before_agent_start', PROMPT, ec), undefined);
+  assert.deepEqual([...liveSessions].sort(), ['/m.jsonl', '/p.jsonl']); // an ephemeral session has no file to record
+});
+
+test('default export: every instance in a process shares one live-session set, so a child of the first is skipped by the second', async () => {
+  const mod = await import('./extension.js');
+  const piFor = () => {
+    const handlers = new Map();
+    return { handlers, on: (e, f) => handlers.set(e, f), registerMcpServer() {}, registerCommand: (n, d) => handlers.set('cmd:' + n, d), sendUserMessage: () => assert.fail('a child must send nothing') };
+  };
+  const parentPi = piFor();
+  const childPi = piFor();
+  mod.default(parentPi);
+  mod.default(childPi);
+  const shared = globalThis[mod.LIVE_SESSIONS_KEY];
+  assert.ok(shared instanceof Set);
+  const file = path.join(os.tmpdir(), `tr-live-${process.pid}-parent.jsonl`);
+  try {
+    await parentPi.handlers.get('session_start')({ reason: 'startup' }, ctx({ file }));
+    assert.equal(shared.has(file), true);
+    const cc = ctx({ file: file + '.child', parent: file });
+    await childPi.handlers.get('session_start')({ reason: 'startup' }, cc);
+    assert.equal(await childPi.handlers.get('before_agent_start')(PROMPT, cc), undefined);
+    await childPi.handlers.get('cmd:total-recall').handler('help', cc);
+    assert.equal(cc.notes[0][1], 'warning');
+  } finally {
+    await parentPi.handlers.get('session_shutdown')({ reason: 'quit' }, ctx({ file }));
+    await childPi.handlers.get('session_shutdown')({ reason: 'quit' }, ctx({ file }));
+  }
+  assert.equal(shared.has(file), false);
+});
+
+test('LIVE_SESSIONS_KEY is versioned and the set is created once and reused', async () => {
+  const mod = await import('./extension.js');
+  assert.match(String(mod.LIVE_SESSIONS_KEY.description), /total-recall.*live-sessions.*v1/);
+  assert.equal(mod.processLiveSessions(), mod.processLiveSessions());
+  assert.equal(globalThis[mod.LIVE_SESSIONS_KEY], mod.processLiveSessions());
+});
 
 // ---- RF2: engine availability ----
 
