@@ -960,6 +960,8 @@ let private genTier : Gen<Tier> = Gen.elements [ Hot; Warm; Cold ]
 let private genText : Gen<string> = Gen.elements [ "base"; "a"; "b" ]
 let private genTags : Gen<string list> = Gen.elements [ []; [ "x" ]; [ "y" ]; [ "x"; "y" ]; [ "x"; "y"; "z" ] ]
 let private genProject : Gen<string option> = Gen.elements [ None; Some "p" ]
+let private genScope : Gen<string option> = Gen.elements [ None; Some "global" ]
+let private genEntryType : Gen<EntryType> = Gen.elements [ Decision; Correction ]
 let private genBool : Gen<bool> = Gen.elements [ true; false ]
 
 let private genRecord : Gen<SyncRecord> =
@@ -967,6 +969,8 @@ let private genRecord : Gen<SyncRecord> =
         let! text = genText
         let! tags = genTags
         let! project = genProject
+        let! scope = genScope
+        let! entryType = genEntryType
         let! contentStamp = genStamp
         let! tier = genTier
         let! tierStamp = genStamp
@@ -976,6 +980,8 @@ let private genRecord : Gen<SyncRecord> =
             { record text with
                 Tags = tags
                 Project = project
+                Scope = scope
+                EntryType = entryType
                 ContentStamp = contentStamp
                 Placement = placement tier tierStamp sticky stickyStamp }
     }
@@ -985,9 +991,15 @@ let private genEntry : Gen<LocalEntry> =
         let! text = genText
         let! tags = genTags
         let! project = genProject
+        let! scope = genScope
+        let! entryType = genEntryType
         let! tier = genTier
         let! sticky = genBool
-        return { LocalEntry.Content = { fields text with Project = project }; Tags = tags; Tier = tier; Sticky = sticky }
+        return
+            { LocalEntry.Content = { fields text with Project = project; Scope = scope; EntryType = entryType }
+              Tags = tags
+              Tier = tier
+              Sticky = sticky }
     }
 
 let private genStamps : Gen<GroupStamps> =
@@ -1126,6 +1138,9 @@ let private coherent (i: MergeInput) : bool =
         match pending with
         | Some p when List.contains p carried -> pushing = Some p
         | _ -> true
+    // Only an entry that is gone has its pending stamps cleared by the decision (the Row-effects rule); with an
+    // entry present a pending-only proof is still there on the next cycle, so those rows are not restricted.
+    let ok pending pushing recordStamp baseStamp = i.Local.IsSome || ok pending pushing recordStamp baseStamp
     let groupOk (select: GroupStamps -> Stamp option) (stamp: SyncRecord -> Stamp) =
         ok (select i.Pending) (select i.Pushing) (i.Theirs |> Option.map stamp) (effectiveBase i |> Option.map stamp)
     // A held-delete item is opened only by W6 and W8, which need an active row with a base.
@@ -1209,7 +1224,11 @@ let propertyTests =
                 let tierOk =
                     not (older t.Placement.TierStamp b.Placement.TierStamp)
                     || (m.Tier = (None, KeepPending) && bu.Tier = KeepBase && m.Repush.Tier = i.Pending.Tier.IsNone)
-                contentOk && stickyOk && tierOk
+                let repushOk =
+                    (not m.Repush.Content || (older t.ContentStamp b.ContentStamp && i.Pending.Content.IsNone))
+                    && (not m.Repush.Sticky || (older t.Placement.StickyStamp b.Placement.StickyStamp && i.Pending.Sticky.IsNone))
+                    && (not m.Repush.Tier || (older t.Placement.TierStamp b.Placement.TierStamp && i.Pending.Tier.IsNone))
+                contentOk && stickyOk && tierOk && repushOk
             | _ -> true)
 
         testPropertyWithConfig config
