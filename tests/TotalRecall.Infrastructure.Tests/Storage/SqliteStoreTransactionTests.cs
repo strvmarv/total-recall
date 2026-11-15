@@ -359,7 +359,7 @@ public class SqliteStoreTransactionTests
             var opts = new UpdateEntryOpts
             {
                 Content = "after", Summary = "sum", Tags = new[] { "x", "y" },
-                Project = "proj", DecayScore = 0.5, MetadataJson = "{\"k\":\"v\"}",
+                Project = "proj", DecayScore = 0.5, MetadataJson = "{\"k\":\"v\"}", Touch = true,
             };
 
             using (var tx = storeA.BeginTransaction())
@@ -432,7 +432,7 @@ public class SqliteStoreTransactionTests
     }
 
     [Fact]
-    public void FailureAtDeleteVec_RollsBackBothRows() =>
+    public void FailureAtDeleteVec_RollsBack() =>
         AssertFailureRollsBack("delete-vec",
             tx => tx.Delete(Tier.Hot, ContentType.Memory, "id-1"),
             store => SeedHot(store, "id-1", "x"));

@@ -129,6 +129,10 @@ VALUES
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// Stable id derived from <c>MD5(sourceTool:sourcePath:contentHash)</c> —
+    /// matches the TS recipe so the same row can be deduped across runtimes.
+    /// </summary>
     internal static string StableId(string sourceTool, string sourcePath, string contentHash)
     {
         var input = $"{sourceTool}:{sourcePath}:{contentHash}";
