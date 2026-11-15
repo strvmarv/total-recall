@@ -712,3 +712,194 @@ let wholeEntryEdgeTests =
             let w2 = { input with Row = Some Left; HeldDelete = Some LocalDeletion } |> noEntry
             Expect.isFalse (decide w2).CloseHeldDelete "an ignored record leaves the item open"
     ]
+
+// ------------------------------------------------------------------------------------------------
+// Task 4: the ordered lists W6 (record absent, entry present) and W8 (record present, entry gone)
+
+/// W6.1's trigger: a pending change of the text (local text differs from the base's text).
+let private pendingEdit (i: MergeInput) : MergeInput = i |> withLocal (withText "edit") |> pendingContent (ours 4)
+let private item (d: Direction) (i: MergeInput) : MergeInput = { i with HeldDelete = Some d }
+
+[<Tests>]
+let absentRecordTests =
+    testList "SyncMerge W6: the record is gone, the entry is here" [
+        let w6 = noRecord input
+
+        testCase "W6.1 a pending change of the text: leave, publish again with a fresh stamp, tell the user" <| fun _ ->
+            for p in bothApplies do
+                for sticky in [ false; true ] do
+                    let i = w6 |> pendingEdit |> proven p
+                    let i = if sticky then localSticky i else i
+                    let d = decide i
+                    Expect.equal d.Entry LeaveEntry "leave"
+                    Expect.isTrue d.FreshContentStamp "fresh stamp"
+                    Expect.equal d.Notes [ EditBeatsDeletion ] "note"
+                    Expect.equal d.Base (everyBase KeepBase) "base kept: the push writes the record from the base"
+                    Expect.isNone d.RowState "row unchanged"
+
+        testCase "W6.1 closes an open item of either direction" <| fun _ ->
+            for dir in [ RemoteDeletion; LocalDeletion ] do
+                Expect.isTrue (decide (w6 |> pendingEdit |> item dir)).CloseHeldDelete (sprintf "%A item" dir)
+            Expect.isFalse (decide (w6 |> pendingEdit)).CloseHeldDelete "no item"
+
+        testCase "a held pin-edit is not a pending change: the deletion is held, not republished" <| fun _ ->
+            // The base became the remote text when the pin-edit was held; the local pin text differs from it, and
+            // the content stamp was cleared.
+            let i = w6 |> localSticky |> withBase (fun r -> { r with Content = "remote" }) |> withLocal (withText "pin text")
+            let d = decide i
+            Expect.equal d.Entry (HoldDeletion RemoteDeletion) "held"
+            Expect.isFalse d.FreshContentStamp "not republished"
+            Expect.isEmpty d.Notes "no note"
+
+        testCase "a pending content stamp with the base's text is not a text change (a project-only edit)" <| fun _ ->
+            let i = w6 |> pendingContent (ours 4) |> withLocal (fun l -> { l with Content = { l.Content with Project = Some "p" } })
+            let d = decide i
+            Expect.equal d.Entry DeleteEntry "deleted"
+            Expect.equal d.Notes [ PendingChangesDropped ] "the project change is dropped, and the user is told"
+
+        testCase "W6.2 a sticky entry or a pending sticky stamp holds the deletion" <| fun _ ->
+            for p in bothApplies do
+                Expect.equal (decide (w6 |> localSticky |> proven p)).Entry (HoldDeletion RemoteDeletion) "sticky"
+                Expect.equal (decide (w6 |> pendingSticky (ours 4) |> proven p)).Entry (HoldDeletion RemoteDeletion) "pending pin"
+            let d = decide (w6 |> localSticky)
+            Expect.isFalse d.FreshContentStamp "no fresh stamp"
+
+        testCase "W6.2 an open RemoteDeletion item is not reopened; a LocalDeletion item is replaced" <| fun _ ->
+            let d = decide (w6 |> localSticky |> item RemoteDeletion)
+            Expect.equal d.Entry LeaveEntry "already held"
+            Expect.isFalse d.CloseHeldDelete "the item stays"
+            let r = decide (w6 |> localSticky |> item LocalDeletion)
+            Expect.equal r.Entry (HoldDeletion RemoteDeletion) "held in the other direction"
+            Expect.isTrue r.CloseHeldDelete "replaces the open item"
+
+        testCase "W6.3 an open RemoteDeletion item with nothing pending stays" <| fun _ ->
+            let d = decide (w6 |> item RemoteDeletion)
+            Expect.equal d.Entry LeaveEntry "leave"
+            Expect.isFalse d.CloseHeldDelete "the item stays"
+
+        testCase "W6.4 a proven apply deletes the entry and forgets the row" <| fun _ ->
+            let d = decide w6
+            Expect.equal d.Entry DeleteEntry "delete"
+            Expect.equal d.RowState (Some Forgotten) "forgotten"
+            Expect.equal d.Base (everyBase KeepBase) "base kept"
+            Expect.isEmpty d.Notes "nothing was pending"
+            Expect.isFalse d.FreshContentStamp "no fresh stamp"
+
+        testCase "W6.4 a pending tag, tier or non-text change is dropped with a note; a colder local tier alone is not" <| fun _ ->
+            let note (what: string) (i: MergeInput) =
+                let d = decide i
+                Expect.equal d.Entry DeleteEntry (what + ": delete")
+                Expect.equal d.Notes [ PendingChangesDropped ] what
+            note "tags" (w6 |> withLocal (fun l -> { l with Tags = [ "x" ] }))
+            note "pending tier" (w6 |> pendingTier (ours 4))
+            note "project" (w6 |> withLocal (fun l -> { l with Content = { l.Content with Project = Some "p" } }))
+            note "scope" (w6 |> withLocal (fun l -> { l with Content = { l.Content with Scope = Some "global" } }))
+            note "entry type" (w6 |> withLocal (fun l -> { l with Content = { l.Content with EntryType = Correction } }))
+            let colder = decide (w6 |> withBase (withTier Hot (theirs 1)) |> withLocal (fun l -> { l with Tier = Cold }))
+            Expect.equal colder.Entry DeleteEntry "a local demotion"
+            Expect.isEmpty colder.Notes "a local demotion never syncs and is not pending"
+
+        testCase "W6.5 an unproven apply holds the deletion" <| fun _ ->
+            let d = decide (w6 |> proven false)
+            Expect.equal d.Entry (HoldDeletion RemoteDeletion) "held"
+            Expect.isNone d.RowState "row unchanged"
+
+        testCase "a held entry keeps its pending stamps; a deleted one does not" <| fun _ ->
+            for i in [ w6 |> localSticky; w6 |> pendingSticky (ours 4); w6 |> proven false ] do
+                Expect.isFalse (clearsPending (decide i).Entry true) "held"
+            Expect.isTrue (clearsPending (decide w6).Entry true) "deleted"
+
+        testCase "deletion needs proof: never a sticky entry, an unproven apply, a pending pin or text, an open item" <| fun _ ->
+            let never (what: string) (i: MergeInput) = Expect.notEqual (decide i).Entry DeleteEntry what
+            never "sticky" (w6 |> localSticky)
+            never "unproven" (w6 |> proven false)
+            never "pending pin" (w6 |> pendingSticky (ours 4))
+            never "pending text" (w6 |> pendingEdit)
+            never "an open item" (w6 |> item RemoteDeletion)
+    ]
+
+[<Tests>]
+let presentRecordTests =
+    testList "SyncMerge W8: the record is here, the entry is gone" <| [
+        let w8 = noEntry input
+
+        testCase "W8.1 an edit of the text beats the local deletion" <| fun _ ->
+            for p in bothApplies do
+                let d = decide (w8 |> theirText "remote" (theirs 3) |> proven p)
+                Expect.equal d.Entry InsertFromRecord "insert"
+                Expect.equal d.RowState (Some Active) "row"
+                Expect.equal d.Notes [ EditBeatsDeletion ] "note"
+                Expect.equal d.Base (everyBase BaseBecomesTheirs) "base"
+                Expect.isEmpty d.Reviews "unpinned"
+            let sticky = decide (w8 |> theirText "remote" (theirs 3) |> withTheirs (withSticky true (theirs 3)))
+            Expect.equal sticky.Reviews [ NewPin ] "a sticky record adds a new-pin review"
+
+        testCase "W8.1 closes an open item of either direction" <| fun _ ->
+            for dir in [ RemoteDeletion; LocalDeletion ] do
+                let d = decide (w8 |> theirText "remote" (theirs 3) |> item dir)
+                Expect.equal d.Entry InsertFromRecord "insert"
+                Expect.isTrue d.CloseHeldDelete (sprintf "%A item" dir)
+
+        testCase "an unchanged record, or one changed outside the text, does not bring the entry back" <| fun _ ->
+            let cases =
+                [ "unchanged", w8
+                  "tier", w8 |> withTheirs (withTier Hot (theirs 3))
+                  "tags", w8 |> withTheirs (fun r -> { r with Tags = [ "x" ] })
+                  "pin", w8 |> withTheirs (withSticky true (theirs 3))
+                  "project", w8 |> theirText "base" (theirs 3) |> withTheirs (fun r -> { r with Project = Some "p" })
+                  "scope", w8 |> theirText "base" (theirs 3) |> withTheirs (fun r -> { r with Scope = Some "global" })
+                  "entry type", w8 |> theirText "base" (theirs 3) |> withTheirs (fun r -> { r with EntryType = Correction })
+                  "an older text", w8 |> theirText "old" (theirs 0)
+                  "our own push", w8 |> theirText "remote" (ours 3) |> pushingContent (ours 3) ]
+            for what, i in cases do
+                Expect.equal (decide (proven true i)).Entry PushDeletion (what + ": proven, the deletion stands")
+                Expect.equal (decide (proven false i)).Entry (HoldDeletion LocalDeletion) (what + ": unproven, held")
+
+        testCase "W8.2 an open LocalDeletion item is kept and nothing is pushed" <| fun _ ->
+            for p in bothApplies do
+                let d = decide (w8 |> item LocalDeletion |> proven p)
+                Expect.equal d.Entry Ignore "ignore"
+                Expect.isFalse d.CloseHeldDelete "the user has not answered"
+
+        testCase "W8.3 and W8.4 replace an open RemoteDeletion item" <| fun _ ->
+            let d3 = decide (w8 |> item RemoteDeletion)
+            Expect.equal d3.Entry PushDeletion "proven"
+            Expect.isTrue d3.CloseHeldDelete "the remote item is moot"
+            let d4 = decide (w8 |> item RemoteDeletion |> proven false)
+            Expect.equal d4.Entry (HoldDeletion LocalDeletion) "unproven"
+            Expect.isTrue d4.CloseHeldDelete "replaced"
+
+        testCase "W8 updates the base per group: an older group keeps it, a newer one takes the record's, tags always" <| fun _ ->
+            let i = w8 |> withTheirs (withTier Hot (theirs 0) >> withSticky true (theirs 3))
+            let d = decide i
+            Expect.equal d.Base { Content = KeepBase; Tags = BaseBecomesTheirs; Sticky = BaseBecomesTheirs; Tier = KeepBase } "per group"
+
+        testCase "W8.4 a held local deletion clears the pending stamps of the entry that is gone" <| fun _ ->
+            Expect.isTrue (clearsPending (decide (w8 |> proven false)).Entry false) "HoldDeletion LocalDeletion clears"
+
+        testCase "a deletion pushed first and an edit written back converge in both orders" <| fun _ ->
+            // B edits the text while A's deletion is pushed: B republishes its edit (W6.1); A sees it as an edit (W3 or W8.1).
+            let b = decide (noRecord input |> pendingEdit)
+            Expect.isTrue b.FreshContentStamp "B publishes its edit again"
+            Expect.equal b.Entry LeaveEntry "B keeps the memory"
+            let editRecord = theirText "edit" (theirs 5)
+            let aDeletePushedFirst = decide ({ input with Row = Some Forgotten } |> noEntry |> editRecord)
+            Expect.equal aDeletePushedFirst.Entry InsertFromRecord "A gets the memory back (W3)"
+            // The other order: A's deletion is still pending locally when the edit lands.
+            let aEditFirst = decide (noEntry input |> editRecord)
+            Expect.equal aEditFirst.Entry InsertFromRecord "A gets the memory back (W8.1)"
+            // B sees its own record again: nothing is deleted.
+            let bSeesOwn =
+                input |> editRecord |> withLocal (withText "edit") |> pendingContent (theirs 5) |> pushingContent (theirs 5)
+            let d = decide bSeesOwn
+            Expect.isTrue (match d.Entry with MergeGroups _ -> true | _ -> false) "B keeps the entry"
+
+        testCase "a reset to a pre-edit commit does not re-insert a forgotten memory with older text" <| fun _ ->
+            let i = { input with Row = Some Forgotten } |> withBase (fun r -> { r with Content = "edit"; ContentStamp = theirs 5 }) |> noEntry
+            Expect.equal (decide (i |> theirText "base" (theirs 1))).Entry Ignore "the old record is older than the base"
+
+        testCase "a machine-driven promotion does not undo a forget or a local deletion" <| fun _ ->
+            let promoted = withTheirs (withTier Hot (theirs 3))
+            Expect.equal (decide ({ input with Row = Some Forgotten } |> noEntry |> promoted)).Entry Ignore "forgotten (W3)"
+            Expect.notEqual (decide (noEntry input |> promoted)).Entry InsertFromRecord "deleted (W8)"
+    ]

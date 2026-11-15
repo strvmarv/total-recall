@@ -423,13 +423,37 @@ let private textNewer (input: MergeInput) (b: SyncRecord) (t: SyncRecord) : bool
     let own = classify t.ContentStamp (Some b.ContentStamp) input.Pending.Content input.Pushing.Content = Own
     gt t.ContentStamp b.ContentStamp && t.Content <> b.Content && not own
 
-// W6 (Task 4)
+/// W6: the record is absent, the entry is here, the row is `Active` with a base. The first that applies.
 let private absentRecordEntryPresent (input: MergeInput) (bb: SyncRecord) (l: LocalEntry) : MergeDecision * bool =
-    baseDecision, false
+    let pendingText = input.Pending.Content.IsSome && l.Content.Text <> bb.Content
+    let sticky = l.Sticky || input.Pending.Sticky.IsSome
+    let remoteOpen = input.HeldDelete = Some RemoteDeletion
+    if pendingText then                                                          // W6.1: an edit beats the deletion
+        { baseDecision with Entry = LeaveEntry; FreshContentStamp = true; Notes = [ EditBeatsDeletion ] }, true
+    elif sticky then                                                             // W6.2
+        { baseDecision with Entry = (if remoteOpen then LeaveEntry else HoldDeletion RemoteDeletion) }, false
+    elif remoteOpen then { baseDecision with Entry = LeaveEntry }, false         // W6.3
+    elif input.ApplyProven then                                                  // W6.4
+        let dropped =
+            normaliseTags l.Tags <> normaliseTags bb.Tags
+            || input.Pending.Tier.IsSome
+            || l.Content.Project <> bb.Project
+            || l.Content.Scope <> bb.Scope
+            || l.Content.EntryType <> bb.EntryType
+        { baseDecision with
+            Entry = DeleteEntry
+            RowState = Some Forgotten
+            Notes = (if dropped then [ PendingChangesDropped ] else []) },
+        false
+    else { baseDecision with Entry = HoldDeletion RemoteDeletion }, false        // W6.5
 
-// W8 (Task 4)
+/// W8: the record is present, the entry is gone, the row is `Active` with a base. The first that applies.
 let private presentRecordEntryGone (input: MergeInput) (bb: SyncRecord) (t: SyncRecord) : MergeDecision =
-    baseDecision
+    let bu = baseUpdateFor input (Some bb) t
+    if textNewer input bb t then insertFrom t true                                               // W8.1
+    elif input.HeldDelete = Some LocalDeletion then { baseDecision with Entry = Ignore; Base = bu }              // W8.2
+    elif input.ApplyProven then { baseDecision with Entry = PushDeletion; Base = bu }                            // W8.3
+    else { baseDecision with Entry = HoldDeletion LocalDeletion; Base = bu }                                     // W8.4
 
 /// The held-delete item closes when the situation it was opened for is over.
 let private finish (input: MergeInput) (forceClose: bool) (d: MergeDecision) : MergeDecision =
