@@ -14,7 +14,8 @@ let private stamp (t: int64) (c: int) (m: string) : Stamp = { TimeMs = t; Counte
 /// A uniform-ish int64 in [lo, hi] (the ranges here are far below Int64.MaxValue).
 let private rangeGen (lo: int64) (hi: int64) : Gen<int64> =
     let span = hi - lo + 1L
-    Arb.generate<int64> |> Gen.map (fun x -> lo + (((x % span) + span) % span))
+    // DoNotSize: the default int64 generator is limited to +-size (about 100), which would only reach the ends.
+    Arb.generate<DoNotSize<int64>> |> Gen.map (fun (DoNotSize x) -> lo + (((x % span) + span) % span))
 
 let private domainTime : Gen<int64> = rangeGen 0L maxTimeMs
 
@@ -80,6 +81,34 @@ let stampTests =
                 Expect.isNone (Stamp.tryParse s) (sprintf "should reject %A" s)
             Expect.isSome (Timestamp.tryParse "1969-12-31T23:59:59.999Z") "a pre-epoch timestamp is fine"
             Expect.isNone (Timestamp.tryParse "2026-11-12T09:14:03Z") "no milliseconds is not the wire form"
+
+        testCase "calendar validity: leap years, month lengths, zero fields" <| fun _ ->
+            let t (date: string) = Timestamp.tryParse (date + "T00:00:00.000Z")
+            for ok in [ "2000-02-29"; "2024-02-29"; "2026-12-31"; "2026-04-30"; "0004-02-29"; "9999-12-31" ] do
+                Expect.isSome (t ok) (sprintf "%s is a real date" ok)
+            for bad in [ "2025-02-29"; "1900-02-29"; "2100-02-29"; "2026-04-31"; "2026-06-31"; "2026-09-31"; "2026-11-31"
+                         "2026-00-10"; "2026-01-00"; "2026-01-32"; "2026-13-01" ] do
+                Expect.isNone (t bad) (sprintf "%s is not a real date" bad)
+            // Round trip of dates a sized generator would never reach.
+            for d in [ "2000-02-29"; "2024-02-29"; "1900-03-01"; "2100-03-01"; "0001-01-01"; "9999-12-31"; "1999-12-31" ] do
+                let text = d + "T23:59:59.999Z"
+                Expect.equal (t d |> Option.map Timestamp.format) (Some (d + "T00:00:00.000Z")) "format inverts parse"
+                Expect.equal (Timestamp.tryParse text |> Option.map Timestamp.format) (Some text) "end of day"
+
+        testCase "tryParse never throws on null or odd input" <| fun _ ->
+            Expect.isNone (Stamp.tryParse null) "null stamp"
+            Expect.isNone (Timestamp.tryParse null) "null timestamp"
+            Expect.isNone (MachineId.tryCreate null) "null machine"
+
+        testProperty "tryParse never throws and any Some re-formats to the input" <|
+            Prop.forAll
+                (Arb.fromGen (Gen.frequency [ 4, Arb.generate<string>
+                                              1, Gen.elements [ "2026-11-12T09:14:03.512Z"; "2026-11-12T09:14:03.512Z.000003.4f2a9c1e" ]
+                                              2, Gen.map (fun (s: string) -> "2026-11-12T09:14:03.512Z.000003." + s) Arb.generate<string> ]))
+                (fun s ->
+                    let stampOk = match Stamp.tryParse s with Some st -> Stamp.format st = s | None -> true
+                    let tsOk = match Timestamp.tryParse s with Some ms -> Timestamp.format ms = s | None -> true
+                    stampOk && tsOk)
 
         testCase "MachineId.tryCreate" <| fun _ ->
             Expect.isNone (MachineId.tryCreate "4F2A9C1E") "upper case"
