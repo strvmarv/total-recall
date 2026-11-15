@@ -142,13 +142,40 @@ let private clockGen : Gen<Clock> =
 /// The one stamp/clock position `issue` cannot move past (its own test covers it).
 let private notTop (t: int64) (c: int) = not (t = maxTimeMs && c = maxCounter)
 
-let private clockOptGen : Gen<Clock option> =
-    Gen.frequency [ 1, Gen.constant None
-                    4, clockGen |> Gen.filter (fun c -> notTop c.ClockMs c.ClockCounter) |> Gen.map Some ]
+/// Times clustered around `now` (ties, one millisecond either side, the drift limit and one past it)
+/// plus fully random ones, and counters at the interesting values, so the counter rules are reached.
+let private nearTime (now: int64) : Gen<int64> =
+    Gen.frequency [ 6, Gen.elements [ 0L; 1L; -1L; driftLimitMs; driftLimitMs + 1L; -driftLimitMs ] |> Gen.map (fun d -> max 0L (min maxTimeMs (now + d)))
+                    1, domainTime ]
 
-let private baseOptGen : Gen<Stamp option> =
+let private counterGen : Gen<int> =
+    Gen.frequency [ 4, Gen.elements [ 0; 1; 7; 9; 999_998; 999_999 ]
+                    1, Gen.choose (0, maxCounter) ]
+
+let private clockNear (now: int64) : Gen<Clock option> =
     Gen.frequency [ 1, Gen.constant None
-                    4, stampGen |> Gen.filter (fun s -> notTop s.TimeMs s.Counter) |> Gen.map Some ]
+                    5, gen {
+                        let! t = nearTime now
+                        let! c = counterGen
+                        return Some { ClockMs = t; ClockCounter = c } } ]
+    |> Gen.filter (function Some c -> notTop c.ClockMs c.ClockCounter | None -> true)
+
+let private baseNear (now: int64) : Gen<Stamp option> =
+    Gen.frequency [ 1, Gen.constant None
+                    5, gen {
+                        let! t = nearTime now
+                        let! c = counterGen
+                        let! m = machineGen
+                        return Some { TimeMs = t; Counter = c; Machine = m } } ]
+    |> Gen.filter (function Some b -> notTop b.TimeMs b.Counter | None -> true)
+
+let private issueInputs : Gen<int64 * Clock option * Stamp option> =
+    gen {
+        let! now = domainTime
+        let! clock = clockNear now
+        let! baseS = baseNear now
+        return now, clock, baseS
+    }
 
 let private pos (c: Clock) = (c.ClockMs, c.ClockCounter)
 
@@ -163,7 +190,7 @@ let clockTests =
     let T = ts "2026-11-12T10:00:00.000Z"
     testList "SyncStamp.Clock" [
         testProperty "issue is strictly greater than the clock and the base, and the clock never goes backwards" <|
-            Prop.forAll (Arb.fromGen (Gen.zip3 domainTime clockOptGen baseOptGen)) (fun (now, clock, baseS) ->
+            Prop.forAll (Arb.fromGen issueInputs) (fun (now, clock, baseS) ->
                 let r = ok (Clock.issue m now clock baseS)
                 let stampPos = (r.Stamp.TimeMs, r.Stamp.Counter)
                 let aboveClock = match clock with Some c -> stampPos > pos c | None -> true
@@ -173,7 +200,12 @@ let clockTests =
                     | Some c, Some c2 -> pos c2 >= pos c
                     | Some _, None -> false
                     | None, _ -> true
-                aboveClock && aboveBase && clockOk && Stamp.inDomain r.Stamp)
+                // FarFuture is exactly "the stamp is past now + the drift limit", and then the clock stays put.
+                let farOk = r.FarFuture = (r.Stamp.TimeMs > now + driftLimitMs)
+                let heldOk =
+                    if r.FarFuture then r.Clock = clock
+                    else r.Clock = Some { ClockMs = r.Stamp.TimeMs; ClockCounter = r.Stamp.Counter }
+                aboveClock && aboveBase && clockOk && Stamp.inDomain r.Stamp && farOk && heldOk)
 
         testCase "slow clock: an unpin by a slow machine still sorts after the pin it saw" <| fun _ ->
             let a = mid "0000000a"
@@ -195,6 +227,8 @@ let clockTests =
             Expect.equal (ok (Clock.issue m T None (Some (stamp T 4 "0000000a")))).Stamp.Counter 5 "base counter + 1"
             // both have it: the larger wins
             Expect.equal (ok (Clock.issue m T (Some (at T 7)) (Some (stamp T 9 "0000000a")))).Stamp.Counter 10 "larger + 1"
+            // the clock's counter is the larger one: a base with a smaller counter must not win
+            Expect.equal (ok (Clock.issue m T (Some (at T 9)) (Some (stamp T 7 "0000000a")))).Stamp.Counter 10 "clock larger"
             // the base is later than now and the clock
             let r = ok (Clock.issue m T (Some (at T 7)) (Some (stamp (T + 3L) 2 "0000000a")))
             Expect.equal (r.Stamp.TimeMs, r.Stamp.Counter) (T + 3L, 3) "base time wins"
@@ -219,6 +253,22 @@ let clockTests =
             Expect.equal w.Stamp.TimeMs maxTimeMs "now is clamped to the top"
             let n = ok (Clock.issue m Int64.MinValue None None)
             Expect.equal n.Stamp.TimeMs 0L "now is clamped to the bottom"
+
+        testCase "overflow can land exactly on the last millisecond" <| fun _ ->
+            let r = ok (Clock.issue m T (Some { ClockMs = maxTimeMs - 1L; ClockCounter = 999_999 }) None)
+            Expect.equal (r.Stamp.TimeMs, r.Stamp.Counter) (maxTimeMs, 0) "last millisecond, counter 0, not Exhausted"
+
+        testCase "a clock ahead of now but within the limit is adopted" <| fun _ ->
+            let ahead : Clock = { ClockMs = T + 3_600_000L; ClockCounter = 2 }
+            let r = ok (Clock.issue m T (Some ahead) None)
+            Expect.isFalse r.FarFuture "an hour ahead is within the limit"
+            Expect.equal r.Clock (Some { ClockMs = T + 3_600_000L; ClockCounter = 3 }) "moves with the stamp"
+
+        testCase "guardStartup clamps a wild wall clock" <| fun _ ->
+            let c : Clock = { ClockMs = 5L; ClockCounter = 1 }
+            Expect.equal (Clock.guardStartup Int64.MinValue (Some c)).Reset false "now clamps to 0; a clock 5 ms ahead is within the limit"
+            Expect.equal (Clock.guardStartup Int64.MinValue (Some { ClockMs = driftLimitMs + 1L; ClockCounter = 0 })) { Clock = Some { ClockMs = 0L; ClockCounter = 0 }; Reset = true } "reset to the clamped now"
+            Expect.equal (Clock.guardStartup Int64.MaxValue (Some { ClockMs = maxTimeMs; ClockCounter = 3 })).Reset false "now clamps to the top, nothing is ahead"
 
         testCase "drift: exactly 24 hours ahead is adopted, one millisecond more is not (issue)" <| fun _ ->
             let now = T
