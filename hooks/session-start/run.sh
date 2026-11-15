@@ -38,7 +38,26 @@ session_context="${skill_escaped}"
 if [ -n "${CURSOR_PLUGIN_ROOT:-}" ]; then
   printf '{\n  "additional_context": "%s"\n}\n' "$session_context"
 elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -z "${COPILOT_CLI:-}" ]; then
-  printf '{\n  "hookSpecificOutput": {\n    "hookEventName": "SessionStart",\n    "additionalContext": "%s"\n  }\n}\n' "$session_context"
+  # What's-new notice (Claude Code only): whats-new.js prints ONE JSON string literal or nothing.
+  # It has its own 2.5 s deadline; `timeout 4` (GNU coreutils only: Windows' TIMEOUT.EXE is not it)
+  # is the backstop. Under `set -e` any failure must leave the output exactly as it was without it.
+  notice=""
+  if timeout --version >/dev/null 2>&1; then
+    notice=$(timeout 4 node "$PLUGIN_ROOT/hooks/session-start/whats-new.js" 2>/dev/null) || true
+  else
+    notice=$(node "$PLUGIN_ROOT/hooks/session-start/whats-new.js" 2>/dev/null) || true
+  fi
+  # Accept only one line that starts and ends with a double quote (at least 3 characters).
+  case "$notice" in
+    *$'\n'*|*$'\r'*) notice="" ;;
+    \"?*\") ;;
+    *) notice="" ;;
+  esac
+  if [ -n "$notice" ]; then
+    printf '{\n  "systemMessage": %s,\n  "hookSpecificOutput": {\n    "hookEventName": "SessionStart",\n    "additionalContext": "%s"\n  }\n}\n' "$notice" "$session_context"
+  else
+    printf '{\n  "hookSpecificOutput": {\n    "hookEventName": "SessionStart",\n    "additionalContext": "%s"\n  }\n}\n' "$session_context"
+  fi
 else
   printf '{\n  "additionalContext": "%s"\n}\n' "$session_context"
 fi
