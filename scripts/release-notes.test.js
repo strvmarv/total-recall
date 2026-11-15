@@ -587,9 +587,17 @@ test('the docs describe the what\'s-new notice and the updates.notice setting', 
   const next = rest.search(/^### /m);
   const lifecycle = next < 0 ? rest : rest.slice(0, next);
   const hostIds = ['claude-code', 'pi', 'copilot-cli', 'cursor', 'codex', 'gemini-cli', 'kiro', 'opencode', 'hermes', 'cline', 'windsurf', 'zed', 'vscode', 'other'];
-  for (const needle of ['whatsNew', 'whats-new/', ...hostIds.map((id) => `\`${id}\``)]) {
+  for (const needle of ['whatsNew', 'whats-new/']) {
     assert.ok(lifecycle.includes(needle), `the session_start section of AGENTS.md does not mention ${needle}`);
   }
   const changelog = fs.readFileSync(here('../CHANGELOG.md'), 'utf8');
+  const listed = (text, from) => {
+    const at = text.indexOf(from);
+    assert.ok(at >= 0, `no "${from}" list found`);
+    const end = text.indexOf(';', at);
+    return [...text.slice(at, end).matchAll(/`([a-z-]+)`/g)].map((m) => m[1]).filter((id) => id !== 'HostIds');
+  };
+  assert.deepEqual(listed(lifecycle, '(`HostIds`:'), hostIds, 'AGENTS.md host id list differs from HostIds.cs');
+  assert.deepEqual(listed(changelog, 'closed list of ids ('), hostIds, 'CHANGELOG.md host id list differs from HostIds.cs');
   assert.ok(changelog.includes('#99'), 'CHANGELOG.md does not mention #99');
 });
