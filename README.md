@@ -136,7 +136,7 @@ New memories land in the **warm** tier, where they are searched for every questi
 
 ## Privacy
 
-Your data stays on your machine by default. It leaves it only if you configure a Postgres backend, Cortex or a remote embedder. Two things contact GitHub on their own: a plugin install downloads the engine from GitHub Releases on first launch, and a daily version check asks `api.github.com` for the newest release (it sends only the version, and `updates.check = false` turns it off). The detail is in [PRIVACY.md](PRIVACY.md).
+Your data stays on your machine by default and no memory or usage data goes to any analytics service or third party. It leaves your machine only if you configure a Postgres backend, Cortex or a remote embedder. Two things contact GitHub on their own: a plugin install downloads the engine from GitHub Releases on first launch, and a periodic version check, about once a day, asks `api.github.com` for the newest release (it sends only the version of total-recall you run, in its User-Agent header, GitHub sees your IP address as for any request, and `updates.check = false` turns it off). The detail is in [PRIVACY.md](PRIVACY.md).
 
 ## Contributing
 
