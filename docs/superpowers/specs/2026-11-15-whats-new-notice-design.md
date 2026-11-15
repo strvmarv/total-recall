@@ -256,8 +256,10 @@ inspects the store. Rules:
   one line keeps working; there is no "both". The limit also holds inside one engine process: a host that
   calls `session_start` more than once per session (Kiro does, from its hook and from its steering file) must
   not get the "available" notice on the second call after "updated" was delivered on the first, so
-  `WhatsNewService` remembers, in memory, each host for which it has delivered (marked) a notice and returns
-  nothing for that host for the rest of that engine's life. The cost: a later "available" notice waits for
+  `WhatsNewService` remembers, in memory, each resolved host id for which a notice was marked and returns
+  nothing for that host for the rest of that engine's life. The set is filled by `PendingNotice.MarkSeen()`
+  (the pending notice holds a reference to the service for this), never by `Check`, so a notice the handler
+  dropped under its 30 s rule, or a `Check` that returned nothing, adds nothing and the retry shows it. The cost: a later "available" notice waits for
   the engine's next start, which for a host that keeps one engine for days can be later than the host's next
   session (accepted, see Accepted losses).
 - **Packaged notes of another version.** Notes whose `version` differs from the running version are ignored
@@ -309,7 +311,7 @@ Config (`[updates]` in `config.toml`, read in `ConfigLoader`, documented in `doc
 
 | Key | Default | Meaning |
 |---|---|---|
-| `updates.check` | `true` | Whether the engine fetches release information at all. |
+| `updates.check` | `true` | Whether the engine fetches release information at all. It also never does while `updates.notice` is false (a request whose answer could never be shown). |
 | `updates.notice` | `true` | Whether any notice is shown. `false` also stops the "Updated" notice. |
 | `updates.check_interval_hours` | `24` | Minimum time between checks. |
 
@@ -328,7 +330,7 @@ Cursor (see Accepted losses).
   start a real checker there). It is a fire-and-forget task like the reindex worker: a cancellation token the
   `finally` that disposes the handles also cancels. An expected failure of an attempt (offline, a timeout, an
   HTTP error status, an unexpected body) is silent: nothing is written to stdout or stderr. Only an unexpected
-  exception in the task writes one `[total-recall]` line to stderr, and nothing is ever thrown out of it. It starts only when the running version is not a dev build, `updates.check` is on and
+  exception in the task writes one `[total-recall]` line to stderr, and nothing is ever thrown out of it. It starts only when the running version is not a dev build, `updates.notice` and `updates.check` are on and
   `TOTAL_RECALL_NO_UPDATE_CHECK` does not disable it. That condition lives in a static factory of the checker
   that returns nothing when the check is off (taking the version, the settings and the environment through
   parameters, the environment as a `Func<string?>` so tests never set a process-wide variable), so a test can
@@ -342,7 +344,9 @@ Cursor (see Accepted losses).
   of at most 24 hours (re-reading the file on each wake, and never asking for a wait `Task.Delay` cannot
   take), then checks again, in a loop until cancelled (a session can last days). A restart therefore never
   re-fetches before the file says it is due. The clock and the delay are injected so tests never wait.
-- **What the file records.** `checkedAt` is when the server last answered (a 200, or a 403 or 429, which
+- **What the file records.** `checkedAt` and `lastAttempt` are ISO 8601 UTC strings (as in the direct stamp),
+  and a key that has no value is omitted (a file written after only a 403 has no `version` or `summary`).
+  `checkedAt` is when the server last answered (a 200, or a 403 or 429, which
   count as an answer); `lastAttempt` is when an attempt last ended, whatever the outcome. A 200 writes the
   new `version` and `summary` and sets both times. A 403 or 429 keeps the earlier `version` and `summary`
   (or none) and sets both times. Any other failure (offline, timeout, a 5xx, a body that is not the expected
@@ -351,8 +355,8 @@ Cursor (see Accepted losses).
 - **The request.** `GET https://api.github.com/repos/strvmarv/total-recall/releases/latest` (stable running
   version) or `.../releases?per_page=10` (prerelease running version), unauthenticated, `User-Agent:
   total-recall/<version>`, `Accept: application/vnd.github+json`, one 3 s deadline covering the send and the read of the answer (a linked cancellation, so a slow
-  body is bounded too), and a response read through a bounded stream (at most 256 KB; a longer one is a
-  failed attempt). The URL is a constant; nothing in
+  body is bounded too), and a response read through a bounded stream (at most 1 MB, the cap the packaged notes use; a
+  longer one is a failed attempt), with automatic redirects turned off (a redirect answer is a failed attempt). The URL is a constant; nothing in
   the configuration or the environment changes it, and the test constructor takes a base address and an
   `HttpMessageHandler`. The channel follows the running version, as above.
 - **Reading the answer.** A release counts only when it is not a draft, its `tag_name` is `v` followed by a
@@ -360,7 +364,7 @@ Cursor (see Accepted losses).
   a stable running version) it is not a prerelease. A 200 answer with no release that counts is treated as
   not the expected shape: only `lastAttempt` changes. The
   checker records the greatest by semver, `version` as the bare version, and the first paragraph of the
-  release body (a blank line ends it; a null or empty body gives no summary) reduced by `SummarySanitizer`.
+  release body (a blank line ends it, and a line break is `\n`, `\r\n` or `\r`; a null or empty body gives no summary) reduced by `SummarySanitizer`.
   Nothing else from the answer is stored, and a link is never taken from it. The stored summary is
   sanitised again when it is read, and the stored version is validated again by the same rule (at most
   64 characters, a valid semver, no `+build`), so an edited file cannot inject text or a very long line.
@@ -369,6 +373,9 @@ Cursor (see Accepted losses).
   host's `availableSeen` for that channel. `WhatsNewState` reads the whole seen file (`version` and
   `availableSeen`); `WriteSeenVersion` and a new `WriteAvailableSeen` both read the current file and keep
   the other field. A new reader returns `latest-<channel>.json` (at most 64 KB, any error is none).
+  New constructor parameters of `WhatsNewService` and `WhatsNewCommand` are optional trailing ones (the existing
+  constructors and their callers stay valid), and `WhatsNewRenderer.Line` gains an optional host id (the
+  one-argument form stays valid for the first-seen and updated lines; an available line needs the host).
   `NoticeKind` gains `Available`, `KindName` returns `"available"` for it, and the `Notice` for it carries
   the running version as `From`, the newer version as `Version`, and what to mark. `PendingNotice.MarkSeen()`
   and the CLI mark the right field for the kind. `WhatsNewService.Check` and the CLI read the settings
@@ -378,11 +385,13 @@ Cursor (see Accepted losses).
   never from fetched text. The table is: Claude Code `/total-recall:commands update`; pi `pi update`;
   Copilot CLI `copilot plugin update total-recall@strvmarv-total-recall-marketplace`; Gemini CLI, Kiro,
   OpenCode, Hermes, Cline, Windsurf, Zed and VS Code `npm install -g @strvmarv/total-recall`; Cursor,
-  Codex and `other` the sentence `see docs/hosts/<page>.md` with the host's page (`cursor.md`,
-  `codex-cli.md`, `other-mcp.md`). The table covers every id of `HostIds`. Each host's page states the same instruction (an
+  Codex and `other` the pointer `see docs/hosts/<page>.md` with the host's own page (`cursor.md`,
+  `codex-cli.md`, `other-mcp.md`), where an "Updating" section holds the real steps (written from what each
+  install form is: a clone or npm for Cursor, the marketplace for Codex, `npm install -g` for other MCP
+  hosts). The table covers every id of `HostIds`. Each host's page states the same instruction (an
   "Updating" sentence is added to a page that has none; the Claude Code page names `/total-recall:commands
-  update` beside its `/plugin` steps), and a test checks that every entry's command or pointer appears on the
-  page it names (the pages are `claude-code.md`, `pi.md`, `copilot-cli.md`, `cursor.md`, `codex-cli.md`,
+  update` beside its `/plugin` steps), and a test checks that every command entry appears verbatim on its host's page and that every pointer entry
+  names a page that exists and has an "Updating" section (the pages are `claude-code.md`, `pi.md`, `copilot-cli.md`, `cursor.md`, `codex-cli.md`,
   `gemini-cli.md`, `kiro.md`, `opencode.md`, `hermes.md`, `cline.md`, `windsurf.md`, `zed.md`, `vscode.md`,
   `other-mcp.md`).
 
@@ -392,7 +401,7 @@ Cursor (see Accepted losses).
 `PinnedFloorCommand` (one line in `CliApp.BuildRegistry`). Rules:
 
 - **Inputs.** `--host` is normalised with `HostIds.Normalize` (a missing or unknown value is `other`) and
-  overrides** `TOTAL_RECALL_HOST`. It reads the seen-state, the packaged notes (next to the binary,
+  **overrides** `TOTAL_RECALL_HOST`. It reads the seen-state, the packaged notes (next to the binary,
   `AppContext.BaseDirectory`), the `updates.notice` and `updates.check` settings and
   `TOTAL_RECALL_NO_UPDATE_CHECK` (T3), and the channel's `latest-<channel>.json` (T3), and never the
   network.
@@ -535,8 +544,9 @@ its `/plugin` steps), and a test checks that every entry's text appears on its p
 - `docs/configuration.md` (the `[updates]` keys), `skills/commands/SKILL.md` (announce line),
   `skills/using-total-recall/SKILL.md`, `.kiro/steering/total-recall.md`,
   `.kiro/hooks/total-recall-session-start.json`, `AGENTS.md` (session lifecycle, release flow: the tag
-  message format becomes load-bearing and is now checked), `docs/first-run.md`, the pi and Claude Code
-  host pages (including the update instruction and the observed `clientInfo.name`), and `CHANGELOG.md`. `scripts/host-docs.test.js` already checks that the example status line matches
+  message format becomes load-bearing and is now checked), `docs/first-run.md`, all 14 host pages under `docs/hosts/`
+  (each states its update instruction; the pi and Claude Code pages also describe the "available" notice and the
+  observed `clientInfo.name`), and `CHANGELOG.md`. `scripts/host-docs.test.js` already checks that the example status line matches
   the commands skill; keep it passing.
 - Tests: the decider (every rule above, including first run, downgrade and skipped versions); the direct
   stamp (written before the engine lookup, expiry, relay withheld, relay restored without a stamp);
@@ -559,7 +569,7 @@ its `/plugin` steps), and a test checks that every entry's text appears on its p
 
 - The exact JSON shape of `whatsNew` and the state file (above is the intended content).
 - The `clientInfo.name` to host-id table, filled from what each host actually sends where checkable.
-- Per-host `<how>` strings from the host pages.
+- The wording of each host page's "Updating" section (the instruction itself is fixed by the table).
 - Fallback for the annotated-tag problem in `actions/checkout` (see section 1).
 - Whether `whats-new` also exposes `--full` (the section bullets are in the packaged JSON) as a
   convenience; not required.
