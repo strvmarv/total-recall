@@ -1,7 +1,8 @@
 # A "what's new" notice at startup
 
-Date: 2026-11-15. Status: draft for the owner's review. Next step after approval: `/develop` Define,
-which turns this into reviewed issues (the parts below are meant to become separate PRs).
+Date: 2026-11-15. Status: reviewed three times, approved by the owner to define. Delivery is split into three
+sub-tickets under one plain tracking issue (see "Parts for Define"); each is a `/develop` ticket with its
+own PR, and this one spec covers all three.
 
 ## Problem
 
@@ -232,7 +233,9 @@ never on the boot path:
   there is no retry within one attempt.
 - **Untrusted input.** The response is data. The summary is reduced to one line of plain text (control
   characters, ANSI escapes and newlines removed, markdown links flattened, capped at 200 characters at a
-  word boundary) before it is stored. The update instruction in a nudge is composed from the host table
+  word boundary) before it is stored. The sanitiser is specified here once and implemented twice, in JavaScript in
+  the release script (section 1) and in C# in the engine, both tested against one shared fixture list so
+  they cannot drift. The update instruction in a nudge is composed from the host table
   below, never from fetched text.
 
 Config (`[updates]` in `config.toml`, read in `ConfigLoader`, documented in `docs/configuration.md`):
@@ -355,7 +358,12 @@ their pages). A host whose page has no update instruction gets the generic "see 
 - Verifying, on an installed host, any channel marked unverified above, and recording what was observed
   in the host page, as the `AGENTS.md` host sections do.
 
-## Parts for Define (each can be its own PR)
+## Parts for Define (each is its own PR)
+
+Tickets: **T1** is Part 1 (release pipeline); **T2** is Parts 2 and 4 (the notice itself: they ship in
+one release); **T3** is Part 3 (update check, opt-out plumbing, privacy). Part 5's documentation and tests
+are folded into each ticket for the code it describes. T1 is defined and delivered first and carries this
+spec to `main`; T2 and T3 are defined afterwards, each citing this spec.
 
 1. Release pipeline: `scripts/release-notes.js`, `check-version` gate, notes in archives and release body.
 2. Engine core: state files, decider, semver, sanitiser, renderer, `whats-new` CLI, config keys, the
