@@ -682,6 +682,7 @@ test('SKILL.md: Issue entry names the two parent routes and Memory follows spec-
   const memory = section(read('SKILL.md'), 'Memory').replace(/\s+/g, ' ');
   assert.ok(/`spec-merged`/.test(memory), 'Memory snapshots at spec-merged');
   assert.ok(/`Refs #<n>`[^.]*parent/.test(section(read('SKILL.md'), 'Commits and PRs').replace(/\s+/g, ' ')), 'Commits and PRs says a parent says Refs');
+  assert.ok(/`Part of #<parent>`/.test(section(read('SKILL.md'), 'Commits and PRs').replace(/\s+/g, ' ')), 'Commits and PRs says a sub-ticket PR adds Part of');
 });
 
 test('define.md: the closing sentence of Fetch step 5 says an unmerged parent spec stops', () => {
