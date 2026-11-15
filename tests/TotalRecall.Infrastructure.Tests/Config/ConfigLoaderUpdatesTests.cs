@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using Tomlyn.Model;
 using TotalRecall.Infrastructure.Config;
 using Xunit;
 
@@ -89,5 +90,64 @@ public sealed class ConfigLoaderUpdatesTests : IDisposable
         var cfg = new ConfigLoader().LoadDefaults();
         var json = ConfigJsonSerializer.Serialize(cfg);
         Assert.DoesNotContain("updates", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void LoadUpdatesCheckEnabled_NoUserFile_IsTrue()
+    {
+        Assert.True(ConfigLoader.LoadUpdatesCheckEnabled(Path.Combine(_dir, "absent.toml")));
+    }
+
+    [Fact]
+    public void LoadUpdatesCheckEnabled_CheckFalse_IsFalse()
+    {
+        Assert.False(ConfigLoader.LoadUpdatesCheckEnabled(Write("[updates]\ncheck = false\n")));
+    }
+
+    [Fact]
+    public void LoadUpdatesCheckEnabled_WrongType_IsTrue()
+    {
+        Assert.True(ConfigLoader.LoadUpdatesCheckEnabled(Write("[updates]\ncheck = \"no\"\n")));
+    }
+
+    [Fact]
+    public void LoadUpdatesCheckEnabled_BrokenToml_IsTrue()
+    {
+        Assert.True(ConfigLoader.LoadUpdatesCheckEnabled(Write("[updates\ncheck = = false\n")));
+    }
+
+    [Theory]
+    [InlineData("check_interval_hours = 12", 12)]
+    [InlineData("check_interval_hours = 1", 1)]
+    [InlineData("check_interval_hours = 8760", 8760)]
+    [InlineData("check_interval_hours = 0", 24)]
+    [InlineData("check_interval_hours = -1", 24)]
+    [InlineData("check_interval_hours = 8761", 24)]
+    [InlineData("check_interval_hours = 1.5", 24)]
+    [InlineData("check_interval_hours = \"12\"", 24)]
+    public void LoadUpdatesCheckIntervalHours_Values(string line, int expected)
+    {
+        Assert.Equal(expected, ConfigLoader.LoadUpdatesCheckIntervalHours(Write("[updates]\n" + line + "\n")));
+    }
+
+    [Fact]
+    public void LoadUpdatesCheckIntervalHours_TableAbsent_Is24()
+    {
+        Assert.Equal(24, ConfigLoader.LoadUpdatesCheckIntervalHours(Write("[tiers.hot]\nmax_entries = 50\n")));
+    }
+
+    [Fact]
+    public void LoadUpdatesCheckIntervalHours_BrokenToml_Is24()
+    {
+        Assert.Equal(24, ConfigLoader.LoadUpdatesCheckIntervalHours(Write("[updates\ncheck_interval_hours = = 5\n")));
+    }
+
+    [Fact]
+    public void Defaults_HaveCheckAndInterval()
+    {
+        var table = new ConfigLoader().LoadEffectiveTable(Path.Combine(_dir, "absent.toml"));
+        var updates = Assert.IsType<TomlTable>(table["updates"]);
+        Assert.Equal(true, updates["check"]);
+        Assert.Equal(24L, updates["check_interval_hours"]);
     }
 }

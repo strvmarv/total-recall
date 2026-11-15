@@ -73,6 +73,13 @@ default_ttl_seconds = 600
 # Tell the user once per host and version that total-recall is new or was
 # updated. Set false to turn it off.
 notice = true
+# Ask GitHub in the background, at most once per interval, whether a newer
+# release exists. Never runs while notice = false; setting the environment
+# variable TOTAL_RECALL_NO_UPDATE_CHECK=1 also turns it off.
+check = true
+# Minimum hours between update checks: a whole number from 1 to 8760;
+# anything else means 24.
+check_interval_hours = 24
 
 # --- Storage mode ---
 # Controls how the plugin stores and retrieves data.
