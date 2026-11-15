@@ -151,7 +151,7 @@ test('SUBCOMMANDS dispatcher: every listed name dispatches, an unlisted word is 
 
 // ---- this repository's own profile ----
 
-test('.github/develop.md: the repository profile parses, pins the account and runs the .NET suite, the shim suites and the catalog guard', () => {
+test('.github/develop.md: the repository profile parses, pins the account, sets up the worktree and runs the .NET suite, the shim suites and the catalog guard', () => {
   const root = path.join(HERE, '..', '..', '..');
   const markdown = fs.readFileSync(path.join(root, '.github', 'develop.md'), 'utf8');
   const result = parseProfile(markdown);
@@ -161,6 +161,10 @@ test('.github/develop.md: the repository profile parses, pins the account and ru
 
   // The shim suites run through `npm run test:shim`, whose runner holds the one list of test files.
   assert.deepEqual(result.profile.verify, [
+    // Setup that CI does before it builds: a fresh worktree has neither node_modules/ nor the embedding model.
+    // --ignore-scripts: the package's postinstall and prepare write outside the worktree (home-directory host configs, .git/config).
+    'npm ci --ignore-scripts',
+    '[ -f models/bge-small-en-v1.5/model.onnx ] && [ -f models/bge-small-en-v1.5/tokenizer.json ] || sh scripts/fetch-bge-small.sh',
     'dotnet test src/TotalRecall.sln --filter "Category!=Integration"',
     'npm run test:shim',
     // CI's catalog drift guard: build, then diff `dump-catalog` on stdout (no file written outside the worktree).
@@ -184,17 +188,20 @@ test('verify-files: this repo profile writes each block byte-exact to verify-<i>
     path.join(dir, 'verify-1.sh'),
     path.join(dir, 'verify-2.sh'),
     path.join(dir, 'verify-3.sh'),
+    path.join(dir, 'verify-4.sh'),
+    path.join(dir, 'verify-5.sh'),
   ]);
   const expected = parseProfile(fs.readFileSync(profileFile, 'utf8')).profile.verify;
-  assert.equal(expected.length, 3);
+  assert.equal(expected.length, 5);
   parsed.files.forEach((file, i) => {
     const bytes = fs.readFileSync(file);
     assert.equal(bytes.toString('utf8'), `${expected[i]}\n`);
     assert.ok(!bytes.includes(13), 'LF only');
     assert.notDeepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf], 'no BOM');
   });
+  assert.equal(fs.readFileSync(parsed.files[0], 'utf8'), 'npm ci --ignore-scripts\n');
   assert.equal(
-    fs.readFileSync(parsed.files[0], 'utf8'),
+    fs.readFileSync(parsed.files[2], 'utf8'),
     'dotnet test src/TotalRecall.sln --filter "Category!=Integration"\n',
   );
 });
