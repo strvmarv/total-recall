@@ -586,7 +586,8 @@ test('the docs describe the what\'s-new notice and the updates.notice setting', 
   const rest = agents.slice(start + 10);
   const next = rest.search(/^### /m);
   const lifecycle = next < 0 ? rest : rest.slice(0, next);
-  for (const needle of ['whatsNew', 'whats-new/']) {
+  const hostIds = ['claude-code', 'pi', 'copilot-cli', 'cursor', 'codex', 'gemini-cli', 'kiro', 'opencode', 'hermes', 'cline', 'windsurf', 'zed', 'vscode', 'other'];
+  for (const needle of ['whatsNew', 'whats-new/', ...hostIds.map((id) => `\`${id}\``)]) {
     assert.ok(lifecycle.includes(needle), `the session_start section of AGENTS.md does not mention ${needle}`);
   }
   const changelog = fs.readFileSync(here('../CHANGELOG.md'), 'utf8');
