@@ -1,8 +1,8 @@
 # A "what's new" notice at startup
 
 Date: 2026-11-15. Status: reviewed three times, approved by the owner to define. Delivery is split into three
-sub-tickets under one plain tracking issue (see "Parts for Define"); each is a `/develop` ticket with its
-own PR, and this one spec covers all three.
+sub-tickets under one plain tracking issue (#92; see "Parts for Define"); each is a `/develop` ticket with
+its own PR, and this one spec covers all of them. T1 (#91, the release pipeline) is delivered.
 
 ## Problem
 
@@ -246,11 +246,17 @@ never on the boot path:
   word boundary) before it is stored. The sanitiser is specified here once and implemented twice, in JavaScript in
   the release script (section 1) and in C# in the engine, both tested against one shared fixture file
   (`scripts/fixtures/summary-sanitiser.json`, inputs and expected outputs, which the engine's tests read)
-  so they cannot drift. The rule: remove control characters and ANSI escape sequences; turn every run of
-  whitespace, including newlines, into one space; flatten a markdown link `[text](url)` to `text` and drop
-  bare URLs' angle brackets; keep inline code and emphasis marks as plain characters; trim; if longer than
-  200 characters cut at the last space at or before 200 and add no ellipsis; a single word longer than
-  200 characters is cut at 200. Examples in the fixture file: `"Fixed [the cache](https://x.y) bug\n"` gives
+  so they cannot drift. The fixture file is the binding contract; the shipped JavaScript
+  (`scripts/release-notes.js`, `sanitizeSummary`) runs these passes in this order: (1) remove ANSI escape
+  sequences, (2) remove control characters other than whitespace, (3) repeat until nothing changes:
+  flatten a markdown link `[text](url)` to `text` (a URL ends at its first `)`) and drop the angle
+  brackets around a bare `<http(s)://...>` URL (scheme case-insensitive, other schemes untouched), (4) turn
+  every whitespace run into one space, (5) trim spaces, (6) if longer than 200 UTF-16 code units cut at the
+  last space at or before 200 with no ellipsis, a single longer word is cut at 200, and a cut that would
+  leave half of a surrogate pair drops that half. Whitespace is .NET's `char.IsWhiteSpace` set (U+FEFF is
+  not whitespace); inline code and emphasis marks stay as plain characters; an unpaired surrogate in the
+  input is passed through. Known cost: on adversarial input the link pass grows faster than linearly, so the
+  engine caps the input length (to 4,000 characters) before pass 3. Examples in the fixture file: `"Fixed [the cache](https://x.y) bug\n"` gives
   `"Fixed the cache bug"`; `"\u001b[31mred\u001b[0m"` gives `"red"`. The update instruction in a nudge is composed from the host table
   below, never from fetched text.
 
@@ -376,10 +382,11 @@ their pages). A host whose page has no update instruction gets the generic "see 
 
 ## Parts for Define (each is its own PR)
 
-Tickets: **T1** is Part 1 (release pipeline); **T2** is Parts 2 and 4 (the notice itself: they ship in
-one release); **T3** is Part 3 (update check, opt-out plumbing, privacy). Part 5's documentation and tests
-are folded into each ticket for the code it describes. T1 is defined and delivered first and carries this
-spec to `main`; T2 and T3 are defined afterwards, each citing this spec.
+Tickets: **T1** is Part 1 (release pipeline; delivered as #91 / PR #96). **T2a** is Part 2 (the engine and
+the model-relayed notice). **T2b** is Part 4 (direct delivery in Claude Code and pi, the shim's `host`
+argument, the direct stamp, the announce-line edits). **T3** is Part 3 (update check, opt-out plumbing,
+privacy). Part 5's documentation and tests are folded into each ticket for the code it describes. All of
+them hang under the tracking issue #92 and cite this spec; T2a, T2b and T3 are defined one at a time.
 
 1. Release pipeline: `scripts/release-notes.js`, `check-version` gate, notes in archives and release body.
 2. Engine core: state files, decider, semver, sanitiser, renderer, `whats-new` CLI, config keys, the
@@ -392,7 +399,6 @@ spec to `main`; T2 and T3 are defined afterwards, each citing this spec.
 5. Documentation and the tests that guard it.
 
 Order and release rules: Part 1 ships in a release before the notice has notes to show; until then the
-engine shows a version-only line (no summary), still a valid first-seen or update line. **Parts 2 and 4
-ship in the same release**: without Part 4 every caller resolves to `other` (including Hermes, which
+engine shows a version-only line (no summary), still a valid first-seen or update line. **Parts 2 and 4 (T2a and T2b) ship in the same release, in two PRs**: without Part 4 every caller resolves to `other` (including Hermes, which
 discards the result) and no direct stamp exists, so a notice would be marked and spent unseen. Part 3 may follow, since without it no "available"
 notice exists. Each part adds its own tests, and each new test file is added to `SHIM_TEST_TARGETS`.
