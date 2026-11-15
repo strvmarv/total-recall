@@ -1,6 +1,8 @@
 using System;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Storage;
+using TotalRecall.Infrastructure.Memory;
+using TotalRecall.Infrastructure.Search;
 using TotalRecall.Infrastructure.Telemetry;
 using TotalRecall.Infrastructure.Tests.TestSupport;
 using Xunit;
@@ -530,6 +532,238 @@ public class SqliteStoreTransactionTests
             }
 
             Assert.False(new ImportLog(conn).IsAlreadyImported("h"));
+        }
+    }
+
+    // ---- Task 4: move and the all-steps sweep ----
+
+    private static string VecHex(MsSqliteConnection conn, string vecTable)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT embedding FROM {vecTable}";
+        return Convert.ToHexString((byte[])cmd.ExecuteScalar()!);
+    }
+
+    [Fact]
+    public void Move_CopiesRowAndVector()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            SeedHot(store, "id-1", "text");
+            using (var tx = store.BeginTransaction())
+            {
+                tx.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, "id-1");
+                tx.Commit();
+            }
+
+            Assert.Null(store.Get(Tier.Hot, ContentType.Memory, "id-1"));
+            var moved = store.Get(Tier.Warm, ContentType.Memory, "id-1")!;
+            Assert.Equal(1_000L, moved.CreatedAt);
+            Assert.Equal(0, ScalarLong(conn, "SELECT count(*) FROM hot_memories_vec"));
+            Assert.Equal(StoreSnapshot.Hex(Embed("text")), VecHex(conn, "warm_memories_vec"));
+        }
+    }
+
+    [Fact]
+    public void Move_WithEmbedding_UsesIt()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            SeedHot(store, "id-1", "text");
+            var fresh = Embed("a much longer replacement text");
+            using (var tx = store.BeginTransaction())
+            {
+                tx.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, "id-1", fresh);
+                tx.Commit();
+            }
+
+            Assert.Equal(StoreSnapshot.Hex(fresh), VecHex(conn, "warm_memories_vec"));
+        }
+    }
+
+    [Fact]
+    public void Move_NoSourceVectorNoEmbedding_TargetHasNone_AndOrphanIsRemoved()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            store.Insert(Tier.Hot, ContentType.Memory, new InsertEntryOpts("x", Id: "id-1"));
+            // Pre-plant an orphan vector row at the rowid the target row will get.
+            using (var plant = conn.CreateCommand())
+            {
+                plant.CommandText = "INSERT INTO warm_memories_vec (rowid, embedding) VALUES (1, $e)";
+                plant.Parameters.AddWithValue("$e",
+                    System.Runtime.InteropServices.MemoryMarshal.AsBytes(
+                        new ReadOnlySpan<float>(Embed("orphan"))).ToArray());
+                plant.ExecuteNonQuery();
+            }
+
+            using (var tx = store.BeginTransaction())
+            {
+                tx.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, "id-1");
+                tx.Commit();
+            }
+
+            Assert.NotNull(store.Get(Tier.Warm, ContentType.Memory, "id-1"));
+            Assert.Equal(0, ScalarLong(conn, "SELECT count(*) FROM warm_memories_vec"));
+        }
+    }
+
+    [Fact]
+    public void Move_MissingSource_ThrowsAndChangesNothing()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            SeedHot(store, "id-1", "x");
+            var before = StoreSnapshot.Take(conn);
+            using (var tx = store.BeginTransaction())
+            {
+                Assert.Throws<InvalidOperationException>(() =>
+                    tx.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, "nope"));
+            }
+
+            Assert.Equal(before, StoreSnapshot.Take(conn));
+        }
+    }
+
+    [Fact]
+    public void Move_StickyHotToWarmAndBack_DoesNotCarryStickyFlag()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            SeedHot(store, "id-1", "x");
+            store.SetSticky(ContentType.Memory, "id-1", true);
+
+            using (var tx = store.BeginTransaction())
+            {
+                tx.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, "id-1");
+                tx.Move(Tier.Warm, ContentType.Memory, Tier.Hot, ContentType.Memory, "id-1");
+                tx.Commit();
+            }
+
+            Assert.NotNull(store.Get(Tier.Hot, ContentType.Memory, "id-1"));
+            Assert.False(store.IsSticky(ContentType.Memory, "id-1"));
+        }
+    }
+
+    [Fact]
+    public void Move_SameTierAndType_ThrowsAndChangesNothing()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            SeedHot(store, "id-1", "x");
+            var before = StoreSnapshot.Take(conn);
+            using (var tx = store.BeginTransaction())
+            {
+                Assert.ThrowsAny<Exception>(() =>
+                    tx.Move(Tier.Hot, ContentType.Memory, Tier.Hot, ContentType.Memory, "id-1"));
+            }
+
+            Assert.Equal(before, StoreSnapshot.Take(conn));
+        }
+    }
+
+    [Fact]
+    public void Move_MatchesStoreMoveAndMoveAndReEmbed()
+    {
+        var (connA, storeA) = NewStore();
+        var (connB, storeB) = NewStore();
+        using (connA)
+        using (connB)
+        {
+            SeedHot(storeA, "id-1", "same text");
+            SeedHot(storeB, "id-1", "same text");
+
+            using (var tx = storeA.BeginTransaction())
+            {
+                tx.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory,
+                    "id-1", Embed("same text"));
+                tx.Commit();
+            }
+            var entry = storeB.Get(Tier.Hot, ContentType.Memory, "id-1")!;
+            MoveHelpers.MoveAndReEmbed(
+                storeB, new VectorSearch(connB), new FakeEmbedder(), entry,
+                Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory);
+
+            Assert.Equal(
+                StoreSnapshot.Take(connB, maskTimes: true),
+                StoreSnapshot.Take(connA, maskTimes: true));
+        }
+    }
+
+    [Theory]
+    [InlineData("move-copy")]
+    [InlineData("move-vec")]
+    [InlineData("delete-vec")]
+    [InlineData("delete-row")]
+    public void FailureAtEachMoveStep_RollsBack(string step) =>
+        AssertFailureRollsBack(step,
+            tx => tx.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, "id-1"),
+            store => SeedHot(store, "id-1", "x"));
+
+    // One transaction that uses every operation, so the sweep covers every
+    // step in every operation.
+    private static void RunSweep(SqliteStoreTransaction tx)
+    {
+        tx.Insert(Tier.Hot, ContentType.Memory,
+            new InsertEntryOpts("sweep", Id: "s1"), Embed("sweep"));
+        tx.Update(Tier.Hot, ContentType.Memory, "s1", new UpdateEntryOpts { Content = "sweep2" });
+        tx.SetSticky(ContentType.Memory, "s1", true);
+        tx.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, "s1");
+        tx.LogImport("t", "/p", "h", "s1", Tier.Warm, ContentType.Memory);
+        tx.Delete(Tier.Warm, ContentType.Memory, "s1");
+    }
+
+    [Fact]
+    public void AllStepsSweep_EveryFailurePointRollsBackEverything()
+    {
+        // 1. A clean run: count the steps and check the committed result.
+        int total;
+        {
+            var (conn, store) = NewStore();
+            using (conn)
+            {
+                var count = 0;
+                using (var tx = store.BeginTransaction())
+                {
+                    tx.BeforeStep = _ => count++;
+                    RunSweep(tx);
+                    tx.Commit();
+                }
+                total = count;
+
+                Assert.Equal(11, total);
+                Assert.Null(store.Get(Tier.Warm, ContentType.Memory, "s1"));
+                Assert.True(new ImportLog(conn).IsAlreadyImported("h"));
+            }
+        }
+
+        // 2. Fail at each step in turn: the whole transaction rolls back.
+        for (var k = 1; k <= total; k++)
+        {
+            var (conn, store) = NewStore();
+            using (conn)
+            {
+                var before = StoreSnapshot.Take(conn);
+                var seen = 0;
+                using (var tx = store.BeginTransaction())
+                {
+                    var failAt = k;
+                    tx.BeforeStep = _ =>
+                    {
+                        if (++seen == failAt)
+                            throw new InvalidOperationException("injected at step " + failAt);
+                    };
+                    Assert.Throws<InvalidOperationException>(() => RunSweep(tx));
+                }
+
+                Assert.Equal(before, StoreSnapshot.Take(conn));
+            }
         }
     }
 }

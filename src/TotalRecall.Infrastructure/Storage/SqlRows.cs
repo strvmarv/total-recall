@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 using Microsoft.Data.Sqlite;
+using Microsoft.FSharp.Core;
 using TotalRecall.Core;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
@@ -175,6 +176,72 @@ VALUES
         return result is long l && l != 0L;
     }
 
+    /// <summary>
+    /// Copy one row from <paramref name="fromTable"/> into
+    /// <paramref name="toTable"/> exactly as <c>SqliteStore.Move</c> always
+    /// has (<c>updated_at</c> = <paramref name="now"/>, every other column
+    /// kept, <c>sticky</c> not carried) and return the target rowid. The
+    /// source row is NOT deleted: callers do that after any vector work.
+    /// Throws <see cref="InvalidOperationException"/> when the source row does
+    /// not exist.
+    /// </summary>
+    public static long CopyRow(
+        MsSqliteConnection conn, SqliteTransaction? tx,
+        string fromTable, string toTable, string id, long now)
+    {
+        var entry = ReadRow(conn, tx, fromTable, id)
+            ?? throw new InvalidOperationException($"Entry {id} not found in {fromTable}");
+
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = $@"
+INSERT INTO {toTable}
+  (id, content, summary, source, source_tool, project, tags,
+   created_at, updated_at, last_accessed_at, access_count,
+   decay_score, parent_id, collection_id, metadata, scope, entry_type,
+   times_injected)
+VALUES
+  ($id, $content, $summary, $source, $source_tool, $project, $tags,
+   $created_at, $updated_at, $last_accessed_at, $access_count,
+   $decay_score, $parent_id, $collection_id, $metadata, $scope, $entry_type,
+   $times_injected)";
+
+            cmd.Parameters.AddWithValue("$id", entry.Id);
+            cmd.Parameters.AddWithValue("$content", entry.Content);
+            cmd.Parameters.AddWithValue("$summary", ToDbString(entry.Summary));
+            cmd.Parameters.AddWithValue("$source", ToDbString(entry.Source));
+            cmd.Parameters.AddWithValue(
+                "$source_tool",
+                FSharpOption<SourceTool>.get_IsSome(entry.SourceTool)
+                    ? SourceToolMapping.ToDbValue(entry.SourceTool.Value)
+                    : (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("$project", ToDbString(entry.Project));
+            cmd.Parameters.AddWithValue("$tags", TagsJson.EncodeFList(entry.Tags));
+            cmd.Parameters.AddWithValue("$created_at", entry.CreatedAt);
+            cmd.Parameters.AddWithValue("$updated_at", now);
+            cmd.Parameters.AddWithValue("$last_accessed_at", entry.LastAccessedAt);
+            cmd.Parameters.AddWithValue("$access_count", entry.AccessCount);
+            cmd.Parameters.AddWithValue("$decay_score", entry.DecayScore);
+            cmd.Parameters.AddWithValue("$parent_id", ToDbString(entry.ParentId));
+            cmd.Parameters.AddWithValue("$collection_id", ToDbString(entry.CollectionId));
+            cmd.Parameters.AddWithValue("$metadata", entry.MetadataJson);
+            cmd.Parameters.AddWithValue("$scope", entry.Scope);
+            cmd.Parameters.AddWithValue(
+                "$entry_type", EntryTypeMapping.ToDbValue(entry.EntryType));
+            cmd.Parameters.AddWithValue("$times_injected", entry.TimesInjected);
+            cmd.ExecuteNonQuery();
+        }
+
+        using var rowidCmd = conn.CreateCommand();
+        rowidCmd.Transaction = tx;
+        rowidCmd.CommandText = "SELECT last_insert_rowid()";
+        return (long)rowidCmd.ExecuteScalar()!;
+    }
+
+    private static object ToDbString(FSharpOption<string> opt) =>
+        FSharpOption<string>.get_IsSome(opt) ? opt.Value : (object)DBNull.Value;
+
     /// <summary>The rowid of the content row with this id, or null.</summary>
     public static long? RowId(
         MsSqliteConnection conn, SqliteTransaction? tx, string table, string id)
@@ -212,14 +279,20 @@ internal static class VecRows
         string vecTable, long rowid, ReadOnlyMemory<float> embedding)
     {
         Delete(conn, tx, vecTable, rowid);
+        InsertBytes(conn, tx, vecTable, rowid, MemoryMarshal.AsBytes(embedding.Span).ToArray());
+    }
 
+    /// <summary>Insert raw vector bytes at <paramref name="rowid"/> (no cleanup).</summary>
+    public static void InsertBytes(
+        MsSqliteConnection conn, SqliteTransaction? tx,
+        string vecTable, long rowid, byte[] embedding)
+    {
         using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText =
             $"INSERT INTO {vecTable} (rowid, embedding) VALUES ($rowid, $embedding)";
         cmd.Parameters.AddWithValue("$rowid", rowid);
-        cmd.Parameters.AddWithValue(
-            "$embedding", MemoryMarshal.AsBytes(embedding.Span).ToArray());
+        cmd.Parameters.AddWithValue("$embedding", embedding);
         cmd.ExecuteNonQuery();
     }
 

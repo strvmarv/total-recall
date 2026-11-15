@@ -335,71 +335,10 @@ public sealed class SqliteStore : IStore, IMetaStore, IDisposable
         using var tx = _conn.BeginTransaction();
         try
         {
-            // Read the source row. We read directly from SQL (rather than
-            // calling Get) so the read is enlisted in the transaction.
-            Entry? entry;
-            using (var readCmd = _conn.CreateCommand())
-            {
-                readCmd.Transaction = tx;
-                readCmd.CommandText = $"SELECT * FROM {fromTable} WHERE id = $id";
-                readCmd.Parameters.AddWithValue("$id", id);
-                using var reader = readCmd.ExecuteReader();
-                entry = reader.Read() ? RowToEntry(reader) : null;
-            }
-            if (entry is null)
-                throw new InvalidOperationException(
-                    $"Entry {id} not found in {fromTable}");
-
-            using (var insertCmd = _conn.CreateCommand())
-            {
-                insertCmd.Transaction = tx;
-                insertCmd.CommandText = $@"
-INSERT INTO {toTable}
-  (id, content, summary, source, source_tool, project, tags,
-   created_at, updated_at, last_accessed_at, access_count,
-   decay_score, parent_id, collection_id, metadata, scope, entry_type,
-   times_injected)
-VALUES
-  ($id, $content, $summary, $source, $source_tool, $project, $tags,
-   $created_at, $updated_at, $last_accessed_at, $access_count,
-   $decay_score, $parent_id, $collection_id, $metadata, $scope, $entry_type,
-   $times_injected)";
-
-                insertCmd.Parameters.AddWithValue("$id", entry.Id);
-                insertCmd.Parameters.AddWithValue("$content", entry.Content);
-                insertCmd.Parameters.AddWithValue("$summary", ToDbString(entry.Summary));
-                insertCmd.Parameters.AddWithValue("$source", ToDbString(entry.Source));
-                insertCmd.Parameters.AddWithValue(
-                    "$source_tool",
-                    FSharpOption<SourceTool>.get_IsSome(entry.SourceTool)
-                        ? SourceToolMapping.ToDbValue(entry.SourceTool.Value)
-                        : (object)DBNull.Value);
-                insertCmd.Parameters.AddWithValue("$project", ToDbString(entry.Project));
-                insertCmd.Parameters.AddWithValue("$tags", TagsJson.EncodeFList(entry.Tags));
-                insertCmd.Parameters.AddWithValue("$created_at", entry.CreatedAt);
-                insertCmd.Parameters.AddWithValue("$updated_at", now);
-                insertCmd.Parameters.AddWithValue("$last_accessed_at", entry.LastAccessedAt);
-                insertCmd.Parameters.AddWithValue("$access_count", entry.AccessCount);
-                insertCmd.Parameters.AddWithValue("$decay_score", entry.DecayScore);
-                insertCmd.Parameters.AddWithValue("$parent_id", ToDbString(entry.ParentId));
-                insertCmd.Parameters.AddWithValue("$collection_id", ToDbString(entry.CollectionId));
-                insertCmd.Parameters.AddWithValue("$metadata", entry.MetadataJson);
-                insertCmd.Parameters.AddWithValue("$scope", entry.Scope);
-                insertCmd.Parameters.AddWithValue(
-                    "$entry_type", EntryTypeMapping.ToDbValue(entry.EntryType));
-                insertCmd.Parameters.AddWithValue("$times_injected", entry.TimesInjected);
-
-                insertCmd.ExecuteNonQuery();
-            }
-
-            using (var delCmd = _conn.CreateCommand())
-            {
-                delCmd.Transaction = tx;
-                delCmd.CommandText = $"DELETE FROM {fromTable} WHERE id = $id";
-                delCmd.Parameters.AddWithValue("$id", id);
-                delCmd.ExecuteNonQuery();
-            }
-
+            // Read + insert into the target, then delete the source, all in
+            // this one transaction.
+            SqlRows.CopyRow(_conn, tx, fromTable, toTable, id, now);
+            SqlRows.DeleteRow(_conn, tx, fromTable, id);
             tx.Commit();
         }
         catch
@@ -477,9 +416,6 @@ VALUES
         var ord = reader.GetOrdinal(name);
         return reader.IsDBNull(ord) ? null : reader.GetString(ord);
     }
-
-    private static object ToDbString(FSharpOption<string> opt) =>
-        FSharpOption<string>.get_IsSome(opt) ? opt.Value : (object)DBNull.Value;
 
     private IReadOnlyList<Entry> ReadAll(SqliteCommand cmd)
     {

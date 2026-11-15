@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.InteropServices;
 using Microsoft.Data.Sqlite;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Telemetry;
@@ -69,6 +70,47 @@ public sealed class SqliteStoreTransaction : IDisposable
     /// <summary>Read an entry inside the transaction.</summary>
     public Entry? Get(Tier tier, ContentType type, string id) =>
         SqlRows.ReadRow(_conn, Tx, MigrationRunner.TableName(tier, type), id);
+
+    /// <summary>
+    /// Move a row between tiers/types: copy it to the target table as
+    /// <c>SqliteStore.Move</c> does (<c>updated_at</c> = now, every other
+    /// column kept, <c>sticky</c> not carried), move its vector (the given
+    /// embedding, else a copy of the source vector bytes; none when the
+    /// source has none and none is given), then delete the source vector and
+    /// row. Steps: <c>move-copy</c>, <c>move-vec</c>, <c>delete-vec</c>,
+    /// <c>delete-row</c>. Throws <see cref="InvalidOperationException"/> when
+    /// the source row does not exist.
+    /// </summary>
+    public void Move(
+        Tier fromTier, ContentType fromType, Tier toTier, ContentType toType,
+        string id, ReadOnlyMemory<float>? embedding = null)
+    {
+        var tx = Tx;
+        var fromTable = MigrationRunner.TableName(fromTier, fromType);
+        var toTable = MigrationRunner.TableName(toTier, toType);
+        var fromVec = MigrationRunner.VecTableName(fromTier, fromType);
+        var toVec = MigrationRunner.VecTableName(toTier, toType);
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+        Step("move-copy");
+        var sourceRowid = SqlRows.RowId(_conn, tx, fromTable, id);
+        var targetRowid = SqlRows.CopyRow(_conn, tx, fromTable, toTable, id, now);
+
+        Step("move-vec");
+        // A leftover orphan vector row at the target rowid must never read as
+        // the moved entry's vector.
+        VecRows.Delete(_conn, tx, toVec, targetRowid);
+        var bytes = embedding is { } e
+            ? MemoryMarshal.AsBytes(e.Span).ToArray()
+            : VecRows.ReadBytes(_conn, tx, fromVec, sourceRowid!.Value);
+        if (bytes is not null)
+            VecRows.InsertBytes(_conn, tx, toVec, targetRowid, bytes);
+
+        Step("delete-vec");
+        VecRows.Delete(_conn, tx, fromVec, sourceRowid!.Value);
+        Step("delete-row");
+        SqlRows.DeleteRow(_conn, tx, fromTable, id);
+    }
 
     /// <summary>Apply an update to one row. Step: <c>update</c>.</summary>
     public void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts)
