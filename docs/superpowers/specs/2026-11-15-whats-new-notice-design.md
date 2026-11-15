@@ -58,7 +58,13 @@ Stated so nobody mistakes them for bugs:
 - On Cursor the `TOTAL_RECALL_NO_UPDATE_CHECK` variable cannot reach the engine (Cursor strips
   `TOTAL_RECALL_*`); only `updates.check = false` in the engine's own data directory works there.
 - A session shows at most one notice (first seen, then updated, then available), so an "available" nudge that
-  is due on the same start as an "updated" notice waits for that host's next start.
+  is due on the same start as an "updated" notice waits for that host's next start. Because the engine also
+  limits itself to one notice per host per engine process (a host that calls `session_start` twice must not
+  get two), the nudge waits for the next start of the engine, which can be after several sessions of a host
+  that keeps its engine running.
+- When `TOTAL_RECALL_NO_UPDATE_CHECK` is set only in an MCP `env` block, the hook's `whats-new` run does not
+  see it and can still show an "available" notice from a `latest-<channel>.json` an earlier check left (the
+  engine itself makes no new request). `updates.check = false` in the config file is seen by every process.
 - Two sessions of one host that mark at the same moment can each overwrite the other's mark (the file is
   read, changed and renamed into place, not locked): at worst a notice is shown once more.
 - The prerelease channel asks GitHub for the ten newest releases, so a run of more than ten newer
@@ -247,7 +253,13 @@ inspects the store. Rules:
 - **One notice per start (owner's decision).** The order is first seen, then updated, then available; the
   first that applies is the notice. A due "available" waits for the host's next start, because the others
   record only their own mark. The notice is one line (section 4 rendering), so every channel that carries
-  one line keeps working; there is no "both".
+  one line keeps working; there is no "both". The limit also holds inside one engine process: a host that
+  calls `session_start` more than once per session (Kiro does, from its hook and from its steering file) must
+  not get the "available" notice on the second call after "updated" was delivered on the first, so
+  `WhatsNewService` remembers, in memory, each host for which it has delivered (marked) a notice and returns
+  nothing for that host for the rest of that engine's life. The cost: a later "available" notice waits for
+  the engine's next start, which for a host that keeps one engine for days can be later than the host's next
+  session (accepted, see Accepted losses).
 - **Packaged notes of another version.** Notes whose `version` differs from the running version are ignored
   (treated as a missing notes file: the line has the version and no summary).
 - **`updates.notice = false`** returns no notice and records nothing.
@@ -256,8 +268,8 @@ inspects the store. Rules:
 - Semver compare is a small in-repo implementation (prerelease ordering per SemVer 2.0.0), no new
   dependency, AOT-safe.
 
-Update checker, a background task in the long-lived MCP engine, started like the reindex worker and
-never on the boot path:
+Update checker, a background task in the long-lived MCP engine, a fire-and-forget task in the style of the reindex worker (but started
+from `Program.RunServeAsync`, see the T3 build decisions) and never on the boot path:
 
 - Runs at most once per `updates.check_interval_hours` (default 24); a failed or offline attempt is
   retried no sooner than one hour later and is silent. See "Build decisions for the update checker (T3)"
@@ -302,7 +314,7 @@ Config (`[updates]` in `config.toml`, read in `ConfigLoader`, documented in `doc
 | `updates.check_interval_hours` | `24` | Minimum time between checks. |
 
 `TOTAL_RECALL_NO_UPDATE_CHECK` set to any non-empty value other than `0` or `false` (compared without regard
-to case, after trimming spaces) forces `updates.check = false` without a config file (CI, containers); an
+to case, after trimming spaces; a value that is only spaces counts as empty) forces `updates.check = false` without a config file (CI, containers); an
 empty, `0` or `false` value leaves the setting as it is. A value of `updates.check_interval_hours` that is
 not a whole number from 1 to 8760 means 24.
 To reach the engine on Codex, the variable is added to `ENV_VARS` in `codex/build-mcp.js` and
@@ -314,17 +326,22 @@ Cursor (see Accepted losses).
 - **Where it starts.** In `Program.RunServeAsync`, after `OpenProduction` returns and before the server loop,
   and nowhere inside `ServerComposition` (which `ui`, `dump-catalog` and tests also reach, and which would
   start a real checker there). It is a fire-and-forget task like the reindex worker: a cancellation token the
-  `finally` that disposes the handles also cancels, and every failure written as one `[total-recall]` line to
-  stderr, never thrown. It starts only when the running version is not a dev build, `updates.check` is on and
-  `TOTAL_RECALL_NO_UPDATE_CHECK` does not disable it. It works the same for the sqlite, Postgres and Cortex
+  `finally` that disposes the handles also cancels. An expected failure of an attempt (offline, a timeout, an
+  HTTP error status, an unexpected body) is silent: nothing is written to stdout or stderr. Only an unexpected
+  exception in the task writes one `[total-recall]` line to stderr, and nothing is ever thrown out of it. It starts only when the running version is not a dev build, `updates.check` is on and
+  `TOTAL_RECALL_NO_UPDATE_CHECK` does not disable it. That condition lives in a static factory of the checker
+  that returns nothing when the check is off (taking the version, the settings and the environment through
+  parameters, the environment as a `Func<string?>` so tests never set a process-wide variable), so a test can
+  reach it; `Program` makes one call and cancels the result in its `finally`. It works the same for the sqlite, Postgres and Cortex
   backends because it touches only files and the network. Settings are read once at start (a `config set`
   applies from the next session, like every other setting).
 - **Schedule.** A first attempt can happen 60 s after start (never on the boot path), and the file decides
   whether it happens: the checker reads `latest-<channel>.json` and is due when `checkedAt` is missing or at
-  least `check_interval_hours` old **and** `lastAttempt` is missing or at least one hour old. Otherwise it
-  sleeps until the later of the two moments, then checks again, in a loop until cancelled (a session can last
-  days). A restart therefore never re-fetches before the file says it is due. The clock and the delay are
-  injected so tests never wait.
+  least `check_interval_hours` old **and** `lastAttempt` is missing or at least one hour old; a time more than
+  one day in the future counts as missing. Otherwise it sleeps until the later of the two moments, in steps
+  of at most 24 hours (re-reading the file on each wake, and never asking for a wait `Task.Delay` cannot
+  take), then checks again, in a loop until cancelled (a session can last days). A restart therefore never
+  re-fetches before the file says it is due. The clock and the delay are injected so tests never wait.
 - **What the file records.** `checkedAt` is when the server last answered (a 200, or a 403 or 429, which
   count as an answer); `lastAttempt` is when an attempt last ended, whatever the outcome. A 200 writes the
   new `version` and `summary` and sets both times. A 403 or 429 keeps the earlier `version` and `summary`
@@ -333,16 +350,20 @@ Cursor (see Accepted losses).
   like the seen-state.
 - **The request.** `GET https://api.github.com/repos/strvmarv/total-recall/releases/latest` (stable running
   version) or `.../releases?per_page=10` (prerelease running version), unauthenticated, `User-Agent:
-  total-recall/<version>`, `Accept: application/vnd.github+json`, a 3 s timeout, and a response read through
-  a bounded stream (at most 256 KB; a longer one is a failed attempt). The URL is a constant; nothing in
+  total-recall/<version>`, `Accept: application/vnd.github+json`, one 3 s deadline covering the send and the read of the answer (a linked cancellation, so a slow
+  body is bounded too), and a response read through a bounded stream (at most 256 KB; a longer one is a
+  failed attempt). The URL is a constant; nothing in
   the configuration or the environment changes it, and the test constructor takes a base address and an
   `HttpMessageHandler`. The channel follows the running version, as above.
 - **Reading the answer.** A release counts only when it is not a draft, its `tag_name` is `v` followed by a
-  version `SemVer.TryParse` accepts, and (for a stable running version) it is not a prerelease. The
+  version of at most 64 characters that `SemVer.TryParse` accepts and that carries no `+build` part, and (for
+  a stable running version) it is not a prerelease. A 200 answer with no release that counts is treated as
+  not the expected shape: only `lastAttempt` changes. The
   checker records the greatest by semver, `version` as the bare version, and the first paragraph of the
   release body (a blank line ends it; a null or empty body gives no summary) reduced by `SummarySanitizer`.
   Nothing else from the answer is stored, and a link is never taken from it. The stored summary is
-  sanitised again when it is read, so an edited file cannot inject text.
+  sanitised again when it is read, and the stored version is validated again by the same rule (at most
+  64 characters, a valid semver, no `+build`), so an edited file cannot inject text or a very long line.
 - **How the decider gets it.** `WhatsNewDecider.Decide` keeps its four-argument form (every existing call
   stays valid) and gains two optional inputs: the channel's latest release (`version`, `summary`) and the
   host's `availableSeen` for that channel. `WhatsNewState` reads the whole seen file (`version` and
@@ -358,8 +379,12 @@ Cursor (see Accepted losses).
   Copilot CLI `copilot plugin update total-recall@strvmarv-total-recall-marketplace`; Gemini CLI, Kiro,
   OpenCode, Hermes, Cline, Windsurf, Zed and VS Code `npm install -g @strvmarv/total-recall`; Cursor,
   Codex and `other` the sentence `see docs/hosts/<page>.md` with the host's page (`cursor.md`,
-  `codex-cli.md`, `other-mcp.md`). Each entry is taken from the host's page, and a test checks that every
-  page the table names exists and that the table covers every id of `HostIds`.
+  `codex-cli.md`, `other-mcp.md`). The table covers every id of `HostIds`. Each host's page states the same instruction (an
+  "Updating" sentence is added to a page that has none; the Claude Code page names `/total-recall:commands
+  update` beside its `/plugin` steps), and a test checks that every entry's command or pointer appears on the
+  page it names (the pages are `claude-code.md`, `pi.md`, `copilot-cli.md`, `cursor.md`, `codex-cli.md`,
+  `gemini-cli.md`, `kiro.md`, `opencode.md`, `hermes.md`, `cline.md`, `windsurf.md`, `zed.md`, `vscode.md`,
+  `other-mcp.md`).
 
 ### 3. CLI backend (T2b, extended by T3)
 
@@ -380,8 +405,9 @@ Cursor (see Accepted losses).
 - **Running version.** The Cli project cannot reach the Server assembly's `ResolveServerVersion`, so
   `CliApp` exposes its own version (the entry assembly's informational version with build metadata
   stripped, the rule it already uses for `--version`) and the command takes it, the state directory, the
-  binary directory, the `updates.notice` setting and the output writer through a public test constructor,
-  as `PinnedFloorCommand` does (no clock: the command ignores the direct stamp).
+  binary directory, the `updates.notice` setting (and, from T3, the `updates.check` setting, the environment
+  variable through a `Func<string?>`, and the latest-release state) and the output writer through a public
+  test constructor, as `PinnedFloorCommand` does (no clock: the command ignores the direct stamp).
 - **Output.** `text`: the line and a newline. `json`: `{"kind":"first-seen"|"updated"|"available","text":"<line>"}`.
   `claude-code`: `{"systemMessage":"<line>"}`. With no notice: nothing for `text`, `{}` for the other two.
   Default format is `text`; an unknown `--format` value behaves as `text`. JSON is written with `JsonWriter` (AOT-safe).
@@ -491,14 +517,16 @@ Updated:    total-recall updated 4.7.0 -> 4.8.0: <summary> More: <url>          
 Available:  total-recall 4.9.0 is available (you have 4.8.0): <summary> Update: <how>  More: <url>
 ```
 
-`<how>` comes from a table in the renderer, one entry per host, each taken from that host's page under
-`docs/hosts/` (Claude Code: `/total-recall:commands update`; pi: the pi install command; the rest from
-their pages). A host whose page has no update instruction gets the generic "see docs/hosts/<host>.md".
+`<how>` comes from the table in "Build decisions for the update checker (T3)", one entry per host id, which
+is the single source. Each host's page under `docs/hosts/` states the same instruction (a short "Updating"
+sentence added where a page has none, and the Claude Code page naming `/total-recall:commands update` beside
+its `/plugin` steps), and a test checks that every entry's text appears on its page.
 
 ### 5. Documentation, privacy and tests
 
 - `PRIVACY.md`: a new numbered item under "What data leaves your machine": the daily version request to
-  `api.github.com`, what is sent (the user agent with the version) and what is not, and how to switch it
+  `api.github.com`, what is sent (the user agent with the version) and what is not (no identifier; GitHub
+  sees the requester's IP address, as for any HTTPS request), and how to switch it
   off. The item alone is not enough: line 9 ("no data is transmitted to any external server") and line 59
   ("does not phone home") are reworded to name the default-on version check, and the `[updates]` switch.
   `docs/architecture.md` ("No network calls required at runtime") is corrected the same way. A test in
