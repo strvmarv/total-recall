@@ -24,12 +24,15 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 export const HOST = 'claude-code';
 export const DEADLINE_MS = 2500;
 export const STDIN_CAP_MS = 500;
-export const MAX_LINE_CHARS = 1000;
 
-// C0 and C1 controls (CR and LF included), DEL, U+2028 and U+2029: nothing that could break a line
-// or sit as an invisible character in what the user sees.
-// eslint-disable-next-line no-control-regex
-const FORBIDDEN_IN_LINE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+// The shape check lives in pi/whatsNew.js (one function for both hosts). It is loaded by dynamic
+// import inside a try, like the other helpers: if the file is broken nothing is accepted.
+let isDisplayableNotice = () => false;
+try {
+  ({ isDisplayableNotice } = await import(new URL('../../pi/whatsNew.js', import.meta.url).href));
+} catch {
+  // leave the rejecting default
+}
 
 /**
  * The `systemMessage` of the engine's `claude-code` output, or undefined for anything else:
@@ -47,9 +50,7 @@ export function acceptSystemMessage(text) {
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
   const line = parsed.systemMessage;
-  if (typeof line !== 'string' || line === '' || line.length > MAX_LINE_CHARS) return undefined;
-  if (FORBIDDEN_IN_LINE.test(line)) return undefined;
-  return line;
+  return isDisplayableNotice(line) ? line : undefined;
 }
 
 /**
@@ -109,7 +110,10 @@ export async function run(deps = {}) {
     const source = sourceOf(await readStdin(deps.stdin, stdinCapMs));
 
     // Direct wins: the stamp first, on every source, before any engine is looked for.
+    // Without a data directory the engine would fall back to a relative one and record the version
+    // there, and with no stamp the model would relay the line again: write nothing, run nothing.
     const dataDir = deps.resolveDataDir(env);
+    if (typeof dataDir !== 'string' || dataDir === '') return '';
     deps.writeDirectStamp({ dataDir, host: HOST });
 
     if (source === 'compact') return '';

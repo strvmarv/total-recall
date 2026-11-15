@@ -123,15 +123,10 @@ describe('run: order and sources', () => {
 });
 
 describe('run: data directory and engine', () => {
-  test('no data dir: no stamp is written but the engine still runs', async () => {
-    const stamps = [];
-    const deps = makeDeps({
-      resolveDataDir: () => null,
-      writeDirectStamp: (args) => { stamps.push(args); return false; },
-    });
-    const out = await run(deps);
-    assert.equal(out, JSON.stringify('hello'));
-    for (const s of stamps) assert.equal(s.dataDir, null);
+  test('no data dir: nothing is stamped and the engine is neither looked up nor run', async () => {
+    const deps = makeDeps({ resolveDataDir: () => { deps.calls.push('resolveDataDir'); return null; } });
+    assert.equal(await run(deps), '');
+    assert.deepEqual(names(deps.calls), ['resolveDataDir']);
   });
 
   test('no engine: returns "" after the stamp', async () => {

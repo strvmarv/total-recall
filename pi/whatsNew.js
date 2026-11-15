@@ -14,6 +14,24 @@ const HOST_ID = /^[a-z][a-z-]{0,20}$/;
 const FORMATS = ['text', 'json', 'claude-code'];
 const DEFAULT_TIMEOUT_MS = 3000;
 const MAX_STDOUT_CHARS = 8 * 1024;
+export const MAX_NOTICE_CHARS = 1000;
+
+// C0 and C1 controls (CR and LF included), DEL, U+2028 and U+2029: nothing that could break a line
+// or sit as an invisible character in what the user sees.
+// eslint-disable-next-line no-control-regex
+const FORBIDDEN_IN_NOTICE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+
+/**
+ * True for a string of 1 to 1000 characters with no control character (C0, C1, DEL), no CR or LF
+ * and no U+2028 or U+2029. The engine's notice text is untrusted: every host checks it with this
+ * before showing it.
+ */
+export function isDisplayableNotice(text) {
+  return typeof text === 'string'
+    && text !== ''
+    && text.length <= MAX_NOTICE_CHARS
+    && !FORBIDDEN_IN_NOTICE.test(text);
+}
 
 /**
  * Record that this host delivers the notice directly:

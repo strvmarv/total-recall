@@ -535,13 +535,31 @@ for (const reason of ['startup', 'new', 'resume', 'fork']) {
   });
 }
 
-test('notice: an unresolvable data dir passes null to the stamp writer and the run still happens', async () => {
+test('notice: an unresolvable data dir writes no stamp and neither looks up nor runs the engine', async () => {
   const { fire, calls } = boot({ resolveDataDir: () => null });
-  await fire('session_start', { reason: 'startup' }, ctx({ hasUI: true }));
+  const c = ctx({ hasUI: true });
+  await fire('session_start', { reason: 'startup' }, c);
   await settle();
-  assert.deepEqual(calls.stamps, [{ dataDir: null, host: 'pi' }]);
-  assert.equal(calls.runWhatsNew.length, 1);
+  assert.deepEqual(calls.stamps, []);
+  assert.equal(calls.resolveEngine, 0);
+  assert.equal(calls.runWhatsNew.length, 0);
+  assert.deepEqual(c.notes, []);
 });
+
+for (const [label, text] of [
+  ['a multi-line text', 'line one\nline two'],
+  ['an over-long text', 'x'.repeat(1001)],
+  ['a text with a control character', 'a\u001b[31mred'],
+  ['a text with U+2028', 'a\u2028b'],
+]) {
+  test(`notice: ${label} from the runner is not passed to notify`, async () => {
+    const { fire } = boot({ runWhatsNew: async () => text });
+    const c = ctx({ hasUI: true });
+    await fire('session_start', { reason: 'startup' }, c);
+    await settle();
+    assert.deepEqual(c.notes, []);
+  });
+}
 
 for (const value of [undefined, '']) {
   test(`notice: a runner resolving ${JSON.stringify(value)} shows nothing`, async () => {

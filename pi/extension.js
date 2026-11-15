@@ -23,7 +23,9 @@ import { resolveEngine as realResolveEngine, runFloor as realRunFloor } from './
 import { registerCommands } from './command.js';
 import { registerDevelop } from './develop.js';
 import { resolveUserServer as realResolveUserServer } from './userServer.js';
-import { runWhatsNew as realRunWhatsNew, writeDirectStamp as realWriteDirectStamp } from './whatsNew.js';
+import {
+  isDisplayableNotice, runWhatsNew as realRunWhatsNew, writeDirectStamp as realWriteDirectStamp,
+} from './whatsNew.js';
 import { resolveDataDir as realResolveDataDir } from '../scripts/fetch-binary.js';
 
 export const MCP_SERVER_NAME = 'total-recall';
@@ -143,13 +145,17 @@ export function createExtension({
         if (event.reason === 'reload' || ctx.hasUI !== true || !hookable(ctx)) return;
         const user = resolveUserServer ? resolveUserServer(ctx.cwd) : { skip: false, env: {} };
         if (user.skip) return;
-        writeDirectStamp({ dataDir: resolveDataDir({ ...env, ...user.env }), host: HOST_ID });
+        // Without a data directory the engine would fall back to a relative one and record the version
+        // there, and with no stamp the model would relay the line again: write nothing, run nothing.
+        const dataDir = resolveDataDir({ ...env, ...user.env });
+        if (typeof dataDir !== 'string' || dataDir === '') return;
+        writeDirectStamp({ dataDir, host: HOST_ID });
         const binaryPath = resolveEngine();
         if (!binaryPath) return;
         // Not awaited: the handler returns at once. A stale ctx (session replaced) may throw on use.
         Promise.resolve(runWhatsNew({ binaryPath, host: HOST_ID, format: 'text', env: user.env, timeoutMs: 3000 }))
           .then((text) => {
-            if (typeof text !== 'string' || text === '') return;
+            if (!isDisplayableNotice(text)) return;
             try {
               ctx.ui.notify(text, 'info');
             } catch {

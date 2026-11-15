@@ -6,7 +6,7 @@ import { spawn as realSpawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { writeDirectStamp, runWhatsNew } from './whatsNew.js';
+import { writeDirectStamp, runWhatsNew, isDisplayableNotice } from './whatsNew.js';
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'tr-whatsnew-'));
@@ -293,3 +293,29 @@ test('runWhatsNew: the timeout kills the child with SIGKILL', async () => {
   assert.equal(await p, undefined);
   assert.equal(signal, 'SIGKILL');
 });
+
+test('isDisplayableNotice: accepts an ordinary line and the 1000-character limit', () => {
+  assert.equal(isDisplayableNotice('total-recall 4.8.0: x. All releases: https://example.test'), true);
+  assert.equal(isDisplayableNotice('x'.repeat(1000)), true);
+  assert.equal(isDisplayableNotice('total-recall 4.8.0 \u2014 caf\u00e9'), true);
+});
+
+for (const [label, value] of [
+  ['1001 characters', 'x'.repeat(1001)],
+  ['an empty string', ''],
+  ['undefined', undefined],
+  ['null', null],
+  ['a number', 5],
+  ['an object', { a: 1 }],
+  ['LF', 'a\nb'],
+  ['CR', 'a\rb'],
+  ['U+2028', 'a\u2028b'],
+  ['U+2029', 'a\u2029b'],
+  ['a C0 control (BEL)', 'a\u0007b'],
+  ['a C0 control (ESC)', 'a\u001b[31mb'],
+  ['a tab', 'a\tb'],
+  ['DEL', 'a\u007fb'],
+  ['a C1 control', 'a\u0085b'],
+]) {
+  test(`isDisplayableNotice: rejects ${label}`, () => assert.equal(isDisplayableNotice(value), false));
+}
