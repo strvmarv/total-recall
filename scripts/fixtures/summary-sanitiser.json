@@ -25,6 +25,16 @@
     "expected": "a) tail"
   },
   {
+    "name": "an angle-bracketed URL that leaves a link behind is flattened again",
+    "input": "<http://[a]>(b)",
+    "expected": "http://a"
+  },
+  {
+    "name": "doubled angle brackets lose both pairs",
+    "input": "<<https://x.y>>",
+    "expected": "https://x.y"
+  },
+  {
     "name": "an unclosed link is left alone",
     "input": "see [a](http://x now",
     "expected": "see [a](http://x now"

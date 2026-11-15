@@ -31,9 +31,10 @@ const CONTROL = /[\u0000-\u0008\u000e-\u001f\u007f-\u0084\u0086-\u009f]/g;
 /**
  * One line of plain text, at most 200 characters, for a release summary or any text fetched for one.
  * The passes run in this order: (1) ANSI sequences, (2) control characters except whitespace, (3) a
- * markdown link `[text](url)` becomes `text` (repeated until none is left, so nested links go too; a URL
- * ends at its first `)`) and `<http(s)://...>` loses its angle brackets (scheme case-insensitive, other
- * schemes untouched), (4) whitespace runs become one space, (5) trim spaces only (a byte order mark is not
+ * markdown link `[text](url)` becomes `text` (a URL ends at its first `)`) and `<http(s)://...>` loses its
+ * angle brackets (scheme case-insensitive, other schemes untouched); the two steps repeat together until
+ * the text stops changing, so nested links go too and dropping a bracket pair cannot leave a link or
+ * another pair behind, (4) whitespace runs become one space, (5) trim spaces only (a byte order mark is not
  * whitespace here, as in .NET), (6) cut at the last space at or before 200 UTF-16 code units (no ellipsis;
  * one longer word is cut at 200; a cut that would leave half of a surrogate pair drops that half).
  * Pass 1 comes before pass 2 because pass 2 removes the ESC character.
@@ -46,8 +47,8 @@ export function sanitizeSummary(text) {
   for (let prev = null; prev !== s;) {
     prev = s;
     s = s.replace(MD_LINK, '$1');
+    s = s.replace(ANGLE_URL, '$1');
   }
-  s = s.replace(ANGLE_URL, '$1');
   s = s.replace(WHITESPACE, ' ').replace(/^ | $/g, '');
   if (s.length > MAX_SUMMARY) {
     const cut = s.lastIndexOf(' ', MAX_SUMMARY);
@@ -273,7 +274,7 @@ export function readAnnotatedTag(tag, { cwd } = {}) {
   if (type.stdout.trim() !== 'tag') throw new Error(`${tag} is not an annotated tag`);
   const contents = runGit(['for-each-ref', '--format=%(contents)', ref], cwd);
   if (contents.status !== 0) throw new Error(`cannot read the message of ${ref}: ${String(contents.stderr).trim() || 'git failed'}`);
-  const list = runGit(['tag', '-l'], cwd);
+  const list = runGit(['tag', '-l', '--no-column'], cwd);
   if (list.status !== 0) throw new Error(`cannot list the tags: ${String(list.stderr).trim() || 'git failed'}`);
   return { message: stripSignature(contents.stdout), tags: list.stdout.split('\n').filter((t) => t !== '') };
 }
@@ -305,8 +306,13 @@ export function main(argv) {
       if (v === undefined || v.startsWith('--')) return usage(`${a} needs a value`);
       i += 1;
       if (a === '--notes-out') notesOut.push(v);
-      else if (a === '--cwd') cwd = v;
-      else bodyOut = v;
+      else if (a === '--cwd') {
+        if (cwd !== undefined) return usage('--cwd may be given only once');
+        cwd = v;
+      } else {
+        if (bodyOut !== undefined) return usage('--body-out may be given only once');
+        bodyOut = v;
+      }
     } else if (a.startsWith('--')) return usage(`unknown option ${a}`);
     else positional.push(a);
   }
@@ -324,7 +330,13 @@ export function main(argv) {
     return { code: 1, out: annotate('error', e.message), err: '' };
   }
   let out = built.warnings.map((w) => annotate('warning', w)).join('');
-  if (check) return { code: 0, out: `${out}release notes of ${tag} are valid\n`, err: '' };
+  if (check) {
+    const { summary, sections } = built.notes;
+    const counts = [sections.added, sections.changed, sections.fixed].map((list) => list.length).join('/');
+    out += `release notes of ${tag} are valid\n`;
+    out += `release notes OK: ${tag}: summary ${summary.length} characters; added/changed/fixed ${counts}\n`;
+    return { code: 0, out, err: '' };
+  }
   try {
     const json = `${JSON.stringify(built.notes, null, 2)}\n`;
     for (const file of notesOut) fs.writeFileSync(file, json);

@@ -24,13 +24,14 @@ test('sanitizeSummary matches every case in scripts/fixtures/summary-sanitiser.j
   }
 });
 
+const HOSTILE = [
+  '[[[a](b)](c)](d)', '[a](b', '\u001b', '\u001b[', '\u001b[1;31', '<<https://x.y>>', '<http://[a]>(b)', '\ufeff\ufeff x',
+  'x'.repeat(199) + '\ud83d\ude00' + 'y'.repeat(50), '[' + 'a'.repeat(300) + '](u)', '\u0000'.repeat(500),
+  'word '.repeat(100), '\r\n'.repeat(120), '[x](y)'.repeat(80),
+];
+
 test('sanitizeSummary keeps its invariants on hostile input', () => {
-  const hostile = [
-    '[[[a](b)](c)](d)', '[a](b', '\u001b', '\u001b[', '\u001b[1;31', '<<https://x.y>>', '\ufeff\ufeff x',
-    'x'.repeat(199) + '\ud83d\ude00' + 'y'.repeat(50), '[' + 'a'.repeat(300) + '](u)', '\u0000'.repeat(500),
-    'word '.repeat(100), '\r\n'.repeat(120), '[x](y)'.repeat(80),
-  ];
-  for (const input of hostile) {
+  for (const input of HOSTILE) {
     const out = sanitizeSummary(input);
     assert.ok(out.length <= 200, `length: ${JSON.stringify(input).slice(0, 30)}`);
     assert.ok(!/[\r\n]/.test(out), 'no line break');
@@ -38,6 +39,13 @@ test('sanitizeSummary keeps its invariants on hostile input', () => {
     assert.ok(!/[\u0000-\u0008\u000e-\u001f\u007f-\u0084\u0086-\u009f]/.test(out), 'no control character');
     assert.ok(!/\[[^\]]*\]\([^)]*\)/.test(out), 'no markdown link left');
     assert.ok(!/[\ud800-\udbff]$/.test(out), 'no lone high surrogate at the end');
+  }
+});
+
+test('sanitizeSummary is idempotent on every fixture input and every hostile input', () => {
+  for (const input of [...SANITISER_CASES.map((c) => c.input), ...HOSTILE]) {
+    const once = sanitizeSummary(input);
+    assert.equal(sanitizeSummary(once), once, JSON.stringify(input).slice(0, 40));
   }
 });
 
@@ -364,6 +372,25 @@ test('readAnnotatedTag: an annotated tag gives its message and the tag list', ()
   assert.deepEqual([...tags].sort(), ['v1.0.0', 'v1.0.1', 'v1.1.0', 'v1.1.1-beta.1']);
 });
 
+test('readAnnotatedTag: the tag list is one tag per entry even under git column.ui=always', () => {
+  const colRepo = tmp('rn-col-');
+  git(colRepo, 'init', '-q', '-b', 'main');
+  git(colRepo, 'commit', '-q', '--allow-empty', '-m', 'first');
+  const names = ['v1.0.0', 'v1.0.1', 'v1.1.0', 'v1.1.1', 'v2.0.0', 'v2.0.1', 'v2.1.0', 'v2.1.1'];
+  for (const name of names) git(colRepo, 'tag', '-a', name, '-m', `${name}\n\nSummary.\n`);
+  // With column.ui=always git prints columns even when its output is a pipe. readAnnotatedTag spawns git
+  // with the process environment, so the setting is put there for the call.
+  const columnEnv = { ...gitEnv, GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'column.ui', GIT_CONFIG_VALUE_0: 'always' };
+  const saved = process.env;
+  process.env = { ...saved, ...columnEnv };
+  try {
+    const { tags } = readAnnotatedTag('v2.1.1', { cwd: colRepo });
+    assert.deepEqual([...tags].sort(), names);
+  } finally {
+    process.env = saved;
+  }
+});
+
 test('readAnnotatedTag: a lightweight tag fails closed with "not an annotated tag"', () => {
   assert.throws(() => readAnnotatedTag('v1.0.0', { cwd: repo }), /v1\.0\.0 is not an annotated tag/);
 });
@@ -427,6 +454,28 @@ test('CLI: --notes-out may repeat and --body-out writes the body', () => {
   assert.equal(notes.summary, 'A real summary.');
   assert.deepEqual(notes.sections.added, ['one thing']);
   assert.equal(fs.readFileSync(path.join(out, 'body.md'), 'utf8'), 'A real summary.\n\nAdded\n- one thing\n');
+});
+
+test('CLI: a repeated --body-out or --cwd is a usage error', () => {
+  const out = tmp('rn-out-');
+  for (const [opt, second] of [['--body-out', 'b.md'], ['--cwd', repo]]) {
+    const args = ['v1.0.1', '--cwd', repo, '--body-out', 'a.md', opt, second];
+    const r = runCli(args, { cwd: out });
+    assert.equal(r.status, 2, opt);
+    assert.match(r.stderr, new RegExp(`^${opt} may be given only once$`, 'm'), opt);
+    assert.match(r.stderr, /usage: node scripts\/release-notes\.js/, opt);
+  }
+  assert.deepEqual(fs.readdirSync(out), [], 'nothing written');
+});
+
+test('CLI --check: a valid tag prints what was parsed, and the writer line is unchanged', () => {
+  const r = runCli(['v1.0.1', '--check', '--cwd', repo]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(r.stdout.includes('release notes of v1.0.1 are valid\n'), r.stdout);
+  assert.ok(r.stdout.includes('release notes OK: v1.0.1: summary 15 characters; added/changed/fixed 1/0/0\n'), r.stdout);
+  const out = tmp('rn-out-');
+  const w = runCli(['v1.0.1', '--cwd', repo, '--body-out', 'b.md'], { cwd: out });
+  assert.equal(w.stdout, 'wrote the release notes of v1.0.1\n');
 });
 
 test('CLI --check: a stable tag without a summary exits 1 with an ::error:: line', () => {
@@ -514,9 +563,10 @@ test('AGENTS.md documents the tag message shape the release checks', () => {
   const rest = agents.slice(start + '### Release flow'.length);
   const next = rest.search(/^### /m);
   const flow = next < 0 ? rest : rest.slice(0, next);
-  for (const needle of ['release-notes.json', 'release-notes.js', '--check', 'summary paragraph', 'annotated', '-F']) {
+  for (const needle of ['release-notes.json', 'release-notes.js', '--check', 'summary paragraph', 'annotated', '-F', '--cleanup=whitespace']) {
     assert.ok(flow.includes(needle), `the Release flow section of AGENTS.md does not mention ${needle}`);
   }
+  assert.ok(!flow.includes('`#` lines are kept'), 'the Release flow section of AGENTS.md says # lines are kept, which git does not do');
   const changelog = fs.readFileSync(here('../CHANGELOG.md'), 'utf8');
   assert.ok(changelog.includes('#91'), 'CHANGELOG.md does not mention #91');
 });

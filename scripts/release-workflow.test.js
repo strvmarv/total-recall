@@ -306,8 +306,13 @@ const WRITE_NOTES = 'Write release notes';
 const SIZE_GUARD = 'Guard npm package size (pre-publish)';
 const NPM_PUBLISH = 'npm publish';
 
-/** The text of a step's `run:` value (a one-liner or a block), line continuations joined, spaces collapsed. */
-function runText(step) {
+/**
+ * The text of a step's `run:` value (a one-liner or a block), line continuations joined, spaces collapsed.
+ * A shell comment (a `#` that starts a word, to the end of the line) is dropped, so a command that
+ * appears only in a comment is not seen; pass `keepComments` to read the raw text (GitHub expands
+ * `${{ }}` inside comments too).
+ */
+function runText(step, keepComments = false) {
   const lines = step.text.split('\n');
   const start = lines.findIndex((l) => /^ {8}run:/.test(l));
   if (start < 0) return '';
@@ -316,7 +321,8 @@ function runText(step) {
     if (/^ {8}\S/.test(l) || /^ {6}\S/.test(l)) break;
     out.push(l);
   }
-  return out.join('\n').replace(/\\\n/g, ' ').replace(/\s+/g, ' ').trim();
+  const code = keepComments ? out : out.map((l) => l.replace(/(^|\s)#.*$/, '$1'));
+  return code.join('\n').replace(/\\\n/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 /** The value of a `key: value` line at the given indent of a step: 8 spaces for its own keys, 10 for `env:` and `with:` entries. */
@@ -343,7 +349,7 @@ function checkNotesStepsOfJob(text, job, scriptName) {
     problems.push(`"${scriptName}" does not pass the tag through env: REF_NAME`);
   }
   for (const s of [step, ...(fetch >= 0 ? [steps[fetch]] : [])]) {
-    if (runText(s).includes('${{')) problems.push(`"${s.name}" interpolates an expression into the shell`);
+    if (runText(s, true).includes('${{')) problems.push(`"${s.name}" interpolates an expression into the shell`);
   }
   if (!/^ {8}run:/m.test(step.text)) problems.push(`"${scriptName}" has no run:`);
   return problems;
@@ -384,6 +390,8 @@ function checkReleaseNotesAreWritten(text) {
   const write = at(WRITE_NOTES);
   if (write < 0) return problems;
   const cmd = runText(steps[write]);
+  if (/^(?:      - |        )if:/m.test(steps[write].text)) problems.push(`"${WRITE_NOTES}" has an if: condition and can be skipped`);
+  if (/^(?:      - |        )continue-on-error:/m.test(steps[write].text)) problems.push(`"${WRITE_NOTES}" sets continue-on-error, so its failure is ignored`);
   if (!/(?:^| )node scripts\/release-notes\.js "\$REF_NAME" /.test(cmd)) problems.push(`"${WRITE_NOTES}" does not run node scripts/release-notes.js "$REF_NAME"`);
   if (/ --check\b/.test(cmd)) problems.push(`"${WRITE_NOTES}" runs with --check, so it writes nothing`);
   const outs = [...cmd.matchAll(/--notes-out (\S+)/g)].map((m) => m[1].replace(/^"|"$/g, ''));
@@ -530,4 +538,40 @@ test('release.yml: the build job needs check-version', () => {
 test('mutation: a build job that no longer needs check-version is caught', () => {
   assert.ok(checkBuildWaitsForTheGate(mutate('    needs: check-version\n', '')).some((p) => /needs: check-version/.test(p)));
   assert.ok(checkBuildWaitsForTheGate(mutate('    needs: check-version\n', '    needs: publish\n')).some((p) => /needs: check-version/.test(p)));
+});
+
+// ---- the write step cannot be skipped or ignored ----
+
+test('mutation: an if: or continue-on-error on the write step is caught', () => {
+  const run = '        run: |\n          set -euo pipefail\n          node scripts/release-notes.js "$REF_NAME" \\\n';
+  for (const [line, pattern] of [['if: false', /if: condition/], ['continue-on-error: true', /continue-on-error/]]) {
+    const mutated = mutate(run, `        ${line}\n${run}`);
+    assert.ok(checkReleaseNotesAreWritten(mutated).some((p) => pattern.test(p)), line);
+  }
+  const first = mutate('      - name: Write release notes\n', '      - if: false\n        name: Write release notes\n');
+  assert.ok(checkReleaseNotesAreWritten(first).some((p) => /if: condition/.test(p)));
+});
+
+// ---- a shell comment is not a command ----
+
+test('runText drops a shell comment but keeps a # inside a word', () => {
+  const step = (run) => ({ name: 'x', text: `      - name: x\n        run: ${run}\n` });
+  assert.equal(runText(step('true # git fetch --force --tags origin')), 'true');
+  assert.equal(runText(step('echo a#b "$X"')), 'echo a#b "$X"');
+  assert.equal(runText({ name: 'x', text: '      - name: x\n        run: |\n          # note\n          echo hi # more\n          echo bye\n' }), 'echo hi echo bye');
+});
+
+test('mutation: a command that appears only after # in a run: is not accepted', () => {
+  for (const [job, check] of [['check-version', checkReleaseNotesGate], ['publish', checkReleaseNotesAreWritten]]) {
+    const block = jobBlock(REAL, job);
+    const commented = REAL.replace(block, block.replace('run: git fetch --force --tags origin', 'run: true # git fetch --force --tags origin'));
+    assert.notEqual(commented, REAL, job);
+    assert.ok(check(commented).some((p) => /does not run git fetch --force --tags origin/.test(p)), job);
+  }
+  const gate = mutate('run: node scripts/release-notes.js "$REF_NAME" --check', 'run: true # node scripts/release-notes.js "$REF_NAME" --check');
+  assert.ok(checkReleaseNotesGate(gate).some((p) => /does not run node scripts\/release-notes\.js "\$REF_NAME" --check/.test(p)));
+  const out = mutate('            --notes-out binaries/linux-x64/release-notes.json \\\n', '            # --notes-out binaries/linux-x64/release-notes.json \\\n');
+  assert.ok(checkReleaseNotesAreWritten(out).some((p) => p.includes('binaries/linux-x64/release-notes.json')));
+  const body = mutate('            --body-out "$RUNNER_TEMP/release-body.md"\n', '            # --body-out "$RUNNER_TEMP/release-body.md"\n');
+  assert.ok(checkReleaseNotesAreWritten(body).some((p) => /has no --body-out/.test(p)));
 });
