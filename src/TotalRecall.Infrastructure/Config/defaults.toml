@@ -69,6 +69,11 @@ default = "user:local"
 max_entries = 200
 default_ttl_seconds = 600
 
+[updates]
+# Show a short "what's new" notice once, the first time a session starts
+# after the plugin was updated. Set false to turn it off.
+notice = true
+
 # --- Storage mode ---
 # Controls how the plugin stores and retrieves data.
 # "local"   - SQLite + ONNX embeddings, fully self-contained (default)

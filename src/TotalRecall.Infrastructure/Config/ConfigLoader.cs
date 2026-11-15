@@ -156,6 +156,30 @@ public sealed class ConfigLoader : IConfigLoader
         return Array.Empty<string>();
     }
 
+    /// <summary>
+    /// Read <c>updates.notice</c> from the effective config — whether the
+    /// "what's new" notice is shown. True unless the value is the boolean
+    /// <c>false</c>; a missing table, a value of another type, or an unreadable
+    /// or unparsable config file all read as true (the notice stays on).
+    /// </summary>
+    public static bool LoadUpdatesNoticeEnabled(string? userConfigPath = null)
+    {
+        try
+        {
+            var table = new ConfigLoader().LoadEffectiveTable(userConfigPath);
+            if (table.TryGetValue("updates", out var updatesObj) && updatesObj is TomlTable updatesTable
+                && updatesTable.TryGetValue("notice", out var noticeObj) && noticeObj is bool notice)
+            {
+                return notice;
+            }
+        }
+        catch (Exception)
+        {
+            // Any read or parse problem leaves the notice on.
+        }
+        return true;
+    }
+
     /// <inheritdoc/>
     public Core.Config.TotalRecallConfig LoadDefaults()
     {
