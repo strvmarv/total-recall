@@ -143,6 +143,7 @@ Print the command reference table below. Do not call any MCP tools.
 | `kb remove <id>` | Remove a KB entry |
 | `compact [--fast]` | Compact hot tier now (default: model-driven; `--fast`: heuristic sweep) |
 | `eval` | Retrieval quality report (`--benchmark`, `--compare`, `--snapshot`) |
+| `eval grow` | Review benchmark candidates captured from retrieval misses (`list`, `resolve`) |
 | `config [get\|set]` | View or update configuration |
 | `update` | Update the plugin to the latest version |
 | `ui` | Open the built-in web management UI in the browser (`total-recall ui`) |
@@ -285,6 +286,7 @@ See the full command body in [`compact.md`](compact.md).
 - `--benchmark`: call `eval_benchmark` for synthetic benchmark results
 - `--compare <name>`: call `eval_compare` to compare against a saved baseline
 - `--snapshot <name>`: call `eval_snapshot` to save current config as a named baseline
+- `grow` (`eval grow list` or `eval grow resolve`): call `eval_grow` with `action` `list` to show the pending benchmark candidates, or `resolve` with `accept` and/or `reject` (candidate ids from the list) to accept or reject them; `benchmark` optionally names the benchmark JSONL. A candidate that holds a secret, PII or a configured sensitive term stays pending. CLI: `total-recall eval grow list` and `total-recall eval grow resolve --accept <id1,id2> --reject <id1,id2>`
 
 ### config [get|set] <key> [value]
 
