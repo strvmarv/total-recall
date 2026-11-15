@@ -31,6 +31,7 @@ export const SHIM_TEST_TARGETS = [
   'scripts/fetch-binary.test.js',
   'scripts/sync-version.test.js',
   'scripts/release-workflow.test.js',
+  'scripts/release-notes.test.js',
   'scripts/host-docs.test.js',
   'scripts/host-config.test.js',
   'scripts/run-shim-tests.test.js',

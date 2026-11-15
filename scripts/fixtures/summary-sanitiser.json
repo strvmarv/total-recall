@@ -1,0 +1,62 @@
+[
+  {
+    "name": "markdown link is flattened to its text",
+    "input": "Fixed [the cache](https://x.y) bug\n",
+    "expected": "Fixed the cache bug"
+  },
+  {
+    "name": "link text may span a line break",
+    "input": "[two\nlines](https://x.y)",
+    "expected": "two lines"
+  },
+  {
+    "name": "ANSI escape sequences are removed",
+    "input": "\u001b[31mred\u001b[0m",
+    "expected": "red"
+  },
+  {
+    "name": "whitespace runs including newlines and tabs collapse to one space",
+    "input": "a\n\nb\tc",
+    "expected": "a b c"
+  },
+  {
+    "name": "non-breaking space, line separator and vertical tab are whitespace",
+    "input": "a b c\u000bd",
+    "expected": "a b c d"
+  },
+  {
+    "name": "control characters are removed",
+    "input": "\u0007\u0000",
+    "expected": ""
+  },
+  {
+    "name": "angle brackets around a bare URL are dropped",
+    "input": "see <https://x.y> now",
+    "expected": "see https://x.y now"
+  },
+  {
+    "name": "inline code and emphasis are kept",
+    "input": "keep `code` and *emphasis*",
+    "expected": "keep `code` and *emphasis*"
+  },
+  {
+    "name": "surrounding whitespace is trimmed",
+    "input": "  padded  \n",
+    "expected": "padded"
+  },
+  {
+    "name": "empty input stays empty",
+    "input": "",
+    "expected": ""
+  },
+  {
+    "name": "long text is cut at the last space at or before 200 characters, with no ellipsis",
+    "input": "abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij",
+    "expected": "abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij"
+  },
+  {
+    "name": "a single word longer than 200 characters is cut at 200",
+    "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+]
