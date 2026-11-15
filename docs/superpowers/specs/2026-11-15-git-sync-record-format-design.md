@@ -298,8 +298,10 @@ C# tests in `tests/TotalRecall.Infrastructure.Tests/GitSync/RecordCodecTests.cs`
 - `Parse` rejects, without throwing: an oversize file (a deeply nested or huge one is rejected before it is
   parsed), invalid JSON, an array root, a BOM, trailing content, nesting over 64, `tags` as a string or with a
   non-string element, a number for `content`, a missing stamp, an id that does not match the path, a
-  **duplicate key** at the top level, inside `ext`, inside unknown content, a lone-surrogate escape
-  (`"\ud800"`) in an id, in content and in a tag. `Write` of a record with a lone surrogate gives
+  **duplicate key** at the top level, inside `ext`, inside unknown content, an escaped
+  duplicate (`"cont\u0065nt"` next to `"content"`), nesting of exactly 64 (accepted) and 65 (rejected), invalid
+  UTF-8 bytes, a lone-surrogate escape (`"\ud800"`) in an id, in content, in a tag, in an unknown value and in
+  an unknown property name. `Write` of a record with a lone surrogate gives
   `NotEncodable`.
 - Accepts CRLF, emoji, accented and CJK content and writes it back identically; a record whose content is
   100,000 U+0001 characters (600,000 bytes serialized) is accepted by `Parse` (under 1 MiB) and blocked by
