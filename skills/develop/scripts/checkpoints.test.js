@@ -53,6 +53,7 @@ function ctxFor(c) {
 }
 
 const A = 'a'.repeat(40);
+const B = 'b'.repeat(40);
 const LINE = `tr-develop/v1 phase=kickoff branch=feat/x head=${A} review=agent gh=strvmarv track=small`;
 
 // ---- constants ----
@@ -202,6 +203,9 @@ test('validate-cases golden covers every phase, both error codes and the brief\'
     'defined parent track', 'kickoff parent track', 'pr-open parent track', 'pr-open parent track deferred 2',
     'pr-open parent track with plan', 'pr-open parent track with tasksDone', 'reapproved parent track',
     'tasks parent track', 'plan-approved parent track', 'final-approved parent track', 'definedAt with an offset',
+    'defined plan track with parent and parentBlob', 'defined with parent but no parentBlob', 'defined parent 0',
+    'defined parentBlob 41 hex', 'kickoff carrying parent', 'defined parent track carrying parent',
+    'reapproved plan track with parent and parentBlob',
   ]) {
     assert.ok(names.some((n) => n.includes(needle)), `golden case "${needle}"`);
   }
@@ -289,6 +293,16 @@ test('formatCheckpoint writes branch first, table order next, unknown keys last 
   assert.equal(
     line,
     `tr-develop/v1 phase=kickoff branch=feat/x track=small head=${A} review=agent gh=strvmarv alpha=2 zeta=1`,
+  );
+});
+
+test('formatCheckpoint writes parent and parentBlob after approvedSha and before specBlob', () => {
+  const line = formatCheckpoint('defined', {
+    parentBlob: A, parent: '12', approvedSha: B, specBlob: A, spec: 'docs/superpowers/specs/x.md', branch: 'feat/x', track: 'plan',
+  });
+  assert.equal(
+    line,
+    `tr-develop/v1 phase=defined branch=feat/x track=plan spec=docs/superpowers/specs/x.md approvedSha=${B} parent=12 parentBlob=${A} specBlob=${A}`,
   );
 });
 

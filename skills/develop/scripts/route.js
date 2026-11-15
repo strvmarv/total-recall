@@ -11,6 +11,7 @@
 //   node route.js parts <specFile>
 //   node route.js stub <bodyFile>
 //   node route.js stub-body <specFile> <part> <parent> <dependsFile> <outFile>
+//   node route.js parent-line <file>
 
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -234,6 +235,7 @@ const ATX_HEADING_RE = /^#{1,6}\s/;
 const LABELS = ['Scope:', 'Depends on:', 'Done when:'];
 const DEPENDS_RE = /^Part [1-9]\d*(?:, Part [1-9]\d*)*$/;
 const STUB_LINE_RE = /^Part ([1-9]\d?) of ([1-9]\d?) in #([1-9]\d{0,8})$/;
+const PARENT_LINE_RE = /^Parent: #([1-9]\d{0,8}), Part ([1-9]\d?) \((docs\/superpowers\/specs\/[A-Za-z0-9._-]+\.md)\)$/;
 const NUMBER_RE = /^[1-9]\d{0,8}$/;
 const MAX_PARTS = 50;
 const MAX_TITLE = 80;
@@ -315,6 +317,20 @@ export function parseStubLine(bodyText) {
   return { ok: true, part: Number(m[1]), count: Number(m[2]), parent: Number(m[3]) };
 }
 
+/**
+ * The `Parent: #<n>, Part <k> (<spec path>)` line of a sub-spec or approach file (design spec sections 8
+ * and 9): the first non-empty line, or the first non-empty one after a leading `# ` title heading.
+ */
+export function parseParentLine(fileText) {
+  if (typeof fileText !== 'string') return { ok: false, error: 'no-parent-line' };
+  const lines = fileText.replace(/^\uFEFF/, '').replace(/\r/g, '').split('\n').map((line) => line.trim());
+  let i = lines.findIndex((line) => line !== '');
+  if (i !== -1 && lines[i].startsWith('# ')) i = lines.findIndex((line, at) => at > i && line !== '');
+  const m = i === -1 ? null : PARENT_LINE_RE.exec(lines[i]);
+  if (!m) return { ok: false, error: 'no-parent-line' };
+  return { ok: true, parent: Number(m[1]), part: Number(m[2]), spec: m[3] };
+}
+
 function isNumberInput(value) {
   return (typeof value === 'string' || typeof value === 'number') && NUMBER_RE.test(String(value));
 }
@@ -360,6 +376,7 @@ export function stubBody(specText, part, parent, depends) {
 
 export const SUBCOMMANDS = [
   'count-tasks', 'count-cycles', 'tasks-for', 'live', 'position', 'route', 'parts', 'stub', 'stub-body',
+  'parent-line',
 ];
 
 function readText(file) {
@@ -463,6 +480,11 @@ function runStub(args) {
   return parseStubLine(readText(args[0]));
 }
 
+function runParentLine(args) {
+  if (!args[0]) usage('parent-line <file>');
+  return parseParentLine(readText(args[0]));
+}
+
 function runStubBody(args) {
   const [specFile, part, parent, dependsFile, outFile] = args;
   if (!specFile || !part || !parent || !dependsFile || !outFile) {
@@ -487,6 +509,7 @@ function dispatch(argv) {
     case 'parts': return runParts(rest);
     case 'stub': return runStub(rest);
     case 'stub-body': return runStubBody(rest);
+    case 'parent-line': return runParentLine(rest);
     default: return { ok: false, error: 'unknown subcommand' };
   }
 }

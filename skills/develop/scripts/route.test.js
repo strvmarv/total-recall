@@ -18,6 +18,7 @@ import {
   hasUncountedMarkers,
   parseParts,
   parseStubLine,
+  parseParentLine,
   stubBody,
 } from './route.js';
 
@@ -220,7 +221,7 @@ test('hasUncountedMarkers: only comments that do not count, and the body', () =>
 
 test('SUBCOMMANDS lists the CLI names', () => {
   assert.deepEqual(SUBCOMMANDS, [
-    'count-tasks', 'count-cycles', 'tasks-for', 'live', 'position', 'route', 'parts', 'stub', 'stub-body',
+    'count-tasks', 'count-cycles', 'tasks-for', 'live', 'position', 'route', 'parts', 'stub', 'stub-body', 'parent-line',
   ]);
 });
 
@@ -656,6 +657,54 @@ test('parseStubLine: anything else is no-stub-line', () => {
   assert.deepEqual(parseStubLine(undefined), { ok: false, error: 'no-stub-line' });
 });
 
+const PARENT_SPEC = 'docs/superpowers/specs/2026-11-15-x-design.md';
+const PARENT_LINE = `Parent: #92, Part 2 (${PARENT_SPEC})`;
+const PARENT_OK = { ok: true, parent: 92, part: 2, spec: PARENT_SPEC };
+
+test('parseParentLine: the first non-empty line, or the first after a leading title heading', () => {
+  assert.deepEqual(parseParentLine(`${PARENT_LINE}\n`), PARENT_OK);
+  assert.deepEqual(parseParentLine(PARENT_LINE), PARENT_OK);
+  assert.deepEqual(parseParentLine(`\n\n${PARENT_LINE}\n\nrest\n`), PARENT_OK);
+  assert.deepEqual(parseParentLine(`# Title of the sub-spec\n\n${PARENT_LINE}\n\n## Goal\n`), PARENT_OK);
+  assert.deepEqual(parseParentLine(`\n# Title\n${PARENT_LINE}\n`), PARENT_OK);
+  assert.deepEqual(parseParentLine(`# Title\r\n\r\n${PARENT_LINE}\r\n\r\nrest\r\n`), PARENT_OK);
+  assert.deepEqual(parseParentLine(`${PARENT_LINE}\r\n`), PARENT_OK);
+  assert.deepEqual(parseParentLine(`\uFEFF# Title\n\n${PARENT_LINE}\n`), PARENT_OK);
+  assert.deepEqual(parseParentLine(`   ${PARENT_LINE}   \n`), PARENT_OK);
+  assert.deepEqual(
+    parseParentLine('Parent: #123456789, Part 12 (docs/superpowers/specs/a.B_c-1.md)\n'),
+    { ok: true, parent: 123456789, part: 12, spec: 'docs/superpowers/specs/a.B_c-1.md' },
+  );
+});
+
+test('parseParentLine: anything else is no-parent-line', () => {
+  const bad = [
+    'Parent: #92, Part 2 (docs/other/x.md)',
+    'Parent: #92, Part 2 (docs/superpowers/plans/x.md)',
+    'Parent: #92, Part 2 (docs/superpowers/specs/sub/x.md)',
+    'Parent: #92, Part 2 (docs/superpowers/specs/../x.md)',
+    'Parent: #92 (docs/superpowers/specs/x.md)',
+    'Parent: #92, Part (docs/superpowers/specs/x.md)',
+    'Parent: #92, Part 0 (docs/superpowers/specs/x.md)',
+    'Parent: #92, Part 02 (docs/superpowers/specs/x.md)',
+    'Parent: #092, Part 2 (docs/superpowers/specs/x.md)',
+    'Parent: #0, Part 2 (docs/superpowers/specs/x.md)',
+    'Parent: #1234567890, Part 2 (docs/superpowers/specs/x.md)',
+    'parent: #92, Part 2 (docs/superpowers/specs/x.md)',
+    `${PARENT_LINE} and more`,
+    `x ${PARENT_LINE}`,
+    '',
+    '\n',
+    `Intro line\n${PARENT_LINE}\n`,
+    `# Title\n\nIntro line\n${PARENT_LINE}\n`,
+    `# Title\n# Another\n${PARENT_LINE}\n`,
+    `## Title\n${PARENT_LINE}\n`,
+    `# Title\n`,
+  ];
+  for (const text of bad) assert.deepEqual(parseParentLine(text), { ok: false, error: 'no-parent-line' }, JSON.stringify(text));
+  assert.deepEqual(parseParentLine(undefined), { ok: false, error: 'no-parent-line' });
+});
+
 const STUB_LAST = 'This part is not defined yet. Run /develop <this issue> to define it.';
 
 test('stubBody: part 2 with its dependency', () => {
@@ -747,6 +796,20 @@ test('CLI parts and stub print the function results', () => {
   assert.equal(run(['parts', path.join(dir, 'missing.md')]).parsed.ok, false);
   assert.equal(run(['parts']).parsed.ok, false);
   assert.equal(run(['stub']).parsed.ok, false);
+});
+
+test('CLI parent-line prints the function result', () => {
+  const dir = tmpDir();
+  const ok = run(['parent-line', put(dir, 'sub.md', `# Sub-spec\r\n\r\n${PARENT_LINE}\r\n\r\nbody\r\n`)]);
+  assert.equal(ok.status, 0);
+  assert.deepEqual(ok.parsed, PARENT_OK);
+  const approach = run(['parent-line', put(dir, 'approach.md', `${PARENT_LINE}\n\nCycle 1: x\n`)]);
+  assert.deepEqual(approach.parsed, PARENT_OK);
+  const none = run(['parent-line', put(dir, 'none.md', `# Sub-spec\n\nIntro\n${PARENT_LINE}\n`)]);
+  assert.equal(none.status, 1);
+  assert.deepEqual(none.parsed, { ok: false, error: 'no-parent-line' });
+  assert.equal(run(['parent-line', path.join(dir, 'missing.md')]).parsed.ok, false);
+  assert.equal(run(['parent-line']).parsed.ok, false);
 });
 
 test('CLI stub-body writes the body and prints {ok, title}', () => {

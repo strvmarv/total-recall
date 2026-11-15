@@ -95,7 +95,7 @@ const KICKOFF_CARRY_KEYS = [...CARRY_KEYS, 'rounds.final'];
 /** Order of keys in a formatted line: `branch` first, then these, then unknown keys sorted. */
 const KEY_ORDER = [
   'branch', 'track', 'repo', 'base', 'bodyHash', 'acHash', 'definedBy', 'definedAt',
-  'spec', 'approvedSha', 'specBlob', 'head', 'review', 'gh', 'plan', 'planSha', 'rounds.plan',
+  'spec', 'approvedSha', 'parent', 'parentBlob', 'specBlob', 'head', 'review', 'gh', 'plan', 'planSha', 'rounds.plan',
   'tasksDone', 'cyclesDone', 'deferred', 'rounds.final', 'pr', 'stage', 'blocker',
 ];
 
@@ -176,7 +176,9 @@ function valueOk(key, value, phase, ctx) {
     case 'spec': return SPEC_RE.test(value);
     case 'plan': return PLAN_RE.test(value);
     case 'head': return SHA_RE.test(value) && (phase === 'closed' || phase === 'spec-merged' || ctx.isAncestor(value));
-    case 'specBlob': return SHA_RE.test(value);
+    case 'specBlob':
+    case 'parentBlob': return SHA_RE.test(value);
+    case 'parent': return PR_NUMBER_RE.test(value);
     case 'definedAt': return DEFINED_AT_RE.test(value);
     case 'planSha': return SHA_RE.test(value) && (phase === 'closed' || ctx.isAncestor(value));
     case 'approvedSha': return SHA_RE.test(value) && (!defineLike || ctx.isAncestor(value));
@@ -236,6 +238,13 @@ export function validateCheckpoint(cp, ctx) {
       if (has(key)) return fail('bad-value', key);
     }
   }
+  // `parent` and `parentBlob` belong to a sub-ticket's `defined` and `reapproved` and to no parent-track
+  // ticket (one level only); they are a pair.
+  for (const key of ['parent', 'parentBlob']) {
+    if (has(key) && (!['defined', 'reapproved'].includes(phase) || track === 'parent')) return fail('bad-value', key);
+  }
+  if (has('parentBlob') && !has('parent')) return fail('missing', 'parent');
+  if (has('parent') && !has('parentBlob')) return fail('missing', 'parentBlob');
   // `plan` and `planSha` are a pair on every phase.
   if (has('planSha') && !has('plan')) return fail('missing', 'plan');
   if (has('plan') && !has('planSha')) return fail('missing', 'planSha');
