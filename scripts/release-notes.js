@@ -60,7 +60,7 @@ export function sanitizeSummary(text) {
 const SECTION_HEADING = /^#*\s*(added|changed|fixed)\b/i;
 // The shape of a heading line on its own: the word alone, with an optional parenthesised suffix and/or colon.
 // "Fixed the release workflow." does not have this shape, so it stays a summary.
-const HEADING_LINE = /^#*\s*(added|changed|fixed)(\s*\(.*\))?\s*:?\s*$/i;
+const HEADING_LINE = /^#*\s*(added|changed|fixed)(\s*\([^)]*\))?\s*:?\s*$/i;
 const BULLET = /^[-*+]\s+(.*)$/;
 
 const isBlank = (line) => line.trim() === '';

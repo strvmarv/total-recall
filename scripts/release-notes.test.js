@@ -160,3 +160,8 @@ test('parseTagMessage: a bullet with no text is skipped', () => {
   const p = parseTagMessage('v1\n\nSummary.\n\nAdded\n- \n- a\n');
   assert.deepEqual(p.sections.added, ['a']);
 });
+
+test('parseTagMessage: a summary that starts with a parenthesised word is still a summary', () => {
+  const p = parseTagMessage('v1.0.0\n\nFixed (rare) crash on startup (see #12)\n');
+  assert.equal(p.summary, 'Fixed (rare) crash on startup (see #12)');
+});
