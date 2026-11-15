@@ -147,8 +147,9 @@ export function createExtension({
     // child has a session file (rememberAgents: true is the default) and no PI_SUBAGENT_ID, so only that
     // last rule recognises it. None of these is the user's conversation, and a child would otherwise open
     // its own memory session. Observed, the limits of the rule and the workarounds: docs/hosts/pi.md.
-    // Set at session_start and kept for the life of this session: its header names a parent session file
-    // that has started and not yet shut down in this process, so it is a child of that session.
+    // Set at session_start and kept for the life of this session: `child` says that its header names a
+    // parent session file that has started and not yet shut down in this process; `ownFile` is the file
+    // this session recorded in `liveSessions`, which session_shutdown removes.
     let child = false;
     let ownFile;
     const hookable = (ctx) => !env.PI_SUBAGENT_ID && ctx.sessionManager.getSessionFile() !== undefined && !child;
@@ -159,14 +160,16 @@ export function createExtension({
     // builds the replacement for /new, /resume, /fork and /reload, so only a child's parent is still here.
     const noteSessionStart = (ctx) => {
       child = false;
+      ownFile = undefined;
       try {
+        // Decide first and record second, so a session is never its own parent.
+        const parent = ctx.sessionManager.getHeader?.()?.parentSession;
+        child = typeof parent === 'string' && liveSessions.has(parent);
         const file = ctx.sessionManager.getSessionFile();
         if (typeof file === 'string' && file !== '') {
           ownFile = file;
           liveSessions.add(file);
         }
-        const parent = ctx.sessionManager.getHeader?.()?.parentSession;
-        child = typeof parent === 'string' && liveSessions.has(parent);
       } catch {
         child = false;
       }

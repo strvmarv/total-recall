@@ -449,22 +449,25 @@ test('replacement: a fork whose header names its parent still gets everything on
 
 test('replacement: /new, /resume and /reload after the old session shut down stay hooked', async () => {
   const liveSessions = new Set();
-  const first = boot({ liveSessions });
-  const firstCtx = ctx({ file: '/a.jsonl' });
-  await first.fire('session_start', { reason: 'startup' }, firstCtx);
+  // A replacement's header may name a session that has just shut down (one it was once forked from): only
+  // the shutdown handler keeps such a replacement from being taken for a child.
+  let open = { instance: boot({ liveSessions }), ctx: ctx({ file: '/a.jsonl' }), file: '/a.jsonl' };
+  await open.instance.fire('session_start', { reason: 'startup' }, open.ctx);
   for (const [reason, file, parent] of [
     ['new', '/b.jsonl', undefined],
-    ['resume', '/c.jsonl', undefined],
-    ['reload', '/c.jsonl', undefined],
-    ['resume', '/d.jsonl', '/gone.jsonl'], // an old session that was itself a fork of a closed one
+    ['resume', '/c.jsonl', '/a.jsonl'], // a session once forked from the one that has just shut down
+    ['reload', '/c.jsonl', '/a.jsonl'], // the same session again: its header still names the first one
+    ['resume', '/d.jsonl', '/c.jsonl'], // forked from the one that has just shut down
   ]) {
-    await first.fire('session_shutdown', { reason }, firstCtx);
-    const next = boot({ liveSessions });
-    const nextCtx = ctx({ file, parent });
-    await next.fire('session_start', { reason }, nextCtx);
-    assert.equal(await getsInstructions(next, nextCtx), true, reason);
-    await next.fire('session_shutdown', { reason: 'quit' }, nextCtx);
+    await open.instance.fire('session_shutdown', { reason }, open.ctx);
+    assert.equal(liveSessions.has(open.file), false, `${reason}: the old session left the set`);
+    const instance = boot({ liveSessions });
+    const c = ctx({ file, parent });
+    await instance.fire('session_start', { reason }, c);
+    assert.equal(await getsInstructions(instance, c), true, reason);
+    open = { instance, ctx: c, file };
   }
+  await open.instance.fire('session_shutdown', { reason: 'quit' }, open.ctx);
   assert.equal(liveSessions.size, 0);
 });
 
