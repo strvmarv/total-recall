@@ -54,7 +54,7 @@ them:
 - `updated_at` is **derived**: it is the time of `content_stamp`. The model has no field for it. On read it
   must parse (a bad one is rejected) but its value is otherwise ignored; on write it is always the content
   stamp's time. For a canonical file the two agree, so the round trip is byte-identical.
-- Tags are a set. The codec writes them **sorted (ordinal) and de-duplicated**, so the same set is always the
+- Tags are a set. The codec writes them **sorted by UTF-16 code-unit order (F# string `compare`; this differs from UTF-8 byte order for supplementary characters) and de-duplicated**, so the same set is always the
   same bytes. `Parse` accepts any order and duplicates and the model holds them sorted and de-duplicated.
 
 ## Design
@@ -148,7 +148,7 @@ order, and returns the first failure:
    `CreatedAt` and `UpdatedAt` (parse as `yyyy-MM-ddTHH:mm:ss.fffZ` with ASCII digits in fixed positions,
    else `BadTimestamp field`); `ContentStamp`, `TierStamp`, `StickyStamp` (`Stamp.tryParse`, else
    `BadStamp field`);
-5. the optional fields: a present value of the wrong type is `WrongType`; `Source` that is a string but not one
+5. the optional fields: a present value of the wrong type is `WrongType`, and an `origin` object that lacks `tool` or `hash`, or whose value is not a string, is `WrongType` named `ext.total-recall.origin`; `Source` that is a string but not one
    of the seven names is **dropped** (becomes `None`), not an error.
 
 `ValidRecord = { Record: SyncRecord; Notes: Note list }` where `Note` is `StickyNormalisedToHot` (the record said
@@ -172,7 +172,7 @@ byte count `Write` returned); it only fails with `NotEncodable`.
 `NotEncodable` on write, never an exception.
 
 **Truncation of text from a record** (used by `Reject` and `Note`): at most 64 UTF-16 code units, never
-cutting inside a surrogate pair (the pair is dropped whole), with every Unicode category Cc character
+cutting inside a surrogate pair (the pair is dropped whole) and with a lone surrogate replaced by `?`, with every Unicode category Cc character
 (U+0000 to U+001F, U+007F to U+009F) and U+2028 and U+2029 replaced by `?`.
 
 ### The codec (`RecordCodec.cs`, namespace `TotalRecall.Infrastructure.GitSync`)
@@ -189,9 +189,12 @@ It runs, in this order, and never throws (it catches the exceptions of the reade
    anywhere, known or unknown**, and rejects a lone surrogate or invalid UTF-8 as `NotJson` (so every record
    `Parse` accepts can be written back); and takes the text of a number only from a `Number` token, which the
    reader has already checked against the JSON number grammar;
-4. a `RawSyncRecord` is built and `validate` is called.
+4. a `RawSyncRecord` is built and `validate` is called. Structural errors (steps 1 to 3: `Oversize`, `NotJson`,
+   `DuplicateKey`) take precedence over every `validate` reason, including `UnknownFormat`.
 
-A `ParsedRecord` holds the validated `SyncRecord` and the **unknown content**, each item a detached
+A `ParsedRecord` holds the validated `SyncRecord` (whose `Tier` is the normalised one), the `Notes` of the
+validation, the **stored tier** (`StoredTier`, the tier exactly as the file says, which differs from the model's
+only for a `sticky: true` record that names a colder tier) and the **unknown content**, each item a detached
 `JsonElement` clone with its position (its original order within its object): every top-level property other
 than the nine known ones; every `ext` namespace other than `total-recall`; every property of
 `ext["total-recall"]` other than the known ones; every property of `placement` and of `origin` other than the
@@ -201,7 +204,7 @@ immutable, so it can be reused for any number of patches.
 
 **Writing.** `Write(SyncRecord) : WriteResult` and `Write(ParsedRecord) : WriteResult`
 (`WriteResult = Bytes of byte[] | NotEncodable`; the second includes the unknown content, so
-`Write(Parse(bytes))` is the round trip). The canonical form is UTF-8 without a BOM, two-space indent, LF line
+`Write(Parse(bytes))` is the round trip: it writes `StoredTier`, not the normalised model tier, and writes `updated_at` as the time of the content stamp, a hand-edited `updated_at` that disagrees being corrected; `Write(SyncRecord)` has no stored tier and writes the model's). The canonical form is UTF-8 without a BOM, two-space indent, LF line
 endings, one trailing newline, the properties in the order of the umbrella spec's example (top level:
 `format`, `id`, `content`, `entry_type`, `tags`, `source` (omitted when absent), `created_at`, `updated_at`,
 `ext`; inside `ext["total-recall"]`: `project`, `scope`, `placement` (`tier`, `tier_stamp`, `sticky`,
@@ -223,15 +226,22 @@ encoder defaults. A string is written in double quotes with exactly these escape
 other character is written literally as UTF-8**, including U+007F, accented, CJK and supplementary-plane
 characters (emoji). A lone surrogate cannot be encoded: the result is `NotEncodable`.
 
-**Patching.** `Patch(ParsedRecord, RecordPatch) : PatchResult` (`PatchResult = Bytes of byte[] | NotEncodable | MissingTierStamp`):
+**Patching.** `Patch(ParsedRecord, RecordPatch) : PatchResult` (`PatchResult = Patched of byte[] * SyncRecord | NotEncodable | MissingTierStamp`):
 
 ```csharp
 record RecordPatch(
-    ContentPatch? Content,   // Content, Project, Scope, EntryType, Source, ContentStamp (also sets updated_at)
+    ContentPatch? Content,   // see below; its ContentStamp always sets updated_at
     IReadOnlyList<string>? Tags,
     StickyPatch? Sticky,     // Sticky, StickyStamp, TierStampIfRaised
     TierPatch? Tier);        // Tier, TierStamp
 ```
+
+`ContentPatch` has a required `Content` string, a required `EntryType`, a required `ContentStamp`, and for
+`Project`, `Scope` and `Source` a `Change<'a> = Keep | Set of 'a | Clear` (so a text edit that does not name
+`Source` keeps an unknown source, and one can clear a project). `TierStampIfRaised` is ignored when a `Tier` part
+is present. `Patch` returns the bytes **and the resulting `SyncRecord`** (`Patched of byte[] * SyncRecord`), so
+the caller runs `checkWritable` without parsing again. A patch with no content part still writes `updated_at` as
+the time of the file's `content_stamp`.
 
 An absent part leaves its properties exactly as they were, **as they are in the file** (including a stored
 tier that normalisation would raise, and unknown content), so a patch never rewrites a group it does not name.
@@ -248,7 +258,7 @@ hot:
 | neither | as stored | as stored |
 | `Sticky` only, not raised | as stored | the patch's |
 | `Sticky` only, raised | hot, with `TierStampIfRaised` (absent: result `MissingTierStamp`) | the patch's |
-| `Tier` only, record sticky in the file | `max(patch tier, hot)` i.e. hot, with the patch's `TierStamp` | as stored |
+| `Tier` only, record sticky in the file | hot, with the patch's `TierStamp` | as stored |
 | `Tier` only, record not sticky | the patch's | as stored |
 | `Sticky` and `Tier`, resulting sticky | hot, with the patch's `TierStamp` | the patch's |
 | `Sticky` and `Tier`, resulting not sticky | the patch's | the patch's |
@@ -271,6 +281,7 @@ F# tests in `tests/TotalRecall.Core.Tests` (Expecto, with FsCheck for properties
   malformed text.
 - **Record helpers:** each name function and its `tryParse` round-trip; unknown names give `None`; `tierRank`
   orders hot before warm before cold.
+- **Validation (structure):** a lone surrogate in a `Reject` string is replaced; an `origin` missing `tool` or `hash` is `WrongType`; a record that is both of an unknown format and has a duplicate key reports `DuplicateKey` (structure first).
 - **Validation:** the id rule (eligible ids; uppercase, one character, 65 characters, a leading dash, a
   trailing `\n`, NUL, a space, a Unicode digit); `recordPath` and `idOfPath` for good, wrong-shard, nested,
   traversal, wrong-extension and wrong-directory paths; each rule of `validate` in the stated order (oversize
@@ -306,6 +317,13 @@ C# tests in `tests/TotalRecall.Infrastructure.Tests/GitSync/RecordCodecTests.cs`
 - Accepts CRLF, emoji, accented and CJK content and writes it back identically; a record whose content is
   100,000 U+0001 characters (600,000 bytes serialized) is accepted by `Parse` (under 1 MiB) and blocked by
   `checkWritable` (over 256 KiB).
+- Tags and patch details: `Parse` accepts unsorted and duplicated tags and `Write`/`Patch` write them sorted and
+  unique in UTF-16 code-unit order (a tag with U+FFFD sorts after one with an emoji, where UTF-8 byte order
+  would put it before); a file stored as `sticky: true` with a warm tier round-trips through
+  `Write(Parse(bytes))` unchanged (the stored tier is written, and `Notes` holds the normalisation); a
+  hand-edited `updated_at` that disagrees with the content stamp is rewritten to the stamp's time on a no-content
+  patch; a content patch without `Source` keeps an unknown source, `Set` replaces it, `Clear` removes it;
+  `TierStampIfRaised` is ignored when a `Tier` part is present; `Patch` returns the post-patch record.
 - Parity: the codec's `source` names equal the strings `SourceToolMapping.ToDbValue` writes for every case, and
   its `entry_type` names equal `EntryTypeMapping.ToDbValue(x).ToLowerInvariant()` for every case.
 
