@@ -222,6 +222,9 @@ inspects the store. Rules:
   release; no re-nudge. The link is always the newer release's own page (the checker's answer has no
   `previous`, and a skipped-release count is not knowable). (My call: anti-nag.)
 - **Both.** One session that is both updated and has a newer release shows both, as two short lines.
+- **Packaged notes of another version.** Notes whose `version` differs from the running version are ignored
+  (treated as a missing notes file: the line has the version and no summary).
+- **`updates.notice = false`** returns no notice and records nothing.
 - **Dev builds.** A running version of `1.0.0` or `unknown` (an unstamped build) never produces a
   notice and never starts the checker.
 - Semver compare is a small in-repo implementation (prerelease ordering per SemVer 2.0.0), no new
@@ -256,7 +259,10 @@ never on the boot path:
   leave half of a surrogate pair drops that half. Whitespace is .NET's `char.IsWhiteSpace` set (U+FEFF is
   not whitespace); inline code and emphasis marks stay as plain characters; an unpaired surrogate in the
   input is passed through. Known cost: on adversarial input the link pass grows faster than linearly, so the
-  engine caps the input length (to 4,000 characters) before pass 3. Examples in the fixture file: `"Fixed [the cache](https://x.y) bug\n"` gives
+  engine (only; the release script's input is the maintainer's own tag message) caps its input at 4,000
+  characters before pass 3, and its tests bound the time for a 4,000-character hostile input (under
+  100 ms). The scheme match of the angle-bracket rule is ASCII-only (a Unicode case-folding match such as
+  `<http\u017f://x>` must not match), pinned by a fixture case. Examples in the fixture file: `"Fixed [the cache](https://x.y) bug\n"` gives
   `"Fixed the cache bug"`; `"\u001b[31mred\u001b[0m"` gives `"red"`. The update instruction in a nudge is composed from the host table
   below, never from fetched text.
 
@@ -383,19 +389,25 @@ their pages). A host whose page has no update instruction gets the generic "see 
 ## Parts for Define (each is its own PR)
 
 Tickets: **T1** is Part 1 (release pipeline; delivered as #91 / PR #96). **T2a** is Part 2 (the engine and
-the model-relayed notice). **T2b** is Part 4 (direct delivery in Claude Code and pi, the shim's `host`
-argument, the direct stamp, the announce-line edits). **T3** is Part 3 (update check, opt-out plumbing,
+the model-relayed notice). **T2b** is Part 4 (the `whats-new` CLI, direct delivery in Claude Code and pi,
+the shim's `host` argument, the direct stamp, the announce-line edits). No release is tagged between the
+T2a and T2b merges. **T3** is Part 3 (update check, opt-out plumbing,
 privacy). Part 5's documentation and tests are folded into each ticket for the code it describes. All of
 them hang under the tracking issue #92 and cite this spec; T2a, T2b and T3 are defined one at a time.
 
 1. Release pipeline: `scripts/release-notes.js`, `check-version` gate, notes in archives and release body.
-2. Engine core: state files, decider, semver, sanitiser, renderer, `whats-new` CLI, config keys, the
-   `whatsNew` field of `session_start` (with host-id resolution, the `host` argument table, the
-   engine-side direct-stamp check, the `hermes` suppression and the 30 s handler rule).
-3. Update checker, the `TOTAL_RECALL_NO_UPDATE_CHECK` plumbing (`codex/build-mcp.js`, `codex/mcp.json`)
-   and the `PRIVACY.md` changes.
-4. Host wiring: the shim adding `host` to `session_start` calls, the direct stamp, Claude Code hook, pi
-   extension, announce-line edits (both `SKILL.md` files and the two `.kiro` files).
+2. Engine core (T2a): state files, decider, semver, sanitiser, renderer, the `updates.notice` key, the
+   `whatsNew` field of `session_start` (with host-id resolution and the table that maps the harness's
+   `clientInfo.name` to a host id, including `hermes-mcp-client` -> `hermes`; the engine-side
+   direct-stamp check, the `hermes` suppression and the 30 s handler rule).
+3. Update checker, the `updates.check` and `updates.check_interval_hours` keys, the
+   `TOTAL_RECALL_NO_UPDATE_CHECK` plumbing (`codex/build-mcp.js`, `codex/mcp.json`) and the `PRIVACY.md`
+   changes.
+4. Host wiring (T2b): the `whats-new` CLI (text, json and `claude-code` formats; it applies the
+   first-seen, updated, downgrade, dev-build and `updates.notice` rules and ignores the direct stamp, the
+   Hermes rule and the 30 s rule, since the direct channel is its caller), the shim adding `host` to
+   `session_start` calls, the direct stamp, Claude Code hook, pi extension, announce-line edits (both
+   `SKILL.md` files and the two `.kiro` files).
 5. Documentation and the tests that guard it.
 
 Order and release rules: Part 1 ships in a release before the notice has notes to show; until then the
