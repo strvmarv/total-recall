@@ -36,6 +36,7 @@ export const SHIM_TEST_TARGETS = [
   'scripts/host-config.test.js',
   'scripts/run-shim-tests.test.js',
   'hooks/hooks.config.test.js',
+  'hooks/session-start/whats-new.test.js',
 ];
 
 const TEST_FILE = /\.test\.(?:js|mjs|cjs)$/;

@@ -23,11 +23,18 @@ import { resolveEngine as realResolveEngine, runFloor as realRunFloor } from './
 import { registerCommands } from './command.js';
 import { registerDevelop } from './develop.js';
 import { resolveUserServer as realResolveUserServer } from './userServer.js';
+import {
+  isDisplayableNotice, runWhatsNew as realRunWhatsNew, writeDirectStamp as realWriteDirectStamp,
+} from './whatsNew.js';
+import { resolveDataDir as realResolveDataDir } from '../scripts/fetch-binary.js';
 
 export const MCP_SERVER_NAME = 'total-recall';
 export const CONTEXT_MESSAGE_TYPE = 'total-recall-context';
 /** Tools the injected instructions name; every other tool is reached through pi's tool_search. */
 export const DIRECT_TOOLS = ['session_start', 'session_end', 'session_refresh', 'memory_*', 'kb_search'];
+
+/** The host id the engine's what's-new notice and its stamp use for this harness. */
+const HOST_ID = 'pi';
 
 /** pi's default MCP request timeout is 60 s; the first session_start (imports, embedder) can exceed it. */
 const MCP_TIMEOUT_SECONDS = 120;
@@ -43,6 +50,7 @@ export function nodeCommand(execPath = process.execPath) {
 /**
  * The MCP server as pi should start it. NO `cwd`: the engine resolves the current project
  * (project-scoped pins, project docs) from its working directory, so it must inherit pi's.
+ * `env` names the host for the engine's what's-new notice (pi merges it over the parent environment).
  */
 export function mcpServerConfig({ rootDir, execPath = process.execPath }) {
   const toolExposure = {};
@@ -53,6 +61,7 @@ export function mcpServerConfig({ rootDir, execPath = process.execPath }) {
     exposure: 'deferred',
     toolExposure,
     timeout: MCP_TIMEOUT_SECONDS,
+    env: { TOTAL_RECALL_HOST: HOST_ID },
     description: 'total-recall: tiered memory and knowledge base (search, store, pin, compact) for the coding session.',
   };
 }
@@ -74,7 +83,10 @@ function deliveredInContext(ctx) {
   }
 }
 
-export function createExtension({ rootDir, env, readFile, resolveEngine, runFloor, resolveUserServer, execPath = process.execPath }) {
+export function createExtension({
+  rootDir, env, readFile, resolveEngine, runFloor, resolveUserServer,
+  runWhatsNew, writeDirectStamp, resolveDataDir, execPath = process.execPath,
+}) {
   const skillPath = path.join(rootDir, 'skills', 'commands', 'SKILL.md');
   const developSkillPath = path.join(rootDir, 'skills', 'develop', 'SKILL.md');
 
@@ -125,6 +137,37 @@ export function createExtension({ rootDir, env, readFile, resolveEngine, runFloo
       // The command is a convenience.
     }
 
+    // The what's-new notice: the stamp first (so the engine's own session_start does not announce the
+    // same release again), then the engine's line, shown through the UI without delaying startup. Every
+    // step is guarded: nothing here may throw into pi. A missing dependency counts as "no followed server".
+    const showNotice = (event, ctx) => {
+      try {
+        if (event.reason === 'reload' || ctx.hasUI !== true || !hookable(ctx)) return;
+        const user = resolveUserServer ? resolveUserServer(ctx.cwd) : { skip: false, env: {} };
+        if (user.skip) return;
+        // Without a data directory the engine would fall back to a relative one and record the version
+        // there, and with no stamp the model would relay the line again: write nothing, run nothing.
+        const dataDir = resolveDataDir({ ...env, ...user.env });
+        if (typeof dataDir !== 'string' || dataDir === '') return;
+        writeDirectStamp({ dataDir, host: HOST_ID });
+        const binaryPath = resolveEngine();
+        if (!binaryPath) return;
+        // Not awaited: the handler returns at once. A stale ctx (session replaced) may throw on use.
+        Promise.resolve(runWhatsNew({ binaryPath, host: HOST_ID, format: 'text', env: user.env, timeoutMs: 3000 }))
+          .then((text) => {
+            if (!isDisplayableNotice(text)) return;
+            try {
+              ctx.ui.notify(text, 'info');
+            } catch {
+              // The notice is a convenience.
+            }
+          })
+          .catch(() => {});
+      } catch {
+        // The notice is a convenience.
+      }
+    };
+
     // The session-start text, waiting for the next user prompt to carry it.
     let pending;
 
@@ -133,8 +176,8 @@ export function createExtension({ rootDir, env, readFile, resolveEngine, runFloo
       if (!hookable(ctx)) return undefined;
       // A reload rebuilds this instance (the queue is lost) but keeps the transcript: skip only when
       // the earlier message is still in context.
-      if (event.reason === 'reload' && deliveredInContext(ctx)) return undefined;
-      pending = queuedText();
+      if (!(event.reason === 'reload' && deliveredInContext(ctx))) pending = queuedText();
+      showNotice(event, ctx);
       return undefined;
     });
 
@@ -193,5 +236,8 @@ export default function totalRecallPiExtension(pi) {
     resolveEngine: realResolveEngine,
     runFloor: realRunFloor,
     resolveUserServer: (cwd) => realResolveUserServer({ env: process.env, cwd }),
+    runWhatsNew: realRunWhatsNew,
+    writeDirectStamp: realWriteDirectStamp,
+    resolveDataDir: realResolveDataDir,
   })(pi);
 }

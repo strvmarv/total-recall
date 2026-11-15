@@ -601,3 +601,41 @@ test('the docs describe the what\'s-new notice and the updates.notice setting', 
   assert.deepEqual(listed(changelog, 'closed list of ids ('), hostIds, 'CHANGELOG.md host id list differs from HostIds.cs');
   assert.ok(changelog.includes('#99'), 'CHANGELOG.md does not mention #99');
 });
+
+// ---- T2b: the direct delivery of the notice is documented ----
+
+test('the docs describe the direct what\'s-new notice (command, stamps, pi, Claude Code)', () => {
+  const agents = fs.readFileSync(here('../AGENTS.md'), 'utf8');
+  const start = agents.indexOf('### What happens on `session_start`');
+  assert.ok(start >= 0, 'AGENTS.md has no "What happens on `session_start`" heading');
+  const rest = agents.slice(start + 10);
+  const next = rest.search(/^### /m);
+  const lifecycle = next < 0 ? rest : rest.slice(0, next);
+  assert.ok(!lifecycle.includes('Not built yet'), 'AGENTS.md still says the direct delivery is not built yet');
+  for (const needle of ['whats-new --host', 'direct-', 'pi/whatsNew.js', 'hooks/session-start/whats-new.js', 'T3', 'Not observed', 'systemMessage', 'direct-claude-code.json', 'direct-pi.json']) {
+    assert.ok(lifecycle.includes(needle), `the session_start section of AGENTS.md does not mention ${needle}`);
+  }
+  const where = agents.slice(agents.indexOf('### WHERE TO LOOK'), agents.indexOf('### Key Commands'));
+  for (const needle of ['WhatsNewCommand.cs', 'pi/whatsNew.js', 'hooks/session-start/whats-new.js']) {
+    assert.ok(where.includes(needle), `the WHERE TO LOOK table of AGENTS.md does not list ${needle}`);
+  }
+  assert.ok(agents.includes('direct what\'s-new notice'), 'AGENTS.md has no short statement about the direct notice in the hook notes');
+
+  const claude = fs.readFileSync(here('../docs/hosts/claude-code.md'), 'utf8');
+  for (const needle of ['what\'s-new', 'systemMessage', 'Not observed', 'claude-code', 'direct-claude-code.json']) {
+    assert.ok(claude.includes(needle), `docs/hosts/claude-code.md does not mention ${needle}`);
+  }
+  const notObserved = claude.slice(claude.lastIndexOf('Not observed'));
+  assert.ok(notObserved.includes('systemMessage'), 'docs/hosts/claude-code.md does not list the systemMessage display under "Not observed"');
+  assert.ok(/client name/i.test(notObserved), 'docs/hosts/claude-code.md does not list the client name under "Not observed"');
+
+  const pi = fs.readFileSync(here('../docs/hosts/pi.md'), 'utf8');
+  for (const needle of ['what\'s-new', 'TOTAL_RECALL_HOST', 'client name', 'ctx.ui.notify', 'direct-pi.json']) {
+    assert.ok(pi.includes(needle), `docs/hosts/pi.md does not mention ${needle}`);
+  }
+  assert.ok(pi.includes('MCP client name is `pi`'), 'docs/hosts/pi.md does not state that pi\'s MCP client name is `pi`');
+  assert.ok(pi.includes('read from pi\'s source'), 'docs/hosts/pi.md does not say the pi facts were read from pi\'s source');
+
+  const changelog = fs.readFileSync(here('../CHANGELOG.md'), 'utf8');
+  assert.ok(changelog.includes('#106'), 'CHANGELOG.md does not mention #106');
+});

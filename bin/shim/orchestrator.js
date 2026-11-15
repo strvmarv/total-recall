@@ -155,7 +155,7 @@ export function runShim(opts) {
     const decision = surface.route(msg, state);
     switch (decision.kind) {
       case 'respond': toHarness(decision.message); break;
-      case 'proxy': if (proxy) proxy.send(msg); break;
+      case 'proxy': if (proxy) proxy.send(decision.message ?? msg); break;
       case 'drop': break;
       case 'shutdown':
         toHarness(decision.message);

@@ -75,6 +75,34 @@ test('never-drop: not_ready before engine, proxied after; one open stream', asyn
   shim.stop();
 });
 
+test('the engine receives the harness client name as host for session_start only', async () => {
+  const stdin = new PassThrough();
+  const stdout = new PassThrough();
+  const out = collect(stdout);
+  const shim = runShim({
+    stdin, stdout, catalog,
+    serverName: 'total-recall', serverVersion: '3.2.0', protocolVersion: '2024-11-05',
+    provision: async () => ({ ok: true }),
+    engineCommand: process.execPath, engineArgs: [fake, '--echo-params'],
+  });
+  try {
+    const send = (m) => stdin.write(JSON.stringify(m) + '\n');
+    send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { clientInfo: { name: 'claude-code', version: '9' } } });
+    await waitFor(() => out.some((m) => m.method === 'notifications/tools/list_changed'));
+
+    send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'session_start', arguments: { host: 'evil' } } });
+    send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'memory_search', arguments: { query: 'q' } } });
+    await waitFor(() => out.some((m) => m.id === 2) && out.some((m) => m.id === 3));
+    assert.deepEqual(JSON.parse(out.find((m) => m.id === 2).result.content[0].text),
+      { name: 'session_start', arguments: { host: 'claude-code' } });
+    assert.deepEqual(JSON.parse(out.find((m) => m.id === 3).result.content[0].text),
+      { name: 'memory_search', arguments: { query: 'q' } });
+
+  } finally {
+    shim.stop();
+  }
+});
+
 // --- Provisioning retry (#87) -----------------------------------------------------------------
 
 const sink = () => ({ write() {} });

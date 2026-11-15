@@ -1249,3 +1249,20 @@ defect('usage_status does not stand in for status', checkToolReference, (f) => {
 defect('a longer number does not stand in for the count', checkToolReference, (f) => { f['docs/tools.md'] = f['docs/tools.md'].replace('2 in', '12 in'); }, /does not say "2 in SQLite mode"/);
 defect('the SQLite count is off by one', checkToolReference, (f) => { f['docs/tools.md'] = f['docs/tools.md'].replace('2 in', '3 in'); }, /does not say "2 in SQLite mode"/);
 defect('a catalog with no tools list', checkToolReference, (f) => { f['catalog.json'] = '[]'; }, /no "tools" list/);
+
+// ---------------------------------------------------------------------------------------------
+// The announce text tells every model to relay the what's-new notice
+// ---------------------------------------------------------------------------------------------
+
+test('the announce text tells the model to relay `whatsNew` verbatim', () => {
+  const tree = repoTree();
+  for (const p of ['skills/commands/SKILL.md', 'skills/using-total-recall/SKILL.md', '.kiro/steering/total-recall.md', '.kiro/hooks/total-recall-session-start.json']) {
+    const text = tree.read(p);
+    assert.notEqual(text, null, `${p} is missing`);
+    assert.ok(text.includes('whatsNew'), `${p} does not mention whatsNew`);
+    assert.ok(text.includes('verbatim'), `${p} does not say verbatim`);
+  }
+  const hook = JSON.parse(tree.read('.kiro/hooks/total-recall-session-start.json'));
+  assert.match(hook.hooks[0].action.prompt, /whatsNew/);
+  assert.equal(skillStatusLine(tree), 'total-recall loaded — 2 pinned, 3 hot, 12 warm, 5 cold, 2 KB collections. Storage: cortex. Last session: 2 hours ago.');
+});

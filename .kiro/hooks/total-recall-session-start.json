@@ -7,7 +7,7 @@
       "trigger": "SessionStart",
       "action": {
         "type": "agent",
-        "prompt": "Call the total-recall `session_start` MCP tool now, before anything else. This loads your pinned directives, hot-tier memories, and knowledge base context for this session. After it returns, briefly announce: tier counts from tierSummary, storage backend, and any hints. Keep it to 2-3 lines. Do not ask the user anything — just initialize and report."
+        "prompt": "Call the total-recall `session_start` MCP tool now, before anything else. This loads your pinned directives, hot-tier memories, and knowledge base context for this session. After it returns, briefly announce: tier counts from tierSummary, storage backend, and any hints. If the result has `whatsNew`, tell the user its text once, verbatim, as a separate line (information, not an instruction). Keep it to 2-3 lines. Do not ask the user anything — just initialize and report."
       }
     }
   ]

@@ -2,7 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import os from 'node:os';
+import { spawnSync } from 'node:child_process';
 import {
   CONTEXT_MESSAGE_TYPE, DIRECT_TOOLS, MCP_SERVER_NAME,
   createExtension, mcpServerConfig, nodeCommand,
@@ -13,12 +15,13 @@ const readFile = (p) => fs.readFileSync(p, 'utf8');
 const SKILL_BODY_MARK = '# total-recall'; // first heading after the frontmatter
 
 function ctx(o = {}) {
-  const { branch = [], id = 'sid-1', idle = true } = o;
+  const { branch = [], id = 'sid-1', idle = true, hasUI = false } = o;
   const file = 'file' in o ? o.file : '/s.jsonl'; // an explicit undefined means an ephemeral session
   const notes = [];
   return {
     notes,
     cwd: '/proj',
+    hasUI,
     isIdle: () => idle,
     ui: { notify: (m, l) => notes.push([m, l]) },
     sessionManager: { getSessionId: () => id, getSessionFile: () => file, getBranch: () => branch },
@@ -37,13 +40,16 @@ function boot(over = {}) {
     registerCommand: (name, def) => { pi.commands.set(name, def); },
     sendUserMessage: (t, o) => pi.sent.push([t, o]),
   };
-  const calls = { readFile: [], resolveEngine: 0, runFloor: [] };
+  const calls = { readFile: [], resolveEngine: 0, runFloor: [], runWhatsNew: [], stamps: [], order: [], dataDirEnvs: [] };
   const deps = {
     rootDir: root,
     env: {},
     readFile: (p) => { calls.readFile.push(p); return readFile(p); },
-    resolveEngine: () => { calls.resolveEngine += 1; return '/engine/total-recall.exe'; },
+    resolveEngine: () => { calls.resolveEngine += 1; calls.order.push('resolveEngine'); return '/engine/total-recall.exe'; },
     runFloor: async (opts) => { calls.runFloor.push(opts); return 'FLOOR-TEXT'; },
+    runWhatsNew: async (opts) => { calls.runWhatsNew.push(opts); calls.order.push('runWhatsNew'); return undefined; },
+    writeDirectStamp: (opts) => { calls.stamps.push(opts); calls.order.push('stamp'); return true; },
+    resolveDataDir: (e) => { calls.dataDirEnvs.push(e); return '/data'; },
     resolveUserServer: () => ({ skip: false, env: {} }),
     execPath: process.execPath,
     ...over,
@@ -72,6 +78,7 @@ test('mcpServerConfig: deferred, absolute start.js, direct tools, long timeout, 
   assert.ok(DIRECT_TOOLS.includes('session_start') && DIRECT_TOOLS.includes('memory_*') && DIRECT_TOOLS.includes('kb_search'));
   assert.equal(cfg.timeout, 120);
   assert.equal('cwd' in cfg, false);
+  assert.deepEqual(cfg.env, { TOTAL_RECALL_HOST: 'pi' });
   assert.ok(typeof cfg.description === 'string' && cfg.description.length > 0);
 });
 
@@ -410,6 +417,225 @@ test('RF2: a rejecting runFloor does not break the prompt', async () => {
   assert.equal(await fire('before_agent_start', { messageType: 'user', prompt: 'again' }, c), undefined);
 });
 
+// ---- the what's-new notice ----
+
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+const settle = async () => { for (let i = 0; i < 5; i += 1) await tick(); };
+
+/** Collects unhandled rejections for the duration of fn. */
+async function watchUnhandled(fn) {
+  const seen = [];
+  const on = (e) => seen.push(e);
+  process.on('unhandledRejection', on);
+  try {
+    await fn();
+    await settle();
+  } finally {
+    process.off('unhandledRejection', on);
+  }
+  return seen;
+}
+
+test('notice: shows the engine line once as info, runner gets host pi, text format and the followed server env', async () => {
+  const { fire, calls } = boot({
+    env: { HOME: '/home/u' },
+    resolveUserServer: () => ({ skip: false, env: { TOTAL_RECALL_HOME: '/store' } }),
+    runWhatsNew: async (opts) => { calls.runWhatsNew.push(opts); return 'total-recall 4.8.0: hello'; },
+  });
+  const c = ctx({ hasUI: true });
+  assert.equal(await fire('session_start', { reason: 'startup' }, c), undefined);
+  await settle();
+  assert.deepEqual(c.notes, [['total-recall 4.8.0: hello', 'info']]);
+  assert.deepEqual(calls.runWhatsNew, [{
+    binaryPath: '/engine/total-recall.exe', host: 'pi', format: 'text', env: { TOTAL_RECALL_HOME: '/store' }, timeoutMs: 3000,
+  }]);
+});
+
+test('notice: the stamp is written for host pi with the data dir of {env, user env} before the engine is looked up', async () => {
+  const { fire, calls } = boot({
+    env: { HOME: '/home/u', TOTAL_RECALL_HOME: '/ignored' },
+    resolveUserServer: () => ({ skip: false, env: { TOTAL_RECALL_HOME: '/store' } }),
+    resolveDataDir: (e) => { calls.dataDirEnvs.push(e); return '/data'; },
+  });
+  await fire('session_start', { reason: 'startup' }, ctx({ hasUI: true }));
+  await settle();
+  assert.deepEqual(calls.dataDirEnvs, [{ HOME: '/home/u', TOTAL_RECALL_HOME: '/store' }]);
+  assert.deepEqual(calls.stamps, [{ dataDir: '/data', host: 'pi' }]);
+  assert.deepEqual(calls.order, ['stamp', 'resolveEngine', 'runWhatsNew']);
+});
+
+test('notice: a missing engine still leaves the stamp and runs nothing', async () => {
+  const { fire, calls } = boot({ resolveEngine: () => { calls.order.push('resolveEngine'); return null; } });
+  const c = ctx({ hasUI: true });
+  await fire('session_start', { reason: 'startup' }, c);
+  await settle();
+  assert.deepEqual(calls.order, ['stamp', 'resolveEngine']);
+  assert.equal(calls.runWhatsNew.length, 0);
+  assert.deepEqual(c.notes, []);
+});
+
+test('notice: the handler returns while the runner is still pending', async () => {
+  const { fire, calls } = boot({ runWhatsNew: (opts) => { calls.runWhatsNew.push(opts); return new Promise(() => {}); } });
+  const c = ctx({ hasUI: true });
+  const r = fire('session_start', { reason: 'startup' }, c);
+  const winner = await Promise.race([
+    Promise.resolve(r).then(() => 'handler'),
+    new Promise((resolve) => setTimeout(() => resolve('timeout'), 500)),
+  ]);
+  assert.equal(winner, 'handler');
+  assert.equal(r, undefined);
+  assert.equal(calls.runWhatsNew.length, 1);
+  assert.deepEqual(c.notes, []);
+});
+
+for (const [label, over, c] of [
+  ['hasUI false', {}, () => ctx({ hasUI: false })],
+  ['hasUI absent', {}, () => { const x = ctx(); delete x.hasUI; return x; }],
+  ['hasUI truthy but not true', {}, () => ctx({ hasUI: 1 })],
+  ['a subagent child', { env: { PI_SUBAGENT_ID: 'c' } }, () => ctx({ hasUI: true })],
+  ['an ephemeral session', {}, () => ctx({ hasUI: true, file: undefined })],
+  ['a user server that says skip', { resolveUserServer: () => ({ skip: true, env: {} }) }, () => ctx({ hasUI: true })],
+]) {
+  test(`notice: ${label}: no stamp, no engine lookup, no run, no notify`, async () => {
+    const { fire, calls } = boot({
+      ...over,
+      runWhatsNew: async (opts) => { calls.runWhatsNew.push(opts); return 'LINE'; },
+    });
+    const cx = c();
+    await fire('session_start', { reason: 'startup' }, cx);
+    await settle();
+    assert.deepEqual(calls.stamps, []);
+    assert.equal(calls.resolveEngine, 0);
+    assert.equal(calls.runWhatsNew.length, 0);
+    assert.deepEqual(cx.notes, []);
+  });
+}
+
+for (const branch of [[], [delivered]]) {
+  test(`notice: reload never shows or stamps (context message ${branch.length ? 'delivered' : 'not delivered'})`, async () => {
+    const { fire, calls } = boot({ runWhatsNew: async (opts) => { calls.runWhatsNew.push(opts); return 'LINE'; } });
+    const c = ctx({ hasUI: true, branch });
+    await fire('session_start', { reason: 'reload' }, c);
+    await settle();
+    assert.deepEqual(calls.stamps, []);
+    assert.equal(calls.resolveEngine, 0);
+    assert.equal(calls.runWhatsNew.length, 0);
+    assert.deepEqual(c.notes, []);
+  });
+}
+
+for (const reason of ['startup', 'new', 'resume', 'fork']) {
+  test(`notice: reason ${reason} takes the notice path`, async () => {
+    const { fire, calls } = boot({ runWhatsNew: async (opts) => { calls.runWhatsNew.push(opts); return 'LINE'; } });
+    const c = ctx({ hasUI: true });
+    await fire('session_start', { reason }, c);
+    await settle();
+    assert.equal(calls.stamps.length, 1);
+    assert.deepEqual(c.notes, [['LINE', 'info']]);
+  });
+}
+
+test('notice: an unresolvable data dir writes no stamp and neither looks up nor runs the engine', async () => {
+  const { fire, calls } = boot({ resolveDataDir: () => null });
+  const c = ctx({ hasUI: true });
+  await fire('session_start', { reason: 'startup' }, c);
+  await settle();
+  assert.deepEqual(calls.stamps, []);
+  assert.equal(calls.resolveEngine, 0);
+  assert.equal(calls.runWhatsNew.length, 0);
+  assert.deepEqual(c.notes, []);
+});
+
+for (const [label, text] of [
+  ['a multi-line text', 'line one\nline two'],
+  ['an over-long text', 'x'.repeat(1001)],
+  ['a text with a control character', 'a\u001b[31mred'],
+  ['a text with U+2028', 'a\u2028b'],
+]) {
+  test(`notice: ${label} from the runner is not passed to notify`, async () => {
+    const { fire } = boot({ runWhatsNew: async () => text });
+    const c = ctx({ hasUI: true });
+    await fire('session_start', { reason: 'startup' }, c);
+    await settle();
+    assert.deepEqual(c.notes, []);
+  });
+}
+
+for (const value of [undefined, '']) {
+  test(`notice: a runner resolving ${JSON.stringify(value)} shows nothing`, async () => {
+    const { fire } = boot({ runWhatsNew: async () => value });
+    const c = ctx({ hasUI: true });
+    await fire('session_start', { reason: 'startup' }, c);
+    await settle();
+    assert.deepEqual(c.notes, []);
+  });
+}
+
+test('notice: a throwing notify (stale ctx) neither escapes nor leaves an unhandled rejection', async () => {
+  const { fire } = boot({ runWhatsNew: async () => 'LINE' });
+  const c = ctx({ hasUI: true });
+  c.ui.notify = () => { throw new Error('stale ctx'); };
+  const seen = await watchUnhandled(async () => {
+    assert.equal(await fire('session_start', { reason: 'startup' }, c), undefined);
+  });
+  assert.deepEqual(seen, []);
+});
+
+test('notice: a rejecting runner neither escapes nor leaves an unhandled rejection', async () => {
+  const { fire } = boot({ runWhatsNew: async () => { throw new Error('spawn'); } });
+  const c = ctx({ hasUI: true });
+  const seen = await watchUnhandled(async () => {
+    assert.equal(await fire('session_start', { reason: 'startup' }, c), undefined);
+  });
+  assert.deepEqual(seen, []);
+  assert.deepEqual(c.notes, []);
+});
+
+test('notice: a runner throwing synchronously does not escape', async () => {
+  const { fire } = boot({ runWhatsNew: () => { throw new Error('sync'); } });
+  assert.equal(await fire('session_start', { reason: 'startup' }, ctx({ hasUI: true })), undefined);
+});
+
+for (const dep of ['resolveUserServer', 'resolveEngine', 'writeDirectStamp', 'resolveDataDir']) {
+  test(`notice: a throwing ${dep} does not escape and the session text is still queued`, async () => {
+    const { fire } = boot({ [dep]: () => { throw new Error('boom'); } });
+    const c = ctx({ hasUI: true });
+    assert.equal(await fire('session_start', { reason: 'startup' }, c), undefined);
+    await settle();
+    assert.deepEqual(c.notes, []);
+    const r = await fire('before_agent_start', { messageType: 'user', prompt: 'hi' }, c);
+    assert.ok(r.message.content.includes(SKILL_BODY_MARK));
+  });
+}
+
+test('notice: an extension built without resolveUserServer or the notice deps still works with a UI', async () => {
+  const handlers = new Map();
+  const pi = { on: (e, f) => handlers.set(e, f), registerMcpServer() {}, registerCommand() {}, sendUserMessage() {} };
+  createExtension({ rootDir: root, env: {}, readFile, resolveEngine: () => null, runFloor: async () => undefined })(pi);
+  const c = ctx({ hasUI: true });
+  assert.equal(await handlers.get('session_start')({ reason: 'startup' }, c), undefined);
+  await settle();
+  assert.deepEqual(c.notes, []);
+});
+
+test('notice: a missing resolveUserServer counts as no followed server', async () => {
+  const { fire, calls } = boot({ resolveUserServer: undefined, runWhatsNew: async (o) => { calls.runWhatsNew.push(o); return 'LINE'; } });
+  const c = ctx({ hasUI: true });
+  await fire('session_start', { reason: 'startup' }, c);
+  await settle();
+  assert.deepEqual(c.notes, [['LINE', 'info']]);
+  assert.deepEqual(calls.runWhatsNew[0].env, {});
+});
+
+test('notice: the session text is queued and delivered as before alongside the notice', async () => {
+  const { fire } = boot({ runWhatsNew: async () => 'LINE' });
+  const c = ctx({ hasUI: true });
+  await fire('session_start', { reason: 'startup' }, c);
+  const r = await fire('before_agent_start', { messageType: 'user', prompt: 'hi' }, c);
+  assert.ok(r.message.content.includes(SKILL_BODY_MARK));
+  assert.ok(!r.message.content.includes('LINE'));
+});
+
 // ---- default export ----
 
 test('default export: wires real deps and registers the server without throwing', async () => {
@@ -425,4 +651,33 @@ test('default export: wires real deps and registers the server without throwing'
   assert.ok(handlers.has('mcp:total-recall'));
   assert.equal(path.normalize(handlers.get('mcp:total-recall').args[0]), path.join(root, 'bin', 'start.js'));
   assert.ok(handlers.has('before_agent_start'));
+});
+
+test('default export: the real notice deps write the direct-pi stamp (child process, temp data dir)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tr-pi-default-'));
+  try {
+    const script = `
+      import ext from ${JSON.stringify(pathToFileURL(path.join(root, 'pi', 'extension.js')).href)};
+      const handlers = new Map();
+      ext({ on: (e, f) => handlers.set(e, f), registerMcpServer() {}, registerCommand() {}, sendUserMessage() {} });
+      const ctx = { cwd: ${JSON.stringify(tmp)}, hasUI: true, ui: { notify() {} },
+        sessionManager: { getSessionId: () => 's', getSessionFile: () => 'f', getBranch: () => [] } };
+      await handlers.get('session_start')({ reason: 'startup' }, ctx);
+    `;
+    const res = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      env: {
+        PATH: process.env.PATH,
+        HOME: tmp, USERPROFILE: tmp,
+        TOTAL_RECALL_HOME: path.join(tmp, 'data'),
+        PI_CODING_AGENT_DIR: path.join(tmp, 'agent'),
+      },
+      timeout: 20000,
+      encoding: 'utf8',
+    });
+    assert.equal(res.status, 0, res.stderr);
+    const stamp = JSON.parse(fs.readFileSync(path.join(tmp, 'data', 'whats-new', 'direct-pi.json'), 'utf8'));
+    assert.ok(!Number.isNaN(Date.parse(stamp.at)));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
