@@ -153,5 +153,10 @@
     "name": "an unpaired surrogate in the input is passed through, not repaired",
     "input": "a \ud83d yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
     "expected": "a \ud83d"
+  },
+  {
+    "name": "the angle-bracket scheme match is ASCII-only (U+017F does not fold to s)",
+    "input": "<http\u017f://x>",
+    "expected": "<http\u017f://x>"
   }
 ]

@@ -20,6 +20,7 @@ No reflection, no dynamic code generation. All JSON via source-generated `JsonCo
 | `Telemetry/` | `CompactionLog`, `UsageEventLog`, `UsageDailyRollup`, `UsageWatermarkStore` | Retrieval events, compaction history, usage telemetry |
 | `Usage/` | `IUsageImporter`, `UsageIndexer`, `UsageQueryService` | Token usage tracking and query |
 | `Sync/` | `CortexClient`, `SyncQueue`, `SyncService`, `PeriodicSync`, `RoutingStore` | Bidirectional Cortex sync |
+| `GitSync/` | `RecordReader`, `ParsedRecord`, `RecordWriter`, `RecordPatcher` | Git sync record codec (not wired to any sync yet): strict reader (1 MiB cap, duplicate-key and encoding pre-pass), hand-written canonical writer (byte-stable, unknown content kept), patcher. Wire names are lower-case, not the `EntryTypeMapping` DB strings |
 | `Config/` | `ConfigLoader`, `TomlConfig` | TOML config loading + `~/.total-recall/config.toml` |
 | `Diagnostics/` | `ExceptionLogger` | AOT-safe exception chain logging |
 | `Migration/` | `MigrationRunner`, `PostgresMigrationRunner` | Sequential schema migration framework |
