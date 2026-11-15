@@ -349,8 +349,8 @@ Cursor (see Accepted losses).
   `checkedAt` is when the server last answered (a 200, or a 403 or 429, which
   count as an answer); `lastAttempt` is when an attempt last ended, whatever the outcome. A 200 writes the
   new `version` and `summary` and sets both times. A 403 or 429 keeps the earlier `version` and `summary`
-  (or none) and sets both times. Any other failure (offline, timeout, a 5xx, a body that is not the expected
-  shape, a non-redirect 3xx) changes only `lastAttempt` and keeps the rest. The file is written atomically,
+  (or none) and sets both times. Any other failure (offline, a timeout, any status other than 200, 403 or 429 including a
+  redirect, a body that is not the expected shape) changes only `lastAttempt` and keeps the rest. The file is written atomically,
   like the seen-state.
 - **The request.** `GET https://api.github.com/repos/strvmarv/total-recall/releases/latest` (stable running
   version) or `.../releases?per_page=10` (prerelease running version), unauthenticated, `User-Agent:
@@ -359,7 +359,7 @@ Cursor (see Accepted losses).
   longer one is a failed attempt), with automatic redirects turned off (a redirect answer is a failed attempt). The URL is a constant; nothing in
   the configuration or the environment changes it, and the test constructor takes a base address and an
   `HttpMessageHandler`. The channel follows the running version, as above.
-- **Reading the answer.** A release counts only when it is not a draft, its `tag_name` is `v` followed by a
+- **Reading the answer.** The stable endpoint answers one release object and the listing an array; both go through the same counting rule. A release counts only when it is not a draft, its `tag_name` is `v` followed by a
   version of at most 64 characters that `SemVer.TryParse` accepts and that carries no `+build` part, and (for
   a stable running version) it is not a prerelease. A 200 answer with no release that counts is treated as
   not the expected shape: only `lastAttempt` changes. The
@@ -390,8 +390,8 @@ Cursor (see Accepted losses).
   install form is: a clone or npm for Cursor, the marketplace for Codex, `npm install -g` for other MCP
   hosts). The table covers every id of `HostIds`. Each host's page states the same instruction (an
   "Updating" sentence is added to a page that has none; the Claude Code page names `/total-recall:commands
-  update` beside its `/plugin` steps), and a test checks that every command entry appears verbatim on its host's page and that every pointer entry
-  names a page that exists and has an "Updating" section (the pages are `claude-code.md`, `pi.md`, `copilot-cli.md`, `cursor.md`, `codex-cli.md`,
+  update` beside its `/plugin` steps), and a test (in `scripts/host-docs.test.js`, reading the table from the C# source the way `scripts/release-notes.test.js` reads `HostIds.cs`) checks that every command entry appears verbatim on its host's page and that every pointer entry
+  names a page that exists and has an "Updating" section, meaning a `###` heading or a bullet whose text begins `Updating` under an existing `##` section (the pages' `##` headings are pinned by rule 1 of that test and do not change) (the pages are `claude-code.md`, `pi.md`, `copilot-cli.md`, `cursor.md`, `codex-cli.md`,
   `gemini-cli.md`, `kiro.md`, `opencode.md`, `hermes.md`, `cline.md`, `windsurf.md`, `zed.md`, `vscode.md`,
   `other-mcp.md`).
 
@@ -523,7 +523,7 @@ most 1000 characters (the summary is at most 200; an available line adds the ins
 First seen: total-recall 4.8.0: <summary> All releases: <releasesUrl>
 Updated:    total-recall updated 4.7.0 -> 4.8.0: <summary> More: <url>            (one release)
             total-recall updated 4.5.0 -> 4.8.0: <summary> All releases: <releasesUrl>   (longer jump)
-Available:  total-recall 4.9.0 is available (you have 4.8.0): <summary> Update: <how>  More: <url>
+Available:  total-recall 4.9.0 is available (you have 4.8.0): <summary> Update: <how> More: <url>
 ```
 
 `<how>` comes from the table in "Build decisions for the update checker (T3)", one entry per host id, which
