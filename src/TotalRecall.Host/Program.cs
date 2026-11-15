@@ -67,6 +67,7 @@ using TotalRecall.Infrastructure.Config;
 using TotalRecall.Infrastructure.Diagnostics;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Migration;
+using TotalRecall.Infrastructure.WhatsNew;
 using TotalRecall.Server;
 using TotalRecall.Web;
 
@@ -204,6 +205,26 @@ internal static class Program
             return 1;
         }
 
+        // Background update check (what's-new "available" notice). Started here and nowhere else:
+        // ServerComposition is also reached by `ui`, `dump-catalog` and tests. It returns at once
+        // (the first request is 60 seconds away, on its own task), never throws and never writes to
+        // stdout, so it cannot touch the MCP handshake. Any failure here means no update check.
+        UpdateCheckerRun? updateCheck = null;
+        try
+        {
+            updateCheck = UpdateChecker.Start(
+                McpServer.ResolveServerVersion(),
+                WhatsNewState.DefaultDir(),
+                ConfigLoader.LoadUpdatesNoticeEnabled(),
+                ConfigLoader.LoadUpdatesCheckEnabled(),
+                ConfigLoader.LoadUpdatesCheckIntervalHours(),
+                () => Environment.GetEnvironmentVariable(UpdateSettings.NoUpdateCheckEnvVar));
+        }
+        catch
+        {
+            updateCheck = null;
+        }
+
         // Step 4: run the MCP server. Dispose handles on shutdown.
         try
         {
@@ -217,6 +238,7 @@ internal static class Program
         }
         finally
         {
+            updateCheck?.Dispose();
             handles.Dispose();
         }
     }
