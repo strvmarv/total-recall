@@ -2,7 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import os from 'node:os';
+import { spawnSync } from 'node:child_process';
 import {
   CONTEXT_MESSAGE_TYPE, DIRECT_TOOLS, MCP_SERVER_NAME,
   createExtension, mcpServerConfig, nodeCommand,
@@ -503,6 +505,7 @@ for (const [label, over, c] of [
     await fire('session_start', { reason: 'startup' }, cx);
     await settle();
     assert.deepEqual(calls.stamps, []);
+    assert.equal(calls.resolveEngine, 0);
     assert.equal(calls.runWhatsNew.length, 0);
     assert.deepEqual(cx.notes, []);
   });
@@ -632,16 +635,31 @@ test('default export: wires real deps and registers the server without throwing'
   assert.ok(handlers.has('before_agent_start'));
 });
 
-test('default export: the notice deps are the real functions', async () => {
-  const [{ runWhatsNew, writeDirectStamp }, { resolveDataDir }] = await Promise.all([
-    import('./whatsNew.js'), import('../scripts/fetch-binary.js'),
-  ]);
-  assert.equal(typeof runWhatsNew, 'function');
-  assert.equal(typeof writeDirectStamp, 'function');
-  assert.equal(typeof resolveDataDir, 'function');
-  // Registers with a UI-less context: the notice path must stay silent and touch nothing.
-  const handlers = new Map();
-  const pi = { on: (e, f) => handlers.set(e, f), registerMcpServer() {}, registerCommand() {}, sendUserMessage() {} };
-  (await import('./extension.js')).default(pi);
-  assert.equal(await handlers.get('session_start')({ reason: 'startup' }, ctx({ hasUI: false })), undefined);
+test('default export: the real notice deps write the direct-pi stamp (child process, temp data dir)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tr-pi-default-'));
+  try {
+    const script = `
+      import ext from ${JSON.stringify(pathToFileURL(path.join(root, 'pi', 'extension.js')).href)};
+      const handlers = new Map();
+      ext({ on: (e, f) => handlers.set(e, f), registerMcpServer() {}, registerCommand() {}, sendUserMessage() {} });
+      const ctx = { cwd: ${JSON.stringify(tmp)}, hasUI: true, ui: { notify() {} },
+        sessionManager: { getSessionId: () => 's', getSessionFile: () => 'f', getBranch: () => [] } };
+      await handlers.get('session_start')({ reason: 'startup' }, ctx);
+    `;
+    const res = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      env: {
+        PATH: process.env.PATH,
+        HOME: tmp, USERPROFILE: tmp,
+        TOTAL_RECALL_HOME: path.join(tmp, 'data'),
+        PI_CODING_AGENT_DIR: path.join(tmp, 'agent'),
+      },
+      timeout: 20000,
+      encoding: 'utf8',
+    });
+    assert.equal(res.status, 0, res.stderr);
+    const stamp = JSON.parse(fs.readFileSync(path.join(tmp, 'data', 'whats-new', 'direct-pi.json'), 'utf8'));
+    assert.ok(!Number.isNaN(Date.parse(stamp.at)));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
