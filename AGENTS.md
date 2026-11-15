@@ -402,7 +402,7 @@ The composition root in `src/TotalRecall.Host/Program.cs` wires up all dependenc
 
 Schema changes are handled by a sequential migration framework in `src/TotalRecall.Infrastructure/Storage/Schema.cs`. The `MigrationRunner` runs each migration function inside a transaction, indexed by `_schema_version`. On startup, it checks the current schema version and runs any newer migrations.
 
-Schema is managed by sequential migrations (currently 16; Migration 16 added the pinned tables). For the authoritative migration table, see `src/TotalRecall.Infrastructure/AGENTS.md`.
+Schema is managed by sequential migrations (currently 18; Migration 18 added the git sync state tables). For the authoritative migration table, see `src/TotalRecall.Infrastructure/AGENTS.md`.
 
 To add a schema change:
 
@@ -410,7 +410,7 @@ To add a schema change:
 2. The function receives the `SqliteConnection` and runs inside a transaction.
 3. Use `CREATE TABLE IF NOT EXISTS` and `ALTER TABLE ... ADD COLUMN` as needed.
 4. The version number is the array index + 1.
-5. Add a test in `tests/TotalRecall.Infrastructure.Tests/SchemaTests.cs` covering the new migration's pre/post-state.
+5. Add a test in `tests/TotalRecall.Infrastructure.Tests/SchemaTests.cs` covering the new migration's pre/post-state. `SchemaTests` carries the `Integration` trait, so the standard verify (`Category!=Integration`) skips it: put a migration's own tests in a file without that trait (see `tests/TotalRecall.Infrastructure.Tests/GitSync/GitSyncSchemaTests.cs`) so they run on every push.
 
 ---
 
