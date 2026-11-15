@@ -42,8 +42,13 @@ export function sanitizeSummary(text) {
   s = s.replace(WHITESPACE, ' ').replace(/^ | $/g, '');
   if (s.length > MAX_SUMMARY) {
     const cut = s.lastIndexOf(' ', MAX_SUMMARY);
-    s = cut > 0 ? s.slice(0, cut) : s.slice(0, MAX_SUMMARY);
-    if (/[\ud800-\udbff]$/.test(s)) s = s.slice(0, -1);
+    if (cut > 0) {
+      s = s.slice(0, cut);
+    } else {
+      // A hard cut inside one long word: do not keep half of a surrogate pair.
+      const splitsPair = /[\ud800-\udbff]/.test(s[MAX_SUMMARY - 1]) && /[\udc00-\udfff]/.test(s[MAX_SUMMARY]);
+      s = s.slice(0, splitsPair ? MAX_SUMMARY - 1 : MAX_SUMMARY);
+    }
   }
   return s;
 }
