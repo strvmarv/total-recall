@@ -86,6 +86,9 @@ function deliveredInContext(ctx) {
 export function createExtension({
   rootDir, env, readFile, resolveEngine, runFloor, resolveUserServer,
   runWhatsNew, writeDirectStamp, resolveDataDir, execPath = process.execPath,
+  // The session files that have started and not yet shut down in this process. A fresh set by default,
+  // so one extension instance (and every test) stands alone; the default export shares one per process.
+  liveSessions = new Set(),
 }) {
   const skillPath = path.join(rootDir, 'skills', 'commands', 'SKILL.md');
   const developSkillPath = path.join(rootDir, 'skills', 'develop', 'SKILL.md');
@@ -127,7 +130,24 @@ export function createExtension({
     // It is NOT false for a top-level pi-subagents child: pi-subagents keeps that child's session in a
     // file by default (rememberAgents: true) and sets no PI_SUBAGENT_ID, so the child gets the
     // instructions and the floor. Observed, and the workarounds, in docs/hosts/pi.md.
-    const hookable = (ctx) => !env.PI_SUBAGENT_ID && ctx.sessionManager.getSessionFile() !== undefined;
+    // Set at session_start and kept for the life of this session: its header names a parent session file
+    // that has started and not yet shut down in this process, so it is a child of that session.
+    let child = false;
+    const hookable = (ctx) => !env.PI_SUBAGENT_ID && ctx.sessionManager.getSessionFile() !== undefined && !child;
+
+    // Record this session before anything is skipped (a skipped child can be a parent in turn), then
+    // decide whether it is a child. Any failure leaves it the user's session, as before.
+    const noteSessionStart = (ctx) => {
+      child = false;
+      try {
+        const file = ctx.sessionManager.getSessionFile();
+        if (typeof file === 'string' && file !== '') liveSessions.add(file);
+        const parent = ctx.sessionManager.getHeader?.()?.parentSession;
+        child = typeof parent === 'string' && liveSessions.has(parent);
+      } catch {
+        child = false;
+      }
+    };
 
     try {
       registerCommands(pi, { hookable, skillText: loadSkillText() });
@@ -177,6 +197,7 @@ export function createExtension({
     let pending;
 
     pi.on('session_start', (event, ctx) => {
+      noteSessionStart(ctx);
       pending = undefined;
       if (!hookable(ctx)) return undefined;
       // A reload rebuilds this instance (the queue is lost) but keeps the transcript: skip only when

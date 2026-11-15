@@ -15,16 +15,22 @@ const readFile = (p) => fs.readFileSync(p, 'utf8');
 const SKILL_BODY_MARK = '# total-recall'; // first heading after the frontmatter
 
 function ctx(o = {}) {
-  const { branch = [], id = 'sid-1', idle = true, hasUI = false } = o;
+  const { branch = [], id = 'sid-1', idle = true, hasUI = false, parent } = o;
   const file = 'file' in o ? o.file : '/s.jsonl'; // an explicit undefined means an ephemeral session
   const notes = [];
+  const sessionManager = { getSessionId: () => id, getSessionFile: () => file, getBranch: () => branch };
+  // `header` picks what getHeader does: a header (naming `parent`, when given), none, or a throw.
+  // Left out, the session manager has no getHeader at all, as before pi-subagents children were handled.
+  if (o.header === 'missing') sessionManager.getHeader = () => null;
+  else if (o.header === 'throws') sessionManager.getHeader = () => { throw new Error('no header'); };
+  else if (parent !== undefined || o.header === 'present') sessionManager.getHeader = () => ({ type: 'session', parentSession: parent });
   return {
     notes,
     cwd: '/proj',
     hasUI,
     isIdle: () => idle,
     ui: { notify: (m, l) => notes.push([m, l]) },
-    sessionManager: { getSessionId: () => id, getSessionFile: () => file, getBranch: () => branch },
+    sessionManager,
   };
 }
 
@@ -384,6 +390,41 @@ for (const [label, over, file] of [
     assert.equal(c.notes[0][1], 'warning');
   });
 }
+
+// ---- pi-subagents children: a session whose parent session is live in this process ----
+
+/** A parent and a child extension instance that share one set of live session files, as in one pi process. */
+function family(over = {}) {
+  const liveSessions = new Set();
+  return { liveSessions, parent: boot({ liveSessions, ...over }), child: boot({ liveSessions, ...over }) };
+}
+const PROMPT = { messageType: 'user', prompt: 'hi' };
+
+test('child: a session whose parent session file is live gets no hook work, no message, no notice and refusing commands', async () => {
+  const { parent, child } = family();
+  const pc = ctx({ file: '/p.jsonl', hasUI: true });
+  await parent.fire('session_start', { reason: 'startup' }, pc);
+  const cc = ctx({ file: '/c.jsonl', parent: '/p.jsonl', hasUI: true });
+  child.calls.readFile.length = 0;
+  assert.equal(await child.fire('session_start', { reason: 'startup' }, cc), undefined);
+  assert.equal(await child.fire('session_compact', { reason: 'manual' }, cc), undefined);
+  assert.equal(await child.fire('session_tree', {}, cc), undefined);
+  assert.equal(await child.fire('before_agent_start', PROMPT, cc), undefined);
+  assert.equal(child.calls.readFile.length, 0);
+  assert.equal(child.calls.resolveEngine, 0);
+  assert.equal(child.calls.runFloor.length, 0);
+  assert.equal(child.calls.stamps.length, 0);
+  assert.equal(child.calls.runWhatsNew.length, 0);
+  assert.equal(child.pi.servers.length, 1); // the MCP server stays registered: a child may use the tools
+  await child.pi.commands.get('total-recall').handler('help', cc);
+  await child.pi.commands.get('develop').handler('123', cc);
+  assert.equal(child.pi.sent.length, 0);
+  assert.deepEqual(cc.notes.map((n) => n[1]), ['warning', 'warning']);
+  // the parent itself still gets the instructions, and its notice
+  const r = await parent.fire('before_agent_start', PROMPT, pc);
+  assert.match(r.message.content, /total-recall/);
+  assert.equal(parent.calls.runWhatsNew.length, 1);
+});
 
 // ---- RF2: engine availability ----
 
