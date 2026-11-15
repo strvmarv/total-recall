@@ -492,6 +492,53 @@ test('shutdown: removes the file captured at session_start, even when ctx is sta
   assert.doesNotThrow(() => b.pi.handlers.get('session_shutdown')({ reason: 'quit' }, undefined));
 });
 
+test('child: a skipped child still counts as a parent, so its own persisted child is skipped too', async () => {
+  const liveSessions = new Set();
+  const root = boot({ liveSessions });
+  const child = boot({ liveSessions });
+  const grandchild = boot({ liveSessions });
+  await root.fire('session_start', { reason: 'startup' }, ctx({ file: '/r.jsonl' }));
+  const cc = ctx({ file: '/c.jsonl', parent: '/r.jsonl' });
+  await child.fire('session_start', { reason: 'startup' }, cc);
+  const gc = ctx({ file: '/g.jsonl', parent: '/c.jsonl', hasUI: true });
+  assert.equal(await grandchild.fire('session_start', { reason: 'startup' }, gc), undefined);
+  assert.equal(await grandchild.fire('before_agent_start', PROMPT, gc), undefined);
+  assert.equal(grandchild.calls.runWhatsNew.length, 0);
+});
+
+for (const header of ['missing', 'throws', undefined]) {
+  test(`child: a session manager whose header is ${header ?? 'not offered at all'} is the user's session and never breaks the start`, async () => {
+    const liveSessions = new Set(['/p.jsonl']);
+    const s = boot({ liveSessions });
+    const c = ctx({ file: '/s.jsonl', header });
+    assert.doesNotThrow(() => s.pi.handlers.get('session_start')({ reason: 'startup' }, c));
+    assert.equal(await getsInstructions(s, c), true);
+  });
+}
+
+test('child: a header with no parent, or a parent that is not live, is the user\'s session', async () => {
+  const liveSessions = new Set(['/other.jsonl']);
+  for (const parent of [undefined, '/closed.jsonl', '']) {
+    const s = boot({ liveSessions });
+    const c = ctx({ file: '/s.jsonl', parent, header: 'present' });
+    await s.fire('session_start', { reason: 'startup' }, c);
+    assert.equal(await getsInstructions(s, c), true, String(parent));
+  }
+});
+
+test('child: PI_SUBAGENT_ID and a missing session file are still skipped when the live set is in play', async () => {
+  const liveSessions = new Set(['/p.jsonl']);
+  const marked = boot({ liveSessions, env: { PI_SUBAGENT_ID: 'x' } });
+  const mc = ctx({ file: '/m.jsonl' });
+  await marked.fire('session_start', { reason: 'startup' }, mc);
+  assert.equal(await marked.fire('before_agent_start', PROMPT, mc), undefined);
+  const ephemeral = boot({ liveSessions });
+  const ec = ctx({ file: undefined });
+  await ephemeral.fire('session_start', { reason: 'startup' }, ec);
+  assert.equal(await ephemeral.fire('before_agent_start', PROMPT, ec), undefined);
+  assert.deepEqual([...liveSessions].sort(), ['/m.jsonl', '/p.jsonl']); // an ephemeral session has no file to record
+});
+
 // ---- RF2: engine availability ----
 
 test('RF2: no engine means no floor call, but the session text is still delivered', async () => {
