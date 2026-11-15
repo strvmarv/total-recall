@@ -550,7 +550,52 @@ public sealed class ConfigLoader : IConfigLoader
             cortex,
             scope,
             skill,
-            toolCache);
+            toolCache,
+            ProjectGitSync(table));
+    }
+
+    // --- [git_sync] -------------------------------------------------------
+
+    /// <summary>
+    /// Reads the optional <c>[git_sync]</c> table. Absent (or not a table) gives <c>None</c>. Otherwise every key
+    /// is read as a raw value and normalised by <see cref="Core.Config.GitSyncSettings.normalise"/>: a wrong type
+    /// or an out-of-range value never throws here, it becomes a default plus a warning. A TOML syntax error is
+    /// raised earlier, by the parse.
+    /// </summary>
+    private static FSharpOption<Core.Config.GitSyncConfig> ProjectGitSync(TomlTable table)
+    {
+        if (!table.TryGetValue("git_sync", out var obj) || obj is not TomlTable gs)
+            return FSharpOption<Core.Config.GitSyncConfig>.None;
+
+        var raw = new Core.Config.RawGitSync(
+            GitRaw(gs, "remote"),
+            GitRaw(gs, "branch"),
+            GitRaw(gs, "interval_seconds"),
+            GitRaw(gs, "session_start"),
+            GitRaw(gs, "session_start_soft_seconds"),
+            GitRaw(gs, "session_start_max_seconds"),
+            GitRaw(gs, "session_start_stall_seconds"),
+            GitRaw(gs, "session_end"),
+            GitRaw(gs, "session_end_seconds"),
+            GitRaw(gs, "delete_guard_percent"));
+        return FSharpOption<Core.Config.GitSyncConfig>.Some(Core.Config.GitSyncSettings.normalise(raw));
+    }
+
+    private static Core.Config.GitRawValue GitRaw(TomlTable table, string key)
+    {
+        if (!table.TryGetValue(key, out var v))
+            return Core.Config.GitRawValue.RawAbsent;
+        return v switch
+        {
+            string s => Core.Config.GitRawValue.NewRawStr(s),
+            long n => Core.Config.GitRawValue.NewRawInt(n),
+            bool b => Core.Config.GitRawValue.NewRawBool(b),
+            double => Core.Config.GitRawValue.NewRawBad("a float"),
+            TomlTableArray => Core.Config.GitRawValue.NewRawBad("an array of tables"),
+            TomlArray => Core.Config.GitRawValue.NewRawBad("an array"),
+            TomlTable => Core.Config.GitRawValue.NewRawBad("a table"),
+            _ => Core.Config.GitRawValue.NewRawBad("a value of another type"),
+        };
     }
 
     // --- walker helpers ---------------------------------------------------

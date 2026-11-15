@@ -132,7 +132,7 @@ public sealed class SchemaTests
         var tablesAfterFirst = ListTables(conn);
 
         // Second run should be a no-op: no errors, no duplicate schema,
-        // no extra _schema_version rows beyond the initial 3.
+        // no extra _schema_version rows beyond the migrations already applied.
         MigrationRunner.RunMigrations(conn);
         var tablesAfterSecond = ListTables(conn);
 
@@ -144,8 +144,8 @@ public sealed class SchemaTests
         Assert.True(reader.Read());
         var count = reader.GetInt64(0);
         var maxVersion = reader.GetInt64(1);
-        Assert.Equal(17L, count);
-        Assert.Equal(17L, maxVersion);
+        Assert.Equal(18L, count);
+        Assert.Equal(18L, maxVersion);
     }
 
     [Fact]

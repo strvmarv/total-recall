@@ -108,6 +108,7 @@ let configTests =
                 Scope = None
                 Skill = None
                 ToolCache = None
+                GitSync = None
             }
             Expect.equal cfg.Tiers.Hot.MaxEntries 50 "field access works"
             Expect.equal cfg.Embedding.Model "bge-small-en-v1.5" "nested field access works"
