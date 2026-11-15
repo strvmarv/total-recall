@@ -509,7 +509,14 @@ test('CLI: runs through a symlinked path (the main-module check resolves real pa
 
 test('AGENTS.md documents the tag message shape the release checks', () => {
   const agents = fs.readFileSync(here('../AGENTS.md'), 'utf8');
-  for (const needle of ['release-notes.json', 'annotated', 'summary paragraph', 'check-version']) {
-    assert.ok(agents.includes(needle), `AGENTS.md does not mention ${needle}`);
+  const start = agents.indexOf('### Release flow');
+  assert.ok(start >= 0, 'AGENTS.md has no "### Release flow" heading');
+  const rest = agents.slice(start + '### Release flow'.length);
+  const next = rest.search(/^### /m);
+  const flow = next < 0 ? rest : rest.slice(0, next);
+  for (const needle of ['release-notes.json', 'release-notes.js', '--check', 'summary paragraph', 'annotated', '-F']) {
+    assert.ok(flow.includes(needle), `the Release flow section of AGENTS.md does not mention ${needle}`);
   }
+  const changelog = fs.readFileSync(here('../CHANGELOG.md'), 'utf8');
+  assert.ok(changelog.includes('#91'), 'CHANGELOG.md does not mention #91');
 });

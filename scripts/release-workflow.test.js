@@ -362,6 +362,8 @@ function checkReleaseNotesGate(text) {
     if (/^(?:      - |        )if:/m.test(gate.text)) problems.push(`"${CHECK_NOTES}" has an if: condition and can be skipped`);
     if (/^(?:      - |        )continue-on-error:/m.test(gate.text)) problems.push(`"${CHECK_NOTES}" sets continue-on-error, so its failure is ignored`);
   }
+  const job = jobBlock(text, 'check-version');
+  if (job && /^    continue-on-error:/m.test(job)) problems.push('the check-version job sets continue-on-error, so its failure is ignored');
   return problems;
 }
 
@@ -514,6 +516,11 @@ test('mutation: an if: or continue-on-error on the gate step is caught', () => {
   }
   const first = mutate('      - name: Check the release notes\n', '      - if: always()\n        name: Check the release notes\n');
   assert.ok(checkReleaseNotesGate(first).some((p) => /if: condition/.test(p)));
+});
+
+test('mutation: continue-on-error on the check-version job is caught', () => {
+  const mutated = mutate('  check-version:\n    name: Check version files match the tag\n', '  check-version:\n    continue-on-error: true\n    name: Check version files match the tag\n');
+  assert.ok(checkReleaseNotesGate(mutated).some((p) => /check-version job sets continue-on-error/.test(p)));
 });
 
 test('release.yml: the build job needs check-version', () => {
