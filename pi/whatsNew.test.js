@@ -275,3 +275,21 @@ test('runWhatsNew: runs a real child process end to end', async () => {
   });
   assert.equal(result, 'hello \u2014 world');
 });
+
+test('runWhatsNew: a host that is not a plain host id, or an unknown format, never spawns', async () => {
+  for (const [host, format] of [['--no-mark', 'text'], ['../x', 'text'], ['', 'text'], ['pi', 'yaml'], ['pi', undefined], [undefined, 'text']]) {
+    const { spawn, calls } = fakeSpawn();
+    const out = await runWhatsNew({ binaryPath: '/engine', host, format, spawn });
+    assert.equal(out, undefined, `${host} ${format}`);
+    assert.equal(calls.length, 0, `${host} ${format}`);
+  }
+});
+
+test('runWhatsNew: the timeout kills the child with SIGKILL', async () => {
+  const { spawn, calls } = fakeSpawn();
+  let signal;
+  const p = runWhatsNew({ binaryPath: '/engine', host: 'pi', format: 'text', timeoutMs: 10, spawn });
+  calls[0].child.kill = (sig) => { signal = sig; return true; };
+  assert.equal(await p, undefined);
+  assert.equal(signal, 'SIGKILL');
+});

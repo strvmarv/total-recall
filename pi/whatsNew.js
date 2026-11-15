@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const HOST_ID = /^[a-z][a-z-]{0,20}$/;
+const FORMATS = ['text', 'json', 'claude-code'];
 const DEFAULT_TIMEOUT_MS = 3000;
 const MAX_STDOUT_CHARS = 8 * 1024;
 
@@ -69,6 +70,10 @@ export function runWhatsNew({
       resolve(value);
     };
     try {
+      if (typeof host !== 'string' || !HOST_ID.test(host) || !FORMATS.includes(format)) {
+        finish(undefined);
+        return;
+      }
       const args = ['whats-new', '--host', host, '--format', format];
       if (noMark) args.push('--no-mark');
       const childEnv = { ...process.env, ...env };
@@ -92,7 +97,7 @@ export function runWhatsNew({
         finish(code === 0 && text !== '' ? text : undefined);
       });
       timer = setTimeout(() => {
-        try { child.kill(); } catch { /* already gone */ }
+        try { child.kill('SIGKILL'); } catch { /* already gone */ }
         try { child.stdout.destroy(); } catch { /* already closed */ }
         finish(undefined);
       }, timeoutMs);
