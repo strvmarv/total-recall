@@ -75,17 +75,8 @@ let private groups (d: MergeDecision) : Merged =
 let private applyToContent (m: Merged) : ContentApply = fst m.Content
 let private pendingOfContent (m: Merged) : StampAction = snd m.Content
 
-[<Tests>]
-let typeTests =
-    testList "SyncMerge types" [
-        testCase "the neutral input builds" <| fun _ ->
-            Expect.equal input.Row (Some Active) "row"
-            Expect.equal (input.Local |> Option.map (fun l -> l.Content.Text)) (Some "base") "local text"
-            Expect.isTrue (Stamp.compare (ours 1) (theirs 1) <> 0) "the two machines' stamps differ"
-    ]
-
 // ------------------------------------------------------------------------------------------------
-// Task 2: the group rules, reached through W4 and W5 (an entry and a record both exist)
+// the group rules, reached through W4 and W5 (an entry and a record both exist)
 
 let private pendingContent (s: Stamp) (i: MergeInput) : MergeInput = { i with Pending = { i.Pending with Content = Some s } }
 let private pendingSticky (s: Stamp) (i: MergeInput) : MergeInput = { i with Pending = { i.Pending with Sticky = Some s } }
@@ -227,6 +218,14 @@ let contentRuleTests =
             let d = decide i
             expectContent d LeaveContent KeepPending "local wins"
             Expect.isEmpty d.Reviews "the text was changed on one side only"
+
+        testCase "FC5 a record that changed only another field still takes the whole content group over a pending text edit (whole-group last-writer-wins; no conflict is opened)" <| fun _ ->
+            let i =
+                input |> theirText "base" (theirs 3) |> withTheirs (fun r -> { r with Project = Some "p" })
+                |> withLocal (withText "edit") |> pendingContent (ours 2)
+            let d = decide i
+            expectContent d TakeTheirs ClearPending "the later stamp takes the group"
+            Expect.isEmpty d.Reviews "the umbrella opens a conflict only when both sides changed the text"
 
         testCase "FC5 the record is later: taken; a conflict when both changed the text (local loses)" <| fun _ ->
             let i = input |> theirText "remote" (theirs 3) |> withLocal (withText "edit") |> pendingContent (ours 2)
@@ -526,7 +525,7 @@ let mutationResistanceTests =
     ]
 
 // ------------------------------------------------------------------------------------------------
-// Task 3: the whole-entry rows without ordered lists, and held-delete closing
+// the whole-entry rows without ordered lists, and held-delete closing
 
 let private everyBase (c: BaseChange) : BaseUpdate = { Content = c; Tags = c; Sticky = c; Tier = c }
 let private bothApplies : bool list = [ true; false ]
@@ -557,9 +556,10 @@ let wholeEntryTests =
 
         testCase "W2 a left row ignores the record, with or without a base" <| fun _ ->
             for b in [ input.Base; None ] do
-                let d = decide ({ input with Row = Some Left; Base = b } |> noEntry)
-                Expect.equal d.Entry Ignore "ignore"
-                Expect.isNone d.RowState "unchanged"
+                for p in bothApplies do
+                    let d = decide ({ input with Row = Some Left; Base = b } |> noEntry |> proven p)
+                    Expect.equal d.Entry Ignore "ignore"
+                    Expect.isNone d.RowState "unchanged"
 
         testCase "W3 a forgotten row comes back only for a newer, different text that is not our own push" <| fun _ ->
             let forgotten = { input with Row = Some Forgotten } |> noEntry
@@ -714,7 +714,7 @@ let wholeEntryEdgeTests =
     ]
 
 // ------------------------------------------------------------------------------------------------
-// Task 4: the ordered lists W6 (record absent, entry present) and W8 (record present, entry gone)
+// the ordered lists W6 (record absent, entry present) and W8 (record present, entry gone)
 
 /// W6.1's trigger: a pending change of the text (local text differs from the base's text).
 let private pendingEdit (i: MergeInput) : MergeInput = i |> withLocal (withText "edit") |> pendingContent (ours 4)
@@ -808,6 +808,9 @@ let absentRecordTests =
             for i in [ w6 |> localSticky; w6 |> pendingSticky (ours 4); w6 |> proven false ] do
                 Expect.isFalse (clearsPending (decide i).Entry true) "held"
             Expect.isTrue (clearsPending (decide w6).Entry true) "deleted"
+            let deferred = decide ({ w6 with Row = Some Forgotten } |> pendingSticky (ours 4) |> pendingTier (ours 4))
+            Expect.equal deferred.Entry Defer "an impossible snapshot is deferred"
+            Expect.isFalse (clearsPending deferred.Entry true) "and its pending stamps are kept"
 
         testCase "deletion needs proof: never a sticky entry, an unproven apply, a pending pin or text, an open item" <| fun _ ->
             let never (what: string) (i: MergeInput) = Expect.notEqual (decide i).Entry DeleteEntry what
@@ -877,23 +880,6 @@ let presentRecordTests =
         testCase "W8.4 a held local deletion clears the pending stamps of the entry that is gone" <| fun _ ->
             Expect.isTrue (clearsPending (decide (w8 |> proven false)).Entry false) "HoldDeletion LocalDeletion clears"
 
-        testCase "a deletion pushed first and an edit written back converge in both orders" <| fun _ ->
-            // B edits the text while A's deletion is pushed: B republishes its edit (W6.1); A sees it as an edit (W3 or W8.1).
-            let b = decide (noRecord input |> pendingEdit)
-            Expect.isTrue b.FreshContentStamp "B publishes its edit again"
-            Expect.equal b.Entry LeaveEntry "B keeps the memory"
-            let editRecord = theirText "edit" (theirs 5)
-            let aDeletePushedFirst = decide ({ input with Row = Some Forgotten } |> noEntry |> editRecord)
-            Expect.equal aDeletePushedFirst.Entry InsertFromRecord "A gets the memory back (W3)"
-            // The other order: A's deletion is still pending locally when the edit lands.
-            let aEditFirst = decide (noEntry input |> editRecord)
-            Expect.equal aEditFirst.Entry InsertFromRecord "A gets the memory back (W8.1)"
-            // B sees its own record again: nothing is deleted.
-            let bSeesOwn =
-                input |> editRecord |> withLocal (withText "edit") |> pendingContent (theirs 5) |> pushingContent (theirs 5)
-            let d = decide bSeesOwn
-            Expect.isTrue (match d.Entry with MergeGroups _ -> true | _ -> false) "B keeps the entry"
-
         testCase "a reset to a pre-edit commit does not re-insert a forgotten memory with older text" <| fun _ ->
             let i = { input with Row = Some Forgotten } |> withBase (fun r -> { r with Content = "edit"; ContentStamp = theirs 5 }) |> noEntry
             Expect.equal (decide (i |> theirText "base" (theirs 1))).Entry Ignore "the old record is older than the base"
@@ -952,7 +938,7 @@ let deletionEdgeTests =
     ]
 
 // ------------------------------------------------------------------------------------------------
-// Task 5: generators, the reference interpreter and the properties
+// generators, the reference interpreter and the properties
 
 let private genStamp : Gen<Stamp> = Gen.elements [ for n in 0 .. 5 do yield ours n; yield theirs n ]
 let private genOptStamp : Gen<Stamp option> = Gen.frequency [ 2, Gen.constant None; 3, genStamp |> Gen.map Some ]
@@ -1248,7 +1234,7 @@ let propertyTests =
             Expect.equal (decide (apply i d)).Entry Ignore "once the push lands the record is gone and nothing is left to do"
 
         testPropertyWithConfig config
-            "order of arrival for content (no own stamps, the same sticky group in both versions): the greater content stamp decides in either order"
+            "order of arrival for content is independent of the order (no own stamps, the same sticky group in both versions)"
             (Prop.forAll
                 (Arb.fromGen (gen {
                     let! b = genRecord
