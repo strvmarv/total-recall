@@ -227,4 +227,14 @@ public class WhatsNewStateTests : IDisposable
         Put(WhatsNewState.StampFileName("pi"), "{\"at\":\"" + at.ToString("o") + "\"}");
         Assert.True(WhatsNewState.IsDirectStampFresh(Dir, "pi", Now));
     }
+
+    [Fact]
+    public void IsDirectStampFresh_StampAsJavaScriptWritesIt_ParsesAndAges()
+    {
+        // JavaScript's Date.prototype.toISOString: milliseconds and a literal Z.
+        Put(WhatsNewState.StampFileName("pi"), "{\"at\":\"2026-11-15T20:24:56.123Z\"}");
+        var written = new DateTimeOffset(2026, 11, 15, 20, 24, 56, 123, TimeSpan.Zero);
+        Assert.True(WhatsNewState.IsDirectStampFresh(Dir, "pi", written + TimeSpan.FromDays(29)));
+        Assert.False(WhatsNewState.IsDirectStampFresh(Dir, "pi", written + TimeSpan.FromDays(31)));
+    }
 }

@@ -68,6 +68,9 @@ public static class CliApp
     // always lied. See Fix C in the beta-native-deps PR for the wiring.
     private static readonly string AppVersion = ResolveAppVersion();
 
+    /// <summary>The running app version (build metadata stripped), for commands that need it.</summary>
+    internal static string CurrentVersion => AppVersion;
+
     private const int ExitOk = 0;
     private const int ExitUsage = 2;
 
@@ -191,6 +194,7 @@ public static class CliApp
             new Commands.ImportHostCommand(),
             new Commands.StatusCommand(),
             new Commands.PinnedFloorCommand(),
+            new Commands.WhatsNewCommand(),
             new Commands.UsageCommand(),
             new Commands.MigrateCommand(),
             new Commands.ReindexEmbeddingsCommand(),
