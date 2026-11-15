@@ -50,13 +50,13 @@ test('release.yml: the publish job attests the release assets and may write atte
 
 const STEP_START = /^      - /m; // every step is a `- ` list item at 6 spaces, whatever its first key is
 
-/** The publish job's steps as [{name, text}] in order. */
-function publishSteps(text) {
-  const publish = jobBlock(text, 'publish');
-  if (!publish) return [];
-  const i = publish.indexOf('\n    steps:\n');
+/** A job's steps as [{name, text}] in order (the publish job's unless another job is named). */
+function publishSteps(text, job = 'publish') {
+  const block = jobBlock(text, job);
+  if (!block) return [];
+  const i = block.indexOf('\n    steps:\n');
   if (i < 0) return [];
-  const body = publish.slice(i + '\n    steps:\n'.length);
+  const body = block.slice(i + '\n    steps:\n'.length);
   return body.split(new RegExp(`(?=${STEP_START.source})`, 'm')).filter((c) => STEP_START.test(c)).map((c) => ({
     name: (/^(?:      - |        )name: (.*)$/m.exec(c) ?? [])[1]?.trim() ?? '',
     text: c,
@@ -289,4 +289,209 @@ test('mutation: a publish step that also runs for stable releases or interpolate
   const inline = REAL.replace('releases/$RELEASE_ID"', 'releases/${{ steps.attach_release.outputs.id }}"');
   assert.notEqual(inline, REAL);
   assert.ok(checkPrereleaseIsPublishedAfterAttach(inline).length > 0);
+});
+
+// ---- release notes: the tag message gates the release and the notes ship with every package ----
+//
+// check-version runs `release-notes.js --check` so a stable tag without a summary fails before four
+// platform builds. The publish job writes `release-notes.json` into every binaries/<rid>/ and the
+// release body into $RUNNER_TEMP. That has to happen after the artifact downloads and before the size
+// guard and `npm publish`: npm publishes before the archives are staged, so this is the only position
+// that reaches both the npm package and the four archives.
+
+const RIDS = ['linux-x64', 'linux-arm64', 'osx-arm64', 'win-x64'];
+const FETCH_TAGS = 'Fetch all tags';
+const CHECK_NOTES = 'Check the release notes';
+const WRITE_NOTES = 'Write release notes';
+const SIZE_GUARD = 'Guard npm package size (pre-publish)';
+const NPM_PUBLISH = 'npm publish';
+
+/** The text of a step's `run:` value (a one-liner or a block), line continuations joined, spaces collapsed. */
+function runText(step) {
+  const lines = step.text.split('\n');
+  const start = lines.findIndex((l) => /^ {8}run:/.test(l));
+  if (start < 0) return '';
+  const out = [lines[start].replace(/^ {8}run:\s*\|?\s*/, '')];
+  for (const l of lines.slice(start + 1)) {
+    if (/^ {8}\S/.test(l) || /^ {6}\S/.test(l)) break;
+    out.push(l);
+  }
+  return out.join('\n').replace(/\\\n/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** The value of a `key: value` line at the given indent of a step: 8 spaces for its own keys, 10 for `env:` and `with:` entries. */
+const stepKey = (step, key, indent = 8) => (new RegExp(`^ {${indent}}${key}: (.*)$`, 'm').exec(step.text) ?? [])[1]?.trim();
+
+function checkNotesStepsOfJob(text, job, scriptName) {
+  const problems = [];
+  const steps = publishSteps(text, job);
+  const at = (name) => steps.findIndex((s) => s.name === name);
+  const checkout = steps.findIndex((s) => /uses: actions\/checkout@v5\b/.test(s.text));
+  const fetch = at(FETCH_TAGS);
+  const script = at(scriptName);
+  if (checkout < 0) problems.push(`the ${job} job has no actions/checkout@v5 step`);
+  else if (!/^ {10}fetch-depth: 0$/m.test(steps[checkout].text)) problems.push(`the ${job} checkout does not set fetch-depth: 0`);
+  if (fetch < 0) problems.push(`the ${job} job has no "${FETCH_TAGS}" step`);
+  else {
+    if (!/git fetch --force --tags origin/.test(runText(steps[fetch]))) problems.push(`the ${job} "${FETCH_TAGS}" step does not run git fetch --force --tags origin`);
+    if (checkout >= 0 && fetch < checkout) problems.push(`the ${job} job fetches tags before the checkout`);
+  }
+  if (script < 0) return [...problems, `the ${job} job has no "${scriptName}" step`];
+  if (fetch >= 0 && fetch > script) problems.push(`the ${job} job fetches tags after "${scriptName}"`);
+  const step = steps[script];
+  if (stepKey(step, 'REF_NAME', 10) !== '${{ github.ref_name }}') {
+    problems.push(`"${scriptName}" does not pass the tag through env: REF_NAME`);
+  }
+  for (const s of [step, ...(fetch >= 0 ? [steps[fetch]] : [])]) {
+    if (runText(s).includes('${{')) problems.push(`"${s.name}" interpolates an expression into the shell`);
+  }
+  if (!/^ {8}run:/m.test(step.text)) problems.push(`"${scriptName}" has no run:`);
+  return problems;
+}
+
+function checkReleaseNotesGate(text) {
+  const problems = checkNotesStepsOfJob(text, 'check-version', CHECK_NOTES);
+  const steps = publishSteps(text, 'check-version');
+  const gate = steps.find((s) => s.name === CHECK_NOTES);
+  if (gate) {
+    if (!/^node scripts\/release-notes\.js "\$REF_NAME" --check$/.test(runText(gate))) {
+      problems.push(`"${CHECK_NOTES}" does not run node scripts/release-notes.js "$REF_NAME" --check`);
+    }
+    const node = steps.findIndex((s) => /uses: actions\/setup-node@v5\b/.test(s.text));
+    if (node < 0 || node > steps.indexOf(gate)) problems.push(`"${CHECK_NOTES}" does not come after Setup Node.js`);
+  }
+  return problems;
+}
+
+/** The `--body-out` value of the write step, quotes removed. */
+const bodyOutOf = (step) => (/--body-out (\S+)/.exec(runText(step)) ?? [])[1]?.replace(/^"|"$/g, '');
+
+function checkReleaseNotesAreWritten(text) {
+  const problems = checkNotesStepsOfJob(text, 'publish', WRITE_NOTES);
+  const steps = publishSteps(text, 'publish');
+  const at = (name) => steps.findIndex((s) => s.name === name);
+  const write = at(WRITE_NOTES);
+  if (write < 0) return problems;
+  const cmd = runText(steps[write]);
+  if (!/(?:^| )node scripts\/release-notes\.js "\$REF_NAME" /.test(cmd)) problems.push(`"${WRITE_NOTES}" does not run node scripts/release-notes.js "$REF_NAME"`);
+  if (/ --check\b/.test(cmd)) problems.push(`"${WRITE_NOTES}" runs with --check, so it writes nothing`);
+  const outs = [...cmd.matchAll(/--notes-out (\S+)/g)].map((m) => m[1].replace(/^"|"$/g, ''));
+  for (const rid of RIDS) {
+    if (!outs.includes(`binaries/${rid}/release-notes.json`)) problems.push(`"${WRITE_NOTES}" does not write binaries/${rid}/release-notes.json`);
+  }
+  const downloads = steps.map((s, i) => (/^Download .* artifact$/.test(s.name) ? i : -1)).filter((i) => i >= 0);
+  if (downloads.length !== RIDS.length) problems.push(`expected ${RIDS.length} artifact download steps, found ${downloads.length}`);
+  if (downloads.some((i) => i > write)) problems.push(`"${WRITE_NOTES}" runs before the artifact downloads, which would overwrite its files`);
+  for (const later of [SIZE_GUARD, NPM_PUBLISH]) {
+    const i = at(later);
+    if (i < 0) problems.push(`no "${later}" step`);
+    else if (write > i) problems.push(`"${WRITE_NOTES}" runs after "${later}", so the notes miss the npm package and the archives`);
+  }
+  const attach = steps.find((s) => s.name === ATTACH);
+  if (!attach) return [...problems, `no "${ATTACH}" step`];
+  // The attach step writes the path as `${{ runner.temp }}/...`, the write step as `$RUNNER_TEMP/...`: they are the
+  // same file, so map the expression to the variable before comparing them.
+  const bodyPath = stepKey(attach, 'body_path', 10)?.replace(/^"|"$/g, '').replace('${{ runner.temp }}', '$RUNNER_TEMP');
+  const bodyOut = bodyOutOf(steps[write]);
+  if (bodyOut === undefined) problems.push(`"${WRITE_NOTES}" has no --body-out`);
+  if (bodyPath === undefined) problems.push('the attach step has no body_path, so the release body is not the tag message');
+  else if (bodyOut !== undefined && bodyPath !== bodyOut) problems.push(`the attach step's body_path (${bodyPath}) is not the file --body-out writes (${bodyOut})`);
+  return problems;
+}
+
+test('release.yml: check-version fetches the tags and checks the release notes of the tag', () => {
+  assert.deepEqual(checkReleaseNotesGate(REAL), []);
+});
+
+test('release.yml: the notes are written into every binaries/<rid>/ before the size guard and npm publish, and the attach step uses the body', () => {
+  assert.deepEqual(checkReleaseNotesAreWritten(REAL), []);
+});
+
+test('publishSteps: parses the steps of another job and keeps the publish default', () => {
+  assert.ok(publishSteps(REAL, 'check-version').some((s) => s.name === CHECK_NOTES));
+  assert.ok(publishSteps(REAL).some((s) => s.name === ATTACH));
+  assert.deepEqual(publishSteps(REAL, 'no-such-job'), []);
+});
+
+/** A copy of the workflow with the step named `name` (of `job`) taken out. */
+function withoutStep(text, name, job = 'publish') {
+  const step = publishSteps(text, job).find((s) => s.name === name);
+  assert.ok(step, `the real workflow has "${name}"`);
+  return text.replace(step.text, '');
+}
+
+/** A copy of the workflow with the step `name` moved to right after the step `after` (both in the publish job). */
+function moveStepAfter(text, name, after) {
+  const steps = publishSteps(text);
+  const moved = steps.find((s) => s.name === name).text.replace(/\n*$/, '\n');
+  const anchor = steps.find((s) => s.name === after).text;
+  return text.replace(steps.find((s) => s.name === name).text, '').replace(anchor, `${anchor.replace(/\n*$/, '\n')}\n${moved}\n`);
+}
+
+const mutate = (from, to) => {
+  const mutated = REAL.replace(from, to);
+  assert.notEqual(mutated, REAL, `the real workflow contains ${JSON.stringify(from)}`);
+  return mutated;
+};
+
+test('mutation: the write step moved after npm publish is caught', () => {
+  const mutated = moveStepAfter(REAL, WRITE_NOTES, NPM_PUBLISH);
+  assert.notEqual(mutated, REAL);
+  assert.ok(checkReleaseNotesAreWritten(mutated).some((p) => /after "npm publish"/.test(p)));
+});
+
+test('mutation: the write step moved before the artifact downloads is caught', () => {
+  const mutated = moveStepAfter(REAL, WRITE_NOTES, 'Fetch bge-small ONNX model');
+  assert.notEqual(mutated, REAL);
+  assert.ok(checkReleaseNotesAreWritten(mutated).some((p) => /before the artifact downloads/.test(p)));
+});
+
+test('mutation: a missing rid is caught', () => {
+  for (const rid of RIDS) {
+    const mutated = REAL.replace(new RegExp(`^ +--notes-out binaries/${rid}/release-notes\\.json.*\\n`, 'm'), '');
+    assert.notEqual(mutated, REAL, rid);
+    assert.ok(checkReleaseNotesAreWritten(mutated).some((p) => p.includes(`binaries/${rid}/release-notes.json`)), rid);
+  }
+});
+
+test('mutation: a missing body_path is caught, and so is one that names another file', () => {
+  const removed = mutate(/^ +body_path: .*\n/m, '');
+  assert.ok(checkReleaseNotesAreWritten(removed).some((p) => /no body_path/.test(p)));
+  const other = mutate('${{ runner.temp }}/release-body.md', '${{ runner.temp }}/other.md');
+  assert.ok(checkReleaseNotesAreWritten(other).some((p) => /not the file --body-out writes/.test(p)));
+});
+
+test('mutation: the gate step removed from check-version is caught', () => {
+  const mutated = withoutStep(REAL, CHECK_NOTES, 'check-version');
+  assert.ok(checkReleaseNotesGate(mutated).some((p) => /no "Check the release notes" step/.test(p)));
+});
+
+test('mutation: a gate step that no longer passes --check, or runs before Setup Node.js, is caught', () => {
+  assert.ok(checkReleaseNotesGate(mutate('"$REF_NAME" --check', '"$REF_NAME"')).some((p) => /--check/.test(p)));
+  const steps = publishSteps(REAL, 'check-version');
+  const node = steps.find((s) => s.name === 'Setup Node.js').text;
+  const early = REAL.replace(node, '').replace(steps.find((s) => s.name === CHECK_NOTES).text, (g) => `${g}${node}`);
+  assert.notEqual(early, REAL);
+  assert.ok(checkReleaseNotesGate(early).some((p) => /after Setup Node\.js/.test(p)));
+});
+
+test('mutation: a missing fetch step, a shallow checkout, or a fetch after the script is caught', () => {
+  for (const [job, check] of [['check-version', checkReleaseNotesGate], ['publish', checkReleaseNotesAreWritten]]) {
+    assert.ok(check(withoutStep(REAL, FETCH_TAGS, job)).some((p) => /no "Fetch all tags" step/.test(p)), job);
+    const block = jobBlock(REAL, job);
+    const shallow = REAL.replace(block, block.replace(/^ +with:\n +fetch-depth: 0\n/m, ''));
+    assert.notEqual(shallow, REAL, job);
+    assert.ok(check(shallow).some((p) => /fetch-depth: 0/.test(p)), job);
+    const steps = publishSteps(REAL, job);
+    const fetch = steps.find((s) => s.name === FETCH_TAGS).text;
+    const script = steps.find((s) => s.name === (job === 'publish' ? WRITE_NOTES : CHECK_NOTES)).text;
+    const late = REAL.replace(fetch, '').replace(script, (g) => `${g.replace(/\n*$/, '\n')}\n${fetch.replace(/\n*$/, '\n')}\n`);
+    assert.notEqual(late, REAL, job);
+    assert.ok(check(late).some((p) => /fetches tags after/.test(p)), job);
+  }
+});
+
+test('mutation: the tag inlined into a run: block is caught', () => {
+  assert.ok(checkReleaseNotesGate(mutate('"$REF_NAME" --check', '"${{ github.ref_name }}" --check')).some((p) => /interpolates an expression/.test(p)));
+  assert.ok(checkReleaseNotesAreWritten(mutate('node scripts/release-notes.js "$REF_NAME" \\\n', 'node scripts/release-notes.js "${{ github.ref_name }}" \\\n')).some((p) => /interpolates an expression/.test(p)));
 });
