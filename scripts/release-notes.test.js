@@ -504,3 +504,12 @@ test('CLI: runs through a symlinked path (the main-module check resolves real pa
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /::warning::/);
 });
+
+// ---- Task 6: AGENTS.md says what the release checks ----
+
+test('AGENTS.md documents the tag message shape the release checks', () => {
+  const agents = fs.readFileSync(here('../AGENTS.md'), 'utf8');
+  for (const needle of ['release-notes.json', 'annotated', 'summary paragraph', 'check-version']) {
+    assert.ok(agents.includes(needle), `AGENTS.md does not mention ${needle}`);
+  }
+});
