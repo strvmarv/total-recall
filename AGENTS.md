@@ -14,7 +14,7 @@ This file is the operational handbook for AI agents and human contributors worki
 ### Layer Diagram
 ```
 TotalRecall.Host (C#)          ← AOT entry point + composition root
-├── TotalRecall.Server (C#)    ← MCP JSON-RPC over stdio; 49 handlers (one file each)
+├── TotalRecall.Server (C#)    ← MCP JSON-RPC over stdio; 51 handlers (one file each; 50 are served in SQLite mode, 51 in Cortex mode)
 ├── TotalRecall.Web (C#)       ← embedded minimal-API + React SPA (web UI), dispatches to ToolRegistry
 ├── TotalRecall.Cli (C#)       ← CLI commands (Spectre.Console), including `total-recall ui`
 ├── TotalRecall.Infrastructure (C#) ← SQLite/Postgres, ONNX embedder, importers, migrations
@@ -402,7 +402,7 @@ The composition root in `src/TotalRecall.Host/Program.cs` wires up all dependenc
 
 Schema changes are handled by a sequential migration framework in `src/TotalRecall.Infrastructure/Storage/Schema.cs`. The `MigrationRunner` runs each migration function inside a transaction, indexed by `_schema_version`. On startup, it checks the current schema version and runs any newer migrations.
 
-Schema is managed by sequential migrations (currently 16; Migration 16 added the pinned tables). For the authoritative migration table, see `src/TotalRecall.Infrastructure/AGENTS.md`.
+Schema is managed by sequential migrations (currently 17; Migration 16 added the pinned tables and Migration 17 the sticky column on the hot tables). For the authoritative migration table, see `src/TotalRecall.Infrastructure/AGENTS.md`.
 
 To add a schema change:
 

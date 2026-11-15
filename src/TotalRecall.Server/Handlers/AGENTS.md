@@ -6,7 +6,7 @@ This directory contains **one file per MCP tool handler** (51 total). Each handl
 
 ## catalog.json — pre-engine tools/list
 
-The shim's `bin/start.js` serves a static `catalog.json` (repo root) as the `tools/list` response before the engine is ready (or between restarts). This file captures the **local/sqlite tool surface** (41 core + mode-dependent tools). To regenerate it after adding or removing handlers:
+The shim's `bin/start.js` serves a static `catalog.json` (repo root) as the `tools/list` response before the engine is ready (or between restarts). This file captures the **local/sqlite tool surface** (42 core + mode-dependent tools). To regenerate it after adding or removing handlers:
 
 ```bash
 dotnet run --project src/TotalRecall.Host -- dump-catalog > catalog.json

@@ -68,7 +68,7 @@ src/
 │   └── Config.fs                 — config record types + validation
 │
 ├── TotalRecall.Infrastructure/   — C# imperative shell: I/O, framework dependencies
-│   ├── Storage/                  — Microsoft.Data.Sqlite + sqlite-vec, Schema.cs (migrations 1..5)
+│   ├── Storage/                  — Microsoft.Data.Sqlite + sqlite-vec, Schema.cs (migrations 1..17)
 │   ├── Embedding/                — Microsoft.ML.OnnxRuntime + Microsoft.ML.Tokenizers
 │   ├── Importers/                — ClaudeCode, CopilotCli, Cursor, Cline, OpenCode, Hermes, ProjectDocs
 │   ├── Ingestion/                — file ingester, hierarchical index, chunking dispatch
@@ -78,7 +78,7 @@ src/
 │   ├── Diagnostics/              — ExceptionLogger.LogChain (walks InnerException chain, AOT-safe)
 │   └── Config/                   — TOML loader, defaults.toml as embedded resource
 │
-├── TotalRecall.Server/           — JSON-RPC stdio MCP server, 32 tool handlers
+├── TotalRecall.Server/           — JSON-RPC stdio MCP server, 42 core tool handlers (50–51 with mode-dependent tools)
 │   ├── McpServer.cs              — request dispatch, lifecycle, error translation
 │   ├── Handlers/                 — one file per MCP tool (memory_*, kb_*, eval_*, session_*, status, …)
 │   └── AutoMigrationGuard.cs     — 5-state migration state machine (TS → .NET on first launch)
@@ -402,7 +402,7 @@ Once the MCP server is running and connected to your coding assistant, use the e
 /total-recall:commands eval --compare baseline   # Compare current config against saved baseline
 ```
 
-Real query misses captured as benchmark candidates are added to the benchmark suite with the `eval_grow` tool or the CLI (`total-recall eval grow list`, then `total-recall eval grow resolve --accept <id1,id2,...> --reject <id1,id2,...>`); the commands skill has no subcommand for it.
+Real query misses captured as benchmark candidates are added to the benchmark suite with the `eval_grow` tool or the CLI (`total-recall eval grow list`, then `total-recall eval grow resolve --accept <id1,id2,...> --reject <id1,id2,...>`), or with `/total-recall:commands eval grow`.
 
 Or run the benchmark CLI directly (without MCP):
 
