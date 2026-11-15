@@ -666,3 +666,51 @@ test('deliver.md and handoff.md: the Task 6 carry-overs', () => {
   assert.ok(/for a parent, by Ensure-stubs creating and linking stubs and by `issue-close` after a yes in Status mode/.test(handoff), 'm2: the issue-own-state paragraph');
   assert.ok(/acceptance-criteria region \(every track\)/.test(handoff), 'm7: every track');
 });
+
+// ---- the entry point and the user-facing documents for parents ----
+
+function readRepo(rel) {
+  return fs.readFileSync(path.join(REPO, rel), 'utf8').replace(/\r\n/g, '\n');
+}
+
+test('SKILL.md: Issue entry names the two parent routes and Memory follows spec-merged', () => {
+  const entry = section(read('SKILL.md'), 'Issue entry').replace(/\s+/g, ' ');
+  assert.ok(/- `parent-status`: .{0,80}`spec-merged`.{0,200}Status mode/.test(entry), 'parent-status: latest progress spec-merged, go to Status mode');
+  assert.ok(/before any pin validation/.test(entry.slice(entry.indexOf('`parent-status`'))), 'parent-status is chosen before pin validation');
+  assert.ok(/- `terminal-pin`:/.test(entry) && /un-minimize/.test(entry) && /no re-pin/i.test(entry), 'terminal-pin: restore or un-minimize the pin, no re-pin');
+  assert.ok(entry.indexOf('`after-the-pr`') < entry.indexOf('`parent-status`') && entry.indexOf('`parent-status`') < entry.indexOf('`terminal-pin`') && entry.indexOf('`terminal-pin`') < entry.indexOf('`new-issue-or-stop`'), 'the new routes sit after after-the-pr and before new-issue-or-stop');
+  const memory = section(read('SKILL.md'), 'Memory').replace(/\s+/g, ' ');
+  assert.ok(/`spec-merged`/.test(memory), 'Memory snapshots at spec-merged');
+  assert.ok(/`Refs #<n>`[^.]*parent/.test(section(read('SKILL.md'), 'Commits and PRs').replace(/\s+/g, ' ')), 'Commits and PRs says a parent says Refs');
+});
+
+test('define.md: the closing sentence of Fetch step 5 says an unmerged parent spec stops', () => {
+  const fetch = section(read('define.md'), 'Fetch').replace(/\s+/g, ' ');
+  assert.ok(/out\) is said, then ask standalone-or-stop \(an unmerged parent spec stops, as above\)\./.test(fetch), 'the closing sentence carries the exception');
+});
+
+test('tutorial.md: one paragraph on a parent, its spec PR and its sub-tickets', () => {
+  const text = read('tutorial.md').replace(/\s+/g, ' ');
+  assert.ok(/parent/.test(text) && /sub-ticket/.test(text) && /spec/.test(text), 'tutorial.md mentions a parent, its spec and sub-tickets');
+});
+
+test('docs/develop.md: the parent section, its compatibility note and what the probe verified', () => {
+  const doc = readRepo('docs/develop.md');
+  assert.ok(headings(doc).includes('Larger work: parent tickets and sub-tickets'), 'the section exists');
+  const sec = section(doc, 'Larger work: parent tickets and sub-tickets').replace(/\s+/g, ' ');
+  assert.ok(/Parent tickets need this version of the skill\./.test(sec), 'parents need this version of the skill');
+  assert.ok(/minimize/i.test(sec) && /`closed`/.test(sec) && /`spec-merged`/.test(sec), 'the recovery for a wrong closed comment');
+  assert.ok(/-F sub_issue_id/.test(sec) && /state_reason/.test(sec) && /not verified|unverified/i.test(sec), 'the verified calls and the unverified one');
+  assert.ok(/Refs #/.test(sec) && /never `Closes`|closes nothing/i.test(sec), 'the spec PR closes nothing');
+});
+
+test('AGENTS.md and CHANGELOG.md: the parent track is described where contributors look', () => {
+  const agents = section(readRepo('AGENTS.md'), 'develop skill').replace(/\s+/g, ' ');
+  for (const term of ['track=parent', 'spec-merged', 'parent-status', 'terminal-pin', 'route.js parts', 'parentBlob', 'Ensure-stubs']) {
+    assert.ok(agents.includes(term), `AGENTS.md develop skill section mentions ${term}`);
+  }
+  const log = readRepo('CHANGELOG.md');
+  const unreleased = log.slice(log.indexOf('## Unreleased'), log.indexOf('\n## ', log.indexOf('## Unreleased') + 5)).replace(/\s+/g, ' ');
+  const added = unreleased.slice(unreleased.indexOf('### Added'), unreleased.indexOf('### Changed'));
+  assert.ok(/parent ticket/i.test(added) && /sub-ticket/.test(added) && /need this version/.test(added), 'the Unreleased Added list has the parent entry with the compatibility note');
+});

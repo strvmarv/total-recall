@@ -72,7 +72,7 @@ Conventions for every step:
      `ghpin.js run` with `out`) has a part `<k>` in `route.js parts`.
 
    Any check above that fails (a pin that fails `validate`, a link, first line or part that does not check
-   out) is said, then ask standalone-or-stop.
+   out) is said, then ask standalone-or-stop (an unmerged parent spec stops, as above).
 6. A trusted parent only (not chosen standalone): **dependencies.** For each part in part `<k>`'s `dependsOn`, find its stub by the
    selection of [Ensure-stubs](deliver.md#ensure-stubs) steps 1 to 3 (read only here: adopt, create and link
    nothing) and read its state. A part is done when its stub is closed with `state_reason` `completed`; one
