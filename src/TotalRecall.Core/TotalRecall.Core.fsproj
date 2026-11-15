@@ -10,6 +10,7 @@
     <Compile Include="SyncStamp.fs" />
     <Compile Include="SyncRecord.fs" />
     <Compile Include="SyncValidation.fs" />
+    <Compile Include="SyncMerge.fs" />
     <Compile Include="Config.fs" />
     <Compile Include="Tokenizer.fs" />
     <Compile Include="Decay.fs" />
