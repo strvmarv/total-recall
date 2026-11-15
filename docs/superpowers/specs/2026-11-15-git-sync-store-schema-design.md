@@ -21,7 +21,7 @@ first, on their own, with tests that pin the shape.
 2. `Core.Config.GitSyncConfig`: the settings record with the umbrella's keys and defaults, a pure
    normalisation that turns any input into a usable configuration plus a list of warnings, and the loader that
    reads `[git_sync]` from `config.toml`.
-3. A `[git_sync]` section whose values are of the wrong type, out of range, unknown, or not a table never makes
+3. A `[git_sync]` section whose values are of the wrong type or out of range (or that is not a table; unknown keys are ignored without a warning) never makes
    the configuration fail to load: each bad value becomes its default (or is clamped) and is recorded as a
    warning in the loaded configuration, naming the key; a remote or branch that cannot be used safely is
    recorded as not set.
@@ -176,12 +176,12 @@ and has:
 | `session_end_seconds` | 8 | an integer 1 to 3,600 |
 | `delete_guard_percent` | 20 | an integer 0 to 100 |
 
-After the per-key rules, **if `soft > max`, `soft` is lowered to `max`** (the hard ceiling wins). The warning is given only when `session_start_soft_seconds` was written; when it was absent and `max` is below the default soft value, `soft` is lowered silently.
+After the per-key rules, **if `soft > max`, `soft` is lowered to `max`** (the hard ceiling wins). The warning is given only when `session_start_soft_seconds` was written **and was valid** (a bad explicit value already got its own warning and its default is lowered silently); when it was absent and `max` is below the default soft value, `soft` is lowered silently too.
 Warnings are one line each, in key order of the table, so the output is deterministic.
 
 The loader, in `ConfigLoader.Project` next to the other sections, builds `GitSync` from `table["git_sync"]` when
 it is a table (`None` otherwise, including when `git_sync` is present but not a table, which adds no config and
-is left to the TOML layer). Floats, arrays and nested tables are `Bad`. It calls `normalise`
+is left to the TOML layer). Any value that is not a string, an integer or a boolean (a float, a date or time, an array, a table) is `Bad`. It calls `normalise`
 and wraps the result in `Some`. `ConfigJsonSerializer` is unchanged (`GitSync` is not serialized, Decided 3).
 
 `defaults.toml` gets a commented `[git_sync]` block documenting the keys and defaults, next to `[cortex]`.
@@ -201,7 +201,7 @@ and wraps the result in `Some`. `ConfigJsonSerializer` is unchanged (`GitSync` i
   warning text and order; totality over generated `RawValue`s (never throws; every field in range).
 - **Loader** (`tests/TotalRecall.Infrastructure.Tests/ConfigLoaderTests.cs`): no `[git_sync]` gives `GitSync = None`
   and the rest of the configuration unchanged; a section with only a remote gives the defaults; every key set;
-  a malformed section (wrong types, unknown keys, `git_sync` as a string) loads with warnings and does not throw;
+  a malformed section (wrong types, `git_sync` as a string; an unknown key is ignored) loads with warnings where a key was bad and does not throw; an integer literal beyond `int64` (`x = 99999999999999999999`) fails the parse like any syntax error (this pins Decided 4);
   a user file overriding a default of another section is unaffected.
 - **Existing test updated:** `SchemaTests.RunMigrations_RunTwice_Idempotent` asserts 17 `_schema_version` rows and
   `MAX(version) = 17` (and a stale "initial 3" comment); both become 18. `SchemaTests` is `Integration`-trait, so the
