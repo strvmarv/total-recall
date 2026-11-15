@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using TotalRecall.Infrastructure.WhatsNew;
 
 namespace TotalRecall.Server.Handlers;
 
@@ -20,16 +21,26 @@ public sealed class SessionStartHandler : IToolHandler
     private readonly ISessionLifecycle _sessionLifecycle;
     private readonly TotalRecall.Infrastructure.Sync.PeriodicSync? _periodicSync;
     private readonly TotalRecall.Infrastructure.Sync.SyncService? _syncService;
+    private readonly WhatsNewService? _whatsNew;
+    private readonly TimeProvider _time;
+
+    /// <summary>A call that took longer than this gets no notice: the model's
+    /// own tool timeout is near, and a notice that is not shown must not be recorded.</summary>
+    private static readonly TimeSpan NoticeDeadline = TimeSpan.FromSeconds(30);
 
     public SessionStartHandler(
         ISessionLifecycle sessionLifecycle,
         TotalRecall.Infrastructure.Sync.PeriodicSync? periodicSync = null,
-        TotalRecall.Infrastructure.Sync.SyncService? syncService = null)
+        TotalRecall.Infrastructure.Sync.SyncService? syncService = null,
+        WhatsNewService? whatsNew = null,
+        TimeProvider? timeProvider = null)
     {
         _sessionLifecycle = sessionLifecycle
             ?? throw new ArgumentNullException(nameof(sessionLifecycle));
         _periodicSync = periodicSync;
         _syncService = syncService;
+        _whatsNew = whatsNew;
+        _time = timeProvider ?? TimeProvider.System;
     }
 
     public string Name => "session_start";
@@ -41,7 +52,7 @@ public sealed class SessionStartHandler : IToolHandler
 
     public async Task<ToolCallResult> ExecuteAsync(JsonElement? arguments, CancellationToken ct)
     {
-        _ = arguments;
+        var started = _time.GetTimestamp();
         var result = await _sessionLifecycle.EnsureInitializedAsync(ct).ConfigureAwait(false);
 
         // Startup flush: drain any backlog that survived a prior process.
@@ -57,11 +68,51 @@ public sealed class SessionStartHandler : IToolHandler
         }
 
         _periodicSync?.Start();
+
+        // The notice is built per call, outside the cached init result. It is
+        // recorded as seen only after the response is built and only when the
+        // call was quick enough for the model to still show it. Nothing here may
+        // fail session_start.
+        PendingNotice? pending = null;
+        try
+        {
+            if (_whatsNew is not null)
+            {
+                pending = _whatsNew.Check(ReadHost(arguments));
+                if (pending is not null && _time.GetElapsedTime(started) > NoticeDeadline)
+                    pending = null;
+                if (pending is not null)
+                    result = result with { WhatsNew = new WhatsNewDto(pending.Kind, pending.Text, pending.Relay) };
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { pending = null; }
+
         var jsonText = JsonSerializer.Serialize(result, JsonContext.Default.SessionInitResult);
+        if (pending is not null)
+        {
+            try { pending.MarkSeen(); }
+            catch { /* best-effort: an unrecorded notice is simply offered again */ }
+        }
         return new ToolCallResult
         {
             Content = new[] { new ToolContent { Type = "text", Text = jsonText } },
             IsError = false,
         };
+    }
+
+    // The optional string argument `host` (the calling client's name). Every
+    // other shape of arguments (absent, null, non-object, non-string value) is
+    // read as "no host".
+    private static string? ReadHost(JsonElement? arguments)
+    {
+        if (arguments is { } args
+            && args.ValueKind == JsonValueKind.Object
+            && args.TryGetProperty("host", out var hostEl)
+            && hostEl.ValueKind == JsonValueKind.String)
+        {
+            return hostEl.GetString();
+        }
+        return null;
     }
 }

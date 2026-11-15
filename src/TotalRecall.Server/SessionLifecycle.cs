@@ -1751,7 +1751,8 @@ public sealed record SessionInitResult(
     [property: JsonPropertyName("storage")] string Storage,
     [property: JsonPropertyName("hotContextTruncated")] bool HotContextTruncated,
     [property: JsonPropertyName("sessionAgeHint")] string? SessionAgeHint,
-    [property: JsonPropertyName("backgroundTasks")] BackgroundTasksDto? BackgroundTasks = null);
+    [property: JsonPropertyName("backgroundTasks")] BackgroundTasksDto? BackgroundTasks = null,
+    [property: JsonPropertyName("whatsNew")] WhatsNewDto? WhatsNew = null);
 
 /// <summary>One row in the host-importer summary. Skill fields default to
 /// zero / empty for legacy memory-only importers; the skill import sweep
@@ -1787,6 +1788,15 @@ public sealed record WarmSweepResult(
 public sealed record ProjectDocsResult(
     [property: JsonPropertyName("filesIngested")] int FilesIngested,
     [property: JsonPropertyName("totalChunks")] int TotalChunks);
+
+/// <summary>The what's-new notice for this call: <c>Kind</c> is <c>first-seen</c> or
+/// <c>updated</c>, <c>Text</c> the one line to show and <c>Relay</c> the instruction
+/// to the model for showing it. Built per call by the session_start handler, never
+/// part of the cached init result; the whole field is null when there is no notice.</summary>
+public sealed record WhatsNewDto(
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("text")] string Text,
+    [property: JsonPropertyName("relay")] string Relay);
 
 /// <summary>First-run smoke test outcome: <c>Passed</c> and a short human-readable
 /// <c>Notes</c> (the exact-match rate and threshold, or why it could not finish).
