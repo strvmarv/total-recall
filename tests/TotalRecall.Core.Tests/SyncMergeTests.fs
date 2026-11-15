@@ -524,3 +524,157 @@ let mutationResistanceTests =
                 expectContent d HeldAsPinEdit ClearPending "held"
                 Expect.equal d.Reviews [ PinEdit ] "pin-edit"
     ]
+
+// ------------------------------------------------------------------------------------------------
+// Task 3: the whole-entry rows without ordered lists, and held-delete closing
+
+let private everyBase (c: BaseChange) : BaseUpdate = { Content = c; Tags = c; Sticky = c; Tier = c }
+let private bothApplies : bool list = [ true; false ]
+let private proven (b: bool) (i: MergeInput) : MergeInput = { i with ApplyProven = b }
+
+/// W1/W2/W3/W9 shape: a record, no local entry.
+let private noEntry (i: MergeInput) : MergeInput = { i with Local = None }
+/// W6/W7 shape: an entry, no record.
+let private noRecord (i: MergeInput) : MergeInput = { i with Theirs = None }
+
+[<Tests>]
+let wholeEntryTests =
+    testList "SyncMerge whole-entry rows" [
+        testCase "W1 a record with no entry and no row: insert non-sticky, row Active, base from the record" <| fun _ ->
+            for p in bothApplies do
+                let d = decide ({ input with Row = None; Base = None } |> noEntry |> proven p)
+                Expect.equal d.Entry InsertFromRecord "insert"
+                Expect.equal d.RowState (Some Active) "row"
+                Expect.equal d.Base (everyBase BaseBecomesTheirs) "base"
+                Expect.isEmpty d.Reviews "no review"
+                Expect.isFalse d.FreshContentStamp "no fresh stamp"
+
+        testCase "W1 a sticky record adds a new-pin review; a stale base is ignored when there is no row" <| fun _ ->
+            let i = { input with Row = None } |> noEntry |> withTheirs (withSticky true (theirs 1))
+            let d = decide i
+            Expect.equal d.Entry InsertFromRecord "insert"
+            Expect.equal d.Reviews [ NewPin ] "new pin"
+
+        testCase "W2 a left row ignores the record, with or without a base" <| fun _ ->
+            for b in [ input.Base; None ] do
+                let d = decide ({ input with Row = Some Left; Base = b } |> noEntry)
+                Expect.equal d.Entry Ignore "ignore"
+                Expect.isNone d.RowState "unchanged"
+
+        testCase "W3 a forgotten row comes back only for a newer, different text that is not our own push" <| fun _ ->
+            let forgotten = { input with Row = Some Forgotten } |> noEntry
+            for p in bothApplies do
+                let d = decide (forgotten |> theirText "remote" (theirs 3) |> proven p)
+                Expect.equal d.Entry InsertFromRecord "insert"
+                Expect.equal d.RowState (Some Active) "row Active"
+                Expect.equal d.Notes [ EditBeatsDeletion ] "note"
+                Expect.equal d.Base (everyBase BaseBecomesTheirs) "base"
+            let ignored (what: string) (i: MergeInput) = Expect.equal (decide i).Entry Ignore what
+            ignored "only the tier changed" (forgotten |> withTheirs (withTier Hot (theirs 3)))
+            ignored "only the tags changed" (forgotten |> withTheirs (fun r -> { r with Tags = [ "x" ] }))
+            ignored "only the pin changed" (forgotten |> withTheirs (withSticky true (theirs 3)))
+            ignored "an older text" (forgotten |> theirText "remote" (theirs 0))
+            ignored "our own push" (forgotten |> theirText "remote" (ours 3) |> pushingContent (ours 3))
+            ignored "a newer stamp with the same text" (forgotten |> theirText "base" (theirs 3))
+            ignored "no base" ({ forgotten with Base = None } |> theirText "remote" (theirs 3))
+            Expect.isNone (decide (forgotten |> theirText "remote" (theirs 0))).RowState "the row stays"
+
+        testCase "W7 a new local entry with no record: leave it for the caller to push" <| fun _ ->
+            for row, b in [ None, None; Some Active, None ] do
+                let d = decide ({ input with Row = row; Base = b } |> noRecord)
+                Expect.equal d.Entry LeaveEntry "leave"
+                Expect.isNone d.RowState "no row change"
+                Expect.equal d.Base (everyBase KeepBase) "base"
+
+        testCase "W9 no base, entry gone: our own pushed record is deleted; a foreign one is not resurrected" <| fun _ ->
+            let w9 = { input with Base = None } |> noEntry
+            for p in bothApplies do
+                let own = decide (w9 |> pushingContent (theirs 1) |> proven p)
+                Expect.equal own.Entry PushDeletion "own push"
+                Expect.equal own.Base (everyBase BaseBecomesTheirs) "base"
+                Expect.isNone own.RowState "row unchanged until the push completes"
+                let foreign = decide (w9 |> proven p)
+                Expect.equal foreign.Entry Ignore "foreign"
+                Expect.equal foreign.RowState (Some Forgotten) "remembered as deleted"
+                Expect.equal foreign.Base (everyBase BaseBecomesTheirs) "base"
+
+        testCase "W9 an own tier stamp over a foreign text stamp is not a proof of the deletion" <| fun _ ->
+            let d = decide ({ input with Base = None } |> noEntry |> pushingTier (theirs 1))
+            Expect.equal d.Entry Ignore "ignore"
+            Expect.equal d.RowState (Some Forgotten) "forgotten"
+            let other = decide ({ input with Base = None } |> noEntry |> pushingContent (ours 9))
+            Expect.equal other.Entry Ignore "another stamp is not the record's"
+
+        testCase "chain: a deleted base-less row with a foreign record is not resurrected until a newer, different text" <| fun _ ->
+            let first = decide ({ input with Base = None } |> noEntry)
+            Expect.equal first.Entry Ignore "W9"
+            let next = { input with Row = first.RowState; Base = input.Theirs } |> noEntry
+            Expect.equal (decide next).Entry Ignore "W3, same record"
+            let newer = next |> theirText "newer" (theirs 5)
+            Expect.equal (decide newer).Entry InsertFromRecord "a newer, different text brings it back"
+
+        testCase "W10 the record is gone and so is the entry: forget, base kept" <| fun _ ->
+            for row in [ Active; Forgotten ] do
+                for p in bothApplies do
+                    let d = decide ({ input with Row = Some row } |> noEntry |> noRecord |> proven p)
+                    Expect.equal d.Entry Ignore "ignore"
+                    Expect.equal d.RowState (Some Forgotten) "forgotten"
+                    Expect.equal d.Base (everyBase KeepBase) "base kept"
+
+        testCase "W11 W12 W13 nothing anywhere" <| fun _ ->
+            let none = { input with Base = None } |> noEntry |> noRecord
+            Expect.equal (decide none).Entry DropRow "W11 an active row that never reached the repository is dropped"
+            Expect.isNone (decide none).RowState "the row goes with DropRow"
+            Expect.equal (decide { none with Row = Some Forgotten }).Entry Ignore "W12 forgotten, no base"
+            Expect.equal (decide { none with Row = Some Left }).Entry Ignore "W12 left, no base"
+            Expect.equal (decide ({ input with Row = Some Left } |> noEntry |> noRecord)).Entry Ignore "W12 left, with a base"
+            Expect.equal (decide { none with Row = None }).Entry Ignore "W13 no row"
+            Expect.isNone (decide { none with Row = Some Left }).RowState "unchanged"
+
+        testCase "W14 a forgotten or left row with an entry is deferred, with or without a record" <| fun _ ->
+            for row in [ Forgotten; Left ] do
+                for theirsPresent in [ true; false ] do
+                    let i = { input with Row = Some row; HeldDelete = Some RemoteDeletion }
+                    let i = if theirsPresent then i else noRecord i
+                    let d = decide i
+                    Expect.equal d.Entry Defer "defer"
+                    Expect.isFalse d.CloseHeldDelete "defer closes nothing"
+                    Expect.isNone d.RowState "row unchanged"
+                    Expect.equal d.Base (everyBase KeepBase) "base kept"
+
+        testCase "held-delete: a RemoteDeletion item closes when the record is present or the entry is gone, not otherwise" <| fun _ ->
+            let item = Some RemoteDeletion
+            Expect.isTrue (decide { input with HeldDelete = item }).CloseHeldDelete "record and entry present"
+            Expect.isTrue (decide ({ input with HeldDelete = item } |> noEntry |> noRecord)).CloseHeldDelete "entry gone"
+            Expect.isFalse (decide ({ input with Base = None; HeldDelete = item } |> noRecord)).CloseHeldDelete "record absent, entry present (W7)"
+
+        testCase "held-delete: a LocalDeletion item closes when the entry is back or the record is gone, not while the deletion stands" <| fun _ ->
+            let item = Some LocalDeletion
+            Expect.isTrue (decide { input with HeldDelete = item }).CloseHeldDelete "entry present"
+            Expect.isTrue (decide ({ input with HeldDelete = item } |> noEntry |> noRecord)).CloseHeldDelete "record gone"
+            Expect.isFalse (decide ({ input with Base = None; HeldDelete = item } |> noEntry)).CloseHeldDelete "record present, entry gone (W9 ignore)"
+
+        testCase "held-delete: no item, never closed" <| fun _ ->
+            for i in [ input; noEntry input; noRecord input; { input with Row = None } ] do
+                Expect.isFalse (decide i).CloseHeldDelete "no item"
+
+        testCase "clearsPending states the Row-effects paragraph" <| fun _ ->
+            for o in [ InsertFromRecord; DeleteEntry; DropRow; PushDeletion; HoldDeletion LocalDeletion ] do
+                Expect.isTrue (clearsPending o true) (sprintf "%A clears with an entry" o)
+                Expect.isTrue (clearsPending o false) (sprintf "%A clears without an entry" o)
+            Expect.isTrue (clearsPending Ignore false) "ignore without an entry"
+            Expect.isFalse (clearsPending Ignore true) "ignore with an entry"
+            let merged = groups (decide input)
+            for o in [ HoldDeletion RemoteDeletion; LeaveEntry; Defer; MergeGroups merged ] do
+                Expect.isFalse (clearsPending o true) (sprintf "%A keeps pending stamps" o)
+                Expect.isFalse (clearsPending o false) (sprintf "%A keeps pending stamps" o)
+
+        testCase "every row value returns a decision" <| fun _ ->
+            for row in [ None; Some Active; Some Forgotten; Some Left ] do
+                for t in [ true; false ] do
+                    for l in [ true; false ] do
+                        let i = { input with Row = row }
+                        let i = if t then i else noRecord i
+                        let i = if l then i else noEntry i
+                        ignore (decide i)
+    ]

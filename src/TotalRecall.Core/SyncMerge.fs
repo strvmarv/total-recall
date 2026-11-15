@@ -409,15 +409,78 @@ let private baseDecision : MergeDecision =
       CloseHeldDelete = false
       FreshContentStamp = false }
 
+let private insertFrom (t: SyncRecord) (editBeatsDeletion: bool) : MergeDecision =
+    { baseDecision with
+        Entry = InsertFromRecord
+        Base = allTheirs
+        RowState = Some Active
+        Reviews = (if t.Placement.Sticky then [ NewPin ] else [])
+        Notes = (if editBeatsDeletion then [ EditBeatsDeletion ] else []) }
+
+/// "Text newer": the record's content stamp is greater than the base's, its text differs from the
+/// base's, and the stamp is not one this row proves it sent.
+let private textNewer (input: MergeInput) (b: SyncRecord) (t: SyncRecord) : bool =
+    let own = classify t.ContentStamp (Some b.ContentStamp) input.Pending.Content input.Pushing.Content = Own
+    gt t.ContentStamp b.ContentStamp && t.Content <> b.Content && not own
+
+// W6 (Task 4)
+let private absentRecordEntryPresent (input: MergeInput) (bb: SyncRecord) (l: LocalEntry) : MergeDecision * bool =
+    baseDecision, false
+
+// W8 (Task 4)
+let private presentRecordEntryGone (input: MergeInput) (bb: SyncRecord) (t: SyncRecord) : MergeDecision =
+    baseDecision
+
+/// The held-delete item closes when the situation it was opened for is over.
+let private finish (input: MergeInput) (forceClose: bool) (d: MergeDecision) : MergeDecision =
+    let close =
+        match d.Entry, input.HeldDelete with
+        | Defer, _ -> false
+        | _, None -> false
+        | _, Some _ when forceClose -> true
+        | _, Some RemoteDeletion -> input.Theirs.IsSome || input.Local.IsNone
+        | e, Some LocalDeletion -> input.Local.IsSome || input.Theirs.IsNone || e = InsertFromRecord
+    { d with CloseHeldDelete = close }
+
 let decide (input: MergeInput) : MergeDecision =
     let b = if input.Row.IsSome then input.Base else None          // Decided here 10
-    match input.Row, input.Theirs, input.Local with
-    | (None | Some Active), Some t, Some l ->                       // W4 and W5
-        let outcome, reviews = mergeGroups input b l t
-        { baseDecision with
-            Entry = outcome
-            Base = baseUpdateFor input b t
-            RowState = (if input.Row.IsNone then Some Active else None)
-            Reviews = reviews
-            CloseHeldDelete = input.HeldDelete.IsSome }
-    | _ -> { baseDecision with Entry = Defer }                       // placeholder until Task 3
+    let d, forceClose =
+        match input.Row, input.Theirs, input.Local with
+        | Some (Forgotten | Left), _, Some _ -> { baseDecision with Entry = Defer }, false          // W14
+        | None, Some t, None -> insertFrom t false, false                                           // W1
+        | Some Left, Some _, None -> baseDecision, false                                            // W2
+        | Some Forgotten, Some t, None ->                                                           // W3
+            match b with
+            | Some bb when textNewer input bb t -> insertFrom t true, false
+            | _ -> baseDecision, false
+        | (None | Some Active), Some t, Some l ->                                                   // W4 and W5
+            let outcome, reviews = mergeGroups input b l t
+            { baseDecision with
+                Entry = outcome
+                Base = baseUpdateFor input b t
+                RowState = (if input.Row.IsNone then Some Active else None)
+                Reviews = reviews },
+            false
+        | Some Active, Some t, None ->
+            match b with
+            | Some bb -> presentRecordEntryGone input bb t, false                                   // W8
+            | None ->                                                                               // W9
+                if input.Pushing.Content = Some t.ContentStamp then
+                    { baseDecision with Entry = PushDeletion; Base = allTheirs }, false
+                else
+                    { baseDecision with Entry = Ignore; Base = allTheirs; RowState = Some Forgotten }, false
+        | (None | Some Active), None, Some l ->
+            match b with
+            | Some bb -> absentRecordEntryPresent input bb l                                        // W6
+            | None -> { baseDecision with Entry = LeaveEntry }, false                               // W7
+        | Some Active, None, None ->
+            match b with
+            | Some _ -> { baseDecision with Entry = Ignore; RowState = Some Forgotten }, false      // W10
+            | None -> { baseDecision with Entry = DropRow }, false                                  // W11
+        | Some Forgotten, None, None ->
+            match b with
+            | Some _ -> { baseDecision with Entry = Ignore; RowState = Some Forgotten }, false      // W10
+            | None -> baseDecision, false                                                           // W12
+        | Some Left, None, None -> baseDecision, false                                              // W12
+        | None, None, None -> baseDecision, false                                                   // W13
+    finish input forceClose d
