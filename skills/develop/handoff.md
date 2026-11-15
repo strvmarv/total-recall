@@ -13,7 +13,7 @@ exact values a rule depends on live beside the prose that states it.
 object, and a failure is `{"ok":false,"error":...}`. The goldens at the end of this section are the
 script's test fixtures; a case a golden pins is not repeated here.
 
-**Regions.** The acceptance-criteria region (both tracks) sits between `<!-- tr-develop:ac-begin -->`
+**Regions.** The acceptance-criteria region (every track) sits between `<!-- tr-develop:ac-begin -->`
 and `<!-- tr-develop:ac-end -->`. The approach region (small track only) sits between
 `<!-- tr-develop:approach-begin -->` and `<!-- tr-develop:approach-end -->`, in the collapsed block at
 the bottom of the ticket (its shape is under "The issue after Define"). Each region appears exactly
@@ -1268,7 +1268,8 @@ so a cap holds within an uninterrupted loop and may be exceeded across crashes.
 
 **The issue's own state.** Besides checkpoints, a run changes an issue only by assigning it (to the definer
 at Define, to the executor at kickoff; best effort), by Define's claim comment and its link comment on an
-outsider's original issue, and, at Define, by writing its body. It sets no status label. GitHub closes the
+outsider's original issue, at Define by writing its body, and, for a parent, by Ensure-stubs creating and
+linking stubs and by `issue-close` after a yes in Status mode. It sets no status label. GitHub closes the
 issue when the PR merges; a parent's PR says `Refs`, so merging it closes nothing.
 
 **Goldens.** `position-cases` (`{name, progress, counts, expect}`) and `position-error-cases`;
@@ -1455,10 +1456,16 @@ checkpoint a pin that fails is re-defined instead (Define), never re-pinned.
      `regions.js body` (and `regions.js ac` for `acHash`).
    - **The spec** (spec-bearing tracks): show `git diff <approvedSha> <tip> -- <spec>`, where `<tip>` is the worktree's
      HEAD, so an unpushed commit, a person's or an implementer's, is shown too, with its author.
+   - **The parent** (a sub-ticket: the old pin carries `parent`, or the spec or approach has a `Parent:` line,
+     `route.js parent-line`): recompute `parent` from the link (`parent-read`) and `parentBlob` as
+     `git rev-parse origin/<base>:<parent spec>`, and show the old and new blob, so a re-pin cannot hide
+     drift. `checkCarry` does not carry `parent` and `parentBlob`; this step and step 6 supply them.
 
    This works whoever last edited the body, an outsider included.
 2. Ask for approval. If the approach or the spec changed, run that artifact's reviewer loop on the change
-   first; the orchestrator's fixes to the spec are commits too. The commits shown in step 1, those fixes and
+   first (a parent runs Define's Parent track check, step 4, instead: `route.js parts` on the changed spec
+   and a `route.js stub-body` dry run for each part; a finding is fixed, never presented);
+   the orchestrator's fixes to the spec are commits too. The commits shown in step 1, those fixes and
    the plan loop's are exempt from the spec guard; a commit made any other way after step 1 is not, and is
    shown again.
 3. Only when progress exists, and only when what the track plans from changed against the **governing pin**
@@ -1472,6 +1479,8 @@ checkpoint a pin that fails is re-defined instead (Define), never re-pinned.
    - Parent track: a parent has no `planSha`, so its re-approval runs no loop and its position is `finish`
      (open or update the spec PR).
    - Small track: `cyclesDone` resets to 0 and the new cycles skip behaviour whose tests already pass.
+   - A sub-ticket's `parent` and `parentBlob` are recomputed (step 1); a different parent blob alone is
+     drift, not a change, and starts no follow-up.
    - A final loop that had run is invalidated: `rounds.final` is dropped, and its deferred findings are
      carried into the `deferred` count and listed in the summary.
    - A change to context text only, on the plan track, needs no loop.
@@ -1488,7 +1497,10 @@ checkpoint a pin that fails is re-defined instead (Define), never re-pinned.
      `definedAt` as the approver and the time; `branch` is the latest checkpoint's. Progress: `head`, `plan`
      and `planSha` as they stand after any plan loop, `tasksDone` or `cyclesDone`, the new `rounds.plan`,
      `deferred`, `review` and `gh`. It never carries `rounds.final` or `pr`. A parent's `reapproved`
-     carries `track=parent`, `head`, `review`, `gh` and `deferred`, and no plan fields.
+     carries `track=parent`, `head`, `review`, `gh` and `deferred`, and no plan fields. A sub-ticket's
+     `reapproved` (and `defined`) carries the `parent` and `parentBlob` of step 1, recomputed, never copied
+     from the old pin; a recompute that fails (the parent is closed or its spec is unreadable) keeps the old
+     fields and warns, and with no old fields they are left out and the warning says so.
 
    The summary names what changed and who approved. Read it back. The earlier pins stay as the audit trail.
    The run then continues at the position that `route.js position` derives from the new progress.

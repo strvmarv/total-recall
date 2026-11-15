@@ -599,3 +599,70 @@ test('handoff.md: spec-merged in the position table, the progress enumeration, t
   const re = section(text, 'Re-approval').replace(/\s+/g, ' ');
   assert.ok(/a parent has no `planSha`/i.test(re) && /`finish`/.test(re), 'Re-approval says a parent has no planSha and positions at finish');
 });
+
+// ---- the sub-ticket prose ----
+
+test('define.md: a sub-ticket is found, trusted, checked for dependencies and given context in Fetch', () => {
+  const text = read('define.md');
+  for (const term of [
+    'GET repos/<owner>/<repo>/issues/<n>/parent', 'parentBlob', 'route.js parent-line', 'Deviation from the parent design',
+    'Part <k> of <count> in #<parent>', 'define anyway',
+  ]) {
+    assert.ok(text.includes(term), `define.md mentions ${term}`);
+  }
+  const fetch = section(text, 'Fetch').replace(/\s+/g, ' ');
+  assert.ok(/route\.js stub/.test(fetch) && /standalone/.test(fetch), 'Fetch asks standalone-or-stop on a stub line without a link');
+  assert.ok(/not merged yet/.test(fetch) && /`spec-merged`/.test(fetch), 'Fetch stops on a parent spec that is not merged yet');
+  assert.ok(/route\.js parts/.test(fetch) && /counted/.test(fetch), 'Fetch checks the part in the parent spec and counts the parent checkpoints');
+  assert.ok(/at most 5/.test(fetch) && /2,000/.test(fetch), 'Fetch limits the sibling summaries');
+  assert.ok(/deliver\.md#ensure-stubs/.test(fetch), 'Fetch uses the Ensure-stubs selection for the dependency state');
+});
+
+test('define.md: the Sub-ticket section holds the parent line, the review, the stub line and the pin fields', () => {
+  const text = read('define.md');
+  const found = headings(text);
+  assert.ok(found.indexOf('Small track') < found.indexOf('Sub-ticket') && found.indexOf('Sub-ticket') < found.indexOf('Sign-off'), 'Sub-ticket sits between Small track and Sign-off');
+  const sub = section(text, 'Sub-ticket').replace(/\s+/g, ' ');
+  assert.ok(/Parent: #<parent>, Part <k> \(<parent spec path>\)/.test(sub) && /route\.js parent-line/.test(sub), 'the Parent line and its check');
+  assert.ok(/60-line limit/.test(sub), 'the small track counts the Parent line toward 60 lines');
+  assert.ok(/git rev-parse origin\/<base>:<parent spec>/.test(sub) && /`parent`/.test(sub), 'the blob is computed at origin/<base>');
+  assert.ok(/stub's first line/.test(sub), 'the rewritten body keeps the stub line');
+  assert.ok(/Sign-off/.test(sub) || /sign-off preview/.test(sub), 'the sign-off preview shows both fields');
+  assert.ok(/`parent` and `parentBlob`/.test(section(text, 'Publish').replace(/\s+/g, ' ')), 'Publish puts both fields in the pin');
+});
+
+test('deliver.md: the parent-drift warning, Part of in the PR body and the re-approval recompute', () => {
+  const text = read('deliver.md');
+  assert.ok(text.includes('Part of #') && text.includes('parent spec changed'), 'deliver.md names Part of # and the drift warning');
+  const common = section(text, 'Common steps').replace(/\s+/g, ' ');
+  assert.ok(/route\.js parent-line/.test(common) && /`parentBlob`/.test(common) && /never a stop/.test(common), 'integrity reads the Parent line, compares the blob and never stops');
+  const finish = section(text, 'Finish and close-out').replace(/\s+/g, ' ');
+  assert.ok(/`Closes #<n>`[^.]*`Part of #<parent>`/.test(finish), 'the PR body adds Part of after Closes');
+  const re = section(text, 'Re-approval').replace(/\s+/g, ' ');
+  assert.ok(/`parentBlob`/.test(re) && /`checkpoints.js carry` does not carry/.test(re) && /old and (the )?new blob/.test(re), 'Re-approval recomputes parent and parentBlob and shows both blobs');
+});
+
+test('handoff.md: Re-approval recomputes parent and parentBlob and checks a changed parent spec first', () => {
+  const re = section(read('handoff.md'), 'Re-approval').replace(/\s+/g, ' ');
+  assert.ok(/`parent` and `parentBlob`/.test(re) && /old and (the )?new blob/.test(re), 'step 1 shows the old and new blob');
+  assert.ok(/does not carry `parent` and `parentBlob`/.test(re), 'checkCarry does not carry the two fields');
+  assert.ok(/keeps the old fields and warns/.test(re), 'a failed recompute keeps the old fields');
+  assert.ok(/route\.js parts/.test(re) && /stub-body/.test(re), 'a changed parent spec is checked with parts and the stub-body dry run before approval');
+});
+
+test('deliver.md and handoff.md: the Task 6 carry-overs', () => {
+  const deliver = read('deliver.md');
+  const ensure = section(deliver, 'Ensure-stubs').replace(/\s+/g, ' ');
+  assert.ok(/`parent-read`/.test(ensure) && /parent_issue_url/.test(ensure) && /absent/.test(ensure), 'm1: parent-read when parent_issue_url is absent');
+  const merged = section(deliver, 'Merged close-out').replace(/\s+/g, ' ');
+  assert.ok(/`track=parent`[^.]*follows \[Parent track close-out\]/.test(merged), 'm3: a parent follows its own close-out');
+  assert.ok(/`spec` and `approvedSha` (come|are taken) from the pin, or from the `pr-open` checkpoint when the pin is absent/.test(merged), 'm3: spec and approvedSha from the pin or the pr-open');
+  assert.ok(/fewer than 100 entries, at most 5/.test(ensure) && /cut short/.test(ensure), 'm4: the scan pages and the cut-short rule');
+  assert.ok(/`sub-issue-link`[^.]*numeric `id`/.test(ensure), 'm4: adoption links the numeric id');
+  const status = section(deliver, 'Status mode').replace(/\s+/g, ' ');
+  assert.ok(/`gh` is `<login>`/.test(status) && /`branch`, `head` and `pr` from `spec-merged`/.test(status), 'm5: the closed checkpoint fields');
+  assert.ok(/every stop path/i.test(status) && /scratch directory/.test(status), 'm6: Status mode cleans up on every stop path');
+  const handoff = read('handoff.md').replace(/\s+/g, ' ');
+  assert.ok(/for a parent, by Ensure-stubs creating and linking stubs and by `issue-close` after a yes in Status mode/.test(handoff), 'm2: the issue-own-state paragraph');
+  assert.ok(/acceptance-criteria region \(every track\)/.test(handoff), 'm7: every track');
+});

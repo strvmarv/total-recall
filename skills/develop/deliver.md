@@ -166,6 +166,16 @@ Every track, in order. Steps 1 to 6 are the same numbers as the spec.
    access is at the keyboard, and the run continues at step 5 afterwards. With no one to ask (a
    headless run) it is a changed-artifact stop: a terminal report, nothing posted. Any other failure
    here is a plain blocker 6.
+
+   **Parent drift** (a sub-ticket: the pin carries `parent` and `parentBlob`). Read the parent spec path
+   from the `Parent:` line of the spec (`<spec>` in the worktree) or, on the small track, of the approach
+   (`regions.js approach <bodyFile> <approachFile>`): `node <skill dir>/scripts/route.js parent-line <file>`.
+   Recompute `git rev-parse origin/<base>:<parent spec>` and compare it with `parentBlob`. A difference
+   puts "the parent spec changed since this ticket was defined" in the kickoff summary (and the report); a
+   `parent-line` or `rev-parse` that fails is a warning that drift could not be checked. It is a warning
+   only: never a stop and never a re-approval. At a start, repeat Define's dependency question
+   ([Define](define.md#fetch), step 6) for the part on the `Parent:` line; a stop ends the run with
+   nothing posted.
 5. **Workspace.**
    - *Start, plan or parent track:* a worktree on the pin's `branch`, tracking `origin/<branch>` (Define pushed
      it). If `origin/<branch>` is ahead of the pin's `approvedSha` (an earlier executor's commits
@@ -289,7 +299,8 @@ The plan and small tracks; the parent track has its own steps ([Parent track](#p
    `git push` are not used. First look for an existing PR (**Existing PR**, below); none: write the
    title and body to files in `<dir>` and create it; one: edit it.
    - **Title:** the issue's title as pinned by `bodyHash` (the snapshot's title file).
-   - **Body:** `Closes #<n>`, a summary, the acceptance criteria with their results, the spec link at
+   - **Body:** `Closes #<n>`, for a sub-ticket (the pin carries `parent`) a line `Part of #<parent>`
+     straight after it, a summary, the acceptance criteria with their results, the spec link at
      `approvedSha` (plan track; `https://github.com/<owner>/<repo>/blob/<approvedSha>/<spec>`) and the
      deferred findings.
    - **Original issue.** A `Tracks #<original>` line in the body ([Define](define.md#draft-the-ticket))
@@ -309,8 +320,8 @@ The plan and small tracks; the parent track has its own steps ([Parent track](#p
      fails other than by a 404; tell the person in that case.
    - **Base not the default branch.** GitHub closes an issue only for a PR merged into the repository's
      default branch. When `baseIsDefault` (step 1 of Common steps) is false, every `Closes` above is
-     `Refs` (`Refs #<n>` and `Refs #<original>`), and the report tells the person the issue will not
-     close by itself.
+     `Refs` (`Refs #<n>` and `Refs #<original>`; `Part of #<parent>` stays), and the report tells the
+     person the issue will not close by itself.
    - **Existing PR.** List the open PRs for the branch (**Pull-request calls**, above). One whose head
      repository is this repository (not a fork) and whose head branch is this branch is an existing
      PR: update it with `pr-edit` on its `<pr>` and do not open a second one. Otherwise create one.
@@ -324,8 +335,9 @@ The plan and small tracks; the parent track has its own steps ([Parent track](#p
 ## Merged close-out
 
 Reached from [After the PR](#after-the-pr) when the PR is merged. Each step tolerates a thing that is
-already gone, so a crash in the middle just reruns. The steps below are the plan and small tracks;
-a parent follows its own, after them.
+already gone, so a crash in the middle just reruns. The steps below are the plan and small tracks. A
+parent (the `pr-open` checkpoint's `track=parent`) follows [Parent track close-out](#parent-track-close-out)
+instead, which reuses steps 1 and 2 and never posts `closed`.
 
 1. Remove the worktree (`git worktree remove <path>`, never `--force`).
 2. Delete the local branch with `git branch -d <branch>`, from the main checkout (never `-D`).
@@ -338,8 +350,9 @@ A worktree or branch that git refuses to remove is kept and reported.
 ### Parent track close-out
 
 Fetch `origin` first (`git fetch origin --prune`, pinned, through `ghpin.js run`) and pattern-check `spec`
-(the spec pattern) and `approvedSha` (40 lowercase hex) before either reaches a command. Then do steps 1
-and 2 above, then:
+(the spec pattern) and `approvedSha` (40 lowercase hex) before either reaches a command. `spec` and
+`approvedSha` come from the pin, or from the `pr-open` checkpoint when the pin is absent (this route runs
+before any pin validation). Then do steps 1 and 2 above, then:
 
 1. **Read the merged spec.** Save the file at `origin/<base>` (`git show origin/<base>:<spec>`, through
    `ghpin.js run` with `out`) and run `node <skill dir>/scripts/route.js parts <specFile>`. A missing
@@ -378,19 +391,24 @@ before any pin validation).
    fewer than 100 entries (explicit pages, `per_page=100&page=<N>`, through `ghpin.js run` with `out`; never
    `--paginate`, so the number of calls is bounded). An entry whose first line parses as a
    stub line for this parent is a **claimant** for that part.
-2. **Scan.** `issue-scan` (`state=open`, `since=<definedAt>`), `<N>` = 1 to 5 (bodies are included).
+2. **Scan.** `issue-scan` (`state=open`, `since=<definedAt>`), `<N>` from 1 until a page has fewer than
+   100 entries, at most 5 (bodies are included). When page 5 is full the scan is **cut short**: say so.
    For each issue not already in step 1 (compared by number) whose first line parses as a stub line for
    this parent, add a claimant. An issue linked to a different parent (its `parent_issue_url` is set) is
    reported, never a claimant. Only open issues are scanned, so a ghost closed by hand drops out and its
-   part gets a new stub. Say when the scan stopped at page 5 (cut short).
+   part gets a new stub.
 3. **Eligible.** A claimant counts only when it is not a pull request (the issues list returns them; an
    entry with a `pull_request` key is one) and its author has write access (`counted.js write-access`
    after a `permission` fetch, as in [Define](define.md#claim); a `user.type` other than `User` is
    never eligible and never looked up; a failed lookup other than a 404 is blocker 3). This applies to
    linked and unlinked claimants alike. Of a part's eligible claimants the **lowest issue number is the
    stub**; the others are reported as duplicates and never edited or closed. An unlinked stub is
-   **adopted**: link it (`sub-issue-link`), never duplicate it. An ineligible claimant is only reported
-   and never makes the part count as having a stub.
+   **adopted**: link it with `sub-issue-link` and the claimant's numeric `id` (retried as in step 4.3),
+   never duplicate it. When `parent_issue_url` is absent from the list entries (the field is unverified),
+   run `parent-read` on that claimant before adopting it: a 200 naming another issue means it is linked
+   elsewhere, so it is only reported and drops out as a claimant (the next eligible one is the stub); a
+   200 naming this parent means it is already linked; a 404 means unlinked; any other status is
+   blocker 3. An ineligible claimant is only reported and never makes the part count as having a stub.
 4. **Create.** For each part, in order, with no stub after steps 1 to 3:
    1. Write `<dependsFile>`: a JSON map from each number in the part's `dependsOn` to the issue
       number of that part's stub (known, since parts are created in order and depend only on lower
@@ -469,11 +487,12 @@ as completed (`issue-close` with its number, a write, only on a yes) before it c
 
 When every part is settled, offer (the ask tool) to close the parent, and list the parts that were
 closed as not planned. On a yes, close the parent first (`issue-close`, as completed, through
-`ghpin.js run`), then post `closed` (`branch`, `head`, `gh` and `pr` from `spec-merged`; no integrity
-check runs). If the parent issue is already closed (someone closed it by hand) and every part is
-settled, post only `closed`, so a crash between the two steps never leaves the parent in status mode for
+`ghpin.js run`), then post `closed` (`branch`, `head` and `pr` from `spec-merged`, or from `pr-open` when it
+is absent; `gh` is `<login>`, the executor posting it; no integrity check runs). If the parent issue is
+already closed (someone closed it by hand) and every part is settled, post only `closed`, so a crash between the two steps never leaves the parent in status mode for
 good. On a no, do nothing. The parent is never closed without that answer. Snapshot memory after a
-`closed`.
+`closed`. Every stop path of Status mode (a blocker, a stop or a no, a terminal report) cleans up the
+scratch directory ([Preflight](SKILL.md#preflight)).
 
 ## Re-approval
 
@@ -483,8 +502,11 @@ checkpoint), when [After the PR](#after-the-pr) finds one, or when the person ch
 atomic: the new pin is posted last, in one comment. Follow [Re-approval](handoff.md#re-approval) step by
 step. Its step 1 recovers the old text with
 `node <skill dir>/scripts/history.js find <editsRawFile> <renamesRawFile> <issueJsonFile> <pinnedBodyHash> <outDir>`
-(`edits` and `renames` fetched with `ghpin.js run`); its step 6 posts one `reapproved` (after `checkpoints.js carry`, as in the conventions). The run then derives its position again from the new progress (step 3 of Common steps) and
-continues at step 5.
+(`edits` and `renames` fetched with `ghpin.js run`); its step 6 posts one `reapproved` (after `checkpoints.js carry`, as in the conventions). A sub-ticket's `reapproved` (the pin carries
+`parent`, or the spec or approach has a `Parent:` line) carries `parent` and `parentBlob` recomputed, and
+the person sees the old and new blob: `checkpoints.js carry` does not carry them, so Re-approval adds
+them itself (steps 1, 3 and 6). The run then derives its position again from the new progress (step 3 of
+Common steps) and continues at step 5.
 
 ## Rules
 
