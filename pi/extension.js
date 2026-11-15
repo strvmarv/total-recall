@@ -33,6 +33,23 @@ export const CONTEXT_MESSAGE_TYPE = 'total-recall-context';
 /** Tools the injected instructions name; every other tool is reached through pi's tool_search. */
 export const DIRECT_TOOLS = ['session_start', 'session_end', 'session_refresh', 'memory_*', 'kb_search'];
 
+/**
+ * Key, on globalThis, of the set of session files that have started and not yet shut down in this
+ * process. pi loads the extension again for every session it builds, and pi-subagents builds its
+ * children in the same process, so the instances can only meet through the global object. Versioned,
+ * so that two copies of this package (an old and a new one) never read each other's set by mistake.
+ */
+export const LIVE_SESSIONS_KEY = Symbol.for('total-recall:pi:live-sessions:v1');
+
+/** The process-wide set, created on first use. Duck-typed, in case a loader gives each copy its own Set class. */
+export function processLiveSessions() {
+  const existing = globalThis[LIVE_SESSIONS_KEY];
+  if (existing && typeof existing.add === 'function' && typeof existing.has === 'function' && typeof existing.delete === 'function') return existing;
+  const created = new Set();
+  globalThis[LIVE_SESSIONS_KEY] = created;
+  return created;
+}
+
 /** The host id the engine's what's-new notice and its stamp use for this harness. */
 const HOST_ID = 'pi';
 
@@ -86,6 +103,9 @@ function deliveredInContext(ctx) {
 export function createExtension({
   rootDir, env, readFile, resolveEngine, runFloor, resolveUserServer,
   runWhatsNew, writeDirectStamp, resolveDataDir, execPath = process.execPath,
+  // The session files that have started and not yet shut down in this process. A fresh set by default,
+  // so one extension instance (and every test) stands alone; the default export shares one per process.
+  liveSessions = new Set(),
 }) {
   const skillPath = path.join(rootDir, 'skills', 'commands', 'SKILL.md');
   const developSkillPath = path.join(rootDir, 'skills', 'develop', 'SKILL.md');
@@ -120,14 +140,40 @@ export function createExtension({
     }
 
     // False when PI_SUBAGENT_ID is set (a full pi process that has a session file; pi-herdr-agents is
-    // said to set it for its children, which was not inspected) and in a session with no session file:
-    // --no-session, or a pi-subagents child that is kept in memory (a nested child by default, or one
-    // with persist_session: false). Such a child is not the user's conversation, and it would otherwise
-    // open its own memory session.
-    // It is NOT false for a top-level pi-subagents child: pi-subagents keeps that child's session in a
-    // file by default (rememberAgents: true) and sets no PI_SUBAGENT_ID, so the child gets the
-    // instructions and the floor. Observed, and the workarounds, in docs/hosts/pi.md.
-    const hookable = (ctx) => !env.PI_SUBAGENT_ID && ctx.sessionManager.getSessionFile() !== undefined;
+    // said to set it for its children, which was not inspected), in a session with no session file
+    // (--no-session, or a pi-subagents child kept in memory: a nested child by default, or one with
+    // persist_session: false), and in a child: a session whose header names a parent session file that
+    // has started and not yet shut down in this process (see noteSessionStart). A top-level pi-subagents
+    // child has a session file (rememberAgents: true is the default) and no PI_SUBAGENT_ID, so only that
+    // last rule recognises it. None of these is the user's conversation, and a child would otherwise open
+    // its own memory session. Observed, the limits of the rule and the workarounds: docs/hosts/pi.md.
+    // Set at session_start and kept for the life of this session: `child` says that its header names a
+    // parent session file that has started and not yet shut down in this process; `ownFile` is the file
+    // this session recorded in `liveSessions`, which session_shutdown removes.
+    let child = false;
+    let ownFile;
+    const hookable = (ctx) => !env.PI_SUBAGENT_ID && ctx.sessionManager.getSessionFile() !== undefined && !child;
+
+    // Record this session before anything is skipped (a skipped child can be a parent in turn), then
+    // decide whether it is a child. Any failure leaves it the user's session, as before. A parent in the
+    // header alone would not do: pi's own /fork sets it too. pi shuts the old session down before it
+    // builds the replacement for /new, /resume, /fork and /reload, so only a child's parent is still here.
+    const noteSessionStart = (ctx) => {
+      child = false;
+      ownFile = undefined;
+      try {
+        // Decide first and record second, so a session is never its own parent.
+        const parent = ctx.sessionManager.getHeader?.()?.parentSession;
+        child = typeof parent === 'string' && liveSessions.has(parent);
+        const file = ctx.sessionManager.getSessionFile();
+        if (typeof file === 'string' && file !== '') {
+          ownFile = file;
+          liveSessions.add(file);
+        }
+      } catch {
+        child = false;
+      }
+    };
 
     try {
       registerCommands(pi, { hookable, skillText: loadSkillText() });
@@ -176,7 +222,20 @@ export function createExtension({
     // The session-start text, waiting for the next user prompt to carry it.
     let pending;
 
+    // pi shuts a session down before it builds its replacement (/new, /resume, /fork, /reload), so a
+    // session is a child only while its parent is between its own session_start and this event. The file
+    // recorded at session_start is removed, not one read from a ctx that may be stale by now.
+    pi.on('session_shutdown', () => {
+      try {
+        if (ownFile !== undefined) liveSessions.delete(ownFile);
+      } catch {
+        // Nothing here may throw into pi.
+      }
+      return undefined;
+    });
+
     pi.on('session_start', (event, ctx) => {
+      noteSessionStart(ctx);
       pending = undefined;
       if (!hookable(ctx)) return undefined;
       // A reload rebuilds this instance (the queue is lost) but keeps the transcript: skip only when
@@ -244,5 +303,6 @@ export default function totalRecallPiExtension(pi) {
     runWhatsNew: realRunWhatsNew,
     writeDirectStamp: realWriteDirectStamp,
     resolveDataDir: realResolveDataDir,
+    liveSessions: processLiveSessions(),
   })(pi);
 }
