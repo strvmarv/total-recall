@@ -118,3 +118,45 @@ test('parseTagMessage: body is the message without the title line and the blank 
   assert.equal(parseTagMessage('v1.0.0\n\nSummary.\n\nAdded\n- x\n').body, 'Summary.\n\nAdded\n- x\n');
   assert.equal(parseTagMessage(tagMessage('v4.7.0')).body, tagMessage('v4.7.0').split('\n').slice(2).join('\n'));
 });
+
+// ---- Task 2 review fixes ----
+
+test('parseTagMessage: v4.6.0 summary starts with its real first words', () => {
+  assert.match(parseTagMessage(tagMessage('v4.6.0')).summary, /^session_start now runs a version-gated/);
+});
+
+test('parseTagMessage: a first paragraph opening with a section heading is not a summary, whatever follows', () => {
+  for (const msg of ['v1\n\nAdded\n\n- a\n', 'v1\n\nAdded:\n- a\n', 'v1\n\nAdded (from x)\n- a\n', 'v1\n\n## Added\n\n- a\n']) {
+    const p = parseTagMessage(msg);
+    assert.equal(p.summary, '', JSON.stringify(msg));
+    assert.deepEqual(p.sections.added, ['a'], JSON.stringify(msg));
+  }
+  const p = parseTagMessage('v1\n\nAdded\nsome text\n\nFixed\n- z\n');
+  assert.equal(p.summary, '');
+  assert.deepEqual(p.sections.fixed, ['z']);
+  assert.equal(parseTagMessage('v1\n\nFixed the release workflow.\n').summary, 'Fixed the release workflow.');
+});
+
+test('parseTagMessage: a summary ends at the first bullet line as well as at a blank line', () => {
+  const p = parseTagMessage('v1\n\nSummary.\n- a\n- b\n\nAdded\n- c\n');
+  assert.equal(p.summary, 'Summary.');
+  assert.deepEqual(p.sections.added, ['c']);
+  assert.deepEqual(p.sections.changed, []);
+  assert.deepEqual(p.sections.fixed, []);
+});
+
+test('parseTagMessage: a Fixed heading at column 0 inside a bullet list opens the fixed section', () => {
+  const p = parseTagMessage('v1\n\nSummary.\n\nAdded\n- a\nFixed\n- b\n');
+  assert.deepEqual(p.sections.added, ['a']);
+  assert.deepEqual(p.sections.fixed, ['b']);
+});
+
+test('parseTagMessage: a tab-indented continuation line joins the previous bullet', () => {
+  const p = parseTagMessage('v1\n\nSummary.\n\nAdded\n- a\n\tmore\n- b\n');
+  assert.deepEqual(p.sections.added, ['a more', 'b']);
+});
+
+test('parseTagMessage: a bullet with no text is skipped', () => {
+  const p = parseTagMessage('v1\n\nSummary.\n\nAdded\n- \n- a\n');
+  assert.deepEqual(p.sections.added, ['a']);
+});

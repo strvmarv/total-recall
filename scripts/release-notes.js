@@ -55,10 +55,12 @@ export function sanitizeSummary(text) {
 
 // ---- the tag message ----
 
-const SECTION_KEYS = ['added', 'changed', 'fixed'];
 // A heading opens a section when, after optional `#`s, it starts with Added, Changed or Fixed
 // ("Added (from 4.7.0-beta.1)" counts). Any other non-bullet line is a heading that closes the section.
 const SECTION_HEADING = /^#*\s*(added|changed|fixed)\b/i;
+// The shape of a heading line on its own: the word alone, with an optional parenthesised suffix and/or colon.
+// "Fixed the release workflow." does not have this shape, so it stays a summary.
+const HEADING_LINE = /^#*\s*(added|changed|fixed)(\s*\(.*\))?\s*:?\s*$/i;
 const BULLET = /^[-*+]\s+(.*)$/;
 
 const isBlank = (line) => line.trim() === '';
@@ -78,15 +80,17 @@ export function parseTagMessage(message) {
   let i = 0;
   while (i < rest.length && isBlank(rest[i])) i += 1;
   const paragraphStart = i;
-  while (i < rest.length && !isBlank(rest[i])) i += 1;
-  const paragraph = rest.slice(paragraphStart, i);
 
-  // A paragraph is not a summary when it opens with a bullet, or when a section heading line is
-  // followed by bullets in the same paragraph ("Added\n- x"). "Fixed the release workflow." on its own
-  // is a summary.
-  const notSummary = paragraph.length > 0
-    && (BULLET.test(paragraph[0]) || (SECTION_HEADING.test(paragraph[0]) && paragraph.length > 1 && BULLET.test(paragraph[1])));
-  const summary = paragraph.length > 0 && !notSummary ? sanitizeSummary(paragraph.join(' ')) : '';
+  // A first paragraph is not a summary when its first line is a bullet or a section heading (whatever
+  // follows); the section walk then starts at that paragraph so its bullets are kept. Otherwise the
+  // summary ends at the first blank line or bullet line.
+  const notSummary = paragraphStart < rest.length
+    && (BULLET.test(rest[paragraphStart]) || HEADING_LINE.test(rest[paragraphStart].trim()));
+  let summary = '';
+  if (!notSummary) {
+    while (i < rest.length && !isBlank(rest[i]) && !BULLET.test(rest[i])) i += 1;
+    summary = sanitizeSummary(rest.slice(paragraphStart, i).join(' '));
+  }
 
   const sections = { added: [], changed: [], fixed: [] };
   let current = null;
@@ -99,11 +103,13 @@ export function parseTagMessage(message) {
     }
     const bullet = BULLET.exec(line);
     if (bullet) {
-      if (current !== null) last = sections[current].push(bullet[1].trim()) - 1;
+      const text = bullet[1].trim();
+      if (current !== null && text !== '') last = sections[current].push(text) - 1;
+      else last = -1;
       continue;
     }
     const heading = SECTION_HEADING.exec(line);
-    current = heading ? SECTION_KEYS[['added', 'changed', 'fixed'].indexOf(heading[1].toLowerCase())] : null;
+    current = heading ? heading[1].toLowerCase() : null;
     last = -1;
   }
   return { title, summary, sections, body };
