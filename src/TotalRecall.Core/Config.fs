@@ -83,6 +83,50 @@ type CortexConfig = {
     SyncIntervalSeconds: int option
 }
 
+type GitSessionStart =
+    | Blocking
+    | Background
+    | Off
+
+/// The `[git_sync]` settings after normalisation. `Remote` is `None` when not set or not usable; `Branch` is
+/// `Some "main"` when absent and `None` only when a value was given that cannot be used. `Warnings` lists what
+/// was corrected, one line each.
+type GitSyncConfig = {
+    Remote: string option
+    Branch: string option
+    IntervalSeconds: int
+    SessionStart: GitSessionStart
+    SessionStartSoftSeconds: int
+    SessionStartMaxSeconds: int
+    SessionStartStallSeconds: int
+    SessionEnd: bool
+    SessionEndSeconds: int
+    DeleteGuardPercent: int
+    Warnings: string list
+}
+
+/// One TOML value as the loader saw it. `RawBad` carries a phrase naming an unsupported type ("a float", "an array").
+type GitRawValue =
+    | RawAbsent
+    | RawBad of string
+    | RawStr of string
+    | RawInt of int64
+    | RawBool of bool
+
+/// The `[git_sync]` table as read from TOML, one raw value per key. Unknown keys are not carried.
+type RawGitSync = {
+    RemoteRaw: GitRawValue
+    BranchRaw: GitRawValue
+    IntervalRaw: GitRawValue
+    SessionStartRaw: GitRawValue
+    SoftRaw: GitRawValue
+    MaxRaw: GitRawValue
+    StallRaw: GitRawValue
+    SessionEndRaw: GitRawValue
+    SessionEndSecondsRaw: GitRawValue
+    DeleteGuardRaw: GitRawValue
+}
+
 type UserConfig = {
     UserId: string option
 }
@@ -127,7 +171,172 @@ type TotalRecallConfig = {
     Scope: ScopeConfig option
     Skill: SkillConfig option
     ToolCache: ToolCacheConfig option
+    GitSync: GitSyncConfig option
 }
+
+/// The pure side of the `[git_sync]` settings: defaults, range constants and `normalise`, which turns any raw
+/// input into a usable configuration plus warnings. Total: it never throws.
+module GitSyncSettings =
+
+    [<Literal>]
+    let DefaultBranch = "main"
+    [<Literal>]
+    let DefaultIntervalSeconds = 300
+    [<Literal>]
+    let MinIntervalSeconds = 30
+    [<Literal>]
+    let MaxIntervalSeconds = 86400
+    [<Literal>]
+    let MaxSeconds = 3600
+    [<Literal>]
+    let DefaultSoftSeconds = 10
+    [<Literal>]
+    let DefaultMaxSeconds = 20
+    [<Literal>]
+    let DefaultStallSeconds = 8
+    [<Literal>]
+    let DefaultSessionEndSeconds = 8
+    [<Literal>]
+    let DefaultDeleteGuardPercent = 20
+
+    let defaults : GitSyncConfig =
+        { Remote = None
+          Branch = Some DefaultBranch
+          IntervalSeconds = DefaultIntervalSeconds
+          SessionStart = Blocking
+          SessionStartSoftSeconds = DefaultSoftSeconds
+          SessionStartMaxSeconds = DefaultMaxSeconds
+          SessionStartStallSeconds = DefaultStallSeconds
+          SessionEnd = true
+          SessionEndSeconds = DefaultSessionEndSeconds
+          DeleteGuardPercent = DefaultDeleteGuardPercent
+          Warnings = [] }
+
+    let private described (v: GitRawValue) : string =
+        match v with
+        | RawAbsent -> "nothing"
+        | RawBad phrase -> phrase
+        | RawStr _ -> "a string"
+        | RawInt _ -> "an integer"
+        | RawBool _ -> "a boolean"
+
+    let private isAlnum (c: char) =
+        (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+
+    /// A repository address that cannot be an option to `git` and carries no whitespace or control
+    /// characters. Scheme and transport checks belong to milestone 1a.
+    let isUsableRemote (s: string) : bool =
+        s.Length > 0
+        && s.[0] <> '-'
+        && not (s |> Seq.exists (fun c -> System.Char.IsWhiteSpace c || System.Char.IsControl c))
+
+    /// `^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$` with no `..` and no `//`, not ending in `/` or `.`, and no
+    /// `/`-separated component that begins with `.` or ends with `.lock`.
+    let isUsableBranch (s: string) : bool =
+        s.Length >= 1
+        && s.Length <= 100
+        && isAlnum s.[0]
+        && (s |> Seq.forall (fun c -> isAlnum c || c = '.' || c = '_' || c = '/' || c = '-'))
+        && not (s.Contains "..")
+        && not (s.Contains "//")
+        && not (s.EndsWith "/")
+        && not (s.EndsWith ".")
+        && (s.Split('/') |> Array.forall (fun part -> not (part.StartsWith ".") && not (part.EndsWith ".lock")))
+
+    /// An integer key in `lo..hi`: the value, a description of the problem (without the "using" part) and
+    /// whether the value was explicit and valid.
+    let private intKey (lo: int) (hi: int) (dflt: int) (raw: GitRawValue) : int * string option * bool =
+        match raw with
+        | RawAbsent -> dflt, None, false
+        | RawInt n when n >= int64 lo && n <= int64 hi -> int n, None, true
+        | RawInt n -> dflt, Some (sprintf "%d is outside %d to %d" n lo hi), false
+        | other -> dflt, Some (sprintf "expected an integer, got %s" (described other)), false
+
+    let private warn (key: string) (problem: string option) (used: int) : string option =
+        problem |> Option.map (fun p -> sprintf "git_sync.%s: %s; using %d" key p used)
+
+    let normalise (raw: RawGitSync) : GitSyncConfig =
+        let remote, remoteWarn =
+            match raw.RemoteRaw with
+            | RawAbsent -> None, None
+            | RawStr s ->
+                let t = s.Trim()
+                if t = "" then None, None
+                elif isUsableRemote t then Some t, None
+                else None, Some "git_sync.remote: not a usable repository address; treated as not set"
+            | other ->
+                None, Some (sprintf "git_sync.remote: expected a string, got %s; treated as not set" (described other))
+        let branch, branchWarn =
+            match raw.BranchRaw with
+            | RawAbsent -> Some DefaultBranch, None
+            | RawStr s when isUsableBranch s -> Some s, None
+            | RawStr _ -> None, Some "git_sync.branch: not a usable branch name; treated as not set"
+            | other ->
+                None, Some (sprintf "git_sync.branch: expected a string, got %s; treated as not set" (described other))
+        let interval, intervalWarn =
+            match raw.IntervalRaw with
+            | RawAbsent -> DefaultIntervalSeconds, None
+            | RawInt 0L -> 0, None
+            | RawInt n when n >= 1L && n < int64 MinIntervalSeconds ->
+                MinIntervalSeconds,
+                Some (sprintf "git_sync.interval_seconds: %d is below the minimum of %d; using %d" n MinIntervalSeconds MinIntervalSeconds)
+            | RawInt n when n >= int64 MinIntervalSeconds && n <= int64 MaxIntervalSeconds -> int n, None
+            | RawInt n ->
+                DefaultIntervalSeconds,
+                Some (sprintf "git_sync.interval_seconds: %d is outside 0 or %d to %d; using %d" n MinIntervalSeconds MaxIntervalSeconds DefaultIntervalSeconds)
+            | other ->
+                DefaultIntervalSeconds,
+                Some (sprintf "git_sync.interval_seconds: expected an integer, got %s; using %d" (described other) DefaultIntervalSeconds)
+        let sessionStart, sessionStartWarn =
+            match raw.SessionStartRaw with
+            | RawAbsent -> Blocking, None
+            | RawStr "blocking" -> Blocking, None
+            | RawStr "background" -> Background, None
+            | RawStr "off" -> Off, None
+            | RawStr _ ->
+                Blocking, Some "git_sync.session_start: not one of \"blocking\", \"background\", \"off\"; using \"blocking\""
+            | other ->
+                Blocking, Some (sprintf "git_sync.session_start: expected a string, got %s; using \"blocking\"" (described other))
+        let soft, softProblem, softValid = intKey 1 MaxSeconds DefaultSoftSeconds raw.SoftRaw
+        let maxSeconds, maxProblem, _ = intKey 1 MaxSeconds DefaultMaxSeconds raw.MaxRaw
+        let stall, stallProblem, _ = intKey 1 MaxSeconds DefaultStallSeconds raw.StallRaw
+        let sessionEnd, sessionEndWarn =
+            match raw.SessionEndRaw with
+            | RawAbsent -> true, None
+            | RawBool b -> b, None
+            | other -> true, Some (sprintf "git_sync.session_end: expected a boolean, got %s; using true" (described other))
+        let endSeconds, endProblem, _ = intKey 1 MaxSeconds DefaultSessionEndSeconds raw.SessionEndSecondsRaw
+        let guard, guardProblem, _ = intKey 0 100 DefaultDeleteGuardPercent raw.DeleteGuardRaw
+        // The soft limit never exceeds the hard one. The warning is given only for a valid explicit soft; a bad
+        // soft that is then lowered names the value finally used.
+        let finalSoft = if soft > maxSeconds then maxSeconds else soft
+        let softWarn =
+            if softValid && soft > maxSeconds then
+                Some (sprintf "git_sync.session_start_soft_seconds: %d is above session_start_max_seconds; using %d" soft maxSeconds)
+            else warn "session_start_soft_seconds" softProblem finalSoft
+        let warnings =
+            [ remoteWarn
+              branchWarn
+              intervalWarn
+              sessionStartWarn
+              softWarn
+              warn "session_start_max_seconds" maxProblem maxSeconds
+              warn "session_start_stall_seconds" stallProblem stall
+              sessionEndWarn
+              warn "session_end_seconds" endProblem endSeconds
+              warn "delete_guard_percent" guardProblem guard ]
+            |> List.choose id
+        { Remote = remote
+          Branch = branch
+          IntervalSeconds = interval
+          SessionStart = sessionStart
+          SessionStartSoftSeconds = finalSoft
+          SessionStartMaxSeconds = maxSeconds
+          SessionStartStallSeconds = stall
+          SessionEnd = sessionEnd
+          SessionEndSeconds = endSeconds
+          DeleteGuardPercent = guard
+          Warnings = warnings }
 
 // --- pure helpers (isSafeKey, deepMerge, setNestedKey) ---
 

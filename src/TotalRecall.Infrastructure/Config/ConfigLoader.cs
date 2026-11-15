@@ -550,7 +550,8 @@ public sealed class ConfigLoader : IConfigLoader
             cortex,
             scope,
             skill,
-            toolCache);
+            toolCache,
+            FSharpOption<Core.Config.GitSyncConfig>.None);
     }
 
     // --- walker helpers ---------------------------------------------------
