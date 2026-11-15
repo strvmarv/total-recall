@@ -79,4 +79,67 @@ internal static class RecordFixtures
 
     /// <summary>The minimal sample as canonical text.</summary>
     public static string Minimal => Canonical();
+
+    /// <summary>A canonical record with every optional field and unknown content at every level
+    /// (an unknown source, unknown properties in the top level, ext, total-recall, placement and origin).</summary>
+    private const string UnknownsTemplate = """
+        {
+          "format": "total-recall/memory/v1",
+          "id": "3f9c2a7e-1111",
+          "content": "Use bun, not npm, in this repo.",
+          "entry_type": "correction",
+          "tags": [],
+          "source": "windsurf",
+          "created_at": "2026-11-12T09:14:03.000Z",
+          "updated_at": "2026-11-12T09:14:03.512Z",
+          "ext": {
+            "total-recall": {
+              "project": "owner/repo",
+              "placement": {
+                "tier": "warm",
+                "tier_stamp": "2026-11-12T09:14:03.512Z.000003.4f2a9c1e",
+                "sticky": false,
+                "sticky_stamp": "2026-11-12T09:14:03.512Z.000003.4f2a9c1e",
+                "note": "p"
+              },
+              "content_stamp": "2026-11-12T09:14:03.512Z.000003.4f2a9c1e",
+              "origin": {
+                "tool": "claude-code",
+                "hash": "h",
+                "extra": 7
+              },
+              "written_by": "laptop",
+              "future": true,
+              "alpha": null,
+              "obj": {},
+              "arr": [],
+              "nested": [
+                1,
+                {
+                  "a": null
+                }
+              ],
+              "n1": -0,
+              "n2": 1.50,
+              "n3": 1E400,
+              "s": "q\"\\"
+            },
+            "other-tool": {
+              "k": [
+                1,
+                2
+              ]
+            },
+            "another-tool": {}
+          },
+          "zeta": {
+            "n": 1.50
+          },
+          "yota": [],
+          "alpha-top": "z"
+        }
+
+        """;
+
+    public static string Unknowns => UnknownsTemplate.Replace("\r\n", "\n");
 }

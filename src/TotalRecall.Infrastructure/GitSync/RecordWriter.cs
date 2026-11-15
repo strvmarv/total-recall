@@ -55,11 +55,16 @@ public static class RecordWriter
         }
     }
 
+    /// <summary>False for anything the text form cannot carry, including a hand-built record with a null part.</summary>
     private static bool Encodable(SyncRecord r) =>
-        SyncStamp.Timestamp.inRange(r.CreatedAtMs)
-        && SyncStamp.StampModule.inDomain(r.ContentStamp)
-        && SyncStamp.StampModule.inDomain(r.Placement.TierStamp)
-        && SyncStamp.StampModule.inDomain(r.Placement.StickyStamp);
+        r.Tags is not null
+        && r.Placement is not null
+        && StampOk(r.ContentStamp)
+        && StampOk(r.Placement.TierStamp)
+        && StampOk(r.Placement.StickyStamp)
+        && SyncStamp.Timestamp.inRange(r.CreatedAtMs);
+
+    private static bool StampOk(SyncStamp.Stamp? s) => s is not null && s.Machine is not null && SyncStamp.StampModule.inDomain(s);
 
     // ---- the document, as a small tree ----
 
@@ -206,8 +211,14 @@ public static class RecordWriter
             }
         }
 
-        private void WriteString(string text)
+        private void WriteString(string? text)
         {
+            if (text is null)
+            {
+                Bad = true;
+                return;
+            }
+
             _sb.Append('"');
             for (var i = 0; i < text.Length; i++)
             {

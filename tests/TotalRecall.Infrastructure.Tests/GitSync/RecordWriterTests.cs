@@ -97,6 +97,12 @@ public class RecordWriterTests
     }
 
     [Fact]
+    public void Every_hex_digit_of_a_control_escape_is_lowercase()
+    {
+        AssertGolden(Canonical("\\u000b\\u000e\\u0010\\u001a"), Make(content: "\u000b\u000e\u0010\u001a"));
+    }
+
+    [Fact]
     public void Everything_else_is_written_literally_as_utf8()
     {
         // DEL, accented, CJK, an emoji (a surrogate pair) and U+2028 are not escaped
@@ -133,74 +139,18 @@ public class RecordWriterTests
         AssertRoundTrip(Canonical(tagsJson: "[\n    \"a\",\n    \"b\"\n  ]"));
     }
 
-    private const string Unknowns = """
-        {
-          "format": "total-recall/memory/v1",
-          "id": "3f9c2a7e-1111",
-          "content": "Use bun, not npm, in this repo.",
-          "entry_type": "correction",
-          "tags": [],
-          "source": "windsurf",
-          "created_at": "2026-11-12T09:14:03.000Z",
-          "updated_at": "2026-11-12T09:14:03.512Z",
-          "ext": {
-            "total-recall": {
-              "project": "owner/repo",
-              "placement": {
-                "tier": "warm",
-                "tier_stamp": "2026-11-12T09:14:03.512Z.000003.4f2a9c1e",
-                "sticky": false,
-                "sticky_stamp": "2026-11-12T09:14:03.512Z.000003.4f2a9c1e",
-                "note": "p"
-              },
-              "content_stamp": "2026-11-12T09:14:03.512Z.000003.4f2a9c1e",
-              "origin": {
-                "tool": "claude-code",
-                "hash": "h",
-                "extra": 7
-              },
-              "written_by": "laptop",
-              "future": true,
-              "alpha": null,
-              "obj": {},
-              "arr": [],
-              "nested": [
-                1,
-                {
-                  "a": null
-                }
-              ],
-              "n1": -0,
-              "n2": 1.50,
-              "n3": 1E400,
-              "s": "q\"\\"
-            },
-            "other-tool": {
-              "k": [
-                1,
-                2
-              ]
-            }
-          },
-          "zeta": {
-            "n": 1.50
-          }
-        }
-
-        """;
-
     [Fact]
     public void Unknown_content_at_every_level_round_trips_byte_for_byte()
     {
-        AssertRoundTrip(Unknowns.Replace("\r\n", "\n"));
+        AssertRoundTrip(Unknowns);
     }
 
     [Fact]
     public void Unknown_strings_are_re_escaped_by_the_writers_rule_so_an_escaped_letter_comes_back_literal()
     {
-        var input = Unknowns.Replace("\r\n", "\n").Replace("\"s\": \"q\\\"\\\\\"", "\"s\": \"\\u0041\\/\"");
+        var input = Unknowns.Replace("\"s\": \"q\\\"\\\\\"", "\"s\": \"\\u0041\\/\"");
         var parsed = RecordReader.Parse(Encoding.UTF8.GetBytes(input), RecordPath).Parsed!;
-        var expected = Unknowns.Replace("\r\n", "\n").Replace("\"s\": \"q\\\"\\\\\"", "\"s\": \"A/\"");
+        var expected = Unknowns.Replace("\"s\": \"q\\\"\\\\\"", "\"s\": \"A/\"");
         Assert.Equal(expected, Text(RecordWriter.Write(parsed)));
     }
 
@@ -257,6 +207,23 @@ public class RecordWriterTests
         Assert.True(RecordWriter.Write(Make(project: Some(lone))).NotEncodable);
         Assert.True(RecordWriter.Write(Make(writtenBy: Some(lone))).NotEncodable);
         Assert.False(RecordWriter.Write(Make(content: "ok \U0001F600")).NotEncodable);
+    }
+
+    [Fact]
+    public void A_hand_built_record_with_a_null_part_is_not_encodable_and_does_not_throw()
+    {
+        var good = Make();
+        Assert.True(RecordWriter.Write(Make(content: null!)).NotEncodable);
+        Assert.True(RecordWriter.Write(Make(id: null!)).NotEncodable);
+        Assert.True(RecordWriter.Write(Make(tags: new string[] { null! })).NotEncodable);
+        var nullTags = new SyncRecord(
+            good.Id, good.Content, good.EntryType, null!, good.Source, good.CreatedAtMs, good.Project, good.Scope,
+            good.Placement, good.ContentStamp, good.Origin, good.WrittenBy);
+        Assert.True(RecordWriter.Write(nullTags).NotEncodable);
+        var noStamp = new SyncRecord(
+            good.Id, good.Content, good.EntryType, good.Tags, good.Source, good.CreatedAtMs, good.Project, good.Scope,
+            good.Placement, null!, good.Origin, good.WrittenBy);
+        Assert.True(RecordWriter.Write(noStamp).NotEncodable);
     }
 
     [Fact]
