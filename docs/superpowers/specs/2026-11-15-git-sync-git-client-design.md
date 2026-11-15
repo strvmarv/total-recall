@@ -74,7 +74,7 @@ The umbrella fixes the behavior; these are the calls it leaves open or that this
    ignore list cannot rewrite or hide the bytes of a record (the repository's own `.gitattributes`, `* -text`, still applies).
 4. **The environment keeps only the git variables sync needs (beyond).** Every call removes **every** variable whose name
    begins with `GIT_` (compared without regard to case) except a named allowlist: `GIT_SSH`, `GIT_SSH_COMMAND` (rewritten, see 5),
-   `GIT_SSH_VARIANT`, `GIT_SSL_*`, `GIT_PROXY_COMMAND`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM` and `GIT_CONFIG_NOSYSTEM` (the user's
+   `GIT_SSH_VARIANT`, `GIT_SSL_*`, `GIT_PROXY_COMMAND`, `GIT_EXEC_PATH` (a relocated git install needs it to find its helpers), `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM` and `GIT_CONFIG_NOSYSTEM` (the user's
    choice of which configuration files exist). That drops the repository selectors a host that runs inside a git hook exports
    (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_COMMON_DIR`, …), injected configuration
    (`GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>`), the author and committer identity (`GIT_AUTHOR_*`,
@@ -85,19 +85,21 @@ The umbrella fixes the behavior; these are the calls it leaves open or that this
    **after** this scrub, so a test can point `HOME`, `XDG_CONFIG_HOME` and `USERPROFILE` at a throwaway configuration (the
    minimum git is 2.28, so `GIT_CONFIG_GLOBAL`, which needs 2.32, cannot be relied on).
 5. **The ssh command.** `GIT_SSH_COMMAND` is set to `<user's command> -o BatchMode=yes -o ConnectTimeout=8`, where the
-   user's command is the first of the process's own `GIT_SSH_COMMAND`, `git config --get core.sshCommand` (one read per
-   process, cached, run with the scrubbed environment and none of the `-c` overrides), else `ssh`. The configuration read is
+   user's command is the first of the process's own `GIT_SSH_COMMAND` (read **after** `EnvironmentOverrides`, so a test can set it),
+   `core.sshCommand` (one read per `GitClient` instance, cached, run with the scrubbed environment and the overrides applied,
+   and none of the `-c` overrides), else `ssh`. The configuration read is
    `config --global --get core.sshCommand` and, when that is unset (exit 1), `config --system --get core.sshCommand`: never a
    plain `config --get`, which would read the local configuration of whatever repository the process happens to be in. A
    `core.sshCommand` set inside the clone itself is not read (the user does not edit the clone). When none of
    those is set but `GIT_SSH` is, the environment is left alone (a `GIT_SSH` program such as `plink` does not take
-   OpenSSH options) and the hard limit is the only protection; that is stated in the docs of 1a-3. If the user's command
-   already sets `BatchMode` or `ConnectTimeout`, ssh keeps the first value it sees, which is theirs; the hard limit still
+   OpenSSH options) and the hard limit is the only protection; that is stated in the docs of 1a-3. When the user's command (or
+   `GIT_SSH_VARIANT`) names a `plink`, `tortoiseplink` or `putty` program, `-batch` is appended instead of the two `-o` options.
+   If the user's command already sets `BatchMode` or `ConnectTimeout`, ssh keeps the first value it sees, which is theirs; the hard limit still
    applies.
 6. **Remote addresses.** A remote is accepted when `GitSyncSettings.isUsableRemote` holds (milestone 0b-3) **and** it is of one
    of these shapes, decided by a pure `classifyRemote`: a **URL** (`<scheme>://…`, scheme letters, digits, `+`, `.` and `-`,
    including `file://`), an **scp-like address** (`[user@]host:path`, the host having at least two characters and no `/` before
-   the colon), or an **absolute local path** (starts with `/`, `\\`, or a drive letter and `:\` or `:/`). Everything else is
+   the colon), or an **absolute local path** (starts with `/` or `\\`, or, **on Windows only**, a drive letter and `:\` or `:/`; on any other system git sends `C:/r` through ssh to a host named `C`, so it is refused there and `file:///C:/r` is the spelling). Everything else is
    refused: a transport-helper prefix (`<scheme>::`, such as `ext::` or `fd::`, which make git run a program), and a **relative
    local path** (`repo`, `../x`, `./x`), which git would resolve against whatever directory the process runs in, so the same
    configuration could name a different repository each session. IPv6 literals in a URL (`https://[::1]/x`) are not helper
@@ -132,8 +134,8 @@ The umbrella fixes the behavior; these are the calls it leaves open or that this
     | Order | Kind | Fragments |
     |---|---|---|
     | 1 | `Auth` | `terminal prompts disabled`, `could not read Username`, `could not read Password`, `Authentication failed`, `Permission denied (`, `Host key verification failed`, `HTTP 401`, `HTTP 403`, `error: 401`, `error: 403`, `Invalid username or password` |
-    | 2 | `RemoteNotFound` | `does not appear to be a git repository`, `Repository not found`, `repository '...' not found` (the text `not found` after `repository`), `HTTP 404`, `error: 404` |
-    | 3 | `RemoteBranchMissing` | `Remote branch`+`not found`, `couldn't find remote ref` |
+    | 2 | `RemoteNotFound` | `does not appear to be a git repository`, `Repository not found`, `repository '` followed later by `' not found`, `repository '` followed later by `' does not exist` (a missing plain-path remote), `HTTP 404`, `error: 404` |
+    | 3 | `RemoteBranchMissing` | `Remote branch ` followed later by ` not found in upstream`, `couldn't find remote ref` |
     | 4 | `NonFastForward` | `[rejected]` together with `non-fast-forward` or `fetch first`, or `Updates were rejected` |
     | 5 | `Network` | `Could not resolve host`, `Connection refused`, `Connection timed out`, `Operation timed out`, `Network is unreachable`, `No route to host`, `Failed to connect`, `Connection reset`, `early EOF`, `RPC failed`, `unable to access` (with a `curl` code in the same text), `kex_exchange_identification`, `Connection closed by` |
     | 6 | `NotARepository` | `not a git repository` |
@@ -141,7 +143,8 @@ The umbrella fixes the behavior; these are the calls it leaves open or that this
 
     A timeout, a cancellation, a process that cannot start (`NoGit`), a version below the minimum (`GitTooOld`) and an output
     over the limit (`OutputTooLarge`) are decided before any fragment is read. The text kept for the user is redacted: the
-    user-info part of any URL (`https://user:token@host`) is replaced, and the text is cut to its **last** 2 KiB after
+    user-info part of any URL (`https://user:token@host`) is replaced **line by line as it is read, before any truncation or capture limit** (so a URL cut by the 64 KiB or 2 KiB limit cannot leave its credentials half visible),
+    the caller's own remote's user-info is also replaced verbatim wherever it appears (`GitRunOptions.RedactValues`), and the text is cut to its **last** 2 KiB after
     progress output is dropped (git's `fetch --progress` overwrites a line with `\r`; for each line only the text after the last
     `\r` is kept). No log line, exception message or result ever carries the remote's credentials.
 13. **The minimum git is 2.28** (`init -b`). A version below it is `GitTooOld`; a missing executable is `NoGit`. Nothing
@@ -156,14 +159,14 @@ The umbrella fixes the behavior; these are the calls it leaves open or that this
     `busy` does not say who holds it. "Busy" is told apart from a real error by the open failure's `HResult`: a sharing
     violation on Windows (the low 16 bits are 32 or 33) and `EAGAIN`/`EWOULDBLOCK` on Unix (11 on Linux, 35 on macOS) are busy;
     anything else is a real error and throws. .NET disables its Unix file locking when `DOTNET_SYSTEM_IO_DISABLEFILELOCKING` is
-    `1` or `true`; the lock would then silently exclude no one, so `TryAcquireAsync` detects that variable and throws
+    `1` or `true`, or when the `System.IO.DisableFileLocking` AppContext switch is set; the lock would then silently exclude no one, so `TryAcquireAsync` detects either and throws
     `NotSupportedException` instead of pretending.
 16. **Exit codes have a defined meaning (beyond).** The client maps them, so the cycle never reads a raw code: `IsAncestor` is
     `Yes` (0), `No` (1) or, for any other code (128 for a commit the shallow clone does not hold), `Unknown`, which the cycle
     reads as "unproven", not "corrupt"; `RevParse` is a sha (0), `Absent` (1) or a failure; `ConfigGet` is a value (0) or
     `Unset` (1); `HasStaged` is `None` (0) or `Some` (1); `LsRemote` returns the head or `None` (also for an empty remote or a
-    missing branch); `Stage` treats git's "pathspec did not match any files" (128) as success, because a scope with nothing
-    tracked or present stages nothing; every other non-zero code is a failure classified as above.
+    missing branch); `Stage` treats exit 128 as success only when the standard error contains `did not match any files` (a scope with nothing
+    tracked or present stages nothing); any other 128, such as `not a git repository` for a damaged clone, is a failure; every other non-zero code is a failure classified as above.
 17. **`ls-remote` is read by exact ref.** `ls-remote` matches a pattern by suffix, so `refs/heads/main` also lists
     `refs/heads/foo/refs/heads/main`. The parser (`SyncGit.parseLsRemote`) takes only the line whose ref **equals**
     `refs/heads/<branch>`.
@@ -188,7 +191,7 @@ New files, all in the existing projects.
 ### Commands
 
 `GitCommand` has exactly these cases. The column "scope" says whether the call runs with `--git-dir`/`--work-tree` (the
-clone) or on its own (a remote address or no repository). Remote addresses and revisions are validated as above.
+clone) or on its own (a remote address or no repository). Remote addresses and revisions are validated as above. A remote in `LsRemote` is `Url of string` (validated) or `Origin` (the clone's own `origin`, which needs no validation).
 
 | Case | Argument list (after the overrides) | Scope |
 |---|---|---|
@@ -225,7 +228,7 @@ Every call carries, before the subcommand, the umbrella's `-c` list: `core.autoc
 `core.longpaths=true`, `commit.gpgsign=false`, `core.hooksPath=<no-hooks>`, `user.name=total-recall`,
 `user.email=noreply@total-recall.local`, `credential.interactive=never`, plus `core.quotepath=false`,
 `protocol.ext.allow=never`, `protocol.fd.allow=never`, `core.askPass=` (a global askpass program would otherwise still run), `core.attributesFile=<empty>`,
-`core.excludesFile=<empty>`, `core.fsmonitor=false`, `http.lowSpeedLimit=1000` and `http.lowSpeedTime=20`, and
+`core.excludesFile=<empty>`, `core.fsmonitor=` (empty: on git before 2.37 any non-empty value, `false` included, names a hook program), `push.gpgSign=false`, `http.lowSpeedLimit=1000` and `http.lowSpeedTime=20`, and
 `gc.auto=0` and `maintenance.auto=false` so a background commit never starts a repack that outlives the call. `Version` and
 `ConfigGetSshCommand` take none of these.
 
@@ -279,7 +282,7 @@ Windows and, through `flock`, on Unix (measured on Linux; a test pins it on whic
 ### `GitSyncPaths`
 
 For a database file `D`, the **sync directory** is `<directory of D>/sync/<dbKey>`, where `dbKey` is the first 12 lowercase
-hex characters of the SHA-256 of the UTF-8 bytes of D's **file name** (not its directory). It holds the lock (`lock`), the
+hex characters of the SHA-256 of the UTF-8 bytes of D's **file name** (not its directory), lower-cased invariantly on Windows and macOS, whose file systems are case-insensitive by default, so one file reached as `A.db` and `a.db` has one lock and one clone (`GitSyncPaths` takes the case-insensitivity as a parameter so it is testable on any system). It holds the lock (`lock`), the
 empty hooks directory (`no-hooks`), the empty file (`empty`) and one directory per remote: the clone is
 `<sync directory>/<cloneKey remote>/repo`, where `cloneKey` is the first 12 lowercase hex characters of the SHA-256 of the
 remote's UTF-8 bytes. **This departs from the umbrella (beyond)**, which puts the clone at `<directory of D>/sync/<cloneKey>/repo`
@@ -302,7 +305,7 @@ existing `Scan(text, internalTerms)` runs all three and returns the same reasons
 `src/TotalRecall.Core/AGENTS.md` gets a row each for `SyncGit.fs` and `SyncTree.fs`; `src/TotalRecall.Infrastructure/AGENTS.md`
 gets a paragraph on the `GitSync` namespace's git client, lock and paths (the closed command set, the isolation, the sync
 directory layout and that real-git tests run in the standard verify); the root `AGENTS.md` "WHERE TO LOOK" table gets a row for
-the git client and tree reader. Each states that nothing calls them yet.
+the git client and tree reader. Each states that nothing calls them yet. The umbrella design (`2026-11-15-git-sync-design.md`, "Configuration" and "The sync cycle") is amended in the same pull request to the new paths (`<directory of the database file>/sync/<dbKey>/<cloneKey>/repo` and `…/sync/<dbKey>/lock`), so a later milestone author does not follow the old ones.
 
 ## Testing
 
@@ -328,14 +331,13 @@ because git ignores `--depth` for a plain-path clone; skipped with a reason when
 user's global configuration through `EnvironmentOverrides` (`HOME`, `XDG_CONFIG_HOME`, `USERPROFILE`) to a throwaway directory.
 Isolation: a global config with `commit.gpgsign=true`, `core.hooksPath` to a hook that writes a file, `core.autocrlf=true`,
 `init.defaultBranch=trunk`, `core.askPass` to a script that writes a file, a `core.attributesFile` with a `filter` and a
-`core.sshCommand`, has no effect on `Init`, `Commit`, `Stage` and `Clone` (the global `core.sshCommand` is the one thing that
-is read, and used); a local `core.sshCommand` in the repository the process runs in is **not** read; the `ext` transport is
+`core.sshCommand`, has no effect on `Init`, `Commit`, `Stage` and `Clone` (the global `core.sshCommand`, set in the redirected `HOME`, is the one thing that is read, and used; so is the fake ssh script of the next paragraph); a local `core.sshCommand` in the repository the process runs in is **not** read; the `ext` transport is
 refused by running `git` directly with the overrides and an `ext::` address (the typed commands refuse it earlier, which
 another test shows); `GIT_CONFIG_COUNT`, `GIT_AUTHOR_NAME` and `GIT_TRACE` set in the process environment have no effect. The
 hard kill: a stub executable that starts a long-running child kills both at the limit, and a real `git` pointed at a
 `git://127.0.0.1:<port>` listener that accepts and never answers is killed at the limit (a cancelled call stops within two
-seconds). No prompt: an `http://127.0.0.1:<port>` remote that answers `401` fails within ten seconds as `Auth` with no prompt
-and no credential in the result; a fake `GIT_SSH_COMMAND` script run through an `ssh://` remote receives `-o BatchMode=yes` and
+seconds). No prompt: a closed port (`http://127.0.0.1:1`) is `Network` and an absent bare repository through `file://` is `RemoteNotFound` (pinning the message text across git versions); an `http://127.0.0.1:<port>` remote that answers `401` fails within ten seconds as `Auth` with no prompt
+and no credential in the result; a fake ssh script given as the redirected global `core.sshCommand`, run through an `ssh://` remote, receives `-o BatchMode=yes` and
 `-o ConnectTimeout=8`. Operations: the clone, `LsRemote` (a head, no head on an empty remote), incremental `Fetch`
 into a shallow clone, `ResetHard`, `IsAncestor` after a remote rewritten by hand, `RevParse`, `UpdateRef`, `LsTree`,
 `DiffTree` (added, changed and removed; no rename), `CatBlob` (and a blob over the caller's limit, and an output over the
@@ -377,8 +379,8 @@ more tests above.
    authentication failure.
 5. An unreachable host or a refused connection (`Network`) and a missing repository (`RemoteNotFound`) are each classified apart
    from an authentication failure.
-6. A remote address that starts with a dash, holds whitespace or a control character, or names a transport helper is refused
-   before `git` starts; so is a branch the design does not allow.
+6. A remote address that starts with a dash, holds whitespace or a control character, names a transport helper, or is a relative
+   local path is refused before `git` starts; so is a branch the design does not allow.
 7. A shallow clone of a bare repository holds one commit; the remote's head can be read without a fetch; an empty remote has none.
 8. An incremental fetch brings only new objects and leaves the clone shallow; the clone can be reset to the fetched head.
 9. A remote whose history was rewritten by hand still fetches, and the clone can tell the old head is not an ancestor.
