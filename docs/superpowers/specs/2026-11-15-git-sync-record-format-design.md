@@ -193,7 +193,7 @@ An empty `tags` array is written `[]`. Unknown values are written recursively wi
 copied as their original text; strings are re-escaped by the rule below.
 
 **Escaping is ours, not the framework's.** The writer is a small hand-written one (the repository already has
-a hand-written `JsonWriter.AppendString` precedent) so the bytes do not depend on a runtime's Unicode tables or
+hand-written JSON precedent in `Sync/SyncPayload.cs`) so the bytes do not depend on a runtime's Unicode tables or
 encoder defaults. A string is written in double quotes with exactly these escapes: `\"`, `\\`, `\n`, `\r`,
 `\t`, `\b`, `\f`, and `\u00XX` (lowercase hex) for every other control character U+0000 to U+001F. **Every
 other character is written literally as UTF-8**, including U+007F, accented, CJK and supplementary-plane
