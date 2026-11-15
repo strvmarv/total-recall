@@ -33,6 +33,23 @@ export const CONTEXT_MESSAGE_TYPE = 'total-recall-context';
 /** Tools the injected instructions name; every other tool is reached through pi's tool_search. */
 export const DIRECT_TOOLS = ['session_start', 'session_end', 'session_refresh', 'memory_*', 'kb_search'];
 
+/**
+ * Key, on globalThis, of the set of session files that have started and not yet shut down in this
+ * process. pi loads the extension again for every session it builds, and pi-subagents builds its
+ * children in the same process, so the instances can only meet through the global object. Versioned,
+ * so that two copies of this package (an old and a new one) never read each other's set by mistake.
+ */
+export const LIVE_SESSIONS_KEY = Symbol.for('total-recall:pi:live-sessions:v1');
+
+/** The process-wide set, created on first use. Duck-typed, in case a loader gives each copy its own Set class. */
+export function processLiveSessions() {
+  const existing = globalThis[LIVE_SESSIONS_KEY];
+  if (existing && typeof existing.add === 'function' && typeof existing.has === 'function' && typeof existing.delete === 'function') return existing;
+  const created = new Set();
+  globalThis[LIVE_SESSIONS_KEY] = created;
+  return created;
+}
+
 /** The host id the engine's what's-new notice and its stamp use for this harness. */
 const HOST_ID = 'pi';
 
@@ -281,5 +298,6 @@ export default function totalRecallPiExtension(pi) {
     runWhatsNew: realRunWhatsNew,
     writeDirectStamp: realWriteDirectStamp,
     resolveDataDir: realResolveDataDir,
+    liveSessions: processLiveSessions(),
   })(pi);
 }

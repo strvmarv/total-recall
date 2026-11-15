@@ -539,6 +539,41 @@ test('child: PI_SUBAGENT_ID and a missing session file are still skipped when th
   assert.deepEqual([...liveSessions].sort(), ['/m.jsonl', '/p.jsonl']); // an ephemeral session has no file to record
 });
 
+test('default export: every instance in a process shares one live-session set, so a child of the first is skipped by the second', async () => {
+  const mod = await import('./extension.js');
+  const piFor = () => {
+    const handlers = new Map();
+    return { handlers, on: (e, f) => handlers.set(e, f), registerMcpServer() {}, registerCommand: (n, d) => handlers.set('cmd:' + n, d), sendUserMessage: () => assert.fail('a child must send nothing') };
+  };
+  const parentPi = piFor();
+  const childPi = piFor();
+  mod.default(parentPi);
+  mod.default(childPi);
+  const shared = globalThis[mod.LIVE_SESSIONS_KEY];
+  assert.ok(shared instanceof Set);
+  const file = path.join(os.tmpdir(), `tr-live-${process.pid}-parent.jsonl`);
+  try {
+    await parentPi.handlers.get('session_start')({ reason: 'startup' }, ctx({ file }));
+    assert.equal(shared.has(file), true);
+    const cc = ctx({ file: file + '.child', parent: file });
+    await childPi.handlers.get('session_start')({ reason: 'startup' }, cc);
+    assert.equal(await childPi.handlers.get('before_agent_start')(PROMPT, cc), undefined);
+    await childPi.handlers.get('cmd:total-recall').handler('help', cc);
+    assert.equal(cc.notes[0][1], 'warning');
+  } finally {
+    await parentPi.handlers.get('session_shutdown')({ reason: 'quit' }, ctx({ file }));
+    await childPi.handlers.get('session_shutdown')({ reason: 'quit' }, ctx({ file }));
+  }
+  assert.equal(shared.has(file), false);
+});
+
+test('LIVE_SESSIONS_KEY is versioned and the set is created once and reused', async () => {
+  const mod = await import('./extension.js');
+  assert.match(String(mod.LIVE_SESSIONS_KEY.description), /total-recall.*live-sessions.*v1/);
+  assert.equal(mod.processLiveSessions(), mod.processLiveSessions());
+  assert.equal(globalThis[mod.LIVE_SESSIONS_KEY], mod.processLiveSessions());
+});
+
 // ---- RF2: engine availability ----
 
 test('RF2: no engine means no floor call, but the session text is still delivered', async () => {
