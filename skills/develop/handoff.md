@@ -1123,6 +1123,17 @@ closed (`duplicate`, `missing`, or an extra count that the planning loop catches
 `normalize`'s task-marker rule, which fails open: a checkbox inside such a fence is stripped, so editing it
 does not change the hash. That is accepted.
 
+**Parent specs and stubs.** The grammar of a parent spec's breakdown is in section 2 of the design spec
+(`docs/superpowers/specs/2026-11-15-parent-sub-tickets-design.md`).
+`route.js parts <specFile>` prints `{ok, parts: [{n, title, scope, doneWhen, dependsOn}]}`, or
+`{ok:false, error}` with `no-parts`, `not-sequential`, `too-many`, `bad-title`, `bad-label`, `empty-text`,
+`text-too-long` or `bad-dependency`. `route.js stub <bodyFile>` reads the first line of an issue body (a BOM
+and `\r` removed, trimmed) and prints `{ok, part, count, parent}`, or `{ok:false, error:"no-stub-line"}`.
+`route.js stub-body <specFile> <part> <parent> <dependsFile> <outFile>` writes the stub body for one part
+to `outFile`, with `dependsFile` a JSON `{"<part>": <issue number>}` map, and prints `{ok, title}`; its
+errors are those of `parts`, plus `bad-input`, `no-such-part`, `missing-dependency` and `marker-in-text`
+(a `tr-develop/` line or an `<!-- tr-develop:` marker in the copied text).
+
 **Which plan text counts.** `route.js tasks-for <planShaFile> <tipFile|-> <tasksDone>` prints `{tasks}`.
 The tip of `origin/<branch>` is counted when it is sequential and its first `tasksDone` task headings
 equal the `planSha` version's (same numbers, same heading line), so a task appended before a crash is not

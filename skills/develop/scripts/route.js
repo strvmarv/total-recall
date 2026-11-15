@@ -8,6 +8,9 @@
 //   node route.js live <rawCommentsFile> <permissionsFile> <nowIso>
 //   node route.js position <jsonFile>          {progress, counts}
 //   node route.js route <rawCommentsFile> <permissionsFile> <stateFile> [bodyFile]
+//   node route.js parts <specFile>
+//   node route.js stub <bodyFile>
+//   node route.js stub-body <specFile> <part> <parent> <dependsFile> <outFile>
 
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -194,9 +197,141 @@ export function route(input) {
   return done('deliver', issueState === 'closed');
 }
 
+// ---- parent specs and stubs ----
+
+const PART_HEADING_PREFIX = '### Part ';
+const PART_HEADING_RE = /^### Part ([1-9]\d*): (\S(?:.*\S)?)$/;
+const ATX_HEADING_RE = /^#{1,6}\s/;
+const LABELS = ['Scope:', 'Depends on:', 'Done when:'];
+const DEPENDS_RE = /^Part [1-9]\d*(?:, Part [1-9]\d*)*$/;
+const STUB_LINE_RE = /^Part ([1-9]\d?) of ([1-9]\d?) in #([1-9]\d{0,8})$/;
+const NUMBER_RE = /^[1-9]\d{0,8}$/;
+const MAX_PARTS = 50;
+const MAX_TITLE = 80;
+const MAX_TEXT = 1500;
+const STUB_LAST_LINE = 'This part is not defined yet. Run /develop <this issue> to define it.';
+
+/** Length in characters (code points), not UTF-16 units. */
+function charLength(text) {
+  return Array.from(text).length;
+}
+
+/** The three labelled texts of one part's block lines, or an error name. */
+function readLabels(blockLines, n) {
+  const seen = [];
+  const texts = [];
+  for (const line of blockLines) {
+    const label = LABELS.find((l) => line.startsWith(l));
+    if (label) {
+      seen.push(label);
+      texts.push([line.slice(label.length)]);
+    } else if (texts.length > 0) {
+      texts[texts.length - 1].push(line);
+    } else if (line.trim() !== '') {
+      return { error: 'bad-label' };
+    }
+  }
+  if (seen.length !== LABELS.length || seen.some((label, i) => label !== LABELS[i])) return { error: 'bad-label' };
+  const [scope, depends, doneWhen] = texts.map((lines) => lines.join('\n').trim());
+  for (const text of [scope, depends, doneWhen]) {
+    if (text === '') return { error: 'empty-text' };
+    if (charLength(text) > MAX_TEXT) return { error: 'text-too-long' };
+  }
+  let dependsOn = [];
+  if (depends !== 'none') {
+    if (!DEPENDS_RE.test(depends)) return { error: 'bad-dependency' };
+    dependsOn = depends.split(', ').map((entry) => Number(entry.slice('Part '.length)));
+    if (dependsOn.some((m, i) => m >= n || (i > 0 && m <= dependsOn[i - 1]))) return { error: 'bad-dependency' };
+  }
+  return { scope, doneWhen, dependsOn };
+}
+
+/**
+ * The breakdown of a parent spec (design spec section 2): `### Part <n>: <title>` headings outside
+ * code fences, each followed by the labels `Scope:`, `Depends on:` and `Done when:` once each, in
+ * that order. The first error found is returned; a heading error comes before a sequence error, and
+ * a sequence error before the count limit.
+ */
+export function parseParts(specText) {
+  const lines = outsideFences(String(specText)).map((entry) => entry.line);
+  const starts = [];
+  const titles = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!lines[i].startsWith(PART_HEADING_PREFIX)) continue;
+    const m = PART_HEADING_RE.exec(lines[i]);
+    if (!m || charLength(m[2]) > MAX_TITLE) return { ok: false, error: 'bad-title' };
+    if (m[1] !== String(starts.length + 1)) return { ok: false, error: 'not-sequential' };
+    starts.push(i);
+    titles.push(m[2]);
+  }
+  if (starts.length === 0) return { ok: false, error: 'no-parts' };
+  if (starts.length > MAX_PARTS) return { ok: false, error: 'too-many' };
+  const parts = [];
+  for (let k = 0; k < starts.length; k += 1) {
+    let end = starts[k] + 1;
+    while (end < lines.length && !ATX_HEADING_RE.test(lines[end])) end += 1;
+    const read = readLabels(lines.slice(starts[k] + 1, end), k + 1);
+    if (read.error) return { ok: false, error: read.error };
+    parts.push({ n: k + 1, title: titles[k], scope: read.scope, doneWhen: read.doneWhen, dependsOn: read.dependsOn });
+  }
+  return { ok: true, parts };
+}
+
+/** The first line of an issue body as a stub line (design spec section 5), or `no-stub-line`. */
+export function parseStubLine(bodyText) {
+  if (typeof bodyText !== 'string') return { ok: false, error: 'no-stub-line' };
+  const first = bodyText.split('\n')[0].replace(/^\uFEFF/, '').replace(/\r$/, '').trim();
+  const m = STUB_LINE_RE.exec(first);
+  if (!m) return { ok: false, error: 'no-stub-line' };
+  return { ok: true, part: Number(m[1]), count: Number(m[2]), parent: Number(m[3]) };
+}
+
+function isNumberInput(value) {
+  return (typeof value === 'string' || typeof value === 'number') && NUMBER_RE.test(String(value));
+}
+
+function hasMarkerText(text) {
+  return hasMarkerLine(text) || text.includes('<!-- tr-develop:');
+}
+
+/**
+ * A stub's title and body for `part` of the parent spec, with `depends` a `{<part>: <issue number>}`
+ * map (design spec sections 5 and 9). Text that would give the stub a checkpoint line or a criteria
+ * region is refused.
+ */
+export function stubBody(specText, part, parent, depends) {
+  if (!isNumberInput(part) || !isNumberInput(parent) || !isObject(depends)
+    || !Object.values(depends).every((v) => Number.isSafeInteger(v) && v > 0)) {
+    return { ok: false, error: 'bad-input' };
+  }
+  const parsed = parseParts(specText);
+  if (!parsed.ok) return parsed;
+  const found = parsed.parts.find((p) => p.n === Number(part));
+  if (!found) return { ok: false, error: 'no-such-part' };
+  if (hasMarkerText(found.scope) || hasMarkerText(found.doneWhen)) return { ok: false, error: 'marker-in-text' };
+  if (found.dependsOn.some((m) => !Object.hasOwn(depends, String(m)))) return { ok: false, error: 'missing-dependency' };
+  const dependsLine = found.dependsOn.length === 0
+    ? 'Depends on: nothing'
+    : `Depends on: ${found.dependsOn.map((m) => `#${depends[String(m)]}`).join(', ')}`;
+  const body = [
+    `Part ${found.n} of ${parsed.parts.length} in #${Number(parent)}`,
+    '',
+    found.scope,
+    '',
+    dependsLine,
+    '',
+    `Done when: ${found.doneWhen}`,
+    '',
+    STUB_LAST_LINE,
+  ].join('\n');
+  return { ok: true, title: found.title, body: `${body}\n` };
+}
+
 // ---- CLI ----
 
-export const SUBCOMMANDS = ['count-tasks', 'count-cycles', 'tasks-for', 'live', 'position', 'route'];
+export const SUBCOMMANDS = [
+  'count-tasks', 'count-cycles', 'tasks-for', 'live', 'position', 'route', 'parts', 'stub', 'stub-body',
+];
 
 function readText(file) {
   return fs.readFileSync(file, 'utf8');
@@ -289,6 +424,27 @@ function runRoute(args) {
   return { complete: true, needPermissions: [], ...result };
 }
 
+function runParts(args) {
+  if (!args[0]) usage('parts <specFile>');
+  return parseParts(readText(args[0]));
+}
+
+function runStub(args) {
+  if (!args[0]) usage('stub <bodyFile>');
+  return parseStubLine(readText(args[0]));
+}
+
+function runStubBody(args) {
+  const [specFile, part, parent, dependsFile, outFile] = args;
+  if (!specFile || !part || !parent || !dependsFile || !outFile) {
+    usage('stub-body <specFile> <part> <parent> <dependsFile> <outFile>');
+  }
+  const result = stubBody(readText(specFile), part, parent, JSON.parse(readText(dependsFile)));
+  if (!result.ok) return result;
+  fs.writeFileSync(outFile, result.body);
+  return { ok: true, title: result.title };
+}
+
 function dispatch(argv) {
   const [cmd, ...rest] = argv;
   if (!SUBCOMMANDS.includes(cmd)) return { ok: false, error: 'unknown subcommand' };
@@ -299,6 +455,9 @@ function dispatch(argv) {
     case 'live': return runLive(rest);
     case 'position': return runPosition(rest);
     case 'route': return runRoute(rest);
+    case 'parts': return runParts(rest);
+    case 'stub': return runStub(rest);
+    case 'stub-body': return runStubBody(rest);
     default: return { ok: false, error: 'unknown subcommand' };
   }
 }
