@@ -404,8 +404,9 @@ before any pin validation).
    linked and unlinked claimants alike. Of a part's eligible claimants the **lowest issue number is the
    stub**; the others are reported as duplicates and never edited or closed. An unlinked stub is
    **adopted**: link it with `sub-issue-link` and the claimant's numeric `id` (retried as in step 4.3),
-   never duplicate it. When `parent_issue_url` is absent from the list entries (the field is unverified),
-   run `parent-read` on that claimant before adopting it: a 200 naming another issue means it is linked
+   never duplicate it. An entry with `parent_issue_url` is linked, to the parent it names; an entry whose
+   `parent_issue_url` is absent is treated as unlinked, and `parent-read` is run on it before adopting it as a
+   cheap confirmation (the list can lag): a 200 naming another issue means it is linked
    elsewhere, so it is only reported and drops out as a claimant (the next eligible one is the stub); a
    200 naming this parent means it is already linked; a 404 means unlinked; any other status is
    blocker 3. An ineligible claimant is only reported and never makes the part count as having a stub.
