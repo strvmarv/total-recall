@@ -71,7 +71,7 @@ falls back to SQLite, setting `StorageMode` to `"sqlite (cortex failed)"`.
 
 ### Schema
 
-16 sequential migrations in `Storage/Schema.cs`. **Never modify existing migrations** — only append.
+17 sequential migrations in `Storage/Schema.cs`. **Never modify existing migrations** — only append.
 
 | Migration | What it adds |
 |-----------|-------------|
@@ -91,6 +91,7 @@ falls back to SQLite, setting `StorageMode` to `"sqlite (cortex failed)"`.
 | 14 | `times_injected` column on all 6 content tables |
 | 15 | `tool_cache` table |
 | 16 | Pinned tier: `pinned_memories` / `pinned_knowledge` with the full current column set + vec0 + FTS5 + triggers |
+| 17 | `sticky INTEGER NOT NULL DEFAULT 0` column and an `idx_<table>_sticky` index on `hot_memories` / `hot_knowledge` (tier model v2) |
 
 Table naming: `{tier}_{type}` (e.g., `hot_memories`, `cold_knowledge`, `pinned_memories`). Vec tables: `{table}_vec`. FTS tables: `{table}_fts`.
 `MigrationRunner.TableName(tier, type)` is the canonical helper — use it, don't inline strings.
