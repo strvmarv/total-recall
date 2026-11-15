@@ -339,6 +339,16 @@ let writableTests =
             Expect.equal (checkWritable { sampleRecord with Tags = [ null ] } 100) (Some NotEncodable) "null tag"
             Expect.equal (checkWritable { sampleRecord with Project = Some null } 100) (Some NotEncodable) "null project"
 
+        testCase "a hand-built record with a null part is not encodable and does not throw" <| fun _ ->
+            Expect.equal (checkWritable { sampleRecord with Tags = Unchecked.defaultof<string list> } 100) (Some NotEncodable) "null tags"
+            Expect.equal (checkWritable { sampleRecord with Placement = Unchecked.defaultof<Placement> } 100) (Some NotEncodable) "null placement"
+            Expect.equal (checkWritable { sampleRecord with ContentStamp = Unchecked.defaultof<Stamp> } 100) (Some NotEncodable) "null stamp"
+            Expect.equal (checkWritable Unchecked.defaultof<SyncRecord.SyncRecord> 100) (Some NotEncodable) "null record"
+
+        testCase "the limits are the spec's numbers" <| fun _ ->
+            Expect.equal (maxFileBytes, maxRecordBytes, maxWriteTags, maxWriteTagUnits, maxReadTags, maxReadTagUnits)
+                (1_048_576, 262_144, 64, 128, 256, 256) "limits"
+
         testCase "duplicate tags count once" <| fun _ ->
             let tags = List.init 64 (fun i -> sprintf "t%03d" i)
             Expect.equal (checkWritable { sampleRecord with Tags = tags @ tags } 100) None "64 distinct tags written twice are still 64"

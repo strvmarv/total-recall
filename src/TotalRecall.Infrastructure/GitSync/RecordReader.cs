@@ -12,7 +12,7 @@ namespace TotalRecall.Infrastructure.GitSync;
 /// </summary>
 public static class RecordReader
 {
-    public const int MaxFileBytes = 1_048_576;
+    public const int MaxFileBytes = SyncValidation.maxFileBytes;
     internal const int MaxDepth = 64;
 
     private static readonly HashSet<string> KnownTop = new(StringComparer.Ordinal)

@@ -171,8 +171,26 @@ type Block =
 [<Literal>]
 let private memoryFormat = "total-recall/memory/v1"
 
+/// The reader never looks at a file larger than this.
 [<Literal>]
-let private maxFileBytes = 1_048_576
+let maxFileBytes = 1_048_576
+
+/// A record that serializes to more than this is not pushed.
+[<Literal>]
+let maxRecordBytes = 262_144
+
+/// Tag limits when writing (counted as a set) and when reading.
+[<Literal>]
+let maxWriteTags = 64
+
+[<Literal>]
+let maxWriteTagUnits = 128
+
+[<Literal>]
+let maxReadTags = 256
+
+[<Literal>]
+let maxReadTagUnits = 256
 
 let private pathTr = "ext.total-recall."
 let private pathPlacement = "ext.total-recall.placement."
@@ -217,7 +235,7 @@ let validate (path: string) (sizeBytes: int) (raw: RawSyncRecord) : Result<Valid
         let! entryTypeText = req "entry_type" raw.EntryType
         let! entryType = parseWith SyncRecord.tryParseEntryType (BadEntryType(sanitizeText entryTypeText)) entryTypeText
         let! tags = req "tags" raw.Tags
-        do! ensure (not (isNull (box tags)) && tags.Length <= 256 && tags |> List.forall (fun t -> not (isNull t) && t.Length <= 256)) BadTags
+        do! ensure (not (isNull (box tags)) && tags.Length <= maxReadTags && tags |> List.forall (fun t -> not (isNull t) && t.Length <= maxReadTagUnits)) BadTags
         let! tierText = req (pathPlacement + "tier") raw.Tier
         let! tier = parseWith SyncRecord.tryParseTier (BadTier(sanitizeText tierText)) tierText
         let! sticky = req (pathPlacement + "sticky") raw.Sticky
@@ -286,19 +304,23 @@ let private hasUnencodableText (r: SyncRecord.SyncRecord) : bool =
           | None -> () ]
     strings |> List.exists (fun s -> isNull s || hasLoneSurrogate s)
 
+let private stampUnusable (s: Stamp) : bool =
+    isNull (box s) || isNull (box s.Machine) || not (Stamp.inDomain s)
+
 let private hasOutOfDomainNumber (r: SyncRecord.SyncRecord) : bool =
     not (Timestamp.inRange r.CreatedAtMs)
-    || not (Stamp.inDomain r.ContentStamp)
-    || not (Stamp.inDomain r.Placement.TierStamp)
-    || not (Stamp.inDomain r.Placement.StickyStamp)
+    || stampUnusable r.ContentStamp
+    || stampUnusable r.Placement.TierStamp
+    || stampUnusable r.Placement.StickyStamp
 
 /// Whether the entry may be pushed. `serializedBytes` is the size of the record as written.
 /// Tags are counted as a set (the writer writes them unique), so duplicates do not count twice.
 /// The first matching reason, in the order of the spec's list, is returned.
 let checkWritable (record: SyncRecord.SyncRecord) (serializedBytes: int) : Block option =
-    if serializedBytes > 262_144 then Some TooLarge
-    elif (List.distinct record.Tags).Length > 64 then Some TooManyTags
-    elif record.Tags |> List.exists (fun t -> not (isNull t) && t.Length > 128) then Some TagTooLong
+    if isNull (box record) || isNull (box record.Tags) || isNull (box record.Placement) then Some NotEncodable
+    elif serializedBytes > maxRecordBytes then Some TooLarge
+    elif (List.distinct record.Tags).Length > maxWriteTags then Some TooManyTags
+    elif record.Tags |> List.exists (fun t -> not (isNull t) && t.Length > maxWriteTagUnits) then Some TagTooLong
     elif not (isEligibleId record.Id) then Some IneligibleId
     elif hasUnencodableText record || hasOutOfDomainNumber record then Some NotEncodable
     else None
