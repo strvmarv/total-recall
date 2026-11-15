@@ -7,7 +7,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
-  sanitizeSummary, parseTagMessage, parseReleaseTag, compareVersions, previousVersion, buildReleaseNotes, readAnnotatedTag,
+  sanitizeSummary, parseTagMessage, parseReleaseTag, compareVersions, previousVersion, buildReleaseNotes, readAnnotatedTag, stripSignature,
 } from './release-notes.js';
 import { SHIM_TEST_TARGETS } from './run-shim-tests.js';
 
@@ -381,6 +381,28 @@ test('readAnnotatedTag: a name that is not a release tag throws before any git c
   }
 });
 
+test('stripSignature: a PGP or SSH signature block is cut from the message, nothing else is', () => {
+  const body = 'v1.2.3\n\nA summary.\n\nAdded\n- one thing\n';
+  const pgp = `${body}-----BEGIN PGP SIGNATURE-----\n\niQEzBAABCAAdFiEE\n=abcd\n-----END PGP SIGNATURE-----\n`;
+  const ssh = `${body}-----BEGIN SSH SIGNATURE-----\nU1NIU0lH\n-----END SSH SIGNATURE-----\n`;
+  assert.equal(stripSignature(pgp), body);
+  assert.equal(stripSignature(ssh), body);
+  assert.equal(stripSignature(body), body);
+  assert.equal(stripSignature('x'), 'x');
+  // The summary and the release body never see the signature.
+  const built = buildReleaseNotes({ tag: 'v1.2.3', message: stripSignature(pgp), tags: [] });
+  assert.equal(built.notes.summary, 'A summary.');
+  assert.ok(!built.body.includes('SIGNATURE'));
+});
+
+test('readAnnotatedTag: a nonexistent --cwd is reported as such, not blamed on git', () => {
+  const nowhere = path.join(os.tmpdir(), 'rn-no-such-directory');
+  assert.throws(() => readAnnotatedTag('v1.0.1', { cwd: nowhere }), (e) => e.message === `--cwd ${nowhere} is not a directory`);
+  const file = path.join(tmp('rn-file-'), 'f');
+  fs.writeFileSync(file, '');
+  assert.throws(() => readAnnotatedTag('v1.0.1', { cwd: file }), /is not a directory/);
+});
+
 const runCli = (args, { cwd = os.tmpdir() } = {}) => spawnSync(process.execPath, [SCRIPT, ...args], { cwd, env: gitEnv, encoding: 'utf8' });
 
 test('CLI: --notes-out may repeat and --body-out writes the body', () => {
@@ -419,6 +441,44 @@ test('CLI: a lightweight tag or a missing tag exits 1 with an ::error:: line and
     assert.match(r.stdout, /^::error::/m, tag);
   }
   assert.deepEqual(fs.readdirSync(out), []);
+});
+
+test('CLI: a writer run for a stable tag without a summary exits 1 and creates no file', () => {
+  const out = tmp('rn-out-');
+  const r = runCli(['v1.1.0', '--cwd', repo, '--notes-out', 'n.json', '--body-out', 'b.md'], { cwd: out });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout, /^::error::no summary in the tag message of v1\.1\.0$/m);
+  assert.deepEqual(fs.readdirSync(out), []);
+});
+
+test('CLI: a writer run for a prerelease without a summary writes an empty summary and exits 0', () => {
+  const out = tmp('rn-out-');
+  const r = runCli(['v1.1.1-beta.1', '--cwd', repo, '--notes-out', 'n.json'], { cwd: out });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^::warning::no summary/m);
+  const raw = fs.readFileSync(path.join(out, 'n.json'), 'utf8');
+  assert.match(raw, /^ {2}"summary": "",$/m);
+  assert.equal(JSON.parse(raw).summary, '');
+});
+
+test('CLI: an ::error:: message escapes %, CR and LF so it stays one line', () => {
+  const bad = path.join(os.tmpdir(), 'rn-50%-done\nline2');
+  const r = runCli(['v1.0.1', '--check', '--cwd', bad]);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.equal(r.stdout.split('\n').filter((l) => l !== '').length, 1);
+  assert.ok(r.stdout.startsWith('::error::--cwd '), r.stdout);
+  assert.ok(r.stdout.includes('rn-50%25-done%0Aline2 is not a directory'), r.stdout);
+});
+
+test('CLI: an option that is followed by another flag is a usage error, not a file name', () => {
+  const out = tmp('rn-out-');
+  for (const opt of ['--notes-out', '--body-out', '--cwd']) {
+    const r = runCli(['v1.0.1', opt, '--check'], { cwd: out });
+    assert.equal(r.status, 2, opt);
+    assert.match(r.stderr, new RegExp(`^${opt} needs a value$`, 'm'), opt);
+    assert.match(r.stderr, /usage: node scripts\/release-notes\.js/, opt);
+  }
+  assert.deepEqual(fs.readdirSync(out), [], 'no file named --check');
 });
 
 test('CLI: a usage error exits 2', () => {

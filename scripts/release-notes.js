@@ -236,11 +236,25 @@ export function buildReleaseNotes({ tag, message, tags }) {
   };
 }
 
+function isDirectory(dir) {
+  try { return fs.statSync(dir).isDirectory(); } catch { return false; }
+}
+
 // Runs git with an argument array and no shell.
 function runGit(args, cwd) {
   const r = spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   if (r.error) throw new Error(`cannot run git: ${r.error.message}`);
   return r;
+}
+
+// A signed tag keeps its signature at the end of the message (`%(contents)` includes it). The signature
+// is cut from its first armour line to the end, so it never reaches the summary or the release body.
+const SIGNATURE_START = /^-----BEGIN (?:PGP|SSH) SIGNATURE-----$/m;
+
+/** The tag message without a trailing PGP or SSH signature block. */
+export function stripSignature(message) {
+  const m = SIGNATURE_START.exec(message);
+  return m === null ? message : message.slice(0, m.index);
 }
 
 /**
@@ -251,6 +265,7 @@ function runGit(args, cwd) {
  */
 export function readAnnotatedTag(tag, { cwd } = {}) {
   if (parseReleaseTag(tag) === null) throw new Error(`${tag} is not a release tag`);
+  if (cwd !== undefined && !isDirectory(cwd)) throw new Error(`--cwd ${cwd} is not a directory`);
   const ref = `refs/tags/${tag}`;
   const type = runGit(['cat-file', '-t', ref], cwd);
   if (type.status !== 0) throw new Error(`cannot read ${ref}: ${String(type.stderr).trim() || 'git failed'}`);
@@ -259,7 +274,7 @@ export function readAnnotatedTag(tag, { cwd } = {}) {
   if (contents.status !== 0) throw new Error(`cannot read the message of ${ref}: ${String(contents.stderr).trim() || 'git failed'}`);
   const list = runGit(['tag', '-l'], cwd);
   if (list.status !== 0) throw new Error(`cannot list the tags: ${String(list.stderr).trim() || 'git failed'}`);
-  return { message: contents.stdout, tags: list.stdout.split('\n').filter((t) => t !== '') };
+  return { message: stripSignature(contents.stdout), tags: list.stdout.split('\n').filter((t) => t !== '') };
 }
 
 // ---- command line ----
@@ -286,7 +301,7 @@ export function main(argv) {
     if (a === '--check') check = true;
     else if (a === '--notes-out' || a === '--body-out' || a === '--cwd') {
       const v = argv[i + 1];
-      if (v === undefined) return usage(`${a} needs a value`);
+      if (v === undefined || v.startsWith('--')) return usage(`${a} needs a value`);
       i += 1;
       if (a === '--notes-out') notesOut.push(v);
       else if (a === '--cwd') cwd = v;
