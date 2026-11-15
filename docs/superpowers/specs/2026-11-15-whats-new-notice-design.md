@@ -332,9 +332,9 @@ Host ids: `claude-code`, `pi`, `copilot-cli`, `cursor`, `codex`, `gemini-cli`, `
   provisioned engine as `whats-new --host <id> --format <f>` with a timeout (3 s) and returns the raw
   output. `pi/floor.js` is not changed (its runner only understands the floor's JSON).
 - **Claude Code.** `hooks/session-start/run.sh` calls a node script (`hooks/session-start/whats-new.js`) in
-  its Claude Code branch only. The script has one overall deadline of 3 s measured from its own start (node's start-up is
-  outside it, and `run.sh` also wraps the call in `timeout 4` where `timeout` exists, so a hung script is
-  killed): it reads the hook payload from stdin for at most 500 ms, takes `source`, writes the stamp on
+  its Claude Code branch only. The script has one overall deadline of 2.5 s measured from its own start (node's start-up is
+  outside it, so the worst case is about 3 s, and `run.sh` also wraps the call in `timeout 4` where `timeout` exists, so a hung script is
+  killed): it reads the hook payload from stdin for at most 500 ms, takes `source` (an empty, malformed or timed-out payload counts as `startup`), writes the stamp on
   every source (startup, resume, clear, compact), and calls the engine only when the source is not
   `compact`, giving it what is left of the deadline and killing it at the deadline. It prints one JSON
   string literal (the line, escaped with `JSON.stringify`, on one line) or nothing. `run.sh` accepts the
@@ -344,7 +344,8 @@ Host ids: `claude-code`, `pi`, `copilot-cli`, `cursor`, `codex`, `gemini-cli`, `
   to today's and write no stamp. Any failure of the script (a missing node, a crash, a timeout, output that is
   not a string literal) leaves `run.sh`'s output byte-identical to today's. The script's own test file
   (`hooks/session-start/whats-new.test.js`) is added to `SHIM_TEST_TARGETS`; the test never runs the real hook
-  against the developer's data directory (it passes a temporary one).
+  against the developer's data directory (it passes a temporary one), and the check that a hung engine costs
+  under 3.5 s runs the script against a temporary copy of the plugin tree with a fake engine.
 - **pi.** The extension's `session_start` handler skips `reload` unconditionally, requires `ctx.hasUI`,
   `hookable(ctx)` and a `resolveUserServer` that does not say skip, then writes the `direct-pi` stamp
   synchronously (data directory from `{...process.env, ...user.env}`), and starts the engine run without
@@ -359,7 +360,7 @@ Host ids: `claude-code`, `pi`, `copilot-cli`, `cursor`, `codex`, `gemini-cli`, `
   non-empty string. For a `tools/call` of `session_start` while proxying, the proxied copy of the message
   has `arguments.host` set to that name (replacing any `host` the caller sent; other tools and the
   harness's original message are untouched). Absent or null `arguments` become `{host: <name>}`; any other
-  non-object `arguments` is forwarded unchanged. With no name recorded the call is forwarded unchanged. The
+  `arguments` that is not a plain object (an array included) is forwarded unchanged. With no name recorded the call is forwarded unchanged. The
   engine does the mapping and validation (`HostIds.FromClientName`), so the shim does not.
 - **Announce text.** One bullet in the announce step of `skills/commands/SKILL.md`,
   `skills/using-total-recall/SKILL.md` and `.kiro/steering/total-recall.md`, and a clause in the prompt of
@@ -441,7 +442,7 @@ their pages). A host whose page has no update instruction gets the generic "see 
 
 - AOT: no reflection-based serialization; use the existing `JsonContext` pattern. `HttpClient` is
   already used in the engine (`CortexClient`, embedders), so it is AOT-safe here.
-- Hooks must stay silent and exit 0 on any failure and add little to startup (budget: about 300 ms typical, 3 s hard cap; the pinned floor
+- Hooks must stay silent and exit 0 on any failure and add little to startup (budget: about 300 ms typical, a hard cap of 3 s on the engine call plus node's own start-up, so at most about 3.5 s; the pinned floor
   measures about 140 ms for a spawn).
 - The version check is the only new outbound call and must be disclosable in one sentence.
 - Do not edit existing migrations or hook contracts of other hosts.
