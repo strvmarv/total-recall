@@ -41,17 +41,16 @@ public sealed class ParsedRecord
     internal UnknownContent Unknown { get; }
 }
 
-/// <summary>Unknown properties, per object, in the order the file had them. Values are detached clones.</summary>
+/// <summary>Unknown properties, per object, in the order the file had them. Values are detached clones.
+/// Nothing here is ever modified after parsing.</summary>
 internal sealed class UnknownContent
 {
-    public static readonly UnknownContent Empty = new(new(), new(), new(), new(), new());
-
     public UnknownContent(
-        List<KeyValuePair<string, JsonElement>> top,
-        List<KeyValuePair<string, JsonElement>> extNamespaces,
-        List<KeyValuePair<string, JsonElement>> totalRecall,
-        List<KeyValuePair<string, JsonElement>> placement,
-        List<KeyValuePair<string, JsonElement>> origin)
+        IReadOnlyList<KeyValuePair<string, JsonElement>> top,
+        IReadOnlyList<KeyValuePair<string, JsonElement>> extNamespaces,
+        IReadOnlyList<KeyValuePair<string, JsonElement>> totalRecall,
+        IReadOnlyList<KeyValuePair<string, JsonElement>> placement,
+        IReadOnlyList<KeyValuePair<string, JsonElement>> origin)
     {
         Top = top;
         ExtNamespaces = extNamespaces;
@@ -61,17 +60,17 @@ internal sealed class UnknownContent
     }
 
     /// <summary>Top-level properties other than the nine known ones.</summary>
-    public List<KeyValuePair<string, JsonElement>> Top { get; }
+    public IReadOnlyList<KeyValuePair<string, JsonElement>> Top { get; }
 
     /// <summary><c>ext</c> namespaces other than <c>total-recall</c>.</summary>
-    public List<KeyValuePair<string, JsonElement>> ExtNamespaces { get; }
+    public IReadOnlyList<KeyValuePair<string, JsonElement>> ExtNamespaces { get; }
 
     /// <summary>Properties of <c>ext["total-recall"]</c> other than the known ones.</summary>
-    public List<KeyValuePair<string, JsonElement>> TotalRecall { get; }
+    public IReadOnlyList<KeyValuePair<string, JsonElement>> TotalRecall { get; }
 
-    public List<KeyValuePair<string, JsonElement>> Placement { get; }
+    public IReadOnlyList<KeyValuePair<string, JsonElement>> Placement { get; }
 
-    public List<KeyValuePair<string, JsonElement>> Origin { get; }
+    public IReadOnlyList<KeyValuePair<string, JsonElement>> Origin { get; }
 }
 
 /// <summary>Exactly one of <see cref="Parsed"/> and <see cref="Rejected"/> is set.</summary>

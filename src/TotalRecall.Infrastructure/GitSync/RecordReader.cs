@@ -77,13 +77,16 @@ public static class RecordReader
     /// Walks every token once. Returns a reject for: invalid JSON, a root that is not an object,
     /// nesting deeper than 64, content after the root, a duplicate property name in any object
     /// (names compared after decoding), and any string or name that is not valid text (a lone
-    /// surrogate escape or invalid UTF-8). Null when the document is sound.
+    /// surrogate escape or invalid UTF-8). Null when the document is sound. A structural error
+    /// anywhere in the file wins over a duplicate or bad text found earlier: the first such
+    /// finding is remembered while the rest of the file is read.
     /// </summary>
     private static SyncValidation.Reject? PrePass(byte[] bytes)
     {
         var reader = new Utf8JsonReader(bytes, new JsonReaderOptions { MaxDepth = MaxDepth });
         var names = new Stack<HashSet<string>?>();
         var first = true;
+        SyncValidation.Reject? found = null;
         try
         {
             while (reader.Read())
@@ -111,19 +114,19 @@ public static class RecordReader
                     {
                         var name = reader.GetString()!;
                         if (SyncValidation.hasLoneSurrogate(name))
-                            return SyncValidation.Reject.NewNotJson("text that cannot be encoded");
-                        if (!names.Peek()!.Add(name))
-                            return SyncValidation.Reject.NewDuplicateKey(SyncValidation.sanitizeText(name));
+                            found ??= SyncValidation.Reject.NewNotJson("text that cannot be encoded");
+                        else if (!names.Peek()!.Add(name))
+                            found ??= SyncValidation.Reject.NewDuplicateKey(SyncValidation.sanitizeText(name));
                         break;
                     }
                     case JsonTokenType.String:
                         if (SyncValidation.hasLoneSurrogate(reader.GetString()!))
-                            return SyncValidation.Reject.NewNotJson("text that cannot be encoded");
+                            found ??= SyncValidation.Reject.NewNotJson("text that cannot be encoded");
                         break;
                 }
             }
 
-            return first ? SyncValidation.Reject.NewNotJson("empty") : null;
+            return first ? SyncValidation.Reject.NewNotJson("empty") : found;
         }
         catch (JsonException)
         {

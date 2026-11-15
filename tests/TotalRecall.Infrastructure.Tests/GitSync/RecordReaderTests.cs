@@ -174,6 +174,7 @@ public class RecordReaderTests
         Assert.True(Parse(Edit("\"sticky\": false,", "\"sticky\": false, \"sticky\": true,")).Rejected!.IsDuplicateKey);
         Assert.True(Parse(Edit("\"tags\":", "\"x\": {\"a\":1,\"a\":2}, \"tags\":")).Rejected!.IsDuplicateKey);
         Assert.True(Parse(Edit("\"tags\":", "\"x\": [{\"a\":1},{\"b\":1,\"b\":2}], \"tags\":")).Rejected!.IsDuplicateKey);
+        Assert.True(Parse(Edit("\"ext\": {", "\"ext\": {\"other-tool\": {}, \"other-tool\": {}, ")).Rejected!.IsDuplicateKey);
     }
 
     [Fact]
@@ -187,6 +188,15 @@ public class RecordReaderTests
     public void The_same_name_in_two_different_objects_is_fine()
     {
         Assert.NotNull(Parse(Edit("\"tags\":", "\"x\": {\"a\":1}, \"y\": {\"a\":2}, \"tags\":")).Parsed);
+        Assert.NotNull(Parse(Edit("\"tags\":", "\"x\": [{\"a\":1},{\"a\":2}], \"tags\":")).Parsed);
+    }
+
+    [Fact]
+    public void A_structural_error_later_in_the_file_wins_over_an_earlier_duplicate()
+    {
+        Assert.True(Parse("{\"a\":1,\"a\":2}x").Rejected!.IsNotJson);
+        Assert.True(Parse("{\"a\":1,\"a\":2").Rejected!.IsNotJson);
+        Assert.True(Parse("{\"a\":1,\"a\":2}").Rejected!.IsDuplicateKey);
     }
 
     [Fact]
@@ -327,6 +337,7 @@ public class RecordReaderTests
     public void Parse_never_throws_and_always_returns_exactly_one_outcome()
     {
         var rng = new Random(20261115);
+        var accepted = 0;
         var good = Encoding.UTF8.GetBytes(Good);
         var fragments = new[]
         {
@@ -348,7 +359,12 @@ public class RecordReaderTests
             Assert.True((r.Parsed is null) != (r.Rejected is null), $"iteration {i}");
             if (r.Rejected is not null)
                 Assert.NotEmpty(SyncValidation.RejectModule.describe(r.Rejected));
+            else
+                accepted++;
         }
+
+        // some mutations land in whitespace or content, so the run reaches Extract and validate
+        Assert.True(accepted > 0, "the fuzz run never produced an accepted record");
     }
 
     private static byte[] RandomBytes(Random rng, int n)
