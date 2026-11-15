@@ -2,7 +2,7 @@
 //
 // Contract test for CatalogDumper.DumpLocalCatalogJson():
 //   - output is valid JSON with shape { "tools": [...] }
-//   - at least 40 tools (local/sqlite mode registers 48: 41 core + 7 sqlite-only)
+//   - at least 40 tools (local/sqlite mode registers 50: 42 core + 8 sqlite-only)
 //   - contains memory_store and usage_status (always in local mode)
 //   - does NOT contain skill_delete (cortex-only)
 
