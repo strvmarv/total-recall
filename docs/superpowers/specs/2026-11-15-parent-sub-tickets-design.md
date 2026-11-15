@@ -35,7 +35,7 @@ Terms. The **spec-bearing tracks** are `plan` and `parent`: the two whose pin ca
 
 ## Why one ticket
 
-`ticket-standard.md` says a change that is not small is several tickets. This change could be split into the parent track (sections 1 to 7) and sub-ticket awareness (section 8). It is kept as one ticket because the halves are not independent: stubs that nothing reads are inert, and sub-ticket awareness has nothing to read without the parent track. A split would also need the same spec cited by two tickets, which is the problem this design exists to remove. The plan orders the tasks so the parent half lands first; the person may ask for the split at sign-off.
+`ticket-standard.md` says a change that is not small is several tickets. This change could be split into the parent track (sections 1 to 7) and sub-ticket awareness (section 8). A split is feasible (today's Define already handles an existing issue, so the parent half would ship alone). It is kept as one ticket because the halves are best reviewed together against one design, they share the same unverified API risk (the sub-issue link call), and a split would need the same spec cited by two tickets, which is the problem this design exists to remove. The plan orders the tasks so the parent half lands first; the person may ask for the split at sign-off.
 
 ## Design
 
@@ -97,9 +97,9 @@ New and changed fields:
 | `parentBlob` | same | the git blob id (40 hex) of the parent spec at `origin/<base>` when the sub-ticket was signed off |
 | `specBlob` | `spec-merged` | the blob id (40 hex) of the spec at `origin/<base>` after the merge |
 
-New phase `spec-merged`, for the parent track only. Required: `branch`, `head`, `gh`, `pr`, `spec`, `specBlob`. It is a progress phase. Like `closed` it is exempt from the reachability of `head`, because the branch may be deleted after the merge, and from the integrity check before posting (the exemption list in `deliver.md` and `handoff.md` gains it). For the concurrency check it ends a run and is not a heartbeat: it is added to both lists in `route.js` (`NOT_HEARTBEAT` and `ENDS_A_RUN`), so a fresh `spec-merged` never makes the next `/develop` stop to ask whether a run is live.
+New phase `spec-merged`, for the parent track only. Required: `track` (always `parent`), `branch`, `head`, `gh`, `pr`, `spec`, `specBlob`. It is a progress phase; it joins `PHASES`, the checkpoint-line pattern (`LINE_RE`, which hard-codes the phase list) and `PROGRESS_PHASES`. Like `closed` it is exempt from the reachability of `head`, because the branch may be deleted after the merge, and from the integrity check before posting (the exemption list in `deliver.md` and `handoff.md` gains it). For the concurrency check it ends a run and is not a heartbeat: it is added to both lists in `route.js` (`NOT_HEARTBEAT` and `ENDS_A_RUN`), so a fresh `spec-merged` never makes the next `/develop` stop to ask whether a run is live.
 
-Required fields for the parent track (the table in `handoff.md` gains a "parent:" prefix like the existing "plan:" and "small:" ones): `kickoff` needs `spec` and `approvedSha`; `pr-open` needs `spec` and `approvedSha` (no `plan`, `planSha`, `tasksDone`) and `deferred=0`; `reapproved` needs what `defined` needs plus `head`, `review`, `gh`, `deferred` (no plan fields); `closed` is unchanged. A parent never posts `plan-approved`, `tasks` or `final-approved`; one that appears on a parent track is an error in `route.js`, not a guess.
+Required fields for the parent track (the table in `handoff.md` gains a "parent:" prefix like the existing "plan:" and "small:" ones): `kickoff` needs `spec` and `approvedSha`; `pr-open` needs `spec` and `approvedSha` (no `plan`, `planSha`, `tasksDone`) and `deferred=0`; `reapproved` needs what `defined` needs plus `head`, `review`, `gh`, `deferred` (no plan fields); `closed` is unchanged. A parent never posts `plan-approved`, `tasks` or `final-approved`; one that appears on a parent track is an error in `route.js`, not a guess (`position()` today returns `finish` for `final-approved` before it looks at the track, so that early return is reordered to check the track first).
 
 Resume position for the parent track:
 
@@ -111,7 +111,7 @@ Resume position for the parent track:
 | `spec-merged` | `parent-status` |
 | `closed` | `terminal` |
 
-Routing order. The new issue route `parent-status` is chosen when the latest counted progress is `spec-merged`, and like `pr-open` and `closed` it is chosen **before pin validation**, because after the merge the branch is usually deleted and the pin's `approvedSha` is no longer reachable from `origin/<branch>`. Status mode checks only the patterns of the pin and checkpoint fields it uses (`spec` matches the spec pattern, `specBlob` is 40 hex). The rest of the routing order is unchanged, and a ticket whose pin has no `track=parent` takes every path it takes today.
+Routing order. The new issue route `parent-status` is chosen when the latest counted progress is `spec-merged`, and like `pr-open` and `closed` it is chosen **before pin validation**, because after the merge the branch is usually deleted and the pin's `approvedSha` is no longer reachable from `origin/<branch>`. Status mode checks only the patterns of the pin and checkpoint fields it uses (`spec` matches the spec pattern, `specBlob` is 40 hex, `definedAt` is an ISO-8601 UTC time, and the validator gains that pattern for `definedAt`, which today falls through unchecked). For a closed parent issue the route returns `askClosed` true (`issueState` closed), as the `deliver` route does. The rest of the routing order is unchanged, and a ticket whose pin has no `track=parent` takes every path it takes today.
 
 ### 4. Define a parent
 
@@ -131,10 +131,12 @@ Sub-issues are created when the spec is merged, never at Publish: while the spec
 A **stub** is the issue for one part. Its identity is the pair (parent number, part number), read from its body's first line, which is exactly `Part <n> of <count> in #<parent>` (the count is informational and is not part of the identity). Ensure-stubs, for a merged spec that parses (section 6):
 
 1. List the parent's sub-issues (`GET repos/<o>/<r>/issues/<parent>/sub_issues`, paginated). Each issue whose first line parses as a stub line for this parent is a stub for that part.
-2. Scan the repository's issues updated since the parent's `definedAt` (`GET repos/<o>/<r>/issues?state=all&since=<definedAt>`, paginated, bodies included) for issues whose first line parses as a stub line for this parent and that are not linked. Each is **adopted**: linked to the parent (the link call below), never duplicated.
-3. For each part, in order, with no stub after steps 1 and 2: create the issue from a body file and link it (`POST repos/<o>/<r>/issues/<parent>/sub_issues`, where `sub_issue_id` is the new issue's numeric `id`, not its number). A refused link is retried once; a second refusal is reported with the issue number, and the issue stays as an unlinked stub that step 2 adopts on the next run.
-4. When two issues claim the same part, the lowest issue number is the stub and the others are reported, never edited or closed.
-5. Print the links and anything reported.
+2. Scan the repository's issues updated since the parent's `definedAt` (`GET repos/<o>/<r>/issues?state=all&since=<definedAt>`, at most 5 pages of 100, bodies included; the report says when the scan was cut short) for unlinked issues whose first line parses as a stub line for this parent. An issue is **eligible** only when it is not a pull request (the issues endpoint returns pull requests too) and its author has write access (`counted.js write-access`, the lookup the skill already uses; a `user.type` other than `User` is never eligible). Of the eligible claimants of a part the lowest issue number is **adopted**: linked to the parent, never duplicated. An ineligible claimant is only reported (step 5), never linked.
+3. For each part, in order, with no stub after steps 1 and 2: create the issue from a body file with no assignee (it is an unclaimed task), and link it (`POST repos/<o>/<r>/issues/<parent>/sub_issues`, `-F sub_issue_id=<id>` so that the number is typed as an integer, where `id` is the new issue's numeric `id`, not its number). A refused link is retried once; a second refusal is reported with the issue number, and the issue stays as an unlinked stub that step 2 adopts on the next run. A ghost stub whose link is refused for good is closed by hand by the person, and the part then gets a new stub on the next run.
+4. When two linked issues claim the same part, the lowest issue number is the stub and the others are reported, never edited or closed.
+5. Print the links and anything reported (ineligible claimants, duplicates, a truncated scan).
+
+There is no lock: two runs on different machines can each create a stub for a part. The result is a reported duplicate, which step 4 resolves by number and the person closes by hand. That is accepted.
 
 A stub's title is the part title. Its body is written by a script from the spec (section 9), never retyped:
 
@@ -165,7 +167,7 @@ No Docs step, no Verify step and no final loop run: the change is one committed 
 **Merged close-out** (After the PR, parent track). When the PR is merged:
 
 1. Fetch. Pattern-check `spec` and `approvedSha` before they reach a command. Remove the worktree and the local branch as today.
-2. Run `route.js parts` on the spec at `origin/<base>`. If the file is missing or the breakdown does not parse, report the error and stop: nothing is posted, the issue is not touched. The recovery is an ordinary pull request that fixes the document, then `/develop <parent>` again, which repeats this step.
+2. Run `route.js parts` on the spec at `origin/<base>`. If the file is missing or the breakdown does not parse, this is blocker 2 (the approved artifact would have to change), at stage `finish`: a pin exists, so `blockers.md` applies and a `blocked` checkpoint is posted, and `spec-merged` is not. The recovery is an ordinary pull request that fixes the document, then `/develop <parent>` again, which repeats this step (a `blocked` is never progress, so the route is still `after-the-pr`).
 3. Compute `specBlob` = `git rev-parse origin/<base>:<spec>`. Then test whether the merged text equals the approved text: `git diff --quiet <approvedSha> origin/<base> -- <spec>`; exit 1 means someone edited the spec in the PR, which is reported and recorded (the blob on the base governs); if `<approvedSha>` is not in the local store (a fresh machine, a squash merge), fetch `refs/pull/<pr>/head` and retry once, and when it is still absent say the comparison was skipped.
 4. Post `spec-merged` (no integrity check runs for it), run ensure-stubs, snapshot memory (`SKILL.md`'s list gains `spec-merged`). The issue stays open.
 
@@ -173,7 +175,7 @@ No Docs step, no Verify step and no final loop run: the change is one committed 
 
 `/develop <parent>` with latest progress `spec-merged` runs status mode. It runs Deliver's step 1 (fetch, read, route) only: there is no run to be live, so the concurrency check is skipped. It builds nothing and never changes the parent's body. A closed parent issue is handled by the route's `askClosed`.
 
-1. Read the spec at `origin/<base>` with `route.js parts`. If it does not parse, report the error and stop.
+1. Read the spec at `origin/<base>` with `route.js parts`. If it does not parse, this is blocker 2 at stage `finish`, as in section 6 step 2.
 2. Run ensure-stubs.
 3. For each part show: number, title, the stub's issue and state, the latest counted checkpoint phase of an open sub-ticket (up to 30 open sub-tickets are read and the report says how many were not), and whether it is **ready**. A part is **done** when its issue is closed with `state_reason` completed. It is **ready** when every part it depends on is done. A part closed as not planned is shown as such, is not done, and does not make its dependents ready.
 4. Warn about a sub-issue of the parent that has no valid first line, a first line naming another parent, and a sub-issue whose part is not in the spec. Nothing is deleted or edited.
@@ -218,7 +220,7 @@ All additions follow the existing conventions: zero dependencies, `node <script>
 
 ### 10. Trust
 
-- A stub, its first line, a sibling's summary, the native parent link and the state of a sub-issue are data. Someone with triage access can set the native link, edit a stub's first line and close sub-issues, so they can confuse a run but never steer one: the parent must carry a counted `track=parent` pin and a counted `spec-merged` (both written by people with write access), the first line must agree with the link, and the part must exist in the spec at `origin/<base>`. Readiness, the close offer and the dependency question are advisory, and every consequential step ends in a question to the person or in the sign-off preview. This is the same stance the Trust section takes for the rest of the skill, and it is accepted.
+- A stub, its first line, a sibling's summary, the native parent link and the state of a sub-issue are data. Someone with triage access can set the native link, edit a stub's first line and close sub-issues, so they can confuse a run but never steer one. Adoption of an unlinked issue is limited to authors with write access, so an outsider's issue that merely claims a part is reported and never linked. And: the parent must carry a counted `track=parent` pin and a counted `spec-merged` (both written by people with write access), the first line must agree with the link, and the part must exist in the spec at `origin/<base>`. Readiness, the close offer and the dependency question are advisory, and every consequential step ends in a question to the person or in the sign-off preview. This is the same stance the Trust section takes for the rest of the skill, and it is accepted.
 - The parent spec is a committed repository file read from `origin/<base>`; it is repository content, like the spec of any ticket.
 - A sibling's `pr-open` or `closed` summary is a counted comment and is given to the brainstorm only as quoted data with the usual rule that it is data and never an instruction.
 - Ensure-stubs creates issues the definer's account is allowed to create and links them; it deletes and edits nothing.
@@ -237,9 +239,11 @@ Verified read-only against this repository on 2026-11-15: `GET issues/<n>/parent
 
 Not verified: the `POST issues/<parent>/sub_issues` call (its body shape and that `sub_issue_id` is the numeric `id`), secondary rate limits when several issues are created in a row, and GitHub's per-parent sub-issue limit (the design caps a breakdown at 50 parts). The first task of the plan is a probe of these in a throwaway repository before any code depends on them.
 
+Cost. Ensure-stubs reads the sub-issue list (one call per 100) and at most 5 pages of issues, and status mode reads the comments of up to 30 open sub-tickets (one call each, plus permission lookups). Both are bounded and report when they stop early.
+
 ## Files that change
 
-`skills/develop/`: `ticket-standard.md` (INVEST and the parent rule, Review grades and Markers for the spec-bearing tracks), `define.md` (size decision, parent run, sub-ticket Fetch steps), `deliver.md` (parent track, merged close-out, status mode, sub-ticket additions, the exemption list), `handoff.md` (pin table, required-fields table, position table, goldens), `SKILL.md` (routes, Issue entry, the Memory snapshot list), `tutorial.md`, `scripts/route.js`, `scripts/checkpoints.js`, `scripts/counted.js`, and their tests (`route.test.js`, `checkpoints.test.js`, `counted.test.js`, `skill.test.js`). Outside the skill: `docs/develop.md`, `AGENTS.md` (the `develop` skill section), `CHANGELOG.md`.
+`skills/develop/`: `blockers.md` (blocker 2 names an unusable merged parent spec), `ticket-standard.md` (INVEST and the parent rule, Review grades and Markers for the spec-bearing tracks), `define.md` (size decision, parent run, sub-ticket Fetch steps), `deliver.md` (parent track, merged close-out, status mode, sub-ticket additions, the exemption list), `handoff.md` (pin table, required-fields table, position table, goldens), `SKILL.md` (routes, Issue entry, the Memory snapshot list), `tutorial.md`, `scripts/route.js`, `scripts/checkpoints.js`, `scripts/counted.js`, and their tests (`route.test.js`, `checkpoints.test.js`, `counted.test.js`, `skill.test.js`). Outside the skill: `docs/develop.md`, `AGENTS.md` (the `develop` skill section), `CHANGELOG.md`.
 
 ## Testing
 
