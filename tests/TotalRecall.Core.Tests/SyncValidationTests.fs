@@ -147,6 +147,57 @@ let validateTests =
             Expect.equal (rejected { goodRaw with Tier = Value "x"; Sticky = Absent }) (BadTier "x") "tier before sticky"
             Expect.equal (rejected { goodRaw with UpdatedAt = Value "x"; ContentStamp = Value "x" }) (BadTimestamp "updated_at") "timestamps before stamps"
 
+        testCase "a null where a string or list is expected is a rejection, not an exception" <| fun _ ->
+            Expect.equal (rejected { goodRaw with Tags = Value [ null ] }) BadTags "null tag"
+            Expect.equal (rejected { goodRaw with Tags = Value Unchecked.defaultof<string list> }) BadTags "null list"
+            Expect.equal (rejected { goodRaw with Format = Value null }) (UnknownFormat "") "null format"
+            Expect.equal (rejected { goodRaw with Id = Value null }) BadId "null id"
+            Expect.equal (rejected { goodRaw with EntryType = Value null }) (BadEntryType "") "null entry type"
+            Expect.equal (rejected { goodRaw with Tier = Value null }) (BadTier "") "null tier"
+            Expect.equal (rejected { goodRaw with CreatedAt = Value null }) (BadTimestamp "created_at") "null timestamp"
+            Expect.equal (rejected { goodRaw with ContentStamp = Value null }) (BadStamp "ext.total-recall.content_stamp") "null stamp"
+            Expect.equal (validate null 10 goodRaw) (Error IdPathMismatch) "a null path is a rejection"
+
+        testCase "the full order, one fix at a time" <| fun _ ->
+            let allBad : RawSyncRecord =
+                { Format = Value "x"; Id = Value "x"; Content = Absent; EntryType = Value "x"; CreatedAt = Value "x"; UpdatedAt = Value "x"
+                  Tags = Absent; Tier = Value "x"; Sticky = Absent; TierStamp = Value "x"; StickyStamp = Value "x"; ContentStamp = Value "x"
+                  Source = Mistyped; Project = Mistyped; Scope = Mistyped; WrittenBy = Mistyped; Origin = Mistyped }
+            let chain =
+                [ (fun r -> { r with Format = goodRaw.Format }), UnknownFormat "x"
+                  (fun r -> { r with Id = goodRaw.Id }), BadId
+                  (fun r -> { r with Content = goodRaw.Content }), MissingField "content"
+                  (fun r -> { r with EntryType = goodRaw.EntryType }), BadEntryType "x"
+                  (fun r -> { r with Tags = goodRaw.Tags }), MissingField "tags"
+                  (fun r -> { r with Tier = goodRaw.Tier }), BadTier "x"
+                  (fun r -> { r with Sticky = goodRaw.Sticky }), MissingField "ext.total-recall.placement.sticky"
+                  (fun r -> { r with CreatedAt = goodRaw.CreatedAt }), BadTimestamp "created_at"
+                  (fun r -> { r with UpdatedAt = goodRaw.UpdatedAt }), BadTimestamp "updated_at"
+                  (fun r -> { r with ContentStamp = goodRaw.ContentStamp }), BadStamp "ext.total-recall.content_stamp"
+                  (fun r -> { r with TierStamp = goodRaw.TierStamp }), BadStamp "ext.total-recall.placement.tier_stamp"
+                  (fun r -> { r with StickyStamp = goodRaw.StickyStamp }), BadStamp "ext.total-recall.placement.sticky_stamp"
+                  (fun r -> { r with Source = goodRaw.Source }), WrongType "source"
+                  (fun r -> { r with Project = goodRaw.Project }), WrongType "ext.total-recall.project"
+                  (fun r -> { r with Scope = goodRaw.Scope }), WrongType "ext.total-recall.scope"
+                  (fun r -> { r with WrittenBy = goodRaw.WrittenBy }), WrongType "ext.total-recall.written_by"
+                  (fun r -> { r with Origin = goodRaw.Origin }), WrongType "ext.total-recall.origin" ]
+            let mutable raw = allBad
+            // each step names what the current record is rejected for, then fixes exactly that field
+            Expect.equal (rejected raw) (UnknownFormat "x") "start"
+            let mutable i = 0
+            for fix, _ in chain do
+                raw <- fix raw
+                i <- i + 1
+                if i < chain.Length then
+                    // the reject now reported is the one the NEXT step in the chain fixes
+                    let _, next = chain.[i]
+                    Expect.equal (rejected raw) next (sprintf "after fix %d" i)
+            Expect.isOk (run raw) "all fixed"
+
+        testCase "the two notes together come in a fixed order" <| fun _ ->
+            let v = accepted { goodRaw with Source = Value "windsurf"; Sticky = Value true; Tier = Value "cold" }
+            Expect.equal v.Notes [ UnknownSourceDropped "windsurf"; StickyNormalisedToHot ] "source note, then sticky note"
+
         testCase "optional fields: a wrong type is rejected, absent is fine" <| fun _ ->
             Expect.equal (rejected { goodRaw with Project = Mistyped }) (WrongType "ext.total-recall.project") "project"
             Expect.equal (rejected { goodRaw with Scope = Mistyped }) (WrongType "ext.total-recall.scope") "scope"
@@ -178,6 +229,8 @@ let validateTests =
             Expect.equal v.Notes [ UnknownSourceDropped "windsurf" ] "note"
             let long = accepted { goodRaw with Source = Value (String.replicate 100 "s") }
             Expect.equal long.Notes [ UnknownSourceDropped (String.replicate 64 "s") ] "truncated to 64"
+            let dirty = accepted { goodRaw with Source = Value ("a\nb" + string (char 0xD800)) }
+            Expect.equal dirty.Notes [ UnknownSourceDropped "a?b?" ] "control character and lone surrogate replaced"
 
         testCase "sticky with a colder tier is normalised to hot" <| fun _ ->
             let v = accepted { goodRaw with Sticky = Value true; Tier = Value "warm" }
@@ -188,18 +241,14 @@ let validateTests =
             Expect.equal hot.Notes [] "already hot: no note"
 
         testCase "text from the record is truncated and sanitised in a reject" <| fun _ ->
-            match rejected { goodRaw with Format = Value longText } with
-            | UnknownFormat t ->
-                Expect.isLessThanOrEqual t.Length 64 "at most 64 units"
-                Expect.isFalse (t |> Seq.exists System.Char.IsControl) "no control characters"
-                Expect.isFalse (hasLoneSurrogate t) "no lone surrogate"
-            | other -> failtestf "expected UnknownFormat, got %A" other
-            match rejected { goodRaw with EntryType = Value longText } with
-            | BadEntryType t -> Expect.isLessThanOrEqual t.Length 64 "entry type text"
-            | other -> failtestf "expected BadEntryType, got %A" other
-            match rejected { goodRaw with Tier = Value longText } with
-            | BadTier t -> Expect.isLessThanOrEqual t.Length 64 "tier text"
-            | other -> failtestf "expected BadTier, got %A" other
+            let dirty = "a\nb" + string (char 0xD800)   // the bad characters sit inside the first 64 units
+            Expect.equal (rejected { goodRaw with Format = Value dirty }) (UnknownFormat "a?b?") "format"
+            Expect.equal (rejected { goodRaw with EntryType = Value dirty }) (BadEntryType "a?b?") "entry type"
+            Expect.equal (rejected { goodRaw with Tier = Value dirty }) (BadTier "a?b?") "tier"
+            // a surrogate pair straddling the 64-unit cut is dropped whole
+            let straddle = String.replicate 63 "a" + "\U0001F600" + "tail"
+            Expect.equal (rejected { goodRaw with Format = Value straddle }) (UnknownFormat (String.replicate 63 "a")) "pair at the cut"
+            Expect.equal (rejected { goodRaw with Tier = Value longText }) (BadTier (String.replicate 64 "x")) "100 units cut to 64"
 
         testCase "Reject.describe is one line without control characters for every case" <| fun _ ->
             let all =
@@ -214,8 +263,8 @@ let validateTests =
             (let pool = [| 'a'; 'b'; '0'; '9'; '-'; '/'; '.'; 'T'; 'Z'; ':'; ' '; '\u0000'; '\u001F'; '\u007F'; '\u2028'; char 0xD800; char 0xDC00 |]
              let strGen = Gen.listOf (Gen.elements pool) |> Gen.map (fun cs -> System.String(List.toArray cs))
              let fieldGen (g: Gen<'a>) = Gen.frequency [ 1, Gen.constant Absent; 1, Gen.constant Mistyped; 6, Gen.map Value g ]
-             // half the time start from a field that parses, so the later rules are reached too
-             let strField (good: string) = Gen.frequency [ 3, Gen.constant (Value good); 1, fieldGen strGen ]
+             // nine times in ten a field starts out valid, so the later rules and the Ok branch are reached
+             let strField (good: string) = Gen.frequency [ 9, Gen.constant (Value good); 1, fieldGen strGen ]
              let rawGen =
                  gen {
                      let! format = strField "total-recall/memory/v1"
@@ -236,8 +285,8 @@ let validateTests =
                              UpdatedAt = updated; Tags = tags; Tier = tier; Sticky = sticky; TierStamp = ts
                              StickyStamp = ts; ContentStamp = ts; Source = source; Project = project }
                  }
-             let sizeGen = Gen.elements [ -5; 0; 1000; 1_048_576; 1_048_577; System.Int32.MaxValue ]
-             let pathGen = Gen.elements [ path; ""; "memories/aa/x.json"; null; "memories/3f/3f9c2a7e-1111.json/" ]
+             let sizeGen = Gen.frequency [ 8, Gen.constant 1000; 1, Gen.elements [ -5; 0; 1_048_576; 1_048_577; System.Int32.MaxValue ] ]
+             let pathGen = Gen.frequency [ 12, Gen.constant path; 1, Gen.elements [ ""; "memories/aa/x.json"; null; "memories/3f/3f9c2a7e-1111.json/" ] ]
              Prop.forAll (Arb.fromGen (Gen.zip3 pathGen sizeGen rawGen)) (fun (p, size, raw) ->
                  match validate p size raw with
                  | Ok v -> isEligibleId v.Record.Id && v.Record.Tags = normaliseTags v.Record.Tags
@@ -276,6 +325,23 @@ let writableTests =
                 Expect.equal (checkWritable r 100) (Some NotEncodable) name
             // the id is checked for eligibility first, so a surrogate in it is IneligibleId
             Expect.equal (checkWritable { sampleRecord with Id = "3f9c2a7e" + string (char 0xD800) } 100) (Some IneligibleId) "id"
+
+        testCase "every string field and every stamp is checked" <| fun _ ->
+            let lone = "a" + string (char 0xD800)
+            Expect.equal (checkWritable { sampleRecord with Origin = Some { Tool = lone; Hash = "h" } } 100) (Some NotEncodable) "origin tool"
+            let stickyBad = { sampleRecord.Placement.StickyStamp with Counter = 1_000_000 }
+            Expect.equal (checkWritable { sampleRecord with Placement = { sampleRecord.Placement with StickyStamp = stickyBad } } 100) (Some NotEncodable) "sticky stamp counter"
+            let negative = { sampleRecord.ContentStamp with Counter = -1 }
+            Expect.equal (checkWritable { sampleRecord with ContentStamp = negative } 100) (Some NotEncodable) "negative counter"
+            let late = { sampleRecord.ContentStamp with TimeMs = maxTimeMs + 1L }
+            Expect.equal (checkWritable { sampleRecord with ContentStamp = late } 100) (Some NotEncodable) "time above the maximum"
+            Expect.equal (checkWritable { sampleRecord with Content = null } 100) (Some NotEncodable) "null content"
+            Expect.equal (checkWritable { sampleRecord with Tags = [ null ] } 100) (Some NotEncodable) "null tag"
+            Expect.equal (checkWritable { sampleRecord with Project = Some null } 100) (Some NotEncodable) "null project"
+
+        testCase "duplicate tags count once" <| fun _ ->
+            let tags = List.init 64 (fun i -> sprintf "t%03d" i)
+            Expect.equal (checkWritable { sampleRecord with Tags = tags @ tags } 100) None "64 distinct tags written twice are still 64"
 
         testCase "numbers outside their domain" <| fun _ ->
             Expect.equal (checkWritable { sampleRecord with CreatedAtMs = Timestamp.minMs - 1L } 100) (Some NotEncodable) "created below"

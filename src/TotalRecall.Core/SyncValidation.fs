@@ -217,7 +217,7 @@ let validate (path: string) (sizeBytes: int) (raw: RawSyncRecord) : Result<Valid
         let! entryTypeText = req "entry_type" raw.EntryType
         let! entryType = parseWith SyncRecord.tryParseEntryType (BadEntryType(sanitizeText entryTypeText)) entryTypeText
         let! tags = req "tags" raw.Tags
-        do! ensure (tags.Length <= 256 && tags |> List.forall (fun t -> t.Length <= 256)) BadTags
+        do! ensure (not (isNull (box tags)) && tags.Length <= 256 && tags |> List.forall (fun t -> not (isNull t) && t.Length <= 256)) BadTags
         let! tierText = req (pathPlacement + "tier") raw.Tier
         let! tier = parseWith SyncRecord.tryParseTier (BadTier(sanitizeText tierText)) tierText
         let! sticky = req (pathPlacement + "sticky") raw.Sticky
@@ -293,11 +293,12 @@ let private hasOutOfDomainNumber (r: SyncRecord.SyncRecord) : bool =
     || not (Stamp.inDomain r.Placement.StickyStamp)
 
 /// Whether the entry may be pushed. `serializedBytes` is the size of the record as written.
+/// Tags are counted as a set (the writer writes them unique), so duplicates do not count twice.
 /// The first matching reason, in the order of the spec's list, is returned.
 let checkWritable (record: SyncRecord.SyncRecord) (serializedBytes: int) : Block option =
     if serializedBytes > 262_144 then Some TooLarge
-    elif record.Tags.Length > 64 then Some TooManyTags
-    elif record.Tags |> List.exists (fun t -> t.Length > 128) then Some TagTooLong
+    elif (List.distinct record.Tags).Length > 64 then Some TooManyTags
+    elif record.Tags |> List.exists (fun t -> not (isNull t) && t.Length > 128) then Some TagTooLong
     elif not (isEligibleId record.Id) then Some IneligibleId
     elif hasUnencodableText record || hasOutOfDomainNumber record then Some NotEncodable
     else None
