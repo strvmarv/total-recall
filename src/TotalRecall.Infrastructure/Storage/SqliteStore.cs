@@ -178,7 +178,7 @@ VALUES
                 : (object)DBNull.Value);
         cmd.Parameters.AddWithValue("$project", (object?)opts.Project ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$tags", TagsJson.Encode(opts.Tags));
-        cmd.Parameters.AddWithValue("$created_at", now);
+        cmd.Parameters.AddWithValue("$created_at", opts.CreatedAt ?? now);
         cmd.Parameters.AddWithValue("$updated_at", now);
         cmd.Parameters.AddWithValue("$last_accessed_at", now);
         cmd.Parameters.AddWithValue("$access_count", 0);
@@ -253,6 +253,16 @@ VALUES
         {
             setClauses.Add("metadata = $metadata");
             cmd.Parameters.AddWithValue("$metadata", opts.MetadataJson);
+        }
+        if (opts.Scope is not null)
+        {
+            setClauses.Add("scope = $scope");
+            cmd.Parameters.AddWithValue("$scope", opts.Scope);
+        }
+        if (opts.EntryType is not null)
+        {
+            setClauses.Add("entry_type = $entry_type");
+            cmd.Parameters.AddWithValue("$entry_type", EntryTypeMapping.ToDbValue(opts.EntryType));
         }
         if (opts.Touch)
         {
@@ -767,6 +777,25 @@ internal static class SourceToolMapping
         if (tool.IsManualSource) return "manual";
         throw new ArgumentOutOfRangeException(nameof(tool), tool, "Unknown SourceTool");
     }
+
+    /// <summary>
+    /// Tolerant counterpart of <see cref="Parse"/>: returns <c>None</c> for
+    /// <c>null</c> or a value this build does not know, and never throws. Used
+    /// where a record may come from a newer build (git sync reads records
+    /// written elsewhere); <see cref="Parse"/> keeps throwing on corruption.
+    /// </summary>
+    public static FSharpOption<SourceTool> TryParse(string? value) =>
+        value switch
+        {
+            "claude-code" => FSharpOption<SourceTool>.Some(SourceTool.ClaudeCode),
+            "copilot-cli" => FSharpOption<SourceTool>.Some(SourceTool.CopilotCli),
+            "opencode" => FSharpOption<SourceTool>.Some(SourceTool.Opencode),
+            "cursor" => FSharpOption<SourceTool>.Some(SourceTool.Cursor),
+            "cline" => FSharpOption<SourceTool>.Some(SourceTool.Cline),
+            "hermes" => FSharpOption<SourceTool>.Some(SourceTool.Hermes),
+            "manual" => FSharpOption<SourceTool>.Some(SourceTool.ManualSource),
+            _ => FSharpOption<SourceTool>.None,
+        };
 
     public static FSharpOption<SourceTool> Parse(string? value)
     {

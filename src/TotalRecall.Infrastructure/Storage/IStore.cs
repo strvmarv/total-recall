@@ -143,7 +143,16 @@ public sealed record InsertEntryOpts(
     /// </summary>
     string? Id = null,
     string? Scope = null,
-    EntryType? EntryType = null);
+    EntryType? EntryType = null,
+    /// <summary>
+    /// Optional caller-chosen creation time (unix milliseconds). When set,
+    /// <see cref="SqliteStore"/> stores it as <c>created_at</c>; otherwise
+    /// the insert time is used. <c>updated_at</c> and <c>last_accessed_at</c>
+    /// are always the insert time. The Postgres store does not support it and
+    /// throws <see cref="NotSupportedException"/> when it is set (git sync
+    /// never runs on Postgres, and a caller must not be silently ignored).
+    /// </summary>
+    long? CreatedAt = null);
 
 /// <summary>
 /// Options for <see cref="IStore.Update"/>. Each non-null field becomes
@@ -166,6 +175,16 @@ public sealed record UpdateEntryOpts
     /// </summary>
     public bool ClearSummary { get; init; }
     public bool ClearProject { get; init; }
+    /// <summary>
+    /// New scope. Honored by <see cref="SqliteStore"/>; the Postgres store
+    /// throws <see cref="NotSupportedException"/> when it is set.
+    /// </summary>
+    public string? Scope { get; init; }
+    /// <summary>
+    /// New entry type. Honored by <see cref="SqliteStore"/>; the Postgres
+    /// store throws <see cref="NotSupportedException"/> when it is set.
+    /// </summary>
+    public EntryType? EntryType { get; init; }
 }
 
 /// <summary>

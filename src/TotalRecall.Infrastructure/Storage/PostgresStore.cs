@@ -41,11 +41,19 @@ public sealed class PostgresStore : IStore, IMetaStore
         _hotMaxEntries = hotMaxEntries > 0 ? hotMaxEntries : 50;
     }
 
+    private static void ThrowIfCreatedAtSet(InsertEntryOpts opts)
+    {
+        if (opts.CreatedAt is not null)
+            throw new NotSupportedException(
+                "CreatedAt is not supported by the Postgres store");
+    }
+
     // --- IStore -----------------------------------------------------
 
     public string Insert(Tier tier, ContentType type, InsertEntryOpts opts)
     {
         ArgumentNullException.ThrowIfNull(opts);
+        ThrowIfCreatedAtSet(opts);
         var table = TableName(type);
         var tierStr = TierString(tier);
         var id = opts.Id ?? Guid.NewGuid().ToString();
@@ -70,6 +78,7 @@ public sealed class PostgresStore : IStore, IMetaStore
         ReadOnlyMemory<float> embedding)
     {
         ArgumentNullException.ThrowIfNull(opts);
+        ThrowIfCreatedAtSet(opts);
         var table = TableName(type);
         var tierStr = TierString(tier);
         var id = opts.Id ?? Guid.NewGuid().ToString();
@@ -198,6 +207,9 @@ VALUES
     public void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts)
     {
         ArgumentNullException.ThrowIfNull(opts);
+        if (opts.Scope is not null || opts.EntryType is not null)
+            throw new NotSupportedException(
+                "Scope and EntryType updates are not supported by the Postgres store");
         var table = TableName(type);
         var tierStr = TierString(tier);
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
