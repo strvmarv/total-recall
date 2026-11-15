@@ -398,8 +398,10 @@ flagged as locally changed (with their pending stamps), and leaves everything el
   leak into a record, because those groups are not locally changed;
 - a file is written only for entries the scan flagged. A cycle with nothing flagged makes no commit.
 
-Serialization is `System.Text.Json` through a source-generated context (AOT-safe, like
-`SyncJsonContext`), with a fixed property order, two-space indent and a trailing newline.
+Serialization is a small hand-written writer (so the bytes do not depend on a runtime's encoder tables), with
+a fixed property order, two-space indent and a trailing newline; reading uses `Utf8JsonReader`/`JsonDocument`
+(AOT-safe). The exact layout and escape rules are in `2026-11-15-git-sync-record-format-design.md`; the
+example above is illustrative (it shows the short `tags` array and `placement` object on one line).
 
 ### Reading the repository safely
 

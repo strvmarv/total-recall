@@ -159,10 +159,21 @@ NotJson of string | DuplicateKey of string`. Every string that enters a `Reject`
 record, so it is **truncated to 64 UTF-16 code units and has control characters replaced by `?`** before it is
 stored. `Reject.describe` gives a one-line message for `status`. `validate` never throws, for any input.
 
-**Writing.** `checkWritable (record: SyncRecord) (serializedBytes: int) : Block option` returns a block reason
-when the entry may not be pushed: `TooLarge` (serialized over 262,144 bytes), `TooManyTags` (over 64),
-`TagTooLong` (a tag over 128 UTF-16 code units), `IneligibleId`, or `NotEncodable` (the codec could not write
-it: see below). Else `None`. `Block` also has `ClockExhausted` for `Clock.issue`'s `Error Exhausted`.
+**Writing.** `checkWritable (record: SyncRecord) (serializedBytes: int) : Block option` is pure and returns a
+block reason when the entry may not be pushed: `TooLarge` (serialized over 262,144 bytes), `TooManyTags` (over
+64), `TagTooLong` (a tag over 128 UTF-16 code units), `IneligibleId`, or `NotEncodable` (any string of the
+record holds a lone surrogate, or a stamp or `CreatedAtMs` is outside its domain; `checkWritable` scans for
+these itself). Else `None`. `Block` also has `ClockExhausted` for `Clock.issue`'s `Error Exhausted`. The codec's
+`Write` enforces **none** of the size or tag limits (the caller runs `checkWritable` on the record and on the
+byte count `Write` returned); it only fails with `NotEncodable`.
+
+**Domain of the other numbers.** `CreatedAtMs` is in `[-62_135_596_800_000, 253_402_300_799_999]` (year 1 to
+9999, what the text form can express); `Stamp` and `Clock` values built by hand outside their domain are
+`NotEncodable` on write, never an exception.
+
+**Truncation of text from a record** (used by `Reject` and `Note`): at most 64 UTF-16 code units, never
+cutting inside a surrogate pair (the pair is dropped whole), with every Unicode category Cc character
+(U+0000 to U+001F, U+007F to U+009F) and U+2028 and U+2029 replaced by `?`.
 
 ### The codec (`RecordCodec.cs`, namespace `TotalRecall.Infrastructure.GitSync`)
 
@@ -171,24 +182,37 @@ It runs, in this order, and never throws (it catches the exceptions of the reade
 1. **size first**: more than 1,048,576 bytes is `Oversize`, before any parsing;
 2. the text is UTF-8 without a byte-order mark, a single JSON object followed by nothing but whitespace, with
    nesting no deeper than 64; anything else is `NotJson`;
-3. a **duplicate property name anywhere** (in a known object, in unknown content, inside `ext`) is
-   `DuplicateKey`. This is checked with a pre-pass of `Utf8JsonReader` that tracks the names of each object,
-   so a hostile file cannot show the validator one value and carry another through a patch;
-4. a `RawSyncRecord` is built (a lone surrogate in a decoded string is `NotJson`) and `validate` is called.
+3. a pre-pass of `Utf8JsonReader` over the whole document, which: rejects a **duplicate property name
+   anywhere** (in a known object, in unknown content, inside `ext`) as `DuplicateKey`, comparing the
+   **decoded** names ordinally (so `"content"` and `"cont\u0065nt"` collide) so a hostile file cannot show
+   the validator one value and carry another through a patch; decodes **every string value and property name
+   anywhere, known or unknown**, and rejects a lone surrogate or invalid UTF-8 as `NotJson` (so every record
+   `Parse` accepts can be written back); and takes the text of a number only from a `Number` token, which the
+   reader has already checked against the JSON number grammar;
+4. a `RawSyncRecord` is built and `validate` is called.
 
-A `ParsedRecord` holds the validated `SyncRecord` and the **unknown content**: every top-level property other
-than the nine known ones, every `ext` namespace other than `total-recall`, and every property of
-`ext["total-recall"]` other than the known ones, each as a detached `JsonElement` clone with its position
-(its original order within its object). It is immutable, so it can be reused for any number of patches.
+A `ParsedRecord` holds the validated `SyncRecord` and the **unknown content**, each item a detached
+`JsonElement` clone with its position (its original order within its object): every top-level property other
+than the nine known ones; every `ext` namespace other than `total-recall`; every property of
+`ext["total-recall"]` other than the known ones; every property of `placement` and of `origin` other than the
+known ones; and the **raw text of an unknown `source`** (the model holds `None` for it, but the parsed record
+keeps the string, and `Write` and `Patch` write it back unless a `ContentPatch` names a new `Source`). It is
+immutable, so it can be reused for any number of patches.
 
 **Writing.** `Write(SyncRecord) : WriteResult` and `Write(ParsedRecord) : WriteResult`
-(`WriteResult = Bytes of byte[] | Failed of Block`; the second includes the unknown content, so
+(`WriteResult = Bytes of byte[] | NotEncodable`; the second includes the unknown content, so
 `Write(Parse(bytes))` is the round trip). The canonical form is UTF-8 without a BOM, two-space indent, LF line
 endings, one trailing newline, the properties in the order of the umbrella spec's example (top level:
 `format`, `id`, `content`, `entry_type`, `tags`, `source` (omitted when absent), `created_at`, `updated_at`,
 `ext`; inside `ext["total-recall"]`: `project`, `scope`, `placement` (`tier`, `tier_stamp`, `sticky`,
 `sticky_stamp`), `content_stamp`, `origin`, `written_by`; absent optional properties are omitted), then, in
-each object, its unknown properties in their original order; unknown `ext` namespaces follow `total-recall`.
+each object (top level, `ext["total-recall"]`, `placement`, `origin`), its unknown properties in their original
+order; unknown `ext` namespaces follow `total-recall`. An unknown `source` keeps its normal place.
+
+**Layout.** Two-space indentation, one property per line, `": "` between a name and its value, one array
+element per line, an empty array written `[]` and an empty object `{}`, `,` at the end of every line but the
+last in its container, and nested containers indented one level deeper than their property. (The umbrella's
+example puts a short array and object on one line; it is illustrative.)
 An empty `tags` array is written `[]`. Unknown values are written recursively with the same rules; numbers are
 copied as their original text; strings are re-escaped by the rule below.
 
@@ -197,10 +221,9 @@ hand-written JSON precedent in `Sync/SyncPayload.cs`) so the bytes do not depend
 encoder defaults. A string is written in double quotes with exactly these escapes: `\"`, `\\`, `\n`, `\r`,
 `\t`, `\b`, `\f`, and `\u00XX` (lowercase hex) for every other control character U+0000 to U+001F. **Every
 other character is written literally as UTF-8**, including U+007F, accented, CJK and supplementary-plane
-characters (emoji). A lone surrogate cannot be encoded: the result is `Failed NotEncodable`.
+characters (emoji). A lone surrogate cannot be encoded: the result is `NotEncodable`.
 
-**Patching.** `Patch(ParsedRecord, RecordPatch) : PatchResult` (`PatchResult = Bytes of byte[] | Failed of
-PatchError`, `PatchError = MissingTierStamp | NotEncodable`):
+**Patching.** `Patch(ParsedRecord, RecordPatch) : PatchResult` (`PatchResult = Bytes of byte[] | NotEncodable | MissingTierStamp`):
 
 ```csharp
 record RecordPatch(
@@ -210,15 +233,25 @@ record RecordPatch(
     TierPatch? Tier);        // Tier, TierStamp
 ```
 
-An absent part leaves its properties exactly as they were, unknown content included. `created_at` and
-`written_by` are never changed by a patch. A `StickyPatch` that sets sticky on a record whose tier is colder
-than hot also sets the tier to hot with `TierStampIfRaised` (if it is needed and absent the result is
-`Failed MissingTierStamp`); when a `Sticky` and a `Tier` part are both present the `Sticky` part is applied
-first and a `Tier` part cannot make a sticky record colder than hot (the result is normalised hot). `Patch`
-works from the validated model (so a record that needed normalising is written normalised) and does not
-validate its output: the caller runs `checkWritable` on the result. A patch of a record in canonical form
-changes only the bytes of the properties it names (plus `updated_at` for a content patch); a patch of a
-non-canonical (hand-edited) record also normalises its formatting once.
+An absent part leaves its properties exactly as they were, **as they are in the file** (including a stored
+tier that normalisation would raise, and unknown content), so a patch never rewrites a group it does not name.
+`created_at` and `written_by` are never changed by a patch. `Patch` does not validate its output: the caller
+runs `checkWritable` on the record and on the byte count. A patch of a record in canonical form changes only
+the bytes of the properties it names (plus `updated_at` for a content patch); a patch of a non-canonical
+(hand-edited) record also normalises its formatting once. The tier group (`tier`, `tier_stamp`) and the sticky
+group (`sticky`, `sticky_stamp`) are written like this, by which parts are present, where `stored tier` is the
+tier in the file and `raised` means a pin is being set (`Sticky = true`) while the stored tier is colder than
+hot:
+
+| Parts present | `tier`, `tier_stamp` written | `sticky`, `sticky_stamp` written |
+|---|---|---|
+| neither | as stored | as stored |
+| `Sticky` only, not raised | as stored | the patch's |
+| `Sticky` only, raised | hot, with `TierStampIfRaised` (absent: result `MissingTierStamp`) | the patch's |
+| `Tier` only, record sticky in the file | `max(patch tier, hot)` i.e. hot, with the patch's `TierStamp` | as stored |
+| `Tier` only, record not sticky | the patch's | as stored |
+| `Sticky` and `Tier`, resulting sticky | hot, with the patch's `TierStamp` | the patch's |
+| `Sticky` and `Tier`, resulting not sticky | the patch's | the patch's |
 
 ## Testing
 
@@ -244,7 +277,7 @@ F# tests in `tests/TotalRecall.Core.Tests` (Expecto, with FsCheck for properties
   before format, an unknown format before a missing field, then id and path, each required field absent and
   wrong-typed, bad tier, entry type, tags at 256/257 entries and 256/257 code units, bad timestamps and
   stamps); an unknown `source` is dropped with a note; `sticky: true` with a colder tier is normalised to hot
-  with a note; strings in `Reject` and `Note` are truncated and sanitised; a random raw record never makes
+  with a note; strings in `Reject` and `Note` are truncated at 64 code units without splitting a surrogate pair and have Cc characters, U+2028 and U+2029 replaced; a random raw record never makes
   `validate` throw (property); `checkWritable` at each limit (exactly at and one over) including
   `NotEncodable`.
 
@@ -254,20 +287,20 @@ C# tests in `tests/TotalRecall.Infrastructure.Tests/GitSync/RecordCodecTests.cs`
   written to **literal expected bytes** committed in the test, the same on every operating system. This is the
   guard for byte-stability across platforms and runtime versions.
 - Round trip: `Write(Parse(bytes))` is byte-identical for canonical files, with an unknown top-level
-  property, an unknown `ext` namespace and an unknown property in `ext["total-recall"]` (including a nested
+  property, an unknown `ext` namespace, an unknown property in `ext["total-recall"]`, in `placement` and in `origin`, and an unknown `source` value (which also survives a tags patch) (including a nested
   object, an array, numbers like `1.50` and `1e3`, `true`, `null` and an escaped string), and no BOM, LF
   endings and a trailing newline.
 - Patch: a table-driven test applies each part alone and diffs the old and new bytes line by line, expecting
   only the named properties (and `updated_at` for content) to differ; an absent part changes nothing; a
   sticky patch on a colder record writes tier hot and needs `TierStampIfRaised`; sticky plus tier together
-  stays hot; a patch of a hand-edited record yields the canonical form; the same `ParsedRecord` patched twice
+  stays hot; a patch of a hand-edited record yields the canonical form; each row of the tier/sticky table; a content-only patch of a record stored as `sticky: true` with a warm tier leaves that tier and its stamp as stored; the same `ParsedRecord` patched twice
   gives the same bytes (it is not mutated).
 - `Parse` rejects, without throwing: an oversize file (a deeply nested or huge one is rejected before it is
   parsed), invalid JSON, an array root, a BOM, trailing content, nesting over 64, `tags` as a string or with a
   non-string element, a number for `content`, a missing stamp, an id that does not match the path, a
   **duplicate key** at the top level, inside `ext`, inside unknown content, a lone-surrogate escape
   (`"\ud800"`) in an id, in content and in a tag. `Write` of a record with a lone surrogate gives
-  `Failed NotEncodable`.
+  `NotEncodable`.
 - Accepts CRLF, emoji, accented and CJK content and writes it back identically; a record whose content is
   100,000 U+0001 characters (600,000 bytes serialized) is accepted by `Parse` (under 1 MiB) and blocked by
   `checkWritable` (over 256 KiB).
