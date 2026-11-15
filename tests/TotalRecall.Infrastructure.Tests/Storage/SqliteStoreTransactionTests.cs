@@ -232,6 +232,35 @@ public class SqliteStoreTransactionTests
     }
 
     [Fact]
+    public void Insert_RemovesOrphanVectorRowAtTheReusedRowid()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            store.InsertWithEmbedding(Tier.Hot, ContentType.Memory,
+                new InsertEntryOpts("old", Id: "old"), Embed("old"));
+            // Delete only the content row: its vector row is now an orphan.
+            using (var del = conn.CreateCommand())
+            {
+                del.CommandText = "DELETE FROM hot_memories WHERE id = 'old'";
+                del.ExecuteNonQuery();
+            }
+            Assert.Equal(1, ScalarLong(conn, "SELECT count(*) FROM hot_memories_vec"));
+
+            var fresh = Embed("fresh-content");
+            using (var tx = store.BeginTransaction())
+            {
+                tx.Insert(Tier.Hot, ContentType.Memory,
+                    new InsertEntryOpts("fresh-content", Id: "fresh"), fresh);
+                tx.Commit();
+            }
+
+            Assert.Equal(1, ScalarLong(conn, "SELECT count(*) FROM hot_memories_vec"));
+            Assert.Contains("embedding=" + StoreSnapshot.Hex(fresh), StoreSnapshot.Take(conn));
+        }
+    }
+
+    [Fact]
     public void Insert_WithExistingId_ThrowsAndRollsBack()
     {
         var (conn, store) = NewStore();

@@ -143,15 +143,8 @@ public sealed class SqliteStore : IStore, IMetaStore, IDisposable
     public Entry? Get(Tier tier, ContentType type, string id) =>
         SqlRows.ReadRow(_conn, null, MigrationRunner.TableName(tier, type), id);
 
-    public long? GetInternalKey(Tier tier, ContentType type, string id)
-    {
-        var table = MigrationRunner.TableName(tier, type);
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = $"SELECT rowid FROM {table} WHERE id = $id";
-        cmd.Parameters.AddWithValue("$id", id);
-        var result = cmd.ExecuteScalar();
-        return result is long l ? l : null;
-    }
+    public long? GetInternalKey(Tier tier, ContentType type, string id) =>
+        SqlRows.RowId(_conn, null, MigrationRunner.TableName(tier, type), id);
 
     public void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts)
     {
