@@ -30,13 +30,14 @@ All commands are routed through the `/total-recall:commands` skill:
 | `/total-recall:commands eval --benchmark` | Run synthetic benchmark |
 | `/total-recall:commands eval --compare <name>` | Compare metrics between two config snapshots |
 | `/total-recall:commands eval --snapshot <name>` | Manually create a named config snapshot |
+| `/total-recall:commands eval grow` | Review benchmark candidates captured from retrieval misses (`list`, `resolve`) |
 | `/total-recall:commands config get <key>` | Read config value |
 | `/total-recall:commands config set <key> <val>` | Update config |
 | `/total-recall:commands import-host` | Re-run import sync from all host tools |
 | `/total-recall:commands update` | Update the plugin to the latest version |
 | `/total-recall:commands ui` | Open the built-in web UI (`total-recall ui`) |
 
-Benchmark candidates captured from retrieval misses are reviewed (accepted or rejected) with the `eval_grow` tool or the CLI (`total-recall eval grow list` and `total-recall eval grow resolve`); the commands skill has no subcommand for it.
+Benchmark candidates captured from retrieval misses are reviewed (accepted or rejected) with `eval grow`, which calls the `eval_grow` tool; the CLI forms are `total-recall eval grow list` and `total-recall eval grow resolve`.
 
 Memory capture, retrieval, and compaction run automatically in the background — see the "Automatic Behavior" section of the `/total-recall:commands` skill.
 

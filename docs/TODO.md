@@ -333,7 +333,7 @@ Items identified during the MCP bootstrap shim implementation but intentionally 
 
 ### Mode-aware catalog
 
-`catalog.json` captures the local/sqlite tool surface (41 core + mode-dependent tools). Postgres mode exposes fewer tools, so the pre-engine `tools/list` served by the shim is cosmetically broad until the engine starts and emits `notifications/tools/list_changed` with the authoritative mode-specific list. Tool calls always proxy correctly once the engine is up — only the initial discovery list is approximate. A follow-up would generate and commit a separate `catalog-postgres.json` and have the shim select the right one based on config/env.
+`catalog.json` captures the local/sqlite tool surface (42 core + mode-dependent tools). Postgres mode exposes fewer tools, so the pre-engine `tools/list` served by the shim is cosmetically broad until the engine starts and emits `notifications/tools/list_changed` with the authoritative mode-specific list. Tool calls always proxy correctly once the engine is up — only the initial discovery list is approximate. A follow-up would generate and commit a separate `catalog-postgres.json` and have the shim select the right one based on config/env.
 
 **Files:** `bin/shim/server-surface.js`, `.github/workflows/release.yml` (catalog generation step), `catalog.json`
 
