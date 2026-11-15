@@ -140,13 +140,13 @@ export function createExtension({
     }
 
     // False when PI_SUBAGENT_ID is set (a full pi process that has a session file; pi-herdr-agents is
-    // said to set it for its children, which was not inspected) and in a session with no session file:
-    // --no-session, or a pi-subagents child that is kept in memory (a nested child by default, or one
-    // with persist_session: false). Such a child is not the user's conversation, and it would otherwise
-    // open its own memory session.
-    // It is NOT false for a top-level pi-subagents child: pi-subagents keeps that child's session in a
-    // file by default (rememberAgents: true) and sets no PI_SUBAGENT_ID, so the child gets the
-    // instructions and the floor. Observed, and the workarounds, in docs/hosts/pi.md.
+    // said to set it for its children, which was not inspected), in a session with no session file
+    // (--no-session, or a pi-subagents child kept in memory: a nested child by default, or one with
+    // persist_session: false), and in a child: a session whose header names a parent session file that
+    // has started and not yet shut down in this process (see noteSessionStart). A top-level pi-subagents
+    // child has a session file (rememberAgents: true is the default) and no PI_SUBAGENT_ID, so only that
+    // last rule recognises it. None of these is the user's conversation, and a child would otherwise open
+    // its own memory session. Observed, the limits of the rule and the workarounds: docs/hosts/pi.md.
     // Set at session_start and kept for the life of this session: its header names a parent session file
     // that has started and not yet shut down in this process, so it is a child of that session.
     let child = false;
@@ -154,7 +154,9 @@ export function createExtension({
     const hookable = (ctx) => !env.PI_SUBAGENT_ID && ctx.sessionManager.getSessionFile() !== undefined && !child;
 
     // Record this session before anything is skipped (a skipped child can be a parent in turn), then
-    // decide whether it is a child. Any failure leaves it the user's session, as before.
+    // decide whether it is a child. Any failure leaves it the user's session, as before. A parent in the
+    // header alone would not do: pi's own /fork sets it too. pi shuts the old session down before it
+    // builds the replacement for /new, /resume, /fork and /reload, so only a child's parent is still here.
     const noteSessionStart = (ctx) => {
       child = false;
       try {

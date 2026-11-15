@@ -35,9 +35,10 @@ export function forwardText(args) {
 
 /**
  * Register `/total-recall` and `/total-recall:commands`.
- * `deps.hookable(ctx)` is false when PI_SUBAGENT_ID is set and in sessions with no session file
- * (--no-session, or a pi-subagents child kept in memory: nested by default, or `persist_session: false`), where the instructions were never injected; the
- * command then only shows a notice. It is true for a top-level pi-subagents child (see extension.js).
+ * `deps.hookable(ctx)` is false when PI_SUBAGENT_ID is set, in sessions with no session file
+ * (--no-session, or a pi-subagents child kept in memory) and in a child (a session whose parent
+ * session is still open in the process), where the instructions were never injected; the command then
+ * only shows a notice. See extension.js.
  */
 export function registerCommands(pi, { hookable, skillText }) {
   const completions = commandCompletions(skillText);
