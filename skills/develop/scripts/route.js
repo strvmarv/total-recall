@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { outsideFences } from './regions.js';
+import { DEFINED_AT_RE, SHA_RE, SPEC_RE } from './checkpoints.js';
 import {
   counts,
   countedCheckpoints,
@@ -82,8 +83,8 @@ export function tasksFor(planShaText, tipText, tasksDone) {
 // ---- concurrency ----
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
-const NOT_HEARTBEAT = ['defined', 'pr-open', 'blocked', 'closed'];
-const ENDS_A_RUN = ['pr-open', 'blocked', 'closed'];
+const NOT_HEARTBEAT = ['defined', 'pr-open', 'spec-merged', 'blocked', 'closed'];
+const ENDS_A_RUN = ['pr-open', 'spec-merged', 'blocked', 'closed'];
 const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
 
 function parseTime(text) {
@@ -93,7 +94,7 @@ function parseTime(text) {
 
 /**
  * True when some heartbeat-phase checkpoint is under 24 hours old and no later checkpoint in the list
- * (posted order) is `pr-open`, `blocked` or `closed`. A date that does not parse never makes a
+ * (posted order) is `pr-open`, `spec-merged`, `blocked` or `closed`. A date that does not parse never makes a
  * checkpoint live; an unparseable `nowIso` is a caller error.
  */
 export function isLive(checkpoints, nowIso) {
@@ -127,7 +128,9 @@ function countOrNull(value, key) {
 /**
  * The next step, derived from the latest progress checkpoint (spec section 10). `counts.tasks` and
  * `counts.cycles` are null when the text is missing or not sequential; zero and null are both
- * blocker 6. A progress checkpoint that carries no known `track` is an error, not a guess.
+ * blocker 6. A progress checkpoint that carries no known `track` is an error, not a guess. On the
+ * `parent` track `kickoff` and `reapproved` are `finish` and `spec-merged` is `parent-status`; any
+ * other phase there, and `spec-merged` on another track, is an error.
  */
 export function position(progress, countsIn) {
   if (progress === null || progress === undefined) return 'start';
@@ -135,11 +138,21 @@ export function position(progress, countsIn) {
   switch (progress.phase) {
     case 'closed': return 'terminal';
     case 'pr-open': return 'after-the-pr';
-    case 'final-approved': return 'finish';
+    case 'final-approved': {
+      const track = isObject(progress.fields) ? progress.fields.track : undefined;
+      if (track === 'parent') throw new Error('final-approved is not valid on the parent track');
+      return 'finish';
+    }
     default: break;
   }
   const fields = isObject(progress.fields) ? progress.fields : {};
   const c = isObject(countsIn) ? countsIn : {};
+  if (fields.track === 'parent') {
+    if (progress.phase === 'kickoff' || progress.phase === 'reapproved') return 'finish';
+    if (progress.phase === 'spec-merged') return 'parent-status';
+    throw new Error(`${progress.phase} is not valid on the parent track`);
+  }
+  if (progress.phase === 'spec-merged') throw new Error('spec-merged is only valid on the parent track');
   if (fields.track === 'plan') {
     if (!Object.hasOwn(fields, 'planSha')) return 'write-plan';
     const tasks = countOrNull(c.tasks, 'tasks');
@@ -186,9 +199,25 @@ export function route(input) {
 
   if (cps.length === 0) return done('define');
   const progress = latestProgress(cps);
+  if (progress) {
+    if (progress.fields.track === 'parent' && ['plan-approved', 'tasks', 'final-approved'].includes(progress.phase)) {
+      throw new Error(`${progress.phase} is not valid on the parent track`);
+    }
+    if (progress.phase === 'spec-merged' && progress.fields.track !== 'parent') {
+      throw new Error('spec-merged is only valid on the parent track');
+    }
+  }
   if (progress && progress.phase === 'pr-open') return done('after-the-pr');
   if (progress && progress.phase === 'closed') {
     return done(issueState === 'open' && baseIsDefault === true ? 'new-issue-or-stop' : 'terminal');
+  }
+  if (progress && progress.phase === 'spec-merged') {
+    // The merged parent spec is routed on the pin and the checkpoint's own fields; `pinValid` is not read.
+    const pin = governingPin(cps);
+    const ok = pin !== null && pin.fields.track === 'parent'
+      && SPEC_RE.test(progress.fields.spec) && SHA_RE.test(progress.fields.specBlob)
+      && DEFINED_AT_RE.test(pin.fields.definedAt);
+    return ok ? done('parent-status', issueState === 'closed') : done('terminal-pin');
   }
   if (typeof pinValid !== 'boolean') throw new Error('pinValid is required');
   if (governingPin(cps) === null || pinValid === false) {

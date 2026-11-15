@@ -158,6 +158,40 @@ test('route: a pin check that is needed but not supplied is an error, never a gu
   }), /pinValid/);
 });
 
+function lineComment(id, minute, line) {
+  return {
+    id,
+    createdAt: `2026-11-10T10:${minute}:00Z`,
+    authorLogin: 'alice',
+    authorType: 'User',
+    editorLogin: null,
+    editorType: null,
+    lastEditedAt: null,
+    isMinimized: false,
+    body: `Summary.\n\n\`\`\`\n${line}\n\`\`\`\n`,
+  };
+}
+
+function routeOf(comments) {
+  return route({
+    comments, hasWrite: () => true, pinValid: true, issueState: 'open', baseIsDefault: true, hasUncountedMarkers: false,
+  });
+}
+
+test('route: a parent-track tasks as the latest progress is an error, never a route', () => {
+  assert.throws(() => routeOf([
+    lineComment('1', '01', 'tr-develop/v1 phase=defined track=parent'),
+    lineComment('2', '02', 'tr-develop/v1 phase=tasks track=parent'),
+  ]), /parent/);
+});
+
+test('route: a spec-merged with track=plan as the latest progress is an error', () => {
+  assert.throws(() => routeOf([
+    lineComment('1', '01', 'tr-develop/v1 phase=defined track=plan'),
+    lineComment('2', '02', 'tr-develop/v1 phase=spec-merged track=plan'),
+  ]), /spec-merged/);
+});
+
 // ---- marker lines ----
 
 test('hasMarkerLine: a trimmed line starting with tr-develop/ in any position, fenced or not', () => {
