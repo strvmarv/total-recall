@@ -294,8 +294,13 @@ public static class ImportUtils
             }
             catch (Exception)
             {
-                existing = FindMemory(store, id, tier);
-                if (existing is null) throw;
+                // Two importers racing: the entry may exist now. A failure of
+                // this lookup must not replace the original insert failure.
+                (Tier Tier, Entry Entry)? found = null;
+                try { found = FindMemory(store, id, tier); }
+                catch (Exception) { /* keep the original failure */ }
+                if (found is null) throw;
+                existing = found;
                 repaired = true;
             }
         }

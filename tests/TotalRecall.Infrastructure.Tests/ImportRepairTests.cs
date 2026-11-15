@@ -252,6 +252,9 @@ public sealed class ImportRepairTests : IDisposable
                 Substitute.For<IImportLog>(), "claude-code", "/p/a.md", hash,
                 Tier.Warm, Opts("content")));
         Assert.Equal("boom", ex.Message);
+        store.Received(1).Insert(Tier.Warm, ContentType.Memory, Arg.Any<InsertEntryOpts>());
+        // Three lookups before the insert and three after it (no hit).
+        store.Received(6).Get(Arg.Any<Tier>(), ContentType.Memory, id);
     }
 
     // ---- ImportMarkdownFile ----
