@@ -10,9 +10,44 @@
     "expected": "two lines"
   },
   {
+    "name": "nested links are flattened until none is left (inner link inside a link text)",
+    "input": "[[a](b)](c)",
+    "expected": "a"
+  },
+  {
+    "name": "nested links are flattened until none is left (link inside longer link text)",
+    "input": "[a [b](u)](v)",
+    "expected": "a b"
+  },
+  {
+    "name": "a URL containing a closing parenthesis ends at the first one",
+    "input": "[a](https://x/y_(z)) tail",
+    "expected": "a) tail"
+  },
+  {
+    "name": "an unclosed link is left alone",
+    "input": "see [a](http://x now",
+    "expected": "see [a](http://x now"
+  },
+  {
+    "name": "a link is flattened before the length cut",
+    "input": "[word](https://example.com/pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp) tail",
+    "expected": "word tail"
+  },
+  {
     "name": "ANSI escape sequences are removed",
     "input": "\u001b[31mred\u001b[0m",
     "expected": "red"
+  },
+  {
+    "name": "an ANSI sequence with several parameters is removed",
+    "input": "\u001b[1;31mbold\u001b[0m",
+    "expected": "bold"
+  },
+  {
+    "name": "a lone ESC character is removed",
+    "input": "a\u001bb",
+    "expected": "ab"
   },
   {
     "name": "whitespace runs including newlines and tabs collapse to one space",
@@ -21,7 +56,7 @@
   },
   {
     "name": "non-breaking space, line separator and vertical tab are whitespace",
-    "input": "a b c\u000bd",
+    "input": "a\u00a0b\u2028c\u000bd",
     "expected": "a b c d"
   },
   {
@@ -30,9 +65,19 @@
     "expected": ""
   },
   {
-    "name": "angle brackets around a bare URL are dropped",
+    "name": "angle brackets around a bare http or https URL are dropped",
     "input": "see <https://x.y> now",
     "expected": "see https://x.y now"
+  },
+  {
+    "name": "the scheme match for angle brackets is case-insensitive",
+    "input": "<HTTPS://X.Y>",
+    "expected": "HTTPS://X.Y"
+  },
+  {
+    "name": "angle brackets around other schemes are kept",
+    "input": "<mailto:a@b.c>",
+    "expected": "<mailto:a@b.c>"
   },
   {
     "name": "inline code and emphasis are kept",
@@ -45,9 +90,24 @@
     "expected": "padded"
   },
   {
+    "name": "a byte order mark is not whitespace and is kept",
+    "input": "\ufeffabc",
+    "expected": "\ufeffabc"
+  },
+  {
     "name": "empty input stays empty",
     "input": "",
     "expected": ""
+  },
+  {
+    "name": "text of exactly 200 characters is kept",
+    "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "name": "a space at index 200 gives exactly 200 characters",
+    "input": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb cccc",
+    "expected": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
   },
   {
     "name": "long text is cut at the last space at or before 200 characters, with no ellipsis",
@@ -55,8 +115,18 @@
     "expected": "abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij"
   },
   {
+    "name": "a short word followed by a very long word keeps only the short word",
+    "input": "short xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "expected": "short"
+  },
+  {
     "name": "a single word longer than 200 characters is cut at 200",
     "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "name": "a cut never leaves half of a surrogate pair",
+    "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ud83d\ude00zzz",
+    "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   }
 ]

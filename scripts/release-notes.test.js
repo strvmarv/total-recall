@@ -19,11 +19,19 @@ test('sanitizeSummary matches every case in scripts/fixtures/summary-sanitiser.j
   }
 });
 
-test('sanitizeSummary never returns more than 200 characters or a line break', () => {
-  for (const c of SANITISER_CASES) {
-    const out = sanitizeSummary(c.input);
-    assert.ok(out.length <= 200, c.name);
-    assert.ok(!/[\r\n]/.test(out), c.name);
+test('sanitizeSummary keeps its invariants on hostile input', () => {
+  const hostile = [
+    '[[[a](b)](c)](d)', '[a](b', '\u001b', '\u001b[', '\u001b[1;31', '<<https://x.y>>', '\ufeff\ufeff x',
+    'x'.repeat(199) + '\ud83d\ude00' + 'y'.repeat(50), '[' + 'a'.repeat(300) + '](u)', '\u0000'.repeat(500),
+    'word '.repeat(100), '\r\n'.repeat(120), '[x](y)'.repeat(80),
+  ];
+  for (const input of hostile) {
+    const out = sanitizeSummary(input);
+    assert.ok(out.length <= 200, `length: ${JSON.stringify(input).slice(0, 30)}`);
+    assert.ok(!/[\r\n]/.test(out), 'no line break');
+    assert.ok(!/[\u0000-\u0008\u000e-\u001f\u007f-\u0084\u0086-\u009f]/.test(out), 'no control character');
+    assert.ok(!/\[[^\]]*\]\([^)]*\)/.test(out), 'no markdown link left');
+    assert.ok(!/[\ud800-\udbff]$/.test(out), 'no lone high surrogate at the end');
   }
 });
 
