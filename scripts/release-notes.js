@@ -114,3 +114,72 @@ export function parseTagMessage(message) {
   }
   return { title, summary, sections, body };
 }
+
+// ---- version tags and the previous release ----
+
+// vMAJOR.MINOR.PATCH[-prerelease], SemVer 2.0.0 without build metadata: no leading zeros in the numeric
+// parts or in numeric prerelease identifiers, identifiers are non-empty [0-9A-Za-z-].
+const NUM = '(?:0|[1-9]\\d*)';
+const PRE_ID = '(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)';
+const RELEASE_TAG = new RegExp(`^v(${NUM})\\.(${NUM})\\.(${NUM})(?:-(${PRE_ID}(?:\\.${PRE_ID})*))?$`);
+
+/** The bare version of a `vMAJOR.MINOR.PATCH[-prerelease]` tag, or null for any other tag. */
+export function parseReleaseTag(tag) {
+  const m = RELEASE_TAG.exec(String(tag ?? ''));
+  return m === null ? null : m[0].slice(1);
+}
+
+// A bare version as [major, minor, patch] numbers and the prerelease identifiers ([] for a release).
+function splitVersion(version) {
+  const m = RELEASE_TAG.exec(`v${version}`);
+  if (m === null) throw new TypeError(`not a release version: ${version}`);
+  return { core: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] === undefined ? [] : m[4].split('.') };
+}
+
+const NUMERIC_ID = /^\d+$/;
+
+/**
+ * SemVer 2.0.0 precedence of two bare versions: negative, zero or positive. A release is above its
+ * prereleases; prerelease identifiers compare one by one, numeric ones numerically and below alphanumeric
+ * ones, and when all else is equal the shorter list is lower.
+ */
+export function compareVersions(a, b) {
+  const x = splitVersion(a);
+  const y = splitVersion(b);
+  for (let i = 0; i < 3; i += 1) {
+    if (x.core[i] !== y.core[i]) return x.core[i] < y.core[i] ? -1 : 1;
+  }
+  if (x.pre.length === 0 && y.pre.length === 0) return 0;
+  if (x.pre.length === 0) return 1;
+  if (y.pre.length === 0) return -1;
+  for (let i = 0; i < Math.min(x.pre.length, y.pre.length); i += 1) {
+    const p = x.pre[i];
+    const q = y.pre[i];
+    if (p === q) continue;
+    const pNum = NUMERIC_ID.test(p);
+    const qNum = NUMERIC_ID.test(q);
+    if (pNum && qNum) return Number(p) < Number(q) ? -1 : 1;
+    if (pNum !== qNum) return pNum ? -1 : 1;
+    return p < q ? -1 : 1;
+  }
+  return Math.sign(x.pre.length - y.pre.length);
+}
+
+/**
+ * The version a release is compared with: for a stable `version` the highest lower stable version among
+ * `tags`, for a prerelease the highest lower version of any kind. Tags that are not release tags are
+ * ignored, as is `version` itself and anything above it. Null when there is none, or when `version` is
+ * not a release version.
+ */
+export function previousVersion(version, tags) {
+  if (parseReleaseTag(`v${version}`) === null) return null;
+  const stable = !String(version).includes('-');
+  let best = null;
+  for (const tag of tags) {
+    const v = parseReleaseTag(tag);
+    if (v === null || compareVersions(v, version) >= 0) continue;
+    if (stable && v.includes('-')) continue;
+    if (best === null || compareVersions(v, best) > 0) best = v;
+  }
+  return best;
+}

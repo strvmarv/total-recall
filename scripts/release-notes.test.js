@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { sanitizeSummary, parseTagMessage } from './release-notes.js';
+import { sanitizeSummary, parseTagMessage, parseReleaseTag, compareVersions, previousVersion } from './release-notes.js';
 import { SHIM_TEST_TARGETS } from './run-shim-tests.js';
 
 const here = (rel) => fileURLToPath(new URL(rel, import.meta.url));
@@ -164,4 +164,67 @@ test('parseTagMessage: a bullet with no text is skipped', () => {
 test('parseTagMessage: a summary that starts with a parenthesised word is still a summary', () => {
   const p = parseTagMessage('v1.0.0\n\nFixed (rare) crash on startup (see #12)\n');
   assert.equal(p.summary, 'Fixed (rare) crash on startup (see #12)');
+});
+
+// ---- version tags and the previous release ----
+
+test('parseReleaseTag: a vMAJOR.MINOR.PATCH[-prerelease] tag gives the bare version, anything else null', () => {
+  assert.equal(parseReleaseTag('v4.7.0-beta.1'), '4.7.0-beta.1');
+  assert.equal(parseReleaseTag('v4.10.0'), '4.10.0');
+  for (const tag of ['0.5.1', 'vNEXT', 'v1.2', 'v1.2.3+build', 'v1.2.3-beta+build', 'v01.2.3', 'v1.02.3', 'v1.2.3-', 'v1.2.3-01', 'v1.2.3-a..b', '', ' v1.2.3', 'v1.2.3\n']) {
+    assert.equal(parseReleaseTag(tag), null, JSON.stringify(tag));
+  }
+});
+
+test('compareVersions: SemVer precedence, numeric parts and identifiers compared numerically', () => {
+  assert.ok(compareVersions('4.10.0', '4.9.0') > 0);
+  assert.ok(compareVersions('4.9.0', '4.10.0') < 0);
+  assert.ok(compareVersions('4.7.0-beta.10', '4.7.0-beta.2') > 0);
+  assert.ok(compareVersions('4.7.0-beta.2', '4.7.0-beta.1') > 0);
+  assert.ok(compareVersions('4.7.0', '4.7.0-beta.2') > 0);
+  assert.ok(compareVersions('4.7.0-beta.2', '4.7.0') < 0);
+  assert.equal(compareVersions('4.7.0-beta.2', '4.7.0-beta.2'), 0);
+});
+
+test('compareVersions: the SemVer 2.0.0 prerelease example ordering holds', () => {
+  const ordered = ['1.0.0-alpha', '1.0.0-alpha.1', '1.0.0-alpha.beta', '1.0.0-beta', '1.0.0-beta.2', '1.0.0-beta.11', '1.0.0-rc.1', '1.0.0'];
+  for (let i = 0; i + 1 < ordered.length; i += 1) {
+    assert.ok(compareVersions(ordered[i], ordered[i + 1]) < 0, `${ordered[i]} < ${ordered[i + 1]}`);
+    assert.ok(compareVersions(ordered[i + 1], ordered[i]) > 0, `${ordered[i + 1]} > ${ordered[i]}`);
+  }
+  // numeric identifiers are lower than alphanumeric ones
+  assert.ok(compareVersions('1.0.0-1', '1.0.0-a') < 0);
+});
+
+test('previousVersion: a stable release looks at the highest lower stable version', () => {
+  const tags = ['v4.6.0', 'v4.7.0-beta.1', 'v4.7.0-beta.2', 'v4.7.0', '0.5.1'];
+  assert.equal(previousVersion('4.7.0', tags), '4.6.0');
+  assert.equal(previousVersion('4.6.0', tags), null);
+  assert.equal(previousVersion('4.6.0', ['v4.5.0', ...tags]), '4.5.0');
+});
+
+test('previousVersion: a prerelease looks at the highest lower version of any kind', () => {
+  const tags = ['v4.6.0', 'v4.7.0-beta.1', 'v4.7.0-beta.2', 'v4.7.0', '0.5.1'];
+  assert.equal(previousVersion('4.7.0-beta.2', tags), '4.7.0-beta.1');
+  assert.equal(previousVersion('4.7.0-beta.1', tags), '4.6.0');
+});
+
+test('previousVersion: re-cutting a prerelease ignores a higher stable tag', () => {
+  assert.equal(previousVersion('4.7.0-beta.2', ['v4.6.0', 'v4.7.0-beta.1', 'v4.7.0-beta.2', 'v4.7.0']), '4.7.0-beta.1');
+});
+
+test('previousVersion: SemVer order, not lexical order, decides (4.10.0 is above 4.9.0)', () => {
+  assert.equal(previousVersion('4.10.0', ['v4.8.0', 'v4.9.0', 'v4.10.0']), '4.9.0');
+  assert.equal(previousVersion('4.10.0', ['v4.10.0', 'v4.9.0', 'v4.8.0']), '4.9.0');
+  assert.equal(previousVersion('4.7.0-beta.10', ['v4.7.0-beta.2', 'v4.7.0-beta.9', 'v4.7.0-beta.10']), '4.7.0-beta.9');
+});
+
+test('previousVersion: duplicates, non-semver tags, an unknown version and a missing history are handled', () => {
+  assert.equal(previousVersion('4.7.0', ['v4.6.0', 'v4.6.0', '0.5.1', 'vNEXT', 'v1.2', 'v4.6.1+build']), '4.6.0');
+  assert.equal(previousVersion('4.7.0', ['0.5.1', 'vNEXT']), null);
+  assert.equal(previousVersion('4.7.0', []), null);
+  assert.equal(previousVersion('4.7.0', ['v4.7.0']), null);
+  // the version need not be tagged itself
+  assert.equal(previousVersion('4.8.0', ['v4.7.0']), '4.7.0');
+  assert.equal(previousVersion('not-a-version', ['v4.7.0']), null);
 });
