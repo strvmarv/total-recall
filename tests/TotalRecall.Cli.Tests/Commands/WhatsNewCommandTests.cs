@@ -44,11 +44,26 @@ public sealed class WhatsNewCommandTests : IDisposable
 
     private string SeenPath(string host) => Path.Combine(StateDir, "seen-" + host + ".json");
 
+    private void PutLatest(string channel, string json) => PutState("latest-" + channel + ".json", json);
+
+    private void PutLatestStable(string version = "4.9.0", string summary = "Faster sync.") =>
+        PutLatest("stable", "{\"version\":\"" + version + "\",\"summary\":\"" + summary + "\"}");
+
+    private const string AvailableLine =
+        "total-recall 4.9.0 is available (you have 4.8.0): Faster sync. Update: pi update "
+        + "More: https://github.com/strvmarv/total-recall/releases/tag/v4.9.0";
+
     private (int Exit, string Out) Run(
         string[] args, string version = "4.8.0", Func<bool>? enabled = null, TextWriter? writer = null)
+        => Run(args, version, enabled, writer, null, null);
+
+    private (int Exit, string Out) Run(
+        string[] args, string version, Func<bool>? enabled, TextWriter? writer,
+        Func<bool>? checkSetting, string? env)
     {
         var sw = writer ?? new StringWriter();
-        var cmd = new WhatsNewCommand(version, StateDir, BinDir, enabled ?? (() => true), sw);
+        var cmd = new WhatsNewCommand(version, StateDir, BinDir, enabled ?? (() => true), sw,
+            checkSetting, checkSetting is null ? null : () => env);
         var exit = cmd.RunAsync(args).GetAwaiter().GetResult();
         return (exit, sw.ToString() ?? "");
     }
@@ -329,6 +344,201 @@ public sealed class WhatsNewCommandTests : IDisposable
         var cc = Run(new[] { "--host", "cursor", "--format", "claude-code" });
         using var doc2 = JsonDocument.Parse(cc.Out);
         Assert.Equal(text, doc2.RootElement.GetProperty("systemMessage").GetString());
+    }
+
+    // ---- available notice (update check) ----
+
+    private (int Exit, string Out) RunChecked(string[] args, string version = "4.8.0", string? env = null) =>
+        Run(args, version, null, null, () => true, env);
+
+    [Fact]
+    public void Available_Text_PrintsLineAndMarksAvailableSeen()
+    {
+        WriteNotes();
+        PutState("seen-pi.json", "{\"version\":\"4.8.0\"}");
+        PutLatestStable();
+        var r = RunChecked(new[] { "--host", "pi" });
+        Assert.Equal(AvailableLine + Environment.NewLine, r.Out);
+        Assert.Equal("{\"version\":\"4.8.0\",\"availableSeen\":{\"stable\":\"4.9.0\"}}",
+            File.ReadAllText(SeenPath("pi")));
+    }
+
+    [Fact]
+    public void Available_Json_KindAvailable()
+    {
+        WriteNotes();
+        PutState("seen-pi.json", "{\"version\":\"4.8.0\"}");
+        PutLatestStable();
+        var r = RunChecked(new[] { "--host", "pi", "--format", "json" });
+        using var doc = JsonDocument.Parse(r.Out);
+        Assert.Equal("available", doc.RootElement.GetProperty("kind").GetString());
+        Assert.Equal(AvailableLine, doc.RootElement.GetProperty("text").GetString());
+    }
+
+    [Fact]
+    public void Available_ClaudeCode_SystemMessage()
+    {
+        WriteNotes();
+        PutState("seen-claude-code.json", "{\"version\":\"4.8.0\"}");
+        PutLatestStable();
+        var r = RunChecked(new[] { "--host", "claude-code", "--format", "claude-code" });
+        using var doc = JsonDocument.Parse(r.Out);
+        Assert.EndsWith(
+            "Update: /total-recall:commands update More: https://github.com/strvmarv/total-recall/releases/tag/v4.9.0",
+            doc.RootElement.GetProperty("systemMessage").GetString());
+    }
+
+    [Fact]
+    public void Available_NoMark_WritesNothing()
+    {
+        WriteNotes();
+        const string seenJson = "{\"version\":\"4.8.0\"}";
+        PutState("seen-pi.json", seenJson);
+        PutLatestStable();
+        var a = RunChecked(new[] { "--host", "pi", "--no-mark" });
+        var b = RunChecked(new[] { "--host", "pi", "--no-mark" });
+        Assert.Equal(AvailableLine + Environment.NewLine, a.Out);
+        Assert.Equal(a.Out, b.Out);
+        Assert.Equal(seenJson, File.ReadAllText(SeenPath("pi")));
+    }
+
+    [Fact]
+    public void Available_SameReleaseAgain_PrintsNothing()
+    {
+        WriteNotes();
+        PutState("seen-pi.json", "{\"version\":\"4.8.0\"}");
+        PutLatestStable();
+        Assert.Equal(AvailableLine + Environment.NewLine, RunChecked(new[] { "--host", "pi" }).Out);
+        Assert.Equal("", RunChecked(new[] { "--host", "pi" }).Out);
+    }
+
+    [Fact]
+    public void Available_EvenNewer_PrintsAgain()
+    {
+        WriteNotes();
+        PutState("seen-pi.json", "{\"version\":\"4.8.0\"}");
+        PutLatestStable();
+        RunChecked(new[] { "--host", "pi" });
+        PutLatestStable("4.10.0", "Newer.");
+        var r = RunChecked(new[] { "--host", "pi" });
+        Assert.Equal(
+            "total-recall 4.10.0 is available (you have 4.8.0): Newer. Update: pi update "
+                + "More: https://github.com/strvmarv/total-recall/releases/tag/v4.10.0" + Environment.NewLine,
+            r.Out);
+    }
+
+    [Fact]
+    public void Order_UpdatedThenAvailableOnNextRun()
+    {
+        WriteNotes();
+        PutState("seen-pi.json", "{\"version\":\"4.7.0\"}");
+        PutLatestStable();
+        Assert.Equal(UpdatedLine + Environment.NewLine, RunChecked(new[] { "--host", "pi" }).Out);
+        Assert.Equal(AvailableLine + Environment.NewLine, RunChecked(new[] { "--host", "pi" }).Out);
+        Assert.Equal("", RunChecked(new[] { "--host", "pi" }).Out);
+    }
+
+    [Fact]
+    public void FirstSeen_ThenAvailableNextRun()
+    {
+        WriteNotes();
+        PutLatestStable();
+        Assert.Equal(FirstSeenLine + Environment.NewLine, RunChecked(new[] { "--host", "pi" }).Out);
+        Assert.Equal(AvailableLine + Environment.NewLine, RunChecked(new[] { "--host", "pi" }).Out);
+    }
+
+    [Fact]
+    public void MidSessionLatestFile_ReachesNextRun()
+    {
+        WriteNotes();
+        PutState("seen-pi.json", "{\"version\":\"4.8.0\"}");
+        Assert.Equal("", RunChecked(new[] { "--host", "pi" }).Out);
+        PutLatestStable();
+        Assert.Equal(AvailableLine + Environment.NewLine, RunChecked(new[] { "--host", "pi" }).Out);
+    }
+
+    [Theory]
+    [InlineData(false, null, true)]
+    [InlineData(true, "1", true)]
+    [InlineData(true, null, false)]
+    public void CheckOff_OldLatestFile_NothingAndNoMark(bool checkSetting, string? env, bool noticeEnabled)
+    {
+        WriteNotes();
+        const string seenJson = "{\"version\":\"4.8.0\"}";
+        PutState("seen-pi.json", seenJson);
+        PutLatestStable();
+        var r = Run(new[] { "--host", "pi" }, "4.8.0", () => noticeEnabled, null, () => checkSetting, env);
+        Assert.Equal("", r.Out);
+        Assert.Equal(seenJson, File.ReadAllText(SeenPath("pi")));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("0")]
+    [InlineData("false")]
+    public void EnvEmptyZeroOrFalse_SettingDecides(string env)
+    {
+        WriteNotes();
+        PutState("seen-pi.json", "{\"version\":\"4.8.0\"}");
+        PutLatestStable();
+        var r = RunChecked(new[] { "--host", "pi" }, env: env);
+        Assert.Equal(AvailableLine + Environment.NewLine, r.Out);
+    }
+
+    [Fact]
+    public void CheckSettingOmitted_NoAvailable()
+    {
+        WriteNotes();
+        PutState("seen-pi.json", "{\"version\":\"4.8.0\"}");
+        PutLatestStable();
+        var r = Run(new[] { "--host", "pi" });
+        Assert.Equal("", r.Out);
+    }
+
+    [Theory]
+    [InlineData("claude-code", "claude-code", "/total-recall:commands update")]
+    [InlineData("pi", "pi", "pi update")]
+    [InlineData("cursor", "cursor", "see docs/hosts/cursor.md")]
+    [InlineData("nonsense", "other", "see docs/hosts/other-mcp.md")]
+    public void Available_HostInstruction_PerHost(string hostArg, string hostId, string how)
+    {
+        WriteNotes();
+        PutState("seen-" + hostId + ".json", "{\"version\":\"4.8.0\"}");
+        PutLatestStable();
+        var r = RunChecked(new[] { "--host", hostArg });
+        Assert.Equal(
+            "total-recall 4.9.0 is available (you have 4.8.0): Faster sync. Update: " + how
+                + " More: https://github.com/strvmarv/total-recall/releases/tag/v4.9.0" + Environment.NewLine,
+            r.Out);
+        Assert.Equal("{\"version\":\"4.8.0\",\"availableSeen\":{\"stable\":\"4.9.0\"}}",
+            File.ReadAllText(SeenPath(hostId)));
+    }
+
+    [Fact]
+    public void PrereleaseRunning_ReadsLatestPre()
+    {
+        PutState("seen-pi.json", "{\"version\":\"4.8.0-beta.1\"}");
+        PutLatest("stable", "{\"version\":\"4.9.0\",\"summary\":\"Stable.\"}");
+        PutLatest("pre", "{\"version\":\"4.8.0-beta.2\",\"summary\":\"Beta.\"}");
+        var r = RunChecked(new[] { "--host", "pi" }, version: "4.8.0-beta.1");
+        Assert.Equal(
+            "total-recall 4.8.0-beta.2 is available (you have 4.8.0-beta.1): Beta. Update: pi update "
+                + "More: https://github.com/strvmarv/total-recall/releases/tag/v4.8.0-beta.2" + Environment.NewLine,
+            r.Out);
+        Assert.Equal("{\"version\":\"4.8.0-beta.1\",\"availableSeen\":{\"pre\":\"4.8.0-beta.2\"}}",
+            File.ReadAllText(SeenPath("pi")));
+    }
+
+    [Fact]
+    public void Available_ThrowingWriter_NothingMarked()
+    {
+        WriteNotes();
+        const string seenJson = "{\"version\":\"4.8.0\"}";
+        PutState("seen-pi.json", seenJson);
+        PutLatestStable();
+        var r = Run(new[] { "--host", "pi" }, "4.8.0", null, new ThrowingWriter(), () => true, null);
+        Assert.Equal(0, r.Exit);
+        Assert.Equal(seenJson, File.ReadAllText(SeenPath("pi")));
     }
 
     [Fact]

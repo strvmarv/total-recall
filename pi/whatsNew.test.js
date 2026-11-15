@@ -294,6 +294,12 @@ test('runWhatsNew: the timeout kills the child with SIGKILL', async () => {
   assert.equal(signal, 'SIGKILL');
 });
 
+test('isDisplayableNotice: accepts an available line', () => {
+  assert.equal(
+    isDisplayableNotice('total-recall 4.9.0 is available (you have 4.8.0): Faster sync. Update: copilot plugin update total-recall@strvmarv-total-recall-marketplace More: https://github.com/strvmarv/total-recall/releases/tag/v4.9.0'),
+    true);
+});
+
 test('isDisplayableNotice: accepts an ordinary line and the 1000-character limit', () => {
   assert.equal(isDisplayableNotice('total-recall 4.8.0: x. All releases: https://example.test'), true);
   assert.equal(isDisplayableNotice('x'.repeat(1000)), true);
