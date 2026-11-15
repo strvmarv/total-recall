@@ -176,10 +176,20 @@ Every track, in order. Steps 1 to 6 are the same numbers as the spec.
    `node <skill dir>/scripts/route.js parent-line <file>`. Recompute `git rev-parse origin/<base>:<parent spec>` and compare it with `parentBlob`. A difference
    puts "the parent spec changed since this ticket was defined" in the kickoff summary (and the report); a
    `parent-line` or `rev-parse` that fails is a warning that drift could not be checked. It is a warning
-   only: never a stop and never a re-approval. At a start, repeat Define's dependency question
-   ([Define](define.md#fetch), step 6) for the part on the `Parent:` line, reading the parent spec at
-   `origin/<base>` (`git show`, through `ghpin.js run` with `out`; no worktree is needed); a stop ends the run with
-   nothing posted, and with no one to ask it is a stop (the default).
+   only: never a stop and never a re-approval.
+
+   **Dependency question** (a sub-ticket, at a start, once). It is asked after the integrity check and
+   after Re-approval when that ran (Re-approval continues at step 5, so a run that came through it asks
+   here, as the last thing of this step, before step 5 begins), so every start asks it exactly once and a
+   resume never does. It repeats Define's dependency question ([Define](define.md#fetch), step 6) for
+   the part on the `Parent:` line, reading the parent spec at `origin/<base>` (`git show`, through
+   `ghpin.js run` with `out`; no worktree is needed). Define's step 6 finds the stubs through
+   [Ensure-stubs](#ensure-stubs) steps 1 to 3, and step 2 of those needs the parent pin's `definedAt`:
+   read the parent's comments (`comments`) and its counted pin (`counted.js select`, `track=parent`, as in
+   Define's Fetch step 5) to get `<definedAt>`. If the parent's comments or pin cannot be read, the
+   question is skipped with the same "could not be checked" warning as an unreadable parent (a warning
+   only, never a stop). A stop answer ends the run with nothing posted, and with no one to ask it is a
+   stop (the default), nothing posted.
 5. **Workspace.**
    - *Start, plan or parent track:* a worktree on the pin's `branch`, tracking `origin/<branch>` (Define pushed
      it). If `origin/<branch>` is ahead of the pin's `approvedSha` (an earlier executor's commits
@@ -484,7 +494,9 @@ their patterns.
    parent, and a sub-issue whose part is not in the spec. Nothing is deleted or edited.
 5. **Report** the comparison of step 2: the spec at `origin/<base>` against `specBlob`.
 6. **Offer** (the ask tool) to start the first ready part whose issue is open and has no counted
-   checkpoint (a part already done or in progress is not offered) now, or to stop. On a yes, continue
+   checkpoint (a part already done or in progress is not offered) now, or to stop. For a candidate part
+   whose comments step 3 did not read (past the 30), read that issue's comments (`comments`,
+   `counted.js select`) before offering it. On a yes, continue
    through [Issue entry](SKILL.md#issue-entry) for that issue in this session, so its routing runs (a
    closed or already pinned issue is routed as it would be on its own), not straight into Define. When no
    part qualifies, say so and stop. Readiness is advisory: a person can open any stub.
