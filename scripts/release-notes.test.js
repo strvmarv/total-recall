@@ -612,7 +612,7 @@ test('the docs describe the direct what\'s-new notice (command, stamps, pi, Clau
   const next = rest.search(/^### /m);
   const lifecycle = next < 0 ? rest : rest.slice(0, next);
   assert.ok(!lifecycle.includes('Not built yet'), 'AGENTS.md still says the direct delivery is not built yet');
-  for (const needle of ['whats-new --host', 'direct-', 'pi/whatsNew.js', 'hooks/session-start/whats-new.js', 'T3']) {
+  for (const needle of ['whats-new --host', 'direct-', 'pi/whatsNew.js', 'hooks/session-start/whats-new.js', 'T3', 'Not observed', 'systemMessage', 'direct-claude-code.json', 'direct-pi.json']) {
     assert.ok(lifecycle.includes(needle), `the session_start section of AGENTS.md does not mention ${needle}`);
   }
   const where = agents.slice(agents.indexOf('### WHERE TO LOOK'), agents.indexOf('### Key Commands'));
@@ -633,6 +633,8 @@ test('the docs describe the direct what\'s-new notice (command, stamps, pi, Clau
   for (const needle of ['what\'s-new', 'TOTAL_RECALL_HOST', 'client name', 'ctx.ui.notify', 'direct-pi.json']) {
     assert.ok(pi.includes(needle), `docs/hosts/pi.md does not mention ${needle}`);
   }
+  assert.ok(pi.includes('MCP client name is `pi`'), 'docs/hosts/pi.md does not state that pi\'s MCP client name is `pi`');
+  assert.ok(pi.includes('read from pi\'s source'), 'docs/hosts/pi.md does not say the pi facts were read from pi\'s source');
 
   const changelog = fs.readFileSync(here('../CHANGELOG.md'), 'utf8');
   assert.ok(changelog.includes('#106'), 'CHANGELOG.md does not mention #106');
