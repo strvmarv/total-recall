@@ -24,6 +24,7 @@ C# callers in `TotalRecall.Infrastructure` call into this layer via direct F# in
 | `SyncStamp.fs` | `TotalRecall.Core.SyncStamp` | Git sync: wire timestamps (`yyyy-MM-ddTHH:mm:ss.fffZ`), `MachineId`, `Stamp` (`<timestamp>.<6-digit counter>.<8 hex>`) and the hybrid logical clock (`Clock.issue` / `observe` / `guardStartup`, 24 h drift guard) |
 | `SyncRecord.fs` | `TotalRecall.Core.SyncRecord` | Git sync: the record model (`SyncRecord`, `Placement`, `Origin`) and the lower-case wire names of `Tier`, `EntryType`, `SourceTool` (not the SQLite strings) |
 | `SyncValidation.fs` | `TotalRecall.Core.SyncValidation` | Git sync: id and path rules, `validate` for a record read from the repository (a trust boundary), `Reject` / `Note` / `Block`, `checkWritable`, `sanitizeText` |
+| `SyncMerge.fs` | `TotalRecall.Core.SyncMerge` | Git sync: `decide : MergeInput -> MergeDecision`, the pure per-entry merge (whole-entry table, no-base and field-wise group rules, own-push recognition, per-entry deletion rows); the input, decision, review-request and note types; `clearsPending`. Nothing calls it yet (the cycle is milestone 1b) |
 
 ---
 
