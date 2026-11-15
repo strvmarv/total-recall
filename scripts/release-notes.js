@@ -1,8 +1,17 @@
 // scripts/release-notes.js — turns a release's annotated tag message into the release notes.
-// Zero dependencies, ESM. Design: docs/superpowers/specs/2026-11-15-whats-new-notice-design.md, section 1.
+// Zero dependencies, ESM.
+//
+//   node scripts/release-notes.js <tag> [--check] [--notes-out <file>...] [--body-out <file>] [--cwd <dir>]
+//
+// Exit codes: 0 ok, 1 the tag cannot give release notes, 2 a usage error. Diagnostics go to stdout as
+// GitHub Actions workflow commands (`::error::`, `::warning::`). Design: docs/superpowers/specs/2026-11-15-whats-new-notice-design.md, section 1.
 //
 // The summary sanitiser below is specified in that document (section 2, "Untrusted input") and is also
 // implemented in the engine; both are tested against scripts/fixtures/summary-sanitiser.json.
+
+import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const MAX_SUMMARY = 200;
 
@@ -188,4 +197,145 @@ export function previousVersion(version, tags) {
     if (best === null || compareVersions(v, best) > 0) best = v;
   }
   return best;
+}
+
+// ---- the release notes ----
+
+const REPO_URL = 'https://github.com/strvmarv/total-recall';
+
+/**
+ * The release notes of `tag` from its annotated tag `message` and the repository's tag list: the
+ * `release-notes.json` object, the release body (the message without its title line and the blank line
+ * after it, ending in one newline) and the warnings. A stable tag with no title line or no summary throws;
+ * a prerelease gets a warning for each instead (and an empty summary).
+ */
+export function buildReleaseNotes({ tag, message, tags }) {
+  const version = parseReleaseTag(tag);
+  if (version === null) throw new Error(`${tag} is not a release tag`);
+  const parsed = parseTagMessage(message);
+  const problems = [];
+  if (parsed.title === '') problems.push(`no title in the tag message of ${tag}`);
+  if (parsed.summary === '') problems.push(`no summary in the tag message of ${tag}`);
+  const warnings = [];
+  if (problems.length > 0) {
+    if (!version.includes('-')) throw new Error(problems[0]);
+    warnings.push(...problems);
+  }
+  const trimmed = parsed.body.replace(/\s+$/, '');
+  return {
+    notes: {
+      version,
+      previous: previousVersion(version, tags),
+      summary: parsed.summary,
+      sections: parsed.sections,
+      url: `${REPO_URL}/releases/tag/v${version}`,
+      releasesUrl: `${REPO_URL}/releases`,
+    },
+    body: trimmed === '' ? '' : `${trimmed}\n`,
+    warnings,
+  };
+}
+
+// Runs git with an argument array and no shell.
+function runGit(args, cwd) {
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  if (r.error) throw new Error(`cannot run git: ${r.error.message}`);
+  return r;
+}
+
+/**
+ * The message of the annotated tag `tag` and the repository's tag list. Fails closed: a name that is not
+ * a release tag is refused before git runs, and the tag must be a tag object (`git cat-file -t` prints
+ * `tag`), not a lightweight tag. The tag is only ever passed as the exact ref `refs/tags/<tag>`, so it is
+ * never a pattern and a branch of the same name is not mistaken for it.
+ */
+export function readAnnotatedTag(tag, { cwd } = {}) {
+  if (parseReleaseTag(tag) === null) throw new Error(`${tag} is not a release tag`);
+  const ref = `refs/tags/${tag}`;
+  const type = runGit(['cat-file', '-t', ref], cwd);
+  if (type.status !== 0) throw new Error(`cannot read ${ref}: ${String(type.stderr).trim() || 'git failed'}`);
+  if (type.stdout.trim() !== 'tag') throw new Error(`${tag} is not an annotated tag`);
+  const contents = runGit(['for-each-ref', '--format=%(contents)', ref], cwd);
+  if (contents.status !== 0) throw new Error(`cannot read the message of ${ref}: ${String(contents.stderr).trim() || 'git failed'}`);
+  const list = runGit(['tag', '-l'], cwd);
+  if (list.status !== 0) throw new Error(`cannot list the tags: ${String(list.stderr).trim() || 'git failed'}`);
+  return { message: contents.stdout, tags: list.stdout.split('\n').filter((t) => t !== '') };
+}
+
+// ---- command line ----
+
+const USAGE = [
+  'usage: node scripts/release-notes.js <tag> --check [--cwd <dir>]',
+  '       node scripts/release-notes.js <tag> [--notes-out <file>...] [--body-out <file>] [--cwd <dir>]',
+  '  --check validates only; output files are relative to the current directory, --cwd is the repository',
+].join('\n');
+
+// Workflow-command text: `%`, CR and LF are escaped so one diagnostic stays one line.
+const annotate = (level, text) => `::${level}::${text.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A')}\n`;
+
+/** Runs the command line. Returns {code, out, err}; it prints nothing itself. */
+export function main(argv) {
+  const usage = (msg) => ({ code: 2, out: '', err: `${msg}\n${USAGE}\n` });
+  let check = false;
+  let bodyOut;
+  let cwd;
+  const notesOut = [];
+  const positional = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const a = argv[i];
+    if (a === '--check') check = true;
+    else if (a === '--notes-out' || a === '--body-out' || a === '--cwd') {
+      const v = argv[i + 1];
+      if (v === undefined) return usage(`${a} needs a value`);
+      i += 1;
+      if (a === '--notes-out') notesOut.push(v);
+      else if (a === '--cwd') cwd = v;
+      else bodyOut = v;
+    } else if (a.startsWith('--')) return usage(`unknown option ${a}`);
+    else positional.push(a);
+  }
+  if (positional.length !== 1) return usage(positional.length ? 'one tag at a time' : 'a tag is required');
+  const writes = notesOut.length > 0 || bodyOut !== undefined;
+  if (check && writes) return usage('--check writes no file');
+  if (!check && !writes) return usage('--check, --notes-out or --body-out is required');
+
+  const tag = positional[0];
+  let built;
+  try {
+    const { message, tags } = readAnnotatedTag(tag, { cwd });
+    built = buildReleaseNotes({ tag, message, tags });
+  } catch (e) {
+    return { code: 1, out: annotate('error', e.message), err: '' };
+  }
+  let out = built.warnings.map((w) => annotate('warning', w)).join('');
+  if (check) return { code: 0, out: `${out}release notes of ${tag} are valid\n`, err: '' };
+  try {
+    const json = `${JSON.stringify(built.notes, null, 2)}\n`;
+    for (const file of notesOut) fs.writeFileSync(file, json);
+    if (bodyOut !== undefined) fs.writeFileSync(bodyOut, built.body);
+  } catch (e) {
+    return { code: 1, out: out + annotate('error', `cannot write the release notes: ${e.message}`), err: '' };
+  }
+  out += `wrote the release notes of ${tag}\n`;
+  return { code: 0, out, err: '' };
+}
+
+// Run as a command, not when imported. Both paths are resolved, so a symlinked checkout or script
+// still runs (a gate that exits 0 without running would fail open).
+function isMainModule() {
+  const self = fs.realpathSync(fileURLToPath(import.meta.url));
+  // `node scripts/release-notes` (no extension) leaves argv[1] without `.js`.
+  for (const candidate of [process.argv[1], `${process.argv[1]}.js`]) {
+    try {
+      if (candidate && fs.realpathSync(candidate) === self) return true;
+    } catch { /* not a file; try the next */ }
+  }
+  return false;
+}
+
+if (isMainModule()) {
+  const r = main(process.argv.slice(2));
+  if (r.out) process.stdout.write(r.out);
+  if (r.err) process.stderr.write(r.err);
+  process.exitCode = r.code;
 }

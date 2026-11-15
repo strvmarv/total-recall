@@ -1,9 +1,14 @@
 // scripts/release-notes.test.js — tests for scripts/release-notes.js (the release notes pipeline).
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { sanitizeSummary, parseTagMessage, parseReleaseTag, compareVersions, previousVersion } from './release-notes.js';
+import {
+  sanitizeSummary, parseTagMessage, parseReleaseTag, compareVersions, previousVersion, buildReleaseNotes, readAnnotatedTag,
+} from './release-notes.js';
 import { SHIM_TEST_TARGETS } from './run-shim-tests.js';
 
 const here = (rel) => fileURLToPath(new URL(rel, import.meta.url));
@@ -262,4 +267,172 @@ test('parseTagMessage: a bare bullet marker is an empty bullet and does not clos
   const p = parseTagMessage('v1\n\nSummary.\n\nAdded\n- a\n-\n- b\n');
   assert.deepEqual(p.sections.added, ['a', 'b']);
   assert.deepEqual(parseTagMessage('v1\n\nSummary.\n\nAdded\n*\n+\n- c\n').sections.added, ['c']);
+});
+
+// ---- Task 4: notes assembly, the annotated-tag guard and the CLI ----
+
+const SCRIPT = here('./release-notes.js');
+const NOTES_KEYS = ['version', 'previous', 'summary', 'sections', 'url', 'releasesUrl'];
+const V47_TAGS = ['v4.6.0', 'v4.7.0-beta.1', 'v4.7.0-beta.2', 'v4.7.0', '0.5.1', 'vNEXT'];
+
+test('buildReleaseNotes: the real v4.7.0 message gives the six keys, the previous release and the body', () => {
+  const message = tagMessage('v4.7.0');
+  const { notes, body, warnings } = buildReleaseNotes({ tag: 'v4.7.0', message, tags: V47_TAGS });
+  assert.deepEqual(Object.keys(notes), NOTES_KEYS);
+  assert.equal(notes.version, '4.7.0');
+  assert.equal(notes.previous, '4.6.0');
+  assert.equal(notes.url, 'https://github.com/strvmarv/total-recall/releases/tag/v4.7.0');
+  assert.equal(notes.releasesUrl, 'https://github.com/strvmarv/total-recall/releases');
+  assert.match(notes.summary, /^A release version bump is now one checked command/);
+  assert.equal(notes.sections.added.length, 3);
+  assert.deepEqual(Object.keys(notes.sections), SECTION_KEYS);
+  assert.equal(body, `${message.split('\n').slice(2).join('\n').replace(/\s+$/, '')}\n`);
+  assert.deepEqual(warnings, []);
+});
+
+test('buildReleaseNotes: a prerelease takes its previous version from every lower version', () => {
+  const { notes } = buildReleaseNotes({ tag: 'v4.7.0-beta.2', message: tagMessage('v4.7.0-beta.2'), tags: V47_TAGS });
+  assert.equal(notes.version, '4.7.0-beta.2');
+  assert.equal(notes.previous, '4.7.0-beta.1');
+  assert.equal(notes.url, 'https://github.com/strvmarv/total-recall/releases/tag/v4.7.0-beta.2');
+});
+
+test('buildReleaseNotes: a stable tag without a summary throws and names the tag (v4.2.1)', () => {
+  assert.throws(() => buildReleaseNotes({ tag: 'v4.2.1', message: tagMessage('v4.2.1'), tags: [] }), /no summary in the tag message of v4\.2\.1/);
+  // the first paragraph is a heading, so there is no summary either
+  assert.throws(
+    () => buildReleaseNotes({ tag: 'v1.0.0', message: 'v1.0.0\n\nAdded\n- a bullet\n', tags: [] }),
+    /no summary in the tag message of v1\.0\.0/,
+  );
+});
+
+test('buildReleaseNotes: a prerelease without a summary gives an empty summary and one warning', () => {
+  const { notes, warnings } = buildReleaseNotes({ tag: 'v1.0.0-beta.1', message: 'v1.0.0-beta.1\n', tags: [] });
+  assert.equal(notes.summary, '');
+  assert.equal(notes.previous, null);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /no summary in the tag message of v1\.0\.0-beta\.1/);
+});
+
+test('buildReleaseNotes: a tag that is not a release tag throws, and an empty title is an error for a stable tag', () => {
+  assert.throws(() => buildReleaseNotes({ tag: 'vNEXT', message: 'vNEXT\n\nSummary.\n', tags: [] }), /^Error: vNEXT is not a release tag$/);
+  assert.throws(() => buildReleaseNotes({ tag: 'v1.0.0', message: '\n\nSummary.\n', tags: [] }), /^Error: no title in the tag message of v1\.0\.0$/);
+  const { warnings } = buildReleaseNotes({ tag: 'v1.0.0-rc.1', message: '\n\nSummary.\n', tags: [] });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /no title in the tag message of v1\.0\.0-rc\.1/);
+});
+
+// A temporary repository. Every git call runs with a fixed identity, no user or system config and
+// signing off, so a developer's own git configuration cannot change what the tags contain.
+const tempDirs = [];
+const tmp = (prefix) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+};
+after(() => { for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true }); });
+
+const emptyConfig = path.join(tmp('rn-gitconfig-'), 'empty');
+fs.writeFileSync(emptyConfig, '');
+const gitEnv = {
+  ...process.env,
+  GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.invalid',
+  GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.invalid',
+  GIT_CONFIG_GLOBAL: emptyConfig, GIT_CONFIG_SYSTEM: emptyConfig,
+};
+function git(cwd, ...args) {
+  const r = spawnSync('git', ['-c', 'commit.gpgsign=false', '-c', 'tag.gpgsign=false', ...args], { cwd, env: gitEnv, encoding: 'utf8' });
+  assert.equal(r.status, 0, `git ${args.join(' ')}: ${r.stderr}`);
+  return r.stdout;
+}
+function makeRepo() {
+  const repo = tmp('rn-repo-');
+  git(repo, 'init', '-q', '-b', 'main');
+  git(repo, 'commit', '-q', '--allow-empty', '-m', 'first');
+  git(repo, 'tag', 'v1.0.0'); // lightweight
+  git(repo, 'tag', '-a', 'v1.0.1', '-m', 'v1.0.1\n\nA real summary.\n\nAdded\n- one thing\n');
+  git(repo, 'tag', '-a', 'v1.1.0', '-m', 'v1.1.0'); // stable, no summary
+  git(repo, 'tag', '-a', 'v1.1.1-beta.1', '-m', 'v1.1.1-beta.1'); // prerelease, no summary
+  git(repo, 'branch', 'v1.0.3'); // a branch is not a tag
+  return repo;
+}
+const repo = makeRepo();
+
+test('readAnnotatedTag: an annotated tag gives its message and the tag list', () => {
+  const { message, tags } = readAnnotatedTag('v1.0.1', { cwd: repo });
+  assert.match(message, /^v1\.0\.1\n\nA real summary\.\n\nAdded\n- one thing\n/);
+  assert.deepEqual([...tags].sort(), ['v1.0.0', 'v1.0.1', 'v1.1.0', 'v1.1.1-beta.1']);
+});
+
+test('readAnnotatedTag: a lightweight tag fails closed with "not an annotated tag"', () => {
+  assert.throws(() => readAnnotatedTag('v1.0.0', { cwd: repo }), /v1\.0\.0 is not an annotated tag/);
+});
+
+test('readAnnotatedTag: a missing tag, or a branch of that name, throws a different error', () => {
+  for (const tag of ['v9.9.9', 'v1.0.3']) {
+    assert.throws(() => readAnnotatedTag(tag, { cwd: repo }), (e) => e.message.includes(tag) && !/not an annotated tag/.test(e.message), tag);
+  }
+});
+
+test('readAnnotatedTag: a name that is not a release tag throws before any git call', () => {
+  const nowhere = path.join(os.tmpdir(), 'rn-no-such-directory');
+  for (const tag of ['vNEXT', 'v1.0.*', '--help', '']) {
+    assert.throws(() => readAnnotatedTag(tag, { cwd: nowhere }), /is not a release tag/, tag);
+  }
+});
+
+const runCli = (args, { cwd = os.tmpdir() } = {}) => spawnSync(process.execPath, [SCRIPT, ...args], { cwd, env: gitEnv, encoding: 'utf8' });
+
+test('CLI: --notes-out may repeat and --body-out writes the body', () => {
+  const out = tmp('rn-out-');
+  const r = runCli(['v1.0.1', '--cwd', repo, '--notes-out', 'a.json', '--notes-out', 'b.json', '--body-out', 'body.md'], { cwd: out });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const a = fs.readFileSync(path.join(out, 'a.json'), 'utf8');
+  assert.equal(a, fs.readFileSync(path.join(out, 'b.json'), 'utf8'));
+  assert.ok(a.endsWith('}\n'));
+  assert.ok(a.startsWith('{\n  "version": "1.0.1",'));
+  const notes = JSON.parse(a);
+  assert.deepEqual(Object.keys(notes), NOTES_KEYS);
+  assert.equal(notes.previous, '1.0.0');
+  assert.equal(notes.summary, 'A real summary.');
+  assert.deepEqual(notes.sections.added, ['one thing']);
+  assert.equal(fs.readFileSync(path.join(out, 'body.md'), 'utf8'), 'A real summary.\n\nAdded\n- one thing\n');
+});
+
+test('CLI --check: a stable tag without a summary exits 1 with an ::error:: line', () => {
+  const r = runCli(['v1.1.0', '--check', '--cwd', repo]);
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /^::error::no summary in the tag message of v1\.1\.0$/m);
+});
+
+test('CLI --check: a prerelease without a summary exits 0 with a ::warning:: line', () => {
+  const r = runCli(['v1.1.1-beta.1', '--check', '--cwd', repo]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^::warning::no summary in the tag message of v1\.1\.1-beta\.1$/m);
+});
+
+test('CLI: a lightweight tag or a missing tag exits 1 with an ::error:: line and writes nothing', () => {
+  const out = tmp('rn-out-');
+  for (const tag of ['v1.0.0', 'v9.9.9', 'vNEXT']) {
+    const r = runCli([tag, '--cwd', repo, '--notes-out', 'n.json'], { cwd: out });
+    assert.equal(r.status, 1, tag);
+    assert.match(r.stdout, /^::error::/m, tag);
+  }
+  assert.deepEqual(fs.readdirSync(out), []);
+});
+
+test('CLI: a usage error exits 2', () => {
+  for (const args of [[], ['v1.0.1'], ['v1.0.1', '--bogus'], ['v1.0.1', '--notes-out'], ['v1.0.1', 'v1.0.0', '--check'], ['v1.0.1', '--check', '--body-out', 'b.md']]) {
+    const r = runCli(args, { cwd: repo });
+    assert.equal(r.status, 2, JSON.stringify(args));
+    assert.match(r.stderr, /usage: node scripts\/release-notes\.js/, JSON.stringify(args));
+  }
+});
+
+test('CLI: runs through a symlinked path (the main-module check resolves real paths)', (t) => {
+  const link = path.join(tmp('rn-link-'), 'release-notes.js');
+  try { fs.symlinkSync(SCRIPT, link); } catch { t.skip('symlinks are not available'); return; }
+  const r = spawnSync(process.execPath, [link, 'v1.1.1-beta.1', '--check', '--cwd', repo], { env: gitEnv, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /::warning::/);
 });
