@@ -34,8 +34,34 @@ Five issues (#5 to #9) were created (each HTTP 201) and linked (each HTTP 201) i
 
 Sequence: `POST git/refs` (`ref=refs/heads/probe`, `sha` of `main`) 201; `PUT contents/probe.txt` on branch `probe` 201; `POST pulls` (`head=probe`, `base=main`, body `Closes #4`) 201, pull request #10; `PUT pulls/10/merge` (`merge_method=merge`) 200 `merged: true`. Then `GET issues/4` (about five seconds later): `state` `closed`, `state_reason` `completed`. So the definition of "done" (closed with `state_reason` `completed`) holds for a part closed by a merged `Closes #<n>` pull request into the default branch.
 
-Side observation: #4 was **not** linked to a parent (the brief links only #2 and #5 to #9), so this confirms `state_reason` independent of any link. The issue timeline's `closed` event shows `state_reason` null; read the issue itself, not the timeline.
+Side observation: #4 was **not** linked to a parent (only #2 and #5 to #9 were linked: #3 failed the string-form link, #4 was never linked), so this confirms `state_reason` independent of any link. The issue timeline's `closed` event shows `state_reason` null; read the issue itself, not the timeline.
 
 ## (e) The per-parent sub-issue limit
 
 Read from GitHub's documentation (`Adding sub-issues`, docs.github.com, read 2026-11-15, not probed): "You can add up to 100 sub-issues per parent issue and create up to eight levels of nested sub-issues." The design's cap of 50 parts is within the limit, and a single `per_page=100` page of the list holds a whole parent.
+
+## Walk-through
+
+Run on 2026-11-15 in `strvmarv/develop-probe` as `strvmarv`, every call through `ghpin.js run` with an `out` file, the argument forms of the Trust golden in `handoff.md` (no `-i`). The repository was archived afterwards (`PATCH repos/strvmarv/develop-probe -F archived=true`, HTTP 200, a read back shows `archived` true). Nothing was deleted: the parent #11, the stubs #12 to #14 and the impostor #15 stay in the archived repository.
+
+Step 1, the scripts on a three-part spec (parts `Depends on: none`, `Part 1`, `Part 1, Part 2`). `route.js parts` returned `ok` with three parts and `dependsOn` `[]`, `[1]`, `[1,2]`. `route.js stub-body` with a growing dependency map wrote bodies whose `Depends on:` lines read `nothing`, `#<part 1>` and `#<part 1>, #<part 2>`, and `route.js stub` parsed each (`{ok:true,part:n,count:3,parent:<n>}`).
+
+Step 2, Ensure-stubs by hand on a fresh parent, #11 (`created_at` `2026-11-15T20:43:43Z`, which matches the `definedAt` pattern):
+
+- Step 1 (`sub-issues`, page 1): `[]`, fewer than 100 entries, so one page.
+- Step 2 (`issue-scan`, `since=2026-11-15T20:43:43Z`, page 1): one entry, #11 itself (its first line is no stub line), so no claimant. Issues #1 to #9 from the probe are older than `since` and were not listed.
+- Step 3: `permission` for the author `strvmarv` answered `{"permission":"admin",...}` (200) and `counted.js write-access <file>` printed `{"writeAccess":true}`.
+- Step 4, for parts 1, 2 and 3 in order: `stub-body` (stdout `{ok,title}`), `route.js stub` on the written body (ok), `stub-create` (HTTP 201, no assignee: `assignees` empty) giving #12 (id 6409271647), #13 (id 6409271956), #14 (id 6409272281), then `sub-issue-link` with `-F sub_issue_id=<id>` (201 each; the parent's `sub_issues_summary.total` went 1, 2, 3). Part 2's body read `Depends on: #12` and part 3's `Depends on: #12, #13`, the issue numbers created so far. The sub-issue list then held #12, #13, #14 in that order, each with the first line `Part <n> of 3 in #11`.
+
+Step 3, the second run and the impostor:
+
+- Second run: step 1 listed #12 to #14 (three claimants, one per part), the scan added no issue that was not already there, all three authors were eligible (`writeAccess` true), so no part lacked a stub and nothing was created.
+- Impostor: #15, filed by `strvmarv` with the first line `Part 2 of 3 in #11` (`route.js stub` parsed it as part 2, parent 11). Third run: part 2 had two eligible claimants, #13 (linked) and #15 (unlinked, author `strvmarv`, `User`, write access); the lowest number, #13, stays the stub and #15 is reported as a duplicate; it was not linked, edited or closed (read back: open, no assignee, still no parent), and the sub-issue list stayed #12, #13, #14. Nothing was created.
+
+### The `parent_issue_url` question
+
+Observed case: the issues-LIST response (`GET repos/<o>/<r>/issues?state=open&since=...`) carries `parent_issue_url`, and the link shows in it. For linked #12 to #14 it is the string `https://api.github.com/repos/strvmarv/develop-probe/issues/11`; for an unlinked issue (#11, #15) the key is absent (not `null`). The entries also carry `sub_issues_summary` and `issue_dependencies_summary`. The `sub_issues` list entries carry it too. So the primary text of Ensure-stubs step 2/3 applies as written (an issue with `parent_issue_url` set is linked elsewhere or here; absence means unlinked), and the `parent-read` fallback was not needed; it was checked anyway on #15 (HTTP 404 `No parent issue found`, consistent with the list) and on #12 (200, names #11). The prose must keep the fallback: GitHub documents no guarantee for the field, and the check "absent means unlinked" rests on this one observation.
+
+### Deviation from `deliver.md` as written
+
+None that needed an edit: every step worked as written, so `deliver.md` and `skill.test.js` are unchanged. One behaviour to know about, not a failure: the issues list can lag a write. The scan in the third run, made about a second after #15 was created, did not list #15; the same scan 5 seconds later (and every later one) did, while the create call itself had returned it. A run that starts right after another one can therefore miss a stub the earlier one just created and create a second one. That is the "two runs, each creating a stub" case the section already reports as a duplicate and leaves to the person to close, so the prose is not changed.
