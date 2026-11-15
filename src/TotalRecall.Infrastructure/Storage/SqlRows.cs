@@ -77,6 +77,104 @@ VALUES
         return (long)rowidCmd.ExecuteScalar()!;
     }
 
+    /// <summary>Apply an <see cref="UpdateEntryOpts"/> to one content row.</summary>
+    public static void UpdateRow(
+        MsSqliteConnection conn, SqliteTransaction? tx,
+        string table, string id, UpdateEntryOpts opts, long now)
+    {
+        var setClauses = new List<string> { "updated_at = $updated_at" };
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.Parameters.AddWithValue("$updated_at", now);
+
+        if (opts.Content is not null)
+        {
+            setClauses.Add("content = $content");
+            cmd.Parameters.AddWithValue("$content", opts.Content);
+        }
+        if (opts.Summary is not null || opts.ClearSummary)
+        {
+            setClauses.Add("summary = $summary");
+            cmd.Parameters.AddWithValue("$summary", (object?)opts.Summary ?? DBNull.Value);
+        }
+        if (opts.Tags is not null)
+        {
+            setClauses.Add("tags = $tags");
+            cmd.Parameters.AddWithValue("$tags", TagsJson.Encode(opts.Tags));
+        }
+        if (opts.Project is not null || opts.ClearProject)
+        {
+            setClauses.Add("project = $project");
+            cmd.Parameters.AddWithValue("$project", (object?)opts.Project ?? DBNull.Value);
+        }
+        if (opts.DecayScore.HasValue)
+        {
+            setClauses.Add("decay_score = $decay_score");
+            cmd.Parameters.AddWithValue("$decay_score", opts.DecayScore.Value);
+        }
+        if (opts.MetadataJson is not null)
+        {
+            setClauses.Add("metadata = $metadata");
+            cmd.Parameters.AddWithValue("$metadata", opts.MetadataJson);
+        }
+        if (opts.Scope is not null)
+        {
+            setClauses.Add("scope = $scope");
+            cmd.Parameters.AddWithValue("$scope", opts.Scope);
+        }
+        if (opts.EntryType is not null)
+        {
+            setClauses.Add("entry_type = $entry_type");
+            cmd.Parameters.AddWithValue("$entry_type", EntryTypeMapping.ToDbValue(opts.EntryType));
+        }
+        if (opts.Touch)
+        {
+            setClauses.Add("access_count = access_count + 1");
+            setClauses.Add("last_accessed_at = $last_accessed_at");
+            cmd.Parameters.AddWithValue("$last_accessed_at", now);
+        }
+
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.CommandText = $"UPDATE {table} SET {string.Join(", ", setClauses)} WHERE id = $id";
+        cmd.ExecuteNonQuery();
+    }
+
+    public static void DeleteRow(
+        MsSqliteConnection conn, SqliteTransaction? tx, string table, string id)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = $"DELETE FROM {table} WHERE id = $id";
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.ExecuteNonQuery();
+    }
+
+    // Sticky is hot-only: both operate on the hot_* table regardless of
+    // caller intent, since only those tables carry the `sticky` column.
+    public static void SetStickyRow(
+        MsSqliteConnection conn, SqliteTransaction? tx, ContentType type, string id, bool sticky)
+    {
+        var table = MigrationRunner.TableName(Tier.Hot, type);
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = $"UPDATE {table} SET sticky = $sticky WHERE id = $id";
+        cmd.Parameters.AddWithValue("$sticky", sticky ? 1 : 0);
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.ExecuteNonQuery();
+    }
+
+    public static bool IsStickyRow(
+        MsSqliteConnection conn, SqliteTransaction? tx, ContentType type, string id)
+    {
+        var table = MigrationRunner.TableName(Tier.Hot, type);
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = $"SELECT sticky FROM {table} WHERE id = $id";
+        cmd.Parameters.AddWithValue("$id", id);
+        var result = cmd.ExecuteScalar();
+        return result is long l && l != 0L;
+    }
+
     /// <summary>The rowid of the content row with this id, or null.</summary>
     public static long? RowId(
         MsSqliteConnection conn, SqliteTransaction? tx, string table, string id)

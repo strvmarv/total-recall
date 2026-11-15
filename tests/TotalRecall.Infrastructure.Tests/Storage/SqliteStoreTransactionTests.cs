@@ -1,6 +1,7 @@
 using System;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Storage;
+using TotalRecall.Infrastructure.Telemetry;
 using TotalRecall.Infrastructure.Tests.TestSupport;
 using Xunit;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
@@ -310,6 +311,225 @@ public class SqliteStoreTransactionTests
             Assert.Equal(
                 StoreSnapshot.Take(connB, maskTimes: true),
                 StoreSnapshot.Take(connA, maskTimes: true));
+        }
+    }
+
+    // ---- Task 3: update, delete, sticky, import log ----
+
+    private static void SeedHot(SqliteStore store, string id, string text) =>
+        store.InsertWithEmbedding(Tier.Hot, ContentType.Memory,
+            new InsertEntryOpts(text, Id: id, CreatedAt: 1_000L, Tags: new[] { "a" }),
+            Embed(text));
+
+    /// <summary>
+    /// Runs <paramref name="op"/> in a transaction after a first insert, with a
+    /// failure injected at <paramref name="step"/>; asserts the whole
+    /// transaction (the extra insert included) rolled back.
+    /// </summary>
+    private static void AssertFailureRollsBack(
+        string step, Action<SqliteStoreTransaction> op, Action<SqliteStore>? seed = null)
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            seed?.Invoke(store);
+            var before = StoreSnapshot.Take(conn);
+            using (var tx = store.BeginTransaction())
+            {
+                tx.Insert(Tier.Warm, ContentType.Memory,
+                    new InsertEntryOpts("extra", Id: "extra"), Embed("extra"));
+                tx.BeforeStep = FailAt(step);
+                Assert.Throws<InvalidOperationException>(() => op(tx));
+            }
+
+            Assert.Equal(before, StoreSnapshot.Take(conn));
+        }
+    }
+
+    [Fact]
+    public void Update_Commits_AndMatchesStoreUpdate()
+    {
+        var (connA, storeA) = NewStore();
+        var (connB, storeB) = NewStore();
+        using (connA)
+        using (connB)
+        {
+            SeedHot(storeA, "id-1", "before");
+            SeedHot(storeB, "id-1", "before");
+            var opts = new UpdateEntryOpts
+            {
+                Content = "after", Summary = "sum", Tags = new[] { "x", "y" },
+                Project = "proj", DecayScore = 0.5, MetadataJson = "{\"k\":\"v\"}",
+            };
+
+            using (var tx = storeA.BeginTransaction())
+            {
+                tx.Update(Tier.Hot, ContentType.Memory, "id-1", opts);
+                tx.Commit();
+            }
+            storeB.Update(Tier.Hot, ContentType.Memory, "id-1", opts);
+
+            Assert.Equal(
+                StoreSnapshot.Take(connB, maskTimes: true),
+                StoreSnapshot.Take(connA, maskTimes: true));
+        }
+    }
+
+    [Fact]
+    public void Update_ScopeAndEntryType_Work()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            SeedHot(store, "id-1", "x");
+            using (var tx = store.BeginTransaction())
+            {
+                tx.Update(Tier.Hot, ContentType.Memory, "id-1",
+                    new UpdateEntryOpts { Scope = "s2", EntryType = EntryType.Decision });
+                tx.Commit();
+            }
+
+            var entry = store.Get(Tier.Hot, ContentType.Memory, "id-1")!;
+            Assert.Equal("s2", entry.Scope);
+            Assert.True(entry.EntryType.IsDecision);
+        }
+    }
+
+    [Fact]
+    public void Delete_RemovesRowAndVector()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            SeedHot(store, "id-1", "x");
+            using (var tx = store.BeginTransaction())
+            {
+                tx.Delete(Tier.Hot, ContentType.Memory, "id-1");
+                tx.Commit();
+            }
+
+            Assert.Null(store.Get(Tier.Hot, ContentType.Memory, "id-1"));
+            Assert.Equal(0, ScalarLong(conn, "SELECT count(*) FROM hot_memories_vec"));
+        }
+    }
+
+    [Fact]
+    public void Delete_MissingId_IsNoOp()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            SeedHot(store, "id-1", "x");
+            var before = StoreSnapshot.Take(conn);
+            using (var tx = store.BeginTransaction())
+            {
+                tx.Delete(Tier.Hot, ContentType.Memory, "nope");
+                tx.Commit();
+            }
+
+            Assert.Equal(before, StoreSnapshot.Take(conn));
+        }
+    }
+
+    [Fact]
+    public void FailureAtDeleteVec_RollsBackBothRows() =>
+        AssertFailureRollsBack("delete-vec",
+            tx => tx.Delete(Tier.Hot, ContentType.Memory, "id-1"),
+            store => SeedHot(store, "id-1", "x"));
+
+    [Fact]
+    public void FailureAtDeleteRow_RollsBack() =>
+        AssertFailureRollsBack("delete-row",
+            tx => tx.Delete(Tier.Hot, ContentType.Memory, "id-1"),
+            store => SeedHot(store, "id-1", "x"));
+
+    [Fact]
+    public void FailureAtUpdate_RollsBack() =>
+        AssertFailureRollsBack("update",
+            tx => tx.Update(Tier.Hot, ContentType.Memory, "id-1", new UpdateEntryOpts { Content = "z" }),
+            store => SeedHot(store, "id-1", "x"));
+
+    [Fact]
+    public void FailureAtSetSticky_RollsBack() =>
+        AssertFailureRollsBack("set-sticky",
+            tx => tx.SetSticky(ContentType.Memory, "id-1", true),
+            store => SeedHot(store, "id-1", "x"));
+
+    [Fact]
+    public void SetSticky_IsSticky_RoundTrip()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            SeedHot(store, "id-1", "x");
+            using (var tx = store.BeginTransaction())
+            {
+                Assert.False(tx.IsSticky(ContentType.Memory, "id-1"));
+                tx.SetSticky(ContentType.Memory, "id-1", true);
+                Assert.True(tx.IsSticky(ContentType.Memory, "id-1"));
+                tx.Commit();
+            }
+
+            Assert.True(store.IsSticky(ContentType.Memory, "id-1"));
+        }
+    }
+
+    [Fact]
+    public void SetSticky_RollsBackOnDispose()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            SeedHot(store, "id-1", "x");
+            using (var tx = store.BeginTransaction())
+            {
+                tx.SetSticky(ContentType.Memory, "id-1", true);
+            }
+
+            Assert.False(store.IsSticky(ContentType.Memory, "id-1"));
+        }
+    }
+
+    [Fact]
+    public void LogImport_WritesSameRowAsImportLog()
+    {
+        var (connA, storeA) = NewStore();
+        var (connB, _) = NewStore();
+        using (connA)
+        using (connB)
+        {
+            using (var tx = storeA.BeginTransaction())
+            {
+                tx.LogImport("claude-code", "/p/a.md", "hash-1", "entry-1", Tier.Warm, ContentType.Memory);
+                tx.Commit();
+            }
+            new ImportLog(connB).LogImport(
+                "claude-code", "/p/a.md", "hash-1", "entry-1", Tier.Warm, ContentType.Memory);
+
+            Assert.Equal(
+                StoreSnapshot.Take(connB, maskTimes: true),
+                StoreSnapshot.Take(connA, maskTimes: true));
+            Assert.True(new ImportLog(connA).IsAlreadyImported("hash-1"));
+        }
+    }
+
+    [Fact]
+    public void FailureAtLogImport_RollsBack() =>
+        AssertFailureRollsBack("log-import",
+            tx => tx.LogImport("t", "/p", "h", "e", Tier.Warm, ContentType.Memory));
+
+    [Fact]
+    public void LogImport_RollsBackOnDispose()
+    {
+        var (conn, store) = NewStore();
+        using (conn)
+        {
+            using (var tx = store.BeginTransaction())
+            {
+                tx.LogImport("t", "/p", "h", "e", Tier.Warm, ContentType.Memory);
+            }
+
+            Assert.False(new ImportLog(conn).IsAlreadyImported("h"));
         }
     }
 }

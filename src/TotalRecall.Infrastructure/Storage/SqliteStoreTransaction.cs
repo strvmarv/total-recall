@@ -1,6 +1,7 @@
 using System;
 using Microsoft.Data.Sqlite;
 using TotalRecall.Core;
+using TotalRecall.Infrastructure.Telemetry;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
 namespace TotalRecall.Infrastructure.Storage;
@@ -68,6 +69,63 @@ public sealed class SqliteStoreTransaction : IDisposable
     /// <summary>Read an entry inside the transaction.</summary>
     public Entry? Get(Tier tier, ContentType type, string id) =>
         SqlRows.ReadRow(_conn, Tx, MigrationRunner.TableName(tier, type), id);
+
+    /// <summary>Apply an update to one row. Step: <c>update</c>.</summary>
+    public void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts)
+    {
+        ArgumentNullException.ThrowIfNull(opts);
+        var tx = Tx;
+        Step("update");
+        SqlRows.UpdateRow(
+            _conn, tx, MigrationRunner.TableName(tier, type), id, opts,
+            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+    }
+
+    /// <summary>
+    /// Delete a row and its vector row. A missing id is a no-op. Steps:
+    /// <c>delete-vec</c>, <c>delete-row</c>.
+    /// </summary>
+    public void Delete(Tier tier, ContentType type, string id)
+    {
+        var tx = Tx;
+        var table = MigrationRunner.TableName(tier, type);
+        var rowid = SqlRows.RowId(_conn, tx, table, id);
+        if (rowid is null) return;
+
+        Step("delete-vec");
+        VecRows.Delete(_conn, tx, MigrationRunner.VecTableName(tier, type), rowid.Value);
+        Step("delete-row");
+        SqlRows.DeleteRow(_conn, tx, table, id);
+    }
+
+    /// <summary>Set the sticky flag (hot only). Step: <c>set-sticky</c>.</summary>
+    public void SetSticky(ContentType type, string id, bool sticky)
+    {
+        var tx = Tx;
+        Step("set-sticky");
+        SqlRows.SetStickyRow(_conn, tx, type, id, sticky);
+    }
+
+    public bool IsSticky(ContentType type, string id) =>
+        SqlRows.IsStickyRow(_conn, Tx, type, id);
+
+    /// <summary>
+    /// Record an import in <c>import_log</c> (<c>INSERT OR IGNORE</c>, the same
+    /// stable row id as <see cref="ImportLog.LogImport"/>). Step: <c>log-import</c>.
+    /// </summary>
+    public void LogImport(
+        string sourceTool, string sourcePath, string contentHash,
+        string targetEntryId, Tier tier, ContentType type)
+    {
+        ArgumentNullException.ThrowIfNull(sourceTool);
+        ArgumentNullException.ThrowIfNull(sourcePath);
+        ArgumentNullException.ThrowIfNull(contentHash);
+        ArgumentNullException.ThrowIfNull(targetEntryId);
+        var tx = Tx;
+        Step("log-import");
+        ImportLog.LogImportRow(
+            _conn, tx, sourceTool, sourcePath, contentHash, targetEntryId, tier, type);
+    }
 
     public void Commit()
     {

@@ -151,94 +151,20 @@ public sealed class SqliteStore : IStore, IMetaStore, IDisposable
         ArgumentNullException.ThrowIfNull(opts);
         var table = MigrationRunner.TableName(tier, type);
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
-        var setClauses = new List<string> { "updated_at = $updated_at" };
-        using var cmd = _conn.CreateCommand();
-        cmd.Parameters.AddWithValue("$updated_at", now);
-
-        if (opts.Content is not null)
-        {
-            setClauses.Add("content = $content");
-            cmd.Parameters.AddWithValue("$content", opts.Content);
-        }
-        if (opts.Summary is not null || opts.ClearSummary)
-        {
-            setClauses.Add("summary = $summary");
-            cmd.Parameters.AddWithValue("$summary", (object?)opts.Summary ?? DBNull.Value);
-        }
-        if (opts.Tags is not null)
-        {
-            setClauses.Add("tags = $tags");
-            cmd.Parameters.AddWithValue("$tags", TagsJson.Encode(opts.Tags));
-        }
-        if (opts.Project is not null || opts.ClearProject)
-        {
-            setClauses.Add("project = $project");
-            cmd.Parameters.AddWithValue("$project", (object?)opts.Project ?? DBNull.Value);
-        }
-        if (opts.DecayScore.HasValue)
-        {
-            setClauses.Add("decay_score = $decay_score");
-            cmd.Parameters.AddWithValue("$decay_score", opts.DecayScore.Value);
-        }
-        if (opts.MetadataJson is not null)
-        {
-            setClauses.Add("metadata = $metadata");
-            cmd.Parameters.AddWithValue("$metadata", opts.MetadataJson);
-        }
-        if (opts.Scope is not null)
-        {
-            setClauses.Add("scope = $scope");
-            cmd.Parameters.AddWithValue("$scope", opts.Scope);
-        }
-        if (opts.EntryType is not null)
-        {
-            setClauses.Add("entry_type = $entry_type");
-            cmd.Parameters.AddWithValue("$entry_type", EntryTypeMapping.ToDbValue(opts.EntryType));
-        }
-        if (opts.Touch)
-        {
-            setClauses.Add("access_count = access_count + 1");
-            setClauses.Add("last_accessed_at = $last_accessed_at");
-            cmd.Parameters.AddWithValue("$last_accessed_at", now);
-        }
-
-        cmd.Parameters.AddWithValue("$id", id);
-        cmd.CommandText = $"UPDATE {table} SET {string.Join(", ", setClauses)} WHERE id = $id";
-        cmd.ExecuteNonQuery();
+        SqlRows.UpdateRow(_conn, null, table, id, opts, now);
     }
 
     // Tier model v2 (Task 5). Sticky is hot-only: both methods operate on the
     // hot_* table regardless of caller intent, since only those tables carry
     // the `sticky` column.
-    public void SetSticky(ContentType type, string id, bool sticky)
-    {
-        var table = MigrationRunner.TableName(Tier.Hot, type);
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = $"UPDATE {table} SET sticky = $sticky WHERE id = $id";
-        cmd.Parameters.AddWithValue("$sticky", sticky ? 1 : 0);
-        cmd.Parameters.AddWithValue("$id", id);
-        cmd.ExecuteNonQuery();
-    }
+    public void SetSticky(ContentType type, string id, bool sticky) =>
+        SqlRows.SetStickyRow(_conn, null, type, id, sticky);
 
-    public bool IsSticky(ContentType type, string id)
-    {
-        var table = MigrationRunner.TableName(Tier.Hot, type);
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = $"SELECT sticky FROM {table} WHERE id = $id";
-        cmd.Parameters.AddWithValue("$id", id);
-        var result = cmd.ExecuteScalar();
-        return result is long l && l != 0L;
-    }
+    public bool IsSticky(ContentType type, string id) =>
+        SqlRows.IsStickyRow(_conn, null, type, id);
 
-    public void Delete(Tier tier, ContentType type, string id)
-    {
-        var table = MigrationRunner.TableName(tier, type);
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = $"DELETE FROM {table} WHERE id = $id";
-        cmd.Parameters.AddWithValue("$id", id);
-        cmd.ExecuteNonQuery();
-    }
+    public void Delete(Tier tier, ContentType type, string id) =>
+        SqlRows.DeleteRow(_conn, null, MigrationRunner.TableName(tier, type), id);
 
     public string? FindByContent(Tier tier, ContentType type, string content)
     {

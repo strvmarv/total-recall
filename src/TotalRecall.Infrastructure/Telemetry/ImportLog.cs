@@ -92,8 +92,27 @@ public sealed class ImportLog : IImportLog
         ArgumentNullException.ThrowIfNull(contentHash);
         ArgumentNullException.ThrowIfNull(targetEntryId);
 
+        LogImportRow(_conn, null, sourceTool, sourcePath, contentHash, targetEntryId, targetTier, targetType);
+    }
+
+    /// <summary>
+    /// The one <c>INSERT OR IGNORE</c> into <c>import_log</c>, shared by
+    /// <see cref="LogImport"/> and the store transaction (which passes its own
+    /// <paramref name="tx"/>).
+    /// </summary>
+    internal static void LogImportRow(
+        MsSqliteConnection conn,
+        Microsoft.Data.Sqlite.SqliteTransaction? tx,
+        string sourceTool,
+        string sourcePath,
+        string contentHash,
+        string targetEntryId,
+        Tier targetTier,
+        ContentType targetType)
+    {
         var id = StableId(sourceTool, sourcePath, contentHash);
-        using var cmd = _conn.CreateCommand();
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = @"
 INSERT OR IGNORE INTO import_log
   (id, timestamp, source_tool, source_path, content_hash, target_entry_id, target_tier, target_type)
@@ -110,10 +129,6 @@ VALUES
         cmd.ExecuteNonQuery();
     }
 
-    /// <summary>
-    /// Stable id derived from <c>MD5(sourceTool:sourcePath:contentHash)</c> —
-    /// matches the TS recipe so the same row can be deduped across runtimes.
-    /// </summary>
     internal static string StableId(string sourceTool, string sourcePath, string contentHash)
     {
         var input = $"{sourceTool}:{sourcePath}:{contentHash}";
