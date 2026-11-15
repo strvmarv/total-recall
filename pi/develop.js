@@ -23,7 +23,7 @@ export function developText(args, developSkillPath) {
 /**
  * Register `/develop`.
  * `deps.hookable(ctx)` is false when PI_SUBAGENT_ID is set and in sessions with no session file
- * (--no-session, an in-memory subagent child); the command then only shows a notice. It is true for a
+ * (--no-session, or a pi-subagents child kept in memory: nested by default, or `persist_session: false`); the command then only shows a notice. It is true for a
  * top-level pi-subagents child (see extension.js).
  */
 export function registerDevelop(pi, { hookable, developSkillPath }) {
