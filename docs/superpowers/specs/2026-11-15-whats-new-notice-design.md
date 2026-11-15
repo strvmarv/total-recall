@@ -143,10 +143,11 @@ hook / extension (short-lived)          `total-recall whats-new --host <id>`  (r
   `release-notes.json`: `{ "version", "previous", "summary", "sections": {"added": [], "changed": [],
   "fixed": []}, "url", "releasesUrl" }`. `summary` is the first paragraph after the title line,
   whitespace collapsed, then reduced by the same sanitiser as fetched text (section 2), so a packaged
-  summary of 300 to 373 characters is capped the same way. `previous` is, for a stable release, the
-  highest lower **stable** tag, and for a prerelease the highest lower tag of any kind (null for the
-  first); it is computed from the full tag list (the checkout fetches tags explicitly, since the
-  workflow's shallow checkout has no other tags). An offline engine uses it to tell a one-release update
+  summary of 300 to 373 characters is capped the same way. `version` and `previous` are bare versions without the `v` ("4.7.0", the form `seen-<host>.json` records), and `previous` is
+  null for the first release. `previous` is, for a stable release, the highest lower **stable** version,
+  and for a prerelease the highest lower version of any kind. It is computed from the tag list filtered to
+  `vMAJOR.MINOR.PATCH[-prerelease]` (the repository also holds a non-semver tag `0.5.1`, which is ignored)
+  and ordered by SemVer 2.0.0 precedence, not lexically (v4.10.0 is above v4.9.0). An offline engine uses it to tell a one-release update
   from a longer jump. The parser accepts an optional `total-recall ` prefix in the title and empty or
   missing `Added`/`Changed`/`Fixed` sections. `url` is
   `https://github.com/strvmarv/total-recall/releases/tag/v<version>` and `releasesUrl` is
@@ -164,9 +165,18 @@ hook / extension (short-lived)          `total-recall whats-new --host <id>`  (r
   staged, so the file must exist earlier than both), so the notes ride with the engine in the npm
   package and in every archive, on every install path.
   `softprops/action-gh-release` is given `body_path` so the release body is the same text.
-- Risk the builder must settle: `actions/checkout` on a tag push can lose the annotated tag object, so
-  `git tag -l --format='%(contents)'` may return the commit message. Fall back to `git fetch --force
-  origin tag <name>` or the git-tag API; the step must fail rather than ship a commit message.
+- **Annotated tag object (design, not a risk).** `actions/checkout` of a tag ref leaves a lightweight tag
+  at the commit, so `git tag -l --format='%(contents)'` returns the commit message, which has the same
+  title-blank-paragraph shape and would pass the gate. Both the `check-version` and `publish` jobs fetch
+  with `fetch-depth: 0` and `git fetch --force --tags origin` (which also supplies the tag list
+  `previous` needs), and the script fails closed unless `git cat-file -t refs/tags/<tag>` prints `tag`.
+  Tested against a temporary repository holding a lightweight tag and an annotated one.
+- **Lenient mode.** The gate (stable fails, prerelease warns) and the script that writes the files run in
+  different jobs. The script takes the release kind from the version: for a stable tag a missing summary
+  is an error; for a prerelease it writes `summary: ""` and a warning, so a summary-less beta cannot
+  fail the release after four builds. Tested for both.
+- **Section headings.** A heading is an `Added`, `Changed` or `Fixed` section when it starts with that
+  word, so `Added (from 4.7.0-beta.1)` (v4.7.0-beta.2) counts; any other heading is ignored.
 
 ### 2. Engine: state, decider, update checker
 
@@ -234,8 +244,14 @@ never on the boot path:
 - **Untrusted input.** The response is data. The summary is reduced to one line of plain text (control
   characters, ANSI escapes and newlines removed, markdown links flattened, capped at 200 characters at a
   word boundary) before it is stored. The sanitiser is specified here once and implemented twice, in JavaScript in
-  the release script (section 1) and in C# in the engine, both tested against one shared fixture list so
-  they cannot drift. The update instruction in a nudge is composed from the host table
+  the release script (section 1) and in C# in the engine, both tested against one shared fixture file
+  (`scripts/fixtures/summary-sanitiser.json`, inputs and expected outputs, which the engine's tests read)
+  so they cannot drift. The rule: remove control characters and ANSI escape sequences; turn every run of
+  whitespace, including newlines, into one space; flatten a markdown link `[text](url)` to `text` and drop
+  bare URLs' angle brackets; keep inline code and emphasis marks as plain characters; trim; if longer than
+  200 characters cut at the last space at or before 200 and add no ellipsis; a single word longer than
+  200 characters is cut at 200. Examples in the fixture file: `"Fixed [the cache](https://x.y) bug\n"` gives
+  `"Fixed the cache bug"`; `"\u001b[31mred\u001b[0m"` gives `"red"`. The update instruction in a nudge is composed from the host table
   below, never from fetched text.
 
 Config (`[updates]` in `config.toml`, read in `ConfigLoader`, documented in `docs/configuration.md`):
