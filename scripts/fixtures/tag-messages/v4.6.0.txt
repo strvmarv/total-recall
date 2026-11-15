@@ -1,0 +1,12 @@
+total-recall v4.6.0
+
+session_start now runs a version-gated first-run smoke test and reports it in smokeTest, reports retrieval regressions in regressionAlerts, and tags retrieval and compaction events with a real config snapshot id.
+
+Added
+- session_start runs a version-gated first-run smoke test (#51): the 22 smoke queries run once per version against the bundled corpus in an isolated ephemeral database, reusing the session embedder. Pass is an exact-match rate of at least 0.8. A run that cannot complete reports passed=false with the reason, records nothing and retries next session; it never fails session_start. The record is per machine on Postgres.
+- session_start reports retrieval regressions in regressionAlerts (#50).
+
+Fixed
+- Retrieval and compaction events carry a real config snapshot id (#49).
+- Config snapshot lookups are deterministic when two snapshots share a millisecond.
+

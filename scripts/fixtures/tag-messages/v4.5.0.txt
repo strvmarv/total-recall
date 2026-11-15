@@ -1,0 +1,10 @@
+v4.5.0
+
+Retargeted to .NET 10, memories default to Warm, and session_start reports its project fields.
+
+- The solution and the shipped NativeAOT binaries now target net10.0, declared once in a root Directory.Build.props (.NET 8 support ended on 10 November 2026). No code or behaviour changes; the release and UI smoke steps read the publish output from bin/Release/net10.0/.
+- Warm is the default tier on every ingress path: memory_extract, memory_import, `total-recall memory import` and the Cortex pull no longer put new entries into Hot when no tier is given. Explicit tiers and sticky pins are honoured as before.
+- session_start now reports project, warmSweep and projectDocs instead of hardcoded nulls.
+
+Not yet observed: the linux-arm64, osx-arm64 and win-x64 publishes on net10.0 (only linux-x64 was checked before the tag). Full notes: CHANGELOG.md.
+

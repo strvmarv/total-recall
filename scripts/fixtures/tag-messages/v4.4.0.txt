@@ -1,0 +1,11 @@
+v4.4.0
+
+The develop skill. No engine (C#) changes.
+
+- `/develop` defines a change as a reviewed GitHub issue (brainstorm, spec or approach, two reviewer agents, a ticket written to a standard, pinned by a `defined` comment) and delivers it hands-off as a pull request (plan, build with review at every step, verify, open the PR, stop). It never merges.
+- Every `gh` and network `git` call is pinned to the chosen account on that command only. A run trusts a `defined` comment by a user with write access, not the issue body.
+- Ships as `skills/develop/` with zero-dependency Node scripts, the `adversarial-reviewer` and `counterexample-reviewer` agents, and a `/develop` command for pi. A repository can add a profile at `.github/develop.md`.
+- Release and CI workflows no longer install clang unconditionally; the GitHub-hosted images already ship it.
+
+Not yet observed: write-but-not-admin permission lookups, a real HTTPS push with the pinned helper, and whether Copilot, Cursor and Codex load `agents/` (they fall back to `review=self`). Full notes: CHANGELOG.md.
+

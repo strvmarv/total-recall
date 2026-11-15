@@ -1,0 +1,12 @@
+v4.3.0
+
+Four new coding-agent hosts. Each gets the MCP server, the startup instructions and the per-turn pinned-directive floor. No engine (C#) changes.
+
+- pi harness support: `pi install npm:@strvmarv/total-recall` (or `git:github.com/strvmarv/total-recall`).
+- Codex CLI harness support: `codex plugin marketplace add strvmarv/total-recall-marketplace`, then `codex plugin add total-recall@strvmarv-total-recall-marketplace`.
+- Copilot CLI harness support: node hooks via `.github/plugin/plugin.json` (the old `.copilot-plugin/plugin.json` was never read by Copilot).
+- Cursor CLI harness support: local plugin in `~/.cursor/plugins/local/total-recall`; floor on tool-using turns, workspace-cwd MCP server so project-scoped pins work.
+- The seven-file version sync is now enforced by `codex/manifest.test.js`.
+
+Observed on pi 1.5.2, Codex 0.162.1, Copilot CLI 1.0.98-2 and cursor-agent 2026.11.10 (Windows). macOS/Linux, the Cursor marketplace path and several interactive flows are unobserved; see INSTALL.md and docs/TODO.md. Full notes: CHANGELOG.md.
+
