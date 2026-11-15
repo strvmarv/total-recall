@@ -115,6 +115,10 @@ A repair on retry, not a transaction: in cortex mode the importers write through
 cannot share a transaction, and an import that spans a store write, an embedder call and a log write is
 not worth making transactional for a case a retry can fix.
 
+The steps live in **one shared helper** in `ImportUtils` (it takes the id, tier, content, insert options and
+the log fields and returns whether it inserted or repaired), called by both `ImportMarkdownFile` and the
+Hermes piece loop, so the repair is written once.
+
 For a memory import, after `IsAlreadyImported(hash)` has said "not yet":
 
 1. derive the id;
@@ -130,8 +134,11 @@ A repaired import counts as **imported** (the importer's outcome and the Hermes 
 the entry was not complete before. So a kill after step 3's insert, or after step 4, is repaired by the
 next run: one entry, one embedding, one log row. Today a retry of such a kill inserts a *duplicate* with a
 new random id and leaves the first copy without a vector; with a derived id the retry finds the entry
-instead, so no duplicate and no primary-key error can occur, and the Hermes per-piece loop (which uses the
-same steps) carries on with the rest of the file. In cortex mode the skipped insert is not re-enqueued; a
+instead, so a retry after a kill adds no duplicate and raises no primary-key error, and the Hermes
+per-piece loop (which uses the same steps) carries on with the rest of the file. Two importers running at
+once (two sessions starting together) can both pass the lookup and both insert the derived id: the loser's
+insert fails, and the helper then looks the entry up again and, if it is there, carries on as in step 3
+(otherwise it rethrows), so the race is benign and costs nothing but the duplicate work. In cortex mode the skipped insert is not re-enqueued; a
 kill between `RoutingStore`'s local insert and its enqueue leaves the entry local only, a gap that exists
 today and is not widened.
 
