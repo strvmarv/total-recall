@@ -119,9 +119,14 @@ export function createExtension({
       // The hooks still work; the user can add the server to mcp.json by hand.
     }
 
-    // False in a subagent child (pi-herdr-agents sets PI_SUBAGENT_ID for a full pi process that has a
-    // session file) and in an ephemeral session (--no-session, in-memory pi-subagents child): neither is
-    // the user's conversation, and a child would otherwise open its own memory session.
+    // False when PI_SUBAGENT_ID is set (a full pi process that has a session file; pi-herdr-agents is
+    // said to set it for its children, which was not inspected) and in a session with no session file:
+    // --no-session, or a pi-subagents child that is kept in memory (a nested child by default, or one
+    // with persist_session: false). Such a child is not the user's conversation, and it would otherwise
+    // open its own memory session.
+    // It is NOT false for a top-level pi-subagents child: pi-subagents keeps that child's session in a
+    // file by default (rememberAgents: true) and sets no PI_SUBAGENT_ID, so the child gets the
+    // instructions and the floor. Observed, and the workarounds, in docs/hosts/pi.md.
     const hookable = (ctx) => !env.PI_SUBAGENT_ID && ctx.sessionManager.getSessionFile() !== undefined;
 
     try {
