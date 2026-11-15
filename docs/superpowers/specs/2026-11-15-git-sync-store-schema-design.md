@@ -21,9 +21,10 @@ first, on their own, with tests that pin the shape.
 2. `Core.Config.GitSyncConfig`: the settings record with the umbrella's keys and defaults, a pure
    normalisation that turns any input into a usable configuration plus a list of warnings, and the loader that
    reads `[git_sync]` from `config.toml`.
-3. A malformed `[git_sync]` section never makes the configuration fail to load: each bad value becomes its
-   default (or is clamped) and is reported as a warning naming the key; a remote or branch that cannot be used
-   safely is reported as not set.
+3. A `[git_sync]` section whose values are of the wrong type, out of range, unknown, or not a table never makes
+   the configuration fail to load: each bad value becomes its default (or is clamped) and is recorded as a
+   warning in the loaded configuration, naming the key; a remote or branch that cannot be used safely is
+   recorded as not set.
 4. No change to any existing behavior, table, key, tool or config snapshot.
 
 ## Non-goals
@@ -34,6 +35,9 @@ first, on their own, with tests that pin the shape.
   `GitClient`, the clone path, the URL scheme and transport checks: milestone 1a.
 - The encodings of `pushing_stamps` and `repush_groups`, and of the JSON payloads: the milestone that first
   writes them (1b-i, 1b-ii, 1b-iii) fixes them. This milestone stores them as opaque TEXT.
+- TOML syntax errors: a syntax error anywhere in `config.toml`, including inside `[git_sync]`, still fails the load
+  exactly as it does for every other section (`ConfigLoader.ParseToml` runs before any section is projected).
+- Surfacing the warnings to the user (`status`, stderr): the consumers are later milestones; this one records them.
 - Serializing `[git_sync]` into config snapshots (`ConfigJsonSerializer` is unchanged) and the web UI Config page.
 - Postgres: the sync tables are SQLite-only (the umbrella: "SQLite and cortex stores only"); the Postgres
   migration runner is untouched. Cortex mode uses the local SQLite store, so it gets the tables with no extra work.
@@ -54,7 +58,8 @@ The umbrella lists the table columns and the config keys; the spec fixes what it
    never configures sync has `GitSync = None` and sees no change. Absent keys take the defaults below.
 4. **Bad values never fail the load.** A value of the wrong TOML type, out of range, or outside the allowed set
    takes its default (or is clamped) and adds a warning `git_sync.<key>: <what was wrong>; using <value>`.
-   The loader does not throw for anything inside `[git_sync]`. (The pinned-tier loader throws on a wrong type;
+   Projecting `[git_sync]` does not throw for any value the TOML parser accepts. (A syntax error is the parser's
+   and fails as before; an integer literal beyond `int64` is such a syntax error, so `RawValue` needs no case for it.) (The pinned-tier loader throws on a wrong type;
    a typo in an optional section that breaks every command is a worse failure than a warning for settings that
    are only read by sync.)
 5. **A remote or branch that cannot be used safely is "not set", not defaulted.** A branch defaulted to
@@ -148,8 +153,10 @@ type GitSyncConfig =
       Warnings: string list }
 ```
 
-and `TotalRecallConfig.GitSync: GitSyncConfig option` (a new last field). The pure module `GitSyncConfig`
-(`Config.fs`, after the types) has:
+and `TotalRecallConfig.GitSync: GitSyncConfig option` (a new last field). The pure module `GitSyncSettings`
+(`Config.fs`, after the types; a distinct name, because a record type and a module of the same name in one flat
+module would get an implicit `Module` suffix that C# callers see) holds the range constants as `[<Literal>]`s
+and has:
 
 - `defaults : GitSyncConfig` (remote `None`, branch `Some "main"`, no warnings);
 - `normalise : RawGitSync -> GitSyncConfig`, where `RawGitSync` carries each key as a `RawValue` of
@@ -159,7 +166,7 @@ and `TotalRecallConfig.GitSync: GitSyncConfig option` (a new last field). The pu
 | Key | Default | Rule (anything else: the default, plus a warning) |
 |---|---|---|
 | `remote` | not set | a string; trimmed; non-empty; no whitespace or control characters; does not start with `-`. Else `None`. An empty string is "not set" without a warning |
-| `branch` | `"main"` | a string matching `^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$`, with no `..`, no `//`, and not ending in `/`, `.` or `.lock`. Else `None` + warning (not defaulted, Decided 5) |
+| `branch` | `"main"` | a string matching `^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$`, with no `..` and no `//`, not ending in `/` or `.`, and **no `/`-separated component that begins with `.` or ends with `.lock`**. Else `None` + warning (not defaulted, Decided 5). The allowed set is deliberately narrower than git's (it excludes names git would accept, such as a leading `_` or non-ASCII letters) and never wider |
 | `interval_seconds` | 300 | an integer; `0` disables the timer; otherwise 30 to 86,400. A value 1 to 29 is **clamped to 30**; a negative value or one above 86,400 takes the default |
 | `session_start` | `blocking` | one of `"blocking"`, `"background"`, `"off"` (case-sensitive) |
 | `session_start_soft_seconds` | 10 | an integer 1 to 3,600 |
@@ -169,12 +176,12 @@ and `TotalRecallConfig.GitSync: GitSyncConfig option` (a new last field). The pu
 | `session_end_seconds` | 8 | an integer 1 to 3,600 |
 | `delete_guard_percent` | 20 | an integer 0 to 100 |
 
-After the per-key rules, **if `soft > max`, `soft` is lowered to `max`** (the hard ceiling wins) with a warning.
+After the per-key rules, **if `soft > max`, `soft` is lowered to `max`** (the hard ceiling wins). The warning is given only when `session_start_soft_seconds` was written; when it was absent and `max` is below the default soft value, `soft` is lowered silently.
 Warnings are one line each, in key order of the table, so the output is deterministic.
 
 The loader, in `ConfigLoader.Project` next to the other sections, builds `GitSync` from `table["git_sync"]` when
 it is a table (`None` otherwise, including when `git_sync` is present but not a table, which adds no config and
-is left to the TOML layer). Integer values outside the `int64` range and floats are `Bad`. It calls `normalise`
+is left to the TOML layer). Floats, arrays and nested tables are `Bad`. It calls `normalise`
 and wraps the result in `Some`. `ConfigJsonSerializer` is unchanged (`GitSync` is not serialized, Decided 3).
 
 `defaults.toml` gets a commented `[git_sync]` block documenting the keys and defaults, next to `[cortex]`.
@@ -188,23 +195,26 @@ and wraps the result in `Some`. `ConfigJsonSerializer` is unchanged (`GitSync` i
   and `_meta` upgrades with every row intact (the test drops the new objects and sets the version back to 17);
   each `CHECK` rejects a value outside its list and accepts each value inside it; each primary key rejects a
   duplicate; `direction` accepts NULL; `arrived_at` rejects NULL.
-- **Settings, pure** (`tests/TotalRecall.Core.Tests/GitSyncConfigTests.fs`): defaults; every key with a valid
+- **Settings, pure** (`tests/TotalRecall.Core.Tests/GitSyncConfigTests.fs`, added to `TotalRecall.Core.Tests.fsproj` before `Program.fs`): defaults; every key with a valid
   value; every rule row with a boundary below, at and above each limit; wrong types; unsafe `remote` and `branch`
-  strings (leading `-`, spaces, tab, newline, NUL, `..`, trailing `.lock`, 101 characters); `soft > max`; the
+  strings (leading `-`, spaces, tab, newline, NUL, `..`, `//`, a trailing `.lock`, a component such as `feature/.x` or `a.lock/b`, 101 characters); `soft > max` with and without an explicit soft value; the
   warning text and order; totality over generated `RawValue`s (never throws; every field in range).
 - **Loader** (`tests/TotalRecall.Infrastructure.Tests/ConfigLoaderTests.cs`): no `[git_sync]` gives `GitSync = None`
   and the rest of the configuration unchanged; a section with only a remote gives the defaults; every key set;
   a malformed section (wrong types, unknown keys, `git_sync` as a string) loads with warnings and does not throw;
   a user file overriding a default of another section is unaffected.
+- **Existing test updated:** `SchemaTests.RunMigrations_RunTwice_Idempotent` asserts 17 `_schema_version` rows and
+  `MAX(version) = 17` (and a stale "initial 3" comment); both become 18. `SchemaTests` is `Integration`-trait, so the
+  standard verify does not run it: the full unfiltered Infrastructure suite is run once locally for this change.
 - **No regression:** the existing suites; the config snapshot JSON of a config with a `[git_sync]` section equals
-  that of the same config without it; `StatusCommandTests` (which constructs `TotalRecallConfig` positionally)
-  is updated for the new field.
+  that of the same config without it; `StatusCommandTests` (positional construction) and `TotalRecall.Core.Tests/ConfigTests.fs` (a record
+  literal) are updated for the new field.
 - AOT: the publish shows no new warning.
 
 ## Risks
 
-- A new field on `TotalRecallConfig` breaks every positional construction. There are two (the loader and
-  `StatusCommandTests`); the compiler finds any other.
+- A new field on `TotalRecallConfig` breaks every construction of it. There are three (the loader,
+  `StatusCommandTests`, and a record literal in `TotalRecall.Core.Tests/ConfigTests.fs`); the compiler finds any other.
 - A migration number collision with a concurrent change: migration 18 is the next free number on `main` at the
   time of writing; the implementer re-checks before the PR.
 - The ranges are judgments. They are constants in one place and the warnings say what was used, so changing one
@@ -212,7 +222,9 @@ and wraps the result in `Some`. `ConfigJsonSerializer` is unchanged (`GitSync` i
 
 ## Documentation
 
-- `src/TotalRecall.Infrastructure/AGENTS.md`: the migration table gets a row for migration 18 (and the number in
-  the root `AGENTS.md` "Database Migrations" paragraph is corrected to 18).
+- `src/TotalRecall.Infrastructure/AGENTS.md`: the migration table gets the missing row for migration 17 and a row
+  for migration 18, and the "16 sequential migrations" count is corrected. Root `AGENTS.md` "Database Migrations":
+  "currently 16" becomes 18, and the checklist's schema-test step says new schema tests go in a non-`Integration`
+  test file so the standard verify runs them.
 - `src/TotalRecall.Core/AGENTS.md`: the `Config.fs` row mentions `GitSyncConfig`.
 - `CHANGELOG.md` is not changed: nothing user-visible.
