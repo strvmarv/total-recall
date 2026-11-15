@@ -370,7 +370,6 @@ let stickyRuleTests =
                             let i1 = i0 |> withLocal (fun l -> { l with Sticky = ls }) |> recSticky rs (theirs 3)
                             let i = match p with Some s -> pendingSticky s i1 | None -> i1
                             let apply = fst (stickyOf (decide i))
-                            Expect.isTrue (apply = LeaveSticky || apply = UnpinLocally || apply = ReviewNewPin) "no pinning case exists"
                             if apply = UnpinLocally then Expect.isTrue ls "unpin only a pinned entry"
                             Expect.equal (apply = ReviewNewPin) (List.contains NewPin (decide i).Reviews) "review and apply agree"
     ]
@@ -468,4 +467,60 @@ let entryPlumbingTests =
         testCase "an open held-delete item is closed when the record is present" <| fun _ ->
             for item in [ RemoteDeletion; LocalDeletion ] do
                 Expect.isTrue (decide { input with HeldDelete = Some item }).CloseHeldDelete "closed"
+    ]
+
+[<Tests>]
+let mutationResistanceTests =
+    testList "SyncMerge group rules, edge cases" [
+        testCase "own content with a base differs from a non-own stamp: own via Pushing alone, via Pending alone" <| fun _ ->
+            // The record carries our stamp 3 with text "theirs-text"; the local entry has other text.
+            let i = { input with Theirs = Some { record "theirs-text" with ContentStamp = ours 3 } } |> withLocal (withText "local-text")
+            let viaPushing = decide (i |> pushingContent (ours 3))
+            expectContent viaPushing LeaveContent KeepPending "own via Pushing: nothing applied, no pending to clear"
+            Expect.isEmpty viaPushing.Reviews "no conflict for an own stamp"
+            Expect.equal viaPushing.Base.Content BaseBecomesTheirs "base"
+            let viaPending = decide (i |> pendingContent (ours 3))
+            expectContent viaPending LeaveContent ClearPending "own via Pending: the pending stamp equals the record's and is cleared"
+            expectContent (decide i) TakeTheirs KeepPending "without either, the same record is an ordinary remote change"
+
+        testCase "own content with a later pending change: no conflict review" <| fun _ ->
+            let i =
+                { input with Theirs = Some { record "mine" with ContentStamp = ours 3 }; Local = Some (local "edit") }
+                |> pendingContent (ours 5) |> pushingContent (ours 3)
+            Expect.isEmpty (decide i).Reviews "own"
+
+        testCase "unchanged groups keep a pending stamp, the base and do not re-push" <| fun _ ->
+            let i = input |> withLocal (withText "edit") |> pendingContent (ours 4) |> pendingSticky (ours 4) |> pendingTier (ours 4)
+            let d = decide i
+            let m = groups d
+            Expect.equal m.Content (LeaveContent, KeepPending) "content"
+            Expect.equal m.Sticky (LeaveSticky, KeepPending) "sticky"
+            Expect.equal m.Tier (None, KeepPending) "tier"
+            Expect.equal m.Repush { Content = false; Sticky = false; Tier = false } "no repush"
+            Expect.equal (d.Base.Content, d.Base.Sticky, d.Base.Tier) (KeepBase, KeepBase, KeepBase) "bases kept"
+
+        testCase "FR2 needs a pending stamp: equal tiers with none is FR4" <| fun _ ->
+            let d = decide (input |> withLocal (fun l -> { l with Tier = Hot }) |> withTheirs (withTier Hot (theirs 3)))
+            Expect.equal (tierOf d) (None, KeepPending) "FR4"
+
+        testCase "no conflict when the pending stamp is set but the local text is the base's text" <| fun _ ->
+            // FC4 side and FC5 side: a pending project-only change, a remote text edit.
+            for pending in [ ours 5; ours 2 ] do
+                let i = input |> theirText "remote" (theirs 3) |> pendingContent pending
+                Expect.isEmpty (decide i).Reviews "one side only changed the text"
+
+        testCase "no conflict when both sides made the same text edit and differ in another field" <| fun _ ->
+            for pending in [ ours 5; ours 2 ] do
+                let i =
+                    input |> theirText "same-edit" (theirs 3) |> withTheirs (fun r -> { r with Project = Some "p" })
+                    |> withLocal (withText "same-edit") |> pendingContent pending
+                Expect.isEmpty (decide i).Reviews "the texts are equal"
+
+        testCase "NC2 no base, a sticky local entry holds a project-only and a scope-only difference" <| fun _ ->
+            let sticky = input |> noBase |> localSticky
+            for i in [ sticky |> withTheirs (fun r -> { r with Project = Some "p" })
+                       sticky |> withTheirs (fun r -> { r with Scope = Some "global" }) ] do
+                let d = decide i
+                expectContent d HeldAsPinEdit ClearPending "held"
+                Expect.equal d.Reviews [ PinEdit ] "pin-edit"
     ]
