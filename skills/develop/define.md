@@ -346,7 +346,7 @@ presentation.
      link `https://github.com/<owner>/<repo>/blob/<approvedSha>/<spec>`. It holds no `tr-develop/v1`
      line;
    - fields: the pins above (on a sub-ticket also `parent` and `parentBlob`, as shown at sign-off),
-     `definedBy=<login>` and `definedAt` (UTC, exactly `YYYY-MM-DDTHH:MM:SSZ`). Check them with
+     `definedBy=<login>` and `definedAt` (UTC, exactly `YYYY-MM-DDTHH:MM:SSZ`; `checkpoints.js validate` holds only a parent pin to that form). Check them with
      `checkpoints.js validate` (`repo` and `base` from `origin`; build `reachable` as
      [Deliver](deliver.md#common-steps) step 1 says (plan and parent tracks: probe `<approvedSha>` with
      `rev-parse --verify --quiet <approvedSha>^{commit}` through `ghpin.js run`, where status 1 means absent, so not

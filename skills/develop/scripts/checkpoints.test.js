@@ -206,6 +206,9 @@ test('validate-cases golden covers every phase, both error codes and the brief\'
     'defined plan track with parent and parentBlob', 'defined with parent but no parentBlob', 'defined parent 0',
     'defined parentBlob 41 hex', 'kickoff carrying parent', 'defined parent track carrying parent',
     'reapproved plan track with parent and parentBlob',
+    'definedAt with +00:00 on a plan track', 'definedAt with a fraction on a plan track',
+    'definedAt with +00:00 on a small track', 'definedAt with a fraction on a small track',
+    'definedAt with a fraction (parent track only)',
   ]) {
     assert.ok(names.some((n) => n.includes(needle)), `golden case "${needle}"`);
   }

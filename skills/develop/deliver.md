@@ -167,14 +167,18 @@ Every track, in order. Steps 1 to 6 are the same numbers as the spec.
    headless run) it is a changed-artifact stop: a terminal report, nothing posted. Any other failure
    here is a plain blocker 6.
 
-   **Parent drift** (a sub-ticket: the pin carries `parent` and `parentBlob`). Read the parent spec path
-   from the `Parent:` line of the spec (`<spec>` in the worktree) or, on the small track, of the approach
-   (`regions.js approach <bodyFile> <approachFile>`): `node <skill dir>/scripts/route.js parent-line <file>`.
-   Recompute `git rev-parse origin/<base>:<parent spec>` and compare it with `parentBlob`. A difference
+   **Parent drift** (a sub-ticket: the pin carries `parent` and `parentBlob`). This step runs before the
+   workspace of step 5 exists (a start has no worktree yet, because Define removed its own), so it reads
+   from `origin`, never from a worktree. Read the parent spec path from the `Parent:` line of the spec
+   (plan track: save `git show origin/<branch>:<spec>` through `ghpin.js run` with `out`; the branch is on
+   origin, Define pushed it, and the integrity check above has just matched it to `approvedSha`) or, on the
+   small track, of the approach (`regions.js approach <bodyFile> <approachFile>`):
+   `node <skill dir>/scripts/route.js parent-line <file>`. Recompute `git rev-parse origin/<base>:<parent spec>` and compare it with `parentBlob`. A difference
    puts "the parent spec changed since this ticket was defined" in the kickoff summary (and the report); a
    `parent-line` or `rev-parse` that fails is a warning that drift could not be checked. It is a warning
    only: never a stop and never a re-approval. At a start, repeat Define's dependency question
-   ([Define](define.md#fetch), step 6) for the part on the `Parent:` line; a stop ends the run with
+   ([Define](define.md#fetch), step 6) for the part on the `Parent:` line, reading the parent spec at
+   `origin/<base>` (`git show`, through `ghpin.js run` with `out`; no worktree is needed); a stop ends the run with
    nothing posted, and with no one to ask it is a stop (the default).
 5. **Workspace.**
    - *Start, plan or parent track:* a worktree on the pin's `branch`, tracking `origin/<branch>` (Define pushed
@@ -414,7 +418,7 @@ before any pin validation).
    1. Write `<dependsFile>`: a JSON map from each number in the part's `dependsOn` to the issue
       number of that part's stub (known, since parts are created in order and depend only on lower
       ones). Run `node <skill dir>/scripts/route.js stub-body <specFile> <part> <parent> <dependsFile> <bodyFile>`;
-      it prints `{ok, title}`. Write the title to `<titleFile>`. A `marker-in-text` stops Ensure-stubs
+      it prints `{ok, title}`. Write the title to `<titleFile>` without a trailing newline. A `marker-in-text` stops Ensure-stubs
       as blocker 2 at stage `finish`: the breakdown must change, and the text is never stripped. Any
       other `ok:false` is a wrong call: fix it.
    2. `stub-create` (`<titleFile>`, `<bodyFile>`; no assignee, an unclaimed task) with `out`; read its
@@ -448,7 +452,7 @@ otherwise report it and stop; nothing is written. `state` and `merged` decide th
   yes run preflight checks 1 and 5, recreate the branch from the latest checkpoint's `head` when it is
   gone from `origin` (fetching `refs/pull/<pr>/head` if that commit is not local), then run pin
   validation and integrity like any Deliver start. With no mismatch, merge a moved `origin/<base>` as
-  step 5 does and go to [Finish and close-out](#finish-and-close-out). A mismatch goes to
+  step 5 does and go to [Finish and close-out](#finish-and-close-out) (a parent: Parent track step 1). A mismatch goes to
   [Re-approval](#re-approval); its `reapproved` drops `pr`, and the run re-enters Deliver, runs the
   loops it owes and Finish, and only then opens the new PR.
 
@@ -465,9 +469,11 @@ their patterns.
 
 1. **Read the spec** at `origin/<base>` with `route.js parts`, as in Merged close-out. A file that does
    not parse is blocker 2 at stage `finish`.
-2. **Compare** `git rev-parse origin/<base>:<spec>` with `specBlob`. Run [Ensure-stubs](#ensure-stubs);
-   when the blobs differ, report it and ask (the ask tool) before its create step, because a later
-   amendment, even a typo fix, could add or reshape parts. On a no, create nothing and go on.
+2. **Compare** `git rev-parse origin/<base>:<spec>` with `specBlob`. When the blobs differ, report it and
+   ask (the ask tool) before running [Ensure-stubs](#ensure-stubs), because a later amendment, even a typo
+   fix, could add or reshape parts, and its step 3 links an unlinked claimant and its step 4 creates a
+   stub. On a yes, run it. On a no, run its steps 1 to 3 read only (nothing is linked, adopted or
+   created) and go on. When the blobs match, run it without asking.
 3. **Show each part:** number, title, the stub's issue and state, the phase of the latest counted
    checkpoint of an open sub-ticket (`comments` and `counted.js select` for its issue; up to 30 open
    sub-tickets are read, and the report says how many were not), and whether it is **ready**. A part is
@@ -477,8 +483,11 @@ their patterns.
 4. **Warn** about a sub-issue of the parent with no valid first line, a first line that names another
    parent, and a sub-issue whose part is not in the spec. Nothing is deleted or edited.
 5. **Report** the comparison of step 2: the spec at `origin/<base>` against `specBlob`.
-6. **Offer** (the ask tool) to start the first ready part now (it continues into Define for that issue
-   in this session) or to stop. Readiness is advisory: a person can open any stub.
+6. **Offer** (the ask tool) to start the first ready part whose issue is open and has no counted
+   checkpoint (a part already done or in progress is not offered) now, or to stop. On a yes, continue
+   through [Issue entry](SKILL.md#issue-entry) for that issue in this session, so its routing runs (a
+   closed or already pinned issue is routed as it would be on its own), not straight into Define. When no
+   part qualifies, say so and stop. Readiness is advisory: a person can open any stub.
 
 A part is **settled** when its issue is closed, as completed or as not planned; done is for readiness
 and settled is for closing the parent. When the base is not the default branch (`baseIsDefault` false) a

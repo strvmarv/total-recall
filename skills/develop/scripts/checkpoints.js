@@ -29,7 +29,11 @@ const BRANCH_RE = /^(feat|fix)\/[a-z0-9][a-z0-9-]{0,62}$/;
 export const SPEC_RE = /^docs\/superpowers\/specs\/[A-Za-z0-9._-]+\.md$/;
 const PLAN_RE = /^docs\/superpowers\/plans\/[A-Za-z0-9._-]+\.md$/;
 export const SHA_RE = /^[0-9a-f]{40}$/;
-/** `definedAt` is a UTC time in the form the skill writes: it goes into a query string, so no offset. */
+/**
+ * A parent pin's `definedAt` is a UTC time in the form the skill writes: it goes into the Ensure-stubs query
+ * string, so no offset. Only the parent track is held to it; a plan or small pin written before parent support
+ * (any ISO-8601 UTC form, as the earlier release took it) stays valid.
+ */
 export const DEFINED_AT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 const HASH_RE = /^[0-9a-f]{64}$/;
 const COUNTER_RE = /^\d+$/;
@@ -165,7 +169,7 @@ function validPr(value, repo) {
 }
 
 /** Returns true when `value` is acceptable for `key` on `phase`. `ctx.isAncestor` decides reachability. */
-function valueOk(key, value, phase, ctx) {
+function valueOk(key, value, phase, ctx, track) {
   const defineLike = phase === 'defined' || phase === 'reapproved';
   switch (key) {
     case 'track': return TRACKS.includes(value);
@@ -179,7 +183,7 @@ function valueOk(key, value, phase, ctx) {
     case 'specBlob':
     case 'parentBlob': return SHA_RE.test(value);
     case 'parent': return PR_NUMBER_RE.test(value);
-    case 'definedAt': return DEFINED_AT_RE.test(value);
+    case 'definedAt': return track !== 'parent' || DEFINED_AT_RE.test(value);
     case 'planSha': return SHA_RE.test(value) && (phase === 'closed' || ctx.isAncestor(value));
     case 'approvedSha': return SHA_RE.test(value) && (!defineLike || ctx.isAncestor(value));
     case 'bodyHash':
@@ -252,7 +256,7 @@ export function validateCheckpoint(cp, ctx) {
   const known = KEY_ORDER.filter(has);
   const rounds = Object.keys(fields).filter((key) => key.startsWith('rounds.') && !KEY_ORDER.includes(key)).sort();
   for (const key of [...known, ...rounds]) {
-    if (!valueOk(key, fields[key], phase, ctx)) return fail('bad-value', key);
+    if (!valueOk(key, fields[key], phase, ctx, track)) return fail('bad-value', key);
   }
   return { ok: true };
 }

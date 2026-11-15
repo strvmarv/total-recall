@@ -636,6 +636,7 @@ test('deliver.md: the parent-drift warning, Part of in the PR body and the re-ap
   assert.ok(text.includes('Part of #') && text.includes('parent spec changed'), 'deliver.md names Part of # and the drift warning');
   const common = section(text, 'Common steps').replace(/\s+/g, ' ');
   assert.ok(/route\.js parent-line/.test(common) && /`parentBlob`/.test(common) && /never a stop/.test(common), 'integrity reads the Parent line, compares the blob and never stops');
+  assert.ok(/git show origin\/<branch>:<spec>/.test(common) && /before the workspace of step 5 exists/.test(common), 'parent drift reads the spec from origin, not from a worktree that does not exist yet');
   const finish = section(text, 'Finish and close-out').replace(/\s+/g, ' ');
   assert.ok(/`Closes #<n>`[^.]*`Part of #<parent>`/.test(finish), 'the PR body adds Part of after Closes');
   const re = section(text, 'Re-approval').replace(/\s+/g, ' ');
