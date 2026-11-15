@@ -551,6 +551,7 @@ public class SqliteStoreTransactionTests
         using (conn)
         {
             SeedHot(store, "id-1", "text");
+            var startMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             using (var tx = store.BeginTransaction())
             {
                 tx.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, "id-1");
@@ -560,6 +561,9 @@ public class SqliteStoreTransactionTests
             Assert.Null(store.Get(Tier.Hot, ContentType.Memory, "id-1"));
             var moved = store.Get(Tier.Warm, ContentType.Memory, "id-1")!;
             Assert.Equal(1_000L, moved.CreatedAt);
+            Assert.True(moved.UpdatedAt >= startMs);
+            Assert.Equal("text", moved.Content);
+            Assert.Equal(new[] { "a" }, moved.Tags);
             Assert.Equal(0, ScalarLong(conn, "SELECT count(*) FROM hot_memories_vec"));
             Assert.Equal(StoreSnapshot.Hex(Embed("text")), VecHex(conn, "warm_memories_vec"));
         }
@@ -660,7 +664,7 @@ public class SqliteStoreTransactionTests
             var before = StoreSnapshot.Take(conn);
             using (var tx = store.BeginTransaction())
             {
-                Assert.ThrowsAny<Exception>(() =>
+                Assert.Throws<Microsoft.Data.Sqlite.SqliteException>(() =>
                     tx.Move(Tier.Hot, ContentType.Memory, Tier.Hot, ContentType.Memory, "id-1"));
             }
 
@@ -738,7 +742,10 @@ public class SqliteStoreTransactionTests
                 total = count;
 
                 Assert.Equal(11, total);
+                Assert.Null(store.Get(Tier.Hot, ContentType.Memory, "s1"));
                 Assert.Null(store.Get(Tier.Warm, ContentType.Memory, "s1"));
+                Assert.Equal(0, ScalarLong(conn, "SELECT count(*) FROM hot_memories_vec"));
+                Assert.Equal(0, ScalarLong(conn, "SELECT count(*) FROM warm_memories_vec"));
                 Assert.True(new ImportLog(conn).IsAlreadyImported("h"));
             }
         }
