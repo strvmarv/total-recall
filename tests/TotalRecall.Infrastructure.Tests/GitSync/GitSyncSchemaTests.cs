@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using Microsoft.Data.Sqlite;
 using TotalRecall.Infrastructure.Storage;
 using Xunit;
@@ -35,16 +34,16 @@ public sealed class GitSyncSchemaTests
         cmd.ExecuteNonQuery();
     }
 
-    private record Column(string Name, string Type, bool NotNull, int Pk);
+    private record Column(string Name, string Type, bool NotNull, int Pk, string? Default = null);
 
     private static List<Column> Columns(MsSqliteConnection conn, string table)
     {
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"SELECT name, type, \"notnull\", pk FROM pragma_table_info('{table}') ORDER BY cid";
+        cmd.CommandText = $"SELECT name, type, \"notnull\", pk, dflt_value FROM pragma_table_info('{table}') ORDER BY cid";
         using var r = cmd.ExecuteReader();
         var list = new List<Column>();
         while (r.Read())
-            list.Add(new Column(r.GetString(0), r.GetString(1), r.GetInt64(2) == 1, (int)r.GetInt64(3)));
+            list.Add(new Column(r.GetString(0), r.GetString(1), r.GetInt64(2) == 1, (int)r.GetInt64(3), r.IsDBNull(4) ? null : r.GetString(4)));
         return list;
     }
 
@@ -100,7 +99,7 @@ public sealed class GitSyncSchemaTests
             new[]
             {
                 new Column("entry_id", "TEXT", true, 1), new Column("kind", "TEXT", true, 2),
-                new Column("record_hash", "TEXT", false, 0), new Column("attempts", "INTEGER", true, 0),
+                new Column("record_hash", "TEXT", false, 0), new Column("attempts", "INTEGER", true, 0, "0"),
                 new Column("detail", "TEXT", false, 0),
             },
             Columns(conn, "git_sync_issue"));
