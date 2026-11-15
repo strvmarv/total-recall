@@ -47,32 +47,47 @@ tested row by row before any code that touches git or the database uses them.
 
 ## Decided here
 
-The umbrella leaves these open; the spec fixes them so the implementation does not guess. Each is small and none
-changes a rule the umbrella states.
+The umbrella leaves these open; the spec fixes them so the implementation does not guess. Each is small; the
+ones that go beyond the umbrella's text are marked **(beyond)** and justified.
 
 1. **`changed` is stamp comparison**, per group, in three states: `newer` (the record's stamp is greater than the
    base's), `older` (less) and `unchanged` (equal). A group is **never taken from an `older` record**: the local
-   group is kept and the group is marked for re-push from the base (the umbrella places this marker under
-   unproven applies; a proven apply cannot produce it, because every push is a fast-forward, so the function
-   treats both the same).
+   group is kept and **the base keeps its group value and stamp** (the repository is caught up from the base,
+   so the base must not be overwritten with the older record). The group is marked for re-push (`Repush`) only
+   when it has **no pending change** (a group with a real pending change goes through the normal path, as the
+   umbrella says). The umbrella places the marker under unproven applies; a proven apply cannot produce it,
+   because every push is a fast-forward, so the function treats both the same.
 2. **A group is `own`** (the record carries a stamp this row can prove it sent) when the record's stamp equals
    the row's `Pushing` stamp or its `Pending` stamp for that group and the base, if there is one, is not newer
-   than the record. An `own` group is settled before any table is consulted: nothing is applied for it, and its
-   pending stamp is cleared only if it equals the record's. Tags have no stamp and are never `own`.
+   than the record. An `own` group is settled before any table is consulted: nothing is applied for it, its
+   base becomes the record's, and its pending stamp is cleared only if it equals the record's. Tags have no
+   stamp and are never `own`.
 3. **`sameContent`** compares text, `project`, `scope` and `entry_type`. `source` and `created_at` follow
    whichever side wins and are not compared.
-4. **"Both sides changed the text"** means the local text and the record's text each differ from the base's text
-   and from each other.
-5. **A sticky local entry holds remote content as a `pin-edit`** when the record's text, `project` or `scope`
-   differs from the local entry's; a difference only in `entry_type` or `source` is taken directly. When the
+4. **A pending change of the text** (used by the deletion rows and by "both sides changed the text") means
+   `Pending.Content` is set **and** the local text differs from the base's text. A held `pin-edit` is not a
+   pending change: holding one clears the content stamp, and the remote text becomes the base while the local
+   pin text stays.
+5. **"Both sides changed the text"** (field-wise) means a pending change of the text, the record's text differs
+   from the base's text, and the two texts differ from each other. With no base, differing texts are a conflict.
+6. **A sticky local entry holds remote content as a `pin-edit`** when the record's text, `project` or `scope`
+   differs from the local entry's; a difference only in `entry_type` or `source` is taken directly. "Sticky" is
+   **effective** stickiness: the local flag unless the same decision unpins it (the sticky group is decided
+   first), so a record that unpins and edits at once takes its text directly and opens no `pin-edit`. When the
    local side wins (its pending stamp is greater) nothing is held: the local pin text is what will be pushed.
-6. **Pending text change** (the deletion rows) is derived: the entry's text differs from the base's text. A
-   pending tag, sticky, tier, project or scope change does not count.
-7. **A snapshot that cannot occur** (the scan re-activates a `forgotten` or `left` row whose entry exists) gives
-   `Defer`: leave this entry for the next cycle and do not advance `L`, the same outcome the umbrella uses for a
-   snapshot that changed under the transaction.
-8. **A base-less row with no entry** is dropped whenever the record is absent, and also when the record is
-   present but is not provably this machine's own push; the umbrella drops it only for "empty `pushing_stamps`".
+7. **An edit of the text beats a deletion in every apply (beyond).** A pending change of the text on an entry
+   whose record is absent is published again with a fresh content stamp, proven or not, pinned or not, with or
+   without an open item. The umbrella gets the same result in two steps (hold the deletion, then close the item
+   when the push writes the record back); deciding it directly avoids an item that opens and closes. A pin is
+   still never deleted unasked: only the user's own edit of its text republishes it.
+8. **A snapshot that cannot occur** (the scan re-activates a `forgotten` or `left` row whose entry exists) gives
+   `Defer`: leave this entry for the next cycle and do not advance `L`.
+9. **A base-less row with no entry and a record present (beyond).** If the record is provably this machine's own
+   push the local deletion is pushed. Otherwise the user's deletion stands and the other machine's record is
+   not resurrected: the row becomes `Forgotten` with the record as its base (only a newer, different text
+   brings it back). The umbrella drops the row only when no record exists; dropping it here would lose the
+   record from the visit set and from the `L..R` diff for good.
+10. **`Base` is ignored when `Row` is `None`** (a new local entry has no base by definition).
 
 ## Design
 
@@ -86,6 +101,8 @@ changes a rule the umbrella states.
 
 ```fsharp
 type RowState = Active | Forgotten | Left
+
+type Direction = RemoteDeletion | LocalDeletion
 
 /// The local entry's content fields. Mirrors the record's content group.
 type ContentFields =
@@ -106,7 +123,7 @@ type MergeInput =
       Pending: GroupStamps          // persisted stamps of locally changed groups
       Pushing: GroupStamps          // pushing_stamps: what this row proves it sent
       ApplyProven: bool
-      HeldDeleteOpen: bool }        // a held-delete item is open for this id
+      HeldDelete: Direction option } // the direction of the held-delete item open for this id, if any
 ```
 
 `Row = None` with `Local = Some _` is a new local entry (the scan creates its row in the same cycle; the function
@@ -115,7 +132,7 @@ accepts both). Every `Stamp` is in its domain (0b-1).
 ### Output
 
 ```fsharp
-type Direction = RemoteDeletion | LocalDeletion
+type Side = Local | Remote
 
 /// What to do with a group's pending stamp after the decision.
 type StampAction =
@@ -161,6 +178,9 @@ type EntryOutcome =
 
 type BaseChange = KeepBase | BaseBecomesTheirs
 
+/// The base is updated per group (an `older` group keeps its base). Tags and the whole-entry rows use all four.
+type BaseUpdate = { Content: BaseChange; Tags: BaseChange; Sticky: BaseChange; Tier: BaseChange }
+
 type ConflictLoser = { Side: Side; Text: string; Stamp: Stamp option }   // Side = Local | Remote
 
 type ReviewRequest =
@@ -174,7 +194,7 @@ type MergeNote =
 
 type MergeDecision =
     { Entry: EntryOutcome
-      Base: BaseChange                    // the row's base after the decision
+      Base: BaseUpdate                    // the row's base after the decision, per group
       RowState: RowState option           // Some s: the row's new state; None: unchanged (or no row)
       Reviews: ReviewRequest list
       Notes: MergeNote list
@@ -183,7 +203,15 @@ type MergeDecision =
 ```
 
 `Tier option * StampAction` and the like are written as small records in code if that reads better; the shape is
-fixed, the spelling is not. There is **no case that pins a local entry**, so no decision can turn a pin on.
+fixed, the spelling is not. Several records share the labels `Content`, `Tags`, `Sticky` and `Tier` (and
+`SyncRecord` and `Placement` have more), so code and tests annotate record construction. There is **no case that
+pins a local entry**, so no decision can turn a pin on.
+
+**Row effects the outcome implies.** For every outcome other than `MergeGroups` and `LeaveEntry` the row's
+pending stamps are cleared (the entry was inserted, deleted, forgotten or dropped). `MergeGroups` and
+`LeaveEntry` act on pending stamps only through the `StampAction` of each group and `FreshContentStamp`.
+`Base = BaseBecomesTheirs` for all four groups is written "base := theirs" in the tables; "base kept" is all
+four `KeepBase`.
 
 ### Order of evaluation
 
@@ -192,8 +220,9 @@ For one input, `decide` evaluates in this order and returns the first that appli
 1. **Inconsistent snapshot** (`Defer`): `Row` is `Forgotten` or `Left` and `Local` is `Some`.
 2. **Group classification.** If `Theirs` and `Base` are both present, each stamped group is `newer`, `older` or
    `unchanged`. A group is `own` per Decided here 2 (this is computed also when there is no base). The
-   classifications are inputs to the tables below.
-3. **Whole-entry table** (W1 to W15) by which of the record, the entry and the base exist.
+   classifications are inputs to the tables below. **The sticky group is decided first**, so the content rules
+   can use effective stickiness (Decided here 6).
+3. **Whole-entry table** (W1 to W14) by which of the record, the entry and the base exist.
 4. **Group rules** for W4 and W5: the **no-base** rules (N-rows) when there is no base, otherwise the
    **field-wise** rules (F-rows); `own` groups and, with a base, `older` and `unchanged` groups are settled
    first.
@@ -203,8 +232,9 @@ would read a reset as a removal), and the deletion rows change as stated in W7, 
 
 ### Whole-entry table
 
-`theirs`, `entry` and `base` say which exist. "Text newer" means the record's `content` stamp is greater than the
-base's and its text differs from the base's text, and the stamp is not `own`.
+`theirs`, `entry` and `base` say which exist (`Base` counts only when `Row` is not `None`). "Text newer" means
+the record's `content` stamp is greater than the base's, its text differs from the base's text, and the stamp is
+not `own`. Every combination of record, entry, row and base falls in exactly one row.
 
 | # | Record | Entry | Row, base | Outcome |
 |---|---|---|---|---|
@@ -212,68 +242,76 @@ base's and its text differs from the base's text, and the stamp is not `own`.
 | W2 | present | none | `Left` | `Ignore` |
 | W3 | present | none | `Forgotten` | base present and text newer: as W1 (row `Active`, base := theirs, note `EditBeatsDeletion`); otherwise `Ignore` |
 | W4 | present | present | no row, or `Active` without base | `MergeGroups` by the no-base rules; base := theirs |
-| W5 | present | present | `Active` with base | `MergeGroups` by the field-wise rules; base := theirs |
-| W6 | absent | present | `Active`, base, and the entry is sticky or `Pending.Sticky` is set | `HoldDeletion RemoteDeletion` (if `HeldDeleteOpen`: `LeaveEntry`) |
-| W7 | absent | present | `Active`, base, not sticky | see "Absent record, entry present" |
-| W8 | absent | present | no row, or `Active` without base | `LeaveEntry` (a new local entry; the push step writes it) |
-| W9 | present | none | `Active` with base | see "Present record, entry gone" |
-| W10 | present | none | `Active` without base | row has `Pushing` stamps and the record is `own` for at least one of them: `PushDeletion`, base := theirs; otherwise `DropRow` |
-| W11 | absent | none | `Active` or `Forgotten`, base | row `Forgotten`, base kept; `Entry = Ignore` |
-| W12 | absent | none | `Active`, no base | `DropRow` |
-| W13 | absent | none | `Left` | `Ignore` |
-| W14 | absent | none | no row | `Ignore` |
-| W15 | present or absent | present or none | `Forgotten` or `Left` with an entry | `Defer` (rule 1) |
+| W5 | present | present | `Active` with base | `MergeGroups` by the field-wise rules; base per group |
+| W6 | absent | present | `Active` with base | the ordered list "Absent record, entry present" |
+| W7 | absent | present | no row, or `Active` without base | `LeaveEntry` (a new local entry; the caller pushes it whole) |
+| W8 | present | none | `Active` with base | the ordered list "Present record, entry gone" |
+| W9 | present | none | `Active` without base | the record is `own` for a stamp in `Pushing`: `PushDeletion`, base := theirs; otherwise `Ignore`, row `Forgotten`, base := theirs (Decided here 9) |
+| W10 | absent | none | `Active` or `Forgotten`, with base | `Ignore`; row `Forgotten`, base kept |
+| W11 | absent | none | `Active`, no base | `DropRow` |
+| W12 | absent | none | `Forgotten` without base, or `Left` | `Ignore` |
+| W13 | absent | none | no row | `Ignore` |
+| W14 | present or absent | present | `Forgotten` or `Left` | `Defer` (Decided here 8); checked first |
 
-**Absent record, entry present** (W7), `Active` with a base, entry not sticky and no pending sticky. In order:
-1. text pending and (`ApplyProven` or `HeldDeleteOpen`): `LeaveEntry`, `FreshContentStamp`, `CloseHeldDelete`
-   when an item is open, note `EditBeatsDeletion`, base kept (the push writes the record from the base);
-2. `HeldDeleteOpen`: `LeaveEntry` (the item stays open);
-3. `ApplyProven`: `DeleteEntry`, row `Forgotten`, base kept; note `PendingChangesDropped` when a tag or tier
+**Absent record, entry present** (W6), in order; the first that applies:
+1. a pending change of the text: `LeaveEntry`, `FreshContentStamp`, base kept (the push writes the record from the
+   base), `CloseHeldDelete` if an item is open, note `EditBeatsDeletion` (Decided here 7);
+2. the entry is sticky or `Pending.Sticky` is set: `HoldDeletion RemoteDeletion` (`LeaveEntry` if a
+   `RemoteDeletion` item is already open);
+3. a `RemoteDeletion` item is open: `LeaveEntry` (the item stays);
+4. `ApplyProven`: `DeleteEntry`, row `Forgotten`, base kept; note `PendingChangesDropped` when a tag or tier
    change was pending;
-4. otherwise (unproven): `HoldDeletion RemoteDeletion`.
-For a sticky entry (W6) with text pending and an open item, step 1 applies first.
+5. otherwise (unproven): `HoldDeletion RemoteDeletion`.
 
-**Present record, entry gone** (W9), `Active` with a base. Let `edit` be "text newer".
-1. `edit`: `InsertFromRecord`, row `Active`, base := theirs, note `EditBeatsDeletion`, `Reviews = [NewPin]` if
-   the record is sticky (the edit wins in every apply, proven or not);
-2. otherwise the local deletion stands: proven: `PushDeletion`, base := theirs, row unchanged until the push
-   completes; unproven: `HoldDeletion LocalDeletion`, base := theirs.
-An unchanged record and one changed only outside the text (tier, tags, sticky, project, scope, entry type) are
-the same case.
+**Present record, entry gone** (W8), in order; the first that applies. `edit` is "text newer":
+1. `edit`: `InsertFromRecord`, row `Active`, base := theirs, note `EditBeatsDeletion`, `CloseHeldDelete` if any
+   item is open, `Reviews = [NewPin]` if the record is sticky;
+2. a `LocalDeletion` item is open: `Ignore` (the item stays; the user has not answered), base per group;
+3. `ApplyProven`: `PushDeletion`, base per group, row unchanged until the push completes;
+4. otherwise: `HoldDeletion LocalDeletion`, base per group.
+An unchanged record and one changed only outside the text (tier, tags, sticky, project, scope, entry type) fall
+in 2 to 4. "Base per group" keeps the base of an `older` group and updates the others (Decided here 1).
+
+**Held-delete items.** `CloseHeldDelete` is set when: a `RemoteDeletion` item is open and the record is present
+or the entry is gone (the record reappeared, or the deletion is moot); a `LocalDeletion` item is open and the
+entry is present or the record is absent or an edit of the text wins (W8.1); and in W6.1 as stated. A decision
+never opens an item that is already open (`HoldDeletion` becomes `LeaveEntry`).
 
 ### Group rules
 
 Notation: `L` the local entry, `T` the record, `B` the base, `p` the pending stamp of the group, `t` the record's
 stamp of the group. `RestampPending` means "issue a stamp above `t` and keep it pending".
 
-**Settled first (with a base):** an `own` group gives `Leave` with `ClearPending` if `p = t`, else `KeepPending`;
-an `older` group gives `Leave`, `KeepPending` and its `Repush` flag; an `unchanged` group gives `Leave`,
-`KeepPending`. Only `newer` groups that are not `own` reach the rows below. **Without a base** only `own` groups
-are settled first.
+**Settled first (with a base):** an `own` group gives `Leave`, base becomes the record's, and `ClearPending` if
+`p = t`, else `KeepPending`; an `older` group gives `Leave`, `KeepPending`, **base kept**, and its `Repush` flag
+only if `p` is unset; an `unchanged` group gives `Leave`, `KeepPending`. Only `newer` groups that are not `own`
+reach the rows below. **Without a base** only `own` groups are settled first.
 
 **Content, field-wise** (`newer`, not `own`). First match:
 
 | # | Condition | Apply, pending, reviews |
 |---|---|---|
 | FC1 | `sameContent(L, T)` | `LeaveContent`; `ClearPending` if `p` is set |
-| FC2 | `L` sticky, text/project/scope of `T` differ from `L`, and (`p` unset or `t > p`) | `HeldAsPinEdit`; `ClearPending`; `Reviews = [PinEdit]` |
+| FC2 | `L` effectively sticky, text/project/scope of `T` differ from `L`, and (`p` unset or `t > p`) | `HeldAsPinEdit`; `ClearPending`; `Reviews = [PinEdit]` |
 | FC3 | `p` unset | `TakeTheirs` |
 | FC4 | `p > t` | `LeaveContent`, `KeepPending`; if both sides changed the text: `Conflict {Remote, T.text, t}` |
 | FC5 | `t > p` | `TakeTheirs`, `ClearPending`; if both sides changed the text: `Conflict {Local, L.text, p}` |
+
+FC2 clears the content stamp but the base becomes the record, so the held text is not a local change.
 
 **Content, no base** (not `own`). First match:
 
 | # | Condition | Apply, pending, reviews |
 |---|---|---|
 | NC1 | `sameContent(L, T)` | `AdoptCreatedAt`, `ClearPending` |
-| NC2 | `L` sticky and text/project/scope differ | `HeldAsPinEdit`, `ClearPending`, `Reviews = [PinEdit]` |
+| NC2 | `L` effectively sticky and text/project/scope differ | `HeldAsPinEdit`, `ClearPending`, `Reviews = [PinEdit]` |
 | NC3 | same text, other fields differ | `TakeTheirs`, `ClearPending` |
 | NC4 | different text | `TakeTheirs`, `ClearPending`, `Conflict {Local, L.text, p}` |
 
 **Tags.** Field-wise, in a proven apply: `Result` keeps an element of `B` iff it is in both `L` and `T`, and keeps
 an element not in `B` iff it is in `L` or `T` (the three-way set merge). No base, or an unproven apply: the union
 of `L` and `T`. `ApplyLocal` = `Result` differs from `L`; `PushNeeded` = `Result` differs from `T`. With no
-record (W8) the tags result is `L`'s and `PushNeeded` is true.
+record (W7) there is no merge; the caller pushes the new entry whole.
 
 **Sticky, field-wise** (`newer`, not `own`). First match:
 
@@ -313,29 +351,32 @@ record (W8) the tags result is `L`'s and `PushNeeded` is true.
 
 - **Total and deterministic.** Any `MergeInput`, including an inconsistent one and a fuzzed one, gives one
   `MergeDecision` and no exception.
-- **Deletion needs proof.** `DeleteEntry` occurs only for: a present entry, a base, an absent record, a
-  non-sticky entry with no pending sticky stamp and no pending text change, `ApplyProven`, no open held-delete
-  item.
+- **Deletion needs proof.** `DeleteEntry` occurs only for: a present entry, a row `Active` with a base, an
+  absent record, a non-sticky entry with no pending sticky stamp and no pending change of the text,
+  `ApplyProven`, no open `RemoteDeletion` item.
 - **A pin is never taken from a record.** No `StickyApply` or `EntryOutcome` pins a local entry, and
   `InsertFromRecord` is always non-sticky (a sticky record adds `NewPin`).
 - **Never from an older stamp.** For every stamped group an `older` record leaves the local group unchanged and
-  sets that group's `Repush`.
-- **Idempotent.** Applying a decision to the state it was made from (a small reference interpreter in the tests)
-  and calling `decide` again on the result, with the same record, gives a decision that changes nothing: no
-  local change, no review, no note, no re-push, `Entry` one of `LeaveEntry`, `Ignore` or a `MergeGroups` whose
-  every part is a leave.
-- **Order of arrival for the stamped groups.** For two record versions of one entry with different stamps in a
-  group, applying them in either order leaves the local content, sticky and tier groups as the greater stamp
-  (the warmer tier) decides. Tags are excluded: the three-way merge is relative to a base that moves, and two
-  machines' versions of one file are a linear history in practice.
+  the group's base unchanged; `Repush` is set for it exactly when the group has no pending stamp.
+- **Idempotent.** Apply a decision's effects to a model of the entry, the row and the held item (a reference
+  interpreter in the tests), call `decide` again with the same record, and there is no further local change, no
+  new review request, no new note and no new item. The outcomes that legitimately repeat until the push or the
+  user acts are `PushDeletion`, `FreshContentStamp`, `PushNeeded` and `Defer`; `HoldDeletion` repeats as
+  `LeaveEntry` because an open item is never reopened.
+- **Order of arrival for content and tier.** For two record versions of one entry with different stamps in a
+  group, applying them in either order leaves the local content and tier groups as the greater stamp (the
+  warmer tier) decides. Tags are excluded (the three-way merge is relative to a base that moves, and two
+  machines' versions of one file are a linear history in practice). Sticky is excluded: a remote pin is only
+  ever a review request, so a pin followed by an older unpin and the reverse legitimately differ in what is
+  asked of the user.
 
 ## Testing
 
-F# tests in `tests/TotalRecall.Core.Tests/SyncMergeTests.fs` (Expecto; FsCheck for properties). Generators build
+F# tests in `tests/TotalRecall.Core.Tests/SyncMergeTests.fs` (Expecto; FsCheck for properties. Generators build
 records and entries from a small pool so stamps tie, are older, newer and own at useful rates.
-- **Whole-entry table:** one test per row W1 to W15, each in proven and unproven, with each distinguishing
-  input (sticky, pending sticky, pending text, open held-delete, row state, own stamps); W7 steps 1 to 4;
-  W9 for an edit, an unchanged record, a tier-only and a tag-only change, a sticky record.
+- **Whole-entry table:** one test per row W1 to W14, each in proven and unproven, with each distinguishing
+  input (sticky, pending sticky, pending text, open held-delete, row state, own stamps); W6 steps 1 to 5 (including a held pin-edit followed by a remote deletion, which is not a pending change);
+  W8 for an edit, an unchanged record, a tier-only and a tag-only change, a sticky record.
 - **Group rules:** one test per row FC1 to FC5, NC1 to NC4, FS1 to FS7, NS1 to NS3, FR1 to FR4 and the no-base
   tier rule, plus the settled-first cases (`own` with `p = t` and with a newer `p`, `older`, `unchanged`);
   stamps rather than values deciding "changed" (an unpin, a re-pin and an old offline unpin; both sides ending
@@ -345,11 +386,17 @@ records and entries from a small pool so stamps tie, are older, newer and own at
 - **Own pushes:** a record carrying this machine's pushed stamp, with another machine's tag change in between;
   a stamp carrying this machine's id that matches nothing remembered is an ordinary remote change; an `own`
   stamp with a base newer than the record is not `own`.
-- **Properties:** the five above, over generated inputs; the idempotence property uses a reference interpreter
+- **Held items and bases:** an item closed when the record reappears, when an edit of the text wins and when
+  the entry or record changes; an item never reopened; an older group keeping its base value and stamp in W5
+  and W8, and its `Repush` only without a pending stamp; a record that unpins and edits at once; a base-less
+  deleted row with a foreign record (W9) not resurrected until a newer, different text.
+- **Properties:** the properties above, over generated inputs; the idempotence property uses a reference interpreter
   that is test code (it applies a decision to a model of the entry and the row).
 - **Defer and totality:** every combination of `Row` x record x entry x base x proven x held-open x sticky
   (exhaustive over the small domain) returns a decision.
-The project builds under `PublishAot` with no new warning.
+The project builds under `PublishAot` with no new warning. `TotalRecall.Core.fsproj` gets `SyncMergeGroups.fs`
+(if split) and `SyncMerge.fs` after `SyncValidation.fs`, in that order; the test fsproj gets `SyncMergeTests.fs`
+before `Program.fs`.
 
 ## Risks
 
