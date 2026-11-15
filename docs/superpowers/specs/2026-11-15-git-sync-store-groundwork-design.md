@@ -25,7 +25,9 @@ The sync engine (later milestones) needs four things the store and the importers
 
 1. The four capabilities above exist, are tested, and change no existing behavior except the id of newly
    imported **memories** (below).
-2. Two machines that import the same host file get the same memory id, in every storage mode.
+2. Two machines that import the same host memory (a Claude Code memory file, or a section of a Hermes
+   memory file: the only imports that insert **memories** today) get the same memory id, in every storage
+   mode.
 3. A memory import that was interrupted is repaired by the next run: one entry, one embedding, one log
    row, no error.
 
@@ -44,7 +46,8 @@ The sync engine (later milestones) needs four things the store and the importers
 
 - `InsertEntryOpts` gains a trailing `long? CreatedAt = null` (unix milliseconds). `SqliteStore` binds
   `created_at` to it when set and to "now" otherwise; `updated_at` and `last_accessed_at` stay "now". The
-  Postgres store does not use it (git sync never runs on Postgres); its XML comment says so.
+  Postgres store's `Insert` and `InsertWithEmbedding` throw `NotSupportedException` when it is set (git
+  sync never runs on Postgres, and a caller must not be silently ignored, as for `Scope` below).
   `RoutingStore` passes the options through unchanged.
 - `UpdateEntryOpts` gains `string? Scope` and `EntryType? EntryType`. `SqliteStore.Update` writes each when
   set. `PostgresStore.Update` throws `NotSupportedException` when either is set (nothing sets them today),
@@ -75,9 +78,11 @@ Rules:
 - The existing `SqliteStore` methods keep their behavior. Their SQL is refactored so the transaction and
   the store share one implementation of each statement; the shared helpers take an optional transaction.
 - One transaction at a time per store: `BeginTransaction()` while another is open throws
-  `InvalidOperationException`. While one is open, the same store's other methods must not be called (they
-  run on the same connection); the builder confirms what Microsoft.Data.Sqlite does with such a call and
-  documents it in the XML comment. Nothing in this milestone calls the store that way.
+  `InvalidOperationException`. While one is open, **no code may use the store's connection** (the store's
+  other methods, `VectorSearch`, `ImportLog`, a background re-embed or periodic-sync thread: they all
+  share it); the builder confirms what Microsoft.Data.Sqlite does with such a call and documents the rule
+  in the XML comment. Nothing in this milestone calls the connection that way. Sync (milestone 1b-i) runs
+  on its own connection.
 - Embeddings are computed by the caller **before** `BeginTransaction()`; the transaction never calls the
   embedder.
 - An internal test seam, `Action<string>? BeforeStep`, is called with a step name (`insert-row`,
@@ -94,11 +99,15 @@ is the same hash the import log and `IsAlreadyImported` use. The result is not a
 version or variant bits); it only has to look like the ids the store already creates and to match the id
 rule of the sync design (`^[0-9a-f][0-9a-f-]{7,63}$`).
 
-It is used for imports that insert a **memory** (`ContentType.Memory`):
+It is used for imports that insert a **memory** (`ContentType.Memory`). Today exactly two paths do:
 
-- `ImportUtils.ImportMarkdownFile`, which every markdown importer calls, derives the id from the file hash
-  when the content type is Memory and leaves the knowledge path unchanged;
-- `HermesImporter`, which inserts each `§`-delimited piece itself, derives the id from the piece's hash.
+- `ImportUtils.ImportMarkdownFile`, the shared helper, derives the id from the file hash when its content
+  type is Memory and leaves the knowledge path unchanged. Only `ClaudeCodeImporter.ImportMemories` passes
+  Memory, and only for a file whose frontmatter type is not `reference` (a `reference` file is imported as
+  cold knowledge and keeps a random id). The Cline, Copilot CLI, Cursor, OpenCode and Hermes
+  skill/identity imports all pass Knowledge and are unchanged;
+- `HermesImporter`'s memory-section import, which inserts each `§`-delimited piece itself, derives the id
+  from the piece's hash.
 
 ### Crash-safe imports
 
@@ -112,14 +121,19 @@ For a memory import, after `IsAlreadyImported(hash)` has said "not yet":
 2. look for an entry with that id in every tier of the memory type (`Get` on hot, warm and cold);
 3. if one exists: **skip the insert**, remember the tier it is in, and continue with step 4; otherwise
    insert it with the derived id (as today, with the target tier);
-4. embed the content and call `InsertEmbedding` for the entry's tier (it already replaces an orphan
-   vector row, so it is safe to repeat);
-5. write the `import_log` row (`INSERT OR IGNORE`, so a repeat is harmless).
+4. embed the **stored** content when the entry already existed (the importer's text may differ if the
+   entry was edited or arrived by sync), else the imported content, and call `InsertEmbedding` for the
+   entry's current tier (it already replaces an orphan vector row, so it is safe to repeat);
+5. write the `import_log` row for the entry's current tier (`INSERT OR IGNORE`, so a repeat is harmless).
 
-So a kill after step 3's insert, or after step 4, is repaired by the next run: one entry, one embedding,
-one log row. In cortex mode step 3's skipped insert is not re-enqueued; the earlier insert already was.
-The Hermes importer's per-piece loop uses the same steps, so one half-imported piece no longer raises a
-primary-key error that aborts the rest of the file.
+A repaired import counts as **imported** (the importer's outcome and the Hermes `imported` counter), since
+the entry was not complete before. So a kill after step 3's insert, or after step 4, is repaired by the
+next run: one entry, one embedding, one log row. Today a retry of such a kill inserts a *duplicate* with a
+new random id and leaves the first copy without a vector; with a derived id the retry finds the entry
+instead, so no duplicate and no primary-key error can occur, and the Hermes per-piece loop (which uses the
+same steps) carries on with the rest of the file. In cortex mode the skipped insert is not re-enqueued; a
+kill between `RoutingStore`'s local insert and its enqueue leaves the entry local only, a gap that exists
+today and is not widened.
 
 An entry that exists under the derived id but whose content differs (a user edited a memory that was
 imported but never logged) is treated as already imported. The odds of a SHA-256 collision are ignored.
@@ -142,8 +156,9 @@ Unit tests in `tests/TotalRecall.Infrastructure.Tests`, beside the existing stor
   string, and the right case for each known one; `Parse` still throws on an unknown string.
 - **Transaction commits:** insert with embedding, move, delete, update, sticky and `LogImport` in one
   transaction commit together; the rows, the vector rows and the import log match what the separate
-  existing methods would have produced (compare against `SqliteStore.Move` and `InsertWithEmbedding` on a
-  twin database).
+  existing methods would have produced on a twin database (timestamps such as `updated_at` are masked,
+  because the store reads the system clock directly; vector rows are compared by content and by the
+  content row they belong to, not by rowid).
 - **Transaction rollback:** for each step name, throw from `BeforeStep` and assert the content tables, the
   vector tables and `import_log` are byte-for-byte as before `BeginTransaction()`; disposing without
   `Commit` does the same; a second `BeginTransaction()` while one is open throws; operations after
@@ -153,11 +168,17 @@ Unit tests in `tests/TotalRecall.Infrastructure.Tests`, beside the existing stor
 - **Existing behavior:** the existing store, `MoveAndReEmbed` and importer tests pass unchanged, except
   where they assert a memory import's id.
 - **Deterministic ids:** `ImportIds.FromHash` returns a known value for a fixed input, always matches the
-  id rule, and differs for different hashes; the same file imported into two fresh stores gives the same
-  memory id (every markdown importer, and each Hermes piece); a knowledge import still gets a random id.
+  id rule, and differs for different hashes; the same Claude Code memory file, and each Hermes memory
+  section, imported into two fresh stores gives the same memory id (and `ImportMarkdownFile` with
+  `ContentType.Memory` directly, for the shared path); a Claude Code `type: reference` file, and every
+  Cline, Copilot CLI, Cursor, OpenCode and Hermes knowledge import, still get random ids; a memory
+  imported before this change (random id, log row present) is skipped, keeps its id and is not
+  duplicated. The shared code uses only `IStore`, `IVectorSearch` and `IImportLog`, so it is exercised
+  with the SQLite store, with `RoutingStore` and with a fake `IStore`; no Postgres server is needed.
 - **Repair:** with the insert done and the embedding and log row missing, with the insert and embedding
   done and the log row missing, and with a fully imported entry, a re-run leaves exactly one entry, one
-  vector row and one log row, reports no error, and in the Hermes case finishes the remaining pieces; the
+  vector row and one log row, reports no error and counts as imported, and in the Hermes case finishes the
+  remaining pieces; the repaired embedding is of the stored content when the entry's text was edited; the
   repair also works when the entry has since moved to another tier; with `RoutingStore` as the store, the
   repair does not enqueue a second upsert.
 - **AOT:** the project still publishes under `PublishAot` with no new warning.
