@@ -549,7 +549,7 @@ let wholeEntryTests =
                 Expect.isEmpty d.Reviews "no review"
                 Expect.isFalse d.FreshContentStamp "no fresh stamp"
 
-        testCase "W1 a sticky record adds a new-pin review; a stale base is ignored when there is no row" <| fun _ ->
+        testCase "W1 a sticky record adds a new-pin review" <| fun _ ->
             let i = { input with Row = None } |> noEntry |> withTheirs (withSticky true (theirs 1))
             let d = decide i
             Expect.equal d.Entry InsertFromRecord "insert"
@@ -677,4 +677,38 @@ let wholeEntryTests =
                         let i = if t then i else noRecord i
                         let i = if l then i else noEntry i
                         ignore (decide i)
+    ]
+
+[<Tests>]
+let wholeEntryEdgeTests =
+    testList "SyncMerge whole-entry rows, edge cases" [
+        testCase "Row = None ignores a supplied base: W7 and W13 are not W6 and W10" <| fun _ ->
+            let newEntry = decide ({ input with Row = None } |> noRecord)
+            Expect.equal newEntry.Entry LeaveEntry "W7 with a stale base"
+            Expect.isNone newEntry.RowState "no row change"
+            Expect.equal (decide ({ input with Row = None } |> noEntry |> noRecord)).Entry Ignore "W13 with a stale base"
+
+        testCase "W3 insert: a sticky record adds a new-pin review" <| fun _ ->
+            let i = { input with Row = Some Forgotten } |> noEntry |> theirText "remote" (theirs 3) |> withTheirs (withSticky true (theirs 3))
+            let d = decide i
+            Expect.equal d.Entry InsertFromRecord "insert"
+            Expect.equal d.Reviews [ NewPin ] "new pin"
+
+        testCase "W3 and W9: an own stamp through Pending alone counts for W3 (own) and not for W9 (Pushing only)" <| fun _ ->
+            let forgotten = { input with Row = Some Forgotten } |> noEntry |> theirText "remote" (ours 3) |> pendingContent (ours 3)
+            Expect.equal (decide forgotten).Entry Ignore "W3: own through Pending is not a remote edit"
+            let w9 = { input with Base = None } |> noEntry |> pendingContent (theirs 1)
+            let d = decide w9
+            Expect.equal d.Entry Ignore "W9 needs Pushing"
+            Expect.equal d.RowState (Some Forgotten) "remembered as deleted"
+
+        testCase "held-delete: a LocalDeletion item closes when the record's edit brings the entry back" <| fun _ ->
+            let w3 = { input with Row = Some Forgotten; HeldDelete = Some LocalDeletion } |> noEntry |> theirText "remote" (theirs 3)
+            let d = decide w3
+            Expect.equal d.Entry InsertFromRecord "insert"
+            Expect.isTrue d.CloseHeldDelete "closed with the insert"
+            let w1 = { input with Row = None; HeldDelete = Some LocalDeletion } |> noEntry
+            Expect.isTrue (decide w1).CloseHeldDelete "closed with the insert (W1)"
+            let w2 = { input with Row = Some Left; HeldDelete = Some LocalDeletion } |> noEntry
+            Expect.isFalse (decide w2).CloseHeldDelete "an ignored record leaves the item open"
     ]
