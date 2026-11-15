@@ -896,6 +896,17 @@ workflow is ignored and reported, in the run's own words, in the kickoff comment
 **Fetch commands.** Every read or write below runs through `ghpin.js run` with an `out` file (text
 never passes through a shell); `<skill>` is the skill directory.
 
+Six calls serve the parent and sub-ticket flow. `parent-read` reads the native parent of issue `<n>` (Define
+Fetch for an existing issue; a 404 means it has none). `sub-issues` lists the sub-issues of `<parent>`
+(Ensure-stubs, Status mode and the dependency check in Define Fetch). `issue-scan` lists the open issues
+updated since `<definedAt>` (Ensure-stubs, to find a stub that an earlier run created but did not link).
+`sub-issues` and `issue-scan` read one page per call, so the caller substitutes the page number for `<N>`:
+`sub-issues` goes from 1 until a page has fewer than 100 entries, `issue-scan` from 1 to 5. `stub-create`
+creates a stub issue from a title file and a body file (Ensure-stubs). `sub-issue-link` links that stub to
+`<parent>` (Ensure-stubs); `<id>` is the stub's numeric `id`, not its `number`, and `-F` sends it as an
+integer (the string form `-f` is refused with a 422). `issue-close` closes the parent as completed (Status
+mode, when every part is settled and the person says yes).
+
 ```json golden:perm-cases
 [
   {"name":"admin role","perm":{"role_name":"admin"},"expect":true},
@@ -996,7 +1007,13 @@ never passes through a shell); `<skill>` is the skill directory.
   {"name":"comment-edit","args":["api","-X","PATCH","repos/<owner>/<repo>/issues/comments/<id>","-F","body=@<commentFile>"]},
   {"name":"comments","args":["api","graphql","--paginate","-F","query=@<skill>/queries/comments.graphql","-f","owner=<owner>","-f","name=<repo>","-F","number=<n>"]},
   {"name":"edits","args":["api","graphql","--paginate","-F","query=@<skill>/queries/edits.graphql","-f","owner=<owner>","-f","name=<repo>","-F","number=<n>"]},
-  {"name":"renames","args":["api","graphql","--paginate","-F","query=@<skill>/queries/renames.graphql","-f","owner=<owner>","-f","name=<repo>","-F","number=<n>"]}
+  {"name":"renames","args":["api","graphql","--paginate","-F","query=@<skill>/queries/renames.graphql","-f","owner=<owner>","-f","name=<repo>","-F","number=<n>"]},
+  {"name":"parent-read","args":["api","repos/<owner>/<repo>/issues/<n>/parent"]},
+  {"name":"sub-issues","args":["api","repos/<owner>/<repo>/issues/<parent>/sub_issues?per_page=100&page=<N>"]},
+  {"name":"issue-scan","args":["api","repos/<owner>/<repo>/issues?state=open&since=<definedAt>&per_page=100&page=<N>"]},
+  {"name":"stub-create","args":["api","repos/<owner>/<repo>/issues","-F","title=@<titleFile>","-F","body=@<bodyFile>"]},
+  {"name":"sub-issue-link","args":["api","repos/<owner>/<repo>/issues/<parent>/sub_issues","-F","sub_issue_id=<id>"]},
+  {"name":"issue-close","args":["api","-X","PATCH","repos/<owner>/<repo>/issues/<n>","-F","state=closed","-F","state_reason=completed"]}
 ]
 ```
 

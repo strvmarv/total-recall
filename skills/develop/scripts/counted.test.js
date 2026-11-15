@@ -188,6 +188,7 @@ test('fetch-commands: the expected names, each starting with api', () => {
   assert.deepEqual(FETCH.map((f) => f.name), [
     'issue', 'pr-create', 'pr-edit', 'permission', 'comment-body', 'comment-post', 'comment-edit',
     'comments', 'edits', 'renames',
+    'parent-read', 'sub-issues', 'issue-scan', 'stub-create', 'sub-issue-link', 'issue-close',
   ]);
   for (const f of FETCH) assert.equal(f.args[0], 'api', f.name);
 });
@@ -246,6 +247,49 @@ test('fetch-commands: text goes through files, titles and bodies never as plain 
   }
   assert.deepEqual(FETCH.find((f) => f.name === 'pr-create').args.filter((a) => a.startsWith('head=') || a.startsWith('base=')), ['head=<branch>', 'base=<base>']);
   assert.deepEqual(FETCH.find((f) => f.name === 'permission').args, ['api', 'repos/<owner>/<repo>/collaborators/<login>/permission']);
+});
+
+test('fetch-commands: sub-issue-link types sub_issue_id as an integer (-F), never a string (-f)', () => {
+  const { args } = FETCH.find((f) => f.name === 'sub-issue-link');
+  assert.equal(args[args.indexOf('sub_issue_id=<id>') - 1], '-F');
+  assert.equal(args.filter((a) => a === '-f').length, 0);
+});
+
+test('fetch-commands: sub-issues and issue-scan page explicitly with per_page=100 and page=<N>', () => {
+  for (const name of ['sub-issues', 'issue-scan']) {
+    const { args } = FETCH.find((f) => f.name === name);
+    assert.equal(args.length, 2, name);
+    assert.match(args[1], /[?&]per_page=100(&|$)/, name);
+    assert.match(args[1], /[?&]page=<N>(&|$)/, name);
+  }
+});
+
+test('fetch-commands: issue-scan reads open issues since the defined time', () => {
+  const { args } = FETCH.find((f) => f.name === 'issue-scan');
+  assert.match(args[1], /[?&]state=open(&|$)/);
+  assert.match(args[1], /[?&]since=<definedAt>(&|$)/);
+});
+
+test('fetch-commands: stub-create sends the title and body through -F files', () => {
+  const { args } = FETCH.find((f) => f.name === 'stub-create');
+  assert.equal(args[args.indexOf('title=@<titleFile>') - 1], '-F');
+  assert.equal(args[args.indexOf('body=@<bodyFile>') - 1], '-F');
+  assert.equal(args.filter((a) => a === '-f').length, 0);
+});
+
+test('fetch-commands: issue-close patches the issue closed as completed', () => {
+  const { args } = FETCH.find((f) => f.name === 'issue-close');
+  assert.deepEqual(args.slice(0, 4), ['api', '-X', 'PATCH', 'repos/<owner>/<repo>/issues/<n>']);
+  assert.equal(args[args.indexOf('state=closed') - 1], '-F');
+  assert.equal(args[args.indexOf('state_reason=completed') - 1], '-F');
+});
+
+test('fetch-commands: the new calls carry no --jq filter and no --paginate', () => {
+  for (const name of ['parent-read', 'sub-issues', 'issue-scan', 'stub-create', 'sub-issue-link', 'issue-close']) {
+    const { args } = FETCH.find((f) => f.name === name);
+    assert.ok(!args.includes('--jq'), name);
+    assert.ok(!args.includes('--paginate'), name);
+  }
 });
 
 // ---- isWriteAccessResult ----
