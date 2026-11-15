@@ -14,6 +14,13 @@
 A run that stops (a crash, a blocker, a closed laptop) can be resumed by anyone with write access:
 run `/develop <n>` again and it picks up from the issue.
 
+## Larger work
+
+A change too big for one PR can be defined as a **parent** ticket. Its spec splits the work into
+parts, and its PR carries only that spec: merging it closes nothing. Run `/develop <parent>` after the
+merge and it creates one **sub-ticket** per part and shows which parts are ready. Each sub-ticket then
+goes through Define and Deliver on its own, against the parent spec.
+
 ## Ways to run it
 
 | You type | What happens |
