@@ -8,16 +8,20 @@ repository overrides is in Repository overrides.
 
 Test the change against INVEST: independent, negotiable, valuable, estimable, small, testable.
 
-- A change that is not small or not independent is several tickets. Say so, ask the person which one
-  to define first, and define only that one.
-- Never create a parent or an epic.
+- A change that is not small or not independent is several tickets. Say so and ask the person which
+  they want: **Define it as a parent** (the parent track: one parent ticket with a reviewed spec that
+  breaks the work into parts, each part later a ticket of its own), or **Define only the first piece**
+  (one ticket, no parent).
+- Create a parent only through the parent track, never a hand-made epic whose body tracks work. A
+  parent's body is its goal, criteria and scope; it holds no progress list, which comes from the parts'
+  own states.
 
 ## Problem before solution
 
 - Say who is affected, what they cannot do today, and why it matters.
 - Name the outcome wanted.
-- Leave the mechanism to the spec (plan track) or the approach (small track). A plan-track ticket
-  carries no proposed implementation: no files or functions to change, no schema changes, no design
+- Leave the mechanism to the spec (plan or parent track) or the approach (small track). A ticket on
+  the plan or parent track carries no proposed implementation: no files or functions to change, no schema changes, no design
   choices. Observed facts quoted as evidence are not engineering detail: error text, stack traces,
   and paths in Steps to reproduce, Environment and version, Evidence or Context are allowed.
 
@@ -74,14 +78,14 @@ Read `.github/ISSUE_TEMPLATE/` at `origin/<base>`, not from the working tree.
 
 ## Review grades
 
-In the plan track's spec loop and the small track's approach loop, the reviewer is given the ticket
-preview and this standard, and grades the ticket.
+In the plan or parent track's spec loop and the small track's approach loop, the reviewer is given the
+ticket preview and this standard, and grades the ticket.
 
 | Finding | Grade |
 |---|---|
 | A required section is missing | major |
 | A criterion cannot be checked | major |
-| A proposed implementation (mechanism, the engineering detail) in a plan-track ticket. Observed facts quoted as evidence are not engineering detail | major |
+| A proposed implementation (mechanism, the engineering detail) in a plan or parent track ticket. Observed facts quoted as evidence are not engineering detail | major |
 | A title issue (over 80 characters, not an outcome, against the repository's convention) | minor |
 | A length issue | minor |
 
@@ -90,7 +94,7 @@ preview and this standard, and grades the ticket.
 The body holds no machine block, only two kinds of region between HTML comments (GitHub does not
 render them).
 
-The criteria region, in both tracks:
+The criteria region, on every track:
 
 ```text
 <!-- tr-develop:ac-begin -->

@@ -5,7 +5,7 @@ This is the single stop list. Stop for the blockers below and for nothing else; 
 ## Stop for these
 
 1. **Review cap reached** without sign-off.
-2. **The approved artifact would have to change:** an impossible requirement, a contradiction with the codebase, or a scope change.
+2. **The approved artifact would have to change:** an impossible requirement, a contradiction with the codebase, a scope change, or a merged parent spec that cannot be read (the file is missing or its breakdown does not parse).
 3. **Missing access:** credentials, a required tool, push or PR permission, or the tracker, after one safe remediation attempt.
 4. **A destructive, security-sensitive or outward-facing action**, or any side effect outside the worktree, beyond: pushing the feature branch; opening or updating its PR; the issue writes this skill defines; and deleting the local branch of a merged PR with `git branch -d`. Merging, force-pushing, deleting data, changing secrets or permissions, releasing and messaging people all stop here.
 5. **Out-of-scope verification failure,** or a base-merge conflict that cannot be resolved within the spec.
@@ -37,6 +37,6 @@ Post nothing, and make the terminal report the record, when either holds:
 - no counted pin or `kickoff` exists on the issue yet;
 - the blocker is of the terminal-only kinds in blocker 6: a trust failure, a failed permission lookup, or a changed-artifact stop with no one to approve it.
 
-A blocker raised inside [Re-approval](handoff.md#re-approval) posts `blocked` and pushes none of Re-approval's commits.
+A blocker raised inside [Re-approval](handoff.md#re-approval) posts `blocked` and pushes none of Re-approval's commits. A blocker 2 raised by a parent's Merged close-out or Status mode skips step 1: no worktree is left and nothing is unpushed.
 
 Later sessions read the blocker back from `counted.js select`'s `latest`, the latest counted checkpoint of any phase, `blocked` included: show its `stage` and `blocker` to the person. A `blocked` is never progress, so it does not move the position. A resume the person starts on purpose after a `blocked` with `blocker=1` gives that loop a fresh 6 rounds; say so ([Resume and routing](handoff.md#resume-and-routing)). For worktrees and the todo list see [Worktrees](SKILL.md#worktrees) and [Progress](SKILL.md#progress).
