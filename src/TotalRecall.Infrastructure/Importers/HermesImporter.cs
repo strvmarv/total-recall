@@ -197,19 +197,22 @@ public sealed class HermesImporter : IImporter
                 var summaryLen = Math.Min(200, piece.Length);
                 var summary = piece.Substring(0, summaryLen);
 
-                var entryId = _store.Insert(Tier.Warm, ContentType.Memory, new InsertEntryOpts(
-                    Content: piece,
-                    Summary: summary,
-                    Source: filePath,
-                    SourceTool: SourceTool.Hermes,
-                    Project: project,
-                    Tags: tags,
-                    EntryType: EntryType.Imported));
-
-                var embedding = _embedder.Embed(piece);
-                _vectorSearch.InsertEmbedding(Tier.Warm, ContentType.Memory, entryId, embedding);
-                _importLog.LogImport(
-                    Name, filePath, hash, entryId, Tier.Warm, ContentType.Memory);
+                // Hash-derived id and repair-on-retry, shared with the markdown
+                // memory import: a half-imported piece from an earlier run is
+                // completed on retry instead of being duplicated. (A failure
+                // here still aborts the remaining pieces of this run via the
+                // file-level catch below; the next run finishes them.)
+                ImportUtils.InsertOrRepairMemory(
+                    _store, _embedder, _vectorSearch, _importLog,
+                    Name, filePath, hash, Tier.Warm,
+                    new InsertEntryOpts(
+                        Content: piece,
+                        Summary: summary,
+                        Source: filePath,
+                        SourceTool: SourceTool.Hermes,
+                        Project: project,
+                        Tags: tags,
+                        EntryType: EntryType.Imported));
                 imported++;
             }
         }
