@@ -1,5 +1,6 @@
 module TotalRecall.Core.Tests.SyncStampTests
 
+open System
 open Expecto
 open FsCheck
 open TotalRecall.Core.SyncStamp
@@ -126,4 +127,150 @@ let stampTests =
         testProperty "stamps from different machines never compare equal" <|
             Prop.forAll (Arb.fromGen (Gen.two stampGen)) (fun (a, b) ->
                 a.Machine = b.Machine || Stamp.compare a b <> 0)
+    ]
+
+
+// ---- the hybrid logical clock ----
+
+let private clockGen : Gen<Clock> =
+    gen {
+        let! t = domainTime
+        let! c = Gen.choose (0, maxCounter)
+        return { ClockMs = t; ClockCounter = c }
+    }
+
+/// The one stamp/clock position `issue` cannot move past (its own test covers it).
+let private notTop (t: int64) (c: int) = not (t = maxTimeMs && c = maxCounter)
+
+let private clockOptGen : Gen<Clock option> =
+    Gen.frequency [ 1, Gen.constant None
+                    4, clockGen |> Gen.filter (fun c -> notTop c.ClockMs c.ClockCounter) |> Gen.map Some ]
+
+let private baseOptGen : Gen<Stamp option> =
+    Gen.frequency [ 1, Gen.constant None
+                    4, stampGen |> Gen.filter (fun s -> notTop s.TimeMs s.Counter) |> Gen.map Some ]
+
+let private pos (c: Clock) = (c.ClockMs, c.ClockCounter)
+
+let private ok (r: Result<IssueResult, ClockError>) =
+    match r with
+    | Ok v -> v
+    | Error e -> failwithf "expected Ok, got Error %A" e
+
+[<Tests>]
+let clockTests =
+    let m = mid "4f2a9c1e"
+    let T = ts "2026-11-12T10:00:00.000Z"
+    testList "SyncStamp.Clock" [
+        testProperty "issue is strictly greater than the clock and the base, and the clock never goes backwards" <|
+            Prop.forAll (Arb.fromGen (Gen.zip3 domainTime clockOptGen baseOptGen)) (fun (now, clock, baseS) ->
+                let r = ok (Clock.issue m now clock baseS)
+                let stampPos = (r.Stamp.TimeMs, r.Stamp.Counter)
+                let aboveClock = match clock with Some c -> stampPos > pos c | None -> true
+                let aboveBase = match baseS with Some b -> Stamp.compare r.Stamp b > 0 | None -> true
+                let clockOk =
+                    match clock, r.Clock with
+                    | Some c, Some c2 -> pos c2 >= pos c
+                    | Some _, None -> false
+                    | None, _ -> true
+                aboveClock && aboveBase && clockOk && Stamp.inDomain r.Stamp)
+
+        testCase "slow clock: an unpin by a slow machine still sorts after the pin it saw" <| fun _ ->
+            let a = mid "0000000a"
+            let b = mid "0000000b"
+            let pin = (ok (Clock.issue a (T + 500L) None None)).Stamp   // A pins at 10:00:00.500
+            let seen = Clock.observe (T + 200L) None pin                // B's clock reads 10:00:00.200
+            Expect.isFalse seen.FarFuture "not far future"
+            let unpin = (ok (Clock.issue b (T + 200L) seen.Clock (Some pin))).Stamp
+            Expect.isGreaterThan (Stamp.compare unpin pin) 0 "unpin after pin"
+
+        testCase "counter rules" <| fun _ ->
+            let at t c : Clock = { ClockMs = t; ClockCounter = c }
+            // neither clock nor base has the winning time
+            Expect.equal (ok (Clock.issue m T None None)).Stamp.Counter 0 "fresh"
+            Expect.equal (ok (Clock.issue m (T + 5L) (Some (at T 9)) None)).Stamp.Counter 0 "now is later than the clock"
+            // the clock has it
+            Expect.equal (ok (Clock.issue m T (Some (at T 7)) None)).Stamp.Counter 8 "clock counter + 1"
+            // the base has it
+            Expect.equal (ok (Clock.issue m T None (Some (stamp T 4 "0000000a")))).Stamp.Counter 5 "base counter + 1"
+            // both have it: the larger wins
+            Expect.equal (ok (Clock.issue m T (Some (at T 7)) (Some (stamp T 9 "0000000a")))).Stamp.Counter 10 "larger + 1"
+            // the base is later than now and the clock
+            let r = ok (Clock.issue m T (Some (at T 7)) (Some (stamp (T + 3L) 2 "0000000a")))
+            Expect.equal (r.Stamp.TimeMs, r.Stamp.Counter) (T + 3L, 3) "base time wins"
+
+        testCase "counter overflow advances the time by one millisecond" <| fun _ ->
+            let top = 999_999
+            let clk : Clock = { ClockMs = T; ClockCounter = top }
+            for c, b in [ Some clk, None
+                          None, Some (stamp T top "0000000a")
+                          Some clk, Some (stamp T top "0000000a") ] do
+                let r = ok (Clock.issue m T c b)
+                Expect.equal (r.Stamp.TimeMs, r.Stamp.Counter) (T + 1L, 0) "next millisecond, counter restarts"
+
+        testCase "top of the range" <| fun _ ->
+            Expect.equal (Clock.issue m maxTimeMs None (Some (stamp maxTimeMs 999_999 "0000000a"))) (Error Exhausted) "exhausted"
+            Expect.equal (Clock.issue m 0L (Some { ClockMs = maxTimeMs; ClockCounter = 999_999 }) None) (Error Exhausted) "exhausted by the clock"
+            let r = ok (Clock.issue m T None (Some (stamp maxTimeMs 0 "0000000a")))
+            Expect.equal (r.Stamp.TimeMs, r.Stamp.Counter) (maxTimeMs, 1) "one below the top still issues"
+            Expect.isTrue r.FarFuture "and it is far in the future"
+            // a wild wall clock is clamped, not trusted
+            let w = ok (Clock.issue m Int64.MaxValue None None)
+            Expect.equal w.Stamp.TimeMs maxTimeMs "now is clamped to the top"
+            let n = ok (Clock.issue m Int64.MinValue None None)
+            Expect.equal n.Stamp.TimeMs 0L "now is clamped to the bottom"
+
+        testCase "drift: exactly 24 hours ahead is adopted, one millisecond more is not (issue)" <| fun _ ->
+            let now = T
+            let edge = stamp (now + driftLimitMs) 2 "0000000a"
+            let r1 = ok (Clock.issue m now None (Some edge))
+            Expect.isFalse r1.FarFuture "at the limit"
+            Expect.equal r1.Clock (Some { ClockMs = now + driftLimitMs; ClockCounter = 3 }) "clock moves"
+            let far = stamp (now + driftLimitMs + 1L) 2 "0000000a"
+            let own : Clock = { ClockMs = now; ClockCounter = 4 }
+            let r2 = ok (Clock.issue m now (Some own) (Some far))
+            Expect.isTrue r2.FarFuture "past the limit"
+            Expect.equal r2.Clock (Some own) "the input clock is returned unchanged"
+            Expect.isGreaterThan (Stamp.compare r2.Stamp far) 0 "but the new stamp still supersedes the base"
+            Expect.equal (ok (Clock.issue m now None (Some far))).Clock None "a missing clock stays missing"
+
+        testCase "drift: observe" <| fun _ ->
+            let now = T
+            let own : Clock = { ClockMs = now; ClockCounter = 4 }
+            let edge = Clock.observe now (Some own) (stamp (now + driftLimitMs) 2 "0000000a")
+            Expect.isFalse edge.FarFuture "at the limit"
+            Expect.equal edge.Clock (Some { ClockMs = now + driftLimitMs; ClockCounter = 2 }) "adopted"
+            let far = Clock.observe now (Some own) (stamp (now + driftLimitMs + 1L) 2 "0000000a")
+            Expect.isTrue far.FarFuture "past the limit"
+            Expect.equal far.Clock (Some own) "unchanged"
+            Expect.equal (Clock.observe now None (stamp (now + driftLimitMs + 1L) 2 "0000000a")).Clock None "stays missing"
+            // an older stamp never moves the clock back
+            let older = Clock.observe now (Some own) (stamp (now - 10L) 9 "0000000a")
+            Expect.equal older.Clock (Some own) "not backwards"
+            // an equal time with a higher counter moves it up
+            let up = Clock.observe now (Some own) (stamp now 6 "0000000a")
+            Expect.equal up.Clock (Some { ClockMs = now; ClockCounter = 6 }) "counter moves up"
+
+        testCase "guardStartup" <| fun _ ->
+            let year = 365L * 86_400_000L
+            let ahead = Clock.guardStartup T (Some { ClockMs = T + year; ClockCounter = 5 })
+            Expect.isTrue ahead.Reset "a year ahead is reset"
+            Expect.equal ahead.Clock (Some { ClockMs = T; ClockCounter = 0 }) "to the wall clock"
+            let edge : Clock = { ClockMs = T + driftLimitMs; ClockCounter = 5 }
+            let same = Clock.guardStartup T (Some edge)
+            Expect.isFalse same.Reset "exactly 24 hours ahead is left alone"
+            Expect.equal same.Clock (Some edge) "unchanged"
+            Expect.equal (Clock.guardStartup T None) { Clock = None; Reset = false } "no clock, no change"
+
+        testProperty "serialize and tryDeserialize round-trip" <|
+            Prop.forAll (Arb.fromGen clockGen) (fun c -> Clock.tryDeserialize (Clock.serialize c) = Some c)
+
+        testCase "tryDeserialize rejects malformed text" <| fun _ ->
+            for bad in [ ""; "12"; "-1.0"; "1.1000000"; "1. 2"; " 1.2"; "1.2 "; "1.-2"; "+1.2"; "01.2"; "1.02"; "1.2.3"; ".2"; "1."
+                         "253402300800000.0"; "1.\uFF12" ] do
+                Expect.isNone (Clock.tryDeserialize bad) (sprintf "should reject %A" bad)
+            Expect.isNone (Clock.tryDeserialize null) "null"
+            Expect.equal (Clock.tryDeserialize "0.0") (Some { ClockMs = 0L; ClockCounter = 0 }) "zero"
+            Expect.equal (Clock.tryDeserialize "253402300799999.999999") (Some { ClockMs = maxTimeMs; ClockCounter = 999_999 }) "top"
+            Expect.isNone (Clock.tryDeserialize "1.1000000") "counter above the maximum"
     ]

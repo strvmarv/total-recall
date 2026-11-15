@@ -101,3 +101,95 @@ module Stamp =
             | _ -> None
 
     let compare (a: Stamp) (b: Stamp) : int = Operators.compare a b
+
+/// The machine's persisted clock: the largest (time, counter) it has issued or observed.
+type Clock = { ClockMs: int64; ClockCounter: int }
+
+type ClockError =
+    /// The next stamp would pass the last time the text form can express.
+    | Exhausted
+
+/// `Clock` is the clock to persist; `FarFuture` says the stamp is more than `driftLimitMs` ahead of the wall clock.
+type IssueResult = { Stamp: Stamp; Clock: Clock option; FarFuture: bool }
+
+type ObserveResult = { Clock: Clock option; FarFuture: bool }
+
+type GuardResult = { Clock: Clock option; Reset: bool }
+
+module Clock =
+
+    let private clampNow (nowMs: int64) : int64 = max 0L (min maxTimeMs nowMs)
+
+    /// Issues a stamp strictly greater than the clock and than `baseStamp` (the stamp the changed
+    /// field carried before). A stamp more than `driftLimitMs` ahead of `nowMs` is returned for
+    /// ordering but the clock is not moved to it.
+    let issue
+        (machine: MachineId)
+        (nowMs: int64)
+        (clock: Clock option)
+        (baseStamp: Stamp option)
+        : Result<IssueResult, ClockError> =
+        let now = clampNow nowMs
+        let t =
+            [ Some now
+              clock |> Option.map (fun c -> c.ClockMs)
+              baseStamp |> Option.map (fun b -> b.TimeMs) ]
+            |> List.choose id
+            |> List.max
+        let counters =
+            [ match clock with
+              | Some c when c.ClockMs = t -> yield c.ClockCounter
+              | _ -> ()
+              match baseStamp with
+              | Some b when b.TimeMs = t -> yield b.Counter
+              | _ -> () ]
+        let c0 = match counters with [] -> 0 | cs -> List.max cs + 1
+        let time, counter = if c0 > maxCounter then t + 1L, 0 else t, c0
+        if time > maxTimeMs then
+            Error Exhausted
+        else
+            let farFuture = time > now + driftLimitMs
+            let newClock : Clock option =
+                if farFuture then clock else Some { ClockMs = time; ClockCounter = counter }
+            Ok { Stamp = { TimeMs = time; Counter = counter; Machine = machine }; Clock = newClock; FarFuture = farFuture }
+
+    /// Moves the clock up to a stamp read from the repository, unless that stamp is far in the future.
+    let observe (nowMs: int64) (clock: Clock option) (seen: Stamp) : ObserveResult =
+        let now = clampNow nowMs
+        if seen.TimeMs > now + driftLimitMs then
+            { Clock = clock; FarFuture = true }
+        else
+            let s : Clock = { ClockMs = seen.TimeMs; ClockCounter = seen.Counter }
+            let moved : Clock =
+                match clock with
+                | Some c when (c.ClockMs, c.ClockCounter) >= (s.ClockMs, s.ClockCounter) -> c
+                | _ -> s
+            { Clock = Some moved; FarFuture = false }
+
+    /// A persisted clock more than `driftLimitMs` ahead of the wall clock is reset to it.
+    let guardStartup (nowMs: int64) (clock: Clock option) : GuardResult =
+        let now = clampNow nowMs
+        match clock with
+        | Some c when c.ClockMs > now + driftLimitMs ->
+            { Clock = Some { ClockMs = now; ClockCounter = 0 }; Reset = true }
+        | _ -> { Clock = clock; Reset = false }
+
+    /// `<time ms>.<counter>`, the form stored in `_meta`.
+    let serialize (c: Clock) : string =
+        let inv = Globalization.CultureInfo.InvariantCulture
+        c.ClockMs.ToString(inv) + "." + c.ClockCounter.ToString(inv)
+
+    /// Strict inverse of `serialize`: ASCII digits only, no leading zeros, both parts in range.
+    let tryDeserialize (s: string) : Clock option =
+        if isNull s then None
+        else
+            let dot = s.IndexOf '.'
+            if dot <= 0 || dot = s.Length - 1 || s.IndexOf('.', dot + 1) >= 0 then None
+            else
+                let timePart, counterPart = s.Substring(0, dot), s.Substring(dot + 1)
+                let canonical (p: string) = String.forall isDigit p && (p.Length = 1 || p.[0] <> '0')
+                if not (canonical timePart && canonical counterPart) || timePart.Length > 15 || counterPart.Length > 6 then None
+                else
+                    let t = Int64.Parse timePart
+                    let c = Int32.Parse counterPart
+                    if t > maxTimeMs || c > maxCounter then None else Some { ClockMs = t; ClockCounter = c }
