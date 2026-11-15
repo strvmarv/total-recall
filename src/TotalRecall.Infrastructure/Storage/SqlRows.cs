@@ -1,0 +1,148 @@
+using System;
+using System.Runtime.InteropServices;
+using Microsoft.Data.Sqlite;
+using TotalRecall.Core;
+using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
+
+namespace TotalRecall.Infrastructure.Storage;
+
+/// <summary>
+/// The row-level SQL shared by <see cref="SqliteStore"/> and
+/// <see cref="SqliteStoreTransaction"/>, so each statement has one
+/// implementation. Every helper takes the connection and an optional
+/// transaction; a non-null transaction is set on each command it runs.
+/// </summary>
+internal static class SqlRows
+{
+    internal static string BuildInsertSql(string table) => $@"
+INSERT INTO {table}
+  (id, content, summary, source, source_tool, project, tags,
+   created_at, updated_at, last_accessed_at, access_count,
+   decay_score, parent_id, collection_id, metadata, scope, entry_type,
+   times_injected)
+VALUES
+  ($id, $content, $summary, $source, $source_tool, $project, $tags,
+   $created_at, $updated_at, $last_accessed_at, $access_count,
+   $decay_score, $parent_id, $collection_id, $metadata, $scope, $entry_type,
+   $times_injected)";
+
+    internal static void BindInsertParameters(
+        SqliteCommand cmd,
+        string id,
+        InsertEntryOpts opts,
+        long now)
+    {
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.Parameters.AddWithValue("$content", opts.Content);
+        cmd.Parameters.AddWithValue("$summary", (object?)opts.Summary ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$source", (object?)opts.Source ?? DBNull.Value);
+        cmd.Parameters.AddWithValue(
+            "$source_tool",
+            opts.SourceTool is not null
+                ? SourceToolMapping.ToDbValue(opts.SourceTool)
+                : (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("$project", (object?)opts.Project ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$tags", TagsJson.Encode(opts.Tags));
+        cmd.Parameters.AddWithValue("$created_at", opts.CreatedAt ?? now);
+        cmd.Parameters.AddWithValue("$updated_at", now);
+        cmd.Parameters.AddWithValue("$last_accessed_at", now);
+        cmd.Parameters.AddWithValue("$access_count", 0);
+        cmd.Parameters.AddWithValue("$decay_score", 1.0);
+        cmd.Parameters.AddWithValue("$parent_id", (object?)opts.ParentId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$collection_id", (object?)opts.CollectionId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$metadata", opts.MetadataJson ?? "{}");
+        cmd.Parameters.AddWithValue("$scope", opts.Scope ?? "");
+        cmd.Parameters.AddWithValue(
+            "$entry_type",
+            EntryTypeMapping.ToDbValue(opts.EntryType ?? EntryType.Preference));
+        cmd.Parameters.AddWithValue("$times_injected", 0);
+    }
+
+    /// <summary>Insert a content row and return its new rowid.</summary>
+    public static long InsertRow(
+        MsSqliteConnection conn, SqliteTransaction? tx,
+        string table, string id, InsertEntryOpts opts, long now)
+    {
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = BuildInsertSql(table);
+            BindInsertParameters(cmd, id, opts, now);
+            cmd.ExecuteNonQuery();
+        }
+
+        using var rowidCmd = conn.CreateCommand();
+        rowidCmd.Transaction = tx;
+        rowidCmd.CommandText = "SELECT last_insert_rowid()";
+        return (long)rowidCmd.ExecuteScalar()!;
+    }
+
+    /// <summary>The rowid of the content row with this id, or null.</summary>
+    public static long? RowId(
+        MsSqliteConnection conn, SqliteTransaction? tx, string table, string id)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = $"SELECT rowid FROM {table} WHERE id = $id";
+        cmd.Parameters.AddWithValue("$id", id);
+        return cmd.ExecuteScalar() is long l ? l : null;
+    }
+
+    /// <summary>Read one content row as an <see cref="Entry"/>, or null.</summary>
+    public static Entry? ReadRow(
+        MsSqliteConnection conn, SqliteTransaction? tx, string table, string id)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = $"SELECT * FROM {table} WHERE id = $id";
+        cmd.Parameters.AddWithValue("$id", id);
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? SqliteStore.RowToEntry(reader) : null;
+    }
+}
+
+/// <summary>Row-level SQL for the <c>*_vec</c> (sqlite-vec) tables.</summary>
+internal static class VecRows
+{
+    /// <summary>
+    /// Insert a vector row at <paramref name="rowid"/>, first removing any
+    /// orphan vector row at that rowid (left by a content row deleted without
+    /// its vector).
+    /// </summary>
+    public static void InsertWithOrphanCleanup(
+        MsSqliteConnection conn, SqliteTransaction? tx,
+        string vecTable, long rowid, ReadOnlyMemory<float> embedding)
+    {
+        Delete(conn, tx, vecTable, rowid);
+
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText =
+            $"INSERT INTO {vecTable} (rowid, embedding) VALUES ($rowid, $embedding)";
+        cmd.Parameters.AddWithValue("$rowid", rowid);
+        cmd.Parameters.AddWithValue(
+            "$embedding", MemoryMarshal.AsBytes(embedding.Span).ToArray());
+        cmd.ExecuteNonQuery();
+    }
+
+    public static void Delete(
+        MsSqliteConnection conn, SqliteTransaction? tx, string vecTable, long rowid)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = $"DELETE FROM {vecTable} WHERE rowid = $rowid";
+        cmd.Parameters.AddWithValue("$rowid", rowid);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>The stored vector bytes at this rowid, or null.</summary>
+    public static byte[]? ReadBytes(
+        MsSqliteConnection conn, SqliteTransaction? tx, string vecTable, long rowid)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = $"SELECT embedding FROM {vecTable} WHERE rowid = $rowid";
+        cmd.Parameters.AddWithValue("$rowid", rowid);
+        return cmd.ExecuteScalar() as byte[];
+    }
+}

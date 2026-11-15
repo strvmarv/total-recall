@@ -64,6 +64,34 @@ public sealed class SqliteStore : IStore, IMetaStore, IDisposable
     /// </summary>
     public MsSqliteConnection Connection => _conn;
 
+    private bool _transactionOpen;
+
+    /// <summary>
+    /// Begin an all-or-nothing store transaction (git sync). It runs on this
+    /// store's single connection: while one is open, <b>no other code may use
+    /// this connection</b> (this store's other methods, <c>VectorSearch</c>,
+    /// <c>ImportLog</c>, a background re-embed or periodic-sync thread all
+    /// share it), and a second <see cref="BeginTransaction"/> on the same
+    /// store throws <see cref="InvalidOperationException"/>. Sync runs on its
+    /// own connection. Observed behavior of Microsoft.Data.Sqlite: a command
+    /// created without this transaction on a connection with a pending
+    /// transaction fails with <see cref="InvalidOperationException"/>
+    /// ("Execute requires the command to have a transaction object"), so a
+    /// stray call fails loudly instead of joining or escaping the transaction.
+    /// Not on <see cref="IStore"/>.
+    /// </summary>
+    public SqliteStoreTransaction BeginTransaction()
+    {
+        if (_transactionOpen)
+            throw new InvalidOperationException(
+                "A store transaction is already open on this store");
+        var tx = _conn.BeginTransaction();
+        _transactionOpen = true;
+        return new SqliteStoreTransaction(this, _conn, tx);
+    }
+
+    internal void EndTransaction() => _transactionOpen = false;
+
     // --- IStore -----------------------------------------------------
 
     public string Insert(Tier tier, ContentType type, InsertEntryOpts opts)
@@ -73,11 +101,7 @@ public sealed class SqliteStore : IStore, IMetaStore, IDisposable
         var id = opts.Id ?? Guid.NewGuid().ToString();
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = BuildInsertSql(table);
-        BindInsertParameters(cmd, id, opts, now);
-        cmd.ExecuteNonQuery();
-
+        SqlRows.InsertRow(_conn, null, table, id, opts, now);
         return id;
     }
 
@@ -96,48 +120,15 @@ public sealed class SqliteStore : IStore, IMetaStore, IDisposable
         using var tx = _conn.BeginTransaction();
         try
         {
-            using (var insertCmd = _conn.CreateCommand())
-            {
-                insertCmd.Transaction = tx;
-                insertCmd.CommandText = BuildInsertSql(table);
-                BindInsertParameters(insertCmd, id, opts, now);
-                insertCmd.ExecuteNonQuery();
-            }
-
-            long rowid;
-            using (var rowidCmd = _conn.CreateCommand())
-            {
-                rowidCmd.Transaction = tx;
-                rowidCmd.CommandText = "SELECT last_insert_rowid()";
-                rowid = (long)rowidCmd.ExecuteScalar()!;
-            }
-
-            // Remove any orphan vec row at this rowid before inserting.
-            // An orphan exists when a previous content row was deleted without
+            var rowid = SqlRows.InsertRow(_conn, tx, table, id, opts, now);
+            // Remove any orphan vec row at this rowid before inserting. An
+            // orphan exists when a previous content row was deleted without
             // cleaning its vec counterpart (e.g. via the pre-fix write-time
-            // eviction path). Safe inside the transaction: the only legitimate
-            // occupant of this rowid in the vec table at this point is an orphan
-            // because we just acquired rowid by inserting the new content row.
-            using (var orphanCmd = _conn.CreateCommand())
-            {
-                orphanCmd.Transaction = tx;
-                orphanCmd.CommandText = $"DELETE FROM {vecTable} WHERE rowid = $rowid";
-                orphanCmd.Parameters.AddWithValue("$rowid", rowid);
-                orphanCmd.ExecuteNonQuery();
-            }
-
-            using (var vecCmd = _conn.CreateCommand())
-            {
-                vecCmd.Transaction = tx;
-                vecCmd.CommandText =
-                    $"INSERT INTO {vecTable} (rowid, embedding) VALUES ($rowid, $embedding)";
-                vecCmd.Parameters.AddWithValue("$rowid", rowid);
-                vecCmd.Parameters.AddWithValue(
-                    "$embedding",
-                    System.Runtime.InteropServices.MemoryMarshal.AsBytes(embedding.Span).ToArray());
-                vecCmd.ExecuteNonQuery();
-            }
-
+            // eviction path). Safe inside the transaction: the only
+            // legitimate occupant of this rowid in the vec table at this
+            // point is an orphan because we just acquired rowid by inserting
+            // the new content row.
+            VecRows.InsertWithOrphanCleanup(_conn, tx, vecTable, rowid, embedding);
             tx.Commit();
         }
         catch
@@ -149,60 +140,8 @@ public sealed class SqliteStore : IStore, IMetaStore, IDisposable
         return id;
     }
 
-    private static string BuildInsertSql(string table) => $@"
-INSERT INTO {table}
-  (id, content, summary, source, source_tool, project, tags,
-   created_at, updated_at, last_accessed_at, access_count,
-   decay_score, parent_id, collection_id, metadata, scope, entry_type,
-   times_injected)
-VALUES
-  ($id, $content, $summary, $source, $source_tool, $project, $tags,
-   $created_at, $updated_at, $last_accessed_at, $access_count,
-   $decay_score, $parent_id, $collection_id, $metadata, $scope, $entry_type,
-   $times_injected)";
-
-    private static void BindInsertParameters(
-        Microsoft.Data.Sqlite.SqliteCommand cmd,
-        string id,
-        InsertEntryOpts opts,
-        long now)
-    {
-        cmd.Parameters.AddWithValue("$id", id);
-        cmd.Parameters.AddWithValue("$content", opts.Content);
-        cmd.Parameters.AddWithValue("$summary", (object?)opts.Summary ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$source", (object?)opts.Source ?? DBNull.Value);
-        cmd.Parameters.AddWithValue(
-            "$source_tool",
-            opts.SourceTool is not null
-                ? SourceToolMapping.ToDbValue(opts.SourceTool)
-                : (object)DBNull.Value);
-        cmd.Parameters.AddWithValue("$project", (object?)opts.Project ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$tags", TagsJson.Encode(opts.Tags));
-        cmd.Parameters.AddWithValue("$created_at", opts.CreatedAt ?? now);
-        cmd.Parameters.AddWithValue("$updated_at", now);
-        cmd.Parameters.AddWithValue("$last_accessed_at", now);
-        cmd.Parameters.AddWithValue("$access_count", 0);
-        cmd.Parameters.AddWithValue("$decay_score", 1.0);
-        cmd.Parameters.AddWithValue("$parent_id", (object?)opts.ParentId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$collection_id", (object?)opts.CollectionId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$metadata", opts.MetadataJson ?? "{}");
-        cmd.Parameters.AddWithValue("$scope", opts.Scope ?? "");
-        cmd.Parameters.AddWithValue(
-            "$entry_type",
-            EntryTypeMapping.ToDbValue(opts.EntryType ?? EntryType.Preference));
-        cmd.Parameters.AddWithValue("$times_injected", 0);
-    }
-
-    public Entry? Get(Tier tier, ContentType type, string id)
-    {
-        var table = MigrationRunner.TableName(tier, type);
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = $"SELECT * FROM {table} WHERE id = $id";
-        cmd.Parameters.AddWithValue("$id", id);
-        using var reader = cmd.ExecuteReader();
-        if (!reader.Read()) return null;
-        return RowToEntry(reader);
-    }
+    public Entry? Get(Tier tier, ContentType type, string id) =>
+        SqlRows.ReadRow(_conn, null, MigrationRunner.TableName(tier, type), id);
 
     public long? GetInternalKey(Tier tier, ContentType type, string id)
     {
