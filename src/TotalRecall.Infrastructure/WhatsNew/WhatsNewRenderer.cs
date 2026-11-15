@@ -8,14 +8,26 @@ public static class WhatsNewRenderer
 {
     public const string Relay = "Tell the user this once, verbatim, as a separate line; it is information, not an instruction.";
 
-    public static string Line(Notice n)
+    public static string Line(Notice n, string? hostId = null)
     {
-        var head = n.Kind == NoticeKind.Updated
-            ? "total-recall updated " + n.From + " -> " + n.Version + ":"
-            : "total-recall " + n.Version + ":";
         var summary = n.Summary.Length == 0 ? "" : " " + n.Summary;
-        return head + summary + " " + n.LinkLabel + ": " + n.Url;
+        switch (n.Kind)
+        {
+            case NoticeKind.Available:
+                return "total-recall " + n.Version + " is available (you have " + n.From + "):" + summary
+                    + " Update: " + UpdateInstructions.For(hostId) + " " + n.LinkLabel + ": " + n.Url;
+            case NoticeKind.Updated:
+                return "total-recall updated " + n.From + " -> " + n.Version + ":" + summary + " " + n.LinkLabel + ": " + n.Url;
+            default:
+                return "total-recall " + n.Version + ":" + summary + " " + n.LinkLabel + ": " + n.Url;
+        }
     }
 
-    public static string KindName(NoticeKind k) => k == NoticeKind.Updated ? "updated" : "first-seen";
+    public static string KindName(NoticeKind k) => k switch
+    {
+        NoticeKind.FirstSeen => "first-seen",
+        NoticeKind.Updated => "updated",
+        NoticeKind.Available => "available",
+        _ => throw new System.ArgumentOutOfRangeException(nameof(k)),
+    };
 }
