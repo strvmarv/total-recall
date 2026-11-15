@@ -151,7 +151,7 @@
   - **delete_guard_percent:** `-1L` and `101L` → 20 + warning; `0L`, `100L` → as written.
   - **session_end:** a bool is kept; any other type → `true` + wrong-type warning.
   - **soft above max:** explicit soft 30 with max 20 → soft 20 and the soft-above-max warning (last); soft absent with max 5 → soft 5, **no** warning; soft `RawStr "x"` with max 5 → soft 5 and **only** the wrong-type warning (no second warning); soft 5 and max 5 → no change.
-  - **Warning order and count:** several bad keys at once yield the warnings in the table's key order with the soft-above-max warning last, each a single line (no newline).
+  - **Warning order and count:** several bad keys at once yield the warnings in the table's key order (the soft-above-max warning at the soft slot), each a single line (no newline).
   - **Property (FsCheck: `Gen.oneof` over the listed cases, `Arb.fromGen`, and `testPropertyWithConfig` as in `SyncMergeTests.fs`):** for any generated `RawGitSync` (each field one of `RawAbsent`, `RawBad "a float"`, `RawStr` of a generated string (including control characters and long strings), `RawInt` over `int64` extremes and the boundaries, `RawBool`), `normalise` returns without throwing and every field is in range (`IntervalSeconds = 0 || 30..86400`; the three limits and `SessionEndSeconds` in `1..3600`; `SessionStartSoftSeconds <= SessionStartMaxSeconds`; `DeleteGuardPercent` in `0..100`; `Remote` is `None` or satisfies the remote rule; `Branch` is `None` or satisfies the branch rule), and `Warnings` has no element containing a newline.
 
 - [ ] **Step 2: Run, confirm they fail to compile** (no types).
