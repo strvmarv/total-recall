@@ -592,6 +592,97 @@ export function checkPrivacy(tree) {
   return problems;
 }
 
+export const UPDATE_INSTRUCTIONS_CS = 'src/TotalRecall.Infrastructure/WhatsNew/UpdateInstructions.cs';
+export const HOST_IDS_CS = 'src/TotalRecall.Infrastructure/WhatsNew/HostIds.cs';
+const POINTER = /^see (docs\/hosts\/[a-z-]+\.md)$/;
+
+/** The `["host"] = "how"` entries of UpdateInstructions.cs, one per line, in file order. */
+export function howTable(csText) {
+  return [...csText.matchAll(/^\s*\["([a-z-]+)"\]\s*=\s*"([^"]*)",?\s*$/gm)].map((m) => [m[1], m[2]]);
+}
+
+/** The ids in the `KnownIds = { ... };` initializer of HostIds.cs: its quoted strings, and `other` for the bare identifier `Other`. */
+export function knownHostIds(csText) {
+  const body = /\bKnownIds\s*=\s*\{([\s\S]*?)\}\s*;/.exec(csText);
+  if (!body) return [];
+  return [...body[1].matchAll(/"([^"]*)"|\bOther\b/g)].map((m) => m[1] ?? 'other');
+}
+
+/**
+ * The text of a page's Updating parts, whitespace collapsed to single spaces, several joined by a newline; null when there is none.
+ * A part is the body of a `###` (or deeper) heading whose text starts with `Updating`, up to the next heading of level 1-3, or a list
+ * item whose text starts with `Updating` or `**Updating` together with its indented continuation lines. A `##` heading never counts.
+ * Fenced blocks are removed first.
+ */
+export function updatingSection(md) {
+  const lines = stripFences(md).split('\n');
+  const parts = [];
+  const collapse = (text) => text.replace(/\s+/g, ' ').trim();
+  for (let i = 0; i < lines.length; i++) {
+    const h = ATX.exec(lines[i]);
+    if (h) {
+      if (h[1].length < 3 || !h[2].trim().startsWith('Updating')) continue;
+      let end = i + 1;
+      while (end < lines.length) {
+        const next = ATX.exec(lines[end]);
+        if (next && next[1].length <= 3) break;
+        end++;
+      }
+      parts.push(collapse(lines.slice(i + 1, end).join('\n')));
+      i = end - 1;
+      continue;
+    }
+    const item = /^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+((?:\*\*)?Updating.*)$/.exec(lines[i]);
+    if (!item) continue;
+    const text = [item[1]];
+    while (i + 1 < lines.length && /^[ \t]+\S/.test(lines[i + 1])) text.push(lines[++i]);
+    parts.push(collapse(text.join(' ')));
+  }
+  return parts.length === 0 ? null : parts.join('\n');
+}
+
+/** The page of a host id: `codex` is codex-cli, `other` is other-mcp, any other id is its own name. */
+function hostPage(id) {
+  return `docs/hosts/${id === 'codex' ? 'codex-cli' : id === 'other' ? 'other-mcp' : id}.md`;
+}
+
+/** Rule 17: the engine's update instruction table (UpdateInstructions.cs) and the host pages' Updating sections agree. */
+export function checkUpdating(tree) {
+  const cs = tree.read(UPDATE_INSTRUCTIONS_CS);
+  const ids = tree.read(HOST_IDS_CS);
+  const problems = [];
+  if (cs === null) problems.push(`${UPDATE_INSTRUCTIONS_CS} is missing`);
+  if (ids === null) problems.push(`${HOST_IDS_CS} is missing`);
+  if (cs === null || ids === null) return problems;
+  const table = howTable(cs);
+  const known = knownHostIds(ids);
+  const inTable = new Set(table.map(([id]) => id));
+  for (const id of known) if (!inTable.has(id)) problems.push(`no update instruction for ${id}`);
+  for (const [id] of table) if (!known.includes(id)) problems.push(`${id} is not a host id`);
+  const sections = new Map();
+  for (const h of HARNESSES) {
+    const p = `docs/hosts/${h.id}.md`;
+    const text = tree.read(p);
+    if (text === null) continue;
+    const section = updatingSection(text);
+    sections.set(p, section);
+    if (section === null) problems.push(`${p} has no Updating section`);
+  }
+  for (const [id, how] of table) {
+    const page = hostPage(id);
+    const pointer = POINTER.exec(how);
+    if (pointer) {
+      if (pointer[1] !== page) problems.push(`${id}: the pointer names ${pointer[1]}, expected ${page}`);
+      continue;
+    }
+    const section = sections.get(page);
+    if (section !== undefined && section !== null && !section.includes(how)) {
+      problems.push(`${page}: its Updating section does not contain "${how}"`);
+    }
+  }
+  return problems;
+}
+
 // ---------------------------------------------------------------------------------------------
 // Helper tests
 // ---------------------------------------------------------------------------------------------
@@ -809,6 +900,8 @@ function validPage(h) {
     '',
     'Memory.',
     '',
+    validUpdating(h),
+    '',
     '## Known gaps',
     '',
     'None known.',
@@ -818,6 +911,16 @@ function validPage(h) {
     'Observed on 10.8.2.',
     '',
   ].join('\n');
+}
+
+const REAL_UPDATE_INSTRUCTIONS_CS = fs.readFileSync(path.join(ROOT, UPDATE_INSTRUCTIONS_CS), 'utf8').replace(/\r\n/g, '\n');
+const REAL_HOST_IDS_CS = fs.readFileSync(path.join(ROOT, HOST_IDS_CS), 'utf8').replace(/\r\n/g, '\n');
+const HOW = new Map(howTable(REAL_UPDATE_INSTRUCTIONS_CS));
+
+/** The Updating bullet of a valid page: the table's command for a command host, an npm sentence for a pointer page. */
+function validUpdating(h) {
+  const how = HOW.get(h.id === 'codex-cli' ? 'codex' : h.id === 'other-mcp' ? 'other' : h.id);
+  return how === undefined || POINTER.test(how) ? '- Updating: run `npm install -g @strvmarv/total-recall` again.' : `- Updating: \`${how}\``;
 }
 
 const CLINE_TOKENS = ['`~/.cline/data`', '`saoudrizwan.claude-dev`', '`CLINE_HOME`'];
@@ -949,13 +1052,15 @@ function validFiles() {
     'codex/hook.js': "const a = '(INSTALL.md, \"Codex CLI\")';\n",
     'copilot/hook.js': "const a = '(INSTALL.md, \"Copilot CLI\")';\n",
     'cursor/hook.js': "const a = '(INSTALL.md, \"Cursor\")';\n",
+    [UPDATE_INSTRUCTIONS_CS]: REAL_UPDATE_INSTRUCTIONS_CS,
+    [HOST_IDS_CS]: REAL_HOST_IDS_CS,
   };
   for (const h of HARNESSES) files[`docs/hosts/${h.id}.md`] = validPage(h);
   files['docs/hosts/cline.md'] += `\n${CLINE_TOKENS.join(' ')}\n`;
   return files;
 }
 
-const CHECKS = { checkPages, checkNoStaleFacts, checkLinks, checkStatusLine, checkDisclosure, checkClinePath, checkHookNotes, checkOpenCodePointer, checkCheckPrompt, checkReadmeShape, checkReadmeContent, checkDocsReachable, checkToolReference, checkPrivacy };
+const CHECKS = { checkPages, checkNoStaleFacts, checkLinks, checkStatusLine, checkDisclosure, checkClinePath, checkHookNotes, checkOpenCodePointer, checkCheckPrompt, checkReadmeShape, checkReadmeContent, checkDocsReachable, checkToolReference, checkPrivacy, checkUpdating };
 
 test('the valid in-memory tree passes every check', () => {
   const tree = memoryTree(validFiles());
@@ -1350,6 +1455,69 @@ defect('the architecture page claims no network calls', checkPrivacy, (f) => { f
 defect('the architecture page does not name the check', checkPrivacy, (f) => { f['docs/architecture.md'] = '# Architecture\n'; }, /architecture\.md.*api\.github\.com/);
 defect('the README privacy section does not name the check', checkPrivacy, (f) => { f['README.md'] = f['README.md'].replace('api.github.com', 'GitHub'); }, /README\.md/);
 defect('the privacy policy is missing', checkPrivacy, (f) => { delete f['PRIVACY.md']; }, /PRIVACY\.md is missing/);
+
+// ---------------------------------------------------------------------------------------------
+// Rule 17: every host page states its update instruction, as the engine's table does
+// ---------------------------------------------------------------------------------------------
+
+const UPDATING_BULLET = /^- Updating:.*\n/m;
+const NPM_UPDATE = 'npm install -g @strvmarv/total-recall';
+
+test('updating rule holds on the repository', () => assert.deepEqual(checkUpdating(repoTree()), []));
+test('howTable: the real table has the 14 host ids', () => {
+  const ids = howTable(REAL_UPDATE_INSTRUCTIONS_CS).map(([id]) => id);
+  assert.equal(ids.length, 14);
+  assert.deepEqual(ids, knownHostIds(REAL_HOST_IDS_CS));
+});
+test('howTable: one entry per line, any spacing, a trailing comma is optional', () => {
+  assert.deepEqual(howTable('  ["a-b"] = "x y",\n["c"]="z"\n// ["d"] = "no" trailing\n["e"] = "a" + "b",\n'), [['a-b', 'x y'], ['c', 'z']]);
+});
+test('knownHostIds: the quoted ids of the initializer, and other for the bare Other', () => {
+  assert.deepEqual(knownHostIds('x KnownIds =\n{\n "a", "b-c",\n Other,\n};\nvar y = { "no" };'), ['a', 'b-c', 'other']);
+  assert.deepEqual(knownHostIds('nothing here'), []);
+});
+test('updatingSection: a bullet', () => {
+  assert.equal(updatingSection('## What you get\n\n- Memory.\n- Updating: run `x` again.\n- Next.\n'), 'Updating: run `x` again.');
+  assert.equal(updatingSection('1. **Updating**: do `x`.\n'), '**Updating**: do `x`.');
+});
+test('updatingSection: a bullet with indented continuation lines', () => {
+  assert.equal(updatingSection('- Updating: run\n  `npm install -g\n  @strvmarv/total-recall`.\n\n- Next.\n'), 'Updating: run `npm install -g @strvmarv/total-recall`.');
+});
+test('updatingSection: a ### Updating section ends at the next heading of level 1-3', () => {
+  assert.equal(updatingSection('### Updating\n\nRun `x`.\n\n#### Detail\n\nmore\n\n### Other\n\nno\n'), 'Run `x`. #### Detail more');
+  assert.equal(updatingSection('### Updating the plugin\n\nRun `x`.\n\n## Next\n\nno\n'), 'Run `x`.');
+});
+test('updatingSection: a ## Updating heading, a fenced bullet and no bullet at all give null', () => {
+  assert.equal(updatingSection('## Updating\n\nnpm install -g x\n'), null);
+  assert.equal(updatingSection('```\n- Updating: run `x`.\n```\n'), null);
+  assert.equal(updatingSection('- Updates: run `x`.\n'), null);
+});
+test('updatingSection: several matches are concatenated', () => {
+  assert.equal(updatingSection('- Updating: a.\n\n### Updating\n\nb.\n'), 'Updating: a.\nb.');
+});
+
+defect('a host page has no Updating section', checkUpdating, (f) => { f['docs/hosts/zed.md'] = f['docs/hosts/zed.md'].replace(UPDATING_BULLET, ''); }, /zed\.md has no Updating section/);
+defect('a command is not on its page', checkUpdating, (f) => {
+  f['docs/hosts/copilot-cli.md'] = f['docs/hosts/copilot-cli.md'].replace(UPDATING_BULLET, '- Updating: `copilot plugin upgrade total-recall@strvmarv-total-recall-marketplace`\n');
+}, /copilot-cli\.md: its Updating section does not contain "copilot plugin update total-recall@strvmarv-total-recall-marketplace"/);
+defect('the npm command only outside the Updating section', checkUpdating, (f) => {
+  f['docs/hosts/kiro.md'] = f['docs/hosts/kiro.md'].replace(UPDATING_BULLET, '- Updating: see the vendor docs.\n');
+}, /kiro\.md: its Updating section does not contain "npm install -g @strvmarv\/total-recall"/);
+defect('a pointer page without an Updating section', checkUpdating, (f) => { f['docs/hosts/cursor.md'] = f['docs/hosts/cursor.md'].replace(UPDATING_BULLET, ''); }, /cursor\.md has no Updating section/);
+defect('the table points at another page', checkUpdating, (f) => {
+  f[UPDATE_INSTRUCTIONS_CS] = f[UPDATE_INSTRUCTIONS_CS].replace('see docs/hosts/cursor.md', 'see docs/hosts/nope.md');
+}, /cursor: the pointer names docs\/hosts\/nope\.md, expected docs\/hosts\/cursor\.md/);
+defect('the table misses a host id', checkUpdating, (f) => { f[UPDATE_INSTRUCTIONS_CS] = f[UPDATE_INSTRUCTIONS_CS].replace(/^.*\["zed"\].*\n/m, ''); }, /no update instruction for zed/);
+defect('the table has an unknown id', checkUpdating, (f) => { f[UPDATE_INSTRUCTIONS_CS] = f[UPDATE_INSTRUCTIONS_CS].replace('["zed"]', '["emacs"] = "x",\n        ["zed"]'); }, /emacs is not a host id/);
+defect('a level-2 Updating heading does not count', checkUpdating, (f) => {
+  f['docs/hosts/zed.md'] = f['docs/hosts/zed.md'].replace(UPDATING_BULLET, `## Updating\n\n${NPM_UPDATE}\n`);
+}, /zed\.md has no Updating section/);
+defect('the table file is missing', checkUpdating, (f) => { delete f[UPDATE_INSTRUCTIONS_CS]; }, /UpdateInstructions\.cs is missing/);
+test('a ### Updating section counts', () => {
+  const files = validFiles();
+  files['docs/hosts/zed.md'] = files['docs/hosts/zed.md'].replace(UPDATING_BULLET, `### Updating\n\nRun \`${NPM_UPDATE}\`.\n`);
+  assert.deepEqual(checkUpdating(memoryTree(files)), []);
+});
 
 // ---------------------------------------------------------------------------------------------
 // The announce text tells every model to relay the what's-new notice

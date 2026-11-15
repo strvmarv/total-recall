@@ -54,6 +54,7 @@ In the next session, the user pastes the check prompt from `INSTALL.md`, Step 4.
 
 - The `total-recall` MCP server as a local MCP command.
 - With the optional copy, the total-recall skills in OpenCode's plugins directory.
+- Updating: run `npm install -g @strvmarv/total-recall` again (add `--ignore-scripts` if you installed that way), then restart OpenCode.
 
 ## Known gaps
 

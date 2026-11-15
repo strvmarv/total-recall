@@ -51,6 +51,7 @@ In the next session, the user pastes the check prompt from `INSTALL.md`, Step 4.
 ## What you get
 
 - The `total-recall` MCP server, as a context server.
+- Updating: run `npm install -g @strvmarv/total-recall` again (add `--ignore-scripts` if you installed that way), then restart Zed.
 
 ## Known gaps
 

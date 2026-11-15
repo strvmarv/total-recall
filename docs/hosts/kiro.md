@@ -55,6 +55,7 @@ In the next session, the user pastes the check prompt from `INSTALL.md`, Step 4.
 - The `total-recall` MCP server.
 - The startup instructions, as an `always`-inclusion steering file that tells the model to call `session_start`.
 - With the workspace hooks copied: the pinned-directive floor (a `UserPromptSubmit` command hook running `pinned-floor --host kiro`, whose plain-text output Kiro appends to context), a `UserPromptSubmit` agent hook that reminds the model to search memory, a `SessionStart` agent hook that calls `session_start`, and a `Stop` agent hook for capture (all from `.kiro/hooks/` and `AGENTS.md`).
+- Updating: run `npm install -g @strvmarv/total-recall` again (add `--ignore-scripts` if you installed that way), then restart Kiro.
 
 ## Known gaps
 
