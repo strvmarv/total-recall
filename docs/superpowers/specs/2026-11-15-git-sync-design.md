@@ -365,7 +365,7 @@ Record file:
   "entry_type": "correction",
   "tags": ["tooling"],
   "source": "claude-code",
-  "created_at": "2026-11-12T09:14:03Z",
+  "created_at": "2026-11-12T09:14:03.000Z",
   "updated_at": "2026-11-12T09:14:03.512Z",
   "ext": {
     "total-recall": {
@@ -379,6 +379,10 @@ Record file:
   }
 }
 ```
+
+Timestamps are ISO-8601 UTC with milliseconds; `entry_type` is the lowercase name; `updated_at` is derived
+(the time of `content_stamp`) and tags are written sorted and unique (the exact rules are in
+`2026-11-15-git-sync-record-format-design.md`).
 
 `origin` appears only on entries an importer created (see "Imports"); it is carried unchanged from the
 base record. `written_by` is a display name and is excluded from every comparison.
