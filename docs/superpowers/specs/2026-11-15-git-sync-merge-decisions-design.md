@@ -207,11 +207,16 @@ fixed, the spelling is not. Several records share the labels `Content`, `Tags`, 
 `SyncRecord` and `Placement` have more), so code and tests annotate record construction. There is **no case that
 pins a local entry**, so no decision can turn a pin on.
 
-**Row effects the outcome implies.** For every outcome other than `MergeGroups` and `LeaveEntry` the row's
-pending stamps are cleared (the entry was inserted, deleted, forgotten or dropped). `MergeGroups` and
-`LeaveEntry` act on pending stamps only through the `StampAction` of each group and `FreshContentStamp`.
+**Row effects the outcome implies.** The row's pending stamps are cleared for the outcomes where the entry is gone
+or has just been inserted: `InsertFromRecord`, `DeleteEntry`, `DropRow`, `PushDeletion`,
+`HoldDeletion LocalDeletion`, and `Ignore` when there is no entry. `HoldDeletion RemoteDeletion`, `LeaveEntry`,
+`Defer` and `Ignore` with an entry leave them untouched (a held entry keeps its pending pin, tags and tier, and
+a `restore` pushes them); `MergeGroups` acts on them only through each group's `StampAction`.
 `Base = BaseBecomesTheirs` for all four groups is written "base := theirs" in the tables; "base kept" is all
-four `KeepBase`.
+four `KeepBase`. **A new base is composed group by group** from the old base and the record: content fields and
+`ContentStamp`; `Tags`; `Placement.Sticky` and `StickyStamp`; `Placement.Tier` and `TierStamp`; a group marked
+`BaseBecomesTheirs` takes the record's values, one marked `KeepBase` keeps the old base's. `Id`, `Origin` and
+`WrittenBy` always come from the record. The result is still one `SyncRecord`.
 
 ### Order of evaluation
 
@@ -246,7 +251,7 @@ not `own`. Every combination of record, entry, row and base falls in exactly one
 | W6 | absent | present | `Active` with base | the ordered list "Absent record, entry present" |
 | W7 | absent | present | no row, or `Active` without base | `LeaveEntry` (a new local entry; the caller pushes it whole) |
 | W8 | present | none | `Active` with base | the ordered list "Present record, entry gone" |
-| W9 | present | none | `Active` without base | the record is `own` for a stamp in `Pushing`: `PushDeletion`, base := theirs; otherwise `Ignore`, row `Forgotten`, base := theirs (Decided here 9) |
+| W9 | present | none | `Active` without base | the record's `content` stamp is `own` for a stamp in `Pushing`: `PushDeletion`, base := theirs; otherwise (including a foreign text edit over an own tier or pin stamp) `Ignore`, row `Forgotten`, base := theirs (Decided here 9) |
 | W10 | absent | none | `Active` or `Forgotten`, with base | `Ignore`; row `Forgotten`, base kept |
 | W11 | absent | none | `Active`, no base | `DropRow` |
 | W12 | absent | none | `Forgotten` without base, or `Left` | `Ignore` |
@@ -275,7 +280,9 @@ in 2 to 4. "Base per group" keeps the base of an `older` group and updates the o
 **Held-delete items.** `CloseHeldDelete` is set when: a `RemoteDeletion` item is open and the record is present
 or the entry is gone (the record reappeared, or the deletion is moot); a `LocalDeletion` item is open and the
 entry is present or the record is absent or an edit of the text wins (W8.1); and in W6.1 as stated. A decision
-never opens an item that is already open (`HoldDeletion` becomes `LeaveEntry`).
+never opens an item that is already open (`HoldDeletion RemoteDeletion` becomes `LeaveEntry`, and a held
+`LocalDeletion` is `Ignore`, W8.2). `CloseHeldDelete` together with a `HoldDeletion` of the other direction in
+one decision means the open item is replaced by the new one.
 
 ### Group rules
 
@@ -361,8 +368,9 @@ record (W7) there is no merge; the caller pushes the new entry whole.
 - **Idempotent.** Apply a decision's effects to a model of the entry, the row and the held item (a reference
   interpreter in the tests), call `decide` again with the same record, and there is no further local change, no
   new review request, no new note and no new item. The outcomes that legitimately repeat until the push or the
-  user acts are `PushDeletion`, `FreshContentStamp`, `PushNeeded` and `Defer`; `HoldDeletion` repeats as
-  `LeaveEntry` because an open item is never reopened.
+  user acts are `PushDeletion`, `FreshContentStamp` (with its `EditBeatsDeletion` note, W6.1), `PushNeeded` and
+  `Defer`; a held deletion repeats as `LeaveEntry` (remote) or `Ignore` (local) because an open item is never
+  reopened.
 - **Order of arrival for content and tier.** For two record versions of one entry with different stamps in a
   group, applying them in either order leaves the local content and tier groups as the greater stamp (the
   warmer tier) decides. Tags are excluded (the three-way merge is relative to a base that moves, and two
@@ -386,6 +394,8 @@ records and entries from a small pool so stamps tie, are older, newer and own at
 - **Own pushes:** a record carrying this machine's pushed stamp, with another machine's tag change in between;
   a stamp carrying this machine's id that matches nothing remembered is an ordinary remote change; an `own`
   stamp with a base newer than the record is not `own`.
+- **Pending stamps on a held entry:** `Pending.Sticky`, `Pending.Tier` and a pending tag change survive
+  `HoldDeletion RemoteDeletion` (W6.2 and W6.5) and `Defer`.
 - **Held items and bases:** an item closed when the record reappears, when an edit of the text wins and when
   the entry or record changes; an item never reopened; an older group keeping its base value and stamp in W5
   and W8, and its `Repush` only without a pending stamp; a record that unpins and edits at once; a base-less
