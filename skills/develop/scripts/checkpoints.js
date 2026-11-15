@@ -14,27 +14,29 @@ import { fenceFor } from './regions.js';
 
 export const PHASES = [
   'defined', 'reapproved', 'kickoff', 'plan-approved', 'tasks',
-  'final-approved', 'pr-open', 'blocked', 'closed',
+  'final-approved', 'pr-open', 'spec-merged', 'blocked', 'closed',
 ];
 
 export const PROGRESS_PHASES = [
-  'kickoff', 'plan-approved', 'tasks', 'final-approved', 'pr-open', 'closed', 'reapproved',
+  'kickoff', 'plan-approved', 'tasks', 'final-approved', 'pr-open', 'spec-merged', 'closed', 'reapproved',
 ];
 
 /** The checkpoint line, exactly as fixed by the spec. */
-const LINE_RE = /^tr-develop\/v1 phase=(defined|reapproved|kickoff|plan-approved|tasks|final-approved|pr-open|blocked|closed)( [a-zA-Z][a-zA-Z0-9.]*=\S+)*$/;
+const LINE_RE = /^tr-develop\/v1 phase=(defined|reapproved|kickoff|plan-approved|tasks|final-approved|pr-open|spec-merged|blocked|closed)( [a-zA-Z][a-zA-Z0-9.]*=\S+)*$/;
 const KEY_RE = /^[a-zA-Z][a-zA-Z0-9.]*$/;
 
 const BRANCH_RE = /^(feat|fix)\/[a-z0-9][a-z0-9-]{0,62}$/;
-const SPEC_RE = /^docs\/superpowers\/specs\/[A-Za-z0-9._-]+\.md$/;
+export const SPEC_RE = /^docs\/superpowers\/specs\/[A-Za-z0-9._-]+\.md$/;
 const PLAN_RE = /^docs\/superpowers\/plans\/[A-Za-z0-9._-]+\.md$/;
-const SHA_RE = /^[0-9a-f]{40}$/;
+export const SHA_RE = /^[0-9a-f]{40}$/;
+/** `definedAt` is a UTC time in the form the skill writes: it goes into a query string, so no offset. */
+export const DEFINED_AT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 const HASH_RE = /^[0-9a-f]{64}$/;
 const COUNTER_RE = /^\d+$/;
 const LOGIN_RE = /^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,38})$/;
 const PR_NUMBER_RE = /^[1-9]\d{0,8}$/;
 
-const TRACKS = ['plan', 'small'];
+const TRACKS = ['plan', 'small', 'parent'];
 const STAGES = ['read', 'workspace', 'plan', 'build', 'final', 'finish'];
 const BLOCKERS = ['1', '2', '3', '4', '5', '6'];
 const REVIEWS = ['agent', 'self'];
@@ -42,37 +44,43 @@ const REVIEWS = ['agent', 'self'];
 const DEFINED_FIELDS = ['track', 'repo', 'base', 'branch', 'bodyHash', 'acHash', 'definedBy', 'definedAt'];
 const PROGRESS_BASE = ['track', 'branch', 'head', 'review', 'gh'];
 
-/** Required fields per phase: `all` for every track, `plan` only on the plan track, `small` only on small. */
+/** Required fields per phase: `all` for every track, `plan`, `small` and `parent` only on that track. */
 const REQUIRED = {
-  defined: { all: DEFINED_FIELDS, plan: ['spec', 'approvedSha'], small: [] },
+  defined: { all: DEFINED_FIELDS, plan: ['spec', 'approvedSha'], small: [], parent: ['spec', 'approvedSha'] },
   reapproved: {
     all: [...DEFINED_FIELDS, 'head', 'review', 'gh', 'deferred'],
     plan: ['spec', 'approvedSha'],
     small: [],
+    parent: ['spec', 'approvedSha'],
   },
-  kickoff: { all: PROGRESS_BASE, plan: ['spec', 'approvedSha'], small: [] },
+  kickoff: { all: PROGRESS_BASE, plan: ['spec', 'approvedSha'], small: [], parent: ['spec', 'approvedSha'] },
   'plan-approved': {
     all: [...PROGRESS_BASE, 'spec', 'approvedSha', 'plan', 'planSha', 'rounds.plan'],
     plan: [],
     small: [],
+    parent: [],
   },
   tasks: {
     all: [...PROGRESS_BASE, 'deferred'],
     plan: ['spec', 'approvedSha', 'plan', 'planSha', 'tasksDone'],
     small: ['cyclesDone'],
+    parent: [],
   },
   'final-approved': {
     all: [...PROGRESS_BASE, 'deferred', 'rounds.final'],
     plan: ['spec', 'approvedSha', 'plan', 'planSha', 'tasksDone'],
     small: [],
+    parent: [],
   },
   'pr-open': {
     all: [...PROGRESS_BASE, 'pr', 'deferred'],
     plan: ['spec', 'approvedSha', 'plan', 'planSha', 'tasksDone'],
     small: [],
+    parent: ['spec', 'approvedSha'],
   },
-  blocked: { all: ['branch', 'stage', 'blocker'], plan: [], small: [] },
-  closed: { all: ['branch', 'head', 'gh', 'pr'], plan: [], small: [] },
+  'spec-merged': { all: ['track', 'branch', 'head', 'gh', 'pr', 'spec', 'specBlob'], plan: [], small: [], parent: [] },
+  blocked: { all: ['branch', 'stage', 'blocker'], plan: [], small: [], parent: [] },
+  closed: { all: ['branch', 'head', 'gh', 'pr'], plan: [], small: [], parent: [] },
 };
 
 /** `reapproved` invalidates the final loop and has no PR (spec section 11 steps 3 and 6). */
@@ -87,7 +95,7 @@ const KICKOFF_CARRY_KEYS = [...CARRY_KEYS, 'rounds.final'];
 /** Order of keys in a formatted line: `branch` first, then these, then unknown keys sorted. */
 const KEY_ORDER = [
   'branch', 'track', 'repo', 'base', 'bodyHash', 'acHash', 'definedBy', 'definedAt',
-  'spec', 'approvedSha', 'head', 'review', 'gh', 'plan', 'planSha', 'rounds.plan',
+  'spec', 'approvedSha', 'specBlob', 'head', 'review', 'gh', 'plan', 'planSha', 'rounds.plan',
   'tasksDone', 'cyclesDone', 'deferred', 'rounds.final', 'pr', 'stage', 'blocker',
 ];
 
@@ -135,6 +143,7 @@ export function requiredFields(phase, track) {
   if (!entry) return [];
   if (track === 'plan') return [...entry.all, ...entry.plan];
   if (track === 'small') return [...entry.all, ...entry.small];
+  if (track === 'parent') return [...entry.all, ...entry.parent];
   return [...entry.all];
 }
 
@@ -166,7 +175,9 @@ function valueOk(key, value, phase, ctx) {
     case 'branch': return (phase === 'blocked' && value === '-') || BRANCH_RE.test(value);
     case 'spec': return SPEC_RE.test(value);
     case 'plan': return PLAN_RE.test(value);
-    case 'head': return SHA_RE.test(value) && (phase === 'closed' || ctx.isAncestor(value));
+    case 'head': return SHA_RE.test(value) && (phase === 'closed' || phase === 'spec-merged' || ctx.isAncestor(value));
+    case 'specBlob': return SHA_RE.test(value);
+    case 'definedAt': return DEFINED_AT_RE.test(value);
     case 'planSha': return SHA_RE.test(value) && (phase === 'closed' || ctx.isAncestor(value));
     case 'approvedSha': return SHA_RE.test(value) && (!defineLike || ctx.isAncestor(value));
     case 'bodyHash':
@@ -206,11 +217,22 @@ export function validateCheckpoint(cp, ctx) {
   }
   const track = has('track') ? fields.track : null;
 
+  // The parent track has no plan loop, and `spec-merged` belongs to it alone.
+  if (track === 'parent' && ['plan-approved', 'tasks', 'final-approved'].includes(phase)) return fail('bad-value', 'track');
+  if (phase === 'spec-merged' && track !== 'parent') return fail('bad-value', 'track');
+
   for (const key of requiredFields(phase, track)) {
     if (!has(key)) return fail('missing', key);
   }
   if (phase === 'reapproved') {
     for (const key of NEVER_ON_REAPPROVED) {
+      if (has(key)) return fail('bad-value', key);
+    }
+  }
+  if (track === 'parent' && phase === 'pr-open') {
+    // A parent has no plan and no deferred findings: its PR holds the spec alone.
+    if (fields.deferred !== '0') return fail('bad-value', 'deferred');
+    for (const key of ['plan', 'planSha', 'tasksDone']) {
       if (has(key)) return fail('bad-value', key);
     }
   }

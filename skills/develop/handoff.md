@@ -506,7 +506,7 @@ that is also a progress step. The goldens at the end of this section are the scr
 trimmed of whitespace, NBSP (U+00A0) and a BOM (U+FEFF). Exactly one trimmed line may match
 
 ```text
-^tr-develop/v1 phase=(defined|reapproved|kickoff|plan-approved|tasks|final-approved|pr-open|blocked|closed)( [a-zA-Z][a-zA-Z0-9.]*=\S+)*$
+^tr-develop/v1 phase=(defined|reapproved|kickoff|plan-approved|tasks|final-approved|pr-open|spec-merged|blocked|closed)( [a-zA-Z][a-zA-Z0-9.]*=\S+)*$
 ```
 
 No match is `no-line`; two or more are `multiple-lines` (a quoted copy of the line in the summary
@@ -515,29 +515,35 @@ rather than guessed. The fields are the `key=value` tokens after `phase`, split 
 
 **Patterns.** Branch `^(feat|fix)/[a-z0-9][a-z0-9-]{0,62}$` (`-` is allowed on `blocked` only); spec
 `^docs/superpowers/specs/[A-Za-z0-9._-]+\.md$`; plan `^docs/superpowers/plans/[A-Za-z0-9._-]+\.md$`;
-`head`, `planSha` and `approvedSha` are 40 lowercase hex; `bodyHash` and `acHash` are 64 lowercase
-hex; counters (`tasksDone`, `cyclesDone`, `deferred`, `rounds.*`) are `^\d+$`, so `0` is valid; `track`
-is `plan` or `small`; `review` is `agent` or `self`; `stage` is one of `read`, `workspace`, `plan`,
+`head`, `planSha`, `approvedSha` and `specBlob` are 40 lowercase hex; `bodyHash` and `acHash` are 64 lowercase
+hex; `definedAt` is exactly `YYYY-MM-DDTHH:MM:SSZ` (UTC, no fraction and no offset: it goes into a query
+string); counters (`tasksDone`, `cyclesDone`, `deferred`, `rounds.*`) are `^\d+$`, so `0` is valid; `track`
+is `plan`, `small` or `parent`; `review` is `agent` or `self`; `stage` is one of `read`, `workspace`, `plan`,
 `build`, `final`, `finish`; `blocker` is `1` to `6`; `gh` and `definedBy` pass `isLogin`
 (`^[A-Za-z0-9][A-Za-z0-9_-]{0,38}$`, defined once in `checkpoints.js`; `jane-doe_acme` is valid); `repo` equals the context
 repository case-insensitively and `base` equals the context base, on `defined` and `reapproved`;
 `pr` is the prefix `https://github.com/<repo>/pull/` (compared case-insensitively, so a `.` in a
 repository name is literal) followed by `[1-9]\d{0,8}`.
 
-**Required fields.** "plan:" means the plan track only, "small:" the small track only. `plan` and
+**Required fields.** "plan:" means the plan track only, "small:" the small track only, "parent:" the parent
+track only. The parent track never has `plan-approved`, `tasks` or `final-approved` (a checkpoint of one of
+those phases with `track=parent` is `bad-value` on `track`), and `spec-merged` is a parent-track phase (any
+other track is `bad-value` on `track`). On a parent `pr-open`, `deferred` must be `0` and `plan`, `planSha` and
+`tasksDone` must be absent (`bad-value` on that key, `deferred` checked first). `plan` and
 `planSha` are optional on `defined`, `reapproved` and `kickoff`, but present together or absent
 together on every phase. Fields not listed are optional; a listed key that is present is always
 checked.
 
 | Phase | Required |
 | --- | --- |
-| `defined` | track, repo, base, branch, bodyHash, acHash, definedBy, definedAt; plan: spec, approvedSha |
-| `reapproved` | everything `defined` requires, plus head, review, gh, deferred; never `rounds.final` or `pr` |
-| `kickoff` | track, branch, head, review, gh; plan: spec, approvedSha |
+| `defined` | track, repo, base, branch, bodyHash, acHash, definedBy, definedAt; plan: spec, approvedSha; parent: spec, approvedSha |
+| `reapproved` | everything `defined` requires, plus head, review, gh, deferred; parent: spec, approvedSha; never `rounds.final` or `pr` |
+| `kickoff` | track, branch, head, review, gh; plan: spec, approvedSha; parent: spec, approvedSha |
 | `plan-approved` | track, branch, head, review, gh, spec, approvedSha, plan, planSha, rounds.plan |
 | `tasks` | track, branch, head, review, gh, deferred; plan: spec, approvedSha, plan, planSha, tasksDone; small: cyclesDone |
 | `final-approved` | track, branch, head, review, gh, deferred, rounds.final; plan: spec, approvedSha, plan, planSha, tasksDone |
-| `pr-open` | track, branch, head, review, gh, pr, deferred; plan: spec, approvedSha, plan, planSha, tasksDone |
+| `pr-open` | track, branch, head, review, gh, pr, deferred; plan: spec, approvedSha, plan, planSha, tasksDone; parent: spec, approvedSha (`deferred` is `0`; no plan, planSha or tasksDone) |
+| `spec-merged` | track (always `parent`), branch, head, gh, pr, spec, specBlob |
 | `blocked` | branch, stage, blocker |
 | `closed` | branch, head, gh, pr |
 
@@ -545,6 +551,7 @@ checked.
 
 | Field | Meaning |
 | --- | --- |
+| `specBlob` | on `spec-merged`: the git blob id of the spec file at `origin/<base>` after the merge |
 | `track`, `spec`, `approvedSha` | copied from the governing pin from `kickoff` on, so that a lost pin can be rebuilt; informational there (the pin's own copy governs every check) |
 | `branch` | the feature branch; `-` on a `blocked` that has no branch yet |
 | `head` | a commit already pushed to `origin/<branch>`; every phase from `kickoff` on, optional on `blocked` |
@@ -558,7 +565,7 @@ checked.
 | `stage`, `blocker` | on `blocked`: where the run was and the blocker number |
 
 **Reachability.** `head` and `planSha` must be reachable from the branch tip on every phase except
-`closed` (after a merge the branch may be gone, so `closed` only needs a 40-hex `head`);
+`closed` and, for `head`, `spec-merged` (after a merge the branch may be gone, so these only need a 40-hex `head`);
 `approvedSha` must be reachable on `defined` and `reapproved`. The caller computes `reachable` first and passes the
 list as data: it lists each of the checkpoint's own `approvedSha`, `head` and `planSha` (skip fields it does not carry)
 that are reachable from `origin/<branch>`, so a `reapproved` that carries all three
@@ -593,7 +600,7 @@ and never carries `rounds.final`: a re-approval invalidates the final loop. `pr`
 summary, a blank line, then the line inside a fence one backtick longer than any run in the summary)
 and the bare line to `lineFile`, both UTF-8 without a BOM, and prints `{line}`. Keys are written
 `branch` first, then in the order `track`, `repo`, `base`, `bodyHash`, `acHash`, `definedBy`,
-`definedAt`, `spec`, `approvedSha`, `head`, `review`, `gh`, `plan`, `planSha`, `rounds.plan`,
+`definedAt`, `spec`, `approvedSha`, `specBlob`, `head`, `review`, `gh`, `plan`, `planSha`, `rounds.plan`,
 `tasksDone`, `cyclesDone`, `deferred`, `rounds.final`, `pr`, `stage`, `blocker`, then any unknown key
 sorted. It refuses with `{"ok":false,"error":"summary-has-checkpoint-line"}`, writing nothing, when
 any summary line matches the grammar after trimming, and with `bad-value` (and the key) for an
@@ -640,6 +647,7 @@ Goldens: `parse-cases` (`{name, body, expect}`), `validate-cases` (`{name, cp, c
   {"name":"a blockquoted line is not a line","body":"> tr-develop/v1 phase=kickoff branch=feat/x head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa review=agent gh=strvmarv track=small\n","expect":{"ok":false,"error":"no-line"}},
   {"name":"text after the line on the same line","body":"tr-develop/v1 phase=kickoff branch=feat/x head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa review=agent gh=strvmarv track=small and more words\n","expect":{"ok":false,"error":"no-line"}},
   {"name":"rounds.plan=0 and definedAt","body":"tr-develop/v1 phase=defined track=small rounds.plan=0 definedAt=2026-11-10T12:34:56Z\n","expect":{"ok":true,"phase":"defined"}},
+  {"name":"a spec-merged line","body":"Spec merged.\n\n```\ntr-develop/v1 phase=spec-merged branch=feat/x track=parent head=ffffffffffffffffffffffffffffffffffffffff gh=strvmarv pr=https://github.com/strvmarv/total-recall/pull/42 spec=docs/superpowers/specs/2026-11-10-x-design.md specBlob=1111111111111111111111111111111111111111\n```\n","expect":{"ok":true,"phase":"spec-merged"}},
   {"name":"a repeated key is refused, not guessed","body":"tr-develop/v1 phase=kickoff branch=feat/x branch=feat/y\n","expect":{"ok":false,"error":"no-line"}},
   {"name":"the line plus a second one with a repeated key","body":"tr-develop/v1 phase=kickoff branch=feat/x head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa review=agent gh=strvmarv track=small\ntr-develop/v1 phase=tasks head=a head=b\n","expect":{"ok":false,"error":"multiple-lines"}}
 ]
@@ -729,6 +737,21 @@ Goldens: `parse-cases` (`{name, body, expect}`), `validate-cases` (`{name, cp, c
   {"name":"pr that is an issue URL","cp":{"phase":"closed","fields":{"branch":"feat/x","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","gh":"strvmarv","pr":"https://github.com/strvmarv/total-recall/issues/42"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":false,"error":"bad-value","key":"pr"}},
   {"name":"reapproved carrying rounds.final","cp":{"phase":"reapproved","fields":{"track":"plan","repo":"strvmarv/total-recall","base":"main","branch":"feat/x","bodyHash":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","acHash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","definedBy":"jane-doe_acme","definedAt":"2026-11-10T12:34:56Z","spec":"docs/superpowers/specs/2026-11-10-x-design.md","approvedSha":"cccccccccccccccccccccccccccccccccccccccc","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","review":"agent","gh":"strvmarv","deferred":"0","rounds.plan":"2","plan":"docs/superpowers/plans/2026-11-10-x.md","planSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","tasksDone":"1","rounds.final":"1"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":false,"error":"bad-value","key":"rounds.final"}},
   {"name":"reapproved carrying pr","cp":{"phase":"reapproved","fields":{"track":"plan","repo":"strvmarv/total-recall","base":"main","branch":"feat/x","bodyHash":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","acHash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","definedBy":"jane-doe_acme","definedAt":"2026-11-10T12:34:56Z","spec":"docs/superpowers/specs/2026-11-10-x-design.md","approvedSha":"cccccccccccccccccccccccccccccccccccccccc","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","review":"agent","gh":"strvmarv","deferred":"0","rounds.plan":"2","plan":"docs/superpowers/plans/2026-11-10-x.md","planSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","tasksDone":"1","pr":"https://github.com/strvmarv/total-recall/pull/42"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":false,"error":"bad-value","key":"pr"}},
+  {"name":"spec-merged parent track (head is not reachable: the closed exemption)","cp":{"phase":"spec-merged","fields":{"track":"parent","branch":"feat/x","head":"ffffffffffffffffffffffffffffffffffffffff","gh":"strvmarv","pr":"https://github.com/strvmarv/total-recall/pull/42","spec":"docs/superpowers/specs/2026-11-10-x-design.md","specBlob":"1111111111111111111111111111111111111111"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":true}},
+  {"name":"spec-merged missing specBlob","cp":{"phase":"spec-merged","fields":{"track":"parent","branch":"feat/x","head":"ffffffffffffffffffffffffffffffffffffffff","gh":"strvmarv","pr":"https://github.com/strvmarv/total-recall/pull/42","spec":"docs/superpowers/specs/2026-11-10-x-design.md"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":false,"error":"missing","key":"specBlob"}},
+  {"name":"spec-merged specBlob 39 hex","cp":{"phase":"spec-merged","fields":{"track":"parent","branch":"feat/x","head":"ffffffffffffffffffffffffffffffffffffffff","gh":"strvmarv","pr":"https://github.com/strvmarv/total-recall/pull/42","spec":"docs/superpowers/specs/2026-11-10-x-design.md","specBlob":"111111111111111111111111111111111111111"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":false,"error":"bad-value","key":"specBlob"}},
+  {"name":"spec-merged track plan","cp":{"phase":"spec-merged","fields":{"track":"plan","branch":"feat/x","head":"ffffffffffffffffffffffffffffffffffffffff","gh":"strvmarv","pr":"https://github.com/strvmarv/total-recall/pull/42","spec":"docs/superpowers/specs/2026-11-10-x-design.md","specBlob":"1111111111111111111111111111111111111111"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":false,"error":"bad-value","key":"track"}},
+  {"name":"defined parent track","cp":{"phase":"defined","fields":{"track":"parent","repo":"strvmarv/total-recall","base":"main","branch":"feat/x","bodyHash":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","acHash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","definedBy":"jane-doe_acme","definedAt":"2026-11-10T12:34:56Z","spec":"docs/superpowers/specs/2026-11-10-x-design.md","approvedSha":"cccccccccccccccccccccccccccccccccccccccc"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":true}},
+  {"name":"kickoff parent track","cp":{"phase":"kickoff","fields":{"track":"parent","branch":"feat/x","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","review":"agent","gh":"strvmarv","spec":"docs/superpowers/specs/2026-11-10-x-design.md","approvedSha":"cccccccccccccccccccccccccccccccccccccccc"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":true}},
+  {"name":"pr-open parent track","cp":{"phase":"pr-open","fields":{"track":"parent","branch":"feat/x","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","review":"agent","gh":"strvmarv","spec":"docs/superpowers/specs/2026-11-10-x-design.md","approvedSha":"cccccccccccccccccccccccccccccccccccccccc","pr":"https://github.com/strvmarv/total-recall/pull/42","deferred":"0"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":true}},
+  {"name":"pr-open parent track deferred 2","cp":{"phase":"pr-open","fields":{"track":"parent","branch":"feat/x","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","review":"agent","gh":"strvmarv","spec":"docs/superpowers/specs/2026-11-10-x-design.md","approvedSha":"cccccccccccccccccccccccccccccccccccccccc","pr":"https://github.com/strvmarv/total-recall/pull/42","deferred":"2"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":false,"error":"bad-value","key":"deferred"}},
+  {"name":"pr-open parent track with plan","cp":{"phase":"pr-open","fields":{"track":"parent","branch":"feat/x","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","review":"agent","gh":"strvmarv","spec":"docs/superpowers/specs/2026-11-10-x-design.md","approvedSha":"cccccccccccccccccccccccccccccccccccccccc","pr":"https://github.com/strvmarv/total-recall/pull/42","deferred":"0","plan":"docs/superpowers/plans/2026-11-10-x.md","planSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":false,"error":"bad-value","key":"plan"}},
+  {"name":"pr-open parent track with tasksDone","cp":{"phase":"pr-open","fields":{"track":"parent","branch":"feat/x","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","review":"agent","gh":"strvmarv","spec":"docs/superpowers/specs/2026-11-10-x-design.md","approvedSha":"cccccccccccccccccccccccccccccccccccccccc","pr":"https://github.com/strvmarv/total-recall/pull/42","deferred":"0","tasksDone":"3"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":false,"error":"bad-value","key":"tasksDone"}},
+  {"name":"reapproved parent track","cp":{"phase":"reapproved","fields":{"track":"parent","repo":"strvmarv/total-recall","base":"main","branch":"feat/x","bodyHash":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","acHash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","definedBy":"jane-doe_acme","definedAt":"2026-11-10T12:34:56Z","spec":"docs/superpowers/specs/2026-11-10-x-design.md","approvedSha":"cccccccccccccccccccccccccccccccccccccccc","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","review":"agent","gh":"strvmarv","deferred":"0"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":true}},
+  {"name":"plan-approved parent track","cp":{"phase":"plan-approved","fields":{"track":"parent"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":false,"error":"bad-value","key":"track"}},
+  {"name":"tasks parent track","cp":{"phase":"tasks","fields":{"track":"parent"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":false,"error":"bad-value","key":"track"}},
+  {"name":"final-approved parent track","cp":{"phase":"final-approved","fields":{"track":"parent"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":false,"error":"bad-value","key":"track"}},
+  {"name":"definedAt with an offset","cp":{"phase":"defined","fields":{"track":"plan","repo":"strvmarv/total-recall","base":"main","branch":"feat/x","bodyHash":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","acHash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","definedBy":"jane-doe_acme","definedAt":"2026-11-10T12:34:56+01:00","spec":"docs/superpowers/specs/2026-11-10-x-design.md","approvedSha":"cccccccccccccccccccccccccccccccccccccccc"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":false,"error":"bad-value","key":"definedAt"}},
   {"name":"unknown phase","cp":{"phase":"deploy","fields":{"track":"plan","branch":"feat/x","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","review":"agent","gh":"strvmarv","spec":"docs/superpowers/specs/2026-11-10-x-design.md","approvedSha":"cccccccccccccccccccccccccccccccccccccccc"}},"ctx":{"repo":"strvmarv/total-recall","base":"main"},"reachable":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","cccccccccccccccccccccccccccccccccccccccc"],"expect":{"ok":false,"error":"bad-value","key":"phase"}}
 ]
 ```

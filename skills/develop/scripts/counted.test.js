@@ -365,6 +365,22 @@ for (const c of SELECT_CASES) {
   });
 }
 
+test('selectState: a counted spec-merged after a pr-open is the latest progress', () => {
+  const comment = (id, createdAt, line) => ({
+    id, createdAt, authorLogin: 'strvmarv', authorType: 'User', editorLogin: null, editorType: null,
+    lastEditedAt: null, isMinimized: false, body: `Summary.\n\n\`\`\`\n${line}\n\`\`\`\n`,
+  });
+  const comments = [
+    comment('IC_open', '2026-11-10T10:01:00Z', 'tr-develop/v1 phase=pr-open branch=feat/x track=parent'),
+    comment('IC_merged', '2026-11-10T10:02:00Z', 'tr-develop/v1 phase=spec-merged branch=feat/x track=parent'),
+  ];
+  const state = selectState(rawOf([pageOf(comments)]), { strvmarv: { role_name: 'write' } });
+  assert.equal(state.complete, true);
+  assert.equal(state.progress.id, 'IC_merged');
+  assert.equal(state.progress.phase, 'spec-merged');
+  assert.equal(state.latest.id, 'IC_merged');
+});
+
 function selectCli(comments, permissions, dir = tmpDir()) {
   const rawFile = path.join(dir, 'comments.raw.json');
   fs.writeFileSync(rawFile, rawOf([pageOf(comments)]));

@@ -9,6 +9,9 @@ import { readGolden } from './golden.js';
 import {
   PHASES,
   PROGRESS_PHASES,
+  DEFINED_AT_RE,
+  SPEC_RE,
+  SHA_RE,
   SUBCOMMANDS,
   isLogin,
   parseCheckpoint,
@@ -57,11 +60,24 @@ const LINE = `tr-develop/v1 phase=kickoff branch=feat/x head=${A} review=agent g
 test('PHASES and PROGRESS_PHASES are the spec lists', () => {
   assert.deepEqual(PHASES, [
     'defined', 'reapproved', 'kickoff', 'plan-approved', 'tasks',
-    'final-approved', 'pr-open', 'blocked', 'closed',
+    'final-approved', 'pr-open', 'spec-merged', 'blocked', 'closed',
   ]);
   assert.deepEqual(PROGRESS_PHASES, [
-    'kickoff', 'plan-approved', 'tasks', 'final-approved', 'pr-open', 'closed', 'reapproved',
+    'kickoff', 'plan-approved', 'tasks', 'final-approved', 'pr-open', 'spec-merged', 'closed', 'reapproved',
   ]);
+});
+
+test('DEFINED_AT_RE accepts only the UTC form the skill writes; SPEC_RE and SHA_RE are exported', () => {
+  assert.equal(DEFINED_AT_RE.test('2026-11-10T12:34:56Z'), true);
+  for (const bad of ['2026-11-10T12:34:56+01:00', '2026-11-10T12:34:56.789Z', '2026-11-10 12:34:56Z',
+    '2026-11-10T12:34:56', '2026-11-10T12:34:56Z\n', '']) {
+    assert.equal(DEFINED_AT_RE.test(bad), false, JSON.stringify(bad));
+  }
+  assert.equal(SPEC_RE.test('docs/superpowers/specs/2026-11-10-x-design.md'), true);
+  assert.equal(SPEC_RE.test('docs/superpowers/plans/x.md'), false);
+  assert.equal(SHA_RE.test('a'.repeat(40)), true);
+  assert.equal(SHA_RE.test('a'.repeat(39)), false);
+  assert.equal(SHA_RE.test('A'.repeat(40)), false);
 });
 
 // ---- isLogin ----
@@ -143,6 +159,23 @@ test('requiredFields follows the per-phase table', () => {
   assert.deepEqual(requiredFields('closed', 'small'), ['branch', 'head', 'gh', 'pr']);
 });
 
+test('requiredFields knows the parent track and spec-merged', () => {
+  assert.deepEqual(requiredFields('spec-merged', 'parent'), ['track', 'branch', 'head', 'gh', 'pr', 'spec', 'specBlob']);
+  const prOpen = requiredFields('pr-open', 'parent');
+  assert.ok(prOpen.includes('spec') && prOpen.includes('approvedSha'));
+  for (const key of ['plan', 'planSha', 'tasksDone']) assert.ok(!prOpen.includes(key), key);
+  assert.deepEqual(requiredFields('kickoff', 'parent'), ['track', 'branch', 'head', 'review', 'gh', 'spec', 'approvedSha']);
+  assert.deepEqual(requiredFields('defined', 'parent'), [
+    'track', 'repo', 'base', 'branch', 'bodyHash', 'acHash', 'definedBy', 'definedAt', 'spec', 'approvedSha',
+  ]);
+  assert.deepEqual(requiredFields('reapproved', 'parent'), [
+    'track', 'repo', 'base', 'branch', 'bodyHash', 'acHash', 'definedBy', 'definedAt',
+    'head', 'review', 'gh', 'deferred', 'spec', 'approvedSha',
+  ]);
+  assert.deepEqual(requiredFields('closed', 'parent'), ['branch', 'head', 'gh', 'pr']);
+  assert.deepEqual(requiredFields('blocked', 'parent'), ['branch', 'stage', 'blocker']);
+});
+
 // ---- validate-cases ----
 
 test('validate-cases golden: validateCheckpoint matches every expectation', () => {
@@ -165,6 +198,10 @@ test('validate-cases golden covers every phase, both error codes and the brief\'
     'bodyHash 63 hex', 'plan path outside', 'planSha not reachable', 'kickoff with planSha but no plan',
     'closed head not reachable', 'rounds.plan=0', 'gh=x;y', 'pr in another repository', 'pr lookalike',
     'reapproved carrying rounds.final', 'reapproved carrying pr',
+    'spec-merged parent track', 'spec-merged missing specBlob', 'spec-merged specBlob 39 hex', 'spec-merged track plan',
+    'defined parent track', 'kickoff parent track', 'pr-open parent track', 'pr-open parent track deferred 2',
+    'pr-open parent track with plan', 'pr-open parent track with tasksDone', 'reapproved parent track',
+    'tasks parent track', 'plan-approved parent track', 'final-approved parent track', 'definedAt with an offset',
   ]) {
     assert.ok(names.some((n) => n.includes(needle)), `golden case "${needle}"`);
   }
@@ -175,6 +212,23 @@ test('validateCheckpoint rejects a non-string or empty value and an unknown phas
   const ctx = ctxFor(c);
   assert.deepEqual(validateCheckpoint({ phase: 'kickoff', fields: { ...c.cp.fields, gh: 7 } }, ctx), { ok: false, error: 'bad-value', key: 'gh' });
   assert.deepEqual(validateCheckpoint({ phase: 'nope', fields: c.cp.fields }, ctx), { ok: false, error: 'bad-value', key: 'phase' });
+});
+
+test('validateCheckpoint: spec-merged head is not checked for reachability, a spec-merged specBlob is', () => {
+  const c = readGolden(HANDOFF, 'validate-cases').find((x) => x.name.startsWith('spec-merged parent track'));
+  const ctx = { ...ctxFor(c), isAncestor: () => false };
+  assert.deepEqual(validateCheckpoint(c.cp, ctx), { ok: true });
+  assert.deepEqual(validateCheckpoint({ phase: 'spec-merged', fields: { ...c.cp.fields, head: 'f'.repeat(39) } }, ctx),
+    { ok: false, error: 'bad-value', key: 'head' });
+});
+
+test('validateCheckpoint: a track rejection comes before the missing-field check', () => {
+  const ctx = { repo: 'a/b', base: 'main', isAncestor: () => true };
+  for (const phase of ['plan-approved', 'tasks', 'final-approved']) {
+    assert.deepEqual(validateCheckpoint({ phase, fields: { track: 'parent' } }, ctx), { ok: false, error: 'bad-value', key: 'track' }, phase);
+  }
+  assert.deepEqual(validateCheckpoint({ phase: 'spec-merged', fields: { track: 'small' } }, ctx), { ok: false, error: 'bad-value', key: 'track' });
+  assert.deepEqual(validateCheckpoint({ phase: 'spec-merged', fields: {} }, ctx), { ok: false, error: 'missing', key: 'track' });
 });
 
 test('validateCheckpoint: a missing track is `missing track` before any other missing field', () => {
@@ -271,6 +325,8 @@ test('CLI validate: valid and invalid goldens give the same result as the functi
     ...cases.filter((c) => c.expect.error === 'bad-value').slice(0, 3),
     cases.find((c) => c.name.startsWith('closed head not reachable')),
     cases.find((c) => c.name === 'planSha not reachable'),
+    cases.find((c) => c.name.startsWith('spec-merged parent track')),
+    cases.find((c) => c.name === 'pr-open parent track with plan'),
   ];
   for (const c of picks) {
     const { file } = jsonFile({ checkpoint: c.cp, repo: c.ctx.repo, base: c.ctx.base, reachable: c.reachable });
