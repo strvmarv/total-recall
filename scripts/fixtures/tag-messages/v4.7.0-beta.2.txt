@@ -1,0 +1,12 @@
+total-recall v4.7.0-beta.2
+
+Prerelease (npm dist-tag beta). Everything in 4.7.0-beta.1, plus a fix to the release workflow. 4.7.0-beta.1 is on npm, but its GitHub release has no assets, so use this one.
+
+Added (from 4.7.0-beta.1)
+- A release version bump is one command, and a mismatch fails the release (#62): `node scripts/sync-version.js <version>` sets all seven version files, `--check` verifies them, and a `check-version` job in release.yml fails a tag that differs from the version files before anything is built.
+- The release archives and provisioning.manifest.json carry a build attestation (#64): verify with `gh attestation verify <file> --repo strvmarv/total-recall`. The shim still checks only the sha256 from the manifest.
+- A reinstall of the same version no longer downloads the engine again (#65): a manifest-verified archive is also kept in <data dir>/cache/binaries/<version>/ and restored before the manifest is fetched, so it works offline. Any cache problem is a miss, never an error.
+
+Fixed
+- A prerelease could not be attached to a GitHub release (found with 4.7.0-beta.1): this repository has immutable releases, which lock assets once a release is published, so the upload of a prerelease's assets was refused. The release workflow now creates a prerelease as a draft and publishes it, by release id, in a following step.
+

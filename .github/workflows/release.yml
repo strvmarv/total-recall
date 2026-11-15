@@ -40,8 +40,17 @@ jobs:
     name: Check version files match the tag
     runs-on: ubuntu-latest
     steps:
+      # The release notes are read from the annotated tag object. A shallow tag checkout leaves
+      # a lightweight tag at the commit (a pointer without the tag message), so the explicit
+      # fetch guarantees the annotated tag object whatever the checkout's settings, and it also
+      # gives the history of earlier releases, which the notes use to find the previous version.
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Fetch all tags
+        run: git fetch --force --tags origin
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -53,6 +62,14 @@ jobs:
         env:
           REF_NAME: ${{ github.ref_name }}
         run: node scripts/sync-version.js --check --expect "${REF_NAME#v}"
+
+      # A stable release needs a summary in its tag message: it is shown to users in the
+      # "what's new" notice. Failing here costs seconds, before four platform builds.
+      - name: Check the release notes
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: node scripts/release-notes.js "$REF_NAME" --check
 
   build:
     name: Build ${{ matrix.rid }}
@@ -220,8 +237,16 @@ jobs:
       id-token: write
       attestations: write
     steps:
+      # Full history and all tags, as in check-version: the release notes are read from the
+      # annotated tag object, and a shallow tag checkout leaves a lightweight tag at the commit,
+      # so the explicit fetch guarantees the annotated tag object whatever the checkout's settings.
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Fetch all tags
+        run: git fetch --force --tags origin
 
       # No registry-url on setup-node below: when registry-url is set, setup-node
       # writes an .npmrc with a dummy _authToken (XXXXX-XXXXX-XXXXX-XXXXX), and a
@@ -307,6 +332,25 @@ jobs:
           chmod +x binaries/linux-x64/total-recall
           chmod +x binaries/linux-arm64/total-recall
           chmod +x binaries/osx-arm64/total-recall
+
+      # Write release-notes.json into every binaries/<rid>/ and the release body into
+      # $RUNNER_TEMP. The position matters: npm publishes before the archives are staged, so
+      # this is the only place that reaches both the npm package (package.json `files` ships
+      # binaries/) and the four per-RID archives. It must come after the artifact downloads
+      # (which would overwrite the files) and before the size guard and `npm publish`.
+      # The tag reaches the shell through env, never as an interpolated expression.
+      - name: Write release notes
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          node scripts/release-notes.js "$REF_NAME" \
+            --notes-out binaries/linux-x64/release-notes.json \
+            --notes-out binaries/linux-arm64/release-notes.json \
+            --notes-out binaries/osx-arm64/release-notes.json \
+            --notes-out binaries/win-x64/release-notes.json \
+            --body-out "$RUNNER_TEMP/release-body.md"
 
       # Regression guard for the E413 class of failure. The npm registry rejects
       # oversized publish payloads with "413 Payload Too Large" — v3.0.0 hit this
@@ -487,6 +531,8 @@ jobs:
             release-assets/total-recall-osx-arm64.tar.gz
             release-assets/total-recall-win-x64.tar.gz
             release-assets/provisioning.manifest.json
+          # The release body is the tag message (without its title line), written by "Write release notes".
+          body_path: ${{ runner.temp }}/release-body.md
           prerelease: ${{ contains(github.ref_name, '-') }}
           # This repository has immutable releases, which lock assets once a release is published.
           # A stable release uploads its assets before it is published, but a prerelease stays

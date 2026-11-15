@@ -11,3 +11,6 @@ codex/bootstrap.cjs text eol=lf
 
 # The develop profile lists shell commands that the skill runs; pin it to LF so none of them carries a carriage return.
 .github/develop.md text eol=lf
+
+# Tag message fixtures for the release notes tests: pin to LF so a Windows checkout keeps them byte-exact.
+scripts/fixtures/tag-messages/*.txt text eol=lf

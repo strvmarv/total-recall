@@ -1,0 +1,15 @@
+total-recall v4.7.0
+
+A release version bump is now one checked command, the release archives and the provisioning manifest carry a build attestation, and a reinstall of the same version restores the engine from a per-user cache instead of downloading it again. Validated on the prereleases 4.7.0-beta.1 and 4.7.0-beta.2.
+
+Added
+- A release version bump is one command, and a mismatch fails the release (#62): `node scripts/sync-version.js <version>` sets all seven version files, `--check` verifies them, and a `check-version` job in release.yml fails a tag that differs from the version files before anything is built.
+- The release archives and provisioning.manifest.json carry a build attestation (#64): verify with `gh attestation verify <file> --repo strvmarv/total-recall`. The shim still checks only the sha256 from the manifest.
+- A reinstall of the same version no longer downloads the engine again (#65): a manifest-verified archive is also kept in <data dir>/cache/binaries/<version>/ and restored before the manifest is fetched, so it works offline. Any cache problem is a miss, never an error.
+
+Changed
+- Comments that pointed at the deleted TypeScript implementation were removed or rewritten, and a test keeps them out (#66).
+
+Fixed
+- A prerelease could not be attached to a GitHub release (found with 4.7.0-beta.1): this repository has immutable releases, which lock assets once a release is published. The release workflow now creates a prerelease as a draft and publishes it, by release id, in a following step.
+
