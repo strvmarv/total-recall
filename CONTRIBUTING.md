@@ -228,6 +228,12 @@ Add it to the importer collection wired up in `src/TotalRecall.Host/Program.cs` 
 
 ### 3. Add tests
 
+> **Memory imports.** The example above shows the shape, not the final code: an importer that inserts a
+> **memory** should not mint a random id. Route it through `ImportUtils.ImportMarkdownFile` with
+> `ContentType.Memory` (or `ImportUtils.InsertOrRepairMemory` directly for a custom format), which derives
+> the id from the import hash, so the same host memory is the same entry on every machine, and repairs a
+> half-finished import on the next run. Knowledge imports keep random ids.
+
 Create `tests/TotalRecall.Infrastructure.Tests/Importers/MyToolImporterTests.cs` mirroring `ClaudeCodeImporterTests.cs`. Cover at minimum: detect-true / detect-false, empty scan, dedup against existing import_log entries, and at least one round-trip insert with assertion on the resulting entry shape.
 
 ---
