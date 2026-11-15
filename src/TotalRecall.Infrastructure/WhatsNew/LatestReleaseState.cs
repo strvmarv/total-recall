@@ -36,7 +36,10 @@ public static class LatestReleaseState
             var info = new FileInfo(path);
             if (!info.Exists || info.Length > MaxBytes) return null;
 
-            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            var text = ReadBounded(path);
+            if (text is null) return null;
+
+            using var doc = JsonDocument.Parse(text);
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Object) return null;
 
@@ -57,6 +60,25 @@ public static class LatestReleaseState
         {
             return null;
         }
+    }
+
+    // Reads at most MaxBytes + 1 bytes, so a file that grew after the Length check cannot be
+    // pulled into memory whole. More than MaxBytes read means over the cap (null).
+    private static string? ReadBounded(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        var buffer = new byte[MaxBytes + 1];
+        var total = 0;
+        while (total < buffer.Length)
+        {
+            var n = stream.Read(buffer, total, buffer.Length - total);
+            if (n == 0) break;
+            total += n;
+        }
+        if (total > MaxBytes) return null;
+
+        var start = total >= 3 && buffer[0] == 0xEF && buffer[1] == 0xBB && buffer[2] == 0xBF ? 3 : 0;
+        return new UTF8Encoding(false).GetString(buffer, start, total - start);
     }
 
     public static void Write(string dir, string channel, LatestReleaseFile file)

@@ -119,6 +119,24 @@ public class LatestReleaseStateTests : IDisposable
     }
 
     [Fact]
+    public void Read_ExactlyOneByteOverCap_IsNull()
+    {
+        var text = Padded((int)LatestReleaseState.MaxBytes + 1);
+        Assert.Equal(65_537, text.Length);
+        Put("latest-stable.json", text);
+        Assert.Null(LatestReleaseState.Read(Dir, "stable"));
+    }
+
+    [Fact]
+    public void Read_Utf8Bom_IsTolerated()
+    {
+        Directory.CreateDirectory(Dir);
+        File.WriteAllBytes(Path.Combine(Dir, "latest-stable.json"),
+            new byte[] { 0xEF, 0xBB, 0xBF }.Concat(System.Text.Encoding.UTF8.GetBytes("{\"version\":\"4.9.0\"}")).ToArray());
+        Assert.Equal("4.9.0", LatestReleaseState.Read(Dir, "stable")!.Version);
+    }
+
+    [Fact]
     public void Read_AtSizeCap_IsRead()
     {
         var text = Padded(65_536);
@@ -174,8 +192,10 @@ public class LatestReleaseStateTests : IDisposable
             "{\"version\":\"4.9.0\",\"summary\":\"\\u001b[31mFixed\\u001b[0m [the cache](https://x.y) bug\\nnow\"}");
         Assert.Equal("Fixed the cache bug now", LatestReleaseState.Read(Dir, "stable")!.Summary);
 
+        var longSummary = string.Join(" ", Enumerable.Repeat("word", 101))[..500];
+        Assert.Equal(500, longSummary.Length);
         Put("latest-pre.json",
-            "{\"version\":\"4.10.0-beta.1\",\"summary\":\"" + string.Join(" ", Enumerable.Repeat("word", 100)) + "\"}");
+            "{\"version\":\"4.10.0-beta.1\",\"summary\":\"" + longSummary + "\"}");
         var s = LatestReleaseState.Read(Dir, "pre")!.Summary;
         Assert.NotNull(s);
         Assert.True(s!.Length <= 200);

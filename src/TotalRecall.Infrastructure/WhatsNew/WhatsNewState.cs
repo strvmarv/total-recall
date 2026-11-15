@@ -78,6 +78,7 @@ public static class WhatsNewState
     /// <summary>Records the version the host was told about, keeping any availableSeen marks.</summary>
     public static void WriteSeenVersion(string dir, string host, string version)
     {
+        if (version is null) return;
         var seen = ReadSeen(dir, host);
         WriteSeen(dir, host, version, seen.AvailableSeen);
     }

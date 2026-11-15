@@ -133,6 +133,17 @@ public class WhatsNewStateTests : IDisposable
     }
 
     [Fact]
+    public void WriteSeenVersion_NullVersion_WritesNothing_KeepsExistingFile()
+    {
+        const string original = "{\"version\":\"4.8.0\",\"availableSeen\":{\"stable\":\"4.9.0\"}}";
+        Put("seen-pi.json", original);
+        WhatsNewState.WriteSeenVersion(Dir, "pi", null!);
+        Assert.Equal(original, File.ReadAllText(Path.Combine(Dir, "seen-pi.json")));
+        Assert.Equal(new[] { "seen-pi.json" },
+            Directory.GetFiles(Dir).Select(Path.GetFileName).ToArray());
+    }
+
+    [Fact]
     public void WriteSeenVersion_UnwritablePath_DoesNotThrow()
     {
         Directory.CreateDirectory(_root);
