@@ -131,7 +131,7 @@ name) and `tierName` / `tryParseTier` / `tierRank` (hot is the warmest). Each is
 that field (the codec tells apart nothing else). The fields are: `Format`, `Id`, `Content`, `EntryType`,
 `CreatedAt`, `UpdatedAt` (strings); `Tags` (an array of strings: any non-array or non-string element makes the
 whole field `WrongType`); `Tier`, `TierStamp`, `StickyStamp`, `ContentStamp` (strings); `Sticky` (a boolean);
-optional `Source`, `Project`, `Scope`, `WrittenBy` (strings) and `Origin` (an object of two strings). The
+optional `Source`, `Project`, `Scope`, `WrittenBy` (strings) and `Origin` (an object of two strings; the codec reports `WrongType` named `ext.total-recall.origin` when the object lacks `tool` or `hash` or one is not a string). The
 `ext` and `placement` objects are not fields: a missing or non-object one makes the fields inside it `Absent`
 (or `WrongType` for a present non-object), named by their path, for example `ext.total-recall.placement.tier`.
 
@@ -148,7 +148,7 @@ order, and returns the first failure:
    `CreatedAt` and `UpdatedAt` (parse as `yyyy-MM-ddTHH:mm:ss.fffZ` with ASCII digits in fixed positions,
    else `BadTimestamp field`); `ContentStamp`, `TierStamp`, `StickyStamp` (`Stamp.tryParse`, else
    `BadStamp field`);
-5. the optional fields: a present value of the wrong type is `WrongType`, and an `origin` object that lacks `tool` or `hash`, or whose value is not a string, is `WrongType` named `ext.total-recall.origin`; `Source` that is a string but not one
+5. the optional fields: a present value of the wrong type is `WrongType`; `Source` that is a string but not one
    of the seven names is **dropped** (becomes `None`), not an error.
 
 `ValidRecord = { Record: SyncRecord; Notes: Note list }` where `Note` is `StickyNormalisedToHot` (the record said
@@ -244,7 +244,7 @@ the caller runs `checkWritable` without parsing again. A patch with no content p
 the time of the file's `content_stamp`.
 
 An absent part leaves its properties exactly as they were, **as they are in the file** (including a stored
-tier that normalisation would raise, and unknown content), so a patch never rewrites a group it does not name.
+tier that normalisation would raise, and unknown content), so a patch never rewrites a group it does not name. The one exception is tags: `Write` and `Patch` always write the tags sorted and unique, so a hand-edited record with unsorted tags is normalised by any write, as its formatting is.
 `created_at` and `written_by` are never changed by a patch. `Patch` does not validate its output: the caller
 runs `checkWritable` on the record and on the byte count. A patch of a record in canonical form changes only
 the bytes of the properties it names (plus `updated_at` for a content patch); a patch of a non-canonical
@@ -281,7 +281,7 @@ F# tests in `tests/TotalRecall.Core.Tests` (Expecto, with FsCheck for properties
   malformed text.
 - **Record helpers:** each name function and its `tryParse` round-trip; unknown names give `None`; `tierRank`
   orders hot before warm before cold.
-- **Validation (structure):** a lone surrogate in a `Reject` string is replaced; an `origin` missing `tool` or `hash` is `WrongType`; a record that is both of an unknown format and has a duplicate key reports `DuplicateKey` (structure first).
+- **Validation (truncation):** a lone surrogate in a `Reject` string is replaced.
 - **Validation:** the id rule (eligible ids; uppercase, one character, 65 characters, a leading dash, a
   trailing `\n`, NUL, a space, a Unicode digit); `recordPath` and `idOfPath` for good, wrong-shard, nested,
   traversal, wrong-extension and wrong-directory paths; each rule of `validate` in the stated order (oversize
@@ -317,6 +317,7 @@ C# tests in `tests/TotalRecall.Infrastructure.Tests/GitSync/RecordCodecTests.cs`
 - Accepts CRLF, emoji, accented and CJK content and writes it back identically; a record whose content is
   100,000 U+0001 characters (600,000 bytes serialized) is accepted by `Parse` (under 1 MiB) and blocked by
   `checkWritable` (over 256 KiB).
+- Structure (codec level): an `origin` missing `tool` or `hash` is `WrongType`; a record that is both of an unknown format and has a duplicate key reports `DuplicateKey` (structure first).
 - Tags and patch details: `Parse` accepts unsorted and duplicated tags and `Write`/`Patch` write them sorted and
   unique in UTF-16 code-unit order (a tag with U+FFFD sorts after one with an emoji, where UTF-8 byte order
   would put it before); a file stored as `sticky: true` with a warm tier round-trips through
