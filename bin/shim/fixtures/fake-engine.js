@@ -3,6 +3,7 @@
 //   (default)      answer initialize, echo tools/call as a text result
 //   --crash-after-initialize   exit(1) right after the initialize handshake
 //   --hang-initialize          never answer initialize
+//   --echo-params              answer tools/call with the received params as JSON text
 //   --log-stderr               emit a marker line on stderr at startup
 import readline from 'node:readline';
 
@@ -34,6 +35,10 @@ rl.on('line', (line) => {
     return;
   }
   if (msg.method === 'tools/call') {
+    if (mode === '--echo-params') {
+      write({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: JSON.stringify(msg.params) }], isError: false } });
+      return;
+    }
     write({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: 'engine-ok' }], isError: false } });
     return;
   }

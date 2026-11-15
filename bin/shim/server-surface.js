@@ -17,6 +17,31 @@ export class ServerSurface {
     this._name = serverName;
     this._version = serverVersion;
     this._protocol = protocolVersion;
+    // The harness's own name (initialize clientInfo.name), once it sends a usable one.
+    this._clientName = undefined;
+  }
+
+  // Records the harness's client name from an initialize request. Anything that is not a
+  // non-empty string leaves the previous value alone.
+  _noteClientName(msg) {
+    const name = msg.params?.clientInfo?.name;
+    if (typeof name !== 'string') return;
+    const trimmed = name.trim().slice(0, 128);
+    if (trimmed) this._clientName = trimmed;
+  }
+
+  // A session_start call carrying the harness's name as `host`, or null when there is nothing
+  // to add. The inbound message is never mutated.
+  _withHost(msg) {
+    if (!this._clientName) return null;
+    const args = msg.params.arguments;
+    if (args === undefined || args === null) {
+      return { ...msg, params: { ...msg.params, arguments: { host: this._clientName } } };
+    }
+    if (typeof args === 'object' && !Array.isArray(args)) {
+      return { ...msg, params: { ...msg.params, arguments: { ...args, host: this._clientName } } };
+    }
+    return null;
   }
 
   route(msg, state) {
@@ -32,6 +57,7 @@ export class ServerSurface {
 
     switch (msg.method) {
       case 'initialize':
+        this._noteClientName(msg);
         return {
           kind: 'respond',
           message: makeResult(msg.id, {
@@ -48,10 +74,14 @@ export class ServerSurface {
         return state.ready
           ? { kind: 'proxy' }
           : { kind: 'respond', message: makeResult(msg.id, this._catalog) };
-      case 'tools/call':
-        return state.ready
-          ? { kind: 'proxy' }
-          : { kind: 'respond', message: makeResult(msg.id, state.notReadyResult()) };
+      case 'tools/call': {
+        if (!state.ready) return { kind: 'respond', message: makeResult(msg.id, state.notReadyResult()) };
+        if (msg.params?.name === 'session_start') {
+          const message = this._withHost(msg);
+          if (message) return { kind: 'proxy', message };
+        }
+        return { kind: 'proxy' };
+      }
       default:
         return state.ready
           ? { kind: 'proxy' }
