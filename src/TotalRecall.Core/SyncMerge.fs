@@ -186,3 +186,238 @@ let clearsPending (outcome: EntryOutcome) (hasEntry: bool) : bool =
     | LeaveEntry
     | Defer
     | MergeGroups _ -> false
+
+// ---------------------------------------------------------------------------------------------
+// Stamps and classification
+
+let private gt (a: Stamp) (b: Stamp) : bool = Stamp.compare a b > 0
+
+/// How the record's stamp for one group relates to the row. `Own`: the record carries a stamp this
+/// row proves it sent (equal to `Pushing` or `Pending`) and the base is not newer than it.
+type private Class =
+    | Own
+    | Older
+    | Unchanged
+    | Newer
+
+let private classify (t: Stamp) (b: Stamp option) (pending: Stamp option) (pushing: Stamp option) : Class =
+    let baseNewer =
+        match b with
+        | Some bs -> gt bs t
+        | None -> false
+    let provable = pushing = Some t || pending = Some t
+    if provable && not baseNewer then Own
+    else
+        match b with
+        | None -> Newer
+        | Some bs ->
+            let c = Stamp.compare t bs
+            if c > 0 then Newer elif c < 0 then Older else Unchanged
+
+/// One group's result: the apply, the pending-stamp action, whether the push step re-publishes the
+/// base's value for the group (`Re`), and the reviews it opens.
+type private G<'a> =
+    { Value: 'a
+      Action: StampAction
+      Re: bool
+      Revs: ReviewRequest list }
+
+let private g (value: 'a) (action: StampAction) (revs: ReviewRequest list) : G<'a> =
+    { Value = value; Action = action; Re = false; Revs = revs }
+
+/// `own`, `older` and `unchanged` groups are settled before any table is consulted.
+let private settled (cls: Class) (p: Stamp option) (t: Stamp) (leave: 'a) : G<'a> option =
+    match cls with
+    | Own -> Some (g leave (if p = Some t then ClearPending else KeepPending) [])
+    | Older -> Some { Value = leave; Action = KeepPending; Re = p.IsNone; Revs = [] }
+    | Unchanged -> Some (g leave KeepPending [])
+    | Newer -> None
+
+// ---------------------------------------------------------------------------------------------
+// Sticky, tier, content, tags
+
+let private stickyGroup (cls: Class) (hasBase: bool) (l: LocalEntry) (t: SyncRecord) (p: Stamp option) : G<StickyApply> =
+    let ts = t.Placement.StickyStamp
+    match settled cls p ts LeaveSticky with
+    | Some r -> r
+    | None ->
+        let ls = l.Sticky
+        let rs = t.Placement.Sticky
+        if hasBase then
+            match p with
+            | Some pv ->
+                if ls = rs then g LeaveSticky ClearPending []                    // FS1
+                elif gt pv ts then g LeaveSticky KeepPending []                  // FS2
+                elif not rs then g UnpinLocally ClearPending []                  // FS3
+                else g ReviewNewPin ClearPending [ NewPin ]                      // FS4
+            | None ->
+                if ls = rs then g LeaveSticky KeepPending []                     // FS5
+                elif not rs then g UnpinLocally KeepPending []                   // FS6
+                else g ReviewNewPin KeepPending [ NewPin ]                       // FS7
+        elif ls = rs then g LeaveSticky ClearPending []                          // NS1
+        elif ls then                                                             // NS2: a local pin is kept and pushed
+            (match p with
+             | Some pv when gt pv ts -> g LeaveSticky KeepPending []
+             | _ -> g LeaveSticky RestampPending [])
+        else g ReviewNewPin ClearPending [ NewPin ]                              // NS3
+
+let private warmer (a: Tier) (b: Tier) : bool = tierRank a < tierRank b
+
+let private tierGroup (cls: Class) (hasBase: bool) (l: LocalEntry) (t: SyncRecord) (p: Stamp option) : G<Tier option> =
+    let ts = t.Placement.TierStamp
+    match settled cls p ts None with
+    | Some r -> r
+    | None ->
+        let lt = l.Tier
+        let rt = t.Placement.Tier
+        let localWins =
+            match p with
+            | Some pv when gt pv ts -> KeepPending
+            | _ -> RestampPending
+        if hasBase then
+            if warmer rt lt then g (Some rt) ClearPending []                     // FR1
+            elif p.IsSome && lt = rt then g None ClearPending []                 // FR2
+            elif p.IsSome && warmer lt rt then g None localWins []               // FR3
+            else g None KeepPending []                                           // FR4
+        elif lt = rt then g None ClearPending []
+        elif warmer rt lt then g (Some rt) ClearPending []
+        else g None localWins []
+
+let private sameContent (l: ContentFields) (t: SyncRecord) : bool =
+    l.Text = t.Content && l.Project = t.Project && l.Scope = t.Scope && l.EntryType = t.EntryType
+
+/// A sticky entry holds a record's content as a pin-edit when text, project or scope differ.
+let private pinDiffers (l: ContentFields) (t: SyncRecord) : bool =
+    l.Text <> t.Content || l.Project <> t.Project || l.Scope <> t.Scope
+
+let private contentGroup
+    (cls: Class)
+    (b: SyncRecord option)
+    (effSticky: bool)
+    (l: LocalEntry)
+    (t: SyncRecord)
+    (p: Stamp option)
+    : G<ContentApply> =
+    let ts = t.ContentStamp
+    match settled cls p ts LeaveContent with
+    | Some r -> r
+    | None ->
+        match b with
+        | Some bb ->
+            let pendingText = p.IsSome && l.Content.Text <> bb.Content
+            let both = pendingText && t.Content <> bb.Content && t.Content <> l.Content.Text
+            if sameContent l.Content t then                                      // FC1
+                g LeaveContent (if p.IsSome then ClearPending else KeepPending) []
+            elif effSticky && pinDiffers l.Content t && (p.IsNone || gt ts p.Value) then
+                g HeldAsPinEdit ClearPending [ PinEdit ]                         // FC2
+            elif p.IsNone then g TakeTheirs KeepPending []                       // FC3
+            elif gt p.Value ts then                                              // FC4
+                g LeaveContent KeepPending
+                    (if both then [ Conflict { Side = Remote; Text = t.Content; Stamp = Some ts } ] else [])
+            else                                                                 // FC5
+                g TakeTheirs ClearPending
+                    (if both then [ Conflict { Side = Side.Local; Text = l.Content.Text; Stamp = p } ] else [])
+        | None ->
+            if sameContent l.Content t then g AdoptCreatedAt ClearPending []     // NC1
+            elif effSticky && pinDiffers l.Content t then
+                g HeldAsPinEdit ClearPending [ PinEdit ]                         // NC2
+            elif l.Content.Text = t.Content then g TakeTheirs ClearPending []    // NC3
+            else                                                                 // NC4
+                g TakeTheirs ClearPending [ Conflict { Side = Side.Local; Text = l.Content.Text; Stamp = p } ]
+
+/// Three-way set merge when there is a base and the apply is proven; otherwise the union (a reset
+/// pull would read the three-way merge as a removal).
+let private mergeTags (proven: bool) (b: SyncRecord option) (l: string list) (t: string list) : TagsOutcome =
+    let ls = Set.ofList l
+    let ts = Set.ofList t
+    let result =
+        match b with
+        | Some bb when proven ->
+            let bs = Set.ofList bb.Tags
+            Set.unionMany [ bs; ls; ts ]
+            |> Set.filter (fun e ->
+                if bs.Contains e then ls.Contains e && ts.Contains e else ls.Contains e || ts.Contains e)
+            |> Set.toList
+        | _ -> Set.union ls ts |> Set.toList
+    let result = normaliseTags result
+    { Result = result
+      ApplyLocal = result <> normaliseTags l
+      PushNeeded = result <> normaliseTags t }
+
+let private allTheirs : BaseUpdate =
+    { BaseUpdate.Content = BaseBecomesTheirs
+      Tags = BaseBecomesTheirs
+      Sticky = BaseBecomesTheirs
+      Tier = BaseBecomesTheirs }
+
+let private keepAll : BaseUpdate =
+    { BaseUpdate.Content = KeepBase; Tags = KeepBase; Sticky = KeepBase; Tier = KeepBase }
+
+let private classOf (input: MergeInput) (b: SyncRecord option) (t: SyncRecord) : Class * Class * Class =
+    let c =
+        classify t.ContentStamp (b |> Option.map (fun x -> x.ContentStamp)) input.Pending.Content input.Pushing.Content
+    let s =
+        classify t.Placement.StickyStamp (b |> Option.map (fun x -> x.Placement.StickyStamp)) input.Pending.Sticky input.Pushing.Sticky
+    let r =
+        classify t.Placement.TierStamp (b |> Option.map (fun x -> x.Placement.TierStamp)) input.Pending.Tier input.Pushing.Tier
+    c, s, r
+
+/// Per group: an `older` or `unchanged` group keeps its base; `own` and `newer` take the record's. Tags always do.
+let private baseUpdateFor (input: MergeInput) (b: SyncRecord option) (t: SyncRecord) : BaseUpdate =
+    match b with
+    | None -> allTheirs
+    | Some _ ->
+        let c, s, r = classOf input b t
+        let f cls =
+            match cls with
+            | Own
+            | Newer -> BaseBecomesTheirs
+            | Older
+            | Unchanged -> KeepBase
+        { BaseUpdate.Content = f c; Tags = BaseBecomesTheirs; Sticky = f s; Tier = f r }
+
+let private mergeGroups
+    (input: MergeInput)
+    (b: SyncRecord option)
+    (l: LocalEntry)
+    (t: SyncRecord)
+    : EntryOutcome * ReviewRequest list =
+    let cc, cs, cr = classOf input b t
+    let hasBase = b.IsSome
+    let sticky = stickyGroup cs hasBase l t input.Pending.Sticky      // decided first
+    let effSticky = l.Sticky && sticky.Value <> UnpinLocally
+    let content = contentGroup cc b effSticky l t input.Pending.Content
+    let tier = tierGroup cr hasBase l t input.Pending.Tier
+    let tags = mergeTags input.ApplyProven b l.Tags t.Tags
+    let merged : Merged =
+        { Merged.Content = (content.Value, content.Action)
+          Tags = tags
+          Sticky = (sticky.Value, sticky.Action)
+          Tier = (tier.Value, tier.Action)
+          Repush = { GroupFlags.Content = content.Re; Sticky = sticky.Re; Tier = tier.Re } }
+    MergeGroups merged, sticky.Revs @ content.Revs
+
+// ---------------------------------------------------------------------------------------------
+// The whole-entry table
+
+let private baseDecision : MergeDecision =
+    { Entry = Ignore
+      Base = keepAll
+      RowState = None
+      Reviews = []
+      Notes = []
+      CloseHeldDelete = false
+      FreshContentStamp = false }
+
+let decide (input: MergeInput) : MergeDecision =
+    let b = if input.Row.IsSome then input.Base else None          // Decided here 10
+    match input.Row, input.Theirs, input.Local with
+    | (None | Some Active), Some t, Some l ->                       // W4 and W5
+        let outcome, reviews = mergeGroups input b l t
+        { baseDecision with
+            Entry = outcome
+            Base = baseUpdateFor input b t
+            RowState = (if input.Row.IsNone then Some Active else None)
+            Reviews = reviews
+            CloseHeldDelete = input.HeldDelete.IsSome }
+    | _ -> { baseDecision with Entry = Defer }                       // placeholder until Task 3
