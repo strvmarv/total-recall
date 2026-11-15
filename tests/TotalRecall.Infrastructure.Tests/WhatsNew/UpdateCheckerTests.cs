@@ -319,6 +319,42 @@ public sealed class UpdateCheckerTests : IDisposable
         Assert.Equal(UpdateAttemptOutcome.Failed, await Make(gh, clock).RunOnceAsync(CancellationToken.None));
     }
 
+    [Fact]
+    public async Task Answer_LoneSurrogateEscape_IsFailedNotUnexpected()
+    {
+        const string body = "[{\"tag_name\":\"\\ud800\",\"draft\":false,\"prerelease\":false}]";
+        var channel = UpdateChannel.Of("4.8.0-beta.1");
+        Prior("4.9.0", "Old.", TimeSpan.FromHours(5), TimeSpan.FromHours(4), channel);
+
+        var clock = new FakeClock();
+        var gh = new FakeGitHub(clock).Then(Json(200, body));
+        var outcome = await Make(gh, clock, "4.8.0-beta.1").RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(UpdateAttemptOutcome.Failed, outcome);
+        Assert.Equal(new LatestReleaseFile("4.9.0", "Old.", T0 - TimeSpan.FromHours(5), T0),
+            LatestReleaseState.Read(_dir, channel));
+
+        var clock2 = new FakeClock();
+        var gh2 = new FakeGitHub(clock2).Then(Json(200, body));
+        var errors = new StringWriter();
+        var cts = StopAfterRequests(clock2, gh2, 2);
+        await Make(gh2, clock2, "4.8.0-beta.1", errors: errors).RunLoopAsync(cts.Token);
+
+        Assert.Equal(2, gh2.Requests.Count);
+        Assert.Equal("", errors.ToString());
+    }
+
+    [Fact]
+    public async Task Answer_LoneSurrogateInBody_StillCountsRelease_NoSummary()
+    {
+        var (outcome, _) = await Attempt("{\"tag_name\":\"v4.9.0\",\"body\":\"\\ud800 text\"}");
+
+        Assert.Equal(UpdateAttemptOutcome.Answered, outcome);
+        using var doc = JsonDocument.Parse(RawFile());
+        Assert.Equal("4.9.0", doc.RootElement.GetProperty("version").GetString());
+        Assert.False(doc.RootElement.TryGetProperty("summary", out _));
+    }
+
     // --- summary (AC5) ---------------------------------------------------------------------------
 
     [Theory]
@@ -607,6 +643,17 @@ public sealed class UpdateCheckerTests : IDisposable
         var merged = UpdateChecker.MergeWithMemory(file, T0 - TimeSpan.FromHours(2), null, T0);
 
         Assert.Equal(new LatestReleaseFile("4.9.0", "S", T0 - TimeSpan.FromHours(2), null), merged);
+    }
+
+    [Fact]
+    public void MergeWithMemory_FutureMemoryTime_IsDropped()
+    {
+        var file = new LatestReleaseFile("4.9.0", "S", T0 - TimeSpan.FromHours(5), T0 - TimeSpan.FromHours(1));
+
+        var merged = UpdateChecker.MergeWithMemory(file, T0 + TimeSpan.FromDays(3), T0 + TimeSpan.FromHours(30), T0);
+
+        Assert.Equal(file, merged);
+        Assert.Null(UpdateChecker.MergeWithMemory(null, T0 + TimeSpan.FromDays(3), T0 + TimeSpan.FromDays(3), T0));
     }
 
     [Fact]

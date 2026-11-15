@@ -58,7 +58,7 @@ function stripShell(src) {
   return src.split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
 }
 
-const NETWORK = /\bfetch\s*\(|node:https?\b|require\(\s*['"]https?['"]|from\s+['"]https?['"]|\bcurl\b|\bwget\b|api\.github\.com\//;
+const NETWORK = /\bfetch\s*\(|node:https?\b|require\(\s*['"]https?['"]|from\s+['"]https?['"]|\bcurl\b|\bwget\b|api\.github\.com/;
 
 test('Program.cs starts the update checker exactly once and disposes it', () => {
   const code = stripCode(read('src/TotalRecall.Host/Program.cs'));

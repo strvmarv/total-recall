@@ -267,7 +267,7 @@ public sealed class UpdateChecker
             if (item.ValueKind != JsonValueKind.Object) continue;
             if (IsTrue(item, "draft")) continue;
             if (!item.TryGetProperty("tag_name", out var tag) || tag.ValueKind != JsonValueKind.String) continue;
-            var tagText = tag.GetString();
+            var tagText = TryGetString(tag);
             if (tagText is null || tagText.Length < 2 || tagText[0] != 'v') continue;
             var version = tagText[1..];
             if (!UpdateChannel.IsValidReleaseVersion(version)) continue;
@@ -286,10 +286,22 @@ public sealed class UpdateChecker
         string? summary = null;
         if (bestItem.TryGetProperty("body", out var body) && body.ValueKind == JsonValueKind.String)
         {
-            var clean = SummarySanitizer.Sanitize(FirstParagraph(body.GetString()));
-            if (clean.Length > 0) summary = clean;
+            var bodyText = TryGetString(body);
+            if (bodyText is not null)
+            {
+                var clean = SummarySanitizer.Sanitize(FirstParagraph(bodyText));
+                if (clean.Length > 0) summary = clean;
+            }
         }
         return (bestVersion, summary);
+    }
+
+    // A string holding a lone escaped surrogate (JSON "\ud800") makes GetString() throw; a badly
+    // shaped body is a failed check, never an unexpected one.
+    private static string? TryGetString(JsonElement element)
+    {
+        try { return element.GetString(); }
+        catch (InvalidOperationException) { return null; }
     }
 
     private static bool IsTrue(JsonElement obj, string name) =>
@@ -329,15 +341,17 @@ public sealed class UpdateChecker
         return dueAnswer > dueRetry ? dueAnswer : dueRetry;
     }
 
-    /// <summary>Drops file times later than now + FutureTolerance, then takes the later non-null time of each pair.</summary>
+    /// <summary>Drops file and memory times later than now + FutureTolerance, then takes the later non-null time of each pair.</summary>
     internal static LatestReleaseFile? MergeWithMemory(
         LatestReleaseFile? file, DateTimeOffset? lastAnswer, DateTimeOffset? lastAttempt, DateTimeOffset now)
     {
         var limit = now + FutureTolerance;
         var fileAnswer = file?.CheckedAt is { } c && c <= limit ? c : (DateTimeOffset?)null;
         var fileAttempt = file?.LastAttempt is { } l && l <= limit ? l : (DateTimeOffset?)null;
-        var answer = Later(fileAnswer, lastAnswer);
-        var attempt = Later(fileAttempt, lastAttempt);
+        var memoryAnswer = lastAnswer is { } ma && ma <= limit ? ma : (DateTimeOffset?)null;
+        var memoryAttempt = lastAttempt is { } mt && mt <= limit ? mt : (DateTimeOffset?)null;
+        var answer = Later(fileAnswer, memoryAnswer);
+        var attempt = Later(fileAttempt, memoryAttempt);
 
         if (file is null && answer is null && attempt is null) return null;
         return new LatestReleaseFile(file?.Version, file?.Summary, answer, attempt);
