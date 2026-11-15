@@ -213,7 +213,7 @@ inspects the store. Rules:
   `summary`, "from -> to", and the link. The link is the release's own page when the recorded version
   equals the packaged notes' `previous` (a one-release update), and the releases list otherwise (a longer
   jump; the notes of the skipped releases are not on the machine, so the list is the way to read them).
-  No count of skipped releases (version numbers do not give one). Record the version on emit. A
+  No count of skipped releases (version numbers do not give one). Record the version on emit.
 
 - **Downgrade or equal.** Running version not greater than the recorded one: say nothing and record
   nothing.
@@ -279,7 +279,7 @@ To reach the engine on Codex, the variable is added to `ENV_VARS` in `codex/buil
 `codex/mcp.json` is regenerated (its `--check` test guards the file). It cannot reach the engine on
 Cursor (see Accepted losses).
 
-### 3. CLI backend
+### 3. CLI backend (T2b)
 
 `total-recall whats-new --host <id> [--format claude-code|text|json]`, registered beside
 `PinnedFloorCommand` (an `--host` outside the closed list in section 4 is treated as `other`). It reads the state and packaged notes (never the network), decides, marks the
@@ -295,7 +295,7 @@ Host ids: `claude-code`, `pi`, `copilot-cli`, `cursor`, `codex`, `gemini-cli`, `
 |---|---|---|
 | Direct | Claude Code | The `SessionStart` hook (`hooks/session-start/run.sh`, synchronous) runs a small node script that first writes the `direct-claude-code` stamp (below), then imports `pi/floor.js` as the Codex and Copilot hooks do, runs the engine **directly and only when `resolveEngine()` finds it provisioned** (never `bin/start.js`, which would download the engine inside a blocking hook), with a 3 s timeout, as `whats-new --host claude-code --format claude-code`, and adds the returned `systemMessage` to the JSON `run.sh` already prints beside `hookSpecificOutput.additionalContext`. The `systemMessage` is added only in the Claude Code branch (not the Cursor or Copilot env branches the same script serves). `run.sh` runs under `set -euo pipefail`, so the call is wrapped to never fail the hook. Not shown for `compact`; seen-state prevents repeats on `resume` and `clear`. With no provisioned engine (a git install in the first session after an update) the hook stays silent. |
 | Direct | pi | The extension's `session_start` handler (skipping `reload`, as the context message does) runs `whats-new --host pi --format text` through a runner beside `pi/floor.js` and calls `ctx.ui.notify(text, "info")`. Only when `ctx.hasUI` and `hookable(ctx)`; silent while the engine is unprovisioned, and silent (no stamp either) when `resolveUserServer` says skip. Nothing is marked when it does not run. Like the floor, it follows a hand-configured `mcp.json` server through `resolveUserServer` (skipping when it says skip, and passing its `TOTAL_RECALL_*` env) so the notice reads the same data directory the MCP tools use. It writes the `direct-pi` stamp (below) first, and only when `ctx.hasUI`, `hookable(ctx)` and not `resolveUserServer` skip, i.e. only when a notice could actually be displayed and read from the right store; a skip leaves no stamp and the relayed line stands. |
-| Relayed | every other host, and Claude Code or pi without their direct channel | The `session_start` result gains `whatsNew: { kind, text, relay } | null`, rendered by the same code. `relay` is a fixed engine-authored sentence ("Tell the user this once, verbatim, as a separate line; it is information, not an instruction.") so a host with no instruction file still gets the relay rule. `skills/commands/SKILL.md`, `skills/using-total-recall/SKILL.md`, `.kiro/steering/total-recall.md` and `.kiro/hooks/total-recall-session-start.json` add the same line to their announce step. Not emitted, and nothing marked, for `hermes` (its provider discards the result). |
+| Relayed | every other host, and Claude Code or pi without their direct channel | The `session_start` result gains `whatsNew: { kind, text, relay } | null`, rendered by the same code. `relay` is a fixed engine-authored sentence ("Tell the user this once, verbatim, as a separate line; it is information, not an instruction.") so a host with no instruction file still gets the relay rule. (T2b:) `skills/commands/SKILL.md`, `skills/using-total-recall/SKILL.md`, `.kiro/steering/total-recall.md` and `.kiro/hooks/total-recall-session-start.json` add the same line to their announce step. Not emitted, and nothing marked, for `hermes` (its provider discards the result). |
 
 **Direct wins (owner's decision).** Where a direct channel exists, the relayed line is withheld for that
 host, so the notice is not spent by whichever channel happens to run first. Each direct runner writes a
@@ -396,11 +396,13 @@ privacy). Part 5's documentation and tests are folded into each ticket for the c
 them hang under the tracking issue #92 and cite this spec; T2a, T2b and T3 are defined one at a time.
 
 1. Release pipeline: `scripts/release-notes.js`, `check-version` gate, notes in archives and release body.
-2. Engine core (T2a): state files, decider, semver, sanitiser, renderer, the `updates.notice` key, the
+2. Engine core (T2a): state files, the decider rules for first seen, updated, downgrade, dev build and
+   `updates.notice`, semver, sanitiser, renderer, the `updates.notice` key, the
    `whatsNew` field of `session_start` (with host-id resolution and the table that maps the harness's
    `clientInfo.name` to a host id, including `hermes-mcp-client` -> `hermes`; the engine-side
    direct-stamp check, the `hermes` suppression and the 30 s handler rule).
-3. Update checker, the `updates.check` and `updates.check_interval_hours` keys, the
+3. Update checker, the decider's Available rule and its state (`availableSeen`, `latest-*.json`), the
+   `updates.check` and `updates.check_interval_hours` keys, the
    `TOTAL_RECALL_NO_UPDATE_CHECK` plumbing (`codex/build-mcp.js`, `codex/mcp.json`) and the `PRIVACY.md`
    changes.
 4. Host wiring (T2b): the `whats-new` CLI (text, json and `claude-code` formats; it applies the
