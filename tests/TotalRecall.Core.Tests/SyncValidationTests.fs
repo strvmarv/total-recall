@@ -25,6 +25,8 @@ let idAndTextTests =
             Expect.equal (recordPath "3f9c2a7e-1111") "memories/3f/3f9c2a7e-1111.json" "path"
             Expect.equal (shard "3f9c2a7e-1111") "3f" "shard"
             Expect.equal (idOfPath "memories/3f/3f9c2a7e-1111.json") (Some "3f9c2a7e-1111") "round trip"
+            for bad in [ null; ""; "../../x"; "a"; "3F9C2A7E" ] do
+                Expect.throws (fun () -> recordPath bad |> ignore) (sprintf "recordPath refuses %A" bad)
             for p in [ null; ""; "memories/aa/3f9c2a7e-1111.json"; "memories/3f/x/3f9c2a7e-1111.json"; "memories/../x.json"
                        "memories/3f/3f9c2a7e-1111.JSON"; "memories/3f/3f9c2a7e-1111.json.bak"; "other/3f/3f9c2a7e-1111.json"
                        "memories\\3f\\3f9c2a7e-1111.json"; "/memories/3f/3f9c2a7e-1111.json"; "memories/3f/3F9C2A7E-1111.json"
@@ -51,6 +53,9 @@ let idAndTextTests =
             Expect.equal (sanitizeText ("a" + lo + "b")) "a?b" "lone low"
 
         testCase "sanitizeText replaces control characters" <| fun _ ->
+            Expect.equal (sanitizeText (String.replicate 63 "a" + hi)) (String.replicate 63 "a" + "?") "a lone high surrogate as the last character"
+            Expect.equal (sanitizeText (String.replicate 63 "a" + hi + "tail")) (String.replicate 63 "a" + "?" + "") "a lone surrogate at the cut is replaced, then the limit stops the text"
+            Expect.equal (sanitizeText "\u0085\u00A0") "?\u00A0" "U+0085 is Cc, U+00A0 is not"
             Expect.equal (sanitizeText "a\u0007b\u007Fc\u009Bd\u2028e\u2029f\ng\u0000") "a?b?c?d?e?f?g?" "Cc, U+2028, U+2029"
             Expect.equal (sanitizeText "é中😀") "é中😀" "printable text is untouched"
     ]

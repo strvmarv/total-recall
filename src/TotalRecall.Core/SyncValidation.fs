@@ -19,11 +19,14 @@ let isEligibleId (id: string) : bool =
             if not (isLowerHex id.[i] || id.[i] = '-') then ok <- false
         ok
 
-/// The first two characters of an eligible id.
+/// The first two characters of an eligible id. Precondition: `isEligibleId id`.
 let shard (id: string) : string = id.Substring(0, 2)
 
-/// `memories/<shard>/<id>.json`; the id must be eligible.
-let recordPath (id: string) : string = "memories/" + shard id + "/" + id + ".json"
+/// `memories/<shard>/<id>.json`. Precondition: `isEligibleId id`, otherwise `ArgumentException`
+/// (so a hostile id can never become a path). Ids from an untrusted source enter only through `idOfPath`.
+let recordPath (id: string) : string =
+    if not (isEligibleId id) then invalidArg (nameof id) "the id is not eligible"
+    "memories/" + shard id + "/" + id + ".json"
 
 /// The id of a path of exactly the form `recordPath` writes (an eligible id whose shard matches), else `None`.
 let idOfPath (path: string) : string option =

@@ -44,4 +44,5 @@ let recordTests =
             // (and after it in UTF-8 byte order).
             Expect.equal (normaliseTags [ "b"; "a"; "b"; "\uFFFD"; "\U0001F600" ]) [ "a"; "b"; "\U0001F600"; "\uFFFD" ] "ordinal"
             Expect.equal (normaliseTags []) [] "empty"
+            Expect.equal (normaliseTags [ "a"; "B"; "b"; "A" ]) [ "A"; "B"; "a"; "b" ] "upper case before lower case (not culture order)"
     ]
