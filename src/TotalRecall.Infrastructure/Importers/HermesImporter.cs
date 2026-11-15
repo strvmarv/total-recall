@@ -198,8 +198,10 @@ public sealed class HermesImporter : IImporter
                 var summary = piece.Substring(0, summaryLen);
 
                 // Hash-derived id and repair-on-retry, shared with the markdown
-                // memory import (a half-imported piece is completed, not
-                // duplicated, and no longer aborts the rest of the file).
+                // memory import: a half-imported piece from an earlier run is
+                // completed on retry instead of being duplicated. (A failure
+                // here still aborts the remaining pieces of this run via the
+                // file-level catch below; the next run finishes them.)
                 ImportUtils.InsertOrRepairMemory(
                     _store, _embedder, _vectorSearch, _importLog,
                     Name, filePath, hash, Tier.Warm,

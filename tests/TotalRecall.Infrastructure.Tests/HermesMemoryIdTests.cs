@@ -141,10 +141,15 @@ public sealed class HermesMemoryIdTests : IDisposable
         // First run: the embedder fails on the first call, after piece one was inserted.
         var first = NewImporter(f, new ThrowingEmbedder(throwOnCall: 1)).ImportMemories();
         Assert.NotEmpty(first.Errors);
+        // The half-imported state: piece one inserted, no vector, no log row.
+        Assert.Equal(1, Scalar(f.Conn, "SELECT count(*) FROM warm_memories"));
+        Assert.Equal(0, Scalar(f.Conn, "SELECT count(*) FROM warm_memories_vec"));
+        Assert.Equal(0, Scalar(f.Conn, "SELECT count(*) FROM import_log"));
 
         var second = NewImporter(f).ImportMemories();
 
         Assert.Empty(second.Errors);
+        Assert.Equal(2, second.Imported);
         Assert.Equal(2, Scalar(f.Conn, "SELECT count(*) FROM warm_memories"));
         Assert.Equal(2, Scalar(f.Conn, "SELECT count(*) FROM warm_memories_vec"));
         Assert.Equal(2, Scalar(f.Conn, "SELECT count(*) FROM import_log"));
