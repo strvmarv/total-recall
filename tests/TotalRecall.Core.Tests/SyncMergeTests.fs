@@ -950,3 +950,336 @@ let deletionEdgeTests =
             let d = decide bNext
             Expect.equal (groups d).Content (LeaveContent, ClearPending) "own record: nothing applied"
     ]
+
+// ------------------------------------------------------------------------------------------------
+// Task 5: generators, the reference interpreter and the properties
+
+let private genStamp : Gen<Stamp> = Gen.elements [ for n in 0 .. 5 do yield ours n; yield theirs n ]
+let private genOptStamp : Gen<Stamp option> = Gen.frequency [ 2, Gen.constant None; 3, genStamp |> Gen.map Some ]
+let private genTier : Gen<Tier> = Gen.elements [ Hot; Warm; Cold ]
+let private genText : Gen<string> = Gen.elements [ "base"; "a"; "b" ]
+let private genTags : Gen<string list> = Gen.elements [ []; [ "x" ]; [ "y" ]; [ "x"; "y" ]; [ "x"; "y"; "z" ] ]
+let private genProject : Gen<string option> = Gen.elements [ None; Some "p" ]
+let private genBool : Gen<bool> = Gen.elements [ true; false ]
+
+let private genRecord : Gen<SyncRecord> =
+    gen {
+        let! text = genText
+        let! tags = genTags
+        let! project = genProject
+        let! contentStamp = genStamp
+        let! tier = genTier
+        let! tierStamp = genStamp
+        let! sticky = genBool
+        let! stickyStamp = genStamp
+        return
+            { record text with
+                Tags = tags
+                Project = project
+                ContentStamp = contentStamp
+                Placement = placement tier tierStamp sticky stickyStamp }
+    }
+
+let private genEntry : Gen<LocalEntry> =
+    gen {
+        let! text = genText
+        let! tags = genTags
+        let! project = genProject
+        let! tier = genTier
+        let! sticky = genBool
+        return { LocalEntry.Content = { fields text with Project = project }; Tags = tags; Tier = tier; Sticky = sticky }
+    }
+
+let private genStamps : Gen<GroupStamps> =
+    gen {
+        let! c = genOptStamp
+        let! s = genOptStamp
+        let! t = genOptStamp
+        return { GroupStamps.Content = c; Sticky = s; Tier = t }
+    }
+
+let private genOpt (g: Gen<'a>) : Gen<'a option> = Gen.frequency [ 1, Gen.constant None; 3, g |> Gen.map Some ]
+
+let private genInput : Gen<MergeInput> =
+    gen {
+        let! row = Gen.elements [ None; Some Active; Some Forgotten; Some Left ]
+        let! b = genOpt genRecord
+        let! t = genOpt genRecord
+        let! l = genOpt genEntry
+        let! pending = genStamps
+        let! pushing = genStamps
+        let! isProven = genBool
+        let! held = Gen.elements [ None; Some RemoteDeletion; Some LocalDeletion ]
+        return { Row = row; Base = b; Theirs = t; Local = l; Pending = pending; Pushing = pushing; ApplyProven = isProven; HeldDelete = held }
+    }
+
+let private config = { FsCheckConfig.defaultConfig with maxTest = 2000 }
+let private forAllInputs (name: string) (f: MergeInput -> bool) =
+    testPropertyWithConfig config name (Prop.forAll (Arb.fromGen genInput) f)
+
+/// `decide` ignores a base when there is no row.
+let private effectiveBase (i: MergeInput) : SyncRecord option = if i.Row.IsSome then i.Base else None
+
+// ---- the reference interpreter: apply a decision to a model of the entry, the row and the held item ----
+
+let private contentOf (r: SyncRecord) : ContentFields =
+    { Text = r.Content; Project = r.Project; Scope = r.Scope; EntryType = r.EntryType; Source = r.Source; CreatedAtMs = r.CreatedAtMs }
+
+/// The base composed group by group (the spec's composition rule).
+let private composeBase (oldB: SyncRecord option) (t: SyncRecord) (bu: BaseUpdate) : SyncRecord option =
+    match oldB with
+    | None -> Some t
+    | Some b ->
+        let theirsOf c = c = BaseBecomesTheirs
+        let pick (c: BaseChange) (o: 'a) (n: 'a) : 'a = if theirsOf c then n else o
+        Some
+            { b with
+                Id = t.Id
+                Origin = t.Origin
+                WrittenBy = t.WrittenBy
+                Content = pick bu.Content b.Content t.Content
+                EntryType = pick bu.Content b.EntryType t.EntryType
+                Source = pick bu.Content b.Source t.Source
+                CreatedAtMs = pick bu.Content b.CreatedAtMs t.CreatedAtMs
+                Project = pick bu.Content b.Project t.Project
+                Scope = pick bu.Content b.Scope t.Scope
+                ContentStamp = pick bu.Content b.ContentStamp t.ContentStamp
+                Tags = pick bu.Tags b.Tags t.Tags
+                Placement =
+                    { Tier = pick bu.Tier b.Placement.Tier t.Placement.Tier
+                      TierStamp = pick bu.Tier b.Placement.TierStamp t.Placement.TierStamp
+                      Sticky = pick bu.Sticky b.Placement.Sticky t.Placement.Sticky
+                      StickyStamp = pick bu.Sticky b.Placement.StickyStamp t.Placement.StickyStamp } }
+
+let private keepAllBases : BaseUpdate = { Content = KeepBase; Tags = KeepBase; Sticky = KeepBase; Tier = KeepBase }
+
+let private bump (s: Stamp) : Stamp = { s with Counter = s.Counter + 1 }
+
+let private apply (i: MergeInput) (d: MergeDecision) : MergeInput =
+    let oldBase = effectiveBase i
+    let localAfter =
+        match d.Entry, i.Local, i.Theirs with
+        | InsertFromRecord, _, Some r -> Some { LocalEntry.Content = contentOf r; Tags = r.Tags; Tier = r.Placement.Tier; Sticky = false }
+        | MergeGroups m, Some l, Some r ->
+            let content =
+                match fst m.Content with
+                | TakeTheirs -> contentOf r
+                | AdoptCreatedAt -> { l.Content with CreatedAtMs = r.CreatedAtMs }
+                | LeaveContent
+                | HeldAsPinEdit -> l.Content
+            Some
+                { l with
+                    Content = content
+                    Tags = (if m.Tags.ApplyLocal then m.Tags.Result else l.Tags)
+                    Sticky = (if fst m.Sticky = UnpinLocally then false else l.Sticky)
+                    Tier = (match fst m.Tier with Some t -> t | None -> l.Tier) }
+        | DeleteEntry, _, _ -> None
+        | _ -> i.Local
+    let pending =
+        if clearsPending d.Entry i.Local.IsSome then noStamps
+        else
+            match d.Entry, i.Theirs with
+            | MergeGroups m, Some r ->
+                let act (a: StampAction) (old: Stamp option) (t: Stamp) : Stamp option =
+                    match a with
+                    | KeepPending -> old
+                    | ClearPending -> None
+                    | RestampPending -> Some (bump t)
+                { GroupStamps.Content = act (snd m.Content) i.Pending.Content r.ContentStamp
+                  Sticky = act (snd m.Sticky) i.Pending.Sticky r.Placement.StickyStamp
+                  Tier = act (snd m.Tier) i.Pending.Tier r.Placement.TierStamp }
+            | _ -> i.Pending
+    let row =
+        match d.Entry with
+        | DropRow -> None
+        | PushDeletion -> Some Forgotten                  // the push lands: the file is removed
+        | _ -> (match d.RowState with Some s -> Some s | None -> i.Row)
+    let baseAfter =
+        match d.Entry, i.Theirs with
+        | DropRow, _ -> None
+        | _, Some r -> if d.Base = keepAllBases then oldBase else composeBase oldBase r d.Base
+        | _, None -> oldBase
+    let closed = if d.CloseHeldDelete then None else i.HeldDelete
+    let held =
+        match d.Entry with
+        | HoldDeletion x when closed.IsNone -> Some x
+        | _ -> closed
+    { i with
+        Row = row
+        Base = baseAfter
+        Theirs = (if d.Entry = PushDeletion then None else i.Theirs)
+        Local = localAfter
+        Pending = pending
+        HeldDelete = held }
+
+let private show (x: 'a) : string = sprintf "%A" x
+
+/// A row whose pending stamps are coherent with its pushing stamps. A stamp reaches the repository only after
+/// it was recorded in `pushing_stamps`, so a record carrying one of this row's pending stamps has it in
+/// `Pushing` too. Without that, clearing the pending stamp of an entry that is gone (the Row-effects rule)
+/// would also clear the only proof that the record is the row's own, and a later cycle would read the same
+/// record as a remote edit: a state the push protocol cannot produce. A held-delete item exists only on an
+/// active row with a base.
+let private coherent (i: MergeInput) : bool =
+    let ok (pending: Stamp option) (pushing: Stamp option) (recordStamp: Stamp option) (baseStamp: Stamp option) =
+        let carried = [ recordStamp; baseStamp ] |> List.choose id
+        match pending with
+        | Some p when List.contains p carried -> pushing = Some p
+        | _ -> true
+    let groupOk (select: GroupStamps -> Stamp option) (stamp: SyncRecord -> Stamp) =
+        ok (select i.Pending) (select i.Pushing) (i.Theirs |> Option.map stamp) (effectiveBase i |> Option.map stamp)
+    // A held-delete item is opened only by W6 and W8, which need an active row with a base.
+    let heldOk = i.HeldDelete.IsNone || (i.Row = Some Active && (effectiveBase i).IsSome)
+    heldOk
+    && groupOk (fun g -> g.Content) (fun r -> r.ContentStamp)
+    && groupOk (fun g -> g.Sticky) (fun r -> r.Placement.StickyStamp)
+    && groupOk (fun g -> g.Tier) (fun r -> r.Placement.TierStamp)
+
+/// A decision that changes nothing further: used by the idempotence property.
+let private isNeutral (d: MergeDecision) : bool =
+    let groupsNeutral (m: Merged) =
+        m.Content = (LeaveContent, KeepPending) && m.Sticky = (LeaveSticky, KeepPending) && m.Tier = (None, KeepPending) && not m.Tags.ApplyLocal
+    let entryOk =
+        match d.Entry with
+        | LeaveEntry | Ignore | PushDeletion | Defer -> true      // PushDeletion repeats until the push lands
+        | MergeGroups m -> groupsNeutral m                         // Repush and PushNeeded may repeat
+        | InsertFromRecord | DeleteEntry | HoldDeletion _ | DropRow -> false
+    let notesOk = if d.FreshContentStamp then d.Notes = [ EditBeatsDeletion ] || d.Notes.IsEmpty else d.Notes.IsEmpty
+    entryOk && d.Reviews.IsEmpty && notesOk && not d.CloseHeldDelete
+
+[<Tests>]
+let propertyTests =
+    testList "SyncMerge properties" [
+        forAllInputs "total and deterministic: any input gives the same decision twice and never throws" (fun i -> decide i = decide i)
+
+        testCase "total over the exhaustive small domain" <| fun _ ->
+            let records = [ None; Some (record "base"); Some (record "remote" |> withContentStamp (theirs 3)) ]
+            let entries = [ None; Some (local "base"); Some { local "base" with Sticky = true } ]
+            let mutable n = 0
+            for row in [ None; Some Active; Some Forgotten; Some Left ] do
+                for t in records do
+                    for l in entries do
+                        for b in [ None; Some (record "base") ] do
+                            for isProven in bothApplies do
+                                for held in [ None; Some RemoteDeletion; Some LocalDeletion ] do
+                                    for pendingPin in [ None; Some (ours 4) ] do
+                                        let i =
+                                            { Row = row; Base = b; Theirs = t; Local = l; Pending = { noStamps with Sticky = pendingPin }
+                                              Pushing = noStamps; ApplyProven = isProven; HeldDelete = held }
+                                        ignore (decide i)
+                                        n <- n + 1
+            Expect.equal n (4 * 3 * 3 * 2 * 2 * 3 * 2) "every combination was decided"
+
+        forAllInputs "deletion needs proof: DeleteEntry only for a proven, unheld deletion of an unpinned entry with nothing pending" (fun i ->
+            match (decide i).Entry with
+            | DeleteEntry ->
+                match i.Local, effectiveBase i with
+                | Some l, Some bb ->
+                    let pendingText = i.Pending.Content.IsSome && l.Content.Text <> bb.Content
+                    i.Row = Some Active && i.Theirs.IsNone && not l.Sticky && i.Pending.Sticky.IsNone && not pendingText
+                    && i.ApplyProven && i.HeldDelete <> Some RemoteDeletion
+                | _ -> false
+            | _ -> true)
+
+        forAllInputs "a pin is never taken from a record" (fun i ->
+            let d = decide i
+            let after = apply i d
+            match d.Entry with
+            | MergeGroups m ->
+                let apply = fst m.Sticky
+                let l = i.Local.Value
+                (apply = ReviewNewPin) = List.contains NewPin d.Reviews
+                && (apply <> UnpinLocally || l.Sticky)
+                && (not (after.Local.Value.Sticky) || l.Sticky)
+            | InsertFromRecord ->
+                (match after.Local with Some e -> not e.Sticky | None -> false)
+                && (List.contains NewPin d.Reviews = i.Theirs.Value.Placement.Sticky)
+            | _ -> true)
+
+        forAllInputs "never from an older stamp: an older group is left alone, its base is kept, and it is re-pushed exactly without a pending stamp" (fun i ->
+            match decide i, i.Theirs, effectiveBase i with
+            | { Entry = MergeGroups m; Base = bu }, Some t, Some b ->
+                let older (ts: Stamp) (bs: Stamp) = Stamp.compare ts bs < 0
+                let contentOk =
+                    not (older t.ContentStamp b.ContentStamp)
+                    || (m.Content = (LeaveContent, KeepPending) && bu.Content = KeepBase && m.Repush.Content = i.Pending.Content.IsNone)
+                let stickyOk =
+                    not (older t.Placement.StickyStamp b.Placement.StickyStamp)
+                    || (m.Sticky = (LeaveSticky, KeepPending) && bu.Sticky = KeepBase && m.Repush.Sticky = i.Pending.Sticky.IsNone)
+                let tierOk =
+                    not (older t.Placement.TierStamp b.Placement.TierStamp)
+                    || (m.Tier = (None, KeepPending) && bu.Tier = KeepBase && m.Repush.Tier = i.Pending.Tier.IsNone)
+                contentOk && stickyOk && tierOk
+            | _ -> true)
+
+        testPropertyWithConfig config
+            "idempotent: applying a decision and deciding again changes nothing further (for a coherent row)"
+            (Prop.forAll (Arb.fromGen (Gen.filter coherent genInput)) (fun i ->
+                let d1 = decide i
+                let i2 = apply i d1
+                let d2 = decide i2
+                if isNeutral d2 then true
+                else failwithf "first: %s\nsecond input: %s\nsecond: %s" (show d1) (show i2) (show d2)))
+
+        testCase "a PushDeletion repeats in a proven apply until the push lands" <| fun _ ->
+            let i = noEntry input
+            let d = decide i
+            Expect.equal d.Entry PushDeletion "first"
+            Expect.equal (decide i).Entry PushDeletion "the same input decides the same: the deletion is pushed again"
+            Expect.equal (decide (apply i d)).Entry Ignore "once the push lands the record is gone and nothing is left to do"
+
+        testPropertyWithConfig config
+            "order of arrival for content (no own stamps, the same sticky group in both versions): the greater content stamp decides in either order"
+            (Prop.forAll
+                (Arb.fromGen (gen {
+                    let! b = genRecord
+                    let! l = genEntry
+                    let! v1 = genRecord
+                    let! v2 = genRecord
+                    let! isProven = genBool
+                    return b, l, { v2 with Placement = { v2.Placement with Sticky = v1.Placement.Sticky; StickyStamp = v1.Placement.StickyStamp } }, v1, isProven }))
+                (fun (b, l, v2, v1, isProven) ->
+                    (v1.ContentStamp <> v2.ContentStamp) ==> lazy (
+                        let s0 : MergeInput =
+                            { Row = Some Active; Base = Some b; Theirs = None; Local = Some l; Pending = noStamps; Pushing = noStamps
+                              ApplyProven = isProven; HeldDelete = None }
+                        let step (s: MergeInput) (v: SyncRecord) : MergeInput =
+                            let i = { s with Theirs = Some v }
+                            apply i (decide i)
+                        let final (a: SyncRecord) (c: SyncRecord) = step (step s0 a) c
+                        let x = (final v1 v2).Local.Value.Content
+                        let y = (final v2 v1).Local.Value.Content
+                        x.Text = y.Text && x.Project = y.Project)))
+
+        testPropertyWithConfig config
+            "tier is monotone in either order, and order independent when the greater tier stamp's tier is not colder"
+            (Prop.forAll
+                (Arb.fromGen (gen {
+                    let! b = genRecord
+                    let! l = genEntry
+                    let! v1 = genRecord
+                    let! v2 = genRecord
+                    let! isProven = genBool
+                    return b, l, v1, v2, isProven }))
+                (fun (b, l, v1, v2, isProven) ->
+                    let s0 : MergeInput =
+                        { Row = Some Active; Base = Some b; Theirs = None; Local = Some l; Pending = noStamps; Pushing = noStamps
+                          ApplyProven = isProven; HeldDelete = None }
+                    let step (s: MergeInput) (v: SyncRecord) : MergeInput =
+                        let i = { s with Theirs = Some v }
+                        apply i (decide i)
+                    let final (a: SyncRecord) (c: SyncRecord) = step (step s0 a) c
+                    let rank (s: MergeInput) = tierRank s.Local.Value.Tier
+                    let monotone = rank (final v1 v2) <= tierRank l.Tier && rank (final v2 v1) <= tierRank l.Tier
+                    let greater, other = if Stamp.compare v1.Placement.TierStamp v2.Placement.TierStamp > 0 then v1, v2 else v2, v1
+                    let ordered =
+                        v1.Placement.TierStamp = v2.Placement.TierStamp
+                        || tierRank greater.Placement.Tier > tierRank other.Placement.Tier
+                        || (final v1 v2).Local.Value.Tier = (final v2 v1).Local.Value.Tier
+                    monotone && ordered))
+
+        forAllInputs "a decision never lowers a tier" (fun i ->
+            match i.Local, (apply i (decide i)).Local with
+            | Some before, Some after when i.Theirs.IsSome -> tierRank after.Tier <= tierRank before.Tier
+            | _ -> true)
+    ]
