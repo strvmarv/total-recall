@@ -40,10 +40,10 @@ jobs:
     name: Check version files match the tag
     runs-on: ubuntu-latest
     steps:
-      # A tag checkout fetches the tag as a lightweight tag (a commit pointer without the tag
-      # message), and the release notes are read from the annotated tag object. Fetching all
-      # tags overwrites it with the real annotated tag and also gives the history of earlier
-      # releases, which the notes use to find the previous version.
+      # The release notes are read from the annotated tag object. A shallow tag checkout leaves
+      # a lightweight tag at the commit (a pointer without the tag message), so the explicit
+      # fetch guarantees the annotated tag object whatever the checkout's settings, and it also
+      # gives the history of earlier releases, which the notes use to find the previous version.
       - name: Checkout
         uses: actions/checkout@v5
         with:
@@ -238,7 +238,8 @@ jobs:
       attestations: write
     steps:
       # Full history and all tags, as in check-version: the release notes are read from the
-      # annotated tag object, which a tag checkout leaves as a lightweight tag.
+      # annotated tag object, and a shallow tag checkout leaves a lightweight tag at the commit,
+      # so the explicit fetch guarantees the annotated tag object whatever the checkout's settings.
       - name: Checkout
         uses: actions/checkout@v5
         with:

@@ -248,13 +248,14 @@ function runGit(args, cwd) {
 }
 
 // A signed tag keeps its signature at the end of the message (`%(contents)` includes it). The signature
-// is cut from its first armour line to the end, so it never reaches the summary or the release body.
-const SIGNATURE_START = /^-----BEGIN (?:PGP|SSH) SIGNATURE-----$/m;
+// is cut from its first armour line to the end (PGP, SSH, or x509 from gpgsm), so it never reaches the
+// summary or the release body.
+const SIGNATURE_START = /^-----BEGIN (?:PGP SIGNATURE|SSH SIGNATURE|SIGNED MESSAGE)-----$/m;
 
-/** The tag message without a trailing PGP or SSH signature block. */
+/** The tag message without a trailing PGP, SSH or x509 signature block (and the blank line the cut leaves). */
 export function stripSignature(message) {
   const m = SIGNATURE_START.exec(message);
-  return m === null ? message : message.slice(0, m.index);
+  return m === null ? message : message.slice(0, m.index).replace(/\n{2,}$/, '\n');
 }
 
 /**

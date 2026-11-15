@@ -359,8 +359,17 @@ function checkReleaseNotesGate(text) {
     }
     const node = steps.findIndex((s) => /uses: actions\/setup-node@v5\b/.test(s.text));
     if (node < 0 || node > steps.indexOf(gate)) problems.push(`"${CHECK_NOTES}" does not come after Setup Node.js`);
+    if (/^(?:      - |        )if:/m.test(gate.text)) problems.push(`"${CHECK_NOTES}" has an if: condition and can be skipped`);
+    if (/^(?:      - |        )continue-on-error:/m.test(gate.text)) problems.push(`"${CHECK_NOTES}" sets continue-on-error, so its failure is ignored`);
   }
   return problems;
+}
+
+/** The build job must wait for check-version, or a bad tag message fails only after four platform builds. */
+function checkBuildWaitsForTheGate(text) {
+  const build = jobBlock(text, 'build');
+  if (!build) return ['release.yml has no build job'];
+  return /^    needs: check-version$/m.test(build) ? [] : ['the build job does not have needs: check-version'];
 }
 
 /** The `--body-out` value of the write step, quotes removed. */
@@ -494,4 +503,24 @@ test('mutation: a missing fetch step, a shallow checkout, or a fetch after the s
 test('mutation: the tag inlined into a run: block is caught', () => {
   assert.ok(checkReleaseNotesGate(mutate('"$REF_NAME" --check', '"${{ github.ref_name }}" --check')).some((p) => /interpolates an expression/.test(p)));
   assert.ok(checkReleaseNotesAreWritten(mutate('node scripts/release-notes.js "$REF_NAME" \\\n', 'node scripts/release-notes.js "${{ github.ref_name }}" \\\n')).some((p) => /interpolates an expression/.test(p)));
+});
+
+// ---- the gate cannot be skipped or ignored, and the builds wait for it ----
+
+test('mutation: an if: or continue-on-error on the gate step is caught', () => {
+  for (const [line, pattern] of [['if: always()', /if: condition/], ['continue-on-error: true', /continue-on-error/]]) {
+    const mutated = mutate(`        run: node scripts/release-notes.js "$REF_NAME" --check\n`, `        ${line}\n        run: node scripts/release-notes.js "$REF_NAME" --check\n`);
+    assert.ok(checkReleaseNotesGate(mutated).some((p) => pattern.test(p)), line);
+  }
+  const first = mutate('      - name: Check the release notes\n', '      - if: always()\n        name: Check the release notes\n');
+  assert.ok(checkReleaseNotesGate(first).some((p) => /if: condition/.test(p)));
+});
+
+test('release.yml: the build job needs check-version', () => {
+  assert.deepEqual(checkBuildWaitsForTheGate(REAL), []);
+});
+
+test('mutation: a build job that no longer needs check-version is caught', () => {
+  assert.ok(checkBuildWaitsForTheGate(mutate('    needs: check-version\n', '')).some((p) => /needs: check-version/.test(p)));
+  assert.ok(checkBuildWaitsForTheGate(mutate('    needs: check-version\n', '    needs: publish\n')).some((p) => /needs: check-version/.test(p)));
 });

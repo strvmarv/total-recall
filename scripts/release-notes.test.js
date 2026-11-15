@@ -389,6 +389,14 @@ test('stripSignature: a PGP or SSH signature block is cut from the message, noth
   assert.equal(stripSignature(ssh), body);
   assert.equal(stripSignature(body), body);
   assert.equal(stripSignature('x'), 'x');
+  // An x509 (gpgsm) signature is cut too.
+  const x509 = `${body}-----BEGIN SIGNED MESSAGE-----\nMIAGCSqGSIb3DQEHAqCAMIACAQEx\n-----END SIGNED MESSAGE-----\n`;
+  assert.equal(stripSignature(x509), body);
+  // A blank line left between the message and the armour does not stay at the end of the message.
+  assert.equal(stripSignature(`${body}\n-----BEGIN PGP SIGNATURE-----\n\nabc\n-----END PGP SIGNATURE-----\n`), body);
+  assert.equal(stripSignature(`${body}\n\n-----BEGIN SSH SIGNATURE-----\nabc\n-----END SSH SIGNATURE-----\n`), body);
+  // A message that is not signed keeps its own trailing blank lines.
+  assert.equal(stripSignature(`${body}\n`), `${body}\n`);
   // The summary and the release body never see the signature.
   const built = buildReleaseNotes({ tag: 'v1.2.3', message: stripSignature(pgp), tags: [] });
   assert.equal(built.notes.summary, 'A summary.');
