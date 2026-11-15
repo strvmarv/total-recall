@@ -222,6 +222,12 @@ public sealed class MyToolImporter : IImporter
 }
 ```
 
+> **Memory imports.** The example above shows the shape, not the final code: an importer that inserts a
+> **memory** should not mint a random id. Route it through `ImportUtils.ImportMarkdownFile` with
+> `ContentType.Memory` (or `ImportUtils.InsertOrRepairMemory` directly for a custom format), which derives
+> the id from the import hash, so the same host memory is the same entry on every machine, and repairs a
+> half-finished import on the next run. Knowledge imports keep random ids.
+
 ### 2. Register the importer
 
 Add it to the importer collection wired up in `src/TotalRecall.Host/Program.cs` or wherever `IEnumerable<IImporter>` is composed (search for `ClaudeCodeImporter` to find the registration site — all importers are added as a group).

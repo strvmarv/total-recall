@@ -64,6 +64,34 @@ public sealed class SqliteStore : IStore, IMetaStore, IDisposable
     /// </summary>
     public MsSqliteConnection Connection => _conn;
 
+    private bool _transactionOpen;
+
+    /// <summary>
+    /// Begin an all-or-nothing store transaction (git sync). It runs on this
+    /// store's single connection: while one is open, <b>no other code may use
+    /// this connection</b> (this store's other methods, <c>VectorSearch</c>,
+    /// <c>ImportLog</c>, a background re-embed or periodic-sync thread all
+    /// share it), and a second <see cref="BeginTransaction"/> on the same
+    /// store throws <see cref="InvalidOperationException"/>. Sync runs on its
+    /// own connection. Observed behavior of Microsoft.Data.Sqlite: a command
+    /// created without this transaction on a connection with a pending
+    /// transaction fails with <see cref="InvalidOperationException"/>
+    /// ("Execute requires the command to have a transaction object"), so a
+    /// stray call fails loudly instead of joining or escaping the transaction.
+    /// Not on <see cref="IStore"/>.
+    /// </summary>
+    public SqliteStoreTransaction BeginTransaction()
+    {
+        if (_transactionOpen)
+            throw new InvalidOperationException(
+                "A store transaction is already open on this store");
+        var tx = _conn.BeginTransaction();
+        _transactionOpen = true;
+        return new SqliteStoreTransaction(this, _conn, tx);
+    }
+
+    internal void EndTransaction() => _transactionOpen = false;
+
     // --- IStore -----------------------------------------------------
 
     public string Insert(Tier tier, ContentType type, InsertEntryOpts opts)
@@ -73,11 +101,7 @@ public sealed class SqliteStore : IStore, IMetaStore, IDisposable
         var id = opts.Id ?? Guid.NewGuid().ToString();
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = BuildInsertSql(table);
-        BindInsertParameters(cmd, id, opts, now);
-        cmd.ExecuteNonQuery();
-
+        SqlRows.InsertRow(_conn, null, table, id, opts, now);
         return id;
     }
 
@@ -96,48 +120,15 @@ public sealed class SqliteStore : IStore, IMetaStore, IDisposable
         using var tx = _conn.BeginTransaction();
         try
         {
-            using (var insertCmd = _conn.CreateCommand())
-            {
-                insertCmd.Transaction = tx;
-                insertCmd.CommandText = BuildInsertSql(table);
-                BindInsertParameters(insertCmd, id, opts, now);
-                insertCmd.ExecuteNonQuery();
-            }
-
-            long rowid;
-            using (var rowidCmd = _conn.CreateCommand())
-            {
-                rowidCmd.Transaction = tx;
-                rowidCmd.CommandText = "SELECT last_insert_rowid()";
-                rowid = (long)rowidCmd.ExecuteScalar()!;
-            }
-
-            // Remove any orphan vec row at this rowid before inserting.
-            // An orphan exists when a previous content row was deleted without
+            var rowid = SqlRows.InsertRow(_conn, tx, table, id, opts, now);
+            // Remove any orphan vec row at this rowid before inserting. An
+            // orphan exists when a previous content row was deleted without
             // cleaning its vec counterpart (e.g. via the pre-fix write-time
-            // eviction path). Safe inside the transaction: the only legitimate
-            // occupant of this rowid in the vec table at this point is an orphan
-            // because we just acquired rowid by inserting the new content row.
-            using (var orphanCmd = _conn.CreateCommand())
-            {
-                orphanCmd.Transaction = tx;
-                orphanCmd.CommandText = $"DELETE FROM {vecTable} WHERE rowid = $rowid";
-                orphanCmd.Parameters.AddWithValue("$rowid", rowid);
-                orphanCmd.ExecuteNonQuery();
-            }
-
-            using (var vecCmd = _conn.CreateCommand())
-            {
-                vecCmd.Transaction = tx;
-                vecCmd.CommandText =
-                    $"INSERT INTO {vecTable} (rowid, embedding) VALUES ($rowid, $embedding)";
-                vecCmd.Parameters.AddWithValue("$rowid", rowid);
-                vecCmd.Parameters.AddWithValue(
-                    "$embedding",
-                    System.Runtime.InteropServices.MemoryMarshal.AsBytes(embedding.Span).ToArray());
-                vecCmd.ExecuteNonQuery();
-            }
-
+            // eviction path). Safe inside the transaction: the only
+            // legitimate occupant of this rowid in the vec table at this
+            // point is an orphan because we just acquired rowid by inserting
+            // the new content row.
+            VecRows.InsertWithOrphanCleanup(_conn, tx, vecTable, rowid, embedding);
             tx.Commit();
         }
         catch
@@ -149,154 +140,31 @@ public sealed class SqliteStore : IStore, IMetaStore, IDisposable
         return id;
     }
 
-    private static string BuildInsertSql(string table) => $@"
-INSERT INTO {table}
-  (id, content, summary, source, source_tool, project, tags,
-   created_at, updated_at, last_accessed_at, access_count,
-   decay_score, parent_id, collection_id, metadata, scope, entry_type,
-   times_injected)
-VALUES
-  ($id, $content, $summary, $source, $source_tool, $project, $tags,
-   $created_at, $updated_at, $last_accessed_at, $access_count,
-   $decay_score, $parent_id, $collection_id, $metadata, $scope, $entry_type,
-   $times_injected)";
+    public Entry? Get(Tier tier, ContentType type, string id) =>
+        SqlRows.ReadRow(_conn, null, MigrationRunner.TableName(tier, type), id);
 
-    private static void BindInsertParameters(
-        Microsoft.Data.Sqlite.SqliteCommand cmd,
-        string id,
-        InsertEntryOpts opts,
-        long now)
-    {
-        cmd.Parameters.AddWithValue("$id", id);
-        cmd.Parameters.AddWithValue("$content", opts.Content);
-        cmd.Parameters.AddWithValue("$summary", (object?)opts.Summary ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$source", (object?)opts.Source ?? DBNull.Value);
-        cmd.Parameters.AddWithValue(
-            "$source_tool",
-            opts.SourceTool is not null
-                ? SourceToolMapping.ToDbValue(opts.SourceTool)
-                : (object)DBNull.Value);
-        cmd.Parameters.AddWithValue("$project", (object?)opts.Project ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$tags", TagsJson.Encode(opts.Tags));
-        cmd.Parameters.AddWithValue("$created_at", now);
-        cmd.Parameters.AddWithValue("$updated_at", now);
-        cmd.Parameters.AddWithValue("$last_accessed_at", now);
-        cmd.Parameters.AddWithValue("$access_count", 0);
-        cmd.Parameters.AddWithValue("$decay_score", 1.0);
-        cmd.Parameters.AddWithValue("$parent_id", (object?)opts.ParentId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$collection_id", (object?)opts.CollectionId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$metadata", opts.MetadataJson ?? "{}");
-        cmd.Parameters.AddWithValue("$scope", opts.Scope ?? "");
-        cmd.Parameters.AddWithValue(
-            "$entry_type",
-            EntryTypeMapping.ToDbValue(opts.EntryType ?? EntryType.Preference));
-        cmd.Parameters.AddWithValue("$times_injected", 0);
-    }
-
-    public Entry? Get(Tier tier, ContentType type, string id)
-    {
-        var table = MigrationRunner.TableName(tier, type);
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = $"SELECT * FROM {table} WHERE id = $id";
-        cmd.Parameters.AddWithValue("$id", id);
-        using var reader = cmd.ExecuteReader();
-        if (!reader.Read()) return null;
-        return RowToEntry(reader);
-    }
-
-    public long? GetInternalKey(Tier tier, ContentType type, string id)
-    {
-        var table = MigrationRunner.TableName(tier, type);
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = $"SELECT rowid FROM {table} WHERE id = $id";
-        cmd.Parameters.AddWithValue("$id", id);
-        var result = cmd.ExecuteScalar();
-        return result is long l ? l : null;
-    }
+    public long? GetInternalKey(Tier tier, ContentType type, string id) =>
+        SqlRows.RowId(_conn, null, MigrationRunner.TableName(tier, type), id);
 
     public void Update(Tier tier, ContentType type, string id, UpdateEntryOpts opts)
     {
         ArgumentNullException.ThrowIfNull(opts);
         var table = MigrationRunner.TableName(tier, type);
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
-        var setClauses = new List<string> { "updated_at = $updated_at" };
-        using var cmd = _conn.CreateCommand();
-        cmd.Parameters.AddWithValue("$updated_at", now);
-
-        if (opts.Content is not null)
-        {
-            setClauses.Add("content = $content");
-            cmd.Parameters.AddWithValue("$content", opts.Content);
-        }
-        if (opts.Summary is not null || opts.ClearSummary)
-        {
-            setClauses.Add("summary = $summary");
-            cmd.Parameters.AddWithValue("$summary", (object?)opts.Summary ?? DBNull.Value);
-        }
-        if (opts.Tags is not null)
-        {
-            setClauses.Add("tags = $tags");
-            cmd.Parameters.AddWithValue("$tags", TagsJson.Encode(opts.Tags));
-        }
-        if (opts.Project is not null || opts.ClearProject)
-        {
-            setClauses.Add("project = $project");
-            cmd.Parameters.AddWithValue("$project", (object?)opts.Project ?? DBNull.Value);
-        }
-        if (opts.DecayScore.HasValue)
-        {
-            setClauses.Add("decay_score = $decay_score");
-            cmd.Parameters.AddWithValue("$decay_score", opts.DecayScore.Value);
-        }
-        if (opts.MetadataJson is not null)
-        {
-            setClauses.Add("metadata = $metadata");
-            cmd.Parameters.AddWithValue("$metadata", opts.MetadataJson);
-        }
-        if (opts.Touch)
-        {
-            setClauses.Add("access_count = access_count + 1");
-            setClauses.Add("last_accessed_at = $last_accessed_at");
-            cmd.Parameters.AddWithValue("$last_accessed_at", now);
-        }
-
-        cmd.Parameters.AddWithValue("$id", id);
-        cmd.CommandText = $"UPDATE {table} SET {string.Join(", ", setClauses)} WHERE id = $id";
-        cmd.ExecuteNonQuery();
+        SqlRows.UpdateRow(_conn, null, table, id, opts, now);
     }
 
     // Tier model v2 (Task 5). Sticky is hot-only: both methods operate on the
     // hot_* table regardless of caller intent, since only those tables carry
     // the `sticky` column.
-    public void SetSticky(ContentType type, string id, bool sticky)
-    {
-        var table = MigrationRunner.TableName(Tier.Hot, type);
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = $"UPDATE {table} SET sticky = $sticky WHERE id = $id";
-        cmd.Parameters.AddWithValue("$sticky", sticky ? 1 : 0);
-        cmd.Parameters.AddWithValue("$id", id);
-        cmd.ExecuteNonQuery();
-    }
+    public void SetSticky(ContentType type, string id, bool sticky) =>
+        SqlRows.SetStickyRow(_conn, null, type, id, sticky);
 
-    public bool IsSticky(ContentType type, string id)
-    {
-        var table = MigrationRunner.TableName(Tier.Hot, type);
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = $"SELECT sticky FROM {table} WHERE id = $id";
-        cmd.Parameters.AddWithValue("$id", id);
-        var result = cmd.ExecuteScalar();
-        return result is long l && l != 0L;
-    }
+    public bool IsSticky(ContentType type, string id) =>
+        SqlRows.IsStickyRow(_conn, null, type, id);
 
-    public void Delete(Tier tier, ContentType type, string id)
-    {
-        var table = MigrationRunner.TableName(tier, type);
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = $"DELETE FROM {table} WHERE id = $id";
-        cmd.Parameters.AddWithValue("$id", id);
-        cmd.ExecuteNonQuery();
-    }
+    public void Delete(Tier tier, ContentType type, string id) =>
+        SqlRows.DeleteRow(_conn, null, MigrationRunner.TableName(tier, type), id);
 
     public string? FindByContent(Tier tier, ContentType type, string content)
     {
@@ -467,71 +335,10 @@ VALUES
         using var tx = _conn.BeginTransaction();
         try
         {
-            // Read the source row. We read directly from SQL (rather than
-            // calling Get) so the read is enlisted in the transaction.
-            Entry? entry;
-            using (var readCmd = _conn.CreateCommand())
-            {
-                readCmd.Transaction = tx;
-                readCmd.CommandText = $"SELECT * FROM {fromTable} WHERE id = $id";
-                readCmd.Parameters.AddWithValue("$id", id);
-                using var reader = readCmd.ExecuteReader();
-                entry = reader.Read() ? RowToEntry(reader) : null;
-            }
-            if (entry is null)
-                throw new InvalidOperationException(
-                    $"Entry {id} not found in {fromTable}");
-
-            using (var insertCmd = _conn.CreateCommand())
-            {
-                insertCmd.Transaction = tx;
-                insertCmd.CommandText = $@"
-INSERT INTO {toTable}
-  (id, content, summary, source, source_tool, project, tags,
-   created_at, updated_at, last_accessed_at, access_count,
-   decay_score, parent_id, collection_id, metadata, scope, entry_type,
-   times_injected)
-VALUES
-  ($id, $content, $summary, $source, $source_tool, $project, $tags,
-   $created_at, $updated_at, $last_accessed_at, $access_count,
-   $decay_score, $parent_id, $collection_id, $metadata, $scope, $entry_type,
-   $times_injected)";
-
-                insertCmd.Parameters.AddWithValue("$id", entry.Id);
-                insertCmd.Parameters.AddWithValue("$content", entry.Content);
-                insertCmd.Parameters.AddWithValue("$summary", ToDbString(entry.Summary));
-                insertCmd.Parameters.AddWithValue("$source", ToDbString(entry.Source));
-                insertCmd.Parameters.AddWithValue(
-                    "$source_tool",
-                    FSharpOption<SourceTool>.get_IsSome(entry.SourceTool)
-                        ? SourceToolMapping.ToDbValue(entry.SourceTool.Value)
-                        : (object)DBNull.Value);
-                insertCmd.Parameters.AddWithValue("$project", ToDbString(entry.Project));
-                insertCmd.Parameters.AddWithValue("$tags", TagsJson.EncodeFList(entry.Tags));
-                insertCmd.Parameters.AddWithValue("$created_at", entry.CreatedAt);
-                insertCmd.Parameters.AddWithValue("$updated_at", now);
-                insertCmd.Parameters.AddWithValue("$last_accessed_at", entry.LastAccessedAt);
-                insertCmd.Parameters.AddWithValue("$access_count", entry.AccessCount);
-                insertCmd.Parameters.AddWithValue("$decay_score", entry.DecayScore);
-                insertCmd.Parameters.AddWithValue("$parent_id", ToDbString(entry.ParentId));
-                insertCmd.Parameters.AddWithValue("$collection_id", ToDbString(entry.CollectionId));
-                insertCmd.Parameters.AddWithValue("$metadata", entry.MetadataJson);
-                insertCmd.Parameters.AddWithValue("$scope", entry.Scope);
-                insertCmd.Parameters.AddWithValue(
-                    "$entry_type", EntryTypeMapping.ToDbValue(entry.EntryType));
-                insertCmd.Parameters.AddWithValue("$times_injected", entry.TimesInjected);
-
-                insertCmd.ExecuteNonQuery();
-            }
-
-            using (var delCmd = _conn.CreateCommand())
-            {
-                delCmd.Transaction = tx;
-                delCmd.CommandText = $"DELETE FROM {fromTable} WHERE id = $id";
-                delCmd.Parameters.AddWithValue("$id", id);
-                delCmd.ExecuteNonQuery();
-            }
-
+            // Read + insert into the target, then delete the source, all in
+            // this one transaction.
+            SqlRows.CopyRow(_conn, tx, fromTable, toTable, id, now);
+            SqlRows.DeleteRow(_conn, tx, fromTable, id);
             tx.Commit();
         }
         catch
@@ -609,9 +416,6 @@ VALUES
         var ord = reader.GetOrdinal(name);
         return reader.IsDBNull(ord) ? null : reader.GetString(ord);
     }
-
-    private static object ToDbString(FSharpOption<string> opt) =>
-        FSharpOption<string>.get_IsSome(opt) ? opt.Value : (object)DBNull.Value;
 
     private IReadOnlyList<Entry> ReadAll(SqliteCommand cmd)
     {
@@ -767,6 +571,25 @@ internal static class SourceToolMapping
         if (tool.IsManualSource) return "manual";
         throw new ArgumentOutOfRangeException(nameof(tool), tool, "Unknown SourceTool");
     }
+
+    /// <summary>
+    /// Tolerant counterpart of <see cref="Parse"/>: returns <c>None</c> for
+    /// <c>null</c> or a value this build does not know, and never throws. Used
+    /// where a record may come from a newer build (git sync reads records
+    /// written elsewhere); <see cref="Parse"/> keeps throwing on corruption.
+    /// </summary>
+    public static FSharpOption<SourceTool> TryParse(string? value) =>
+        value switch
+        {
+            "claude-code" => FSharpOption<SourceTool>.Some(SourceTool.ClaudeCode),
+            "copilot-cli" => FSharpOption<SourceTool>.Some(SourceTool.CopilotCli),
+            "opencode" => FSharpOption<SourceTool>.Some(SourceTool.Opencode),
+            "cursor" => FSharpOption<SourceTool>.Some(SourceTool.Cursor),
+            "cline" => FSharpOption<SourceTool>.Some(SourceTool.Cline),
+            "hermes" => FSharpOption<SourceTool>.Some(SourceTool.Hermes),
+            "manual" => FSharpOption<SourceTool>.Some(SourceTool.ManualSource),
+            _ => FSharpOption<SourceTool>.None,
+        };
 
     public static FSharpOption<SourceTool> Parse(string? value)
     {

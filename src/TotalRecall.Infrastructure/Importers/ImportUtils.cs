@@ -30,6 +30,13 @@ public sealed record ImportFileOutcome(
     string? Error = null);
 
 /// <summary>
+/// Result of <see cref="ImportUtils.InsertOrRepairMemory"/>: the entry's id,
+/// the tier it ended up in, and whether an existing (half-imported) entry was
+/// repaired instead of a new one being inserted.
+/// </summary>
+internal readonly record struct MemoryImportResult(string EntryId, Tier Tier, bool Repaired);
+
+/// <summary>
 /// Parsed frontmatter block from a markdown file.
 /// All fields are optional because importers parse a wide variety of files.
 /// </summary>
@@ -198,18 +205,32 @@ public static class ImportUtils
                 tags = baseTags.ToArray();
             }
 
-            var entryId = store.Insert(tier, contentType, new InsertEntryOpts(
+            var opts = new InsertEntryOpts(
                 Content: content,
                 Summary: summary,
                 Source: filePath,
                 SourceTool: sourceToolDu,
                 Project: project,
                 Tags: tags,
-                EntryType: EntryType.Imported));
+                EntryType: EntryType.Imported);
 
-            var embedding = embedder.Embed(content);
-            vectorSearch.InsertEmbedding(tier, contentType, entryId, embedding);
-            importLog.LogImport(sourceToolName, filePath, hash, entryId, tier, contentType);
+            if (contentType.IsMemory)
+            {
+                // Memories get a hash-derived id and a repair-on-retry import
+                // (git sync: the same host memory is the same entry on every
+                // machine, and a half-finished import is completed, not
+                // duplicated). Knowledge keeps random ids.
+                InsertOrRepairMemory(
+                    store, embedder, vectorSearch, importLog,
+                    sourceToolName, filePath, hash, tier, opts);
+            }
+            else
+            {
+                var entryId = store.Insert(tier, contentType, opts);
+                var embedding = embedder.Embed(content);
+                vectorSearch.InsertEmbedding(tier, contentType, entryId, embedding);
+                importLog.LogImport(sourceToolName, filePath, hash, entryId, tier, contentType);
+            }
 
             return new ImportFileOutcome(ImportFileStatus.Imported);
         }
@@ -219,6 +240,94 @@ public static class ImportUtils
                 ImportFileStatus.Errored,
                 $"{filePath}: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Insert a <b>memory</b> import with a hash-derived id, or repair it when
+    /// an earlier run was interrupted. The caller has already checked
+    /// <see cref="IImportLog.IsAlreadyImported"/>. Steps:
+    /// <list type="number">
+    ///   <item>derive the id with <see cref="ImportIds.FromHash"/>;</item>
+    ///   <item>look for an entry with that id in the target tier, then in the
+    ///     other two tiers (Hot, Warm, Cold), and if one exists skip the insert
+    ///     and use the tier it is in;</item>
+    ///   <item>otherwise insert it with the derived id; if that insert throws
+    ///     (two importers racing) and the entry is now there, carry on as if
+    ///     it had been found, else rethrow;</item>
+    ///   <item>embed the <b>stored</b> content when the entry already existed
+    ///     (it may have been edited or arrived by sync), else the imported
+    ///     content, and insert the vector for the entry's current tier (the
+    ///     vector insert replaces an orphan row, so it is safe to repeat);</item>
+    ///   <item>write the <c>import_log</c> row for the entry's current tier
+    ///     (<c>INSERT OR IGNORE</c>).</item>
+    /// </list>
+    /// A repaired import counts as imported (the entry was not complete before).
+    /// It is not a transaction because in cortex mode the importers write
+    /// through <c>RoutingStore</c>, which cannot share one.
+    /// </summary>
+    internal static MemoryImportResult InsertOrRepairMemory(
+        IStore store,
+        IEmbedder embedder,
+        IVectorSearch vectorSearch,
+        IImportLog importLog,
+        string sourceToolName,
+        string sourcePath,
+        string contentHash,
+        Tier tier,
+        InsertEntryOpts opts)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(embedder);
+        ArgumentNullException.ThrowIfNull(vectorSearch);
+        ArgumentNullException.ThrowIfNull(importLog);
+        ArgumentNullException.ThrowIfNull(opts);
+
+        var id = ImportIds.FromHash(contentHash);
+        var existing = FindMemory(store, id, tier);
+        var repaired = existing is not null;
+
+        if (existing is null)
+        {
+            try
+            {
+                store.Insert(tier, ContentType.Memory, opts with { Id = id });
+            }
+            catch (Exception)
+            {
+                // Two importers racing: the entry may exist now. A failure of
+                // this lookup must not replace the original insert failure.
+                (Tier Tier, Entry Entry)? found = null;
+                try { found = FindMemory(store, id, tier); }
+                catch (Exception) { /* keep the original failure */ }
+                if (found is null) throw;
+                existing = found;
+                repaired = true;
+            }
+        }
+
+        var entryTier = existing?.Tier ?? tier;
+        var content = existing?.Entry.Content ?? opts.Content;
+
+        var embedding = embedder.Embed(content);
+        vectorSearch.InsertEmbedding(entryTier, ContentType.Memory, id, embedding);
+        importLog.LogImport(
+            sourceToolName, sourcePath, contentHash, id, entryTier, ContentType.Memory);
+
+        return new MemoryImportResult(id, entryTier, repaired);
+    }
+
+    private static (Tier Tier, Entry Entry)? FindMemory(IStore store, string id, Tier targetTier)
+    {
+        var order = new List<Tier> { targetTier };
+        foreach (var t in new[] { Tier.Hot, Tier.Warm, Tier.Cold })
+            if (!t.Equals(targetTier)) order.Add(t);
+
+        foreach (var t in order)
+        {
+            var entry = store.Get(t, ContentType.Memory, id);
+            if (entry is not null) return (t, entry);
+        }
+        return null;
     }
 
     /// <summary>
