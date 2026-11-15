@@ -195,6 +195,38 @@ public class RecordPatcherTests
         Assert.Equal(Tier.Hot, result.Record!.Placement.Tier);                 // the model is normalised
     }
 
+    [Fact]
+    public void A_record_stored_sticky_with_a_warm_tier_is_handled_by_its_stored_tier()
+    {
+        // Tier only: a sticky record is hot, so the tier group becomes hot with the patch's stamp
+        var (tierOnly, _) = Apply(StoredWarmSticky, new RecordPatch(Tier: new TierPatch(Tier.Cold, Stamp(Later))));
+        Assert.Equal(Keys("tier", "tier_stamp"), ChangedKeys(StoredWarmSticky, tierOnly));
+        Assert.Equal("\"tier\": \"hot\"", Prop(tierOnly, "tier"));
+        Assert.Contains(Later, Prop(tierOnly, "tier_stamp"));
+
+        // Re-pinning counts as a raise (the stored tier is colder than hot), so the stamp is required
+        var repin = RecordPatcher.Patch(Load(StoredWarmSticky), new RecordPatch(Sticky: new StickyPatch(true, Stamp(Later))));
+        Assert.Equal(PatchFailure.MissingTierStamp, repin.Failure);
+
+        // Unpinning leaves the tier as stored, and the model follows it
+        var (unpin, result) = Apply(StoredWarmSticky, new RecordPatch(Sticky: new StickyPatch(false, Stamp(Later))));
+        Assert.Equal(Keys("sticky", "sticky_stamp"), ChangedKeys(StoredWarmSticky, unpin));
+        Assert.Equal("\"tier\": \"warm\"", Prop(unpin, "tier"));
+        Assert.Equal(Tier.Warm, result.Record!.Placement.Tier);
+    }
+
+    [Fact]
+    public void Scope_can_be_cleared_and_a_null_value_is_not_encodable()
+    {
+        var withScope = Warm.Replace("\"project\": \"owner/repo\",", "\"project\": \"owner/repo\",\n      \"scope\": \"global\",");
+        var cleared = Apply(withScope, new RecordPatch(Content: new ContentPatch("x", EntryType.Decision, Stamp(Later), Scope: Change<string>.Clear))).Text;
+        Assert.DoesNotContain("\"scope\"", cleared);
+
+        var nullValue = new RecordPatch(Content: new ContentPatch("x", EntryType.Decision, Stamp(Later), Project: Change<string>.Set(null!)));
+        Assert.Equal(PatchFailure.NotEncodable, RecordPatcher.Patch(Load(Warm), nullValue).Failure);
+        Assert.Equal(PatchFailure.NotEncodable, RecordPatcher.Patch(Load(Warm), new RecordPatch(Tags: new string[] { null! })).Failure);
+    }
+
     // ---- invariants of every patch ----
 
     [Fact]
