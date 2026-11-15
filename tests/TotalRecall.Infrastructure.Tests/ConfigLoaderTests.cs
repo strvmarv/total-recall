@@ -662,4 +662,176 @@ public sealed class ConfigLoaderTests : IDisposable
         Assert.Equal(1200, cfg.Tiers.Hot.MaxContentChars);
         Assert.Equal(5, cfg.Compaction.PromoteMinAccess);
     }
+
+    // --- [git_sync] -------------------------------------------------------
+
+    private Core.Config.GitSyncConfig LoadGitSync(string toml)
+    {
+        var userPath = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(userPath, toml);
+        var cfg = new ConfigLoader().LoadEffectiveConfig(userPath);
+        Assert.True(FSharpOption<Core.Config.GitSyncConfig>.get_IsSome(cfg.GitSync), "a [git_sync] table gives Some");
+        return cfg.GitSync.Value;
+    }
+
+    private static bool Warned(Core.Config.GitSyncConfig c, string key) =>
+        c.Warnings.Any(w => w.StartsWith("git_sync." + key + ":", StringComparison.Ordinal));
+
+    [Fact]
+    public void GitSync_NoSection_IsNone_AndTheRestIsUnchanged()
+    {
+        Assert.True(FSharpOption<Core.Config.GitSyncConfig>.get_IsNone(new ConfigLoader().LoadDefaults().GitSync));
+
+        var userPath = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(userPath, "[tiers.hot]\nmax_entries = 999\n");
+        var cfg = new ConfigLoader().LoadEffectiveConfig(userPath);
+        Assert.True(FSharpOption<Core.Config.GitSyncConfig>.get_IsNone(cfg.GitSync));
+        Assert.Equal(999, cfg.Tiers.Hot.MaxEntries);
+    }
+
+    [Fact]
+    public void GitSync_OnlyRemote_GivesTheDefaults()
+    {
+        var c = LoadGitSync("[git_sync]\nremote = \"git@github.com:alice/x.git\"\n");
+
+        Assert.Equal("git@github.com:alice/x.git", c.Remote.Value);
+        Assert.Equal("main", c.Branch.Value);
+        Assert.Equal(300, c.IntervalSeconds);
+        Assert.True(c.SessionStart.IsBlocking);
+        Assert.Equal(10, c.SessionStartSoftSeconds);
+        Assert.Equal(20, c.SessionStartMaxSeconds);
+        Assert.Equal(8, c.SessionStartStallSeconds);
+        Assert.True(c.SessionEnd);
+        Assert.Equal(8, c.SessionEndSeconds);
+        Assert.Equal(20, c.DeleteGuardPercent);
+        Assert.Empty(c.Warnings);
+    }
+
+    [Fact]
+    public void GitSync_EveryKeySet_IsAsWritten()
+    {
+        var c = LoadGitSync("""
+            [git_sync]
+            remote = "https://github.com/alice/x.git"
+            branch = "dev"
+            interval_seconds = 60
+            session_start = "off"
+            session_start_soft_seconds = 5
+            session_start_max_seconds = 15
+            session_start_stall_seconds = 3
+            session_end = false
+            session_end_seconds = 12
+            delete_guard_percent = 50
+            """);
+
+        Assert.Equal("https://github.com/alice/x.git", c.Remote.Value);
+        Assert.Equal("dev", c.Branch.Value);
+        Assert.Equal(60, c.IntervalSeconds);
+        Assert.True(c.SessionStart.IsOff);
+        Assert.Equal(5, c.SessionStartSoftSeconds);
+        Assert.Equal(15, c.SessionStartMaxSeconds);
+        Assert.Equal(3, c.SessionStartStallSeconds);
+        Assert.False(c.SessionEnd);
+        Assert.Equal(12, c.SessionEndSeconds);
+        Assert.Equal(50, c.DeleteGuardPercent);
+        Assert.Empty(c.Warnings);
+    }
+
+    [Fact]
+    public void GitSync_WrongTypes_LoadWithWarnings()
+    {
+        var c = LoadGitSync("""
+            [git_sync]
+            remote = 7
+            branch = ["a"]
+            interval_seconds = "five"
+            session_start = 3
+            session_start_soft_seconds = [1]
+            session_end = "yes"
+            delete_guard_percent = 1.5
+            unknown_key = "ignored"
+            """);
+
+        Assert.True(FSharpOption<string>.get_IsNone(c.Remote));
+        Assert.True(FSharpOption<string>.get_IsNone(c.Branch));
+        Assert.Equal(300, c.IntervalSeconds);
+        Assert.True(c.SessionStart.IsBlocking);
+        Assert.Equal(10, c.SessionStartSoftSeconds);
+        Assert.True(c.SessionEnd);
+        Assert.Equal(20, c.DeleteGuardPercent);
+        foreach (var key in new[] { "remote", "branch", "interval_seconds", "session_start", "session_start_soft_seconds", "session_end", "delete_guard_percent" })
+            Assert.True(Warned(c, key), key);
+        Assert.DoesNotContain(c.Warnings, w => w.Contains("unknown_key"));
+    }
+
+    [Fact]
+    public void GitSync_NotATable_IsNone_AndTheLoadSucceeds()
+    {
+        var userPath = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(userPath, "git_sync = \"x\"\n");
+        var cfg = new ConfigLoader().LoadEffectiveConfig(userPath);
+        Assert.True(FSharpOption<Core.Config.GitSyncConfig>.get_IsNone(cfg.GitSync));
+    }
+
+    [Fact]
+    public void GitSync_Interval_ZeroDisables_SmallIsRaised()
+    {
+        var zero = LoadGitSync("[git_sync]\ninterval_seconds = 0\n");
+        Assert.Equal(0, zero.IntervalSeconds);
+        Assert.Empty(zero.Warnings);
+
+        var small = LoadGitSync("[git_sync]\ninterval_seconds = 10\n");
+        Assert.Equal(30, small.IntervalSeconds);
+        Assert.Single(small.Warnings);
+        Assert.True(Warned(small, "interval_seconds"));
+    }
+
+    [Fact]
+    public void GitSync_UnusableRemoteAndBranch_AreNotSet()
+    {
+        var c = LoadGitSync("[git_sync]\nremote = \"-oProxyCommand=x\"\nbranch = \"feature/.x\"\n");
+        Assert.True(FSharpOption<string>.get_IsNone(c.Remote));
+        Assert.True(FSharpOption<string>.get_IsNone(c.Branch), "a bad branch is never replaced by main");
+        Assert.True(Warned(c, "remote"));
+        Assert.True(Warned(c, "branch"));
+    }
+
+    [Theory]
+    [InlineData("remote = \"unterminated")]
+    [InlineData("interval_seconds = 99999999999999999999")]
+    public void GitSync_SyntaxErrors_StillFailTheLoad(string line)
+    {
+        var userPath = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(userPath, "[git_sync]\n" + line + "\n");
+        Assert.Throws<InvalidDataException>(() => new ConfigLoader().LoadEffectiveConfig(userPath));
+    }
+
+    [Fact]
+    public void GitSync_UserFileWithAnotherSection_BothLoad_AndTheTableSurvivesTheMerge()
+    {
+        var userPath = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(userPath, "[tiers.hot]\nmax_entries = 999\n\n[git_sync]\nremote = \"git@h:o/r.git\"\n");
+        var loader = new ConfigLoader();
+
+        var cfg = loader.LoadEffectiveConfig(userPath);
+        Assert.Equal(999, cfg.Tiers.Hot.MaxEntries);
+        Assert.Equal("git@h:o/r.git", cfg.GitSync.Value.Remote.Value);
+
+        var table = loader.LoadEffectiveTable(userPath);
+        Assert.True(table.TryGetValue("git_sync", out var gs) && gs is TomlTable t && (string)t["remote"] == "git@h:o/r.git");
+    }
+
+    [Fact]
+    public void GitSync_ConfigSnapshotJson_IsUnchangedBySettings()
+    {
+        var plain = Path.Combine(_tempDir, "plain.toml");
+        var withSync = Path.Combine(_tempDir, "with.toml");
+        File.WriteAllText(plain, "[tiers.hot]\nmax_entries = 999\n");
+        File.WriteAllText(withSync, "[tiers.hot]\nmax_entries = 999\n\n[git_sync]\nremote = \"git@h:o/r.git\"\ninterval_seconds = 60\n");
+        var loader = new ConfigLoader();
+
+        Assert.Equal(
+            ConfigJsonSerializer.Serialize(loader.LoadEffectiveConfig(plain)),
+            ConfigJsonSerializer.Serialize(loader.LoadEffectiveConfig(withSync)));
+    }
 }

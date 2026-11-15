@@ -69,6 +69,21 @@ default = "user:local"
 max_entries = 200
 default_ttl_seconds = 600
 
+# --- Git sync (optional) ---
+# Sync memories across your machines through a private git repository you own.
+# Nothing is read from this table yet; the values below are the defaults.
+# [git_sync]
+# remote = "git@github.com:you/total-recall-sync.git"
+# branch = "main"
+# interval_seconds = 300            # 0 turns the timer off; otherwise 30 to 86400
+# session_start = "blocking"        # "blocking", "background" or "off"
+# session_start_soft_seconds = 10
+# session_start_max_seconds = 20
+# session_start_stall_seconds = 8
+# session_end = true
+# session_end_seconds = 8
+# delete_guard_percent = 20
+
 [updates]
 # Tell the user once per host and version that total-recall is new or was
 # updated. Set false to turn it off.
