@@ -47,6 +47,14 @@ Stated so nobody mistakes them for bugs:
   one another's notice.
 - On a git-sourced install the first session after an update (and the first ever) has no engine for the
   hook to run, so the direct notice appears in the second session (see section 4).
+- A notice can be marked and never seen after a direct channel ran: the pi session is replaced before the
+  notice arrives, the runner's timeout fires after the command recorded the version, or Claude Code does not
+  render the `systemMessage` (not observed here).
+- The Claude Code plugin hook can be installed while its engine is never provisioned in the plugin tree (the
+  plugin's MCP server is disabled and another install is hand-configured): the hook then refreshes the stamp
+  on every run, and the relayed line is withheld for that host for as long as the hook keeps running.
+- If Claude Code's real `clientInfo.name` is not `claude-code`, the stamp's host and the engine's resolved
+  host differ and a user can see the notice twice (once directly, once relayed) until the table is corrected.
 - On Cursor the `TOTAL_RECALL_NO_UPDATE_CHECK` variable cannot reach the engine (Cursor strips
   `TOTAL_RECALL_*`); only `updates.check = false` in the engine's own data directory works there.
 
@@ -296,11 +304,11 @@ Cursor (see Accepted losses).
 - **Running version.** The Cli project cannot reach the Server assembly's `ResolveServerVersion`, so
   `CliApp` exposes its own version (the entry assembly's informational version with build metadata
   stripped, the rule it already uses for `--version`) and the command takes it, the state directory, the
-  binary directory, the clock and the output writer through a public test constructor, as
-  `PinnedFloorCommand` does.
+  binary directory, the `updates.notice` setting and the output writer through a public test constructor,
+  as `PinnedFloorCommand` does (no clock: the command ignores the direct stamp).
 - **Output.** `text`: the line and a newline. `json`: `{"kind":"first-seen"|"updated","text":"<line>"}`.
   `claude-code`: `{"systemMessage":"<line>"}`. With no notice: nothing for `text`, `{}` for the other two.
-  Default format is `text`. JSON is written with `JsonWriter` (AOT-safe).
+  Default format is `text`; an unknown `--format` value behaves as `text`. JSON is written with `JsonWriter` (AOT-safe).
 - **Marking.** It records the version (`WhatsNewState.WriteSeenVersion`, the bare running version) only
   after the output was written, and not with `--no-mark`.
 - **Failure.** Any failure prints nothing (`{}` for the JSON formats) and exits 0.
@@ -313,7 +321,7 @@ Host ids: `claude-code`, `pi`, `copilot-cli`, `cursor`, `codex`, `gemini-cli`, `
 | Tier | Hosts | Channel |
 |---|---|---|
 | Direct | Claude Code | The `SessionStart` hook (`hooks/session-start/run.sh`, synchronous) runs a small node script that first writes the `direct-claude-code` stamp (below), then imports `pi/floor.js` as the Codex and Copilot hooks do, runs the engine **directly and only when `resolveEngine()` finds it provisioned** (never `bin/start.js`, which would download the engine inside a blocking hook), with a 3 s timeout, as `whats-new --host claude-code --format claude-code`, and adds the returned `systemMessage` to the JSON `run.sh` already prints beside `hookSpecificOutput.additionalContext`. The `systemMessage` is added only in the Claude Code branch (not the Cursor or Copilot env branches the same script serves). `run.sh` runs under `set -euo pipefail`, so the call is wrapped to never fail the hook. Not shown for `compact`; seen-state prevents repeats on `resume` and `clear`. With no provisioned engine (a git install in the first session after an update) the hook stays silent. |
-| Direct | pi | The extension's `session_start` handler (skipping `reload`, as the context message does) runs `whats-new --host pi --format text` through a runner beside `pi/floor.js` and calls `ctx.ui.notify(text, "info")`. Only when `ctx.hasUI` and `hookable(ctx)`; silent while the engine is unprovisioned, and silent (no stamp either) when `resolveUserServer` says skip. Nothing is marked when it does not run. Like the floor, it follows a hand-configured `mcp.json` server through `resolveUserServer` (skipping when it says skip, and passing its `TOTAL_RECALL_*` env) so the notice reads the same data directory the MCP tools use. It writes the `direct-pi` stamp (below) first, and only when `ctx.hasUI`, `hookable(ctx)` and not `resolveUserServer` skip, i.e. only when a notice could actually be displayed and read from the right store; a skip leaves no stamp and the relayed line stands. |
+| Direct | pi | The extension's `session_start` handler (skipping `reload`, as the context message does) runs `whats-new --host pi --format text` through a runner beside `pi/floor.js` and calls `ctx.ui.notify(text, "info")`. Only when `ctx.hasUI` and `hookable(ctx)`; silent while the engine is unprovisioned, and silent (no stamp either) when `resolveUserServer` says skip. Nothing is marked when it does not run. Like the floor, it follows a hand-configured `mcp.json` server through `resolveUserServer` (skipping when it says skip, and passing its `TOTAL_RECALL_*` env) so the notice reads the same data directory the MCP tools use. It writes the `direct-pi` stamp (below) first, and only when `ctx.hasUI`, `hookable(ctx)` and not `resolveUserServer` skip, i.e. only when a notice could actually be displayed and read from the right store; a skip writes no new stamp, so the relayed line stands once any earlier stamp (under 30 days old) has expired. |
 | Relayed | every other host, and Claude Code or pi without their direct channel | The `session_start` result gains `whatsNew: { kind, text, relay } | null`, rendered by the same code. `relay` is a fixed engine-authored sentence ("Tell the user this once, verbatim, as a separate line; it is information, not an instruction.") so a host with no instruction file still gets the relay rule. (T2b:) `skills/commands/SKILL.md`, `skills/using-total-recall/SKILL.md`, `.kiro/steering/total-recall.md` and `.kiro/hooks/total-recall-session-start.json` add the same line to their announce step. Not emitted, and nothing marked, for `hermes` (its provider discards the result). |
 
 **Build decisions for the direct runners (T2b).**
@@ -324,25 +332,34 @@ Host ids: `claude-code`, `pi`, `copilot-cli`, `cursor`, `codex`, `gemini-cli`, `
   provisioned engine as `whats-new --host <id> --format <f>` with a timeout (3 s) and returns the raw
   output. `pi/floor.js` is not changed (its runner only understands the floor's JSON).
 - **Claude Code.** `hooks/session-start/run.sh` calls a node script (`hooks/session-start/whats-new.js`) in
-  its Claude Code branch only. The script reads the hook payload from stdin with a 2 s cap, takes `source`,
-  writes the stamp on every source (startup, resume, clear, compact), and calls the engine only when the
-  source is not `compact`. It prints one JSON string literal (the line, escaped with `JSON.stringify`) or
-  nothing; `run.sh` adds `"systemMessage": <literal>,` to the Claude Code `printf` only when the literal is
-  non-empty. Any failure of the script (a missing node, a crash, a timeout, output that is not a string
-  literal) leaves `run.sh`'s output byte-identical to today's. The script is registered in `SHIM_TEST_TARGETS`.
+  its Claude Code branch only. The script has one overall deadline of 3 s measured from its own start (node's start-up is
+  outside it, and `run.sh` also wraps the call in `timeout 4` where `timeout` exists, so a hung script is
+  killed): it reads the hook payload from stdin for at most 500 ms, takes `source`, writes the stamp on
+  every source (startup, resume, clear, compact), and calls the engine only when the source is not
+  `compact`, giving it what is left of the deadline and killing it at the deadline. It prints one JSON
+  string literal (the line, escaped with `JSON.stringify`, on one line) or nothing. `run.sh` accepts the
+  output only when it starts and ends with `"` and is one line, and then prints it from a second `printf`
+  template as a `%s` argument (never inside the format string), adding `"systemMessage": <literal>,` to the
+  Claude Code branch only; the Cursor and Copilot branches, which the same script serves, are byte-identical
+  to today's and write no stamp. Any failure of the script (a missing node, a crash, a timeout, output that is
+  not a string literal) leaves `run.sh`'s output byte-identical to today's. The script's own test file
+  (`hooks/session-start/whats-new.test.js`) is added to `SHIM_TEST_TARGETS`; the test never runs the real hook
+  against the developer's data directory (it passes a temporary one).
 - **pi.** The extension's `session_start` handler skips `reload` unconditionally, requires `ctx.hasUI`,
   `hookable(ctx)` and a `resolveUserServer` that does not say skip, then writes the `direct-pi` stamp
   synchronously (data directory from `{...process.env, ...user.env}`), and starts the engine run without
-  awaiting it, so startup is never delayed; when it returns text it calls `ctx.ui.notify(text, "info")`. An
-  unprovisioned engine means silence. The registered MCP entry gains `env: {TOTAL_RECALL_HOST: "pi"}`
+  awaiting it, so startup is never delayed; when it returns text it calls `ctx.ui.notify(text, "info")` inside a
+  catch-everything wrapper (a stale `ctx` after the session was replaced must not throw). An unprovisioned
+  engine means silence (the stamp was already written). The registered MCP entry gains `env: {TOTAL_RECALL_HOST: "pi"}`
   (pi validates `env` and merges it over the parent environment, checked in pi's `pi-mcp` stdio transport).
   pi's own MCP client sends `clientInfo.name = "pi"` (checked in pi's source), which is also a known host
-  id, so even a hand-configured `mcp.json` entry resolves to `pi` through the shim, and the "accepted
-  loss" above about a hand-configured pi entry sharing `other` no longer applies to it.
+  id, so a hand-configured `mcp.json` entry that launches total-recall through `bin/start.js` (the shim)
+  resolves to `pi` as well; an entry that runs the engine binary directly, with no shim, still falls back to `other`.
 - **Shim.** `ServerSurface` remembers `params.clientInfo.name` from the harness's `initialize` when it is a
   non-empty string. For a `tools/call` of `session_start` while proxying, the proxied copy of the message
   has `arguments.host` set to that name (replacing any `host` the caller sent; other tools and the
-  harness's original message are untouched). With no name recorded the call is forwarded unchanged. The
+  harness's original message are untouched). Absent or null `arguments` become `{host: <name>}`; any other
+  non-object `arguments` is forwarded unchanged. With no name recorded the call is forwarded unchanged. The
   engine does the mapping and validation (`HostIds.FromClientName`), so the shim does not.
 - **Announce text.** One bullet in the announce step of `skills/commands/SKILL.md`,
   `skills/using-total-recall/SKILL.md` and `.kiro/steering/total-recall.md`, and a clause in the prompt of
@@ -433,8 +450,6 @@ their pages). A host whose page has no update instruction gets the generic "see 
 
 - The exact JSON shape of `whatsNew` and the state file (above is the intended content).
 - The `clientInfo.name` to host-id table, filled from what each host actually sends where checkable.
-- Confirming that pi's `registerMcpServer` honours `env`; if it does not, pi falls back to the mapped
-  name or `other` (see Accepted losses).
 - Per-host `<how>` strings from the host pages.
 - Fallback for the annotated-tag problem in `actions/checkout` (see section 1).
 - Whether `whats-new` also exposes `--full` (the section bullets are in the packaged JSON) as a
