@@ -306,23 +306,79 @@ const WRITE_NOTES = 'Write release notes';
 const SIZE_GUARD = 'Guard npm package size (pre-publish)';
 const NPM_PUBLISH = 'npm publish';
 
-/**
- * The text of a step's `run:` value (a one-liner or a block), line continuations joined, spaces collapsed.
- * A shell comment (a `#` that starts a word, to the end of the line) is dropped, so a command that
- * appears only in a comment is not seen; pass `keepComments` to read the raw text (GitHub expands
- * `${{ }}` inside comments too).
- */
-function runText(step, keepComments = false) {
+/** The lines of a step's `run:` value: the rest of the `run:` line, then the more indented lines of a block. */
+function runLines(step) {
   const lines = step.text.split('\n');
   const start = lines.findIndex((l) => /^ {8}run:/.test(l));
-  if (start < 0) return '';
-  const out = [lines[start].replace(/^ {8}run:\s*\|?\s*/, '')];
+  if (start < 0) return null;
+  const head = lines[start].replace(/^ {8}run:\s*/, '');
+  const out = [];
   for (const l of lines.slice(start + 1)) {
     if (/^ {8}\S/.test(l) || /^ {6}\S/.test(l)) break;
     out.push(l);
   }
-  const code = keepComments ? out : out.map((l) => l.replace(/(^|\s)#.*$/, '$1'));
-  return code.join('\n').replace(/\\\n/g, ' ').replace(/\s+/g, ' ').trim();
+  return { head, block: /^\|[-+]?$/.test(head), rest: out };
+}
+
+/** The raw text of a step's `run:` value, comments included (GitHub expands `${{ }}` inside comments too). */
+const rawRun = (step) => { const r = runLines(step); return r ? [r.head, ...r.rest].join('\n') : ''; };
+
+/**
+ * A line without its shell comment. A `#` starts a comment at the start of the line or after
+ * whitespace, `;`, `&`, `|` or `(`, unless it is quoted or escaped; so `$#`, `${#a[@]}`, `${V#v}`,
+ * `$((16#ff))`, `z#frag`, `'#'` and `\#` are left alone.
+ */
+function stripComment(line) {
+  let single = false;
+  let double = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '\\' && !single) i++;
+    else if (c === "'" && !double) single = !single;
+    else if (c === '"' && !single) double = !double;
+    else if (c === '#' && !single && !double && (i === 0 || /[\s;&|(]/.test(line[i - 1]))) return line.slice(0, i);
+  }
+  return line;
+}
+
+/**
+ * The shell commands of a step's `run:` value, as bash would see them: lines are joined only by a
+ * backslash-newline continuation, a whole comment line ends a pending continuation, a comment at the
+ * end of a line is dropped, and any other newline separates two commands. Spaces are collapsed.
+ * A one-line value loses one pair of surrounding YAML quotes first.
+ */
+function runCommands(step) {
+  const r = runLines(step);
+  if (!r) return [];
+  let lines;
+  if (r.block) lines = r.rest;
+  else {
+    const value = [r.head, ...r.rest.map((l) => l.trim())].filter((l) => l !== '').join(' ');
+    lines = [(/^"(.*)"$/.exec(value) ?? /^'(.*)'$/.exec(value))?.[1] ?? value];
+  }
+  const commands = [];
+  let pending = null;
+  const flush = (text) => {
+    const command = text.replace(/\s+/g, ' ').trim();
+    if (command !== '') commands.push(command);
+  };
+  for (const line of lines) {
+    if (line.trim().startsWith('#')) {
+      if (pending !== null) flush(pending);
+      pending = null;
+      continue;
+    }
+    const code = stripComment(line).trimEnd();
+    const continues = /(?:^|[^\\])(?:\\\\)*\\$/.test(code);
+    const joined = `${pending ?? ''} ${continues ? code.slice(0, -1) : code}`;
+    if (continues) pending = joined;
+    else {
+      flush(joined);
+      pending = null;
+    }
+  }
+  if (pending !== null) flush(pending);
+  return commands;
 }
 
 /** The value of a `key: value` line at the given indent of a step: 8 spaces for its own keys, 10 for `env:` and `with:` entries. */
@@ -339,7 +395,7 @@ function checkNotesStepsOfJob(text, job, scriptName) {
   else if (!/^ {10}fetch-depth: 0$/m.test(steps[checkout].text)) problems.push(`the ${job} checkout does not set fetch-depth: 0`);
   if (fetch < 0) problems.push(`the ${job} job has no "${FETCH_TAGS}" step`);
   else {
-    if (!/git fetch --force --tags origin/.test(runText(steps[fetch]))) problems.push(`the ${job} "${FETCH_TAGS}" step does not run git fetch --force --tags origin`);
+    if (!runCommands(steps[fetch]).includes('git fetch --force --tags origin')) problems.push(`the ${job} "${FETCH_TAGS}" step does not run git fetch --force --tags origin`);
     if (checkout >= 0 && fetch < checkout) problems.push(`the ${job} job fetches tags before the checkout`);
   }
   if (script < 0) return [...problems, `the ${job} job has no "${scriptName}" step`];
@@ -349,7 +405,7 @@ function checkNotesStepsOfJob(text, job, scriptName) {
     problems.push(`"${scriptName}" does not pass the tag through env: REF_NAME`);
   }
   for (const s of [step, ...(fetch >= 0 ? [steps[fetch]] : [])]) {
-    if (runText(s, true).includes('${{')) problems.push(`"${s.name}" interpolates an expression into the shell`);
+    if (rawRun(s).includes('${{')) problems.push(`"${s.name}" interpolates an expression into the shell`);
   }
   if (!/^ {8}run:/m.test(step.text)) problems.push(`"${scriptName}" has no run:`);
   return problems;
@@ -360,7 +416,8 @@ function checkReleaseNotesGate(text) {
   const steps = publishSteps(text, 'check-version');
   const gate = steps.find((s) => s.name === CHECK_NOTES);
   if (gate) {
-    if (!/^node scripts\/release-notes\.js "\$REF_NAME" --check$/.test(runText(gate))) {
+    const commands = runCommands(gate);
+    if (commands.length !== 1 || commands[0] !== 'node scripts/release-notes.js "$REF_NAME" --check') {
       problems.push(`"${CHECK_NOTES}" does not run node scripts/release-notes.js "$REF_NAME" --check`);
     }
     const node = steps.findIndex((s) => /uses: actions\/setup-node@v5\b/.test(s.text));
@@ -380,8 +437,11 @@ function checkBuildWaitsForTheGate(text) {
   return /^    needs: check-version$/m.test(build) ? [] : ['the build job does not have needs: check-version'];
 }
 
-/** The `--body-out` value of the write step, quotes removed. */
-const bodyOutOf = (step) => (/--body-out (\S+)/.exec(runText(step)) ?? [])[1]?.replace(/^"|"$/g, '');
+/** The `--body-out` value of a command, quotes removed. */
+const bodyOutOf = (cmd) => (/--body-out (\S+)/.exec(cmd) ?? [])[1]?.replace(/^"|"$/g, '');
+
+/** The write command: the script, the four `--notes-out` files and the body, and nothing else, so no failure is ignored. */
+const WRITE_COMMAND = new RegExp(`^node scripts/release-notes\\.js "\\$REF_NAME"(?: --notes-out binaries/[a-z0-9-]+/release-notes\\.json){${RIDS.length}} --body-out "\\$RUNNER_TEMP/release-body\\.md"$`);
 
 function checkReleaseNotesAreWritten(text) {
   const problems = checkNotesStepsOfJob(text, 'publish', WRITE_NOTES);
@@ -389,14 +449,19 @@ function checkReleaseNotesAreWritten(text) {
   const at = (name) => steps.findIndex((s) => s.name === name);
   const write = at(WRITE_NOTES);
   if (write < 0) return problems;
-  const cmd = runText(steps[write]);
+  const commands = runCommands(steps[write]);
+  const cmd = commands.find((c) => c.startsWith('node scripts/release-notes.js')) ?? '';
   if (/^(?:      - |        )if:/m.test(steps[write].text)) problems.push(`"${WRITE_NOTES}" has an if: condition and can be skipped`);
   if (/^(?:      - |        )continue-on-error:/m.test(steps[write].text)) problems.push(`"${WRITE_NOTES}" sets continue-on-error, so its failure is ignored`);
-  if (!/(?:^| )node scripts\/release-notes\.js "\$REF_NAME" /.test(cmd)) problems.push(`"${WRITE_NOTES}" does not run node scripts/release-notes.js "$REF_NAME"`);
+  if (!/^node scripts\/release-notes\.js "\$REF_NAME"(?: |$)/.test(cmd)) problems.push(`"${WRITE_NOTES}" does not run node scripts/release-notes.js "$REF_NAME"`);
   if (/ --check\b/.test(cmd)) problems.push(`"${WRITE_NOTES}" runs with --check, so it writes nothing`);
   const outs = [...cmd.matchAll(/--notes-out (\S+)/g)].map((m) => m[1].replace(/^"|"$/g, ''));
   for (const rid of RIDS) {
     if (!outs.includes(`binaries/${rid}/release-notes.json`)) problems.push(`"${WRITE_NOTES}" does not write binaries/${rid}/release-notes.json`);
+    if (outs.filter((o) => o === `binaries/${rid}/release-notes.json`).length > 1) problems.push(`"${WRITE_NOTES}" writes binaries/${rid}/release-notes.json more than once`);
+  }
+  if (commands.length !== 2 || commands[0] !== 'set -euo pipefail' || !WRITE_COMMAND.test(commands[1]) || /[;&|]/.test(commands[1])) {
+    problems.push(`"${WRITE_NOTES}" is not set -euo pipefail followed by one node scripts/release-notes.js command with the four --notes-out files and --body-out "$RUNNER_TEMP/release-body.md" and nothing else`);
   }
   const downloads = steps.map((s, i) => (/^Download .* artifact$/.test(s.name) ? i : -1)).filter((i) => i >= 0);
   if (downloads.length !== RIDS.length) problems.push(`expected ${RIDS.length} artifact download steps, found ${downloads.length}`);
@@ -411,7 +476,7 @@ function checkReleaseNotesAreWritten(text) {
   // The attach step writes the path as `${{ runner.temp }}/...`, the write step as `$RUNNER_TEMP/...`: they are the
   // same file, so map the expression to the variable before comparing them.
   const bodyPath = stepKey(attach, 'body_path', 10)?.replace(/^"|"$/g, '').replace('${{ runner.temp }}', '$RUNNER_TEMP');
-  const bodyOut = bodyOutOf(steps[write]);
+  const bodyOut = bodyOutOf(cmd);
   if (bodyOut === undefined) problems.push(`"${WRITE_NOTES}" has no --body-out`);
   if (bodyPath === undefined) problems.push('the attach step has no body_path, so the release body is not the tag message');
   else if (bodyOut !== undefined && bodyPath !== bodyOut) problems.push(`the attach step's body_path (${bodyPath}) is not the file --body-out writes (${bodyOut})`);
@@ -554,11 +619,26 @@ test('mutation: an if: or continue-on-error on the write step is caught', () => 
 
 // ---- a shell comment is not a command ----
 
-test('runText drops a shell comment but keeps a # inside a word', () => {
+test('runCommands: joins only continuations, ends a command at a comment line and drops a comment', () => {
   const step = (run) => ({ name: 'x', text: `      - name: x\n        run: ${run}\n` });
-  assert.equal(runText(step('true # git fetch --force --tags origin')), 'true');
-  assert.equal(runText(step('echo a#b "$X"')), 'echo a#b "$X"');
-  assert.equal(runText({ name: 'x', text: '      - name: x\n        run: |\n          # note\n          echo hi # more\n          echo bye\n' }), 'echo hi echo bye');
+  const block = (...lines) => ({ name: 'x', text: `      - name: x\n        run: |\n${lines.map((l) => `          ${l}\n`).join('')}` });
+  assert.deepEqual(runCommands(step('true # git fetch --force --tags origin')), ['true']);
+  assert.deepEqual(runCommands(step('echo a#b "$X"')), ['echo a#b "$X"']);
+  assert.deepEqual(runCommands(block('# note', 'echo hi # more', 'echo bye')), ['echo hi', 'echo bye']);
+  assert.deepEqual(runCommands(block('node s "$R" \\', '  --a x \\', '  --b y')), ['node s "$R" --a x --b y']);
+  assert.deepEqual(runCommands(block('node s "$R" \\', '# note', '--a x')), ['node s "$R"', '--a x']);
+  assert.deepEqual(runCommands(block('node s "$R" # x', '--check')), ['node s "$R"', '--check']);
+  assert.deepEqual(runCommands(block('echo a # one \\', 'echo b')), ['echo a', 'echo b']);
+  assert.deepEqual(runCommands(step('"# git fetch --force --tags origin"')), []);
+  assert.deepEqual(runCommands(step("'git fetch --force --tags origin'")), ['git fetch --force --tags origin']);
+  assert.deepEqual(runCommands(step('echo x;# git fetch --force --tags origin')), ['echo x;']);
+  assert.deepEqual(runCommands(step('(# a')), ['(']);
+});
+
+test('runCommands: a # that is not a comment is left intact', () => {
+  for (const line of ['echo $# "$#"', 'echo ${#arr[@]}', 'echo "${REF_NAME#v}"', 'echo $((16#ff))', 'echo z#frag', "echo '#'", 'echo "a #b"', "echo ' # git fetch'", 'echo \\# x']) {
+    assert.deepEqual(runCommands({ name: 'x', text: `      - name: x\n        run: |\n          ${line}\n` }), [line], line);
+  }
 });
 
 test('mutation: a command that appears only after # in a run: is not accepted', () => {
@@ -574,4 +654,33 @@ test('mutation: a command that appears only after # in a run: is not accepted', 
   assert.ok(checkReleaseNotesAreWritten(out).some((p) => p.includes('binaries/linux-x64/release-notes.json')));
   const body = mutate('            --body-out "$RUNNER_TEMP/release-body.md"\n', '            # --body-out "$RUNNER_TEMP/release-body.md"\n');
   assert.ok(checkReleaseNotesAreWritten(body).some((p) => /has no --body-out/.test(p)));
+});
+
+// ---- a comment at the end of a command line, a quoted comment, and an ignored failure ----
+
+test('mutation: a comment that ends a command line of the gate or the write step is caught', () => {
+  const gate = mutate('        run: node scripts/release-notes.js "$REF_NAME" --check\n', '        run: |\n          node scripts/release-notes.js "$REF_NAME" # x\n          --check\n');
+  assert.ok(checkReleaseNotesGate(gate).some((p) => /does not run node scripts\/release-notes\.js "\$REF_NAME" --check/.test(p)));
+  const write = mutate('            --notes-out binaries/linux-x64/release-notes.json \\\n', '            # all four rids\n            --notes-out binaries/linux-x64/release-notes.json \\\n');
+  assert.ok(checkReleaseNotesAreWritten(write).length > 0);
+});
+
+test('mutation: a fetch that is only a quoted or glued comment is caught in both jobs', () => {
+  for (const [job, check] of [['check-version', checkReleaseNotesGate], ['publish', checkReleaseNotesAreWritten]]) {
+    for (const run of ['"# git fetch --force --tags origin"', "'# git fetch --force --tags origin'", 'echo x;# git fetch --force --tags origin', 'echo git fetch --force --tags origin']) {
+      const block = jobBlock(REAL, job);
+      const mutated = REAL.replace(block, block.replace('run: git fetch --force --tags origin', `run: ${run}`));
+      assert.notEqual(mutated, REAL, job);
+      assert.ok(check(mutated).some((p) => /does not run git fetch --force --tags origin/.test(p)), `${job}: ${run}`);
+    }
+  }
+});
+
+test('mutation: a write command whose failure is ignored in shell is caught', () => {
+  for (const tail of [' || true', '; true', ' & true']) {
+    const mutated = mutate('            --body-out "$RUNNER_TEMP/release-body.md"\n', `            --body-out "$RUNNER_TEMP/release-body.md"${tail}\n`);
+    assert.ok(checkReleaseNotesAreWritten(mutated).length > 0, tail);
+  }
+  const twice = mutate('            --notes-out binaries/linux-x64/release-notes.json \\\n', '            --notes-out binaries/linux-x64/release-notes.json \\\n            --notes-out binaries/linux-x64/release-notes.json \\\n');
+  assert.ok(checkReleaseNotesAreWritten(twice).length > 0);
 });

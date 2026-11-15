@@ -30,6 +30,16 @@
     "expected": "http://a"
   },
   {
+    "name": "the link pass runs before the angle-bracket pass (an angle-bracketed URL inside a link target)",
+    "input": "[a](<https://x)>)",
+    "expected": "a>)"
+  },
+  {
+    "name": "the link pass runs before the angle-bracket pass (a link closes inside an open angle bracket)",
+    "input": "<https://x[a](b>)",
+    "expected": "<https://xa"
+  },
+  {
     "name": "doubled angle brackets lose both pairs",
     "input": "<<https://x.y>>",
     "expected": "https://x.y"
