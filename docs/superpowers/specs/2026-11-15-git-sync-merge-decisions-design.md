@@ -190,7 +190,7 @@ type ReviewRequest =
 
 type MergeNote =
     | EditBeatsDeletion           // an edit of the text won against a deletion
-    | PendingChangesDropped       // a pending tag or tier change was dropped with the entry
+    | PendingChangesDropped       // a pending tag, tier or non-text content change was dropped with the entry
 
 type MergeDecision =
     { Entry: EntryOutcome
@@ -264,8 +264,8 @@ not `own`. Every combination of record, entry, row and base falls in exactly one
 2. the entry is sticky or `Pending.Sticky` is set: `HoldDeletion RemoteDeletion` (`LeaveEntry` if a
    `RemoteDeletion` item is already open);
 3. a `RemoteDeletion` item is open: `LeaveEntry` (the item stays);
-4. `ApplyProven`: `DeleteEntry`, row `Forgotten`, base kept; note `PendingChangesDropped` when a tag or tier
-   change was pending;
+4. `ApplyProven`: `DeleteEntry`, row `Forgotten`, base kept; note `PendingChangesDropped` when a tag, tier or
+   non-text content change (project, scope, entry type) was pending;
 5. otherwise (unproven): `HoldDeletion RemoteDeletion`.
 
 **Present record, entry gone** (W8), in order; the first that applies. `edit` is "text newer":
@@ -395,7 +395,10 @@ records and entries from a small pool so stamps tie, are older, newer and own at
   a stamp carrying this machine's id that matches nothing remembered is an ordinary remote change; an `own`
   stamp with a base newer than the record is not `own`.
 - **Pending stamps on a held entry:** `Pending.Sticky`, `Pending.Tier` and a pending tag change survive
-  `HoldDeletion RemoteDeletion` (W6.2 and W6.5) and `Defer`.
+  `HoldDeletion RemoteDeletion` (W6.2 and W6.5) and `Defer`; a sticky-only pending change holds the entry with
+  no `FreshContentStamp` (held, not written back, not republished); a project-only pending edit deletes in W6.4
+  with `PendingChangesDropped`. A two-machine test feeds W6.1 for one machine and W3 for the other in both
+  orders and ends with the memory on both.
 - **Held items and bases:** an item closed when the record reappears, when an edit of the text wins and when
   the entry or record changes; an item never reopened; an older group keeping its base value and stamp in W5
   and W8, and its `Repush` only without a pending stamp; a record that unpins and edits at once; a base-less
