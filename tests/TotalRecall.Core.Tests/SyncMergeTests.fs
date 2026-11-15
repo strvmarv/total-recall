@@ -903,3 +903,50 @@ let presentRecordTests =
             Expect.equal (decide ({ input with Row = Some Forgotten } |> noEntry |> promoted)).Entry Ignore "forgotten (W3)"
             Expect.notEqual (decide (noEntry input |> promoted)).Entry InsertFromRecord "deleted (W8)"
     ]
+
+[<Tests>]
+let deletionEdgeTests =
+    testList "SyncMerge W6 and W8, edge cases" [
+        testCase "W8.2 to W8.4 update the base per group" <| fun _ ->
+            let w8 = noEntry input |> withTheirs (withTier Hot (theirs 0) >> withSticky true (theirs 3))
+            let expected = { Content = KeepBase; Tags = BaseBecomesTheirs; Sticky = BaseBecomesTheirs; Tier = KeepBase }
+            Expect.equal (decide w8).Base expected "W8.3 proven"
+            Expect.equal (decide (proven false w8)).Base expected "W8.4 unproven"
+            Expect.equal (decide (item LocalDeletion w8)).Base expected "W8.2 open item"
+
+        testCase "W8 an own content stamp takes the record's base for the content group" <| fun _ ->
+            let i = noEntry input |> theirText "remote" (ours 3) |> pushingContent (ours 3)
+            let d = decide i
+            Expect.equal d.Entry PushDeletion "the deletion stands"
+            Expect.equal d.Base.Content BaseBecomesTheirs "own"
+
+        testCase "W6.4 a pending content stamp with nothing changed gives no note" <| fun _ ->
+            let d = decide (noRecord input |> pendingContent (ours 4))
+            Expect.equal d.Entry DeleteEntry "delete"
+            Expect.isEmpty d.Notes "nothing was dropped"
+
+        testCase "W6.2 a pending pin on an unpinned entry holds the deletion without republishing" <| fun _ ->
+            let d = decide (noRecord input |> pendingSticky (ours 4))
+            Expect.equal d.Entry (HoldDeletion RemoteDeletion) "held"
+            Expect.isFalse d.FreshContentStamp "not republished"
+            Expect.isEmpty d.Notes "no note"
+
+        testCase "a deletion pushed first and an edit written back: both machines end with the memory and the edited text" <| fun _ ->
+            // Machine B edits while A's deletion is pushed. B republishes (W6.1); the record then carries B's text.
+            let b = decide (noRecord input |> pendingEdit)
+            Expect.equal b.Entry LeaveEntry "B keeps its entry"
+            Expect.isTrue b.FreshContentStamp "B publishes the edit again"
+            let editRecord = theirText "edit" (st 5 m1)       // B's republished record, stamped by B (machine m1 here)
+            // A, order 1: its deletion was pushed first; the row is forgotten.
+            let a1 = decide ({ input with Row = Some Forgotten } |> noEntry |> editRecord)
+            // A, order 2: the edit arrives while A's deletion is still local.
+            let a2 = decide (noEntry input |> editRecord)
+            for a in [ a1; a2 ] do
+                Expect.equal a.Entry InsertFromRecord "A gets the memory back, from the record's text"
+                Expect.equal a.Base.Content BaseBecomesTheirs "the base is the record, so the text is \"edit\""
+            // B, on the next cycle, sees its own record: its entry stays and its text is untouched.
+            let bNext =
+                input |> editRecord |> withLocal (withText "edit") |> pendingContent (st 5 m1) |> pushingContent (st 5 m1)
+            let d = decide bNext
+            Expect.equal (groups d).Content (LeaveContent, ClearPending) "own record: nothing applied"
+    ]
