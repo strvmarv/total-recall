@@ -6,7 +6,7 @@
 
 ## Summary
 
-By default, total-recall stores all data **locally on your machine**, and no data is transmitted to any external server, analytics service, or third party. The plugin has no network activity except the cases described under "What data leaves your machine" below, including the configurations you can opt in to.
+By default, total-recall stores all data **locally on your machine** and sends nothing to any analytics service or third party. Apart from a daily version check to `api.github.com` (it sends only the version of total-recall you run, and `updates.check = false` turns it off), the plugin has no network activity except the cases described under "What data leaves your machine" below, including the configurations you can opt in to.
 
 ---
 
@@ -54,9 +54,17 @@ Three optional configurations send data off your machine, to a system you choose
 
 See [Configuration](docs/configuration.md) and [Connecting to Cortex](docs/cortex.md).
 
-### 5. Nothing else
+### 5. Update check (on by default)
 
-By default there is no telemetry, no crash reporting, no usage analytics, no cloud sync and no account system, and the plugin does not phone home.
+At most once a day (`updates.check_interval_hours`, default 24), the MCP engine asks `api.github.com` for the newest total-recall release, so that it can tell you in a "newer release available" notice that one exists. It does this in the background, never while the server starts. It requests `/repos/strvmarv/total-recall/releases/latest`, or the ten newest releases when you run a prerelease.
+
+The request is unauthenticated and carries only the header `User-Agent: total-recall/<version>` (the version you run) and an `Accept` header. No identifier, memory, configuration or usage data is sent. GitHub does see the IP address the request comes from, as it does for any HTTPS request. The answer (the newest version and a one-line summary) is kept in `~/.total-recall/whats-new/` and used only for that notice.
+
+To turn it off, set `updates.check = false` in `config.toml`, or set `TOTAL_RECALL_NO_UPDATE_CHECK=1` in the environment of the server (Cursor does not pass that variable to its plugin server, so use the setting there). `updates.notice = false` turns the notice, and with it the check, off too. See [Configuration](docs/configuration.md).
+
+### 6. Nothing else
+
+By default there is no telemetry, no crash reporting, no usage analytics, no cloud sync and no account system, and apart from the version check (item 5) the plugin contacts nothing on its own.
 
 ---
 
@@ -68,7 +76,7 @@ By default, vector embeddings are computed **locally** using the bundled ONNX ru
 
 ## Data you ingest from other tools
 
-On `session_start`, total-recall scans known memory locations for Claude Code, Copilot CLI, Cursor, Cline, OpenCode, and Hermes and imports entries it hasn't seen before. This import is local filesystem access only — no network calls are made by default (with a Postgres or Cortex backend, imported entries are stored or synced like any other memory, and with a remote embedder their text is sent to it to be embedded). Imported entries are deduplicated via content hash in an `import_log` table.
+On `session_start`, total-recall scans known memory locations for Claude Code, Copilot CLI, Cursor, Cline, OpenCode, and Hermes and imports entries it hasn't seen before. This import is local filesystem access only — the import itself makes no network call (with a Postgres or Cortex backend, imported entries are stored or synced like any other memory, and with a remote embedder their text is sent to it to be embedded). Imported entries are deduplicated via content hash in an `import_log` table.
 
 ---
 

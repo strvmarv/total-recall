@@ -547,6 +547,51 @@ export function checkToolReference(tree) {
   return problems;
 }
 
+/** The text under the first heading of `level` whose text satisfies `match`, up to the next heading of that level or a higher one. Null when there is none. */
+function sectionText(text, level, match) {
+  const lines = stripFences(text).split('\n');
+  const real = text.split('\n');
+  let start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const h = ATX.exec(lines[i]);
+    if (!h) continue;
+    if (start >= 0 && h[1].length <= level) return real.slice(start + 1, i).join('\n');
+    if (start < 0 && h[1].length === level && match(h[2].trim())) start = i;
+  }
+  return start >= 0 ? real.slice(start + 1).join('\n') : null;
+}
+
+const PRIVACY_CHECK_NEEDLES = ['api.github.com', 'total-recall/<version>', 'IP address', 'updates.check = false', 'TOTAL_RECALL_NO_UPDATE_CHECK'];
+const PRIVACY_FORBIDDEN = [/no data is transmitted/i, /does not phone home/i, /never phones? home/i];
+
+/** Rule 16: the privacy policy, the architecture page and the README disclose the daily version check. */
+export function checkPrivacy(tree) {
+  const privacy = tree.read('PRIVACY.md');
+  if (privacy === null) return ['PRIVACY.md is missing'];
+  const problems = [];
+  const leaves = sectionText(privacy, 2, (t) => t === 'What data leaves your machine');
+  const item = leaves === null ? null : sectionText(`## x\n${leaves}`, 3, (t) => /update check|version check/i.test(t));
+  if (item === null) problems.push('PRIVACY.md: no update check item under "What data leaves your machine"');
+  else for (const needle of PRIVACY_CHECK_NEEDLES) if (!item.includes(needle)) problems.push(`PRIVACY.md: the update check item does not mention ${needle}`);
+  const summary = sectionText(privacy, 2, (t) => t === 'Summary');
+  if (summary === null) problems.push('PRIVACY.md: no Summary section');
+  else for (const needle of ['api.github.com', 'updates.check']) if (!summary.includes(needle)) problems.push(`PRIVACY.md: the Summary does not mention ${needle}`);
+  for (const re of PRIVACY_FORBIDDEN) {
+    const m = re.exec(privacy);
+    if (m) problems.push(`PRIVACY.md says "${m[0]}", which the version check makes untrue`);
+  }
+  const arch = tree.read('docs/architecture.md');
+  if (arch === null) problems.push('docs/architecture.md is missing');
+  else {
+    if (arch.includes('No network calls required at runtime')) problems.push('docs/architecture.md still says "No network calls required at runtime"');
+    if (!arch.includes('api.github.com')) problems.push('docs/architecture.md does not mention api.github.com');
+  }
+  const readme = tree.read('README.md');
+  if (readme === null) problems.push('README.md is missing');
+  else if (!(sectionText(readme, 2, (t) => t === 'Privacy') ?? '').includes('api.github.com')) problems.push('README.md: the Privacy section does not mention api.github.com');
+  return problems;
+}
+
 // ---------------------------------------------------------------------------------------------
 // Helper tests
 // ---------------------------------------------------------------------------------------------
@@ -829,9 +874,11 @@ function validReadme() {
     '',
     '## Documentation',
     '',
-    '[first run](docs/first-run.md), [script](docs/npm-postinstall.md), [db](docs/database-location.md), [tools](docs/tools.md), [platforms](docs/platforms.md)',
+    '[first run](docs/first-run.md), [script](docs/npm-postinstall.md), [db](docs/database-location.md), [tools](docs/tools.md), [platforms](docs/platforms.md), [architecture](docs/architecture.md)',
     '',
     '## Privacy',
+    '',
+    'A daily version check asks api.github.com for the newest release.',
     '',
     '## Contributing',
     '',
@@ -869,7 +916,32 @@ function validFiles() {
     'docs/platforms.md': `# Platforms\n\n| Cline | ${CLINE_TOKENS.join(' ')} |\n`,
     'docs/database-location.md': '# Relocating the database\n',
     'docs/first-run.md': '# First run\n',
-    'PRIVACY.md': '# Privacy Policy\n\nSee [First run](docs/first-run.md).\n',
+    'PRIVACY.md': [
+      '# Privacy Policy',
+      '',
+      '## Summary',
+      '',
+      'Local storage; apart from the daily version check to api.github.com (`updates.check = false` turns it off) nothing leaves.',
+      '',
+      '## What data leaves your machine',
+      '',
+      '### 1. Download',
+      '',
+      'See [First run](docs/first-run.md).',
+      '',
+      '### 5. Update check (on by default)',
+      '',
+      'Once a day the engine asks api.github.com for the newest release, with the header User-Agent: total-recall/<version>.',
+      'GitHub sees your IP address. Off with `updates.check = false` or TOTAL_RECALL_NO_UPDATE_CHECK=1.',
+      '',
+      '### 6. Nothing else',
+      '',
+      'No telemetry.',
+      '',
+      '## Contact',
+      '',
+    ].join('\n'),
+    'docs/architecture.md': '# Architecture\n\nThe only outbound request is the update check to api.github.com.\n',
     '.opencode/INSTALL.md': `# OpenCode\n\nSee ${BLOB}docs/hosts/opencode.md\n`,
     'skills/commands/SKILL.md': `# Commands\n\n     > ${STATUS}\n`,
     'scripts/postinstall.js': Object.keys(MODULE_TOOLS).map((m) => `import { x } from './${m}.js';`).join('\n')
@@ -883,7 +955,7 @@ function validFiles() {
   return files;
 }
 
-const CHECKS = { checkPages, checkNoStaleFacts, checkLinks, checkStatusLine, checkDisclosure, checkClinePath, checkHookNotes, checkOpenCodePointer, checkCheckPrompt, checkReadmeShape, checkReadmeContent, checkDocsReachable, checkToolReference };
+const CHECKS = { checkPages, checkNoStaleFacts, checkLinks, checkStatusLine, checkDisclosure, checkClinePath, checkHookNotes, checkOpenCodePointer, checkCheckPrompt, checkReadmeShape, checkReadmeContent, checkDocsReachable, checkToolReference, checkPrivacy };
 
 test('the valid in-memory tree passes every check', () => {
   const tree = memoryTree(validFiles());
@@ -1249,6 +1321,35 @@ defect('usage_status does not stand in for status', checkToolReference, (f) => {
 defect('a longer number does not stand in for the count', checkToolReference, (f) => { f['docs/tools.md'] = f['docs/tools.md'].replace('2 in', '12 in'); }, /does not say "2 in SQLite mode"/);
 defect('the SQLite count is off by one', checkToolReference, (f) => { f['docs/tools.md'] = f['docs/tools.md'].replace('2 in', '3 in'); }, /does not say "2 in SQLite mode"/);
 defect('a catalog with no tools list', checkToolReference, (f) => { f['catalog.json'] = '[]'; }, /no "tools" list/);
+
+// ---------------------------------------------------------------------------------------------
+// Rule 16: the privacy policy discloses the version check
+// ---------------------------------------------------------------------------------------------
+
+const UPDATE_CHECK_ITEM = '### 5. Update check (on by default)';
+const PRIVACY_NEEDLES = ['api.github.com', 'total-recall/<version>', 'IP address', 'updates.check = false', 'TOTAL_RECALL_NO_UPDATE_CHECK'];
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Change only the text of the update check item (from its heading to the next heading) in PRIVACY.md. */
+const inUpdateItem = (f, change) => {
+  const at = f['PRIVACY.md'].indexOf(UPDATE_CHECK_ITEM);
+  const end = f['PRIVACY.md'].indexOf('\n### 6.', at);
+  f['PRIVACY.md'] = f['PRIVACY.md'].slice(0, at) + change(f['PRIVACY.md'].slice(at, end)) + f['PRIVACY.md'].slice(end);
+};
+
+test('privacy rule holds on the repository', () => assert.deepEqual(checkPrivacy(repoTree()), []));
+defect('the update check item is missing', checkPrivacy, (f) => { f['PRIVACY.md'] = f['PRIVACY.md'].replace(UPDATE_CHECK_ITEM, '### 5. Something else'); }, /no update check item/);
+for (const needle of PRIVACY_NEEDLES) {
+  defect(`the update check item does not mention ${needle}`, checkPrivacy, (f) => { inUpdateItem(f, (t) => t.replace(needle, 'xxx')); }, new RegExp(`does not mention ${escapeRe(needle)}`));
+}
+defect('the summary says nothing is transmitted', checkPrivacy, (f) => { f['PRIVACY.md'] += '\nno data is transmitted to any external server\n'; }, /no data is transmitted/i);
+defect('the policy says it does not phone home', checkPrivacy, (f) => { f['PRIVACY.md'] += '\nThe plugin does not phone home.\n'; }, /phone home/);
+defect('the policy says it never phones home', checkPrivacy, (f) => { f['PRIVACY.md'] += '\nIt never phones home.\n'; }, /phones home/);
+defect('the summary does not name the check', checkPrivacy, (f) => { f['PRIVACY.md'] = f['PRIVACY.md'].replace('daily version check to api.github.com', 'daily version check'); }, /Summary/);
+defect('the summary does not mention updates.check', checkPrivacy, (f) => { f['PRIVACY.md'] = f['PRIVACY.md'].replace('(`updates.check = false` turns it off)', ''); }, /Summary.*updates\.check/);
+defect('the architecture page claims no network calls', checkPrivacy, (f) => { f['docs/architecture.md'] += '\nNo network calls required at runtime.\n'; }, /architecture\.md/);
+defect('the architecture page does not name the check', checkPrivacy, (f) => { f['docs/architecture.md'] = '# Architecture\n'; }, /architecture\.md.*api\.github\.com/);
+defect('the README privacy section does not name the check', checkPrivacy, (f) => { f['README.md'] = f['README.md'].replace('api.github.com', 'GitHub'); }, /README\.md/);
+defect('the privacy policy is missing', checkPrivacy, (f) => { delete f['PRIVACY.md']; }, /PRIVACY\.md is missing/);
 
 // ---------------------------------------------------------------------------------------------
 // The announce text tells every model to relay the what's-new notice

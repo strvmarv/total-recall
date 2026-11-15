@@ -136,7 +136,7 @@ New memories land in the **warm** tier, where they are searched for every questi
 
 ## Privacy
 
-Everything stays on your machine by default. Data leaves it only if you configure a Postgres backend, Cortex or a remote embedder, and when a plugin install downloads the engine from GitHub Releases on first launch. The detail is in [PRIVACY.md](PRIVACY.md).
+Your data stays on your machine by default. It leaves it only if you configure a Postgres backend, Cortex or a remote embedder. Two things contact GitHub on their own: a plugin install downloads the engine from GitHub Releases on first launch, and a daily version check asks `api.github.com` for the newest release (it sends only the version, and `updates.check = false` turns it off). The detail is in [PRIVACY.md](PRIVACY.md).
 
 ## Contributing
 
