@@ -236,6 +236,8 @@ public static class MigrationRunner
         Migration16_PinnedTier,
         // Migration 17: add sticky column to hot content tables (tier model v2)
         Migration17_HotStickyColumn,
+        // Migration 18: git sync state tables (sync foundations) and an index on import_log(target_entry_id)
+        Migration18_GitSync,
     };
 
     /// <summary>
@@ -855,6 +857,75 @@ public static class MigrationRunner
             }
             Exec(conn, tx, $"CREATE INDEX IF NOT EXISTS idx_{tbl}_sticky ON {tbl}(sticky)");
         }
+    }
+
+    private static readonly string[] GitSyncDdl =
+    {
+        """
+        CREATE TABLE IF NOT EXISTS git_sync_entry (
+            entry_id             TEXT PRIMARY KEY NOT NULL,
+            state                TEXT NOT NULL CHECK (state IN ('active','forgotten','left')),
+            base_json            TEXT,
+            scanned_content_hash TEXT,
+            scanned_tags_hash    TEXT,
+            local_sticky         INTEGER,
+            local_tier           TEXT,
+            content_stamp        TEXT,
+            sticky_stamp         TEXT,
+            tier_stamp           TEXT,
+            repush_groups        TEXT,
+            pushing_stamps       TEXT,
+            blocked_hash         TEXT,
+            blocked_reason       TEXT,
+            allowed_hash         TEXT
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS git_sync_review (
+            entry_id     TEXT NOT NULL,
+            kind         TEXT NOT NULL CHECK (kind IN ('new-pin','pin-edit','conflict','held-delete')),
+            state        TEXT NOT NULL CHECK (state IN ('open','unseen','approved','declined','resolved')),
+            record_hash  TEXT,
+            direction    TEXT CHECK (direction IS NULL OR direction IN ('remote','local')),
+            payload_json TEXT,
+            machine      TEXT,
+            arrived_at   INTEGER NOT NULL,
+            PRIMARY KEY (entry_id, kind)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS git_sync_issue (
+            entry_id    TEXT NOT NULL,
+            kind        TEXT NOT NULL CHECK (kind IN ('apply-failed','rejected-record','ineligible-id')),
+            record_hash TEXT,
+            attempts    INTEGER NOT NULL DEFAULT 0,
+            detail      TEXT,
+            PRIMARY KEY (entry_id, kind)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS git_sync_alias (
+            canonical_id TEXT NOT NULL,
+            other_id     TEXT NOT NULL,
+            origin_hash  TEXT,
+            state        TEXT NOT NULL CHECK (state IN ('open','converged','resolved','abandoned')),
+            PRIMARY KEY (canonical_id, other_id)
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_import_log_target_entry_id ON import_log(target_entry_id)",
+    };
+
+    /// <summary>
+    /// Migration 18 — the state tables of git sync and an index so an import can be found by the entry it
+    /// created. Tables and index only; nothing reads or writes them yet. SQLite only (the Postgres runner is
+    /// untouched). <c>IF NOT EXISTS</c> throughout: no <c>ALTER</c>, no existing row is read.
+    /// </summary>
+    private static void Migration18_GitSync(
+        MsSqliteConnection conn,
+        Microsoft.Data.Sqlite.SqliteTransaction tx)
+    {
+        foreach (var sql in GitSyncDdl)
+            Exec(conn, tx, sql);
     }
 
     // --- helpers ----------------------------------------------------------
