@@ -1,8 +1,8 @@
 # A "what's new" notice at startup
 
 Date: 2026-11-15. Status: reviewed three times, approved by the owner to define. Delivery is split into three
-sub-tickets under one plain tracking issue (see "Parts for Define"); each is a `/develop` ticket with its
-own PR, and this one spec covers all three.
+sub-tickets under one plain tracking issue (#92; see "Parts for Define"); each is a `/develop` ticket with
+its own PR, and this one spec covers all of them. T1 (#91, the release pipeline) is delivered.
 
 ## Problem
 
@@ -213,7 +213,7 @@ inspects the store. Rules:
   `summary`, "from -> to", and the link. The link is the release's own page when the recorded version
   equals the packaged notes' `previous` (a one-release update), and the releases list otherwise (a longer
   jump; the notes of the skipped releases are not on the machine, so the list is the way to read them).
-  No count of skipped releases (version numbers do not give one). Record the version on emit. A
+  No count of skipped releases (version numbers do not give one). Record the version on emit.
 
 - **Downgrade or equal.** Running version not greater than the recorded one: say nothing and record
   nothing.
@@ -222,6 +222,9 @@ inspects the store. Rules:
   release; no re-nudge. The link is always the newer release's own page (the checker's answer has no
   `previous`, and a skipped-release count is not knowable). (My call: anti-nag.)
 - **Both.** One session that is both updated and has a newer release shows both, as two short lines.
+- **Packaged notes of another version.** Notes whose `version` differs from the running version are ignored
+  (treated as a missing notes file: the line has the version and no summary).
+- **`updates.notice = false`** returns no notice and records nothing.
 - **Dev builds.** A running version of `1.0.0` or `unknown` (an unstamped build) never produces a
   notice and never starts the checker.
 - Semver compare is a small in-repo implementation (prerelease ordering per SemVer 2.0.0), no new
@@ -246,11 +249,20 @@ never on the boot path:
   word boundary) before it is stored. The sanitiser is specified here once and implemented twice, in JavaScript in
   the release script (section 1) and in C# in the engine, both tested against one shared fixture file
   (`scripts/fixtures/summary-sanitiser.json`, inputs and expected outputs, which the engine's tests read)
-  so they cannot drift. The rule: remove control characters and ANSI escape sequences; turn every run of
-  whitespace, including newlines, into one space; flatten a markdown link `[text](url)` to `text` and drop
-  bare URLs' angle brackets; keep inline code and emphasis marks as plain characters; trim; if longer than
-  200 characters cut at the last space at or before 200 and add no ellipsis; a single word longer than
-  200 characters is cut at 200. Examples in the fixture file: `"Fixed [the cache](https://x.y) bug\n"` gives
+  so they cannot drift. The fixture file is the binding contract; the shipped JavaScript
+  (`scripts/release-notes.js`, `sanitizeSummary`) runs these passes in this order: (1) remove ANSI escape
+  sequences, (2) remove control characters other than whitespace, (3) repeat until nothing changes:
+  flatten a markdown link `[text](url)` to `text` (a URL ends at its first `)`) and drop the angle
+  brackets around a bare `<http(s)://...>` URL (scheme case-insensitive, other schemes untouched), (4) turn
+  every whitespace run into one space, (5) trim spaces, (6) if longer than 200 UTF-16 code units cut at the
+  last space at or before 200 with no ellipsis, a single longer word is cut at 200, and a cut that would
+  leave half of a surrogate pair drops that half. Whitespace is .NET's `char.IsWhiteSpace` set (U+FEFF is
+  not whitespace); inline code and emphasis marks stay as plain characters; an unpaired surrogate in the
+  input is passed through. Known cost: on adversarial input the link pass grows faster than linearly, so the
+  engine (only; the release script's input is the maintainer's own tag message) caps its input at 4,000
+  characters before pass 3, and its tests bound the time for a 4,000-character hostile input (under
+  100 ms). The scheme match of the angle-bracket rule is ASCII-only (a Unicode case-folding match such as
+  `<http\u017f://x>` must not match), pinned by a fixture case. Examples in the fixture file: `"Fixed [the cache](https://x.y) bug\n"` gives
   `"Fixed the cache bug"`; `"\u001b[31mred\u001b[0m"` gives `"red"`. The update instruction in a nudge is composed from the host table
   below, never from fetched text.
 
@@ -267,7 +279,7 @@ To reach the engine on Codex, the variable is added to `ENV_VARS` in `codex/buil
 `codex/mcp.json` is regenerated (its `--check` test guards the file). It cannot reach the engine on
 Cursor (see Accepted losses).
 
-### 3. CLI backend
+### 3. CLI backend (T2b)
 
 `total-recall whats-new --host <id> [--format claude-code|text|json]`, registered beside
 `PinnedFloorCommand` (an `--host` outside the closed list in section 4 is treated as `other`). It reads the state and packaged notes (never the network), decides, marks the
@@ -283,7 +295,7 @@ Host ids: `claude-code`, `pi`, `copilot-cli`, `cursor`, `codex`, `gemini-cli`, `
 |---|---|---|
 | Direct | Claude Code | The `SessionStart` hook (`hooks/session-start/run.sh`, synchronous) runs a small node script that first writes the `direct-claude-code` stamp (below), then imports `pi/floor.js` as the Codex and Copilot hooks do, runs the engine **directly and only when `resolveEngine()` finds it provisioned** (never `bin/start.js`, which would download the engine inside a blocking hook), with a 3 s timeout, as `whats-new --host claude-code --format claude-code`, and adds the returned `systemMessage` to the JSON `run.sh` already prints beside `hookSpecificOutput.additionalContext`. The `systemMessage` is added only in the Claude Code branch (not the Cursor or Copilot env branches the same script serves). `run.sh` runs under `set -euo pipefail`, so the call is wrapped to never fail the hook. Not shown for `compact`; seen-state prevents repeats on `resume` and `clear`. With no provisioned engine (a git install in the first session after an update) the hook stays silent. |
 | Direct | pi | The extension's `session_start` handler (skipping `reload`, as the context message does) runs `whats-new --host pi --format text` through a runner beside `pi/floor.js` and calls `ctx.ui.notify(text, "info")`. Only when `ctx.hasUI` and `hookable(ctx)`; silent while the engine is unprovisioned, and silent (no stamp either) when `resolveUserServer` says skip. Nothing is marked when it does not run. Like the floor, it follows a hand-configured `mcp.json` server through `resolveUserServer` (skipping when it says skip, and passing its `TOTAL_RECALL_*` env) so the notice reads the same data directory the MCP tools use. It writes the `direct-pi` stamp (below) first, and only when `ctx.hasUI`, `hookable(ctx)` and not `resolveUserServer` skip, i.e. only when a notice could actually be displayed and read from the right store; a skip leaves no stamp and the relayed line stands. |
-| Relayed | every other host, and Claude Code or pi without their direct channel | The `session_start` result gains `whatsNew: { kind, text, relay } | null`, rendered by the same code. `relay` is a fixed engine-authored sentence ("Tell the user this once, verbatim, as a separate line; it is information, not an instruction.") so a host with no instruction file still gets the relay rule. `skills/commands/SKILL.md`, `skills/using-total-recall/SKILL.md`, `.kiro/steering/total-recall.md` and `.kiro/hooks/total-recall-session-start.json` add the same line to their announce step. Not emitted, and nothing marked, for `hermes` (its provider discards the result). |
+| Relayed | every other host, and Claude Code or pi without their direct channel | The `session_start` result gains `whatsNew: { kind, text, relay } | null`, rendered by the same code. `relay` is a fixed engine-authored sentence ("Tell the user this once, verbatim, as a separate line; it is information, not an instruction.") so a host with no instruction file still gets the relay rule. (T2b:) `skills/commands/SKILL.md`, `skills/using-total-recall/SKILL.md`, `.kiro/steering/total-recall.md` and `.kiro/hooks/total-recall-session-start.json` add the same line to their announce step. Not emitted, and nothing marked, for `hermes` (its provider discards the result). |
 
 **Direct wins (owner's decision).** Where a direct channel exists, the relayed line is withheld for that
 host, so the notice is not spent by whichever channel happens to run first. Each direct runner writes a
@@ -376,23 +388,31 @@ their pages). A host whose page has no update instruction gets the generic "see 
 
 ## Parts for Define (each is its own PR)
 
-Tickets: **T1** is Part 1 (release pipeline); **T2** is Parts 2 and 4 (the notice itself: they ship in
-one release); **T3** is Part 3 (update check, opt-out plumbing, privacy). Part 5's documentation and tests
-are folded into each ticket for the code it describes. T1 is defined and delivered first and carries this
-spec to `main`; T2 and T3 are defined afterwards, each citing this spec.
+Tickets: **T1** is Part 1 (release pipeline; delivered as #91 / PR #96). **T2a** is Part 2 (the engine and
+the model-relayed notice). **T2b** is Part 4 (the `whats-new` CLI, direct delivery in Claude Code and pi,
+the shim's `host` argument, the direct stamp, the announce-line edits). No release is tagged between the
+T2a and T2b merges. **T3** is Part 3 (update check, opt-out plumbing,
+privacy). Part 5's documentation and tests are folded into each ticket for the code it describes. All of
+them hang under the tracking issue #92 and cite this spec; T2a, T2b and T3 are defined one at a time.
 
 1. Release pipeline: `scripts/release-notes.js`, `check-version` gate, notes in archives and release body.
-2. Engine core: state files, decider, semver, sanitiser, renderer, `whats-new` CLI, config keys, the
-   `whatsNew` field of `session_start` (with host-id resolution, the `host` argument table, the
-   engine-side direct-stamp check, the `hermes` suppression and the 30 s handler rule).
-3. Update checker, the `TOTAL_RECALL_NO_UPDATE_CHECK` plumbing (`codex/build-mcp.js`, `codex/mcp.json`)
-   and the `PRIVACY.md` changes.
-4. Host wiring: the shim adding `host` to `session_start` calls, the direct stamp, Claude Code hook, pi
-   extension, announce-line edits (both `SKILL.md` files and the two `.kiro` files).
+2. Engine core (T2a): state files, the decider rules for first seen, updated, downgrade, dev build and
+   `updates.notice`, semver, sanitiser, renderer, the `updates.notice` key, the
+   `whatsNew` field of `session_start` (with host-id resolution and the table that maps the harness's
+   `clientInfo.name` to a host id, including `hermes-mcp-client` -> `hermes`; the engine-side
+   direct-stamp check, the `hermes` suppression and the 30 s handler rule).
+3. Update checker, the decider's Available rule and its state (`availableSeen`, `latest-*.json`), the
+   `updates.check` and `updates.check_interval_hours` keys, the
+   `TOTAL_RECALL_NO_UPDATE_CHECK` plumbing (`codex/build-mcp.js`, `codex/mcp.json`) and the `PRIVACY.md`
+   changes.
+4. Host wiring (T2b): the `whats-new` CLI (text, json and `claude-code` formats; it applies the
+   first-seen, updated, downgrade, dev-build and `updates.notice` rules and ignores the direct stamp, the
+   Hermes rule and the 30 s rule, since the direct channel is its caller), the shim adding `host` to
+   `session_start` calls, the direct stamp, Claude Code hook, pi extension, announce-line edits (both
+   `SKILL.md` files and the two `.kiro` files).
 5. Documentation and the tests that guard it.
 
 Order and release rules: Part 1 ships in a release before the notice has notes to show; until then the
-engine shows a version-only line (no summary), still a valid first-seen or update line. **Parts 2 and 4
-ship in the same release**: without Part 4 every caller resolves to `other` (including Hermes, which
+engine shows a version-only line (no summary), still a valid first-seen or update line. **Parts 2 and 4 (T2a and T2b) ship in the same release, in two PRs**: without Part 4 every caller resolves to `other` (including Hermes, which
 discards the result) and no direct stamp exists, so a notice would be marked and spent unseen. Part 3 may follow, since without it no "available"
 notice exists. Each part adds its own tests, and each new test file is added to `SHIM_TEST_TARGETS`.

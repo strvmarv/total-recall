@@ -69,6 +69,11 @@ default = "user:local"
 max_entries = 200
 default_ttl_seconds = 600
 
+[updates]
+# Tell the user once per host and version that total-recall is new or was
+# updated. Set false to turn it off.
+notice = true
+
 # --- Storage mode ---
 # Controls how the plugin stores and retrieves data.
 # "local"   - SQLite + ONNX embeddings, fully self-contained (default)

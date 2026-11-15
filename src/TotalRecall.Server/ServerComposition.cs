@@ -147,7 +147,8 @@ public static class ServerComposition
         int hotMaxChars = 1200,
         ReindexProgress? reindexProgress = null,
         string querySource = "assistant",
-        Infrastructure.Eval.SessionConfigSnapshot? configSnapshot = null)
+        Infrastructure.Eval.SessionConfigSnapshot? configSnapshot = null,
+        Infrastructure.WhatsNew.WhatsNewService? whatsNew = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(vectors);
@@ -202,7 +203,7 @@ public static class ServerComposition
         registry.Register(new KbResolveHandler(store));
 
         // ---- Session (4) ----
-        registry.Register(new SessionStartHandler(sessionLifecycle, periodicSync, syncService));
+        registry.Register(new SessionStartHandler(sessionLifecycle, periodicSync, syncService, whatsNew));
         registry.Register(new SessionEndHandler(sessionLifecycle, store, compactionLogWriter, syncService: syncService, hotMaxContentChars: hotMaxChars, configSnapshot: configSnapshot));
         registry.Register(new SessionContextHandler(store));
         registry.Register(new SessionRefreshHandler(sessionLifecycle));
@@ -299,6 +300,19 @@ public static class ServerComposition
         var cfg = new ConfigLoader().LoadEffectiveConfig();
         return OpenSqlite(cfg, dbPath, "sqlite");
     }
+
+    /// <summary>
+    /// The what's-new notice service for this process. Construction does no I/O
+    /// (the catalog dump builds a registry too): the setting, the clock and the
+    /// TOTAL_RECALL_HOST override are read lazily, on each session_start.
+    /// </summary>
+    internal static Infrastructure.WhatsNew.WhatsNewService BuildWhatsNew() => new(
+        McpServer.ResolveServerVersion(),
+        Infrastructure.WhatsNew.WhatsNewState.DefaultDir(),
+        AppContext.BaseDirectory,
+        () => ConfigLoader.LoadUpdatesNoticeEnabled(),
+        () => DateTimeOffset.UtcNow,
+        () => Environment.GetEnvironmentVariable("TOTAL_RECALL_HOST"));
 
     // Resolve the embedder model-change policy from config (FSharp option interop
     // in one place). Used by every backend's startup migration call.
@@ -573,7 +587,8 @@ public static class ServerComposition
                 hotMaxChars: cfg.Tiers.Hot.MaxContentChars,
                 reindexProgress: reindexProgress,
                 querySource: querySource,
-                configSnapshot: configSnapshot);
+                configSnapshot: configSnapshot,
+                whatsNew: BuildWhatsNew());
 
             registry.Register(new UsageStatusHandler(usageQuery));
 
@@ -675,7 +690,8 @@ public static class ServerComposition
                 scopeDefault: ResolveScopeDefault(cfg),
                 pinnedMaxChars: ResolvePinnedMaxChars(cfg),
                 hotMaxChars: cfg.Tiers.Hot.MaxContentChars,
-                querySource: querySource);
+                querySource: querySource,
+                whatsNew: BuildWhatsNew());
 
             return new ServerCompositionHandles(dataSource, registry, store, storageMode);
         }
@@ -902,7 +918,8 @@ public static class ServerComposition
                 hotMaxChars: cfg.Tiers.Hot.MaxContentChars,
                 reindexProgress: reindexProgress,
                 querySource: querySource,
-                configSnapshot: configSnapshot);
+                configSnapshot: configSnapshot,
+                whatsNew: BuildWhatsNew());
 
             registry.Register(new UsageStatusHandler(usageQuery));
 

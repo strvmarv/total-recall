@@ -968,6 +968,7 @@ public sealed record InsightsResultDto(
 [JsonSerializable(typeof(WarmSweepResult))]
 [JsonSerializable(typeof(ProjectDocsResult))]
 [JsonSerializable(typeof(SmokeTestResult))]
+[JsonSerializable(typeof(WhatsNewDto))]
 [JsonSerializable(typeof(RegressionAlert))]
 [JsonSerializable(typeof(System.Collections.Generic.List<ImportSummaryRow>))]
 [JsonSerializable(typeof(System.Collections.Generic.List<RegressionAlert>))]

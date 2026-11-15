@@ -570,3 +570,34 @@ test('AGENTS.md documents the tag message shape the release checks', () => {
   const changelog = fs.readFileSync(here('../CHANGELOG.md'), 'utf8');
   assert.ok(changelog.includes('#91'), 'CHANGELOG.md does not mention #91');
 });
+
+// ---- Task 8: the what's-new notice is documented ----
+
+test('the docs describe the what\'s-new notice and the updates.notice setting', () => {
+  const config = fs.readFileSync(here('../docs/configuration.md'), 'utf8');
+  assert.ok(config.includes('[updates]'), 'docs/configuration.md has no [updates] block');
+  assert.ok(config.includes('notice'), 'docs/configuration.md does not mention the notice setting');
+  const agents = fs.readFileSync(here('../AGENTS.md'), 'utf8');
+  for (const needle of ['whatsNew', 'whats-new/', 'hermes-mcp-client', 'relay']) {
+    assert.ok(agents.includes(needle), `AGENTS.md does not mention ${needle}`);
+  }
+  const start = agents.indexOf('### What happens on `session_start`');
+  assert.ok(start >= 0, 'AGENTS.md has no "What happens on `session_start`" heading');
+  const rest = agents.slice(start + 10);
+  const next = rest.search(/^### /m);
+  const lifecycle = next < 0 ? rest : rest.slice(0, next);
+  const hostIds = ['claude-code', 'pi', 'copilot-cli', 'cursor', 'codex', 'gemini-cli', 'kiro', 'opencode', 'hermes', 'cline', 'windsurf', 'zed', 'vscode', 'other'];
+  for (const needle of ['whatsNew', 'whats-new/']) {
+    assert.ok(lifecycle.includes(needle), `the session_start section of AGENTS.md does not mention ${needle}`);
+  }
+  const changelog = fs.readFileSync(here('../CHANGELOG.md'), 'utf8');
+  const listed = (text, from) => {
+    const at = text.indexOf(from);
+    assert.ok(at >= 0, `no "${from}" list found`);
+    const end = text.indexOf(';', at);
+    return [...text.slice(at, end).matchAll(/`([a-z-]+)`/g)].map((m) => m[1]).filter((id) => id !== 'HostIds');
+  };
+  assert.deepEqual(listed(lifecycle, '(`HostIds`:'), hostIds, 'AGENTS.md host id list differs from HostIds.cs');
+  assert.deepEqual(listed(changelog, 'closed list of ids ('), hostIds, 'CHANGELOG.md host id list differs from HostIds.cs');
+  assert.ok(changelog.includes('#99'), 'CHANGELOG.md does not mention #99');
+});
