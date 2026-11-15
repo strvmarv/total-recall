@@ -47,7 +47,7 @@ interface IStore
 
 **All-or-nothing transaction (git sync groundwork).** `SqliteStore.BeginTransaction()` returns a
 `SqliteStoreTransaction` (not on `IStore`) offering insert with its vector, move between tiers, delete,
-update, `SetSticky` and an `import_log` write as one unit: `Commit()` makes them all take effect,
+update, `SetSticky` (hot only) and an `import_log` write as one unit: `Commit()` makes them all take effect,
 `Dispose()` without `Commit()` rolls everything back. Embeddings are computed by the caller before it opens.
 It runs on the store's single connection, so while one is open no other code may use that connection
 (Microsoft.Data.Sqlite fails a stray command with `InvalidOperationException`), and a second
@@ -193,7 +193,7 @@ Importers run during `session_start` step 2. Order in `ServerComposition` matche
 
 **Memory import ids and crash repair.** An import that inserts a **memory** (today: Claude Code memory
 files via `ImportUtils.ImportMarkdownFile` with `ContentType.Memory`, and the Hermes `MEMORY.md`/`USER.md`
-sections) goes through `ImportUtils.InsertOrRepairMemory`. It derives the entry id from the import hash
+sections) goes through `ImportUtils.InsertOrRepairMemory` (internal to the assembly). It derives the entry id from the import hash
 (`ImportIds.FromHash`: first 16 bytes of `SHA-256(hash)`, lowercase `8-4-4-4-12`), so the same host memory is
 the same entry on every machine (git sync relies on this), looks for an existing entry with that id in the
 target tier and then the other tiers, and if one exists skips the insert and repairs it: it re-embeds the
