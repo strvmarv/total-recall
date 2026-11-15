@@ -50,6 +50,9 @@ miss_rate_delta = 0.1             # Alert if miss rate increased by this much vs
 latency_ratio = 2.0               # Alert if latency increased by this factor vs. previous snapshot
 min_events = 10                   # Minimum retrieval events required on each side before the regression check runs
 
+[updates]
+notice = true                     # Tell the user once per host and version what changed (set false to turn the notice off)
+
 [embedding]
 model = "bge-small-en-v1.5"      # Embedding model name
 dimensions = 384                  # Embedding dimensions
