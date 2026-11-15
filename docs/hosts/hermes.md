@@ -49,7 +49,7 @@ A Hermes memory provider, from `hermes-plugin/provider.py` and `hermes-plugin/me
 - Hermes's `memory` tool keeps its name and schema, and its add, replace, remove and read actions go to total-recall's MCP server instead of the local `MEMORY.md` and `USER.md` files.
 - The provider starts the total-recall MCP server itself and calls `session_start` when a Hermes session begins, and `session_end` when it ends.
 - It adds the hot-tier context (`session_context`) to the system prompt, searches memory (`memory_search`, top 5) for each turn's query, and stores each turn as a `surfaced` entry tagged `hermes-turn`.
-- Updating: run `npm install -g @strvmarv/total-recall` again (add `--ignore-scripts` if you installed that way), then restart Hermes.
+- Updating: run `npm install -g @strvmarv/total-recall` again (if you installed with `--ignore-scripts`, also copy `<npm root -g>/@strvmarv/total-recall/hermes-plugin/` over `<hermes home>/plugins/total-recall/` again, as in Path 2 step 1), then start a new Hermes session.
 
 ## Known gaps
 

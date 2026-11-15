@@ -80,7 +80,7 @@ Plugin path:
 - The pinned-directive floor, on the first tool call of each user message (`postToolUse` hook, `additional_context`), on the turn-count trigger only (`floor_every_n_turns`, default 6, counted in tool-using messages): Cursor's CLI never fires a per-prompt hook (`beforeSubmitPrompt`, `stop` and `afterAgentResponse` did not fire, and `beforeSubmitPrompt` cannot add context anyway). Interactively the cadence is exact (the 7th tool-using message injects by default). In `-p` mode Cursor reuses one generation id for the whole conversation, even across `--continue`, so the floor counts once per `-p` conversation.
 - Skills: `commands` and `using-total-recall`.
 - The startup note tells the model to run this package's CLI (`compact --run`, `ui`) as `node <root>/cursor/cli.js <args>`: the wrapper drops the same store variables as the hook, so those commands use the same database as Cursor's server.
-- Updating: for the local plugin, run `git -C "$HOME/.cursor/plugins/local/total-recall" pull`, then restart Cursor (the server downloads the matching engine on its next start). For the MCP server only, run `npm install -g @strvmarv/total-recall` again, then restart Cursor.
+- Updating: for the local plugin, run `git -C "$HOME/.cursor/plugins/local/total-recall" pull`, then delete the clone's git-ignored engine directory with `rm -rf "$HOME/.cursor/plugins/local/total-recall/binaries"` (a pull alone keeps the old engine, because the server trusts an engine that is already there), then restart Cursor (the server downloads the engine for the new version on its next start). For the MCP server only, run `npm install -g @strvmarv/total-recall` again, then restart Cursor.
 
 MCP-only path: the tools, no startup instructions, no floor.
 

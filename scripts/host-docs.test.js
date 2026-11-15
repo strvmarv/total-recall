@@ -605,7 +605,8 @@ export function howTable(csText) {
 export function knownHostIds(csText) {
   const body = /\bKnownIds\s*=\s*\{([\s\S]*?)\}\s*;/.exec(csText);
   if (!body) return [];
-  return [...body[1].matchAll(/"([^"]*)"|\bOther\b/g)].map((m) => m[1] ?? 'other');
+  const code = body[1].replace(/\/\/[^\n]*/g, '');
+  return [...code.matchAll(/"([^"]*)"|\bOther\b/g)].map((m) => m[1] ?? 'other');
 }
 
 /**
@@ -1475,6 +1476,9 @@ test('howTable: one entry per line, any spacing, a trailing comma is optional', 
 test('knownHostIds: the quoted ids of the initializer, and other for the bare Other', () => {
   assert.deepEqual(knownHostIds('x KnownIds =\n{\n "a", "b-c",\n Other,\n};\nvar y = { "no" };'), ['a', 'b-c', 'other']);
   assert.deepEqual(knownHostIds('nothing here'), []);
+});
+test('knownHostIds: a quoted string or the word Other inside a // comment is ignored', () => {
+  assert.deepEqual(knownHostIds('KnownIds = {\n "a", // not "b", and not Other\n // "c"\n Other, // trailing\n};'), ['a', 'other']);
 });
 test('updatingSection: a bullet', () => {
   assert.equal(updatingSection('## What you get\n\n- Memory.\n- Updating: run `x` again.\n- Next.\n'), 'Updating: run `x` again.');
