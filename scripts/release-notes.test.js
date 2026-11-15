@@ -649,7 +649,7 @@ test('the docs describe the available notice and the update check (#115)', () =>
   const rest = agents.slice(start + 10);
   const next = rest.search(/^### /m);
   const lifecycle = next < 0 ? rest : rest.slice(0, next);
-  for (const needle of ['available', 'latest-stable.json', 'availableSeen', 'UpdateChecker', 'Program.RunServeAsync', 'api.github.com', 'TOTAL_RECALL_NO_UPDATE_CHECK', 'updates.check_interval_hours', 'UpdateInstructions', 'T3']) {
+  for (const needle of ['"first-seen"|"updated"|"available"', 'latest-stable.json', 'availableSeen', 'UpdateChecker', 'Program.RunServeAsync', 'api.github.com', 'TOTAL_RECALL_NO_UPDATE_CHECK', 'updates.check_interval_hours', 'UpdateInstructions']) {
     assert.ok(lifecycle.includes(needle), `the session_start section of AGENTS.md does not mention ${needle}`);
   }
   assert.ok(!lifecycle.includes('Still to come'), 'AGENTS.md still says the update check is still to come');

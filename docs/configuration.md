@@ -53,7 +53,7 @@ min_events = 10                   # Minimum retrieval events required on each si
 [updates]
 notice = true                     # Tell the user once per host and version what changed (set false to turn the notice off)
 check = true                      # Ask GitHub in the background whether a newer release exists, and tell the user once per release; never runs while notice = false (set false to turn the check off)
-check_interval_hours = 24         # Minimum hours between checks (a whole number from 1 to 8760; anything else means 24)
+check_interval_hours = 24         # Minimum hours between answered checks; a failed attempt is retried after an hour (a whole number from 1 to 8760; anything else means 24)
 
 [embedding]
 model = "bge-small-en-v1.5"      # Embedding model name
@@ -80,7 +80,7 @@ dimensions = 384                  # Embedding dimensions
 # user_id = "alice"               # or set TOTAL_RECALL_USER_ID env var
 ```
 
-**The update check:** with `updates.check = true` (the default) the server asks GitHub in the background, 60 seconds after it starts, whether a newer release exists, and a host that was already told its version gets one "is available" line per release. After an answer it waits the full `updates.check_interval_hours` before asking again; after a failed attempt it tries again no sooner than an hour later. It never runs while `updates.notice = false`, and a development build never runs it. The request carries only the version you run in its `User-Agent` header; see [PRIVACY.md](../PRIVACY.md). The environment variable `TOTAL_RECALL_NO_UPDATE_CHECK` turns the check off without a config file when it is set to any non-empty value other than `0` or `false` (any case, spaces trimmed); `0`, `false` or empty leave `updates.check` to decide. Codex forwards the variable to its server. Cursor does not pass it to its plugin server (a sanitized environment), so use `updates.check = false` there. A variable set only in an MCP `env` block is not seen by the Claude Code hook that shows the notice, which can still show a release an earlier check recorded.
+**The update check:** with `updates.check = true` (the default) the server asks GitHub in the background, no earlier than 60 seconds after it starts and only when the last answer is older than the interval, whether a newer release exists, and a host that was already told its version gets one "is available" line per release. After an answer it waits the full `updates.check_interval_hours` before asking again; after a failed attempt it tries again no sooner than an hour later. It never runs while `updates.notice = false`, and a development build never runs it. The request carries only the version you run in its `User-Agent` header; see [PRIVACY.md](../PRIVACY.md). The environment variable `TOTAL_RECALL_NO_UPDATE_CHECK` turns the check off without a config file when it is set to any non-empty value other than `0` or `false` (any case, spaces trimmed); `0`, `false` or empty leave `updates.check` to decide. Codex forwards the variable to its server. Cursor does not pass it to its plugin server (a sanitized environment), so use `updates.check = false` there. A variable set only in an MCP `env` block is not seen by the Claude Code hook that shows the notice, which can still show a release an earlier check recorded.
 
 **Relocating the database:** set `TOTAL_RECALL_DB_PATH` to an absolute path or `~/`-prefixed path. See [Relocating the database](database-location.md) for cloud-sync and shared-workspace guidance.
 
