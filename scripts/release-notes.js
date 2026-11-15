@@ -61,7 +61,8 @@ const SECTION_HEADING = /^#*\s*(added|changed|fixed)\b/i;
 // The shape of a heading line on its own: the word alone, with an optional parenthesised suffix and/or colon.
 // "Fixed the release workflow." does not have this shape, so it stays a summary.
 const HEADING_LINE = /^#*\s*(added|changed|fixed)(\s*\([^)]*\))?\s*:?\s*$/i;
-const BULLET = /^[-*+]\s+(.*)$/;
+// A bullet marker followed by text, or a bare marker (an empty bullet, skipped without closing the section).
+const BULLET = /^[-*+](?:\s+(.*))?$/;
 
 const isBlank = (line) => line.trim() === '';
 
@@ -103,7 +104,7 @@ export function parseTagMessage(message) {
     }
     const bullet = BULLET.exec(line);
     if (bullet) {
-      const text = bullet[1].trim();
+      const text = (bullet[1] ?? '').trim();
       if (current !== null && text !== '') last = sections[current].push(text) - 1;
       else last = -1;
       continue;
@@ -125,7 +126,8 @@ const RELEASE_TAG = new RegExp(`^v(${NUM})\\.(${NUM})\\.(${NUM})(?:-(${PRE_ID}(?
 
 /** The bare version of a `vMAJOR.MINOR.PATCH[-prerelease]` tag, or null for any other tag. */
 export function parseReleaseTag(tag) {
-  const m = RELEASE_TAG.exec(String(tag ?? ''));
+  if (typeof tag !== 'string') return null;
+  const m = RELEASE_TAG.exec(tag);
   return m === null ? null : m[0].slice(1);
 }
 
@@ -133,10 +135,13 @@ export function parseReleaseTag(tag) {
 function splitVersion(version) {
   const m = RELEASE_TAG.exec(`v${version}`);
   if (m === null) throw new TypeError(`not a release version: ${version}`);
-  return { core: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] === undefined ? [] : m[4].split('.') };
+  return { core: [m[1], m[2], m[3]], pre: m[4] === undefined ? [] : m[4].split('.') };
 }
 
 const NUMERIC_ID = /^\d+$/;
+
+// Order of two decimal strings without leading zeros (the tag pattern forbids them), exact at any size.
+const compareNumeric = (p, q) => (p.length !== q.length ? Math.sign(p.length - q.length) : p < q ? -1 : p > q ? 1 : 0);
 
 /**
  * SemVer 2.0.0 precedence of two bare versions: negative, zero or positive. A release is above its
@@ -147,7 +152,8 @@ export function compareVersions(a, b) {
   const x = splitVersion(a);
   const y = splitVersion(b);
   for (let i = 0; i < 3; i += 1) {
-    if (x.core[i] !== y.core[i]) return x.core[i] < y.core[i] ? -1 : 1;
+    const c = compareNumeric(x.core[i], y.core[i]);
+    if (c !== 0) return c;
   }
   if (x.pre.length === 0 && y.pre.length === 0) return 0;
   if (x.pre.length === 0) return 1;
@@ -158,7 +164,7 @@ export function compareVersions(a, b) {
     if (p === q) continue;
     const pNum = NUMERIC_ID.test(p);
     const qNum = NUMERIC_ID.test(q);
-    if (pNum && qNum) return Number(p) < Number(q) ? -1 : 1;
+    if (pNum && qNum) return compareNumeric(p, q);
     if (pNum !== qNum) return pNum ? -1 : 1;
     return p < q ? -1 : 1;
   }
@@ -172,8 +178,8 @@ export function compareVersions(a, b) {
  * not a release version.
  */
 export function previousVersion(version, tags) {
-  if (parseReleaseTag(`v${version}`) === null) return null;
-  const stable = !String(version).includes('-');
+  if (typeof version !== 'string' || !Array.isArray(tags) || parseReleaseTag(`v${version}`) === null) return null;
+  const stable = !version.includes('-');
   let best = null;
   for (const tag of tags) {
     const v = parseReleaseTag(tag);

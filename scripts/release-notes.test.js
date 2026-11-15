@@ -228,3 +228,38 @@ test('previousVersion: duplicates, non-semver tags, an unknown version and a mis
   assert.equal(previousVersion('4.8.0', ['v4.7.0']), '4.7.0');
   assert.equal(previousVersion('not-a-version', ['v4.7.0']), null);
 });
+
+// ---- hardening of the version helpers and the bullet pattern ----
+
+test('compareVersions: numbers above 2^53 are compared exactly, in the core and in prerelease identifiers', () => {
+  assert.ok(compareVersions('9007199254740993.0.0', '9007199254740992.0.0') > 0);
+  assert.ok(compareVersions('9007199254740992.0.0', '9007199254740993.0.0') < 0);
+  assert.ok(compareVersions('1.0.0-9007199254740993', '1.0.0-9007199254740992') > 0);
+  assert.ok(compareVersions('1.0.0-9007199254740992', '1.0.0-9007199254740993') < 0);
+  assert.equal(compareVersions('9007199254740993.0.0', '9007199254740993.0.0'), 0);
+  const big = `1${'0'.repeat(399)}`;
+  const small = '9'.repeat(399);
+  assert.ok(compareVersions(`${big}.0.0`, `${small}.0.0`) > 0);
+  assert.ok(compareVersions(`${small}.0.0`, `${big}.0.0`) < 0);
+});
+
+test('previousVersion: anything but an array of tags gives null', () => {
+  for (const tags of [null, undefined, {}, 'v4.6.0', 4]) {
+    assert.equal(previousVersion('4.7.0', tags), null, String(tags));
+  }
+});
+
+test('parseReleaseTag and previousVersion accept only strings', () => {
+  assert.equal(parseReleaseTag(['v1.2.3']), null);
+  assert.equal(parseReleaseTag(null), null);
+  assert.equal(parseReleaseTag(undefined), null);
+  assert.equal(parseReleaseTag({ toString: () => 'v1.2.3' }), null);
+  assert.equal(previousVersion(['4.7.0'], ['v4.6.0']), null);
+  assert.equal(previousVersion({ toString: () => '4.7.0' }, ['v4.6.0']), null);
+});
+
+test('parseTagMessage: a bare bullet marker is an empty bullet and does not close the section', () => {
+  const p = parseTagMessage('v1\n\nSummary.\n\nAdded\n- a\n-\n- b\n');
+  assert.deepEqual(p.sections.added, ['a', 'b']);
+  assert.deepEqual(parseTagMessage('v1\n\nSummary.\n\nAdded\n*\n+\n- c\n').sections.added, ['c']);
+});
