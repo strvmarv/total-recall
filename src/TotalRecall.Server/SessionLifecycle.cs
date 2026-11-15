@@ -1789,8 +1789,8 @@ public sealed record ProjectDocsResult(
     [property: JsonPropertyName("filesIngested")] int FilesIngested,
     [property: JsonPropertyName("totalChunks")] int TotalChunks);
 
-/// <summary>The what's-new notice for this call: <c>Kind</c> is <c>first-seen</c> or
-/// <c>updated</c>, <c>Text</c> the one line to show and <c>Relay</c> the instruction
+/// <summary>The what's-new notice for this call: <c>Kind</c> is <c>first-seen</c>,
+/// <c>updated</c> or <c>available</c>, <c>Text</c> the one line to show and <c>Relay</c> the instruction
 /// to the model for showing it. Built per call by the session_start handler, never
 /// part of the cached init result; the whole field is null when there is no notice.</summary>
 public sealed record WhatsNewDto(

@@ -64,7 +64,7 @@ To turn it off, set `updates.check = false` in `config.toml`, or set `TOTAL_RECA
 
 ### 6. Nothing else
 
-By default there is no telemetry, no crash reporting, no usage analytics, no cloud sync and no account system, and apart from the version check (item 5) the plugin contacts nothing on its own.
+By default there is no telemetry, no crash reporting, no usage analytics, no cloud sync and no account system, and apart from the first-launch download (item 1) and the version check (item 5), the plugin contacts nothing on its own.
 
 ---
 
