@@ -1463,8 +1463,8 @@ checkpoint a pin that fails is re-defined instead (Define), never re-pinned.
 
    This works whoever last edited the body, an outsider included.
 2. Ask for approval. If the approach or the spec changed, run that artifact's reviewer loop on the change
-   first (a parent runs Define's Parent track check, step 4, instead: `route.js parts` on the changed spec
-   and a `route.js stub-body` dry run for each part; a finding is fixed, never presented);
+   first (a parent first runs Define's Parent track check, step 4: `route.js parts` on the changed spec
+   and a `route.js stub-body` dry run for each part, a finding being fixed, never presented; then the spec loop);
    the orchestrator's fixes to the spec are commits too. The commits shown in step 1, those fixes and
    the plan loop's are exempt from the spec guard; a commit made any other way after step 1 is not, and is
    shown again.

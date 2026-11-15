@@ -175,7 +175,7 @@ Every track, in order. Steps 1 to 6 are the same numbers as the spec.
    `parent-line` or `rev-parse` that fails is a warning that drift could not be checked. It is a warning
    only: never a stop and never a re-approval. At a start, repeat Define's dependency question
    ([Define](define.md#fetch), step 6) for the part on the `Parent:` line; a stop ends the run with
-   nothing posted.
+   nothing posted, and with no one to ask it is a stop (the default).
 5. **Workspace.**
    - *Start, plan or parent track:* a worktree on the pin's `branch`, tracking `origin/<branch>` (Define pushed
      it). If `origin/<branch>` is ahead of the pin's `approvedSha` (an earlier executor's commits
