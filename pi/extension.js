@@ -133,6 +133,7 @@ export function createExtension({
     // Set at session_start and kept for the life of this session: its header names a parent session file
     // that has started and not yet shut down in this process, so it is a child of that session.
     let child = false;
+    let ownFile;
     const hookable = (ctx) => !env.PI_SUBAGENT_ID && ctx.sessionManager.getSessionFile() !== undefined && !child;
 
     // Record this session before anything is skipped (a skipped child can be a parent in turn), then
@@ -141,7 +142,10 @@ export function createExtension({
       child = false;
       try {
         const file = ctx.sessionManager.getSessionFile();
-        if (typeof file === 'string' && file !== '') liveSessions.add(file);
+        if (typeof file === 'string' && file !== '') {
+          ownFile = file;
+          liveSessions.add(file);
+        }
         const parent = ctx.sessionManager.getHeader?.()?.parentSession;
         child = typeof parent === 'string' && liveSessions.has(parent);
       } catch {
@@ -195,6 +199,18 @@ export function createExtension({
 
     // The session-start text, waiting for the next user prompt to carry it.
     let pending;
+
+    // pi shuts a session down before it builds its replacement (/new, /resume, /fork, /reload), so a
+    // session is a child only while its parent is between its own session_start and this event. The file
+    // recorded at session_start is removed, not one read from a ctx that may be stale by now.
+    pi.on('session_shutdown', () => {
+      try {
+        if (ownFile !== undefined) liveSessions.delete(ownFile);
+      } catch {
+        // Nothing here may throw into pi.
+      }
+      return undefined;
+    });
 
     pi.on('session_start', (event, ctx) => {
       noteSessionStart(ctx);

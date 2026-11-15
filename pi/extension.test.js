@@ -426,6 +426,72 @@ test('child: a session whose parent session file is live gets no hook work, no m
   assert.equal(parent.calls.runWhatsNew.length, 1);
 });
 
+/** A user session is "hooked" when its first prompt carries the instructions. */
+async function getsInstructions(instance, c) {
+  const r = await instance.fire('before_agent_start', PROMPT, c);
+  return r !== undefined && /total-recall/.test(r.message.content);
+}
+
+test('replacement: a fork whose header names its parent still gets everything once the old session shut down', async () => {
+  const liveSessions = new Set();
+  const old = boot({ liveSessions });
+  const oldCtx = ctx({ file: '/a.jsonl', hasUI: true });
+  await old.fire('session_start', { reason: 'startup' }, oldCtx);
+  await old.fire('session_shutdown', { reason: 'fork' }, oldCtx); // pi tears the old session down first
+  const fork = boot({ liveSessions });
+  const forkCtx = ctx({ file: '/b.jsonl', parent: '/a.jsonl', hasUI: true });
+  await fork.fire('session_start', { reason: 'fork' }, forkCtx);
+  assert.equal(await getsInstructions(fork, forkCtx), true);
+  assert.equal(fork.calls.runWhatsNew.length, 1);
+  await fork.pi.commands.get('develop').handler('123', forkCtx);
+  assert.equal(fork.pi.sent.length, 1);
+});
+
+test('replacement: /new, /resume and /reload after the old session shut down stay hooked', async () => {
+  const liveSessions = new Set();
+  const first = boot({ liveSessions });
+  const firstCtx = ctx({ file: '/a.jsonl' });
+  await first.fire('session_start', { reason: 'startup' }, firstCtx);
+  for (const [reason, file, parent] of [
+    ['new', '/b.jsonl', undefined],
+    ['resume', '/c.jsonl', undefined],
+    ['reload', '/c.jsonl', undefined],
+    ['resume', '/d.jsonl', '/gone.jsonl'], // an old session that was itself a fork of a closed one
+  ]) {
+    await first.fire('session_shutdown', { reason }, firstCtx);
+    const next = boot({ liveSessions });
+    const nextCtx = ctx({ file, parent });
+    await next.fire('session_start', { reason }, nextCtx);
+    assert.equal(await getsInstructions(next, nextCtx), true, reason);
+    await next.fire('session_shutdown', { reason: 'quit' }, nextCtx);
+  }
+  assert.equal(liveSessions.size, 0);
+});
+
+test('child: a child stays skipped when it takes another prompt after its parent shut down', async () => {
+  const { parent, child, liveSessions } = family();
+  const pc = ctx({ file: '/p.jsonl' });
+  await parent.fire('session_start', { reason: 'startup' }, pc);
+  const cc = ctx({ file: '/c.jsonl', parent: '/p.jsonl' });
+  await child.fire('session_start', { reason: 'startup' }, cc);
+  await parent.fire('session_shutdown', { reason: 'new' }, pc);
+  assert.equal(liveSessions.has('/p.jsonl'), false);
+  assert.equal(await child.fire('before_agent_start', PROMPT, cc), undefined);
+  assert.equal(child.calls.runFloor.length, 0);
+});
+
+test('shutdown: removes the file captured at session_start, even when ctx is stale or throws', async () => {
+  const liveSessions = new Set();
+  const a = boot({ liveSessions });
+  await a.fire('session_start', { reason: 'startup' }, ctx({ file: '/a.jsonl' }));
+  assert.deepEqual([...liveSessions], ['/a.jsonl']);
+  assert.doesNotThrow(() => a.pi.handlers.get('session_shutdown')({ reason: 'quit' }, { get sessionManager() { throw new Error('stale ctx'); } }));
+  assert.equal(liveSessions.size, 0);
+  // and a shutdown with nothing recorded is harmless
+  const b = boot({ liveSessions });
+  assert.doesNotThrow(() => b.pi.handlers.get('session_shutdown')({ reason: 'quit' }, undefined));
+});
+
 // ---- RF2: engine availability ----
 
 test('RF2: no engine means no floor call, but the session text is still delivered', async () => {
