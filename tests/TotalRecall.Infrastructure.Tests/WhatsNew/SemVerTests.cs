@@ -63,6 +63,7 @@ public class SemVerTests
     [InlineData("a.b.c")]
     [InlineData("1.2.3 ")]
     [InlineData("1.2.\u0663")]
+    [InlineData("1.2.3+a+b")]
     public void TryParse_Invalid_ReturnsFalse(string? text)
     {
         Assert.False(SemVer.TryParse(text, out _));
@@ -75,6 +76,8 @@ public class SemVerTests
     [InlineData("4.8.0-rc.1+build.5")]
     [InlineData("1.0.0-0")]
     [InlineData("1.0.0-0a")]
+    [InlineData("1.0.0-a-b")]
+    [InlineData("1.2.3+001")]
     public void TryParse_Valid_ReturnsTrue(string text)
     {
         Assert.True(SemVer.TryParse(text, out _));

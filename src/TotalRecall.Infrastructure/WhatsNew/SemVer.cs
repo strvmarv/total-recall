@@ -5,7 +5,6 @@
 // exactly (length, then ordinal) without overflow.
 
 using System;
-using System.Collections.Generic;
 
 namespace TotalRecall.Infrastructure.WhatsNew;
 
@@ -98,7 +97,7 @@ public static class SemVer
         return pa.Length.CompareTo(pb.Length);
     }
 
-    /// <summary>True for null/blank/<c>unknown</c>/<c>1.0.0</c>/unparseable: a build with no real version.</summary>
+    /// <summary>True for null/blank/<c>unknown</c>/unparseable and for <c>1.0.0</c> (also <c>1.0.0+sha</c>): a build with no real version. <c>1.0.0-beta.N</c> is a real prerelease, not a dev build.</summary>
     public static bool IsDevBuild(string? version)
     {
         if (string.IsNullOrWhiteSpace(version)) return true;

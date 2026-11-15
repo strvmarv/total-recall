@@ -45,9 +45,9 @@ public static class HostIds
         return Normalize(folded);
     }
 
-    /// <summary>A non-empty env value wins (normalised); otherwise the client name is mapped.</summary>
+    /// <summary>An env value that is not empty after trimming spaces wins (normalised); otherwise the client name is mapped.</summary>
     public static string Resolve(string? envValue, string? clientName)
-        => string.IsNullOrEmpty(envValue) ? FromClientName(clientName) : Normalize(envValue);
+        => string.IsNullOrEmpty(envValue?.Trim(' ')) ? FromClientName(clientName) : Normalize(envValue);
 
     // ToLowerInvariant would fold U+212A (Kelvin sign) to 'k'; host ids are ASCII only.
     private static string AsciiLower(string s)

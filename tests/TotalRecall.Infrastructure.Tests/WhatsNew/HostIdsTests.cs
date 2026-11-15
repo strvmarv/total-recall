@@ -80,6 +80,7 @@ public class HostIdsTests
     [InlineData("pi", "hermes-mcp-client", "pi")]
     [InlineData("", "hermes-mcp-client", "hermes")]
     [InlineData(null, "hermes-mcp-client", "hermes")]
+    [InlineData("   ", "hermes-mcp-client", "hermes")]
     [InlineData(null, null, "other")]
     [InlineData("", "", "other")]
     [InlineData("../x", "hermes-mcp-client", "other")]
