@@ -45,6 +45,12 @@ public interface ICliCommand
     string Description { get; }
 
     /// <summary>
+    /// True for a command that still dispatches and answers its own <c>--help</c> but is left out of the top-level help
+    /// (and a group whose commands are all hidden is left out too). The group help lists every command of the group.
+    /// </summary>
+    bool Hidden => false;
+
+    /// <summary>
     /// Runs the command with the residual args (after the verb). Returns
     /// the process exit code. Async because some commands (e.g. migrate)
     /// perform I/O and embedding generation that are naturally awaitable.
@@ -183,6 +189,12 @@ public static class CliApp
     }
 
     /// <summary>
+    /// Test seam: the registry a run would use right now (the override when one is set, else the production one), so a
+    /// test can enumerate every command or build a registry that lacks some of them.
+    /// </summary>
+    public static IReadOnlyList<ICliCommand> GetRegistryForTestsInternal() => _overrideRegistry ?? BuildRegistry();
+
+    /// <summary>
     /// Builds the production command registry. Task 5.2+ adds entries here.
     /// Intentionally a plain list — no plugin model, no reflection.
     /// </summary>
@@ -218,6 +230,10 @@ public static class CliApp
             new Commands.Kb.RemoveCommand(),
             new Commands.Config.GetCommand(),
             new Commands.Config.SetCommand(),
+            new Commands.Sync.InitCommand(),
+            new Commands.Sync.JoinCommand(),
+            new Commands.Sync.LeaveCommand(),
+            new Commands.Sync.StatusCommand(),
         };
     }
 
@@ -292,7 +308,7 @@ public static class CliApp
         var leaves = new List<ICliCommand>();
         foreach (var c in registry)
         {
-            if (c.Group is null) leaves.Add(c);
+            if (c.Group is null && !c.Hidden) leaves.Add(c);
         }
         leaves.Sort(static (a, b) => string.CompareOrdinal(a.Name, b.Name));
         foreach (var c in leaves)
@@ -304,7 +320,7 @@ public static class CliApp
         var seenGroups = new HashSet<string>(StringComparer.Ordinal);
         foreach (var c in registry)
         {
-            if (c.Group is not null && seenGroups.Add(c.Group))
+            if (c.Group is not null && !c.Hidden && seenGroups.Add(c.Group))
             {
                 groupNames.Add(c.Group);
             }

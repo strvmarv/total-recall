@@ -353,6 +353,37 @@ internal sealed class BareRemote : IDisposable
         }
     }
 
+    /// <summary>Runs git in the bare repository with the clean home (no hostile configuration reaches it).</summary>
+    public string Git(params string[] args) => _env.RunGit(Path, args);
+
+    /// <summary>Makes a commit with the empty tree in the bare repository (without touching any ref) and returns its id; the clean home has no identity, so one is given.</summary>
+    public string AddEmptyCommit()
+    {
+        var tree = _env.RunGit(Path, "write-tree").Trim();
+        return _env.RunGit(Path, "-c", "user.name=t", "-c", "user.email=t@e", "commit-tree", tree, "-m", "x").Trim();
+    }
+
+    /// <summary>Creates or moves a ref (a branch, a tag, a pull-request ref) to a commit.</summary>
+    public void AddRef(string name, string sha) => _env.RunGit(Path, "update-ref", name, sha);
+
+    /// <summary>Installs an executable hook with the given shell body (needs a POSIX <c>sh</c>).</summary>
+    public void InstallHook(string name, string script)
+    {
+        var hooks = System.IO.Path.Combine(Path, "hooks");
+        Directory.CreateDirectory(hooks);
+        var file = System.IO.Path.Combine(hooks, name);
+        File.WriteAllText(file, "#!/bin/sh\n" + script + "\n");
+        Posix.Executable(file);
+    }
+
+    /// <summary>Removes the bare repository and makes a new, empty one at the same path (a repository recreated at one address).</summary>
+    public void Recreate()
+    {
+        GitTestEnvironment.ForceDelete(Path);
+        Directory.CreateDirectory(Path);
+        _env.RunGit(Path, "init", "--bare", "-b", "main");
+    }
+
     private void Identify()
     {
         _env.RunGit(_scratch, "config", "user.name", "Test");

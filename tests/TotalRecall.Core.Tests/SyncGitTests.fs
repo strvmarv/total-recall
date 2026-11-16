@@ -27,6 +27,8 @@ let private allCommands : GitCommand list =
       Clone("https://h/o/r.git", longBranch, "/d/repo")
       LsRemote(Url "https://h/o/r.git", "main")
       LsRemote(Origin, "main")
+      LsRemoteRefs "file:///r"
+      LsRemoteRefs "https://h/o/r.git"
       AddOrigin "https://h/o/r.git"
       SetOriginUrl "git@github.com:o/r.git"
       Fetch "main"
@@ -71,6 +73,23 @@ let commandTableTests =
                 (args (Clone("file:///r", "main", "/d/repo")))
                 [ "clone"; "--depth=1"; "--no-tags"; "--single-branch"; "--branch"; "main"; "--template="; "--"; "file:///r"; "/d/repo" ]
                 "clone"
+
+        testCase "LsRemoteRefs lists every ref (no --heads)" <| fun _ ->
+            Expect.equal (args (LsRemoteRefs "https://h/o/r.git")) [ "ls-remote"; "--"; "https://h/o/r.git" ] "all refs"
+
+        testCase "LsRemoteRefs is not clone-scoped and takes overrides" <| fun _ ->
+            Expect.isFalse (isCloneScoped (LsRemoteRefs "file:///r")) "not clone-scoped"
+            Expect.isTrue (takesOverrides (LsRemoteRefs "file:///r")) "takes overrides"
+            match built (LsRemoteRefs "file:///r") with
+            | Ok full ->
+                Expect.isFalse (full |> List.exists (fun a -> a.StartsWith "--git-dir")) "no --git-dir"
+                Expect.isTrue (List.contains "-c" full) "overrides"
+            | Error e -> failtestf "%s" e
+
+        testCase "LsRemoteRefs refuses a bad address like Clone does" <| fun _ ->
+            for u in [ "-x"; "ext::sh"; "https://u:tok@h/x y"; "" ] do
+                Expect.isTrue (isError (built (LsRemoteRefs u))) u
+                Expect.equal (isError (built (LsRemoteRefs u))) (isError (built (Clone(u, "main", "/d/repo")))) (u + " same as Clone")
 
         testCase "LsRemote lists one exact ref" <| fun _ ->
             Expect.equal (args (LsRemote(Url "https://h/o/r.git", "main"))) [ "ls-remote"; "--"; "https://h/o/r.git"; "refs/heads/main" ] "url"
@@ -646,6 +665,23 @@ let keyTests =
             Expect.notEqual (dbKey false "A.db") (dbKey false "a.db") "case-sensitive"
             Expect.equal (dbKey true "A.db") (dbKey true "a.DB") "case-insensitive"
             Expect.notEqual (dbKey false "a.db") (dbKey false "b.db") "different names"
+    ]
+
+[<Tests>]
+let lsRemoteRefsTests =
+    testList "SyncGit.parseLsRemoteRefs" [
+        let a = String.replicate 40 "a"
+        testCase "each ref is returned; bad lines are ignored; CRLF is tolerated" <| fun _ ->
+            let out =
+                a + "\tHEAD\n" + a + "\trefs/heads/main\r\n" + a + "\trefs/tags/v1\n" + a + "\trefs/pull/1/head\n"
+                + "no tab here\n" + "abc\trefs/heads/short\n" + "\n" + a + "\t\n" + "\trefs/heads/nosha\n"
+            Expect.equal (parseLsRemoteRefs out) [ "HEAD"; "refs/heads/main"; "refs/tags/v1"; "refs/pull/1/head" ] "refs"
+            Expect.equal (parseLsRemoteRefs "") [] "empty"
+            Expect.equal (parseLsRemoteRefs null) [] "null"
+            Expect.equal (parseLsRemoteRefs (String.replicate 64 "c" + "\trefs/heads/main\r\n")) [ "refs/heads/main" ] "sha-256"
+        testProperty "never throws" <| fun (s: string) ->
+            parseLsRemoteRefs s |> ignore
+            true
     ]
 
 [<Tests>]

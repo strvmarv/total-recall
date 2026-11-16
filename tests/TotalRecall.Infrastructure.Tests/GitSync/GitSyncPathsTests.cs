@@ -128,6 +128,55 @@ public sealed class GitSyncPathsTests
     }
 
     [Fact]
+    public void ForDatabase_HasTheSameSyncDirectoryAndLockAsFor_AndNoClone()
+    {
+        var db = Db("fordb");
+        var withRemote = GitSyncPaths.For(db, Remote, false);
+        var without = GitSyncPaths.ForDatabase(db, false);
+        Assert.Equal(withRemote.DatabaseDirectory, without.DatabaseDirectory);
+        Assert.Equal(withRemote.SyncDirectory, without.SyncDirectory);
+        Assert.Equal(withRemote.LockPath, without.LockPath);
+        Assert.Equal(withRemote.NoHooksDirectory, without.NoHooksDirectory);
+        Assert.Equal(withRemote.EmptyFile, without.EmptyFile);
+        Assert.Throws<InvalidOperationException>(() => without.CloneDirectory);
+    }
+
+    [Fact]
+    public void ForDatabase_KeysOnTheFileName_AndFoldsCaseOnRequest()
+    {
+        Assert.NotEqual(
+            GitSyncPaths.ForDatabase(Db("fdb2", "a.db"), false).SyncDirectory,
+            GitSyncPaths.ForDatabase(Db("fdb2", "b.db"), false).SyncDirectory);
+        Assert.Equal(
+            GitSyncPaths.ForDatabase(Db("fdb3", "A.db"), true).SyncDirectory,
+            GitSyncPaths.ForDatabase(Db("fdb3", "a.db"), true).SyncDirectory);
+        Assert.NotEqual(
+            GitSyncPaths.ForDatabase(Db("fdb4", "A.db"), false).SyncDirectory,
+            GitSyncPaths.ForDatabase(Db("fdb4", "a.db"), false).SyncDirectory);
+        Assert.Throws<ArgumentException>(() => GitSyncPaths.ForDatabase(" ", false));
+    }
+
+    [Fact]
+    public void ForDatabase_EnsureCreated_MakesX()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "tr-paths-fdb5-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var p = GitSyncPaths.ForDatabase(Path.Combine(root, "x.db"), false);
+            p.EnsureCreated();
+            Assert.True(Directory.Exists(p.SyncDirectory));
+            Assert.True(Directory.Exists(p.NoHooksDirectory));
+            Assert.True(File.Exists(p.EmptyFile));
+            Assert.Equal([p.NoHooksDirectory], Directory.GetDirectories(p.SyncDirectory));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
     public void GitOutcome_CarriesAValueOrAFailure()
     {
         var ok = GitOutcome<int>.Ok(7);

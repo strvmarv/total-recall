@@ -231,10 +231,13 @@ module GitSyncSettings =
         && not (s |> Seq.exists (fun c -> System.Char.IsWhiteSpace c || System.Char.IsControl c))
 
     /// `^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$` with no `..` and no `//`, not ending in `/` or `.`, and no
-    /// `/`-separated component that begins with `.` or ends with `.lock`.
+    /// `/`-separated component that begins with `.` or ends with `.lock`. The name `HEAD` is refused: git refuses
+    /// `git branch HEAD`, so it is the one name this rule would otherwise accept that `git check-ref-format --branch`
+    /// rejects.
     let isUsableBranch (s: string) : bool =
         s.Length >= 1
         && s.Length <= 100
+        && s <> "HEAD"
         && isAlnum s.[0]
         && (s |> Seq.forall (fun c -> isAlnum c || c = '.' || c = '_' || c = '/' || c = '-'))
         && not (s.Contains("..", System.StringComparison.Ordinal))

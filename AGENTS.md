@@ -16,7 +16,7 @@ This file is the operational handbook for AI agents and human contributors worki
 TotalRecall.Host (C#)          ← AOT entry point + composition root
 ├── TotalRecall.Server (C#)    ← MCP JSON-RPC over stdio; 51 handlers (one file each; 50 are served in SQLite mode, 51 in Cortex mode)
 ├── TotalRecall.Web (C#)       ← embedded minimal-API + React SPA (web UI), dispatches to ToolRegistry
-├── TotalRecall.Cli (C#)       ← CLI commands (Spectre.Console), including `total-recall ui`
+├── TotalRecall.Cli (C#)       ← CLI commands (Spectre.Console), including `total-recall ui`; the git sync `sync init|join|leave|status` commands exist but are hidden until milestone 1b-iii
 ├── TotalRecall.Infrastructure (C#) ← SQLite/Postgres, ONNX embedder, importers, migrations
 └── TotalRecall.Core (F#)      ← Pure functions: tokenizer, decay, ranking, parsers, chunker
 
@@ -86,7 +86,8 @@ npm wrapper layer (zero-dep Node):
 | Importers (host tools) | `src/TotalRecall.Infrastructure/Importers/` |
 | Cortex sync | `src/TotalRecall.Infrastructure/Sync/` |
 | Git sync guards: manifest, identity rule, public check, `OpenGit` (the `git` storage mode opens the plain local store; no cycle yet), `config_set` denylist | `src/TotalRecall.Core/SyncManifest.fs`, `SyncIdentity.fs`, `SyncPublic.fs`, `SyncSettingsGuard.fs`; `src/TotalRecall.Infrastructure/GitSync/RepoGuard*.cs`, `ManifestFile.cs`, `HostIdentity.cs`; `src/TotalRecall.Server/ServerComposition.cs` (`OpenGit`) |
-| Git sync git client, lock and tree reader (not wired yet) | `src/TotalRecall.Infrastructure/GitSync/GitProcess.cs`, `GitClient*.cs`, `SyncLock.cs`, `GitSyncPaths.cs`; `src/TotalRecall.Core/SyncGit.fs`, `SyncTree.fs` |
+| Git sync git client, lock and tree reader (used by the hidden `sync` commands; no cycle yet) | `src/TotalRecall.Infrastructure/GitSync/GitProcess.cs`, `GitClient*.cs`, `SyncLock.cs`, `GitSyncPaths.cs`; `src/TotalRecall.Core/SyncGit.fs`, `SyncTree.fs` |
+| Git sync setup verbs (hidden `sync init`/`join`/`leave`/`status`) | `src/TotalRecall.Cli/Commands/Sync/*.cs`, `src/TotalRecall.Infrastructure/GitSync/SyncSetupService*.cs`, `GitSyncStateStore.cs`, `ReadOnlyDatabase.cs`, `LegacyDatabaseProbe.cs`, `CloneSideline.cs`, `UserConfigFile.cs`; `src/TotalRecall.Core/SyncSetup.fs` |
 | Core domain types | `src/TotalRecall.Core/Types.fs` |
 | Pure logic (decay, ranking) | `src/TotalRecall.Core/*.fs` |
 | Migration guard | `src/TotalRecall.Server/AutoMigrationGuard.cs` |

@@ -35,7 +35,7 @@ public sealed record GitClientOptions
 /// The typed git operations of sync. Every call goes through <see cref="IGitProcess"/> with a command from the closed
 /// <see cref="SyncGit.GitCommand"/> set, so force, delete and mirror cannot be expressed. The constructor touches no
 /// file; the first call of a command that takes the configuration overrides creates the sync directory, the empty
-/// hooks directory and the empty file. Nothing calls this class yet (milestone 1a-1).
+/// hooks directory and the empty file. `SyncSetupService` (the hidden `sync` commands, milestone 1a-3) is its caller; the sync cycle is milestone 1b.
 /// </summary>
 public sealed partial class GitClient
 {
@@ -345,6 +345,28 @@ public sealed partial class GitClient
             return GitOutcome<string?>.Fail(result);
         var head = SyncGit.parseLsRemote(branch, Text(result));
         return GitOutcome<string?>.Ok(head is null ? null : head.Value);
+    }
+
+    /// <summary>
+    /// Every ref name the remote advertises (<c>HEAD</c>, <c>refs/heads/main</c>, tags, pull refs), empty for an empty
+    /// repository. The setup commands use it to tell an empty repository from one that already holds something.
+    /// </summary>
+    public async Task<GitOutcome<IReadOnlyList<string>>> LsRemoteRefsAsync(
+        string url,
+        TimeSpan? timeout = null,
+        Action<string>? onStderr = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await RunNetworkAsync(
+            SyncGit.GitCommand.NewLsRemoteRefs(url),
+            url,
+            timeout ?? _options.NetworkTimeout,
+            onStderr,
+            cancellationToken).ConfigureAwait(false);
+        if (result.Failure is not null)
+            return GitOutcome<IReadOnlyList<string>>.Fail(result);
+        IReadOnlyList<string> refs = SyncGit.parseLsRemoteRefs(Text(result)).ToList();
+        return GitOutcome<IReadOnlyList<string>>.Ok(refs);
     }
 
     /// <summary>

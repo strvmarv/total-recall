@@ -18,6 +18,7 @@
     <Compile Include="SyncIdentity.fs" />
     <Compile Include="SyncPublic.fs" />
     <Compile Include="SyncSettingsGuard.fs" />
+    <Compile Include="SyncSetup.fs" />
     <Compile Include="Tokenizer.fs" />
     <Compile Include="Decay.fs" />
     <Compile Include="Ranking.fs" />

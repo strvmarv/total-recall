@@ -37,6 +37,9 @@ type GitCommand =
     | Init of branch: string * dir: string
     | Clone of url: string * branch: string * dir: string
     | LsRemote of RemoteRef * branch: string
+    /// `ls-remote -- <url>`: every ref of the remote (no `--heads`, no pattern), used by the setup commands to see whether
+    /// a repository is empty. Not clone-scoped.
+    | LsRemoteRefs of url: string
     | AddOrigin of url: string
     | SetOriginUrl of url: string
     | Fetch of branch: string
@@ -189,6 +192,7 @@ let private validate (ctx: BuildContext) (cmd: GitCommand) : Result<unit, string
     | Clone(u, b, d) -> checkUrl ctx.Windows u |> andThen (fun () -> checkBranch b) |> andThen (fun () -> checkDir d)
     | LsRemote(Origin, b) -> checkBranch b
     | LsRemote(Url u, b) -> checkUrl ctx.Windows u |> andThen (fun () -> checkBranch b)
+    | LsRemoteRefs u -> checkUrl ctx.Windows u
     | AddOrigin u
     | SetOriginUrl u -> checkUrl ctx.Windows u
     | Fetch b
@@ -230,6 +234,7 @@ let commandArgs (cmd: GitCommand) : string list =
     | Clone(u, b, d) -> [ "clone"; "--depth=1"; "--no-tags"; "--single-branch"; "--branch"; b; "--template="; "--"; u; d ]
     | LsRemote(Origin, b) -> [ "ls-remote"; "--"; "origin"; "refs/heads/" + b ]
     | LsRemote(Url u, b) -> [ "ls-remote"; "--"; u; "refs/heads/" + b ]
+    | LsRemoteRefs u -> [ "ls-remote"; "--"; u ]
     | AddOrigin u -> [ "remote"; "add"; "origin"; "--"; u ]
     | SetOriginUrl u -> [ "remote"; "set-url"; "origin"; "--"; u ]
     // the only `+` anywhere: it forces the tracking ref of the disposable clone, never a ref of the remote
@@ -258,7 +263,8 @@ let isCloneScoped (cmd: GitCommand) : bool =
     | ConfigGetSshCommand
     | Init _
     | Clone _
-    | LsRemote(Url _, _) -> false
+    | LsRemote(Url _, _)
+    | LsRemoteRefs _ -> false
     | _ -> true
 
 /// True for a command that carries the configuration overrides (all but the two that only read the user's own
@@ -592,3 +598,19 @@ let parseLsRemote (branch: string) (output: string) : string option =
                 let sha = line.Substring(0, tab)
                 let r = line.Substring(tab + 1)
                 if r = wanted && isSha sha then Some sha else None)
+
+/// Every ref name of an `ls-remote <url>` listing (`HEAD`, `refs/heads/main`, `refs/tags/v1`, ...). A line without a
+/// tab, with a bad sha or a blank one is ignored; a CR before the line end is tolerated. Total.
+let parseLsRemoteRefs (output: string) : string list =
+    if System.String.IsNullOrEmpty output then []
+    else
+        output.Split('\n')
+        |> Array.choose (fun raw ->
+            let line = raw.TrimEnd '\r'
+            let tab = line.IndexOf '\t'
+            if tab <= 0 then None
+            else
+                let sha = line.Substring(0, tab)
+                let r = line.Substring(tab + 1)
+                if isSha sha && r.Length > 0 then Some r else None)
+        |> Array.toList

@@ -98,6 +98,19 @@ public static class ConfigWriter
             Directory.CreateDirectory(parent);
         }
 
+        File.WriteAllText(userConfigPath, RenderUserOverrides(userConfigPath, [(dottedKey, value)]));
+    }
+
+    /// <summary>
+    /// The text <see cref="SaveUserOverride"/> would write after setting each key in order, with no side effect: the
+    /// file is read when it exists, and nothing is written and no directory is created. Throws
+    /// <see cref="InvalidDataException"/> for malformed TOML, as <see cref="SaveUserOverride"/> does.
+    /// </summary>
+    public static string RenderUserOverrides(string userConfigPath, IReadOnlyList<(string Key, object Value)> keys)
+    {
+        ArgumentNullException.ThrowIfNull(userConfigPath);
+        ArgumentNullException.ThrowIfNull(keys);
+
         TomlTable table;
         if (File.Exists(userConfigPath))
         {
@@ -115,10 +128,13 @@ public static class ConfigWriter
             table = new TomlTable();
         }
 
-        SetNestedKey(table, dottedKey, value);
+        foreach (var (key, value) in keys)
+        {
+            ArgumentNullException.ThrowIfNull(key);
+            SetNestedKey(table, key, value);
+        }
 
-        var serialized = SerializeTomlTable(table);
-        File.WriteAllText(userConfigPath, serialized);
+        return SerializeTomlTable(table);
     }
 
     /// <summary>

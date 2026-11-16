@@ -92,6 +92,13 @@ let branchTests =
                 Expect.equal c.Branch (Some b) b
                 Expect.isEmpty c.Warnings "no warning"
 
+        testCase "a branch named HEAD is refused, names that only contain it are kept" <| fun _ ->
+            let c = branch (RawStr "HEAD")
+            Expect.isNone c.Branch "HEAD"
+            Expect.equal c.Warnings [ "git_sync.branch: not a usable branch name; treated as not set" ] "one warning"
+            for b in [ "a/HEAD"; "HEAD/a"; "head"; "HEADS"; "HEAD1" ] do
+                Expect.equal (branch (RawStr b)).Branch (Some b) b
+
         testCase "invalid branch names are not set, never main, with a warning" <| fun _ ->
             let bad =
                 [ ""; "-x"; "a b"; "a..b"; "a//b"; "a/"; "a."; "x.lock"; "a.lock/b"; "feature/.x"; ".x"; "_x"; "\u00e9"
@@ -293,7 +300,8 @@ let totalityTests =
             "remote and branch follow the spec's rules in both directions"
             (Prop.forAll (Arb.fromGen genText) (fun s ->
                 let branchOk =
-                    System.Text.RegularExpressions.Regex.IsMatch(s, "^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$")
+                    s <> "HEAD"
+                    && System.Text.RegularExpressions.Regex.IsMatch(s, "^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$")
                     && not (s.Contains "..") && not (s.Contains "//") && not (s.EndsWith "/") && not (s.EndsWith ".")
                     && s.Split('/') |> Array.forall (fun p -> not (p.StartsWith ".") && not (p.EndsWith ".lock"))
                 let t = s.Trim()
