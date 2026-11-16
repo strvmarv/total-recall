@@ -66,4 +66,61 @@ public sealed class SensitiveContentScannerTests
         var reasons = SensitiveContentScanner.Scan("perfectly clean text", new[] { "", "   " });
         Assert.Empty(reasons);
     }
+
+    // ---- the two-argument form, pinned (milestone 1a-1 made the detectors selectable) -------------------------
+
+    private static readonly string[] Terms = ["internalproduct"];
+
+    public static TheoryData<string, string[]> PinnedTable => new()
+    {
+        { "mail me at jane.doe@example.com", ["email address"] },
+        { "token ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", ["API token or secret"] },
+        { "-----BEGIN RSA PRIVATE KEY-----", ["private key block"] },
+        { "jane@example.com ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -----BEGIN PRIVATE KEY-----", ["email address", "API token or secret", "private key block"] },
+        { "see InternalProduct docs", ["internal term"] },
+        { "jane@example.com and internalproduct", ["email address", "internal term"] },
+        { "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 internalproduct", ["API token or secret", "internal term"] },
+        { "all: jane@example.com, AKIAIOSFODNN7EXAMPLE, -----BEGIN OPENSSH PRIVATE KEY-----, internalproduct", ["email address", "API token or secret", "private key block", "internal term"] },
+        { "nothing to see here", [] },
+        { "git@github.com looks like a mail address to the full scan", ["email address"] },
+    };
+
+    [Theory]
+    [MemberData(nameof(PinnedTable))]
+    public void Scan_TwoArguments_ReturnsExactlyTheReasonsInTheOrderItAlwaysDid(string text, string[] expected)
+    {
+        Assert.Equal(expected, SensitiveContentScanner.Scan(text, Terms));
+        Assert.Equal(expected, SensitiveContentScanner.Scan(text, Terms, Detectors.All));
+    }
+
+    [Fact]
+    public void Scan_WithSelectedDetectors_RunsOnlyThose()
+    {
+        const string all = "jane@example.com ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -----BEGIN PRIVATE KEY----- internalproduct";
+        Assert.Equal(["email address", "internal term"], SensitiveContentScanner.Scan(all, Terms, Detectors.Email));
+        Assert.Equal(["API token or secret", "internal term"], SensitiveContentScanner.Scan(all, Terms, Detectors.Token));
+        Assert.Equal(["email address"], SensitiveContentScanner.Scan(all, null, Detectors.Email));
+        Assert.Equal(["internal term"], SensitiveContentScanner.Scan(all, Terms, Detectors.None));
+        Assert.Equal(["API token or secret", "private key block", "internal term"], SensitiveContentScanner.Scan(all, Terms, Detectors.Token | Detectors.PrivateKey));
+        Assert.Equal(SensitiveContentScanner.Scan(all, null), SensitiveContentScanner.Scan(all, null, Detectors.All));
+        Assert.Empty(SensitiveContentScanner.Scan(null, Terms, Detectors.All));
+    }
+
+    [Theory]
+    [InlineData("ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", "API token or secret")]
+    [InlineData("github_pat_11ABCDEF0123456789_abcdefABCDEF", "API token or secret")]
+    [InlineData("AKIAIOSFODNN7EXAMPLE", "API token or secret")]
+    [InlineData("-----BEGIN RSA PRIVATE KEY-----", "private key block")]
+    public void ScanSecrets_FindsTokensAndPrivateKeys(string text, string reason) =>
+        Assert.Equal([reason], SensitiveContentScanner.ScanSecrets(text));
+
+    [Theory]
+    [InlineData("git@github.com")]
+    [InlineData("noreply@x.com")]
+    [InlineData("alice@example.com")]
+    [InlineData("ordinary prose about internalproduct and tokens")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void ScanSecrets_DoesNotFlagAddressesProseOrNothing(string? text) =>
+        Assert.Empty(SensitiveContentScanner.ScanSecrets(text));
 }

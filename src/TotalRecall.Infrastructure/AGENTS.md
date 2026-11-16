@@ -21,6 +21,7 @@ No reflection, no dynamic code generation. All JSON via source-generated `JsonCo
 | `Usage/` | `IUsageImporter`, `UsageIndexer`, `UsageQueryService` | Token usage tracking and query |
 | `Sync/` | `CortexClient`, `SyncQueue`, `SyncService`, `PeriodicSync`, `RoutingStore` | Bidirectional Cortex sync |
 | `GitSync/` | `RecordReader`, `ParsedRecord`, `RecordWriter`, `RecordPatcher` | Git sync record codec (not wired to any sync yet): strict reader (1 MiB cap, duplicate-key and encoding pre-pass), hand-written canonical writer (byte-stable, unknown content kept), patcher. Wire names are lower-case, not the `EntryTypeMapping` DB strings |
+| `GitSync/` (git client) | `GitProcess`, `GitClient` (+ `GitClient.Write.cs`), `GitSyncPaths`, `GitOutcome`, `SyncLock` | Git sync transport (nothing calls it yet): see "Git sync transport" below |
 | `Config/` | `ConfigLoader`, `TomlConfig` | TOML config loading + `~/.total-recall/config.toml` |
 | `Diagnostics/` | `ExceptionLogger` | AOT-safe exception chain logging |
 | `Migration/` | `MigrationRunner`, `PostgresMigrationRunner` | Sequential schema migration framework |
@@ -55,6 +56,36 @@ It runs on the store's single connection, so while one is open no other code may
 `BeginTransaction()` on the same store throws. The statements live in `Storage/SqlRows.cs` (`SqlRows`,
 `VecRows`), shared with `SqliteStore`'s own methods. An internal `BeforeStep` seam lets tests inject a
 failure at a named step. Nothing in production uses it yet (git sync does, in later milestones).
+
+**Git sync transport (`GitSync/GitProcess.cs`, `GitClient*.cs`, `GitSyncPaths.cs`, `SyncLock.cs`).** Every git call is one
+of the closed `Core.SyncGit.GitCommand` cases (no case can force, delete or mirror; a recording `IGitProcess` plus
+`ForceFlags.AssertNone` checks every argument list the tests produce). `GitProcess` is the only place a process starts:
+no shell, argument list from `SyncGit.build`, the `GIT_*` environment scrubbed to an allow-list, a hard kill of the
+process tree at the call's limit or cancellation, bounded output, and standard error redacted as it is read (a
+credential or a UTF-8 character split across reads is never redacted in pieces). `GitClient` types the operations
+(version, init, clone, ls-remote, fetch, reset, clean, ancestry, rev-parse, the protective ref, stale locks, ls-tree,
+diff-tree, cat-file, stage, commit, push; `stage` is `add -A -f` so a remote's `.gitignore` cannot drop a record); a clone-scoped command carries `--git-dir`/`--work-tree` so a damaged clone
+can never make git act on an enclosing repository, and every call sets `GIT_CEILING_DIRECTORIES` to the database's
+directory (a database directory whose path contains the path-list separator, `:` on Unix, therefore fails every call but
+the version check). The user's ssh command (the process's `GIT_SSH_COMMAND`, else `core.sshCommand` as git resolves it:
+system, global and XDG files with includes, read from the sync directory under the ceiling; once per client) is passed on as `GIT_SSH_COMMAND` with
+`-o BatchMode=yes -o ConnectTimeout=8` appended (`-batch` for a plink or putty program; the variable is left alone when
+only `GIT_SSH` is set, since such a program takes no OpenSSH options). The layout is
+`<directory of the database file>/sync/<dbKey>/{lock, no-hooks, empty, <cloneKey>/repo}` where `dbKey` is the first 12 hex of
+the SHA-256 of the database file's *name* (lower-cased on Windows and macOS), so two databases in one directory never
+share a clone, a protective ref or a lock. `SyncLock` is a file opened with `FileShare.None` (released by the operating
+system if the holder dies; the file is never deleted and holds no text); it throws `NotSupportedException` when .NET's
+file locking is disabled (`DOTNET_SYSTEM_IO_DISABLEFILELOCKING` is `1` or `true`, or the `System.IO.DisableFileLocking`
+switch is set) and tells "busy" (a sharing violation, or EAGAIN) from a real error. .NET ignores a flock failure other than
+"would block", so on a file system without flock support the lock excludes no one. The tests that need `git` are
+`[GitFact]`, the ones that need `sh` are `[ShFact]`, the ones that need both are `[GitShFact]` and the one that needs
+`flock(1)` is `[FlockFact]`: they are ordinary tests (not `Integration`), so the standard verify runs them and a missing
+tool shows as skips. Windows runs the `[GitFact]` tests and skips the `sh`, `git`+`sh` and `flock` ones.
+
+Known limits, left to later milestones: a failed or interrupted `CloneAsync` can leave a partial clone directory that the
+caller must move aside; a remote can send a very large blob or pack (only the call's timeout bounds clone and fetch); and
+a remote's `.gitattributes` can select a filter driver the user's own configuration defines (the repository is the
+user's own, and the filter is theirs).
 
 **Borrowed-connection pattern**: `SqliteStore` accepts a `SqliteConnection` and does NOT dispose it.
 The process-lifetime connection is owned by `ServerComposition.OpenSqlite()` → `ServerCompositionHandles`.

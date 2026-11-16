@@ -19,6 +19,8 @@
     <Compile Include="SyncValidationTests.fs" />
     <Compile Include="SyncMergeTests.fs" />
     <Compile Include="GitSyncConfigTests.fs" />
+    <Compile Include="SyncGitTests.fs" />
+    <Compile Include="SyncTreeTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

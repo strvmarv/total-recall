@@ -85,6 +85,7 @@ npm wrapper layer (zero-dep Node):
 | Embedding (ONNX) | `src/TotalRecall.Infrastructure/Embedding/` |
 | Importers (host tools) | `src/TotalRecall.Infrastructure/Importers/` |
 | Cortex sync | `src/TotalRecall.Infrastructure/Sync/` |
+| Git sync git client, lock and tree reader (not wired yet) | `src/TotalRecall.Infrastructure/GitSync/GitProcess.cs`, `GitClient*.cs`, `SyncLock.cs`, `GitSyncPaths.cs`; `src/TotalRecall.Core/SyncGit.fs`, `SyncTree.fs` |
 | Core domain types | `src/TotalRecall.Core/Types.fs` |
 | Pure logic (decay, ranking) | `src/TotalRecall.Core/*.fs` |
 | Migration guard | `src/TotalRecall.Server/AutoMigrationGuard.cs` |
