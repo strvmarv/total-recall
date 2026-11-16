@@ -8,7 +8,6 @@
 //   SessionStart (inject skills/commands/SKILL.md)    session_start / session_compact -> queued, delivered
 //                                                     with the next user prompt
 //   UserPromptSubmit (pinned-directive floor)         before_agent_start -> engine `pinned-floor`
-//   SessionEnd (compaction nudge)                     not mapped (pi tears down with no screen)
 //
 // Both pieces ride one hidden message returned from before_agent_start. Every hook
 // degrades to "said nothing": a failure here must never delay or break a prompt.

@@ -19,6 +19,7 @@ This skill ensures the total-recall memory system is active for this session.
    - Report storage backend from `storage` (e.g. "sqlite", "cortex", "postgres"). If it shows a fallback like "sqlite (cortex failed)", flag this prominently.
    - If `lastSessionAge` is present, mention when the last session was
    - If `hints` are present, briefly surface the most relevant ones
+   - If a hint of type `hot_tier_compaction_suggested` is present, always surface it (the 2-3 line cap does not drop it): the hot tier is full, and the user should run `/total-recall:commands compact`
    - If `pinned_budget_pressure` is present in `hints`, surface it prominently: pinned entries are eating over half the context budget — suggest unpinning or trimming entries
    - If `backgroundTasks.reindex` shows `state: "running"`, tell the user a one-time embedding re-index is in progress (`done`/`total`): **local semantic retrieval is degraded until it completes**. It runs in the background and the server is fully usable meanwhile — re-check via the `status` tool or the next `session_start`. (This is normal after an embedding-model change or upgrade; it is not an error.)
    - If `backgroundTasks.setup` is present (`event: "provisioned"`), briefly note that first-run setup finished (the memory engine was downloaded) — a one-time message

@@ -1,8 +1,8 @@
 // hooks/claude-hooks.test.js — the Claude Code hooks that run the engine (#98).
 //
-// The prompt hook (hooks/user-prompt-submit/run.sh) and the session-end hook
-// (hooks/session-end/run.sh) must never download or provision the engine: they run it when it is
-// already provisioned and otherwise say `{}`. These tests run the real scripts over a temporary copy
+// The prompt hook (hooks/user-prompt-submit/run.sh) must never download or provision the engine: it
+// runs it when it is already provisioned and otherwise says `{}`. (There was a session-end hook too
+// until #97 removed it, because Claude Code never displays what a SessionEnd hook prints.) These tests run the real scripts over a temporary copy
 // of the plugin tree (each script finds its plugin root from its own location). The copy's
 // bin/start.js writes a marker file if it is ever run, because running it is what would provision.
 
@@ -28,14 +28,6 @@ const HOOKS = [
     payload: '{"session_id":"s1","transcript_path":"/x/t.jsonl"}',
     output: '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"## Pinned"}}',
     validatesJson: true,
-  },
-  {
-    name: 'session-end hook',
-    script: 'hooks/session-end/run.sh',
-    command: 'session-end-hint',
-    payload: '{"session_id":"s1","reason":"clear"}',
-    output: '{"systemMessage":"3 hot entries can be compacted: run /total-recall:commands compact"}',
-    validatesJson: false, // this hook forwards a non-empty engine output as it is
   },
 ];
 

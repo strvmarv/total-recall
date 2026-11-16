@@ -1,6 +1,6 @@
 // hooks/engine-path.js — where the Claude Code hooks find the engine (#98).
 //
-// Run by hooks/user-prompt-submit/run.sh and hooks/session-end/run.sh as `node engine-path.js`.
+// Run by hooks/user-prompt-submit/run.sh as `node engine-path.js`.
 // It prints the absolute path of the engine binary on one line (forward slashes, which Git Bash on
 // Windows accepts), or prints nothing when the engine is not provisioned yet. The hooks run that
 // engine directly and never `bin/start.js`: start.js provisions, which would download the engine
