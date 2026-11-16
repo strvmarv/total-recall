@@ -20,8 +20,7 @@ let private longBranch = String.replicate 100 "a"
 
 let private allCommands : GitCommand list =
     [ Version
-      ConfigGetSshCommand GlobalScope
-      ConfigGetSshCommand SystemScope
+      ConfigGetSshCommand
       Init("main", "/d/repo")
       Init("a/b-c", "/d/repo")
       Clone("file:///r", "main", "/d/repo")
@@ -64,8 +63,7 @@ let commandTableTests =
     testList "SyncGit.commandArgs: the closed command table" [
         testCase "Version and ConfigGetSshCommand" <| fun _ ->
             Expect.equal (args Version) [ "--version" ] "version"
-            Expect.equal (args (ConfigGetSshCommand GlobalScope)) [ "config"; "--global"; "--includes"; "--get"; "core.sshCommand" ] "global"
-            Expect.equal (args (ConfigGetSshCommand SystemScope)) [ "config"; "--system"; "--includes"; "--get"; "core.sshCommand" ] "system"
+            Expect.equal (args ConfigGetSshCommand) [ "config"; "--includes"; "--get"; "core.sshCommand" ] "config"
 
         testCase "Init and Clone carry the target directory after --" <| fun _ ->
             Expect.equal (args (Init("main", "/d/repo"))) [ "init"; "-b"; "main"; "--template="; "--"; "/d/repo" ] "init"
@@ -106,9 +104,9 @@ let commandTableTests =
             Expect.equal (args (CatBlob sha40)) [ "cat-file"; "blob"; sha40 ] "cat-file"
 
         testCase "staging, committing and pushing" <| fun _ ->
-            Expect.equal (args (Stage Memories)) [ "add"; "-A"; "--"; "memories" ] "stage memories"
-            Expect.equal (args (Stage Manifest)) [ "add"; "-A"; "--"; "manifest.json" ] "stage manifest"
-            Expect.equal (args (Stage Attributes)) [ "add"; "-A"; "--"; ".gitattributes" ] "stage attributes"
+            Expect.equal (args (Stage Memories)) [ "add"; "-A"; "-f"; "--"; "memories" ] "stage memories"
+            Expect.equal (args (Stage Manifest)) [ "add"; "-A"; "-f"; "--"; "manifest.json" ] "stage manifest"
+            Expect.equal (args (Stage Attributes)) [ "add"; "-A"; "-f"; "--"; ".gitattributes" ] "stage attributes"
             Expect.equal (args HasStaged) [ "diff"; "--cached"; "--quiet"; "--exit-code" ] "has staged"
             Expect.equal (args (Commit "sync: m +1")) [ "commit"; "--no-verify"; "-m"; "sync: m +1" ] "commit"
             Expect.equal (args (Push "main")) [ "push"; "origin"; "HEAD:refs/heads/main" ] "push"
@@ -118,16 +116,19 @@ let commandTableTests =
 // never force
 
 let private allowedDashed =
-    set [ "--version"; "--global"; "--system"; "--get"; "-b"; "--template="; "--depth=1"; "--no-tags"; "--single-branch"
+    set [ "--version"; "--get"; "-b"; "--template="; "--depth=1"; "--no-tags"; "--single-branch"
           "--branch"; "--progress"; "--hard"; "-fd"; "--includes"; "--is-ancestor"; "--verify"; "--quiet"; "-r"; "-z"; "--no-renames"
-          "--raw"; "-l"; "-A"; "--cached"; "--exit-code"; "--no-verify"; "-m"; "-c"; "--" ]
+          "--raw"; "-l"; "-A"; "-f"; "--cached"; "--exit-code"; "--no-verify"; "-m"; "-c"; "--" ]
 
 let private forbidden =
     [ "--force"; "-f"; "--force-with-lease"; "--delete"; "--mirror"; "--prune"; "-d"; "-D"; "--all"; "--tags" ]
 
 let private checkNeverForce (what: string) (argv: string list) =
+    // `add -A -f` is the one `-f` besides `clean -fd`: it only affects what is staged and never reaches a remote
+    let isStage = List.contains "add" argv
     for a in argv do
-        Expect.isFalse (List.contains a forbidden) (sprintf "%s: %s must not appear in %A" what a argv)
+        if not (a = "-f" && isStage) then
+            Expect.isFalse (List.contains a forbidden) (sprintf "%s: %s must not appear in %A" what a argv)
     // `-no-verify` only for Commit; `+` only in the fetch refspec; a leading ':' refspec (delete) never
     let plus = argv |> List.filter (fun a -> a.StartsWith "+")
     for p in plus do
@@ -144,11 +145,12 @@ let neverForceTests =
                 | Ok full -> checkNeverForce "build" full
                 | Error e -> failtestf "build failed for %A: %s" c e
 
-        testCase "-f appears only as the -fd of Clean, and --no-verify only in Commit" <| fun _ ->
+        testCase "-f appears only as the -fd of Clean and the -f of Stage, and --no-verify only in Commit" <| fun _ ->
             for c in allCommands do
                 let a = args c
                 match c with
                 | Clean -> Expect.equal a [ "clean"; "-fd" ] "clean"
+                | Stage _ -> Expect.equal (a |> List.filter (fun x -> x.StartsWith "-" && x <> "--")) [ "-A"; "-f" ] "stage"
                 | _ -> Expect.isFalse (a |> List.exists (fun x -> x = "-fd" || x = "-f")) (sprintf "%A" c)
                 match c with
                 | Commit _ -> ()
@@ -197,10 +199,12 @@ let remoteTests =
                 [ "https://h/o/r.git", UrlRemote
                   "https://[::1]/x", UrlRemote
                   "ssh://git@h/o/r.git", UrlRemote
+                  "git://h/o/r.git", UrlRemote
+                  "git+ssh://h/o/r.git", UrlRemote
                   "file:///tmp/r", UrlRemote
+                  "HTTPS://H/X", UrlRemote
                   "git@github.com:o/r.git", ScpLike
                   "github.com:o/r.git", ScpLike
-                  "1http://x", UrlRemote
                   "/abs/path", AbsolutePath
                   "\\\\server\\share\\r", AbsolutePath ] do
                 Expect.equal (classifyRemote false s) (Some k) s
@@ -216,7 +220,9 @@ let remoteTests =
             for s in
                 [ ""; "-oProxyCommand=x"; "-"; "a b"; "a\tb"; "a\u0000b"; "https://h/x y"
                   "ext::sh -c x"; "ext::x"; "fd::1"; "rsync::x"; "ext::https://u:tok@h/x"
-                  "repo"; "../x"; "./x"; "a:b"; "x:y"; "a:"; "user@:path"; "99::x"; "1ext::x" ] do
+                  "repo"; "../x"; "./x"; "a:b"; "x:y"; "a:"; "user@:path"; "99::x"; "1ext::x"
+                  // a scheme outside the allow-list makes git run `git-remote-<scheme>`; a case variant of a refused helper too
+                  "Ext://x"; "ext://x"; "fd://x"; "ftp://h/x"; "gopher://x"; "rsync://h/x"; "1http://x"; "git-lfs://h/x"; "a.b://x" ] do
                 Expect.isNone (classifyRemote false s) (sprintf "%A" s)
                 Expect.isTrue (isError (validateRemote false s)) (sprintf "%A" s)
 
@@ -273,7 +279,7 @@ let buildTests =
             | Error e -> failtestf "%s" e
 
         testCase "commands that are not clone-scoped have no --git-dir" <| fun _ ->
-            for c in [ Version; ConfigGetSshCommand GlobalScope; Init("main", "/d/repo"); Clone("file:///r", "main", "/d/repo"); LsRemote(Url "file:///r", "main") ] do
+            for c in [ Version; ConfigGetSshCommand; Init("main", "/d/repo"); Clone("file:///r", "main", "/d/repo"); LsRemote(Url "file:///r", "main") ] do
                 match built c with
                 | Ok full -> Expect.isFalse (full |> List.exists (fun a -> a.StartsWith "--git-dir")) (sprintf "%A" c)
                 | Error e -> failtestf "%s" e
@@ -283,15 +289,15 @@ let buildTests =
 
         testCase "Version and ConfigGetSshCommand take no overrides at all" <| fun _ ->
             Expect.equal (built Version) (Ok [ "--version" ]) "version"
-            Expect.equal (built (ConfigGetSshCommand GlobalScope)) (Ok (args (ConfigGetSshCommand GlobalScope))) "config"
+            Expect.equal (built ConfigGetSshCommand) (Ok (args ConfigGetSshCommand)) "config"
             Expect.isFalse (takesOverrides Version) "version"
-            Expect.isFalse (takesOverrides (ConfigGetSshCommand SystemScope)) "config"
+            Expect.isFalse (takesOverrides ConfigGetSshCommand) "config"
             Expect.isTrue (takesOverrides Clean) "clean"
 
         testCase "every command but the two config readers carries the overrides" <| fun _ ->
             for c in allCommands do
                 match c, built c with
-                | (Version | ConfigGetSshCommand _), Ok full -> Expect.isFalse (List.contains "-c" full) (sprintf "%A" c)
+                | (Version | ConfigGetSshCommand), Ok full -> Expect.isFalse (List.contains "-c" full) (sprintf "%A" c)
                 | _, Ok full ->
                     Expect.isTrue (List.contains "protocol.ext.allow=never" full) (sprintf "ext in %A" c)
                     Expect.isTrue (List.contains "core.hooksPath=/d/no-hooks" full) (sprintf "hooks in %A" c)
@@ -317,7 +323,7 @@ let buildTests =
         testCase "isCloneScoped" <| fun _ ->
             for c in [ Fetch "main"; ResetHard Head; Clean; Stage Memories; Push "main"; LsRemote(Origin, "main"); AddOrigin "u"; HasStaged; CatBlob sha40 ] do
                 Expect.isTrue (isCloneScoped c) (sprintf "%A" c)
-            for c in [ Version; ConfigGetSshCommand GlobalScope; Init("main", "/d/r"); Clone("file:///r", "main", "/d/r"); LsRemote(Url "file:///r", "main") ] do
+            for c in [ Version; ConfigGetSshCommand; Init("main", "/d/r"); Clone("file:///r", "main", "/d/r"); LsRemote(Url "file:///r", "main") ] do
                 Expect.isFalse (isCloneScoped c) (sprintf "%A" c)
     ]
 
@@ -334,7 +340,8 @@ let overridesTests =
                   "credential.interactive=never"; "core.quotepath=false"; "protocol.ext.allow=never"
                   "protocol.fd.allow=never"; "core.askPass="; "core.attributesFile=/e"; "core.excludesFile=/e"
                   "core.fsmonitor="; "push.gpgSign=false"; "http.lowSpeedLimit=1000"; "http.lowSpeedTime=20"
-                  "gc.auto=0"; "maintenance.auto=false" ]
+                  "gc.auto=0"; "maintenance.auto=false"; "clone.defaultRemoteName=origin"; "init.defaultObjectFormat=sha1"
+                  "init.defaultRefFormat=files" ]
             let got = overrides "/h" "/e"
             Expect.equal (got |> List.mapi (fun i x -> i % 2 = 0, x) |> List.filter (fun (isFlag, _) -> isFlag) |> List.map snd |> List.distinct) [ "-c" ] "every key is preceded by -c"
             Expect.equal (got |> List.mapi (fun i x -> i % 2 = 1, x) |> List.filter fst |> List.map snd) expected "values"

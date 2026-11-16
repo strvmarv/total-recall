@@ -165,7 +165,7 @@ public sealed class SyncLockTests : IDisposable
         Assert.Null(await SyncLock.TryAcquireAsync(LockPath(), Timeout.InfiniteTimeSpan));
     }
 
-    [ShFact]
+    [NonRootShFact]
     public async Task PermissionError_Throws_NotBusy()
     {
         var directory = Path.Combine(_root, "readonly");
@@ -173,14 +173,7 @@ public sealed class SyncLockTests : IDisposable
         Posix.Mode(directory, UnixFileMode.UserRead | UnixFileMode.UserExecute);
         try
         {
-            try
-            {
-                using var probe = File.Create(Path.Combine(directory, "probe"));
-                return; // running as root (or the file system ignores modes): the case cannot arise, so this passes vacuously there
-            }
-            catch (UnauthorizedAccessException)
-            {
-            }
+            Assert.Throws<UnauthorizedAccessException>(() => File.Create(Path.Combine(directory, "probe")).Dispose()); // the premise
             var thrown = await Record.ExceptionAsync(() => SyncLock.TryAcquireAsync(Path.Combine(directory, "lock"), TimeSpan.Zero));
             Assert.NotNull(thrown);
             Assert.True(thrown is UnauthorizedAccessException || (thrown is IOException io && !SyncLock.IsSharingViolation(io.HResult, false)), thrown!.ToString());

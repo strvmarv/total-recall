@@ -84,11 +84,17 @@ public sealed class GitClientSetupTests(RecordingFixture fixture)
         var hooks = Path.Combine(init.CloneDirectory, ".git", "hooks");
         Assert.True(!Directory.Exists(hooks) || Directory.GetFileSystemEntries(hooks).Length == 0, "a template was copied into .git/hooks");
         init.Markers!.AssertNoneFired();
+        // the user's defaults for the object format and the reference format do not apply either
+        Assert.Equal("sha1", init.Git("rev-parse", "--show-object-format").Trim());
+        Assert.True(Directory.Exists(Path.Combine(init.CloneDirectory, ".git", "refs", "heads")));
+        Assert.False(Directory.Exists(Path.Combine(init.CloneDirectory, ".git", "reftable")));
 
         using var clone = Rig(hostile: true);
         Ok(await clone.Client.CloneAsync(remote.Url, "main"));
         Assert.True(File.Exists(Path.Combine(clone.CloneDirectory, "file-0-0.txt")));
         clone.Markers!.AssertNoneFired();
+        // `clone.defaultRemoteName=upstream` would leave no `origin` for every later fetch and push
+        Assert.Equal("origin", clone.Git("remote").Trim());
     }
 
     private static readonly string[] HostVariables =
@@ -390,6 +396,54 @@ public sealed class GitClientSetupTests(RecordingFixture fixture)
         Assert.True(File.Exists(Path.Combine(rig.CloneDirectory, "memories", "x.lock")));
         rig.Git("status"); // works again
         Assert.Equal(0, rig.Client.RemoveStaleLocks());
+    }
+
+    [GitFact]
+    public async Task ASha256Remote_CanBeClonedAndRead()
+    {
+        using var scratch = new GitTestEnvironment();
+        scratch.WriteGitConfig("[user]\n\tname = t\n\temail = t@x\n[commit]\n\tgpgsign = false\n");
+        var work = Path.Combine(scratch.Root, "work");
+        var bare = Path.Combine(scratch.Root, "remote.git");
+        Directory.CreateDirectory(work);
+        Directory.CreateDirectory(bare);
+        scratch.RunGit(work, "init", "--object-format=sha256", "-b", "main");
+        scratch.RunGit(bare, "init", "--bare", "--object-format=sha256", "-b", "main");
+        File.WriteAllText(Path.Combine(work, "a.txt"), "hello\n");
+        scratch.RunGit(work, "add", "a.txt");
+        scratch.RunGit(work, "commit", "-m", "one");
+        scratch.RunGit(work, "push", bare, "HEAD:refs/heads/main");
+        var head = scratch.RunGit(work, "rev-parse", "HEAD").Trim();
+        Assert.Equal(64, head.Length);
+
+        using var rig = Rig();
+        Assert.Equal(head, Ok(await rig.Client.LsRemoteAsync(Url(new Uri(bare).AbsoluteUri), "main")));
+        Ok(await rig.Client.CloneAsync(new Uri(bare).AbsoluteUri, "main"));
+        Assert.Equal(head, Ok(await rig.Client.RevParseAsync(SyncGit.Revision.Head)));
+        Assert.Equal(["a.txt"], rig.Git("ls-tree", "--name-only", "HEAD").Split('\n', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    [ShFact]
+    public async Task ADatabaseDirectoryWithAPathListSeparator_FailsClosed_ExceptForTheVersionCheck()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "tr-colon-" + Guid.NewGuid().ToString("N"), "d" + Path.PathSeparator + "b");
+        using var rig = Rig(dbPath: Path.Combine(root, "tr.db"));
+        try
+        {
+            Ok(await rig.Client.VersionAsync());
+            var failure = await rig.Client.LsRemoteAsync(Url("file:///nonexistent/x.git"), "main");
+            Assert.False(failure.IsOk);
+            Assert.Equal(SyncGit.FailureKind.Other, failure.Failure.Failure);
+            Assert.Contains("ceiling", failure.Failure.StderrText);
+            Failed(await rig.Client.InitAsync("main"), SyncGit.FailureKind.Other);
+            Assert.False(Directory.Exists(rig.CloneDirectory));
+        }
+        finally
+        {
+            var top = Directory.GetParent(root)!.FullName;
+            if (Directory.Exists(top))
+                Directory.Delete(top, true);
+        }
     }
 
     [GitFact]

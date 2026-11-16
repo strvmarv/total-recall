@@ -9,12 +9,6 @@ open TotalRecall.Core.Config
 // ---------------------------------------------------------------------------
 // the closed command set
 
-/// Which configuration file `ConfigGetSshCommand` reads. (Never the local configuration of whatever repository the
-/// process happens to be in.)
-type ConfigScope =
-    | GlobalScope
-    | SystemScope
-
 /// A remote: an address (validated) or the clone's own `origin`.
 type RemoteRef =
     | Url of string
@@ -37,7 +31,9 @@ type Revision =
 /// Every `git` invocation sync can make. There is no case that takes free arguments.
 type GitCommand =
     | Version
-    | ConfigGetSshCommand of ConfigScope
+    /// `config --includes --get core.sshCommand`, run from the sync directory (under the ceiling directory, so no
+    /// enclosing repository's configuration is read): the user's system, global and XDG files, includes followed.
+    | ConfigGetSshCommand
     | Init of branch: string * dir: string
     | Clone of url: string * branch: string * dir: string
     | LsRemote of RemoteRef * branch: string
@@ -91,6 +87,8 @@ let private schemePrefix (s: string) : (int * string) option =
         elif s.Length >= i + 2 && s.Substring(i, 2) = "::" then Some(i, "::")
         else None
 
+let private allowedSchemes = set [ "http"; "https"; "ssh"; "git"; "file"; "git+ssh"; "ssh+git" ]
+
 let private isDriveLetterPath (s: string) =
     s.Length >= 3
     && isAsciiLetter s.[0]
@@ -117,7 +115,10 @@ let classifyRemote (windows: bool) (s: string) : RemoteKind option =
     else
         match schemePrefix s with
         | Some(_, "::") -> None
-        | Some(_, _) -> Some UrlRemote
+        | Some(e, _) ->
+            // only the transports sync means to use: git runs `git-remote-<scheme>` for any other scheme, and a
+            // case variant of a refused helper (`Ext://`) is not refused by `protocol.ext.allow`
+            if allowedSchemes.Contains(s.Substring(0, e).ToLowerInvariant()) then Some UrlRemote else None
         | None ->
             if s.StartsWith("/", System.StringComparison.Ordinal) || s.StartsWith("\\\\", System.StringComparison.Ordinal) then
                 Some AbsolutePath
@@ -179,7 +180,7 @@ let private andThen (b: unit -> Result<unit, string>) (a: Result<unit, string>) 
 let private validate (ctx: BuildContext) (cmd: GitCommand) : Result<unit, string> =
     match cmd with
     | Version
-    | ConfigGetSshCommand _
+    | ConfigGetSshCommand
     | Clean
     | HasStaged
     | Stage _ -> Ok()
@@ -223,8 +224,7 @@ let private stagePath (s: StageScope) : string =
 let commandArgs (cmd: GitCommand) : string list =
     match cmd with
     | Version -> [ "--version" ]
-    | ConfigGetSshCommand GlobalScope -> [ "config"; "--global"; "--includes"; "--get"; "core.sshCommand" ]
-    | ConfigGetSshCommand SystemScope -> [ "config"; "--system"; "--includes"; "--get"; "core.sshCommand" ]
+    | ConfigGetSshCommand -> [ "config"; "--includes"; "--get"; "core.sshCommand" ]
     | Init(b, d) -> [ "init"; "-b"; b; "--template="; "--"; d ]
     | Clone(u, b, d) -> [ "clone"; "--depth=1"; "--no-tags"; "--single-branch"; "--branch"; b; "--template="; "--"; u; d ]
     | LsRemote(Origin, b) -> [ "ls-remote"; "--"; "origin"; "refs/heads/" + b ]
@@ -242,7 +242,9 @@ let commandArgs (cmd: GitCommand) : string list =
     | LsTree r -> [ "ls-tree"; "-r"; "-z"; "-l"; revText r; "--"; "memories" ]
     | LsTreeRoot r -> [ "ls-tree"; "-z"; "-l"; revText r ]
     | CatBlob s -> [ "cat-file"; "blob"; s ]
-    | Stage s -> [ "add"; "-A"; "--"; stagePath s ]
+    // `-f` so that an ignore rule shipped by the remote (a `.gitignore` in the clone) cannot silently leave a new record
+    // unstaged; it is the only `-f` besides `clean -fd`, and it never reaches a remote
+    | Stage s -> [ "add"; "-A"; "-f"; "--"; stagePath s ]
     | HasStaged -> [ "diff"; "--cached"; "--quiet"; "--exit-code" ]
     | Commit m -> [ "commit"; "--no-verify"; "-m"; m ]
     // exactly this and nothing else: no `+`, no force option, no delete or mirror form
@@ -252,7 +254,7 @@ let commandArgs (cmd: GitCommand) : string list =
 let isCloneScoped (cmd: GitCommand) : bool =
     match cmd with
     | Version
-    | ConfigGetSshCommand _
+    | ConfigGetSshCommand
     | Init _
     | Clone _
     | LsRemote(Url _, _) -> false
@@ -263,7 +265,7 @@ let isCloneScoped (cmd: GitCommand) : bool =
 let takesOverrides (cmd: GitCommand) : bool =
     match cmd with
     | Version
-    | ConfigGetSshCommand _ -> false
+    | ConfigGetSshCommand -> false
     | _ -> true
 
 /// The `-c key=value` overrides every git call carries, flattened as `"-c"; "key=value"; …`. The user's global
@@ -290,7 +292,12 @@ let overrides (noHooksDir: string) (emptyFile: string) : string list =
       "http.lowSpeedLimit=1000"
       "http.lowSpeedTime=20"
       "gc.auto=0"
-      "maintenance.auto=false" ]
+      "maintenance.auto=false"
+      // what a clone or an init makes must not depend on the user's own defaults: the remote is `origin`, the object
+      // and reference formats are git's classic ones (an unknown key is ignored by an older git)
+      "clone.defaultRemoteName=origin"
+      "init.defaultObjectFormat=sha1"
+      "init.defaultRefFormat=files" ]
     |> List.collect (fun kv -> [ "-c"; kv ])
 
 /// The whole argument list for a command: the explicit repository selector for a clone-scoped command (so a missing

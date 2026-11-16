@@ -460,6 +460,10 @@ public sealed class GitProcessTests
         Assert.Equal(w.PathOf("git.exe"), GitExecutable.TryFind(w.Root, windows: true));
         Assert.Null(GitExecutable.TryFind(w.Root, windows: false));
 
+        using var batch = new StubDirectory();
+        File.WriteAllText(batch.PathOf("git.cmd"), "");
+        Assert.Null(GitExecutable.TryFind(batch.Root, windows: true)); // a batch file is never used
+
         using var dirOnly = new StubDirectory();
         Directory.CreateDirectory(dirOnly.PathOf("git"));
         Assert.Null(GitExecutable.TryFind(dirOnly.Root, windows: false));

@@ -94,7 +94,7 @@ public sealed class GitClientWriteTests(RecordingFixture fixture)
         Assert.False(Ok(await rig.Client.HasStagedAsync()));
     }
 
-    [GitShFact]
+    [NonRootShFact(RequiresGit = true)]
     public async Task Stage_AHostileFileName_CannotForgeTheEmptyScopeMessage()
     {
         using var rig = Rig();
@@ -105,20 +105,33 @@ public sealed class GitClientWriteTests(RecordingFixture fixture)
         Posix.Mode(file, UnixFileMode.None);
         try
         {
-            try
-            {
-                File.ReadAllBytes(file);
-                return; // running as root: nothing is unreadable, so the case cannot arise
-            }
-            catch (UnauthorizedAccessException)
-            {
-            }
+            Assert.Throws<UnauthorizedAccessException>(() => File.ReadAllBytes(file)); // the premise
             Assert.False((await rig.Client.StageAsync(Memories)).IsOk);
         }
         finally
         {
             Posix.Mode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         }
+    }
+
+    [GitFact]
+    public async Task Stage_IgnoresARemotesIgnoreRules_SoANewRecordIsNeverSilentlyDropped()
+    {
+        using var plumbing = new PlumbingRepo();
+        plumbing.Add("100644", plumbing.Blob(Encoding.UTF8.GetBytes("*.json\n")), ".gitignore");
+        plumbing.Add("100644", plumbing.Blob(Encoding.UTF8.GetBytes("memories/\n")), "memories/.gitignore");
+        plumbing.Add("100644", plumbing.Blob(Encoding.UTF8.GetBytes("x")), "README.md");
+        plumbing.Commit("ignore rules");
+        using var remote = BareRemote.Create(commits: 0);
+        plumbing.PushTo(remote.Path);
+
+        using var rig = Rig();
+        Ok(await rig.Client.CloneAsync(remote.Url, "main"));
+        Write(rig, RecordPath(IdA), "{}\n");
+        Ok(await rig.Client.StageAsync(Memories));
+        Assert.True(Ok(await rig.Client.HasStagedAsync()), "a record matched by the remote's .gitignore was left unstaged");
+        Ok(await rig.Client.CommitAsync("record"));
+        Assert.Contains(RecordPath(IdA), rig.Git("ls-tree", "-r", "--name-only", "HEAD"));
     }
 
     [GitFact]

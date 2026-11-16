@@ -61,7 +61,8 @@ public static class GitExecutable
         if (string.IsNullOrEmpty(path))
             return null;
         var isWindows = windows ?? OperatingSystem.IsWindows();
-        var names = isWindows ? new[] { program + ".exe", program + ".cmd" } : new[] { program };
+        // no `.cmd`: a batch file would be re-parsed by cmd.exe, which reads `& | ^ %` in an argument as syntax
+        var names = isWindows ? new[] { program + ".exe" } : new[] { program };
         foreach (var dir in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
         {
             foreach (var name in names)

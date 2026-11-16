@@ -83,11 +83,23 @@ public sealed partial class GitClient
             return Synthetic(SyncGit.FailureKind.Cancelled, "");
 
         var takesOverrides = SyncGit.takesOverrides(command);
-        if (takesOverrides)
+        // the version check needs no directory; every other call (the ssh configuration read included) runs in the sync directory
+        var inSyncDirectory = takesOverrides || command.IsConfigGetSshCommand;
+        if (inSyncDirectory)
         {
             var failure = EnsureCreated();
             if (failure is not null)
                 return failure;
+        }
+
+        // GIT_CEILING_DIRECTORIES is a list separated by the platform's path separator and has no escape, so a database
+        // directory whose own path contains it cannot be named: fail closed rather than leave git free to read the
+        // configuration of an enclosing repository
+        if (inSyncDirectory && _paths.DatabaseDirectory.Contains(Path.PathSeparator))
+        {
+            return Synthetic(
+                SyncGit.FailureKind.Other,
+                $"git sync cannot run: the database directory's path contains '{Path.PathSeparator}', which git's ceiling-directory list cannot hold");
         }
 
         var environment = new Dictionary<string, string?>(StringComparer.Ordinal);
@@ -112,7 +124,7 @@ public sealed partial class GitClient
             EnvironmentOverrides = environment,
             RedactValues = redactValues,
             OnStderrSegment = onStderr,
-            WorkingDirectory = takesOverrides ? _options.WorkingDirectory ?? _paths.SyncDirectory : null,
+            WorkingDirectory = inSyncDirectory ? _options.WorkingDirectory ?? _paths.SyncDirectory : null,
             MaxStdoutBytes = cap,
         };
         return await _process.RunAsync(command, Context(), runOptions, cancellationToken).ConfigureAwait(false);
@@ -154,8 +166,8 @@ public sealed partial class GitClient
 
     /// <summary>
     /// The <c>GIT_SSH_COMMAND</c> for network calls, composed once per instance: the user's command (the process's own
-    /// <c>GIT_SSH_COMMAND</c>, else <c>core.sshCommand</c> from the global and then the system configuration (included
-    /// files followed), never the
+    /// <c>GIT_SSH_COMMAND</c>, else <c>core.sshCommand</c> as git itself resolves it for the user: the system, global
+    /// and XDG files, included files followed, read from the sync directory under the ceiling directory, so never the
     /// configuration of whatever repository the process is in) with <c>-o BatchMode=yes -o ConnectTimeout=8</c>
     /// appended. Null leaves the variable alone (only <c>GIT_SSH</c> is set, which does not take OpenSSH options).
     /// </summary>
@@ -171,18 +183,12 @@ public sealed partial class GitClient
             string? configCommand = null;
             if (string.IsNullOrWhiteSpace(envCommand))
             {
-                foreach (var scope in new[] { SyncGit.ConfigScope.GlobalScope, SyncGit.ConfigScope.SystemScope })
-                {
-                    var read = await RunAsync(SyncGit.GitCommand.NewConfigGetSshCommand(scope), _options.LocalTimeout, cancellationToken)
-                        .ConfigureAwait(false);
-                    if (read.Failure is null)
-                    {
-                        configCommand = Text(read).Trim();
-                        break;
-                    }
-                    if (read.ExitCode != 1) // 1 is "unset"; anything else (a timeout, no git) is not an answer: fail the call, cache nothing
-                        return (null, read);
-                }
+                var read = await RunAsync(SyncGit.GitCommand.ConfigGetSshCommand, _options.LocalTimeout, cancellationToken)
+                    .ConfigureAwait(false);
+                if (read.Failure is null)
+                    configCommand = Text(read).Trim();
+                else if (read.ExitCode != 1) // 1 is "unset"; anything else (a timeout, no git) is not an answer: fail the call, cache nothing
+                    return (null, read);
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -248,7 +254,12 @@ public sealed partial class GitClient
 
     private static string Text(GitResult result) => Encoding.UTF8.GetString(result.Stdout);
 
-    private bool HasRepository() => Directory.Exists(Path.Combine(_paths.CloneDirectory, ".git"));
+    /// <summary>True when the clone has a real <c>.git</c> directory (not a link, not a <c>gitdir:</c> file).</summary>
+    private bool HasRepository()
+    {
+        var git = new DirectoryInfo(Path.Combine(_paths.CloneDirectory, ".git"));
+        return git.Exists && !git.Attributes.HasFlag(FileAttributes.ReparsePoint);
+    }
 
     private static GitOutcome<T> NotARepository<T>() =>
         GitOutcome<T>.Fail(Synthetic(SyncGit.FailureKind.NotARepository, "not a git repository: the clone has no .git"));
@@ -283,7 +294,11 @@ public sealed partial class GitClient
         return Done(added);
     }
 
-    /// <summary>A shallow (depth 1), single-branch clone of the remote at the clone directory.</summary>
+    /// <summary>
+    /// A shallow (depth 1), single-branch clone of the remote at the clone directory. A failed or interrupted clone can
+    /// leave a partial directory behind, which makes the next clone to the same place fail: the caller moves a clone
+    /// that is not good aside before trying again (the sync cycle of a later milestone does).
+    /// </summary>
     public async Task<GitOutcome<NoValue>> CloneAsync(
         string url,
         string branch,

@@ -97,6 +97,11 @@ public sealed class GitClientTreeTests(RecordingFixture fixture)
 
         var root = Ok(await rig.Client.LsTreeRootAsync(Head));
         Assert.Equal(["manifest.json", "memories"], root.Select(e => e.Path).Order(StringComparer.Ordinal));
+
+        // `core.symlinks=false`: a symlink entry of the tree is checked out as a plain file, never as a link
+        var symlinkEntry = Path.Combine(rig.CloneDirectory, "memories", "3f", $"{GoodId.Replace("3f9c", "3f9d")}.json");
+        Assert.True(File.Exists(symlinkEntry));
+        Assert.Null(new FileInfo(symlinkEntry).LinkTarget);
         Assert.Equal("tree", root.Single(e => e.Path == "memories").Kind);
         Assert.Equal("blob", root.Single(e => e.Path == "manifest.json").Kind);
     }

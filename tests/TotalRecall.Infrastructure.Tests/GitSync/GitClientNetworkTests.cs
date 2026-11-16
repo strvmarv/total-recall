@@ -192,8 +192,8 @@ public sealed class GitClientNetworkTests(RecordingFixture fixture)
 {
     private static SyncGit.RemoteRef Url(string url) => SyncGit.RemoteRef.NewUrl(url);
 
-    private ClientRig Rig(Func<GitClientOptions, GitClientOptions>? options = null, string? executable = null) =>
-        new(fixture, options: options, executable: executable);
+    private ClientRig Rig(Func<GitClientOptions, GitClientOptions>? options = null, string? executable = null, string? dbPath = null) =>
+        new(fixture, options: options, executable: executable, dbPath: dbPath);
 
     private static Dictionary<string, string?> Merge(GitTestEnvironment env, params (string Name, string? Value)[] more)
     {
@@ -323,7 +323,8 @@ public sealed class GitClientNetworkTests(RecordingFixture fixture)
         var url = Url("ssh://git@127.0.0.1/o/r.git");
         string[] none = ["GIT_SSH_COMMAND", "GIT_SSH", "GIT_SSH_VARIANT"];
 
-        // a local core.sshCommand of the directory the call runs in is never read
+        // the database lives inside a repository whose own configuration names another ssh command: it is never read
+        // (the call runs in the sync directory, under the ceiling directory)
         var localArgs = Path.Combine(env.Root, "local-args");
         var localSsh = FakeSsh(env.Root, "local-ssh", localArgs);
         var scratch = Path.Combine(env.Root, "scratch-repo");
@@ -331,11 +332,9 @@ public sealed class GitClientNetworkTests(RecordingFixture fixture)
         env.RunGit(scratch, "init");
         env.RunGit(scratch, "config", "core.sshCommand", localSsh);
 
-        using var rig = Rig(o => o with
-        {
-            EnvironmentOverrides = Merge(env, none.Select(n => (n, (string?)null)).ToArray()),
-            WorkingDirectory = scratch,
-        });
+        using var rig = Rig(
+            o => o with { EnvironmentOverrides = Merge(env, none.Select(n => (n, (string?)null)).ToArray()) },
+            dbPath: Path.Combine(scratch, "data", "total-recall.db"));
         Failed(await rig.Client.LsRemoteAsync(url, "main"), SyncGit.FailureKind.Other);
         var args = File.ReadAllLines(argsFile);
         Assert.Contains("BatchMode=yes", args);
@@ -378,6 +377,24 @@ public sealed class GitClientNetworkTests(RecordingFixture fixture)
         using var d = new StubDirectory();
         using var rig = Rig(executable: d.Script("sleep 5\n", "slow-git"), options: o => o with { LocalTimeout = TimeSpan.FromMilliseconds(300) });
         Failed(await rig.Client.LsRemoteAsync(Url("ssh://git@127.0.0.1/o/r.git"), "main"), SyncGit.FailureKind.TimedOut);
+    }
+
+    [GitShFact]
+    public async Task CoreSshCommand_InTheXdgConfigurationFile_IsFound()
+    {
+        using var env = new GitTestEnvironment();
+        var argsFile = Path.Combine(env.Root, "ssh-args");
+        var xdgSsh = FakeSsh(env.Root, "xdg-ssh", argsFile);
+        // `~/.gitconfig` exists (so `git config --global` would read only it) and the setting is in the XDG file
+        File.WriteAllText(Path.Combine(env.Home, ".gitconfig"), "[user]\n\tname = someone\n");
+        Directory.CreateDirectory(Path.Combine(env.Home, ".config", "git"));
+        File.WriteAllText(Path.Combine(env.Home, ".config", "git", "config"), $"[core]\n\tsshCommand = {xdgSsh}\n");
+        using var rig = Rig(o => o with
+        {
+            EnvironmentOverrides = Merge(env, ("GIT_CONFIG_GLOBAL", null), ("GIT_SSH_COMMAND", null), ("GIT_SSH", null), ("GIT_SSH_VARIANT", null)),
+        });
+        Failed(await rig.Client.LsRemoteAsync(Url("ssh://git@127.0.0.1/o/r.git"), "main"), SyncGit.FailureKind.Other);
+        Assert.Contains("BatchMode=yes", File.ReadAllLines(argsFile));
     }
 
     [GitShFact]

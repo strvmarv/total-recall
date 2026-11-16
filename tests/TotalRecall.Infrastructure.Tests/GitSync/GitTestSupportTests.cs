@@ -125,7 +125,7 @@ public sealed class GitTestSupportTests
             Assert.ThrowsAny<Exception>(() => ForceFlags.AssertNone([["push", bad]]));
 
         var ctx = new SyncGit.BuildContext("/d/repo", "/d/no-hooks", "/d/empty", false);
-        foreach (var command in new[] { SyncGit.GitCommand.NewPush("main"), SyncGit.GitCommand.NewFetch("main"), SyncGit.GitCommand.Clean })
+        foreach (var command in new[] { SyncGit.GitCommand.NewPush("main"), SyncGit.GitCommand.NewFetch("main"), SyncGit.GitCommand.Clean, SyncGit.GitCommand.NewStage(SyncGit.StageScope.Memories) })
         {
             var argv = SyncGit.build(ctx, command).ResultValue.ToArray();
             ForceFlags.AssertNone([argv]);

@@ -430,7 +430,7 @@ Every `git` call runs with these overrides, because the user's global settings a
 interactive use and would break background commits:
 
 `-c core.autocrlf=false -c core.symlinks=false -c core.longpaths=true -c commit.gpgsign=false
--c core.hooksPath=<an empty directory under the clone's `.git`, which `clean` never touches> -c user.name=total-recall
+-c core.hooksPath=<an empty directory, `<sync dir>/no-hooks`, outside the clone (milestone 1a-1: `clean` never touches it and a clone rebuilt from scratch keeps it)> -c user.name=total-recall
 -c user.email=noreply@total-recall.local -c credential.interactive=never`
 
 and the environment `GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS` unset, and `GIT_SSH_COMMAND` set to the

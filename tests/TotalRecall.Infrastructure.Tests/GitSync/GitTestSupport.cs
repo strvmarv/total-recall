@@ -34,6 +34,29 @@ internal sealed class ShFactAttribute : FactAttribute
     }
 }
 
+/// <summary>A fact that needs a POSIX <c>sh</c> and a process that is not privileged (a permission error cannot be provoked as root).</summary>
+internal sealed class NonRootShFactAttribute : FactAttribute
+{
+    public NonRootShFactAttribute()
+    {
+        if (OperatingSystem.IsWindows())
+            Skip = "needs a POSIX sh";
+        else if (Environment.IsPrivilegedProcess)
+            Skip = "running as root: file permissions do not apply";
+    }
+
+    /// <summary>Also needs a usable git.</summary>
+    public bool RequiresGit
+    {
+        get => false;
+        set
+        {
+            if (value && Skip is null)
+                Skip = GitFactAttribute.ComputeReason();
+        }
+    }
+}
+
 /// <summary>A fact that needs both a usable <c>git</c> and a POSIX <c>sh</c>.</summary>
 internal sealed class GitShFactAttribute : FactAttribute
 {
@@ -186,6 +209,10 @@ internal sealed class GitTestEnvironment : IDisposable
             [init]
                 defaultBranch = trunk
                 templateDir = {P(Path.Combine(Root, "template"))}
+                defaultObjectFormat = sha256
+                defaultRefFormat = reftable
+            [clone]
+                defaultRemoteName = upstream
             [user]
                 useConfigOnly = true
             [filter "up"]
@@ -444,6 +471,9 @@ internal static class ForceFlags
 
     private static string? Problem(string arg, IReadOnlyList<string> argv)
     {
+        // `add -A -f` is the one `-f` besides `clean -fd`: it only affects what is staged and never reaches a remote
+        if (arg == "-f" && argv.Contains("add"))
+            return null;
         if (Forbidden.Contains(arg) || arg.StartsWith("--force-with-lease=", StringComparison.Ordinal))
             return $"forbidden option {arg}";
         // git accepts an unambiguous prefix of a long option (`--forc`, `--mirr`)

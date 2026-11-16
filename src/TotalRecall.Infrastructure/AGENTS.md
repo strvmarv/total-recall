@@ -64,10 +64,11 @@ no shell, argument list from `SyncGit.build`, the `GIT_*` environment scrubbed t
 process tree at the call's limit or cancellation, bounded output, and standard error redacted as it is read (a
 credential or a UTF-8 character split across reads is never redacted in pieces). `GitClient` types the operations
 (version, init, clone, ls-remote, fetch, reset, clean, ancestry, rev-parse, the protective ref, stale locks, ls-tree,
-diff-tree, cat-file, stage, commit, push); a clone-scoped command carries `--git-dir`/`--work-tree` so a damaged clone
+diff-tree, cat-file, stage, commit, push; `stage` is `add -A -f` so a remote's `.gitignore` cannot drop a record); a clone-scoped command carries `--git-dir`/`--work-tree` so a damaged clone
 can never make git act on an enclosing repository, and every call sets `GIT_CEILING_DIRECTORIES` to the database's
-directory. The user's ssh command (the process's `GIT_SSH_COMMAND`, else `core.sshCommand` from the global and then the
-system configuration, includes followed; read once per client) is passed on as `GIT_SSH_COMMAND` with
+directory (a database directory whose path contains the path-list separator, `:` on Unix, therefore fails every call but
+the version check). The user's ssh command (the process's `GIT_SSH_COMMAND`, else `core.sshCommand` as git resolves it:
+system, global and XDG files with includes, read from the sync directory under the ceiling; once per client) is passed on as `GIT_SSH_COMMAND` with
 `-o BatchMode=yes -o ConnectTimeout=8` appended (`-batch` for a plink or putty program; the variable is left alone when
 only `GIT_SSH` is set, since such a program takes no OpenSSH options). The layout is
 `<directory of the database file>/sync/<dbKey>/{lock, no-hooks, empty, <cloneKey>/repo}` where `dbKey` is the first 12 hex of
@@ -80,6 +81,11 @@ switch is set) and tells "busy" (a sharing violation, or EAGAIN) from a real err
 `[GitFact]`, the ones that need `sh` are `[ShFact]`, the ones that need both are `[GitShFact]` and the one that needs
 `flock(1)` is `[FlockFact]`: they are ordinary tests (not `Integration`), so the standard verify runs them and a missing
 tool shows as skips. Windows runs the `[GitFact]` tests and skips the `sh`, `git`+`sh` and `flock` ones.
+
+Known limits, left to later milestones: a failed or interrupted `CloneAsync` can leave a partial clone directory that the
+caller must move aside; a remote can send a very large blob or pack (only the call's timeout bounds clone and fetch); and
+a remote's `.gitattributes` can select a filter driver the user's own configuration defines (the repository is the
+user's own, and the filter is theirs).
 
 **Borrowed-connection pattern**: `SqliteStore` accepts a `SqliteConnection` and does NOT dispose it.
 The process-lifetime connection is owned by `ServerComposition.OpenSqlite()` → `ServerCompositionHandles`.
