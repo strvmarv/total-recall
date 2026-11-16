@@ -99,8 +99,9 @@ mean differs from what the row holds.
      caused it: the user, or the machine because the entry was used). A *colder* tier (a sweep, budget eviction,
      compaction, `demote`) stores the new `local_tier` and issues **nothing**: demotion stays local. `local_tier` always
      follows the current tier.
-   - **a pending `tier` stamp is cleared** when the row has a base and the current tier is **not warmer than the base
-     record's tier**: a promotion that was undone before it was pushed is no event any more, so the push can never
+   - **the clearing test comes first.** When the row has a base and the current tier is **not warmer than the base
+     record's tier**, no tier stamp is issued (a tier that rose above `local_tier` but not above the base's counts as no
+     event) and a **pending `tier` stamp is cleared**: a promotion that was undone before it was pushed is no event any more, so the push can never
      publish a colder tier under a promotion stamp (umbrella: "a move to a colder tier never syncs"; the merge decisions
      use the same condition). A row without a base keeps its tier stamp (a new record carries the tier it has).
    - a row whose `local_sticky`, `local_tier`, `scanned_content_hash` or `scanned_tags_hash` is NULL (nothing was stored)
@@ -112,14 +113,15 @@ mean differs from what the row holds.
    - the id exists as a **knowledge** entry (a memory retyped to knowledge): the row moves to state `left`, its stamps
      and its `repush_groups` are cleared, its base is kept; nothing is deleted anywhere. A later record with that id is
      ignored (the merge decision for a `left` row).
-   - the id exists in **no** table and the row **has a base, or has `pushing_stamps`** (it is, or may be, in the
-     repository): a **local deletion**. The row is left exactly as it is, and the id is returned in the scan result's
-     `LocalDeletions` list for milestone 1b-ii, which decides what to do. The scan deletes nothing, writes nothing for it
-     and never turns it into `forgotten`.
-   - the id exists in **no** table and the row has **no base and empty `pushing_stamps`** (a never-pushed entry, deleted
-     before it ever reached the repository): the **row is dropped**, with nothing reported. There is nothing in the
-     repository to delete and nothing to lose (the memory is gone); this is the merge table's "drop the row" case, done
-     where the scan already sees it, because the apply visits only rows whose record exists in R.
+   - the id exists in **no** table: a **local deletion**. The row is left exactly as it is, and the id is returned in the
+     scan result's `LocalDeletions` list with two flags (the row has a base; the row has `pushing_stamps`) for milestone
+     1b-ii and the apply, which decide what to do. The scan deletes nothing, drops nothing, writes nothing for it and never
+     turns it into `forgotten`. **In particular it never drops a base-less row**: the scan cannot see R, and the merge
+     decisions treat "no base, no entry, record present in R" (the memory is not re-inserted, the row becomes `forgotten`)
+     differently from "record absent from R" (the row is dropped); dropping the row here would turn the first case into a
+     re-insert of a memory the user deleted. The apply of 1b-i-2 therefore **visits rows with no base and no entry**, in
+     addition to the visit set the umbrella lists.
+
 9. **A `forgotten` or `left` row whose id exists again as an eligible memory** (the user re-stored it, imported it, or
    retyped it back) returns to `active` **with its base cleared** (all other columns reset) and is stamped like a new
    entry (decision 6). A `forgotten` or `left` row with no entry stays as it is.
@@ -142,9 +144,12 @@ mean differs from what the row holds.
     warning. The new clock state is persisted with the stamps; the scan sets the warning and never clears it (showing and
     clearing it belong to `status`, milestone 1b-iii).
     **`Clock.issue` can fail** (`Exhausted`: a floor stamp at the very end of the clock range, which a valid record can
-    carry). For that group of that entry the scan issues **no stamp and stores no new hash**, so the next scan tries
-    again; it adds the entry to the result's `Skipped` list with the reason, sets the warning, and **writes everything
-    else**. One such entry never stops the others.
+    carry). For that **group** of that entry the scan issues **no stamp** and stores **nothing new for the group** (the
+    content or tags hash, `local_sticky` or `local_tier`, whichever belongs to it), so the next scan finds the same change
+    and tries again; it adds the entry to the result's `Skipped` list with the group and the reason, sets the warning, and
+    **writes everything else**, including the entry's other groups. One such group never stops the others.
+    **The warning is written only when its text differs from the stored one**, so a condition that recurs on every scan
+    (a skipped group, a far-future floor) does not make an otherwise idle scan write (decision 14).
 12. **The machine id** is `_meta git_sync_machine` (written by `init` and `join`), read inside the snapshot. A scan on a
     store with no valid machine id refuses (`ScanOutcome.NotJoined`) and writes nothing. The scan does **not** check the
     rest of the join state (remote, repository id, host): the caller, the cycle of 1b-i-3, has already confirmed it with
@@ -161,13 +166,15 @@ mean differs from what the row holds.
 ### The result
 
 15. `ScanOutcome` is `Done(ScanSummary)`, `NotJoined` or `Failed(reason)`. `ScanSummary` carries the counts (new,
-    content, tags, sticky, tier, left, reactivated, dropped, ineligible), the `LocalDeletions` id list and the `Skipped`
+    content, tags, sticky, tier, left, reactivated, ineligible), the `LocalDeletions` list (id and the two flags) and the `Skipped`
     list (id and reason). It is plain data: the cycle of 1b-i-3 reads it, and no text for the user is produced here.
 
 ## Interfaces (for the plan)
 
 - `Core.SyncScan`: `contentHash`, `tagsHash` and `decide`. `decide` takes the row (a record of the stored columns it needs:
-  state, whether a base exists with its tier, the two hashes, `local_sticky`, `local_tier`, which stamps are pending), the local view
+  state, whether a base exists and its tier and stamps, whether `pushing_stamps` is non-empty, the two hashes,
+  `local_sticky`, `local_tier`, which stamps are pending; the scanner parses `base_json` for the base facts, and a
+  `base_json` that cannot be read means "has a base, tier unknown (no clearing), no floor"), the local view
   (`SyncMerge.LocalEntry`, or none) and whether the id exists as a knowledge entry, and returns one action: insert a new
   row, update named groups (each marked "stamp" or "store only"), move to `left`, reactivate, report a local deletion, or
   no change. It issues no stamp itself (the clock is I/O state): the scanner turns each "stamp" into a `Clock.issue` call.
@@ -204,8 +211,9 @@ wall clock; a persisted clock a year ahead; a missing machine id; an id that is 
   transaction, which is stronger (a stamp and the clock that issued it are never apart) and still survives any crash.
 - **The clock guard runs on every scan**, not only "at startup": the scan is the only place the persisted clock is read in
   this milestone, and a scan is cheap.
-- **The scan drops a never-pushed row whose entry is gone** (the umbrella's merge table gives that to the apply, which
-  only visits rows whose record is in R).
+- **The scan reads every eligible entry but skips one it cannot read** (an unknown source tool, invalid tags, an id in two
+  memory tables) and lists it, instead of failing; a skipped id still counts as existing, so it never produces a deletion
+  and keeps its `ineligible-id` issue.
 - **The tier stamp can be cleared by the scan** when a promotion is undone before it is pushed (the umbrella is silent;
   the merge decisions use the same condition).
 - **Retype back reactivates a `forgotten` row** as well as a `left` one (the umbrella lists `forgotten` rows under 1b-ii;
@@ -232,14 +240,15 @@ wall clock; a persisted clock a year ahead; a missing machine id; an id that is 
 7. Given a persisted clock more than 24 hours ahead of the wall clock, when the scan runs, then the clock is reset to the
    wall clock and a warning is recorded (also for a clock value that cannot be read); given a base stamp ahead of the wall
    clock, then a new stamp is issued above it, and a second edit before any push is stamped above the first even then;
-   given a base stamp at the very end of the clock range, then that entry is skipped and listed while every other entry
-   is stamped.
+   given a base stamp at the very end of the clock range, then that group of that entry is skipped and listed while every other
+   group and entry is stamped, and a second scan with the same condition writes nothing.
 8. Given a memory retyped to knowledge, when the scan runs, then its row moves to `left`, its stamps are cleared, its base
    is kept and nothing is deleted; given it is retyped back, then the row is `active` again with its base cleared and all
    groups stamped; given a `forgotten` row whose id exists again as a memory, the same.
-9. Given an `active` row with a last synced version (or in-flight push stamps) whose id exists in no table, when the scan
-   runs, then the id is reported as a local deletion and the row and the data are unchanged; given such a row with
-   neither, then the row is dropped; given a `forgotten` or `left` row with no entry, nothing happens.
+9. Given an `active` row whose id exists in no table, when the scan runs, then the id is reported as a local deletion
+   (saying whether the row has a last synced version and whether it has in-flight push stamps) and the row and the data
+   are unchanged, whether or not the row has a last synced version; given a `forgotten` or `left` row with no entry,
+   nothing happens.
 10. Given a memory whose id does not match the id rule, when the scan runs, then it has no row and no stamp and is listed as
     an `ineligible-id` issue, which disappears when the memory does; knowledge entries and entries of other types are
     never touched; given a memory that cannot be read (an unknown source tool, invalid tags) or whose id is in two memory
