@@ -1,15 +1,16 @@
 // hooks/hooks.config.test.js
 //
-// Regression guard for issue #28: Claude Code enforces a hard-coded 1.5s
-// SHARED budget across all SessionEnd hooks unless a hook's own hooks.json
-// entry sets an explicit per-hook `timeout` (seconds), in which case Claude
-// Code raises the budget to match — capped at 60s
-// (https://code.claude.com/docs/en/hooks.md). This repo's SessionEnd hook
-// (bash -> node -> self-contained .NET exe -> SQLite) measures ~1.2-1.3s
-// end-to-end on Windows, which sits right at that 1.5s default ceiling and
-// gets cancelled. Without an explicit `timeout` field here, that regresses
-// silently — this test catches the field being dropped or set outside a
-// sane range.
+// Guards the Claude Code plugin's hooks/hooks.json (#97).
+//
+// total-recall used to register a SessionEnd hook that printed a user-facing
+// compaction reminder. Claude Code runs a SessionEnd hook but never displays
+// its output when it exits 0 (observed on Claude Code 2.1.325, interactive and
+// `claude -p`: a JSON `systemMessage`, plain stdout and stderr were all
+// invisible), so the hook only slowed every session end (about 1.2 s on
+// Windows, which also needed an explicit `timeout`, #28). It was removed. The
+// compaction reminder is the `hot_tier_compaction_suggested` hint of
+// `session_start` (relayed by the model) plus one pinned-floor nudge per
+// session, see AGENTS.md "Session Lifecycle".
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -24,25 +25,10 @@ function loadHooksConfig() {
   return JSON.parse(fs.readFileSync(hooksJsonPath, 'utf8'));
 }
 
-test('SessionEnd hook declares an explicit timeout above Claude Code\'s 1.5s default budget', () => {
+test('hooks.json registers no SessionEnd hook and hooks/session-end is gone', () => {
   const config = loadHooksConfig();
-  const sessionEndEntries = config.hooks.SessionEnd;
-  assert.ok(Array.isArray(sessionEndEntries) && sessionEndEntries.length > 0,
-    'hooks.json must declare at least one SessionEnd matcher group');
-
-  for (const group of sessionEndEntries) {
-    for (const hook of group.hooks) {
-      assert.equal(typeof hook.timeout, 'number',
-        `SessionEnd hook ${JSON.stringify(hook.command)} must set a numeric "timeout"`);
-      // Above the 1.5s default shared budget, with real headroom over this
-      // hook's measured ~1.2-1.3s cost.
-      assert.ok(hook.timeout >= 5,
-        `SessionEnd hook timeout ${hook.timeout}s is too close to Claude Code's 1.5s default budget`);
-      // Claude Code caps the raised SessionEnd budget at 60s regardless of a
-      // higher configured value — a typo'd value above that (e.g. someone
-      // entering minutes) would silently buy nothing.
-      assert.ok(hook.timeout <= 60,
-        `SessionEnd hook timeout ${hook.timeout}s exceeds Claude Code's 60s cap for SessionEnd`);
-    }
-  }
+  assert.equal(config.hooks.SessionEnd, undefined,
+    'a SessionEnd hook runs but its output is never displayed (#97); do not register one for a reminder');
+  assert.equal(fs.existsSync(path.join(__dirname, 'session-end')), false,
+    'hooks/session-end/ must not exist');
 });
