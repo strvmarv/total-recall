@@ -917,7 +917,7 @@ public static class MigrationRunner
 
     /// <summary>
     /// Migration 18 — the state tables of git sync and an index so an import can be found by the entry it
-    /// created. Tables and index only; only <c>GitSyncStateStore</c> touches them so far (it clears them for a different repository); the cycle that fills them is milestone 1b. SQLite only (the Postgres runner is
+    /// created. Tables and index only; <c>GitSyncStateStore</c> clears them for a different repository and <c>GitSyncScanner</c> writes <c>git_sync_entry</c> and <c>git_sync_issue</c>; the cycle that fills the rest is milestone 1b. SQLite only (the Postgres runner is
     /// untouched). <c>IF NOT EXISTS</c> throughout: no <c>ALTER</c>, no existing row is read.
     /// </summary>
     private static void Migration18_GitSync(
