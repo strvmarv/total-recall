@@ -75,6 +75,18 @@ let tests =
                     && (input.ManifestRepoId.IsNone || input.ManifestRepoId = input.Stored.RepoId)
                 | NotJoined _ -> true))
 
+        testCase "agreeing inputs are joined, also when the host or the manifest id is unknown (property)" <| fun _ ->
+            let text = Gen.elements [ "a"; "b"; "c" ]
+            Check.QuickThrowOnFailure(Prop.forAll (Arb.fromGen (Gen.zip3 text text text)) (fun (remote, rid, host) ->
+                let input =
+                    { ConfiguredRemote = Some remote
+                      Stored = { Remote = Some remote; RepoId = Some rid; Host = Some host }
+                      CurrentHost = Some host
+                      ManifestRepoId = Some rid }
+                evaluate input = Joined
+                && evaluate { input with CurrentHost = None } = Joined
+                && evaluate { input with ManifestRepoId = None } = Joined))
+
         testCase "reasonText wording" <| fun _ ->
             Expect.equal (reasonText DataDirectoryMoved) "this data directory moved or was copied: run `total-recall sync join`" "moved"
             Expect.stringContains (reasonText NeverJoined) "sync init" "never"

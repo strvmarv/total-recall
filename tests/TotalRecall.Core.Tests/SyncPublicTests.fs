@@ -20,7 +20,9 @@ let tests =
                             "https://gitlab.com/o/r"; "/srv/git/r"; "C:\\r"; "https://github.com/o"; "https://github.com/o/r/extra"
                             "https://github.com/o/.git"; "https://github.com/o/.."; "https://github.com/o/."; "https://github.com//r"
                             "https://github.com/o/r%"; "https://ssh.github.com/o/r"; ""; "   "; "ftp://github.com/o/r"
-                            "https://github.com:abc/o/r"; "https://github.com"; "github.com/o/r" ] do
+                            "https://github.com:abc/o/r"; "https://github.com"; "github.com/o/r"
+                            "https://evil.com#@github.com/o/r"; "git://evil.com#@github.com/o/r"; "https://evil.com?x@github.com/o/r"
+                            "https://evil.com\\@github.com/o/r"; "https://evil.com\t@github.com/o/r"; "git@github.com%40evil.com:o/r.git" ] do
                 Expect.equal (parseGitHubSlug remote) None remote
 
         testCase "ofStatus maps 200, 404 and everything else" <| fun _ ->

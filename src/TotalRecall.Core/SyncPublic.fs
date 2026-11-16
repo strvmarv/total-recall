@@ -25,6 +25,10 @@ let private isSlugChar (c: char) =
 
 /// The host of an authority: what follows the last `@`, without a numeric `:port`. `None` for a bad port.
 let private hostOf (authority: string) : string option =
+    // A URL authority ends at `/`, `?` or `#`, and a standard parser reads the host after the last `@` of what
+    // is left; refuse every spelling on which parsers could disagree about where it ends.
+    let suspicious (c: char) = c = '\\' || c = '?' || c = '#' || c = '%' || Char.IsWhiteSpace c || Char.IsControl c
+    if authority |> Seq.exists suspicious then None else
     let afterUser =
         match authority.LastIndexOf '@' with
         | -1 -> authority
