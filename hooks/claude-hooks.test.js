@@ -29,6 +29,14 @@ const HOOKS = [
     output: '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"## Pinned"}}',
     validatesJson: true,
   },
+  {
+    name: 'session-end hook',
+    script: 'hooks/session-end/run.sh',
+    command: 'session-end-hint',
+    payload: '{"session_id":"s1","reason":"clear"}',
+    output: '{"systemMessage":"3 hot entries can be compacted: run /total-recall:commands compact"}',
+    validatesJson: false, // this hook forwards a non-empty engine output as it is
+  },
 ];
 
 // Stands in for the engine: records its arguments and stdin, then prints what the test asks for.
