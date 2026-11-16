@@ -194,6 +194,8 @@ public sealed class SyncSetupInitTests
         var result = await rig.Service().InitAsync(remote.Url, null);
 
         Assert.Equal(SyncSetup.Refusal.Failed, result.Refusal);
+        Assert.Contains("rejected", result.RefusalText);
+        Assert.DoesNotContain("failed to push some refs", result.RefusalText);
         Assert.Equal("", Refs(remote));
         Assert.Null(Meta(rig, SyncIdentity.MetaKeys.RepoId));
         Assert.Empty(rig.Config.Writes);

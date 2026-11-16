@@ -70,6 +70,9 @@ internal sealed class SetupRig : IDisposable
 {
     private int _seed = 1;
 
+    /// <summary>Makes the injected random bytes differ from another rig's (each rig starts at 1).</summary>
+    public int Seed { set => _seed = value; }
+
     public string Root { get; } = Path.Combine(Path.GetTempPath(), "tr-setup-" + Guid.NewGuid().ToString("N"));
     public string DbPath => Path.Combine(Root, "data", "total-recall.db");
     public string ConfigPath => Path.Combine(Root, "data", "config.toml");

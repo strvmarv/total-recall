@@ -100,6 +100,13 @@ public sealed partial class SyncSetupService(SyncSetupEnvironment env)
     private static readonly TimeSpan LockWait = TimeSpan.FromSeconds(3);
     private string _phase = "starting";
 
+    /// <summary>The <c>note:</c> lines a refusal prints: what this run left behind (decision 11).</summary>
+    private readonly List<string> _notes = [];
+
+    /// <summary>A refusal carries the notes of what the run changed before it stopped (each once).</summary>
+    private SetupResult WithNotes(SetupResult result) =>
+        result.ExitCode == 0 ? result : result with { Notes = [.. result.Notes.Concat(_notes).Distinct()] };
+
     // ---- result helpers ---------------------------------------------------------------------------------------
 
     private static SetupResult Refuse(SyncSetup.Refusal refusal, string text, params string[] notes) =>
@@ -301,23 +308,6 @@ public sealed partial class SyncSetupService(SyncSetupEnvironment env)
     }
 
     // ---- the commands -----------------------------------------------------------------------------------------
-
-    /// <summary>Adopts an existing sync repository (decision 6).</summary>
-    public async Task<SetupResult> JoinAsync(string address, string? branch, CancellationToken ct = default)
-    {
-        try
-        {
-            var (prepared, refusal) = await PrepareAsync(address, branch, ct).ConfigureAwait(false);
-            if (refusal is not null)
-                return refusal;
-            using (prepared)
-                return Failed("not implemented");
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            return FailedFrom("join", ex);
-        }
-    }
 
     /// <summary>
     /// The config, last (decision 10.3): the text is rendered now from the file's current content, so a <c>config set</c>

@@ -273,6 +273,22 @@ public sealed class SyncSetupLeaveStatusTests
     }
 
     [GitFact]
+    public async Task Status_WithGitMissing_StillFindsTheClone()
+    {
+        using var rig = new SetupRig { Settings = GuardSettings.For(Remote) };
+        SeedIdentity(rig, Remote, new string('a', 32), rig.Host.Fingerprint, "01234567");
+        MakeClone(rig, ManifestFile.Render(new string('a', 32), "total-recall 1.0", "2026-11-16T10:30:00Z"));
+        var empty = Path.Combine(rig.Root, "empty-path");
+        Directory.CreateDirectory(empty);
+        rig.PathVariable = empty;
+
+        var result = await rig.Service().StatusAsync();
+
+        Assert.Equal("git: not found", Line(result, "git"));
+        Assert.StartsWith("clone: clone at ", Line(result, "clone"));
+    }
+
+    [GitFact]
     public async Task Status_NeverPrintsACredential()
     {
         using var rig = new SetupRig { Settings = GuardSettings.For("https://tokenAAA@host/x") };

@@ -14,7 +14,12 @@ public sealed partial class SyncSetupService
     /// <summary>The last non-empty line of git's (already redacted) standard error, short enough to print.</summary>
     private static string GitText(GitResult result)
     {
-        var line = (result.StderrText ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault();
+        var lines = (result.StderrText ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        // the closing lines of a failed push ("error: failed to push some refs", "hint:", "To <url>") do not say why
+        var line = lines.LastOrDefault(l => !l.StartsWith("error: failed to push", StringComparison.Ordinal)
+                                            && !l.StartsWith("hint:", StringComparison.Ordinal)
+                                            && !l.StartsWith("To ", StringComparison.Ordinal))
+                   ?? lines.LastOrDefault();
         if (string.IsNullOrEmpty(line))
             return "git failed";
         return line.Length > 300 ? line[..300] + "..." : line;
@@ -44,7 +49,12 @@ public sealed partial class SyncSetupService
         if (kind is { IsNonFastForward: true } && step == Step.Push)
             return SetupResult.Refused(SyncSetup.Refusal.RepoExists, "someone pushed to this repository while it was being set up: if it is your sync repository, run `sync join` instead", notes);
         if (kind is { IsCancelled: true })
-            return SetupResult.Refused(SyncSetup.Refusal.Failed, "cancelled", notes);
+        {
+            var text = step == Step.Push
+                ? "cancelled; the push may have completed: if running this again says the repository already exists, run `sync join`"
+                : "cancelled";
+            return SetupResult.Refused(SyncSetup.Refusal.Failed, text, notes);
+        }
         return SetupResult.Refused(SyncSetup.Refusal.Failed, GitText(result), notes);
     }
 
@@ -57,11 +67,11 @@ public sealed partial class SyncSetupService
             if (refusal is not null)
                 return refusal;
             using (prepared)
-                return await InitCoreAsync(prepared!, ct).ConfigureAwait(false);
+                return WithNotes(await InitCoreAsync(prepared!, ct).ConfigureAwait(false));
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            return FailedFrom("init", ex);
+            return WithNotes(FailedFrom("init", ex));
         }
     }
 
@@ -92,11 +102,15 @@ public sealed partial class SyncSetupService
         _phase = "preparing the first commit";
         var cloneDirectory = p.Paths.CloneDirectory;
         if (Directory.Exists(cloneDirectory))
-            CloneSideline.Move(cloneDirectory, "unpushed", env.Clock(), env.Move); // never deleted: an earlier init's clone may be the only copy
+        {
+            var moved = CloneSideline.Move(cloneDirectory, "unpushed", env.Clock(), env.Move); // never deleted: an earlier init's clone may be the only copy
+            _notes.Add($"note: the clone of an earlier init was kept at {moved}");
+        }
 
         var init = await client.InitAsync(p.Branch, ct).ConfigureAwait(false);
         if (!init.IsOk)
             return ClassifyFailure(init.Failure, Step.Clone, forInit: true);
+        _notes.Add($"note: a clone was kept at {cloneDirectory}");
         var origin = await client.SetOriginAsync(p.Address, ct).ConfigureAwait(false);
         if (!origin.IsOk)
             return ClassifyFailure(origin.Failure, Step.Clone, forInit: true, [$"note: a clone was kept at {cloneDirectory}"]);

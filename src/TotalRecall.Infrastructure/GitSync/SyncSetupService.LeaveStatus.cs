@@ -71,6 +71,19 @@ public sealed partial class SyncSetupService
         string? pathsError = null;
         try
         {
+            try
+            {
+                paths = GitSyncPaths.For(
+                    loadError is null ? env.DatabasePath : Path.Combine(Path.GetTempPath(), "tr-status-none", "x.db"),
+                    remote ?? "none",
+                    env.CaseInsensitive);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                pathsError = ex.Message;
+                paths = GitSyncPaths.For(Path.Combine(Path.GetTempPath(), "tr-status-none", "x.db"), "none", false);
+            }
+
             var executable = GitExecutable.TryFind(env.PathVariable);
             if (executable is null)
             {
@@ -78,18 +91,6 @@ public sealed partial class SyncSetupService
             }
             else
             {
-                try
-                {
-                    paths = GitSyncPaths.For(
-                        loadError is null ? env.DatabasePath : Path.Combine(Path.GetTempPath(), "tr-status-none", "x.db"),
-                        remote ?? "none",
-                        env.CaseInsensitive);
-                }
-                catch (Exception ex) when (ex is not OutOfMemoryException)
-                {
-                    pathsError = ex.Message;
-                    paths = GitSyncPaths.For(Path.Combine(Path.GetTempPath(), "tr-status-none", "x.db"), "none", false);
-                }
                 client = new GitClient(env.Process, executable, paths, env.GitOptions);
                 var version = await client.VersionAsync(ct).ConfigureAwait(false);
                 git = version.IsOk
