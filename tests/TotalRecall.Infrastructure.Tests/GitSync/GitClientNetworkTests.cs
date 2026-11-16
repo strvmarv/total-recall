@@ -284,7 +284,7 @@ public sealed class GitClientNetworkTests(RecordingFixture fixture)
         Directory.CreateDirectory(markers.Directory);
         var askpass = Path.Combine(env.Root, "askpass");
         File.WriteAllText(askpass, markers.Script("askpass", "echo hostile\n"));
-        File.SetUnixFileMode(askpass, (UnixFileMode)0b111_101_101);
+        Posix.Executable(askpass);
         env.WriteGitConfig($"[core]\n\taskPass = {askpass}\n");
         var work = Path.Combine(env.Root, "work");
         Directory.CreateDirectory(work);
@@ -309,7 +309,7 @@ public sealed class GitClientNetworkTests(RecordingFixture fixture)
     {
         var path = Path.Combine(directory, name);
         File.WriteAllText(path, $"#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > '{argsFile}'\n{body}");
-        File.SetUnixFileMode(path, (UnixFileMode)0b111_101_101);
+        Posix.Executable(path);
         return path;
     }
 
@@ -417,7 +417,7 @@ public sealed class GitClientNetworkTests(RecordingFixture fixture)
         using var env = new GitTestEnvironment();
         var script = Path.Combine(env.Root, "fake-ssh");
         File.WriteAllText(script, "#!/bin/sh\necho \"fatal: '/o/r.git' does not appear to be a git repository\" >&2\necho 'fatal: Could not read from remote repository.' >&2\nexit 128\n");
-        File.SetUnixFileMode(script, (UnixFileMode)0b111_101_101);
+        Posix.Executable(script);
         env.WriteGitConfig($"[core]\n\tsshCommand = {script}\n");
         using var rig = Rig(o => o with { EnvironmentOverrides = Merge(env, ("GIT_SSH_COMMAND", null), ("GIT_SSH", null), ("GIT_SSH_VARIANT", null)) });
         Failed(await rig.Client.LsRemoteAsync(Url("ssh://git@127.0.0.1/o/r.git"), "main"), SyncGit.FailureKind.RemoteNotFound);
@@ -429,7 +429,7 @@ public sealed class GitClientNetworkTests(RecordingFixture fixture)
         using var env = new GitTestEnvironment();
         var script = Path.Combine(env.Root, "fake-ssh");
         File.WriteAllText(script, "#!/bin/sh\necho 'fatal: bad login deployer:SECRETPASS123 for deployer' >&2\necho 'fatal: Could not read from remote repository.' >&2\nexit 255\n");
-        File.SetUnixFileMode(script, (UnixFileMode)0b111_101_101);
+        Posix.Executable(script);
         env.WriteGitConfig($"[core]\n\tsshCommand = {script}\n");
         using var rig = Rig(o => o with { EnvironmentOverrides = Merge(env, ("GIT_SSH_COMMAND", null), ("GIT_SSH", null), ("GIT_SSH_VARIANT", null)) });
         var segments = new List<string>();

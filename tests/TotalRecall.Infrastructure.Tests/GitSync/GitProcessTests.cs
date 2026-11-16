@@ -17,7 +17,7 @@ internal sealed class StubDirectory : IDisposable
     {
         var path = Path.Combine(Root, name);
         File.WriteAllText(path, "#!/bin/sh\n" + body.Replace("\r\n", "\n"));
-        File.SetUnixFileMode(path, (UnixFileMode)0b111_101_101);
+        Posix.Executable(path);
         return path;
     }
 
@@ -574,13 +574,12 @@ public sealed class StderrAccumulatorTests
     }
 
     [Fact]
-    public void TheObserverRunsOutsideTheLock()
+    public async Task TheObserverRunsOutsideTheLock()
     {
         StderrAccumulator? acc = null;
         string? seen = null;
         acc = new StderrAccumulator(100, null, _ => seen = acc!.Text()); // would deadlock if called under the lock on another thread
-        var t = Task.Run(() => acc.Append("hello\n"));
-        Assert.True(t.Wait(TimeSpan.FromSeconds(5)));
+        await Task.Run(() => acc.Append("hello\n")).WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal("hello", seen);
     }
 

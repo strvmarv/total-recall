@@ -39,6 +39,9 @@ public sealed record GitClientOptions
 /// </summary>
 public sealed partial class GitClient
 {
+    /// <summary>The standard output a call may produce unless a lower limit is given (spec decision 11).</summary>
+    internal const long DefaultMaxStdoutBytes = 64L << 20;
+
     private readonly IGitProcess _process;
     private readonly string _executable;
     private readonly GitSyncPaths _paths;
@@ -102,16 +105,16 @@ public sealed partial class GitClient
         // repository's configuration (`url.<x>.insteadOf`, `credential.helper`)
         environment["GIT_CEILING_DIRECTORIES"] = _paths.DatabaseDirectory;
 
-        var cap = Math.Min(maxStdoutBytes ?? long.MaxValue, _options.MaxStdoutBytes ?? long.MaxValue);
+        // a caller's own limit only ever lowers the process default
+        var cap = Math.Min(Math.Min(maxStdoutBytes ?? long.MaxValue, _options.MaxStdoutBytes ?? long.MaxValue), DefaultMaxStdoutBytes);
         var runOptions = new GitRunOptions(timeout)
         {
             EnvironmentOverrides = environment,
             RedactValues = redactValues,
             OnStderrSegment = onStderr,
             WorkingDirectory = takesOverrides ? _options.WorkingDirectory ?? _paths.SyncDirectory : null,
+            MaxStdoutBytes = cap,
         };
-        if (cap != long.MaxValue)
-            runOptions = runOptions with { MaxStdoutBytes = cap };
         return await _process.RunAsync(command, Context(), runOptions, cancellationToken).ConfigureAwait(false);
     }
 

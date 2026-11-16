@@ -112,7 +112,7 @@ public sealed class GitClientSetupTests(RecordingFixture fixture)
                 var path = Path.Combine(hooks, hook);
                 File.WriteAllText(path, markers.Script("hook-" + hook));
                 if (!OperatingSystem.IsWindows())
-                    File.SetUnixFileMode(path, (UnixFileMode)0b111_101_101);
+                    Posix.Executable(path);
             }
 
             var otherRepo = Path.Combine(other.Root, "other-repo");

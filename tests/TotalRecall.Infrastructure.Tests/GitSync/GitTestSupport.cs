@@ -6,6 +6,22 @@ using Xunit;
 
 namespace TotalRecall.Infrastructure.Tests.GitSync;
 
+/// <summary>Marks a script executable where that means something.</summary>
+internal static class Posix
+{
+    public static void Mode(string path, UnixFileMode mode)
+    {
+        if (!OperatingSystem.IsWindows())
+            File.SetUnixFileMode(path, mode);
+    }
+
+    public static void Executable(string path)
+    {
+        if (!OperatingSystem.IsWindows())
+            File.SetUnixFileMode(path, (UnixFileMode)0b111_101_101);
+    }
+}
+
 /// <summary>A fact that needs a POSIX <c>sh</c>: skipped on Windows and where no <c>sh</c> is on the PATH.</summary>
 internal sealed class ShFactAttribute : FactAttribute
 {
@@ -223,8 +239,7 @@ internal sealed class GitTestEnvironment : IDisposable
     private static void WriteExecutable(string path, string content)
     {
         File.WriteAllText(path, content.Replace("\r\n", "\n"));
-        if (!OperatingSystem.IsWindows())
-            File.SetUnixFileMode(path, (UnixFileMode)0b111_101_101);
+        Posix.Executable(path);
     }
 
     public void Dispose()
