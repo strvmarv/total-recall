@@ -113,7 +113,7 @@ The umbrella fixes the behavior; these are the calls it leaves open. Each marked
    (the key names, with `git_sync_machine`, are constants in Core, used by 1a-3 to write them; the rule does not use the machine id). A stored value that is empty is absent.
    This milestone writes none of them; its tests set them with `SetMeta`.
 7. **The public check, step by step.** The remote is parsed by a pure function into a GitHub `owner/repo` or "not GitHub". GitHub
-   shapes: `https://`, `http://`, `git://`, `ssh://` and `git+ssh://` URLs and the scp-like `user@github.com:owner/repo`, host
+   shapes: `https://`, `http://`, `git://`, `ssh://`, `git+ssh://` and `ssh+git://` URLs and the scp-like `user@github.com:owner/repo`, host
    `github.com` compared without regard to case, any user-info, port and trailing `/` ignored, `repo` with an optional `.git`
    suffix, owner and repo made of letters, digits, `.`, `_` and `-` (not `.` or `..`), and exactly two path segments. Everything
    else (another host, an unresolved ssh alias, a local path, a third path segment) is **skipped**. User-info is never sent.
@@ -191,11 +191,15 @@ New files go after `Config.fs` in `TotalRecall.Core.fsproj`, in this order.
   with no network.
 - `GitSync/RepoGuard.cs`: `EvaluateIdentity(revision = Head)` (reads the settings, the identity and, when a clone exists, its manifest, then calls
   `SyncIdentity.evaluate`; no network command), `ReadManifest(revision = Head)` and `CheckPublicAsync(ct)` (parse, cache, probe, cache write,
-  once-per-process notices). It takes a clock, the store's `IMetaStore`, a `GitClient` and the probe as constructor arguments.
+  once-per-process notices). It takes a clock, the store's `IMetaStore`, the settings, a clone-directory factory (or a `GitClient?`: with no `[git_sync] remote`
+  there is no clone path, and `GitSyncPaths.For` throws for an empty remote) and the probe as constructor arguments. The settings are
+  fixed at construction (the running server keeps the config it loaded), and `EvaluateIdentity` decides `not-configured` before it
+  touches the client.
 
 ### Server, CLI, Web
 
-- `ServerComposition.OpenGit` (internal, taking the configuration and a database path so a test can call it), the `"git"` case
+- `ServerComposition.OpenGit` (internal, taking the configuration, a database path and an optional `PATH` value passed to
+  `GitExecutable.TryFind`, so a test can call it and can make `git` unfindable without changing the process environment), the `"git"` case
   and the catch filter; `FriendlyName("git")` is `git`.
 - `ConfigSetHandler` and `SetCommand` call `SyncSettingsGuard.isProtectedKey` first.
 - `ReindexEmbeddingsCommand.IsPostgres`.
@@ -203,7 +207,7 @@ New files go after `Config.fs` in `TotalRecall.Core.fsproj`, in this order.
 ### Documentation
 
 `src/TotalRecall.Core/AGENTS.md`, `src/TotalRecall.Infrastructure/AGENTS.md` (the GitSync paragraph and the file table),
-`src/TotalRecall.Server/AGENTS.md` if it lists storage modes, and the root `AGENTS.md` (the rows of the layout and the session
+`src/TotalRecall.Server/Handlers/AGENTS.md` (the `config_set` refusal), and the root `AGENTS.md` (the rows of the layout and the session
 section that mention the storage modes). The CHANGELOG `Changed` entry of decision 14. `docs/` gets no page: the feature is not
 advertised until 1b-iii.
 
@@ -234,7 +238,7 @@ request has no `Authorization` header (against a local loopback listener for the
 machine-id source supplied as text (including an empty one and 129 characters).
 
 Server and CLI: `OpenGit` with a valid configuration returns the local tool set and `storage` `git` and starts no process
-(a recording seam); with no remote, a refused remote and no `git` on a `PATH` it falls back with `sqlite (git failed)`;
+(a recording `IGitProcess` handed to the guard shows no start); with no remote, a refused remote and no `git` on a `PATH` it falls back with `sqlite (git failed)`;
 the `ReindexEmbeddingsCommand` accepts a `git` store; `ConfigSetHandler` and `SetCommand` refuse every protected key without
 touching the file or taking a snapshot, and still write an ordinary key; the web `config_set` route refuses `git_sync.remote` (the test points `TOTAL_RECALL_HOME` at a temporary directory, or uses the
 handler's table-provider and path seam, so a missing guard cannot write the real configuration).
