@@ -238,7 +238,7 @@ request has no `Authorization` header (against a local loopback listener for the
 machine-id source supplied as text (including an empty one and 129 characters).
 
 Server and CLI: `OpenGit` with a valid configuration returns the local tool set and `storage` `git` and starts no process
-(a recording `IGitProcess` handed to the guard shows no start); with no remote, a refused remote and no `git` on a `PATH` it falls back with `sqlite (git failed)`;
+(it calls only `GitExecutable.TryFind`, a file-system search); with no remote, a refused remote and no `git` on a `PATH` it falls back with `sqlite (git failed)`;
 the `ReindexEmbeddingsCommand` accepts a `git` store; `ConfigSetHandler` and `SetCommand` refuse every protected key without
 touching the file or taking a snapshot, and still write an ordinary key; the web `config_set` route refuses `git_sync.remote` (the test points `TOTAL_RECALL_HOME` at a temporary directory, or uses the
 handler's table-provider and path seam, so a missing guard cannot write the real configuration).
