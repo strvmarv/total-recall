@@ -476,6 +476,23 @@ public sealed class SyncSetupJoinTests
         Assert.Empty(Siblings(clone, "repo.left-*"));
     }
 
+    [GitFact]
+    public async Task Join_ACancelledLocalStep_KeepsTheClone_AndItsProtectiveRef()
+    {
+        var (remote, _) = await NewSyncRepository();
+        using var _ = remote;
+        using var rig = new SetupRig();
+        Assert.Equal(0, (await rig.Service().JoinAsync(remote.Url, null)).ExitCode);
+        var clone = Clone(rig, remote.Url);
+        rig.Fault = c => c.IsResetHard ? FaultingGitProcess.Failure(SyncGit.FailureKind.Cancelled) : null;
+
+        var result = await rig.Service().JoinAsync(remote.Url, null);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Empty(Siblings(clone, "repo.broken-*"));
+        Assert.True(Directory.Exists(Path.Combine(clone, ".git")), "the healthy clone was moved aside");
+    }
+
     // ---- the record, after a fault ------------------------------------------------------------------------------
 
     [GitFact]

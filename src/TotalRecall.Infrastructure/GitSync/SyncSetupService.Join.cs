@@ -135,6 +135,11 @@ public sealed partial class SyncSetupService
             {
                 client.RemoveStaleLocks();
                 var origin = await client.SetOriginAsync(p.Address, ct).ConfigureAwait(false);
+                if (!origin.IsOk && origin.Failure.Failure is { IsCancelled: true } or { IsTimedOut: true } or { IsOutputTooLarge: true })
+                {
+                    // an interrupted local step says nothing about the clone: keep it, with its protective ref
+                    return (Failed($"the clone could not be prepared: {GitText(origin.Failure)}", kept), false, null);
+                }
                 if (!origin.IsOk)
                 {
                     needFresh = true;
@@ -201,6 +206,8 @@ public sealed partial class SyncSetupService
         var reset = await client.ResetHardAsync(SyncGit.Revision.NewRemoteBranch(p.Branch), ct).ConfigureAwait(false);
         if (!reset.IsOk)
         {
+            if (reset.Failure.Failure is { IsCancelled: true } or { IsTimedOut: true } or { IsOutputTooLarge: true })
+                return (Failed($"the clone could not be brought level: {GitText(reset.Failure)}", kept), reused, null);
             if (reused && !forceFresh)
                 return await AcquireCloneAsync(p, forceFresh: true, ct).ConfigureAwait(false); // a damaged clone: move it aside, clone afresh
             return (ClassifyFailure(reset.Failure, Step.Clone, forInit: false, kept), reused, null);
