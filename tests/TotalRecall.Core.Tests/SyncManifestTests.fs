@@ -27,7 +27,7 @@ let tests =
 
         testCase "a repo id is exactly 32 lowercase hex digits" <| fun _ ->
             Expect.isTrue (isValidRepoId id32) "valid"
-            for bad in [ id32.Substring 1; id32 + "0"; id32.ToUpperInvariant(); "g" + id32.Substring 1; "" ] do
+            for bad in [ id32.Substring 1; id32 + "0"; id32.ToUpperInvariant(); "g" + id32.Substring 1; ""; "\u0662" + id32.Substring 1; id32.Substring(0, 31) + "\n" ] do
                 Expect.isFalse (isValidRepoId bad) bad
 
         testCase "render writes the single line of decision 1, byte for byte" <| fun _ ->
@@ -43,14 +43,25 @@ let tests =
             let text = Encoding.UTF8.GetString bytes
             Expect.stringContains text "\"created_by\":\"a\\\"b\\\\c\\n\\t\\u0001\u00e9\"" "escaped"
 
+        testCase "render uses the short escapes and lower-case hex, and accepts a valid surrogate pair" <| fun _ ->
+            let text = Encoding.UTF8.GetString(render id32 "\r\b\f\u001f\u007f" "2026-11-15T10:00:00Z")
+            Expect.stringContains text "\"created_by\":\"\\r\\b\\f\\u001f\u007f\"" "escapes"
+            let emoji = render id32 "\U0001F600" "2026-11-15T10:00:00Z"
+            Expect.isTrue (Encoding.UTF8.GetString emoji |> fun t -> t.Contains "\U0001F600") "pair kept"
+
         testCase "render refuses a lone surrogate, a bad id and a bad timestamp" <| fun _ ->
             let throws f = Expect.throwsT<ArgumentException> f "ArgumentException"
             let lone = "a" + string (char 0xD800) + "b"
             throws (fun () -> render id32 lone "2026-11-15T10:00:00Z" |> ignore)
+            throws (fun () -> render id32 ("a" + string (char 0xDC00)) "2026-11-15T10:00:00Z" |> ignore)
+            throws (fun () -> render id32 ("a" + string (char 0xD800)) "2026-11-15T10:00:00Z" |> ignore)
             throws (fun () -> render "nope" "x" "2026-11-15T10:00:00Z" |> ignore)
             throws (fun () -> render id32 "x" "2026-11-15 10:00:00" |> ignore)
             throws (fun () -> render id32 "x" "2026-11-15T10:00:00.000Z" |> ignore)
 
         testCase "classifyFormat never throws (property)" <| fun _ ->
-            Check.QuickThrowOnFailure(fun (s: string) -> classifyFormat (if isNull s then "" else s) |> ignore)
+            Check.QuickThrowOnFailure(fun (s: string) ->
+                let s = if isNull s then "" else s
+                classifyFormat s |> ignore
+                classifyFormat ("total-recall/v" + s) |> ignore)
     ]
