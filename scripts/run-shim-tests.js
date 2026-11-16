@@ -37,6 +37,7 @@ export const SHIM_TEST_TARGETS = [
   'scripts/update-check-offline.test.js',
   'scripts/run-shim-tests.test.js',
   'hooks/hooks.config.test.js',
+  'hooks/claude-hooks.test.js',
   'hooks/session-start/whats-new.test.js',
 ];
 
