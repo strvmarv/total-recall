@@ -6,18 +6,6 @@ using Xunit;
 
 namespace TotalRecall.Infrastructure.Tests.GitSync;
 
-/// <summary>A fact that needs a POSIX <c>sh</c>: skipped on Windows and where no <c>sh</c> is on the PATH.</summary>
-internal sealed class ShFactAttribute : FactAttribute
-{
-    public ShFactAttribute()
-    {
-        if (OperatingSystem.IsWindows())
-            Skip = "needs a POSIX sh";
-        else if (!File.Exists("/bin/sh") && !File.Exists("/usr/bin/sh"))
-            Skip = "no sh found";
-    }
-}
-
 /// <summary>A throwaway directory with stub "git" scripts in it.</summary>
 internal sealed class StubDirectory : IDisposable
 {
