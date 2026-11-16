@@ -140,6 +140,38 @@ public sealed class GitSyncScannerStampTests
         Assert.NotEqual(afterFirst.ScannedContentHash, row.ScannedContentHash);
     }
 
+    [Theory]
+    [InlineData("content")]
+    [InlineData("pin")]
+    public void AnUpdate_KeepsTheBaseAndEveryColumnItDoesNotOwn(string change)
+    {
+        using var rig = new ScanRig();
+        rig.AddMemory(Tier.Hot, A, "one");
+        Scan(rig, T1);
+        var seeded = rig.Rows()[A] with
+        {
+            BaseJson = BaseJson(A, Tier.Hot, Stamp(1000), Stamp(2000), Stamp(3000)),
+            RepushGroups = "tier",
+            PushingStamps = "{\"content\":\"x\"}",
+            BlockedHash = "bh",
+            BlockedReason = "secret",
+            AllowedHash = "ah",
+        };
+        GitSyncRows.Write(rig.Connection, seeded);
+        if (change == "content")
+            rig.Store.Update(Tier.Hot, ContentType.Memory, A, new UpdateEntryOpts { Content = "two" });
+        else
+            rig.Pin(A);
+
+        Scan(rig, T2);
+
+        var row = rig.Rows()[A];
+        Assert.Equal(seeded.BaseJson, row.BaseJson);
+        Assert.Equal((seeded.RepushGroups, seeded.PushingStamps, seeded.BlockedHash, seeded.BlockedReason, seeded.AllowedHash),
+            (row.RepushGroups, row.PushingStamps, row.BlockedHash, row.BlockedReason, row.AllowedHash));
+        Assert.NotEqual(seeded, row);
+    }
+
     [Fact]
     public void Scan_TagsOnlyChange_ChangesTheTagsHash_AndIssuesNoStamp()
     {

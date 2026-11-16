@@ -49,8 +49,10 @@ public sealed partial class GitSyncScanner
                 Kinds.Add(Kind.FarFuture);
             if (issued.Clock is not null)
             {
+                // Persisted only when it moved: a far-future stamp leaves the clock as it was.
+                if (Clock is null || !issued.Clock.Value.Equals(Clock.Value))
+                    ClockChanged = true;
                 Clock = issued.Clock;
-                ClockChanged = true;
             }
             stamp = issued.Stamp;
             return true;
@@ -197,6 +199,8 @@ public sealed partial class GitSyncScanner
     private static GitSyncRow? FreshRow(string id, SnapshotEntry entry, Issuer issuer, List<SkippedItem> skipped)
     {
         var view = entry.View;
+        // A new row has no floor, and a clock at the end of the range was reset by the guard, so a failure here is
+        // practically unreachable; if it happens the entry is left alone and the next scan tries again.
         if (!issuer.TryIssue(null, out var cs))
         {
             skipped.Add(new SkippedItem(id, "content", ExhaustedReason));
