@@ -65,7 +65,7 @@ pieces:
    commands and cannot join a snapshot), reads the `sticky` column from the hot table, and maps rows with the store's row
    mapper. The scan never writes a memory, knowledge, vector or `import_log` row.
    **An entry that cannot be read** (an unknown `source_tool`, tags that are not valid JSON) **or whose id is in two memory
-   tables** is **skipped for this scan** and listed in the result's `Skipped` list with its id and the reason: its row is
+   tables** is **skipped for this scan** and listed in the result's `Skipped` list (an item is the id, the group, none for a whole-entry skip, and the reason): its row is
    untouched and it is never reported as a local deletion. One bad entry never fails the scan.
    Entries are processed **in id order** (ordinal), so the counters of the stamps do not depend on the table scan order.
 
@@ -172,7 +172,7 @@ mean differs from what the row holds.
 
 15. `ScanOutcome` is `Done(ScanSummary)`, `NotJoined` or `Failed(reason)`. `ScanSummary` carries the counts (new,
     content, tags, sticky, tier, left, reactivated, ineligible), the `LocalDeletions` list (id and the two flags) and the `Skipped`
-    list (id and reason). It is plain data: the cycle of 1b-i-3 reads it, and no text for the user is produced here.
+    list (id, group or none, reason). It is plain data: the cycle of 1b-i-3 reads it, and no text for the user is produced here.
 
 ## Requirements on the later parts
 
@@ -185,8 +185,12 @@ repeated in their own definitions, because the scan's results are only correct i
   umbrella's visit-set text; it is needed for the merge table's "drop the row" case.
 - **An entry the scan listed in `Skipped` for a group is exempt for that group:** the apply's "the scanned hash, `local_sticky`
   or `local_tier` differs from the row's" deferral must not hold `L` back for it (it would on every cycle, and no push
-  would ever happen), the apply must not overwrite that group from the repository, and the push must not write it. The
-  entry is retried by every scan and listed, like an `apply-failed` entry.
+  would ever happen), the apply must not overwrite that group from the repository, and the push must not write it. For
+  that group the apply also leaves the scanned hash, `local_sticky` or `local_tier` **exactly as the scan left it** (the
+  first bullet applies to the other groups only), or the next scan would see no change and the unstamped edit would never
+  be stamped. The entry is retried by every scan and listed, like an `apply-failed` entry. A `Skipped` item whose group
+  is none (an entry that could not be read, or whose id is in two tables) is treated the same way for the whole entry: not
+  a deferral, nothing applied to it, nothing pushed for it.
 - **1b-ii acts on `LocalDeletions`** and is the only part that creates `forgotten` rows.
 
 ## Interfaces (for the plan)
