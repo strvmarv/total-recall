@@ -12,6 +12,9 @@
 // Pass 3 is hand-scanned, not a backtracking regex: on nested hostile input the regex form grows
 // about cubically. Each scan is linear and is equivalent to the regex it replaces
 // (\[([^\]]*)\]\([^)]*\) and <(https?://[^<>WS]*)>, scheme ASCII-only and case-insensitive).
+// The loop runs at most one pass per level of nested matches, plus a last one that changes nothing, so the
+// work on hostile input is bounded by counting passes (Sanitize(text, out passes)), not by time; see the
+// spec, section 2.
 
 using System.Text;
 
@@ -22,8 +25,13 @@ public static class SummarySanitizer
     public const int MaxInputChars = 4000;
     public const int MaxSummary = 200;
 
-    public static string Sanitize(string? text)
+    public static string Sanitize(string? text) => Sanitize(text, out _);
+
+    // The same, also reporting how many iterations the pass-3 loop ran (the last one, which changes nothing,
+    // included; 0 when the input is null or empty). The tests bound that count instead of the time it takes.
+    internal static string Sanitize(string? text, out int passes)
     {
+        passes = 0;
         if (string.IsNullOrEmpty(text)) return string.Empty;
 
         var s = RemoveControl(RemoveAnsi(text));
@@ -38,6 +46,7 @@ public static class SummarySanitizer
         // Each pass that changes the text shortens it, so the loop ends.
         while (true)
         {
+            passes++;
             var before = s;
             s = FlattenLinks(s);
             s = UnbracketUrls(s);
