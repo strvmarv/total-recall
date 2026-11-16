@@ -64,8 +64,8 @@ let commandTableTests =
     testList "SyncGit.commandArgs: the closed command table" [
         testCase "Version and ConfigGetSshCommand" <| fun _ ->
             Expect.equal (args Version) [ "--version" ] "version"
-            Expect.equal (args (ConfigGetSshCommand GlobalScope)) [ "config"; "--global"; "--get"; "core.sshCommand" ] "global"
-            Expect.equal (args (ConfigGetSshCommand SystemScope)) [ "config"; "--system"; "--get"; "core.sshCommand" ] "system"
+            Expect.equal (args (ConfigGetSshCommand GlobalScope)) [ "config"; "--global"; "--includes"; "--get"; "core.sshCommand" ] "global"
+            Expect.equal (args (ConfigGetSshCommand SystemScope)) [ "config"; "--system"; "--includes"; "--get"; "core.sshCommand" ] "system"
 
         testCase "Init and Clone carry the target directory after --" <| fun _ ->
             Expect.equal (args (Init("main", "/d/repo"))) [ "init"; "-b"; "main"; "--template="; "--"; "/d/repo" ] "init"
@@ -119,7 +119,7 @@ let commandTableTests =
 
 let private allowedDashed =
     set [ "--version"; "--global"; "--system"; "--get"; "-b"; "--template="; "--depth=1"; "--no-tags"; "--single-branch"
-          "--branch"; "--progress"; "--hard"; "-fd"; "--is-ancestor"; "--verify"; "--quiet"; "-r"; "-z"; "--no-renames"
+          "--branch"; "--progress"; "--hard"; "-fd"; "--includes"; "--is-ancestor"; "--verify"; "--quiet"; "-r"; "-z"; "--no-renames"
           "--raw"; "-l"; "-A"; "--cached"; "--exit-code"; "--no-verify"; "-m"; "-c"; "--" ]
 
 let private forbidden =

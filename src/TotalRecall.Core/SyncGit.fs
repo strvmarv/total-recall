@@ -223,8 +223,8 @@ let private stagePath (s: StageScope) : string =
 let commandArgs (cmd: GitCommand) : string list =
     match cmd with
     | Version -> [ "--version" ]
-    | ConfigGetSshCommand GlobalScope -> [ "config"; "--global"; "--get"; "core.sshCommand" ]
-    | ConfigGetSshCommand SystemScope -> [ "config"; "--system"; "--get"; "core.sshCommand" ]
+    | ConfigGetSshCommand GlobalScope -> [ "config"; "--global"; "--includes"; "--get"; "core.sshCommand" ]
+    | ConfigGetSshCommand SystemScope -> [ "config"; "--system"; "--includes"; "--get"; "core.sshCommand" ]
     | Init(b, d) -> [ "init"; "-b"; b; "--template="; "--"; d ]
     | Clone(u, b, d) -> [ "clone"; "--depth=1"; "--no-tags"; "--single-branch"; "--branch"; b; "--template="; "--"; u; d ]
     | LsRemote(Origin, b) -> [ "ls-remote"; "--"; "origin"; "refs/heads/" + b ]

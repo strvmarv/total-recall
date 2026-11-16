@@ -18,6 +18,20 @@ internal sealed class ShFactAttribute : FactAttribute
     }
 }
 
+/// <summary>A fact that needs both a usable <c>git</c> and a POSIX <c>sh</c>.</summary>
+internal sealed class GitShFactAttribute : FactAttribute
+{
+    public GitShFactAttribute()
+    {
+        if (OperatingSystem.IsWindows())
+            Skip = "needs a POSIX sh";
+        else if (!File.Exists("/bin/sh") && !File.Exists("/usr/bin/sh"))
+            Skip = "no sh found";
+        else
+            Skip = GitFactAttribute.ComputeReason();
+    }
+}
+
 /// <summary>A fact that needs a usable <c>git</c> (2.28 or later); skipped with a reason when there is none.</summary>
 internal sealed class GitFactAttribute : FactAttribute
 {

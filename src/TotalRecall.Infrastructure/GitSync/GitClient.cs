@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.FSharp.Core;
 using TotalRecall.Core;
 
 namespace TotalRecall.Infrastructure.GitSync;
@@ -43,6 +44,8 @@ public sealed partial class GitClient
     private readonly GitSyncPaths _paths;
     private readonly GitClientOptions _options;
     private readonly object _setupGate = new();
+    private readonly SemaphoreSlim _sshGate = new(1, 1);
+    private (bool Computed, string? Command) _ssh;
 
     public GitClient(IGitProcess process, string executable, GitSyncPaths paths, GitClientOptions? options = null)
     {
@@ -135,6 +138,108 @@ public sealed partial class GitClient
         }
     }
 
+    // ---- the network: ssh options and redaction --------------------------------------------------------------
+
+    private static FSharpOption<string> Opt(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? FSharpOption<string>.None : FSharpOption<string>.Some(value);
+
+    /// <summary>A name set in the client's overrides is authoritative (a null value means absent); else the process's own.</summary>
+    private string? EnvironmentValue(string name) =>
+        _options.EnvironmentOverrides is not null && _options.EnvironmentOverrides.TryGetValue(name, out var overridden)
+            ? overridden
+            : Environment.GetEnvironmentVariable(name);
+
+    /// <summary>
+    /// The <c>GIT_SSH_COMMAND</c> for network calls, composed once per instance: the user's command (the process's own
+    /// <c>GIT_SSH_COMMAND</c>, else <c>core.sshCommand</c> from the global and then the system configuration (included
+    /// files followed), never the
+    /// configuration of whatever repository the process is in) with <c>-o BatchMode=yes -o ConnectTimeout=8</c>
+    /// appended. Null leaves the variable alone (only <c>GIT_SSH</c> is set, which does not take OpenSSH options).
+    /// </summary>
+    private async Task<(string? Command, GitResult? Failure)> SshCommandAsync(CancellationToken cancellationToken)
+    {
+        await _sshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_ssh.Computed)
+                return (_ssh.Command, null);
+
+            var envCommand = EnvironmentValue("GIT_SSH_COMMAND");
+            string? configCommand = null;
+            if (string.IsNullOrWhiteSpace(envCommand))
+            {
+                foreach (var scope in new[] { SyncGit.ConfigScope.GlobalScope, SyncGit.ConfigScope.SystemScope })
+                {
+                    var read = await RunAsync(SyncGit.GitCommand.NewConfigGetSshCommand(scope), _options.LocalTimeout, cancellationToken)
+                        .ConfigureAwait(false);
+                    if (read.Failure is null)
+                    {
+                        configCommand = Text(read).Trim();
+                        break;
+                    }
+                    if (read.ExitCode != 1) // 1 is "unset"; anything else (a timeout, no git) is not an answer: fail the call, cache nothing
+                        return (null, read);
+                }
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            var command = SyncGit.composeSshCommand(
+                new SyncGit.SshSource(Opt(envCommand), Opt(configCommand), Opt(EnvironmentValue("GIT_SSH")), Opt(EnvironmentValue("GIT_SSH_VARIANT"))));
+            var value = command is null ? null : command.Value;
+            _ssh = (true, value);
+            return (value, null);
+        }
+        finally
+        {
+            _sshGate.Release();
+        }
+    }
+
+    /// <summary>The literal pieces of a URL's user-info that must never appear in any text: the whole and the password part.</summary>
+    private static IReadOnlyList<string> RedactValuesOf(string? url)
+    {
+        var values = new List<string>();
+        var info = string.IsNullOrEmpty(url) ? null : SyncGit.userInfoOf(url);
+        if (info is not null)
+        {
+            var whole = info.Value;
+            values.Add(whole);
+            var colon = whole.IndexOf(':');
+            if (colon >= 0)
+                values.Add(whole[(colon + 1)..]);
+        }
+        return values.Where(v => v.Length >= 8).ToList();
+    }
+
+    /// <summary>A call that may use ssh or carry a credential in its URL.</summary>
+    private async Task<GitResult> RunNetworkAsync(
+        SyncGit.GitCommand command,
+        string? url,
+        TimeSpan timeout,
+        Action<string>? onStderr,
+        CancellationToken cancellationToken,
+        long? maxStdoutBytes = null)
+    {
+        if (cancellationToken.IsCancellationRequested)
+            return Synthetic(SyncGit.FailureKind.Cancelled, "");
+        Dictionary<string, string?>? extra = null;
+        string? ssh;
+        try
+        {
+            var composed = await SshCommandAsync(cancellationToken).ConfigureAwait(false);
+            if (composed.Failure is not null)
+                return composed.Failure;
+            ssh = composed.Command;
+        }
+        catch (OperationCanceledException)
+        {
+            return Synthetic(SyncGit.FailureKind.Cancelled, "");
+        }
+        if (ssh is not null)
+            extra = new Dictionary<string, string?> { ["GIT_SSH_COMMAND"] = ssh };
+        return await RunAsync(command, timeout, cancellationToken, onStderr, extra, RedactValuesOf(url), maxStdoutBytes).ConfigureAwait(false);
+    }
+
     private static GitOutcome<NoValue> Done(GitResult result) =>
         result.Failure is null ? GitOutcome<NoValue>.Ok(default) : GitOutcome<NoValue>.Fail(result);
 
@@ -182,11 +287,12 @@ public sealed partial class GitClient
         TimeSpan? timeout = null,
         Action<string>? onStderr = null,
         CancellationToken cancellationToken = default) =>
-        Done(await RunAsync(
+        Done(await RunNetworkAsync(
             SyncGit.GitCommand.NewClone(url, branch, _paths.CloneDirectory),
+            url,
             timeout ?? _options.NetworkTimeout,
-            cancellationToken,
-            onStderr).ConfigureAwait(false));
+            onStderr,
+            cancellationToken).ConfigureAwait(false));
 
     /// <summary>
     /// The object id of <c>refs/heads/&lt;branch&gt;</c> on the remote, or null when the remote has no such branch
@@ -199,11 +305,12 @@ public sealed partial class GitClient
         Action<string>? onStderr = null,
         CancellationToken cancellationToken = default)
     {
-        var result = await RunAsync(
+        var result = await RunNetworkAsync(
             SyncGit.GitCommand.NewLsRemote(remote, branch),
+            remote.IsUrl ? ((SyncGit.RemoteRef.Url)remote).Item : null,
             timeout ?? _options.NetworkTimeout,
-            cancellationToken,
-            onStderr).ConfigureAwait(false);
+            onStderr,
+            cancellationToken).ConfigureAwait(false);
         if (result.Failure is not null)
             return GitOutcome<string?>.Fail(result);
         var head = SyncGit.parseLsRemote(branch, Text(result));
@@ -219,11 +326,12 @@ public sealed partial class GitClient
         TimeSpan? timeout = null,
         Action<string>? onStderr = null,
         CancellationToken cancellationToken = default) =>
-        Done(await RunAsync(
+        Done(await RunNetworkAsync(
             SyncGit.GitCommand.NewFetch(branch),
+            null,
             timeout ?? _options.NetworkTimeout,
-            cancellationToken,
-            onStderr).ConfigureAwait(false));
+            onStderr,
+            cancellationToken).ConfigureAwait(false));
 
     /// <summary>Moves the work tree and index to a revision, discarding local changes. Refuses when the clone has no <c>.git</c>.</summary>
     public async Task<GitOutcome<NoValue>> ResetHardAsync(SyncGit.Revision revision, CancellationToken cancellationToken = default)
