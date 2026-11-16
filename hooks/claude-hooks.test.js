@@ -248,7 +248,10 @@ describe('hooks/engine-path.js', { skip }, () => {
       });
       const a = await run(withEngine);
       assert.equal(a.code, 0);
-      assert.equal(a.out, `${path.join(withEngine.binDir, getBinaryName(RID)).replaceAll('\\', '/')}\n`);
+      // engine-path.js finds the plugin root from import.meta.url, which Node resolves through symlinks
+      // (macOS: os.tmpdir() is /var/..., a link to /private/var/...). Compare real paths.
+      const expected = path.join(fs.realpathSync(withEngine.binDir), getBinaryName(RID)).replaceAll('\\', '/');
+      assert.equal(a.out, `${expected}\n`);
       const b = await run(without);
       assert.equal(b.code, 0);
       assert.equal(b.out, '');
