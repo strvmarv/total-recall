@@ -244,9 +244,10 @@ delete_guard_percent = 20               # a cycle that would delete more than ma
 There are no environment overrides: hosts such as Cursor and Codex strip the environment their MCP server
 and hooks see, so an override would be visible to some processes and not others. The config is loaded
 into a new `Core.Config.GitSyncConfig` (the F# config types live in `TotalRecall.Core`). The clone lives
-in `<directory of the database file>/sync/<first 12 hex of SHA-256(remote URL)>/repo` (next to the
-database, not in the data directory), so two databases (`TOTAL_RECALL_DB_PATH`) never share a clone and a
-respelled URL gets its own.
+in `<directory of the database file>/sync/<dbKey>/<first 12 hex of SHA-256(remote URL)>/repo` (next to the
+database, not in the data directory), where `<dbKey>` is the first 12 hex of the SHA-256 of the database file's
+name (milestone 1a-1: two database files in one directory must not share a clone, a protective ref or a lock),
+so two databases (`TOTAL_RECALL_DB_PATH`) never share a clone and a respelled URL gets its own.
 
 **The sync settings are not changeable by the agent.** `config_set` (the MCP tool, and the web UI, which
 allowlists it) refuses to write `storage.mode` and every `git_sync.*` key, and so does the CLI
@@ -488,7 +489,7 @@ A cycle has four steps, always in this order, under one lock: **scan, fetch, app
 apply are separate from fetch and push so that offline work and network work do not depend on each other.
 
 **The lock** is an OS-held file lock (released by the operating system if the process dies) at
-`<directory of the database file>/sync/lock`, **outside** the clone, so it can guard the first clone and
+`<directory of the database file>/sync/<dbKey>/lock`, **outside** the clone, so it can guard the first clone and
 survives a corrupt-clone rename. A process that cannot take it reports `busy` in the `sync` result (and in
 `status`) and, in `session_start`, waits for it for at most the stall limit; it never silently starts with
 stale state. In-process work is gated as well. Under the held lock, any stale `*.lock` file left in the
