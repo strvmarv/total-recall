@@ -82,8 +82,10 @@ The umbrella fixes the behavior; these are the calls it leaves open. Each marked
    `Invalid of reason`, `Unreadable of reason` (a git failure: an unborn `HEAD`, a corrupt clone, a blob over the cap, no `git`),
    `Newer of int` or `Ok of manifest`, and `EvaluateIdentity` returns a `GuardVerdict` holding that and the `JoinState`. The
    `JoinState` is evaluated with the manifest's `repo_id` only for `Ok`; for every other outcome it has no `repo_id` to compare.
-   `GuardVerdict.CanSync` is true only when the state is `joined` and the manifest outcome is `Ok` or `NoClone` (`NoClone`: the
-   cycle will clone, then evaluate again with the fetched manifest); a clone whose manifest is missing, invalid, unreadable or newer
+   `GuardVerdict.CanSync` is true only when the state is `joined`, the host fingerprint was available (not `HostUnverified`) and the
+   manifest outcome is `Ok` or `NoClone` (`NoClone` means no `.git` under the clone directory, checked on the file system with no
+   git call, so a present but empty directory is `NoClone` and a half-made clone with a `.git` is `Unreadable`; the cycle will
+   clone, then evaluate again with the fetched manifest); a clone whose manifest is missing, invalid, unreadable or newer
    therefore never syncs. A caller reports a newer format before `not-joined` (a newer repository must never be written to,
    whoever joined it).
 4. **The `JoinState` rule and its order.** The first check that fails decides, so the reason is stable:
@@ -99,11 +101,13 @@ The umbrella fixes the behavior; these are the calls it leaves open. Each marked
    characters after trimming. A source that does not exist or holds nothing usable is **absent**: the empty text is used, so a copy
    to **another path** is still caught and a copy to the same path on another machine is not (stated in the code and the docs of
    1a-3). A source that exists but **fails** (the `ioreg` timeout, a registry error, an unreadable file) makes the fingerprint
-   **unavailable** for this process: `evaluate` then skips check (d) (a transient failure must not read as a moved directory) and
-   the verdict carries `HostUnverified`, which 1a-3's `init` and `join` treat as "try again" and never stamp. The canonical path is
+   **unavailable** for this process (so is a path-resolution failure or a link loop): `evaluate` then skips check (d) (a transient failure
+   must not read as a moved directory), and the verdict carries `HostUnverified`, which makes `CanSync` false (the cycle skips and
+   retries) and which 1a-3's `init` and `join` treat as "try again" and never stamp. The canonical path is
    the full path of the database file with every existing component resolved through its symbolic links (walked one component at a
    time with `ResolveLinkTarget`, so macOS `/var` and a symlinked home directory give one spelling), trailing separators removed,
-   and lower-cased on Windows and macOS (default case-insensitive file systems). It is computed once per process. It never uses
+   a `\\?\` prefix stripped, and lower-cased with the invariant culture on Windows and macOS (default case-insensitive file
+   systems; an 8.3 short-name spelling is not resolved, and its only cost is a re-join). It is computed once per process. It never uses
    the hostname.
 6. **Identity is read through `IMetaStore`.** `GitSyncIdentity` reads `git_sync_remote`, `git_sync_repo_id` and `git_sync_host`
    (the key names, with `git_sync_machine`, are constants in Core, used by 1a-3 to write them; the rule does not use the machine id). A stored value that is empty is absent.
@@ -116,7 +120,7 @@ The umbrella fixes the behavior; these are the calls it leaves open. Each marked
    The probe is `GET https://api.github.com/repos/<owner>/<repo>`: no `Authorization` header and no cookies, `Accept:
    application/vnd.github+json`, a `User-Agent` of `total-recall`, redirects followed at most 3 times, a 5-second limit, and
    the body is never read. `200` is **public** (refused). `404` is **private or missing** (proceeds). Anything else (`401`, `403`,
-   `429`, `5xx`, a redirect loop, a timeout, a network error, or a final response that did not come from `api.github.com`) is
+   `429`, `5xx`, a redirect loop, a timeout, a network error, or a final response that did not come from the host of the base address the probe was built with, `api.github.com` in production) is
    **unknown**: the caller warns once per process and proceeds. A skipped host is told once per process. The two notices are
    returned as text on the verdict (the verbs and the cycle print them). **There is no in-process memo of the verdict**: every
    call goes through the cache of decision 8 and, on a miss, the probe; only the notices are once per `RepoGuard` instance (the
@@ -147,15 +151,16 @@ The umbrella fixes the behavior; these are the calls it leaves open. Each marked
     string is still Postgres, as before.
 13. **The denylist is one pure predicate, called from three places.** `SyncSettingsGuard.isProtectedKey` (Core) is true for a key
     whose first dot-separated segment is `git_sync` (any depth, and bare `git_sync`, which would replace the table), for bare
-    `storage` (which would replace the table), and for `storage.mode` and **`storage.connection_string` (beyond)**: with no `mode`
+    `storage` (which would replace the table), and for `storage.mode`, **`storage.connection_string` (beyond)** and every key beneath them (`ConfigWriter` replaces a scalar at an
+    intermediate segment with a table, so `storage.mode.x` would erase `mode`): with no `mode`
     set, which is the shipped default, a connection string alone selects Postgres (`OpenProduction`, `IsPostgres`), so leaving it
     writable would let the agent change the storage backend by the other door; the web UI already lists both keys as read-only.
     Segments are trimmed of whitespace and compared without regard to case, and
     a key with an empty segment is also refused (it cannot be a real setting, and refusing it is the safe side). The MCP
     `ConfigSetHandler` and the CLI `SetCommand` call it before anything is read, snapshotted or written; the web UI reaches the
     same handler through `ToolAllowlist`, so one check covers MCP and web, and a test asserts that route. The refusal names the key and
-    says: "This setting is changed by you, in `config.toml` or with `total-recall sync init`, `sync join` and `sync leave`; an agent
-    cannot change it." The CLI exits 2; the MCP call fails with an `ArgumentException` (the existing "bad argument" path of
+    says: "This setting is changed by you, in `config.toml`; an agent cannot change it." (1a-3 adds the `sync` commands to the text
+    when they exist.) The CLI exits 2; the MCP call fails with an `ArgumentException` (the existing "bad argument" path of
     `ErrorTranslator`).
 14. **A behavior change, announced.** `total-recall config set storage.mode cortex` (and `storage.connection_string`) worked before and
     is refused now (the web UI already shows the keys as read-only). The CHANGELOG says so and where to set them instead.
@@ -178,14 +183,14 @@ New files go after `Config.fs` in `TotalRecall.Core.fsproj`, in this order.
 ### Infrastructure (C#)
 
 - `GitSync/ManifestFile.cs`: parse over the Core rules (`System.Text.Json` reader with duplicate-key detection; render is the Core
-  function).
+  function), the 64 KiB read cap and the permissive first look for a newer `format` of decision 1.
 - `GitSync/HostIdentity.cs`: `MachineIdReader` (the three sources, each behind a seam so a test supplies the text) and the canonical
   database path; `Current` is computed once per process.
 - `GitSync/GitSyncIdentityStore.cs`: reads the three keys.
 - `GitSync/PublicRepoProbe.cs`: the `HttpClient` call behind `IPublicRepoProbe` (`Task<int?> GetStatusAsync`), so every test runs
   with no network.
-- `GitSync/RepoGuard.cs`: `EvaluateIdentity()` (reads the settings, the identity and, when a clone exists, its manifest, then calls
-  `SyncIdentity.evaluate`; no network command), `ReadManifest()` and `CheckPublicAsync(ct)` (parse, cache, probe, cache write,
+- `GitSync/RepoGuard.cs`: `EvaluateIdentity(revision = Head)` (reads the settings, the identity and, when a clone exists, its manifest, then calls
+  `SyncIdentity.evaluate`; no network command), `ReadManifest(revision = Head)` and `CheckPublicAsync(ct)` (parse, cache, probe, cache write,
   once-per-process notices). It takes a clock, the store's `IMetaStore`, a `GitClient` and the probe as constructor arguments.
 
 ### Server, CLI, Web
@@ -206,20 +211,20 @@ advertised until 1b-iii.
 
 Pure (Core, Expecto and FsCheck): `classifyFormat` for `total-recall/v1`, `v2`, `v10`, `v999999999`, `v1000000000`, `v0`, `v01`,
 `v-1`, `v1.0`, an empty string, a different prefix and upper case; `isValidRepoId`; `render` against a fixed vector and a round
-trip; `evaluate` for every reason, the order of decision 4 (a case failing two checks reports the earlier), and a property that
-it is total and that `joined` needs every input to agree; a hostname-only change leaves `joined`; `hostFingerprint` against a
+trip; `evaluate` for every reason, the order of decision 4 (a case failing two checks reports the earlier), and properties that it is total and that, with an available fingerprint, `joined` needs every input to agree (the unavailable case is tested on its own,
+and `CanSync` is false for it); a hostname-only change leaves `joined`; `hostFingerprint` against a
 fixed vector, and a property that a different path or machine id gives a different value; `parseGitHubSlug` over the shapes of
 decision 7 (an https URL with a token as user-info, an scp-like address, a port, `.git`, a trailing slash, an upper-case host, an
 ssh alias, `gitlab.com`, a local path, three segments, `..`, `https://github.com@evil.com/o/r`, a repository named `.git`); `ofStatus` for 200, 404, 301, 401, 403, 429, 500 and none; cache
 parse, format and `isFresh` (exactly 24 hours, one second over, a timestamp in the future by 4 and by 6 minutes);
-`isProtectedKey` for the keys of decision 13 and for look-alikes that must stay writable (`storage`-prefixed look-alikes such as
+`isProtectedKey` for the keys of decision 13 (including `storage.mode.x` and `storage.connection_string.x`) and for look-alikes that must stay writable (`storage`-prefixed look-alikes such as
 `storagex.mode`, `tiers.hot.max_entries`, `git_syncx.remote`, `embedding.provider`).
 
 Infrastructure (real `git` where a clone is needed, through the 1a-1 support code, skipped with a reason when `git` is missing):
 `ManifestFile` over valid and every refused input of decision 1 (duplicate key, exactly 4096 bytes accepted and 4097 refused, BOM,
 invalid UTF-8, wrong `repo_id`, non-string `format`, a newer format with otherwise broken fields, a newer format larger than
 4 KiB and one with a BOM, both `Newer`), and `ReadManifest` for a symlink, a directory and a submodule named `manifest.json`, an
-unborn `HEAD` and a corrupt clone (`Unreadable`); `RepoGuard.EvaluateIdentity` against a store whose `_meta` is
+unborn `HEAD` and a corrupt clone (`Unreadable`), and an empty clone directory (`NoClone`); `RepoGuard.EvaluateIdentity` against a store whose `_meta` is
 set to each state and a clone holding a manifest, asserting through a recording `IGitProcess` that no `clone`, `ls-remote`,
 `fetch` or `push` started in any case; a hostname change leaves `joined`; a copied data directory (a different path) is
 `data-directory-moved`; the same database reached through a symlinked directory gives the same fingerprint; a failing machine-id
@@ -256,7 +261,7 @@ catalog; none is added).
 7. Given a remote on another host, an ssh alias or a local path, when the public check runs, then no request is made and the user
    is told once that the repository must be kept private.
 8. Given a private answer less than 24 hours old for the same repository, when the check runs again, then no second request is
-   made; given an older answer, a different repository or an answer stamped in the future, then it asks again; given a public
+   made; given an older answer, a different repository or an answer stamped more than five minutes in the future, then it asks again; given a public
    answer, then it is never reused.
 9. Given any public check, then the request carries no credentials and no part of the remote's user-info.
 10. Given `[storage] mode = "git"` with a usable remote and `git` installed, when the app opens its store, then it opens as the local
@@ -266,8 +271,8 @@ catalog; none is added).
     its store, then it falls back to the local store, reports `sqlite (git failed)`, and the message names the reason without
     any credential from the remote.
 12. Given a store in `git` mode, when `reindex-embeddings` runs, then it treats it as a local store.
-13. Given a request to set `storage.mode`, `storage.connection_string` or any `git_sync` setting (in any letter case, with spaces around a part, or the bare
-    table name), when it comes from the MCP tool, the web UI or the `config set` command, then it is refused with a message
+13. Given a request to set `storage.mode`, `storage.connection_string` or any `git_sync` setting (in any letter case, with spaces around a part, as the bare
+    table name, or as a key beneath the two storage settings), when it comes from the MCP tool, the web UI or the `config set` command, then it is refused with a message
     saying the user changes it, the config file is untouched and no snapshot is taken; given an ordinary key, then it is
     written as before.
 14. Given the existing automated checks, the shim tests, the tool catalog check and the release build, when they run, then they
