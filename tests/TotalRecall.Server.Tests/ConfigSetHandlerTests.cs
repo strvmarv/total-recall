@@ -43,6 +43,39 @@ public sealed class ConfigSetHandlerTests : IDisposable
             userConfigPath: _configPath);
     }
 
+    [Theory]
+    [InlineData("git_sync.remote")]
+    [InlineData("storage.mode")]
+    [InlineData("storage.connection_string")]
+    [InlineData("storage.mode.x")]
+    [InlineData("GIT_SYNC.interval_seconds")]
+    [InlineData("storage")]
+    [InlineData(" storage . connection_string ")]
+    public async Task ProtectedKey_IsRefused_BeforeAnythingIsReadOrWritten(string key)
+    {
+        var providerCalls = 0;
+        var handler = new ConfigSetHandler(
+            tableProvider: () => { providerCalls++; return new TomlTable(); },
+            userConfigPath: _configPath);
+        var json = JsonSerializer.Serialize(new { key, value = "x" });
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(
+            () => handler.ExecuteAsync(Args(json), CancellationToken.None));
+
+        Assert.Contains(key, ex.Message);
+        Assert.Contains("an agent cannot change it", ex.Message);
+        Assert.False(File.Exists(_configPath));
+        Assert.Equal(0, providerCalls);
+    }
+
+    [Fact]
+    public async Task LookAlikeKey_IsStillWritten()
+    {
+        var handler = NewHandler();
+        await handler.ExecuteAsync(Args("""{"key":"storagex.mode","value":"x"}"""), CancellationToken.None);
+        Assert.True(File.Exists(_configPath));
+    }
+
     [Fact]
     public async Task HappyPath_WritesStringValue()
     {

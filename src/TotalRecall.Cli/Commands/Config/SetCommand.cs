@@ -91,6 +91,14 @@ public sealed class SetCommand : ICliCommand
             return 2;
         }
 
+        // The storage mode and the sync settings are the user's to change: refuse before anything is read,
+        // snapshotted or written.
+        if (Core.SyncSettingsGuard.isProtectedKey(key))
+        {
+            Console.Error.WriteLine(Core.SyncSettingsGuard.refusal(key));
+            return 2;
+        }
+
         var coerced = Coerce(rawValue);
 
         IConfigLoader loader = _loader ?? new ConfigLoader();

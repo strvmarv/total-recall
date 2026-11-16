@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- **`total-recall config set` and the `config_set` tool now refuse `storage.mode`, `storage.connection_string` and every `git_sync` setting (#128, part of #93).** These settings decide where the store lives and which repository memories are synced to, so only the user changes them, by hand in `config.toml`; an agent that read a planted memory can no longer redirect them. `config set storage.mode cortex` used to work and is refused now. The web UI already showed both storage keys as read-only.
+
 ## 4.8.0 - 2026-11-16
 
 ### Added

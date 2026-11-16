@@ -72,6 +72,10 @@ public sealed class ConfigSetHandler : IToolHandler
         if (string.IsNullOrEmpty(key))
             throw new ArgumentException("key must be a non-empty string");
 
+        // The storage mode and the sync settings are the user's to change (an agent must not redirect the store).
+        if (TotalRecall.Core.SyncSettingsGuard.isProtectedKey(key))
+            throw new ArgumentException(TotalRecall.Core.SyncSettingsGuard.refusal(key));
+
         if (!args.TryGetProperty("value", out var vEl))
             throw new ArgumentException("value is required");
 

@@ -81,6 +81,28 @@ public sealed class SetCommandTests : IDisposable
         Assert.Equal(2, code);
     }
 
+    [Theory]
+    [InlineData("git_sync.remote")]
+    [InlineData("storage.mode")]
+    [InlineData("storage.connection_string")]
+    [InlineData("storage.mode.x")]
+    [InlineData("GIT_SYNC.interval_seconds")]
+    [InlineData("storage")]
+    public async Task ProtectedKey_Exit2_NothingWritten_NoSnapshot(string key)
+    {
+        var path = TempConfigPath();
+        var snapshots = new FakeSnapshotStore();
+        var cmd = new SetCommand(new FakeLoader(), path, snapshots, new StringWriter());
+
+        var code = await cmd.RunAsync(new[] { key, "x" });
+
+        Assert.Equal(2, code);
+        Assert.Contains(key, _errWriter.ToString());
+        Assert.Contains("an agent cannot change it", _errWriter.ToString());
+        Assert.False(File.Exists(path));
+        Assert.Empty(snapshots.Created);
+    }
+
     [Fact]
     public async Task HappyPath_NoSnapshot_WritesFile()
     {
