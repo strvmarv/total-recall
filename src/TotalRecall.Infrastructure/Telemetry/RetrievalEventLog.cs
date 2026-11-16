@@ -166,6 +166,21 @@ UPDATE retrieval_events
     }
 
     /// <summary>
+    /// The newest <c>retrieval_events</c> timestamp strictly older than
+    /// <paramref name="beforeMs"/> (any <c>query_source</c>), or null when
+    /// there is none. Feeds <c>lastSessionAge</c>.
+    /// </summary>
+    public long? GetLastEventTimestampBefore(long beforeMs)
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "SELECT MAX(timestamp) FROM retrieval_events WHERE timestamp < $before";
+        cmd.Parameters.AddWithValue("$before", beforeMs);
+        var result = cmd.ExecuteScalar();
+        if (result is null || result is DBNull) return null;
+        return Convert.ToInt64(result);
+    }
+
+    /// <summary>
     /// SELECT events with optional filters, ordered by <c>timestamp DESC</c>.
     /// </summary>
     public IReadOnlyList<RetrievalEventRow> GetEvents(RetrievalEventQuery query)

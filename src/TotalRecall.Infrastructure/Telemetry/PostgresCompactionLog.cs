@@ -24,14 +24,17 @@ public sealed class PostgresCompactionLog : ICompactionLogReader
     }
 
     /// <inheritdoc />
-    public long? GetLastTimestampExcludingReason(string excludedReason)
+    public long? GetLastActivityTimestampBefore(long beforeMs)
     {
-        ArgumentNullException.ThrowIfNull(excludedReason);
         using var conn = _dataSource.OpenConnection();
         using var cmd = conn.CreateCommand();
+        // left(), not LIKE: in LIKE an underscore is a one-character wildcard.
         cmd.CommandText =
-            "SELECT MAX(timestamp) FROM compaction_log WHERE reason != $1";
-        cmd.Parameters.AddWithValue(excludedReason);
+            "SELECT MAX(timestamp) FROM compaction_log " +
+            "WHERE timestamp < $1 " +
+            "AND reason != 'warm_sweep_decay' " +
+            "AND left(reason, 10) != 'migration_'";
+        cmd.Parameters.AddWithValue(beforeMs);
         var result = cmd.ExecuteScalar();
         if (result is null || result is DBNull) return null;
         return result is long l ? l : Convert.ToInt64(result, CultureInfo.InvariantCulture);

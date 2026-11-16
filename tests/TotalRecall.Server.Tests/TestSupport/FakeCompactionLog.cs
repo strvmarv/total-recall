@@ -18,7 +18,7 @@ public sealed class FakeCompactionLog : ICompactionLogReader
 
     public void Add(CompactionMovementRow row) => Rows.Add(row);
 
-    public long? GetLastTimestampExcludingReason(string excludedReason) => null;
+    public long? GetLastActivityTimestampBefore(long beforeMs) => null;
 
     public IReadOnlyList<CompactionAnalyticsRow> GetAllForAnalytics(long? sinceTimestamp = null)
         => Array.Empty<CompactionAnalyticsRow>();
