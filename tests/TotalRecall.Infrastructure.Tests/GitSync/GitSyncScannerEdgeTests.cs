@@ -223,10 +223,7 @@ public sealed class GitSyncScannerEdgeTests
         var (rig, now) = ExhaustedSetup();
         using var _ = rig;
         rig.AddMemory(Tier.Warm, "not-an-id");                                  // an ineligible id
-        rig.AddMemory(Tier.Warm, C, "far");
-        SeedRow(rig, C, BaseJson(C, Tier.Warm, Stamp(now + 5 * Day), Stamp(1), Stamp(2)), Tier.Warm);
-        rig.Store.Update(Tier.Warm, ContentType.Memory, C, new UpdateEntryOpts { Content = "far, edited" });
-        Scan(rig, now);                                                          // skip + far-future floor + ineligible issue
+        Scan(rig, now);                                                          // skip + ineligible issue
         var dump = DumpSync(rig);
         var memories = rig.Dump();
 
@@ -235,7 +232,7 @@ public sealed class GitSyncScannerEdgeTests
         var third = rig.Scanner(now + 2000);
         Assert.IsType<ScanOutcome.Done>(third.Scan());
 
-        // C's far-future stamp was issued in the first scan; A's content group is still skipped (the same change)
+        // A's content group is still skipped (the same change) and the ineligible id is still there; the far-future kind has its own test
         Assert.Equal(0, second.WriteTransactionCount);
         Assert.Equal(0, third.WriteTransactionCount);
         Assert.Equal(dump, DumpSync(rig));
@@ -422,7 +419,9 @@ public sealed class GitSyncScannerEdgeTests
         var outcome = new GitSyncScanner(scannerConn, () => T1).Scan();
         sw.Stop();
 
-        Assert.IsType<ScanOutcome.Failed>(outcome);
+        var failed = Assert.IsType<ScanOutcome.Failed>(outcome);
+        Assert.Contains("locked", failed.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("rollback", failed.Reason, StringComparison.OrdinalIgnoreCase);
         Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10), $"took {sw.Elapsed}");
         rig.Exec("COMMIT");
         Assert.Empty(rig.Rows());
