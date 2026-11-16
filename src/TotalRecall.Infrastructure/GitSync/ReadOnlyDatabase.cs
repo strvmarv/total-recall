@@ -37,7 +37,7 @@ public static class ReadOnlyDatabase
 
             var csb = new SqliteConnectionStringBuilder
             {
-                DataSource = wal ? target : ImmutableUri(target),
+                DataSource = wal ? target : ImmutableUri(target, OperatingSystem.IsWindows()),
                 Mode = SqliteOpenMode.ReadOnly,
                 Pooling = false,
             };
@@ -67,12 +67,12 @@ public static class ReadOnlyDatabase
     /// A <c>file:</c> URI for the path with <c>%</c>, <c>?</c> and <c>#</c> percent-encoded and <c>?immutable=1</c> appended
     /// (<c>file:///C:/...</c> for a Windows drive path).
     /// </summary>
-    internal static string ImmutableUri(string fullPath)
+    internal static string ImmutableUri(string fullPath, bool windows)
     {
         var p = fullPath.Replace("%", "%25", StringComparison.Ordinal)
             .Replace("?", "%3F", StringComparison.Ordinal)
             .Replace("#", "%23", StringComparison.Ordinal);
-        if (OperatingSystem.IsWindows())
+        if (windows)
             p = "/" + p.Replace('\\', '/');
         return "file://" + p + "?immutable=1";
     }

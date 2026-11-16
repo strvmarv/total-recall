@@ -103,6 +103,25 @@ public sealed class ReadOnlyDatabaseTests : IDisposable
         Assert.Single(Directory.GetFileSystemEntries(linkDir));
     }
 
+    [ShFact]
+    public void ALinkToADatabaseWithALiveWriter_ReadsTheWritersValue_AndOneSidecarIsPending()
+    {
+        var path = Db("reallive");
+        var linkDir = Path.Combine(_root, "linklive");
+        Directory.CreateDirectory(linkDir);
+        var link = Path.Combine(linkDir, "total-recall.db");
+        File.CreateSymbolicLink(link, path);
+
+        using (var writer = SyncDb.OpenMigrated(path))
+        {
+            SyncDb.Exec(writer, "UPDATE _meta SET value = 'newer' WHERE key = 'git_sync_repo_id'");
+            Assert.Equal("newer", ReadValue(ReadOnlyDatabase.Open(link)));
+        }
+
+        File.WriteAllBytes(path + "-wal", []);
+        Assert.Equal(ReadOnlyDatabase.PendingWalText, ReadOnlyDatabase.Open(link).Unknown);
+    }
+
     [Fact]
     public void ALiveWriter_IsOpenedReadOnly_AndItsLatestValueIsRead()
     {
@@ -174,16 +193,17 @@ public sealed class ReadOnlyDatabaseTests : IDisposable
         using (var open = ReadOnlyDatabase.Open(path).Connection)
             Assert.Null(new ReadOnlyMeta(open).GetMeta("k"));
 
-        var closed = new MsSqliteConnection("Data Source=:memory:");
-        Assert.ThrowsAny<Exception>(() => new ReadOnlyMeta(closed).GetMeta("k"));
-        closed.Dispose();
+        // a _meta table without the expected column is a real SqliteException that is not "no such table"
+        var broken = Path.Combine(_root, "brokenmeta.db");
+        SyncDb.CreatePlain(broken, "CREATE TABLE _meta (key TEXT, other TEXT)");
+        using var brokenOpen = ReadOnlyDatabase.Open(broken).Connection;
+        Assert.Throws<SqliteException>(() => new ReadOnlyMeta(brokenOpen).GetMeta("k"));
     }
 
     [Fact]
-    public void ImmutableUri_EncodesPercentQuestionMarkAndHash()
+    public void ImmutableUri_EncodesPercentQuestionMarkAndHash_OnBothPlatformShapes()
     {
-        var uri = ReadOnlyDatabase.ImmutableUri(OperatingSystem.IsWindows() ? @"C:\a%b\c?d#e.db" : "/a%b/c?d#e.db");
-        Assert.EndsWith("a%25b/c%3Fd%23e.db?immutable=1", uri);
-        Assert.StartsWith(OperatingSystem.IsWindows() ? "file:///C:/" : "file:///", uri);
+        Assert.Equal("file:///C:/a%25b/c%3Fd%23e.db?immutable=1", ReadOnlyDatabase.ImmutableUri(@"C:\a%b\c?d#e.db", windows: true));
+        Assert.Equal("file:///a%25b/c%3Fd%23e.db?immutable=1", ReadOnlyDatabase.ImmutableUri("/a%b/c?d#e.db", windows: false));
     }
 }
