@@ -35,7 +35,7 @@ Backends (selected by config):
 3. `compact` — decay scores, compact hot→warm (summarize), demote warm→cold; earned warm→hot promotion runs in the warm sweep
 4. `ingest` — chunk files with heading-aware Markdown and regex-based code parsing, embed chunks, store in cold tier
 
-**Local mode:** all state lives in `~/.total-recall/total-recall.db`. The embedding model and the sqlite-vec native extension are bundled with the binary. No network calls required at runtime.
+**Local mode:** all state lives in `~/.total-recall/total-recall.db`. The embedding model and the sqlite-vec native extension are bundled with the binary. Nothing else needs the network at runtime; by default the only outbound request is the periodic update check (about once a day) to `api.github.com`, off with `updates.check = false` or `TOTAL_RECALL_NO_UPDATE_CHECK`.
 
 **Cortex mode:** user memories write locally first for low latency. A `RoutingStore` wraps every write: persist locally, enqueue to `sync_queue`. A background sync loop flushes the queue to Cortex every `sync_interval_seconds` (default: 300) and at session boundaries. Global knowledge (team KB, connectors) is read directly from Cortex.
 

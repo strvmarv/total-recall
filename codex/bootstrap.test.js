@@ -221,6 +221,12 @@ test('build-mcp: any change to the source changes the output; args[1] is the sou
   assert.deepEqual(server.env_vars, ENV_VARS);
 });
 
+test('build-mcp: the update-check switch reaches the server', () => {
+  assert.ok(ENV_VARS.includes('TOTAL_RECALL_NO_UPDATE_CHECK'));
+  const cfg = JSON.parse(fs.readFileSync(mcpPath, 'utf8'));
+  assert.ok(cfg.mcpServers['total-recall'].env_vars.includes('TOTAL_RECALL_NO_UPDATE_CHECK'));
+});
+
 test('build-mcp: CRLF in the source is normalized before embedding', () => {
   assert.equal(buildMcp(source.replace(/\n/g, '\r\n')), buildMcp(source));
 });

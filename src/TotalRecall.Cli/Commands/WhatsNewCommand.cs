@@ -3,9 +3,11 @@
 // `total-recall whats-new --host <id> [--format text|json|claude-code] [--no-mark]`.
 // Backend for the hosts that deliver the what's-new notice themselves (the Claude Code
 // hook, the pi extension): prints the notice for one host, then records that the host
-// was told. The host comes only from --host; the command reads no environment variable,
-// applies no Hermes rule and ignores the direct-delivery stamps (the caller already
-// chose to deliver directly). FAIL-SAFE: any error prints the format's empty output
+// was told. The host comes only from --host; the one environment variable the command
+// reads is the update-check switch (production only), it applies no Hermes rule and
+// ignores the direct-delivery stamps (the caller already chose to deliver directly).
+// It reads files only (the latest-release files the engine's checker writes) and never
+// the network. FAIL-SAFE: any error prints the format's empty output
 // ("" for text, "{}" for the JSON formats) and exits 0.
 
 using System;
@@ -25,17 +27,22 @@ public sealed class WhatsNewCommand : ICliCommand
     private readonly string? _binaryDir;
     private readonly Func<bool>? _noticeEnabled;
     private readonly TextWriter? _out;
+    private readonly Func<bool>? _checkSetting;
+    private readonly Func<string?>? _noUpdateCheckEnv;
 
     /// <summary>Production: every input is resolved when the command runs, not when the registry is built.</summary>
     public WhatsNewCommand() { }
 
-    public WhatsNewCommand(string version, string stateDir, string binaryDir, Func<bool> noticeEnabled, TextWriter output)
+    public WhatsNewCommand(string version, string stateDir, string binaryDir, Func<bool> noticeEnabled, TextWriter output,
+        Func<bool>? checkSetting = null, Func<string?>? noUpdateCheckEnv = null)
     {
         _version = version ?? throw new ArgumentNullException(nameof(version));
         _stateDir = stateDir ?? throw new ArgumentNullException(nameof(stateDir));
         _binaryDir = binaryDir ?? throw new ArgumentNullException(nameof(binaryDir));
         _noticeEnabled = noticeEnabled ?? throw new ArgumentNullException(nameof(noticeEnabled));
         _out = output ?? throw new ArgumentNullException(nameof(output));
+        _checkSetting = checkSetting ?? (() => false);
+        _noUpdateCheckEnv = noUpdateCheckEnv ?? (() => null);
     }
 
     public string Name => "whats-new";
@@ -62,11 +69,27 @@ public sealed class WhatsNewCommand : ICliCommand
             var version = _version ?? CliApp.CurrentVersion;
             var enabled = _noticeEnabled is null ? ConfigLoader.LoadUpdatesNoticeEnabled() : _noticeEnabled();
 
-            var seen = WhatsNewState.ReadSeenVersion(stateDir, host);
-            var notes = PackagedReleaseNotes.Read(binaryDir);
-            var notice = WhatsNewDecider.Decide(version, notes, seen, enabled);
+            var production = _version is null;
+            var checkSetting = production ? ConfigLoader.LoadUpdatesCheckEnabled() : _checkSetting!();
+            var envValue = production
+                ? Environment.GetEnvironmentVariable(UpdateSettings.NoUpdateCheckEnvVar)
+                : _noUpdateCheckEnv!();
 
-            var rendered = notice is null ? Empty(format) : Render(format, notice);
+            var seen = WhatsNewState.ReadSeen(stateDir, host);
+            var notes = PackagedReleaseNotes.Read(binaryDir);
+
+            var channel = UpdateChannel.Of(version);
+            LatestRelease? latest = null;
+            if (UpdateSettings.CheckOn(enabled, checkSetting, envValue))
+            {
+                var file = LatestReleaseState.Read(stateDir, channel);
+                latest = file?.Version is { } v ? new LatestRelease(v, file.Summary ?? "") : null;
+            }
+            seen.AvailableSeen.TryGetValue(channel, out var availableSeen);
+
+            var notice = WhatsNewDecider.Decide(version, notes, seen.Version, enabled, latest, availableSeen);
+
+            var rendered = notice is null ? Empty(format) : Render(format, notice, host);
             if (rendered.Length > 0)
             {
                 output.WriteLine(rendered);
@@ -75,7 +98,12 @@ public sealed class WhatsNewCommand : ICliCommand
 
             // Record only after the notice was written, so one that never reached the host is offered again.
             if (notice is not null && mark)
-                WhatsNewState.WriteSeenVersion(stateDir, host, notice.Version);
+            {
+                if (notice.Kind == NoticeKind.Available && notice.Channel is not null)
+                    WhatsNewState.WriteAvailableSeen(stateDir, host, notice.Channel, notice.Version);
+                else
+                    WhatsNewState.WriteSeenVersion(stateDir, host, notice.Version);
+            }
             return 0;
         }
         catch
@@ -111,9 +139,9 @@ public sealed class WhatsNewCommand : ICliCommand
 
     private static string Empty(Format format) => format == Format.Text ? "" : "{}";
 
-    private static string Render(Format format, Notice notice)
+    private static string Render(Format format, Notice notice, string host)
     {
-        var line = WhatsNewRenderer.Line(notice);
+        var line = WhatsNewRenderer.Line(notice, host);
         if (format == Format.Text) return line;
 
         var sb = new StringBuilder();

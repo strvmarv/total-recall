@@ -52,6 +52,7 @@ In the next session, the user pastes the check prompt from `INSTALL.md`, Step 4.
 
 - The `total-recall` MCP server.
 - The startup instructions, as a rules file that tells the model to call `session_start`.
+- Updating: run `npm install -g @strvmarv/total-recall` again (add `--ignore-scripts` if you installed that way), then restart Windsurf.
 
 ## Known gaps
 

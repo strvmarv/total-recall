@@ -312,7 +312,9 @@ public static class ServerComposition
         AppContext.BaseDirectory,
         () => ConfigLoader.LoadUpdatesNoticeEnabled(),
         () => DateTimeOffset.UtcNow,
-        () => Environment.GetEnvironmentVariable("TOTAL_RECALL_HOST"));
+        () => Environment.GetEnvironmentVariable("TOTAL_RECALL_HOST"),
+        checkSetting: () => ConfigLoader.LoadUpdatesCheckEnabled(),
+        noUpdateCheckEnv: () => Environment.GetEnvironmentVariable(Infrastructure.WhatsNew.UpdateSettings.NoUpdateCheckEnvVar));
 
     // Resolve the embedder model-change policy from config (FSharp option interop
     // in one place). Used by every backend's startup migration call.

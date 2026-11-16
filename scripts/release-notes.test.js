@@ -639,3 +639,41 @@ test('the docs describe the direct what\'s-new notice (command, stamps, pi, Clau
   const changelog = fs.readFileSync(here('../CHANGELOG.md'), 'utf8');
   assert.ok(changelog.includes('#106'), 'CHANGELOG.md does not mention #106');
 });
+
+// ---- T3 (#115): the available notice and the update check are documented ----
+
+test('the docs describe the available notice and the update check (#115)', () => {
+  const agents = fs.readFileSync(here('../AGENTS.md'), 'utf8');
+  const start = agents.indexOf('### What happens on `session_start`');
+  assert.ok(start >= 0, 'AGENTS.md has no "What happens on `session_start`" heading');
+  const rest = agents.slice(start + 10);
+  const next = rest.search(/^### /m);
+  const lifecycle = next < 0 ? rest : rest.slice(0, next);
+  for (const needle of ['"first-seen"|"updated"|"available"', 'latest-stable.json', 'availableSeen', 'UpdateChecker', 'Program.RunServeAsync', 'api.github.com', 'TOTAL_RECALL_NO_UPDATE_CHECK', 'updates.check_interval_hours', 'UpdateInstructions']) {
+    assert.ok(lifecycle.includes(needle), `the session_start section of AGENTS.md does not mention ${needle}`);
+  }
+  assert.ok(!lifecycle.includes('Still to come'), 'AGENTS.md still says the update check is still to come');
+  const where = agents.slice(agents.indexOf('### WHERE TO LOOK'), agents.indexOf('### Key Commands'));
+  for (const needle of ['UpdateChecker.cs', 'LatestReleaseState.cs', 'UpdateInstructions.cs']) {
+    assert.ok(where.includes(needle), `the WHERE TO LOOK table of AGENTS.md does not list ${needle}`);
+  }
+
+  const config = fs.readFileSync(here('../docs/configuration.md'), 'utf8');
+  for (const needle of ['check = true', 'check_interval_hours = 24', 'TOTAL_RECALL_NO_UPDATE_CHECK', 'Cursor']) {
+    assert.ok(config.includes(needle), `docs/configuration.md does not mention ${needle}`);
+  }
+  for (const page of ['claude-code', 'pi']) {
+    const text = fs.readFileSync(here(`../docs/hosts/${page}.md`), 'utf8');
+    for (const needle of ['is available (you have', 'updates.check']) {
+      assert.ok(text.includes(needle), `docs/hosts/${page}.md does not mention ${needle}`);
+    }
+  }
+  for (const page of ['codex-cli', 'cursor']) {
+    const text = fs.readFileSync(here(`../docs/hosts/${page}.md`), 'utf8');
+    assert.ok(text.includes('TOTAL_RECALL_NO_UPDATE_CHECK'), `docs/hosts/${page}.md does not mention TOTAL_RECALL_NO_UPDATE_CHECK`);
+  }
+  const changelog = fs.readFileSync(here('../CHANGELOG.md'), 'utf8');
+  for (const needle of ['#115', 'TOTAL_RECALL_NO_UPDATE_CHECK']) {
+    assert.ok(changelog.includes(needle), `CHANGELOG.md does not mention ${needle}`);
+  }
+});

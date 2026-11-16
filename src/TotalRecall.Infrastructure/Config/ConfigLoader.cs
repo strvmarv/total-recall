@@ -180,6 +180,51 @@ public sealed class ConfigLoader : IConfigLoader
         return true;
     }
 
+    /// <summary>
+    /// Whether the background update check is on (<c>updates.check</c>). On unless the
+    /// effective config holds the boolean false; a missing table, a value of another
+    /// type, or an unreadable or unparsable config file all read as true.
+    /// </summary>
+    public static bool LoadUpdatesCheckEnabled(string? userConfigPath = null)
+    {
+        try
+        {
+            var table = new ConfigLoader().LoadEffectiveTable(userConfigPath);
+            if (table.TryGetValue("updates", out var updatesObj) && updatesObj is TomlTable updatesTable
+                && updatesTable.TryGetValue("check", out var checkObj) && checkObj is bool check)
+            {
+                return check;
+            }
+        }
+        catch (Exception)
+        {
+            // Any read or parse problem leaves the check on.
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Minimum hours between update checks (<c>updates.check_interval_hours</c>): a whole
+    /// number from 1 to 8760, anything else (or any read problem) is 24.
+    /// </summary>
+    public static int LoadUpdatesCheckIntervalHours(string? userConfigPath = null)
+    {
+        try
+        {
+            var table = new ConfigLoader().LoadEffectiveTable(userConfigPath);
+            if (table.TryGetValue("updates", out var updatesObj) && updatesObj is TomlTable updatesTable
+                && updatesTable.TryGetValue("check_interval_hours", out var raw))
+            {
+                return WhatsNew.UpdateSettings.NormalizeIntervalHours(raw);
+            }
+        }
+        catch (Exception)
+        {
+            // Any read or parse problem means the default interval.
+        }
+        return WhatsNew.UpdateSettings.DefaultIntervalHours;
+    }
+
     /// <inheritdoc/>
     public Core.Config.TotalRecallConfig LoadDefaults()
     {

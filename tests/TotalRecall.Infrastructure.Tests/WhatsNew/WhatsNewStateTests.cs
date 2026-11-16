@@ -133,6 +133,17 @@ public class WhatsNewStateTests : IDisposable
     }
 
     [Fact]
+    public void WriteSeenVersion_NullVersion_WritesNothing_KeepsExistingFile()
+    {
+        const string original = "{\"version\":\"4.8.0\",\"availableSeen\":{\"stable\":\"4.9.0\"}}";
+        Put("seen-pi.json", original);
+        WhatsNewState.WriteSeenVersion(Dir, "pi", null!);
+        Assert.Equal(original, File.ReadAllText(Path.Combine(Dir, "seen-pi.json")));
+        Assert.Equal(new[] { "seen-pi.json" },
+            Directory.GetFiles(Dir).Select(Path.GetFileName).ToArray());
+    }
+
+    [Fact]
     public void WriteSeenVersion_UnwritablePath_DoesNotThrow()
     {
         Directory.CreateDirectory(_root);
@@ -142,6 +153,160 @@ public class WhatsNewStateTests : IDisposable
             WhatsNewState.WriteSeenVersion(Path.Combine(blocker, "whats-new"), "pi", "4.8.0"));
         Assert.Null(ex);
         Assert.Null(WhatsNewState.ReadSeenVersion(Path.Combine(blocker, "whats-new"), "pi"));
+    }
+
+    [Fact]
+    public void ReadSeen_VersionAndAvailableSeen()
+    {
+        Put("seen-pi.json", "{\"version\":\"4.8.0\",\"availableSeen\":{\"stable\":\"4.9.0\",\"pre\":\"4.10.0-beta.1\"}}");
+        var seen = WhatsNewState.ReadSeen(Dir, "pi");
+        Assert.Equal("4.8.0", seen.Version);
+        Assert.Equal(2, seen.AvailableSeen.Count);
+        Assert.Equal("4.9.0", seen.AvailableSeen["stable"]);
+        Assert.Equal("4.10.0-beta.1", seen.AvailableSeen["pre"]);
+    }
+
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("\"4.9.0\"")]
+    [InlineData("{\"stable\":4}")]
+    [InlineData("{\"beta\":\"4.9.0\"}")]
+    public void ReadSeen_AvailableSeenWrongShapes_Ignored(string available)
+    {
+        Put("seen-pi.json", "{\"version\":\"4.8.0\",\"availableSeen\":" + available + "}");
+        var seen = WhatsNewState.ReadSeen(Dir, "pi");
+        Assert.Equal("4.8.0", seen.Version);
+        Assert.Empty(seen.AvailableSeen);
+    }
+
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("")]
+    [InlineData("[]")]
+    public void ReadSeen_CorruptOrMissing_IsEmpty(string content)
+    {
+        Assert.Null(WhatsNewState.ReadSeen(Dir, "pi").Version);
+        Put("seen-pi.json", content);
+        var seen = WhatsNewState.ReadSeen(Dir, "pi");
+        Assert.NotNull(seen);
+        Assert.Null(seen.Version);
+        Assert.Empty(seen.AvailableSeen);
+    }
+
+    [Fact]
+    public void ReadSeen_OnlyKnownChannelKeysKept_WhenMixed()
+    {
+        Put("seen-pi.json", "{\"availableSeen\":{\"stable\":\"4.9.0\",\"beta\":\"x\",\"pre\":5}}");
+        var seen = WhatsNewState.ReadSeen(Dir, "pi");
+        Assert.Null(seen.Version);
+        Assert.Single(seen.AvailableSeen);
+        Assert.Equal("4.9.0", seen.AvailableSeen["stable"]);
+    }
+
+    [Fact]
+    public void WriteSeenVersion_ThenWriteAvailableSeen_KeepsBoth()
+    {
+        WhatsNewState.WriteSeenVersion(Dir, "pi", "4.8.0");
+        WhatsNewState.WriteAvailableSeen(Dir, "pi", "stable", "4.9.0");
+        var seen = WhatsNewState.ReadSeen(Dir, "pi");
+        Assert.Equal("4.8.0", seen.Version);
+        Assert.Equal("4.9.0", seen.AvailableSeen["stable"]);
+    }
+
+    [Fact]
+    public void WriteAvailableSeen_ThenWriteSeenVersion_KeepsBoth()
+    {
+        WhatsNewState.WriteAvailableSeen(Dir, "pi", "stable", "4.9.0");
+        WhatsNewState.WriteSeenVersion(Dir, "pi", "4.8.0");
+        var seen = WhatsNewState.ReadSeen(Dir, "pi");
+        Assert.Equal("4.8.0", seen.Version);
+        Assert.Equal("4.9.0", seen.AvailableSeen["stable"]);
+    }
+
+    [Fact]
+    public void WriteAvailableSeen_PerChannel_DoesNotOverwriteOtherChannel()
+    {
+        WhatsNewState.WriteAvailableSeen(Dir, "pi", "stable", "4.9.0");
+        WhatsNewState.WriteAvailableSeen(Dir, "pi", "pre", "4.10.0-beta.1");
+        var seen = WhatsNewState.ReadSeen(Dir, "pi");
+        Assert.Equal("4.9.0", seen.AvailableSeen["stable"]);
+        Assert.Equal("4.10.0-beta.1", seen.AvailableSeen["pre"]);
+        Assert.Equal(
+            "{\"availableSeen\":{\"stable\":\"4.9.0\",\"pre\":\"4.10.0-beta.1\"}}",
+            File.ReadAllText(Path.Combine(Dir, "seen-pi.json")));
+    }
+
+    [Fact]
+    public void WriteAvailableSeen_PreFirstThenStable_KeysInFixedOrder()
+    {
+        WhatsNewState.WriteAvailableSeen(Dir, "pi", "pre", "4.10.0-beta.1");
+        WhatsNewState.WriteSeenVersion(Dir, "pi", "4.8.0");
+        WhatsNewState.WriteAvailableSeen(Dir, "pi", "stable", "4.9.0");
+        Assert.Equal(
+            "{\"version\":\"4.8.0\",\"availableSeen\":{\"stable\":\"4.9.0\",\"pre\":\"4.10.0-beta.1\"}}",
+            File.ReadAllText(Path.Combine(Dir, "seen-pi.json")));
+    }
+
+    [Fact]
+    public void WriteAvailableSeen_NoSeenFile_WritesOnlyAvailableSeen()
+    {
+        WhatsNewState.WriteAvailableSeen(Dir, "pi", "stable", "4.9.0");
+        using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(Dir, "seen-pi.json")));
+        var props = doc.RootElement.EnumerateObject().ToList();
+        Assert.Single(props);
+        Assert.Equal("availableSeen", props[0].Name);
+        Assert.Null(WhatsNewState.ReadSeenVersion(Dir, "pi"));
+    }
+
+    [Theory]
+    [InlineData("beta")]
+    [InlineData("../x")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void WriteAvailableSeen_UnknownChannel_WritesNothing(string? channel)
+    {
+        WhatsNewState.WriteAvailableSeen(Dir, "pi", channel!, "4.9.0");
+        Assert.False(File.Exists(Path.Combine(Dir, "seen-pi.json")));
+        Assert.False(Directory.Exists(Dir) && Directory.GetFiles(Dir).Length > 0);
+    }
+
+    [Fact]
+    public void WriteSeenVersion_OverCorruptFile_WritesVersionOnly()
+    {
+        Put("seen-pi.json", "not json");
+        WhatsNewState.WriteSeenVersion(Dir, "pi", "4.8.0");
+        Assert.Equal("{\"version\":\"4.8.0\"}", File.ReadAllText(Path.Combine(Dir, "seen-pi.json")));
+    }
+
+    [Fact]
+    public void WriteAvailableSeen_HostilePath_StaysInsideDirectory()
+    {
+        WhatsNewState.WriteAvailableSeen(Dir, "../../x", "stable", "4.9.0");
+        Assert.True(File.Exists(Path.Combine(Dir, "seen-other.json")));
+        Assert.Equal("4.9.0", WhatsNewState.ReadSeen(Dir, "other").AvailableSeen["stable"]);
+        Assert.False(File.Exists(Path.Combine(_root, "seen-other.json")));
+    }
+
+    [Fact]
+    public void WriteAvailableSeen_UnwritablePath_DoesNotThrow()
+    {
+        Directory.CreateDirectory(_root);
+        var blocker = Path.Combine(_root, "blocker");
+        File.WriteAllText(blocker, "i am a file");
+        var ex = Record.Exception(() =>
+            WhatsNewState.WriteAvailableSeen(Path.Combine(blocker, "whats-new"), "pi", "stable", "4.9.0"));
+        Assert.Null(ex);
+        Assert.Empty(WhatsNewState.ReadSeen(Path.Combine(blocker, "whats-new"), "pi").AvailableSeen);
+    }
+
+    [Fact]
+    public void WriteAvailableSeen_LeavesNoTempFiles()
+    {
+        WhatsNewState.WriteAvailableSeen(Dir, "pi", "stable", "4.9.0");
+        WhatsNewState.WriteAvailableSeen(Dir, "pi", "pre", "4.10.0-beta.1");
+        WhatsNewState.WriteSeenVersion(Dir, "pi", "4.8.0");
+        Assert.Equal(new[] { "seen-pi.json" },
+            Directory.GetFiles(Dir).Select(Path.GetFileName).ToArray());
     }
 
     private void Stamp(string host, DateTimeOffset at) =>

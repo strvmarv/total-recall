@@ -43,7 +43,7 @@ public sealed class McpServer
     // tests don't resolve the test host's version.
     private static readonly string ServerVersion = ResolveServerVersion();
 
-    internal static string ResolveServerVersion()
+    public static string ResolveServerVersion()
     {
         var asm = typeof(McpServer).Assembly;
         var info = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;

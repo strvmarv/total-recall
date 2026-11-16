@@ -34,6 +34,7 @@ export const SHIM_TEST_TARGETS = [
   'scripts/release-notes.test.js',
   'scripts/host-docs.test.js',
   'scripts/host-config.test.js',
+  'scripts/update-check-offline.test.js',
   'scripts/run-shim-tests.test.js',
   'hooks/hooks.config.test.js',
   'hooks/session-start/whats-new.test.js',

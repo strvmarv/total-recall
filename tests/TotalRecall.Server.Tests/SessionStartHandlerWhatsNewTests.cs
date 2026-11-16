@@ -42,6 +42,17 @@ public sealed class SessionStartHandlerWhatsNewTests : IDisposable
     private WhatsNewService MakeService() =>
         new("4.8.0", State, Bin, () => true, () => Now, () => null);
 
+    private WhatsNewService MakeCheckingService() =>
+        new("4.8.0", State, Bin, () => true, () => Now, () => null, () => true, () => null);
+
+    private void PutAvailable(string seenVersion)
+    {
+        Directory.CreateDirectory(State);
+        File.WriteAllText(Path.Combine(State, "seen-other.json"), "{\"version\":\"" + seenVersion + "\"}");
+        File.WriteAllText(Path.Combine(State, "latest-stable.json"),
+            "{\"version\":\"4.9.0\",\"summary\":\"Faster sync.\"}");
+    }
+
     private string SeenPath(string host) => Path.Combine(State, "seen-" + host + ".json");
 
     private static async Task<JsonDocument> Run(
@@ -207,6 +218,56 @@ public sealed class SessionStartHandlerWhatsNewTests : IDisposable
         using var _ = await Run(handler);
 
         Assert.Null(lifecycle.ResultToReturn.WhatsNew);
+    }
+
+    [Fact]
+    public async Task AvailableNotice_IsRelayedWithKindAvailable_AndMarked()
+    {
+        PutAvailable("4.8.0");
+        var handler = new SessionStartHandler(
+            new FakeSessionLifecycle(), whatsNew: MakeCheckingService());
+
+        using var doc = await Run(handler);
+
+        var notice = doc.RootElement.GetProperty("whatsNew");
+        Assert.Equal("available", notice.GetProperty("kind").GetString());
+        Assert.Contains("is available (you have 4.8.0)", notice.GetProperty("text").GetString());
+        Assert.Equal("{\"version\":\"4.8.0\",\"availableSeen\":{\"stable\":\"4.9.0\"}}",
+            File.ReadAllText(SeenPath("other")));
+    }
+
+    [Fact]
+    public async Task TwoCallsSameHandler_UpdatedThenNothing_EvenWithAvailableDue()
+    {
+        PutAvailable("4.7.0");
+        var handler = new SessionStartHandler(
+            new FakeSessionLifecycle(), whatsNew: MakeCheckingService());
+
+        using var first = await Run(handler);
+        Assert.Equal("updated", first.RootElement.GetProperty("whatsNew").GetProperty("kind").GetString());
+
+        using var second = await Run(handler);
+        Assert.Equal(JsonValueKind.Null, second.RootElement.GetProperty("whatsNew").ValueKind);
+    }
+
+    [Fact]
+    public async Task CallOver30Seconds_AvailableNotMarked_NextCallShowsIt()
+    {
+        PutAvailable("4.8.0");
+        var before = File.ReadAllText(SeenPath("other"));
+        var clock = new ManualTimeProvider();
+        var lifecycle = new AdvancingLifecycle(clock, TimeSpan.FromSeconds(31));
+        var handler = new SessionStartHandler(
+            lifecycle, whatsNew: MakeCheckingService(), timeProvider: clock);
+
+        using var slow = await Run(handler);
+        Assert.Equal(JsonValueKind.Null, slow.RootElement.GetProperty("whatsNew").ValueKind);
+        Assert.Equal(before, File.ReadAllText(SeenPath("other")));
+
+        lifecycle.Delay = TimeSpan.Zero;
+        using var fast = await Run(handler);
+        Assert.Equal("available", fast.RootElement.GetProperty("whatsNew").GetProperty("kind").GetString());
+        Assert.Contains("availableSeen", File.ReadAllText(SeenPath("other")));
     }
 
     /// <summary>A TimeProvider whose monotonic timestamp only moves when told to.</summary>
