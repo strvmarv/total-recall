@@ -55,8 +55,10 @@ pieces:
    `^[0-9a-f][0-9a-f-]{7,63}$` (the rule already in `SyncValidation`). A sticky memory is a hot memory with `sticky = 1`.
    Knowledge entries are never read except by id (decision 8).
 2. **An entry with any other id is not eligible.** It gets no row and no stamp. The scan records it in
-   `git_sync_issue` (`kind = 'ineligible-id'`, `detail` the tier). The issue row is removed when the entry no longer
-   exists as a memory. (The umbrella says `status` lists these; `status` is 1b-iii.)
+   `git_sync_issue` (`kind = 'ineligible-id'`, `detail` the tier). The id and the tier are read before the entry is mapped, so
+   an entry that cannot be read (decision 3) still gets its issue. An issue row is **written only when it is absent or its
+   `detail` differs, and removed only when it is present and the id is no longer in any memory table**; a skipped entry
+   still counts as existing. (The umbrella says `status` lists these; `status` is 1b-iii.)
 3. **One consistent snapshot.** The scan reads inside one `BEGIN` read transaction on its own connection (WAL mode, so
    writers are not blocked), so a concurrent `Move` between tables can neither hide an entry nor show it twice. The
    scanner runs its own `SELECT` per table with the transaction set (the store's `List` and `Get` open their own
@@ -119,8 +121,9 @@ mean differs from what the row holds.
      turns it into `forgotten`. **In particular it never drops a base-less row**: the scan cannot see R, and the merge
      decisions treat "no base, no entry, record present in R" (the memory is not re-inserted, the row becomes `forgotten`)
      differently from "record absent from R" (the row is dropped); dropping the row here would turn the first case into a
-     re-insert of a memory the user deleted. The apply of 1b-i-2 therefore **visits rows with no base and no entry**, in
-     addition to the visit set the umbrella lists.
+     re-insert of a memory the user deleted. The apply of 1b-i-2 must therefore reach a row with no base and no entry **whose id is absent from R**: the
+     umbrella's visit set (rows with no base whose id is in R's tree) already reaches the case where R holds the record, but
+     not this one, and the merge table's "drop the row" case needs it (see "Requirements on the later parts").
 
 9. **A `forgotten` or `left` row whose id exists again as an eligible memory** (the user re-stored it, imported it, or
    retyped it back) returns to `active` **with its base cleared** (all other columns reset) and is stamped like a new
@@ -134,22 +137,24 @@ mean differs from what the row holds.
 11. **The clock.** The scan loads the persisted clock (`git_sync_hlc`, `Clock.tryDeserialize`) and applies
     `Clock.guardStartup` once per scan: a clock more than 24 hours ahead of the wall clock is reset to the wall clock; an
     absent value starts from the wall clock; a value that is present but unreadable is replaced by the wall clock; the
-    reset and the unreadable value each set `git_sync_clock_warning` to a short text. A new stamp is issued with
+    reset and the unreadable value each add their kind to the warning (below). A new stamp is issued with
     `Clock.issue` from the wall clock, the local clock and a **floor stamp: the greater of the group's base stamp (the
     stamp the row's base record carries, read from `base_json`; none when there is no base or it is unreadable) and the
     group's pending stamp**, so a stamp is always greater than the clock, than anything this machine issued before and
     than the group's base **and** than the stamp it replaces. (`Clock.issue` does not move the clock when the floor is
     far in the future, so the pending stamp must be part of the floor or a second edit would re-issue the same stamp, and
-    the own-push rule could then clear a real edit.) A far-future floor still yields a stamp above it and sets the
-    warning. The new clock state is persisted with the stamps; the scan sets the warning and never clears it (showing and
+    the own-push rule could then clear a real edit.) A far-future floor still yields a stamp above it and adds the kind `far-future` to the warning. The new clock state is persisted with the stamps; the scan adds to the warning and never clears it (showing and
     clearing it belong to `status`, milestone 1b-iii).
     **`Clock.issue` can fail** (`Exhausted`: a floor stamp at the very end of the clock range, which a valid record can
     carry). For that **group** of that entry the scan issues **no stamp** and stores **nothing new for the group** (the
     content or tags hash, `local_sticky` or `local_tier`, whichever belongs to it), so the next scan finds the same change
-    and tries again; it adds the entry to the result's `Skipped` list with the group and the reason, sets the warning, and
+    and tries again; it adds the entry to the result's `Skipped` list with the group and the reason, adds the kind `exhausted` to the warning, and
     **writes everything else**, including the entry's other groups. One such group never stops the others.
-    **The warning is written only when its text differs from the stored one**, so a condition that recurs on every scan
-    (a skipped group, a far-future floor) does not make an otherwise idle scan write (decision 14).
+    **The warning is a set of kinds, only ever added to.** The kinds are `clock-reset`, `clock-unreadable`, `far-future`
+    and `exhausted`; `git_sync_clock_warning` holds their names, sorted and joined by `,`, behind the fixed prefix `clock: `
+    (no time, no id: the details are in the result). A scan adds the kinds it met that are not stored yet and writes the key
+    only when that changes it, so a condition that recurs on every scan (a skipped group, a far-future floor) and a mix of
+    conditions in one scan never make an otherwise idle scan write (decision 14).
 12. **The machine id** is `_meta git_sync_machine` (written by `init` and `join`), read inside the snapshot. A scan on a
     store with no valid machine id refuses (`ScanOutcome.NotJoined`) and writes nothing. The scan does **not** check the
     rest of the join state (remote, repository id, host): the caller, the cycle of 1b-i-3, has already confirmed it with
@@ -158,7 +163,7 @@ mean differs from what the row holds.
     written in **one** `BEGIN IMMEDIATE` transaction. A failure or a lock timeout leaves the rows and the clock exactly as
     they were, and the scan reports it (`ScanOutcome.Failed`, with the reason); the next scan finds the same changes and
     stamps them. A change made to an entry between the snapshot and the write is found by the next scan, because the
-    stored hash is the snapshot's, not a re-read. A clock reset or a warning counts as something to write; a scan with nothing to write opens no write
+    stored hash is the snapshot's, not a re-read. A clock reset or a new warning kind counts as something to write; a scan with nothing to write opens no write
     transaction. The tests reach two seams that are internal to the scanner (as `SqliteStoreTransaction.BeforeStep` is for
     the store transaction): a hook called between the scan's table reads, and a fault hook before each group of writes.
 14. **Idempotent.** Two scans in a row with no edit between change nothing: no row, no issue, no clock and no stamp.
@@ -168,6 +173,21 @@ mean differs from what the row holds.
 15. `ScanOutcome` is `Done(ScanSummary)`, `NotJoined` or `Failed(reason)`. `ScanSummary` carries the counts (new,
     content, tags, sticky, tier, left, reactivated, ineligible), the `LocalDeletions` list (id and the two flags) and the `Skipped`
     list (id and reason). It is plain data: the cycle of 1b-i-3 reads it, and no text for the user is produced here.
+
+## Requirements on the later parts
+
+This milestone fixes what the scan leaves in the rows. The following are requirements on 1b-i-2 and 1b-i-3 (and 1b-ii),
+repeated in their own definitions, because the scan's results are only correct if they are honoured:
+
+- **The apply writes what the scan will compare** (the Goal note): after it writes a pulled change it sets the content and
+  tags hashes, `local_sticky` and `local_tier` from the view of the stored entry, in the same transaction.
+- **The apply reaches a row with no base and no entry whose id is absent from R** (decision 8). This extends the
+  umbrella's visit-set text; it is needed for the merge table's "drop the row" case.
+- **An entry the scan listed in `Skipped` for a group is exempt for that group:** the apply's "the scanned hash, `local_sticky`
+  or `local_tier` differs from the row's" deferral must not hold `L` back for it (it would on every cycle, and no push
+  would ever happen), the apply must not overwrite that group from the repository, and the push must not write it. The
+  entry is retried by every scan and listed, like an `apply-failed` entry.
+- **1b-ii acts on `LocalDeletions`** and is the only part that creates `forgotten` rows.
 
 ## Interfaces (for the plan)
 
@@ -195,7 +215,9 @@ as a table test; `decide` is total over its input space.
 Infrastructure (`GitSyncScannerTests.cs`, a temporary SQLite database seeded through `SqliteStore`, no git, no network):
 each acceptance criterion below; idempotence; the memory tables compared before and after every scan; a fault injected
 in the write transaction; a concurrent writer moving an entry between the scan's table reads; a base stamp ahead of the
-wall clock; a persisted clock a year ahead; a missing machine id; an id that is a path; knowledge entries ignored.
+wall clock; a persisted clock a year ahead; a missing machine id; an id that is a path; knowledge entries ignored; a mixed set of clock conditions in one scan (a reset,
+a far-future floor and an exhausted group) written once and then left alone by a second scan; an ineligible-id issue that
+already exists is not rewritten.
 
 ## Departures from the umbrella design
 
@@ -214,6 +236,7 @@ wall clock; a persisted clock a year ahead; a missing machine id; an id that is 
 - **The scan reads every eligible entry but skips one it cannot read** (an unknown source tool, invalid tags, an id in two
   memory tables) and lists it, instead of failing; a skipped id still counts as existing, so it never produces a deletion
   and keeps its `ineligible-id` issue.
+- **The visit set grows** by one case (a base-less row with no entry whose id is absent from R), a requirement on 1b-i-2.
 - **The tier stamp can be cleared by the scan** when a promotion is undone before it is pushed (the umbrella is silent;
   the merge decisions use the same condition).
 - **Retype back reactivates a `forgotten` row** as well as a `left` one (the umbrella lists `forgotten` rows under 1b-ii;
