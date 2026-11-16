@@ -822,6 +822,26 @@ public sealed class SessionLifecycleTests
         Assert.Equal(expected, actual);
     }
 
+    // ---------- 11b. newest of the last-activity sources ----------
+
+    [Fact]
+    public void NewestActivity_AllNull_ReturnsNull()
+    {
+        Assert.Null(SessionLifecycle.NewestActivity(null, null, null));
+    }
+
+    [Fact]
+    public void NewestActivity_IgnoresNullZeroAndNegative_AndPicksTheNewest()
+    {
+        Assert.Equal(500L, SessionLifecycle.NewestActivity(null, 0L, -7L, 200L, 500L, 300L));
+    }
+
+    [Fact]
+    public void NewestActivity_NoCandidates_ReturnsNull()
+    {
+        Assert.Null(SessionLifecycle.NewestActivity());
+    }
+
     [Fact]
     public void LastSessionAge_Null_TimestampZero_ReturnsNull()
     {

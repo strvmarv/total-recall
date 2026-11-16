@@ -1398,6 +1398,22 @@ public sealed class SessionLifecycle : ISessionLifecycle
     }
 
     /// <summary>
+    /// The newest of several nullable unix-ms timestamps: a null, zero or
+    /// negative candidate is ignored, and the result is null when none is left.
+    /// Combines the last-activity sources behind <c>lastSessionAge</c>.
+    /// </summary>
+    public static long? NewestActivity(params long?[] candidates)
+    {
+        long? newest = null;
+        foreach (var c in candidates)
+        {
+            if (c is null || c.Value <= 0) continue;
+            if (newest is null || c.Value > newest.Value) newest = c;
+        }
+        return newest;
+    }
+
+    /// <summary>
     /// Format a last-session-age string from a timestamp + now (both unix ms).
     /// Mirrors TS <c>getLastSessionAge</c> in session-tools.ts:76-99.
     /// </summary>
