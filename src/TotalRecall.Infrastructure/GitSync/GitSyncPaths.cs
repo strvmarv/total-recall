@@ -10,11 +10,13 @@ namespace TotalRecall.Infrastructure.GitSync;
 /// </summary>
 public sealed class GitSyncPaths
 {
-    private GitSyncPaths(string databaseDirectory, string syncDirectory, string cloneDirectory)
+    private readonly string? _cloneDirectory;
+
+    private GitSyncPaths(string databaseDirectory, string syncDirectory, string? cloneDirectory)
     {
         DatabaseDirectory = databaseDirectory;
         SyncDirectory = syncDirectory;
-        CloneDirectory = cloneDirectory;
+        _cloneDirectory = cloneDirectory;
     }
 
     /// <summary>The full path of the directory holding the database file; <c>sync</c> is its child.</summary>
@@ -23,8 +25,12 @@ public sealed class GitSyncPaths
     /// <summary><c>&lt;DatabaseDirectory&gt;/sync/&lt;dbKey&gt;</c>.</summary>
     public string SyncDirectory { get; }
 
-    /// <summary>The disposable clone: <c>&lt;SyncDirectory&gt;/&lt;cloneKey&gt;/repo</c>.</summary>
-    public string CloneDirectory { get; }
+    /// <summary>
+    /// The disposable clone: <c>&lt;SyncDirectory&gt;/&lt;cloneKey&gt;/repo</c>. Throws for paths made by
+    /// <see cref="ForDatabase"/>, which know no remote.
+    /// </summary>
+    public string CloneDirectory =>
+        _cloneDirectory ?? throw new InvalidOperationException("these paths were made without a remote and have no clone directory");
 
     public string LockPath => Path.Combine(SyncDirectory, "lock");
 
@@ -44,16 +50,32 @@ public sealed class GitSyncPaths
         if (string.IsNullOrEmpty(remote))
             throw new ArgumentException("a remote is required", nameof(remote));
 
+        var (directory, syncDirectory) = Resolve(dbPath, caseInsensitive);
+        var cloneDirectory = Path.Combine(syncDirectory, SyncGit.cloneKey(remote), "repo");
+        return new GitSyncPaths(directory, syncDirectory, cloneDirectory);
+    }
+
+    /// <summary>
+    /// The same sync directory, lock, hooks directory and empty file as <see cref="For"/> for the database, and no
+    /// clone directory (<see cref="CloneDirectory"/> throws). For the commands that need the lock but no remote.
+    /// </summary>
+    public static GitSyncPaths ForDatabase(string dbPath, bool caseInsensitive)
+    {
+        if (string.IsNullOrWhiteSpace(dbPath))
+            throw new ArgumentException("a database path is required", nameof(dbPath));
+        var (directory, syncDirectory) = Resolve(dbPath, caseInsensitive);
+        return new GitSyncPaths(directory, syncDirectory, null);
+    }
+
+    private static (string Directory, string SyncDirectory) Resolve(string dbPath, bool caseInsensitive)
+    {
         var full = Path.GetFullPath(dbPath);
         var directory = Path.GetDirectoryName(full)
             ?? throw new ArgumentException("the database path has no directory", nameof(dbPath));
         var fileName = Path.GetFileName(full);
         if (fileName.Length == 0)
             throw new ArgumentException("the database path has no file name", nameof(dbPath));
-
-        var syncDirectory = Path.Combine(directory, "sync", SyncGit.dbKey(caseInsensitive, fileName));
-        var cloneDirectory = Path.Combine(syncDirectory, SyncGit.cloneKey(remote), "repo");
-        return new GitSyncPaths(directory, syncDirectory, cloneDirectory);
+        return (directory, Path.Combine(directory, "sync", SyncGit.dbKey(caseInsensitive, fileName)));
     }
 
     /// <summary>

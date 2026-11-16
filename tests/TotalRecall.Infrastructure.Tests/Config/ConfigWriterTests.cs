@@ -272,4 +272,81 @@ public sealed class ConfigWriterTests : IDisposable
         Assert.Null(ConfigWriter.GetNestedValue(t, "a.c"));
         Assert.Null(ConfigWriter.GetNestedValue(t, "nope"));
     }
+
+    // --- RenderUserOverrides ----------------------------------------------
+
+    private static readonly (string, object)[] ThreeKeys =
+    [
+        ("storage.mode", "git"),
+        ("git_sync.remote", "git@host:o/r.git"),
+        ("git_sync.branch", "main"),
+    ];
+
+    [Fact]
+    public void RenderUserOverrides_OnAMissingFile_EqualsRepeatedSaveUserOverride_AndCreatesNothing()
+    {
+        var dir = Path.Combine(_tempDir, "not-yet");
+        var path = Path.Combine(dir, "config.toml");
+
+        var rendered = ConfigWriter.RenderUserOverrides(path, ThreeKeys);
+
+        Assert.False(Directory.Exists(dir));
+        Assert.False(File.Exists(path));
+        var saved = Path.Combine(_tempDir, "saved", "config.toml");
+        foreach (var (key, value) in ThreeKeys)
+            ConfigWriter.SaveUserOverride(saved, key, value);
+        Assert.Equal(File.ReadAllText(saved), rendered);
+    }
+
+    [Fact]
+    public void RenderUserOverrides_KeepsUnrelatedSections_AndReplacesAKeyInAnExistingTable()
+    {
+        var path = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(path, "[tiers.hot]\nmax_entries = 7\n\n[storage]\nmode = \"local\"\nconnection_string = \"x\"\n");
+        var before = File.ReadAllText(path);
+
+        var rendered = ConfigWriter.RenderUserOverrides(path, ThreeKeys);
+
+        Assert.Equal(before, File.ReadAllText(path));
+        var model = Toml.ToModel(rendered);
+        Assert.Equal(7L, ((TomlTable)((TomlTable)model["tiers"])["hot"])["max_entries"]);
+        var storage = (TomlTable)model["storage"];
+        Assert.Equal("git", storage["mode"]);
+        Assert.Equal("x", storage["connection_string"]);
+        var sync = (TomlTable)model["git_sync"];
+        Assert.Equal("git@host:o/r.git", sync["remote"]);
+        Assert.Equal("main", sync["branch"]);
+    }
+
+    [Fact]
+    public void RenderUserOverrides_MalformedToml_Throws()
+    {
+        var path = Path.Combine(_tempDir, "config.toml");
+        File.WriteAllText(path, "[storage\nmode = ");
+        Assert.Throws<InvalidDataException>(() => ConfigWriter.RenderUserOverrides(path, ThreeKeys));
+    }
+
+    [Fact]
+    public void SaveUserOverride_StillWritesTheSameBytes()
+    {
+        // golden strings of the writer: a refactor that extracts the rendering must not change a byte
+        var cases = new (string Existing, string Key, object Value, string Expected)[]
+        {
+            ("", "a.b", "x", "[a]\nb = \"x\"\n"),
+            ("", "top", 5L, "top = 5\n"),
+            ("", "flag", true, "flag = true\n"),
+            ("[a]\nb = \"old\"\nc = 1\n", "a.b", "new", "[a]\nb = \"new\"\nc = 1\n"),
+        };
+        foreach (var (existing, key, value, expected) in cases)
+        {
+            var path = Path.Combine(_tempDir, Guid.NewGuid().ToString("N"), "config.toml");
+            if (existing.Length > 0)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, existing);
+            }
+            ConfigWriter.SaveUserOverride(path, key, value);
+            Assert.Equal(expected, File.ReadAllText(path));
+        }
+    }
 }
