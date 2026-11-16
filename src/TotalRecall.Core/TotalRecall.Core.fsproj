@@ -13,6 +13,7 @@
     <Compile Include="SyncMerge.fs" />
     <Compile Include="Config.fs" />
     <Compile Include="SyncGit.fs" />
+    <Compile Include="SyncTree.fs" />
     <Compile Include="Tokenizer.fs" />
     <Compile Include="Decay.fs" />
     <Compile Include="Ranking.fs" />
