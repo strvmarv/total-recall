@@ -302,12 +302,13 @@ from `Program.RunServeAsync`, see the T3 build decisions) and never on the boot 
   input is passed through. Known cost: on adversarial input the link pass grows faster than linearly, so the
   engine (only; the release script's input is the maintainer's own tag message) caps its input at 4,000
   characters before pass 3, and its tests bound the work on a 4,000-character hostile input, not the time it
-  takes: pass 3 runs at most one pass per level of nested matches plus a last pass that changes nothing (every
-  non-nested match of a scan goes in that scan), each pass is linear, and the total is quadratic by design (about 2,000 passes for the
-  `<`-nested input). The engine's `Sanitize(text, out passes)` counts the passes for the tests, and a wall-clock
-  ceiling of 10 seconds stays only as a backstop for a gross slowdown, such as a return to a backtracking
-  regular expression. The scheme match of the angle-bracket rule is ASCII-only (a Unicode case-folding match such as
-  `<http\u017f://x>` must not match), pinned by a fixture case. Examples in the fixture file: `"Fixed [the cache](https://x.y) bug\n"` gives
+  takes: pass 3 runs at most one pass per level of nested matches plus a last pass that changes nothing
+  (every non-nested match of a scan goes in that scan), each pass is linear, and the total is quadratic by
+  design (about 2,000 passes for the `<`-nested input). The engine's `Sanitize(text, out passes)` counts the
+  passes for the tests, and a wall-clock ceiling of 10 seconds stays only as a backstop for a gross
+  slowdown, such as a return to a backtracking regular expression. The scheme match of the angle-bracket
+  rule is ASCII-only (a Unicode case-folding match such as `<http\u017f://x>` must not match), pinned by a
+  fixture case. Examples in the fixture file: `"Fixed [the cache](https://x.y) bug\n"` gives
   `"Fixed the cache bug"`; `"\u001b[31mred\u001b[0m"` gives `"red"`. The update instruction in a nudge is composed from the host table
   below, never from fetched text.
 
