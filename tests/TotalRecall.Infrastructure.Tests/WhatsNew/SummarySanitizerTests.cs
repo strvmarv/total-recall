@@ -107,6 +107,21 @@ public class SummarySanitizerTests
     [Fact]
     public void Sanitize_Null_ReturnsEmpty() => Assert.Equal("", SummarySanitizer.Sanitize(null));
 
+    // The pass counter is the work measure the hostile-input test bounds (#122): the iterations of the pass-3 loop,
+    // including the last one that changes nothing, and 0 for null or empty input, which returns early.
+    [Theory]
+    [InlineData(null, 0)]
+    [InlineData("", 0)]
+    [InlineData("plain text", 1)]
+    [InlineData("[a](b)", 2)]
+    [InlineData("<<<https://x>>>", 4)]
+    public void Sanitize_CountsThePassesOfThePassThreeLoop(string? input, int expectedPasses)
+    {
+        var output = SummarySanitizer.Sanitize(input, out var passes);
+        Assert.Equal(expectedPasses, passes);
+        Assert.Equal(SummarySanitizer.Sanitize(input), output);
+    }
+
     [Fact]
     public void Sanitize_WhitespaceAndControlHandling_MatchesCharClassification()
     {
