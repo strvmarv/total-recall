@@ -14,6 +14,8 @@ dotnet run --project src/TotalRecall.Host -- dump-catalog > catalog.json
 
 CI runs a **"Catalog drift guard"** step that regenerates `catalog.json` and diffs it against the committed version — the build fails if they differ. Keep `catalog.json` committed and up-to-date whenever you add, remove, or rename a tool handler.
 
+> Note: `config_set` refuses `storage.mode`, `storage.connection_string` and every `git_sync` setting (`Core.SyncSettingsGuard.isProtectedKey`, before anything is read or written; the CLI `config set` and, through the allowlist, the web UI share it), because an agent must not be able to redirect the store or the sync.
+
 > Note: `catalog.json` reflects the local/sqlite surface. Postgres mode exposes fewer tools; the pre-engine `tools/list` is therefore cosmetically broad until the engine comes up and re-advertises via `notifications/tools/list_changed`. Tool calls always proxy correctly — only the pre-engine discovery list is approximate.
 
 ---
