@@ -9,7 +9,7 @@ This file is the operational handbook for AI agents and human contributors worki
 ## Quick Reference
 
 ### Project Overview
-.NET 10 NativeAOT MCP server plugin (C# imperative shell + F# functional core) with npm packaging for Claude Code / Copilot CLI / Cursor / Kiro / OpenCode / Codex CLI marketplace distribution. Three-tier memory (Hot/Warm/Cold with a **sticky** flag — new entries default to warm (`memory_store`, `memory_extract`, `memory_import` / `memory import` without a recognised tier, and Cortex pulls that omit it) and *earn* promotion to hot by access; sticky pins, set via `memory_pin`/`memory_unpin`, are always injected first and immune to decay/compaction) + hierarchical KB, all local by default (SQLite + sqlite-vec + bundled ONNX), optionally synced to Cortex (sticky pins are local-only, never synced). The single binary also exposes a third surface: a built-in local web UI (`total-recall ui`) serving an embedded React SPA with seven sections (Dashboard, Memory, Knowledge Base, Usage, Insights, Eval, Config) via `TotalRecall.Web`.
+.NET 10 NativeAOT MCP server plugin (C# imperative shell + F# functional core) with npm packaging for Claude Code / Copilot CLI / Cursor / Kiro / OpenCode / Codex CLI marketplace distribution. Three-tier memory (Hot/Warm/Cold with a **sticky** flag — new entries default to warm (`memory_store`, `memory_extract`, `memory_import` / `memory import` without a recognised tier, and Cortex pulls that omit it) and *earn* promotion to hot by access; sticky pins, set via `memory_pin`/`memory_unpin`, are always injected first and immune to decay/compaction) + hierarchical KB, all local by default (SQLite + sqlite-vec + bundled ONNX), optionally synced to Cortex (sticky pins are local-only, never synced). A `[storage] mode = "git"` exists as groundwork for git sync (#93): it opens the plain local store, falls back to `sqlite (git failed)` when it cannot work, and syncs nothing yet. The single binary also exposes a third surface: a built-in local web UI (`total-recall ui`) serving an embedded React SPA with seven sections (Dashboard, Memory, Knowledge Base, Usage, Insights, Eval, Config) via `TotalRecall.Web`.
 
 ### Layer Diagram
 ```
@@ -85,6 +85,7 @@ npm wrapper layer (zero-dep Node):
 | Embedding (ONNX) | `src/TotalRecall.Infrastructure/Embedding/` |
 | Importers (host tools) | `src/TotalRecall.Infrastructure/Importers/` |
 | Cortex sync | `src/TotalRecall.Infrastructure/Sync/` |
+| Git sync guards: manifest, identity rule, public check, `OpenGit` (the `git` storage mode opens the plain local store; no cycle yet), `config_set` denylist | `src/TotalRecall.Core/SyncManifest.fs`, `SyncIdentity.fs`, `SyncPublic.fs`, `SyncSettingsGuard.fs`; `src/TotalRecall.Infrastructure/GitSync/RepoGuard*.cs`, `ManifestFile.cs`, `HostIdentity.cs`; `src/TotalRecall.Server/ServerComposition.cs` (`OpenGit`) |
 | Git sync git client, lock and tree reader (not wired yet) | `src/TotalRecall.Infrastructure/GitSync/GitProcess.cs`, `GitClient*.cs`, `SyncLock.cs`, `GitSyncPaths.cs`; `src/TotalRecall.Core/SyncGit.fs`, `SyncTree.fs` |
 | Core domain types | `src/TotalRecall.Core/Types.fs` |
 | Pure logic (decay, ranking) | `src/TotalRecall.Core/*.fs` |
@@ -375,7 +376,7 @@ The root cause is Windows Defender mid-scanning the freshly-extracted `total-rec
 
 ### Config persistence
 
-`config_set` writes to `~/.total-recall/config.toml` via `Tomlyn`. Changes are merged with existing user config and take effect on the next session (the running server keeps the config it loaded). The CLI `total-recall config set` auto-creates a config snapshot named `pre-change:<key>` first so retrieval metrics from before and after can be compared with `eval_compare`; the MCP `config_set` tool does not snapshot (call `eval_snapshot` first).
+`config_set` writes to `~/.total-recall/config.toml` via `Tomlyn`, except that it (and the CLI `config set`) refuses `storage.mode`, `storage.connection_string` and every `git_sync` setting and what is beneath them: those are changed by hand in `config.toml` (`Core.SyncSettingsGuard`). Changes are merged with existing user config and take effect on the next session (the running server keeps the config it loaded). The CLI `total-recall config set` auto-creates a config snapshot named `pre-change:<key>` first so retrieval metrics from before and after can be compared with `eval_compare`; the MCP `config_set` tool does not snapshot (call `eval_snapshot` first).
 
 ### Eval system
 

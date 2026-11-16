@@ -22,6 +22,12 @@ internal sealed class PlumbingRepo : IDisposable
 
     public string Git(params string[] args) => _env.RunGit(_dir, args);
 
+    /// <summary>The scratch repository's working directory (a valid clone source).</summary>
+    public string WorkDir => _dir;
+
+    /// <summary>The isolated git environment (home, configuration) this repository was built in.</summary>
+    public GitTestEnvironment Env => _env;
+
     public string Blob(byte[] content)
     {
         var temp = Path.Combine(_env.Root, "blob-" + Guid.NewGuid().ToString("N"));

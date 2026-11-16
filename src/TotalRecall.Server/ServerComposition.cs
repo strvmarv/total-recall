@@ -246,7 +246,18 @@ public static class ServerComposition
     public static ServerCompositionHandles OpenProduction(string? dbPath = null, string querySource = "assistant")
     {
         var cfg = new ConfigLoader().LoadEffectiveConfig();
+        return OpenConfigured(cfg, dbPath, querySource, pathVariable: null);
+    }
 
+    /// <summary>
+    /// <see cref="OpenProduction"/> after the configuration is loaded: picks the backend from <c>[storage] mode</c> and
+    /// falls back to the local store, with a label, when cortex, postgres or git cannot be opened.
+    /// <paramref name="pathVariable"/> is the <c>PATH</c> value <c>git</c> is looked for in (null: the process's own);
+    /// a test passes its own so it need not change the process environment.
+    /// </summary>
+    internal static ServerCompositionHandles OpenConfigured(
+        Core.Config.TotalRecallConfig cfg, string? dbPath, string querySource, string? pathVariable)
+    {
         var configuredMode = "local";
         if (FSharpOption<Core.Config.StorageConfig>.get_IsSome(cfg.Storage)
             && FSharpOption<string>.get_IsSome(cfg.Storage.Value.Mode))
@@ -272,10 +283,11 @@ public static class ServerComposition
             {
                 "cortex" => OpenCortex(cfg, dbPath, FriendlyName(configuredMode), querySource),
                 "postgres" => OpenPostgres(cfg, FriendlyName(configuredMode), querySource),
+                "git" => OpenGit(cfg, dbPath, querySource, pathVariable),
                 _ => OpenSqlite(cfg, dbPath, FriendlyName(configuredMode), querySource)
             };
         }
-        catch (Exception ex) when (configuredMode is "cortex" or "postgres")
+        catch (Exception ex) when (configuredMode is "cortex" or "postgres" or "git")
         {
             // Non-local backend failed — fall back to SQLite so the session
             // is still usable, and surface what happened in the storage label.
@@ -284,6 +296,39 @@ public static class ServerComposition
                 $"[total-recall] {friendly} storage failed, falling back to sqlite: {ex.Message}");
             return OpenSqlite(cfg, dbPath, $"sqlite ({friendly} failed)", querySource);
         }
+    }
+
+    /// <summary>
+    /// The <c>git</c> storage mode: the plain local store plus a check that a sync can work at all. It runs no git
+    /// command and makes no network call (it is on the MCP boot path): a usable <c>[git_sync] remote</c> and branch
+    /// and a <c>git</c> executable on the <c>PATH</c>. Anything else throws, and the caller falls back to the local
+    /// store as <c>sqlite (git failed)</c>. Whether this machine has joined the repository is a state the sync cycle
+    /// reports, not a boot failure.
+    /// </summary>
+    internal static ServerCompositionHandles OpenGit(
+        Core.Config.TotalRecallConfig cfg, string? dbPath, string querySource, string? pathVariable)
+    {
+        var settings = FSharpOption<Core.Config.GitSyncConfig>.get_IsSome(cfg.GitSync)
+            ? cfg.GitSync.Value
+            : Core.Config.GitSyncSettings.defaults;
+
+        if (!FSharpOption<string>.get_IsSome(settings.Remote))
+            throw new InvalidOperationException("[git_sync] remote is not set or is not a usable repository address");
+        var remote = settings.Remote.Value;
+
+        var valid = Core.SyncGit.validateRemote(OperatingSystem.IsWindows(), remote);
+        if (valid.IsError)
+            // the message is fixed text: SyncGit.validateRemote never carries the address (it may hold credentials)
+            throw new InvalidOperationException("[git_sync] remote: " + valid.ErrorValue);
+        if (!FSharpOption<string>.get_IsSome(settings.Branch))
+            throw new InvalidOperationException("[git_sync] branch is not a usable branch name");
+        if (Infrastructure.GitSync.GitExecutable.TryFind(pathVariable) is null)
+            throw new InvalidOperationException("no git executable was found on the PATH");
+
+        foreach (var warning in settings.Warnings)
+            Console.Error.WriteLine($"[total-recall] {warning}"); // normalise warnings never quote the remote
+
+        return OpenSqlite(cfg, dbPath, "git", querySource);
     }
 
     /// <summary>

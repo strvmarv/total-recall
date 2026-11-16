@@ -4,6 +4,9 @@
 // Writes a user override via ConfigWriter.SaveUserOverride (AOT-safe hand-
 // rolled TOML writer) and returns {key, old_value, new_value, written}.
 //
+// The storage mode and the sync settings (storage.mode, storage.connection_string, git_sync.*) are refused before
+// anything is read or written: only the user changes them, in config.toml.
+//
 // Args:
 //   key   (string, required, dotted path)
 //   value (JSON, required; accepts string/number/bool; JSON null removes
@@ -71,6 +74,10 @@ public sealed class ConfigSetHandler : IToolHandler
         var key = kEl.GetString();
         if (string.IsNullOrEmpty(key))
             throw new ArgumentException("key must be a non-empty string");
+
+        // The storage mode and the sync settings are the user's to change (an agent must not redirect the store).
+        if (TotalRecall.Core.SyncSettingsGuard.isProtectedKey(key))
+            throw new ArgumentException(TotalRecall.Core.SyncSettingsGuard.refusal(key));
 
         if (!args.TryGetProperty("value", out var vEl))
             throw new ArgumentException("value is required");

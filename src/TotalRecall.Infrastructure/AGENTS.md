@@ -22,6 +22,7 @@ No reflection, no dynamic code generation. All JSON via source-generated `JsonCo
 | `Sync/` | `CortexClient`, `SyncQueue`, `SyncService`, `PeriodicSync`, `RoutingStore` | Bidirectional Cortex sync |
 | `GitSync/` | `RecordReader`, `ParsedRecord`, `RecordWriter`, `RecordPatcher` | Git sync record codec (not wired to any sync yet): strict reader (1 MiB cap, duplicate-key and encoding pre-pass), hand-written canonical writer (byte-stable, unknown content kept), patcher. Wire names are lower-case, not the `EntryTypeMapping` DB strings |
 | `GitSync/` (git client) | `GitProcess`, `GitClient` (+ `GitClient.Write.cs`), `GitSyncPaths`, `GitOutcome`, `SyncLock` | Git sync transport (nothing calls it yet): see "Git sync transport" below |
+| `GitSync/` (guards) | `ManifestFile`, `HostIdentity`, `MachineIdReader`, `GitSyncIdentityStore`, `PublicRepoProbe`, `RepoGuard` (+ `RepoGuard.Public.cs`) | Git sync guards (nothing starts a cycle yet): manifest codec, host fingerprint, the stored identity, the anonymous GitHub probe and `RepoGuard` (`EvaluateIdentityAsync`, `ReadManifestAsync`, `CheckPublicAsync`). See "Git sync guards" below. |
 | `Config/` | `ConfigLoader`, `TomlConfig` | TOML config loading + `~/.total-recall/config.toml` |
 | `Diagnostics/` | `ExceptionLogger` | AOT-safe exception chain logging |
 | `Migration/` | `MigrationRunner`, `PostgresMigrationRunner` | Sequential schema migration framework |
@@ -56,6 +57,27 @@ It runs on the store's single connection, so while one is open no other code may
 `BeginTransaction()` on the same store throws. The statements live in `Storage/SqlRows.cs` (`SqlRows`,
 `VecRows`), shared with `SqliteStore`'s own methods. An internal `BeforeStep` seam lets tests inject a
 failure at a named step. Nothing in production uses it yet (git sync does, in later milestones).
+
+**Git sync guards (`GitSync/RepoGuard*.cs`, `ManifestFile.cs`, `HostIdentity.cs`, `GitSyncIdentityStore.cs`, `PublicRepoProbe.cs`).**
+`RepoGuard.EvaluateIdentityAsync(revision = Head)` reads the settings, the stored identity (`_meta` keys `git_sync_remote`,
+`git_sync_repo_id`, `git_sync_host`), the host fingerprint and the repository's manifest from the **local clone** at the given
+revision (the cycle passes `refs/remotes/origin/<branch>` after its fetch, when `HEAD` is still the old commit) and returns a
+`GuardVerdict`: the `Core.SyncIdentity.JoinState`, the `ManifestRead` outcome (`NoClone` = no `.git` under the clone directory,
+`NoManifest`, `Invalid`, `Unreadable` for any git failure or a blob over 64 KiB, `Newer`, `Ok`) and `HostUnverified`.
+`GuardVerdict.CanSync` is true only when joined, the host fingerprint was available and the manifest is `Ok` or there is no
+clone yet; a caller reports a newer format before `not-joined`. It runs no network command (`Clone`, `LsRemote`, `Fetch`,
+`Push`). `ManifestFile.Parse` lets a newer `format` win over every refusal except non-JSON and invalid UTF-8 (a strict UTF-8
+check first, then a permissive look for the first root `format`), then applies the 4 KiB cap and the `v1` rules, and never
+throws on hostile input. `HostIdentity` hashes the OS machine id (Linux `/etc/machine-id`, macOS `ioreg`, Windows `MachineGuid`)
+with the canonical database path (links resolved one hop at a time, `\\?\` stripped, lower-cased on Windows and macOS);
+a source that exists but fails makes the fingerprint unavailable (`null`) instead of reading as a moved directory.
+`RepoGuard.CheckPublicAsync` asks `GET https://api.github.com/repos/<owner>/<repo>` with no credentials, no cookies, at most 3
+redirects and a 5-second limit (only an answer from the base address's host counts): 200 is public (refused), 404 private (cached
+24 hours in `_meta.git_sync_public_check`; nothing else is cached, and a store fault on the cache is a miss), anything else is
+unknown (one warning per guard); a non-GitHub remote is skipped with one notice. There is no in-process memo of the verdict.
+`ServerComposition.OpenGit` (the `git` storage mode) validates the remote, the branch and that a `git` executable is on the
+`PATH` (`GitExecutable.TryFind`, no process) and otherwise opens the plain local store with the label `git`; a failure falls back
+to `sqlite (git failed)`.
 
 **Git sync transport (`GitSync/GitProcess.cs`, `GitClient*.cs`, `GitSyncPaths.cs`, `SyncLock.cs`).** Every git call is one
 of the closed `Core.SyncGit.GitCommand` cases (no case can force, delete or mirror; a recording `IGitProcess` plus
