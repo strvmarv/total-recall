@@ -81,8 +81,14 @@ internal sealed class Prepared : IDisposable
 
     public void Dispose()
     {
-        Connection.Dispose();
-        Lock.Dispose();
+        try
+        {
+            Connection.Dispose();
+        }
+        finally
+        {
+            Lock.Dispose();
+        }
     }
 }
 
@@ -284,8 +290,14 @@ public sealed partial class SyncSetupService(SyncSetupEnvironment env)
 
     private static (Prepared?, SetupResult?) Release(SyncLockHandle handle, MsSqliteConnection? connection, SetupResult result)
     {
-        connection?.Dispose();
-        handle.Dispose();
+        try
+        {
+            connection?.Dispose();
+        }
+        finally
+        {
+            handle.Dispose();
+        }
         return (null, result);
     }
 
@@ -325,9 +337,14 @@ public sealed partial class SyncSetupService(SyncSetupEnvironment env)
         }
     }
 
-    /// <summary>Turns git mode off (decision 7).</summary>
-    public Task<SetupResult> LeaveAsync(CancellationToken ct = default) => Task.FromResult(Failed("not implemented"));
-
-    /// <summary>Reads what this machine knows (decision 8).</summary>
-    public Task<SetupResult> StatusAsync(CancellationToken ct = default) => Task.FromResult(Failed("not implemented"));
+    /// <summary>
+    /// The config, last (decision 10.3): the text is rendered now from the file's current content, so a <c>config set</c>
+    /// that ran meanwhile is kept, and written once.
+    /// </summary>
+    private void WriteConfig(IReadOnlyList<(string Key, object Value)> keys)
+    {
+        _phase = "writing config.toml";
+        var text = env.Config.Render(keys);
+        env.Config.Write(text);
+    }
 }

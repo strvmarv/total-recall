@@ -1,0 +1,211 @@
+using Microsoft.FSharp.Core;
+using TotalRecall.Core;
+using TotalRecall.Infrastructure.Storage;
+using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
+
+namespace TotalRecall.Infrastructure.GitSync;
+
+public sealed partial class SyncSetupService
+{
+    // ---- leave (decision 7) -----------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Turns git mode off: writes <c>storage.mode = "local"</c> and nothing else. Its paths come from the database path
+    /// alone, so it works when the remote is missing or unusable and with <c>git</c> missing. It reads no repository.
+    /// </summary>
+    public async Task<SetupResult> LeaveAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            _phase = "reading the settings";
+            if (env.LoadError is not null)
+                return Failed(env.LoadError);
+            if (env.EffectiveMode != "git")
+                return SetupResult.Done("this machine is not in git mode; nothing changed");
+
+            _phase = "taking the sync lock";
+            var paths = GitSyncPaths.ForDatabase(env.DatabasePath, env.CaseInsensitive);
+            paths.EnsureCreated();
+            using var handle = await SyncLock.TryAcquireAsync(paths.LockPath, LockWait, ct).ConfigureAwait(false);
+            if (handle is null)
+                return Refuse(SyncSetup.Refusal.Busy, "another total-recall process is syncing this database: try again in a moment");
+
+            WriteConfig([("storage.mode", "local")]);
+            return SetupResult.Done(
+                "storage.mode is now \"local\"",
+                "your memories, this machine's sync state and the repository are untouched; [git_sync] is kept,",
+                "so `sync join <address>` later restores git mode");
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return FailedFrom("leave", ex);
+        }
+    }
+
+    // ---- status (decision 8) ----------------------------------------------------------------------------------
+
+    /// <summary>
+    /// What this machine knows about its sync setup. Read-only: no network, no lock, nothing created (a database that
+    /// does not exist is opened by no one). Exit 0 whatever it finds; a fact it cannot read prints as
+    /// <c>unknown (reason)</c> and the rest carries on.
+    /// </summary>
+    public async Task<SetupResult> StatusAsync(CancellationToken ct = default)
+    {
+        var loadError = env.LoadError;
+        var remote = FSharpOption<string>.get_IsSome(env.Settings.Remote) ? env.Settings.Remote.Value : null;
+
+        var mode = loadError is null ? env.EffectiveMode : $"unknown ({loadError})";
+        var git = "unknown";
+        var configuredRemote = loadError is null ? Opt(remote) : SyncSetup.Fact.NewUnknown(loadError);
+        var configuredBranch = loadError is null
+            ? Opt(FSharpOption<string>.get_IsSome(env.Settings.Branch) ? env.Settings.Branch.Value : null)
+            : SyncSetup.Fact.NewUnknown(loadError);
+        SyncSetup.Fact storedRemote = Unknown(loadError), repoId = Unknown(loadError), machineId = Unknown(loadError);
+        var host = SyncSetup.HostCheck.NotRecorded;
+        var join = loadError is null ? "unknown" : $"unknown ({loadError})";
+        var clone = loadError is null ? "unknown" : $"unknown ({loadError})";
+
+        MsSqliteConnection? connection = null;
+        try
+        {
+            GitSyncPaths? paths = null;
+            GitClient? client = null;
+            if (loadError is null)
+            {
+                try
+                {
+                    paths = GitSyncPaths.For(env.DatabasePath, remote ?? "none", env.CaseInsensitive);
+                    var executable = GitExecutable.TryFind(env.PathVariable);
+                    if (executable is null)
+                    {
+                        git = "not found";
+                    }
+                    else
+                    {
+                        client = new GitClient(env.Process, executable, paths, env.GitOptions);
+                        var version = await client.VersionAsync(ct).ConfigureAwait(false);
+                        git = version.IsOk
+                            ? $"{version.Value.Major}.{version.Value.Minor}"
+                            : version.Failure.Failure is { IsGitTooOld: true } ? "found, but older than 2.28" : "found, but it did not report a version";
+                    }
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
+                {
+                    git = $"unknown ({ex.Message})";
+                }
+
+                var open = ReadOnlyDatabase.Open(env.DatabasePath);
+                connection = open.Connection;
+                var meta = new ReadOnlyMeta(connection);
+                if (open.Unknown is not null)
+                {
+                    storedRemote = repoId = machineId = SyncSetup.Fact.NewUnknown(open.Unknown);
+                }
+                else
+                {
+                    storedRemote = ReadFact(meta, SyncIdentity.MetaKeys.Remote);
+                    repoId = ReadFact(meta, SyncIdentity.MetaKeys.RepoId);
+                    machineId = ReadFact(meta, SyncIdentity.MetaKeys.Machine);
+                    host = ReadHost(meta);
+                }
+
+                (join, clone) = await JoinAndCloneAsync(open, meta, remote, paths, client, ct).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            connection?.Dispose();
+        }
+
+        return new SetupResult(
+            0, null, null,
+            SyncSetup.renderStatus(new SyncSetup.StatusFacts(mode, git, configuredRemote, configuredBranch, storedRemote, repoId, machineId, host, join, clone))
+                .ToArray(),
+            []);
+    }
+
+    private static SyncSetup.Fact Opt(string? value) =>
+        value is null ? SyncSetup.Fact.Missing : SyncSetup.Fact.NewKnown(value);
+
+    private static SyncSetup.Fact Unknown(string? reason) =>
+        reason is null ? SyncSetup.Fact.Missing : SyncSetup.Fact.NewUnknown(reason);
+
+    private static SyncSetup.Fact ReadFact(IMetaStore meta, string key)
+    {
+        try
+        {
+            var value = meta.GetMeta(key);
+            return string.IsNullOrEmpty(value) ? SyncSetup.Fact.Missing : SyncSetup.Fact.NewKnown(value);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return SyncSetup.Fact.NewUnknown(ex.Message);
+        }
+    }
+
+    private SyncSetup.HostCheck ReadHost(IMetaStore meta)
+    {
+        try
+        {
+            var stored = meta.GetMeta(SyncIdentity.MetaKeys.Host);
+            if (string.IsNullOrEmpty(stored))
+                return SyncSetup.HostCheck.NotRecorded;
+            var current = env.Host.Fingerprint;
+            if (current is null)
+                return SyncSetup.HostCheck.Unavailable;
+            return string.Equals(stored, current, StringComparison.Ordinal) ? SyncSetup.HostCheck.Matches : SyncSetup.HostCheck.Differs;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return SyncSetup.HostCheck.NotRecorded;
+        }
+    }
+
+    /// <summary>The join state (from the 1a-2 guard, local reads only) and whether a clone exists, each as one text.</summary>
+    private async Task<(string Join, string Clone)> JoinAndCloneAsync(
+        ReadOnlyOpen open, IMetaStore meta, string? remote, GitSyncPaths? paths, GitClient? client, CancellationToken ct)
+    {
+        if (remote is null)
+            return (JoinText(SyncIdentity.NotJoinedReason.NotConfigured), "no clone");
+
+        var cloneText = "no clone";
+        try
+        {
+            if (paths is not null)
+            {
+                var dotGit = Path.Combine(paths.CloneDirectory, ".git");
+                if (Directory.Exists(dotGit) || File.Exists(dotGit))
+                    cloneText = $"clone at {paths.CloneDirectory}";
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            cloneText = $"unknown ({ex.Message})";
+        }
+
+        if (open.Unknown is not null)
+            return ($"unknown ({open.Unknown})", cloneText);
+        try
+        {
+            var guard = new RepoGuard(env.Settings, meta, client, env.Host, env.Probe, env.Clock);
+            var verdict = await guard.EvaluateIdentityAsync(null, ct).ConfigureAwait(false);
+            var join = verdict.Join.IsJoined ? "joined" : JoinText(((SyncIdentity.JoinState.NotJoined)verdict.Join).Item);
+            var manifest = verdict.Manifest.Kind switch
+            {
+                ManifestReadKind.Ok => "manifest ok",
+                ManifestReadKind.Newer => $"manifest written by a newer total-recall (format {verdict.Manifest.NewerVersion}): update total-recall",
+                ManifestReadKind.Invalid => $"manifest invalid: {verdict.Manifest.Reason}",
+                ManifestReadKind.Unreadable => $"manifest unreadable: {verdict.Manifest.Reason}",
+                ManifestReadKind.NoManifest => "the clone has no manifest",
+                _ => null,
+            };
+            return (join, manifest is null ? cloneText : $"{cloneText}; {manifest}");
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
+        {
+            return ($"unknown ({ex.Message})", cloneText);
+        }
+    }
+
+    private static string JoinText(SyncIdentity.NotJoinedReason reason) => "not joined: " + SyncIdentity.reasonText(reason);
+}

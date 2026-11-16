@@ -237,6 +237,23 @@ public sealed class SyncSetupPreconditionTests
     }
 
     [GitFact]
+    public async Task AGitThatThrows_IsFailedNamingThePhase()
+    {
+        using var rig = new SetupRig();
+        rig.Before = c =>
+        {
+            if (c.IsVersion)
+                throw new IOException("cannot run git");
+        };
+
+        var result = await rig.Service().InitAsync(GoodAddress, null);
+
+        Assert.Equal(SyncSetup.Refusal.Failed, result.Refusal);
+        Assert.Contains("looking for git", result.RefusalText);
+        rig.AssertNothingCreated();
+    }
+
+    [GitFact]
     public async Task Preconditions_ReleaseTheLockAndConnectionOnEveryExit()
     {
         // each way out after the lock is taken: a garbage database (the probe throws), the old format (refused),
