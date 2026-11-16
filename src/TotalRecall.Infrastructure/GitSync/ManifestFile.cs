@@ -67,9 +67,13 @@ public static class ManifestFile
             if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject) return null;
             while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
             {
-                var name = reader.GetString();
+                // A key holding a lone-surrogate escape is valid JSON but cannot be decoded: it is some other key,
+                // and the look goes on.
+                bool isFormat;
+                try { isFormat = reader.ValueTextEquals("format"); }
+                catch (InvalidOperationException) { isFormat = false; }
                 if (!reader.Read()) return null;
-                if (name == "format" && !seenFormat)
+                if (isFormat && !seenFormat)
                 {
                     seenFormat = true;
                     if (reader.TokenType == JsonTokenType.String) format = reader.GetString();

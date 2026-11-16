@@ -37,7 +37,7 @@ let private hostOf (authority: string) : string option =
     | -1 -> Some afterUser
     | i ->
         let port = afterUser.Substring(i + 1)
-        if port.Length > 0 && port |> Seq.forall (fun c -> c >= '0' && c <= '9') then Some(afterUser.Substring(0, i)) else None
+        if port |> Seq.forall (fun c -> c >= '0' && c <= '9') then Some(afterUser.Substring(0, i)) else None
 
 let private slugOfPath (path: string) : GitHubSlug option =
     let path = if path.EndsWith("/", StringComparison.Ordinal) then path.Substring(0, path.Length - 1) else path

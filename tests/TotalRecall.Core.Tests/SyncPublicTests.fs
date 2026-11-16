@@ -12,7 +12,7 @@ let tests =
             for remote in [ "https://github.com/o/r"; "https://github.com/o/r.git"; "https://github.com/o/r/"
                             "http://GitHub.com/o/r"; "git://github.com/o/r.git"; "ssh://git@github.com/o/r.git"
                             "ssh://git@github.com:22/o/r.git"; "git+ssh://git@github.com/o/r"; "ssh+git://git@github.com/o/r"
-                            "git@github.com:o/r.git"; "https://user:tok3n@github.com/o/r"; "HTTPS://github.com/o/r" ] do
+                            "git@github.com:o/r.git"; "https://user:tok3n@github.com/o/r"; "HTTPS://github.com/o/r"; "https://github.com:/o/r" ] do
                 Expect.equal (parseGitHubSlug remote) (Some or') remote
 
         testCase "parseGitHubSlug refuses every other shape" <| fun _ ->
@@ -20,7 +20,7 @@ let tests =
                             "https://gitlab.com/o/r"; "/srv/git/r"; "C:\\r"; "https://github.com/o"; "https://github.com/o/r/extra"
                             "https://github.com/o/.git"; "https://github.com/o/.."; "https://github.com/o/."; "https://github.com//r"
                             "https://github.com/o/r%"; "https://ssh.github.com/o/r"; ""; "   "; "ftp://github.com/o/r"
-                            "https://github.com:abc/o/r"; "https://github.com"; "github.com/o/r"
+                            "https://github.com:abc/o/r"; "https://github.com:4a/o/r"; "https://github.com"; "github.com/o/r"
                             "https://evil.com#@github.com/o/r"; "git://evil.com#@github.com/o/r"; "https://evil.com?x@github.com/o/r"
                             "https://evil.com\\@github.com/o/r"; "https://evil.com\t@github.com/o/r"; "git@github.com%40evil.com:o/r.git" ] do
                 Expect.equal (parseGitHubSlug remote) None remote

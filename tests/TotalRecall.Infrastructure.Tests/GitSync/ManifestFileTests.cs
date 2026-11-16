@@ -121,6 +121,8 @@ public sealed class ManifestFileTests
         Assert.Equal(ManifestParseKind.Invalid, ManifestFile.Parse(Utf8($$"""{"format":"total-recall/v1","repo_id":"{{Id}}","\ud800":1}""")).Kind);
         Assert.Equal(ManifestParseKind.Invalid, ManifestFile.Parse(Utf8("""{"format":"\ud800"}""")).Kind);
         Assert.Equal(ManifestParseKind.Newer, ManifestFile.Parse(Utf8("""{"format":"total-recall/v2","x":"\ud800"}""")).Kind);
+        Assert.Equal(ManifestParseKind.Newer, ManifestFile.Parse(Utf8("""{"format":"total-recall/v2","\ud800":1}""")).Kind);
+        Assert.Equal(ManifestParseKind.Newer, ManifestFile.Parse(Utf8("""{"\ud800":1,"format":"total-recall/v2"}""")).Kind);
     }
 
     [Theory]

@@ -23,7 +23,7 @@ internal sealed class LoopbackFactAttribute : FactAttribute
 /// <summary>A loopback HTTP server for the probe tests: each request is handed to <c>handler</c>, which writes the response.</summary>
 internal sealed class LoopbackServer : IDisposable
 {
-    private readonly HttpListener _listener = new();
+    private readonly HttpListener _listener;
     private readonly Func<HttpListenerContext, Task> _handler;
     private readonly Task _loop;
 
@@ -33,10 +33,24 @@ internal sealed class LoopbackServer : IDisposable
     public LoopbackServer(Func<HttpListenerContext, Task> handler)
     {
         _handler = handler;
-        var port = FreePort();
-        BaseAddress = new Uri($"http://127.0.0.1:{port}/");
-        _listener.Prefixes.Add(BaseAddress.ToString());
-        _listener.Start();
+        // a free port is found by binding and releasing one; another process can take it in between, so retry
+        for (var attempt = 0; ; attempt++)
+        {
+            var listener = new HttpListener();
+            var address = new Uri($"http://127.0.0.1:{FreePort()}/");
+            listener.Prefixes.Add(address.ToString());
+            try
+            {
+                listener.Start();
+                _listener = listener;
+                BaseAddress = address;
+                break;
+            }
+            catch (HttpListenerException) when (attempt < 5)
+            {
+                listener.Close();
+            }
+        }
         _loop = Task.Run(Loop);
     }
 
