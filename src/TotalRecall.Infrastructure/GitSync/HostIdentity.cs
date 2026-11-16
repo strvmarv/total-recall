@@ -155,7 +155,7 @@ public sealed class HostIdentity
 
     /// <summary>
     /// The full path with every existing component resolved through its symbolic links (one component at a time), a
-    /// <c>\\?\</c> prefix stripped, trailing separators removed and, on a case-insensitive system, lower-cased with
+    /// <c>\\?\</c> prefix stripped (a <c>link/..</c> in the given path is collapsed lexically by <c>GetFullPath</c> first), trailing separators removed and, on a case-insensitive system, lower-cased with
     /// the invariant culture. Null on any failure.
     /// </summary>
     internal static string? CanonicalPathOf(string path, bool caseInsensitive)
@@ -194,7 +194,9 @@ public sealed class HostIdentity
             FileSystemInfo info = Directory.Exists(next) ? new DirectoryInfo(next) : new FileInfo(next);
             if (info.Exists && info.LinkTarget is not null)
             {
-                var target = info.ResolveLinkTarget(returnFinalTarget: true);
+                // One hop at a time: every ancestor of `next` is already physical, so a relative target (`../z`) is
+                // resolved against the right directory; the recursion walks the target's own components again.
+                var target = info.ResolveLinkTarget(returnFinalTarget: false);
                 if (target is null) return null;
                 var rest = parts[(i + 1)..];
                 return ResolveLinks(rest.Length == 0 ? target.FullName : Path.Combine([target.FullName, .. rest]), depth + 1);

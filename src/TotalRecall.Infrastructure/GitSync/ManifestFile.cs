@@ -57,7 +57,10 @@ public static class ManifestFile
 
     private static string? LookForFormat(ReadOnlySpan<byte> body)
     {
+        // Any exception means no look: non-JSON never reads as a newer format. The first `format` key is the one used,
+        // whatever its type. (`GetString` throws InvalidOperationException, not JsonException, for a lone surrogate.)
         string? format = null;
+        var seenFormat = false;
         try
         {
             var reader = new Utf8JsonReader(body);
@@ -65,14 +68,21 @@ public static class ManifestFile
             while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
             {
                 var name = reader.GetString();
-                if (!reader.Read()) break;
-                if (name == "format" && format is null && reader.TokenType == JsonTokenType.String)
-                    format = reader.GetString();
+                if (!reader.Read()) return null;
+                if (name == "format" && !seenFormat)
+                {
+                    seenFormat = true;
+                    if (reader.TokenType == JsonTokenType.String) format = reader.GetString();
+                }
                 reader.Skip();
             }
+            if (reader.TokenType != JsonTokenType.EndObject) return null;
+            return reader.Read() ? null : format;
         }
-        catch (JsonException) { /* what was read so far stands */ }
-        return format;
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            return null;
+        }
     }
 
     private static ManifestParse ParseStrict(ReadOnlySpan<byte> bytes)
@@ -111,7 +121,7 @@ public static class ManifestFile
             if (reader.TokenType != JsonTokenType.EndObject) return ManifestParse.Invalid("the manifest is not a complete JSON object");
             if (reader.Read()) return ManifestParse.Invalid("the manifest has content after its JSON object");
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
             return ManifestParse.Invalid("the manifest is not valid JSON");
         }

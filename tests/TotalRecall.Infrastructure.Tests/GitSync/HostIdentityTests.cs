@@ -171,6 +171,23 @@ public sealed class HostIdentityTests : IDisposable
     }
 
     [ShFact]
+    public void ARelativeLinkChainThroughASymlinkedDirectory_ResolvesLikeRealpath()
+    {
+        // chain -> sub1/l2, sub1 -> x/y, x/y/l2 -> ../z   (realpath of chain is <root>/x/z)
+        Directory.CreateDirectory(Path.Combine(_root, "x", "y"));
+        Directory.CreateDirectory(Path.Combine(_root, "x", "z"));
+        Directory.CreateSymbolicLink(Path.Combine(_root, "sub1"), "x/y");
+        Directory.CreateSymbolicLink(Path.Combine(_root, "x", "y", "l2"), "../z");
+        Directory.CreateSymbolicLink(Path.Combine(_root, "chain"), "sub1/l2");
+
+        var canonical = HostIdentity.CanonicalPathOf(Path.Combine(_root, "chain", "tr.db"), false);
+
+        var expected = HostIdentity.CanonicalPathOf(Path.Combine(_root, "x", "z", "tr.db"), false);
+        Assert.Equal(expected, canonical);
+        Assert.Contains(Path.Combine("x", "z"), canonical);
+    }
+
+    [ShFact]
     public void ASymlinkLoop_MakesTheFingerprintUnavailable()
     {
         var a = Path.Combine(_root, "a");

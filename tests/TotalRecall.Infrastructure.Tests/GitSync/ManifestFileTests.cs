@@ -115,6 +115,29 @@ public sealed class ManifestFileTests
     }
 
     [Fact]
+    public void ALoneSurrogateEscape_IsInvalid_NotAnException_AndANewerFormatStillWins()
+    {
+        Assert.Equal(ManifestParseKind.Invalid, ManifestFile.Parse(Utf8($$"""{"format":"total-recall/v1","repo_id":"{{Id}}","created_by":"\ud800"}""")).Kind);
+        Assert.Equal(ManifestParseKind.Invalid, ManifestFile.Parse(Utf8($$"""{"format":"total-recall/v1","repo_id":"{{Id}}","\ud800":1}""")).Kind);
+        Assert.Equal(ManifestParseKind.Invalid, ManifestFile.Parse(Utf8("""{"format":"\ud800"}""")).Kind);
+        Assert.Equal(ManifestParseKind.Newer, ManifestFile.Parse(Utf8("""{"format":"total-recall/v2","x":"\ud800"}""")).Kind);
+    }
+
+    [Theory]
+    [InlineData("""{"format":"total-recall/v2","x":""")]
+    [InlineData("""{"format":"total-recall/v2",,,}""")]
+    [InlineData("""{"format":"total-recall/v2"} garbage""")]
+    public void NonJson_NeverReadsAsANewerFormat(string json) =>
+        Assert.Equal(ManifestParseKind.Invalid, ManifestFile.Parse(Utf8(json)).Kind);
+
+    [Theory]
+    [InlineData("""{"format":"total-recall/v2","format":"total-recall/v1"}""", ManifestParseKind.Newer)]
+    [InlineData("""{"format":"total-recall/v1","format":"total-recall/v2"}""", ManifestParseKind.Invalid)]
+    [InlineData("""{"format":5,"format":"total-recall/v2"}""", ManifestParseKind.Invalid)]
+    public void OfADuplicatedFormat_TheFirstIsUsed(string json, ManifestParseKind expected) =>
+        Assert.Equal(expected, ManifestFile.Parse(Utf8(json)).Kind);
+
+    [Fact]
     public void ASpanOver64KiB_IsInvalid_EvenWhenItNamesANewerFormat()
     {
         Assert.Equal(ManifestParseKind.Invalid, ManifestFile.Parse(PadTo("""{"format":"total-recall/v2"}""", 65537)).Kind);
