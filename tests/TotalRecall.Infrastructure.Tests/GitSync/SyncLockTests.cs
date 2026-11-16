@@ -173,7 +173,14 @@ public sealed class SyncLockTests : IDisposable
         Posix.Mode(directory, UnixFileMode.UserRead | UnixFileMode.UserExecute);
         try
         {
-            Assert.Throws<UnauthorizedAccessException>(() => File.Create(Path.Combine(directory, "probe")).Dispose()); // the premise
+            try
+            {
+                File.Create(Path.Combine(directory, "probe")).Dispose();
+                return; // the file system or the user ignores the mode (not only root): the case cannot arise here
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
             var thrown = await Record.ExceptionAsync(() => SyncLock.TryAcquireAsync(Path.Combine(directory, "lock"), TimeSpan.Zero));
             Assert.NotNull(thrown);
             Assert.True(thrown is UnauthorizedAccessException || (thrown is IOException io && !SyncLock.IsSharingViolation(io.HResult, false)), thrown!.ToString());

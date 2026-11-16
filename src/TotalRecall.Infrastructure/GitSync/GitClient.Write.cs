@@ -17,8 +17,6 @@ public sealed partial class GitClient
         SyncGit.Revision to,
         CancellationToken cancellationToken = default)
     {
-        if (!HasRepository())
-            return NotARepository<IReadOnlyList<SyncTree.DiffEntry>>();
         var result = await RunAsync(SyncGit.GitCommand.NewDiffTree(from, to), _options.LocalTimeout, cancellationToken).ConfigureAwait(false);
         return result.Failure is not null
             ? GitOutcome<IReadOnlyList<SyncTree.DiffEntry>>.Fail(result)
@@ -28,8 +26,6 @@ public sealed partial class GitClient
     /// <summary>Every file under <c>memories/</c> at a revision, with its mode and size. Judge each with <see cref="SyncTree.classifyRecordEntry"/>.</summary>
     public async Task<GitOutcome<IReadOnlyList<SyncTree.TreeEntry>>> LsTreeAsync(SyncGit.Revision revision, CancellationToken cancellationToken = default)
     {
-        if (!HasRepository())
-            return NotARepository<IReadOnlyList<SyncTree.TreeEntry>>();
         var result = await RunAsync(SyncGit.GitCommand.NewLsTree(revision), _options.LocalTimeout, cancellationToken).ConfigureAwait(false);
         return result.Failure is not null
             ? GitOutcome<IReadOnlyList<SyncTree.TreeEntry>>.Fail(result)
@@ -39,8 +35,6 @@ public sealed partial class GitClient
     /// <summary>The entries of the root of a revision, not recursive (the manifest and the <c>memories</c> directory).</summary>
     public async Task<GitOutcome<IReadOnlyList<SyncTree.TreeEntry>>> LsTreeRootAsync(SyncGit.Revision revision, CancellationToken cancellationToken = default)
     {
-        if (!HasRepository())
-            return NotARepository<IReadOnlyList<SyncTree.TreeEntry>>();
         var result = await RunAsync(SyncGit.GitCommand.NewLsTreeRoot(revision), _options.LocalTimeout, cancellationToken).ConfigureAwait(false);
         return result.Failure is not null
             ? GitOutcome<IReadOnlyList<SyncTree.TreeEntry>>.Fail(result)
@@ -53,8 +47,6 @@ public sealed partial class GitClient
     /// </summary>
     public async Task<GitOutcome<byte[]>> CatBlobAsync(string sha, int maxBytes, CancellationToken cancellationToken = default)
     {
-        if (!HasRepository())
-            return NotARepository<byte[]>();
         var result = await RunAsync(
             SyncGit.GitCommand.NewCatBlob(sha),
             _options.LocalTimeout,

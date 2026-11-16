@@ -27,7 +27,7 @@ public sealed record GitClientOptions
     /// <summary>A cap on the standard output of every call; none means the process default (64 MiB).</summary>
     public int? MaxStdoutBytes { get; init; }
 
-    /// <summary>The directory a process starts in; by default the sync directory (none for the version and ssh configuration reads).</summary>
+    /// <summary>The directory a process starts in; by default the sync directory (none for the version check).</summary>
     public string? WorkingDirectory { get; init; }
 }
 
@@ -91,6 +91,10 @@ public sealed partial class GitClient
             if (failure is not null)
                 return failure;
         }
+
+        // a clone-scoped command never starts against a clone that is missing, damaged or a link
+        if (SyncGit.isCloneScoped(command) && !CloneIsSound())
+            return Synthetic(SyncGit.FailureKind.NotARepository, "not a git repository: the clone is missing or is not a plain directory");
 
         // GIT_CEILING_DIRECTORIES is a list separated by the platform's path separator and has no escape, so a database
         // directory whose own path contains it cannot be named: fail closed rather than leave git free to read the
@@ -166,9 +170,10 @@ public sealed partial class GitClient
 
     /// <summary>
     /// The <c>GIT_SSH_COMMAND</c> for network calls, composed once per instance: the user's command (the process's own
-    /// <c>GIT_SSH_COMMAND</c>, else <c>core.sshCommand</c> as git itself resolves it for the user: the system, global
-    /// and XDG files, included files followed, read from the sync directory under the ceiling directory, so never the
-    /// configuration of whatever repository the process is in) with <c>-o BatchMode=yes -o ConnectTimeout=8</c>
+    /// <c>GIT_SSH_COMMAND</c>, else <c>core.sshCommand</c> as git resolves it for a user outside any repository: the
+    /// system, global and XDG files, included files followed, read from the sync directory under the ceiling directory,
+    /// so never the configuration of whatever repository the process is in; an <c>includeIf "hasconfig:remote.*.url:…"</c>
+    /// is therefore not seen, and such a user sets <c>GIT_SSH_COMMAND</c>) with <c>-o BatchMode=yes -o ConnectTimeout=8</c>
     /// appended. Null leaves the variable alone (only <c>GIT_SSH</c> is set, which does not take OpenSSH options).
     /// </summary>
     private async Task<(string? Command, GitResult? Failure)> SshCommandAsync(CancellationToken cancellationToken)
@@ -254,15 +259,22 @@ public sealed partial class GitClient
 
     private static string Text(GitResult result) => Encoding.UTF8.GetString(result.Stdout);
 
-    /// <summary>True when the clone has a real <c>.git</c> directory (not a link, not a <c>gitdir:</c> file).</summary>
-    private bool HasRepository()
-    {
-        var git = new DirectoryInfo(Path.Combine(_paths.CloneDirectory, ".git"));
-        return git.Exists && !git.Attributes.HasFlag(FileAttributes.ReparsePoint);
-    }
+    private static bool IsRealDirectory(DirectoryInfo directory) =>
+        directory.Exists && !directory.Attributes.HasFlag(FileAttributes.ReparsePoint);
 
-    private static GitOutcome<T> NotARepository<T>() =>
-        GitOutcome<T>.Fail(Synthetic(SyncGit.FailureKind.NotARepository, "not a git repository: the clone has no .git"));
+    /// <summary>
+    /// True when the clone is what sync made: the <c>&lt;cloneKey&gt;</c> directory, the <c>repo</c> directory and its
+    /// <c>.git</c> are real directories, not links and not a <c>gitdir:</c> file. A link planted in any of them would
+    /// point <c>--git-dir</c> and <c>--work-tree</c> at someone else's repository.
+    /// </summary>
+    private bool CloneIsSound()
+    {
+        var clone = new DirectoryInfo(_paths.CloneDirectory);
+        return IsRealDirectory(clone)
+            && clone.Parent is { } parent
+            && IsRealDirectory(parent)
+            && IsRealDirectory(new DirectoryInfo(Path.Combine(_paths.CloneDirectory, ".git")));
+    }
 
     // ---- operations -----------------------------------------------------------------------------------------
 
@@ -354,24 +366,18 @@ public sealed partial class GitClient
     /// <summary>Moves the work tree and index to a revision, discarding local changes. Refuses when the clone has no <c>.git</c>.</summary>
     public async Task<GitOutcome<NoValue>> ResetHardAsync(SyncGit.Revision revision, CancellationToken cancellationToken = default)
     {
-        if (!HasRepository())
-            return NotARepository<NoValue>();
         return Done(await RunAsync(SyncGit.GitCommand.NewResetHard(revision), _options.LocalTimeout, cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>Removes untracked files and directories from the clone. Refuses when the clone has no <c>.git</c>.</summary>
     public async Task<GitOutcome<NoValue>> CleanAsync(CancellationToken cancellationToken = default)
     {
-        if (!HasRepository())
-            return NotARepository<NoValue>();
         return Done(await RunAsync(SyncGit.GitCommand.Clean, _options.LocalTimeout, cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>Whether <paramref name="ancestor"/> is an ancestor of <paramref name="descendant"/>; any exit code but 0 and 1 is <see cref="Tri.Unknown"/>.</summary>
     public async Task<GitOutcome<Tri>> IsAncestorAsync(SyncGit.Revision ancestor, SyncGit.Revision descendant, CancellationToken cancellationToken = default)
     {
-        if (!HasRepository())
-            return NotARepository<Tri>();
         var result = await RunAsync(SyncGit.GitCommand.NewIsAncestor(ancestor, descendant), _options.LocalTimeout, cancellationToken).ConfigureAwait(false);
         return result.ExitCode switch
         {
@@ -385,8 +391,6 @@ public sealed partial class GitClient
     /// <summary>The commit a revision names, or null when it does not exist.</summary>
     public async Task<GitOutcome<string?>> RevParseAsync(SyncGit.Revision revision, CancellationToken cancellationToken = default)
     {
-        if (!HasRepository())
-            return NotARepository<string?>();
         var result = await RunAsync(SyncGit.GitCommand.NewRevParse(revision), _options.LocalTimeout, cancellationToken).ConfigureAwait(false);
         return result.ExitCode switch
         {
@@ -399,15 +403,13 @@ public sealed partial class GitClient
     /// <summary>Points the protective ref <c>refs/total-recall/last-synced</c> at a commit the clone holds.</summary>
     public async Task<GitOutcome<NoValue>> UpdateLastSyncedAsync(string sha, CancellationToken cancellationToken = default)
     {
-        if (!HasRepository())
-            return NotARepository<NoValue>();
         return Done(await RunAsync(SyncGit.GitCommand.NewUpdateLastSynced(sha), _options.LocalTimeout, cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>
     /// Deletes every <c>*.lock</c> file under the clone's <c>.git</c> (an interrupted git leaves them) and returns the
-    /// number removed. It does nothing when <c>.git</c> is itself a link, and inside it skips links (a symlinked file
-    /// or directory is neither followed nor deleted), so nothing outside <c>.git</c> is touched.
+    /// number removed. It does nothing when the clone is not sound (see <see cref="CloneIsSound"/>), and inside <c>.git</c>
+    /// skips links (a symlinked file or directory is neither followed nor deleted), so nothing outside it is touched.
     /// </summary>
     public int RemoveStaleLocks()
     {
@@ -415,8 +417,7 @@ public sealed partial class GitClient
         var removed = 0;
         try
         {
-            var info = new DirectoryInfo(gitDirectory);
-            if (!info.Exists || info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            if (!CloneIsSound())
                 return 0;
             var enumeration = new EnumerationOptions
             {

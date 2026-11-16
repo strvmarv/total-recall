@@ -263,6 +263,35 @@ public sealed class GitClientFakeProcessTests
     }
 
     [Fact]
+    public async Task Stage_ExitCode128_IsOnlySuccessForTheExactEmptyScopeLine()
+    {
+        var notARepository = new FakeGitProcess(new GitResult(128, [], "fatal: not a git repository: '/x/.git'", SyncGit.FailureKind.NotARepository, TimeSpan.Zero));
+        var (client, root) = Client(notARepository);
+        try
+        {
+            var outcome = await client.StageAsync(SyncGit.StageScope.Memories);
+            Assert.False(outcome.IsOk);
+            Assert.Equal(SyncGit.FailureKind.NotARepository, outcome.Failure.Failure);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+
+        var empty = new FakeGitProcess(new GitResult(128, [], "fatal: pathspec 'memories' did not match any files\n", SyncGit.FailureKind.Other, TimeSpan.Zero));
+        var (second, root2) = Client(empty);
+        try
+        {
+            Assert.True((await second.StageAsync(SyncGit.StageScope.Memories)).IsOk);
+            Assert.False((await second.StageAsync(SyncGit.StageScope.Manifest)).IsOk); // the line names another path
+        }
+        finally
+        {
+            Directory.Delete(root2, true);
+        }
+    }
+
+    [Fact]
     public async Task AMalformedListing_IsAFailureOfKindOther_WithoutTheOutput()
     {
         var fake = new FakeGitProcess(new GitResult(0, Encoding.UTF8.GetBytes("100644 blob nothex 1\tmemories/x\0"), "", null, TimeSpan.Zero));

@@ -202,7 +202,6 @@ let remoteTests =
                   "git://h/o/r.git", UrlRemote
                   "git+ssh://h/o/r.git", UrlRemote
                   "file:///tmp/r", UrlRemote
-                  "HTTPS://H/X", UrlRemote
                   "git@github.com:o/r.git", ScpLike
                   "github.com:o/r.git", ScpLike
                   "/abs/path", AbsolutePath
@@ -222,7 +221,7 @@ let remoteTests =
                   "ext::sh -c x"; "ext::x"; "fd::1"; "rsync::x"; "ext::https://u:tok@h/x"
                   "repo"; "../x"; "./x"; "a:b"; "x:y"; "a:"; "user@:path"; "99::x"; "1ext::x"
                   // a scheme outside the allow-list makes git run `git-remote-<scheme>`; a case variant of a refused helper too
-                  "Ext://x"; "ext://x"; "fd://x"; "ftp://h/x"; "gopher://x"; "rsync://h/x"; "1http://x"; "git-lfs://h/x"; "a.b://x" ] do
+                  "Ext://x"; "HTTPS://h/x"; "SSH://h/x"; "File:///x"; "ext://x"; "fd://x"; "ftp://h/x"; "gopher://x"; "rsync://h/x"; "1http://x"; "git-lfs://h/x"; "a.b://x" ] do
                 Expect.isNone (classifyRemote false s) (sprintf "%A" s)
                 Expect.isTrue (isError (validateRemote false s)) (sprintf "%A" s)
 

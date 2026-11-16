@@ -116,9 +116,10 @@ let classifyRemote (windows: bool) (s: string) : RemoteKind option =
         match schemePrefix s with
         | Some(_, "::") -> None
         | Some(e, _) ->
-            // only the transports sync means to use: git runs `git-remote-<scheme>` for any other scheme, and a
-            // case variant of a refused helper (`Ext://`) is not refused by `protocol.ext.allow`
-            if allowedSchemes.Contains(s.Substring(0, e).ToLowerInvariant()) then Some UrlRemote else None
+            // only the transports sync means to use, spelled as git spells them (lower case): git runs
+            // `git-remote-<scheme>` for any other scheme, and a case variant of a refused helper (`Ext://`) is not
+            // refused by `protocol.ext.allow`
+            if allowedSchemes.Contains(s.Substring(0, e)) then Some UrlRemote else None
         | None ->
             if s.StartsWith("/", System.StringComparison.Ordinal) || s.StartsWith("\\\\", System.StringComparison.Ordinal) then
                 Some AbsolutePath

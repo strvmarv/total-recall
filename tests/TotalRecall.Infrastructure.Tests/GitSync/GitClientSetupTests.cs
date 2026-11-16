@@ -375,6 +375,75 @@ public sealed class GitClientSetupTests(RecordingFixture fixture)
         Assert.True(File.Exists(Path.Combine(realGit, "index.lock")));
     }
 
+    [GitShFact]
+    public async Task ALinkInTheClonePath_IsNeverFollowed_ByAnyCloneScopedCall()
+    {
+        using var scratch = new GitTestEnvironment();
+        scratch.WriteGitConfig("[user]\n\tname = t\n\temail = t@x\n[commit]\n\tgpgsign = false\n");
+        var user = Path.Combine(scratch.Root, "users-own-repo");
+        Directory.CreateDirectory(user);
+        scratch.RunGit(user, "init");
+        File.WriteAllText(Path.Combine(user, "tracked.txt"), "one\n");
+        scratch.RunGit(user, "add", "tracked.txt");
+        scratch.RunGit(user, "commit", "-m", "first");
+        File.WriteAllText(Path.Combine(user, "notes.txt"), "untracked notes\n");
+        Directory.CreateDirectory(Path.Combine(user, "memories"));
+        File.WriteAllText(Path.Combine(user, "memories", "m.txt"), "memory\n");
+        var before = scratch.RunGit(user, "status", "--porcelain", "--untracked-files=all");
+
+        async Task AssertEverythingRefused(ClientRig rig)
+        {
+            int CloneScopedCalls() => rig.Recorder.Calls.Count(c => SyncGit.isCloneScoped(c.Command));
+            var calls = CloneScopedCalls();
+            Failed(await rig.Client.ResetHardAsync(SyncGit.Revision.Head), SyncGit.FailureKind.NotARepository);
+            Failed(await rig.Client.CleanAsync(), SyncGit.FailureKind.NotARepository);
+            Failed(await rig.Client.StageAsync(SyncGit.StageScope.Memories), SyncGit.FailureKind.NotARepository);
+            Failed(await rig.Client.CommitAsync("x"), SyncGit.FailureKind.NotARepository);
+            Failed(await rig.Client.FetchAsync("main"), SyncGit.FailureKind.NotARepository);
+            Failed(await rig.Client.PushAsync("main"), SyncGit.FailureKind.NotARepository);
+            Failed(await rig.Client.RevParseAsync(SyncGit.Revision.Head), SyncGit.FailureKind.NotARepository);
+            Failed(await rig.Client.HasStagedAsync(), SyncGit.FailureKind.NotARepository);
+            Assert.Equal(0, rig.Client.RemoveStaleLocks());
+            Assert.Equal(calls, CloneScopedCalls()); // nothing was started against the clone
+            Assert.Equal(before, scratch.RunGit(user, "status", "--porcelain", "--untracked-files=all"));
+        }
+
+        // `repo` itself is a link to the user's repository
+        using (var rig = Rig())
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(rig.CloneDirectory)!);
+            Directory.CreateSymbolicLink(rig.CloneDirectory, user);
+            await AssertEverythingRefused(rig);
+        }
+
+        // `.git` is a link to the user's own `.git`
+        using (var rig = Rig())
+        {
+            Directory.CreateDirectory(rig.CloneDirectory);
+            Directory.CreateSymbolicLink(Path.Combine(rig.CloneDirectory, ".git"), Path.Combine(user, ".git"));
+            await AssertEverythingRefused(rig);
+        }
+
+        // the <cloneKey> directory is a link
+        using (var rig = Rig())
+        {
+            var real = Path.Combine(rig.Root, "real-key-dir");
+            Directory.CreateDirectory(Path.Combine(real, "repo"));
+            scratch.RunGit(Path.Combine(real, "repo"), "init");
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetDirectoryName(rig.CloneDirectory)!)!);
+            Directory.CreateSymbolicLink(Path.GetDirectoryName(rig.CloneDirectory)!, real);
+            await AssertEverythingRefused(rig);
+        }
+
+        // a `.git` that is a file (`gitdir:` pointer)
+        using (var rig = Rig())
+        {
+            Directory.CreateDirectory(rig.CloneDirectory);
+            File.WriteAllText(Path.Combine(rig.CloneDirectory, ".git"), $"gitdir: {Path.Combine(user, ".git")}\n");
+            await AssertEverythingRefused(rig);
+        }
+    }
+
     [GitFact]
     public async Task RemoveStaleLocks_RemovesOnlyLocksInsideDotGit()
     {
