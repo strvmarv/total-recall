@@ -14,6 +14,10 @@
     <Compile Include="Config.fs" />
     <Compile Include="SyncGit.fs" />
     <Compile Include="SyncTree.fs" />
+    <Compile Include="SyncManifest.fs" />
+    <Compile Include="SyncIdentity.fs" />
+    <Compile Include="SyncPublic.fs" />
+    <Compile Include="SyncSettingsGuard.fs" />
     <Compile Include="Tokenizer.fs" />
     <Compile Include="Decay.fs" />
     <Compile Include="Ranking.fs" />
