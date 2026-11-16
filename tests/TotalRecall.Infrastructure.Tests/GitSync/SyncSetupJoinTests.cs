@@ -230,6 +230,8 @@ public sealed class SyncSetupJoinTests
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(newId, Meta(rig, SyncIdentity.MetaKeys.RepoId));
         Assert.Single(Siblings(clone, "repo.left-*"));
+        Assert.Contains(result.Lines, l => l.StartsWith("note: the earlier clone of this address was kept at", StringComparison.Ordinal));
+        Assert.DoesNotContain(result.Lines, l => l.StartsWith("note: a clone was kept at", StringComparison.Ordinal));
         Assert.True(ProtectiveRef(rig, clone) == "", "the new clone carries the old repository's protective ref");
         Assert.Equal(0, Count(rig, "git_sync_entry"));
         Assert.Equal(1, Count(rig, "git_sync_review")); // the conflict row stays
@@ -417,6 +419,8 @@ public sealed class SyncSetupJoinTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.Single(Siblings(clone, "repo.broken-*"));
+        Assert.Contains(result.Lines, l => l.StartsWith("note: a damaged clone was kept at", StringComparison.Ordinal));
+        Assert.DoesNotContain(result.Lines, l => l.StartsWith("note: a clone was kept at", StringComparison.Ordinal));
         Assert.True(await IsJoinedAsync(rig, remote.Url));
     }
 

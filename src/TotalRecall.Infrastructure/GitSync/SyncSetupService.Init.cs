@@ -157,6 +157,7 @@ public sealed partial class SyncSetupService
             "this machine is set up for git sync (storage.mode = \"git\"), but syncing memories is not part of this build yet",
         };
         lines.AddRange(notes);
+        lines.AddRange(SidelineNotes(lines));
         return SetupResult.Done([.. lines]);
     }
 }

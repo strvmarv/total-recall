@@ -207,6 +207,8 @@ public sealed class SyncSetupInitTests
         File.Delete(Path.Combine(remote.Path, "hooks", "pre-receive"));
         var retry = await rig.Service().InitAsync(remote.Url, null);
         Assert.Equal(0, retry.ExitCode);
+        Assert.Contains(retry.Lines, l => l.StartsWith("note: the clone of an earlier init was kept at", StringComparison.Ordinal));
+        Assert.DoesNotContain(retry.Lines, l => l.StartsWith("note: a clone was kept at", StringComparison.Ordinal));
         Assert.Equal("refs/heads/main", Refs(remote));
         var siblings = Directory.GetDirectories(Path.GetDirectoryName(clone)!);
         Assert.Contains(siblings, d => Path.GetFileName(d).StartsWith("repo.unpushed-20261116103000", StringComparison.Ordinal));

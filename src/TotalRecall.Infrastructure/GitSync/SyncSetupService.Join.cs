@@ -90,10 +90,7 @@ public sealed partial class SyncSetupService
             "this machine is set up for git sync (storage.mode = \"git\"), but syncing memories is not part of this build yet",
         };
         lines.AddRange(notes);
-        // the clone now in use is not "kept"; only the clones that were moved aside are worth a line
-        foreach (var kept in _notes.Distinct())
-            if (!kept.StartsWith("note: a clone was kept at", StringComparison.Ordinal) && !lines.Contains(kept))
-                lines.Add(kept);
+        lines.AddRange(SidelineNotes(lines));
         return SetupResult.Done([.. lines]);
     }
 

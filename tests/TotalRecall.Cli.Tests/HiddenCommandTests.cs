@@ -133,9 +133,6 @@ public sealed class HiddenCommandTests : IDisposable
 
     private static readonly Regex Phrase = new(@"sync\s+(init|join|leave|status)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    private static readonly Regex SourceForm =
-        new(@"total-recall sync (init|join|leave|status)|""sync (init|join|leave|status)""", RegexOptions.Compiled);
-
     [Fact]
     public async Task NoUserFacingDocumentNamesTheSyncCommands()
     {
@@ -164,21 +161,27 @@ public sealed class HiddenCommandTests : IDisposable
             }
         }
 
-        foreach (var name in new[] { "README.md", "INSTALL.md", "catalog.json", "package.json", "GEMINI.md" })
+        foreach (var name in new[] { "README.md", "INSTALL.md", "CHANGELOG.md", "CONTRIBUTING.md", "PRIVACY.md", "catalog.json", "package.json", "GEMINI.md" })
         {
             var file = Path.Combine(root, name);
             if (File.Exists(file))
                 ScanFile(file, Phrase);
         }
         ScanTree("docs", "*.md", Phrase, rel => rel.StartsWith("docs/superpowers/", StringComparison.Ordinal));
-        foreach (var dir in new[] { "skills", "hooks", "agents", ".kiro" })
-            ScanTree(dir, "*", Phrase, rel => rel.EndsWith(".test.js", StringComparison.Ordinal));
+        foreach (var dir in new[]
+                 {
+                     "skills", "hooks", "agents", ".kiro", "pi", "codex", "copilot", "cursor", "hermes-plugin", ".claude-plugin",
+                     ".codex-plugin", ".cursor-plugin", ".github/plugin", ".opencode", "scripts", "src/TotalRecall.Web/ClientApp/src",
+                 })
+            ScanTree(dir, "*", Phrase, rel => rel.EndsWith(".test.js", StringComparison.Ordinal) || rel.StartsWith("scripts/fixtures/", StringComparison.Ordinal));
 
-        // the source: the command forms (the bare words "sync status" occur in an unrelated comment of Schema.cs)
+        // the source: every message and comment of the product code, except the sync commands themselves and one unrelated
+        // comment of Schema.cs that says "sync status"
         ScanTree(
-            "src", "*.cs", SourceForm,
+            "src", "*.cs", Phrase,
             rel => rel.StartsWith("src/TotalRecall.Cli/Commands/Sync/", StringComparison.Ordinal)
-                   || rel.StartsWith("src/TotalRecall.Infrastructure/GitSync/SyncSetupService", StringComparison.Ordinal));
+                   || rel.StartsWith("src/TotalRecall.Infrastructure/GitSync/", StringComparison.Ordinal)
+                   || rel == "src/TotalRecall.Infrastructure/Storage/Schema.cs");
 
         Assert.True(found > 0, "no document was scanned");
         Assert.True(offenders.Count == 0, "these files name the sync commands: " + string.Join(", ", offenders));

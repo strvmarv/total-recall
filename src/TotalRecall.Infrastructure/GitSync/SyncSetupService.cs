@@ -103,6 +103,13 @@ public sealed partial class SyncSetupService(SyncSetupEnvironment env)
     /// <summary>The <c>note:</c> lines a refusal prints: what this run left behind (decision 11).</summary>
     private readonly List<string> _notes = [];
 
+    /// <summary>
+    /// The notes of a successful run that the record step did not produce: where a clone that was moved aside went. The
+    /// clone now in use is not "kept" (it is the one the machine uses), so that note is left out.
+    /// </summary>
+    private IEnumerable<string> SidelineNotes(IEnumerable<string> already) =>
+        _notes.Distinct().Where(n => !n.StartsWith("note: a clone was kept at", StringComparison.Ordinal) && !already.Contains(n));
+
     /// <summary>A refusal carries the notes of what the run changed before it stopped (each once).</summary>
     private SetupResult WithNotes(SetupResult result) =>
         result.ExitCode == 0 ? result : result with { Notes = [.. result.Notes.Concat(_notes).Distinct()] };
