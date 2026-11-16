@@ -561,6 +561,8 @@ function sectionText(text, level, match) {
   return start >= 0 ? real.slice(start + 1).join('\n') : null;
 }
 
+// A documentation check, not a URL check: does the prose name the host the version check talks to.
+const GITHUB_API_NAMED = /\bapi\.github\.com\b/;
 const PRIVACY_CHECK_NEEDLES = ['api.github.com', 'total-recall/<version>', 'IP address', 'updates.check = false', 'TOTAL_RECALL_NO_UPDATE_CHECK'];
 const PRIVACY_FORBIDDEN = [/no data is transmitted/i, /does not phone home/i, /never phones? home/i];
 
@@ -584,11 +586,11 @@ export function checkPrivacy(tree) {
   if (arch === null) problems.push('docs/architecture.md is missing');
   else {
     if (arch.includes('No network calls required at runtime')) problems.push('docs/architecture.md still says "No network calls required at runtime"');
-    if (!arch.includes('api.github.com')) problems.push('docs/architecture.md does not mention api.github.com');
+    if (!GITHUB_API_NAMED.test(arch)) problems.push('docs/architecture.md does not mention api.github.com');
   }
   const readme = tree.read('README.md');
   if (readme === null) problems.push('README.md is missing');
-  else if (!(sectionText(readme, 2, (t) => t === 'Privacy') ?? '').includes('api.github.com')) problems.push('README.md: the Privacy section does not mention api.github.com');
+  else if (!GITHUB_API_NAMED.test(sectionText(readme, 2, (t) => t === 'Privacy') ?? '')) problems.push('README.md: the Privacy section does not mention api.github.com');
   return problems;
 }
 
