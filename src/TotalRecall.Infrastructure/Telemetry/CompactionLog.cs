@@ -65,12 +65,15 @@ public sealed record CompactionMovementRow(
 public interface ICompactionLogReader
 {
     /// <summary>
-    /// Returns the maximum <c>timestamp</c> across all <c>compaction_log</c>
-    /// rows whose <c>reason</c> is NOT equal to <paramref name="excludedReason"/>,
-    /// or <c>null</c> if no such rows exist. Mirrors the TS query in
-    /// <c>session-tools.ts</c>'s <c>getLastSessionAge</c>.
+    /// Returns the maximum <c>timestamp</c> strictly older than
+    /// <paramref name="beforeMs"/> across the <c>compaction_log</c> rows that
+    /// stand for real activity, or <c>null</c> if there are none. Excluded:
+    /// reason <c>warm_sweep_decay</c> (legacy TypeScript rows) and every reason
+    /// that starts with <c>migration_</c> (one-off data migrations are not a
+    /// session). Feeds <c>lastSessionAge</c>; the cutoff is the start of the
+    /// running session, so its own rows never count.
     /// </summary>
-    long? GetLastTimestampExcludingReason(string excludedReason);
+    long? GetLastActivityTimestampBefore(long beforeMs);
 
     /// <summary>
     /// Returns every compaction_log row projected to the small analytics
@@ -108,13 +111,16 @@ public sealed class CompactionLog : ICompactionLogReader
     }
 
     /// <inheritdoc />
-    public long? GetLastTimestampExcludingReason(string excludedReason)
+    public long? GetLastActivityTimestampBefore(long beforeMs)
     {
-        ArgumentNullException.ThrowIfNull(excludedReason);
         using var cmd = _conn.CreateCommand();
+        // substr, not LIKE: in LIKE an underscore is a one-character wildcard.
         cmd.CommandText =
-            "SELECT MAX(timestamp) FROM compaction_log WHERE reason != $reason";
-        cmd.Parameters.AddWithValue("$reason", excludedReason);
+            "SELECT MAX(timestamp) FROM compaction_log " +
+            "WHERE timestamp < $before " +
+            "AND reason != 'warm_sweep_decay' " +
+            "AND substr(reason, 1, 10) != 'migration_'";
+        cmd.Parameters.AddWithValue("$before", beforeMs);
         var result = cmd.ExecuteScalar();
         if (result is null || result is DBNull) return null;
         return result is long l ? l : Convert.ToInt64(result, CultureInfo.InvariantCulture);

@@ -232,13 +232,13 @@ public sealed class SessionLifecycleTests
     private sealed class FakeCompactionLog : ICompactionLogReader
     {
         public long? LastTimestamp { get; set; }
-        public string? LastExcludedReason { get; private set; }
+        public long? LastBeforeMs { get; private set; }
         public int Calls { get; private set; }
 
-        public long? GetLastTimestampExcludingReason(string excludedReason)
+        public long? GetLastActivityTimestampBefore(long beforeMs)
         {
             Calls++;
-            LastExcludedReason = excludedReason;
+            LastBeforeMs = beforeMs;
             return LastTimestamp;
         }
 
@@ -785,12 +785,13 @@ public sealed class SessionLifecycleTests
     public async Task LastSessionAge_Null_WhenNoLog()
     {
         var compaction = new FakeCompactionLog { LastTimestamp = null };
-        var lifecycle = BuildLifecycle(new FakeStore(), compaction: compaction);
+        var lifecycle = BuildLifecycle(new FakeStore(), compaction: compaction, now: 1_000_000_000_000L);
 
         var result = await lifecycle.EnsureInitializedAsync();
 
         Assert.Null(result.LastSessionAge);
-        Assert.Equal("warm_sweep_decay", compaction.LastExcludedReason);
+        // The cutoff is the lifecycle's start: the running session never counts.
+        Assert.Equal(1_000_000_000_000L, compaction.LastBeforeMs);
     }
 
     // ---------- 11. last session age formatting (table-driven) ----------

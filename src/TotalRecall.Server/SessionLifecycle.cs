@@ -48,6 +48,9 @@ public sealed class SessionLifecycle : ISessionLifecycle
     private readonly IStore _store;
     private readonly ICompactionLogReader _compactionLog;
     private readonly Func<long> _nowMs;
+    // When this lifecycle (the server process) came up. Everything at or after
+    // it belongs to the running session, so lastSessionAge ignores it.
+    private readonly long _startedAtMs;
     private readonly string _sessionId;
     private readonly string _storageMode;
     private readonly TotalRecall.Infrastructure.Usage.UsageIndexer? _usageIndexer;
@@ -59,6 +62,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
     private readonly int _autoDemoteMinInjections;
     private readonly double _taskWeight;
     private readonly Func<long, (int Count, double AvgLatencyMs)>? _retrievalStatsSince;
+    private readonly Func<long, long?>? _lastRetrievalBefore;
     private readonly Func<(long Hits, long Misses, long TokensSaved)>? _cacheStats;
     private readonly ReindexProgress? _reindexProgress;
     private readonly string? _binaryDir;
@@ -112,7 +116,8 @@ public sealed class SessionLifecycle : ISessionLifecycle
         Core.Config.CompactionConfig? compactionConfig = null,
         TotalRecall.Infrastructure.Eval.SessionConfigSnapshot? configSnapshot = null,
         Func<IReadOnlyList<TotalRecall.Infrastructure.Eval.RegressionFinding>?>? regressionCheck = null,
-        Func<SmokeTestResult?>? smokeTest = null)
+        Func<SmokeTestResult?>? smokeTest = null,
+        Func<long, long?>? lastRetrievalBefore = null)
     {
         ArgumentNullException.ThrowIfNull(importers);
         ArgumentNullException.ThrowIfNull(store);
@@ -122,6 +127,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         _compactionLog = compactionLog;
         _sessionId = sessionId ?? Guid.NewGuid().ToString();
         _nowMs = nowMs ?? (() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        _startedAtMs = _nowMs();
         _usageIndexer = usageIndexer;
         _usageQuery = usageQuery;
         _storageMode = storageMode;
@@ -132,6 +138,7 @@ public sealed class SessionLifecycle : ISessionLifecycle
         _autoDemoteMinInjections = autoDemoteMinInjections > 0 ? autoDemoteMinInjections : 10;
         _taskWeight = taskWeight >= 0 && taskWeight <= 1 ? taskWeight : 0.0;
         _retrievalStatsSince = retrievalStatsSince;
+        _lastRetrievalBefore = lastRetrievalBefore;
         _cacheStats = cacheStats;
         _reindexProgress = reindexProgress;
         _binaryDir = binaryDir;
@@ -499,12 +506,17 @@ public sealed class SessionLifecycle : ISessionLifecycle
             hints = stickyHints.Concat(hints).ToList();
         }
 
-        // 8. Last session age (humanized). Prefer usage_events MAX(ts) — that
-        //    actually tracks session activity per host. Fall back to the
-        //    compaction log (last tier movement excl. warm sweep) when no
-        //    usage reader is wired (e.g. pure-postgres composition).
-        var lastAgeMs = _usageQuery?.GetLastEventTimestampMs()
-                        ?? _compactionLog.GetLastTimestampExcludingReason("warm_sweep_decay");
+        // 8. Last session age (humanized): the newest activity of an EARLIER
+        //    session. Three local sources (usage events, retrieval events, and
+        //    compaction rows that are not a one-off migration); each counts only
+        //    rows strictly older than _startedAtMs, so nothing the running
+        //    session writes (this start included) can make it "just now".
+        //    A source that is not wired (Postgres has no usage or retrieval
+        //    reader) contributes nothing.
+        var lastAgeMs = NewestActivity(
+            _usageQuery?.GetLastEventTimestampBefore(_startedAtMs),
+            _lastRetrievalBefore?.Invoke(_startedAtMs),
+            _compactionLog.GetLastActivityTimestampBefore(_startedAtMs));
         var lastSessionAge = FormatLastSessionAge(lastAgeMs, _nowMs());
 
         // Pin the session's config snapshot now (creates it, or reuses the

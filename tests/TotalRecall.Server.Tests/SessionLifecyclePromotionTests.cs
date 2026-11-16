@@ -102,7 +102,7 @@ public sealed class SessionLifecyclePromotionTests
 
     private sealed class FakeCompactionLog : ICompactionLogReader
     {
-        public long? GetLastTimestampExcludingReason(string excludedReason) => null;
+        public long? GetLastActivityTimestampBefore(long beforeMs) => null;
         public IReadOnlyList<CompactionAnalyticsRow> GetAllForAnalytics(long? sinceTimestamp = null)
             => Array.Empty<CompactionAnalyticsRow>();
         public IReadOnlyList<CompactionMovementRow> GetRecentMovements(int limit)

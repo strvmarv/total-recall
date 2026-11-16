@@ -29,14 +29,16 @@ public sealed class UsageQueryService
     }
 
     /// <summary>
-    /// Returns MAX(ts) across <c>usage_events</c>, or null if the table is empty.
-    /// Used by SessionLifecycle to humanize "last session age" from real session
-    /// activity rather than the compaction log (which only writes on tier moves).
+    /// Returns MAX(ts) across <c>usage_events</c> rows strictly older than
+    /// <paramref name="beforeMs"/>, or null when there is none. One of the
+    /// sources behind <c>lastSessionAge</c>; the cutoff is the start of the
+    /// running session, so its own events never count.
     /// </summary>
-    public long? GetLastEventTimestampMs()
+    public long? GetLastEventTimestampBefore(long beforeMs)
     {
         using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "SELECT MAX(ts) FROM usage_events";
+        cmd.CommandText = "SELECT MAX(ts) FROM usage_events WHERE ts < $before";
+        cmd.Parameters.AddWithValue("$before", beforeMs);
         var result = cmd.ExecuteScalar();
         if (result is null || result is DBNull) return null;
         return Convert.ToInt64(result);

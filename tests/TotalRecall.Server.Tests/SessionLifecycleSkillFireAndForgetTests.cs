@@ -47,7 +47,7 @@ public sealed class SessionLifecycleSkillFireAndForgetTests
 
     private sealed class MinimalCompactionLog : ICompactionLogReader
     {
-        public long? GetLastTimestampExcludingReason(string excludedReason) => null;
+        public long? GetLastActivityTimestampBefore(long beforeMs) => null;
         public IReadOnlyList<CompactionAnalyticsRow> GetAllForAnalytics(long? sinceTimestamp = null) => Array.Empty<CompactionAnalyticsRow>();
         public IReadOnlyList<CompactionMovementRow> GetRecentMovements(int limit) => Array.Empty<CompactionMovementRow>();
         public CompactionMovementRow? GetByTargetEntryId(string targetEntryId) => null;
