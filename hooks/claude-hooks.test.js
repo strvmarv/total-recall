@@ -155,6 +155,7 @@ for (const hook of HOOKS) {
         const r = await runScript(tree, { stdin: hook.payload });
         assert.equal(r.stdout, '{}\n');
         assert.equal(r.code, 0);
+        // The bound is the ticket's own (#98: "within 1 second"); the measured time is about 60 ms.
         assert.ok(r.ms < 1000, `took ${r.ms} ms`);
         assert.equal(fs.existsSync(tree.marker), false, 'bin/start.js must not run (it provisions)');
       } finally { tree.cleanup(); }
@@ -191,6 +192,17 @@ for (const hook of HOOKS) {
         } finally { tree.cleanup(); }
       });
     }
+
+    test('an engine that is present but not executable gives {}', { skip: skip || (process.getuid?.() === 0 ? 'root can run it anyway' : false) }, async () => {
+      const tree = makeTree(hook, { engine: 'fake' });
+      try {
+        fs.chmodSync(path.join(tree.binDir, getBinaryName(RID)), 0o644);
+        const r = await runScript(tree, { stdin: hook.payload, env: { FAKE_ENGINE_OUT: hook.output } });
+        assert.equal(r.stdout, '{}\n');
+        assert.equal(r.code, 0);
+        assert.equal(fs.existsSync(tree.marker), false);
+      } finally { tree.cleanup(); }
+    });
 
     test('a missing helper file gives {} and the engine is not run', async () => {
       const tree = makeTree(hook, { engine: 'fake', helper: false });
