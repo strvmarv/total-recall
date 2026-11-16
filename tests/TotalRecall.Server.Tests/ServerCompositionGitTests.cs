@@ -104,12 +104,13 @@ public sealed class ServerCompositionGitTests : IDisposable
     }
 
     [Fact]
-    public void ARefusedRemote_NeverLeaksItsCredentials()
+    public void TheMessageForARefusedRemote_CarriesNoPartOfTheAddress()
     {
         using var handles = Open(GitMode + "[git_sync]\nremote = \"ext::https://user:tok3n12345@h/x\"\n");
 
         Assert.Equal("sqlite (git failed)", handles.StorageMode);
         Assert.DoesNotContain("tok3n12345", _err.ToString());
+        Assert.DoesNotContain("user:", _err.ToString());
     }
 
     [Fact]

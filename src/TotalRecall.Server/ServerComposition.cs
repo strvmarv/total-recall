@@ -32,7 +32,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using Microsoft.FSharp.Collections;
 using Microsoft.FSharp.Core;
 using Npgsql;
 using TotalRecall.Infrastructure.Config;
@@ -319,14 +318,15 @@ public static class ServerComposition
 
         var valid = Core.SyncGit.validateRemote(OperatingSystem.IsWindows(), remote);
         if (valid.IsError)
-            throw new InvalidOperationException("[git_sync] remote: " + Core.SyncGit.redact(ListModule.OfSeq(new[] { remote }), valid.ErrorValue));
+            // the message is fixed text: SyncGit.validateRemote never carries the address (it may hold credentials)
+            throw new InvalidOperationException("[git_sync] remote: " + valid.ErrorValue);
         if (!FSharpOption<string>.get_IsSome(settings.Branch))
             throw new InvalidOperationException("[git_sync] branch is not a usable branch name");
         if (Infrastructure.GitSync.GitExecutable.TryFind(pathVariable) is null)
             throw new InvalidOperationException("no git executable was found on the PATH");
 
         foreach (var warning in settings.Warnings)
-            Console.Error.WriteLine($"[total-recall] {Core.SyncGit.redact(ListModule.OfSeq(new[] { remote }), warning)}");
+            Console.Error.WriteLine($"[total-recall] {warning}"); // normalise warnings never quote the remote
 
         return OpenSqlite(cfg, dbPath, "git", querySource);
     }
