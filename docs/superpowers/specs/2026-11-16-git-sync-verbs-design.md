@@ -88,7 +88,8 @@ they read. Until one does, `[storage] mode = "git"` can only be reached by editi
       so is any other address whose user-info holds a `:` (a login such as `git@` stays allowed), with `bad-remote` and "an
       address must not hold a password or token: use an ssh key or a git credential helper", because the address is stored in
       `config.toml`, `_meta` and the clone's `.git/config` and the umbrella says total-recall stores no token. A `scheme://`
-      address containing `?` or `#` is refused too (`bad-remote`, "an address must not contain a query or fragment"). An `@` after
+      address containing `?` or `#` is refused too (`bad-remote`, "an address must not contain a query or fragment"). A `scheme://` address whose authority has no `@` but whose text after its last `:` (outside `[...]`) is not all digits
+      (`https://user:pa?ss@host/x` splits at the `?` into the authority `user:pa`) is refused too, as one that may hold a password. An `@` after
       the authority (`https://host/o/repo@v2.git`) or after the first `:` of an scp-like address (`host:team/repo@2.git`) is not
       user-info and is accepted. The branch is usable (`GitSyncSettings.isUsableBranch`, decision 13), else `bad-branch`. The new
       config text is **dry-run rendered** here (`IUserConfigFile.Render` with the three keys, result discarded, no side effect), so
@@ -251,7 +252,8 @@ they read. Until one does, `[storage] mode = "git"` can only be reached by editi
     the user-info is read as in decision 4.1. A user-info holding `:` is shown as `<text before the colon>:***`; a user-info without
     `:` on an `http`, `https`, `git`, `file`, `ftp` or `ftps` address is shown as `***`; any other form (`ssh://git@host/...`,
     `git@host:o/r`, a path) is shown as written. A `scheme://` address is also cut at its first `?` or `#`, which is replaced by
-    `?***` or `#***`. `init` and `join` refuse such addresses (decision 4.1), so this protects the values a user hand-edited into
+    `?***` or `#***`, and one whose authority has no `@` and a non-numeric text after its last `:` (decision 4.1) is shown as
+    `<scheme>://***`. `init` and `join` refuse such addresses (decision 4.1), so this protects the values a user hand-edited into
     `config.toml`. Every line that prints an address, in any command, uses it. Together with the 1a-1 redaction of git's standard
     error, no command prints a user-info credential or a query string.
 15. **Progress.** Git's own redacted standard error lines for the network steps are forwarded as they come (the client's
@@ -276,24 +278,28 @@ they read. Until one does, `[storage] mode = "git"` can only be reached by editi
     | absent | present | | | refuse |
     | present, no tables | absent | | | proceed |
     | present, no tables | present | | | refuse |
-    | has tables | any | no such table | | refuse (the old TypeScript format) |
-    | has the table | any | maximum version below 5 | | refuse (migration 5 sweeps orphan rows) |
-    | has the table | absent | version 5 or more | present or absent | proceed (a marker-less database with no backup is the guard's to repair) |
+    | has tables | any | no such table | | refuse (a synthetic case: every real old-format database has `_schema_version`) |
+    | has the table | any | maximum version below 5 | | refuse (migration 5 sweeps orphan rows; this is where a real TypeScript database lands: `_schema_version` at version 3, `_meta`, the six content tables, no marker) |
+    | has the table | absent | version 5 or more | present or absent | proceed (the guard stamps or reports a marker-less database with no backup on the next start) |
     | has the table | present | version 5 or more | present | proceed (the guard returns "already migrated") |
     | has the table | present | version 5 or more | absent | refuse |
 
+    A marker is present when its `_meta` value is non-empty (as the guard counts it). A file that is not a SQLite database makes the
+    probe throw, which is `failed` with the exception's message and no change to the file.
+
     `leave` needs no store. `status` never opens the database read-write (it would migrate, sweep and switch the journal mode).
-    It first resolves the final target of the database path (`File.ResolveLinkTarget(path, true)`; SQLite places the sidecars beside
-    the target). When the file exists and neither `<target>-wal` nor `<target>-shm` does (a cleanly closed database), it opens it
-    with `immutable=1`, which reads the main file and creates nothing, even in a read-only directory; when a sidecar exists (a live
-    or a crashed writer) it opens `Mode=ReadOnly`, which recovers the WAL correctly and may create a `-shm`: the one case where
-    `status` can create a file, and the sidecars are the writer's. The connection string is built with
-    `SqliteConnectionStringBuilder` and is always `Mode=ReadOnly;Pooling=False`; for `immutable=1` its data source is a `file:` URI
-    whose path has `%`, `?` and `#` percent-encoded (`;` needs no escape in the builder) and which uses the `file:///C:/...` form
-    for a Windows drive path, followed by `?immutable=1`. It uses plain `Microsoft.Data.Sqlite` (no extension, pragma or migration)
-    and reads `_meta` with plain SQL through a `ReadOnlyMeta : IMetaStore` whose `SetMeta` and `DeleteMeta` throw. A missing file,
-    a missing `_meta` table or any read error is `not recorded` or `unknown (<reason>)`; with no file the guard gets an empty
-    `ReadOnlyMeta`. The service takes a store opener, so tests pass a temporary one.
+    It first resolves the final target of the database path (`File.ResolveLinkTarget(path, true)`, which is null for a path that is
+    not a link: then the path itself; SQLite places the sidecars beside the target). By the sidecars `<target>-wal` and
+    `<target>-shm`: **neither exists** (a cleanly closed database): it opens the file with `immutable=1`, which reads the main file
+    and creates nothing, even in a read-only directory; **both exist** (a live writer): `Mode=ReadOnly`, which reads the current
+    state and creates nothing; **exactly one exists** (a crashed writer, or a copied file): it does not open the database, because a
+    read-only open would have to create the other one, and prints `unknown (a write-ahead log is pending: start total-recall once)`.
+    The connection string is built with `SqliteConnectionStringBuilder` and is always `Mode=ReadOnly;Pooling=False`; for `immutable=1`
+    its data source is a `file:` URI whose path has `%`, `?` and `#` percent-encoded (`;` needs no escape in the builder) and which
+    uses the `file:///C:/...` form for a Windows drive path, followed by `?immutable=1`. It uses plain `Microsoft.Data.Sqlite` (no
+    extension, pragma or migration) and reads `_meta` with plain SQL through a `ReadOnlyMeta : IMetaStore` whose `SetMeta` and
+    `DeleteMeta` throw. A missing file, a missing `_meta` table or any read error is `not recorded` or `unknown (<reason>)`; with no
+    file the guard gets an empty `ReadOnlyMeta`. The service takes a store opener, so tests pass a temporary one.
 17. **Paths without a remote.** `GitSyncPaths` gains `ForDatabase(dbPath, caseInsensitive)`: the same `SyncDirectory`, `LockPath`,
     `NoHooksDirectory`, `EmptyFile` and `EnsureCreated` as `For`, and no clone directory (`CloneDirectory` throws
     `InvalidOperationException`). `leave` uses it for the lock. `status` builds its `GitClient` (it needs one for `git --version`,
@@ -384,10 +390,10 @@ with `GitTestEnvironment.WriteGitConfig` (`commit.gpgsign=true`, `core.hooksPath
   connection string alone, an upper-case mode and an unknown text, with nothing changed, and `local` and `git` accepted;
   `host-unverified` when the machine-id source fails; `busy` with the lock held by another handle, and the lock released after
   success and after every refusal; `no-git` with an empty `PATH`; an address with `https://token@host/o/r`,
-  `https://user:pass@host/o/r`, `ssh://git:ghp_x@host/o/r`, `file://tok:pw@host/tmp/x.git`, `https://user:p'ss@host/o/r` and `https://host/o/r?token=x` is
-  `bad-remote` (and `displayRemote` hides the user-info and the query of each); `git@host:o/r`, `ssh://git@host/o/r`, `https://host/o/repo@v2.git` and `host:team/repo@2.git` are accepted. A
+  `https://user:pass@host/o/r`, `ssh://git:ghp_x@host/o/r`, `file://tok:pw@host/tmp/x.git`, `https://user:p'ss@host/o/r`, `https://user:pa?ss@host/x`, `https://user:pa/ss@host/x` and `https://host/o/r?token=x` is
+  `bad-remote` (and `displayRemote` hides the user-info and the query of each); `git@host:o/r`, `ssh://git@host/o/r`, `https://host:8080/o/r`, `https://[::1]:8080/o/r`, `https://host/o/repo@v2.git` and `host:team/repo@2.git` are accepted. A
   refusal of steps 4.1 to 4.4 leaves no database file, no migration and no sync directory; `init` and `join` refuse a database in
-  the old TypeScript format (a file with tables and no `_schema_version`, and a `.ts-backup` beside an absent or unmarked database)
+  the old TypeScript format (the real shape, a file with tables and no `_schema_version`, and a `.ts-backup` beside an absent or unmarked database)
   without changing a byte of it; every row of the probe table of decision 16 is tested, and an `init` or `join` on a schema-18 database leaves a content row that has
   no vector row in place (no orphan sweep).
 - **leave / status**: `leave` in git mode writes `local` and leaves every row, `_meta` key, clone and the repository as they were
@@ -397,7 +403,8 @@ with `GitTestEnvironment.WriteGitConfig` (`commit.gpgsign=true`, `core.hooksPath
   directory listing and the file's bytes identical before and after: no `-wal`, `-shm`, migration or orphan sweep), also in a
   read-only directory, through a symbolic link to the database, with a `#`, a `?`, a `%41` and a `;` in the data directory's name
   (the right identity is read, no stray file is created), on a database with a live writer connection (`Mode=ReadOnly` branch: the
-  current values are read), and on a database in the old TypeScript format, after `init`, after
+  current values are read), and on a database in the real old TypeScript shape (`_schema_version` at version 3, `_meta`, the six content tables, no marker), on
+  one with a `-wal` and no `-shm` (`unknown`, nothing created), on a file that is not a database, after `init`, after
   `leave`, with a damaged manifest in the clone, with a changed remote and with a moved data directory prints the matching join
   state, runs no git network command and never prints a credential (a hand-edited address `https://token@host/x`, and the same in
   every refusal, note and forwarded progress line of `init` and `join`).
