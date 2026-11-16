@@ -712,7 +712,10 @@ test('AGENTS.md and CHANGELOG.md: the parent track is described where contributo
     assert.ok(agents.includes(term), `AGENTS.md develop skill section mentions ${term}`);
   }
   const log = readRepo('CHANGELOG.md');
-  const unreleased = log.slice(log.indexOf('## Unreleased'), log.indexOf('\n## ', log.indexOf('## Unreleased') + 5)).replace(/\s+/g, ' ');
-  const added = unreleased.slice(unreleased.indexOf('### Added'), unreleased.indexOf('### Changed'));
-  assert.ok(/parent ticket/i.test(added) && /sub-ticket/.test(added) && /need this version/.test(added), 'the Unreleased Added list has the parent entry with the compatibility note');
+  // The entry sits in whichever changelog section shipped it, so find it by its ticket number: a release renames
+  // "Unreleased" to a version heading and must not break this test.
+  const entry = log.split('\n').find((line) => line.startsWith('- ') && /parent ticket/i.test(line) && /\(#103\)/.test(line));
+  assert.ok(entry !== undefined, 'the changelog has the parent entry (#103)');
+  const text = entry.replace(/\s+/g, ' ');
+  assert.ok(/sub-ticket/.test(text) && /need this version/.test(text), 'the parent entry has the compatibility note');
 });
