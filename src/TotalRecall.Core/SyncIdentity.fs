@@ -28,6 +28,12 @@ module MetaKeys =
     let LastError = "git_sync_last_error"
     [<Literal>]
     let Arrivals = "git_sync_arrivals"
+    /// The machine's hybrid logical clock, `<time ms>.<counter>` (written by the scan, `SyncScan`).
+    [<Literal>]
+    let Hlc = "git_sync_hlc"
+    /// What was odd about the clock, as a set of kinds (written by the scan, `SyncScan.ClockWarning`).
+    [<Literal>]
+    let ClockWarning = "git_sync_clock_warning"
 
 /// What `_meta` holds about the repository this machine joined; an empty value is `None`.
 type StoredIdentity =
