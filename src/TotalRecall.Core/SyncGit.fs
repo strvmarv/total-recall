@@ -347,3 +347,240 @@ let scrubEnvironment (env: (string * string) list) : (string * string) list =
 /// Set after the scrub: no terminal prompt, and English messages for the failure classifier.
 let fixedEnvironment : (string * string) list =
     [ "GIT_TERMINAL_PROMPT", "0"; "LC_ALL", "C"; "LANGUAGE", "C" ]
+
+// ---------------------------------------------------------------------------
+// part B: failures, redaction, the ssh command, keys, ls-remote
+
+/// What the process runner knows about a finished call.
+type FailureInput =
+    { ExitCode: int option
+      TimedOut: bool
+      Cancelled: bool
+      SpawnFailed: bool
+      OutputTooLarge: bool
+      Stderr: string }
+
+type FailureKind =
+    | NoGit
+    | GitTooOld
+    | TimedOut
+    | Cancelled
+    | Auth
+    | RemoteNotFound
+    | Network
+    | NonFastForward
+    | RemoteBranchMissing
+    | NotARepository
+    | OutputTooLarge
+    | Other
+
+/// Text the user sees is kept to the last this many UTF-16 code units.
+let maxStderrKeptChars = 2048
+
+let private ord = System.StringComparison.Ordinal
+
+let private containsAny (text: string) (fragments: string list) =
+    fragments |> List.exists (fun f -> text.Contains(f, ord))
+
+/// `first` somewhere, and `second` somewhere after it.
+let private containsInOrder (text: string) (first: string) (second: string) =
+    let i = text.IndexOf(first, ord)
+    i >= 0 && text.IndexOf(second, i + first.Length, ord) >= 0
+
+/// A pure classification of a finished call. The flags are decided first (in this order); then the standard error is
+/// matched, case-insensitively, against the rows of decision 12 in order, the first match winning, so a specific line
+/// beats git's generic `Could not read from remote repository` trailer. `GitTooOld` is not produced here: the version
+/// check decides it.
+let classifyFailure (i: FailureInput) : FailureKind =
+    if i.SpawnFailed then NoGit
+    elif i.TimedOut then TimedOut
+    elif i.Cancelled then Cancelled
+    elif i.OutputTooLarge then OutputTooLarge
+    else
+        let t = (if isNull i.Stderr then "" else i.Stderr).ToLowerInvariant()
+        if containsAny t
+            [ "terminal prompts disabled"; "could not read username"; "could not read password"
+              "unable to get password from user"; "authentication failed"; "permission denied ("
+              "host key verification failed"; "http 401"; "http 403"; "error: 401"; "error: 403"
+              "invalid username or password" ] then Auth
+        elif containsAny t [ "does not appear to be a git repository"; "repository not found"; "http 404"; "error: 404" ]
+             || containsInOrder t "repository '" "' not found"
+             || containsInOrder t "repository '" "' does not exist" then RemoteNotFound
+        elif containsInOrder t "remote branch " " not found in upstream" || t.Contains("couldn't find remote ref", ord) then
+            RemoteBranchMissing
+        elif (t.Contains("[rejected]", ord) && (t.Contains("non-fast-forward", ord) || t.Contains("fetch first", ord)))
+             || t.Contains("updates were rejected", ord) then NonFastForward
+        elif containsAny t
+                [ "could not resolve host"; "connection refused"; "connection timed out"; "operation timed out"
+                  "network is unreachable"; "no route to host"; "failed to connect"; "connection reset"; "early eof"
+                  "rpc failed"; "kex_exchange_identification"; "connection closed by"
+                  "operation too slow" ] // the last is sync's own `http.lowSpeedLimit` stall, beyond the spec's table
+             || (t.Contains("unable to access", ord)
+                 && (System.Text.RegularExpressions.Regex.IsMatch(t, @"curl \d") || t.Contains("couldn't connect", ord))) then Network
+        elif t.Contains("not a git repository", ord) then NotARepository
+        else Other
+
+/// The major and minor of `git version 2.45.1.windows.1`, else `None`.
+let parseVersion (s: string) : (int * int) option =
+    if isNull s then None
+    else
+        let m = System.Text.RegularExpressions.Regex.Match(s, @"git version (\d+)\.(\d+)")
+        if m.Success then
+            match System.Int32.TryParse m.Groups.[1].Value, System.Int32.TryParse m.Groups.[2].Value with
+            | (true, a), (true, b) -> Some(a, b)
+            | _ -> None
+        else None
+
+/// 2.28 (`init -b`) or later.
+let isSupportedVersion (major: int, minor: int) : bool = major > 2 || (major = 2 && minor >= 28)
+
+// ---- redaction -------------------------------------------------------------
+
+let private isAuthorityEnd (c: char) = c = '/' || c = '"' || c = '\'' || System.Char.IsWhiteSpace c
+
+/// For the first `://` at or after `from`: `(index of ://, start of the authority, index of the last @ in it or -1)`.
+let private userInfoSpan (s: string) (from: int) : (int * int * int) option =
+    let i = s.IndexOf("://", from, ord)
+    if i < 0 then None
+    else
+        let start = i + 3
+        let mutable e = start
+        while e < s.Length && not (isAuthorityEnd s.[e]) do
+            e <- e + 1
+        // the last `@` inside [start, e)
+        let mutable at = -1
+        for k in start .. e - 1 do
+            if s.[k] = '@' then at <- k
+        Some(i, start, at)
+
+/// The text between `://` and the last `@` of the authority of the first URL in `s`, else `None`.
+let userInfoOf (s: string) : string option =
+    if isNull s then None
+    else
+        match userInfoSpan s 0 with
+        | Some(_, start, at) when at > start -> Some(s.Substring(start, at - start))
+        | _ -> None
+
+/// Replaces each (non-empty) literal in `secrets` with `***`, then the user-info of every `scheme://user[:pass]@`.
+let redact (secrets: string list) (text: string) : string =
+    if isNull text then ""
+    else
+        let afterSecrets =
+            secrets
+            |> List.filter (fun x -> not (System.String.IsNullOrEmpty x))
+            // longest first, so a secret that contains another is replaced whole
+            |> List.sortWith (fun a b -> if a.Length <> b.Length then compare b.Length a.Length else System.String.CompareOrdinal(a, b))
+            |> List.fold (fun (acc: string) x -> acc.Replace(x, "***", ord)) text
+        let sb = System.Text.StringBuilder()
+        let mutable pos = 0
+        let mutable go = true
+        while go do
+            match userInfoSpan afterSecrets pos with
+            | None ->
+                sb.Append(afterSecrets, pos, afterSecrets.Length - pos) |> ignore
+                go <- false
+            | Some(i, start, at) ->
+                if at >= start then
+                    sb.Append(afterSecrets, pos, start - pos).Append("***") |> ignore
+                    pos <- at // the `@` itself is copied by the next round
+                else
+                    sb.Append(afterSecrets, pos, start - pos) |> ignore
+                    pos <- start
+        sb.ToString()
+
+/// Splits on `\n`, drops one trailing `\r` from each line, keeps for each line only the text after its last `\r` (a
+/// progress rewrite), redacts each line, joins them and keeps the last `maxStderrKeptChars` code units.
+let cleanStderr (secrets: string list) (raw: string) : string =
+    if System.String.IsNullOrEmpty raw then ""
+    else
+        let lines =
+            raw.Split('\n')
+            |> Array.map (fun line ->
+                let l = if line.EndsWith("\r", ord) then line.Substring(0, line.Length - 1) else line
+                let k = l.LastIndexOf '\r'
+                let kept = if k >= 0 then l.Substring(k + 1) else l
+                redact secrets kept)
+        let joined = System.String.Join("\n", lines)
+        if joined.Length > maxStderrKeptChars then
+            let start = joined.Length - maxStderrKeptChars
+            // never start on the second half of a surrogate pair
+            let start = if System.Char.IsLowSurrogate joined.[start] then start + 1 else start
+            joined.Substring start
+        else
+            joined
+
+// ---- the ssh command -------------------------------------------------------
+
+type SshSource =
+    { EnvCommand: string option
+      ConfigCommand: string option
+      GitSsh: string option
+      Variant: string option }
+
+let private present (o: string option) : string option =
+    match o with
+    | Some s when not (System.String.IsNullOrWhiteSpace s) -> Some(s.Trim())
+    | _ -> None
+
+/// The program of a command line: its first token, honouring a leading double quote, as a lower-case base name.
+let private programOf (command: string) : string =
+    let c = command.TrimStart()
+    let token =
+        if c.StartsWith("\"", ord) || c.StartsWith("'", ord) then
+            let close = c.IndexOf(c.[0], 1)
+            if close > 0 then c.Substring(1, close - 1) else c.Substring 1
+        else
+            let sp = c.IndexOfAny [| ' '; '\t' |]
+            if sp >= 0 then c.Substring(0, sp) else c
+    let baseName = token.Replace('\\', '/').Split('/') |> Array.last
+    baseName.ToLowerInvariant()
+
+let private isPuttyName (name: string) = name.Contains("plink", ord) || name.Contains("putty", ord)
+
+/// The `GIT_SSH_COMMAND` value: the user's command (the process's own `GIT_SSH_COMMAND`, else `core.sshCommand`,
+/// else `ssh`) with `-o BatchMode=yes -o ConnectTimeout=8` appended, or `-batch` for a plink/putty program. `None`
+/// (leave the environment alone) when only `GIT_SSH` names a program: it does not take OpenSSH options.
+let composeSshCommand (src: SshSource) : string option =
+    let command = present src.EnvCommand |> Option.orElse (present src.ConfigCommand)
+    match command, present src.GitSsh with
+    | None, Some _ -> None
+    | _ ->
+        let baseCommand = defaultArg command "ssh"
+        let variantPutty =
+            match present src.Variant with
+            | Some v -> isPuttyName (v.ToLowerInvariant())
+            | None -> false
+        if variantPutty || isPuttyName (programOf baseCommand) then Some(baseCommand + " -batch")
+        else Some(baseCommand + " -o BatchMode=yes -o ConnectTimeout=8")
+
+// ---- keys ------------------------------------------------------------------
+
+let private hex12 (s: string) : string =
+    use sha = System.Security.Cryptography.SHA256.Create()
+    let bytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes s)
+    System.String.Concat(bytes |> Array.take 6 |> Array.map (fun b -> b.ToString "x2"))
+
+/// First 12 lowercase hex characters of the SHA-256 of the remote's UTF-8 bytes.
+let cloneKey (remote: string) : string = hex12 remote
+
+/// The same over the database file name, lower-cased invariantly first on a case-insensitive file system.
+let dbKey (caseInsensitive: bool) (fileName: string) : string =
+    hex12 (if caseInsensitive then fileName.ToLowerInvariant() else fileName)
+
+// ---- ls-remote -------------------------------------------------------------
+
+/// The sha of the line whose ref equals `refs/heads/<branch>` (`ls-remote` matches by suffix, so
+/// `refs/heads/foo/refs/heads/main` is also listed for `main`).
+let parseLsRemote (branch: string) (output: string) : string option =
+    if System.String.IsNullOrEmpty output then None
+    else
+        let wanted = "refs/heads/" + branch
+        output.Split('\n')
+        |> Array.tryPick (fun raw ->
+            let line = raw.TrimEnd '\r'
+            let tab = line.IndexOf '\t'
+            if tab <= 0 then None
+            else
+                let sha = line.Substring(0, tab)
+                let r = line.Substring(tab + 1)
+                if r = wanted && isSha sha then Some sha else None)

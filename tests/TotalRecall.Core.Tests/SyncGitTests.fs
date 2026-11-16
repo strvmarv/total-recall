@@ -372,3 +372,289 @@ let overridesTests =
             Expect.equal fixedEnvironment [ "GIT_TERMINAL_PROMPT", "0"; "LC_ALL", "C"; "LANGUAGE", "C" ] "fixed"
             Expect.equal removedEnvironmentNames [ "SSH_ASKPASS" ] "removed"
     ]
+
+// ===========================================================================
+// part B: failures, redaction, ssh, keys, ls-remote
+
+let private input (stderr: string) : FailureInput =
+    { ExitCode = Some 128; TimedOut = false; Cancelled = false; SpawnFailed = false; OutputTooLarge = false; Stderr = stderr }
+
+let private kindOf (stderr: string) : FailureKind = classifyFailure (input stderr)
+
+[<Tests>]
+let classifyTests =
+    testList "SyncGit.classifyFailure: the ordered fragment table of decision 12" [
+        testCase "Auth" <| fun _ ->
+            for s in
+                [ "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+                  "fatal: unable to get password from user"
+                  "git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository."
+                  "fatal: Authentication failed for 'https://github.com/o/r.git/'"
+                  "Host key verification failed.\nfatal: Could not read from remote repository."
+                  "error: The requested URL returned error: 401"
+                  "fatal: unable to access 'https://h/': The requested URL returned error: 403"
+                  "remote: Invalid username or password."
+                  "fatal: could not read Password for 'https://u@h': terminal prompts disabled"
+                  "fatal: unable to access 'https://h/': The requested URL returned error: HTTP 401"
+                  "remote: HTTP 403 forbidden" ] do
+                Expect.equal (kindOf s) Auth s
+
+        testCase "RemoteNotFound" <| fun _ ->
+            for s in
+                [ "fatal: '/x/missing' does not appear to be a git repository\nfatal: Could not read from remote repository."
+                  "ERROR: Repository not found.\nfatal: Could not read from remote repository."
+                  "fatal: repository '/abs/missing' does not exist"
+                  "fatal: repository 'https://h/o/r.git/' not found"
+                  "error: The requested URL returned error: 404"
+                  "remote: HTTP 404 not found" ] do
+                Expect.equal (kindOf s) RemoteNotFound s
+
+        testCase "RemoteBranchMissing" <| fun _ ->
+            for s in
+                [ "warning: Could not find remote branch main to clone.\nfatal: Remote branch main not found in upstream origin"
+                  "fatal: couldn't find remote ref refs/heads/main" ] do
+                Expect.equal (kindOf s) RemoteBranchMissing s
+
+        testCase "NonFastForward" <| fun _ ->
+            for s in
+                [ " ! [rejected]        HEAD -> main (non-fast-forward)"
+                  " ! [rejected]        HEAD -> main (fetch first)"
+                  "error: failed to push some refs to 'x'\nhint: Updates were rejected because the remote contains work" ] do
+                Expect.equal (kindOf s) NonFastForward s
+
+        testCase "Network" <| fun _ ->
+            for s in
+                [ "ssh: Could not resolve hostname x: Name or service not known\nfatal: Could not read from remote repository."
+                  "ssh: connect to host h port 22: Connection refused"
+                  "fatal: unable to access 'https://h/': Failed to connect to h port 443 after 5 ms: Couldn't connect to server"
+                  "fatal: unable to access 'https://h/': Could not resolve host: h"
+                  "fatal: unable to access 'https://h/': Connection timed out after 20 ms"
+                  "fatal: the remote end hung up unexpectedly\nfatal: early EOF"
+                  "error: RPC failed; curl 28 Operation too slow"
+                  "kex_exchange_identification: Connection closed by remote host"
+                  "fatal: unable to access 'https://h/': Couldn't connect to server"
+                  "fatal: unable to access 'https://h/': Operation too slow. Less than 1000 bytes/sec transferred the last 20 seconds"
+                  "fatal: unable to access 'https://h/': Operation timed out after 5001 milliseconds"
+                  "ssh: connect to host h port 22: Network is unreachable"
+                  "ssh: connect to host h port 22: No route to host"
+                  "Connection reset by peer" ] do
+                Expect.equal (kindOf s) Network s
+
+        testCase "ordered fragments need their order, and 'curl' must be a curl code" <| fun _ ->
+            Expect.equal (kindOf "' not found while repository '") Other "wrong order, not found"
+            Expect.equal (kindOf "' does not exist, the repository '") Other "wrong order, does not exist"
+            Expect.equal (kindOf " not found in upstream, remote branch ") Other "wrong order, branch"
+            Expect.equal (kindOf "fatal: unable to access 'https://github.com/curl/curl.git/': SSL certificate problem") Other "curl in a name"
+
+        testCase "NotARepository" <| fun _ ->
+            Expect.equal (kindOf "fatal: not a git repository: '/x/.git'") NotARepository "not a repo"
+
+        testCase "Other" <| fun _ ->
+            for s in
+                [ "fatal: Could not read from remote repository."
+                  ""
+                  "remote: error: GH013: Repository rule violations found\n! [remote rejected] main -> main (push declined due to repository rule violations)"
+                  "fatal: unrecognized argument" ] do
+                Expect.equal (kindOf s) Other (sprintf "%A" s)
+
+        testCase "the order decides: Auth before Network, a specific line beats the generic trailer" <| fun _ ->
+            Expect.equal (kindOf "Permission denied (publickey).\nssh: Could not resolve hostname x") Auth "auth first"
+            Expect.equal (kindOf "fatal: repository 'x' not found\nfatal: Could not read from remote repository.") RemoteNotFound "specific"
+            Expect.equal (kindOf "Connection refused\nfatal: not a git repository") Network "network before notarepo"
+
+        testCase "matching is case-insensitive" <| fun _ ->
+            Expect.equal (kindOf "PERMISSION DENIED (PUBLICKEY).") Auth "upper"
+            Expect.equal (kindOf "connection REFUSED") Network "mixed"
+
+        testCase "flags are decided before any fragment, in the stated order" <| fun _ ->
+            let text = "Permission denied (publickey)."
+            Expect.equal (classifyFailure { input text with SpawnFailed = true }) NoGit "spawn"
+            Expect.equal (classifyFailure { input text with TimedOut = true }) TimedOut "timeout"
+            Expect.equal (classifyFailure { input text with Cancelled = true }) Cancelled "cancelled"
+            Expect.equal (classifyFailure { input text with OutputTooLarge = true }) OutputTooLarge "large"
+            Expect.equal (classifyFailure { input text with SpawnFailed = true; TimedOut = true; Cancelled = true; OutputTooLarge = true }) NoGit "all four"
+            Expect.equal (classifyFailure { input text with TimedOut = true; Cancelled = true; OutputTooLarge = true }) TimedOut "three"
+            Expect.equal (classifyFailure { input text with Cancelled = true; OutputTooLarge = true }) Cancelled "two"
+
+        testProperty "total, and a flag always wins over the text" <| fun (text: string) (a: bool) (b: bool) (c: bool) (d: bool) ->
+            let i = { input (if isNull text then "" else text) with SpawnFailed = a; TimedOut = b; Cancelled = c; OutputTooLarge = d }
+            let k = classifyFailure i
+            if a then k = NoGit
+            elif b then k = TimedOut
+            elif c then k = Cancelled
+            elif d then k = OutputTooLarge
+            else k <> NoGit && k <> TimedOut && k <> Cancelled && k <> OutputTooLarge && k <> GitTooOld
+    ]
+
+[<Tests>]
+let versionTests =
+    testList "SyncGit.parseVersion" [
+        testCase "parses the first two numbers" <| fun _ ->
+            Expect.equal (parseVersion "git version 2.43.0") (Some(2, 43)) "plain"
+            Expect.equal (parseVersion "git version 2.45.1.windows.1\n") (Some(2, 45)) "windows"
+            Expect.equal (parseVersion "git version 2.39.5 (Apple Git-154)") (Some(2, 39)) "apple"
+            Expect.isNone (parseVersion "garbage") "garbage"
+            Expect.isNone (parseVersion "") "empty"
+            Expect.isNone (parseVersion null) "null"
+        testCase "the minimum is 2.28" <| fun _ ->
+            Expect.isTrue (isSupportedVersion (2, 28)) "2.28"
+            Expect.isTrue (isSupportedVersion (2, 56)) "2.56"
+            Expect.isTrue (isSupportedVersion (3, 0)) "3.0"
+            Expect.isFalse (isSupportedVersion (2, 27)) "2.27"
+            Expect.isFalse (isSupportedVersion (1, 9)) "1.9"
+    ]
+
+[<Tests>]
+let redactTests =
+    testList "SyncGit.redact, userInfoOf, cleanStderr" [
+        testCase "the user-info of every URL becomes ***" <| fun _ ->
+            Expect.equal (redact [] "https://user:ghp_abc@github.com/o/r.git") "https://***@github.com/o/r.git" "password"
+            Expect.equal (redact [] "ssh://git@h/x") "ssh://***@h/x" "no password"
+            Expect.equal (redact [] "https://h/o/r") "https://h/o/r" "none"
+            Expect.equal (redact [] "a https://u:p@h/x and ssh://k@h2/y") "a https://***@h/x and ssh://***@h2/y" "two"
+            Expect.equal (redact [] "'https://u:p@h' x") "'https://***@h' x" "quote ends"
+            Expect.equal (redact [] "https://u:p@h x") "https://***@h x" "space ends"
+            Expect.equal (redact [] "https://u:p@ss@h/x") "https://***@h/x" "last @ before the path"
+            Expect.equal (redact [] "git@github.com:o/r.git") "git@github.com:o/r.git" "scp-like carries no credential"
+            Expect.equal (redact [] "mail me@x.com") "mail me@x.com" "@ without ://"
+            Expect.equal (redact [] "https://h/a@b") "https://h/a@b" "an @ after the path is not user-info"
+            Expect.equal (redact [] "https://h x@y.com") "https://h x@y.com" "whitespace ends the authority"
+            Expect.equal (redact [] "'https://h'@x.com") "'https://h'@x.com" "a quote ends the authority"
+
+        testCase "caller secrets are replaced wherever they appear, before the URL rule" <| fun _ ->
+            Expect.equal (redact [ "ghp_abc" ] "token ghp_abc seen") "token *** seen" "literal"
+            Expect.equal (redact [ "p@ss" ] "https://u:p@ss@h/x") "https://***@h/x" "literal first"
+            Expect.equal (redact [ "" ] "x") "x" "an empty secret is ignored"
+            Expect.equal (redact [ "pass1234"; "user:pass1234" ] "x user:pass1234 y") "x *** y" "the longer secret first"
+            Expect.equal (redact [ "abcdef"; "defghi" ] "abcdefghi") "***ghi" "overlapping secrets: no extra leak beyond the longest-first rule"
+
+        testCase "idempotent" <| fun _ ->
+            let once = redact [ "zzz" ] "https://u:p@h/x zzz https://k@h2"
+            Expect.equal (redact [ "zzz" ] once) once "twice"
+
+        testProperty "random credentials never survive" <| fun (a: uint32) (b: uint32) ->
+            let user = "USR" + string a
+            let pass = "PW" + string b
+            let out = redact [] ("see https://" + user + ":" + pass + "@h/x")
+            not (out.Contains user) && not (out.Contains pass)
+
+        testCase "userInfoOf" <| fun _ ->
+            Expect.equal (userInfoOf "https://user:pw@h/x") (Some "user:pw") "url"
+            Expect.equal (userInfoOf "git@github.com:o/r.git") None "scp-like"
+            Expect.equal (userInfoOf "ssh://git@h/x") (Some "git") "ssh"
+            Expect.equal (userInfoOf "https://h/x") None "none"
+            Expect.equal (userInfoOf "x https://u:p@ss@h/x") (Some "u:p@ss") "last @"
+            Expect.equal (userInfoOf null) None "null"
+
+        testCase "cleanStderr keeps lines, drops progress rewrites, handles CRLF" <| fun _ ->
+            Expect.equal (cleanStderr [] "a\nb\n") "a\nb\n" "plain"
+            let out = cleanStderr [] "Receiving objects: 10%\rReceiving objects: 100%\rdone\nerror: boom\n"
+            Expect.isTrue (out.Contains "done") "done kept"
+            Expect.isTrue (out.Contains "error: boom") "error kept"
+            Expect.isFalse (out.Contains "10%") "progress dropped"
+            Expect.equal (cleanStderr [] "Permission denied\r\n") "Permission denied\n" "crlf"
+            Expect.equal (cleanStderr [] "x\r") "x" "a trailing CR is dropped first"
+            Expect.equal (cleanStderr [] null) "" "null"
+
+        testCase "cleanStderr keeps the last 2048 code units" <| fun _ ->
+            let big = String.replicate 5 (String.replicate 999 "a" + "\n") + "END"
+            let out = cleanStderr [] big
+            Expect.equal out.Length maxStderrKeptChars "length"
+            Expect.isTrue (out.EndsWith "END") "the tail"
+
+        testCase "the cut never starts on half a surrogate pair" <| fun _ ->
+            let out = cleanStderr [] ("\U0001F600" + String.replicate 2047 "a")
+            Expect.isFalse (System.Char.IsLowSurrogate out.[0]) "no lone low surrogate"
+            Expect.isTrue (out.Length <= maxStderrKeptChars) "within the limit"
+
+        testCase "a token cannot be half-visible at the cut" <| fun _ ->
+            let url = "fatal: https://user:SECRETTOKEN@h/x\n"
+            for pad in [ 2000 .. 2050 ] do
+                let out = cleanStderr [] (url + String.replicate pad "z")
+                Expect.isFalse (out.Contains "SECRETTOKEN") (sprintf "pad %d" pad)
+                Expect.isFalse (out.Contains "user:") (sprintf "pad %d" pad)
+            Expect.equal maxStderrKeptChars 2048 "constant"
+    ]
+
+[<Tests>]
+let sshTests =
+    testList "SyncGit.composeSshCommand" [
+        let none : SshSource = { EnvCommand = None; ConfigCommand = None; GitSsh = None; Variant = None }
+        let opts = "-o BatchMode=yes -o ConnectTimeout=8"
+        testCase "defaults to ssh with the two options" <| fun _ ->
+            Expect.equal (composeSshCommand none) (Some("ssh " + opts)) "default"
+        testCase "the process's command, then the config's, and blanks are absent" <| fun _ ->
+            Expect.equal (composeSshCommand { none with EnvCommand = Some "ssh -i k" }) (Some("ssh -i k " + opts)) "env"
+            Expect.equal
+                (composeSshCommand { none with EnvCommand = Some "ssh -i env"; ConfigCommand = Some "ssh -i cfg" })
+                (Some("ssh -i env " + opts))
+                "env beats config"
+            Expect.equal (composeSshCommand { none with EnvCommand = Some "  "; ConfigCommand = Some "ssh -i cfg" }) (Some("ssh -i cfg " + opts)) "blank env"
+            Expect.equal
+                (composeSshCommand { none with ConfigCommand = Some "C:/Windows/System32/OpenSSH/ssh.exe" })
+                (Some("C:/Windows/System32/OpenSSH/ssh.exe " + opts))
+                "config path"
+        testCase "GIT_SSH alone leaves the environment alone" <| fun _ ->
+            Expect.isNone (composeSshCommand { none with GitSsh = Some "/x/plink" }) "git_ssh"
+            Expect.equal
+                (composeSshCommand { none with GitSsh = Some "/x/plink"; EnvCommand = Some "ssh" })
+                (Some("ssh " + opts))
+                "a command beats GIT_SSH"
+        testCase "plink and putty get -batch and no -o options" <| fun _ ->
+            Expect.equal (composeSshCommand { none with EnvCommand = Some "plink -ssh" }) (Some "plink -ssh -batch") "plink"
+            Expect.equal (composeSshCommand { none with Variant = Some "plink" }) (Some "ssh -batch") "variant"
+            Expect.equal (composeSshCommand { none with Variant = Some "TortoisePlink" }) (Some "ssh -batch") "tortoise variant"
+            Expect.equal (composeSshCommand { none with EnvCommand = Some "putty.exe" }) (Some "putty.exe -batch") "putty"
+            Expect.equal
+                (composeSshCommand { none with EnvCommand = Some "\"C:/Program Files/PuTTY/plink.exe\" -ssh" })
+                (Some "\"C:/Program Files/PuTTY/plink.exe\" -ssh -batch")
+                "a quoted path"
+            Expect.equal (composeSshCommand { none with EnvCommand = Some "ssh -i ~/plinkkey" }) (Some("ssh -i ~/plinkkey " + opts)) "only the program counts"
+        testCase "quotes, backslashes and case in the program path" <| fun _ ->
+            Expect.equal
+                (composeSshCommand { none with EnvCommand = Some "'C:/Program Files/PuTTY/plink.exe' -ssh" })
+                (Some "'C:/Program Files/PuTTY/plink.exe' -ssh -batch")
+                "single quotes"
+            Expect.equal
+                (composeSshCommand { none with EnvCommand = Some "\"C:\\Program Files\\PuTTY\\PLINK.EXE\" -ssh" })
+                (Some "\"C:\\Program Files\\PuTTY\\PLINK.EXE\" -ssh -batch")
+                "backslashes and upper case"
+        testCase "a command that already names BatchMode still gets the options appended" <| fun _ ->
+            Expect.equal
+                (composeSshCommand { none with EnvCommand = Some "ssh -o BatchMode=no" })
+                (Some("ssh -o BatchMode=no " + opts))
+                "user's first value wins in ssh"
+    ]
+
+[<Tests>]
+let keyTests =
+    testList "SyncGit.cloneKey and dbKey" [
+        testCase "cloneKey against a fixed vector" <| fun _ ->
+            // printf '%s' "git@github.com:alice/total-recall-sync.git" | sha256sum | cut -c1-12
+            Expect.equal (cloneKey "git@github.com:alice/total-recall-sync.git") "d938d07c0fca" "vector"
+            Expect.notEqual (cloneKey "git@github.com:alice/total-recall-sync") (cloneKey "git@github.com:alice/total-recall-sync.git") "differs"
+            Expect.isTrue (System.Text.RegularExpressions.Regex.IsMatch(cloneKey "x", "^[0-9a-f]{12}$")) "shape"
+        testCase "dbKey against a fixed vector and case rules" <| fun _ ->
+            // printf '%s' "total-recall.db" | sha256sum | cut -c1-12
+            Expect.equal (dbKey false "total-recall.db") "da6cac52b1c4" "vector"
+            Expect.notEqual (dbKey false "A.db") (dbKey false "a.db") "case-sensitive"
+            Expect.equal (dbKey true "A.db") (dbKey true "a.DB") "case-insensitive"
+            Expect.notEqual (dbKey false "a.db") (dbKey false "b.db") "different names"
+    ]
+
+[<Tests>]
+let lsRemoteTests =
+    testList "SyncGit.parseLsRemote" [
+        let a = String.replicate 40 "a"
+        let b = String.replicate 40 "b"
+        testCase "an exact ref only" <| fun _ ->
+            Expect.equal (parseLsRemote "main" (a + "\trefs/heads/main\n")) (Some a) "one"
+            Expect.isNone (parseLsRemote "main" "") "empty"
+            let tricky = a + "\trefs/heads/foo/refs/heads/main\n" + b + "\trefs/heads/main\n"
+            Expect.equal (parseLsRemote "main" tricky) (Some b) "suffix match ignored"
+            let swapped = b + "\trefs/heads/main\n" + a + "\trefs/heads/foo/refs/heads/main\n"
+            Expect.equal (parseLsRemote "main" swapped) (Some b) "swapped"
+            Expect.isNone (parseLsRemote "main" ("abc\trefs/heads/main\n")) "short sha ignored"
+            Expect.isNone (parseLsRemote "main" (a + "\trefs/heads/other\n")) "other branch"
+            Expect.equal (parseLsRemote "main" (String.replicate 64 "c" + "\trefs/heads/main\r\n")) (Some(String.replicate 64 "c")) "sha-256 and CRLF"
+    ]
