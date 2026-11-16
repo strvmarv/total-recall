@@ -77,7 +77,7 @@ and refreshes hot-tier context near the current generation point.
 
 ### Session End
 
-total-recall shows no reminder when a session ends, because what a session-end hook prints is not displayed. The compaction reminder is the `hot_tier_compaction_suggested` hint that `session_start` returns when the hot tier holds at least `tiers.hot.compaction_hint_threshold` entries (surface it in the startup announcement, above), plus one nudge per session from the per-turn pinned floor on hosts that have it (a hook message saying that N hot-tier entries are uncompacted: tell the user once). Both reach the user only through you. Compaction is user-triggered — run `/total-recall:commands compact` when told or whenever you want to compact manually. Also call the `session_end` MCP tool for final bookkeeping.
+total-recall shows no reminder when a session ends (Claude Code, for one, does not display what a session-end hook prints). The compaction reminder is the `hot_tier_compaction_suggested` hint that `session_start` returns when the hot tier holds at least `tiers.hot.compaction_hint_threshold` entries (surface it in the startup announcement, above), plus one nudge per session from the per-turn pinned floor on hosts that have it (a hook message saying that N hot-tier entries are uncompacted: tell the user once). Both reach the user only through you. Compaction is user-triggered — run `/total-recall:commands compact` when told or whenever you want to compact manually. Also call the `session_end` MCP tool for final bookkeeping.
 
 ### Rules
 
