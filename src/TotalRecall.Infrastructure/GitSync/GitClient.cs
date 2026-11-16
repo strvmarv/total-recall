@@ -35,7 +35,7 @@ public sealed record GitClientOptions
 /// The typed git operations of sync. Every call goes through <see cref="IGitProcess"/> with a command from the closed
 /// <see cref="SyncGit.GitCommand"/> set, so force, delete and mirror cannot be expressed. The constructor touches no
 /// file; the first call of a command that takes the configuration overrides creates the sync directory, the empty
-/// hooks directory and the empty file. Nothing calls this class yet (milestone 1a-1).
+/// hooks directory and the empty file. `SyncSetupService` (the hidden `sync` commands, milestone 1a-3) is its caller; the sync cycle is milestone 1b.
 /// </summary>
 public sealed partial class GitClient
 {

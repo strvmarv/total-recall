@@ -5,8 +5,8 @@ namespace TotalRecall.Infrastructure.GitSync;
 /// <summary>
 /// The operating-system lock that keeps two processes from syncing one database at once. It is a file opened with
 /// <c>FileShare.None</c>, which the operating system releases when the holder dies, so a crash never leaves it held.
-/// The file is never deleted and holds no text (a second taker cannot read it on Windows). Nothing calls this yet
-/// (milestone 1a-1). Two things for a caller: hold the handle in a <c>using</c> for the whole cycle (an undisposed
+/// The file is never deleted and holds no text (a second taker cannot read it on Windows). No caller yet: the sync cycle that
+/// takes it is milestone 1b. Two things for a caller: hold the handle in a <c>using</c> for the whole cycle (an undisposed
 /// handle is released by the finalizer at some later collection); and .NET ignores a flock failure other than
 /// "would block" (<c>ENOTSUP</c>, <c>ENOLCK</c>), so on a file system without flock support the lock excludes no one.
 /// </summary>

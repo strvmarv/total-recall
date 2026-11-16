@@ -6,7 +6,7 @@ namespace TotalRecall.Infrastructure.GitSync;
 /// Where git sync keeps its files for one database file and one remote:
 /// <c>&lt;directory of the database&gt;/sync/&lt;dbKey&gt;/{lock, no-hooks, empty, &lt;cloneKey&gt;/repo}</c>. Keyed on the
 /// database's file name, so two database files in one directory never share a clone, a protective ref or a lock. The
-/// class builds and creates paths and never deletes anything. Nothing calls it yet (milestone 1a-1).
+/// class builds and creates paths and never deletes anything. `SyncSetupService` (the hidden `sync` commands) uses it; `ForDatabase` is the shared resolution.
 /// </summary>
 public sealed class GitSyncPaths
 {
