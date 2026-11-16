@@ -12,8 +12,9 @@
 // Pass 3 is hand-scanned, not a backtracking regex: on nested hostile input the regex form grows
 // about cubically. Each scan is linear and is equivalent to the regex it replaces
 // (\[([^\]]*)\]\([^)]*\) and <(https?://[^<>WS]*)>, scheme ASCII-only and case-insensitive).
-// The loop runs at most one pass per level of nested matches, plus a last one that changes nothing, so the work on hostile input is bounded by
-// counting passes (Sanitize(text, out passes)), not by time; see the spec, section 2.
+// The loop runs at most one pass per level of nested matches, plus a last one that changes nothing, so the
+// work on hostile input is bounded by counting passes (Sanitize(text, out passes)), not by time; see the
+// spec, section 2.
 
 using System.Text;
 
