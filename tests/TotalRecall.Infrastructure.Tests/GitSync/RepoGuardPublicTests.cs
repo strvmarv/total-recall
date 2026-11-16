@@ -91,7 +91,29 @@ public sealed class RepoGuardPublicTests : IDisposable
         var result = await Guard(null, probe).CheckPublicAsync();
 
         Assert.True(result.Verdict.IsSkipped);
+        Assert.NotNull(result.Notice);
+        Assert.Contains("remote is configured", result.Notice);
         Assert.Equal(0, probe.Calls);
+    }
+
+    private sealed class ThrowingMeta : TotalRecall.Infrastructure.Storage.IMetaStore
+    {
+        public string? GetMeta(string key) => throw new InvalidOperationException("locked");
+        public void SetMeta(string key, string value) => throw new InvalidOperationException("read-only");
+        public void DeleteMeta(string key) => throw new InvalidOperationException("read-only");
+    }
+
+    [Fact]
+    public async Task AStoreFault_OnTheCache_IsAMiss_NotAFailedCheck()
+    {
+        var probe = new StubProbe(() => 404);
+        var guard = new RepoGuard(GuardSettings.For(Remote), new ThrowingMeta(), null,
+            new HostIdentity(() => new MachineIdResult(MachineIdKind.Absent, null), "/tmp/db", false), probe, () => _now);
+
+        var result = await guard.CheckPublicAsync();
+
+        Assert.True(result.Verdict.IsPrivate);
+        Assert.Equal(1, probe.Calls);
     }
 
     [Fact]

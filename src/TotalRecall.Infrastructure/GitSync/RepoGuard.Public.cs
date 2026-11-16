@@ -53,7 +53,7 @@ public sealed partial class RepoGuard
     {
         var remote = ConfiguredRemote;
         if (remote is null)
-            return Skipped("no remote is configured");
+            return Skipped("no [git_sync] remote is configured");
 
         var parsed = SyncPublic.parseGitHubSlug(remote);
         if (!FSharpOption<SyncPublic.GitHubSlug>.get_IsSome(parsed))
@@ -61,7 +61,7 @@ public sealed partial class RepoGuard
         var slug = parsed.Value;
 
         var nowUnix = _clock().ToUnixTimeSeconds();
-        var cached = SyncPublic.parseCache(_meta.GetMeta(SyncIdentity.MetaKeys.PublicCheck) ?? "");
+        var cached = SyncPublic.parseCache(ReadCache());
         if (FSharpOption<Tuple<string, long>>.get_IsSome(cached)
             && cached.Value.Item1 == SyncPublic.slugKey(slug)
             && SyncPublic.isFresh(nowUnix, cached.Value.Item2))
@@ -74,7 +74,7 @@ public sealed partial class RepoGuard
 
         if (verdict.IsPrivate)
         {
-            _meta.SetMeta(SyncIdentity.MetaKeys.PublicCheck, SyncPublic.formatCache(slug, nowUnix));
+            WriteCache(SyncPublic.formatCache(slug, nowUnix));
             return new PublicCheckResult(verdict, null, FromCache: false);
         }
 
@@ -82,6 +82,19 @@ public sealed partial class RepoGuard
             return new PublicCheckResult(verdict, Once(ref _unknownNoticed, SyncPublic.unknownNotice(unknown.Item)), FromCache: false);
 
         return new PublicCheckResult(verdict, null, FromCache: false); // a public answer is never cached
+    }
+
+    // The cache is advisory: a store fault (a read-only or locked database) is a miss, never a failed check.
+    private string ReadCache()
+    {
+        try { return _meta.GetMeta(SyncIdentity.MetaKeys.PublicCheck) ?? ""; }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return ""; }
+    }
+
+    private void WriteCache(string value)
+    {
+        try { _meta.SetMeta(SyncIdentity.MetaKeys.PublicCheck, value); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { /* not cached: the next check asks again */ }
     }
 
     private PublicCheckResult Skipped(string reason) =>

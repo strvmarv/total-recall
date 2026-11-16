@@ -114,4 +114,4 @@ let unknownNotice (reason: string) : string =
 
 /// The notice for a remote the check does not cover. It carries no address.
 let skippedNotice (reason: string) : string =
-    sprintf "The public-repository check only covers github.com (%s). Keep the sync repository private: it holds your memories in plain text." reason
+    sprintf "The public-repository check was skipped (%s); it only covers github.com. Keep the sync repository private: it holds your memories in plain text." reason

@@ -114,7 +114,7 @@ public sealed class RepoGuardIdentityTests : IDisposable
             using var rig = new RepoGuardIdentityTests();
             switch (shape)
             {
-                case "symlink": rig._source.Add("120000", rig._source.Blob(Encoding.UTF8.GetBytes("target")), "manifest.json"); break;
+                case "symlink": rig._source.Add("120000", rig._source.Blob(Manifest(IdA)), "manifest.json"); break; // the link text is a valid manifest: only the mode can refuse it
                 case "submodule": rig._source.Add("160000", new string('a', 40), "manifest.json"); break;
                 default: rig._source.Add("100644", rig._source.Blob(Manifest(IdA)), "manifest.json/x"); break;
             }
@@ -125,6 +125,30 @@ public sealed class RepoGuardIdentityTests : IDisposable
 
             Assert.True(read.Kind == ManifestReadKind.Invalid, $"{shape}: {read.Kind} {read.Reason}");
         }
+    }
+
+    [GitFact]
+    public async Task AnExecutableManifest_IsStillOk()
+    {
+        _source.Add("100755", _source.Blob(Manifest(IdA)), "manifest.json");
+        _source.Commit("executable manifest");
+        Clone();
+
+        Assert.Equal(ManifestReadKind.Ok, (await Guard().ReadManifestAsync()).Kind);
+    }
+
+    [GitFact]
+    public async Task ADotGitThatIsAFile_IsUnreadable_NotNoClone()
+    {
+        Directory.CreateDirectory(Paths.CloneDirectory);
+        File.WriteAllText(Path.Combine(Paths.CloneDirectory, ".git"), "gitdir: /elsewhere\n");
+        Join();
+
+        var verdict = await Guard().EvaluateIdentityAsync();
+
+        Assert.Equal(ManifestReadKind.Unreadable, verdict.Manifest.Kind);
+        Assert.False(verdict.CanSync);
+        Assert.DoesNotContain(Recorder.Calls, call => SyncGit.isCloneScoped(call.Command));
     }
 
     [GitFact]

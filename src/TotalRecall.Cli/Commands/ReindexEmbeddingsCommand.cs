@@ -128,7 +128,7 @@ public sealed class ReindexEmbeddingsCommand : ICliCommand
         {
             var m = s.Mode.Value;
             if (m == "postgres") return true;
-            if (m == "cortex" || m == "local") return false;
+            if (m == "cortex" || m == "local" || m == "git") return false;
             // Unknown mode with a connection string → treat as postgres to be safe.
             return Microsoft.FSharp.Core.FSharpOption<string>.get_IsSome(s.ConnectionString);
         }

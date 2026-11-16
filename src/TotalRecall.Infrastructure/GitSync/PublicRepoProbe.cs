@@ -29,12 +29,15 @@ public sealed class PublicRepoProbe : IPublicRepoProbe, IDisposable
 
     internal PublicRepoProbe(Uri? baseAddress, HttpMessageHandler? handler, TimeSpan? timeout)
     {
-        _base = baseAddress ?? GitHubApi;
+        var baseUri = baseAddress ?? GitHubApi;
+        // `new Uri(base, "repos/...")` drops the last segment of a base without a trailing slash
+        _base = baseUri.AbsolutePath.EndsWith('/') ? baseUri : new UriBuilder(baseUri) { Path = baseUri.AbsolutePath + "/" }.Uri;
         _timeout = timeout ?? TimeSpan.FromSeconds(5);
         handler ??= new HttpClientHandler
         {
             UseCookies = false,
             UseDefaultCredentials = false,
+            UseProxy = !_base.IsLoopback, // the system proxy for api.github.com; never for a loopback test server
             AllowAutoRedirect = true,
             MaxAutomaticRedirections = 3,
         };

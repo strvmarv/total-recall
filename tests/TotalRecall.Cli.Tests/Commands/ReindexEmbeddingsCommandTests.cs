@@ -96,4 +96,46 @@ public sealed class ReindexEmbeddingsCommandTests : IDisposable
             }
         }
     }
+
+    private static async Task<(int Code, string Err)> RunWithStorage(string storageToml, StringWriter err)
+    {
+        var home = Path.Combine(Path.GetTempPath(), "tr-reindex-mode-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(home);
+        var previous = Environment.GetEnvironmentVariable("TOTAL_RECALL_HOME");
+        try
+        {
+            Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", home);
+            File.WriteAllText(Path.Combine(home, "config.toml"), storageToml);
+            var missing = Path.Combine(home, "does-not-exist.db");
+
+            var code = await new ReindexEmbeddingsCommand().RunAsync(new[] { "--db", missing });
+
+            return (code, err.ToString());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", previous);
+            try { Directory.Delete(home, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public async Task GitMode_WithAConnectionString_IsALocalStore_NotPostgres()
+    {
+        // Before the edit an unknown mode with a connection string counted as Postgres and was refused here.
+        var (code, err) = await RunWithStorage("[storage]\nmode = \"git\"\nconnection_string = \"Host=x\"\n", _errWriter);
+
+        Assert.Equal(1, code);
+        Assert.Contains("database not found", err);
+        Assert.DoesNotContain("postgres backend not yet supported", err);
+    }
+
+    [Fact]
+    public async Task PostgresMode_IsStillRefused()
+    {
+        var (code, err) = await RunWithStorage("[storage]\nmode = \"postgres\"\nconnection_string = \"Host=x\"\n", _errWriter);
+
+        Assert.Equal(1, code);
+        Assert.Contains("postgres backend not yet supported", err);
+    }
 }

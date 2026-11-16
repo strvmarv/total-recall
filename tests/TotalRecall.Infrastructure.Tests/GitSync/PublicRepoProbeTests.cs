@@ -64,6 +64,36 @@ public sealed class PublicRepoProbeTests
         using var probe = new PublicRepoProbe(server.BaseAddress);
 
         Assert.Equal(301, await probe.GetStatusAsync("o", "r", CancellationToken.None));
+        Assert.Equal(4, server.Seen.Count); // the request and exactly 3 redirects followed
+    }
+
+    [LoopbackFact]
+    public async Task ACookieTheServerSets_IsNeverSentBack()
+    {
+        using var server = new LoopbackServer(c =>
+        {
+            if (c.Request.Url!.AbsolutePath == "/repos/o/r")
+            {
+                c.Response.AddHeader("Set-Cookie", "session=1; Path=/");
+                return Respond(c, 301, "/repositories/1");
+            }
+            return Respond(c, 200);
+        });
+        using var probe = new PublicRepoProbe(server.BaseAddress);
+
+        Assert.Equal(200, await probe.GetStatusAsync("o", "r", CancellationToken.None));
+        Assert.All(server.Seen, seen => Assert.Null(seen.Headers["Cookie"]));
+    }
+
+    [LoopbackFact]
+    public async Task ABaseAddressWithoutATrailingSlash_KeepsItsPath()
+    {
+        using var server = new LoopbackServer(c => Respond(c, 200));
+        using var probe = new PublicRepoProbe(new Uri(server.BaseAddress, "api"));
+
+        await probe.GetStatusAsync("o", "r", CancellationToken.None);
+
+        Assert.Equal("/api/repos/o/r", Assert.Single(server.Seen).Path);
     }
 
     [LoopbackFact]
