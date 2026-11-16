@@ -81,11 +81,8 @@ let hashTests =
             differs { fields with Source = Some Cursor }
             differs { fields with CreatedAtMs = 1L }
 
-        testCase "fields that never sync cannot change a hash: the hashes read only the content fields and the tags" <| fun _ ->
-            // the functions take no other input (summary, metadata, usage counters, decay, updated_at never reach them)
-            let a = { localEntry with Tier = Hot; Sticky = true }
-            Expect.equal (contentHash a.Content) (contentHash localEntry.Content) "tier and sticky are not content"
-            Expect.equal (tagsHash a.Tags) (tagsHash localEntry.Tags) "tier and sticky are not tags"
+        // Fields that never sync (summary, metadata, usage counters, decay, updated_at) cannot change a hash: the two
+        // functions take only the content fields and the tag list, which the type signatures enforce.
     ]
 
 [<Tests>]
@@ -166,6 +163,8 @@ let decideTests =
                     PendingSticky = Some(st 3) }
             let c = changes (decideRow r (Some localEntry) false)
             Expect.equal c.Sticky (IssueStamp(Some(st 4))) "the sticky floor comes from the sticky stamps"
+            let r2 = { r with PendingSticky = Some(st 6) }
+            Expect.equal (changes (decideRow r2 (Some localEntry) false)).Sticky (IssueStamp(Some(st 6))) "the pending stamp is the greater"
 
         testCase "a tier warmer than local_tier with no base issues a tier stamp, floored by the tier stamps" <| fun _ ->
             let hot = { localEntry with Tier = Hot }
