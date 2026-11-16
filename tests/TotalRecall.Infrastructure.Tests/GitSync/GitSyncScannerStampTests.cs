@@ -123,6 +123,27 @@ public sealed class GitSyncScannerStampTests
     }
 
     [Fact]
+    public void StampsFollowIdOrder_WhateverTheOrderOfTheRows()
+    {
+        using var rig = new ScanRig();
+        // rows are created in the opposite order of the ids (decision 3: stamp counters do not depend on table order)
+        foreach (var id in new[] { C, B, A })
+        {
+            rig.AddMemory(Tier.Warm, id, "one " + id);
+            Scan(rig, T1);
+        }
+        Assert.Equal([C, B, A], rig.Rows().Keys);                                // the rows come back in rowid order
+        foreach (var id in new[] { C, B, A })
+            rig.Store.Update(Tier.Warm, ContentType.Memory, id, new UpdateEntryOpts { Content = "two " + id });
+
+        Scan(rig, T2);
+
+        var rows = rig.Rows();
+        Assert.True(Cmp(rows[A].ContentStamp, rows[B].ContentStamp) < 0);
+        Assert.True(Cmp(rows[B].ContentStamp, rows[C].ContentStamp) < 0);
+    }
+
+    [Fact]
     public void SecondEditBeforeAnyPush_IsStampedAboveTheFirst()
     {
         using var rig = new ScanRig();
