@@ -213,8 +213,10 @@ public sealed class SyncSetupLeaveStatusTests
         }
     }
 
-    private static void MakeClone(SetupRig rig, byte[]? manifest)
+    private static void MakeClone(SetupRig rig, byte[]? manifest, bool helperFiles = true)
     {
+        if (helperFiles)
+            rig.PathsFor(Remote).EnsureCreated(); // a clone exists only after a sync command ran, which made these
         var dir = rig.PathsFor(Remote).CloneDirectory;
         Directory.CreateDirectory(dir);
         rig.GitEnv.RunGit(dir, "init", "-b", "main");
@@ -242,13 +244,32 @@ public sealed class SyncSetupLeaveStatusTests
             SeedIdentity(rig, Remote, new string('a', 32), rig.Host.Fingerprint, "01234567");
             MakeClone(rig, bytes);
 
+            var before = SyncDb.Snapshot(rig.Root);
             var result = await rig.Service().StatusAsync();
+            MsSqliteConnection.ClearAllPools();
+            Assert.Equal(before, SyncDb.Snapshot(rig.Root));
 
             Assert.Contains(expect, Line(result, "clone"));
             Assert.StartsWith("clone: clone at ", Line(result, "clone"));
             Assert.All(rig.Recorder.Calls, c =>
                 Assert.True(c.Command.IsVersion || c.Command.IsLsTreeRoot || c.Command.IsCatBlob, $"unexpected {c.Command}"));
         }
+    }
+
+    [GitFact]
+    public async Task Status_ACloneWithoutTheHelperFiles_DoesNotReadTheManifest_AndCreatesNothing()
+    {
+        using var rig = new SetupRig { Settings = GuardSettings.For(Remote) };
+        SeedIdentity(rig, Remote, new string('a', 32), rig.Host.Fingerprint, "01234567");
+        MakeClone(rig, ManifestFile.Render(new string('a', 32), "total-recall 1.0", "2026-11-16T10:30:00Z"), helperFiles: false);
+        var before = SyncDb.Snapshot(rig.Root);
+
+        var result = await rig.Service().StatusAsync();
+
+        MsSqliteConnection.ClearAllPools();
+        Assert.Equal(before, SyncDb.Snapshot(rig.Root));
+        Assert.Contains("manifest not read", Line(result, "clone"));
+        Assert.Equal("join state: joined", Line(result, "join state"));
     }
 
     [GitFact]
@@ -295,6 +316,7 @@ public sealed class SyncSetupLeaveStatusTests
         Assert.Equal(0, result.ExitCode);
         Assert.StartsWith("repository id: unknown (", Line(result, "repository id"));
         Assert.StartsWith("recorded remote: unknown (", Line(result, "recorded remote"));
+        Assert.StartsWith("host check: unknown (", Line(result, "host check"));
     }
 
     [GitFact]
@@ -323,7 +345,8 @@ public sealed class SyncSetupLeaveStatusTests
         Assert.Equal("storage mode: unknown (config.toml is malformed)", Line(result, "storage mode"));
         Assert.Equal("configured remote: unknown (config.toml is malformed)", Line(result, "configured remote"));
         Assert.Equal("last sync: never (this build does not run the sync cycle)", result.Lines[^1]);
-        Assert.Equal("git: unknown", Line(result, "git"));
+        Assert.Matches(@"^git: \d+\.\d+$", Line(result, "git"));
+        Assert.StartsWith("host check: unknown (", Line(result, "host check"));
         rig.AssertNothingCreated();
     }
 

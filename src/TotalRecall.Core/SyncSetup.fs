@@ -232,6 +232,8 @@ type HostCheck =
     | Differs
     | Unavailable
     | NotRecorded
+    /// The check could not be made (the database could not be read); carries the reason.
+    | HostUnknown of string
 
 /// One fact of `sync status`: read, absent, or not readable (with the reason).
 type Fact =
@@ -265,6 +267,7 @@ let renderStatus (facts: StatusFacts) : string list =
         | Differs -> "differs"
         | Unavailable -> "unavailable"
         | NotRecorded -> "not recorded"
+        | HostUnknown r -> sprintf "unknown (%s)" r
     [ sprintf "storage mode: %s" facts.Mode
       sprintf "git: %s" facts.Git
       sprintf "configured remote: %s" (show "not set" displayRemote facts.ConfiguredRemote)

@@ -220,6 +220,6 @@ let statusTests =
             Expect.contains lines "host check: not recorded" "host"
 
         testCase "the host check words" <| fun _ ->
-            for h, w in [ Matches, "matches"; Differs, "differs"; Unavailable, "unavailable"; NotRecorded, "not recorded" ] do
+            for h, w in [ Matches, "matches"; Differs, "differs"; Unavailable, "unavailable"; NotRecorded, "not recorded"; HostUnknown "no such table", "unknown (no such table)" ] do
                 Expect.contains (renderStatus { facts with Host = h }) ("host check: " + w) w
     ]
