@@ -11,10 +11,12 @@
 # the host flag and must NEVER fail session teardown (exit 0, "{}" on error).
 #
 # Claude Code shares a 1.5s default budget across all SessionEnd hooks and
-# cancels whatever hasn't returned by then; this chain (bash -> node -> the
-# self-contained .NET engine -> SQLite) measures ~1.2-1.3s on Windows, right
-# at that edge. hooks.json's SessionEnd entry sets an explicit `timeout` to
-# raise the budget — see issue #28.
+# cancels whatever hasn't returned by then; the chain this hook used to run
+# (bash -> node bin/start.js -> the self-contained .NET engine -> SQLite)
+# measured ~1.2-1.3s on Windows, right at that edge. hooks.json's SessionEnd
+# entry sets an explicit `timeout` to raise the budget — see issue #28. The
+# chain is now bash -> node hooks/engine-path.js (exits) -> the engine, run
+# directly (not re-measured), and it never provisions (#98).
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,7 +29,15 @@ elif [ -n "${COPILOT_CLI:-}" ]; then
   host="copilot-cli"
 fi
 
-if ! output=$(node "$PLUGIN_ROOT/bin/start.js" session-end-hint --host "$host" 2>/dev/null) || [ -z "$output" ]; then
+# This hook never provisions anything (#98). `bin/start.js` provisions before it runs a command,
+# which would download the engine (about 100 MB) inside this hook, whose budget it cannot meet, and
+# could leave a half-written archive for the MCP shim. So the engine is run directly, and only when
+# it is already provisioned (hooks/engine-path.js, the check the other hosts' hooks use); until then
+# the hint is skipped.
+engine=$(node "$PLUGIN_ROOT/hooks/engine-path.js" </dev/null 2>/dev/null) || engine=""
+engine="${engine%$'\r'}"
+
+if [ -z "$engine" ] || ! output=$("$engine" session-end-hint --host "$host" 2>/dev/null) || [ -z "$output" ]; then
   printf '{}\n'
 else
   printf '%s\n' "$output"

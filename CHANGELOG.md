@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+
+- **The Claude Code prompt and session-end hooks no longer download the engine (#98).** Both hooks ran `node bin/start.js <command>`, and for any command but `serve` that launcher provisions the engine first. On a git-sourced install (the Claude Code marketplace, whose tree has no `binaries/` for a new version) the first prompt after an install or an update therefore downloaded the engine archive (about 100 MB) inside a hook that blocks the prompt, with no lock, possibly while the MCP shim was writing the same files, and a session that ended first did the same inside the session-end hook's 10 second budget. The hooks now ask `hooks/engine-path.js` for the engine (the check the Codex and Copilot hooks and the pi extension use: the binary exists and its model payload passes its size check) and run it directly, or print `{}` until it is provisioned; the MCP shim provisions as before. The check only reads, so it shares the shim's own limit: a binary extracted before `models/registry.json` counts as provisioned, and the engine's failure then gives `{}`. A new test file, `hooks/claude-hooks.test.js`, runs both scripts over a temporary plugin tree whose `bin/start.js` records that it ran. Not observed: Windows, and how long the first prompt after an update blocked before.
+
 ## 4.8.0 - 2026-11-16
 
 ### Added
