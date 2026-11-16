@@ -17,7 +17,7 @@ public sealed class GitSyncScannerReadTests
     public void Eligible_MemoriesInHotWarmAndCold_AreRead_AndTheirViewMapsEmptyProjectAndScopeToNone()
     {
         using var rig = new ScanRig();
-        rig.AddMemory(Tier.Hot, A, "hot one", tags: ["b", "a", "a"], project: "owner/repo", scope: "owner/repo",
+        rig.AddMemory(Tier.Hot, A, "hot one", tags: ["b", "a", "a"], project: "owner/repo", scope: "global",
             entryType: EntryType.Preference, sourceTool: SourceTool.ClaudeCode, createdAt: 42);
         rig.AddMemory(Tier.Warm, B, "warm one", project: "", scope: "");
         rig.AddMemory(Tier.Cold, C, "cold one");
@@ -31,7 +31,7 @@ public sealed class GitSyncScannerReadTests
         Assert.True(hot.View.Sticky);
         Assert.Equal("hot one", hot.View.Content.Text);
         Assert.Equal("owner/repo", hot.View.Content.Project.Value);
-        Assert.Equal("owner/repo", hot.View.Content.Scope.Value);
+        Assert.Equal("global", hot.View.Content.Scope.Value);
         Assert.True(hot.View.Content.EntryType.IsPreference);
         Assert.True(hot.View.Content.Source.Value.IsClaudeCode);
         Assert.Equal(42L, hot.View.Content.CreatedAtMs);
@@ -44,6 +44,53 @@ public sealed class GitSyncScannerReadTests
         Assert.True(snap.Entries[C].Tier.IsCold);
         Assert.Empty(snap.Skipped);
         Assert.Empty(snap.Ineligible);
+    }
+
+    [Fact]
+    public void TheSnapshotCarriesTheClockTheWarningAndTheExistingIneligibleIdIssues()
+    {
+        using var rig = new ScanRig();
+        rig.SetMeta("git_sync_hlc", "1700000000000.3");
+        rig.SetMeta("git_sync_clock_warning", "clock: far-future");
+        rig.Exec("INSERT INTO git_sync_issue (entry_id, kind, attempts, detail) VALUES ('not-an-id', 'ineligible-id', 0, 'warm')");
+        rig.Exec("INSERT INTO git_sync_issue (entry_id, kind, attempts, detail) VALUES ('3f9c2a7e', 'apply-failed', 2, 'x')");
+
+        var snap = rig.Scanner(1).ReadSnapshot();
+
+        Assert.Equal(ScanRig.MachineId, snap.MachineId);
+        Assert.Equal("1700000000000.3", snap.ClockText);
+        Assert.Equal("clock: far-future", snap.WarningText);
+        var issue = Assert.Single(snap.Issues);
+        Assert.Equal(("not-an-id", "warm"), (issue.Key, issue.Value));
+    }
+
+    [Fact]
+    public void AnIdUnreadableInOneTierAndReadableInAnother_IsSkippedOnce()
+    {
+        using var rig = new ScanRig();
+        rig.AddMemory(Tier.Warm, A);
+        rig.AddMemory(Tier.Cold, A);
+        rig.Exec($"UPDATE warm_memories SET source_tool = 'bogus' WHERE id = '{A}'");
+
+        var snap = rig.Scanner(1).ReadSnapshot();
+
+        Assert.Empty(snap.Entries);
+        Assert.Equal(A, Assert.Single(snap.Skipped).Id);
+    }
+
+    [Fact]
+    public void AFaultInsideTheHotRead_LeavesTheConnectionUsable()
+    {
+        using var rig = new ScanRig();
+        rig.AddMemory(Tier.Hot, A);
+        var scanner = rig.Scanner(1);
+        scanner.AfterFirstTableRead = () => throw new InvalidOperationException("boom");
+
+        var failed = Assert.IsType<ScanOutcome.Failed>(scanner.Scan());
+        Assert.Equal("boom", failed.Reason);
+
+        scanner.AfterFirstTableRead = null;
+        Assert.IsType<ScanOutcome.Done>(scanner.Scan());
     }
 
     [Fact]

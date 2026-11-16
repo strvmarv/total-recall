@@ -53,7 +53,7 @@ public sealed partial class GitSyncScanner
     private readonly MsSqliteConnection _conn;
     private readonly Func<long> _nowMs;
 
-    // Test seams (decision 13).
+    /// <summary>Test seam (decision 13): called once, after the hot memory table was read and before the warm one.</summary>
     internal Action? AfterFirstTableRead { get; set; }
 
     public GitSyncScanner(MsSqliteConnection connection, Func<long> nowMs)
@@ -71,13 +71,23 @@ public sealed partial class GitSyncScanner
             var snapshot = ReadSnapshot();
             if (!snapshot.Joined)
                 return new ScanOutcome.NotJoined();
-            return new ScanOutcome.Done(ScanSummary.Empty);
+            var machine = SyncStamp.MachineIdModule.tryCreate(snapshot.MachineId!).Value;
+            var plan = BuildPlan(snapshot, machine);
+            if (plan.HasWrites)
+                Write(plan);
+            return new ScanOutcome.Done(plan.Summary);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             return new ScanOutcome.Failed(ex.Message);
         }
     }
+
+    /// <summary>How many write transactions this scanner opened (a scan with nothing to write opens none).</summary>
+    internal int WriteTransactionCount { get; private set; }
+
+    /// <summary>Called inside the open write transaction before each of the steps <c>rows</c>, <c>issues</c>, <c>clock</c> and <c>warning</c>.</summary>
+    internal Action<string>? BeforeWrite { get; set; }
 
     // ------------------------------------------------------------------------------------------
     // The read side
@@ -113,11 +123,15 @@ public sealed partial class GitSyncScanner
         Exec("BEGIN");
         try
         {
-            return ReadSnapshotCore();
+            var snapshot = ReadSnapshotCore();
+            Exec("COMMIT");
+            return snapshot;
         }
-        finally
+        catch
         {
-            try { Exec("COMMIT"); } catch (SqliteException) { }
+            // Whatever failed, the read transaction ends here, so the connection is never left inside one.
+            try { Exec("ROLLBACK"); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
+            throw;
         }
     }
 
