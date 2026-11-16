@@ -80,9 +80,10 @@ they read. Until one does, `[storage] mode = "git"` can only be reached by editi
 4. **Preconditions, in this order, for `init` and `join`** (cheap and local first; the network last). A failure at any step ends
    the command with the named refusal before the next step runs:
    1. the address is usable: `SyncGit.validateRemote(OperatingSystem.IsWindows(), address)`, else `bad-remote`; and it carries
-      **no credential** (`SyncSetup.addressRefusal`, with the one reader `SyncSetup.userInfoOf` that `displayRemote` shares). For a
-      `scheme://` address the authority ends at the first `/`, `?`, `#`, quote or whitespace after `://`, and the user-info is the
-      text before the **last** `@` of the authority; for an scp-like address it is the text before the first `@` when that `@`
+      **no credential** (`SyncSetup.addressRefusal`, with the one reader `SyncSetup.addressUserInfo` that `displayRemote` shares; it is a different reader
+      from the 1a-1 `SyncGit.userInfoOf`, which redacts git's standard error and so scans free text and stops at a quote). For a
+      `scheme://` address the authority ends at the first `/`, `?` or `#` after `://` (a quote or any other character does not
+      end it: a password may hold one), and the user-info is the text before the **last** `@` of the authority; for an scp-like address it is the text before the first `@` when that `@`
       comes before the first `:`; a path has none. A `http`, `https`, `git` or `file` address with any user-info is refused, and
       so is any other address whose user-info holds a `:` (a login such as `git@` stays allowed), with `bad-remote` and "an
       address must not hold a password or token: use an ssh key or a git credential helper", because the address is stored in
@@ -246,34 +247,53 @@ they read. Until one does, `[storage] mode = "git"` can only be reached by editi
     `OpenGit`'s existing branch check refuses it. A test compares `isUsableBranch` with `git check-ref-format --branch` over a table
     of names (real git, `[GitFact]`): every name `isUsableBranch` accepts must be accepted by git, so no other name can pass here
     and fail later.
-14. **Display form of an address.** `SyncSetup.displayRemote` (any letter case of the scheme, any scheme including `ftp` and `ftps`): the user-info is read as in
-    decision 4.1. A user-info holding `:` is shown as
-    `<text before the colon>:***`; a user-info without `:` on an `http`, `https`, `git`, `ftp` or `ftps` address is shown as `***`;
-    any other form (`ssh://git@host/...`, `git@host:o/r`, a path) is shown as written. `init` and `join` refuse such addresses
-    (decision 4.1), so this protects the values a user hand-edited into `config.toml`. Every line that prints an address, in any
-    command, uses it. Together with the 1a-1 redaction of git's standard error, no command prints a credential.
+14. **Display form of an address.** `SyncSetup.displayRemote` (any letter case of the scheme, any scheme including `ftp` and `ftps`):
+    the user-info is read as in decision 4.1. A user-info holding `:` is shown as `<text before the colon>:***`; a user-info without
+    `:` on an `http`, `https`, `git`, `file`, `ftp` or `ftps` address is shown as `***`; any other form (`ssh://git@host/...`,
+    `git@host:o/r`, a path) is shown as written. A `scheme://` address is also cut at its first `?` or `#`, which is replaced by
+    `?***` or `#***`. `init` and `join` refuse such addresses (decision 4.1), so this protects the values a user hand-edited into
+    `config.toml`. Every line that prints an address, in any command, uses it. Together with the 1a-1 redaction of git's standard
+    error, no command prints a user-info credential or a query string.
 15. **Progress.** Git's own redacted standard error lines for the network steps are forwarded as they come (the client's
     `onStderr`), prefixed with two spaces, to standard error. Only `fetch` prints a progress meter (the command set adds no
     `--progress` to `clone` or `push`: they print one or two lines), so a slow first clone is quiet; nothing else is designed here.
     A failure to write to standard output (a closed pipe) is ignored: it never changes the exit code of the operation.
 16. **Where the store is opened.** `init` and `join` open the SQLite database **after the lock** (decision 4.5) at
     `ConfigLoader.GetDbPath()` (the same file as every other command, honouring `TOTAL_RECALL_DB_PATH`) with
-    `SqliteConnection.Open` and `MigrationRunner.RunMigrations`, and wrap the connection in the borrowed-connection constructor of
-    `SqliteStore`. They do **not** use `new SqliteStore(dbPath)`, whose `CleanupOrphanRows` sweep deletes content rows that lack a
-    vector row: these commands touch no memory table, not even to repair one. They do not use `MemoryComponents.OpenProduction` (it
-    would open the embedder and, in `git` mode, run `OpenGit`). Before opening, they refuse with `failed` ("this database has not
-    been migrated yet: start total-recall once first") in the states `AutoMigrationGuard` would still act on, so the schema runner
-    never stamps a database that has not been migrated from the old TypeScript format: (a) the file exists, has at least one table
-    and no `_schema_version` table; (b) `<db>.ts-backup` exists and the file is absent, or `_meta` lacks the
-    `migration_from_ts_complete` key (`MigrationRunner.MigrationCompleteMarkerKey`). The probe is plain read-only SQL in
-    Infrastructure (the guard itself lives in the Server project, which the CLI does not reference). `leave` needs no store.
-    `status` never opens the database read-write (it would migrate, sweep and switch the journal mode): when the file exists and
-    neither `<db>-wal` nor `<db>-shm` does, it opens it `immutable=1` (read-only and creating nothing, even in a read-only
-    directory); when a sidecar exists a writer is live, so it opens `Mode=ReadOnly` (which adds nothing); both with `Pooling=False`
-    and plain `Microsoft.Data.Sqlite` (no extension, pragma or migration). It reads `_meta` with plain SQL through a
-    `ReadOnlyMeta : IMetaStore` whose `SetMeta` and `DeleteMeta` throw, and treats a missing file, a missing `_meta` table or any
-    read error as `not recorded` or `unknown (<reason>)`; with no file it passes the guard an empty `ReadOnlyMeta`. The service
-    takes a store opener, so tests pass a temporary one.
+    `SqliteConnection.Open(path, pooling: false)` and `MigrationRunner.RunMigrations`, and wrap the connection in the
+    borrowed-connection constructor of `SqliteStore`; the service disposes the connection (the borrowed store does not). They do
+    **not** use `new SqliteStore(dbPath)`, whose `CleanupOrphanRows` sweep deletes content rows that lack a vector row. The commands
+    write no memory row, and on a database at schema 5 or later no memory row is deleted or changed (a pending additive migration
+    runs as it would for any other command). They do not use `MemoryComponents.OpenProduction` (it would open the embedder and, in
+    `git` mode, run `OpenGit`). **Before opening, they refuse** with `failed` ("this database has not been migrated yet: start
+    total-recall once first") in the states `AutoMigrationGuard` would still act on, or in which the schema runner would delete rows,
+    by a read-only probe in Infrastructure (plain SQL; the guard itself lives in the Server project, which the CLI does not
+    reference):
+
+    | database file | `<db>.ts-backup` | `_schema_version` | marker `migration_from_ts_complete` | result |
+    |---|---|---|---|---|
+    | absent | absent | | | proceed (a fresh database) |
+    | absent | present | | | refuse |
+    | present, no tables | absent | | | proceed |
+    | present, no tables | present | | | refuse |
+    | has tables | any | no such table | | refuse (the old TypeScript format) |
+    | has the table | any | maximum version below 5 | | refuse (migration 5 sweeps orphan rows) |
+    | has the table | absent | version 5 or more | present or absent | proceed (a marker-less database with no backup is the guard's to repair) |
+    | has the table | present | version 5 or more | present | proceed (the guard returns "already migrated") |
+    | has the table | present | version 5 or more | absent | refuse |
+
+    `leave` needs no store. `status` never opens the database read-write (it would migrate, sweep and switch the journal mode).
+    It first resolves the final target of the database path (`File.ResolveLinkTarget(path, true)`; SQLite places the sidecars beside
+    the target). When the file exists and neither `<target>-wal` nor `<target>-shm` does (a cleanly closed database), it opens it
+    with `immutable=1`, which reads the main file and creates nothing, even in a read-only directory; when a sidecar exists (a live
+    or a crashed writer) it opens `Mode=ReadOnly`, which recovers the WAL correctly and may create a `-shm`: the one case where
+    `status` can create a file, and the sidecars are the writer's. The connection string is built with
+    `SqliteConnectionStringBuilder` and is always `Mode=ReadOnly;Pooling=False`; for `immutable=1` its data source is a `file:` URI
+    whose path has `%`, `?` and `#` percent-encoded (`;` needs no escape in the builder) and which uses the `file:///C:/...` form
+    for a Windows drive path, followed by `?immutable=1`. It uses plain `Microsoft.Data.Sqlite` (no extension, pragma or migration)
+    and reads `_meta` with plain SQL through a `ReadOnlyMeta : IMetaStore` whose `SetMeta` and `DeleteMeta` throw. A missing file,
+    a missing `_meta` table or any read error is `not recorded` or `unknown (<reason>)`; with no file the guard gets an empty
+    `ReadOnlyMeta`. The service takes a store opener, so tests pass a temporary one.
 17. **Paths without a remote.** `GitSyncPaths` gains `ForDatabase(dbPath, caseInsensitive)`: the same `SyncDirectory`, `LockPath`,
     `NoHooksDirectory`, `EmptyFile` and `EnsureCreated` as `For`, and no clone directory (`CloneDirectory` throws
     `InvalidOperationException`). `leave` uses it for the lock. `status` builds its `GitClient` (it needs one for `git --version`,
@@ -290,7 +310,7 @@ they read. Until one does, `[storage] mode = "git"` can only be reached by editi
 ### Core (pure, F#)
 
 - `SyncSetup.fs` (new, after `SyncSettingsGuard.fs`): `effectiveMode (mode: string option) (connectionString: string option) :
-  string`, `modeVerdict (mode: string) : Result<unit, string>` (decision 4.2), `userInfoOf (address: string) : string option`, `addressRefusal (address: string) : string option`
+  string`, `modeVerdict (mode: string) : Result<unit, string>` (decision 4.2), `addressUserInfo (address: string) : string option`, `addressRefusal (address: string) : string option`
   (4.1), `displayRemote (address: string) : string` (14), `isSameRepository (storedId: string option) (manifestId: string) (previousBranch: string option) (branch: string) : bool`,
   `keepMachineId (storedMachine: string option) (storedHost: string option) (currentHost: string) : bool`, `newRepoId (bytes: byte[]) : string` (16 bytes to 32
   lowercase hex; throws on another length), `newMachineId (bytes: byte[]) : string` (4 bytes to 8 lowercase hex; throws on another
@@ -314,7 +334,8 @@ they read. Until one does, `[storage] mode = "git"` can only be reached by editi
 - `Config/ConfigWriter.cs`: `RenderUserOverrides(path, keys)`, which `SaveUserOverride` now also uses (render, then the same
   `File.WriteAllText`); the denylist stays in the callers of `config set`, and the verbs are the only other writers, writing only
   the keys above.
-- `GitSync/ReadOnlyMeta.cs`: the read-only `IMetaStore` of decision 16; `GitSync/LegacyDatabaseProbe.cs`: its read-only migration probe.
+- `GitSync/ReadOnlyMeta.cs`: the read-only `IMetaStore` and the read-only connection builder of decision 16 (`ReadOnlyDatabase`);
+  `GitSync/LegacyDatabaseProbe.cs`: the migration probe table of decision 16.
 
 ### CLI
 
@@ -340,8 +361,8 @@ with `GitTestEnvironment.WriteGitConfig` (`commit.gpgsign=true`, `core.hooksPath
   and `RepoGuard.EvaluateIdentityAsync` is `joined` with `CanSync` true; the same files with a hostile global configuration;
   `repo-exists` for a repository with the branch (nothing pushed, nothing recorded); `not-empty` for a repository with only another
   branch, one with only a tag, and one with only a `refs/pull/1/head`; a push that fails (a bare repository whose `pre-receive`
-  hook rejects) leaves the remote empty, records nothing and a second `init` against a good repository succeeds and sidelines the
-  first clone; a non-fast-forward race (a second `init` pushed between the look and the push, driven with a recording process
+  hook rejects) leaves the remote empty, records nothing and a second `init` against the same bare repository (its hook removed) succeeds and sidelines
+  the first clone; a non-fast-forward race (a second `init` pushed between the look and the push, driven with a recording process
   wrapper) is `repo-exists`; a fake process reporting `Auth` is `needs-auth`, `TimedOut` is `unreachable` with the "may have
   completed" text, a nonexistent path is `unreachable` with the not-found text.
 - **join**: a repository made by `init` (from a second data directory) is joined: clone, manifest read, identity stored, config
@@ -363,17 +384,20 @@ with `GitTestEnvironment.WriteGitConfig` (`commit.gpgsign=true`, `core.hooksPath
   connection string alone, an upper-case mode and an unknown text, with nothing changed, and `local` and `git` accepted;
   `host-unverified` when the machine-id source fails; `busy` with the lock held by another handle, and the lock released after
   success and after every refusal; `no-git` with an empty `PATH`; an address with `https://token@host/o/r`,
-  `https://user:pass@host/o/r`, `ssh://git:ghp_x@host/o/r`, `file://tok:pw@host/tmp/x.git` and `https://host/o/r?token=x` is
-  `bad-remote`; `git@host:o/r`, `ssh://git@host/o/r`, `https://host/o/repo@v2.git` and `host:team/repo@2.git` are accepted. A
+  `https://user:pass@host/o/r`, `ssh://git:ghp_x@host/o/r`, `file://tok:pw@host/tmp/x.git`, `https://user:p'ss@host/o/r` and `https://host/o/r?token=x` is
+  `bad-remote` (and `displayRemote` hides the user-info and the query of each); `git@host:o/r`, `ssh://git@host/o/r`, `https://host/o/repo@v2.git` and `host:team/repo@2.git` are accepted. A
   refusal of steps 4.1 to 4.4 leaves no database file, no migration and no sync directory; `init` and `join` refuse a database in
   the old TypeScript format (a file with tables and no `_schema_version`, and a `.ts-backup` beside an absent or unmarked database)
-  without changing a byte of it; an `init` or `join` leaves a content row that has no vector row in place (no orphan sweep).
+  without changing a byte of it; every row of the probe table of decision 16 is tested, and an `init` or `join` on a schema-18 database leaves a content row that has
+  no vector row in place (no orphan sweep).
 - **leave / status**: `leave` in git mode writes `local` and leaves every row, `_meta` key, clone and the repository as they were
   (a snapshot comparison); not in git mode it changes nothing; it works with `git` missing and with `mode = "git"` and no remote
   configured. `status` before any setup (no database file, no sync directory: both still absent afterwards; the git
-  version still printed) and on an existing database that is closed cleanly (the directory listing and the file's bytes identical
-  before and after: no `-wal`, `-shm`, migration or orphan sweep), also in a read-only directory, and on a database in the old
-  TypeScript format, after `init`, after
+  version still printed) and on an existing database that is closed cleanly (created with pooling off or the pools cleared; the
+  directory listing and the file's bytes identical before and after: no `-wal`, `-shm`, migration or orphan sweep), also in a
+  read-only directory, through a symbolic link to the database, with a `#`, a `?`, a `%41` and a `;` in the data directory's name
+  (the right identity is read, no stray file is created), on a database with a live writer connection (`Mode=ReadOnly` branch: the
+  current values are read), and on a database in the old TypeScript format, after `init`, after
   `leave`, with a damaged manifest in the clone, with a changed remote and with a moved data directory prints the matching join
   state, runs no git network command and never prints a credential (a hand-edited address `https://token@host/x`, and the same in
   every refusal, note and forwarded progress line of `init` and `join`).
@@ -395,7 +419,7 @@ with `GitTestEnvironment.WriteGitConfig` (`commit.gpgsign=true`, `core.hooksPath
 
 1. Given an empty repository (no branch, tag or other ref), when `sync init --url <it>` runs, then it gets one commit on the chosen branch holding a
    `.gitattributes` and a valid `manifest.json` with a new repository id; this machine's config is set to the `git` mode with that
-   address and branch; the identity is stored; and sync reports `joined`. The files in the commit are the same whatever the user's
+   address and branch; the identity is stored; and `sync status` reports `joined`. The files in the commit are the same whatever the user's
    global git settings say (signing, hooks, default branch, line endings), without any prompt.
 2. Given a repository that already has the branch, or has any other ref, when `sync init` runs, then it refuses (`repo-exists`,
    `not-empty`), and nothing is pushed, recorded or configured.
@@ -410,27 +434,28 @@ with `GitTestEnvironment.WriteGitConfig` (`commit.gpgsign=true`, `core.hooksPath
    proceeds. Given an address that carries a password or token, it is refused.
 6. Given a machine that already joined one repository, when `init` or `join` points it at a different repository (at another
    address, or at the same address after the repository was recreated), then the sync bookkeeping is cleared except conflict
-   items, the memories are untouched, and the old repository's clone is moved aside, not deleted; given the same repository under a
-   respelled address, then the bookkeeping, the machine id and the last-synced commit are kept and the clone follows the new
-   address; given the same repository after the data directory was moved or copied, then the bookkeeping and the last-synced
-   commit are kept and the machine gets a new machine id.
-7. Given a failed push, an unreachable or unreadable repository, an authentication failure or a refused manifest, when the command
+   items, the memories are untouched, and the old repository's clone is moved aside, not deleted.
+7. Given the same repository under a respelled address, when `join` runs, then the bookkeeping, the machine id and the last-synced
+   commit are kept and the clone follows the new address.
+8. Given the same repository after the data directory was moved or copied, when `join` runs, then the bookkeeping and the
+   last-synced commit are kept and the machine gets a new machine id.
+9. Given a failed push, an unreachable or unreadable repository, an authentication failure or a refused manifest, when the command
    ends, then no identity or setting was recorded, a retry works, and the output names the reason (`unreachable`, `needs-auth`, ...)
    without any credential or address user-info; a transient network failure while refreshing an existing clone keeps that clone.
-8. Given `init`, `join` or `leave` (in git mode) running, when another of them runs for the same data directory, then the second
+10. Given `init`, `join` or `leave` (in git mode) running, when another of them runs for the same data directory, then the second
    reports `busy`; the lock is free after every ending.
-9. Given a machine in the `git` mode, when `sync leave` runs, then the mode becomes `local`, every memory, sync row, clone and file
+11. Given a machine in the `git` mode, when `sync leave` runs, then the mode becomes `local`, every memory, sync row, clone and file
    in the repository is untouched, and the command says so; given any other mode it changes nothing; it needs neither `git`, the
    network nor a usable remote setting.
-10. Given any machine, when `sync status` runs, then it reports the mode, whether `git` is found, the configured and stored remote and
+12. Given any machine, when `sync status` runs, then it reports the mode, whether `git` is found, the configured and stored remote and
     branch with any credential hidden, the repository and machine ids, the host check, the join state with its reason and the state
     of the clone; it makes no network call, creates no file or directory, and fails on nothing: an unreadable part is shown as
     unknown.
-11. Given a branch named `HEAD`, when the settings are read or `--branch` is given, then it is refused; and every branch name the
+13. Given a branch named `HEAD`, when the settings are read or `--branch` is given, then it is refused; and every branch name the
     rule accepts is accepted by git itself.
-12. Given anyone who never types `sync`, then `total-recall --help`, every document and every message are as before and the tool
+14. Given anyone who never types `sync`, then `total-recall --help`, every document and every message are as before and the tool
     catalog is unchanged; and given any command, then it never overwrites or deletes anything in the repository: its only push is
     one plain, non-forced push of the new branch, and it deletes no clone, no memory and nothing in the repository (git's own stale
     lock files inside a clone aside).
-13. Given the existing automated checks, the shim tests, the tool catalog check and the release build, when they run, then they pass
+15. Given the existing automated checks, the shim tests, the tool catalog check and the release build, when they run, then they pass
     and the release build shows no new warning; and given the contributor guides, then they describe the new pieces.
