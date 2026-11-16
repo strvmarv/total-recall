@@ -410,6 +410,42 @@ public sealed class GitClientNetworkTests(RecordingFixture fixture)
         Assert.DoesNotContain("BatchMode=yes", args); // GIT_SSH programs do not take OpenSSH options
     }
 
+    // ---- ls-remote of every ref ---------------------------------------------------------------------------------
+
+    [GitFact]
+    public async Task LsRemoteRefs_ListsEveryRef()
+    {
+        using var rig = Rig();
+        using var empty = BareRemote.Create(0);
+        Assert.Empty(Ok(await rig.Client.LsRemoteRefsAsync(empty.Url)));
+
+        using var one = BareRemote.Create();
+        var refs = Ok(await rig.Client.LsRemoteRefsAsync(one.Url));
+        Assert.Contains("refs/heads/main", refs);
+        Assert.Contains("HEAD", refs);
+
+        using var env = new GitTestEnvironment();
+        env.RunGit(one.Path, "tag", "v1");
+        Assert.Contains("refs/tags/v1", Ok(await rig.Client.LsRemoteRefsAsync(one.Url)));
+        Assert.Contains("refs/heads/main", Ok(await rig.Client.LsRemoteRefsAsync(one.Path)));
+    }
+
+    [GitFact]
+    public async Task LsRemoteRefs_AMissingPath_Fails()
+    {
+        using var rig = Rig();
+        var outcome = await rig.Client.LsRemoteRefsAsync("file:///nonexistent/x");
+        Assert.False(outcome.IsOk);
+        Assert.NotNull(outcome.Failure);
+    }
+
+    [GitFact]
+    public async Task LsRemoteRefs_RefusesABadAddress()
+    {
+        using var rig = Rig();
+        await Assert.ThrowsAsync<ArgumentException>(() => rig.Client.LsRemoteRefsAsync("ext::sh -c x"));
+    }
+
     // ---- failure kinds ----------------------------------------------------------------------------------------
 
     [GitFact]

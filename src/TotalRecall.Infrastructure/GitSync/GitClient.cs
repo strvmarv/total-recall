@@ -348,6 +348,28 @@ public sealed partial class GitClient
     }
 
     /// <summary>
+    /// Every ref name the remote advertises (<c>HEAD</c>, <c>refs/heads/main</c>, tags, pull refs), empty for an empty
+    /// repository. The setup commands use it to tell an empty repository from one that already holds something.
+    /// </summary>
+    public async Task<GitOutcome<IReadOnlyList<string>>> LsRemoteRefsAsync(
+        string url,
+        TimeSpan? timeout = null,
+        Action<string>? onStderr = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await RunNetworkAsync(
+            SyncGit.GitCommand.NewLsRemoteRefs(url),
+            url,
+            timeout ?? _options.NetworkTimeout,
+            onStderr,
+            cancellationToken).ConfigureAwait(false);
+        if (result.Failure is not null)
+            return GitOutcome<IReadOnlyList<string>>.Fail(result);
+        IReadOnlyList<string> refs = SyncGit.parseLsRemoteRefs(Text(result)).ToList();
+        return GitOutcome<IReadOnlyList<string>>.Ok(refs);
+    }
+
+    /// <summary>
     /// Fetches the branch into <c>refs/remotes/origin/&lt;branch&gt;</c>, forced (the remote's history may have been
     /// rewritten by hand). The clone stays shallow and the fetch is incremental.
     /// </summary>
