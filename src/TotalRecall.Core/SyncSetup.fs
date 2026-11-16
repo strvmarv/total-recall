@@ -54,15 +54,14 @@ let refusalName (r: Refusal) : string =
 // ---------------------------------------------------------------------------
 // storage mode
 
-/// The mode the server would run in: the configured mode, else `postgres` when only a connection string is set,
-/// else `local`. The text is kept as written (no case folding).
+/// The mode the server would run in, reduced exactly as `ServerComposition.OpenConfigured` does: any configured mode
+/// (kept as written, no case folding, a blank one included, which `modeVerdict` then refuses), else `postgres` when a
+/// connection string is set, else `local`.
 let effectiveMode (mode: string option) (connectionString: string option) : string =
-    match mode with
-    | Some m when not (String.IsNullOrWhiteSpace m) -> m
-    | _ ->
-        match connectionString with
-        | Some c when not (String.IsNullOrWhiteSpace c) -> "postgres"
-        | _ -> "local"
+    match mode, connectionString with
+    | Some m, _ -> m
+    | None, Some _ -> "postgres"
+    | None, None -> "local"
 
 /// `Ok` only for exactly `local` or `git`; anything else (`cortex`, `postgres`, another text, another letter case)
 /// is an error that names the mode and says what to do.

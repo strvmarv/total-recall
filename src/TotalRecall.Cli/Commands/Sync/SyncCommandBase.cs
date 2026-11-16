@@ -89,7 +89,9 @@ public abstract class SyncCommandBase : ICliCommand
             }
             else if (a.StartsWith('-') && a.Length > 1)
             {
-                UsageError($"unknown argument '{a}'");
+                // the text before an `=` only: `--url=https://user:pw@host/x` must not be echoed
+                var eq = a.IndexOf('=');
+                UsageError($"unknown option '{(eq > 0 ? a[..eq] : a)}'");
                 return null;
             }
             else if (!addressIsUrlFlag && address is null)
@@ -98,7 +100,8 @@ public abstract class SyncCommandBase : ICliCommand
             }
             else
             {
-                UsageError($"unexpected argument '{a}'");
+                // never echo the value: it may be an address that holds a credential
+                UsageError("unexpected extra argument");
                 return null;
             }
         }
@@ -115,7 +118,7 @@ public abstract class SyncCommandBase : ICliCommand
     {
         if (args.Length > 0)
         {
-            UsageError($"unexpected argument '{args[0]}'");
+            UsageError("unexpected extra argument");
             return null;
         }
         return (null, null);

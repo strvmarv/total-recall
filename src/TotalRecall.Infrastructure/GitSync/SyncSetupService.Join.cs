@@ -76,7 +76,7 @@ public sealed partial class SyncSetupService
         try
         {
             var kind = same ? RecordKind.JoinSame : RecordKind.JoinDifferent;
-            notes = await RecordAsync(p, new RecordPlan(kind, repoId, reused, same), ct).ConfigureAwait(false);
+            notes = await RecordAsync(p, new RecordPlan(kind, repoId, same), ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
         {

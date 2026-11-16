@@ -128,6 +128,19 @@ public sealed class SyncCommandTests : IDisposable
         Assert.False(Directory.Exists(DataDir));
     }
 
+    [Theory]
+    [InlineData("init", "https://tokenSECRET@host/o/r")]
+    [InlineData("init", "--url=https://user:pwSECRET@host/o/r")]
+    [InlineData("join", "https://tokenSECRET@host/o/r", "https://other:pwSECRET@host/o/r")]
+    [InlineData("leave", "https://tokenSECRET@host/o/r")]
+    public async Task AUsageError_NeverEchoesAnAddress(params string[] args)
+    {
+        var code = await Run(args);
+
+        Assert.Equal(2, code);
+        Assert.DoesNotContain("SECRET", Out + Err);
+    }
+
     // ---- status and leave -----------------------------------------------------------------------------------------
 
     [Fact]

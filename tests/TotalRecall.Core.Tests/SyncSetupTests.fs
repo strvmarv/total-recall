@@ -30,8 +30,10 @@ let refusalTests =
             Expect.equal (effectiveMode None (Some "Host=x")) "postgres" "connection string only"
             Expect.equal (effectiveMode (Some "GIT") None) "GIT" "case kept"
             Expect.equal (effectiveMode (Some "cortex") (Some "x")) "cortex" "mode wins"
-            Expect.equal (effectiveMode (Some "  ") None) "local" "blank mode"
-            Expect.equal (effectiveMode None (Some " ")) "local" "blank connection string"
+            Expect.equal (effectiveMode (Some "  ") None) "  " "a blank mode is kept, as the server keeps it"
+            Expect.equal (effectiveMode (Some "  ") (Some "Host=x")) "  " "a blank mode still wins"
+            Expect.equal (effectiveMode None (Some " ")) "postgres" "a connection string, as the server reads it"
+            Expect.isError (modeVerdict "  ") "a blank mode is refused"
 
         testCase "modeVerdict accepts only exactly local and git and names the mode otherwise" <| fun _ ->
             Expect.equal (modeVerdict "local") (Ok()) "local"

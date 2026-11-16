@@ -4,7 +4,7 @@ using TotalRecall.Infrastructure.Storage;
 
 namespace TotalRecall.Infrastructure.GitSync;
 
-/// <summary>Reads the identity the verbs of milestone 1a-3 store in <c>_meta</c>; this milestone writes none of it.</summary>
+/// <summary>Reads the identity the setup commands store in <c>_meta</c> (written by <c>GitSyncStateStore.WriteIdentity</c>; this class only reads).</summary>
 public sealed class GitSyncIdentityStore(IMetaStore meta)
 {
     public SyncIdentity.StoredIdentity Read() => new(

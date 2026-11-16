@@ -58,9 +58,8 @@ internal enum RecordKind { Init, JoinDifferent, JoinSame }
 
 /// <param name="Kind">Which record this is (decision 10).</param>
 /// <param name="RepoId">The repository id to write (a fresh one for <c>init</c>, the manifest's for <c>join</c>).</param>
-/// <param name="ReusedClone">True when a clone that was already there is being used (false for a fresh or a re-made one).</param>
 /// <param name="SameRepository">True for the same repository (rows kept).</param>
-internal sealed record RecordPlan(RecordKind Kind, string RepoId, bool ReusedClone, bool SameRepository);
+internal sealed record RecordPlan(RecordKind Kind, string RepoId, bool SameRepository);
 
 /// <summary>What a precondition pass opened. It owns the lock and the connection; disposing it releases both.</summary>
 internal sealed class Prepared : IDisposable

@@ -14,7 +14,7 @@ C# callers in `TotalRecall.Infrastructure` call into this layer via direct F# in
 | File | Module | What it does |
 |------|--------|-------------|
 | `Types.fs` | `TotalRecall.Core` | Domain types: `Tier`, `ContentType`, `Entry`, `SearchResult`, config records |
-| `Config.fs` | `TotalRecall.Core.Config` | TOML config record types (`TotalRecallConfig`, `TierConfig`, `EmbeddingConfig`, …); the optional `[git_sync]` settings (`GitSyncConfig`, `RawGitSync`) and the pure `GitSyncSettings.normalise` that turns raw values into a usable config plus warnings; `isUsableBranch` refuses the name `HEAD` (git accepts it, but `origin/HEAD` is the remote's default-branch pointer) |
+| `Config.fs` | `TotalRecall.Core.Config` | TOML config record types (`TotalRecallConfig`, `TierConfig`, `EmbeddingConfig`, …); the optional `[git_sync]` settings (`GitSyncConfig`, `RawGitSync`) and the pure `GitSyncSettings.normalise` that turns raw values into a usable config plus warnings; `isUsableBranch` refuses the name `HEAD` (`git check-ref-format --branch` rejects it, so the rule must too) |
 | `Tokenizer.fs` | `TotalRecall.Core.Tokenizer` | BERT BasicTokenization + WordPiece; counts tokens for budget enforcement |
 | `Decay.fs` | `TotalRecall.Core.Decay` | Exponential decay scoring; `computeScore`, `shouldDemote`, `shouldPromote` |
 | `Ranking.fs` | `TotalRecall.Core.Ranking` | Hybrid search result merging and re-ranking (vector + FTS scores) |

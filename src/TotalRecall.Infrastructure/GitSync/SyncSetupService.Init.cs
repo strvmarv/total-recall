@@ -141,7 +141,7 @@ public sealed partial class SyncSetupService
         IReadOnlyList<string> notes;
         try
         {
-            notes = await RecordAsync(p, new RecordPlan(RecordKind.Init, repoId, ReusedClone: false, SameRepository: false), ct).ConfigureAwait(false);
+            notes = await RecordAsync(p, new RecordPlan(RecordKind.Init, repoId, SameRepository: false), ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
         {
