@@ -60,8 +60,7 @@ internal enum RecordKind { Init, JoinDifferent, JoinSame }
 /// <param name="RepoId">The repository id to write (a fresh one for <c>init</c>, the manifest's for <c>join</c>).</param>
 /// <param name="ReusedClone">True when a clone that was already there is being used (false for a fresh or a re-made one).</param>
 /// <param name="SameRepository">True for the same repository (rows kept).</param>
-/// <param name="OldCloneDirectory">The old clone to move to the new address's place, when the address is respelled; else null.</param>
-internal sealed record RecordPlan(RecordKind Kind, string RepoId, bool ReusedClone, bool SameRepository, string? OldCloneDirectory);
+internal sealed record RecordPlan(RecordKind Kind, string RepoId, bool ReusedClone, bool SameRepository);
 
 /// <summary>What a precondition pass opened. It owns the lock and the connection; disposing it releases both.</summary>
 internal sealed class Prepared : IDisposable
@@ -302,23 +301,6 @@ public sealed partial class SyncSetupService(SyncSetupEnvironment env)
     }
 
     // ---- the commands -----------------------------------------------------------------------------------------
-
-    /// <summary>Starts a sync repository at an empty remote (decision 5).</summary>
-    public async Task<SetupResult> InitAsync(string address, string? branch, CancellationToken ct = default)
-    {
-        try
-        {
-            var (prepared, refusal) = await PrepareAsync(address, branch, ct).ConfigureAwait(false);
-            if (refusal is not null)
-                return refusal;
-            using (prepared)
-                return Failed("not implemented");
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            return FailedFrom("init", ex);
-        }
-    }
 
     /// <summary>Adopts an existing sync repository (decision 6).</summary>
     public async Task<SetupResult> JoinAsync(string address, string? branch, CancellationToken ct = default)

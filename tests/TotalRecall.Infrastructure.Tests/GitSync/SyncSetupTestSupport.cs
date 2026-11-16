@@ -74,6 +74,7 @@ internal sealed class SetupRig : IDisposable
     public string DbPath => Path.Combine(Root, "data", "total-recall.db");
     public string ConfigPath => Path.Combine(Root, "data", "config.toml");
     public GitTestEnvironment GitEnv { get; } = new();
+    public MarkerFiles? Markers { get; }
     public FakeUserConfig Config { get; }
     public RecordingGitProcess Recorder { get; }
     public List<string> Reported { get; } = [];
@@ -96,7 +97,7 @@ internal sealed class SetupRig : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(Root, "data"));
         if (hostile)
-            GitEnv.WriteHostileConfig();
+            Markers = GitEnv.WriteHostileConfig();
         else
             GitEnv.WriteGitConfig("");
         Config = new FakeUserConfig(ConfigPath);
