@@ -88,6 +88,16 @@ public class CliAppTests
         Assert.Contains("unknown command", result.StdErr);
     }
 
+    [Fact]
+    public void Run_SessionEndHint_IsNotACommand()
+    {
+        // The Claude Code SessionEnd hook that called `session-end-hint` was removed (#97):
+        // a SessionEnd hook's output is never displayed, so the command had no reader.
+        var result = Capture(() => CliApp.Run(new[] { "session-end-hint", "--host", "claude-code" }));
+        Assert.Equal(2, result.ExitCode);
+        Assert.Contains("unknown command", result.StdErr);
+    }
+
     // Stub command used by the registration-seam test below.
     private sealed class StubCommand : ICliCommand
     {

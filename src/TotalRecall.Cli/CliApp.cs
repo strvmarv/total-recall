@@ -218,7 +218,6 @@ public static class CliApp
             new Commands.Kb.RemoveCommand(),
             new Commands.Config.GetCommand(),
             new Commands.Config.SetCommand(),
-            new Commands.SessionEndHintCommand(),
         };
     }
 
