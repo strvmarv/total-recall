@@ -19,6 +19,15 @@ module MetaKeys =
     let Host = "git_sync_host"
     [<Literal>]
     let PublicCheck = "git_sync_public_check"
+    /// The commit this machine last synced (written by the sync cycle, milestone 1b).
+    [<Literal>]
+    let LastSha = "git_sync_last_sha"
+    [<Literal>]
+    let LastOk = "git_sync_last_ok"
+    [<Literal>]
+    let LastError = "git_sync_last_error"
+    [<Literal>]
+    let Arrivals = "git_sync_arrivals"
 
 /// What `_meta` holds about the repository this machine joined; an empty value is `None`.
 type StoredIdentity =

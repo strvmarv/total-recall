@@ -668,7 +668,7 @@ let keyTests =
     ]
 
 [<Tests>]
-let lsRemoteTests =
+let lsRemoteRefsTests =
     testList "SyncGit.parseLsRemoteRefs" [
         let a = String.replicate 40 "a"
         testCase "each ref is returned; bad lines are ignored; CRLF is tolerated" <| fun _ ->
@@ -685,7 +685,7 @@ let lsRemoteTests =
     ]
 
 [<Tests>]
-let lsRemoteTests2 =
+let lsRemoteTests =
     testList "SyncGit.parseLsRemote" [
         let a = String.replicate 40 "a"
         let b = String.replicate 40 "b"
