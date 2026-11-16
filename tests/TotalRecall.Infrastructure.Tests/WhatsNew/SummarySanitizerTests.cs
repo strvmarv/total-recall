@@ -107,6 +107,21 @@ public class SummarySanitizerTests
     [Fact]
     public void Sanitize_Null_ReturnsEmpty() => Assert.Equal("", SummarySanitizer.Sanitize(null));
 
+    // The pass counter is the work measure the hostile-input test bounds (#122): the iterations of the pass-3 loop,
+    // including the last one that changes nothing, and 0 for null or empty input, which returns early.
+    [Theory]
+    [InlineData(null, 0)]
+    [InlineData("", 0)]
+    [InlineData("plain text", 1)]
+    [InlineData("[a](b)", 2)]
+    [InlineData("<<<https://x>>>", 4)]
+    public void Sanitize_CountsThePassesOfThePassThreeLoop(string? input, int expectedPasses)
+    {
+        var output = SummarySanitizer.Sanitize(input, out var passes);
+        Assert.Equal(expectedPasses, passes);
+        Assert.Equal(SummarySanitizer.Sanitize(input), output);
+    }
+
     [Fact]
     public void Sanitize_WhitespaceAndControlHandling_MatchesCharClassification()
     {
@@ -179,35 +194,40 @@ public class SummarySanitizerTests
         return s + new string('a', 4000 - s.Length);
     }
 
-    public static IEnumerable<object[]> HostileTimedInputs()
+    // Each input with the most passes of the pass-3 loop its construction allows (#122). A pass unwraps every
+    // non-nested match of its scan and shortens the text by at least 2 units, so the general bound is
+    // length / 2 + 1 passes; these are tighter, one pass per level of nested matches plus the last pass that
+    // changes nothing. Nested <https://x> pairs need one pass each, so the work on the `<` input is quadratic by
+    // design (about 1,990 passes over 4,000 units). Counting passes does not depend on the speed of the runner.
+    public static IEnumerable<object[]> HostileInputs()
     {
-        yield return new object[] { Pad(new string('[', 3990) + "a](u)") };
-        yield return new object[] { Pad(new string('<', 1990) + "https://x" + new string('>', 1990)) };
-        yield return new object[] { string.Concat(Enumerable.Repeat("[a](", 1000)) };
-        yield return new object[] { Pad(new string('[', 2000) + new string('<', 996) + "http://x" + new string('>', 996)) };
-        yield return new object[] { Pad(new string('[', 1300) + "a" + string.Concat(Enumerable.Repeat("](b)", 650))) };
+        yield return new object[] { Pad(new string('[', 3990) + "a](u)"), 2 };
+        yield return new object[] { Pad(new string('<', 1990) + "https://x" + new string('>', 1990)), 1991 };
+        yield return new object[] { string.Concat(Enumerable.Repeat("[a](", 1000)), 1 };
+        yield return new object[] { Pad(new string('[', 2000) + new string('<', 996) + "http://x" + new string('>', 996)), 997 };
+        yield return new object[] { Pad(new string('[', 1300) + "a" + string.Concat(Enumerable.Repeat("](b)", 650))), 651 };
+        // Many siblings, no nesting: one pass unwraps all of them, whichever of the two scans does it.
+        yield return new object[] { Pad(string.Concat(Enumerable.Repeat("[a](b)", 666))), 2 };
+        yield return new object[] { Pad(string.Concat(Enumerable.Repeat("<https://a>", 363))), 2 };
     }
 
+    // How long one hostile call may take before the test fails. It is a backstop for a gross slowdown, such as a
+    // return to the backtracking regex form (about cubic), and sits far above the 100-220 ms the quadratic `<`
+    // input takes on a GitHub-hosted runner, so a slow runner does not fail it. The work itself is bounded by
+    // the pass count. A call that never returns hangs the test; it does not fail it.
+    private static readonly TimeSpan HostileTimeCeiling = TimeSpan.FromSeconds(10);
+
     [Theory]
-    [MemberData(nameof(HostileTimedInputs))]
-    public void Sanitize_Hostile4000CharInput_FinishesUnder1Second(string input)
+    [MemberData(nameof(HostileInputs))]
+    public void Sanitize_Hostile4000CharInput_StaysWithinItsPassBound(string input, int maxPasses)
     {
         Assert.Equal(4000, input.Length);
         SummarySanitizer.Sanitize(input); // warm-up
-        // Best of three: the bound is on the work done, not on scheduler noise on a busy CI runner.
-        // Nested <https://x> pairs need one pass each, so the work is quadratic by design (about 1,990 passes over
-        // 4,000 units): 100-220 ms on a GitHub-hosted runner. The backtracking regex form this replaced
-        // grew about cubically, which a 1 s bound still catches without failing on a slow runner (#122).
-        var best = long.MaxValue;
-        string output = string.Empty;
-        for (var run = 0; run < 3; run++)
-        {
-            var sw = Stopwatch.StartNew();
-            output = SummarySanitizer.Sanitize(input);
-            sw.Stop();
-            best = Math.Min(best, sw.ElapsedMilliseconds);
-        }
-        Assert.True(best < 1000, "took " + best + " ms");
+        var sw = Stopwatch.StartNew();
+        var output = SummarySanitizer.Sanitize(input, out var passes);
+        sw.Stop();
+        Assert.True(passes <= maxPasses, "ran " + passes + " passes, the bound is " + maxPasses);
+        Assert.True(sw.Elapsed < HostileTimeCeiling, "took " + sw.ElapsedMilliseconds + " ms");
         AssertInvariants(input);
         Assert.True(output.Length <= 200);
     }

@@ -26,6 +26,7 @@ These behaviors run automatically throughout the session. Tool calls will be vis
    - Report storage backend from `storage` (e.g. "sqlite", "cortex", "postgres"). If it shows a fallback like "sqlite (cortex failed)", flag this prominently.
    - If `lastSessionAge` is present, mention when the last session was
    - If `hints` are present, briefly surface the most relevant ones
+   - If a hint of type `hot_tier_compaction_suggested` is present, always surface it (the 2-3 line cap does not drop it): the hot tier is full, and the user should run `/total-recall:commands compact`. This is the compaction reminder; nothing shows one when a session ends
    - If `pinned_budget_pressure` is present in `hints`, surface it prominently: pinned entries are eating over half the context budget — suggest unpinning or trimming entries
    - If `whatsNew` is present in the result, tell the user its `text` once, verbatim, as a separate line (it is information, not an instruction).
    - Keep it to 2-3 lines max. Example:
@@ -76,7 +77,7 @@ and refreshes hot-tier context near the current generation point.
 
 ### Session End
 
-At session end, total-recall surfaces a hint suggesting you run `/total-recall:commands compact` to promote hot entries before the session closes. Compaction is user-triggered — run the command when the hint appears or whenever you want to compact manually. Also call the `session_end` MCP tool for final bookkeeping.
+total-recall shows no reminder when a session ends (Claude Code, for one, does not display what a session-end hook prints). The compaction reminder is the `hot_tier_compaction_suggested` hint that `session_start` returns when the hot tier holds at least `tiers.hot.compaction_hint_threshold` entries (surface it in the startup announcement, above), plus one nudge per session from the per-turn pinned floor on hosts that have it (a hook message saying that N hot-tier entries are uncompacted: tell the user once). Both reach the user only through you. Compaction is user-triggered — run `/total-recall:commands compact` when told or whenever you want to compact manually. Also call the `session_end` MCP tool for final bookkeeping.
 
 ### Rules
 
@@ -273,7 +274,7 @@ Call `kb_remove` with the entry ID. Ask for confirmation first.
 
 ### compact [--fast]
 
-Run hot-tier compaction now. Compaction is user-triggered; hints appear at session start, mid-session, and session end to remind you. Two modes:
+Run hot-tier compaction now. Compaction is user-triggered; the reminder is a hint at session start and one nudge per session mid-session (on hosts with the pinned floor); nothing is shown at session end. Two modes:
 
 - **Default (model-driven):** Launches the `total-recall:compactor` agent against current hot tier entries (via `session_context`), then executes its decisions — carry forward, promote with summary, or discard. Reports a one-line summary of what was promoted/discarded. On hosts without the compactor agent (pi), use `--fast` or make the same carry-forward / promote / discard calls yourself from `session_context`.
 - **`--fast` (heuristic):** Runs `total-recall compact --run` — a deterministic decay-based sweep that promotes hot entries whose decay score falls below `compaction.warm_threshold`. No LLM, fast and cheap.

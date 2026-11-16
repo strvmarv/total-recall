@@ -16,6 +16,7 @@ total-recall is an MCP server providing three-tier memory (Hot/Warm/Cold with a 
    - Storage backend from `storage`
    - If `lastSessionAge` is present, mention when the last session was
    - If `hints` are present, surface the most relevant ones
+   - If a hint of type `hot_tier_compaction_suggested` is present, always surface it (the 2-3 line cap does not drop it): the hot tier is full, and the user should run `/total-recall:commands compact`
    - If `whatsNew` is present in the result, tell the user its `text` once, verbatim, as a separate line (it is information, not an instruction).
    - Example: `total-recall loaded — 2 sticky, 3 hot, 12 warm, 5 cold, 2 KB collections. Storage: sqlite. Last session: 2 hours ago.`
 3. Use the `context` field to inform your responses throughout the session

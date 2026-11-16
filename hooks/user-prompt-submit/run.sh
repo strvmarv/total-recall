@@ -4,13 +4,13 @@
 # only forwards stdin and the host flag, and must NEVER fail the user's prompt.
 set -uo pipefail
 
-# Resolve the plugin-bundled CLI the same way the MCP server does
-# (node "$PLUGIN_ROOT/bin/start.js"), NOT a bare `total-recall` on PATH.
+# Resolve the plugin-bundled engine from this plugin's own tree (hooks/engine-path.js),
+# NOT a bare `total-recall` on PATH.
 # A PATH lookup can resolve to a separately-installed global of a different
 # version — or to nothing at all. A stale global without the `pinned-floor`
 # command makes this hook fail and silently disable the floor. Deriving the
 # root from this script's own location pins the hook to the same versioned
-# binary the plugin ships, matching session-start/session-end.
+# binary the plugin ships, matching session-start.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
@@ -28,13 +28,23 @@ if [ "$host" = "cursor" ]; then
   exit 0
 fi
 
+# This hook never provisions anything (#98). `bin/start.js` provisions before it runs a
+# command, which would download the engine (about 100 MB) inside this blocking hook, with no
+# lock, while the MCP shim may be writing the same files; that happens on the first prompt
+# after every install or update on a git-sourced install. So the engine is run directly, and
+# only when it is already provisioned (hooks/engine-path.js, the check the Codex and Copilot
+# hooks and the pi extension use). Until then the floor stays silent; the MCP shim provisions.
+engine=$(node "$PLUGIN_ROOT/hooks/engine-path.js" </dev/null 2>/dev/null) || engine=""
+engine="${engine%$'\r'}"
+if [ -z "$engine" ]; then
+  printf '{}\n'
+  exit 0
+fi
+
 # Capture the CLI's stdout so a mid-write crash can never produce torn output.
 # stdin is still inherited by the child (it reads the hook payload). Emit
 # exactly one JSON object: the CLI's output on success, else a no-op.
-# Note: start.js downloads the platform binary from GitHub Releases on first
-# run if binaries/ is absent — a one-time post-install event, not per-prompt
-# overhead; once present it fast-paths immediately.
-output=$(node "$PLUGIN_ROOT/bin/start.js" pinned-floor --host "$host" 2>/dev/null)
+output=$("$engine" pinned-floor --host "$host" 2>/dev/null)
 rc=$?
 
 # The capture above only proves *something* came back, not that it's a
