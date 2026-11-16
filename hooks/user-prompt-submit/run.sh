@@ -10,7 +10,7 @@ set -uo pipefail
 # version — or to nothing at all. A stale global without the `pinned-floor`
 # command makes this hook fail and silently disable the floor. Deriving the
 # root from this script's own location pins the hook to the same versioned
-# binary the plugin ships, matching session-start/session-end.
+# binary the plugin ships, matching session-start.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+
+- **The Claude Code plugin no longer registers a `SessionEnd` hook, and the docs no longer promise a compaction reminder at session end (#97).** The hook ran `total-recall session-end-hint`, which printed a `systemMessage` asking the user to compact. Claude Code runs a `SessionEnd` hook but never displays what it prints when it exits 0: observed on Claude Code 2.1.325 (Linux, interactive with `/exit` and `claude -p`), a throwaway hook that wrote a marker file and printed a JSON `systemMessage`, plain stdout and stderr ran every time and none of the three appeared, so the reminder has never reached anyone and every session end waited for the hook (its own header comment measures about 1.2 s on Windows). The hook, its wrapper `hooks/session-end/run.sh`, the `session-end-hint` command and its tests are gone. The reminder that does reach the user is the `hot_tier_compaction_suggested` hint that `session_start` returns when the hot tier holds at least `tiers.hot.compaction_hint_threshold` entries (default 5; 0 disables), which the startup instructions now tell the model to always surface at the next session start, plus the once-per-session pinned-floor nudge; both reach the user through the model, not the host. The commands skill, `using-total-recall`, the Kiro steering file, `AGENTS.md` and the Claude Code host page say so. A `SessionEnd` hook that exits 1 or 2 with stderr is shown as a "SessionEnd hook [...] failed" notice, which is not a message and was not used. Exits other than `/exit` (Ctrl+C, Ctrl+D, closing the terminal) were not observed.
+
 ## 4.8.0 - 2026-11-16
 
 ### Added
