@@ -52,14 +52,15 @@ let addressTests =
                        "file://tok:pw@host/tmp/x.git"; "file://tok@host/x"; "ssh://git:ghp_x@host/o/r"; "git+ssh://u:pw@h/x"
                        "https://user:p'ss@host/o/r"; "https://user:pa?ss@host/x"; "https://user:pa/ss@host/x"
                        "https://host/o/r?token=x"; "https://host/o/r#frag"; "https://@host/x"; "https://:@host/x"
-                       "https://a@b@host/x"; "ssh://host:abc/x" ] do
+                       "https://a@b@host/x"; "ssh://host:abc/x"; "ssh://git@host:abc/x"; "https://user:pa]ss/x@h/y"
+                       "ssh://u@v:pa/ss@h/x" ] do
                 Expect.isSome (addressRefusal a) (sprintf "should refuse %s" a)
 
         testCase "AddressTable: accepted addresses" <| fun _ ->
             for a in [ "git@host:o/r"; "ssh://git@host/o/r"; "ssh://git@host:2222/o/r"; "https://host/o/repo@v2.git"
                        "host:team/repo@2.git"; "https://host:8080/o/r"; "https://[::1]:8080/o/r"; "ssh://git@[::1]/o/r"
                        "file:///tmp/x"; "file:///C:/x"; "C:/x"; "/abs/path"; "./rel"; "host:o/r:x"; "https://host:/x"
-                       "https://[::1]/o/r"; "" ] do
+                       "https://[::1]/o/r"; "ssh://git@[::1]:22/o/r"; "" ] do
                 Expect.isNone (addressRefusal a) (sprintf "should accept %s" a)
 
         testCase "addressUserInfo reads the text before the last @ of the authority, or the scp login" <| fun _ ->
@@ -120,7 +121,9 @@ let addressTests =
                   sprintf "https://h/o/r?token=%s" secrets
                   sprintf "https://h/o/r#%s" secrets
                   sprintf "https://u:%s?x@h/x" secrets
-                  sprintf "https://u:%s/x@h/x" secrets ]
+                  sprintf "https://u:%s/x@h/x" secrets
+                  sprintf "https://u:%s]x/y@h/z" secrets
+                  sprintf "ssh://u@v:%s/x@h/y" secrets ]
                 |> List.forall (fun a -> not ((displayRemote a).Contains secrets)))
 
         testProperty "the address functions are total" <| fun (s: string) ->

@@ -79,9 +79,8 @@ let modeVerdict (mode: string) : Result<unit, string> =
 // addresses
 
 type private Shape =
-    /// `scheme://rest`: the scheme as written, the authority (up to the first `/`, `?` or `#`), what follows it and
-    /// the whole text after `://`.
-    | Url of scheme: string * authority: string * tail: string * afterSlashes: string
+    /// `scheme://rest`: the scheme as written, the authority (up to the first `/`, `?` or `#`) and what follows it.
+    | Url of scheme: string * authority: string * tail: string
     /// Anything else: an scp-like address, a path, a drive path.
     | Plain of string
 
@@ -96,7 +95,7 @@ let private parse (address: string) : Shape =
         let rest = a.Substring(sep + 3)
         let stop = rest.IndexOfAny [| '/'; '?'; '#' |]
         let authority, tail = if stop < 0 then rest, "" else rest.Substring(0, stop), rest.Substring stop
-        Url(a.Substring(0, sep), authority, tail, rest)
+        Url(a.Substring(0, sep), authority, tail)
     else Plain a
 
 let private noUserInfoOnScheme =
@@ -110,19 +109,24 @@ let private splitAuthority (authority: string) : (string * string) option =
     let at = authority.LastIndexOf '@'
     if at < 0 then None else Some(authority.Substring(0, at), authority.Substring(at + 1))
 
-/// The text after the last `:` of an authority that is outside `[...]`, or None when there is no such colon.
+/// The host part of an authority (after the last `@`, or all of it): the text after its last `:` outside
+/// `[...]`, or None when there is no such colon. Brackets count only when the host starts with `[`.
 let private afterLastColon (authority: string) : string option =
-    let close = authority.LastIndexOf ']'
-    let colon = authority.LastIndexOf ':'
-    if colon < 0 || colon < close then None else Some(authority.Substring(colon + 1))
+    let host =
+        match splitAuthority authority with
+        | Some(_, h) -> h
+        | None -> authority
+    let from = if host.StartsWith "[" then max 0 (host.LastIndexOf ']') else 0
+    let colon = host.LastIndexOf ':'
+    if colon < from then None else Some(host.Substring(colon + 1))
 
-/// An authority with no `@` whose text after its last `:` (outside `[...]`) is not all digits: it may hold a
-/// password that a `?`, `#` or `/` cut off (`https://user:pa?ss@host/x` splits at the `?` into `user:pa`).
-let private suspectNoAt (authority: string) : bool =
-    not (authority.Contains '@')
-    && (match afterLastColon authority with
-        | Some p -> p.Length > 0 && not (p |> Seq.forall Char.IsAsciiDigit)
-        | None -> false)
+/// An authority whose host part has, after its last `:` (outside `[...]`), text that is not all digits: it may
+/// hold a password that a `?`, `#` or `/` cut off (`https://user:pa?ss@host/x` splits at the `?` into `user:pa`;
+/// `ssh://u@v:pa/ss@h/x` into `u@v:pa`). An empty port is accepted.
+let private suspectPort (authority: string) : bool =
+    match afterLastColon authority with
+    | Some p -> p.Length > 0 && not (p |> Seq.forall Char.IsAsciiDigit)
+    | None -> false
 
 /// The user-info of an address: for a `scheme://` address the text before the last `@` of its authority (the
 /// authority ends at the first `/`, `?` or `#`; a quote or any other character does not end it), for an scp-like
@@ -130,7 +134,7 @@ let private suspectNoAt (authority: string) : bool =
 /// `SyncGit.userInfoOf`, which redacts git's standard error and so scans free text.
 let addressUserInfo (address: string) : string option =
     match parse address with
-    | Url(_, authority, _, _) -> splitAuthority authority |> Option.map fst
+    | Url(_, authority, _) -> splitAuthority authority |> Option.map fst
     | Plain a ->
         let at = a.IndexOf '@'
         let colon = a.IndexOf ':'
@@ -142,12 +146,12 @@ let private passwordText = "an address must not hold a password or token: use an
 let addressRefusal (address: string) : string option =
     match parse address with
     | Plain _ -> None
-    | Url(scheme, authority, _, afterSlashes) ->
+    | Url(scheme, authority, tail) ->
         match splitAuthority authority with
         | Some(userInfo, _) when refusesAnyUserInfo scheme || userInfo.Contains ':' -> Some passwordText
         | _ ->
-            if afterSlashes.IndexOfAny [| '?'; '#' |] >= 0 then Some "an address must not contain a query or fragment"
-            elif suspectNoAt authority then Some passwordText
+            if tail.IndexOfAny [| '?'; '#' |] >= 0 then Some "an address must not contain a query or fragment"
+            elif suspectPort authority then Some passwordText
             else None
 
 /// How an address is printed by any command. A user-info that holds a `:`, and any user-info on `http`, `https`,
@@ -157,8 +161,8 @@ let addressRefusal (address: string) : string option =
 let displayRemote (address: string) : string =
     match parse address with
     | Plain a -> a
-    | Url(scheme, authority, tail, _) ->
-        if suspectNoAt authority then scheme + "://***"
+    | Url(scheme, authority, tail) ->
+        if suspectPort authority then scheme + "://***"
         else
             let shownAuthority =
                 match splitAuthority authority with
