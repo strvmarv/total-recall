@@ -48,13 +48,20 @@ public interface IGitProcess
 /// <summary>Finds the git executable on the PATH.</summary>
 public static class GitExecutable
 {
-    public static string? TryFind(string? pathVariable = null, bool? windows = null)
+    public static string? TryFind(string? pathVariable = null, bool? windows = null) =>
+        Find("git", pathVariable, windows);
+
+    /// <summary>The same search for any program (a test helper: <c>flock</c>).</summary>
+    internal static string? TryFindProgram(string program, string? pathVariable = null, bool? windows = null) =>
+        Find(program, pathVariable, windows);
+
+    private static string? Find(string program, string? pathVariable, bool? windows)
     {
         var path = pathVariable ?? Environment.GetEnvironmentVariable("PATH");
         if (string.IsNullOrEmpty(path))
             return null;
         var isWindows = windows ?? OperatingSystem.IsWindows();
-        var names = isWindows ? new[] { "git.exe", "git.cmd" } : new[] { "git" };
+        var names = isWindows ? new[] { program + ".exe", program + ".cmd" } : new[] { program };
         foreach (var dir in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
         {
             foreach (var name in names)
