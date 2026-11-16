@@ -1,7 +1,7 @@
 // src/TotalRecall.Cli/Commands/Config/SetCommand.cs
 //
 // Plan 5 Task 5.8 — `total-recall config set <key> <value> [--no-snapshot]`.
-// Flow:
+// Flow (the storage mode and the sync settings are refused first, before anything is read, snapshotted or written):
 //   1) Coerce the raw <value> string to bool/long/double/string.
 //   2) Optionally snapshot the current effective config into config_snapshots
 //      with name "pre-change:<key>" — skipped gracefully if the DB doesn't
