@@ -136,9 +136,9 @@ public sealed class StoreGroundworkTests : IDisposable
     }
 
     [Fact]
-    public void Update_CreatedAt_SetsOnlyThatColumn()
+    public void Update_CreatedAt_SetsCreatedAt_AndLeavesTheOtherFields()
     {
-        SeedHot("id-1");
+        SeedHot("id-1", SourceTool.ClaudeCode);
         var before = Scalar("SELECT created_at FROM hot_memories WHERE id = 'id-1'");
         Assert.Equal(1_000L, before);
 
@@ -146,6 +146,31 @@ public sealed class StoreGroundworkTests : IDisposable
 
         Assert.Equal(5_000L, Scalar("SELECT created_at FROM hot_memories WHERE id = 'id-1'"));
         Assert.Equal("text", Text("SELECT content FROM hot_memories WHERE id = 'id-1'"));
+        Assert.Equal("claude-code", Text("SELECT source_tool FROM hot_memories WHERE id = 'id-1'"));
+        Assert.Equal(1L, Scalar("SELECT count(*) FROM hot_memories"));
+    }
+
+    [Fact]
+    public void BeginImmediateTransaction_WhenAnotherConnectionHoldsTheLock_ThrowsBusy_AndLeavesTheStoreUsable()
+    {
+        using var fastConn = Other(); // fails at once instead of waiting out the command timeout
+        var fastStore = new SqliteStore(fastConn);
+        using (var hold = _conn.CreateCommand())
+        {
+            hold.CommandText = "BEGIN IMMEDIATE";
+            hold.ExecuteNonQuery();
+        }
+
+        var ex = Assert.Throws<SqliteException>(() => fastStore.BeginImmediateTransaction());
+        Assert.Equal(5, ex.SqliteErrorCode);
+
+        using (var release = _conn.CreateCommand())
+        {
+            release.CommandText = "ROLLBACK";
+            release.ExecuteNonQuery();
+        }
+        using var tx = fastStore.BeginImmediateTransaction(); // the failed begin left no open-transaction flag behind
+        tx.Commit();
     }
 
     [Fact]

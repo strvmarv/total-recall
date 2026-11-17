@@ -78,28 +78,23 @@ public static class GitSyncRows
         cmd.ExecuteNonQuery();
     }
 
-    private static GitSyncRow ReadRow(SqliteDataReader r)
-    {
-        {
-            var row = new GitSyncRow(
-                EntryId: r.GetString(0),
-                State: ParseState(r.GetString(1)),
-                BaseJson: Text(r, 2),
-                ScannedContentHash: Text(r, 3),
-                ScannedTagsHash: Text(r, 4),
-                LocalSticky: r.IsDBNull(5) ? null : r.GetInt64(5) != 0,
-                LocalTier: ParseTier(Text(r, 6)),
-                ContentStamp: ParseStamp(Text(r, 7)),
-                StickyStamp: ParseStamp(Text(r, 8)),
-                TierStamp: ParseStamp(Text(r, 9)),
-                RepushGroups: Text(r, 10),
-                PushingStamps: Text(r, 11),
-                BlockedHash: Text(r, 12),
-                BlockedReason: Text(r, 13),
-                AllowedHash: Text(r, 14));
-            return row;
-        }
-    }
+    private static GitSyncRow ReadRow(SqliteDataReader r) =>
+        new(
+            EntryId: r.GetString(0),
+            State: ParseState(r.GetString(1)),
+            BaseJson: Text(r, 2),
+            ScannedContentHash: Text(r, 3),
+            ScannedTagsHash: Text(r, 4),
+            LocalSticky: r.IsDBNull(5) ? null : r.GetInt64(5) != 0,
+            LocalTier: ParseTier(Text(r, 6)),
+            ContentStamp: ParseStamp(Text(r, 7)),
+            StickyStamp: ParseStamp(Text(r, 8)),
+            TierStamp: ParseStamp(Text(r, 9)),
+            RepushGroups: Text(r, 10),
+            PushingStamps: Text(r, 11),
+            BlockedHash: Text(r, 12),
+            BlockedReason: Text(r, 13),
+            AllowedHash: Text(r, 14));
 
     /// <summary>Inserts the row, or replaces every column of the row with the same <c>entry_id</c>.</summary>
     public static void Write(MsSqliteConnection conn, GitSyncRow row, SqliteTransaction? tx = null)

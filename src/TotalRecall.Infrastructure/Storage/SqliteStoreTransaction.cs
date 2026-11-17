@@ -142,9 +142,8 @@ public sealed class SqliteStoreTransaction : IDisposable
         var rowid = SqlRows.RowId(_conn, tx, table, id)
             ?? throw new InvalidOperationException($"No entry '{id}' in {table}");
         Step("replace-vec");
-        var vecTable = MigrationRunner.VecTableName(tier, type);
-        VecRows.Delete(_conn, tx, vecTable, rowid);
-        VecRows.InsertWithOrphanCleanup(_conn, tx, vecTable, rowid, embedding);
+        // InsertWithOrphanCleanup deletes any vector row at this rowid first, so an existing vector is replaced.
+        VecRows.InsertWithOrphanCleanup(_conn, tx, MigrationRunner.VecTableName(tier, type), rowid, embedding);
     }
 
     /// <summary>

@@ -473,6 +473,17 @@ let planRowTests =
             Expect.equal (tierAfter (local "a" Hot false) true) (Some(st 5)) "stored hot is warmer than the base: kept"
             Expect.equal (tierAfter (local "a" Warm false) false) (Some(st 5)) "not limited: kept"
 
+        testCase "the hot limit with an unknown base tier keeps the pending tier stamp (the scan never clears then)" <| fun () ->
+            let before = { rowBefore with Pending = { noStamps with Tier = Some(st 5) }; BaseTier = None }
+            let d = mergeWith (fun m -> { m with Tier = (None, KeepPending) })
+            let r = plan d before (Some theirsRec) (Some(local "a" Cold false)) true true (issuer 9)
+            Expect.equal r.Pending.Tier (Some(st 5)) "kept"
+
+        testCase "an empty scope on the stored entry hashes as the stored view does" <| fun () ->
+            let l = { local "a" Warm false with Content = { fields "a" with Scope = None } }
+            let r = plan (mergeWith id) rowBefore (Some theirsRec) (Some l) true false (issuer 9)
+            Expect.equal r.Comparison.Value.ContentHash (SyncScan.contentHash l.Content) "from the view, not from the record"
+
         testCase "the hot limit uses the record's tier when the tier group's base became the record's" <| fun () ->
             let before = { rowBefore with Pending = { noStamps with Tier = Some(st 5) }; BaseTier = Some Cold }
             let d = { mergeWith (fun m -> { m with Tier = (None, KeepPending) }) with Base = { keepAll with Tier = BaseBecomesTheirs } }
