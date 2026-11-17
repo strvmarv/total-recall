@@ -32,7 +32,7 @@ internal abstract record EntryResult
     public sealed record Skipped(string Reason) : EntryResult;
 
     /// <summary>The entry failed and its transaction was rolled back.</summary>
-    public sealed record Failed(string Detail) : EntryResult;
+    public sealed record Failed(string Detail, int Attempts = 0) : EntryResult;
 }
 
 public sealed partial class GitSyncApplier
@@ -81,7 +81,19 @@ public sealed partial class GitSyncApplier
     /// not carry out, computes the vector, then carries the decision out in one immediate transaction that first
     /// re-reads the entry (decisions 7 to 13). <paramref name="theirs"/> is null when the id has no accepted record.
     /// </summary>
-    internal EntryResult ApplyOne(string id, ParsedRecord? theirs, bool proven)
+    internal EntryResult ApplyOne(string id, ParsedRecord? theirs, bool proven, string? blobSha = null)
+    {
+        var result = ApplyCore(id, theirs, proven);
+        return result switch
+        {
+            EntryResult.Failed failed => RecordFailure(id, blobSha, failed),
+            EntryResult.Skipped skipped => RecordSkip(id, skipped),
+            EntryResult.NoOp => CleanUp(id, result),
+            _ => result,
+        };
+    }
+
+    private EntryResult ApplyCore(string id, ParsedRecord? theirs, bool proven)
     {
         BeforeEntry?.Invoke(id);
         var conn = _store.Connection;
@@ -183,13 +195,14 @@ public sealed partial class GitSyncApplier
         TransactionCount++;
         using (tx)
         {
+            var phase = "reread";
             try
             {
-                return CarryOut(id, tx, decision, plan, vector, row, read, oldBase, theirs, local);
+                return CarryOut(id, tx, decision, plan, vector, row, read, oldBase, theirs, local, p => phase = p);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
             {
-                return new EntryResult.Failed(OneLine(ex.Message));
+                return Classify(phase, ex);
             }
         }
     }
@@ -278,18 +291,21 @@ public sealed partial class GitSyncApplier
         LocalRead read,
         ParsedRecord? oldBase,
         ParsedRecord? theirs,
-        SyncMerge.LocalEntry? local)
+        SyncMerge.LocalEntry? local,
+        Action<string> phase)
     {
         tx.BeforeStep = step => BeforeEntryStep?.Invoke(id, step);
         var conn = tx.Connection;
         var dbTx = tx.Transaction;
 
+        phase("reread");
         Step(id, "reread");
         var rowNow = GitSyncRows.Read(conn, id, dbTx);
         var readNow = LocalEntryReader.Read(t => tx.Get(t, ContentType.Memory, id), () => tx.IsSticky(ContentType.Memory, id));
         if (!Equals(row, rowNow) || !read.Equals(readNow) || !AgreesWithRow(rowNow, readNow))
             return new EntryResult.Deferred("the entry changed since the decision was made", Busy: false);
 
+        phase("work");
         var current = (read as LocalRead.Present)?.Tier;
         if (plan.Insert)
         {
@@ -344,6 +360,11 @@ public sealed partial class GitSyncApplier
             tx.LogImport("git-sync", "sync:" + id, hash, id, stored!.Tier, ContentType.Memory);
         }
 
+        phase("issue");
+        Step(id, "issue");
+        GitSyncIssues.Delete(conn, id, GitSyncIssues.ApplyFailed, dbTx);
+
+        phase("commit");
         Step(id, "commit");
         tx.Commit();
 
@@ -369,6 +390,7 @@ public sealed partial class GitSyncApplier
         TransactionCount++;
         using (tx)
         {
+            var phase = "reread";
             try
             {
                 tx.BeforeStep = step => BeforeEntryStep?.Invoke(id, step);
@@ -377,15 +399,20 @@ public sealed partial class GitSyncApplier
                 var readNow = LocalEntryReader.Read(t => tx.Get(t, ContentType.Memory, id), () => tx.IsSticky(ContentType.Memory, id));
                 if (!Equals(row, rowNow) || !read.Equals(readNow) || readNow is not LocalRead.Absent)
                     return new EntryResult.Deferred("the entry changed since the decision was made", Busy: false);
+                phase = "work";
                 Step(id, "row");
                 GitSyncRows.Delete(tx.Connection, id, tx.Transaction);
+                phase = "issue";
+                Step(id, "issue");
+                GitSyncIssues.Delete(tx.Connection, id, GitSyncIssues.ApplyFailed, tx.Transaction);
+                phase = "commit";
                 Step(id, "commit");
                 tx.Commit();
                 return new EntryResult.Carried(CarriedKind.Dropped, false);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
             {
-                return new EntryResult.Failed(OneLine(ex.Message));
+                return Classify(phase, ex);
             }
         }
     }

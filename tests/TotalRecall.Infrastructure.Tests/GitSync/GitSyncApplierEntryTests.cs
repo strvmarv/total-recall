@@ -350,11 +350,11 @@ public sealed class GitSyncApplierEntryTests : IDisposable
     {
         _rig.Scan.AddMemory(Tier.Warm, Id);
         _rig.Scan.AddMemory(Tier.Cold, Id);
-        var before = _rig.Full();
+        var before = _rig.Full(issues: false);
 
         Is<EntryResult.Skipped>(_rig.Apply(ApplyRig.Rec(Id)));
 
-        Assert.Equal(before, _rig.Full());
+        Assert.Equal(before, _rig.Full(issues: false)); // the skip is recorded as an issue, nothing else
     }
 
     [Fact]
@@ -373,19 +373,20 @@ public sealed class GitSyncApplierEntryTests : IDisposable
         var failed = Is<EntryResult.Failed>(_rig.Apply(ApplyRig.Rec(Id, content: "Newer.", minute: 20)));
 
         Assert.Contains("base", failed.Detail);
-        Assert.Equal(before, _rig.Full());
+        Assert.Equal(before, _rig.Full(issues: false)); // only the failure's issue row was written
+        Assert.Equal(1, failed.Attempts);
     }
 
     [Fact]
     public void AnEmbedderThatFails_IsFailed_BeforeAnyTransaction()
     {
         _rig.Embedder.Fails = _ => true;
-        var before = _rig.Full();
+        var before = _rig.Full(issues: false);
 
         var failed = Is<EntryResult.Failed>(_rig.Apply(ApplyRig.Rec(Id)));
 
         Assert.Contains("embedder", failed.Detail);
-        Assert.Equal(before, _rig.Full());
-        Assert.Equal(0, _rig.Applier.TransactionCount);
+        Assert.Equal(before, _rig.Full(issues: false));
+        Assert.Equal(1, _rig.Applier.TransactionCount); // only the one that writes the failure
     }
 }

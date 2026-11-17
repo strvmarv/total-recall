@@ -98,13 +98,14 @@ internal sealed class ApplyRig : IDisposable
 
     // ---- looking ----
 
-    public string Full()
+    public string Full(bool issues = true)
     {
         var sb = new StringBuilder(Scan.Dump());
         foreach (var (id, row) in Scan.Rows().OrderBy(p => p.Key, StringComparer.Ordinal))
             sb.Append(id).Append(' ').Append(row).Append('\n');
-        foreach (var issue in Scan.Issues())
-            sb.Append(issue).Append('\n');
+        if (issues)
+            foreach (var issue in Scan.Issues())
+                sb.Append(issue).Append('\n');
         sb.Append("hlc=").Append(Scan.Meta("git_sync_hlc")).Append('\n');
         return sb.ToString();
     }
