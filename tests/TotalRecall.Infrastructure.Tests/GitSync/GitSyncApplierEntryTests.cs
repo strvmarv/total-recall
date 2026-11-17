@@ -1,0 +1,391 @@
+using Microsoft.FSharp.Core;
+using TotalRecall.Core;
+using TotalRecall.Infrastructure.GitSync;
+using Xunit;
+
+namespace TotalRecall.Infrastructure.Tests.GitSync;
+
+public sealed class GitSyncApplierEntryTests : IDisposable
+{
+    private const string Id = "3f9c2a7e-0000-4000-8000-000000000001";
+    private const string Id2 = "3f9c2a7e-0000-4000-8000-000000000002";
+
+    private readonly ApplyRig _rig = new();
+
+    public void Dispose() => _rig.Dispose();
+
+    private static T Is<T>(EntryResult r) where T : EntryResult => Assert.IsType<T>(r);
+
+    private void AssertScanQuiet()
+    {
+        var before = _rig.Scan.Rows();
+        var scan = _rig.RunScan();
+        Assert.Equal(0, scan.New + scan.Content + scan.Tags + scan.Sticky + scan.Tier + scan.Left + scan.Reactivated);
+        Assert.Equal(before.Count, _rig.Scan.Rows().Count);
+        foreach (var (id, row) in before)
+            Assert.Equal(row, _rig.Scan.Rows()[id]);
+    }
+
+    // ---- insert ----
+
+    [Theory]
+    [InlineData("Hot")]
+    [InlineData("Warm")]
+    [InlineData("Cold")]
+    public void ANewRecord_IsInserted_InItsTier_WithAVector_AnImportRow_AndARowThatTheScanLeavesAlone(string tierName)
+    {
+        var tier = tierName switch { "Hot" => Tier.Hot, "Warm" => Tier.Warm, _ => Tier.Cold };
+        var rec = ApplyRig.Rec(Id, tier: tier, minute: 10);
+
+        var carried = Is<EntryResult.Carried>(_rig.Apply(rec));
+
+        Assert.Equal(CarriedKind.Inserted, carried.Kind);
+        Assert.False(carried.Colder);
+        var found = _rig.Entry(Id)!;
+        Assert.Equal(tier, found.Tier);
+        Assert.Equal("Use bun, not npm.", found.Row.Content);
+        Assert.Equal(1_700_000_000_000L, found.Row.CreatedAt);
+        Assert.Equal(1, _rig.VectorCount(tier));
+        Assert.Equal(1, _rig.ImportLogRows(Id));
+        var row = _rig.Scan.Rows()[Id];
+        Assert.Equal(SyncMerge.RowState.Active, row.State);
+        Assert.NotNull(row.BaseJson);
+        Assert.Null(row.ContentStamp); // nothing is pending: the entry is the record
+        Assert.False(_rig.Scan.Store.IsSticky(ContentType.Memory, Id));
+        AssertScanQuiet();
+    }
+
+    [Fact]
+    public void AnInsert_CarriesEveryField_AndAnAbsentScope_IsEmpty()
+    {
+        var rec = ApplyRig.Rec(Id, tags: ["b", "a"], project: "o/r", scope: "s", source: SourceTool.ClaudeCode);
+
+        _rig.Apply(rec);
+
+        var e = _rig.Entry(Id)!.Row;
+        Assert.Equal(["a", "b"], e.Tags.ToArray());
+        Assert.Equal("o/r", e.Project!.Value);
+        Assert.Equal(SourceTool.ClaudeCode, e.SourceTool!.Value);
+        _rig.Apply(ApplyRig.Rec(Id2));
+        Assert.Null(_rig.Entry(Id2)!.Row.Project);
+    }
+
+    [Fact]
+    public void AnImportedRecord_LogsItsOriginHash_AndAnOtherRecordTheContentHash()
+    {
+        _rig.Apply(ApplyRig.Rec(Id, originHash: "abc123"));
+        _rig.Apply(ApplyRig.Rec(Id2, content: "other"));
+
+        Assert.Equal(1, _rig.ImportLogRows(Id));
+        using var cmd = _rig.Scan.Connection.CreateCommand();
+        cmd.CommandText = "SELECT content_hash, source_path FROM import_log WHERE target_entry_id = $id";
+        cmd.Parameters.AddWithValue("$id", Id);
+        using var r = cmd.ExecuteReader();
+        Assert.True(r.Read());
+        Assert.Equal("abc123", r.GetString(0));
+        Assert.Equal("sync:" + Id, r.GetString(1));
+    }
+
+    [Fact]
+    public void ApplyingACarriedOutRecordTwice_ChangesNothing_AndOpensNoTransactionTheSecondTime()
+    {
+        var rec = ApplyRig.Rec(Id);
+        _rig.Apply(rec);
+        var before = _rig.Full();
+        var opened = _rig.Applier.TransactionCount;
+
+        Assert.IsType<EntryResult.NoOp>(_rig.Apply(rec));
+
+        Assert.Equal(before, _rig.Full());
+        Assert.Equal(opened, _rig.Applier.TransactionCount);
+    }
+
+    // ---- edit ----
+
+    [Fact]
+    public void ANewerText_ReplacesTheContent_AndTheVector_AndClearsWhatTheRecordLacks()
+    {
+        _rig.Apply(ApplyRig.Rec(Id, project: "o/r", scope: "s", source: SourceTool.Cursor, minute: 10));
+        var calls = _rig.Embedder.Calls;
+
+        var carried = Is<EntryResult.Carried>(_rig.Apply(ApplyRig.Rec(Id, content: "New text.", minute: 20)));
+
+        Assert.Equal(CarriedKind.Updated, carried.Kind);
+        var e = _rig.Entry(Id)!.Row;
+        Assert.Equal("New text.", e.Content);
+        Assert.Null(e.Project);
+        Assert.Null(e.SourceTool);
+        Assert.Equal(calls + 1, _rig.Embedder.Calls);
+        Assert.Equal(1, _rig.VectorCount(Tier.Warm));
+        AssertScanQuiet();
+    }
+
+    [Fact]
+    public void ANoBaseFirstSync_WithEqualContentAndADifferentCreatedAt_AdoptsTheCreatedAt_WithoutANewVector()
+    {
+        _rig.Scan.AddMemory(Tier.Warm, Id, createdAt: 1_700_000_000_000L);
+        var calls = _rig.Embedder.Calls;
+
+        _rig.Apply(ApplyRig.Rec(Id, createdAt: 1_600_000_000_000L, minute: 11));
+
+        Assert.Equal(1_600_000_000_000L, _rig.Entry(Id)!.Row.CreatedAt);
+        Assert.Equal(calls, _rig.Embedder.Calls);
+        Assert.NotNull(_rig.Scan.Rows()[Id].BaseJson);
+        AssertScanQuiet();
+    }
+
+    [Fact]
+    public void ANoBaseFirstSync_WithDifferingText_IsPostponedAsAReview_AndNothingChanges()
+    {
+        _rig.Scan.AddMemory(Tier.Warm, Id, content: "Local text.");
+        var before = _rig.Full();
+
+        var result = _rig.Apply(ApplyRig.Rec(Id, content: "Their text.", minute: 11));
+
+        Assert.Equal("review", Is<EntryResult.Postponed>(result).Reason);
+        Assert.Equal(before, _rig.Full());
+    }
+
+    [Fact]
+    public void Tags_AreMergedThreeWay_LocalAdditionsSurvive_AndTheBaseTakesTheRecordsTags()
+    {
+        _rig.Apply(ApplyRig.Rec(Id, tags: ["a", "c"], minute: 10));
+        _rig.Scan.Store.Update(Tier.Warm, ContentType.Memory, Id, new TotalRecall.Infrastructure.Storage.UpdateEntryOpts { Tags = ["a", "c", "local"] });
+        _rig.RunScan();
+
+        var result = _rig.Apply(ApplyRig.Rec(Id, tags: ["a", "theirs"], minute: 10)); // theirs removed c, added theirs
+
+        Assert.IsType<EntryResult.Carried>(result);
+        Assert.Equal(["a", "local", "theirs"], _rig.Entry(Id)!.Row.Tags.OrderBy(t => t, StringComparer.Ordinal).ToArray());
+        AssertScanQuiet();
+    }
+
+    [Fact]
+    public void AnUnpin_FromTheRecord_UnpinsTheLocalEntry()
+    {
+        _rig.Apply(ApplyRig.Rec(Id, tier: Tier.Hot, minute: 10)); // only a hot entry can be pinned
+        _rig.Scan.Pin(Id);
+        _rig.Now = 1_780_000_000_000L; // the local pin is older than the record's unpin (2026-11-12)
+        var scan = _rig.RunScan(); // the pin is stamped locally
+        var local = _rig.Scan.Rows()[Id];
+        Assert.True(local.StickyStamp is not null, $"scan sticky={scan.Sticky} tier={scan.Tier} skipped={scan.Skipped.Count} row={local} tier={_rig.Entry(Id)!.Tier}");
+
+        var result = _rig.Apply(ApplyRig.Rec(Id, tier: Tier.Hot, minute: 10, stickyMinute: 59));
+
+        Assert.IsType<EntryResult.Carried>(result);
+        Assert.False(_rig.Scan.Store.IsSticky(ContentType.Memory, Id));
+        AssertScanQuiet();
+    }
+
+    // ---- tier ----
+
+    [Fact]
+    public void APromotion_MovesTheEntry_KeepsTheVector_AndTheNextScanIsQuiet()
+    {
+        _rig.Apply(ApplyRig.Rec(Id, tier: Tier.Warm, minute: 10));
+        var calls = _rig.Embedder.Calls;
+
+        var result = _rig.Apply(ApplyRig.Rec(Id, tier: Tier.Hot, minute: 10, tierMinute: 20));
+        var carried = result is EntryResult.Failed f ? throw new Xunit.Sdk.XunitException(f.Detail) : Is<EntryResult.Carried>(result);
+
+        Assert.Equal(CarriedKind.Updated, carried.Kind);
+        Assert.Equal(Tier.Hot, _rig.Entry(Id)!.Tier);
+        Assert.Equal(1, _rig.VectorCount(Tier.Hot));
+        Assert.Equal(0, _rig.VectorCount(Tier.Warm));
+        Assert.Equal(calls, _rig.Embedder.Calls);
+        AssertScanQuiet();
+    }
+
+    [Fact]
+    public void APromotionWithANewerText_MovesWithTheNewVector()
+    {
+        _rig.Apply(ApplyRig.Rec(Id, tier: Tier.Warm, minute: 10));
+        var calls = _rig.Embedder.Calls;
+
+        _rig.Apply(ApplyRig.Rec(Id, content: "Changed.", tier: Tier.Hot, minute: 20, tierMinute: 20));
+
+        var found = _rig.Entry(Id)!;
+        Assert.Equal(Tier.Hot, found.Tier);
+        Assert.Equal("Changed.", found.Row.Content);
+        Assert.Equal(calls + 1, _rig.Embedder.Calls);
+        Assert.Equal(1, _rig.VectorCount(Tier.Hot));
+        Assert.Equal(0, _rig.VectorCount(Tier.Warm));
+    }
+
+    // ---- the hot limit ----
+
+    [Fact]
+    public void TheHotLimit_StoresALongHotInsertWarm_AndListsItColder()
+    {
+        using var limited = new ApplyRig(hotMaxContentChars: 10);
+        var rec = ApplyRig.Rec(Id, content: "A text that is longer than ten characters.", tier: Tier.Hot);
+
+        var carried = Is<EntryResult.Carried>(limited.Apply(rec));
+
+        Assert.True(carried.Colder);
+        Assert.Equal(Tier.Warm, limited.Entry(Id)!.Tier);
+        Assert.Equal(Tier.Warm, limited.Scan.Rows()[Id].LocalTier);
+        var scan = limited.RunScan();
+        Assert.Equal(0, scan.Tier);
+    }
+
+    [Fact]
+    public void TheHotLimit_DoesNotDemoteALongHotEntry_ForAProjectOnlyChange()
+    {
+        using var limited = new ApplyRig(hotMaxContentChars: 10);
+        limited.Scan.AddMemory(Tier.Hot, Id, content: "A text that is longer than ten characters.");
+        // a record with the same text and a project: a hot entry that is already long is not demoted by this
+        limited.Apply(ApplyRig.Rec(Id, content: "A text that is longer than ten characters.", tier: Tier.Hot, project: "o/r"));
+
+        Assert.Equal(Tier.Hot, limited.Entry(Id)!.Tier);
+    }
+
+    // ---- local rules ----
+
+    [Fact]
+    public void ARecordWithNoSourceTool_ClearsALocalOne()
+    {
+        _rig.Apply(ApplyRig.Rec(Id, source: SourceTool.Cursor, minute: 10));
+
+        _rig.Apply(ApplyRig.Rec(Id, source: null, minute: 20, content: "Edited."));
+
+        Assert.Null(_rig.Entry(Id)!.Row.SourceTool);
+    }
+
+    [Fact]
+    public void AKnowledgeId_WithNoRow_IsNeverInsertedAsAMemory()
+    {
+        _rig.Scan.AddKnowledge(Tier.Warm, Id);
+        var before = _rig.Full();
+
+        Assert.IsType<EntryResult.NoOp>(_rig.Apply(ApplyRig.Rec(Id)));
+
+        Assert.Equal(before, _rig.Full());
+        Assert.Null(_rig.Entry(Id));
+    }
+
+    [Fact]
+    public void NoRecordNoRowNoEntry_WritesNoRow_OpensNoTransaction_AlsoTwice()
+    {
+        var before = _rig.Full();
+
+        Assert.IsType<EntryResult.NoOp>(_rig.Apply(Id, null));
+        Assert.IsType<EntryResult.NoOp>(_rig.Apply(Id, null));
+
+        Assert.Equal(before, _rig.Full());
+        Assert.Equal(0, _rig.Applier.TransactionCount);
+    }
+
+    [Fact]
+    public void AnEntryWithNoRecordAndNoRow_WritesNoRow()
+    {
+        _rig.Scan.AddMemory(Tier.Warm, Id);
+        var before = _rig.Full();
+
+        Assert.IsType<EntryResult.NoOp>(_rig.Apply(Id, null));
+
+        Assert.Equal(before, _rig.Full());
+        Assert.Empty(_rig.Scan.Rows());
+    }
+
+    [Fact]
+    public void ARowWithNoBase_WhenNothingExistsAnymore_IsDropped_InATransactionOfItsOwn()
+    {
+        _rig.Scan.Store.Insert(Tier.Warm, ContentType.Memory, new TotalRecall.Infrastructure.Storage.InsertEntryOpts(Content: "x", Id: Id));
+        _rig.RunScan(); // a row with no base
+        _rig.Scan.Store.Delete(Tier.Warm, ContentType.Memory, Id);
+        Assert.Contains(Id, _rig.Scan.Rows().Keys);
+
+        var carried = Is<EntryResult.Carried>(_rig.Apply(Id, null));
+
+        Assert.Equal(CarriedKind.Dropped, carried.Kind);
+        Assert.DoesNotContain(Id, _rig.Scan.Rows().Keys);
+        Assert.Equal(1, _rig.Applier.TransactionCount);
+    }
+
+    // ---- postponed ----
+
+    [Fact]
+    public void APostponedEntry_ChangesNothing_AndNeverCallsTheEmbedder_ForEveryReason()
+    {
+        var fresh = new CountingEmbedder { Fails = _ => throw new InvalidOperationException("must not embed") };
+        // a new pin: a record that is pinned and has no entry here is a review request
+        var pinned = ApplyRig.Rec(Id, sticky: true);
+        var before = _rig.Full();
+
+        var result = Is<EntryResult.Postponed>(_rig.Apply(pinned));
+        Assert.Equal("review", result.Reason);
+        Assert.Equal(before, _rig.Full());
+        Assert.Equal(0, _rig.Embedder.Calls);
+
+        // a local deletion with the record present: the entry is gone, the row is active with a base
+        _rig.Apply(ApplyRig.Rec(Id2, minute: 10));
+        _rig.Scan.Store.Delete(Tier.Warm, ContentType.Memory, Id2);
+        var afterDeletion = _rig.Full();
+        var calls = _rig.Embedder.Calls;
+        var deletion = _rig.Apply(ApplyRig.Rec(Id2, minute: 10), proven: true);
+        Assert.IsType<EntryResult.Postponed>(deletion);
+        Assert.Equal("deletion", ((EntryResult.Postponed)deletion).Reason);
+        Assert.Equal(afterDeletion, _rig.Full());
+        Assert.Equal(calls, _rig.Embedder.Calls);
+        Assert.NotNull(fresh);
+    }
+
+    [Fact]
+    public void ARemoteDeletion_WhenTheRecordIsGone_IsPostponed_AndNothingChanges()
+    {
+        _rig.Apply(ApplyRig.Rec(Id, minute: 10));
+        var before = _rig.Full();
+
+        var result = _rig.Apply(Id, null);
+
+        Assert.Equal("deletion", Is<EntryResult.Postponed>(result).Reason);
+        Assert.Equal(before, _rig.Full());
+    }
+
+    // ---- defer and skip ----
+
+    [Fact]
+    public void AnIdInTwoTiers_IsSkipped_AndNothingChanges()
+    {
+        _rig.Scan.AddMemory(Tier.Warm, Id);
+        _rig.Scan.AddMemory(Tier.Cold, Id);
+        var before = _rig.Full();
+
+        Is<EntryResult.Skipped>(_rig.Apply(ApplyRig.Rec(Id)));
+
+        Assert.Equal(before, _rig.Full());
+    }
+
+    [Fact]
+    public void AnIdThatIsNotEligible_IsSkipped()
+    {
+        Is<EntryResult.Skipped>(_rig.Apply("../x", null));
+    }
+
+    [Fact]
+    public void ABaseThatCannotBeRead_IsTheEntrysFailure_NeverNoBase()
+    {
+        _rig.Apply(ApplyRig.Rec(Id, minute: 10));
+        _rig.Scan.Exec($"UPDATE git_sync_entry SET base_json = 'not json' WHERE entry_id = '{Id}'");
+        var before = _rig.Full();
+
+        var failed = Is<EntryResult.Failed>(_rig.Apply(ApplyRig.Rec(Id, content: "Newer.", minute: 20)));
+
+        Assert.Contains("base", failed.Detail);
+        Assert.Equal(before, _rig.Full());
+    }
+
+    [Fact]
+    public void AnEmbedderThatFails_IsFailed_BeforeAnyTransaction()
+    {
+        _rig.Embedder.Fails = _ => true;
+        var before = _rig.Full();
+
+        var failed = Is<EntryResult.Failed>(_rig.Apply(ApplyRig.Rec(Id)));
+
+        Assert.Contains("embedder", failed.Detail);
+        Assert.Equal(before, _rig.Full());
+        Assert.Equal(0, _rig.Applier.TransactionCount);
+    }
+}

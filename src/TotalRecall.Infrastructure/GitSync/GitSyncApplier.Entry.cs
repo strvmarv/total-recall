@@ -43,6 +43,9 @@ public sealed partial class GitSyncApplier
 
     private static T? Unopt<T>(FSharpOption<T>? option) where T : class => option is null ? null : option.Value;
 
+    /// <summary>A null array must stay "no vector": the implicit array-to-memory conversion would make it an empty one.</summary>
+    private static ReadOnlyMemory<float>? Memory(float[]? vector) => vector is null ? null : new ReadOnlyMemory<float>(vector);
+
     private static bool IsBusy(SqliteException ex) => ex.SqliteErrorCode is 5 or 6;
 
     private static string OneLine(string text)
@@ -302,7 +305,7 @@ public sealed partial class GitSyncApplier
                     Scope: Unopt(record.Scope),
                     EntryType: record.EntryType,
                     CreatedAt: record.CreatedAtMs),
-                vector);
+                Memory(vector));
         }
         else
         {
@@ -311,7 +314,7 @@ public sealed partial class GitSyncApplier
             if (plan.Update is not null)
                 tx.Update(current!, ContentType.Memory, id, plan.Update);
             if (plan.MoveTo is not null)
-                tx.Move(current!, ContentType.Memory, plan.MoveTo, ContentType.Memory, id, plan.TextChanged ? vector : null);
+                tx.Move(current!, ContentType.Memory, plan.MoveTo, ContentType.Memory, id, plan.TextChanged ? Memory(vector) : null);
             else if (plan.TextChanged)
                 tx.ReplaceEmbedding(current!, ContentType.Memory, id, vector!);
         }
