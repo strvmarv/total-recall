@@ -235,7 +235,7 @@ public sealed partial class GitSyncScanner
             {
                 var entry = SqliteStore.RowToEntry(reader);
                 var sticky = tier.IsHot && reader.GetInt64(reader.GetOrdinal("sticky")) != 0;
-                readable[id] = new SnapshotEntry(ToLocalEntry(entry, tier, sticky), tier);
+                readable[id] = new SnapshotEntry(LocalEntryReader.ToLocalEntry(entry, tier, sticky), tier);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
@@ -243,20 +243,6 @@ public sealed partial class GitSyncScanner
             }
         }
     }
-
-    private static SyncMerge.LocalEntry ToLocalEntry(Entry e, Tier tier, bool sticky)
-    {
-        var content = new SyncMerge.ContentFields(
-            e.Content,
-            string.IsNullOrEmpty(OptionOrNull(e.Project)) ? null : e.Project,
-            string.IsNullOrEmpty(e.Scope) ? null : FSharpOption<string>.Some(e.Scope),
-            e.EntryType,
-            e.SourceTool,
-            e.CreatedAt);
-        return new SyncMerge.LocalEntry(content, SyncRecordModule.normaliseTags(e.Tags), tier, sticky);
-    }
-
-    private static string? OptionOrNull(FSharpOption<string>? o) => o is null ? null : o.Value;
 
     private string? Meta(string key)
     {
