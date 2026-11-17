@@ -53,8 +53,8 @@ internal sealed class PullRig : IDisposable
         Guard = NewGuard(RemoteText);
     }
 
-    public RepoGuard NewGuard(string? remote) =>
-        Guard = new RepoGuard(GuardSettings.For(remote), Store, Client, Host, new StubProbe(() => 404), () => DateTimeOffset.UtcNow);
+    public RepoGuard NewGuard(string? remote, HostIdentity? host = null) =>
+        Guard = new RepoGuard(GuardSettings.For(remote), Store, Client, host ?? Host, new StubProbe(() => 404), () => DateTimeOffset.UtcNow);
 
     public GitSyncFetcher Fetcher(string branch = "main") => new(Client, Guard, Store, branch);
 

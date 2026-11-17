@@ -74,8 +74,8 @@ public sealed class GitSyncFetcher(GitClient client, RepoGuard guard, IMetaStore
             if (held.Value is not null)
             {
                 var guarded = await _guard.EvaluateIdentityAsync(SyncGit.Revision.NewSha(last), ct).ConfigureAwait(false);
-                if (FullRefusal(guarded) is { } refusal)
-                    return new FetchOutcome.Refused(refusal);
+                if (Gate(guarded) is { } blocked)
+                    return blocked;
                 var proof = await ProveAsync(last, last, ct).ConfigureAwait(false);
                 if (proof.Failure is not null)
                     return proof.Failure;
@@ -95,8 +95,8 @@ public sealed class GitSyncFetcher(GitClient client, RepoGuard guard, IMetaStore
             return new FetchOutcome.Failed(nameof(SyncGit.FailureKind.RemoteBranchMissing), $"the fetch did not bring branch '{_branch}'");
 
         var verdict = await _guard.EvaluateIdentityAsync(SyncGit.Revision.NewSha(r), ct).ConfigureAwait(false);
-        if (FullRefusal(verdict) is { } lateRefusal)
-            return new FetchOutcome.Refused(lateRefusal);
+        if (Gate(verdict) is { } lateBlocked)
+            return lateBlocked;
 
         // 5. the proof state, then 6. the reset.
         var proven = await ProveAsync(last, r, ct).ConfigureAwait(false);
@@ -159,8 +159,32 @@ public sealed class GitSyncFetcher(GitClient client, RepoGuard guard, IMetaStore
         if (verdict.Join is SyncIdentity.JoinState.NotJoined notJoined)
             return SyncIdentity.reasonText(notJoined.Item);
         if (verdict.HostUnverified)
-            return "this machine's identity could not be determined, so it cannot sync";
+            return "host identity could not be determined";
         return null;
+    }
+
+    /// <summary>
+    /// The outcome when the full guard stops the pull: a refusal, or a failure when the manifest could not be read
+    /// because a git call gave no answer (a cancelled or timed-out call is never a refusal).
+    /// </summary>
+    private static readonly string[] FailureNames =
+    [
+        "NoGit", "GitTooOld", "TimedOut", "Cancelled", "Auth", "RemoteNotFound", "Network",
+        "NonFastForward", "RemoteBranchMissing", "NotARepository", "OutputTooLarge",
+    ];
+
+    private static FetchOutcome? Gate(GuardVerdict verdict)
+    {
+        if (verdict.Manifest.Kind == ManifestReadKind.Unreadable && IdentityRefusal(verdict) is null)
+        {
+            var reason = verdict.Manifest.Reason ?? "the manifest could not be read";
+            var kind = nameof(SyncGit.FailureKind.Other);
+            foreach (var name in FailureNames)
+                if (reason.Contains(": " + name, StringComparison.Ordinal))
+                    kind = name;
+            return new FetchOutcome.Failed(kind, OneLine(reason));
+        }
+        return FullRefusal(verdict) is { } refusal ? new FetchOutcome.Refused(refusal) : null;
     }
 
     private static string? FullRefusal(GuardVerdict verdict)
@@ -171,7 +195,7 @@ public sealed class GitSyncFetcher(GitClient client, RepoGuard guard, IMetaStore
         return manifest.Kind switch
         {
             ManifestReadKind.Ok => null,
-            ManifestReadKind.NoClone => "the local copy of the repository is missing: run `total-recall sync join`",
+            ManifestReadKind.NoClone => "the local copy of the repository is missing",
             ManifestReadKind.NoManifest => "the repository has no manifest.json",
             ManifestReadKind.Newer => $"the repository uses a newer format (version {manifest.NewerVersion}): update total-recall",
             ManifestReadKind.Invalid => "the repository's manifest.json is not valid: " + (manifest.Reason ?? "unreadable"),

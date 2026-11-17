@@ -53,6 +53,9 @@ internal static class BaseRenderer
             ? theirs
             : oldBase;
         var unknownSource = update.Content.IsBaseBecomesTheirs ? theirs.UnknownSource : oldBase.UnknownSource;
-        return RecordWriter.WriteCore(next, writtenTier, unknownFrom.Unknown, unknownSource);
+        var contentFrom = update.Content.IsBaseBecomesTheirs ? theirs : oldBase;
+        var u = unknownFrom.Unknown;
+        var unknown = new UnknownContent(u.Top, u.ExtNamespaces, u.TotalRecall, u.Placement, contentFrom.Unknown.Origin);
+        return RecordWriter.WriteCore(next, writtenTier, unknown, unknownSource);
     }
 }

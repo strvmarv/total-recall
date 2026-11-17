@@ -60,7 +60,7 @@ public class BaseRendererTests
     }
 
     [Fact]
-    public void Mixed_ContentKept_SticyAndTierTaken()
+    public void Mixed_ContentKept_StickyAndTierTaken()
     {
         var old = Parse(Record("old text", tags: "[\"a\"]", tier: "cold", contentStamp: Early, tierStamp: Early));
         var theirs = Parse(Record("new text", tags: "[\"b\"]", tier: "hot", sticky: true, contentStamp: Late, tierStamp: Late, stickyStamp: Late));
@@ -138,6 +138,50 @@ public class BaseRendererTests
             theirs.Record.Project, theirs.Record.Scope, theirs.Record.Placement, theirs.Record.ContentStamp, theirs.Record.Origin, theirs.Record.WrittenBy);
 
         Assert.True(RecordWriter.Write(broken).NotEncodable);
+        var brokenParsed = new ParsedRecord(broken, theirs.Notes, theirs.StoredTier, theirs.UnknownSource, theirs.Unknown);
+        Assert.Null(BaseRenderer.Render(brokenParsed, old, Update(true, true, true, true)));  // all theirs
+        Assert.Null(BaseRenderer.Render(brokenParsed, old, Update(true, true, false, false))); // mixed, content from the broken record
         Assert.NotNull(BaseRenderer.Render(theirs, old, Update(true, true, true, true)));
+    }
+
+    [Fact]
+    public void AKeptStickyFlag_SurvivesATheirsThatIsNotSticky_AndTheOtherWayRound()
+    {
+        var pinned = Parse(Record(tier: "hot", sticky: true, stickyStamp: Early));
+        var plain = Parse(Record(tier: "warm", sticky: false, stickyStamp: Late));
+
+        var keptPinned = Back(BaseRenderer.Render(plain, pinned, Update(true, true, false, true)));
+        Assert.True(keptPinned.Placement.Sticky);
+        Assert.Equal(SyncStamp.StampModule.tryParse(Early).Value, keptPinned.Placement.StickyStamp);
+        Assert.Equal(Tier.Hot, keptPinned.Placement.Tier); // a sticky result is hot
+
+        var keptPlain = Back(BaseRenderer.Render(pinned, plain, Update(true, true, false, true)));
+        Assert.False(keptPlain.Placement.Sticky);
+        Assert.Equal(SyncStamp.StampModule.tryParse(Late).Value, keptPlain.Placement.StickyStamp);
+    }
+
+    [Fact]
+    public void AKeptContentGroup_KeepsTheOldBasesUnknownSource_AndItsOriginExtras()
+    {
+        var old = Parse(RecordFixtures.Unknowns);
+        var theirs = Parse(Record("new text"));
+
+        var rendered = BaseRenderer.Render(theirs, old, Update(false, true, true, true))!;
+
+        Assert.Contains("\"source\": \"windsurf\"", rendered);
+        Assert.Contains("\"extra\": 7", rendered); // the origin belongs to the content group
+    }
+
+    [Fact]
+    public void ATakenContentGroup_TakesTheRecordsOriginExtras_NotTheOldBases()
+    {
+        var old = Parse(Record("old text"));
+        var theirs = Parse(RecordFixtures.Unknowns);
+
+        var rendered = BaseRenderer.Render(theirs, old, Update(true, true, false, false))!;
+
+        Assert.Contains("\"extra\": 7", rendered);
+        var kept = BaseRenderer.Render(theirs, old, Update(false, true, true, true))!;
+        Assert.DoesNotContain("\"extra\": 7", kept);
     }
 }

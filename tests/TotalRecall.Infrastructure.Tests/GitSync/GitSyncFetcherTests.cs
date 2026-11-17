@@ -140,33 +140,54 @@ public sealed class GitSyncFetcherTests : IDisposable
         Assert.Equal(1, _rig.Count(c => c.IsLsRemote));
         Assert.Equal(0, _rig.Count(c => c.IsFetch));
         Assert.Equal(0, _rig.Count(c => c.IsResetHard));
-        Assert.True(_rig.Count(c => c.IsLsTreeRoot) >= 1, "the manifest was read from the clone at R");
+        Assert.True(_rig.Count(c => c.IsLsTreeRoot) >= 2, "the manifest was read at L as well as at the early identity guard");
     }
 
     [GitFact]
-    public async Task WhenTheHeadEqualsL_ACopiedDataDirectory_IsRefusedToo()
+    public async Task WhenNothingIsNew_AManifestTheGuardRefuses_IsRefused_AtL()
     {
         var first = Joined();
         _rig.SetLast(first);
-        _rig.Store.SetMeta(SyncIdentity.MetaKeys.Host, "0123456789abcdef0123456789abcdef");
+        _rig.CloneGit("update-ref", "refs/total-recall/last-synced", first);
+        // the remote head, which the clone also holds and L names, carries the manifest of another repository: only the
+        // guard at L can see it (the early identity guard reads the clone's HEAD, still the first commit)
+        _rig.PutManifest(PullRig.ManifestBytes("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+        var other = _rig.Commit("other repo");
+        _rig.CloneGit("fetch", "origin", "main");
+        _rig.SetLast(other); // L = the head, and the clone holds it
 
-        Is<FetchOutcome.Refused>(await Fetch());
+        var refused = Is<FetchOutcome.Refused>(await Fetch());
+
+        Assert.NotEmpty(refused.Reason);
+        Assert.Equal(0, _rig.Count(c => c.IsFetch));
+        Assert.Equal(0, _rig.Count(c => c.IsResetHard));
     }
 
     [GitFact]
-    public async Task WhenTheHeadEqualsL_ButTheCloneLacksIt_ItFallsThroughToTheFetch_AndIsUnproven()
+    public async Task ACancelledManifestRead_IsFailedCancelled_NotRefused_AndNothingIsReset()
     {
-        Joined(); // the clone holds the first commit only
+        Joined();
         _rig.PutText("memories/3f/x.json", "{}");
-        var second = _rig.Commit("second"); // pushed, not fetched
-        _rig.SetLast(second);                // a restored database: L is a commit the clone does not hold
+        _rig.Commit("second");
+        var lsTreeRoots = 0;
+        _rig.Fault = c => c.IsLsTreeRoot && ++lsTreeRoots >= 2 ? FaultingGitProcess.Failure(SyncGit.FailureKind.Cancelled, "cancelled") : null;
 
-        var fetched = Is<FetchOutcome.Fetched>(await Fetch());
+        var failed = Is<FetchOutcome.Failed>(await Fetch());
 
-        Assert.Equal(second, fetched.Result.Head);
-        Assert.False(fetched.Result.NothingNew);
-        Assert.False(fetched.Result.Proven); // no protective ref
-        Assert.True(_rig.Count(c => c.IsFetch) >= 1);
+        Assert.Equal("Cancelled", failed.Kind);
+        Assert.Equal(0, _rig.Count(c => c.IsResetHard));
+    }
+
+    [GitFact]
+    public async Task AnUnverifiedHost_IsRefusedWithThePlansWords_BeforeAnyNetworkCall()
+    {
+        Joined();
+        _rig.NewGuard(PullRig.RemoteText, new HostIdentity(() => new MachineIdResult(MachineIdKind.Failed, null), _rig.DbPath, false));
+
+        var refused = Is<FetchOutcome.Refused>(await Fetch());
+
+        Assert.Equal("host identity could not be determined", refused.Reason);
+        Assert.Equal(0, _rig.Count(c => c.IsLsRemote));
     }
 
     // ---- decision 2, the proof state ----
