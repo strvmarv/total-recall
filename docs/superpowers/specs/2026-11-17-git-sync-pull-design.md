@@ -65,7 +65,8 @@ the sync tables. The new pieces:
 1. **`GitSyncFetcher.FetchAsync` runs the cycle's step 2** and returns a `FetchOutcome`. It never writes the store and
    never writes `git_sync_last_ok` or `git_sync_last_error`; the cycle does. Steps, in order:
    1. read `L` from `_meta.git_sync_last_sha` (absent, empty or not a full lowercase hex object id is "no `L`");
-   2. `git ls-remote origin <branch>`. A failure is `Failed(kind, message)` (unreachable, authentication, timeout, as the
+   2. the parts of the repository guard that need no clone (not joined, a moved data directory, no remote configured) are
+      answered first, so such a machine is `Refused` before any network call. Then `git ls-remote origin <branch>`. A failure is `Failed(kind, message)` (unreachable, authentication, timeout, as the
       git client classifies it) with nothing changed. A remote with no such branch is `Refused`;
    3. when the head equals `L` **and the clone holds that commit** (`rev-parse --verify <L>^{commit}` answers), **nothing is
       fetched and the clone is not reset**: `R = L`, **the repository guard runs as in step 4** (it reads the manifest from
@@ -105,8 +106,10 @@ the sync tables. The new pieces:
    `memories/<shard>/<id>.json` with an eligible id and the right shard (a symlink, a submodule, a file over 1 MiB or
    an invalid record there); a rejection for any other path (a bad path, shard or id) names no id. A record that is
    rejected is never applied and never an exception: it gets a `rejected-record` issue (decision 15), and an id it names is
-   **excluded from the fifth and sixth bullets of decision 5 and is never decided with `Theirs = None`**, so a corrupt
-   remote file is never read as a deletion and never makes the pull incomplete. Its entry and row are untouched.
+   **excluded from the fifth bullet of decision 5 and is never decided with `Theirs = None`**, so a corrupt
+   remote file is never read as a deletion and never makes the pull incomplete. Its entry and row are untouched, **except** that
+   an id the scan reported as locally deleted (bullet 7 of decision 5) is postponed as `deletion`: its record cannot be
+   judged, so `L` must not move over the deletion.
 5. **The set of entries to decide** (the "visit set" of the umbrella, extended as the scan's design requires), in ordinal
    id order:
    - the ids whose record changed between `L` and `R`; with no `L`, or an unproven apply, **every** accepted record in
@@ -118,12 +121,12 @@ the sync tables. The new pieces:
      build writes) is revisited after an upgrade without the record changing;
    - every `active` row **with a base** whose id is **not in `R`'s listing at all** (a possible remote deletion; the decision
      is postponed in this milestone, but it must be reached so `L` is not advanced over it);
-   - every `active` row with **no base and no memory entry** whose id is **not in `R`'s listing at all** (the decision drops
-     the row: it was never in the repository);
-   - every `active` row whose memory exists in no table (the scan's `LocalDeletions`, which the caller passes in), **whatever
-     `R` holds**: with a record unchanged since `L` the decision is a pushed or held deletion, which is postponed, and it
-     must be reached so `L` is not advanced over a local deletion no part has acted on yet.
-   An id in the set with neither a row, a local entry nor a record is ignored (decision 15 still cleans its issues). When
+   - every `active` row whose memory exists in no table (the scan's `LocalDeletions`, which the caller passes in; it
+     includes a row with no base), **whatever `R` holds**: with a record present the decision is a pushed or held deletion,
+     which is postponed, with no record and no base it drops the row (the memory was never in the repository), and it must be
+     reached so `L` is not advanced over a local deletion no part has acted on yet.
+   An id in the set with neither a row, a local entry nor a record is decided as an ignore (`Ignore`, the merge rules'
+   no-op), which counts as a confirmed no-op (decision 15 removes its `apply-failed` row). When
    the outcome was `NothingNew` and the apply is proven, the first bullet is empty: only the other bullets apply.
 6. **A row that is not `active`** (`forgotten`, `left`) is decided like any other row when its id is in the set (the merge
    decisions have rows for it), but the fifth and sixth bullets add `active` rows only, so a `forgotten` or `left` row
@@ -136,7 +139,9 @@ the sync tables. The new pieces:
    accepted record or none when the id is not in `R`'s listing; `Local`, the entry read from the store with the mapping
    the scan uses (one function, shared); `Pending`, the row's three stamp columns; `Pushing`, the decoded
    `pushing_stamps` (decision 11); `ApplyProven`, from the fetch result; `HeldDelete`, always none (no `held-delete` item
-   can exist before 1b-ii; that milestone supplies it). An entry that cannot be read, or whose id is in two memory tables,
+   can exist before 1b-ii; that milestone supplies it). **An id that exists as a knowledge-base entry** (the apply reads the knowledge tables for the visited ids, as the scan does)
+   with no row is decided as an ignore, a confirmed no-op: nothing is inserted, so one id is never in both a memory and a
+   knowledge table (a `join` clears the rows, including the `left` row that said so). An entry that cannot be read, or whose id is in two memory tables,
    is not decided: it is treated as decision 10 treats a scan-skipped id (not applied, an issue, `L` not held back), whether
    or not the scan listed it.
 8. **Postponement.** `SyncApply.postponement` runs **first**, on the decision, before any vector is computed or any store
@@ -145,13 +150,14 @@ the sync tables. The new pieces:
    `deletion`: the entry outcome is `DeleteEntry`, `HoldDeletion` or `PushDeletion`, or the decision has a note,
    `FreshContentStamp`, `CloseHeldDelete` or sets the row state to `Forgotten` (all of these belong to the deletion
    rules); `review`: the decision has any review request; `repush`: a group's `Repush` flag is set. A postponed entry gets
-   **no change at all**: no store write, no row write, no issue write or removal (for the entry or for its path), no `import_log` row, and no embedder
+   **no change at all**: no store write, no row write, no write or removal of the entry's `apply-failed` issue, no `import_log` row, and no embedder
    call. It is listed in the result with its reason, it **holds `L` back** (decision 14), and it is decided again, from
    scratch, by every later pull (the fifth bullet of decision 5 and the diff keep it in the set). This is what lets 1b-ii
    and 1b-iii replace the postponement with the real handling without a migration: nothing was recorded that they must
    undo. **Consequence, stated so nobody reads it as a bug:** while an entry is postponed this machine does not push (the
-   cycle pushes only after a complete apply), so a pinned record or a remote deletion from another machine stalls this
-   machine's pushes until 1b-ii and 1b-iii land. The cycle tests of 1b-i-3 therefore use neither pins nor deletions as data.
+   cycle pushes only after a complete apply), so a pinned record, a remote deletion, **a memory deleted on this machine**
+   (the commonest case, compaction included) or a first-sync text conflict stalls this machine's pushes until 1b-ii and
+   1b-iii land. The cycle tests of 1b-i-3 therefore use none of these as data.
 9. **What is carried out** (everything else): `InsertFromRecord` (a record that is not sticky), `MergeGroups` whose parts
    are content (`LeaveContent`, `AdoptCreatedAt`, `TakeTheirs`), tags, sticky (`LeaveSticky`, `UnpinLocally`) and tier
    (promote), `LeaveEntry`, `Ignore` with no row-state change, `DropRow`, and `Defer`.
@@ -197,7 +203,7 @@ the sync tables. The new pieces:
     only then compute the vector if the decision needs one (an exception here, including the embedder's, is the entry's
     `apply-failed`; a cancellation is not, decision 14). Then **one transaction that takes the write lock when it begins**
     (a deferred transaction could not be upgraded after another process wrote). The store operations and the
-    `git_sync_entry` and `git_sync_issue` statements all run on **that** transaction (decision 12.3 to 12.5 must not
+    `git_sync_entry` and `git_sync_issue` statements all run on **that** transaction (decision 12.3 to 12.6 must not
     write outside it). In it:
     1. **re-read the entry** and require that it is **the same entry the decision was made on** (present or absent as
        before, and its mapped view equal to the `Local` that `decide` used) and that it still **agrees with the row** as the
@@ -224,15 +230,18 @@ the sync tables. The new pieces:
     4. for a newly inserted entry write the `import_log` row in the same transaction (`source_tool = 'git-sync'`,
        `source_path = 'sync:<id>'`, `content_hash` the record's `origin.hash` when it has one, else the scan's content hash
        of the entry), through the existing `INSERT OR IGNORE`, so the host importers skip that content;
-    5. commit.
-    A failure at any step rolls the whole entry back (the store transaction's own seam proves it for each step, and the
-    row and issue steps get the same kind of seam) and is the entry's `apply-failed`.
+    5. remove the entry's `apply-failed` row (decision 15), when there is one;
+    6. commit.
+    A failure at any step rolls the whole entry back, the removal of the issue included (the store transaction's own seam
+    proves it for each step, and the row and issue steps get the same kind of seam) and is the entry's `apply-failed`,
+    which is then written in a transaction of its own after the rollback (decision 15).
 13. **`DropRow`** deletes the entry's row in a transaction of its own with the same re-read: the entry must still be absent.
     **`LeaveEntry` and `Ignore`** go through step 3 of decision 12 like any other carried-out decision (the base, pending
     stamps and row state follow the decision, the comparison columns follow the stored entry when there is one). **A
     decision whose resulting row equals the stored row, with nothing to do to the store, opens no transaction and writes
-    no row.** That rule is about the row and the store only: the clean-up of issue rows (decision 15) is a separate write
-    and is done for it.
+    no row.** That rule is about the row and the store only: the removal of the entry's `apply-failed` row (decision 15) is
+    done for it in **one small transaction of its own** (only when such a row exists), and `DropRow` removes it in its own
+    transaction.
 
 ### Failures, issues and `L`
 
@@ -243,27 +252,31 @@ the sync tables. The new pieces:
     that is safe because each entry's transaction records what it applied. **A failure to record what makes an entry's loss
     visible makes the pull incomplete**: if the `apply-failed`, `rejected-record` or `scan-skipped:` issue cannot be
     written (the same lock that failed the entry may fail it), the entry counts as deferred, and `L` is held back. A failure
-    to write `_meta` is `Failed` with `L` unchanged; a failure to write the ref after `_meta` is `Failed`, and the next pull
-    repairs the ref (decision 2). **Cancellation**: the token being cancelled, an `OperationCanceledException`, and a git call that
+    to write `_meta` is `Failed` with `L` unchanged; a failure to write the ref after `_meta` is `Failed`, and the next pull is
+    unproven when the ref is missing (decision 2), so it reads every record once and writes the ref again when it
+    completes (a ref that is a strict ancestor of `L` is repaired in place). **Cancellation**: the token being cancelled, an `OperationCanceledException`, and a git call that
     fails with the git client's `Cancelled` kind (it does not throw) all stop the pull between entries, never inside one;
     none is an `apply-failed`, none writes an issue, and the pull is incomplete. A failure to list or diff the tree, to
     resolve `R`, or to test ancestry (other than "no" or "unknown", decision 2) is `Failed` for the pull; a failure to read
-    **one** blob (any kind except `Cancelled`) is that entry's `apply-failed`. A failed write of an issue **clean-up**
-    (decision 15) defers that id like a failed issue write.
+    **one** blob (any kind except `Cancelled`) is that entry's `apply-failed`. A failed removal of an
+    `apply-failed` row rolls the entry's transaction back (decision 12.5), so it is that entry's deferral; a failed sweep
+    (decision 15) leaves the rows as they are and is ignored until the next pull.
 15. **Issues.** `apply-failed` (`git_sync_issue`, `kind = 'apply-failed'`): `record_hash` the record's blob id, `attempts`
     incremented on every failure, `detail` a one-line message with control characters replaced and at most 200 characters
     (never a stack trace), written in its own small transaction after the entry's rollback. **`rejected-record`**:
     `record_hash` the blob id, `detail` the reason word of `SyncTree.RejectReason` or the validation reject, and
     **`entry_id` the rejection key: `SyncValidation.sanitizeText` of the entry's path** (at most 64 characters; two paths
     that share their first 64 characters share one row), one function used for writing, for the fourth bullet of decision
-    5 and for the clean-up. Neither kind rewrites an identical row. **Clean-up** is its own write, separate from the
-    no-op rule of decision 13:
-    - for every id **that was decided and carried out or confirmed a no-op** (not postponed, not deferred, not
-      skipped, not failed), whatever the decision: its `apply-failed` row is removed;
-    - at the end of every pull that read the whole listing, every `rejected-record` row whose key is not in this pull's set
-      of rejection keys is removed (the path vanished or is now accepted), also with no `L`; **except** that a key naming
-      an id that was postponed or deferred in this pull keeps its row (decision 8: a postponed entry's problems are
-      untouched).
+    5 and for the sweep. Neither kind rewrites an identical row. **Clean-up**:
+    - the `apply-failed` row of every id **that was decided and carried out or confirmed a no-op** (not postponed, not
+      deferred, not skipped, not failed) is removed, in the entry's transaction (decision 12.5) or, for a decision that
+      writes nothing, in a small transaction of its own (decision 13);
+    - **the sweep**: at the end of a pull in which **every id of the set was processed** (no cancellation, no stop on a busy
+      database, no failed listing, and no blob read failed), every `rejected-record` row whose key is not in this pull's set
+      of rejection keys is removed (the path vanished or is now accepted), also with no `L`. A pull that stopped early
+      keeps every rejection row, so an unread invalid record is not forgotten, and the sweep removes a row whatever
+      happened to the id that the path names (a rejection row describes a path, so removing it leaves nothing for a later
+      part to undo).
     The rows are visible in `ApplySummary`; showing them in `status` is 1b-iii.
 16. **The result.** `ApplyOutcome` is `Done(ApplySummary)` or `Failed(reason)` (the clone cannot be read: a failed listing, a
     corrupt object; nothing was changed by the failing step, entries already done stay done). `ApplySummary` carries the
@@ -290,7 +303,7 @@ the sync tables. The new pieces:
   `L` before each push. A pull that returned `Refused`, `Failed` or incomplete is the cycle's to report. **The writer
   ignores the `import_log` rows whose `source_tool` is `git-sync` when it derives an `origin` from the log** (a pulled entry
   without an origin must not get one). Its tests use neither pins nor deletions as data (decision 8).
-- **1b-ii (deletions)** replaces the `deletion` and `row-state` postponements with the real handling, supplies `HeldDelete`
+- **1b-ii (deletions)** replaces the `deletion` postponement with the real handling, supplies `HeldDelete`
   from the open `held-delete` items, and owns `repush_groups` (the `repush` postponement) and its place in the visit set
   (the umbrella's "rows with a `repush_groups` marker"). It must keep `ApplyProven` exactly as decision 2 defines it.
 - **1b-iii (review)** replaces the `review` postponement: it must open the items from the decision's `Reviews` in the same
@@ -340,7 +353,7 @@ database as a deferral, a record with no source tool clearing a local one, the h
 text change (with and without a pending tier stamp), `NothingNew` with a clone that lacks `L`, a copied data directory on
 `NothingNew`, a local deletion whose record is unchanged, a scan-skipped row surviving the clean-up and not overwriting
 a real failure, rejection keys (vanished, now accepted and postponed), cancellation through a git `Cancelled` failure
-writing no issue, a busy database stopping the apply, and an exhausted clock on `RestampPending`.
+writing no issue, a busy database stopping the apply, an exhausted clock on `RestampPending`, a rejection sweep that is skipped after an early stop, a knowledge id that is not inserted, a rejected id that was deleted here, and a machine that is not joined being refused before any network call.
 
 ## Departures from the umbrella design
 
@@ -353,8 +366,9 @@ writing no issue, a busy database stopping the apply, and an exhausted clock on 
   without it.
 - **A busy or locked database is a deferral** (the umbrella: "a database busy error ... `L` is not advanced"), not an
   `apply-failed`, so a transient lock from another connection does not count an attempt or write an issue.
-- **The visit set has no `repush_groups` bullet** (1b-ii adds it) and has two bullets the umbrella lacks (a rejected record
-  judged again, decision 5; a row's absence read from the listing and not from a rejection, decision 4).
+- **The visit set has no `repush_groups` bullet** (1b-ii adds it) and has bullets the umbrella lacks (a rejected record
+  judged again, a local deletion passed in by the scan, decision 5; a row's absence read from the listing and not from a
+  rejection, decision 4).
 - **A text conflict is postponed** even where the umbrella's no-base table says "the record wins": the decision also opens
   a conflict review, which is 1b-iii, and applying the record's text alone would lose the local text.
 - **Alias detection** is 1b-iii: a pulled record whose `origin.hash` matches a different local legacy import is inserted
@@ -389,14 +403,15 @@ writing no issue, a busy database stopping the apply, and an exhausted clock on 
    attempt count or a reason, neither holds `L` back, an `apply-failed` entry is retried by the next pull even when the remote
    head has not changed, and a later success, even one that changes nothing, removes its issue.
 7. Given a rejected record at the path of a memory that has a row and a last synced version, when the pull runs, then the
-   memory is not read as deleted, nothing is postponed for it, and the rejection is listed; given the path disappears or the
-   record becomes valid, then the listing is cleared.
+   memory is not read as deleted, nothing is postponed for it (unless it was deleted here), and the rejection is listed;
+   given the path disappears or the record becomes valid, then the listing is cleared (also when the entry is postponed
+   for another reason), but not after a pull that stopped early.
 8. Given an edit, a pin or a move that lands on an entry after the scan and before its transaction, when the pull runs, then
    that entry is not changed, is listed as deferred, `L` does not advance, and the next scan stamps the edit.
 9. Given a failure injected at each step of an entry's transaction, when the pull runs, then the content row, the vector,
-   the `import_log` row, the entry's row, its listed problems and the clock are exactly as before (the row and problem writes
-   included) and the entry is listed as failed.
-10. Given the remote head equals `L`, when the pull runs, then it makes one `ls-remote` call, no fetch and no network call
+   the `import_log` row, the entry's row, its earlier listed failure and the clock are exactly as before (the row and
+   problem writes included) and the entry is listed as failed, with its new `apply-failed` entry as the only addition.
+10. Given the remote head equals `L` and the clone holds that commit, when the pull runs, then it makes one `ls-remote` call, no fetch and no network call
    otherwise, still decides the visit set from the local clone, and applies an entry whose previous apply failed.
 11. Given no `L`, an `L` that is not an ancestor of the remote head, an answer from git that is neither yes nor no (for
     instance an `L` the clone does not hold), or a protective ref that points elsewhere, when the pull runs (including when
