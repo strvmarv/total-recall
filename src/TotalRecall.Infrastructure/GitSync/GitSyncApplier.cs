@@ -79,7 +79,4 @@ public sealed partial class GitSyncApplier
 
     /// <summary>How many entry transactions were opened (the small clean-up ones and a row drop included).</summary>
     internal int TransactionCount { get; private set; }
-
-    public Task<ApplyOutcome> ApplyAsync(FetchResult fetch, ScanSummary scan, CancellationToken cancellationToken = default) =>
-        throw new NotImplementedException("the whole pull is built in a later task of the milestone");
 }
