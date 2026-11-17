@@ -463,6 +463,69 @@ public sealed class GitSyncApplierPullTests : IDisposable
         Assert.Equal(blob, Assert.Single(Issues("apply-failed")).RecordHash);
     }
 
+    private void SeedRejectionRow(string key) =>
+        ScanRig.Exec(_rig.Connection,
+            $"INSERT INTO git_sync_issue (entry_id, kind, record_hash, attempts, detail) VALUES ('{key}', 'rejected-record', 'old', 0, 'symlink')");
+
+    [GitFact]
+    public async Task AnEarlyStop_KeepsEveryRejectionRow_ButACompletePullSweepsThem()
+    {
+        const string stale = "memories/zz/gone.json";
+        SeedRejectionRow(stale);
+        PushRecords(Rec(A), Rec(B, "Other."));
+
+        // a blob read that fails: the pull is complete but unread records may hide a rejection, so no sweep
+        var blob = BlobOf($"memories/{A[..2]}/{A}.json");
+        _rig.Fault = c => c.IsCatBlob && ((SyncGit.GitCommand.CatBlob)c).sha == blob
+            ? FaultingGitProcess.Failure(SyncGit.FailureKind.Other, "bad object")
+            : null;
+        await Pull();
+        Assert.Contains(Issues("rejected-record"), r => r.EntryId == stale);
+
+        // a busy stop
+        _rig.Fault = _ => null;
+        _rig.CloneGit("update-ref", "-d", "refs/total-recall/last-synced");
+        _rig.Connection.DefaultTimeout = 1;
+        ScanRig.Exec(_rig.Connection, "PRAGMA busy_timeout = 0");
+        using (var holder = SyncDb.OpenMigrated(_rig.DbPath))
+        {
+            _applier.BeforeTransaction = _ => ScanRig.Exec(holder, "BEGIN IMMEDIATE");
+            try { await Pull(); }
+            finally { ScanRig.Exec(holder, "ROLLBACK"); _applier.BeforeTransaction = null; }
+        }
+        Assert.Contains(Issues("rejected-record"), r => r.EntryId == stale);
+
+        // a cancellation
+        using var cts = new CancellationTokenSource();
+        _applier.BeforeEntry = _ => cts.Cancel();
+        var fetched = Is<FetchOutcome.NothingNew>(await _rig.Fetcher().FetchAsync());
+        await _applier.ApplyAsync(fetched.Result, Scan(), cts.Token);
+        _applier.BeforeEntry = null;
+        Assert.Contains(Issues("rejected-record"), r => r.EntryId == stale);
+
+        // and a complete one sweeps it
+        _rig.Connection.DefaultTimeout = 30;
+        var done = await Pull();
+        Assert.True(done.Complete);
+        Assert.DoesNotContain(Issues("rejected-record"), r => r.EntryId == stale);
+    }
+
+    [GitFact]
+    public async Task ACancellationDuringTheLastEntry_MovesNeitherMetaNorTheRef()
+    {
+        PushRecords(Rec(A));
+        using var cts = new CancellationTokenSource();
+        _applier.BeforeEntry = _ => cts.Cancel();
+        var fetched = Is<FetchOutcome.Fetched>(await _rig.Fetcher().FetchAsync());
+
+        var done = Is<ApplyOutcome.Done>(await _applier.ApplyAsync(fetched.Result, Scan(), cts.Token));
+
+        Assert.Equal(1, done.Summary.Inserted);
+        Assert.False(done.Summary.Complete);
+        Assert.Null(Meta(SyncIdentity.MetaKeys.LastSha));
+        Assert.Null(_rig.CloneRef("refs/total-recall/last-synced"));
+    }
+
     [GitFact]
     public async Task AFailureToWriteTheRef_IsFailed_WithMetaAlreadyMoved_AndTheNextPullRepairsIt()
     {

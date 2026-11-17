@@ -177,6 +177,35 @@ public sealed class GitSyncApplierEntryTests : IDisposable
         AssertScanQuiet();
     }
 
+    [Theory]
+    [InlineData("text")]
+    [InlineData("pin")]
+    [InlineData("move")]
+    public void AnEditBetweenTheScanAndTheApply_IsDeferred_NotOverwritten_AndTheNextScanStampsIt(string edit)
+    {
+        _rig.Now = 1_780_000_000_000L;
+        _rig.Apply(ApplyRig.Rec(Id, tier: Tier.Hot, minute: 10)); // hot: it can be pinned
+        _rig.RunScan(); // the scan ran: nothing pending
+        switch (edit)
+        {
+            case "text": _rig.Scan.Store.Update(Tier.Hot, ContentType.Memory, Id, new TotalRecall.Infrastructure.Storage.UpdateEntryOpts { Content = "A local edit." }); break;
+            case "pin": _rig.Scan.Pin(Id); break;
+            default: _rig.Scan.Store.Move(Tier.Hot, ContentType.Memory, Tier.Cold, ContentType.Memory, Id); break;
+        }
+        var before = _rig.Full();
+
+        // a newer record: without the guard a text edit would be taken as "no change since the base" and overwritten
+        var result = _rig.Apply(ApplyRig.Rec(Id, content: "Their newer text.", tier: Tier.Hot, minute: 20));
+
+        Assert.IsType<EntryResult.Deferred>(result);
+        Assert.Equal(before, _rig.Full());
+        var scan = _rig.RunScan();
+        if (edit == "move")
+            Assert.Equal(Tier.Cold, _rig.Scan.Rows()[Id].LocalTier); // a demotion is recorded, not stamped
+        else
+            Assert.True(scan.Content + scan.Sticky >= 1, "the next scan stamps the local edit");
+    }
+
     // ---- tier ----
 
     [Fact]

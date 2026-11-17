@@ -128,6 +128,20 @@ public class BaseRendererTests
     }
 
     [Fact]
+    public void ARenderingOverTheFileLimit_IsNull_NotABaseThatCouldNeverBeReadBack()
+    {
+        // under 1 MiB as the remote file (4 bytes an element), about 3.7 MB once the writer indents it
+        var elements = string.Join(",", Enumerable.Repeat("[1]", 250_000));
+        var plain = Record("text");
+        var text = "{\n  \"x\": [" + elements + "],\n" + plain[(plain.IndexOf('{') + 2)..];
+        Assert.True(Encoding.UTF8.GetByteCount(text) < 1_048_576);
+        var theirs = Parse(text);
+
+        Assert.Null(BaseRenderer.Render(theirs, null, Update(true, true, true, true)));
+        Assert.Null(BaseRenderer.Render(theirs, Parse(Record("old")), Update(true, true, true, true)));
+    }
+
+    [Fact]
     public void ARecordThatCannotBeEncoded_RendersNull()
     {
         var theirs = Parse(Record("text"));

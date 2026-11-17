@@ -191,7 +191,8 @@ public sealed partial class GitSyncApplier
             everyIdProcessed = false;
 
         // Rejections are recorded whatever happened to the entries; an identical row is not rewritten.
-        var rejectionsWritten = WriteRejections(rejectedNow, rejections);
+        var cancelled = cancellationToken.IsCancellationRequested;
+        var rejectionsWritten = cancelled || WriteRejections(rejectedNow, rejections); // a cancelled pull writes no issue
         if (!rejectionsWritten)
         {
             recordedEveryIssue = false;
@@ -199,10 +200,10 @@ public sealed partial class GitSyncApplier
         }
 
         // The sweep: only after a pull that processed every id, so an unread invalid record is never forgotten.
-        if (everyIdProcessed && !blobReadFailed && recordedEveryIssue)
+        if (everyIdProcessed && !cancelled && !blobReadFailed && recordedEveryIssue)
             SweepRejections(keys);
 
-        var complete = everyIdProcessed && postponed.Count == 0 && deferred.Count == 0 && recordedEveryIssue;
+        var complete = everyIdProcessed && !cancelled && postponed.Count == 0 && deferred.Count == 0 && recordedEveryIssue;
         if (complete && !(fetch.Proven && string.Equals(fetch.Last, fetch.Head, StringComparison.Ordinal)))
         {
             try

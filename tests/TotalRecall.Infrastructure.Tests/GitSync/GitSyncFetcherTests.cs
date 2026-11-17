@@ -270,6 +270,24 @@ public sealed class GitSyncFetcherTests : IDisposable
     }
 
     [GitFact]
+    public async Task ARestoredDatabase_WhoseLTheCloneNeverHeld_IsUnproven_AndTheRefIsNotRepaired()
+    {
+        var first = Joined(); // the clone holds only the first commit, and its protective ref points there
+        _rig.CloneGit("update-ref", "refs/total-recall/last-synced", first);
+        _rig.PutText("memories/3f/x.json", "{}");
+        var second = _rig.Commit("second");
+        _rig.PutText("memories/3f/y.json", "{}");
+        _rig.Commit("third");
+        _rig.SetLast(second); // L is a commit the clone does not hold; the ref is a strict ancestor of it
+
+        var fetched = Is<FetchOutcome.Fetched>(await Fetch());
+
+        Assert.False(fetched.Result.Proven);
+        Assert.Equal(second, fetched.Result.Last);
+        Assert.Equal(first, _rig.CloneRef("refs/total-recall/last-synced")); // not repaired
+    }
+
+    [GitFact]
     public async Task ARefThatIsAStrictAncestorOfL_IsRepairedInPlace_AndProven_AlsoWhenNothingIsNew()
     {
         var first = Joined();

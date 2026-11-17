@@ -65,13 +65,20 @@ public sealed class GitSyncFetcher(GitClient client, RepoGuard guard, IMetaStore
         if (head is null)
             return new FetchOutcome.Refused($"the remote has no branch '{_branch}'");
 
-        // 3. nothing new, and the clone holds the commit: no fetch, no reset.
-        if (last is not null && string.Equals(head, last, StringComparison.Ordinal))
+        // Does the clone hold L? A restored database names a commit the clone may never have had (decision 2).
+        var cloneHoldsLast = false;
+        if (last is not null)
         {
             var held = await _client.RevParseAsync(SyncGit.Revision.NewSha(last), ct).ConfigureAwait(false);
             if (!held.IsOk)
                 return FailedFrom(held.Failure);
-            if (held.Value is not null)
+            cloneHoldsLast = held.Value is not null;
+        }
+
+        // 3. nothing new, and the clone holds the commit: no fetch, no reset.
+        if (last is not null && string.Equals(head, last, StringComparison.Ordinal))
+        {
+            if (cloneHoldsLast)
             {
                 var guarded = await _guard.EvaluateIdentityAsync(SyncGit.Revision.NewSha(last), ct).ConfigureAwait(false);
                 if (Gate(guarded) is { } blocked)
@@ -99,7 +106,7 @@ public sealed class GitSyncFetcher(GitClient client, RepoGuard guard, IMetaStore
             return lateBlocked;
 
         // 5. the proof state, then 6. the reset.
-        var proven = await ProveAsync(last, r, ct).ConfigureAwait(false);
+        var proven = await ProveAsync(cloneHoldsLast ? last : null, r, ct).ConfigureAwait(false);
         if (proven.Failure is not null)
             return proven.Failure;
         var reset = await _client.ResetHardAsync(SyncGit.Revision.NewSha(r), ct).ConfigureAwait(false);
