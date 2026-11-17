@@ -80,6 +80,7 @@ public sealed partial class GitSyncApplier
         var stopped = false;
         var everyIdProcessed = true; // false on a stop or a cancellation
         var blobReadFailed = false;
+        var gitCancelled = false; // a git call that reported the git client's Cancelled kind
         var recordedEveryIssue = true;
 
         for (var i = 0; i < ids.Count; i++)
@@ -133,6 +134,7 @@ public sealed partial class GitSyncApplier
                     if (blob.Failure.Failure == SyncGit.FailureKind.Cancelled || cancellationToken.IsCancellationRequested)
                     {
                         everyIdProcessed = false;
+                        gitCancelled = true;
                         break;
                     }
                     blobReadFailed = true;
@@ -191,7 +193,7 @@ public sealed partial class GitSyncApplier
             everyIdProcessed = false;
 
         // Rejections are recorded whatever happened to the entries; an identical row is not rewritten.
-        var cancelled = cancellationToken.IsCancellationRequested;
+        var cancelled = cancellationToken.IsCancellationRequested || gitCancelled;
         var rejectionsWritten = cancelled || WriteRejections(rejectedNow, rejections); // a cancelled pull writes no issue
         if (!rejectionsWritten)
         {

@@ -428,11 +428,13 @@ public sealed class GitSyncApplierPullTests : IDisposable
     }
 
     [GitFact]
-    public async Task AGitCancelledOnABlobRead_IsNotAFailure_AndHoldsL()
+    public async Task AGitCancelledOnABlobRead_IsNotAFailure_AndHoldsL_AndWritesNoIssue()
     {
         PushRecords(Rec(A));
+        _rig.PutRaw($"memories/{Linked[..2]}/{Linked}.json", Encoding.UTF8.GetBytes("../x"), "120000"); // a rejection the pull would normally record
+        _rig.Commit("a rejected path next to it");
         var blob = BlobOf($"memories/{A[..2]}/{A}.json");
-        _rig.Fault = c => c is { } && c.IsCatBlob && ((SyncGit.GitCommand.CatBlob)c).sha == blob
+        _rig.Fault = c => c.IsCatBlob && ((SyncGit.GitCommand.CatBlob)c).sha == blob
             ? FaultingGitProcess.Failure(SyncGit.FailureKind.Cancelled, "cancelled")
             : null;
 
@@ -441,6 +443,7 @@ public sealed class GitSyncApplierPullTests : IDisposable
         Assert.False(summary.Complete);
         Assert.Empty(summary.Failed);
         Assert.Empty(Issues("apply-failed"));
+        Assert.Empty(Issues("rejected-record")); // a cancelled pull writes no issue
         Assert.NotEqual(_rig.Head, Meta(SyncIdentity.MetaKeys.LastSha));
     }
 
@@ -513,6 +516,7 @@ public sealed class GitSyncApplierPullTests : IDisposable
     [GitFact]
     public async Task ACancellationDuringTheLastEntry_MovesNeitherMetaNorTheRef()
     {
+        SeedRejectionRow("memories/zz/gone.json");
         PushRecords(Rec(A));
         using var cts = new CancellationTokenSource();
         _applier.BeforeEntry = _ => cts.Cancel();
@@ -520,6 +524,7 @@ public sealed class GitSyncApplierPullTests : IDisposable
 
         var done = Is<ApplyOutcome.Done>(await _applier.ApplyAsync(fetched.Result, Scan(), cts.Token));
 
+        Assert.Contains(Issues("rejected-record"), r => r.EntryId == "memories/zz/gone.json"); // no sweep after a cancellation
         Assert.Equal(1, done.Summary.Inserted);
         Assert.False(done.Summary.Complete);
         Assert.Null(Meta(SyncIdentity.MetaKeys.LastSha));
