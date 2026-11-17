@@ -27,6 +27,7 @@
     <Compile Include="SyncSettingsGuardTests.fs" />
     <Compile Include="SyncSetupTests.fs" />
     <Compile Include="SyncScanTests.fs" />
+    <Compile Include="SyncApplyTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
