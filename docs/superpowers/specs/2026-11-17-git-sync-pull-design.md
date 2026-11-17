@@ -413,9 +413,10 @@ writing no issue, a busy database stopping the apply, an exhausted clock on `Res
    for another reason), but not after a pull that stopped early.
 8. Given an edit, a pin or a move that lands on an entry after the scan and before its transaction, when the pull runs, then
    that entry is not changed, is listed as deferred, `L` does not advance, and the next scan stamps the edit.
-9. Given a failure injected at each step of an entry's transaction, when the pull runs, then the content row, the vector,
-   the `import_log` row, the entry's row, its earlier listed failure and the clock are exactly as before (the row and
-   problem writes included) as they were once the attempt is rolled back (the check is made at the rollback) and the entry is then listed as failed with its `apply-failed` entry written, or, for a fault at the re-read or at the removal of the earlier `apply-failed` row, as deferred with nothing written.
+9. Given a failure injected at each step of an entry's transaction, when the pull runs, then at the rollback the content row,
+   the vector, the `import_log` row, the entry's row, its earlier `apply-failed` row and the clock are exactly as before
+   (the row and problem writes included); the entry is then listed as failed with its `apply-failed` entry written, or, for
+   a fault at the re-read or at the removal of the earlier `apply-failed` row, as deferred with nothing written.
 10. Given the remote head equals `L` and the clone holds that commit, when the pull runs, then it makes one `ls-remote` call, no fetch and no network call
    otherwise, still decides the visit set from the local clone, and applies an entry whose previous apply failed.
 11. Given no `L`, an `L` that is not an ancestor of the remote head, an answer from git that is neither yes nor no (for
