@@ -151,3 +151,118 @@ let visitSet (v: VisitInput) : string list =
           v.LocalDeletions ]
     |> Set.toList
     |> List.sortWith (fun a b -> String.CompareOrdinal(a, b))
+
+// ---------------------------------------------------------------------------------------------
+// The next row
+
+/// What `planRow` reads of the row as it is now. `State = None`: there is no row for the id.
+type RowBefore =
+    { State: RowState option
+      Pending: GroupStamps
+      /// The raw text of the `pushing_stamps` column (null: NULL).
+      PushingText: string option
+      /// The tier of the row's base record (`None`: no base, or one that cannot be read).
+      BaseTier: Tier option }
+
+/// The columns the scan compares, taken from the entry as it is stored.
+type Comparison =
+    { ContentHash: string
+      TagsHash: string
+      Sticky: bool
+      Tier: Tier }
+
+/// The row's new state, pending stamps, `pushing_stamps` text and comparison columns. The base is not here: the
+/// caller renders it from the decision's `Base` and the record. `Comparison = None`: leave the columns as they are.
+type RowAfter =
+    { State: RowState
+      Pending: GroupStamps
+      PushingText: string option
+      Comparison: Comparison option }
+
+let private warmer (a: Tier) (b: Tier) : bool = tierRank a < tierRank b
+
+/// The row an entry has after the decision was carried out (decision 12.3). `Ok None`: write no row (there is none and
+/// the decision creates none). `issue` issues a stamp above a floor (`None` when the clock range is exhausted, which
+/// is an `Error`). `stored` is the entry as it is stored **after** the store operations; `hadEntry` whether an entry
+/// existed when the decision was made; `colderTier` whether the hot limit stored or moved it to the warm tier.
+let planRow
+    (d: MergeDecision)
+    (before: RowBefore)
+    (theirs: SyncRecord option)
+    (stored: LocalEntry option)
+    (hadEntry: bool)
+    (colderTier: bool)
+    (issue: Stamp option -> Stamp option)
+    : Result<RowAfter option, string> =
+    let createsRow =
+        match d.Entry with
+        | InsertFromRecord
+        | MergeGroups _ -> true
+        | _ -> d.RowState.IsSome
+    if before.State.IsNone && not createsRow then
+        Ok None
+    else
+        let restamp (recordStamp: Stamp option) (current: Stamp option) : Result<Stamp option, string> =
+            match issue (SyncScan.floorStamp recordStamp current) with
+            | Some s -> Ok(Some s)
+            | None -> Error "the clock cannot issue a stamp for this group"
+        let pending : Result<GroupStamps, string> =
+            match d.Entry with
+            | MergeGroups m ->
+                let apply (action: StampAction) (recordStamp: Stamp option) (current: Stamp option) =
+                    match action with
+                    | KeepPending -> Ok current
+                    | ClearPending -> Ok None
+                    | RestampPending -> restamp recordStamp current
+                let c = apply (snd m.Content) (theirs |> Option.map (fun t -> t.ContentStamp)) before.Pending.Content
+                let s = apply (snd m.Sticky) (theirs |> Option.map (fun t -> t.Placement.StickyStamp)) before.Pending.Sticky
+                let t = apply (snd m.Tier) (theirs |> Option.map (fun t -> t.Placement.TierStamp)) before.Pending.Tier
+                match c, s, t with
+                | Ok c, Ok s, Ok t -> Ok { GroupStamps.Content = c; Sticky = s; Tier = t }
+                | Error e, _, _
+                | _, Error e, _
+                | _, _, Error e -> Error e
+            | outcome ->
+                if clearsPending outcome hadEntry then Ok { GroupStamps.Content = None; Sticky = None; Tier = None }
+                else Ok before.Pending
+        match pending with
+        | Error e -> Error e
+        | Ok pending ->
+            // The hot limit stored the entry colder than the decision meant: a pending tier stamp that the stored tier
+            // no longer exceeds the base's for is dropped, as the scan would drop it.
+            let pending =
+                match stored, pending.Tier with
+                | Some l, Some _ when colderTier ->
+                    let baseTier =
+                        match d.Base.Tier, theirs with
+                        | BaseBecomesTheirs, Some t -> Some t.Placement.Tier
+                        | _ -> before.BaseTier
+                    match baseTier with
+                    | Some bt when not (warmer l.Tier bt) -> { pending with Tier = None }
+                    | _ -> pending
+                | _ -> pending
+            let pushingText =
+                let becameContent = d.Base.Content = BaseBecomesTheirs
+                let becameSticky = d.Base.Sticky = BaseBecomesTheirs
+                let becameTier = d.Base.Tier = BaseBecomesTheirs
+                if not (becameContent || becameSticky || becameTier) then before.PushingText
+                else
+                    let current = PushingStamps.decode (defaultArg before.PushingText null)
+                    PushingStamps.encode
+                        { GroupStamps.Content = (if becameContent then None else current.Content)
+                          Sticky = (if becameSticky then None else current.Sticky)
+                          Tier = (if becameTier then None else current.Tier) }
+            let comparison =
+                stored
+                |> Option.map (fun l ->
+                    { ContentHash = SyncScan.contentHash l.Content
+                      TagsHash = SyncScan.tagsHash l.Tags
+                      Sticky = l.Sticky
+                      Tier = l.Tier })
+            Ok(
+                Some
+                    { State = defaultArg d.RowState (defaultArg before.State Active)
+                      Pending = pending
+                      PushingText = pushingText
+                      Comparison = comparison }
+            )

@@ -339,3 +339,129 @@ let totalityTests =
                 let r = visitSet v
                 r = (r |> List.distinct |> List.sortWith (fun a b -> System.String.CompareOrdinal(a, b)))))
     ]
+
+// ---- planRow ----
+
+let private rowBefore : RowBefore =
+    { State = Some Active
+      Pending = noStamps
+      PushingText = None
+      BaseTier = Some Warm }
+
+let private issuer (n: int) : Stamp option -> Stamp option =
+    fun floor ->
+        match floor with
+        | Some f -> Some { f with TimeMs = f.TimeMs + 1L; Counter = 0 }
+        | None -> Some(st n)
+
+let private never : Stamp option -> Stamp option = fun _ -> None
+
+let private plan d before theirs stored hadEntry colder issue =
+    match planRow d before theirs stored hadEntry colder issue with
+    | Ok(Some r) -> r
+    | other -> failwithf "expected a row, got %A" other
+
+let private theirsRec = record "t" Warm false
+
+[<Tests>]
+let planRowTests =
+    testList "SyncApply.planRow (decision 12.3)" [
+        testCase "KeepPending keeps the group's pending stamp, ClearPending drops it" <| fun () ->
+            let before = { rowBefore with Pending = { GroupStamps.Content = Some(st 5); Sticky = Some(st 5); Tier = Some(st 5) } }
+            let d = mergeWith (fun m -> { m with Content = (LeaveContent, KeepPending); Sticky = (LeaveSticky, ClearPending); Tier = (None, KeepPending) })
+            let r = plan d before (Some theirsRec) (Some(local "a" Warm false)) true false (issuer 9)
+            Expect.equal r.Pending { GroupStamps.Content = Some(st 5); Sticky = None; Tier = Some(st 5) } "per group"
+
+        testCase "RestampPending issues above the greater of the record's group stamp and the pending stamp" <| fun () ->
+            let seen = ResizeArray<Stamp option>()
+            let issue floor =
+                seen.Add floor
+                Some(st 20)
+            let before = { rowBefore with Pending = { noStamps with Content = Some(st 7); Tier = Some(st 0) } }
+            let d = mergeWith (fun m -> { m with Content = (LeaveContent, RestampPending); Tier = (None, RestampPending) })
+            let r = plan d before (Some theirsRec) (Some(local "a" Warm false)) true false issue
+            Expect.equal (List.ofSeq seen) [ Some(st 7); Some(st 1) ] "content floor is the pending stamp (7 > 1), tier floor the record's (1 > 0)"
+            Expect.equal r.Pending { noStamps with Content = Some(st 20); Tier = Some(st 20) } "issued stamps"
+
+        testCase "a clock that cannot issue is an Error" <| fun () ->
+            let d = mergeWith (fun m -> { m with Sticky = (LeaveSticky, RestampPending) })
+            match planRow d rowBefore (Some theirsRec) (Some(local "a" Warm false)) true false never with
+            | Error _ -> ()
+            | other -> failtestf "expected an error, got %A" other
+
+        testCase "outcomes that clear pending stamps: insert, DropRow and Ignore with no entry; keep: LeaveEntry, Defer" <| fun () ->
+            let before = { rowBefore with Pending = { GroupStamps.Content = Some(st 5); Sticky = Some(st 5); Tier = Some(st 5) } }
+            let pendingAfter e hadEntry = (plan { plain with Entry = e } before None None hadEntry false (issuer 9)).Pending
+            Expect.equal (pendingAfter InsertFromRecord false) noStamps "insert"
+            Expect.equal (pendingAfter Ignore false) noStamps "ignore, no entry"
+            Expect.equal (pendingAfter DropRow false) noStamps "drop"
+            Expect.equal (pendingAfter LeaveEntry true) before.Pending "leave"
+            Expect.equal (pendingAfter Defer true) before.Pending "defer"
+
+        testCase "Ok None: no row exists and the decision creates none" <| fun () ->
+            let noRow = { rowBefore with State = None }
+            for e in [ Ignore; LeaveEntry; Defer; DropRow ] do
+                Expect.equal (planRow { plain with Entry = e } noRow None (Some(local "a" Warm false)) true false (issuer 9)) (Ok None) (sprintf "%A" e)
+            Expect.isSome (match planRow { plain with Entry = InsertFromRecord; RowState = Some Active } noRow (Some theirsRec) None false false (issuer 9) with Ok r -> r | _ -> None) "insert makes a row"
+            Expect.isSome (match planRow (mergeWith id) noRow (Some theirsRec) (Some(local "a" Warm false)) true false (issuer 9) with Ok r -> r | _ -> None) "a merge makes a row"
+            Expect.isSome (match planRow { plain with Entry = Ignore; RowState = Some Left } noRow None None false false (issuer 9) with Ok r -> r | _ -> None) "a decision that names a row state makes a row"
+
+        testCase "the state: Active for a new row, the row's own, and the decision's wins" <| fun () ->
+            let noRow = { rowBefore with State = None }
+            Expect.equal (plan { plain with Entry = InsertFromRecord } noRow (Some theirsRec) None false false (issuer 9)).State Active "new"
+            Expect.equal (plan { plain with Entry = LeaveEntry } { rowBefore with State = Some Left } None None true false (issuer 9)).State Left "kept"
+            Expect.equal (plan { plain with Entry = Ignore; RowState = Some Active } { rowBefore with State = Some Left } None None false false (issuer 9)).State Active "decision wins"
+
+        testCase "the comparison columns come from the stored entry; none leaves them" <| fun () ->
+            let l = { local "a" Hot false with Tags = [ "x" ] }
+            let r = plan (mergeWith id) rowBefore (Some theirsRec) (Some l) true false (issuer 9)
+            Expect.equal r.Comparison (Some { ContentHash = SyncScan.contentHash l.Content; TagsHash = SyncScan.tagsHash l.Tags; Sticky = false; Tier = Hot }) "from the stored entry"
+            Expect.isNone (plan { plain with Entry = Ignore } rowBefore None None false false (issuer 9)).Comparison "no entry"
+
+        testCase "pushing_stamps: unchanged when no base became theirs, a group's key removed when it did, NULL when none is left" <| fun () ->
+            let text = PushingStamps.encode { GroupStamps.Content = Some(st 1); Sticky = Some(st 2); Tier = None }
+            let before = { rowBefore with PushingText = text }
+            let withBase b = { mergeWith id with Base = b }
+            let after b = (plan (withBase b) before (Some theirsRec) (Some(local "a" Warm false)) true false (issuer 9)).PushingText
+            Expect.equal (after keepAll) text "unchanged"
+            Expect.equal (after { keepAll with Content = BaseBecomesTheirs }) (PushingStamps.encode { noStamps with Sticky = Some(st 2) }) "content removed"
+            Expect.isNone (after { keepAll with Content = BaseBecomesTheirs; Sticky = BaseBecomesTheirs }) "none left"
+            Expect.equal (after { keepAll with Tags = BaseBecomesTheirs }) text "tags carry no stamp"
+
+        testCase "unreadable pushing text is dropped only when a group is removed" <| fun () ->
+            let before = { rowBefore with PushingText = Some "garbage" }
+            let d b = { mergeWith id with Base = b }
+            Expect.equal (plan (d keepAll) before (Some theirsRec) None true false (issuer 9)).PushingText (Some "garbage") "kept"
+            Expect.isNone (plan (d { keepAll with Tier = BaseBecomesTheirs }) before (Some theirsRec) None true false (issuer 9)).PushingText "dropped"
+
+        testCase "the hot limit: a pending tier stamp is cleared when the stored tier is not warmer than the base's, kept when warmer or when colderTier is false" <| fun () ->
+            let before = { rowBefore with Pending = { noStamps with Tier = Some(st 5) }; BaseTier = Some Warm }
+            let d = mergeWith (fun m -> { m with Tier = (None, KeepPending) })
+            let tierAfter stored colder = (plan d before (Some theirsRec) (Some stored) true colder (issuer 9)).Pending.Tier
+            Expect.isNone (tierAfter (local "a" Warm false) true) "stored warm = base warm: cleared"
+            Expect.isNone (tierAfter (local "a" Cold false) true) "stored colder than base: cleared"
+            Expect.equal (tierAfter (local "a" Hot false) true) (Some(st 5)) "stored hot is warmer than the base: kept"
+            Expect.equal (tierAfter (local "a" Warm false) false) (Some(st 5)) "not limited: kept"
+
+        testCase "the hot limit uses the record's tier when the tier group's base became the record's" <| fun () ->
+            let before = { rowBefore with Pending = { noStamps with Tier = Some(st 5) }; BaseTier = Some Cold }
+            let d = { mergeWith (fun m -> { m with Tier = (None, KeepPending) }) with Base = { keepAll with Tier = BaseBecomesTheirs } }
+            let r = plan d before (Some(record "t" Hot false)) (Some(local "a" Warm false)) true true (issuer 9)
+            Expect.isNone r.Pending.Tier "the new base is the record's hot tier; the stored warm is not warmer than it, so the stamp is cleared"
+    ]
+
+[<Tests>]
+let planRowTotalityTests =
+    testList "SyncApply.planRow is total" [
+        testPropertyWithConfig
+            { FsCheckConfig.defaultConfig with maxTest = 2000 }
+            "planRow never throws over generated decisions, rows and clocks"
+            (Prop.forAll
+                (Arb.fromGen (Gen.map4 (fun d st hadEntry (colder, clock) -> d, st, hadEntry, colder, clock) genDecision (Gen.elements [ None; Some Active; Some Left ]) (Gen.elements [ true; false ]) (Gen.zip (Gen.elements [ true; false ]) (Gen.elements [ true; false ]))))
+                (fun (d, state, hadEntry, colder, clockWorks) ->
+                    let before = { rowBefore with State = state; PushingText = Some "{}" }
+                    let issue = if clockWorks then issuer 9 else never
+                    planRow d before (Some theirsRec) (Some(local "a" Warm false)) hadEntry colder issue |> ignore
+                    planRow d before None None hadEntry colder issue |> ignore
+                    true))
+    ]
