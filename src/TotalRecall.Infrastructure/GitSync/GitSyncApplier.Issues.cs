@@ -25,8 +25,6 @@ public sealed partial class GitSyncApplier
     /// <summary>Writes the entry's <c>apply-failed</c> row in a transaction of its own (decision 15). A failure to write it is a deferral.</summary>
     private EntryResult RecordFailure(string id, string? blobSha, EntryResult.Failed failed)
     {
-        if (!SyncValidation.isEligibleId(id))
-            return failed;
         try
         {
             using var tx = _store.BeginImmediateTransaction();

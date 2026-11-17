@@ -73,6 +73,9 @@ public sealed partial class GitSyncApplier
     private bool InKnowledge(string id) =>
         new[] { Tier.Hot, Tier.Warm, Tier.Cold }.Any(tier => _store.Get(tier, ContentType.Knowledge, id) is not null);
 
+    private static bool InKnowledge(SqliteStoreTransaction tx, string id) =>
+        new[] { Tier.Hot, Tier.Warm, Tier.Cold }.Any(tier => tx.Get(tier, ContentType.Knowledge, id) is not null);
+
     // ---------------------------------------------------------------------------------------------
     // One entry
 
@@ -119,8 +122,20 @@ public sealed partial class GitSyncApplier
         var local = (read as LocalRead.Present)?.View;
 
         // An id that is a knowledge entry and has no row is never inserted as a memory (decision 7).
-        if (row is null && local is null && InKnowledge(id))
-            return new EntryResult.NoOp();
+        if (row is null && local is null)
+        {
+            bool knowledge;
+            try
+            {
+                knowledge = InKnowledge(id);
+            }
+            catch (Exception ex) when (ex is FormatException or ArgumentException or InvalidCastException)
+            {
+                return new EntryResult.Skipped("the id is a knowledge entry that cannot be read: " + OneLine(ex.Message));
+            }
+            if (knowledge)
+                return new EntryResult.NoOp();
+        }
 
         ParsedRecord? oldBase = null;
         if (row?.BaseJson is { } baseText)
@@ -304,6 +319,8 @@ public sealed partial class GitSyncApplier
         var readNow = LocalEntryReader.Read(t => tx.Get(t, ContentType.Memory, id), () => tx.IsSticky(ContentType.Memory, id));
         if (!Equals(row, rowNow) || !read.Equals(readNow) || !AgreesWithRow(rowNow, readNow))
             return new EntryResult.Deferred("the entry changed since the decision was made", Busy: false);
+        if (plan.Insert && InKnowledge(tx, id))
+            return new EntryResult.Deferred("the id now exists as a knowledge entry", Busy: false);
 
         phase("work");
         var current = (read as LocalRead.Present)?.Tier;

@@ -235,9 +235,133 @@ public sealed class GitSyncApplierEntryTests : IDisposable
         using var limited = new ApplyRig(hotMaxContentChars: 10);
         limited.Scan.AddMemory(Tier.Hot, Id, content: "A text that is longer than ten characters.");
         // a record with the same text and a project: a hot entry that is already long is not demoted by this
-        limited.Apply(ApplyRig.Rec(Id, content: "A text that is longer than ten characters.", tier: Tier.Hot, project: "o/r"));
+        var result = limited.Apply(ApplyRig.Rec(Id, content: "A text that is longer than ten characters.", tier: Tier.Hot, project: "o/r"));
 
+        Assert.IsType<EntryResult.Carried>(result);
+        Assert.Equal("o/r", limited.Entry(Id)!.Row.Project!.Value);
         Assert.Equal(Tier.Hot, limited.Entry(Id)!.Tier);
+    }
+
+    [Fact]
+    public void TheHotLimit_StoresAPromotionOverTheLimitWarm_AndListsItColder()
+    {
+        using var limited = new ApplyRig(hotMaxContentChars: 10);
+        const string text = "A text that is longer than ten characters.";
+        limited.Apply(ApplyRig.Rec(Id, text, tier: Tier.Warm, minute: 10));
+
+        var carried = Is<EntryResult.Carried>(limited.Apply(ApplyRig.Rec(Id, text, tier: Tier.Hot, minute: 10, tierMinute: 20)));
+
+        Assert.True(carried.Colder);
+        Assert.Equal(Tier.Warm, limited.Entry(Id)!.Tier);
+        var scan = limited.RunScan();
+        Assert.Equal(0, scan.Tier);
+    }
+
+    [Fact]
+    public void TheHotLimit_MovesAHotEntryWarm_WhenANewerTextIsOverTheLimit()
+    {
+        using var limited = new ApplyRig(hotMaxContentChars: 10);
+        limited.Apply(ApplyRig.Rec(Id, "short", tier: Tier.Hot, minute: 10));
+
+        var carried = Is<EntryResult.Carried>(limited.Apply(ApplyRig.Rec(Id, "A text that is longer than ten characters.", tier: Tier.Hot, minute: 20)));
+
+        Assert.True(carried.Colder);
+        var found = limited.Entry(Id)!;
+        Assert.Equal(Tier.Warm, found.Tier);
+        Assert.StartsWith("A text", found.Row.Content);
+        Assert.Equal(1, limited.VectorCount(Tier.Warm));
+        Assert.Equal(0, limited.VectorCount(Tier.Hot));
+        var scan = limited.RunScan();
+        Assert.Equal(0, scan.Tier + scan.Content);
+    }
+
+    [Fact]
+    public void TheHotLimit_WithAPromotionAndANewerTextTogether_StoresTheNewTextWarm()
+    {
+        using var limited = new ApplyRig(hotMaxContentChars: 10);
+        limited.Apply(ApplyRig.Rec(Id, "short", tier: Tier.Warm, minute: 10));
+
+        var carried = Is<EntryResult.Carried>(limited.Apply(
+            ApplyRig.Rec(Id, "A text that is longer than ten characters.", tier: Tier.Hot, minute: 20, tierMinute: 20)));
+
+        Assert.True(carried.Colder);
+        var found = limited.Entry(Id)!;
+        Assert.Equal(Tier.Warm, found.Tier);
+        Assert.StartsWith("A text", found.Row.Content);
+        Assert.Equal(1, limited.VectorCount(Tier.Warm));
+    }
+
+    // ---- the clock ----
+
+    /// <summary>A local hot entry and a warm record for it, with no base: the local tier wins and its stamp is issued here.</summary>
+    private void LocalHotEntry() => _rig.Scan.AddMemory(Tier.Hot, Id);
+
+    [Fact]
+    public void ARestamp_OpensATransaction_IssuesAStampFromThePersistedClock_AndTheNextScanIsQuiet()
+    {
+        LocalHotEntry();
+        Assert.Null(_rig.Scan.Meta("git_sync_hlc"));
+
+        var result = _rig.Apply(ApplyRig.Rec(Id, tier: Tier.Warm, minute: 10));
+
+        Assert.IsType<EntryResult.Carried>(result);
+        Assert.Equal(1, _rig.Applier.TransactionCount); // the row differs from none and a stamp is issued
+        var row = _rig.Scan.Rows()[Id];
+        Assert.NotNull(row.TierStamp);
+        Assert.NotNull(_rig.Scan.Meta("git_sync_hlc"));
+        Assert.Equal(Tier.Hot, _rig.Entry(Id)!.Tier);
+        AssertScanQuiet();
+    }
+
+    [Fact]
+    public void ARolledBackRestamp_LeavesTheClockAsItWas()
+    {
+        LocalHotEntry();
+        _rig.Applier.BeforeEntryStep = (_, step) => { if (step == "commit") throw new InvalidOperationException("boom"); };
+        var before = _rig.Full(issues: false);
+
+        Is<EntryResult.Failed>(_rig.Apply(ApplyRig.Rec(Id, tier: Tier.Warm, minute: 10)));
+
+        Assert.Equal(before, _rig.Full(issues: false));
+        Assert.Null(_rig.Scan.Meta("git_sync_hlc"));
+        Assert.Empty(_rig.Scan.Rows());
+    }
+
+    [Fact]
+    public void AStampThatCannotBeIssued_IsTheEntrysFailure_AndNothingChanges()
+    {
+        LocalHotEntry();
+        _rig.Scan.Exec("DELETE FROM _meta WHERE key = 'git_sync_machine'");
+        var before = _rig.Full(issues: false);
+
+        var failed = Is<EntryResult.Failed>(_rig.Apply(ApplyRig.Rec(Id, tier: Tier.Warm, minute: 10)));
+
+        Assert.NotEmpty(failed.Detail);
+        Assert.Equal(before, _rig.Full(issues: false));
+    }
+
+    // ---- defer ----
+
+    [Fact]
+    public void ALeftRow_WithTheMemoryPresent_IsDeferred_AndNothingChanges()
+    {
+        _rig.Apply(ApplyRig.Rec(Id, minute: 10));
+        _rig.Scan.Exec($"UPDATE git_sync_entry SET state = 'left' WHERE entry_id = '{Id}'");
+        var before = _rig.Full();
+
+        var result = _rig.Apply(ApplyRig.Rec(Id, content: "Newer.", minute: 20));
+
+        Assert.IsType<EntryResult.Deferred>(result);
+        Assert.Equal(before, _rig.Full());
+    }
+
+    [Fact]
+    public void AKnowledgeEntryThatAppearsAfterTheCheck_DefersTheInsert()
+    {
+        _rig.Applier.BeforeTransaction = _ => _rig.Scan.Store.Insert(Tier.Warm, ContentType.Knowledge, new TotalRecall.Infrastructure.Storage.InsertEntryOpts(Content: "k", Id: Id));
+
+        Assert.IsType<EntryResult.Deferred>(_rig.Apply(ApplyRig.Rec(Id)));
+        Assert.Null(_rig.Entry(Id));
     }
 
     // ---- local rules ----
@@ -305,30 +429,62 @@ public sealed class GitSyncApplierEntryTests : IDisposable
 
     // ---- postponed ----
 
-    [Fact]
-    public void APostponedEntry_ChangesNothing_AndNeverCallsTheEmbedder_ForEveryReason()
+    private void AssertPostponed(string reason, Func<EntryResult> act)
     {
-        var fresh = new CountingEmbedder { Fails = _ => throw new InvalidOperationException("must not embed") };
-        // a new pin: a record that is pinned and has no entry here is a review request
-        var pinned = ApplyRig.Rec(Id, sticky: true);
         var before = _rig.Full();
+        var calls = _rig.Embedder.Calls;
 
-        var result = Is<EntryResult.Postponed>(_rig.Apply(pinned));
-        Assert.Equal("review", result.Reason);
+        var result = act();
+
+        Assert.Equal(reason, Is<EntryResult.Postponed>(result).Reason);
         Assert.Equal(before, _rig.Full());
-        Assert.Equal(0, _rig.Embedder.Calls);
+        Assert.Equal(calls, _rig.Embedder.Calls);
+    }
 
-        // a local deletion with the record present: the entry is gone, the row is active with a base
+    [Fact]
+    public void APostponedNewPin_ChangesNothing_AndNeverCallsTheEmbedder()
+    {
+        AssertPostponed("review", () => _rig.Apply(ApplyRig.Rec(Id, sticky: true)));
+    }
+
+    [Fact]
+    public void APostponedLocalDeletion_WithTheRecordPresent_ChangesNothing()
+    {
         _rig.Apply(ApplyRig.Rec(Id2, minute: 10));
         _rig.Scan.Store.Delete(Tier.Warm, ContentType.Memory, Id2);
-        var afterDeletion = _rig.Full();
-        var calls = _rig.Embedder.Calls;
-        var deletion = _rig.Apply(ApplyRig.Rec(Id2, minute: 10), proven: true);
-        Assert.IsType<EntryResult.Postponed>(deletion);
-        Assert.Equal("deletion", ((EntryResult.Postponed)deletion).Reason);
-        Assert.Equal(afterDeletion, _rig.Full());
-        Assert.Equal(calls, _rig.Embedder.Calls);
-        Assert.NotNull(fresh);
+
+        AssertPostponed("deletion", () => _rig.Apply(ApplyRig.Rec(Id2, minute: 10), proven: true));
+    }
+
+    [Fact]
+    public void APostponedForgottenRow_ChangesNothing()
+    {
+        // an entry that was scanned (a row with no base), then deleted, while the record is present: the row becomes forgotten
+        _rig.Scan.AddMemory(Tier.Warm, Id);
+        _rig.RunScan();
+        _rig.Scan.Store.Delete(Tier.Warm, ContentType.Memory, Id);
+
+        AssertPostponed("deletion", () => _rig.Apply(ApplyRig.Rec(Id, minute: 10), proven: false));
+    }
+
+    [Fact]
+    public void APostponedRepush_ChangesNothing()
+    {
+        _rig.Apply(ApplyRig.Rec(Id, content: "Newer.", minute: 20));
+
+        // a record older than the base: the base's value is re-published by the push, which a later milestone builds
+        AssertPostponed("repush", () => _rig.Apply(ApplyRig.Rec(Id, content: "Older.", minute: 10)));
+    }
+
+    [Fact]
+    public void APostponedTextConflict_ChangesNothing()
+    {
+        _rig.Now = 1_780_000_000_000L;
+        _rig.Apply(ApplyRig.Rec(Id, minute: 10));
+        _rig.Scan.Store.Update(Tier.Warm, ContentType.Memory, Id, new TotalRecall.Infrastructure.Storage.UpdateEntryOpts { Content = "Local edit." });
+        _rig.RunScan();
+
+        AssertPostponed("review", () => _rig.Apply(ApplyRig.Rec(Id, content: "Their edit.", minute: 20)));
     }
 
     [Fact]
