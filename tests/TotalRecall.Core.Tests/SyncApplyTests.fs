@@ -106,6 +106,13 @@ let postponementTests =
             Expect.isTrue (isNone (postponement m)) "content, tags, unpin and promotion"
     ]
 
+[<Tests>]
+let reasonNameTests =
+    testList "SyncApply.reasonName" [
+        testCase "the words are deletion, review and repush" <| fun () ->
+            Expect.equal [ reasonName Deletion; reasonName Review; reasonName Repush ] [ "deletion"; "review"; "repush" ] "words"
+    ]
+
 // ---- pushing_stamps ----
 
 let private text (s: Stamp) = Stamp.format s
@@ -205,6 +212,11 @@ let hotLimitTests =
         testCase "promotion and text change together demote" <| fun () ->
             let both = mergeWith (fun m -> { m with Content = (TakeTheirs, ClearPending); Tier = (Some Hot, ClearPending) })
             Expect.isTrue (demotesToWarm 10 both (record long Hot false) (Some(local "short" Warm false))) "both"
+
+        testCase "a limit of 0 or less is no limit" <| fun () ->
+            let ins = { plain with Entry = InsertFromRecord }
+            Expect.isFalse (demotesToWarm 0 ins (record long Hot false) None) "zero"
+            Expect.isFalse (demotesToWarm -1 ins (record long Hot false) None) "negative"
 
         testCase "other outcomes never demote" <| fun () ->
             for e in [ LeaveEntry; Ignore; DropRow; Defer ] do
@@ -331,6 +343,24 @@ let totalityTests =
                 demotesToWarm 10 d (record long Hot false) (Some(local "short" Warm false)) |> ignore
                 demotesToWarm 10 d (record long Hot false) None |> ignore
                 true))
+
+        testPropertyWithConfig
+            { FsCheckConfig.defaultConfig with maxTest = 2000 }
+            "a decision that is not postponed has no review, note, deletion outcome, forgotten state or repush flag"
+            (Prop.forAll (Arb.fromGen genDecision) (fun d ->
+                match postponement d with
+                | Some _ -> true
+                | None ->
+                    let repush =
+                        match d.Entry with
+                        | MergeGroups m -> m.Repush.Content || m.Repush.Sticky || m.Repush.Tier
+                        | _ -> false
+                    let deletion =
+                        match d.Entry with
+                        | DeleteEntry | HoldDeletion _ | PushDeletion -> true
+                        | _ -> false
+                    d.Reviews.IsEmpty && d.Notes.IsEmpty && not deletion && not repush
+                    && not d.CloseHeldDelete && not d.FreshContentStamp && d.RowState <> Some Forgotten))
 
         testPropertyWithConfig
             { FsCheckConfig.defaultConfig with maxTest = 2000 }

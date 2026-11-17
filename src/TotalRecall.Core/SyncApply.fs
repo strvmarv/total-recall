@@ -102,10 +102,12 @@ let rejectionKey (path: string) : string = SyncValidation.sanitizeText path
 /// (an insert, a promotion into hot, or the record's different text on an entry that is or becomes hot). A sticky
 /// result is exempt. The caller then stores or moves the entry to the warm tier.
 let demotesToWarm (maxChars: int) (d: MergeDecision) (theirs: SyncRecord) (local: LocalEntry option) : bool =
-    let overLimit (text: string) = text.Length > maxChars
+    // A limit of 0 or less means no limit (as `session_end` and `session_start` treat it).
+    let overLimit (text: string) = maxChars > 0 && text.Length > maxChars
     match d.Entry with
     | InsertFromRecord ->
-        theirs.Placement.Tier = Hot && not theirs.Placement.Sticky && overLimit theirs.Content
+        // The entry is inserted non-sticky whatever the record says (decision 9).
+        theirs.Placement.Tier = Hot && overLimit theirs.Content
     | MergeGroups m ->
         match local with
         | None -> false
@@ -132,7 +134,8 @@ type VisitInput =
       NoBaseRows: Set<string>
       /// Ids with an open `apply-failed` issue.
       ApplyFailed: Set<string>
-      /// Accepted ids whose path key has an open `rejected-record` issue.
+      /// Accepted ids whose path key has an open `rejected-record` issue (a path the listing rejects is re-judged by the
+      /// caller from the listing every pull and is not in this set).
       Revisit: Set<string>
       /// `active` rows with a base.
       ActiveWithBase: Set<string>
