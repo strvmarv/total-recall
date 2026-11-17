@@ -149,6 +149,29 @@ public sealed class GitSyncRowsTests : IDisposable
         Assert.Empty(GitSyncRows.ReadAll(_conn));
     }
 
+    [Fact]
+    public void Read_ReturnsOneRowOrNull()
+    {
+        GitSyncRows.Write(_conn, Full("3f9c2a7e"));
+
+        Assert.Equal(Full("3f9c2a7e"), GitSyncRows.Read(_conn, "3f9c2a7e"));
+        Assert.Null(GitSyncRows.Read(_conn, "aaaa1111"));
+    }
+
+    [Fact]
+    public void Delete_RemovesOnlyThatRow_AndAMissingIdIsANoOp()
+    {
+        GitSyncRows.Write(_conn, Full("3f9c2a7e"));
+        GitSyncRows.Write(_conn, Empty("aaaa1111", SyncMerge.RowState.Left));
+
+        GitSyncRows.Delete(_conn, "3f9c2a7e");
+        GitSyncRows.Delete(_conn, "does-not-exist");
+
+        var rows = GitSyncRows.ReadAll(_conn);
+        Assert.Single(rows);
+        Assert.True(rows.ContainsKey("aaaa1111"));
+    }
+
     private void Exec(string sql)
     {
         using var cmd = _conn.CreateCommand();

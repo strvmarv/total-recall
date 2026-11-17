@@ -185,6 +185,18 @@ public sealed record UpdateEntryOpts
     /// store throws <see cref="NotSupportedException"/> when it is set.
     /// </summary>
     public EntryType? EntryType { get; init; }
+    /// <summary>
+    /// New source tool. Honored by <see cref="SqliteStore"/>; the Postgres
+    /// store throws <see cref="NotSupportedException"/> when it is set (git sync).
+    /// </summary>
+    public SourceTool? SourceTool { get; init; }
+    /// <summary>When true the source tool is cleared (written as NULL); wins over <see cref="SourceTool"/>.</summary>
+    public bool ClearSourceTool { get; init; }
+    /// <summary>
+    /// New creation time (unix milliseconds). Honored by <see cref="SqliteStore"/>; the
+    /// Postgres store throws <see cref="NotSupportedException"/> when it is set (git sync).
+    /// </summary>
+    public long? CreatedAt { get; init; }
 }
 
 /// <summary>

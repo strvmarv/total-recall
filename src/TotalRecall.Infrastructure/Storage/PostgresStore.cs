@@ -210,6 +210,9 @@ VALUES
         if (opts.Scope is not null || opts.EntryType is not null)
             throw new NotSupportedException(
                 "Scope and EntryType updates are not supported by the Postgres store");
+        if (opts.SourceTool is not null || opts.ClearSourceTool || opts.CreatedAt is not null)
+            throw new NotSupportedException(
+                "SourceTool and CreatedAt updates are not supported by the Postgres store");
         var table = TableName(type);
         var tierStr = TierString(tier);
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();

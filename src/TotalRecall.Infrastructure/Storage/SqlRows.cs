@@ -128,6 +128,20 @@ VALUES
             setClauses.Add("entry_type = $entry_type");
             cmd.Parameters.AddWithValue("$entry_type", EntryTypeMapping.ToDbValue(opts.EntryType));
         }
+        if (opts.ClearSourceTool)
+        {
+            setClauses.Add("source_tool = NULL");
+        }
+        else if (opts.SourceTool is not null)
+        {
+            setClauses.Add("source_tool = $source_tool");
+            cmd.Parameters.AddWithValue("$source_tool", SourceToolMapping.ToDbValue(opts.SourceTool));
+        }
+        if (opts.CreatedAt.HasValue)
+        {
+            setClauses.Add("created_at = $created_at");
+            cmd.Parameters.AddWithValue("$created_at", opts.CreatedAt.Value);
+        }
         if (opts.Touch)
         {
             setClauses.Add("access_count = access_count + 1");
