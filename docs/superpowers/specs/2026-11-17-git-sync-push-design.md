@@ -41,7 +41,7 @@ Left to later milestones and **not** built here:
 
 ## What exists and what is new
 
-Built already: the git client (`reset --hard`, `clean -fd`, `rev-parse`, `ls-tree`, `cat-file`, `add -- memories`,
+Built already: the git client (`reset --hard`, `clean -fd`, `rev-parse`, `ls-tree`, `cat-file`, `add -A -f -- memories` (`StageAsync`),
 `diff --cached --quiet`, `commit` as `total-recall <noreply@total-recall.local>`, `push HEAD:<branch>` with no force, a
 non-fast-forward as its own failure kind, the protective ref), `RecordPatcher` and `RecordWriter` (the canonical bytes of a
 patched or new record), `SyncValidation.checkWritable` (the size and tag limits), the record reader and `PullTree` (the
@@ -143,7 +143,7 @@ transaction. The new pieces:
    candidates; and every `active` row whose `blocked_reason` is one of these names is looked at **whether or not it is a
    candidate**: when it has no pending group left (the entry went back to its base), or its record now passes, both
    columns are cleared in the plan transaction. The writer never touches `allowed_hash` or a `blocked_reason` of any other
-   name. Marks are written and cleared only for entries that reach the limit check: a candidate left out by decision 5 keeps
+   name. Marks are written and cleared only for entries that reach the limit check: a candidate left out by decision 5, or deferred by decision 9, keeps
    the marks it had.
 
 ### The plan transaction
@@ -166,11 +166,16 @@ transaction. The new pieces:
 10. **Files, commit, push.** For each planned entry the bytes are written to a temporary file in the clone's `.git` directory (never under `memories/`, so
     nothing in the working tree can be staged by accident, and `clean` and ignore rules do not matter) and renamed over
     `memories/<shard>/<id>.json` (the shard directory is created when missing); the clone has `core.symlinks=false` and
-    `* -text`, so the bytes are the writer's. Then `git add -- memories`; **the staged set must equal the written paths** (`diff --cached --name-status -z --no-renames`: each
-    written path `A` or `M`, nothing else, in particular no deletion: `add -A` would stage a tracked path that is missing from the
-    working tree), else the clone is reset and cleaned and the push is `Failed`; **no staged change means no commit and no push**
-    (outcome `NothingToPush`; the unchanged and blocked rows are finalized as decision 12 says, but `_meta.git_sync_last_sha` and the
-    ref are not written, because `L` does not move). Otherwise one commit with the message
+    `* -text` in the root attributes, but a `.gitattributes` the repository tracks below `memories/` (listed as a rejected
+    path, so nothing excludes it) could add an `ident` or an encoding filter, so **the reset step also writes
+    `.git/info/attributes`** (the highest precedence, never touched by `clean`; the clone is created without a template, so the
+    directory is created when missing) with the single line `* -text -eol -ident -filter -working-tree-encoding`, and
+    the bytes are the writer's. Then **only the written paths are staged** (the existing `StageAsync`, which takes the paths
+    instead of `memories`, so a rejected case-variant or a missing tracked file is never swept in); **the staged set must
+    equal the written paths** (`diff --cached --name-status -z --no-renames`: each written path `A` or `M`, nothing else, in
+    particular no deletion), else the clone is reset and cleaned and the push is `Failed`; **no staged change means no commit and no push**
+    (outcome `NothingToPush`; the unchanged entries are finalized as decision 12 says, a blocked entry is not finalized and keeps the marks of the
+    plan transaction, and `_meta.git_sync_last_sha` and the ref are not written, because `L` does not move). Otherwise one commit with the message
     `sync: <label> +<new> ~<changed> -0` and `push HEAD:<branch>` with no force. The label (the OS machine name, so a hostname does appear in the private repository, as the umbrella's `written_by`
     allows) is `Environment.MachineName`
     reduced to `A-Z a-z 0-9 . _ -` and at most 40 characters, else `unknown` (display only: never identity, never in a
@@ -257,8 +262,11 @@ transaction. The new pieces:
 - `Infrastructure.GitSync.GitSyncPusher(GitClient, SqliteStore, branch, machineLabel)`; `PushAsync(apply, scan, ct)`. Test
   seams: `BeforePlanTransaction`, a step hook inside the two transactions (`reread`, `plan`, `pushing`, `block`,
   `finalize`, `meta`, `ref`, `commit`), `BeforePush` (where a test makes the remote move), `TransactionCount`.
-- `SyncGit` / `GitClient`: the existing `Clean` command becomes `clean -fdx` (no caller uses it yet; its golden test changes), and one
-  new local command lists the staged set (`diff --cached --name-status -z --no-renames`).
+- `SyncGit` / `GitClient`: the existing `Clean` command becomes `clean -fdx` and `Stage` takes a list of paths (`add -f --`); one new
+  local command lists the staged set (`diff --cached --name-status -z --no-renames`). No `src` caller uses `Clean` or `Stage` yet, but the
+  tests that pin them change: `SyncGitTests.fs` (the `clean` argument lists, the allowed-dashed list, the list of all commands and the
+  comment on `-f`), the force-flag guard in `GitTestSupport.cs` (`-fdx` is allowed only for `clean`, and `-f` only for `add`/`clean`, and
+  still refused elsewhere) and its own test `GitTestSupportTests.cs`.
 - `GitSyncRows` / the store transaction already take the caller's transaction; the import-log query is one statement on it.
 
 ## Tests
@@ -289,7 +297,7 @@ not moved (the fetch is `NothingNew`, the clone is reset, never published), temp
 fault, a blocked row whose entry went back to its base (its mark cleared), a fabricated `LocalDeletions` entry (nothing written or
 removed), a no-op entry (counted `Unchanged`, finalized, not in the commit message), the mapping of each failure kind to `published`,
 a cancelled token after a successful push (the finalize still runs), a pushed commit with an unconventional but valid record (a
-non-canonical blob is normalised only when it changes), a left-over ignored file in the clone (removed by the reset), a tracked file missing from the working tree before the stage (the staged-set check
+non-canonical blob is normalised only when it changes), a left-over ignored file in the clone (removed by the reset), a repository that tracks `memories/.gitattributes` with `* ident` (text containing `$Id: x$` is committed byte for byte) and a rejected case-variant path beside an accepted record (only the written path is staged), a tracked file missing from the working tree before the stage (the staged-set check
 refuses, `Failed`, reset), `LocalDeletions`, `record-missing` and `not-reconciled` exercised with a hand-built completed `ApplySummary` (a real pull holding a
 deletion is incomplete), and `git grep` shows that nothing outside the pusher and the tests calls it.
 
@@ -304,7 +312,7 @@ deletion is incomplete), and `git grep` shows that nothing outside the pusher an
 - **The finalize leaves the comparison columns alone**, so an edit after the scan is still seen; the umbrella is silent.
 - **A group is not written with a stamp that is not greater than the record's** (defensive), and an entry that changed
   since the scan is deferred (the same guard as the apply's), where the umbrella has the scan alone.
-- **The reset of the clone is by `reset --hard` and `clean -fd`** as the umbrella says; the working tree is never read for
+- **The reset of the clone is `reset --hard` and `clean -fdx`** (the umbrella says `clean -fd`: ignored files must go too, because the stage is forced), with an `info/attributes` file that switches every filter off; the working tree is never read for
   a decision.
 
 ## Acceptance criteria
@@ -320,7 +328,7 @@ The ticket's criteria, numbered here for the tests to name them.
 7. Given a memory with an open apply failure or skip, an id the scan skipped, or an id that a rejected repository path names, when the push runs, then nothing is written for it and it is listed with its reason.
 8. Given a memory with no last synced version while the repository holds its record, one with a last synced version while the repository has no path for it, a record or last synced version that cannot be read, a repository entry that occupies the record's file or folder, or a block that a later part owns, when the push runs, then nothing is written for it, it is listed with its reason and the other memories are pushed; given a memory deleted here, then no file is written or removed for it.
 9. Given a memory edited, pinned or moved after the scan and before the push, or another process holding the database for writing, when the push runs, then that memory is not sent and is listed as changed since the scan (or the push fails as busy with nothing written), the other memories are sent, and the next scan stamps the edit.
-10. Given a failure injected at each step before anything is published (the database updates, each file write, staging, the commit), when the push runs, then nothing is published, every memory and its pending changes, last synced version and last synced commit are exactly as before (only a note of what was about to be sent may remain, and the next push rewrites it), the local copy holds no changed or left-over file, and the failure is reported; a failure inside the database updates leaves nothing at all.
+10. Given a failure injected at each step before anything is published (the database updates, each file write, staging, the commit), when the push runs, then nothing is published, every memory and its pending changes, last synced version and last synced commit are exactly as before (only a note of what was about to be sent and the marks of memories that cannot be sent may remain, and the next push rewrites them), the local copy holds no changed or left-over file, and the failure is reported; a failure inside the database updates leaves nothing at all.
 11. Given a failure after the push was accepted (updating the database or the last synced marker), when the push ends, then it is reported as published, and the next pull recovers every pushed change without loss and without sending it twice.
 12. Given the remote moved after the pull (another machine pushed first), when the push runs, then nothing is published and the outcome says so, every memory keeps its pending changes, the next push starts from a clean copy of the last synced commit, and a pull that follows applies the other machine's change.
 13. Given a push whose answer was lost (the commit reached the remote and the database was never updated), when the next pull runs, then each sent change becomes the last synced version with nothing pending, and a change another machine made in between is merged, not lost.
