@@ -399,6 +399,21 @@ public sealed class GitSyncPusherPlanTests : IDisposable
     }
 
     [GitFact]
+    public async Task TwoStaleGroups_AreListedOnce()
+    {
+        SeedChanged(A);
+        await _rig.PullAsync();
+        _rig.Edit(Tier.Warm, A, new UpdateEntryOpts { Tags = ["x"] });
+        _rig.Now += 1000;
+        _rig.Scan();
+        GitSyncRows.Write(_rig.Pull.Connection, Row(A) with { ContentStamp = St(5), TierStamp = St(5) });
+
+        var (result, _) = await PlanAsync();
+
+        Assert.Equal(new PushItem(A, "stale-stamp"), Assert.Single(Planned(result).Skipped));
+    }
+
+    [GitFact]
     public async Task AnEntryWithNoGroupToWrite_IsUnchanged_AndKeepsTheStalePendingStamp()
     {
         SeedChanged(A);

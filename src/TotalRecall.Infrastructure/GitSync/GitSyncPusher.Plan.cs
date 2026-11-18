@@ -60,7 +60,7 @@ public sealed partial class GitSyncPusher
             return new PlanResult.Stop(Cancelled());
 
         var clearable = prepared.Rows.Values
-            .Where(r => r.State == SyncMerge.RowState.Active && !prepared.Candidates.ContainsKey(r.EntryId)
+            .Where(r => r.State == SyncMerge.RowState.Active && !prepared.Candidates.ContainsKey(r.EntryId) && !prepared.Deleted.Contains(r.EntryId)
                 && r.BlockedReason is { } reason && SyncPush.isWriterReason(reason))
             .Select(r => r.EntryId)
             .Order(StringComparer.Ordinal)
@@ -179,7 +179,7 @@ public sealed partial class GitSyncPusher
                 return;
             }
             plan = SyncPush.planChanged(info.Record.Record, info.Record.UnknownSource is not null, local, pending);
-            foreach (var group in plan.Stale)
+            if (!plan.Stale.IsEmpty)
                 skipped.Add(new PushItem(id, "stale-stamp"));
             if (SyncPush.nothingToWrite(plan))
             {
@@ -225,7 +225,7 @@ public sealed partial class GitSyncPusher
 
     private static UnchangedEntry Unchanged(string id, CandidateInfo info, SyncMerge.GroupStamps pushed)
     {
-        var rendered = RecordWriter.Write(info.Record!.Record).Bytes ?? info.RecordBytes!;
+        var rendered = RecordWriter.Write(info.Record!).Bytes ?? info.RecordBytes!;
         var text = StrictUtf8.GetString(rendered);
         return new UnchangedEntry(id, text, pushed);
     }

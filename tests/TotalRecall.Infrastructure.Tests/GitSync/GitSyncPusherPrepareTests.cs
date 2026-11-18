@@ -169,6 +169,19 @@ public sealed class GitSyncPusherPrepareTests : IDisposable
     }
 
     [GitFact]
+    public async Task AMissingClone_IsFailedClone_AndNothingIsCreated()
+    {
+        var head = _rig.Seed();
+        await _rig.PullAsync();
+        GitTestEnvironment.ForceDelete(_rig.Paths.CloneDirectory);
+
+        var failed = Assert.IsType<PushOutcome.Failed>(Stopped(await Prepare(PushRig.Summary(head))));
+
+        Assert.Equal("Clone", failed.Kind);
+        Assert.False(Directory.Exists(_rig.Paths.CloneDirectory));
+    }
+
+    [GitFact]
     public async Task AnUnreadableStore_IsFailedStore()
     {
         var head = _rig.Seed();

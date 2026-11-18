@@ -21,7 +21,8 @@ internal sealed record PushPrepared(
     IReadOnlyDictionary<string, GitSyncRow> Rows,
     IReadOnlyDictionary<string, CandidateInfo> Candidates,
     IReadOnlyDictionary<string, SyncPush.Exclusion> Excluded,
-    IReadOnlyList<string> ListedPaths);
+    IReadOnlyList<string> ListedPaths,
+    IReadOnlySet<string> Deleted);
 
 internal abstract record PrepareResult
 {
@@ -186,7 +187,7 @@ public sealed partial class GitSyncPusher
                 excluded[id] = found.Value;
         }
 
-        return new PrepareResult.Ready(new PushPrepared(apply.Head, view, rows, candidates, excluded, listed));
+        return new PrepareResult.Ready(new PushPrepared(apply.Head, view, rows, candidates, excluded, listed, deleted));
     }
 
     /// <summary>
@@ -195,6 +196,9 @@ public sealed partial class GitSyncPusher
     /// </summary>
     private async Task<PushOutcome?> ResetCloneAsync(string head, CancellationToken ct)
     {
+        var gitDirectory = new DirectoryInfo(Path.Combine(_client.CloneDirectory, ".git"));
+        if (!gitDirectory.Exists || gitDirectory.LinkTarget is not null || new DirectoryInfo(_client.CloneDirectory).LinkTarget is not null)
+            return Fail("Clone", "the clone is missing or is not a plain git directory", SyncPush.Published.No);
         try
         {
             var info = Path.Combine(_client.CloneDirectory, ".git", "info");
