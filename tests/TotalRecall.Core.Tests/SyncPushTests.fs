@@ -100,6 +100,7 @@ let exclusionTests =
             Expect.equal (exclusion g) (Some UnreadableEntry) "unreadable-entry last"
             Expect.isNone (exclusion { g with EntryUnreadable = false }) "none"
             Expect.equal (exclusion { { none with RecordAccepted = false } with PathOccupied = true }) (Some RecordMissing) "record-missing before path-occupied"
+            Expect.equal (exclusion { none with RecordAccepted = false; BaseUnreadable = true }) (Some RecordMissing) "record-missing before unreadable-base"
         testCase "the reason words are the spec's" <| fun () ->
             Expect.equal
                 ([ Issue; RejectedRecord; NotReconciled; RecordMissing; RecordUnreadable; UnreadableBase; PathOccupied; BlockedElsewhere; UnreadableEntry ]
@@ -135,6 +136,7 @@ let pathTests =
         testCase "an empty listing and an ineligible id are false, with no exception" <| fun () ->
             Expect.isFalse (pathOccupied id []) "empty"
             Expect.isFalse (pathOccupied "XYZ" [ "memories/xy/x.json" ]) "ineligible"
+            Expect.isFalse (pathOccupied id [ null; own ]) "a null entry is no collision"
     ]
 
 // ---- block marks ----
@@ -229,6 +231,14 @@ let planTests =
                     { localEntry with Content = { localEntry.Content with Project = Some "q"; Scope = Some "t" } }
                     { noStamps with Content = Some(st 9) }
             Expect.equal (set.Content |> Option.map (fun c -> c.Project, c.Scope)) (Some(Some "q", Some "t")) "set"
+        testCase "the content group carries the source change" <| fun () ->
+            let src (l: LocalEntry) (r: SyncRecord) (unparsed: bool) =
+                (planChanged r unparsed l { noStamps with Content = Some(st 9) }).Content |> Option.map (fun c -> c.Source)
+            let withSource v = { localEntry with Content = { localEntry.Content with Source = v } }
+            Expect.equal (src (withSource (Some Cursor)) baseRecord false) (Some(SetSource Cursor)) "differs"
+            Expect.equal (src (withSource None) baseRecord false) (Some ClearSource) "no local tool"
+            Expect.equal (src (withSource None) baseRecord true) (Some KeepSource) "unparsed text kept"
+            Expect.equal (src (withSource (Some ClaudeCode)) baseRecord false) (Some KeepSource) "same"
         testCase "sticky and tier groups are written with their pending stamps" <| fun () ->
             let p = planChanged baseRecord false { localEntry with Sticky = true; Tier = Hot } { noStamps with Sticky = Some(st 8); Tier = Some(st 7) }
             Expect.equal p.Sticky (Some(st 8)) "sticky"
@@ -281,8 +291,8 @@ let newRecordTests =
             | Ok r ->
                 Expect.equal (r.Project, r.Scope, r.Source, r.Origin) (None, None, None, None) "absent"
             | Error e -> failtest e
-        testCase "a sticky entry is written hot and sticky" <| fun () ->
-            match newRecord "abcdef12" { localEntry with Sticky = true; Tier = Hot } all "box" None with
+        testCase "a sticky entry is written hot and sticky, whatever tier it is stored in" <| fun () ->
+            match newRecord "abcdef12" { localEntry with Sticky = true; Tier = Warm } all "box" None with
             | Ok r -> Expect.equal (r.Placement.Tier, r.Placement.Sticky) (Hot, true) "pin"
             | Error e -> failtest e
         testCase "a missing stamp of any group is missing-stamp" <| fun () ->
@@ -364,7 +374,8 @@ let stagedTests =
         testCase "parseStagedSet refuses malformed output" <| fun () ->
             Expect.isError (parseStagedSet (bytes "A|memories/ab/x.json|M|")) "an odd number of fields"
             Expect.isError (parseStagedSet (bytes "A|")) "one field"
-            Expect.isError (parseStagedSet (bytes "R100|a|b|")) "rename shape"
+            Expect.isError (parseStagedSet (bytes "R100|a|b|")) "rename shape (odd fields)"
+            Expect.isError (parseStagedSet (bytes "R100|a|")) "a multi-letter status"
             Expect.isError (parseStagedSet (bytes "a|memories/ab/x.json|")) "lower-case status"
             Expect.isError (parseStagedSet [| 0xFFuy; 0uy |]) "not UTF-8"
         testCase "stagedSetMatches wants exactly the written paths as additions or modifications" <| fun () ->

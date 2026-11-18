@@ -99,7 +99,7 @@ let pathOccupied (id: string) (listed: string seq) : bool =
         let ic = StringComparison.OrdinalIgnoreCase
         let ord = StringComparison.Ordinal
         let collides (path: string) =
-            if String.Equals(path, record, ord) then false
+            if isNull path || String.Equals(path, record, ord) then false
             else
                 String.Equals(path, record, ic)
                 || String.Equals(path, shardDir, ic)
@@ -317,7 +317,13 @@ let publishedAfterPush (kind: SyncGit.FailureKind) (stderr: string) : Published 
             No
         else
             Unknown
-    | _ -> No
+    | SyncGit.FailureKind.NoGit
+    | SyncGit.FailureKind.GitTooOld
+    | SyncGit.FailureKind.Auth
+    | SyncGit.FailureKind.RemoteNotFound
+    | SyncGit.FailureKind.NonFastForward
+    | SyncGit.FailureKind.RemoteBranchMissing
+    | SyncGit.FailureKind.NotARepository -> No
 
 /// `sync: <label> +<added> ~<changed> -0`: the push never deletes.
 let commitMessage (added: int) (changed: int) (label: string) : string =
