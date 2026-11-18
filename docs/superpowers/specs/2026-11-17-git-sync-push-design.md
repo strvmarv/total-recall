@@ -294,52 +294,22 @@ calls it.
 
 ## Acceptance criteria
 
-1. Given a pull that completed and a memory created on this machine that the repository does not hold, when the push runs,
-   then the repository gains one commit with one record for it (its text, type, tags, source tool, project, scope,
-   creation time, tier, pin state and stamps, the machine's label as writer, and the host import's origin when the memory
-   was imported from a host file and none when it arrived by sync), the memory's sync record then holds that record as its
-   last synced version with nothing pending and no in-flight stamps, and the last synced commit is that commit.
-2. Given a memory whose repository record exists and whose text, tags, pin state or tier changed here, when the push runs,
-   then only the changed groups of the record change (every other field, including fields this version does not know,
-   stays byte-for-byte), the stamps written are the ones the scan issued, and the memory's sync record is updated as in
-   criterion 1.
-3. Given nothing pending, or entries whose patch changes no file, when the push runs, then no commit is made, nothing is
-   pushed, and the last synced commit does not move.
-4. Given a memory whose record would exceed 256 KiB, has more than 64 distinct tags, or has a tag over 128 characters,
-   when the push runs, then no file is written for it, it is listed with its reason and marked blocked, the other
-   memories are pushed, and a later push after the memory is fixed pushes it and clears the mark.
-5. Given a memory with an open apply failure or skip, an id in the scan's skipped list, or an id that a rejected repository path
-   names, when the push runs, then nothing is written for it and it is listed with its reason.
-6. Given a memory with no last synced version while the repository holds its record, a memory with a last synced version while
-    the repository has no path for it, a record or a last synced version that cannot be read, a repository entry that occupies
-    the record's file or shard path, or a block that another part owns, when the push runs, then nothing is written for it, it
-    is listed with its reason, and the other memories are pushed. Given a memory deleted here (a hand-built completed pull that
-    lists one, since a real pull holding a deletion is incomplete), then no file is written or removed for it.
-7. Given a memory edited, pinned or moved after the scan and before the push, or another process holding the database for
-   writing, when the push runs, then that memory is not pushed and is listed as changed since the scan (or the push fails as
-   busy with nothing written), the other memories are pushed, and the next scan stamps the edit.
-8. Given a failure injected at each step before the push command (the plan transaction, each file write, the stage, the commit),
-   when the push runs, then the database rows are exactly as before, the clone holds no changed file and no left-over temporary
-   file, no memory changes, and the failure is reported (as deferred only for a difference found on re-reading); given a failure
-   after the push command succeeded (the finalize, the `_meta` write, the ref write), then it is reported as published and the next
-   pull recovers every pushed group without loss.
-9. Given the remote moved after the pull (another machine pushed first), when the push runs, then nothing is published, the
-   outcome is non-fast-forward, the memories' pending stamps are kept with their in-flight stamps, a following push resets the
-   clone first, a pull that follows applies the other machine's change, and the next push sends the groups again.
-10. Given a push whose response was lost (the commit reached the remote and the finalize never ran), when the next pull runs,
-   then each pushed group's record is adopted as the last synced version, its pending stamp is cleared, and a change another
-   machine made in between is merged, not lost.
-11. Given a push that was cancelled, or a network, authentication, timeout or remote-rejection failure, when the push ends,
-    then the outcome names the failure and nothing in the repository is overwritten, and no problem is listed for a
-    cancellation.
-12. Given a push that succeeds, when it ends, then the last synced commit is written in the database first and the protective
-    marker follows it; given a crash between the two, then the next fetch repairs the marker.
-13. Given a pull that did not complete, or a last synced commit that is not the pull's head, when the push runs, then it reports
-    not ready and changes nothing; given a commit or an untracked file left in the clone by an earlier failed push (also when
-    the remote has not moved since), then the push resets the clone to the last synced commit, never publishes them, and
-    pushes what is pending.
-14. Given a scan run right after a successful push, then it stamps nothing and writes nothing.
-15. Given the existing automated checks, the shim tests, the tool catalog check and the release build, when they run, then
-    they pass and the release build shows no new warning; given the contributor guides (`AGENTS.md` and the two in
-    `src/TotalRecall.Core` and `src/TotalRecall.Infrastructure`), then they describe the new pieces; and nothing outside the
-    push calls it.
+The ticket's criteria, numbered here for the tests to name them.
+
+1. Given a completed pull and a memory created on this machine that the repository does not hold, when the push runs, then the repository gains one commit with one record for it (its text, type, tags, source tool, project, scope, creation time, tier, pin state and the machine's label as writer), and the memory's sync record holds that record as its last synced version with nothing pending.
+2. Given a new memory that was imported from a host file here, when it is pushed, then its record carries the import's origin; given one that arrived by sync, then its record carries none.
+3. Given a memory whose repository record exists and whose text, tags, pin state or tier changed here, when the push runs, then only the changed parts of the record change (every other field, including fields this version does not know, stays byte for byte), and the stamps written are the ones the scan issued.
+4. Given a successful push, when it ends, then the last synced commit is the new commit, and a scan run right after stamps nothing and writes nothing.
+5. Given nothing pending, or changes that alter no file, when the push runs, then no commit is made, nothing is pushed and the last synced commit does not move.
+6. Given a memory whose record would exceed 256 KiB, has more than 64 distinct tags or has a tag over 128 characters, when the push runs, then no file is written for it, it is listed with its reason and marked blocked, the other memories are pushed, and a later push after the memory is fixed (or back to what the repository holds) sends it or clears the mark.
+7. Given a memory with an open apply failure or skip, an id the scan skipped, or an id that a rejected repository path names, when the push runs, then nothing is written for it and it is listed with its reason.
+8. Given a memory with no last synced version while the repository holds its record, one with a last synced version while the repository has no path for it, a record or last synced version that cannot be read, a repository entry that occupies the record's file or folder, or a block that a later part owns, when the push runs, then nothing is written for it, it is listed with its reason and the other memories are pushed; given a memory deleted here, then no file is written or removed for it.
+9. Given a memory edited, pinned or moved after the scan and before the push, or another process holding the database for writing, when the push runs, then that memory is not sent and is listed as changed since the scan (or the push fails as busy with nothing written), the other memories are sent, and the next scan stamps the edit.
+10. Given a failure injected at each step before anything is published (the database updates, each file write, staging, the commit), when the push runs, then every memory's sync state is exactly as before, the local copy holds no changed or left-over file, no memory changes, and the failure is reported.
+11. Given a failure after the push was accepted (updating the database or the last synced marker), when the push ends, then it is reported as published, and the next pull recovers every pushed change without loss and without sending it twice.
+12. Given the remote moved after the pull (another machine pushed first), when the push runs, then nothing is published and the outcome says so, every memory keeps its pending changes, the next push starts from a clean copy of the last synced commit, and a pull that follows applies the other machine's change.
+13. Given a push whose answer was lost (the commit reached the remote and the database was never updated), when the next pull runs, then each sent change becomes the last synced version with nothing pending, and a change another machine made in between is merged, not lost.
+14. Given a cancelled push, or a network, authentication, timeout or remote-rejection failure, when the push ends, then the outcome names the failure and whether the push may have reached the remote, nothing in the repository is overwritten, and no problem is listed for a cancellation.
+15. Given a push that succeeds, when it ends, then the last synced commit and its marker agree, and after a crash between updating the two the next fetch repairs them.
+16. Given a pull that did not complete, or a last synced commit that is not the pull's head, when the push runs, then it reports not ready and changes nothing; given a commit or an untracked file left in the local copy by an earlier failed push (also when the remote has not moved since), then the push resets the copy, never publishes them, and sends what is pending.
+17. Given the existing automated checks, the shim tests, the tool catalog check and the release build, when they run, then they pass and the release build shows no new warning; given the contributor guides (`AGENTS.md` and the two in `src/TotalRecall.Core` and `src/TotalRecall.Infrastructure`), then they describe the new pieces; and nothing outside the push calls it.
