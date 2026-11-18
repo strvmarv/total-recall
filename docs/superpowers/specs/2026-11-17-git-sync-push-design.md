@@ -94,8 +94,8 @@ transaction. The new pieces:
    - `unreadable-base`: the row's `base_json` cannot be read (it is the entry's own failure, never "no base");
    - `path-occupied`: the tree at `L` holds a path that is not exactly this record's own path but is in the way of it: any
      listed path (accepted or rejected) that, **compared without case**, equals the record's path, equals its shard directory or
-     `memories`, starts with the record's path and a `/`, or **has the same leading directories as the record** (`memories`, then
-     `memories/<shard>`) **up to case but not exactly** (a clone on Windows or macOS folds case, so a foreign `memories/AB/x.json`
+     `memories`, starts with the record's path and a `/`, or **has the same leading directories as the record** (the first two segments of the
+     listed path, `memories` then the shard, however deep the path goes) **up to case but not exactly** (a clone on Windows or macOS folds case, so a foreign `memories/AB/x.json`
      or `memories/ab/ABCDEF12.json` would make the file land elsewhere or stage nothing; the rule does not depend
      on the host's file system, so Linux tests run it); a sibling `memories/ab/other.json` with the exact same directories never
      blocks, and the record's own exact path is never a collision. It would fail the write or the stage of every push. (Known residual: the listing is
@@ -266,8 +266,8 @@ transaction. The new pieces:
   `Left of reason | Send of PushPlan`, `groupsToWrite`, the new-record builder, `afterPush` (row from row, the pushed
   stamps and record text), `commitMessage`, `machineLabel`, `blockReasonName`. Pure and total.
 - `Infrastructure.GitSync.GitSyncPusher(GitClient, SqliteStore, branch, machineLabel)`; `PushAsync(apply, scan, ct)`. Test
-  seams: `BeforePlanTransaction`, a step hook inside the two transactions (`reread`, `plan`, `pushing`, `block`,
-  `finalize`, `meta`, `ref`, `commit`), `BeforePush` (where a test makes the remote move), `TransactionCount`.
+  seams: `BeforePlanTransaction`, a step hook inside the two transactions and between the steps (`reread`, `plan`, `pushing`, `block`, `write` (per file,
+  before the rename), `stage` (before each `StagePaths` batch), `commit`, `finalize`, `meta`, `ref`), `BeforePush` (where a test makes the remote move), `TransactionCount`.
 - `SyncGit` / `GitClient`: two new closed local commands next to the existing ones (`Clean` and the `Stage` scopes, which stay as they
   are): `StagePaths` (`add -f -- <paths>`, each path checked to be a record path) and the staged set (`diff --cached --name-status -z
   --no-renames`). They enter the places that enumerate commands: `SyncGitTests.fs` (the argument lists, the allowed-dashed list, the list
