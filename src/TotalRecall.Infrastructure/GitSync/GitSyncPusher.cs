@@ -101,7 +101,31 @@ public sealed partial class GitSyncPusher
         var prepared = await PrepareAsync(apply, scan, cancellationToken).ConfigureAwait(false);
         if (prepared is PrepareResult.Stop stop)
             return stop.Outcome;
-        throw new NotImplementedException("the plan, write and finalize stages arrive in later tasks");
+        var ready = ((PrepareResult.Ready)prepared).Value;
+
+        var planned = Plan(ready, cancellationToken);
+        if (planned is PlanResult.Stop planStop)
+            return planStop.Outcome;
+        var plan = (PlanResult.Planned)planned;
+
+        var written = await WriteAsync(ready.Head, plan, cancellationToken).ConfigureAwait(false);
+        switch (written)
+        {
+            case WriteOutcome.Committed committed:
+            {
+                var failure = await FinalizeAsync(plan, committed.Commit).ConfigureAwait(false);
+                return failure is not null ? failure : new PushOutcome.Pushed(plan.Summary(committed.Commit));
+            }
+            case WriteOutcome.Stop { Outcome: PushOutcome.NothingToPush nothing }:
+            {
+                var failure = await FinalizeAsync(plan, null).ConfigureAwait(false);
+                return failure is not null ? failure : nothing;
+            }
+            case WriteOutcome.Stop stopped:
+                return stopped.Outcome;
+            default:
+                throw new InvalidOperationException("unreachable");
+        }
     }
 
     private static PushOutcome.Failed Fail(string kind, string message, SyncPush.Published published) =>
