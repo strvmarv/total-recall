@@ -53,7 +53,14 @@ internal sealed class PushRig : IDisposable
             Content: content, SourceTool: source, Project: project, Tags: tags, Id: id, Scope: scope,
             EntryType: entryType, CreatedAt: createdAt));
 
-    public void Pin(string id) => Store.SetSticky(ContentType.Memory, id, true);
+    /// <summary>Pins a memory: a warm or cold one is promoted to hot first, as the pin tool does.</summary>
+    public void Pin(string id)
+    {
+        foreach (var tier in new[] { Tier.Warm, Tier.Cold })
+            if (Store.Get(tier, ContentType.Memory, id) is not null)
+                Store.Move(tier, ContentType.Memory, Tier.Hot, ContentType.Memory, id);
+        Store.SetSticky(ContentType.Memory, id, true);
+    }
 
     public void Unpin(string id) => Store.SetSticky(ContentType.Memory, id, false);
 
