@@ -71,8 +71,8 @@ public sealed partial class GitClient
     }
 
     /// <summary>
-    /// Stages exactly these record paths (<c>git add -f -- &lt;paths&gt;</c>: no <c>-A</c>, so a deletion is never staged
-    /// by it). Unlike <see cref="StageAsync"/> every failure is a failure, including exit 128 for a path that does not
+    /// Stages exactly these record paths (<c>git add -f -- &lt;paths&gt;</c>: no <c>-A</c>, so an unnamed deletion is never staged;
+    /// a named one is, and the push's staged-set check refuses it). Unlike <see cref="StageAsync"/> every failure is a failure, including exit 128 for a path that does not
     /// exist. The list must be non-empty and hold only exact record paths, else the call fails before any process starts.
     /// </summary>
     public async Task<GitOutcome<NoValue>> StagePathsAsync(IReadOnlyList<string> paths, CancellationToken cancellationToken = default)

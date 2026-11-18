@@ -212,7 +212,17 @@ let neverForceTests =
                   [ "memories/cd/abcdef12.json" ]
                   [ "memories/ab/abcdef12.json/x" ]
                   [ "memories/ab/abcdef12.json"; "memories/ab" ]
-                  [ "memories/ab/abcdef12.json\u0000" ] ] do
+                  [ "memories/ab/abcdef12.json\u0000" ]
+                  [ "memories\\ab\\abcdef12.json" ]
+                  [ "./memories/ab/abcdef12.json" ]
+                  [ "/memories/ab/abcdef12.json" ]
+                  [ "memories/ab/abcdef12.JSON" ]
+                  [ "memories/AB/ABCDEF12.json" ]
+                  [ "memories/ab/abcdef12.json\n" ]
+                  [ "memories/ab/abcdef12.json " ]
+                  [ "memories/ab/ab" + String.replicate 63 "c" + ".json" ]
+                  [ "memories/ab/ab\u0000cdef12.json" ]
+                  [ null ] ] do
                 Expect.isTrue (isError (built (StagePaths bad))) (sprintf "%A" bad)
             Expect.isFalse (isError (built (StagePaths [ "memories/ab/abcdef12.json" ]))) "one record path"
             Expect.isFalse (isError (built StagedSet)) "staged set"
@@ -363,7 +373,7 @@ let buildTests =
             Expect.isFalse (isError (build { ctx with CloneDir = "/d/repo/" } Clean)) "trailing slash is fine"
 
         testCase "isCloneScoped" <| fun _ ->
-            for c in [ Fetch "main"; ResetHard Head; Clean; Stage Memories; Push "main"; LsRemote(Origin, "main"); AddOrigin "u"; HasStaged; CatBlob sha40 ] do
+            for c in [ Fetch "main"; ResetHard Head; Clean; Stage Memories; StagePaths [ "memories/ab/abcdef12.json" ]; StagedSet; Push "main"; LsRemote(Origin, "main"); AddOrigin "u"; HasStaged; CatBlob sha40 ] do
                 Expect.isTrue (isCloneScoped c) (sprintf "%A" c)
             for c in [ Version; ConfigGetSshCommand; Init("main", "/d/r"); Clone("file:///r", "main", "/d/r"); LsRemote(Url "file:///r", "main") ] do
                 Expect.isFalse (isCloneScoped c) (sprintf "%A" c)

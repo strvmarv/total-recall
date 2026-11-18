@@ -260,7 +260,7 @@ let commandArgs (cmd: GitCommand) : string list =
     // `-f` so that an ignore rule shipped by the remote (a `.gitignore` in the clone) cannot silently leave a new record
     // unstaged; it is the only `-f` besides `clean -fd`, and it never reaches a remote
     | Stage s -> [ "add"; "-A"; "-f"; "--"; stagePath s ]
-    // the same `-f` for the same reason, on the paths the push wrote only: no `-A`, so a deletion is never staged by it
+    // the same `-f` for the same reason, on the paths the push wrote only: no `-A`, so an unnamed deletion is never staged; a named one is, and the push's staged-set check refuses it
     | StagePaths paths -> [ "add"; "-f"; "--" ] @ paths
     | StagedSet -> [ "diff"; "--cached"; "--name-status"; "-z"; "--no-renames" ]
     | HasStaged -> [ "diff"; "--cached"; "--quiet"; "--exit-code" ]

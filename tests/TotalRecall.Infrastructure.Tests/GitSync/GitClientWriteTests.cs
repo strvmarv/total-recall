@@ -264,7 +264,11 @@ public sealed class GitClientWriteTests(RecordingFixture fixture)
         Ok(await rig.Client.InitAsync("main"));
         await CommitFile(rig, RecordPath(IdA), "{\"a\":1}\n");
 
-        Assert.False((await rig.Client.StagePathsAsync([RecordPath(IdB)])).IsOk);   // exit 128: no such path
+        var absent = await rig.Client.StagePathsAsync([RecordPath(IdB)]);   // exit 128: no such path
+        Assert.False(absent.IsOk);
+        Assert.Equal(128, absent.Failure.ExitCode);
+        Assert.False((await rig.Client.StagePathsAsync([RecordPath(IdA)], new CancellationToken(canceled: true))).IsOk);
+        Failed(await rig.Client.StagedSetAsync(new CancellationToken(canceled: true)), SyncGit.FailureKind.Cancelled);
         // a value the closed command refuses is a programming error, as for every other command: it throws before a process starts
         await Assert.ThrowsAsync<ArgumentException>(() => rig.Client.StagePathsAsync([]));
         await Assert.ThrowsAsync<ArgumentException>(() => rig.Client.StagePathsAsync(["memories"]));
