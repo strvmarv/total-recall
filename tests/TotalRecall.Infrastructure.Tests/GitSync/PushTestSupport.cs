@@ -97,6 +97,15 @@ internal sealed class PushRig : IDisposable
     public Task<PushOutcome> Push(ApplySummary apply, ScanSummary scan, CancellationToken ct = default) =>
         Pusher().PushAsync(apply, scan, ct);
 
+    /// <summary>Another machine pushes a commit: the remote moves ahead of the clone.</summary>
+    public string MoveRemote(string path = "other.txt", string text = "another machine")
+    {
+        Pull.PutText(path, text);
+        var head = Pull.Commit("another machine");
+        Pull.Source.PushTo(Remote.Path);
+        return head;
+    }
+
     // ---- looking ----
 
     public string Remote_Head() => Remote.Head();
