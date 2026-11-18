@@ -32,6 +32,9 @@ internal sealed class PullRig : IDisposable
     public GitSyncPaths Paths { get; }
     public RecordingGitProcess Recorder { get; }
     public Func<SyncGit.GitCommand, GitResult?> Fault { get; set; } = _ => null;
+
+    /// <summary>Runs after a command really ran and may replace its result (a lost answer: the push happened, the caller sees a failure).</summary>
+    public Func<SyncGit.GitCommand, GitResult, GitResult> After { get; set; } = (_, r) => r;
     public GitClient Client { get; }
     public HostIdentity Host { get; }
     public RepoGuard Guard { get; private set; }
@@ -43,7 +46,7 @@ internal sealed class PullRig : IDisposable
         Connection = SyncDb.OpenMigrated(DbPath);
         Store = new SqliteStore(Connection);
         Paths = GitSyncPaths.For(DbPath, RemoteText, caseInsensitive: false);
-        Recorder = new RecordingGitProcess(new FaultingGitProcess(new GitProcess(), c => Fault(c)));
+        Recorder = new RecordingGitProcess(new FaultingGitProcess(new AfterGitProcess(new GitProcess(), (c, r) => After(c, r)), c => Fault(c)));
         Client = new GitClient(
             Recorder,
             GitExecutable.TryFind() ?? "git",
@@ -123,4 +126,12 @@ internal sealed class PullRig : IDisposable
         try { GitTestEnvironment.ForceDelete(Root); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         Source.Dispose();
     }
+}
+
+
+/// <summary>Runs the real command, then lets a callback replace the result.</summary>
+internal sealed class AfterGitProcess(IGitProcess inner, Func<SyncGit.GitCommand, GitResult, GitResult> after) : IGitProcess
+{
+    public async Task<GitResult> RunAsync(SyncGit.GitCommand command, GitContext context, GitRunOptions options, CancellationToken cancellationToken) =>
+        after(command, await inner.RunAsync(command, context, options, cancellationToken).ConfigureAwait(false));
 }

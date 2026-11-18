@@ -46,22 +46,9 @@ public sealed partial class GitSyncApplier
     /// <summary>A null array must stay "no vector": the implicit array-to-memory conversion would make it an empty one.</summary>
     private static ReadOnlyMemory<float>? Memory(float[]? vector) => vector is null ? null : new ReadOnlyMemory<float>(vector);
 
-    private static bool IsBusy(SqliteException ex) => ex.SqliteErrorCode is 5 or 6;
+    private static bool IsBusy(SqliteException ex) => SyncSql.IsBusy(ex);
 
-    private static string OneLine(string text)
-    {
-        var sb = new StringBuilder();
-        foreach (var c in text.Trim())
-        {
-            if (sb.Length >= 200)
-                break;
-            sb.Append(char.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.Control || c is '\u2028' or '\u2029' ? ' ' : c);
-        }
-        // never end on half of a surrogate pair
-        if (sb.Length > 0 && char.IsHighSurrogate(sb[^1]))
-            sb.Length--;
-        return sb.ToString();
-    }
+    private static string OneLine(string text) => SyncSql.OneLine(text);
 
     private void Step(string id, string step) => BeforeEntryStep?.Invoke(id, step);
 
@@ -434,17 +421,7 @@ public sealed partial class GitSyncApplier
         }
     }
 
-    /// <summary>The entry as the scan would compare it: every comparison column that is not NULL equals the entry's.</summary>
-    private static bool AgreesWithRow(GitSyncRow? row, LocalRead read)
-    {
-        if (row is null || read is not LocalRead.Present present)
-            return true;
-        var view = present.View;
-        return (row.ScannedContentHash is null || row.ScannedContentHash == SyncScan.contentHash(view.Content))
-            && (row.ScannedTagsHash is null || row.ScannedTagsHash == SyncScan.tagsHash(view.Tags))
-            && (row.LocalSticky is null || row.LocalSticky == view.Sticky)
-            && (row.LocalTier is null || row.LocalTier.Equals(view.Tier));
-    }
+    private static bool AgreesWithRow(GitSyncRow? row, LocalRead read) => LocalEntryReader.AgreesWithRow(row, read);
 
     /// <summary>
     /// A stamp above <paramref name="floor"/> from the persisted clock (read and written inside the entry's transaction),

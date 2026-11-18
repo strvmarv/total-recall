@@ -70,6 +70,27 @@ public sealed partial class GitClient
         return Done(result);
     }
 
+    /// <summary>
+    /// Stages exactly these record paths (<c>git add -f -- &lt;paths&gt;</c>: no <c>-A</c>, so an unnamed deletion is never staged;
+    /// a named one is, and the push's staged-set check refuses it). Unlike <see cref="StageAsync"/> every failure is a failure, including exit 128 for a path that does not
+    /// exist. The list must be non-empty and hold only exact record paths, else the call fails before any process starts.
+    /// </summary>
+    public async Task<GitOutcome<NoValue>> StagePathsAsync(IReadOnlyList<string> paths, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        return Done(await RunAsync(
+            SyncGit.GitCommand.NewStagePaths(ListModule.OfSeq(paths)), _options.LocalTimeout, cancellationToken).ConfigureAwait(false));
+    }
+
+    /// <summary>What the index holds against <c>HEAD</c>: one entry per path, with its status letter (renames are not detected).</summary>
+    public async Task<GitOutcome<IReadOnlyList<SyncPush.StagedEntry>>> StagedSetAsync(CancellationToken cancellationToken = default)
+    {
+        var result = await RunAsync(SyncGit.GitCommand.StagedSet, _options.LocalTimeout, cancellationToken).ConfigureAwait(false);
+        return result.Failure is not null
+            ? GitOutcome<IReadOnlyList<SyncPush.StagedEntry>>.Fail(result)
+            : Parsed(result, SyncPush.parseStagedSet(result.Stdout));
+    }
+
     /// <summary>True when the index differs from <c>HEAD</c>.</summary>
     public async Task<GitOutcome<bool>> HasStagedAsync(CancellationToken cancellationToken = default)
     {

@@ -237,6 +237,59 @@ public sealed class GitClientWriteTests(RecordingFixture fixture)
         Assert.False(File.Exists(Path.Combine(rig.CloneDirectory, "pwned")));
     }
 
+    private const string IdC = "3f9c2a7e-0000-4000-8000-000000000003";
+
+    [GitFact]
+    public async Task StagePaths_StagesExactlyTheNamedPaths_AndStagedSetListsThem()
+    {
+        using var rig = Rig();
+        Ok(await rig.Client.InitAsync("main"));
+        await CommitFile(rig, RecordPath(IdA), "{\"a\":1}\n");
+        Assert.Empty(Ok(await rig.Client.StagedSetAsync()));
+
+        Write(rig, RecordPath(IdA), "{\"a\":2}\n");
+        Write(rig, RecordPath(IdB), "{\"b\":1}\n");
+        Write(rig, RecordPath(IdC), "{\"c\":1}\n"); // untracked and not named: never staged
+        Ok(await rig.Client.StagePathsAsync([RecordPath(IdA), RecordPath(IdB)]));
+
+        var staged = Ok(await rig.Client.StagedSetAsync()).Select(e => (e.Status, e.Path)).OrderBy(e => e.Path, StringComparer.Ordinal).ToList();
+        Assert.Equal([("M", RecordPath(IdA)), ("A", RecordPath(IdB))], staged);
+        Assert.True(Ok(await rig.Client.HasStagedAsync()));
+    }
+
+    [GitFact]
+    public async Task StagePaths_APathThatDoesNotExist_IsAFailure_AndAnEmptyOrForeignListIsRefusedBeforeGitStarts()
+    {
+        using var rig = Rig();
+        Ok(await rig.Client.InitAsync("main"));
+        await CommitFile(rig, RecordPath(IdA), "{\"a\":1}\n");
+
+        var absent = await rig.Client.StagePathsAsync([RecordPath(IdB)]);   // exit 128: no such path
+        Assert.False(absent.IsOk);
+        Assert.Equal(128, absent.Failure.ExitCode);
+        Assert.False((await rig.Client.StagePathsAsync([RecordPath(IdA)], new CancellationToken(canceled: true))).IsOk);
+        Failed(await rig.Client.StagedSetAsync(new CancellationToken(canceled: true)), SyncGit.FailureKind.Cancelled);
+        // a value the closed command refuses is a programming error, as for every other command: it throws before a process starts
+        await Assert.ThrowsAsync<ArgumentException>(() => rig.Client.StagePathsAsync([]));
+        await Assert.ThrowsAsync<ArgumentException>(() => rig.Client.StagePathsAsync(["memories"]));
+        await Assert.ThrowsAsync<ArgumentException>(() => rig.Client.StagePathsAsync(["../outside"]));
+        Assert.Empty(Ok(await rig.Client.StagedSetAsync()));
+    }
+
+    [GitFact]
+    public async Task StagePaths_ADeletedTrackedFileNamedInTheList_IsStagedAsADeletion()
+    {
+        using var rig = Rig();
+        Ok(await rig.Client.InitAsync("main"));
+        await CommitFile(rig, RecordPath(IdA), "{\"a\":1}\n");
+        File.Delete(Path.Combine(rig.CloneDirectory, RecordPath(IdA)));
+
+        Ok(await rig.Client.StagePathsAsync([RecordPath(IdA)]));
+
+        var staged = Ok(await rig.Client.StagedSetAsync());
+        Assert.Equal([("D", RecordPath(IdA))], staged.Select(e => (e.Status, e.Path)).ToList());
+    }
+
     [GitFact]
     public async Task NeverForces_CoversEveryCommandShape()
     {

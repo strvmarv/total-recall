@@ -53,6 +53,10 @@ type GitCommand =
     | LsTreeRoot of Revision
     | CatBlob of sha: string
     | Stage of StageScope
+    /// `add -f -- <paths>`: exact record paths only (the push stages what it wrote, never a directory).
+    | StagePaths of string list
+    /// `diff --cached --name-status -z --no-renames`: what the index holds against `HEAD`.
+    | StagedSet
     | HasStaged
     | Commit of message: string
     | Push of branch: string
@@ -187,7 +191,12 @@ let private validate (ctx: BuildContext) (cmd: GitCommand) : Result<unit, string
     | ConfigGetSshCommand
     | Clean
     | HasStaged
+    | StagedSet
     | Stage _ -> Ok()
+    | StagePaths paths ->
+        if List.isEmpty paths then Error "no paths to stage"
+        elif paths |> List.forall (fun p -> (SyncValidation.idOfPath p).IsSome) then Ok()
+        else Error "not a record path"
     | Init(b, d) -> checkBranch b |> andThen (fun () -> checkDir d)
     | Clone(u, b, d) -> checkUrl ctx.Windows u |> andThen (fun () -> checkBranch b) |> andThen (fun () -> checkDir d)
     | LsRemote(Origin, b) -> checkBranch b
@@ -251,6 +260,9 @@ let commandArgs (cmd: GitCommand) : string list =
     // `-f` so that an ignore rule shipped by the remote (a `.gitignore` in the clone) cannot silently leave a new record
     // unstaged; it is the only `-f` besides `clean -fd`, and it never reaches a remote
     | Stage s -> [ "add"; "-A"; "-f"; "--"; stagePath s ]
+    // the same `-f` for the same reason, on the paths the push wrote only: no `-A`, so an unnamed deletion is never staged; a named one is, and the push's staged-set check refuses it
+    | StagePaths paths -> [ "add"; "-f"; "--" ] @ paths
+    | StagedSet -> [ "diff"; "--cached"; "--name-status"; "-z"; "--no-renames" ]
     | HasStaged -> [ "diff"; "--cached"; "--quiet"; "--exit-code" ]
     | Commit m -> [ "commit"; "--no-verify"; "-m"; m ]
     // exactly this and nothing else: no `+`, no force option, no delete or mirror form

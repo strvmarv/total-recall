@@ -83,5 +83,17 @@ internal static class LocalEntryReader
         return new LocalRead.Present(ToLocalEntry(foundEntry, foundTier, sticky), foundTier);
     }
 
+    /// <summary>The entry as the scan would compare it: every comparison column that is not NULL equals the entry's. A missing row or entry agrees.</summary>
+    public static bool AgreesWithRow(GitSyncRow? row, LocalRead read)
+    {
+        if (row is null || read is not LocalRead.Present present)
+            return true;
+        var view = present.View;
+        return (row.ScannedContentHash is null || row.ScannedContentHash == SyncScan.contentHash(view.Content))
+            && (row.ScannedTagsHash is null || row.ScannedTagsHash == SyncScan.tagsHash(view.Tags))
+            && (row.LocalSticky is null || row.LocalSticky == view.Sticky)
+            && (row.LocalTier is null || row.LocalTier.Equals(view.Tier));
+    }
+
     private static string? OptionOrNull(FSharpOption<string>? o) => o is null ? null : o.Value;
 }

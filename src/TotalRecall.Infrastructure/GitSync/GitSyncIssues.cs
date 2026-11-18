@@ -87,6 +87,27 @@ internal static class GitSyncIssues
 /// <summary><c>_meta</c> access inside a transaction (<c>SqliteStore.GetMeta</c> builds a command with no transaction and throws while one is open).</summary>
 internal static class SyncSql
 {
+    /// <summary>True for SQLITE_BUSY (5) and SQLITE_LOCKED (6): another connection holds the lock.</summary>
+    public static bool IsBusy(SqliteException ex) => ex.SqliteErrorCode is 5 or 6;
+
+    /// <summary>
+    /// One line for a message the user may see or a column holds: control characters, U+2028 and U+2029 become a space,
+    /// at most 200 UTF-16 units, never ending on half of a surrogate pair.
+    /// </summary>
+    public static string OneLine(string text)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var c in text.Trim())
+        {
+            if (sb.Length >= 200)
+                break;
+            sb.Append(char.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.Control || c is '\u2028' or '\u2029' ? ' ' : c);
+        }
+        if (sb.Length > 0 && char.IsHighSurrogate(sb[^1]))
+            sb.Length--;
+        return sb.ToString();
+    }
+
     public static string? GetMeta(MsSqliteConnection conn, string key, SqliteTransaction? tx = null)
     {
         using var cmd = conn.CreateCommand();
