@@ -20,6 +20,7 @@
     <Compile Include="SyncSettingsGuard.fs" />
     <Compile Include="SyncSetup.fs" />
     <Compile Include="SyncScan.fs" />
+    <Compile Include="SyncApply.fs" />
     <Compile Include="Tokenizer.fs" />
     <Compile Include="Decay.fs" />
     <Compile Include="Ranking.fs" />

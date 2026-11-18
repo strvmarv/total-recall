@@ -90,6 +90,22 @@ public sealed class SqliteStore : IStore, IMetaStore, IDisposable
         return new SqliteStoreTransaction(this, _conn, tx);
     }
 
+    /// <summary>
+    /// Like <see cref="BeginTransaction"/>, but the transaction takes the write lock when it begins
+    /// (<c>BEGIN IMMEDIATE</c>): a deferred transaction that read first could not be upgraded after another process
+    /// wrote. A busy database fails here with a <see cref="SqliteException"/> before any statement runs. The pull
+    /// (git sync) uses it for one entry at a time. Same single-open-transaction rule as <see cref="BeginTransaction"/>.
+    /// </summary>
+    public SqliteStoreTransaction BeginImmediateTransaction()
+    {
+        if (_transactionOpen)
+            throw new InvalidOperationException(
+                "A store transaction is already open on this store");
+        var tx = _conn.BeginTransaction(deferred: false);
+        _transactionOpen = true;
+        return new SqliteStoreTransaction(this, _conn, tx);
+    }
+
     internal void EndTransaction() => _transactionOpen = false;
 
     // --- IStore -----------------------------------------------------

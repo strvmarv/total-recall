@@ -39,6 +39,12 @@ public sealed class SqliteStoreTransaction : IDisposable
     private SqliteTransaction Tx =>
         _tx ?? throw new InvalidOperationException("The store transaction is no longer open");
 
+    /// <summary>The connection the transaction runs on, so the sync tables can be read and written inside it.</summary>
+    internal MsSqliteConnection Connection => _conn;
+
+    /// <summary>The open transaction (every command that runs inside it must set <c>Transaction</c> to it).</summary>
+    internal SqliteTransaction Transaction => Tx;
+
     private void Step(string name) => BeforeStep?.Invoke(name);
 
     /// <summary>
@@ -121,6 +127,23 @@ public sealed class SqliteStoreTransaction : IDisposable
         SqlRows.UpdateRow(
             _conn, tx, MigrationRunner.TableName(tier, type), id, opts,
             DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+    }
+
+    /// <summary>
+    /// Replace the vector of an entry: delete the vector row at the entry's rowid and insert
+    /// <paramref name="embedding"/>, so an entry that had none gets one. Throws
+    /// <see cref="InvalidOperationException"/> when the entry does not exist. Step: <c>replace-vec</c>.
+    /// </summary>
+    public void ReplaceEmbedding(
+        Tier tier, ContentType type, string id, ReadOnlyMemory<float> embedding)
+    {
+        var tx = Tx;
+        var table = MigrationRunner.TableName(tier, type);
+        var rowid = SqlRows.RowId(_conn, tx, table, id)
+            ?? throw new InvalidOperationException($"No entry '{id}' in {table}");
+        Step("replace-vec");
+        // InsertWithOrphanCleanup deletes any vector row at this rowid first, so an existing vector is replaced.
+        VecRows.InsertWithOrphanCleanup(_conn, tx, MigrationRunner.VecTableName(tier, type), rowid, embedding);
     }
 
     /// <summary>
