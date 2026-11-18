@@ -159,7 +159,8 @@ different repository, written by nothing yet). New:
    timeout or cancelled failure never is, so a clone is never moved aside because the network was down. Damage is recovered
    as step (e) does and the attempt restarts from the scan; a recovery does not count as an attempt.
 9. **Once per process.** The cycle moves one damaged clone aside per process: the number of damaged clones found in this
-   process is kept (a lost clone and a partial directory of a failed clone are not damage: decision 8). The **second** damaged
+   process is kept (a lost clone and a partial directory of a failed clone are not damage: decision 8). The count is raised only after the damaged clone was moved aside: if `CloneSideline.Move` fails (a locked directory), the
+   cycle ends `Failed(clone, Unexpected, ...)`, nothing is counted and the next cycle tries the move again. The **second** damaged
    clone found in the process, a fresh one or an older one, gives `CloneUnusable` instead of another sideline; it returns `Failed(clone, CloneUnusable, ...)` and **keeps that state**: every later
    `RunAsync` on the instance returns the same `Failed` at once, touching nothing, so a repository that cannot be checked out
    does not fill the disk with sidelined copies. A restart of the process tries again (a `sync join` or `leave` run in the same process does not clear it).
@@ -175,8 +176,8 @@ different repository, written by nothing yet). New:
     characters and U+2028/U+2029 become a space, at most 500 characters; `SyncCycle.errorLine`, pure) and leave `last_ok`;
     `Busy`, `NotJoined` and `Cancelled` write nothing (`Busy` is not this process's error, `NotJoined` has no sync state).
     A failure to write is swallowed: it never changes the outcome and never throws. The cycle writes no other key of its own.
-    `Done` sets `last_ok` first and deletes `last_error` second, and a reader (1b-iii) treats a `last_error` whose time is
-    not later than `last_ok` as cleared, so a failure between the two writes cannot show an old error as current.
+    `Done` deletes `last_error` first and sets `last_ok` second, so a failure between the two writes leaves a cleared error
+    and an older `last_ok`, never an old error shown as current (no reader compares the two times: the clock may step back).
 11. **Cancellation.** `ct` is checked before each step and passed to every part, and again after each part returns
     (decision 5). `OperationCanceledException`, the fetch's `Cancelled` kind, the push's `Failed("Cancelled", ...)`, a
     cancelled lock wait, a cancelled clone and any incomplete or failed apply with the token cancelled all end the cycle
@@ -187,7 +188,8 @@ different repository, written by nothing yet). New:
 12. **Unexpected exceptions.** Anything the parts do not turn into an outcome (an `IOException`, an `InvalidOperationException`,
     a `NotSupportedException` from the lock when file locking is disabled) is caught around each step, logged with
     `ExceptionLogger.LogChain("[total-recall] sync cycle", ex)` (standard error, like every other boundary), and returned as
-    `Failed(<step>, Unexpected, <message>, No)` and recorded as a failure. `OutOfMemoryException` is not caught.
+    `Failed(<step>, Unexpected, <message>, published)` and recorded as a failure, where `published` is `Unknown` for the `push` step (the push command may have
+    reached the remote before the exception) and `No` for every earlier step. `OutOfMemoryException` is not caught.
 
 ## Pure rules (`Core/SyncCycle.fs`)
 
@@ -230,8 +232,8 @@ directory (throws), each early refusal (remote changed, data directory moved or 
 network command recorded, `Refused` recorded as `last_error`), each late refusal (replaced repository at the fetched head,
 newer format, missing branch, a missing branch at clone: `Refused` after the scan, nothing applied or pushed) and the scan's
 own `NotJoined` (a stored remote and repository id with no machine id); a held
-lock (`Busy`, nothing run, nothing written; the same process's second cycle); a stale `index.lock` removed before git
-runs; an incomplete pull (a deletion the pull postpones: `Done`, push not run, `PushSkipped`, `last_ok` written, the
+lock (`Busy`, nothing run, nothing written; the same process's second cycle); a stale `index.lock` removed before the fetch and before any command that writes
+(the guard's read-only local reads may run first); an incomplete pull (a deletion the pull postpones: `Done`, push not run, `PushSkipped`, `last_ok` written, the
 push command never recorded); the push never reached after a refused fetch, a failed fetch and a failed apply; a
 non-fast-forward at the push (a second attempt succeeds: `Attempts = 2`, the remote holds both machines' work) and three
 in a row (`Failed(push, NonFastForward)`, everything pending, the next cycle succeeds); a failure of each kind at each
@@ -243,8 +245,7 @@ it cannot be deleted); a lost clone followed by a damaged one (the damage is the
 corrupt clone (`.git` garbage: renamed to `repo.broken-<utc>`, kept with its content, re-cloned, `SidelinedClone` set);
 a network failure with a sound clone (clone untouched, never moved); the probe cases (no commit; a timed-out or cancelled
 probe is never damage); entry-level apply failures (the cycle still pushes the others and ends `Done`); damage a second time
-in one process (`CloneUnusable`, the later cycle fails at once, takes no lock, reads and writes nothing, and a constructor with
-a different address throws); damage reported by a failing push reset; a cancel before each step and in the middle of the
+in one process (`CloneUnusable`, the later cycle fails at once, takes no lock, reads and writes nothing, and a new instance starts with a clean damage count); damage reported by a failing push reset; a cancel before each step and in the middle of the
 fetch, the apply (an incomplete `Done`, a failed tree read and a failed ref write under a cancelled token: all `Cancelled`) and
 the push (`Cancelled`, nothing recorded, lock released,
 the clone and rows consistent); a cancel after the push command succeeded (`Done`); an exception thrown by a part
@@ -280,8 +281,8 @@ The ticket's criteria, numbered here for the tests to name them.
    when a cycle runs, then nothing is applied or pushed, the result names the reason and it is recorded as the last error.
 5. Given another process holding the sync lock, when a cycle runs, then it reports busy after the configured wait with
    nothing run and nothing recorded; the lock is released on every ending.
-6. Given a stale lock file left in the local repository copy by a killed git, when a cycle runs, then it is removed first and
-   the cycle succeeds.
+6. Given a stale lock file left in the local repository copy by a killed git, when a cycle runs, then it is removed before the fetch
+   and before anything is written, and the cycle succeeds.
 7. Given a pull that is refused, failed or incomplete, when the cycle runs, then no push is attempted; an incomplete pull
    reports success saying the push did not run, and records the last-ok time.
 8. Given the remote branch moving between the pull and the push, when the push is rejected, then the cycle fetches, applies
@@ -293,8 +294,8 @@ The ticket's criteria, numbered here for the tests to name them.
 10. Given a missing local copy of the repository, when a cycle runs, then it is cloned again, nothing is deleted from the
    store, and pending changes are pushed.
 11. Given a local copy that git cannot open as a repository, when a cycle runs, then it is renamed (never deleted) and cloned
-   again, the result says where the old one went, and nothing is deleted from the store; a network failure, or a clone that was
-   interrupted, never causes this.
+   again, the result says where the old one went, and nothing is deleted from the store; a network failure, or a clone that failed,
+   timed out or was cancelled inside a cycle, never causes this.
 12. Given a second damaged copy in the same process, when a cycle runs, then it fails with a clear reason, and every later
     cycle in that process fails at once without touching the disk.
 13. Given a cancelled cycle, when it ends, then it reports that it was cancelled, records nothing, releases the lock and leaves the
