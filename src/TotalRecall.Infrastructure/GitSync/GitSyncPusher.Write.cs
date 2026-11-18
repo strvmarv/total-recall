@@ -26,10 +26,10 @@ public sealed partial class GitSyncPusher
     /// </summary>
     internal async Task<WriteOutcome> WriteAsync(string head, PlanResult.Planned plan, CancellationToken ct)
     {
-        if (plan.Entries.Count == 0)
-            return new WriteOutcome.Stop(new PushOutcome.NothingToPush(plan.Summary(null)));
         if (ct.IsCancellationRequested)
             return new WriteOutcome.Stop(Cancelled());
+        if (plan.Entries.Count == 0)
+            return new WriteOutcome.Stop(new PushOutcome.NothingToPush(plan.Summary(null)));
 
         var clone = _client.CloneDirectory;
         var gitDirectory = Path.Combine(clone, ".git");

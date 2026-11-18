@@ -204,6 +204,18 @@ public sealed partial class GitSyncPusher
             var info = Path.Combine(_client.CloneDirectory, ".git", "info");
             Directory.CreateDirectory(info);
             await File.WriteAllTextAsync(Path.Combine(info, "attributes"), InfoAttributes, new UTF8Encoding(false), ct).ConfigureAwait(false);
+            // a push that was killed between the temporary write and the rename leaves its file behind (best effort)
+            foreach (var stale in Directory.EnumerateFiles(gitDirectory.FullName, "tr-push-*.tmp"))
+            {
+                try
+                {
+                    File.Delete(stale);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // best effort
+                }
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
