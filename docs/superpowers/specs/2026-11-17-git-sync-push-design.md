@@ -66,7 +66,8 @@ transaction. The new pieces:
    after one. **The clone's own state is not a readiness condition**: a failed push leaves its commit in the clone, and the
    fetcher's `NothingNew` path (the remote did not move) never resets it, so a check on the clone's `HEAD` before the reset
    would refuse every later push.
-2. **The clone is reset first**: `reset --hard <apply.Head>` then `clean -fd`, before any read or write, because a commit
+2. **The clone is reset first**: `reset --hard <apply.Head>` then `clean -fdx` (the clone is a cache, so ignored files go too: a `.gitignore` in the
+   repository must not hide a left-over file from the clean while `add -f` would stage it), before any read or write, because a commit
    or a file left behind by an earlier failed or killed push must never be published by accident. Then `rev-parse HEAD`
    must equal `apply.Head`; a failed reset or clean, a commit that the clone does not hold, or a `HEAD` that differs after
    the reset is `Failed`. (Nothing else writes the clone's working tree while this runs: the caller holds the lock.)
@@ -93,8 +94,8 @@ transaction. The new pieces:
    - `record-unreadable`: decision 3;
    - `unreadable-base`: the row's `base_json` cannot be read (it is the entry's own failure, never "no base");
    - `path-occupied`: the tree at `L` holds a non-record entry where the record's file or its shard directory must go (a
-     blob at `memories/<shard>`, a directory at `memories/<shard>/<id>.json`: a rejected path equal to the shard directory
-     or starting with the record's path and a `/`), which would fail the write for every push;
+     blob at `memories` or at `memories/<shard>`, a directory at `memories/<shard>/<id>.json`: any rejected path that is
+     a proper prefix of the record's path, or starts with the record's path and a `/`), which would fail the write for every push;
    - `blocked-elsewhere`: the row has a `blocked_reason` that is not one of the writer's (decision 8), which later
      milestones own;
    - `unreadable-entry`: the entry cannot be mapped, or is gone or is no longer a memory in one tier when the plan
@@ -121,9 +122,12 @@ transaction. The new pieces:
    A group whose pending stamp is **not greater** than the record's stamp for that group is not written and the entry is
    listed as `stale-stamp`, **the entry's other groups are still written** (the scan and the apply floor every stamp above
    the record's, so this is defensive: a stamp must never move backwards in the repository); the stale group stays
-   pending. An entry whose patched bytes **equal the blob bytes read at `L`** is not written and is finalized like a pushed
-   one (decision 12); a blob that is not in the writer's canonical form is normalised by the first patch that changes it
-   (the writer's bytes are the repository's bytes).
+   pending. An entry with **no group to write** (its tags equal the record's, or every pending group is stale) is **unchanged**,
+   whatever the bytes: nothing is written and it is finalized like a pushed one (decision 12). An entry with a written
+   group whose patched bytes **equal the blob bytes read at `L`** is unchanged too. A blob that is not in the writer's
+   canonical form is normalised only by a patch that writes a group (the writer's bytes are the repository's bytes).
+   `PatchFailure.MissingTierStamp` is `missing-stamp` and `PatchFailure.NotEncodable` is the `not-encodable` block; both
+   leave the **whole entry** out (`stale-stamp` is the only reason that leaves out one group and writes the others).
 7. **A new entry** gets a new record built from the entry: id, text, entry type, tags, source tool, `created_at`, project,
    scope (an empty scope is none), placement (the entry's tier, sticky flag and the row's pending tier and sticky
    stamps), the row's pending content stamp, `written_by` (the machine label, decision 10) and **`origin`**: the first
@@ -139,7 +143,8 @@ transaction. The new pieces:
    candidates; and every `active` row whose `blocked_reason` is one of these names is looked at **whether or not it is a
    candidate**: when it has no pending group left (the entry went back to its base), or its record now passes, both
    columns are cleared in the plan transaction. The writer never touches `allowed_hash` or a `blocked_reason` of any other
-   name.
+   name. Marks are written and cleared only for entries that reach the limit check: a candidate left out by decision 5 keeps
+   the marks it had.
 
 ### The plan transaction
 
@@ -161,22 +166,27 @@ transaction. The new pieces:
 10. **Files, commit, push.** For each planned entry the bytes are written to a temporary file in the clone's `.git` directory (never under `memories/`, so
     nothing in the working tree can be staged by accident, and `clean` and ignore rules do not matter) and renamed over
     `memories/<shard>/<id>.json` (the shard directory is created when missing); the clone has `core.symlinks=false` and
-    `* -text`, so the bytes are the writer's. Then `git add -- memories`; **no staged change means no commit and no push**
-    (outcome `NothingToPush`, rows finalized as decision 12 says). Otherwise one commit with the message
+    `* -text`, so the bytes are the writer's. Then `git add -- memories`; **the staged set must equal the written paths** (`diff --cached --name-status -z --no-renames`: each
+    written path `A` or `M`, nothing else, in particular no deletion: `add -A` would stage a tracked path that is missing from the
+    working tree), else the clone is reset and cleaned and the push is `Failed`; **no staged change means no commit and no push**
+    (outcome `NothingToPush`; the unchanged and blocked rows are finalized as decision 12 says, but `_meta.git_sync_last_sha` and the
+    ref are not written, because `L` does not move). Otherwise one commit with the message
     `sync: <label> +<new> ~<changed> -0` and `push HEAD:<branch>` with no force. The label (the OS machine name, so a hostname does appear in the private repository, as the umbrella's `written_by`
     allows) is `Environment.MachineName`
     reduced to `A-Z a-z 0-9 . _ -` and at most 40 characters, else `unknown` (display only: never identity, never in a
     path); the same label is `written_by` of new records. Any failure after the first file was written (a write, the stage,
-    the commit) resets the clone to `L` and cleans it again, removes any temporary file, and is `Failed`.
+    the commit) resets the clone to `L` and cleans it again, removes any temporary file, and is `Failed`; the reset, the clean and the removal run with `CancellationToken.None` (best effort).
 11. **The push result.** Success: decision 12. A non-fast-forward (the remote moved on: another machine pushed first) is
     `NonFastForward`: nothing was published, the rows keep their `pushing_stamps` and pending stamps (harmless: the next
     pull recognises a stamp it can prove it sent, or sees none of them in the repository), and **the caller runs the cycle
     again** (1b-i-4). Any other failure of the push is `Failed(kind, message, published)`, kind being the git client's
     failure kind text, and `published` says whether the commit may have reached the remote: **`Yes` only after the push
     command succeeded** (a later failure of the finalize); **`Unknown`** for `Cancelled`, `TimedOut`, `Network` and
-    `OutputTooLarge` (the command may have completed before the answer was lost); **`No`** for every other kind
-    (`Auth`, `RemoteNotFound`, `NonFastForward`, `Other`, which is where a host's refusal of the content lands, and the
-    local ones). The stamps written in decision 9 are what lets the next pull tell. The clone is left as it is after a
+    `OutputTooLarge` of the push command (it may have completed before the answer was lost), and for `Other` unless the
+    stderr shows the host refused it (`[remote rejected]`, `[rejected]` or `hook declined`); **`No`** for every other kind
+    (`Auth`, `RemoteNotFound`, `RemoteBranchMissing`, `NoGit`, `GitTooOld`, `NotARepository`), for a refusal in `Other`, for
+    anything before the push command started (a cancellation before it included) and for the local steps. (A
+    `NonFastForward` is its own outcome, not a `Failed` kind.) The stamps written in decision 9 are what lets the next pull tell. The clone is left as it is after a
     failed push or finalize (its `HEAD` may be the unpublished or the published commit; decision 2 resets it next time).
 
 ### After a successful push
@@ -208,7 +218,7 @@ transaction. The new pieces:
     cycle reports them.
 14. **Cancellation** stops the push between steps, never inside a transaction: the token being cancelled, an
     `OperationCanceledException` and a git call that fails with the client's `Cancelled` kind all give `Failed("Cancelled")`
-    (`published` per decision 11). No issue is written for a cancellation. After the push command has succeeded the token is
+    (`published` per decision 11). A cancellation is recorded nowhere as a block or an issue. After the push command has succeeded the token is
     no longer consulted (decision 12).
 15. **Crash safety**, step by step: before the plan transaction commits, nothing has changed; after it and before the push,
     only `pushing_stamps` and block marks exist (a retry rewrites them; the clone is reset first); after a push and
@@ -230,7 +240,9 @@ transaction. The new pieces:
 - **1b-i-4 (the cycle)** calls the push only after a **complete** pull in the same cycle and under the lock, runs the cycle
   again after `NonFastForward` (at most three times per tick), records `git_sync_last_ok` and `git_sync_last_error` from the
   outcomes, and reports blocked, deferred and skipped entries. It must not call the push when the pull was `Refused`,
-  `Failed` or incomplete.
+  `Failed` or incomplete, **removes a stale `.git/*.lock` under the held lock** before the cycle (a killed push can leave
+  `index.lock`, which would fail the reset of decision 2 on every push), and is told that **every deletion (local or remote), review and
+  re-push in the pull makes it incomplete, so no push happens on a machine holding one until 1b-ii and 1b-iii**.
 - **1b-ii (deletions)** adds pushing a local deletion (a `LocalDeletions` row), writing back a record whose deletion lost to a
   pending text edit (`base_json` as the starting record), `repush_groups`, excludes an entry with an open `held-delete` item (the umbrella's step 4), and removes the `record-missing` and
   `not-reconciled` exclusions it makes unreachable.
@@ -245,6 +257,8 @@ transaction. The new pieces:
 - `Infrastructure.GitSync.GitSyncPusher(GitClient, SqliteStore, branch, machineLabel)`; `PushAsync(apply, scan, ct)`. Test
   seams: `BeforePlanTransaction`, a step hook inside the two transactions (`reread`, `plan`, `pushing`, `block`,
   `finalize`, `meta`, `ref`, `commit`), `BeforePush` (where a test makes the remote move), `TransactionCount`.
+- `SyncGit` / `GitClient`: the existing `Clean` command becomes `clean -fdx` (no caller uses it yet; its golden test changes), and one
+  new local command lists the staged set (`diff --cached --name-status -z --no-renames`).
 - `GitSyncRows` / the store transaction already take the caller's transaction; the import-log query is one statement on it.
 
 ## Tests
@@ -275,8 +289,9 @@ not moved (the fetch is `NothingNew`, the clone is reset, never published), temp
 fault, a blocked row whose entry went back to its base (its mark cleared), a fabricated `LocalDeletions` entry (nothing written or
 removed), a no-op entry (counted `Unchanged`, finalized, not in the commit message), the mapping of each failure kind to `published`,
 a cancelled token after a successful push (the finalize still runs), a pushed commit with an unconventional but valid record (a
-non-canonical blob is normalised only when it changes), and `git grep` shows that nothing outside the pusher and the tests
-calls it.
+non-canonical blob is normalised only when it changes), a left-over ignored file in the clone (removed by the reset), a tracked file missing from the working tree before the stage (the staged-set check
+refuses, `Failed`, reset), `LocalDeletions`, `record-missing` and `not-reconciled` exercised with a hand-built completed `ApplySummary` (a real pull holding a
+deletion is incomplete), and `git grep` shows that nothing outside the pusher and the tests calls it.
 
 ## Departures from the umbrella design
 
@@ -305,11 +320,11 @@ The ticket's criteria, numbered here for the tests to name them.
 7. Given a memory with an open apply failure or skip, an id the scan skipped, or an id that a rejected repository path names, when the push runs, then nothing is written for it and it is listed with its reason.
 8. Given a memory with no last synced version while the repository holds its record, one with a last synced version while the repository has no path for it, a record or last synced version that cannot be read, a repository entry that occupies the record's file or folder, or a block that a later part owns, when the push runs, then nothing is written for it, it is listed with its reason and the other memories are pushed; given a memory deleted here, then no file is written or removed for it.
 9. Given a memory edited, pinned or moved after the scan and before the push, or another process holding the database for writing, when the push runs, then that memory is not sent and is listed as changed since the scan (or the push fails as busy with nothing written), the other memories are sent, and the next scan stamps the edit.
-10. Given a failure injected at each step before anything is published (the database updates, each file write, staging, the commit), when the push runs, then every memory's sync state is exactly as before, the local copy holds no changed or left-over file, no memory changes, and the failure is reported.
+10. Given a failure injected at each step before anything is published (the database updates, each file write, staging, the commit), when the push runs, then nothing is published, every memory and its pending changes, last synced version and last synced commit are exactly as before (only a note of what was about to be sent may remain, and the next push rewrites it), the local copy holds no changed or left-over file, and the failure is reported; a failure inside the database updates leaves nothing at all.
 11. Given a failure after the push was accepted (updating the database or the last synced marker), when the push ends, then it is reported as published, and the next pull recovers every pushed change without loss and without sending it twice.
 12. Given the remote moved after the pull (another machine pushed first), when the push runs, then nothing is published and the outcome says so, every memory keeps its pending changes, the next push starts from a clean copy of the last synced commit, and a pull that follows applies the other machine's change.
 13. Given a push whose answer was lost (the commit reached the remote and the database was never updated), when the next pull runs, then each sent change becomes the last synced version with nothing pending, and a change another machine made in between is merged, not lost.
-14. Given a cancelled push, or a network, authentication, timeout or remote-rejection failure, when the push ends, then the outcome names the failure and whether the push may have reached the remote, nothing in the repository is overwritten, and no problem is listed for a cancellation.
+14. Given a cancelled push, or a network, authentication, timeout or remote-rejection failure, when the push ends, then the outcome names the failure and whether the push may have reached the remote, nothing in the repository is overwritten, and a cancellation is not recorded as a blocked memory or a problem.
 15. Given a push that succeeds, when it ends, then the last synced commit and its marker agree, and after a crash between updating the two the next fetch repairs them.
 16. Given a pull that did not complete, or a last synced commit that is not the pull's head, when the push runs, then it reports not ready and changes nothing; given a commit or an untracked file left in the local copy by an earlier failed push (also when the remote has not moved since), then the push resets the copy, never publishes them, and sends what is pending.
 17. Given the existing automated checks, the shim tests, the tool catalog check and the release build, when they run, then they pass and the release build shows no new warning; given the contributor guides (`AGENTS.md` and the two in `src/TotalRecall.Core` and `src/TotalRecall.Infrastructure`), then they describe the new pieces; and nothing outside the push calls it.
