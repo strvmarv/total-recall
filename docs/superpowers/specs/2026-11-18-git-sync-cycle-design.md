@@ -36,7 +36,8 @@ Left to later milestones and **not** built here:
 - `sync init` and `sync join` running a first cycle (milestone 4 and the verbs' wiring in 1b-iii).
 - Anything the user sees: no standard output, no standard error text except the exception log line of decision 12.
 - Repairing damage that only the apply's or the push's own reads find (a corrupt object that makes a blob or tree read fail
-  while `git rev-parse HEAD` still works): such a cycle ends `Failed` every time and the damaged copy stays until the owner
+  while `git rev-parse HEAD` still works): a failed tree read ends the cycle `Failed` every time (an unreadable blob is only an
+  entry-level failure, reported in the summary, and the cycle ends `Done`), and the damaged copy stays until the owner
   moves it aside by hand (the manual purge documented in milestone 4). The cycle recovers a copy that git cannot open as a
   repository (decision 8).
 
@@ -65,11 +66,13 @@ different repository, written by nothing yet). New:
    LockWait)`) and two clocks (`Func<DateTimeOffset>` for the recorded times and the sideline name, `Func<long>` in
    milliseconds for the scan and the apply). `Address` must be the remote the guard and the paths were built from: the
    constructor throws `ArgumentException` when it differs from the guard's configured remote (the guard exposes it for this),
-   so the cycle can never clone one repository while the guard checks another. One instance is meant to live as long as
+   so the cycle can never clone one repository while the guard checks another; it also throws when the paths' clone directory
+   is not the client's, and when `Address` is empty (a machine with no `[git_sync]` remote has no cycle to build: the caller
+   reports that itself). One instance is meant to live as long as
    the process (decision 9 keeps a per-process state). `RunAsync(ct)` returns a `CycleOutcome` and never throws for the
    state of the store, the repository, the file system or the network.
 2. **`CycleOutcome`** is one of: `Done(CycleSummary)`; `NotJoined` (this machine has no sync setup to run: the identity
-   check says `NotConfigured` or `NeverJoined`, or the scan finds no valid machine id; **nothing is recorded**, there is
+   check says `NeverJoined`, or the scan finds no valid machine id; **nothing is recorded**, there is
    nothing to report to a user who never turned sync on); `Refused(reason)` (a setup exists but this machine must not sync:
    remote changed, data directory moved or copied, host unverified, repository replaced, newer repository format, no such
    branch; **recorded as the last error**, the person has to act); `Busy` (another process or task holds the lock);
@@ -86,7 +89,9 @@ different repository, written by nothing yet). New:
 3. **Under the lock, in this order**: (a) take the lock, waiting at most `LockWait` (`Busy` when it stays held; a failure to
    take it other than "held" is `Failed(lock, ...)`); (b) the identity half of the guard (`GitSyncFetcher.CheckIdentityAsync`: no network command and no
    write; it may run the read-only local `ls-tree` and `cat-file` the guard uses to read the clone's manifest),
-   `NotJoined` for `NotConfigured` and `NeverJoined`, `Refused` for the other reasons, **before anything is stamped**, because
+   `NotJoined` for `NeverJoined`, `Refused` for the other reasons (`CheckIdentityAsync` returns a typed `IdentityCheck`:
+   `Joined`, `NotJoined(text)` or `Refused(text)`; the fetcher's own first step maps `NotJoined` and `Refused` both to its
+   `Refused`), **before anything is stamped**, because
    a data directory that was copied to another machine must not issue stamps with the first machine's id. The refusals that
    only the fetched manifest or the remote can give (a replaced repository seen at the fetched head, a newer format, a
    missing branch, an unreadable manifest) come later, from the fetch, after the scan; the scan's stamps are local and
@@ -125,7 +130,7 @@ different repository, written by nothing yet). New:
    commit is not the pull's head: not expected) is `Failed(push, NotReady, reason)`. `Failed(kind, message, published)` is
    `Failed(push, kind, message, published)`. `NonFastForward` (another machine pushed first; nothing was published and
    every change is still pending) starts **another attempt from the scan** (decision 4's (d)): **at most three pushes per
-   cycle** (`SyncCycle.nextAfterPush attempt max outcome`, pure); the third rejection ends the cycle
+   cycle** (`SyncCycle.nextAfterPush`, pure); the third rejection ends the cycle
    `Failed(push, NonFastForward, ..., No)` with everything pending, and the next cycle tries again. The lock stays held
    between attempts. A cancellation between attempts is `Cancelled`.
 
@@ -136,8 +141,12 @@ different repository, written by nothing yet). New:
 8. **A missing or damaged clone is replaced, never deleted.** Step (e) checks the clone with the client's sound-clone
    check. Missing: clone the configured address and branch (`CloneAsync`; no sideline, nothing to keep). A directory that is
    not a sound clone: move it aside with `CloneSideline.Move(clone, "broken", now)` (the rename works while the lock, which
-   is outside the clone, is held), then clone. **A clone that failed or was cancelled leaves a partial directory** (the git process tree is killed): the cycle moves it aside at once with `CloneSideline.Move(clone, "partial", now)`
-   (best effort, never cancelled) and this never counts toward decision 9, so a flaky network cannot cause `CloneUnusable`.
+   is outside the clone, is held), then clone. **A clone that failed or was cancelled leaves a partial directory** (the git process tree is killed). It is the product of
+   that clone call alone, started at a path that did not exist or had just been moved aside, and it holds nothing the
+   remote does not, so the cycle deletes it at once (best effort, never cancelled, read-only attributes cleared, only the
+   clone directory this call created). If it cannot be deleted it is moved aside as `CloneSideline.Move(clone, "partial",
+   now)` instead. Either way it never counts toward decision 9, so a flaky network cannot cause `CloneUnusable`, and
+   repeated timeouts leave at most the one directory that could not be deleted.
    A clone that fails because the remote has no such branch (`RemoteBranchMissing`) is `Refused`, like the fetch's missing
    branch. After a fresh clone the cycle goes on to the fetch. The clone is shallow (`--depth=1`), so it holds `L` only when
    `L` equals the remote head, and it has no protective ref, so the apply is **unproven** in both cases: it deletes nothing
@@ -149,8 +158,9 @@ different repository, written by nothing yet). New:
    never damage; a network, authentication,
    timeout or cancelled failure never is, so a clone is never moved aside because the network was down. Damage is recovered
    as step (e) does and the attempt restarts from the scan; a recovery does not count as an attempt.
-9. **Once per process.** The cycle moves one damaged clone aside per process (a partial directory of a failed clone does not
-   count: decision 8). If a clone that **finished** and that it made after a recovery is also found unusable (damage again), it returns `Failed(clone, CloneUnusable, ...)` and **keeps that state**: every later
+9. **Once per process.** The cycle moves one damaged clone aside per process: the number of damaged clones found in this
+   process is kept (a lost clone and a partial directory of a failed clone are not damage: decision 8). The **second** damaged
+   clone found in the process, a fresh one or an older one, gives `CloneUnusable` instead of another sideline; it returns `Failed(clone, CloneUnusable, ...)` and **keeps that state**: every later
    `RunAsync` on the instance returns the same `Failed` at once, touching nothing, so a repository that cannot be checked out
    does not fill the disk with sidelined copies. A restart of the process tries again (a `sync join` or `leave` run in the same process does not clear it).
    A failed clone (network, auth) is a
@@ -181,7 +191,7 @@ different repository, written by nothing yet). New:
 
 ## Pure rules (`Core/SyncCycle.fs`)
 
-`Step` and `stepName`; `maxAttempts = 3`; `nextAfterPush : attempt:int -> PushKind -> Next` (`Finish` for success, `Fail` for a
+`Step` and `stepName`; `maxAttempts = 3`; `PushKind = Pushed | NothingToPush | NotReady | NonFastForward | Failed` and `nextAfterPush : attempt:int -> PushKind -> Next` (`Finish` for success, `Fail` for a
 failure, `Retry` for `NonFastForward` while `attempt < maxAttempts`, else `Fail` with a non-fast-forward failure);
 `pushDecision : fetchWentOn:bool -> applyDone:bool -> complete:bool -> PushGate` (`Run`, or `Skip` with a reason word);
 `cloneDamage : FailureKind -> Probe -> bool` with `Probe = Healthy | NoCommit | Failed of FailureKind` (damage for
@@ -202,8 +212,8 @@ or `OutputTooLarge`; never for any other kind); `okValue : DateTimeOffset -> str
 
 - `Core.SyncCycle` as above. `Infrastructure.GitSync`: `CycleSettings`, `CycleSummary`, `CycleOutcome`, `GitSyncCycle`
   (constructor as decision 1, `RunAsync(CancellationToken)`, internal seams: `OnStep`, `Fault`-style hooks through the
-  injected git process of the tests), and `GitSyncFetcher.CheckIdentityAsync(CancellationToken) : Task<string?>` (the
-  refusal text or null; the fetcher's own first step uses it).
+  injected git process of the tests), and `GitSyncFetcher.CheckIdentityAsync(CancellationToken) : Task<IdentityCheck>` (`Joined`,
+  `NotJoined(text)` or `Refused(text)`; the fetcher's own first step uses it).
 - No schema change, no config key, no command.
 
 ## Tests
@@ -215,8 +225,8 @@ generated input.
 
 Infrastructure (the pull's and the push's rigs: a joined machine, a bare remote, real git, the faulting process):
 a cycle that pushes a new and a changed memory and applies another machine's change in one run (`Done`, `last_ok`, no
-`last_error`, the order of `OnStep`); a cycle with nothing to do (no commit, no push command); never configured and never joined (`NotJoined`, nothing
-recorded, no scan), each early refusal (remote changed, data directory moved or copied, host unverified: no scan, no stamp, no
+`last_error`, the order of `OnStep`); a cycle with nothing to do (no commit, no push command); never joined (`NotJoined`, nothing recorded, no scan), a constructor with no address, a different address or a different clone
+directory (throws), each early refusal (remote changed, data directory moved or copied, host unverified: no scan, no stamp, no
 network command recorded, `Refused` recorded as `last_error`), each late refusal (replaced repository at the fetched head,
 newer format, missing branch, a missing branch at clone: `Refused` after the scan, nothing applied or pushed) and the scan's
 own `NotJoined` (a stored remote and repository id with no machine id); a held
@@ -228,7 +238,8 @@ in a row (`Failed(push, NonFastForward)`, everything pending, the next cycle suc
 step (the right `Failed` step, kind and `published`; `last_error` text; a later `Done` clears it); a failure to record is
 swallowed; a lost clone (directory deleted: re-clone, unproven apply, nothing deleted, push of the pending changes; with the remote head
 equal to `L` and not); a clone killed by a timeout and by a cancel (the partial directory moved aside as `partial`, not
-counted, a later cycle succeeds, and two cancelled clones in a row never give `CloneUnusable`); a
+counted, a later cycle succeeds, and two cancelled clones in a row never give `CloneUnusable`; the partial directory is deleted, and moved aside as `partial` when
+it cannot be deleted); a lost clone followed by a damaged one (the damage is the first counted); a
 corrupt clone (`.git` garbage: renamed to `repo.broken-<utc>`, kept with its content, re-cloned, `SidelinedClone` set);
 a network failure with a sound clone (clone untouched, never moved); the probe cases (no commit; a timed-out or cancelled
 probe is never damage); entry-level apply failures (the cycle still pushes the others and ends `Done`); damage a second time
@@ -261,39 +272,39 @@ The ticket's criteria, numbered here for the tests to name them.
 1. Given a joined machine with a new memory, an edited memory and a repository that another machine also changed, when a
    cycle runs, then it reports success, the other machine's change is in the store, this machine's changes are in the
    repository as one commit, nothing is pending for them, and the last-ok time is recorded.
-2. Given a machine that has no sync setup, when a cycle runs, then it reports not joined, runs nothing and records nothing;
-   given a machine whose remote changed, whose data directory moved or was copied, or whose host cannot be verified, then
-   nothing is stamped or written and no network command runs before the refusal, the result names the reason, and the refusal
-   is recorded as the last error; given a repository that was replaced, a newer repository format or a missing branch (found
-   when the repository is read), then nothing is applied or pushed, the result names the reason and it is recorded as the last
-   error.
-3. Given another process holding the sync lock, when a cycle runs, then it reports busy after the configured wait with
+2. Given a machine that has no sync setup, when a cycle runs, then it reports not joined, runs nothing and records nothing.
+3. Given a machine whose remote changed, whose data directory moved or was copied, or whose host cannot be verified, when a
+   cycle runs, then nothing is stamped, applied or pushed and no network command runs before the refusal, the result names the
+   reason, and the refusal is recorded as the last error.
+4. Given a repository that was replaced, a newer repository format or a missing branch (found when the repository is read),
+   when a cycle runs, then nothing is applied or pushed, the result names the reason and it is recorded as the last error.
+5. Given another process holding the sync lock, when a cycle runs, then it reports busy after the configured wait with
    nothing run and nothing recorded; the lock is released on every ending.
-4. Given a stale lock file left in the local repository copy by a killed git, when a cycle runs, then it is removed first and
+6. Given a stale lock file left in the local repository copy by a killed git, when a cycle runs, then it is removed first and
    the cycle succeeds.
-5. Given a pull that is refused, failed or incomplete, when the cycle runs, then no push is attempted; an incomplete pull
+7. Given a pull that is refused, failed or incomplete, when the cycle runs, then no push is attempted; an incomplete pull
    reports success saying the push did not run, and records the last-ok time.
-6. Given the remote branch moving between the pull and the push, when the push is rejected, then the cycle fetches, applies
+8. Given the remote branch moving between the pull and the push, when the push is rejected, then the cycle fetches, applies
    and pushes again, up to three pushes in all; the third rejection reports a failure with every change still pending, and a later
    cycle succeeds.
-7. Given a failure in any step (network, authentication, a store failure, a push refused by the host), when a cycle ends,
+9. Given a failure in any step (network, authentication, a store failure, a push refused by the host), when a cycle ends,
    then the outcome names the step, the failure and whether the push may have reached the remote, one line is recorded as the
    last error, nothing is left half done, and the next cycle recovers; a success clears the last error.
-8. Given a missing local copy of the repository, when a cycle runs, then it is cloned again, nothing is deleted from the
+10. Given a missing local copy of the repository, when a cycle runs, then it is cloned again, nothing is deleted from the
    store, and pending changes are pushed.
-9. Given a local copy that git cannot open as a repository, when a cycle runs, then it is renamed (never deleted) and cloned
+11. Given a local copy that git cannot open as a repository, when a cycle runs, then it is renamed (never deleted) and cloned
    again, the result says where the old one went, and nothing is deleted from the store; a network failure, or a clone that was
    interrupted, never causes this.
-10. Given a second damaged copy in the same process, when a cycle runs, then it fails with a clear reason, and every later
+12. Given a second damaged copy in the same process, when a cycle runs, then it fails with a clear reason, and every later
     cycle in that process fails at once without touching the disk.
-11. Given a cancelled cycle, when it ends, then it reports that it was cancelled, records nothing, releases the lock and leaves the
+13. Given a cancelled cycle, when it ends, then it reports that it was cancelled, records nothing, releases the lock and leaves the
     store and the local copy consistent; a cancel after the push was accepted still finishes the bookkeeping and reports
     success.
-12. Given an unexpected error inside a step, when the cycle ends, then it returns a failure for that step instead of throwing,
+14. Given an unexpected error inside a step, when the cycle ends, then it returns a failure for that step instead of throwing,
     logs the cause and releases the lock.
-13. Given the existing automated checks, the shim tests, the tool catalog check and the release build, when they run, then
+15. Given the existing automated checks, the shim tests, the tool catalog check and the release build, when they run, then
     they pass and the release build shows no new warning.
-14. Given the contributor guides (`AGENTS.md` and the two in `src/TotalRecall.Core` and `src/TotalRecall.Infrastructure`),
+16. Given the contributor guides (`AGENTS.md` and the two in `src/TotalRecall.Core` and `src/TotalRecall.Infrastructure`),
     when this change is merged, then they describe the new pieces.
-15. Given the whole code base, when it is searched for callers, then nothing outside the cycle and its tests calls the
+17. Given the whole code base, when it is searched for callers, then nothing outside the cycle and its tests calls the
     cycle.
