@@ -93,11 +93,15 @@ transaction. The new pieces:
    - `record-unreadable`: decision 3;
    - `unreadable-base`: the row's `base_json` cannot be read (it is the entry's own failure, never "no base");
    - `path-occupied`: the tree at `L` holds a path that is not exactly this record's own path but is in the way of it: any
-     listed path (accepted or rejected) that equals the record's path, or its shard directory, or `memories`, or starts with the
-     record's path and a `/`, **compared without case** (a clone on Windows or macOS folds case, so a foreign `memories/AB/x.json`
-     or `memories/ab/ABCDEF12.json` would make the file land elsewhere or stage nothing; the rule does not depend on the host's
-     file system, so Linux tests run it), except the record's own exact path; it would fail the write or the stage of every
-     push;
+     listed path (accepted or rejected) that, **compared without case**, equals the record's path, equals its shard directory or
+     `memories`, starts with the record's path and a `/`, or **has the same leading directories as the record** (`memories`, then
+     `memories/<shard>`) **up to case but not exactly** (a clone on Windows or macOS folds case, so a foreign `memories/AB/x.json`,
+     `MEMORIES/x.json` or `memories/ab/ABCDEF12.json` would make the file land elsewhere or stage nothing; the rule does not depend
+     on the host's file system, so Linux tests run it); a sibling `memories/ab/other.json` with the exact same directories never
+     blocks, and the record's own exact path is never a collision. It would fail the write or the stage of every push. (The listing is
+     of `memories` only: a variant of the root name itself, such as `MEMORIES`, is listed under that name and is covered; a different
+     root entry such as a file `Memories` is not read, and on a folding clone its only effect is a `Failed` push at the staged-set
+     check, never a wrong publication.)
    - `blocked-elsewhere`: the row has a `blocked_reason` that is not one of the writer's (decision 8), which later
      milestones own;
    - `unreadable-entry`: the entry cannot be mapped, or is gone or is no longer a memory in one tier when the plan
@@ -172,7 +176,7 @@ transaction. The new pieces:
     path, so nothing excludes it) could add an `ident` or an encoding filter, so **the reset step first writes
     `.git/info/attributes`**, before the reset itself (the highest precedence, never touched by `clean`; the clone is created
     without a template, so the directory is created when missing) with the single line `* -text -eol -ident -filter -working-tree-encoding`, and
-    the bytes are the writer's. Then **only the written paths are staged** (a new closed client command `StagePaths`, `add -f -- <paths>`, next to the existing `StageAsync` scopes, which init and join use and
+    the bytes are the writer's. Then **only the written paths are staged** (a new closed client command `StagePaths`, `add -f -- <paths>`, called **in batches of at most 100 paths** so a first sync of a large store stays under the Windows command-line limit; the first failing batch is a `Failed` push and the clone is reset, next to the existing `StageAsync` scopes, which init and join use and
     which stay as they are; an absent path is a failure there, unlike the empty `memories` scope; so a rejected
     case-variant or a tracked file that is missing is never swept in); **the staged set must
     equal the written paths** (`diff --cached --name-status -z --no-renames`: each written path `A` or `M`, nothing else, in
@@ -299,7 +303,7 @@ not moved (the fetch is `NothingNew`, the clone is reset, never published), temp
 fault, a blocked row whose entry went back to its base (its mark cleared), a fabricated `LocalDeletions` entry (nothing written or
 removed), a no-op entry (counted `Unchanged`, finalized, not in the commit message), the mapping of each failure kind to `published`,
 a cancelled token after a successful push (the finalize still runs), a pushed commit with an unconventional but valid record (a
-non-canonical blob is normalised only when it changes), a repository that tracks `memories/.gitattributes` with `* ident` (text containing `$Id: x$` is committed byte for byte) and a foreign case-variant path (`memories/AB/x.json`, `memories/ab/ABCDEF12.json`) leaving the new entry out as `path-occupied` on every host, a written file removed between the write and the stage (the stage fails, `Failed`, the clone reset), `LocalDeletions`, `record-missing` and `not-reconciled` exercised with a hand-built completed `ApplySummary` (a real pull holding a
+non-canonical blob is normalised only when it changes), a repository that tracks `memories/.gitattributes` with `* ident` (text containing `$Id: x$` is committed byte for byte) and a foreign case-variant path (`memories/AB/x.json`, `memories/ab/ABCDEF12.json`) leaving the new entry out as `path-occupied` on every host, a written file removed between the write and the stage, for a changed entry (git stages a deletion, the staged-set check refuses) and for a new one (the stage fails): `Failed` and the clone reset either way, a push of 250 new entries (three stage batches),  `LocalDeletions`, `record-missing` and `not-reconciled` exercised with a hand-built completed `ApplySummary` (a real pull holding a
 deletion is incomplete), and `git grep` shows that nothing outside the pusher and the tests calls it.
 
 ## Departures from the umbrella design
