@@ -54,6 +54,9 @@ let private allCommands : GitCommand list =
       Stage Memories
       Stage Manifest
       Stage Attributes
+      StagePaths [ "memories/ab/abcdef12.json" ]
+      StagePaths [ "memories/ab/abcdef12.json"; "memories/3f/3f9c2a7e-0000-4000-8000-000000000000.json" ]
+      StagedSet
       HasStaged
       Commit "sync: m +1 ~0 -0"
       Commit "quotes \" and $(x) and\nnewlines é"
@@ -126,6 +129,11 @@ let commandTableTests =
             Expect.equal (args (Stage Memories)) [ "add"; "-A"; "-f"; "--"; "memories" ] "stage memories"
             Expect.equal (args (Stage Manifest)) [ "add"; "-A"; "-f"; "--"; "manifest.json" ] "stage manifest"
             Expect.equal (args (Stage Attributes)) [ "add"; "-A"; "-f"; "--"; ".gitattributes" ] "stage attributes"
+            Expect.equal
+                (args (StagePaths [ "memories/ab/abcdef12.json"; "memories/cd/cdef0123.json" ]))
+                [ "add"; "-f"; "--"; "memories/ab/abcdef12.json"; "memories/cd/cdef0123.json" ]
+                "stage paths"
+            Expect.equal (args StagedSet) [ "diff"; "--cached"; "--name-status"; "-z"; "--no-renames" ] "staged set"
             Expect.equal (args HasStaged) [ "diff"; "--cached"; "--quiet"; "--exit-code" ] "has staged"
             Expect.equal (args (Commit "sync: m +1")) [ "commit"; "--no-verify"; "-m"; "sync: m +1" ] "commit"
             Expect.equal (args (Push "main")) [ "push"; "origin"; "HEAD:refs/heads/main" ] "push"
@@ -137,7 +145,7 @@ let commandTableTests =
 let private allowedDashed =
     set [ "--version"; "--get"; "-b"; "--template="; "--depth=1"; "--no-tags"; "--single-branch"
           "--branch"; "--progress"; "--hard"; "-fd"; "--includes"; "--is-ancestor"; "--verify"; "--quiet"; "-r"; "-z"; "--no-renames"
-          "--raw"; "-l"; "-A"; "-f"; "--cached"; "--exit-code"; "--no-verify"; "-m"; "-c"; "--" ]
+          "--raw"; "-l"; "-A"; "-f"; "--cached"; "--name-status"; "--exit-code"; "--no-verify"; "-m"; "-c"; "--" ]
 
 let private forbidden =
     [ "--force"; "-f"; "--force-with-lease"; "--delete"; "--mirror"; "--prune"; "-d"; "-D"; "--all"; "--tags" ]
@@ -170,6 +178,7 @@ let neverForceTests =
                 match c with
                 | Clean -> Expect.equal a [ "clean"; "-fd" ] "clean"
                 | Stage _ -> Expect.equal (a |> List.filter (fun x -> x.StartsWith "-" && x <> "--")) [ "-A"; "-f" ] "stage"
+                | StagePaths _ -> Expect.equal (a |> List.filter (fun x -> x.StartsWith "-" && x <> "--")) [ "-f" ] "stage paths"
                 | _ -> Expect.isFalse (a |> List.exists (fun x -> x = "-fd" || x = "-f")) (sprintf "%A" c)
                 match c with
                 | Commit _ -> ()
@@ -192,6 +201,21 @@ let neverForceTests =
                     let n = List.length full
                     Expect.equal (full |> List.skip (n - 3)) [ "push"; "origin"; "HEAD:refs/heads/" + b ] "tail"
                 | Error e -> failtestf "%s" e
+
+        testCase "StagePaths takes only a non-empty list of exact record paths" <| fun _ ->
+            for bad in
+                [ []
+                  [ "memories" ]
+                  [ "../x" ]
+                  [ "memories/ab/x.json" ]
+                  [ "memories/AB/abcdef12.json" ]
+                  [ "memories/cd/abcdef12.json" ]
+                  [ "memories/ab/abcdef12.json/x" ]
+                  [ "memories/ab/abcdef12.json"; "memories/ab" ]
+                  [ "memories/ab/abcdef12.json\u0000" ] ] do
+                Expect.isTrue (isError (built (StagePaths bad))) (sprintf "%A" bad)
+            Expect.isFalse (isError (built (StagePaths [ "memories/ab/abcdef12.json" ]))) "one record path"
+            Expect.isFalse (isError (built StagedSet)) "staged set"
 
         testProperty "random legal branches never put a force or delete in Fetch, Push or Clone" <| fun (seed: int) ->
             let alphabet = "abcdefghijklmnopqrstuvwxyz0123456789-_."
