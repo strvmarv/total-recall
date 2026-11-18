@@ -66,8 +66,7 @@ transaction. The new pieces:
    after one. **The clone's own state is not a readiness condition**: a failed push leaves its commit in the clone, and the
    fetcher's `NothingNew` path (the remote did not move) never resets it, so a check on the clone's `HEAD` before the reset
    would refuse every later push.
-2. **The clone is reset first**: `reset --hard <apply.Head>` then `clean -fdx` (the clone is a cache, so ignored files go too: a `.gitignore` in the
-   repository must not hide a left-over file from the clean while `add -f` would stage it), before any read or write, because a commit
+2. **The clone is reset first**: `reset --hard <apply.Head>` then `clean -fd`, before any read or write (the reset step first writes `.git/info/attributes`, decision 10), because a commit
    or a file left behind by an earlier failed or killed push must never be published by accident. Then `rev-parse HEAD`
    must equal `apply.Head`; a failed reset or clean, a commit that the clone does not hold, or a `HEAD` that differs after
    the reset is `Failed`. (Nothing else writes the clone's working tree while this runs: the caller holds the lock.)
@@ -93,9 +92,12 @@ transaction. The new pieces:
    - `record-missing`: the row has a base **and** the tree has no path for the id (a remote deletion: 1b-ii);
    - `record-unreadable`: decision 3;
    - `unreadable-base`: the row's `base_json` cannot be read (it is the entry's own failure, never "no base");
-   - `path-occupied`: the tree at `L` holds a non-record entry where the record's file or its shard directory must go (a
-     blob at `memories` or at `memories/<shard>`, a directory at `memories/<shard>/<id>.json`: any rejected path that is
-     a proper prefix of the record's path, or starts with the record's path and a `/`), which would fail the write for every push;
+   - `path-occupied`: the tree at `L` holds a path that is not exactly this record's own path but is in the way of it: any
+     listed path (accepted or rejected) that equals the record's path, or its shard directory, or `memories`, or starts with the
+     record's path and a `/`, **compared without case** (a clone on Windows or macOS folds case, so a foreign `memories/AB/x.json`
+     or `memories/ab/ABCDEF12.json` would make the file land elsewhere or stage nothing; the rule does not depend on the host's
+     file system, so Linux tests run it), except the record's own exact path; it would fail the write or the stage of every
+     push;
    - `blocked-elsewhere`: the row has a `blocked_reason` that is not one of the writer's (decision 8), which later
      milestones own;
    - `unreadable-entry`: the entry cannot be mapped, or is gone or is no longer a memory in one tier when the plan
@@ -167,11 +169,12 @@ transaction. The new pieces:
     nothing in the working tree can be staged by accident, and `clean` and ignore rules do not matter) and renamed over
     `memories/<shard>/<id>.json` (the shard directory is created when missing); the clone has `core.symlinks=false` and
     `* -text` in the root attributes, but a `.gitattributes` the repository tracks below `memories/` (listed as a rejected
-    path, so nothing excludes it) could add an `ident` or an encoding filter, so **the reset step also writes
-    `.git/info/attributes`** (the highest precedence, never touched by `clean`; the clone is created without a template, so the
-    directory is created when missing) with the single line `* -text -eol -ident -filter -working-tree-encoding`, and
-    the bytes are the writer's. Then **only the written paths are staged** (the existing `StageAsync`, which takes the paths
-    instead of `memories`, so a rejected case-variant or a missing tracked file is never swept in); **the staged set must
+    path, so nothing excludes it) could add an `ident` or an encoding filter, so **the reset step first writes
+    `.git/info/attributes`**, before the reset itself (the highest precedence, never touched by `clean`; the clone is created
+    without a template, so the directory is created when missing) with the single line `* -text -eol -ident -filter -working-tree-encoding`, and
+    the bytes are the writer's. Then **only the written paths are staged** (a new closed client command `StagePaths`, `add -f -- <paths>`, next to the existing `StageAsync` scopes, which init and join use and
+    which stay as they are; an absent path is a failure there, unlike the empty `memories` scope; so a rejected
+    case-variant or a tracked file that is missing is never swept in); **the staged set must
     equal the written paths** (`diff --cached --name-status -z --no-renames`: each written path `A` or `M`, nothing else, in
     particular no deletion), else the clone is reset and cleaned and the push is `Failed`; **no staged change means no commit and no push**
     (outcome `NothingToPush`; the unchanged entries are finalized as decision 12 says, a blocked entry is not finalized and keeps the marks of the
@@ -262,11 +265,10 @@ transaction. The new pieces:
 - `Infrastructure.GitSync.GitSyncPusher(GitClient, SqliteStore, branch, machineLabel)`; `PushAsync(apply, scan, ct)`. Test
   seams: `BeforePlanTransaction`, a step hook inside the two transactions (`reread`, `plan`, `pushing`, `block`,
   `finalize`, `meta`, `ref`, `commit`), `BeforePush` (where a test makes the remote move), `TransactionCount`.
-- `SyncGit` / `GitClient`: the existing `Clean` command becomes `clean -fdx` and `Stage` takes a list of paths (`add -f --`); one new
-  local command lists the staged set (`diff --cached --name-status -z --no-renames`). No `src` caller uses `Clean` or `Stage` yet, but the
-  tests that pin them change: `SyncGitTests.fs` (the `clean` argument lists, the allowed-dashed list, the list of all commands and the
-  comment on `-f`), the force-flag guard in `GitTestSupport.cs` (`-fdx` is allowed only for `clean`, and `-f` only for `add`/`clean`, and
-  still refused elsewhere) and its own test `GitTestSupportTests.cs`.
+- `SyncGit` / `GitClient`: two new closed local commands next to the existing ones (`Clean` and the `Stage` scopes, which stay as they
+  are): `StagePaths` (`add -f -- <paths>`, each path checked to be a record path) and the staged set (`diff --cached --name-status -z
+  --no-renames`). They enter the places that enumerate commands: `SyncGitTests.fs` (the argument lists, the allowed-dashed list, the list
+  of all commands), and the client tests that call the new methods.
 - `GitSyncRows` / the store transaction already take the caller's transaction; the import-log query is one statement on it.
 
 ## Tests
@@ -297,8 +299,7 @@ not moved (the fetch is `NothingNew`, the clone is reset, never published), temp
 fault, a blocked row whose entry went back to its base (its mark cleared), a fabricated `LocalDeletions` entry (nothing written or
 removed), a no-op entry (counted `Unchanged`, finalized, not in the commit message), the mapping of each failure kind to `published`,
 a cancelled token after a successful push (the finalize still runs), a pushed commit with an unconventional but valid record (a
-non-canonical blob is normalised only when it changes), a left-over ignored file in the clone (removed by the reset), a repository that tracks `memories/.gitattributes` with `* ident` (text containing `$Id: x$` is committed byte for byte) and a rejected case-variant path beside an accepted record (only the written path is staged), a tracked file missing from the working tree before the stage (the staged-set check
-refuses, `Failed`, reset), `LocalDeletions`, `record-missing` and `not-reconciled` exercised with a hand-built completed `ApplySummary` (a real pull holding a
+non-canonical blob is normalised only when it changes), a repository that tracks `memories/.gitattributes` with `* ident` (text containing `$Id: x$` is committed byte for byte) and a foreign case-variant path (`memories/AB/x.json`, `memories/ab/ABCDEF12.json`) leaving the new entry out as `path-occupied` on every host, a written file removed between the write and the stage (the stage fails, `Failed`, the clone reset), `LocalDeletions`, `record-missing` and `not-reconciled` exercised with a hand-built completed `ApplySummary` (a real pull holding a
 deletion is incomplete), and `git grep` shows that nothing outside the pusher and the tests calls it.
 
 ## Departures from the umbrella design
@@ -312,7 +313,7 @@ deletion is incomplete), and `git grep` shows that nothing outside the pusher an
 - **The finalize leaves the comparison columns alone**, so an edit after the scan is still seen; the umbrella is silent.
 - **A group is not written with a stamp that is not greater than the record's** (defensive), and an entry that changed
   since the scan is deferred (the same guard as the apply's), where the umbrella has the scan alone.
-- **The reset of the clone is `reset --hard` and `clean -fdx`** (the umbrella says `clean -fd`: ignored files must go too, because the stage is forced), with an `info/attributes` file that switches every filter off; the working tree is never read for
+- **The reset of the clone is `reset --hard` and `clean -fd`** as the umbrella says, with an `info/attributes` file that switches every filter off written first (ignored files cannot be published, because only the written paths are staged); the working tree is never read for
   a decision.
 
 ## Acceptance criteria
