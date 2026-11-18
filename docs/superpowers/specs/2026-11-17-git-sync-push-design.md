@@ -95,13 +95,12 @@ transaction. The new pieces:
    - `path-occupied`: the tree at `L` holds a path that is not exactly this record's own path but is in the way of it: any
      listed path (accepted or rejected) that, **compared without case**, equals the record's path, equals its shard directory or
      `memories`, starts with the record's path and a `/`, or **has the same leading directories as the record** (`memories`, then
-     `memories/<shard>`) **up to case but not exactly** (a clone on Windows or macOS folds case, so a foreign `memories/AB/x.json`,
-     `MEMORIES/x.json` or `memories/ab/ABCDEF12.json` would make the file land elsewhere or stage nothing; the rule does not depend
+     `memories/<shard>`) **up to case but not exactly** (a clone on Windows or macOS folds case, so a foreign `memories/AB/x.json`
+     or `memories/ab/ABCDEF12.json` would make the file land elsewhere or stage nothing; the rule does not depend
      on the host's file system, so Linux tests run it); a sibling `memories/ab/other.json` with the exact same directories never
-     blocks, and the record's own exact path is never a collision. It would fail the write or the stage of every push. (The listing is
-     of `memories` only: a variant of the root name itself, such as `MEMORIES`, is listed under that name and is covered; a different
-     root entry such as a file `Memories` is not read, and on a folding clone its only effect is a `Failed` push at the staged-set
-     check, never a wrong publication.)
+     blocks, and the record's own exact path is never a collision. It would fail the write or the stage of every push. (Known residual: the listing is
+     of `memories` only, so a root-level case variant of that name (`MEMORIES/x.json`, a file `Memories`) is never read; on a folding
+     clone its only effect is a `Failed` push at the staged-set check on every push, never a wrong publication.)
    - `blocked-elsewhere`: the row has a `blocked_reason` that is not one of the writer's (decision 8), which later
      milestones own;
    - `unreadable-entry`: the entry cannot be mapped, or is gone or is no longer a memory in one tier when the plan
