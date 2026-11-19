@@ -50,7 +50,9 @@ Module `TotalRecall.Core.SyncCycle` (all total, no I/O, no clock):
 - `type Probe = Healthy | NoCommit | ProbeFailed of SyncGit.FailureKind` and
   `cloneDamage (kind: SyncGit.FailureKind) (probe: Probe) : bool`: true for `NotARepository` (probe ignored); for `Other`
   true when the probe is `NoCommit`, or `ProbeFailed k` with `k` not in `Cancelled | TimedOut | OutputTooLarge`; false for
-  `Other` with `Healthy` or an inconclusive probe; false for every other kind.
+  `Other` with `Healthy` or an inconclusive probe. **`RemoteNotFound` is treated exactly like `Other`** (see Interpretations:
+  the fetcher's first clone-scoped call is `ls-remote -- origin`, which on an invalid `.git` runs outside a repository and says
+  "'origin' does not appear to be a git repository", which the classifier maps to `RemoteNotFound`); false for every other kind.
 - `okValue (now: DateTimeOffset) : string`: UTC `yyyy-MM-ddTHH:mm:ss.fffZ`, invariant culture.
 - `errorLine (now) (step: string) (kind: string) (message: string) : string`: `"<okValue now> <step> <kind>: <message>"`
   with control characters (`Char.IsControl`) and U+2028 / U+2029 in the message replaced by one space each, the whole line cut
@@ -58,7 +60,7 @@ Module `TotalRecall.Core.SyncCycle` (all total, no I/O, no clock):
   message giving `"<time> <step> <kind>:"` (no trailing space), `null` message treated as empty.
 
 - [ ] **Step 1: tests first** (`SyncCycleTests.fs`): `nextAfterPush` for every attempt 0..4 and every kind; `pushDecision`
-  all 8 combinations; `cloneDamage` for every `FailureKind` (use a list of all cases) with `Healthy`, `NoCommit` and each
+  all 8 combinations; `cloneDamage` for every `FailureKind` (use a list of all cases; `RemoteNotFound` behaves like `Other`) with `Healthy`, `NoCommit` and each
   `ProbeFailed k`; `okValue` fixed instants and a non-UTC offset input; `errorLine` for a newline, a tab, U+2028, U+2029, a
   600-character message (total length exactly 500, prefix intact), a message with a surrogate pair straddling the cut, an
   empty message, a null message, and a round trip: the first 24 characters parse back to the instant; FsCheck-style
@@ -191,7 +193,9 @@ set `last_error = SyncCycle.errorLine(clock(), step, kind, message)` (`Refused` 
   cleared by an enumeration that skips links, `EnumerationOptions { AttributesToSkip = FileAttributes.ReparsePoint,
   RecurseSubdirectories = true }`, as `RemoveStaleLocks` does, so a link is never followed; never cancelled; only when the
   directory did not exist before the call or was just moved aside), and when the delete
-  fails it is moved aside with `CloneSideline.Move(dir, "partial", clock())`. Neither case counts as damage.
+  fails it is moved aside with `CloneSideline.Move(dir, "partial", clock())`. The whole cleanup is wrapped in a try/catch
+  that swallows non-`OutOfMemoryException` exceptions and keeps the original outcome (`Cancelled` or `Failed(clone, kind)`); a test
+  makes both seams (`DeleteDirectory`, `MoveDirectory`) throw. Neither case counts as damage.
 - after a successful clone, `Cloned = true`.
 
 **Kind mapping.** `FetchOutcome.Failed.Kind` and `PushOutcome.Failed.Kind` are strings; the cycle maps them to
@@ -201,7 +205,7 @@ to `Other`) wherever `SyncCycle.cloneDamage` or the `Cancelled` check needs the 
 
 `FetchStepAsync`: `OnStep("fetch")`, `fetcher.FetchAsync(ct)`; `Fetched` and `NothingNew` go on; `Refused(reason)` gives
 `Refused(reason)`; `Failed(kind, message)` with kind `Cancelled`, or a cancelled token, gives `Cancelled`; damage (decision 8:
-kind `NotARepository`, or kind `Other` with a failing probe from `client.RevParseAsync(Revision.Head)` classified into
+kind `NotARepository`, or kind `Other` or `RemoteNotFound` with a failing probe from `client.RevParseAsync(Revision.Head)` classified into
 `SyncCycle.Probe`) is recovered as `EnsureClone` does for a damaged directory (sideline, count, clone) and the attempt restarts
 from the scan without counting an attempt; any other kind gives `Failed(fetch, kind, message, No)`.
 
@@ -213,7 +217,9 @@ nowMs).ApplyAsync(fetchResult, scan, ct)`; the token decides `Cancelled` first; 
 - [ ] **Step 1: tests** (CycleRig): a lost clone (directory deleted; remote head equal to `L` and not equal to `L`): re-clone,
   `Cloned`, the apply is unproven (a record that vanished from the remote is not deleted locally), nothing deleted from the
   store, pending local changes reach the remote when Task 6 lands (in this task assert the pull side only and that the
-  push step is still the stub); a corrupt clone (`CorruptClone`): the old directory is renamed to `repo.broken-<utc>` with its
+  push step is still the stub); a corrupt clone (`CorruptClone`; the test also asserts the failure kind the fetcher really reports first, expected
+  `RemoteNotFound` from the `ls-remote` call, and fails loudly if git reports another kind that `cloneDamage` does not cover):
+  the old directory is renamed to `repo.broken-<utc>` with its
   content kept, a new clone exists, `SidelinedClone` set; a network failure with a sound clone (clone untouched, never moved,
   `Failed(fetch, Network)`); the probe cases (`Other` with a clone `HEAD` that resolves is not damage; `Other` with a `HEAD`
   that does not resolve is damage; a probe that times out or is cancelled is never damage), using `Fault` on the fetch and the
@@ -226,7 +232,8 @@ nowMs).ApplyAsync(fetchResult, scan, ct)`; the token decides `Cancelled` first; 
   never counted (two cancelled clones in a row never give `CloneUnusable`), and a later cycle succeeds; a `RemoteBranchMissing`
   at clone is `Refused`; a failed move (`CloneSideline.Move` seam: internal `Action<string,string>? MoveDirectory`) is `Failed(clone,
   Unexpected)` with nothing counted and the next cycle trying again; a refused fetch (replaced repository at the fetched head,
-  newer format, missing branch) is `Refused` after the scan with nothing applied and the push command never recorded; a failed
+  newer format, missing branch) is `Refused` after the scan with nothing applied and the push command never recorded, the
+  refusal recorded (`last_error` starts with a UTC time and `fetch Refused:`, `last_ok` unchanged, the lock released); a failed
   fetch (kinds `Auth`, `Network`: `Failed(fetch, kind, ..., No)`, `last_error` names `fetch`, a later `Done` clears it) and a
   failed apply (`Failed(apply, Apply, reason, No)`, forced by a store failure the applier reports as `ApplyOutcome.Failed`) never
   reach the push (no push command recorded); a plain failed clone (`Failed(clone, Network, ..., No)`, retried by the next cycle,
@@ -300,5 +307,8 @@ An unexpected exception at this step is `published = Unknown` (the wrapper of Ta
 - `CycleOutcome.Refused` carries the refusing step (`Refused(Reason, Step)`) so the recording can name it; the spec's
   `Refused(reason)` is otherwise unchanged.
 - `OnStep("record")` fires only when something is written.
+- `cloneDamage` also treats `RemoteNotFound` like `Other` (a local probe decides). The spec lists `NotARepository` and `Other`;
+  a corrupt `.git` makes the fetcher's `ls-remote -- origin` report `RemoteNotFound`, so without this AC 11 could not hold. A
+  healthy clone whose remote really is gone still probes `Healthy` and is never moved aside.
 - The AC 17 check is a source scan over code files, not `git grep`, so it does not depend on `git` and does not count the
   contributor guides.
