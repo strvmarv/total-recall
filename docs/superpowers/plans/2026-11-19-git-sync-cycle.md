@@ -92,10 +92,9 @@ Module `TotalRecall.Core.SyncCycle` (all total, no I/O, no clock):
 - [ ] **Step 2: implement**; run the fetcher, guard and client test classes and the Core tests: all existing tests unchanged.
 - [ ] **Step 3: commit** `Expose the pieces the git sync cycle needs`.
 
-### Task 3: test rig for the cycle
+### Task 3: `PullRig` and `PushRig` can configure a real remote
 
-**Files:** `tests/TotalRecall.Infrastructure.Tests/GitSync/PullTestSupport.cs`, `PushTestSupport.cs`, new
-`CycleTestSupport.cs`.
+**Files:** `tests/TotalRecall.Infrastructure.Tests/GitSync/PullTestSupport.cs`, `PushTestSupport.cs`.
 
 - `PullRig` gets an optional constructor argument `remoteText` (default the existing constant, which stays public as
   `RemoteText` for the existing tests); an instance property `Remote` holds the text actually used by `Paths`, the guard,
@@ -103,7 +102,8 @@ Module `TotalRecall.Core.SyncCycle` (all total, no I/O, no clock):
 - `PushRig` gets a constructor option `configuredRemote: true`, which creates the bare remote first and gives the
   `PullRig` the remote's `Url` as its text, so a clone made by the cycle (`CloneAsync(Address)`) really clones the bare remote
   and the guard, paths and address agree. The default stays as it is.
-- `CycleRig` (new, wraps a `PushRig` made with `configuredRemote: true`): `Cycle(settings?)` builds a `GitSyncCycle` with the rig's
+- `CycleRig` (new `CycleTestSupport.cs`, created in Task 4 because it needs the cycle to compile; Task 3 only changes
+  `PullRig` and `PushRig`) wraps a `PushRig` made with `configuredRemote: true`: `Cycle(settings?)` builds a `GitSyncCycle` with the rig's
   client, guard, store, `CountingEmbedder`, paths, `CycleSettings(Address: rig.Pull.Remote, Branch: "main", MachineLabel:
   "testbox", HotMaxContentChars: 0, LockWait: TimeSpan.Zero)` and two fixed clocks; `Steps` collects `OnStep` names in
   order; helpers `Run()` (a cycle then `RunAsync`), `LastOk` / `LastError` (the `_meta` values), `Calls(kind)` (recorded
@@ -111,9 +111,7 @@ Module `TotalRecall.Core.SyncCycle` (all total, no I/O, no clock):
   `PlantIndexLock()`, `DeleteClone()` (`GitTestEnvironment.ForceDelete` on the clone directory), `CorruptClone()` (overwrite
   `.git/HEAD` with garbage and delete `.git/objects` content so `rev-parse HEAD` fails), `SidelinedClones()` (directories
   matching `repo.broken-*` / `repo.partial-*` beside the clone).
-- [ ] **Step 1:** write the rig; it compiles only after Task 4 gives it a `GitSyncCycle` to build, so this task adds the
-  `PullRig`/`PushRig` changes and a compiled-but-empty `CycleRig` shell guarded by `#if false` for the cycle construction;
-  Task 4 removes the guard. Run the whole `GitSync` test namespace: green and unchanged.
+- [ ] **Step 1:** change `PullRig` and `PushRig` as above. Run the whole `GitSync` test namespace: green and unchanged.
 - [ ] **Step 2: commit** `Let the sync test rigs configure a real remote`.
 
 ### Task 4: `GitSyncCycle` skeleton: shape, lock, identity, scan, recording
@@ -124,13 +122,15 @@ recording) and `GitSyncCycleTests.cs` (+ `CycleTestSupport.cs` finished).
 Types (decisions 1, 2): `CycleSettings(string Address, string Branch, string MachineLabel, int HotMaxContentChars, TimeSpan
 LockWait)`; `CycleSummary` (`Attempts`, `ScanSummary Scan`, `FetchResult? Fetch`, `ApplySummary? Apply`, `PushOutcome? Push`,
 `string? PushSkipped`, `bool Cloned`, `string? SidelinedClone`); `CycleOutcome` = `Done(CycleSummary)`, `NotJoined`,
-`Refused(string Reason)`, `Busy`, `Failed(string Step, string Kind, string Message, SyncPush.Published Published)`,
+`Refused(string Reason, string Step)` (the step that refused: `identity`, `fetch` or `clone`), `Busy`, `Failed(string Step, string Kind, string Message, SyncPush.Published Published)`,
 `Cancelled` (private constructor, nested sealed records as in `FetchOutcome`).
 
 `GitSyncCycle(GitClient client, RepoGuard guard, SqliteStore store, IEmbedder embedder, GitSyncPaths paths, CycleSettings
 settings, Func<DateTimeOffset> clock, Func<long> nowMs)`; constructor throws `ArgumentNullException` for a null argument,
 `ArgumentException` when `Address` is null or empty, when it is not ordinally equal to `guard.ConfiguredRemote`, or when
-`paths.CloneDirectory` differs from `client.CloneDirectory` (compare full paths, ordinal ignore-case on Windows). Internal
+`paths.CloneDirectory` differs from `client.CloneDirectory` (compare full paths, ordinal ignore-case on Windows;
+`paths.CloneDirectory` throws `InvalidOperationException` for paths made by `ForDatabase`: the constructor catches it and
+rethrows an `ArgumentException`). Internal
 seams: `Action<string>? OnStep`, `Action<string, string?>? BeforeMetaWrite`.
 
 `RunAsync(ct)` in this task: step 0 (the stored `CloneUnusable` failure; the field and its small in-process lock exist now
@@ -144,13 +144,13 @@ gives `Failed(scan, Store, reason, No)`), then the attempt body, which this task
 one try/catch in a private `StepAsync(step, ...)` wrapper: `OperationCanceledException` gives `Cancelled`; any other exception
 except `OutOfMemoryException` is logged with `ExceptionLogger.LogChain("[total-recall] sync cycle", ex)` and gives
 `Failed(step, Unexpected, ex.Message, published)` where `published` is `Unknown` for `push` and `No` otherwise. The token is
-checked after each part returns, before the result is used (decision 5): a cancelled token gives `Cancelled`. `OnStep` is
+checked after each part returns, before the result is used (decision 5): a cancelled token gives `Cancelled`; **for the push
+this check is skipped once the push command has succeeded** (decision 11: the pusher finalizes and returns `Pushed`, which is `Done`). `OnStep` is
 called inside the step's try, so a throwing `OnStep` is an unexpected exception of that step.
 
-Recording (decision 10), `Record(outcome)` as the last act under the lock, `OnStep("record")` first (outside the try that
-could change the outcome): `Done` deletes `last_error`, then sets `last_ok = SyncCycle.okValue(clock())`; `Failed` and `Refused`
-set `last_error = SyncCycle.errorLine(clock(), step, kind, message)` (`Refused` uses step `identity` for the early refusal
-and the step that produced it later; kind `Refused`); `Busy`, `NotJoined`, `Cancelled` write nothing. Every write goes through
+Recording (decision 10), `Record(outcome)` as the last act under the lock; `OnStep("record")` fires first, **only when
+something is written** (`Done`, `Failed`, `Refused`), and a throwing `OnStep` there is swallowed like a failed write: `Done` deletes `last_error`, then sets `last_ok = SyncCycle.okValue(clock())`; `Failed` and `Refused`
+set `last_error = SyncCycle.errorLine(clock(), step, kind, message)` (`Refused` uses its own `Step`; kind `Refused`); `Busy`, `NotJoined`, `Cancelled` write nothing. Every write goes through
 `BeforeMetaWrite?.Invoke(key, value)` and is inside a try/catch that swallows `Exception` except `OutOfMemoryException`.
 
 - [ ] **Step 1: tests** (CycleRig, `[GitFact]`): constructor throws for an empty address, a different address, a different
@@ -161,9 +161,14 @@ and the step that produced it later; kind `Refused`); `Busy`, `NotJoined`, `Canc
   process while the first holds the lock is `Busy`, and the lock is released after every outcome (a new `HoldLock()` succeeds);
   the scan's own `NotJoined` (remote and repo id stored, no machine id) is `NotJoined`; an exception thrown by `OnStep` at
   `scan` is `Failed(scan, Unexpected)` with the lock released and `last_error` recorded; a failing meta write
-  (`BeforeMetaWrite` throws) is swallowed and the outcome unchanged; a cancelled token before the lock is `Cancelled` and
+  (`BeforeMetaWrite` throws) is swallowed and the outcome unchanged; the write order of a `Done` (`BeforeMetaWrite` log:
+  delete `last_error`, then set `last_ok`); `Failed(lock)`: with `DOTNET_SYSTEM_IO_DISABLEFILELOCKING=1` set (the test class
+  joins `ProcessEnvironmentCollection` and restores the variable) the outcome is `Failed(lock, Unexpected, ..., No)`, recorded
+  without a lock and no other step runs; a lock wait cancelled mid-wait (`LockWait` 5 s, a held lock, the token cancelled after
+  100 ms) is `Cancelled`, nothing recorded; `Failed(scan, Store)` (a store failure the scanner reports as
+  `ScanOutcome.Failed`, for example a dropped `git_sync_entry` table), with `last_error` naming `scan`; a cancelled token before the lock is `Cancelled` and
   records nothing; a stale `index.lock` planted before the call is gone by the time `scan` starts.
-- [ ] **Step 2: implement**, remove the `#if false` guard of Task 3, run the new tests and the whole `GitSync` namespace.
+- [ ] **Step 2: implement** (with `CycleTestSupport.cs`), run the new tests and the whole `GitSync` namespace.
 - [ ] **Step 3: commit** `Add the git sync cycle: lock, identity, scan and recording`.
 
 ### Task 5: the clone, the fetch, the apply and the push gate
@@ -183,9 +188,16 @@ and the step that produced it later; kind `Refused`); `Busy`, `NotJoined`, `Canc
 - a clone that fails or is cancelled: `CloneAsync` failure kinds `RemoteBranchMissing` give `Refused("the remote has no
   branch ...")`; `Cancelled`, or a cancelled token, gives `Cancelled`; any other kind is `Failed(clone, kind, text, No)`. In every
   failing case the partial directory the call left is removed with a best-effort recursive delete (read-only attributes
-  cleared, never cancelled, only when the directory did not exist before the call or was just moved aside), and when the delete
+  cleared by an enumeration that skips links, `EnumerationOptions { AttributesToSkip = FileAttributes.ReparsePoint,
+  RecurseSubdirectories = true }`, as `RemoveStaleLocks` does, so a link is never followed; never cancelled; only when the
+  directory did not exist before the call or was just moved aside), and when the delete
   fails it is moved aside with `CloneSideline.Move(dir, "partial", clock())`. Neither case counts as damage.
 - after a successful clone, `Cloned = true`.
+
+**Kind mapping.** `FetchOutcome.Failed.Kind` and `PushOutcome.Failed.Kind` are strings; the cycle maps them to
+`SyncGit.FailureKind` with `Enum.TryParse` (case-sensitive; an unknown or unparsable value, and the pusher's `"Clone"`, map
+to `Other`) wherever `SyncCycle.cloneDamage` or the `Cancelled` check needs the enum. The kind **string** put into
+`CycleOutcome.Failed` is the part's own string, unchanged.
 
 `FetchStepAsync`: `OnStep("fetch")`, `fetcher.FetchAsync(ct)`; `Fetched` and `NothingNew` go on; `Refused(reason)` gives
 `Refused(reason)`; `Failed(kind, message)` with kind `Cancelled`, or a cancelled token, gives `Cancelled`; damage (decision 8:
@@ -208,13 +220,17 @@ nowMs).ApplyAsync(fetchResult, scan, ct)`; the token decides `Cancelled` first; 
   `rev-parse HEAD`; a second damaged clone in one process is `Failed(clone, CloneUnusable)`, and every later `RunAsync` on that
   instance returns the same failure with no lock taken, no command recorded and no `last_error` rewrite (`BeforeMetaWrite`
   not called), while a new instance starts clean; a lost clone followed by a damaged one (the damage is the first counted); a
-  clone killed by a timeout and by a cancel (`Fault`): the partial directory is deleted, or is moved aside as `repo.partial-*`
+  clone killed by a timeout and by a cancel (a canned `Fault` result runs no git, so the fault lambda itself creates a
+  partial `repo` directory with a read-only file and, for the cancel case, cancels the token): the partial directory is deleted, or is moved aside as `repo.partial-*`
   when it cannot be deleted (force it by making the delete seam throw: an internal `Action<string>? DeleteDirectory` seam), is
   never counted (two cancelled clones in a row never give `CloneUnusable`), and a later cycle succeeds; a `RemoteBranchMissing`
   at clone is `Refused`; a failed move (`CloneSideline.Move` seam: internal `Action<string,string>? MoveDirectory`) is `Failed(clone,
   Unexpected)` with nothing counted and the next cycle trying again; a refused fetch (replaced repository at the fetched head,
   newer format, missing branch) is `Refused` after the scan with nothing applied and the push command never recorded; a failed
-  fetch and a failed apply never reach the push (no push command recorded); an incomplete pull (a deletion the pull postpones:
+  fetch (kinds `Auth`, `Network`: `Failed(fetch, kind, ..., No)`, `last_error` names `fetch`, a later `Done` clears it) and a
+  failed apply (`Failed(apply, Apply, reason, No)`, forced by a store failure the applier reports as `ApplyOutcome.Failed`) never
+  reach the push (no push command recorded); a plain failed clone (`Failed(clone, Network, ..., No)`, retried by the next cycle,
+  `CloneUnusable` not set); an incomplete pull (a deletion the pull postpones:
   a record removed on the remote for a row this machine holds with a base) is `Done`, `PushSkipped = "pull-incomplete"`,
   `last_ok` written; entry-level apply failures (an unreadable record the pull cannot take) do not stop the cycle (`Done`).
 - [ ] **Step 2: implement**; run the new tests and the `GitSync` namespace.
@@ -239,17 +255,21 @@ An unexpected exception at this step is `published = Unknown` (the wrapper of Ta
   stamps, `last_ok` set, `last_error` absent, `Attempts == 1`, `OnStep` order `lock identity locks scan fetch apply push record`
   with `clone` only after a lost clone); a cycle with nothing to do (`Done`, no commit and no push command recorded); a stale
   `index.lock` removed before the fetch and before any writing command (the recorded commands show no `reset`, `add`, `commit`
-  or `push` before the lock file is gone; the guard's read-only reads may run first); a non-fast-forward once (`MoveRemote`
-  through `After` on the first push; the second attempt succeeds: `Attempts == 2`, the remote holds both machines' work) and
-  three in a row (`Failed(push, NonFastForward, No)`, everything still pending, the next cycle succeeds and `last_error` is
+  or `push` before the lock file is gone; the guard's read-only reads may run first); a non-fast-forward once (the `Fault` lambda, on seeing the push command, calls `MoveRemote` with a distinct file name per
+  call and returns null, so the real push runs and is rejected; the second attempt succeeds: `Attempts == 2`, the remote holds
+  both machines' work) and three in a row (the lambda moves the remote on each of three pushes) (`Failed(push, NonFastForward, No)`, everything still pending, the next cycle succeeds and `last_error` is
   cleared); a failure of each kind at the push (`Auth`, `Network`, `TimedOut`, `Other`) with the right `published` and a
   `last_error` line naming `push`; the push never reached after a `Refused`, `Failed` or incomplete pull; `NotReady` as
   `Failed(push, NotReady)`; a push reset failing with kind `Clone` plus a failing probe: the clone is sidelined and the next
   attempt recovers; an exception thrown at `push` (`OnStep`) is `Failed(push, Unexpected, Unknown)`; a cancel before each
   step (`OnStep` cancels the token) is `Cancelled`, records nothing, releases the lock and leaves rows and clone consistent
   (a following clean cycle succeeds); a cancel in the middle of the fetch, the apply (an incomplete `Done`, a failed tree read
-  and a failed ref write under a cancelled token: all `Cancelled`) and the push; a cancel after the push command succeeded
-  (the `After` seam cancels once the push ran) is `Done` with `last_ok` written; a later `Done` clears `last_error`.
+  and a failed ref write under a cancelled token: all `Cancelled`) and the push; `NotReady` (the `OnStep("push")` hook changes `_meta` `git_sync_last_sha` so it no longer equals the pull's head);
+  AC 10 and AC 11 end to end: a lost clone (remote head equal to `L`, and not) and a corrupt-clone sideline, each followed
+  by the pending new and edited memories landing on the remote in the same cycle (`Done`, `Cloned` or `SidelinedClone` set,
+  nothing deleted from the store); entry-level apply failures (an entry with an `apply-failed` issue: the other entries are
+  pushed, the cycle is `Done`); a cancel after the push command succeeded
+  (the `After` seam cancels the token once the push command's result is returned) is `Done` with `last_ok` written; a later `Done` clears `last_error`.
 - [ ] **Step 2: implement**; run the new tests and the `GitSync` namespace.
 - [ ] **Step 3: commit** `Run the push in the git sync cycle with bounded retries`.
 
@@ -263,9 +283,10 @@ An unexpected exception at this step is `published = Unknown` (the wrapper of Ta
   `CloneUnusable` state, `last_ok` written for an incomplete pull, `last_error` line format), the Core file list, and
   the Infrastructure `GitSync` section; milestone wording stays accurate ("1b-i-4 cycle: done; 1b-ii and 1b-iii next").
   Mention that `GitSyncPusher` is called only by the cycle and its tests.
-- [ ] **Step 2:** a test that runs `git grep -l GitSyncCycle -- src` and asserts every file is a `GitSyncCycle*.cs` file, and
-  `git grep -l GitSyncPusher -- src` lists only the pusher files and `GitSyncCycle*.cs` (skip when `git` or the work tree is
-  unavailable, as other repo-scan tests do; read how `git grep` is shelled out in the existing scan/pull tests first).
+- [ ] **Step 2:** a repo-scan test in the style of `StaleLineageReferenceTests` (`FindRepoRoot`, `EnumerateFiles` over
+  `src/**/*.cs` and `src/**/*.fs`, skipping `bin` and `obj`; no `git grep`, no markdown): every code file that names
+  `GitSyncCycle` is a `GitSyncCycle*.cs` file, and every code file outside the pusher's own files (`GitSyncPusher*.cs`,
+  `SyncPush.fs`) that names `GitSyncPusher` is a `GitSyncCycle*.cs` file.
 - [ ] **Step 3: full verify** from the worktree: `npm ci --ignore-scripts` (remove the `node_modules` symlink first), fetch the
   bge model if missing, `dotnet test src/TotalRecall.sln --filter "Category!=Integration"`, `npm run test:shim`, the Host
   Release build plus `dotnet run --project src/TotalRecall.Host -- dump-catalog | diff catalog.json -`, `node
@@ -274,4 +295,10 @@ An unexpected exception at this step is `published = Unknown` (the wrapper of Ta
 
 ## Interpretations
 
-(none yet)
+- `SyncCycle.PushKind.Failed` and `SyncCycle.Probe.Failed` of the spec are named `PushFailed` and `ProbeFailed`, so the case
+  names do not shadow `Failed` of other unions opened in the same files.
+- `CycleOutcome.Refused` carries the refusing step (`Refused(Reason, Step)`) so the recording can name it; the spec's
+  `Refused(reason)` is otherwise unchanged.
+- `OnStep("record")` fires only when something is written.
+- The AC 17 check is a source scan over code files, not `git grep`, so it does not depend on `git` and does not count the
+  contributor guides.
