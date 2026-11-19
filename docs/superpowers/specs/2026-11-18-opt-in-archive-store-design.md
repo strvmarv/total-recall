@@ -150,6 +150,15 @@ path), sets `PRAGMA secure_delete = ON`, and runs the archive runner. A separate
 is); that is accepted and stated. `TranscriptStore.Open(settings, create)` returns null when `create` is false and the archive tables do
 not exist, so `status`, `forget` and `unforget` never create tables behind a disabled archive.
 
+Opening the main database safely (a builder-check finding, resolved here). `AutoMigrationGuard` classifies a file that has tables but no
+`_schema_version` as a legacy TypeScript database and sidelines it, so the archive runner must never be the first thing to touch a main
+database file. `Open(create: true)` on the main path therefore does this: the file is missing or empty, run `MigrationRunner.RunMigrations`
+first (a normal new database, as `config set` already does for its snapshot); `_schema_version` present, run the archive runner; any
+other state (a legacy or partial file), refuse with a message that says to start total-recall once so the database is migrated, and change
+nothing. A separate `db_path` file has no such problem (it only ever holds archive tables). Under `storage.mode = postgres` the archive is
+not supported (parent non-goal): `enable` refuses and says why, and the tools answer as if the archive were off. The `sqlite`, `cortex`
+and `git` modes use the local sqlite file and are supported.
+
 Operations (all synchronous, small, fully tested):
 
 - `Status()`: schema version, location (main database or the path), session count, chunk count, counts by `kind`, forgotten sessions,
@@ -180,25 +189,35 @@ No ingest API is invented here: tests insert rows with SQL.
    failure that the command prints: the rows are deleted, but the `-wal` file may still hold their text until it is checkpointed, so run
    it again. The command exits 1 and never prints a clean-delete message it did not earn.
 
-The test that backs this reads the raw bytes of the database file and of its `-wal` (and `-shm`) file after a forget and asserts that a
-unique marker string put into a chunk, a title and a project root is absent, with a checkpoint-blocked case that asserts the failure is
-reported.
+The retries use a shortened `busy_timeout` on the archive connection (the default 5 seconds would make three retries take 15), so the
+retry is real and bounded.
+
+The test that backs this reads the raw bytes of the database file and of its `-wal` (and `-shm`) file after a forget. "Text" means
+conversation text and the session's own metadata: three unique markers are put into a chunk's content, a session's title and a session's
+`cwd` (and `source_path`). After `ForgetSession` and `ForgetAll` none of the three may appear. After `ForgetProject` the content and
+title markers may not appear, while the project's roots (its sessions' `cwd` values) intentionally survive in the exclusion record, so
+the `cwd` marker is asserted present there and absent from every other place. Session ids and project keys in exclusion records are
+identifiers, not text, and are not scanned for. A checkpoint-blocked case (a second connection holding a read transaction) asserts the
+failure is reported and the exit code is 1.
 
 ### 8. The `transcripts` commands
 
 One group, five commands, each a small `ICliCommand` in `Commands/Transcripts/` with injected seams (settings reader, store factory,
 sentinel, output writers, `Func<bool> isInteractive`, `Func<string, bool> confirm`) like `WhatsNewCommand` and `RemoveCommand`:
 
-- `transcripts enable`: needs a terminal and a confirmation that says what will be stored once the later parts land (the dialogue of
+- `transcripts enable`: refuses under Postgres storage; needs a terminal and a confirmation that says what will be stored once the later parts land (the dialogue of
   agent sessions, locally, redacted, never synced); validates `db_path`; writes `transcripts.enabled = true` with
-  `ConfigWriter.SaveUserOverride` (the writer, not `config set`: the guard is in the callers); creates the sentinel; opens the store with
-  `create = true` (creating the tables); prints the state.
+  `ConfigWriter.SaveUserOverride` (the writer, not `config set`: the guard is in the callers); opens the store with
+  `create = true` (section 6, creating the tables); only then creates the sentinel; prints the state. A failure in any step leaves the
+  setting and the sentinel as they were (the setting is written last but one, the sentinel last).
 - `transcripts disable`: no gate; writes `false`, removes the sentinel; keeps the data.
-- `transcripts status`: no gate; prints enabled or off, the location, the counts of section 6 and the line `search: not available in
-  this version yet`. While the archive is off it opens nothing and says so.
+- `transcripts status`: no gate; prints the setting (`enabled = true`/`false`), whether it is active (the sentinel; a difference between
+  the two is said, with "applies at the next engine start"), the location, the counts of section 6 and the line `search: not available
+  in this version yet`. It opens the store only when the archive tables already exist (it never creates them), so it shows the counts of
+  a disabled archive that still holds data, and for one that was never enabled it says nothing is stored.
 - `transcripts forget (--session <host>:<id> | --project <key> | --all)`: exactly one selector; needs a terminal; prints how many
-  sessions and chunks will go and asks; runs the matching `Forget*`; prints the counts or the section 7 failure. With no archive tables
-  there is nothing to forget and it says so.
+  sessions and chunks will go and asks; runs the matching `Forget*`; prints the counts or the section 7 failure. It works whether
+  or not the archive is enabled (the user may disable first); with no archive tables there is nothing to forget and it says so.
 - `transcripts unforget (--session <host>:<id> | --project <key> | --cutoff)`: needs a terminal; asks; removes the record or cutoff.
 
 A terminal requirement means `Console.IsInputRedirected` is false; otherwise the command prints that it must be run in a terminal and
@@ -208,8 +227,19 @@ commands (0 ok, 1 failure, 2 usage). The existing `ICliCommand` pattern needs no
 ### 9. The three tools
 
 `transcript_search`, `transcript_get` and `transcript_sessions`, one handler file each in `Server/Handlers/`, registered in
-`OpenSqlite` and `OpenCortexCore`. Input schemas carry the arguments the parent's decision 9 names, all optional except `query` for
-search, so a model sees the final interface; descriptions state that the archive is off by default and, for now, not available. The
+`OpenSqlite` and `OpenCortexCore`. Input schemas are fixed here so a model sees the intended interface and Parts 3 to 5 inherit it (they may refine, never rename).
+A session is always identified as the string `<host>:<host_session_id>` (the form the `forget` commands take):
+
+- `transcript_search`: `query` (string, required); `scope` (`session`, `project` or `all`, default `project`); `project` (string);
+  `session` (string); `since` (ISO-8601 date or date-time string); `include_automated` (boolean, default false); `top_k` (integer 1 to
+  50, default 10).
+- `transcript_get`: either `id` (integer, a chunk id returned by search) or `session` with `from_exchange` and `to_exchange` (integers);
+  `context` (integer 0 to 10, default 1). The alternatives are explained in the description, not expressed with `oneOf`, so every client
+  accepts the schema.
+- `transcript_sessions`: `project` (string); `since` (ISO-8601 string); `limit` (integer 1 to 100, default 20); `include_automated`
+  (boolean, default false).
+
+Descriptions state that the archive is off by default and, for now, not available. The
 gate is an injected `Func<bool>` that reads the sentinel per call. Answers:
 
 - off: `{"enabled":false,"hint":"Run `total-recall transcripts enable` in a terminal to turn the archive on."}`;
