@@ -227,7 +227,17 @@ public sealed class ConfigLoader : IConfigLoader
                 {
                     if (!string.IsNullOrWhiteSpace(ds))
                     {
-                        try { dbPath = ValidateDbPath(ds, "transcripts.db_path"); }
+                        try
+                        {
+                            dbPath = ValidateDbPath(ds, "transcripts.db_path");
+                            // On Windows "C:archive.db" and "\\archive.db" are rooted but relative to the current
+                            // directory, so a later command run elsewhere would look in the wrong place.
+                            if (!Path.IsPathFullyQualified(dbPath))
+                            {
+                                dbPath = string.Empty;
+                                dbPathError = $"transcripts.db_path must be an absolute path or start with ~/. Got: \"{ds.Trim()}\"";
+                            }
+                        }
                         catch (SqliteDbPathException ex) { dbPathError = ex.Message; }
                     }
                 }

@@ -220,7 +220,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"total-recall: transcript sentinel mirror skipped: {ex.Message}");
+            ExceptionLogger.LogChain("total-recall: transcript sentinel mirror skipped", ex);
         }
 
         // Background update check (what's-new "available" notice). Started here and nowhere else:

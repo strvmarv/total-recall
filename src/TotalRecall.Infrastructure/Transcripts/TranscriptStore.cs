@@ -163,7 +163,11 @@ public sealed class TranscriptStore : ITranscriptStore
 
         // An archive-only file at the main path is not a main database, with or without create: refuse before any write.
         if (state == FileState.ArchiveOnly)
-            return new TranscriptOpenResult(TranscriptOpenStatus.Refused, null, LegacyDatabaseProbe.RefusalText);
+            // Not LegacyDatabaseProbe.RefusalText: "start total-recall once" would make the migration guard take this
+            // file for a TypeScript database and rename it to .ts-backup, hiding the archive.
+            return new TranscriptOpenResult(TranscriptOpenStatus.Refused, null,
+                $"{path} holds only a transcript archive, not a total-recall database; point TOTAL_RECALL_DB_PATH " +
+                "at the main database (or set transcripts.db_path to this file)");
 
         if (!create)
         {

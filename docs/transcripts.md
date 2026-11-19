@@ -21,7 +21,7 @@ How it is kept:
 - **With secrets redacted.** Text is meant to be scrubbed of secrets before it is stored.
 - **Never synced by total-recall.** The archive is not sent to Cortex and is not part of git sync. Nothing that syncs reads or writes its tables. This is about total-recall's own sync: if the main database, or the `transcripts.db_path` file, sits in a folder that another service shares (Dropbox, iCloud, OneDrive), that service copies the archive, and `forget` cannot reach those copies.
 
-In this version none of this happens yet: enabling the archive creates empty tables and nothing else.
+In this version none of this happens yet: enabling the archive creates empty tables and nothing else. Only `transcripts enable` creates those tables; a hand edit of `config.toml` does not.
 
 ## Privacy
 
@@ -41,9 +41,9 @@ total-recall transcripts enable
 
 The command must be run in a terminal (standard input must not be redirected) and asks you to confirm. There is no flag to skip the question: a script, or a way to set it without a terminal, is a hand edit of `config.toml` (see below). Declining changes nothing.
 
-On a yes it opens the archive (creating its tables), sets `transcripts.enabled = true` in `~/.total-recall/config.toml` and writes a marker file, `<data directory>/live/enabled`, that tells the hooks of the hosts and the tools that the archive is on. The tools notice the change at once; no restart is needed.
+On a yes it opens the archive (creating its tables), sets `transcripts.enabled = true` in `~/.total-recall/config.toml` and writes a marker file, `<data directory>/live/enabled`, that tells the tools (and, in a later release, the hosts' hooks) that the archive is on. The tools notice the change at once; no restart is needed.
 
-Editing `config.toml` by hand also works (`[transcripts]` `enabled = true`). The engine mirrors the setting into the marker file when it starts, so a hand edit takes effect at the next engine start.
+Editing `config.toml` by hand also works (`[transcripts]` `enabled = true`). The engine mirrors the setting into the marker file when it starts, so a hand edit takes effect at the next engine start. A hand edit creates no tables: only `transcripts enable` does, and until you run it `transcripts status` shows the archive as on with nothing stored.
 
 To turn it off:
 

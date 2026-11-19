@@ -16,9 +16,17 @@ namespace TotalRecall.Infrastructure.Tests.Transcripts;
 /// </summary>
 public sealed class TranscriptForgetTests : IDisposable
 {
-    private readonly TranscriptTestDb _db = new();
+    private TranscriptTestDb _db = new();
 
     public void Dispose() => _db.Dispose();
+
+    /// <summary>Replaces the separate archive file with the main database location (main schema plus archive tables).</summary>
+    private void UseMainDatabase()
+    {
+        _db.Dispose();
+        _db = new TranscriptTestDb(mainDatabase: true);
+        Assert.Equal(1, _db.Scalar("SELECT count(*) FROM sqlite_master WHERE name = '_schema_version'"));
+    }
 
     private sealed record Markers(string Content, string Title, string Cwd, string Source);
 
@@ -82,9 +90,12 @@ public sealed class TranscriptForgetTests : IDisposable
         Assert.Equal(0, Count(all, m.Source));
     }
 
-    [Fact]
-    public void ForgetSession_LeavesNoTextInAnyFile()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ForgetSession_LeavesNoTextInAnyFile(bool mainDatabase)
     {
+        if (mainDatabase) UseMainDatabase();
         var m = AddMarkedSession("pi", "s1", "owner/repo");
         var keep = AddMarkedSession("pi", "s2", "owner/repo");
         AssertAllPresent(m);
@@ -100,9 +111,12 @@ public sealed class TranscriptForgetTests : IDisposable
         Assert.Equal(2, _db.Scalar($"SELECT count(*) FROM tx_chunk_fts WHERE tx_chunk_fts MATCH '{keep.Content}'"));
     }
 
-    [Fact]
-    public void ForgetAll_LeavesNoTextInAnyFile()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ForgetAll_LeavesNoTextInAnyFile(bool mainDatabase)
     {
+        if (mainDatabase) UseMainDatabase();
         var a = AddMarkedSession("pi", "s1", "owner/repo");
         var b = AddMarkedSession("claude-code", "s2", "other/repo");
         AssertAllPresent(a);

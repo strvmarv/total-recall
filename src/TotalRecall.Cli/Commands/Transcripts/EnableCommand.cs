@@ -89,7 +89,8 @@ public sealed class EnableCommand : TranscriptsCommandBase
         if (opened.Status != TranscriptOpenStatus.Opened || opened.Store is null)
         {
             opened.Store?.Dispose();
-            return Fail($"could not open the archive at {where}: {opened.Message ?? opened.Status.ToString()}; nothing was changed");
+            return Fail($"could not open the archive at {where}: {opened.Message ?? opened.Status.ToString()}; " +
+                        $"the setting and the marker file were not changed (an empty database file may have been created at {where})");
         }
         opened.Store.Dispose();
 

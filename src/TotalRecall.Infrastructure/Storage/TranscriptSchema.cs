@@ -10,7 +10,7 @@ namespace TotalRecall.Infrastructure.Storage;
 /// the main schema without changing it. Idempotent: entries at or below
 /// <c>MAX(version)</c> are skipped.
 /// </summary>
-public static class TranscriptMigrationRunner
+internal static class TranscriptMigrationRunner
 {
     private delegate void Migration(MsSqliteConnection conn, Microsoft.Data.Sqlite.SqliteTransaction tx);
 

@@ -92,6 +92,19 @@ public sealed class ConfigLoaderTranscriptsTests : IDisposable
         Assert.Null(s.DbPathError);
     }
 
+    [Theory]
+    [InlineData("C:archive.db")]
+    [InlineData("\\archive.db")]
+    public void RootedButNotFullyQualifiedDbPath_IsRejected_OnWindows(string value)
+    {
+        // Rooted but relative to the current directory (drive-relative or root-relative) only exists on Windows.
+        if (!OperatingSystem.IsWindows()) return;
+        var s = ConfigLoader.LoadTranscriptsSettings(Write($"[transcripts]\ndb_path = '{value}'\n"));
+        Assert.NotNull(s.DbPathError);
+        Assert.Contains("transcripts.db_path must be an absolute path or start with ~/", s.DbPathError);
+        Assert.Equal("", s.DbPath);
+    }
+
     [Fact]
     public void TildeDbPath_IsExpanded()
     {
