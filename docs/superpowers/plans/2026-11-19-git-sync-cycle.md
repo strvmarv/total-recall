@@ -53,6 +53,10 @@ Module `TotalRecall.Core.SyncCycle` (all total, no I/O, no clock):
   `Other` with `Healthy` or an inconclusive probe. **`RemoteNotFound` is treated exactly like `Other`** (see Interpretations:
   the fetcher's first clone-scoped call is `ls-remote -- origin`, which on an invalid `.git` runs outside a repository and says
   "'origin' does not appear to be a git repository", which the classifier maps to `RemoteNotFound`); false for every other kind.
+- `parseKind (name: string) : SyncGit.FailureKind`: case-sensitive, by the union's case name (`NoGit`, `GitTooOld`, `TimedOut`,
+  `Cancelled`, `Auth`, `RemoteNotFound`, `Network`, `NonFastForward`, `RemoteBranchMissing`, `NotARepository`,
+  `OutputTooLarge`, `Other`); null, empty, an unknown name and the pusher's `"Clone"` give `Other`. (`FailureKind` is an F#
+  union, not an enum: there is no `Enum.TryParse`.)
 - `okValue (now: DateTimeOffset) : string`: UTC `yyyy-MM-ddTHH:mm:ss.fffZ`, invariant culture.
 - `errorLine (now) (step: string) (kind: string) (message: string) : string`: `"<okValue now> <step> <kind>: <message>"`
   with control characters (`Char.IsControl`) and U+2028 / U+2029 in the message replaced by one space each, the whole line cut
@@ -61,7 +65,7 @@ Module `TotalRecall.Core.SyncCycle` (all total, no I/O, no clock):
 
 - [ ] **Step 1: tests first** (`SyncCycleTests.fs`): `nextAfterPush` for every attempt 0..4 and every kind; `pushDecision`
   all 8 combinations; `cloneDamage` for every `FailureKind` (use a list of all cases; `RemoteNotFound` behaves like `Other`) with `Healthy`, `NoCommit` and each
-  `ProbeFailed k`; `okValue` fixed instants and a non-UTC offset input; `errorLine` for a newline, a tab, U+2028, U+2029, a
+  `ProbeFailed k`; `parseKind` for every case name, `"Clone"`, `""`, null, a wrong-case name; `okValue` fixed instants and a non-UTC offset input; `errorLine` for a newline, a tab, U+2028, U+2029, a
   600-character message (total length exactly 500, prefix intact), a message with a surrogate pair straddling the cut, an
   empty message, a null message, and a round trip: the first 24 characters parse back to the instant; FsCheck-style
   totality: a loop over generated strings (reuse the style of `SyncPushTests.fs`) never throws and never yields a control
@@ -199,8 +203,7 @@ set `last_error = SyncCycle.errorLine(clock(), step, kind, message)` (`Refused` 
 - after a successful clone, `Cloned = true`.
 
 **Kind mapping.** `FetchOutcome.Failed.Kind` and `PushOutcome.Failed.Kind` are strings; the cycle maps them to
-`SyncGit.FailureKind` with `Enum.TryParse` (case-sensitive; an unknown or unparsable value, and the pusher's `"Clone"`, map
-to `Other`) wherever `SyncCycle.cloneDamage` or the `Cancelled` check needs the enum. The kind **string** put into
+`SyncGit.FailureKind` with `SyncCycle.parseKind` (Task 1; an unknown value and the pusher's `"Clone"` map to `Other`) wherever `SyncCycle.cloneDamage` or the `Cancelled` check needs the enum. The kind **string** put into
 `CycleOutcome.Failed` is the part's own string, unchanged.
 
 `FetchStepAsync`: `OnStep("fetch")`, `fetcher.FetchAsync(ct)`; `Fetched` and `NothingNew` go on; `Refused(reason)` gives
