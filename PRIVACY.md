@@ -23,6 +23,7 @@ By default, total-recall stores the following data in a SQLite database on your 
 | Session metadata (timestamps, access counts, compaction log) | Tier management and eval reporting |
 | Retrieval event logs | Local eval framework (`eval_report`, `eval_compare`) |
 | Config snapshots | Track how config changes affect retrieval quality |
+| Transcript archive (opt-in, off by default): the dialogue of agent sessions, secrets redacted, once a later release can fill it; nothing is stored yet | Let a later session look back at what was said. Kept locally, in the main database or in the file `transcripts.db_path` names, and never synced. See [Transcript archive](docs/transcripts.md) |
 
 You control where the database lives by setting `TOTAL_RECALL_DB_PATH`.
 
@@ -51,6 +52,8 @@ Three optional configurations send data off your machine, to a system you choose
 - **A Postgres backend** (`[storage] connection_string`): memories and knowledge are stored in that database instead of the local SQLite file.
 - **Cortex** (`[storage] mode = "cortex"`): memories and the knowledge base entries you ingest (including the project docs ingested at session start) are synced to the Cortex instance you configure, telemetry (usage, skill usage, retrieval events, the compaction log) is pushed to it, team knowledge base queries go to it, and your skills are uploaded only when `[skills] auto_import` is on.
 - **A remote embedder** (`[embedding] provider = "openai"` or `"bedrock"`): the text to embed is sent to that service.
+
+Separately, the opt-in transcript archive (off by default) is never sent to a remote embedding service unless you set `[transcripts] allow_remote_embedding = true`; archive text is otherwise embedded only by the local model. In this version the archive stores nothing and that setting has no effect yet.
 
 See [Configuration](docs/configuration.md) and [Connecting to Cortex](docs/cortex.md).
 
@@ -95,6 +98,8 @@ To delete only memories while keeping config:
 ```bash
 rm ~/.total-recall/total-recall.db
 ```
+
+The opt-in transcript archive is deleted with `total-recall transcripts forget` (a session, a project or everything; see [Transcript archive](docs/transcripts.md)), which also removes the deleted text from the file and keeps it from being archived again. Deleting `total-recall.db` also deletes an archive that is kept in it (the default); an archive in its own file (`transcripts.db_path`) is a separate file to delete.
 
 By default there is no remote copy to request deletion of. The commands above do not remove a copy in Postgres or Cortex; delete it in that system.
 

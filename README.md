@@ -121,6 +121,7 @@ New memories land in the **warm** tier, where they are searched for every questi
 | [Commands](docs/commands.md) | Every `/total-recall:commands` subcommand |
 | [Web UI](docs/web-ui.md) | The local dashboard and its sections |
 | [Configuration](docs/configuration.md) | `config.toml`, Postgres, remote embedders |
+| [Transcript archive](docs/transcripts.md) | The opt-in archive of conversation transcripts: enabling, status, forgetting (not searchable yet) |
 | [Relocating the database](docs/database-location.md) | Cloud-synced and shared databases |
 | [Connecting to Cortex](docs/cortex.md) | The shared backend for teams |
 | [Skills](docs/skills.md) | Advertising your own skills at session start |

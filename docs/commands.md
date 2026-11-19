@@ -39,6 +39,22 @@ All commands are routed through the `/total-recall:commands` skill:
 
 Benchmark candidates captured from retrieval misses are reviewed (accepted or rejected) with `eval grow`, which calls the `eval_grow` tool; the CLI forms are `total-recall eval grow list` and `total-recall eval grow resolve`.
 
+## Transcript archive commands
+
+The opt-in [transcript archive](transcripts.md) is managed with the `total-recall transcripts` command line (not the `/total-recall:commands` skill). It can be enabled, inspected and emptied but not searched yet.
+
+| Command | Description |
+|---|---|
+| `total-recall transcripts enable` | Turn the archive on (asks first; needs a terminal) |
+| `total-recall transcripts disable` | Turn the archive off (no terminal needed; what it holds is kept) |
+| `total-recall transcripts status` | Show whether it is on, where it is and what it holds |
+| `total-recall transcripts forget --session <host>:<id>` | Delete one session and keep it from being archived again (asks first; needs a terminal) |
+| `total-recall transcripts forget --project <key>` | Delete one project's sessions and keep the project from being archived again |
+| `total-recall transcripts forget --all` | Delete everything and set a cutoff so nothing older is archived later |
+| `total-recall transcripts unforget --session <host>:<id>` / `--project <key>` / `--cutoff` | Allow later archiving again (brings nothing back; asks first; needs a terminal) |
+
+Exit codes: 0 done, 1 failure, 2 usage error or no terminal.
+
 Memory capture, retrieval, and compaction run automatically in the background — see the "Automatic Behavior" section of the `/total-recall:commands` skill.
 
 > **Note:** `/total-recall:commands` is implemented as a Claude Code skill (at `skills/commands/SKILL.md`), not as a slash-command file under `commands/`. The skill handles all `<subcommand>` arguments internally.
