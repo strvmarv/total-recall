@@ -265,9 +265,10 @@ public sealed partial class GitClient
     /// <summary>
     /// True when the clone is what sync made: the <c>&lt;cloneKey&gt;</c> directory, the <c>repo</c> directory and its
     /// <c>.git</c> are real directories, not links and not a <c>gitdir:</c> file. A link planted in any of them would
-    /// point <c>--git-dir</c> and <c>--work-tree</c> at someone else's repository.
+    /// point <c>--git-dir</c> and <c>--work-tree</c> at someone else's repository. The sync cycle uses it to tell a missing
+    /// or damaged clone directory from a usable one.
     /// </summary>
-    private bool CloneIsSound()
+    public bool CloneIsSound()
     {
         var clone = new DirectoryInfo(_paths.CloneDirectory);
         return IsRealDirectory(clone)

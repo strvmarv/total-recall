@@ -24,6 +24,21 @@ public abstract record FetchOutcome
     public sealed record Failed(string Kind, string Message) : FetchOutcome;
 }
 
+/// <summary>The answer of the identity half of the guard (milestone 1b-i-4): may this machine sync this repository at all.</summary>
+public abstract record IdentityCheck
+{
+    private IdentityCheck() { }
+
+    /// <summary>This machine and data directory are the ones that joined the configured repository.</summary>
+    public sealed record Joined : IdentityCheck;
+
+    /// <summary>This machine has no sync setup (it never joined); there is nothing to report to the person.</summary>
+    public sealed record NotJoined(string Text) : IdentityCheck;
+
+    /// <summary>A setup exists but this machine must not sync (remote changed, data directory moved or copied, host unverified, ...).</summary>
+    public sealed record Refused(string Text) : IdentityCheck;
+}
+
 /// <summary>
 /// The fetch of the pull (milestone 1b-i-2, decisions 1 to 3): asks the remote for its head, skips the network when
 /// nothing is new, fetches into the clone, runs the repository guard, decides whether applying is proven (<c>L</c> is
@@ -49,13 +64,33 @@ public sealed class GitSyncFetcher(GitClient client, RepoGuard guard, IMetaStore
         }
     }
 
+    /// <summary>
+    /// The identity half of the guard, with no network command and no write (it may run the read-only local
+    /// <c>ls-tree</c> and <c>cat-file</c> the guard uses to read the clone's manifest). A machine that never joined is
+    /// <see cref="IdentityCheck.NotJoined"/>; every other refusal is <see cref="IdentityCheck.Refused"/>.
+    /// </summary>
+    public async Task<IdentityCheck> CheckIdentityAsync(CancellationToken cancellationToken = default)
+    {
+        var verdict = await _guard.EvaluateIdentityAsync(null, cancellationToken).ConfigureAwait(false);
+        if (verdict.Join is SyncIdentity.JoinState.NotJoined notJoined)
+        {
+            var text = SyncIdentity.reasonText(notJoined.Item);
+            return notJoined.Item.IsNeverJoined ? new IdentityCheck.NotJoined(text) : new IdentityCheck.Refused(text);
+        }
+        if (verdict.HostUnverified)
+            return new IdentityCheck.Refused("host identity could not be determined");
+        return new IdentityCheck.Joined();
+    }
+
     private async Task<FetchOutcome> FetchCoreAsync(CancellationToken ct)
     {
         var last = ReadLast();
 
         // 2. the identity half of the guard needs no clone and no network: refuse first.
-        var early = await _guard.EvaluateIdentityAsync(null, ct).ConfigureAwait(false);
-        if (IdentityRefusal(early) is { } earlyRefusal)
+        var early = await CheckIdentityAsync(ct).ConfigureAwait(false);
+        if (early is IdentityCheck.NotJoined { Text: var notJoinedText })
+            return new FetchOutcome.Refused(notJoinedText);
+        if (early is IdentityCheck.Refused { Text: var earlyRefusal })
             return new FetchOutcome.Refused(earlyRefusal);
 
         var advertised = await _client.LsRemoteAsync(SyncGit.RemoteRef.Origin, _branch, cancellationToken: ct).ConfigureAwait(false);
