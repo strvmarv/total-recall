@@ -17,8 +17,11 @@ public sealed partial class GitSyncApplier
     /// set (the rows with a <c>repush_groups</c> marker included, milestone 1b-ii D16), previews the deletions for the
     /// delete guard (D1 to D4), decides each entry in ordinal id order (one transaction each), records the rejections,
     /// sweeps the cleared ones, and advances <c>L</c> only for a complete pull (a tripped guard does not hold it back, nor
-    /// does a repush marker, D19). Never throws for a bad record, a busy database or a failed entry; the
-    /// token stops it between entries.
+    /// does a repush marker, D19). In an unproven pull every deletion candidate is held before <c>L</c> moves (D5 and the
+    /// umbrella's "a missing file is never proof"): one whose entry ended failed, skipped or scan-skipped, so that its own
+    /// transaction wrote no hold, gets an open <c>unproven</c> item from a fallback transaction of its own (see
+    /// <see cref="HoldUnprovenCandidate"/>), and when that cannot be written the entry is deferred and <c>L</c> stays.
+    /// Never throws for a bad record, a busy database or a failed entry; the token stops it between entries.
     /// </summary>
     public async Task<ApplyOutcome> ApplyAsync(FetchResult fetch, ScanSummary scan, CancellationToken cancellationToken = default)
     {
@@ -135,6 +138,10 @@ public sealed partial class GitSyncApplier
                     if (skipDeferred.Busy)
                         stopped = true;
                 }
+                else
+                {
+                    HoldIfUnprovenCandidate();
+                }
                 continue;
             }
 
@@ -217,10 +224,29 @@ public sealed partial class GitSyncApplier
                         break;
                     case EntryResult.Skipped s:
                         skipped.Add(new SkippedItem(id, null, s.Reason));
+                        HoldIfUnprovenCandidate();
                         break;
                     case EntryResult.Failed f:
                         failed.Add(new FailedEntry(id, f.Attempts, f.Detail));
+                        HoldIfUnprovenCandidate();
                         break;
+                }
+            }
+
+            // An entry that ended failed, skipped or scan-skipped wrote no hold of its own: in an unproven pull a deletion
+            // candidate is held here, or deferred so that L stays (the umbrella's "a missing file is never proof").
+            void HoldIfUnprovenCandidate()
+            {
+                if (fetch.Proven || UnprovenCandidate(id, view, localDeletions, rows) is not { } candidate)
+                    return;
+                var (held, notHeld) = HoldUnprovenCandidate(id, candidate.Direction, candidate.RecordSha);
+                if (held is not null)
+                    heldNow.Add(held);
+                if (notHeld is not null)
+                {
+                    deferred.Add(new DeferredEntry(id, notHeld.Reason));
+                    if (notHeld.Busy)
+                        stopped = true;
                 }
             }
         }
@@ -262,6 +288,26 @@ public sealed partial class GitSyncApplier
             postponed, deferred, failed,
             rejectedNow.Select(p => new RejectedItem(p.Key, p.Value.Reason)).OrderBy(r => r.Key, StringComparer.Ordinal).ToList(),
             skipped, colder, deleted, heldNow, preview.Trips, pushDeletions, closedHeld, notes, repushMarked));
+    }
+
+    /// <summary>
+    /// The direction and the record's blob id of an id that is a deletion candidate of an unproven pull (D1 and D5), read
+    /// from what the pull read at its start: a row that is <c>active</c> with a base, and either no path of the id in
+    /// <c>R</c> (a vanished record: <c>remote</c>, no blob) or an accepted record of an id the scan reports as a local
+    /// deletion (<c>local</c>, the record's blob). Null for anything else: a row with no base (never deleted by a pull), a
+    /// <c>forgotten</c> or <c>left</c> row, a rejected path, or an accepted record of an id that is not a local deletion.
+    /// Whether the entry exists is checked by <see cref="HoldUnprovenCandidate"/> inside its transaction.
+    /// </summary>
+    private static (SyncMerge.Direction Direction, string? RecordSha)? UnprovenCandidate(
+        string id, TreeView view, HashSet<string> localDeletions, Dictionary<string, GitSyncRow> rows)
+    {
+        if (!rows.TryGetValue(id, out var row) || !row.State.IsActive || row.BaseJson is null)
+            return null;
+        if (view.Accepted.TryGetValue(id, out var record))
+            return localDeletions.Contains(id) ? (SyncMerge.Direction.LocalDeletion, record.Sha) : null;
+        if (view.Present.Contains(id))
+            return null; // a rejected path: never a candidate
+        return (SyncMerge.Direction.RemoteDeletion, null);
     }
 
     /// <summary>The guard's verdict for one pull and the directions it tripped, each with its count and the limit.</summary>

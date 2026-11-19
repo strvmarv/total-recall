@@ -299,7 +299,7 @@ public sealed class GitSyncApplierPullTests : IDisposable
     }
 
     [GitFact]
-    public async Task ALocalDeletionsRecordThatTheGuardPreviewCannotRead_IsThatEntrysFailure_AndIsNotReadAgain()
+    public async Task ALocalDeletionsRecordThatTheGuardPreviewCannotRead_IsThatEntrysFailure_IsHeldByTheUnprovenFallback_AndIsNotReadAgain()
     {
         PushRecords(Rec(A));
         await Pull();
@@ -314,7 +314,8 @@ public sealed class GitSyncApplierPullTests : IDisposable
         var summary = await Pull();
 
         Assert.Equal(A, Assert.Single(summary.Failed).Id);
-        Assert.Empty(summary.Held);
+        Assert.Equal([new HeldEntry(A, "local", "unproven")], summary.Held); // the unproven pull's fallback hold
+        Assert.Equal(new HeldItem(A, "local", blob, "unproven", _now), GitSyncReviews.ReadOpenHeld(_rig.Connection)[A]);
         Assert.Empty(summary.GuardTripped);
         Assert.Equal(before + 1, ReadsOf(blob));
         Assert.Equal(blob, Assert.Single(Issues("apply-failed")).RecordHash);

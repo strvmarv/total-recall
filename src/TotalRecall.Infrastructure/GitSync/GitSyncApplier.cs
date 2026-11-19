@@ -35,7 +35,12 @@ public sealed record NoteEntry(string Id, string Note);
 /// </summary>
 public sealed record RepushEntry(string Id, string Groups);
 
-/// <summary>What one pull did. <see cref="Complete"/> is true when every id of the set was processed and none was postponed or deferred.</summary>
+/// <summary>
+/// What one pull did. <see cref="Complete"/> is true when every id of the set was processed and none was postponed or deferred.
+/// <see cref="Held"/> lists every held-delete item the pull wrote, the fallback holds of an unproven pull included: a
+/// deletion candidate whose entry is also in <see cref="Failed"/> or <see cref="Skipped"/> is held all the same, and one
+/// whose hold could not be written is in <see cref="Deferred"/> (milestone 1b-ii, D5).
+/// </summary>
 public sealed record ApplySummary(
     int Inserted,
     int Updated,
@@ -79,7 +84,8 @@ public abstract record ApplyOutcome
 /// the limit carries none of them out and holds each with the cause <c>guard</c> (<see cref="ApplySummary.GuardTripped"/>),
 /// and the pull is still complete. A record whose stamp for a group is older than the base's (a reset reverted it) leaves
 /// the entry alone and marks the group in the row's <c>repush_groups</c> for the push (D16); a marked row is decided on every
-/// pull. Only a decision that opens a review item is postponed (D19), and it changes nothing. Nothing calls it yet.
+/// pull. Only a decision that opens a review item is postponed (D19), and it changes nothing. In an unproven pull a
+/// deletion candidate whose entry failed or was skipped is still held before <c>L</c> moves (D5). Nothing calls it yet.
 /// </summary>
 public sealed partial class GitSyncApplier
 {
@@ -108,7 +114,8 @@ public sealed partial class GitSyncApplier
     /// Test seam: called with the id and a step name inside the open transaction. The store transaction's own steps
     /// (<c>insert-row</c>, <c>update</c>, <c>move-copy</c>, <c>replace-vec</c>, <c>delete-vec</c>, <c>log-import</c>, ...) are
     /// forwarded, and the applier adds <c>reread</c>, <c>row</c>, <c>close</c> (a held-delete item removed), <c>hold</c> (one
-    /// written), <c>issue</c> and <c>commit</c>.
+    /// written), <c>issue</c> and <c>commit</c>; <c>hold-unproven</c> is the fallback hold of an unproven pull, in its own
+    /// transaction after the entry's.
     /// </summary>
     internal Action<string, string>? BeforeEntryStep { get; set; }
 
