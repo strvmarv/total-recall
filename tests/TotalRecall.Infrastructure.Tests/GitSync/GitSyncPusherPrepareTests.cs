@@ -293,7 +293,7 @@ public sealed class GitSyncPusherPrepareTests : IDisposable
     {
         _rig.Seed(Rec(A));
         await _rig.PullAsync();
-        _rig.Edit(Tier.Warm, A, new UpdateEntryOpts { Content = "edited" });
+        _rig.Edit(Tier.Warm, A, new UpdateEntryOpts { Tags = ["x"] });   // no text edit: a text edit would be a write-back (D15)
         _rig.Now += 1000;
         var scan = _rig.Scan();
         var path = SyncValidation.recordPath(A);
@@ -513,5 +513,89 @@ public sealed class GitSyncPusherPrepareTests : IDisposable
 
         Assert.True(prepared.Candidates.ContainsKey("XYZ"));
         Assert.False(prepared.Excluded.ContainsKey("XYZ"));   // no path, no exclusion: the limit check blocks it later
+    }
+
+    // ---- held entries and the narrowed exclusions (milestone 1b-ii, D17, D18) ----
+
+    [GitTheory]
+    [InlineData("tag")]
+    [InlineData("pin")]
+    [InlineData("promotion")]
+    public async Task HeldEntry_WithATagPinOrPromotion_IsExcludedAsHeldDelete_AndWritesNothing(string change)
+    {
+        _rig.Seed(Rec(A), Rec(B, content: "stays"));
+        await _rig.PullAsync();
+        switch (change)
+        {
+            case "tag":
+                _rig.Edit(Tier.Warm, A, new UpdateEntryOpts { Tags = ["x"] });
+                break;
+            case "pin":
+                _rig.Pin(A);
+                break;
+            default:
+                _rig.Store.Move(Tier.Warm, ContentType.Memory, Tier.Hot, ContentType.Memory, A);
+                break;
+        }
+        _rig.Now += 1000;
+        var scan = _rig.Scan();
+        // the record is gone at L and the deletion is held: the state a held remote deletion leaves
+        var head = MoveL(pull => pull.Remove(SyncValidation.recordPath(A)));
+        GitSyncReviews.UpsertHeld(_rig.Pull.Connection, new HeldItem(A, "remote", null, "unproven", 1_700_000_000_000L));
+        var rows = _rig.RowDump();
+
+        var prepared = Ready(await Prepare(PushRig.Summary(head), scan));
+        Assert.Equal(SyncPush.Exclusion.HeldDelete, prepared.Excluded[A]);
+        Assert.Equal("remote", prepared.Held[A].Direction);
+        var summary = Assert.IsType<PushOutcome.NothingToPush>(await _rig.Push(PushRig.Summary(head), scan)).Summary;
+
+        Assert.Equal([new PushItem(A, "held-delete")], summary.Skipped);
+        Assert.Empty(summary.Written);
+        Assert.Equal(head, _rig.Remote.Head());
+        Assert.Equal("", _rig.Remote.Git("ls-tree", "--name-only", "main", "--", SyncValidation.recordPath(A)).Trim());
+        Assert.Equal(rows, _rig.RowDump());   // no pushing_stamps, no mark, the pending stamps kept
+        Assert.NotNull(GitSyncReviews.ReadOpenHeldItem(_rig.Pull.Connection, A));
+    }
+
+    [GitFact]
+    public async Task NoBaseRowOverAnAcceptedButUnparsableRecord_IsNotOverwritten()
+    {
+        var path = SyncValidation.recordPath(A);
+        var head = _rig.SeedWith(pull => pull.PutText(path, "{not json"));
+        Joined(head);
+        _rig.AddMemory(Tier.Warm, A, content: "a local twin over a record that does not parse");
+        _rig.AddMemory(Tier.Warm, B);
+        _rig.Now += 1000;
+        var scan = _rig.Scan();
+
+        var prepared = Ready(await Prepare(PushRig.Summary(head), scan));
+        Assert.Equal(SyncPush.Exclusion.NotReconciled, prepared.Excluded[A]);
+        Assert.Null(prepared.Candidates[A].Record);   // a row with no base never reads the record
+        var pushed = Assert.IsType<PushOutcome.Pushed>(await _rig.Push(PushRig.Summary(head), scan));
+
+        Assert.Equal([B], pushed.Summary.Written);
+        Assert.Equal([new PushItem(A, "not-reconciled")], pushed.Summary.Skipped);
+        Assert.Equal("{not json", _rig.RemoteFile(path));
+        Assert.Null(GitSyncRows.ReadAll(_rig.Pull.Connection)[A].BaseJson);
+    }
+
+    [GitFact]
+    public async Task BaseRowWithNoRecordAndNoPendingText_WritesNothing()
+    {
+        _rig.Seed(Rec(A), Rec(B, content: "stays"));
+        await _rig.PullAsync();
+        _rig.Edit(Tier.Warm, A, new UpdateEntryOpts { Tags = ["x"] });   // no content stamp: a tag and a promotion
+        _rig.Store.Move(Tier.Warm, ContentType.Memory, Tier.Hot, ContentType.Memory, A);
+        _rig.Now += 1000;
+        var scan = _rig.Scan();
+        var head = MoveL(pull => pull.Remove(SyncValidation.recordPath(A)));
+        var rows = _rig.RowDump();
+
+        var summary = Assert.IsType<PushOutcome.NothingToPush>(await _rig.Push(PushRig.Summary(head), scan)).Summary;
+
+        Assert.Equal([new PushItem(A, "record-missing")], summary.Skipped);
+        Assert.Equal(head, _rig.Remote.Head());
+        Assert.Equal("", _rig.Remote.Git("ls-tree", "--name-only", "main", "--", SyncValidation.recordPath(A)).Trim());
+        Assert.Equal(rows, _rig.RowDump());
     }
 }

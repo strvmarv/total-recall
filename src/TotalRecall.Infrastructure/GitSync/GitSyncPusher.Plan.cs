@@ -8,14 +8,22 @@ using SyncRecordModule = TotalRecall.Core.SyncRecord;
 
 namespace TotalRecall.Infrastructure.GitSync;
 
-/// <summary>An entry whose file will be written: a new record, or the record at <c>L</c> patched.</summary>
+/// <summary>
+/// An entry whose file will be written: a new record, the record at <c>L</c> patched, or (milestone 1b-ii, D15) a
+/// write-back: the row's base patched with the entry's groups, for a record a text edit saved from a remote deletion.
+/// <see cref="IsNew"/> is true when the file is new in the repository (a new entry or a write-back; counted as <c>+</c>).
+/// </summary>
 internal sealed record PlannedEntry(
     string Id,
     bool IsNew,
     byte[] Bytes,
     SyncRecordModule.SyncRecord Record,
     SyncPush.GroupPlan? Plan,
-    SyncMerge.GroupStamps Pushed);
+    SyncMerge.GroupStamps Pushed)
+{
+    /// <summary>A write-back (D15): a new file planned from the row's base, so it has a group plan.</summary>
+    public bool WriteBack => IsNew && Plan is not null;
+}
 
 /// <summary>An entry that needs no file: the record at <c>L</c> already says what the entry says (decision 6).</summary>
 internal sealed record UnchangedEntry(string Id, string BaseText, SyncMerge.GroupStamps Pushed);
@@ -60,7 +68,9 @@ public sealed partial class GitSyncPusher
     /// <summary>
     /// Decisions 6 to 9: in one immediate transaction, re-reads each candidate that was not left out, requires that it
     /// still agrees with its row, builds the record to write, and writes the block marks and the <c>pushing_stamps</c>
-    /// of the entries that will be written. Writes no file. A failure rolls the whole transaction back.
+    /// of the entries that will be written. A candidate with a base and no accepted record at <c>L</c> is a write-back
+    /// (milestone 1b-ii, D15): its record is the row's base patched like a changed entry's, and only a content group that
+    /// is written lets it out. Writes no file. A failure rolls the whole transaction back.
     /// </summary>
     internal PlanResult Plan(PushPrepared prepared, CancellationToken ct)
     {
@@ -166,6 +176,7 @@ public sealed partial class GitSyncPusher
         SyncRecordModule.SyncRecord? record;
         SyncPush.GroupPlan? plan = null;
         var isNew = row.BaseJson is null;
+        var writeBack = !isNew && !prepared.Tree.Accepted.ContainsKey(id);
         SyncValidation.Block? violation = null;
 
         if (isNew)
@@ -184,14 +195,24 @@ public sealed partial class GitSyncPusher
         }
         else
         {
-            if (info.Record is null || info.RecordBytes is null)
+            // the record to patch: the one at L, or for a write-back the row's base (its unknown fields survive)
+            var start = writeBack ? info.Base : info.Record;
+            if (start is null || (!writeBack && info.RecordBytes is null))
             {
-                skipped.Add(new PushItem(id, "record-unreadable"));
+                skipped.Add(new PushItem(id, writeBack ? "unreadable-base" : "record-unreadable"));
                 return;
             }
-            plan = SyncPush.planChanged(info.Record.Record, info.Record.UnknownSource is not null, local, pending);
+            plan = SyncPush.planChanged(start.Record, start.UnknownSource is not null, local, pending);
             if (!plan.Stale.IsEmpty)
                 skipped.Add(new PushItem(id, "stale-stamp"));
+            if (writeBack && plan.Content is null)
+            {
+                // only a pending text change newer than the base may write a vanished record back (D15, D18): a stale
+                // content stamp is listed as stale above, a content stamp that is gone since the preparation as missing
+                if (!plan.Stale.Contains("content"))
+                    skipped.Add(new PushItem(id, SyncPush.exclusionName(SyncPush.Exclusion.RecordMissing)));
+                return;
+            }
             if (SyncPush.nothingToWrite(plan))
             {
                 unchanged.Add(Unchanged(id, info, SyncPush.pushedStamps(plan)));
@@ -199,7 +220,7 @@ public sealed partial class GitSyncPusher
                 return;
             }
 
-            var patched = RecordPatcher.Patch(info.Record, ToPatch(plan, local));
+            var patched = RecordPatcher.Patch(start, ToPatch(plan, local));
             if (patched.Failure == PatchFailure.MissingTierStamp)
             {
                 skipped.Add(new PushItem(id, "missing-stamp"));
@@ -221,7 +242,7 @@ public sealed partial class GitSyncPusher
             return;
         }
 
-        if (!isNew && bytes!.AsSpan().SequenceEqual(info.RecordBytes!))
+        if (!isNew && !writeBack && bytes!.AsSpan().SequenceEqual(info.RecordBytes!))
         {
             unchanged.Add(Unchanged(id, info, SyncPush.pushedStamps(plan!)));
             ApplyMark(tx, row, local, violation: null, candidate: true, pushing: null, keepPushing: true, id);
@@ -229,7 +250,7 @@ public sealed partial class GitSyncPusher
         }
 
         var pushed = isNew ? pending : SyncPush.pushedStamps(plan!);
-        entries.Add(new PlannedEntry(id, isNew, bytes!, record!, plan, pushed));
+        entries.Add(new PlannedEntry(id, isNew || writeBack, bytes!, record!, plan, pushed));
         Step(id, "pushing");
         ApplyMark(tx, row, local, violation: null, candidate: true, pushing: SyncApply.PushingStamps.encode(pushed), keepPushing: false, id);
     }

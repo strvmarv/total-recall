@@ -5,7 +5,9 @@
 /// written (`planChanged`), the new record (`newRecord`), the row after a push (`afterPush`), the commit message, the
 /// machine label, the `published` mapping of a failed push and the staged-set check. Milestone 1b-ii (D14) adds the
 /// removal of a locally deleted memory's record: which ones can be removed (`removable`), the `-` count of the commit
-/// message and a deleted path in the staged set. Pure and total: no I/O, no clock.
+/// message and a deleted path in the staged set; the `held-delete` exclusion of an entry with an open held item (D17);
+/// and the narrowed `record-missing` (D18), which no longer covers a row whose pending text edit saved it from a remote
+/// deletion (that row is written back from its base, D15). Pure and total: no I/O, no clock.
 module TotalRecall.Core.SyncPush
 
 open System
@@ -38,10 +40,11 @@ let isCandidate (row: RowFacts) : bool =
             | Some scanned, Some baseHash -> scanned <> baseHash
             | _ -> false))
 
-/// Why a candidate is left out of this push (decision 5).
+/// Why a candidate is left out of this push (decision 5; `HeldDelete` from milestone 1b-ii, D17).
 type Exclusion =
     | Issue
     | RejectedRecord
+    | HeldDelete
     | NotReconciled
     | RecordMissing
     | RecordUnreadable
@@ -54,6 +57,7 @@ let exclusionName (e: Exclusion) : string =
     match e with
     | Issue -> "issue"
     | RejectedRecord -> "rejected-record"
+    | HeldDelete -> "held-delete"
     | NotReconciled -> "not-reconciled"
     | RecordMissing -> "record-missing"
     | RecordUnreadable -> "record-unreadable"
@@ -63,24 +67,34 @@ let exclusionName (e: Exclusion) : string =
     | UnreadableEntry -> "unreadable-entry"
 
 /// The facts the exclusion order reads. `HasIssueOrSkip`: an open `apply-failed` issue or an id the scan skipped.
-/// `RejectedNamesId`: a rejected path of the tree names this id. `RecordAccepted`: the tree holds an accepted record.
+/// `RejectedNamesId`: a rejected path of the tree names this id. `HeldDelete`: the id has an open `held-delete` item
+/// (milestone 1b-ii, D17). `RecordAccepted`: the tree holds an accepted record. `PendingContent`: the row has a pending
+/// content stamp (D18).
 type ExclusionFacts =
     { HasIssueOrSkip: bool
       RejectedNamesId: bool
+      HeldDelete: bool
       HasBase: bool
       RecordAccepted: bool
+      PendingContent: bool
       RecordUnreadable: bool
       BaseUnreadable: bool
       PathOccupied: bool
       BlockedElsewhere: bool
       EntryUnreadable: bool }
 
-/// The first exclusion that matches, in the order of decision 5.
+/// The first exclusion that matches, in the order of decision 5. An entry with an open held item writes nothing, whatever
+/// it has pending (D17). `not-reconciled` is unchanged: a no-base row over an accepted record, even one that does not
+/// parse, is never written over it. `record-missing` is only a row with a base, no accepted record and no pending text
+/// change: nothing the push may write from nothing. After a complete pull it is defensive (a deleted entry is no
+/// candidate, a held one is excluded above); a row with a base, no record and a pending content stamp is written back
+/// from its base (D15, D18).
 let exclusion (f: ExclusionFacts) : Exclusion option =
     if f.HasIssueOrSkip then Some Issue
     elif f.RejectedNamesId then Some RejectedRecord
+    elif f.HeldDelete then Some HeldDelete
     elif not f.HasBase && f.RecordAccepted then Some NotReconciled
-    elif f.HasBase && not f.RecordAccepted then Some RecordMissing
+    elif f.HasBase && not f.RecordAccepted && not f.PendingContent then Some RecordMissing
     elif f.RecordAccepted && f.RecordUnreadable then Some RecordUnreadable
     elif f.BaseUnreadable then Some UnreadableBase
     elif f.PathOccupied then Some PathOccupied

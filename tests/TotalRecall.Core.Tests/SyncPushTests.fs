@@ -45,8 +45,10 @@ let candidateTests =
 let private none : ExclusionFacts =
     { HasIssueOrSkip = false
       RejectedNamesId = false
+      HeldDelete = false
       HasBase = true
       RecordAccepted = true
+      PendingContent = false
       RecordUnreadable = false
       BaseUnreadable = false
       PathOccupied = false
@@ -63,6 +65,7 @@ let exclusionTests =
             let cases =
                 [ { none with HasIssueOrSkip = true }, Issue
                   { none with RejectedNamesId = true }, RejectedRecord
+                  { none with HeldDelete = true }, HeldDelete
                   { none with HasBase = false }, NotReconciled
                   { none with RecordAccepted = false }, RecordMissing
                   { none with RecordUnreadable = true }, RecordUnreadable
@@ -76,8 +79,10 @@ let exclusionTests =
             let all =
                 { HasIssueOrSkip = true
                   RejectedNamesId = true
+                  HeldDelete = true
                   HasBase = false
                   RecordAccepted = true
+                  PendingContent = true
                   RecordUnreadable = true
                   BaseUnreadable = true
                   PathOccupied = true
@@ -86,7 +91,9 @@ let exclusionTests =
             Expect.equal (exclusion all) (Some Issue) "issue first"
             let a = { all with HasIssueOrSkip = false }
             Expect.equal (exclusion a) (Some RejectedRecord) "rejected next"
-            let b = { a with RejectedNamesId = false }
+            let held = { a with RejectedNamesId = false }
+            Expect.equal (exclusion held) (Some HeldDelete) "held-delete next"
+            let b = { held with HeldDelete = false }
             Expect.equal (exclusion b) (Some NotReconciled) "not-reconciled next (no base, record accepted)"
             let c = { b with HasBase = true }
             Expect.equal (exclusion c) (Some RecordUnreadable) "record-unreadable next"
@@ -103,10 +110,37 @@ let exclusionTests =
             Expect.equal (exclusion { none with RecordAccepted = false; BaseUnreadable = true }) (Some RecordMissing) "record-missing before unreadable-base"
         testCase "the reason words are the spec's" <| fun () ->
             Expect.equal
-                ([ Issue; RejectedRecord; NotReconciled; RecordMissing; RecordUnreadable; UnreadableBase; PathOccupied; BlockedElsewhere; UnreadableEntry ]
+                ([ Issue; RejectedRecord; HeldDelete; NotReconciled; RecordMissing; RecordUnreadable; UnreadableBase; PathOccupied; BlockedElsewhere; UnreadableEntry ]
                  |> List.map exclusionName)
-                [ "issue"; "rejected-record"; "not-reconciled"; "record-missing"; "record-unreadable"; "unreadable-base"; "path-occupied"; "blocked-elsewhere"; "unreadable-entry" ]
+                [ "issue"; "rejected-record"; "held-delete"; "not-reconciled"; "record-missing"; "record-unreadable"; "unreadable-base"; "path-occupied"; "blocked-elsewhere"; "unreadable-entry" ]
                 "names"
+    ]
+
+[<Tests>]
+let deletionExclusionTests =
+    testList "SyncPush.exclusion (milestone 1b-ii, D15, D17, D18)" [
+        testCase "exclusion_order_puts_held_delete_after_rejected_record" <| fun () ->
+            let held = { none with HeldDelete = true }
+            Expect.equal (exclusion { held with HasIssueOrSkip = true }) (Some Issue) "an issue comes first"
+            Expect.equal (exclusion { held with RejectedNamesId = true }) (Some RejectedRecord) "a rejected path comes before the hold"
+            Expect.equal (exclusion { held with HasBase = false }) (Some HeldDelete) "the hold comes before not-reconciled"
+            Expect.equal (exclusion { held with RecordAccepted = false }) (Some HeldDelete) "and before record-missing"
+            Expect.equal (exclusion { held with RecordAccepted = false; PendingContent = true }) (Some HeldDelete) "a pending text edit does not lift an open item"
+            Expect.equal (exclusion { held with RecordUnreadable = true; PathOccupied = true }) (Some HeldDelete) "and before every later reason"
+        testCase "recordMissing_does_not_apply_when_a_content_stamp_is_pending" <| fun () ->
+            let saved = { none with RecordAccepted = false; PendingContent = true }
+            Expect.isNone (exclusion saved) "a base, no record and a pending text edit is a write-back"
+            Expect.equal (exclusion { saved with BaseUnreadable = true }) (Some UnreadableBase) "a write-back needs a readable base"
+            Expect.equal (exclusion { saved with PathOccupied = true }) (Some PathOccupied) "and a free path"
+            Expect.equal (exclusion { saved with BlockedElsewhere = true }) (Some BlockedElsewhere) "and no foreign block"
+            Expect.equal (exclusion { saved with PendingContent = false }) (Some RecordMissing) "no pending text: record-missing"
+            Expect.isNone (exclusion { saved with RecordUnreadable = true }) "record-unreadable needs an accepted record"
+        testCase "notReconciled_is_unchanged" <| fun () ->
+            for pending in [ false; true ] do
+                let noBase = { none with HasBase = false; PendingContent = pending }
+                Expect.equal (exclusion noBase) (Some NotReconciled) (sprintf "no base and an accepted record (pending %b)" pending)
+                Expect.equal (exclusion { noBase with RecordUnreadable = true }) (Some NotReconciled) "also over a record that does not parse"
+                Expect.isNone (exclusion { noBase with RecordAccepted = false }) "no base and no record is a new entry"
     ]
 
 // ---- the path rule ----

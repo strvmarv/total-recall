@@ -5,6 +5,7 @@ using TotalRecall.Infrastructure.GitSync;
 using TotalRecall.Infrastructure.Storage;
 using Xunit;
 using static TotalRecall.Infrastructure.Tests.GitSync.ApplyRig;
+using SyncRecordModule = TotalRecall.Core.SyncRecord;
 
 namespace TotalRecall.Infrastructure.Tests.GitSync;
 
@@ -583,5 +584,187 @@ public sealed class GitSyncPusherPlanTests : IDisposable
         Assert.Single(Planned(result).Entries);
         Assert.NotNull(Row(A).PushingStamps);
         Assert.Equal(1, pusher.TransactionCount);
+    }
+
+    // ---- write-back of a record a text edit saved (milestone 1b-ii, D15) ----
+
+    /// <summary>Another machine removes the record from the remote; the next pull of this machine sees the deletion.</summary>
+    private void RemovedByAnotherMachine(string id)
+    {
+        _rig.Pull.Remove(SyncValidation.recordPath(id));
+        _rig.Pull.Commit("another machine removes " + id);
+        _rig.Pull.Source.PushTo(_rig.Remote.Path);
+    }
+
+    private static SyncRecordModule.SyncRecord ReadRecord(string text, string id) =>
+        RecordReader.Parse(Encoding.UTF8.GetBytes(text), SyncValidation.recordPath(id)).Parsed!.Record;
+
+    /// <summary>
+    /// A is pulled, edited here (plus <paramref name="more"/>) and removed by another machine; the pull keeps it with a fresh
+    /// pending content stamp (D10), which is returned with the pull's summaries.
+    /// </summary>
+    private async Task<(ApplySummary Apply, ScanSummary Scan, SyncStamp.Stamp Fresh)> SavedByATextEditAsync(Action? more = null)
+    {
+        SeedChanged(A);
+        await _rig.PullAsync();
+        _rig.Edit(Tier.Warm, A, new UpdateEntryOpts { Content = "edited here" });
+        more?.Invoke();
+        RemovedByAnotherMachine(A);
+        _rig.Now += 1000;
+        var (apply, scan) = await _rig.PullAsync();
+        Assert.True(apply.Complete);
+        Assert.Equal([new NoteEntry(A, "edit-beats-deletion")], apply.Notes);
+        return (apply, scan, Row(A).ContentStamp!);
+    }
+
+    [GitFact]
+    public async Task EntryWhoseTextEditBeatAnRemoteDeletion_IsWrittenBackFromTheBase_WithTheFreshStamp_AndCountsAsAdded()
+    {
+        var path = SyncValidation.recordPath(A);
+        _rig.SeedWith(pull => pull.PutText(path, RecordFixtures.Unknowns.Replace("3f9c2a7e-1111", A)));
+        await _rig.PullAsync();
+        Assert.Contains("\"future\": true", Row(A).BaseJson);
+        _rig.Edit(Tier.Warm, A, new UpdateEntryOpts { Content = "edited here" });
+        _rig.Now += 1000;
+        _rig.Scan();
+        var edited = Row(A).ContentStamp!;
+        RemovedByAnotherMachine(A);
+        _rig.Now += 1000;
+        var (apply, scan) = await _rig.PullAsync();
+        Assert.True(apply.Complete);
+        Assert.Equal([new NoteEntry(A, "edit-beats-deletion")], apply.Notes);
+        var fresh = Row(A).ContentStamp!;
+        Assert.True(SyncStamp.StampModule.compare(fresh, edited) > 0);   // the apply issued a fresh stamp (D10)
+
+        var outcome = await _rig.Push(apply, scan);
+
+        var pushed = Assert.IsType<PushOutcome.Pushed>(outcome);
+        Assert.Equal([A], pushed.Summary.Written);
+        Assert.Equal(1, pushed.Summary.New);
+        Assert.Equal(0, pushed.Summary.Changed);
+        Assert.Empty(pushed.Summary.Skipped);
+        Assert.Equal("sync: testbox +1 ~0 -0", _rig.Remote.Git("log", "-1", "--format=%s", "main").Trim());
+        var written = _rig.RemoteFile(path);
+        var record = ReadRecord(written, A);
+        Assert.Equal("edited here", record.Content);
+        Assert.Equal(fresh, record.ContentStamp);
+        Assert.Contains("\"future\": true", written);   // unknown fields of the base survive
+        Assert.Contains("\"alpha-top\": \"z\"", written);
+        var row = Row(A);
+        Assert.Equal(SyncMerge.RowState.Active, row.State);
+        Assert.Equal(written, row.BaseJson);
+        Assert.Null(row.ContentStamp);
+        Assert.Null(row.PushingStamps);
+        Assert.Equal(_rig.Remote.Head(), _rig.Pull.Last);
+    }
+
+    [GitFact]
+    public async Task WriteBackWithAStaleTierStamp_SkipsOnlyThatGroup()
+    {
+        var (apply, scan, fresh) = await SavedByATextEditAsync(
+            () => _rig.Store.Move(Tier.Warm, ContentType.Memory, Tier.Hot, ContentType.Memory, A));
+        GitSyncRows.Write(_rig.Pull.Connection, Row(A) with { TierStamp = St(5) });   // older than the base's St(10)
+
+        var outcome = await _rig.Push(apply, scan);
+
+        var pushed = Assert.IsType<PushOutcome.Pushed>(outcome);
+        Assert.Equal([A], pushed.Summary.Written);
+        Assert.Equal(1, pushed.Summary.New);
+        Assert.Equal([new PushItem(A, "stale-stamp")], pushed.Summary.Skipped);
+        var record = ReadRecord(_rig.RemoteFile(SyncValidation.recordPath(A)), A);
+        Assert.Equal("edited here", record.Content);
+        Assert.Equal(fresh, record.ContentStamp);
+        Assert.Equal(Tier.Warm, record.Placement.Tier);   // the base's tier and stamp
+        Assert.Equal(St(10), record.Placement.TierStamp);
+        var row = Row(A);
+        Assert.Null(row.ContentStamp);
+        Assert.Equal(St(5), row.TierStamp);   // the stale stamp is kept, as for any entry
+    }
+
+    [GitFact]
+    public async Task AWriteBackWithAStaleContentStamp_WritesNothing()
+    {
+        var (apply, scan, _) = await SavedByATextEditAsync(() => _rig.Edit(Tier.Warm, A, new UpdateEntryOpts { Tags = ["x"] }));
+        GitSyncRows.Write(_rig.Pull.Connection, Row(A) with { ContentStamp = St(5) });   // not newer than the base's St(10)
+        var head = _rig.Remote.Head();
+        var rows = _rig.RowDump();
+
+        var outcome = await _rig.Push(apply, scan);
+
+        var nothing = Assert.IsType<PushOutcome.NothingToPush>(outcome);
+        Assert.Equal([new PushItem(A, "stale-stamp")], nothing.Summary.Skipped);
+        Assert.Empty(nothing.Summary.Written);
+        Assert.Equal(head, _rig.Remote.Head());
+        Assert.Equal(rows, _rig.RowDump());
+    }
+
+    [GitFact]
+    public async Task AWriteBackWhosePendingTextIsGoneAtThePlan_IsRecordMissing()
+    {
+        var (apply, scan, _) = await SavedByATextEditAsync();
+        var pusher = _rig.Pusher();
+        var prepared = Assert.IsType<PrepareResult.Ready>(await pusher.PrepareAsync(apply, scan, default)).Value;
+        Assert.False(prepared.Excluded.ContainsKey(A));
+        GitSyncRows.Write(_rig.Pull.Connection, Row(A) with { ContentStamp = null });
+
+        var planned = Planned(pusher.Plan(prepared, default));
+
+        Assert.Empty(planned.Entries);
+        Assert.Equal([new PushItem(A, "record-missing")], planned.Skipped);
+        Assert.Null(Row(A).PushingStamps);
+    }
+
+    [GitFact]
+    public async Task AWriteBackOfARowWithARepushMarker_ClearsTheMarker()
+    {
+        // a marker can survive on a row whose record is absent (LeaveEntry keeps it): the record written from the base
+        // carries the base's value and stamp of every unpending group, so the base it becomes needs no repush
+        var (apply, scan, fresh) = await SavedByATextEditAsync();
+        GitSyncRows.Write(_rig.Pull.Connection, Row(A) with { RepushGroups = "sticky,tier" });
+
+        var outcome = await _rig.Push(apply, scan);
+
+        Assert.Equal([A], Assert.IsType<PushOutcome.Pushed>(outcome).Summary.Written);
+        var record = ReadRecord(_rig.RemoteFile(SyncValidation.recordPath(A)), A);
+        Assert.Equal(fresh, record.ContentStamp);
+        Assert.Equal(St(10), record.Placement.TierStamp);
+        Assert.Equal(St(10), record.Placement.StickyStamp);
+        var row = Row(A);
+        Assert.Null(row.RepushGroups);
+        Assert.Equal(_rig.RemoteFile(SyncValidation.recordPath(A)), row.BaseJson);
+    }
+
+    [GitFact]
+    public async Task HeldRowWithPendingTextEditAfterTheItemWasClosed_IsPushed()
+    {
+        SeedChanged(A);
+        await _rig.PullAsync();
+        _rig.Pin(A);   // a pending pin: the remote deletion is held (cause sticky)
+        RemovedByAnotherMachine(A);
+        _rig.Now += 1000;
+        var (apply, scan) = await _rig.PullAsync();
+        Assert.Equal([new HeldEntry(A, "remote", "sticky")], apply.Held);
+        var held = Assert.IsType<PushOutcome.NothingToPush>(await _rig.Push(apply, scan));
+        Assert.Equal([new PushItem(A, "held-delete")], held.Summary.Skipped);
+
+        _rig.Edit(Tier.Hot, A, new UpdateEntryOpts { Content = "edited after the hold" });
+        _rig.Now += 1000;
+        var (apply2, scan2) = await _rig.PullAsync();
+        Assert.Equal([A], apply2.ClosedHeld);
+        Assert.Null(GitSyncReviews.ReadOpenHeldItem(_rig.Pull.Connection, A));
+        var outcome = await _rig.Push(apply2, scan2);
+
+        var pushed = Assert.IsType<PushOutcome.Pushed>(outcome);
+        Assert.Equal([A], pushed.Summary.Written);
+        Assert.Equal(1, pushed.Summary.New);
+        Assert.EndsWith(" +1 ~0 -0", _rig.Remote.Git("log", "-1", "--format=%s", "main").Trim());
+        var record = ReadRecord(_rig.RemoteFile(SyncValidation.recordPath(A)), A);
+        Assert.Equal("edited after the hold", record.Content);
+        Assert.True(record.Placement.Sticky);
+        Assert.Equal(Tier.Hot, record.Placement.Tier);
+        var row = Row(A);
+        Assert.Null(row.ContentStamp);
+        Assert.Null(row.StickyStamp);
+        Assert.Null(row.TierStamp);
     }
 }
