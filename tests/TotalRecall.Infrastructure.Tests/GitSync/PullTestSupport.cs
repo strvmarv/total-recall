@@ -40,12 +40,16 @@ internal sealed class PullRig : IDisposable
     public RepoGuard Guard { get; private set; }
     public string Head { get; private set; } = "";
 
-    public PullRig()
+    /// <summary>The remote the guard, the paths and <see cref="Join"/> use: <see cref="RemoteText"/>, or the address the rig was built with.</summary>
+    public string RemoteAddress { get; }
+
+    public PullRig(string? remoteText = null)
     {
+        RemoteAddress = remoteText ?? RemoteText;
         Directory.CreateDirectory(Path.GetDirectoryName(DbPath)!);
         Connection = SyncDb.OpenMigrated(DbPath);
         Store = new SqliteStore(Connection);
-        Paths = GitSyncPaths.For(DbPath, RemoteText, caseInsensitive: false);
+        Paths = GitSyncPaths.For(DbPath, RemoteAddress, caseInsensitive: false);
         Recorder = new RecordingGitProcess(new FaultingGitProcess(new AfterGitProcess(new GitProcess(), (c, r) => After(c, r)), c => Fault(c)));
         Client = new GitClient(
             Recorder,
@@ -53,7 +57,7 @@ internal sealed class PullRig : IDisposable
             Paths,
             new GitClientOptions { EnvironmentOverrides = Source.Env.EnvironmentOverrides });
         Host = new HostIdentity(() => new MachineIdResult(MachineIdKind.Found, "m"), DbPath, false);
-        Guard = NewGuard(RemoteText);
+        Guard = NewGuard(RemoteAddress);
     }
 
     public RepoGuard NewGuard(string? remote, HostIdentity? host = null) =>
@@ -64,7 +68,7 @@ internal sealed class PullRig : IDisposable
     /// <summary>The identity keys a joined machine has, and a machine id so the scan and the apply can stamp.</summary>
     public void Join(string repoId = RepoId, string? host = null)
     {
-        Store.SetMeta(SyncIdentity.MetaKeys.Remote, RemoteText);
+        Store.SetMeta(SyncIdentity.MetaKeys.Remote, RemoteAddress);
         Store.SetMeta(SyncIdentity.MetaKeys.RepoId, repoId);
         Store.SetMeta(SyncIdentity.MetaKeys.Host, host ?? Host.Fingerprint!);
         Store.SetMeta(SyncIdentity.MetaKeys.Machine, MachineId);

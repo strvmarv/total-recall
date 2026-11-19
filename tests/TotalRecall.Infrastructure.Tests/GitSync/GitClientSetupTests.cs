@@ -352,6 +352,31 @@ public sealed class GitClientSetupTests(RecordingFixture fixture)
         Failed(await rig.Client.IsAncestorAsync(SyncGit.Revision.Head, SyncGit.Revision.Head), SyncGit.FailureKind.NotARepository);
     }
 
+    [GitFact]
+    public async Task CloneIsSound_IsTrueForARealClone_AndFalseForAMissingOrHalfMadeOne()
+    {
+        using var rig = Rig();
+        Assert.False(rig.Client.CloneIsSound(), "no directory");
+
+        Directory.CreateDirectory(rig.CloneDirectory);
+        Assert.False(rig.Client.CloneIsSound(), "a directory without .git");
+
+        Ok(await rig.Client.InitAsync("main"));
+        Assert.True(rig.Client.CloneIsSound());
+    }
+
+    [ShFact]
+    public async Task CloneIsSound_IsFalseWhenGitIsALink()
+    {
+        using var rig = Rig();
+        Ok(await rig.Client.InitAsync("main"));
+        var git = Path.Combine(rig.CloneDirectory, ".git");
+        var realGit = Path.Combine(rig.Root, "real-git");
+        Directory.Move(git, realGit);
+        Directory.CreateSymbolicLink(git, realGit);
+        Assert.False(rig.Client.CloneIsSound());
+    }
+
     [ShFact]
     public async Task RemoveStaleLocks_DoesNotFollowLinks()
     {

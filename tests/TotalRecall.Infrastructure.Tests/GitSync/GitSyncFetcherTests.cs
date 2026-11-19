@@ -24,6 +24,40 @@ public sealed class GitSyncFetcherTests : IDisposable
 
     private Task<FetchOutcome> Fetch() => _rig.Fetcher().FetchAsync();
 
+    // ---- the identity half (milestone 1b-i-4) ----
+
+    [GitFact]
+    public async Task CheckIdentity_NeverJoined_IsNotJoined_AndRunsNoNetworkCommand()
+    {
+        _rig.PutManifest();
+        _rig.Commit();
+        _rig.Clone();
+
+        var check = Assert.IsType<IdentityCheck.NotJoined>(await _rig.Fetcher().CheckIdentityAsync());
+
+        Assert.Contains("not joined", check.Text);
+        Assert.Equal(0, _rig.Count(c => c.IsLsRemote || c.IsFetch || c.IsClone || c.IsPush));
+    }
+
+    [GitFact]
+    public async Task CheckIdentity_ARefusal_KeepsItsText_AndAJoinedMachineIsJoined()
+    {
+        Joined();
+        Assert.IsType<IdentityCheck.Joined>(await _rig.Fetcher().CheckIdentityAsync());
+
+        _rig.Store.SetMeta(SyncIdentity.MetaKeys.Host, "0123456789abcdef0123456789abcdef");
+        Assert.Contains("moved or was copied", Assert.IsType<IdentityCheck.Refused>(await _rig.Fetcher().CheckIdentityAsync()).Text);
+
+        _rig.Join();
+        _rig.NewGuard("git@github.com:other/other.git");
+        Assert.Contains("differs", Assert.IsType<IdentityCheck.Refused>(await _rig.Fetcher().CheckIdentityAsync()).Text);
+
+        _rig.NewGuard(PullRig.RemoteText, new HostIdentity(() => new MachineIdResult(MachineIdKind.Failed, null), _rig.DbPath, false));
+        Assert.Contains("host identity", Assert.IsType<IdentityCheck.Refused>(await _rig.Fetcher().CheckIdentityAsync()).Text);
+
+        Assert.Equal(0, _rig.Count(c => c.IsLsRemote || c.IsFetch || c.IsClone || c.IsPush));
+    }
+
     // ---- decision 1, steps in order ----
 
     [GitFact]

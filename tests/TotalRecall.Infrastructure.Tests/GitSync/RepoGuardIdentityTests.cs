@@ -72,6 +72,13 @@ public sealed class RepoGuardIdentityTests : IDisposable
         }
     }
 
+    [GitFact]
+    public void ConfiguredRemote_IsTheRemoteTheGuardWasBuiltWith_OrNull()
+    {
+        Assert.Equal(Remote, Guard().ConfiguredRemote);
+        Assert.Null(Guard(remote: null).ConfiguredRemote);
+    }
+
     // ---- ReadManifestAsync ----------------------------------------------------------------------------------
 
     [GitFact]

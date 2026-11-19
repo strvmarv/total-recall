@@ -41,7 +41,8 @@ public sealed partial class RepoGuard
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
     }
 
-    private string? ConfiguredRemote =>
+    /// <summary>The remote the guard was built with (null when none is configured). The sync cycle compares its own address with it.</summary>
+    public string? ConfiguredRemote =>
         FSharpOption<string>.get_IsSome(_settings.Remote) ? _settings.Remote.Value : null;
 
     /// <summary>
