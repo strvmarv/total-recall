@@ -186,7 +186,7 @@ of these categories:
 | `private-key` | `-----BEGIN [A-Z ]{0,40}PRIVATE KEY( BLOCK)?-----` | from the BEGIN line to the end of the matching `-----END ...-----` line, **or to the end of the text when the END line is missing** |
 | `bearer` | `Authorization: <scheme> <value>` (also `=`; quotes allowed; scheme `Bearer`, `Basic`, `Token`, `Digest` or none), `x-api-key: <value>`, and a bare `Bearer <value>` | the value (at least 8 characters after `Authorization` or `x-api-key`, 16 after a bare `Bearer`) |
 | `url-credentials` | `scheme://user:password@host` | the password only (the user name and the host stay searchable). The user information is the text after `scheme://` up to the **last `@` before the next whitespace**, provided the text before that `@` holds a `:`; the password is what lies between the first `:` and that `@` (so `mysql://root:P@ssw0rd@localhost` and a password with `/` or `+` are each one password; a URL whose query happens to hold `a:b@c` is over-redacted, which is accepted) |
-| `secret-assignment` | an assignment (`=` or `:`, quoted or not, also JSON `"name": "value"` **and its backslash-escaped form `\"name\": \"value\"`**, which is how a credential appears inside a decoded command string; optional backslashes are allowed around the name, the separator and the value quotes) to a secret-named variable: names ending in `_KEY`, `_TOKEN`, `_SECRET`, `_PASSWORD`, `_PASSWD`, or equal to `PASSWORD`, `PASSWD`, `SECRET`, `TOKEN`, `API_KEY`, `APIKEY`, `PASSPHRASE`, `CLIENT_SECRET`, `ACCESS_KEY`, `AUTH_TOKEN` (any case); also the command-line flags `--password`, `--passwd`, `--token`, `--api-key`, `--secret` and `--auth-token` followed by `=` or whitespace | the value: a quoted value ends at its closing quote; a `$(...)` or backtick command substitution is one value (balanced parentheses); any other unquoted value is the whole run of non-whitespace characters (so a `,`, `;`, `&` or `)` inside a password does not leave a suffix behind; an empty value, as in `KEY=` followed by a newline, is not a value). A double-quoted value ends at the first quote not preceded by a backslash, and an escaped quote inside it is part of the value. A multi-word unquoted value is a residual risk |
+| `secret-assignment` | an assignment (`=` or `:`, quoted or not, also JSON `"name": "value"` **and its backslash-escaped form `\"name\": \"value\"`**, which is how a credential appears inside a decoded command string; optional backslashes are allowed around the name, the separator and the value quotes) to a secret-named variable: names ending in `_KEY`, `_TOKEN`, `_SECRET`, `_PASSWORD`, `_PASSWD`, or equal to `PASSWORD`, `PASSWD`, `SECRET`, `TOKEN`, `API_KEY`, `APIKEY`, `PASSPHRASE`, `CLIENT_SECRET`, `ACCESS_KEY`, `AUTH_TOKEN` (any case); also the command-line flags `--password`, `--passwd`, `--token`, `--api-key`, `--secret` and `--auth-token` followed by `=` or whitespace | the value: a quoted value ends at its closing quote; a `$(...)` or backtick command substitution is one value (balanced parentheses); any other unquoted value is the whole run of non-whitespace characters (so a `,`, `;`, `&` or `)` inside a password does not leave a suffix behind; an empty value, as in `KEY=` followed by a newline, is not a value). A plain double-quoted value ends at the first quote not preceded by a backslash, and an escaped quote inside it is part of the value; in the backslash-escaped JSON form the value ends at the next `\"`. A multi-word unquoted value is a residual risk |
 | `unprocessable` | a text that a detector could not finish (the timeout below) | the whole text |
 
 Rules that every detector follows:
@@ -302,13 +302,17 @@ that; a session with no real user turn has a null title.
    - for a `.git` **directory**, the directory that holds it (the walk up from the `cwd` is the resolver's); for a `.git` **file** (a
      linked worktree), the main repository's directory, found as the resolver already does through `gitdir` and `commondir` (the parent
      of the common git directory), so a live worktree and a deleted one give the same root;
+   - for a `.git` file with no `commondir` (a submodule), the directory that holds the `.git` file; `ProjectResolver` gains a method that
+     returns this root (its walk is private today);
    - for a directory that no longer exists: the part before the `/.claude/worktrees/` or `/.zoid/worktrees/` segment, else the `cwd`;
-   - for a directory with no repository: the `cwd` itself;
+   - for a directory that exists and has **no repository**: null (a parent folder such as `~/source` or `/tmp` must not exclude every
+     repository below it, so such a project is excluded by its key only);
    - **never** a filesystem root, the user's home directory or an ancestor of it: the root is then null and the project is excluded by
-     its key only (this is what stops `forget --project` of a session run from `/home/user` or `/tmp` from excluding every project
+     its key only (this is what stops `forget --project` of a session run from `/home/user` from excluding every project
      under it).
    Part 1's `forget` of a project stores the **`project_root` values** of the sessions it removes (not their `cwd`), and a null root is
-   skipped.
+   skipped. `SessionIngest` carries `project_root` and `settled_user_turns`; the root follows the key rule (item 7: it is kept along with
+   a kept key, else re-derived on every pass).
 7. A key derived with source `path` never replaces a stored key with source `remote` for the same session (a deleted repository
    directory would otherwise re-key and rewrite the session); re-keying is Part 8's `reproject`.
 
@@ -382,14 +386,14 @@ Names are the builder's; the behaviour is fixed.
 
 - `SessionIngestState? GetIngestState(string host, string hostSessionId)`: `source_size`, `source_mtime`, `source_fingerprint`,
   `ingested_offset`, `exchange_count`, `settled_user_turns`, `kind`, `project_key`, `project_root`, `title`, `started_at`, `ended_at`, `built_under_cutoff`.
-- `DateTimeOffset? IngestNotBefore()`: the global cutoff, or null.
+- `IngestNotBefore()`: the global cutoff, or null, as both the parsed time and the raw stored text (`built_under_cutoff` is written and compared as that text).
 - `IngestOutcome ApplyIngest(SessionIngest ingest)`: `SessionIngest` carries the session fields (host, id, project key and source, cwd,
   started/ended, kind, title, the source stat fields, offset, counts, the cutoff it was built under), the **expected prior state** (the
   state read in step 2, or "none"), the first rebuilt unit number (0 means every chunk) and the new chunks. Outcomes: `Applied(chunksNew,
   chunksChanged, chunksUnchanged, chunksRemoved, created)`, `Excluded`, `Stale`, `Conflict`. The checks of section 7 step 6 run inside
   the store's own transaction through private, transaction-aware variants of `IsExcluded` and the cutoff read.
 - A second migration in the archive runner (see "What exists today").
-- `Status()` gains the rows of `(project_key, kind, sessions, chunks)`, ordered by chunks descending, returned whole (the command
+- `Status()` gains the rows of `(project_key, kind, sessions, chunks)`, ordered by chunks descending, then project key, then kind, returned whole (the command
   truncates for display). `TranscriptStatus` gets them as a new member with a default of empty.
 
 All SQL is parameterised; the store keeps its own connection and `secure_delete`; every write goes through the store (the ingester never
@@ -409,7 +413,7 @@ from the host directory** (a test double adapter that fails if it is ever enumer
 confirmation.
 
 Output: a progress line every 50 sessions, then a summary: sessions seen, `new`, `updated`, `unchanged`, `excluded`, `empty` (nothing
-kept), `skipped` (no complete first line, unreadable name, duplicate id), `changed` (the host replaced or truncated the file; kept as it was), `retry` (left for the next run), `failed` (an error on that
+kept), `skipped` (no complete first line, unreadable name, duplicate id), `changed` (the host replaced or truncated the file; kept as it was; the summary prints each such `host:id`), `retry` (left for the next run), `failed` (an error on that
 file, logged), chunks new, changed, unchanged and removed. Exit 0 when no file failed, 1 when any failed (the others were still done), 2
 for a usage error. Sessions are processed newest file first. A Ctrl+C stops after the current session and prints the summary so far.
 
@@ -480,7 +484,9 @@ new locations.
   not list them. `built_under_cutoff` is what lets a pass notice that a forget-everything raced it or that `unforget --cutoff` revealed
   records it had dropped.
 - Part 1's `ForgetProject` now records the sessions' repository roots instead of their working directories (section 6, item 6), as Part 1's
-  own spec said Part 2 would do; a project with no repository is excluded by key only.
+  own spec said Part 2 would do; a project whose directory exists and has no repository is excluded by key only.
+- Keeping the chunks of a session whose file was replaced or truncated (`changed`), instead of re-reading it from the start as decision 7
+  says, is a deviation: the archive exists to keep what the host loses.
 - Known limits: a file replaced by a larger one that keeps the same first line, and whose old offset happens to start a line, is not
   detected and is resumed from the stale offset; a host that rewrites a session file (none observed: Claude Code appends) leaves the stored
   session as it was until the user runs forget, unforget and backfill for it (the old chunks are then lost: a stored session and a new
