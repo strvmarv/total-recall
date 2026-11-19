@@ -279,7 +279,7 @@ An unexpected exception at this step is `published = Unknown` (the wrapper of Ta
   by the pending new and edited memories landing on the remote in the same cycle (`Done`, `Cloned` or `SidelinedClone` set,
   nothing deleted from the store); entry-level apply failures (an entry with an `apply-failed` issue: the other entries are
   pushed, the cycle is `Done`); a cancel after the push command succeeded
-  (the `After` seam cancels the token once the push command's result is returned) is `Done` with `last_ok` written; a later `Done` clears `last_error`.
+  (the hook is the existing `rig.Pull.After` of `PullRig`, set to cancel the token when the command is the push and to return its result unchanged; no production seam) is `Done` with `last_ok` written; a later `Done` clears `last_error`.
 - [ ] **Step 2: implement**; run the new tests and the `GitSync` namespace.
 - [ ] **Step 3: commit** `Run the push in the git sync cycle with bounded retries`.
 
