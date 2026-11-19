@@ -225,7 +225,7 @@ public sealed partial class GitSyncApplier
             inserted, updated, dropped, unchanged, notAttempted, complete, fetch.Head, fetch.Proven,
             postponed, deferred, failed,
             rejectedNow.Select(p => new RejectedItem(p.Key, p.Value.Reason)).OrderBy(r => r.Key, StringComparer.Ordinal).ToList(),
-            skipped, colder));
+            skipped, colder, [], [], [], [], [], [], []));
     }
 
     /// <summary>Writes a <c>rejected-record</c> row for each rejection that has none or a different one. False when it could not be written.</summary>

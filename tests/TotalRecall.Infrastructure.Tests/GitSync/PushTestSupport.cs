@@ -19,15 +19,21 @@ internal sealed class PushRig : IDisposable
     public CountingEmbedder Embedder { get; } = new();
     public long Now { get; set; } = 1_800_000_000_000L;
     public const string Label = "testbox";
+    private readonly bool _ownsRemote;
 
     /// <param name="configuredRemote">
     /// True: the machine's configured remote (guard, paths, stored identity) is the bare remote's own address, so a clone the
     /// sync cycle makes really clones it. False (the default): the remote text is a placeholder, and only the test's own
     /// clone of the bare remote talks to it.
     /// </param>
-    public PushRig(bool configuredRemote = false)
+    /// <param name="sharedRemote">
+    /// A bare remote another rig owns (a second machine of a <see cref="TwoMachineRig"/>): used instead of a new empty one
+    /// and left alone by <see cref="Dispose"/>.
+    /// </param>
+    public PushRig(bool configuredRemote = false, BareRemote? sharedRemote = null)
     {
-        Remote = BareRemote.Create(commits: 0);
+        _ownsRemote = sharedRemote is null;
+        Remote = sharedRemote ?? BareRemote.Create(commits: 0);
         Pull = new PullRig(configuredRemote ? Remote.Url : null);
     }
 
@@ -101,7 +107,7 @@ internal sealed class PushRig : IDisposable
 
     /// <summary>A completed pull's summary for <paramref name="head"/>, for a test that does not run the apply.</summary>
     public static ApplySummary Summary(string head, bool complete = true) =>
-        new(0, 0, 0, 0, 0, complete, head, true, [], [], [], [], [], []);
+        new(0, 0, 0, 0, 0, complete, head, true, [], [], [], [], [], [], [], [], [], [], [], [], []);
 
     public GitSyncPusher Pusher(string name = Label) => new(Pull.Client, Pull.Store, "main", name);
 
@@ -139,7 +145,8 @@ internal sealed class PushRig : IDisposable
 
     public void Dispose()
     {
-        Remote.Dispose();
+        if (_ownsRemote)
+            Remote.Dispose();
         Pull.Dispose();
     }
 }

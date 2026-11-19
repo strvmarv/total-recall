@@ -7,9 +7,11 @@ namespace TotalRecall.Infrastructure.GitSync;
 
 /// <summary>
 /// What a cycle needs from the configuration, as values (milestone 1b-i-4, decision 1). <paramref name="Address"/> must be
-/// the remote the guard and the paths were built from.
+/// the remote the guard and the paths were built from. <paramref name="DeleteGuardPercent"/> is passed to the apply
+/// (<see cref="ApplyOptions.DeleteGuardPercent"/>).
 /// </summary>
-public sealed record CycleSettings(string Address, string Branch, string MachineLabel, int HotMaxContentChars, TimeSpan LockWait);
+public sealed record CycleSettings(
+    string Address, string Branch, string MachineLabel, int HotMaxContentChars, TimeSpan LockWait, int DeleteGuardPercent = 20);
 
 /// <summary>
 /// What a finished cycle did, as plain data (decision 2): the parts' summaries of the last attempt, the push's outcome

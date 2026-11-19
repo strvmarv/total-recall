@@ -3,8 +3,12 @@ using TotalRecall.Infrastructure.Storage;
 
 namespace TotalRecall.Infrastructure.GitSync;
 
-/// <summary>The limits the apply needs from the configuration. A <see cref="HotMaxContentChars"/> of 0 or less means no limit.</summary>
-public sealed record ApplyOptions(int HotMaxContentChars);
+/// <summary>
+/// The limits the apply needs from the configuration. A <see cref="HotMaxContentChars"/> of 0 or less means no limit.
+/// <see cref="DeleteGuardPercent"/> is the share of the active rows one direction of deletions may reach before the pull
+/// holds them (milestone 1b-ii, decision 7); the default is the configuration's default.
+/// </summary>
+public sealed record ApplyOptions(int HotMaxContentChars, int DeleteGuardPercent = 20);
 
 public sealed record PostponedEntry(string Id, string Reason);
 
@@ -14,6 +18,18 @@ public sealed record FailedEntry(string Id, int Attempts, string Detail);
 
 /// <summary>A path the pull did not read as a record, with its issue key and the reason word.</summary>
 public sealed record RejectedItem(string Key, string Reason);
+
+/// <summary>A deletion the pull held back: the entry's id, the direction (<c>remote</c> or <c>local</c>) and the cause (<c>guard</c>, <c>unproven</c> or <c>sticky</c>).</summary>
+public sealed record HeldEntry(string Id, string Direction, string Cause);
+
+/// <summary>A direction whose deletions went over the guard limit: how many there were and the limit.</summary>
+public sealed record GuardTrip(string Direction, int Count, int Limit);
+
+/// <summary>An entry the pull has a one-line note about.</summary>
+public sealed record NoteEntry(string Id, string Note);
+
+/// <summary>An entry whose record the next push writes again, with the groups (<c>content,sticky,tier</c>) marked for it.</summary>
+public sealed record RepushEntry(string Id, string Groups);
 
 /// <summary>What one pull did. <see cref="Complete"/> is true when every id of the set was processed and none was postponed or deferred.</summary>
 public sealed record ApplySummary(
@@ -30,7 +46,14 @@ public sealed record ApplySummary(
     IReadOnlyList<FailedEntry> Failed,
     IReadOnlyList<RejectedItem> Rejected,
     IReadOnlyList<SkippedItem> Skipped,
-    IReadOnlyList<string> ColderTier);
+    IReadOnlyList<string> ColderTier,
+    IReadOnlyList<string> Deleted,
+    IReadOnlyList<HeldEntry> Held,
+    IReadOnlyList<GuardTrip> GuardTripped,
+    IReadOnlyList<string> PushDeletions,
+    IReadOnlyList<string> ClosedHeld,
+    IReadOnlyList<NoteEntry> Notes,
+    IReadOnlyList<RepushEntry> RepushMarked);
 
 public abstract record ApplyOutcome
 {
