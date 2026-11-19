@@ -14,7 +14,7 @@ This file is the operational handbook for AI agents and human contributors worki
 ### Layer Diagram
 ```
 TotalRecall.Host (C#)          ← AOT entry point + composition root
-├── TotalRecall.Server (C#)    ← MCP JSON-RPC over stdio; 51 handlers (one file each; 50 are served in SQLite mode, 51 in Cortex mode)
+├── TotalRecall.Server (C#)    ← MCP JSON-RPC over stdio; 54 handlers (one file each; 53 are served in SQLite mode, 54 in Cortex mode)
 ├── TotalRecall.Web (C#)       ← embedded minimal-API + React SPA (web UI), dispatches to ToolRegistry
 ├── TotalRecall.Cli (C#)       ← CLI commands (Spectre.Console), including `total-recall ui`; the git sync `sync init|join|leave|status` commands exist but are hidden until milestone 1b-iii
 ├── TotalRecall.Infrastructure (C#) ← SQLite/Postgres, ONNX embedder, importers, migrations
@@ -403,7 +403,7 @@ The root cause is Windows Defender mid-scanning the freshly-extracted `total-rec
 
 There is no `ToolContext` object (a leftover from the TypeScript design). Each handler receives its dependencies (store, embedder, config, session lifecycle, event logs) through its constructor, wired in `ServerComposition.BuildRegistry()`; see `src/TotalRecall.Server/Handlers/AGENTS.md`. Handlers that log retrieval or compaction events take the shared `SessionConfigSnapshot` and tag events with its id (`"default"` or `""` only when it is absent or the store fails).
 
-The composition root in `src/TotalRecall.Host/Program.cs` wires up all dependencies (storage, embedder, importers, MCP server, migration guard) and is the AOT entry point. The 51 MCP handlers live in `src/TotalRecall.Server/Handlers/` — one file per handler.
+The composition root in `src/TotalRecall.Host/Program.cs` wires up all dependencies (storage, embedder, importers, MCP server, migration guard) and is the AOT entry point. The 54 MCP handlers live in `src/TotalRecall.Server/Handlers/` — one file per handler.
 
 ---
 

@@ -1273,6 +1273,117 @@
         "type": "object",
         "properties": {}
       }
+    },
+    {
+      "name": "transcript_search",
+      "description": "Search archived conversation transcripts. The archive is off by default (turn it on with \u0060total-recall transcripts enable\u0060) and searching it is not available in this version yet.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "What to look for in the archived conversations"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "session",
+              "project",
+              "all"
+            ],
+            "default": "project",
+            "description": "Where to search: one session, the current project (default) or everything"
+          },
+          "project": {
+            "type": "string",
+            "description": "Project to search (default: the current project)"
+          },
+          "session": {
+            "type": "string",
+            "description": "Session to search, as \u003Chost\u003E:\u003Chost_session_id\u003E"
+          },
+          "since": {
+            "type": "string",
+            "description": "Only exchanges since this ISO-8601 date or date-time"
+          },
+          "include_automated": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include automated (non-interactive) sessions"
+          },
+          "top_k": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 10,
+            "description": "Number of results (1 to 50, default 10)"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "transcript_get",
+      "description": "Read archived conversation exchanges: give either id (a chunk id from transcript_search) or session with from_exchange and to_exchange. The archive is off by default (turn it on with \u0060total-recall transcripts enable\u0060) and reading it is not available in this version yet.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "A chunk id returned by transcript_search"
+          },
+          "session": {
+            "type": "string",
+            "description": "Session as \u003Chost\u003E:\u003Chost_session_id\u003E; use with from_exchange and to_exchange instead of id"
+          },
+          "from_exchange": {
+            "type": "integer",
+            "description": "First exchange of the range (with session)"
+          },
+          "to_exchange": {
+            "type": "integer",
+            "description": "Last exchange of the range (with session)"
+          },
+          "context": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10,
+            "default": 1,
+            "description": "Exchanges of context around the result (0 to 10, default 1)"
+          }
+        }
+      }
+    },
+    {
+      "name": "transcript_sessions",
+      "description": "List archived conversation sessions. The archive is off by default (turn it on with \u0060total-recall transcripts enable\u0060) and listing it is not available in this version yet.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Only sessions of this project"
+          },
+          "since": {
+            "type": "string",
+            "description": "Only sessions since this ISO-8601 date or date-time"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "description": "Number of sessions (1 to 100, default 20)"
+          },
+          "include_automated": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include automated (non-interactive) sessions"
+          }
+        }
+      }
     }
   ]
 }
