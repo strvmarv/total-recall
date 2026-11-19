@@ -304,6 +304,72 @@ public sealed class GitSyncCyclePushTests : IDisposable
     }
 
     [GitFact]
+    public async Task ARejectionFollowedByAFailingFetch_IsFailedAtTheFetch_WithNothingPublished()
+    {
+        await SyncedWithAPendingMemory();
+        var raced = false;
+        _rig.Pull.Fault = c =>
+        {
+            if (c.IsPush)
+            {
+                raced = true;
+                _rig.Push.MoveRemote("other-1.txt", "another machine");
+            }
+            return c.IsLsRemote && raced ? FaultingGitProcess.Failure(SyncGit.FailureKind.Network, "could not resolve host") : null;
+        };
+
+        var failed = Assert.IsType<CycleOutcome.Failed>(await _rig.Run());
+
+        Assert.Equal("fetch", failed.Step);
+        Assert.Equal("Network", failed.Kind);
+        Assert.Equal(SyncPush.Published.No, failed.Published);
+        Assert.Equal(1, _rig.Pull.Count(c => c.IsPush));
+        Assert.False(RemoteHas(C));
+
+        _rig.Pull.Fault = _ => null;
+        Assert.IsType<PushOutcome.Pushed>(Done(await _rig.Run()).Push);
+        Assert.True(RemoteHas(C));
+    }
+
+    [GitFact]
+    public async Task ADamagedCloneAtThePush_AfterTheSidelineWasUsed_IsCloneUnusable()
+    {
+        _rig.Push.Seed(Rec(A, "Use bun."));
+        var cycle = _rig.Cycle();
+        Done(await cycle.RunAsync());
+        _rig.CorruptClone();
+        Assert.NotNull(Done(await cycle.RunAsync()).SidelinedClone); // the one sideline of this process
+
+        _rig.Push.Now += 60_000;
+        _rig.Push.AddMemory(Tier.Warm, C, "A new local memory.");
+        var pushing = false;
+        var resetFaulted = false;
+        var probed = false;
+        cycle.OnStep = step => pushing = step == "push";
+        _rig.Pull.Fault = c =>
+        {
+            if (pushing && c.IsResetHard && !resetFaulted)
+            {
+                resetFaulted = true;
+                return FaultingGitProcess.Failure(SyncGit.FailureKind.Other, "fatal: unable to read tree");
+            }
+            if (resetFaulted && !probed && c.IsRevParse)
+            {
+                probed = true;
+                return new GitResult(1, [], "", null, TimeSpan.Zero);
+            }
+            return null;
+        };
+
+        var failed = Assert.IsType<CycleOutcome.Failed>(await cycle.RunAsync());
+
+        Assert.Equal("clone", failed.Step);
+        Assert.Equal("CloneUnusable", failed.Kind);
+        Assert.Single(_rig.Sidelined("broken")); // no second sideline
+        Assert.False(RemoteHas(C));
+    }
+
+    [GitFact]
     public async Task AnExceptionAtThePush_IsFailedWithPublishedUnknown_AndTheLockIsReleased()
     {
         await SyncedWithAPendingMemory();

@@ -50,6 +50,8 @@ public sealed partial class GitSyncCycle
                     Enter(state, SyncCycle.Step.Clone, ct);
                     return await ReplaceDamagedCloneAsync(state, ct).ConfigureAwait(false);
                 }
+                if (ct.IsCancellationRequested) // a probe cut short by the token says nothing: decision 11
+                    return Cancelled();
                 return Fail(step, failed.Kind, failed.Message, failed.Published);
             }
 

@@ -102,9 +102,9 @@ public sealed class GitSyncCycleCloneTests : IDisposable
         var cycle = _rig.Cycle();
         Done(await cycle.RunAsync());
 
-        using var cts = new CancellationTokenSource();
         for (var round = 0; round < 2; round++) // two in a row never give CloneUnusable
         {
+            using var cts = new CancellationTokenSource(); // a cancelled source cannot be reset: one per round
             _rig.DeleteClone();
             _rig.FaultOnce(
                 c => c.IsClone,
@@ -125,8 +125,6 @@ public sealed class GitSyncCycleCloneTests : IDisposable
             Assert.False(Directory.Exists(CloneDirectory), "the partial clone was deleted");
             Assert.Empty(_rig.Sidelined("partial"));
             Assert.Empty(_rig.Sidelined("broken"));
-            if (how == "Cancelled")
-                cts.TryReset();
         }
 
         _rig.Pull.Fault = _ => null;
@@ -257,6 +255,35 @@ public sealed class GitSyncCycleCloneTests : IDisposable
             Assert.Empty(_rig.Sidelined("broken"));
             Assert.Equal("Other", Assert.IsType<CycleOutcome.Failed>(outcome).Kind);
         }
+    }
+
+    [GitFact]
+    public async Task ACancelDuringTheProbe_IsCancelled_NotAFailure_AndNothingIsMoved()
+    {
+        _rig.Push.Seed(Rec(A));
+        Done(await _rig.Run());
+        using var cts = new CancellationTokenSource();
+        var lsRemoteFaulted = false;
+        _rig.Pull.Fault = c =>
+        {
+            if (c.IsLsRemote && !lsRemoteFaulted)
+            {
+                lsRemoteFaulted = true;
+                return FaultingGitProcess.Failure(SyncGit.FailureKind.Other, "remote: internal server error");
+            }
+            if (c.IsRevParse && lsRemoteFaulted)
+            {
+                cts.Cancel(); // the probe is cut short
+                return FaultingGitProcess.Failure(SyncGit.FailureKind.Cancelled, "cancelled");
+            }
+            return null;
+        };
+        var errorBefore = _rig.LastError;
+
+        Assert.IsType<CycleOutcome.Cancelled>(await _rig.Run(cts.Token));
+
+        Assert.Empty(_rig.Sidelined("broken"));
+        Assert.Equal(errorBefore, _rig.LastError);
     }
 
     [GitFact]

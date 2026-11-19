@@ -146,6 +146,8 @@ public sealed partial class GitSyncCycle
                     // null on success: another attempt from the scan; otherwise the outcome that ends the cycle
                     return await ReplaceDamagedCloneAsync(state, ct).ConfigureAwait(false);
                 }
+                if (ct.IsCancellationRequested) // a probe cut short by the token says nothing: decision 11
+                    return Cancelled();
                 return Fail(state.Step, failed.Kind, failed.Message);
             }
             default:

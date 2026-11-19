@@ -106,7 +106,9 @@ public sealed partial class GitSyncCycle
     /// <summary>
     /// A clone that failed or was cancelled leaves a partial directory, which holds nothing the remote does not. It is
     /// deleted at once (best effort, never cancelled, links never followed); when that fails it is moved aside as
-    /// <c>partial</c>; when that fails too it stays. Neither counts as damage.
+    /// <c>partial</c>; when that fails too it stays. Neither counts as damage. Known limit (the spec's "it stays"): a
+    /// directory that stays can hold a <c>.git</c> that passes <see cref="GitClient.CloneIsSound"/>, and then the next
+    /// cycle's fetch finds it as damage and uses the process's one sideline on it.
     /// </summary>
     private void RemovePartialClone()
     {
@@ -172,6 +174,7 @@ public sealed partial class GitSyncCycle
         return SyncCycle.cloneDamage(kind, probe);
     }
 
+    /// <summary>One line of the git error text, cut at 200 characters (the fetcher's rule).</summary>
     private static string Describe(GitResult failure)
     {
         var text = string.IsNullOrWhiteSpace(failure.StderrText) ? "the git call failed" : failure.StderrText.Trim();
