@@ -104,9 +104,11 @@ writable (`transcriptsx.enabled`), the MCP handler, the CLI and the web route.
 small `TranscriptSentinel` class (Infrastructure) resolves the path from `ConfigLoader.GetDataDir()`, and offers `IsEnabled`, `Write`,
 `Remove` and `Mirror(configEnabled)`:
 
-- the engine mirrors `transcripts.enabled` into the sentinel once at startup (create it when the setting is true, delete it when false),
-  from the composition of the sqlite and cortex modes; it is one `stat` and at most one small write, never on the MCP handshake path,
-  and every failure is swallowed (a stderr line through `ExceptionLogger.LogChain`);
+- the engine mirrors the effective setting into the sentinel once at startup: active means `transcripts.enabled` is true **and** the
+  configured `storage.mode` is not `postgres` (create the file when active, delete it when not). It is wired from
+  `Program.RunServeAsync` after `OpenProduction`, as a best-effort step off the handshake path (the same reason the `UpdateChecker` starts
+  there: `ui`, `dump-catalog` and tests also reach the composition and must not touch the real `<dataDir>/live/enabled`); it is one `stat`
+  and at most one small write, and every failure is swallowed (a stderr line through `ExceptionLogger.LogChain`);
 - `transcripts enable` and `disable` write it at once; the tools and the CLI gate on the sentinel per call (a `stat`), so a change applies
   without a restart; a hand edit of `config.toml` reaches the sentinel at the next engine start.
 
@@ -150,14 +152,27 @@ path), sets `PRAGMA secure_delete = ON`, and runs the archive runner. A separate
 is); that is accepted and stated. `TranscriptStore.Open(settings, create)` returns null when `create` is false and the archive tables do
 not exist, so `status`, `forget` and `unforget` never create tables behind a disabled archive.
 
-Opening the main database safely (a builder-check finding, resolved here). `AutoMigrationGuard` classifies a file that has tables but no
-`_schema_version` as a legacy TypeScript database and sidelines it, so the archive runner must never be the first thing to touch a main
-database file. `Open(create: true)` on the main path therefore does this: the file is missing or empty, run `MigrationRunner.RunMigrations`
-first (a normal new database, as `config set` already does for its snapshot); `_schema_version` present, run the archive runner; any
-other state (a legacy or partial file), refuse with a message that says to start total-recall once so the database is migrated, and change
-nothing. A separate `db_path` file has no such problem (it only ever holds archive tables). Under `storage.mode = postgres` the archive is
-not supported (parent non-goal): `enable` refuses and says why, and the tools answer as if the archive were off. The `sqlite`, `cortex`
-and `git` modes use the local sqlite file and are supported.
+Opening safely (builder-check and review findings, resolved here). `AutoMigrationGuard` classifies a file that has tables but no
+`_schema_version` as a legacy TypeScript database and sidelines it, and `MigrationRunner` stamps `migration_from_ts_complete` whenever it
+starts from version 0, which would hide an orphan `total-recall.db.ts-backup`. The archive therefore never touches a main database file
+first. The rules, for the path the store resolves:
+
+- A `db_path` equal to the main database path after resolving both with `ConfigLoader` rules (a different spelling of the same file) is
+  the main database. A different path is a separate file; one that already exists, is not empty and has no `tx_schema_version` is
+  refused (it is somebody's database).
+- **Open without creating** (`create: false`, used by `status`, `forget`, `unforget`): never calls `SqliteConnection.Open` on a file that
+  is missing (that would create it, switch it to WAL and give it default permissions). It checks existence and the presence of
+  `tx_schema_version` read-only (as `ReadOnlyDatabase` does), and returns null when either is absent.
+- **Open creating** (`create: true`, used by `enable`), main database only: first run `GitSync/LegacyDatabaseProbe.Check` on the path and
+  refuse with its refusal text when it returns one (it covers an orphan `.ts-backup`, a TypeScript-format file and a version below 5); a
+  missing or empty file then gets `MigrationRunner.RunMigrations` (a normal new database); a file with `_schema_version` gets the archive
+  runner; any other state is refused with a message to start total-recall once so the database is migrated. If the probe cannot be reused
+  as it is, the builder moves it to a neutral namespace and keeps its tests.
+- A separate `db_path` file is created user-only first, then opened.
+- Under `storage.mode = postgres` the archive is not supported (parent non-goal): `enable` refuses and says why; the tools are not
+  registered under Postgres at all (approach 3); and when a failed Postgres configuration falls back to the local sqlite file, the
+  sentinel is already off (section 3), so the tools there answer that the archive is off. The `sqlite`, `cortex` and `git` modes use the
+  local sqlite file and are supported.
 
 Operations (all synchronous, small, fully tested):
 
@@ -165,9 +180,12 @@ Operations (all synchronous, small, fully tested):
   forgotten projects, the cutoff time.
 - `ForgetSession(host, hostSessionId)`, `ForgetProject(projectKey)`, `ForgetAll(now)`: each runs in one transaction, deletes chunks
   explicitly and then sessions, writes its exclusion (a `session` record; a `project` record whose `roots` are the distinct `cwd`
-  values of the sessions it removed, plus the key, which also covers a key the user types for a project that was never archived; for
+  values of the sessions it removed, plus the key, which also covers a key the user types for a project that was never archived, as long as the archive tables exist; for
   everything, `ingest_not_before = max(existing, now)` in `tx_state`), then performs the delete hygiene of section 7. Each returns the
   counts removed.
+Forgetting the same session or key again is an upsert (a project record merges its `roots`); with no archive tables `forget` creates
+nothing and says nothing is stored.
+
 - `UnforgetSession`, `UnforgetProject`, `ClearCutoff`: remove the record or cutoff; they return whether anything was removed.
 - `IsExcluded(host, hostSessionId, projectKey, cwd)`: true when a `session` record matches, or a `project` record matches by key or by
   `cwd` lying under one of its `roots` (a directory-boundary prefix test, case-sensitive except on Windows); and
@@ -178,27 +196,27 @@ No ingest API is invented here: tests insert rows with SQL.
 
 ### 7. Delete hygiene
 
-`secure_delete` alone does not scrub text-index segments or earlier write-ahead-log frames, so a delete does four things, in order:
+`secure_delete` alone does not scrub text-index segments or earlier write-ahead-log frames, so a delete does these things in order:
 
-1. the transaction deleting rows (the text-index triggers remove the terms; the migration turned on the FTS5 `secure-delete` option, a
-   persistent index setting, available from SQLite 3.42; if the running SQLite rejects it, the store falls back to an FTS5 `rebuild`
-   after each delete and the status output says so);
-2. an FTS5 `optimize` of `tx_chunk_fts`, so merged segments replace the old ones;
+1. the transaction deleting rows, with the connection's normal `busy_timeout` (the text-index triggers remove the terms; the migration
+   turned on the FTS5 `secure-delete` option, a persistent index setting available from SQLite 3.42; if the running SQLite rejects it,
+   `enable` fails clearly instead of degrading);
+2. an FTS5 `optimize` of `tx_chunk_fts` only if the byte-scan test shows it is needed beyond the secure-delete option (the builder
+   decides from the test; if the scan passes without it, it is omitted);
 3. `PRAGMA wal_checkpoint(TRUNCATE)`;
-4. if the checkpoint reports busy (the engine or another process holds the database), retry three times 200 ms apart, then return a
-   failure that the command prints: the rows are deleted, but the `-wal` file may still hold their text until it is checkpointed, so run
-   it again. The command exits 1 and never prints a clean-delete message it did not earn.
-
-The retries use a shortened `busy_timeout` on the archive connection (the default 5 seconds would make three retries take 15), so the
-retry is real and bounded.
+4. if the checkpoint reports busy (the engine or another process holds the database), retry three times 200 ms apart with a shortened
+   `busy_timeout` set only around the checkpoint (the default 5 seconds would make the retries take 15), then return a failure that the
+   command prints: the rows are deleted, but the `-wal` file may still hold their text until it is checkpointed, so run it again. The
+   command exits 1 and never prints a clean-delete message it did not earn.
 
 The test that backs this reads the raw bytes of the database file and of its `-wal` (and `-shm`) file after a forget. "Text" means
 conversation text and the session's own metadata: three unique markers are put into a chunk's content, a session's title and a session's
-`cwd` (and `source_path`). After `ForgetSession` and `ForgetAll` none of the three may appear. After `ForgetProject` the content and
-title markers may not appear, while the project's roots (its sessions' `cwd` values) intentionally survive in the exclusion record, so
-the `cwd` marker is asserted present there and absent from every other place. Session ids and project keys in exclusion records are
-identifiers, not text, and are not scanned for. A checkpoint-blocked case (a second connection holding a read transaction) asserts the
-failure is reported and the exit code is 1.
+`cwd` (and `source_path`). The text index case-folds and splits on punctuation, so the markers are lowercase alphanumeric tokens, the
+test first asserts each marker is present before the forget, and the scan is case-insensitive. After `ForgetSession` and `ForgetAll`
+none of the three may appear. After `ForgetProject` the content and title markers may not appear, while the project's roots (its
+sessions' `cwd` values) intentionally survive in the exclusion record, so the `cwd` marker is asserted present there and absent from
+every other place. Session ids and project keys in exclusion records are identifiers, not text, and are not scanned for. A
+checkpoint-blocked case (a second connection holding a read transaction) asserts the failure is reported and the exit code is 1.
 
 ### 8. The `transcripts` commands
 
@@ -252,10 +270,16 @@ web allowlist). `ServerCompositionTests` (the `BuildRegistry` exact list) must n
 
 ### 10. Isolation from sync
 
-Two tests in `tests/TotalRecall.Infrastructure.Tests/` (not `Integration`): a behavioural one that migrates the main schema and the archive
-schema into one database, inserts archive rows, runs the git sync scanner and checks `git_sync_entry` and `sync_queue` stay empty and
-that the sync backlog reader reports zero; and a static one, modelled on `HiddenCommandTests.ScanTree`, that fails when any file under
-`Infrastructure/Sync/`, `Infrastructure/GitSync/` or the `Core` sync modules mentions `tx_`, `Transcript` or `Archive`.
+Two tests in `tests/TotalRecall.Infrastructure.Tests/` (not `Integration`):
+
+- A behavioural one on a joined machine: the scanner returns `NotJoined` before it reads anything when there is no sync identity, and an
+  empty memory set leaves its table empty anyway, so the test sets up a machine identity, migrates the main schema and the archive
+  schema into one database, inserts **one memory row and several archive rows**, enqueues one memory in `sync_queue` as a positive
+  control, runs `GitSyncScanner.Scan()`, and asserts the outcome is `Done`, that `git_sync_entry` holds exactly that memory and nothing
+  for the archive, that `sync_queue` holds exactly the one memory entry, and that the backlog reader counts one.
+- A static one, modelled on `HiddenCommandTests.ScanTree`, that fails when any file under `Infrastructure/Sync/`,
+  `Infrastructure/GitSync/` or the `Core` sync modules (`Sync*.fs`) mentions `tx_`, `Transcript` or `Archive`, case-sensitively, and names
+  its one exclusion: `SyncSettingsGuard.fs`, which this part edits to protect the `transcripts` table.
 
 ### 11. Documentation
 
@@ -264,13 +288,19 @@ and emptied but not searched yet, and that Parts 1 to 3 are announced together; 
 enabling, status, forgetting and unforgetting), the `[transcripts]` block in `docs/configuration.md`, the commands in `docs/commands.md`,
 the tool rows (section 9), `PRIVACY.md` (a row in the stored-data table, and under "Configurations you opt in to" the statement that the
 archive is never sent to a remote embedding service unless `allow_remote_embedding = true`, keeping every Rule 16 needle and phrase),
-`CHANGELOG.md`. The new documents must not contain the phrase pattern that `HiddenCommandTests` forbids for the sync verbs.
+`CHANGELOG.md` (an entry marked unreleased and internal: the foundation of the archive, off by default, not searchable yet),
+a paragraph in `PRIVACY.md`'s "Data retention and deletion" that says `transcripts forget` is the way to delete the archive and that
+deleting `total-recall.db` also deletes an archive kept in it, and the migration section of `src/TotalRecall.Infrastructure/AGENTS.md`
+(the archive runner and its own version table). The new documents must not contain the phrase pattern that `HiddenCommandTests` forbids for the sync verbs.
 
 ## Deviation from the parent design
 
 - The parent's Part 1 scope says to refactor `MigrationRunner` so it can run a named list against a named version table. This part adds a
   separate `TranscriptMigrationRunner` instead (approach 1), which satisfies the parent's intent (its own list and `tx_schema_version`
   against any chosen file, main chain untouched) without editing frozen code.
+- The parent says Parts 1 to 3 are announced together, not before. This part still adds a visible `transcripts` command group, a README
+  link (Rule 13 forces a link to every top-level docs page) and a changelog entry. They are marked as not searchable yet and as
+  unreleased; the announcement itself (release notes, the what's-new line) is a release-time act that this part does not perform.
 - The parent's decision 7 says a project exclusion stores "the root directories its sessions had". This part stores the distinct `cwd`
   values of the removed sessions; reducing them to repository roots is the project-identity work of Part 2 and the `reproject` of Part 8,
   and the stored shape (a JSON array of directories) does not change.
