@@ -53,6 +53,18 @@ internal abstract record EntryResult
 
 public sealed partial class GitSyncApplier
 {
+    /// <summary>
+    /// The delete guard's verdict for one pull (milestone 1b-ii, D3 and D4): a tripped direction carries none of its
+    /// deletions out. The default trips neither. (Nested: <see cref="TotalRecall.Infrastructure.GitSync.GuardVerdict"/> is the
+    /// repository guard's.)
+    /// </summary>
+    internal readonly record struct GuardVerdict(bool RemoteTripped, bool LocalTripped)
+    {
+        /// <summary>The decision is a deletion of a tripped direction: a <c>DeleteEntry</c> (remote) or a <c>PushDeletion</c> (local).</summary>
+        public bool Converts(SyncMerge.MergeDecision d) =>
+            d.Entry.IsDeleteEntry && RemoteTripped || d.Entry.IsPushDeletion && LocalTripped;
+    }
+
     private static FSharpOption<T> Some<T>(T value) => FSharpOption<T>.Some(value);
 
     private static FSharpOption<T>? Opt<T>(T? value) where T : class => value is null ? null : FSharpOption<T>.Some(value);
@@ -87,11 +99,12 @@ public sealed partial class GitSyncApplier
     /// not carry out, computes the vector, then carries the decision out in one immediate transaction that first
     /// re-reads the entry (decisions 7 to 13). <paramref name="theirs"/> is null when the id has no accepted record;
     /// <paramref name="held"/> is the id's open held-delete item as the pull read it (milestone 1b-ii, D8), null when it
-    /// has none; <paramref name="blobSha"/> is the record's blob id.
+    /// has none; <paramref name="blobSha"/> is the record's blob id; <paramref name="guard"/> is the pull's guard verdict,
+    /// which turns a deletion of a tripped direction into a held item with the cause <c>guard</c> (D4).
     /// </summary>
-    internal EntryResult ApplyOne(string id, ParsedRecord? theirs, bool proven, HeldItem? held, string? blobSha = null)
+    internal EntryResult ApplyOne(string id, ParsedRecord? theirs, bool proven, HeldItem? held, string? blobSha = null, GuardVerdict guard = default)
     {
-        var result = ApplyCore(id, theirs, proven, held, blobSha);
+        var result = ApplyCore(id, theirs, proven, held, blobSha, guard);
         return result switch
         {
             EntryResult.Failed failed => RecordFailure(id, blobSha, failed),
@@ -101,7 +114,7 @@ public sealed partial class GitSyncApplier
         };
     }
 
-    private EntryResult ApplyCore(string id, ParsedRecord? theirs, bool proven, HeldItem? held, string? blobSha)
+    private EntryResult ApplyCore(string id, ParsedRecord? theirs, bool proven, HeldItem? held, string? blobSha, GuardVerdict guard)
     {
         BeforeEntry?.Invoke(id);
         var conn = _store.Connection;
@@ -145,13 +158,16 @@ public sealed partial class GitSyncApplier
         ParsedRecord? oldBase = null;
         if (row?.BaseJson is { } baseText)
         {
-            var parsedBase = RecordReader.Parse(Encoding.UTF8.GetBytes(baseText), SyncValidation.recordPath(id));
+            var parsedBase = ParseBase(id, baseText);
             if (parsedBase.Parsed is null)
                 return new EntryResult.Failed("the row's base cannot be read: " + OneLine(SyncValidation.RejectModule.describe(parsedBase.Rejected)));
             oldBase = parsedBase.Parsed;
         }
 
         var decision = SyncMerge.decide(BuildInput(row, oldBase, theirs, local, proven, held));
+        var converted = guard.Converts(decision);
+        if (converted)
+            decision = SyncDeletion.holdInstead(decision); // D4: kept base update, no notes, no row state change
 
         if (SyncApply.postponement(decision) is { } postponed)
             return new EntryResult.Postponed(SyncApply.reasonName(postponed.Value));
@@ -212,7 +228,7 @@ public sealed partial class GitSyncApplier
             var phase = "reread";
             try
             {
-                return CarryOut(id, tx, decision, plan, vector, row, read, held, proven, blobSha, oldBase, theirs, local, p => phase = p);
+                return CarryOut(id, tx, decision, converted, plan, vector, row, read, held, proven, blobSha, oldBase, theirs, local, p => phase = p);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
             {
@@ -225,7 +241,7 @@ public sealed partial class GitSyncApplier
     /// The input of <c>SyncMerge.decide</c> for one id from what was read of it: the row (state, pending stamps,
     /// <c>pushing_stamps</c>), its parsed base, the record at <c>R</c>, the local entry, whether the apply is proven, and
     /// the direction of its open held-delete item (milestone 1b-ii, D2 and D8). The one place the input is built, so every
-    /// decision about an id sees the same input.
+    /// decision about an id sees the same input (the preview's included).
     /// </summary>
     private static SyncMerge.MergeInput BuildInput(
         GitSyncRow? row, ParsedRecord? oldBase, ParsedRecord? theirs, SyncMerge.LocalEntry? local, bool proven, HeldItem? held) =>
@@ -243,6 +259,10 @@ public sealed partial class GitSyncApplier
                 "local" => Some(SyncMerge.Direction.LocalDeletion),
                 _ => null, // no item (the column admits only these two words)
             });
+
+    /// <summary>The row's <c>base_json</c> read as the record at the id's path.</summary>
+    private static ParseResult ParseBase(string id, string baseText) =>
+        RecordReader.Parse(Encoding.UTF8.GetBytes(baseText), SyncValidation.recordPath(id));
 
     private static bool HasRestamp(SyncMerge.MergeDecision d) =>
         d.FreshContentStamp
@@ -342,6 +362,7 @@ public sealed partial class GitSyncApplier
         string id,
         SqliteStoreTransaction tx,
         SyncMerge.MergeDecision decision,
+        bool converted,
         StorePlan plan,
         float[]? vector,
         GitSyncRow? row,
@@ -442,7 +463,7 @@ public sealed partial class GitSyncApplier
         {
             Step(id, "hold");
             var direction = SyncDeletion.directionName(hold.Item);
-            var cause = SyncDeletion.holdCause(proven, false, hold.Item);
+            var cause = SyncDeletion.holdCause(proven, converted, hold.Item);
             GitSyncReviews.UpsertHeld(conn, new HeldItem(id, direction, theirs is null ? null : blobSha, cause, _nowMs()), dbTx);
             heldEntry = new HeldEntry(id, direction, cause);
         }

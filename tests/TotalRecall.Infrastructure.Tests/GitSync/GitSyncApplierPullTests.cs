@@ -273,6 +273,46 @@ public sealed class GitSyncApplierPullTests : IDisposable
         Assert.Equal([A, B, C], summary.PushDeletions);
     }
 
+    private int ReadsOf(string blob) => _rig.Count(c => c is SyncGit.GitCommand.CatBlob cb && cb.sha == blob);
+
+    [GitFact]
+    public async Task ALocalDeletionsRecord_IsReadOnce_ByTheGuardPreviewAndTheDecision()
+    {
+        PushRecords(Rec(A));
+        await Pull();
+        _rig.Store.Delete(Tier.Warm, ContentType.Memory, A);
+        _rig.CloneGit("update-ref", "-d", "refs/total-recall/last-synced"); // unproven: every record is read
+        var blob = BlobOf($"memories/{A[..2]}/{A}.json");
+        var before = ReadsOf(blob);
+
+        var summary = await Pull();
+
+        Assert.Equal([new HeldEntry(A, "local", "unproven")], summary.Held);
+        Assert.Equal(before + 1, ReadsOf(blob));
+    }
+
+    [GitFact]
+    public async Task ALocalDeletionsRecordThatTheGuardPreviewCannotRead_IsThatEntrysFailure_AndIsNotReadAgain()
+    {
+        PushRecords(Rec(A));
+        await Pull();
+        _rig.Store.Delete(Tier.Warm, ContentType.Memory, A);
+        _rig.CloneGit("update-ref", "-d", "refs/total-recall/last-synced");
+        var blob = BlobOf($"memories/{A[..2]}/{A}.json");
+        _rig.Fault = c => c is SyncGit.GitCommand.CatBlob cb && cb.sha == blob
+            ? FaultingGitProcess.Failure(SyncGit.FailureKind.Other, "bad object")
+            : null;
+        var before = ReadsOf(blob);
+
+        var summary = await Pull();
+
+        Assert.Equal(A, Assert.Single(summary.Failed).Id);
+        Assert.Empty(summary.Held);
+        Assert.Empty(summary.GuardTripped);
+        Assert.Equal(before + 1, ReadsOf(blob));
+        Assert.Equal(blob, Assert.Single(Issues("apply-failed")).RecordHash);
+    }
+
     // ---- postponed ----
 
     [GitFact]

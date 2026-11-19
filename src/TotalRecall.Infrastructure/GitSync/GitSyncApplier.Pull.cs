@@ -14,9 +14,10 @@ public sealed partial class GitSyncApplier
 
     /// <summary>
     /// Applies the fetched repository (decisions 4 to 6, 10 and 14 to 16): reads the tree at <c>R</c>, builds the visit
-    /// set, decides each entry in ordinal id order (one transaction each), records the rejections, sweeps the cleared
-    /// ones, and advances <c>L</c> only for a complete pull. Never throws for a bad record, a busy database or a failed
-    /// entry; the token stops it between entries.
+    /// set, previews the deletions for the delete guard (milestone 1b-ii, D1 to D4), decides each entry in ordinal id order
+    /// (one transaction each), records the rejections, sweeps the cleared ones, and advances <c>L</c> only for a complete
+    /// pull (a tripped guard does not hold it back). Never throws for a bad record, a busy database or a failed entry; the
+    /// token stops it between entries.
     /// </summary>
     public async Task<ApplyOutcome> ApplyAsync(FetchResult fetch, ScanSummary scan, CancellationToken cancellationToken = default)
     {
@@ -78,6 +79,12 @@ public sealed partial class GitSyncApplier
             rejectedNow[rejected.Key] = (rejected.Sha, rejected.Reason);
         }
         var listingByKey = view.Rejected.GroupBy(r => r.NamesId).Where(g => g.Key is not null).ToDictionary(g => g.Key!, g => g.ToList(), StringComparer.Ordinal);
+
+        // The delete guard (D1 to D4). The blobs the preview read are taken by the loop, so no blob is read twice.
+        var blobs = new Dictionary<string, GitOutcome<byte[]>>(StringComparer.Ordinal);
+        var activeRows = rows.Values.Count(r => r.State.IsActive);
+        var preview = await PreviewDeletions(ids, skippedByScan, view, localDeletions, rows, openHeld, fetch.Proven, activeRows, blobs, cancellationToken)
+            .ConfigureAwait(false);
 
         int inserted = 0, updated = 0, dropped = 0, unchanged = 0, notAttempted = 0;
         var postponed = new List<PostponedEntry>();
@@ -142,7 +149,9 @@ public sealed partial class GitSyncApplier
             if (view.Accepted.TryGetValue(id, out var record))
             {
                 sha = record.Sha;
-                var blob = await _client.CatBlobAsync(record.Sha, SyncValidation.maxFileBytes, cancellationToken).ConfigureAwait(false);
+                var blob = blobs.Remove(id, out var previewed)
+                    ? previewed
+                    : await _client.CatBlobAsync(record.Sha, SyncValidation.maxFileBytes, cancellationToken).ConfigureAwait(false);
                 if (!blob.IsOk)
                 {
                     if (blob.Failure.Failure == SyncGit.FailureKind.Cancelled || cancellationToken.IsCancellationRequested)
@@ -170,7 +179,7 @@ public sealed partial class GitSyncApplier
                 theirs = parsed.Parsed;
             }
 
-            Tally(ApplyOne(id, theirs, fetch.Proven, openHeld.GetValueOrDefault(id), sha));
+            Tally(ApplyOne(id, theirs, fetch.Proven, openHeld.GetValueOrDefault(id), sha, preview.Verdict));
 
             void Tally(EntryResult result)
             {
@@ -245,7 +254,107 @@ public sealed partial class GitSyncApplier
             inserted, updated, dropped, unchanged, notAttempted, complete, fetch.Head, fetch.Proven,
             postponed, deferred, failed,
             rejectedNow.Select(p => new RejectedItem(p.Key, p.Value.Reason)).OrderBy(r => r.Key, StringComparer.Ordinal).ToList(),
-            skipped, colder, deleted, heldNow, [], pushDeletions, closedHeld, notes, []));
+            skipped, colder, deleted, heldNow, preview.Trips, pushDeletions, closedHeld, notes, []));
+    }
+
+    /// <summary>The guard's verdict for one pull and the directions it tripped, each with its count and the limit.</summary>
+    private sealed record DeletionPreview(GuardVerdict Verdict, IReadOnlyList<GuardTrip> Trips);
+
+    /// <summary>
+    /// The deletion preview (milestone 1b-ii, D1 to D4), before the first entry transaction. The candidates are the visited
+    /// ids with no accepted record and no rejected path, and the local deletions with an accepted record that parses;
+    /// never a scan-skipped id. Each is decided with the same input as the real decision (its open held-delete item
+    /// included, so an entry with one is left alone and not counted) and nothing is written. <c>DeleteEntry</c> counts as
+    /// remote, <c>PushDeletion</c> as local; a hold that the decision itself makes is not counted, nor is a candidate that
+    /// cannot be decided (the real decision reports it). A direction trips when its count is greater than
+    /// <c>max(10, activeRows * percent / 100)</c>. The blob reads (failed ones included) are left in <paramref name="blobs"/>
+    /// for the loop.
+    /// </summary>
+    private async Task<DeletionPreview> PreviewDeletions(
+        IReadOnlyList<string> ids,
+        Dictionary<string, string> skippedByScan,
+        TreeView view,
+        HashSet<string> localDeletions,
+        Dictionary<string, GitSyncRow> rows,
+        Dictionary<string, HeldItem> openHeld,
+        bool proven,
+        int activeRows,
+        Dictionary<string, GitOutcome<byte[]>> blobs,
+        CancellationToken cancellationToken)
+    {
+        int remote = 0, local = 0;
+        foreach (var id in ids)
+        {
+            if (cancellationToken.IsCancellationRequested)
+                break; // the loop carries nothing out after a cancellation
+            if (skippedByScan.ContainsKey(id))
+                continue;
+
+            ParsedRecord? theirs = null;
+            if (view.Accepted.TryGetValue(id, out var record))
+            {
+                if (!localDeletions.Contains(id))
+                    continue;
+                var blob = await _client.CatBlobAsync(record.Sha, SyncValidation.maxFileBytes, cancellationToken).ConfigureAwait(false);
+                blobs[id] = blob;
+                if (!blob.IsOk)
+                    continue;
+                theirs = RecordReader.Parse(blob.Value, record.Path).Parsed;
+                if (theirs is null)
+                    continue; // an invalid record: skipped by the loop (D13)
+            }
+            else if (view.Present.Contains(id))
+            {
+                continue; // a rejected path: never decided
+            }
+
+            var entry = PreviewDecision(id, rows.GetValueOrDefault(id), theirs, proven, openHeld.GetValueOrDefault(id))?.Entry;
+            if (entry is null)
+                continue;
+            if (entry.IsDeleteEntry)
+                remote++;
+            else if (entry.IsPushDeletion)
+                local++;
+        }
+
+        var limit = SyncDeletion.guardLimit(_options.DeleteGuardPercent, activeRows);
+        var remoteTripped = SyncDeletion.guardTrips(remote, limit);
+        var localTripped = SyncDeletion.guardTrips(local, limit);
+        var trips = new List<GuardTrip>();
+        if (remoteTripped)
+            trips.Add(new GuardTrip(SyncDeletion.directionName(SyncMerge.Direction.RemoteDeletion), remote, limit));
+        if (localTripped)
+            trips.Add(new GuardTrip(SyncDeletion.directionName(SyncMerge.Direction.LocalDeletion), local, limit));
+        return new DeletionPreview(new GuardVerdict(remoteTripped, localTripped), trips);
+    }
+
+    /// <summary>
+    /// The decision the entry would get, read without writing anything; null when it cannot be decided (an id that is not
+    /// eligible, a local entry that cannot be read or is in two tiers, a base that does not parse).
+    /// </summary>
+    private SyncMerge.MergeDecision? PreviewDecision(string id, GitSyncRow? row, ParsedRecord? theirs, bool proven, HeldItem? held)
+    {
+        if (!SyncValidation.isEligibleId(id))
+            return null;
+        LocalRead read;
+        try
+        {
+            read = ReadLocal(id);
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+        if (read is not (LocalRead.Present or LocalRead.Absent))
+            return null;
+        ParsedRecord? oldBase = null;
+        if (row?.BaseJson is { } baseText)
+        {
+            oldBase = ParseBase(id, baseText).Parsed;
+            if (oldBase is null)
+                return null;
+        }
+        return SyncMerge.decide(BuildInput(row, oldBase, theirs, (read as LocalRead.Present)?.View, proven, held));
     }
 
     /// <summary>Writes a <c>rejected-record</c> row for each rejection that has none or a different one. False when it could not be written.</summary>

@@ -6,7 +6,8 @@ namespace TotalRecall.Infrastructure.GitSync;
 /// <summary>
 /// The limits the apply needs from the configuration. A <see cref="HotMaxContentChars"/> of 0 or less means no limit.
 /// <see cref="DeleteGuardPercent"/> is the share of the active rows one direction of deletions may reach before the pull
-/// holds them (milestone 1b-ii, decision 7); the default is the configuration's default.
+/// holds them (milestone 1b-ii, decision 3: the limit is <c>max(10, active rows * percent / 100)</c>); the default is the
+/// configuration's default.
 /// </summary>
 public sealed record ApplyOptions(int HotMaxContentChars, int DeleteGuardPercent = 20);
 
@@ -71,8 +72,10 @@ public abstract record ApplyOutcome
 /// deletions out (D6 to D13): a proven remote deletion is applied, one that is unproven or would remove a pin is held as an
 /// open <c>held-delete</c> item, and a pending text edit beats it; a proven local deletion is listed for the push
 /// (<see cref="ApplySummary.PushDeletions"/>), an unproven one is held, and one whose record in <c>R</c> is rejected or
-/// invalid is skipped. A decision that needs a part not built yet (a review item, a re-push) is postponed and changes
-/// nothing. Nothing calls it yet.
+/// invalid is skipped. Before the first entry a preview counts each direction's deletions (D1 to D4); a direction over
+/// the limit carries none of them out and holds each with the cause <c>guard</c> (<see cref="ApplySummary.GuardTripped"/>),
+/// and the pull is still complete. A decision that needs a part not built yet (a review item, a re-push) is postponed and
+/// changes nothing. Nothing calls it yet.
 /// </summary>
 public sealed partial class GitSyncApplier
 {
