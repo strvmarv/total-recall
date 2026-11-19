@@ -26,11 +26,13 @@ public sealed partial class GitSyncApplier
         Dictionary<string, GitSyncRow> rows;
         Dictionary<string, IssueRow> failures;
         Dictionary<string, IssueRow> rejections;
+        Dictionary<string, HeldItem> openHeld;
         try
         {
             rows = GitSyncRows.ReadAll(conn);
             failures = GitSyncIssues.ReadOpen(conn, GitSyncIssues.ApplyFailed);
             rejections = GitSyncIssues.ReadOpen(conn, GitSyncIssues.RejectedRecord);
+            openHeld = GitSyncReviews.ReadOpenHeld(conn);
         }
         catch (Exception ex) when (ex is FormatException or SqliteException or InvalidOperationException)
         {
@@ -77,6 +79,10 @@ public sealed partial class GitSyncApplier
         var failed = new List<FailedEntry>();
         var skipped = new List<SkippedItem>(scan.Skipped);
         var colder = new List<string>();
+        var deleted = new List<string>();
+        var heldNow = new List<HeldEntry>();
+        var closedHeld = new List<string>();
+        var notes = new List<NoteEntry>();
         var stopped = false;
         var everyIdProcessed = true; // false on a stop or a cancellation
         var blobReadFailed = false;
@@ -156,7 +162,7 @@ public sealed partial class GitSyncApplier
                 theirs = parsed.Parsed;
             }
 
-            Tally(ApplyOne(id, theirs, fetch.Proven, sha));
+            Tally(ApplyOne(id, theirs, fetch.Proven, openHeld.GetValueOrDefault(id), sha));
 
             void Tally(EntryResult result)
             {
@@ -167,6 +173,10 @@ public sealed partial class GitSyncApplier
                         else if (c.Kind == CarriedKind.Updated) updated++;
                         else dropped++;
                         if (c.Colder) colder.Add(id);
+                        if (c.Effects.Deleted) deleted.Add(id);
+                        if (c.Effects.Held is { } h) heldNow.Add(h);
+                        if (c.Effects.Closed) closedHeld.Add(id);
+                        notes.AddRange(c.Effects.Notes.Select(n => new NoteEntry(id, n)));
                         break;
                     case EntryResult.NoOp:
                         unchanged++;
@@ -225,7 +235,7 @@ public sealed partial class GitSyncApplier
             inserted, updated, dropped, unchanged, notAttempted, complete, fetch.Head, fetch.Proven,
             postponed, deferred, failed,
             rejectedNow.Select(p => new RejectedItem(p.Key, p.Value.Reason)).OrderBy(r => r.Key, StringComparer.Ordinal).ToList(),
-            skipped, colder, [], [], [], [], [], [], []));
+            skipped, colder, deleted, heldNow, [], [], closedHeld, notes, []));
     }
 
     /// <summary>Writes a <c>rejected-record</c> row for each rejection that has none or a different one. False when it could not be written.</summary>

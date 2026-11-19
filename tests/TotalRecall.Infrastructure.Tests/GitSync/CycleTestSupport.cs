@@ -93,6 +93,14 @@ internal sealed partial class CycleRig : IDisposable
         Pull.Source.PushTo(Push.Remote.Path);
     }
 
+    /// <summary>Another machine adds a record: the remote moves ahead with it.</summary>
+    public void AddRecordOnRemote(SyncRecord.SyncRecord record)
+    {
+        Pull.PutRecord(record);
+        Pull.Commit("another machine adds " + record.Id);
+        Pull.Source.PushTo(Push.Remote.Path);
+    }
+
     /// <summary>Another machine replaces the manifest.</summary>
     public void ReplaceManifestOnRemote(byte[] bytes)
     {

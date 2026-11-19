@@ -22,27 +22,43 @@ internal static class GitSyncReviews
 {
     private const string HeldDelete = "held-delete";
 
+    private const string SelectOpen =
+        "SELECT entry_id, direction, record_hash, payload_json, arrived_at FROM git_sync_review " +
+        "WHERE kind = 'held-delete' AND state = 'open' AND direction IS NOT NULL";
+
     /// <summary>Every open <c>held-delete</c> item, by entry id (ordinal).</summary>
     public static Dictionary<string, HeldItem> ReadOpenHeld(MsSqliteConnection conn, SqliteTransaction? tx = null)
     {
         var rows = new Dictionary<string, HeldItem>(StringComparer.Ordinal);
         using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
-        cmd.CommandText =
-            "SELECT entry_id, direction, record_hash, payload_json, arrived_at FROM git_sync_review " +
-            "WHERE kind = 'held-delete' AND state = 'open' AND direction IS NOT NULL";
+        cmd.CommandText = SelectOpen;
         using var r = cmd.ExecuteReader();
         while (r.Read())
         {
-            var item = new HeldItem(
-                r.GetString(0), r.GetString(1),
-                r.IsDBNull(2) ? null : r.GetString(2),
-                r.IsDBNull(3) ? null : ParseCause(r.GetString(3)),
-                r.GetInt64(4));
+            var item = ReadItem(r);
             rows[item.EntryId] = item;
         }
         return rows;
     }
+
+    /// <summary>The entry's open <c>held-delete</c> item, or null when it has none.</summary>
+    public static HeldItem? ReadOpenHeldItem(MsSqliteConnection conn, string entryId, SqliteTransaction? tx = null)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = SelectOpen + " AND entry_id = $id";
+        cmd.Parameters.AddWithValue("$id", entryId);
+        using var r = cmd.ExecuteReader();
+        return r.Read() ? ReadItem(r) : null;
+    }
+
+    private static HeldItem ReadItem(SqliteDataReader r) =>
+        new(
+            r.GetString(0), r.GetString(1),
+            r.IsDBNull(2) ? null : r.GetString(2),
+            r.IsDBNull(3) ? null : ParseCause(r.GetString(3)),
+            r.GetInt64(4));
 
     /// <summary>Inserts the open item, or replaces the row with the same <c>(entry_id, 'held-delete')</c> (whatever its state and direction).</summary>
     public static void UpsertHeld(MsSqliteConnection conn, HeldItem item, SqliteTransaction? tx = null)

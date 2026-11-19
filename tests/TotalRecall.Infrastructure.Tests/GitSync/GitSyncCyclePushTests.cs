@@ -230,7 +230,7 @@ public sealed class GitSyncCyclePushTests : IDisposable
     public async Task ThePushIsNeverReached_AfterARefusedOrAnIncompletePull()
     {
         await SyncedWithAPendingMemory();
-        _rig.RemoveRecordOnRemote(A); // the pull postpones the deletion: incomplete
+        _rig.AddRecordOnRemote(Rec(D, "A pin.", sticky: true)); // a record that pins an id this machine lacks: a review, incomplete
         var commits = RemoteCommits();
 
         var incomplete = Done(await _rig.Run());

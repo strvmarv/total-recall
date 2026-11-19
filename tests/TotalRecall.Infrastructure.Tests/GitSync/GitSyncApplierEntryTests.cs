@@ -486,17 +486,6 @@ public sealed class GitSyncApplierEntryTests : IDisposable
     }
 
     [Fact]
-    public void APostponedForgottenRow_ChangesNothing()
-    {
-        // an entry that was scanned (a row with no base), then deleted, while the record is present: the row becomes forgotten
-        _rig.Scan.AddMemory(Tier.Warm, Id);
-        _rig.RunScan();
-        _rig.Scan.Store.Delete(Tier.Warm, ContentType.Memory, Id);
-
-        AssertPostponed("deletion", () => _rig.Apply(ApplyRig.Rec(Id, minute: 10), proven: false));
-    }
-
-    [Fact]
     public void APostponedRepush_ChangesNothing()
     {
         _rig.Apply(ApplyRig.Rec(Id, content: "Newer.", minute: 20));
@@ -516,16 +505,355 @@ public sealed class GitSyncApplierEntryTests : IDisposable
         AssertPostponed("review", () => _rig.Apply(ApplyRig.Rec(Id, content: "Their edit.", minute: 20)));
     }
 
+    // ---- remote deletions (milestone 1b-ii, D6 to D12) ----
+
+    private static EntryEffects Effects(EntryResult r)
+    {
+        var carried = r is EntryResult.Failed f ? throw new Xunit.Sdk.XunitException(f.Detail) : Is<EntryResult.Carried>(r);
+        Assert.Equal(CarriedKind.Updated, carried.Kind);
+        return carried.Effects;
+    }
+
+    private GitSyncRow Row(string id = Id) => _rig.Scan.Rows()[id];
+
+    private static int Cmp(SyncStamp.Stamp a, SyncStamp.Stamp b) => SyncStamp.StampModule.compare(a, b);
+
+    private void SetRowColumn(string column, string? value) =>
+        _rig.Scan.Exec($"UPDATE git_sync_entry SET {column} = {(value is null ? "NULL" : "'" + value + "'")} WHERE entry_id = '{Id}'");
+
+    /// <summary>A synced entry (row active with a base at minute 10), then a local change the scan stamps.</summary>
+    private void SyncedThenChanged(string change)
+    {
+        _rig.Apply(ApplyRig.Rec(Id, tier: change == "pin" ? Tier.Hot : Tier.Warm, minute: 10));
+        switch (change)
+        {
+            case "text": _rig.Scan.Store.Update(Tier.Warm, ContentType.Memory, Id, new TotalRecall.Infrastructure.Storage.UpdateEntryOpts { Content = "A local edit." }); break;
+            case "tags": _rig.Scan.Store.Update(Tier.Warm, ContentType.Memory, Id, new TotalRecall.Infrastructure.Storage.UpdateEntryOpts { Tags = ["local"] }); break;
+            case "project": _rig.Scan.Store.Update(Tier.Warm, ContentType.Memory, Id, new TotalRecall.Infrastructure.Storage.UpdateEntryOpts { Project = "o/r" }); break;
+            case "tier": _rig.Scan.Store.Move(Tier.Warm, ContentType.Memory, Tier.Hot, ContentType.Memory, Id); break;
+            case "pin": _rig.Scan.Pin(Id); break;
+            default: throw new ArgumentOutOfRangeException(nameof(change));
+        }
+        _rig.RunScan();
+    }
+
     [Fact]
-    public void ARemoteDeletion_WhenTheRecordIsGone_IsPostponed_AndNothingChanges()
+    public void ProvenRemoteDeletion_DeletesTheEntryAndItsVector_AndMarksTheRowForgottenKeepingTheBase()
     {
         _rig.Apply(ApplyRig.Rec(Id, minute: 10));
+        SetRowColumn("pushing_stamps", "{\"content\":\"" + SyncStamp.StampModule.format(ApplyRig.St(10)) + "\"}");
+        var baseJson = Row().BaseJson;
+        Assert.NotNull(baseJson);
+        Assert.Equal(1, _rig.VectorCount(Tier.Warm));
+
+        var effects = Effects(_rig.Apply(Id, null));
+
+        Assert.True(effects.Deleted);
+        Assert.Null(effects.Held);
+        Assert.False(effects.Closed);
+        Assert.Empty(effects.Notes);
+        Assert.Null(_rig.Entry(Id));
+        Assert.Equal(0, _rig.VectorCount(Tier.Warm));
+        var row = Row();
+        Assert.Equal(SyncMerge.RowState.Forgotten, row.State);
+        Assert.Equal(baseJson, row.BaseJson);
+        Assert.Null(row.ContentStamp);
+        Assert.Null(row.StickyStamp);
+        Assert.Null(row.TierStamp);
+        Assert.Null(row.PushingStamps);
+        Assert.Equal(1, _rig.ImportLogRows(Id)); // import_log is left as it is
+        Assert.Equal(0, _rig.ReviewRows());
+        var scan = _rig.RunScan();
+        Assert.Empty(scan.LocalDeletions);
+        AssertScanQuiet();
+    }
+
+    [Theory]
+    [InlineData("tags")]
+    [InlineData("tier")]
+    [InlineData("project")]
+    public void RemoteDeletion_WithPendingTagTierProjectChange_StillDeletes_AndNotesTheDroppedChanges(string change)
+    {
+        SyncedThenChanged(change);
+
+        var effects = Effects(_rig.Apply(Id, null));
+
+        Assert.True(effects.Deleted);
+        Assert.Equal(["pending-changes-dropped"], effects.Notes);
+        Assert.Null(_rig.Entry(Id));
+        if (change != "tier") // the plain store's Move, used to promote here, leaves the vector behind in the warm table
+            Assert.Equal(0, _rig.VectorCount(Tier.Warm));
+        var row = Row();
+        Assert.Equal(SyncMerge.RowState.Forgotten, row.State);
+        Assert.Null(row.ContentStamp);
+        Assert.Null(row.TierStamp);
+    }
+
+    private void AssertHeld(EntryResult result, string cause)
+    {
+        var effects = Effects(result);
+        Assert.Equal(new HeldEntry(Id, "remote", cause), effects.Held);
+        Assert.False(effects.Deleted);
+        var item = Assert.Single(GitSyncReviews.ReadOpenHeld(_rig.Scan.Connection)).Value;
+        Assert.Equal(new HeldItem(Id, "remote", null, cause, _rig.Now), item);
+        Assert.NotNull(_rig.Entry(Id));
+    }
+
+    [Fact]
+    public void RemoteDeletion_OfAStickyEntry_IsHeldWithCauseSticky()
+    {
+        SyncedThenChanged("pin");
+        SetRowColumn("sticky_stamp", null); // the pin is in the repository: no pending stamp, the entry is sticky
+        var row = Row();
+
+        AssertHeld(_rig.Apply(Id, null), "sticky");
+
+        Assert.True(_rig.Scan.Store.IsSticky(ContentType.Memory, Id));
+        Assert.Equal(row, Row());
+    }
+
+    [Fact]
+    public void RemoteDeletion_WithAPendingStickyStamp_IsHeldWithCauseSticky()
+    {
+        SyncedThenChanged("pin"); // the pin is only pending, not yet in the repository
+        var row = Row();
+        Assert.NotNull(row.StickyStamp);
+
+        AssertHeld(_rig.Apply(Id, null), "sticky");
+
+        Assert.True(_rig.Scan.Store.IsSticky(ContentType.Memory, Id));
+        Assert.Equal(row, Row()); // the pending pin stays pending
+    }
+
+    [Fact]
+    public void RemoteDeletion_InAnUnprovenApply_IsHeldWithCauseUnproven_AndNothingIsDeleted()
+    {
+        _rig.Apply(ApplyRig.Rec(Id, minute: 10));
+        var row = Row();
+
+        AssertHeld(_rig.Apply(Id, null, proven: false), "unproven");
+
+        Assert.Equal(row, Row());
+        Assert.Equal(1, _rig.VectorCount(Tier.Warm));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RemoteDeletion_WithAPendingTextEdit_KeepsTheEntry_IssuesAFreshContentStamp_AndNotesEditBeatsDeletion(bool baseAbovePending)
+    {
+        SyncedThenChanged("text");
+        if (baseAbovePending)
+            SetRowColumn("content_stamp", SyncStamp.StampModule.format(ApplyRig.St(5))); // older than the base's (minute 10)
+        _rig.SeedHeld(Id);
+        var oldPending = Row().ContentStamp!;
+        var entryBefore = _rig.Entry(Id)!;
+        var dump = _rig.Scan.Dump();
+
+        var effects = Effects(_rig.Apply(Id, null));
+
+        Assert.False(effects.Deleted);
+        Assert.Null(effects.Held);
+        Assert.True(effects.Closed);
+        Assert.Equal(["edit-beats-deletion"], effects.Notes);
+        Assert.Equal(dump, _rig.Scan.Dump()); // the entry, its vector and the import log are untouched
+        Assert.Equal("A local edit.", _rig.Entry(Id)!.Row.Content);
+        Assert.Equal(entryBefore, _rig.Entry(Id));
+        var fresh = Row().ContentStamp!;
+        Assert.True(Cmp(fresh, oldPending) > 0, "above the old pending stamp");
+        Assert.True(Cmp(fresh, ApplyRig.St(10)) > 0, "above the base's content stamp");
+        Assert.Equal(SyncMerge.RowState.Active, Row().State);
+        Assert.Null(_rig.Held(Id));
+        Assert.NotNull(_rig.Scan.Meta("git_sync_hlc"));
+    }
+
+    [Fact]
+    public void RecordReappearing_ClosesTheOpenRemoteItem()
+    {
+        _rig.Apply(ApplyRig.Rec(Id, minute: 10));
+        _rig.SeedHeld(Id);
+        var row = Row();
+
+        var effects = Effects(_rig.Apply(ApplyRig.Rec(Id, minute: 10)));
+
+        Assert.True(effects.Closed);
+        Assert.Equal(0, _rig.ReviewRows());
+        Assert.Equal(row, Row());
+    }
+
+    [Fact]
+    public void PendingTextEdit_ClosesTheOpenRemoteItem()
+    {
+        SyncedThenChanged("text");
+        _rig.SeedHeld(Id);
+        _rig.SeedHeld(Id2); // an unrelated entry's item is untouched
+
+        Assert.True(Effects(_rig.Apply(Id, null)).Closed);
+
+        Assert.Null(_rig.Held(Id));
+        Assert.NotNull(_rig.Held(Id2));
+        Assert.NotNull(_rig.Entry(Id));
+    }
+
+    [Fact]
+    public void PendingTagChange_DoesNotCloseTheOpenItem()
+    {
+        SyncedThenChanged("tags");
+        _rig.SeedHeld(Id);
         var before = _rig.Full();
 
-        var result = _rig.Apply(Id, null);
+        Assert.IsType<EntryResult.NoOp>(_rig.Apply(Id, null));
 
-        Assert.Equal("deletion", Is<EntryResult.Postponed>(result).Reason);
         Assert.Equal(before, _rig.Full());
+    }
+
+    [Theory]
+    [InlineData("pin")]
+    [InlineData("tier")]
+    [InlineData("project")]
+    public void PendingPinTierOrProjectChange_DoesNotCloseTheOpenItem(string change)
+    {
+        SyncedThenChanged(change);
+        _rig.SeedHeld(Id);
+        var before = _rig.Full();
+
+        Assert.IsType<EntryResult.NoOp>(_rig.Apply(Id, null));
+
+        Assert.Equal(before, _rig.Full());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void OpenRemoteItem_LeavesTheEntryAlone_NeitherDeletedNorRehold(bool proven)
+    {
+        _rig.Apply(ApplyRig.Rec(Id, minute: 10));
+        _rig.SeedHeld(Id);
+        var before = _rig.Full();
+        var opened = _rig.Applier.TransactionCount;
+
+        Assert.IsType<EntryResult.NoOp>(_rig.Apply(Id, null, proven));
+
+        Assert.Equal(before, _rig.Full());
+        Assert.Equal(opened, _rig.Applier.TransactionCount);
+    }
+
+    /// <summary>The entry is gone here and its row is forgotten (deleted by a remote deletion) or still active with a base (deleted locally).</summary>
+    private void EntryGone(string rowState)
+    {
+        _rig.Apply(ApplyRig.Rec(Id, minute: 10));
+        if (rowState == "forgotten")
+            Effects(_rig.Apply(Id, null));
+        else
+            _rig.Scan.Store.Delete(Tier.Warm, ContentType.Memory, Id);
+        Assert.Null(_rig.Entry(Id));
+    }
+
+    [Theory]
+    [InlineData("forgotten")]
+    [InlineData("active")]
+    public void NewerTextThanTheDeletion_ReinsertsNonSticky_ClosesTheItem_AndNotes(string rowState)
+    {
+        EntryGone(rowState);
+        _rig.SeedHeld(Id);
+
+        var carried = Is<EntryResult.Carried>(_rig.Apply(ApplyRig.Rec(Id, content: "Newer text.", tier: Tier.Hot, minute: 20)));
+
+        Assert.Equal(CarriedKind.Inserted, carried.Kind);
+        Assert.True(carried.Effects.Closed);
+        Assert.Equal(["edit-beats-deletion"], carried.Effects.Notes);
+        Assert.Equal("Newer text.", _rig.Entry(Id)!.Row.Content);
+        Assert.False(_rig.Scan.Store.IsSticky(ContentType.Memory, Id));
+        Assert.Equal(SyncMerge.RowState.Active, Row().State);
+        Assert.Equal(0, _rig.ReviewRows());
+        AssertScanQuiet();
+    }
+
+    [Theory]
+    [InlineData("forgotten")]
+    [InlineData("active")]
+    public void NewerTextThanTheDeletion_ThatPins_IsPostponedAsAReview(string rowState)
+    {
+        EntryGone(rowState);
+
+        AssertPostponed("review", () => _rig.Apply(ApplyRig.Rec(Id, content: "Newer text.", sticky: true, minute: 20)));
+    }
+
+    [Fact]
+    public void ForgottenRow_WithTheSameTextRecord_IsNotReinserted()
+    {
+        EntryGone("forgotten");
+        var before = _rig.Full();
+
+        Assert.IsType<EntryResult.NoOp>(_rig.Apply(ApplyRig.Rec(Id, minute: 20))); // a newer stamp, the same text
+
+        Assert.Equal(before, _rig.Full());
+        Assert.Null(_rig.Entry(Id));
+    }
+
+    [Fact]
+    public void ForgottenRow_WithOlderTextAfterAReset_IsNotReinserted()
+    {
+        EntryGone("forgotten");
+        var before = _rig.Full();
+
+        Assert.IsType<EntryResult.NoOp>(_rig.Apply(ApplyRig.Rec(Id, content: "Older text.", minute: 5)));
+
+        Assert.Equal(before, _rig.Full());
+        Assert.Null(_rig.Entry(Id));
+    }
+
+    [Fact]
+    public void RowActiveWithBase_RecordAbsent_EntryGone_BecomesForgotten()
+    {
+        EntryGone("active");
+        SetRowColumn("tier_stamp", SyncStamp.StampModule.format(ApplyRig.St(30)));
+        var baseJson = Row().BaseJson;
+        var dump = _rig.Scan.Dump();
+
+        var effects = Effects(_rig.Apply(Id, null));
+
+        Assert.False(effects.Deleted); // the deletion was already made
+        Assert.Equal(dump, _rig.Scan.Dump());
+        var row = Row();
+        Assert.Equal(SyncMerge.RowState.Forgotten, row.State);
+        Assert.Equal(baseJson, row.BaseJson);
+        Assert.Null(row.TierStamp);
+        Assert.IsType<EntryResult.NoOp>(_rig.Apply(Id, null)); // and the next pull changes nothing
+    }
+
+    [Fact]
+    public void ADroppedRow_ClosesItsOpenItem_InTheSameTransaction()
+    {
+        _rig.Scan.AddMemory(Tier.Warm, Id);
+        _rig.RunScan(); // a row with no base
+        _rig.Scan.Store.Delete(Tier.Warm, ContentType.Memory, Id);
+        _rig.SeedHeld(Id, "local");
+
+        var carried = Is<EntryResult.Carried>(_rig.Apply(Id, null));
+
+        Assert.Equal(CarriedKind.Dropped, carried.Kind);
+        Assert.True(carried.Effects.Closed);
+        Assert.DoesNotContain(Id, _rig.Scan.Rows().Keys);
+        Assert.Equal(0, _rig.ReviewRows());
+        Assert.Equal(1, _rig.Applier.TransactionCount);
+    }
+
+    [Fact]
+    public void ANoBaseRow_WhoseEntryIsGone_AndAnotherMachinesRecordIsPresent_BecomesForgottenWithTheRecordAsBase()
+    {
+        // an entry that was scanned (a row with no base), then deleted, while another record is present (W9)
+        _rig.Scan.AddMemory(Tier.Warm, Id);
+        _rig.RunScan();
+        _rig.Scan.Store.Delete(Tier.Warm, ContentType.Memory, Id);
+
+        Effects(_rig.Apply(ApplyRig.Rec(Id, minute: 10), proven: false));
+
+        var row = Row();
+        Assert.Equal(SyncMerge.RowState.Forgotten, row.State);
+        Assert.NotNull(row.BaseJson);
+        Assert.Null(row.ContentStamp);
+        Assert.Null(_rig.Entry(Id));
     }
 
     // ---- defer and skip ----

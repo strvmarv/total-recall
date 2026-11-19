@@ -81,7 +81,124 @@ public sealed class GitSyncApplierSafetyTests
     };
 
     private static EntryResult Run(Scenario s) =>
-        s.Rig.Applier.ApplyOne(s.Id, s.Record is null ? null : ApplyRig.Parsed(s.Record), proven: true, blobSha: "abc");
+        s.Rig.Applier.ApplyOne(s.Id, s.Record is null ? null : ApplyRig.Parsed(s.Record), proven: true, s.Rig.Held(s.Id), blobSha: "abc");
+
+    // ---- the deletion decisions (milestone 1b-ii) ----
+
+    /// <summary>A synced entry whose record is gone from the repository: a proven remote deletion.</summary>
+    private static Scenario RemoteDelete()
+    {
+        var rig = new ApplyRig();
+        rig.Apply(ApplyRig.Rec(Id, tags: ["a"], minute: 10));
+        return new Scenario(rig, Id, null);
+    }
+
+    /// <summary>A pinned entry whose record is gone: held with cause <c>sticky</c>.</summary>
+    private static Scenario RemoteHold()
+    {
+        var rig = new ApplyRig();
+        rig.Apply(ApplyRig.Rec(Id, tier: Tier.Hot, minute: 10));
+        rig.Scan.Pin(Id);
+        rig.RunScan();
+        return new Scenario(rig, Id, null);
+    }
+
+    /// <summary>An open remote item whose record reappears unchanged: the item is closed.</summary>
+    private static Scenario CloseOnly()
+    {
+        var rig = new ApplyRig();
+        rig.Apply(ApplyRig.Rec(Id, minute: 10));
+        rig.SeedHeld(Id);
+        return new Scenario(rig, Id, ApplyRig.Rec(Id, minute: 10));
+    }
+
+    /// <summary>A pending text edit and an open remote item, the record gone: a fresh content stamp and a close.</summary>
+    private static Scenario FreshStamp()
+    {
+        var rig = new ApplyRig();
+        rig.Apply(ApplyRig.Rec(Id, minute: 10));
+        rig.Scan.Store.Update(Tier.Warm, ContentType.Memory, Id, new UpdateEntryOpts { Content = "A local edit." });
+        rig.RunScan();
+        rig.SeedHeld(Id);
+        return new Scenario(rig, Id, null);
+    }
+
+    public static IEnumerable<object[]> DeletionScenarios() =>
+        new[] { nameof(RemoteDelete), nameof(RemoteHold), nameof(CloseOnly), nameof(FreshStamp) }.Select(n => new object[] { n });
+
+    private static Scenario BuildDeletion(string name) => name switch
+    {
+        nameof(RemoteDelete) => RemoteDelete(),
+        nameof(RemoteHold) => RemoteHold(),
+        nameof(CloseOnly) => CloseOnly(),
+        _ => FreshStamp(),
+    };
+
+    [Theory]
+    [MemberData(nameof(DeletionScenarios))]
+    public void HeldAndDeletionDecisions_FaultAtEveryStep_RollBackEverything(string scenario)
+    {
+        var steps = new List<string>();
+        using (var probe = BuildDeletion(scenario))
+        {
+            probe.Rig.Applier.BeforeEntryStep = (_, step) => steps.Add(step);
+            Is<EntryResult.Carried>(Run(probe));
+        }
+        Assert.Contains("commit", steps);
+        var expected = scenario switch
+        {
+            nameof(RemoteDelete) => new[] { "delete-vec", "delete-row" },
+            nameof(RemoteHold) => ["hold"],
+            nameof(CloseOnly) => ["close"],
+            _ => ["close", "row"],
+        };
+        Assert.All(expected, step => Assert.Contains(step, steps));
+
+        foreach (var step in steps.Distinct())
+        {
+            using var s = BuildDeletion(scenario);
+            var before = s.Rig.Full(issues: false); // content, vectors, import log, rows, held items, clock
+            var beforeIssues = s.Rig.Scan.Issues();
+            s.Rig.Applier.BeforeEntryStep = (_, current) =>
+            {
+                if (current == step)
+                    throw new InvalidOperationException("fault at " + step);
+            };
+
+            var result = Run(s);
+
+            Assert.Equal(before, s.Rig.Full(issues: false));
+            if (step is "reread" or "issue")
+            {
+                Assert.True(result is EntryResult.Deferred, $"{scenario}/{step}: {result}");
+                Assert.Equal(beforeIssues, s.Rig.Scan.Issues());
+            }
+            else
+            {
+                Assert.True(result is EntryResult.Failed { Attempts: 1 }, $"{scenario}/{step}: {result}");
+                var issue = Assert.Single(s.Rig.Scan.Issues());
+                Assert.Equal((Id, "apply-failed"), (issue.Id, issue.Kind));
+                Assert.Contains("fault at " + step, issue.Detail);
+            }
+        }
+    }
+
+    [Fact]
+    public void AHeldItemChangedAfterTheDecision_IsDeferred_AndNothingChanges()
+    {
+        using var s = CloseOnly();
+        string? after = null;
+        s.Rig.Applier.BeforeTransaction = _ =>
+        {
+            var (conn, _) = s.Rig.Scan.Other();
+            using (conn)
+                GitSyncReviews.UpsertHeld(conn, new HeldItem(Id, "remote", null, "guard", 5));
+            after = s.Rig.Full();
+        };
+
+        Assert.IsType<EntryResult.Deferred>(Run(s));
+        Assert.Equal(after, s.Rig.Full());
+    }
 
     // ---- a fault at every step rolls everything back ----
 

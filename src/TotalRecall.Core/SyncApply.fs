@@ -2,7 +2,9 @@
 /// and carries `SyncMerge.decide`'s decisions out, one entry at a time. This module holds what is decided without
 /// touching anything: which decisions this milestone does not carry out (`postponement`), the `pushing_stamps` column
 /// text, the hot-tier limit, which entries the apply looks at (`visitSet`) and the row an entry has afterwards
-/// (`planRow`). Pure and total: no I/O, no clock (a stamp is issued by the caller through a function).
+/// (`planRow`). Pure and total: no I/O, no clock (a stamp is issued by the caller through a function). Milestone 1b-ii
+/// carries remote deletions out (D6 to D12): `postponement` narrows and `planRow` handles a fresh content stamp and an
+/// applied deletion.
 module TotalRecall.Core.SyncApply
 
 open System
@@ -16,7 +18,7 @@ open TotalRecall.Core.SyncMerge
 
 /// Why a decision is not carried out here: it needs a part of git sync that a later milestone builds.
 type PostponeReason =
-    /// An outcome or note of the deletion rules (applying, holding or pushing a deletion, a `forgotten` row, a held-delete close).
+    /// A local deletion: pushing it, or holding it (milestone 1b-ii carries remote deletions out; local ones follow).
     | Deletion
     /// The decision opens a review item (a pin, a pin-edit, a conflict).
     | Review
@@ -30,18 +32,15 @@ let reasonName (r: PostponeReason) : string =
     | Repush -> "repush"
 
 /// `Some reason` when the decision must not be carried out by this milestone (in this order of precedence); `None` when it is.
+/// A remote deletion (applied or held), a note, a fresh content stamp, a held-delete close and a `forgotten` row are
+/// carried out (milestone 1b-ii, D6 to D12).
 let postponement (d: MergeDecision) : PostponeReason option =
-    let deletionOutcome =
+    let localDeletion =
         match d.Entry with
-        | DeleteEntry
-        | HoldDeletion _
-        | PushDeletion -> true
+        | PushDeletion
+        | HoldDeletion LocalDeletion -> true
         | _ -> false
-    if deletionOutcome
-       || not d.Notes.IsEmpty
-       || d.FreshContentStamp
-       || d.CloseHeldDelete
-       || d.RowState = Some Forgotten then
+    if localDeletion then
         Some Deletion
     elif not d.Reviews.IsEmpty then
         Some Review
@@ -165,7 +164,9 @@ type RowBefore =
       /// The raw text of the `pushing_stamps` column (null: NULL).
       PushingText: string option
       /// The tier of the row's base record (`None`: no base, or one that cannot be read).
-      BaseTier: Tier option }
+      BaseTier: Tier option
+      /// The content stamp of the row's base record (`None`: no base, or one that cannot be read).
+      BaseContentStamp: Stamp option }
 
 /// The columns the scan compares, taken from the entry as it is stored.
 type Comparison =
@@ -187,7 +188,9 @@ let private warmer (a: Tier) (b: Tier) : bool = tierRank a < tierRank b
 /// The row an entry has after the decision was carried out (decision 12.3). `Ok None`: write no row (there is none and
 /// the decision creates none). `issue` issues a stamp above a floor (`None` when the clock range is exhausted, which
 /// is an `Error`). `stored` is the entry as it is stored **after** the store operations; `hadEntry` whether an entry
-/// existed when the decision was made; `colderTier` whether the hot limit stored or moved it to the warm tier.
+/// existed when the decision was made; `colderTier` whether the hot limit stored or moved it to the warm tier. A
+/// `LeaveEntry` with `FreshContentStamp` issues the pending content stamp above the greater of the pending one and the
+/// base's (D10); a `DeleteEntry` that makes the row `forgotten` also clears `pushing_stamps` (D6).
 let planRow
     (d: MergeDecision)
     (before: RowBefore)
@@ -225,6 +228,10 @@ let planRow
                 | Error e, _, _
                 | _, Error e, _
                 | _, _, Error e -> Error e
+            | LeaveEntry when d.FreshContentStamp ->
+                // An edit of the text beat a remote deletion (D10): a new content stamp above the pending and the base's.
+                restamp before.BaseContentStamp before.Pending.Content
+                |> Result.map (fun c -> { before.Pending with Content = c })
             | outcome ->
                 if clearsPending outcome hadEntry then Ok { GroupStamps.Content = None; Sticky = None; Tier = None }
                 else Ok before.Pending
@@ -248,7 +255,12 @@ let planRow
                 let becameContent = d.Base.Content = BaseBecomesTheirs
                 let becameSticky = d.Base.Sticky = BaseBecomesTheirs
                 let becameTier = d.Base.Tier = BaseBecomesTheirs
-                if not (becameContent || becameSticky || becameTier) then before.PushingText
+                let deleted =
+                    match d.Entry, d.RowState with
+                    | DeleteEntry, Some Forgotten -> true
+                    | _ -> false
+                if deleted then None // D6: an applied remote deletion proves nothing was sent any more
+                elif not (becameContent || becameSticky || becameTier) then before.PushingText
                 else
                     let current = PushingStamps.decode (defaultArg before.PushingText null)
                     PushingStamps.encode

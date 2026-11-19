@@ -98,6 +98,23 @@ public sealed class GitSyncReviewsTests : IDisposable
     }
 
     [Fact]
+    public void One_entrys_open_item_is_read_by_its_id()
+    {
+        var item = new HeldItem("k", "local", "blob", "unproven", 10);
+        GitSyncReviews.UpsertHeld(_conn, item);
+        GitSyncReviews.UpsertHeld(_conn, new HeldItem("other", "remote", null, "guard", 11));
+        using (var cmd = _conn.CreateCommand())
+        {
+            cmd.CommandText = "INSERT INTO git_sync_review (entry_id, kind, state, direction, arrived_at) VALUES ('r', 'held-delete', 'resolved', 'remote', 1)";
+            cmd.ExecuteNonQuery();
+        }
+
+        Assert.Equal(item, GitSyncReviews.ReadOpenHeldItem(_conn, "k"));
+        Assert.Null(GitSyncReviews.ReadOpenHeldItem(_conn, "r")); // not open
+        Assert.Null(GitSyncReviews.ReadOpenHeldItem(_conn, "none"));
+    }
+
+    [Fact]
     public void Rows_follow_the_callers_transaction()
     {
         GitSyncReviews.UpsertHeld(_conn, new HeldItem("kept", "remote", null, "guard", 1));

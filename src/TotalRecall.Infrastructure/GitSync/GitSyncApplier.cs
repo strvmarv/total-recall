@@ -67,8 +67,10 @@ public abstract record ApplyOutcome
 
 /// <summary>
 /// The apply of the pull (milestone 1b-i-2): reads the repository tree at the fetched head and carries the pure merge
-/// decisions out on this machine's memories, one entry in one immediate transaction at a time. A decision that needs a
-/// part not built yet (a deletion, a review item, a re-push) is postponed and changes nothing. Nothing calls it yet.
+/// decisions out on this machine's memories, one entry in one immediate transaction at a time. Milestone 1b-ii carries
+/// remote deletions out: a proven one is applied, one that is unproven or would remove a pin is held as an open
+/// <c>held-delete</c> item, and a pending text edit beats it (D6 to D12). A decision that needs a part not built yet (a
+/// local deletion, a review item, a re-push) is postponed and changes nothing. Nothing calls it yet.
 /// </summary>
 public sealed partial class GitSyncApplier
 {
@@ -95,8 +97,9 @@ public sealed partial class GitSyncApplier
 
     /// <summary>
     /// Test seam: called with the id and a step name inside the open transaction. The store transaction's own steps
-    /// (<c>insert-row</c>, <c>update</c>, <c>move-copy</c>, <c>replace-vec</c>, <c>log-import</c>, ...) are forwarded, and the
-    /// applier adds <c>reread</c>, <c>row</c>, <c>issue</c> and <c>commit</c>.
+    /// (<c>insert-row</c>, <c>update</c>, <c>move-copy</c>, <c>replace-vec</c>, <c>delete-vec</c>, <c>log-import</c>, ...) are
+    /// forwarded, and the applier adds <c>reread</c>, <c>row</c>, <c>close</c> (a held-delete item removed), <c>hold</c> (one
+    /// written), <c>issue</c> and <c>commit</c>.
     /// </summary>
     internal Action<string, string>? BeforeEntryStep { get; set; }
 

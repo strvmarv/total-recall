@@ -10,6 +10,7 @@ public sealed class GitSyncCyclePullTests : IDisposable
 {
     private const string A = "a1b2c3d4";
     private const string B = "b2c3d4e5";
+    private const string C = "c3d4e5f6";
 
     private readonly CycleRig _rig = new();
 
@@ -135,7 +136,7 @@ public sealed class GitSyncCyclePullTests : IDisposable
     {
         _rig.Push.Seed(Rec(A, "Use bun."), Rec(B, "Use pnpm."));
         Done(await _rig.Run());
-        _rig.RemoveRecordOnRemote(B); // another machine deleted it: the pull postpones a deletion
+        _rig.AddRecordOnRemote(Rec(C, "A pin.", sticky: true)); // a record that pins an id this machine lacks: a review postpones it
         _rig.Pull.Store.DeleteMeta(SyncIdentity.MetaKeys.LastOk);
         _rig.Now += TimeSpan.FromMinutes(1);
 
@@ -146,6 +147,7 @@ public sealed class GitSyncCyclePullTests : IDisposable
         Assert.Equal("pull-incomplete", summary.PushSkipped);
         Assert.Null(summary.Push);
         Assert.True(StoreHas(B));
+        Assert.False(StoreHas(C));
         Assert.Equal(0, _rig.PushCalls());
         Assert.Equal(SyncCycle.okValue(_rig.Now), _rig.LastOk);
         Assert.Null(_rig.LastError);

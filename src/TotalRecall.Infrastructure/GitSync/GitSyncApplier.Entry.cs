@@ -11,13 +11,23 @@ namespace TotalRecall.Infrastructure.GitSync;
 
 internal enum CarriedKind { Inserted, Updated, Dropped }
 
+/// <summary>
+/// What a carried-out decision did besides its kind (milestone 1b-ii, D6 to D11 and D20): the entry was deleted by a remote
+/// deletion, a held-delete item was written (its direction and cause), the open item was closed, and the decision's notes
+/// (<c>edit-beats-deletion</c>, <c>pending-changes-dropped</c>).
+/// </summary>
+internal sealed record EntryEffects(bool Deleted, HeldEntry? Held, bool Closed, IReadOnlyList<string> Notes)
+{
+    public static readonly EntryEffects None = new(false, null, false, []);
+}
+
 /// <summary>What applying one entry came to (decisions 7 to 13).</summary>
 internal abstract record EntryResult
 {
     private EntryResult() { }
 
     /// <summary>The decision was carried out. <paramref name="Colder"/>: the hot limit stored or moved the entry to the warm tier.</summary>
-    public sealed record Carried(CarriedKind Kind, bool Colder) : EntryResult;
+    public sealed record Carried(CarriedKind Kind, bool Colder, EntryEffects Effects) : EntryResult;
 
     /// <summary>Nothing needed doing (the resulting row equals the stored one and the store is untouched).</summary>
     public sealed record NoOp : EntryResult;
@@ -69,11 +79,13 @@ public sealed partial class GitSyncApplier
     /// <summary>
     /// Applies one id: reads its row and local entry, runs <c>SyncMerge.decide</c>, postpones what this milestone does
     /// not carry out, computes the vector, then carries the decision out in one immediate transaction that first
-    /// re-reads the entry (decisions 7 to 13). <paramref name="theirs"/> is null when the id has no accepted record.
+    /// re-reads the entry (decisions 7 to 13). <paramref name="theirs"/> is null when the id has no accepted record;
+    /// <paramref name="held"/> is the id's open held-delete item as the pull read it (milestone 1b-ii, D8), null when it
+    /// has none; <paramref name="blobSha"/> is the record's blob id.
     /// </summary>
-    internal EntryResult ApplyOne(string id, ParsedRecord? theirs, bool proven, string? blobSha = null)
+    internal EntryResult ApplyOne(string id, ParsedRecord? theirs, bool proven, HeldItem? held, string? blobSha = null)
     {
-        var result = ApplyCore(id, theirs, proven);
+        var result = ApplyCore(id, theirs, proven, held, blobSha);
         return result switch
         {
             EntryResult.Failed failed => RecordFailure(id, blobSha, failed),
@@ -83,7 +95,7 @@ public sealed partial class GitSyncApplier
         };
     }
 
-    private EntryResult ApplyCore(string id, ParsedRecord? theirs, bool proven)
+    private EntryResult ApplyCore(string id, ParsedRecord? theirs, bool proven, HeldItem? held, string? blobSha)
     {
         BeforeEntry?.Invoke(id);
         var conn = _store.Connection;
@@ -133,23 +145,14 @@ public sealed partial class GitSyncApplier
             oldBase = parsedBase.Parsed;
         }
 
-        var input = new SyncMerge.MergeInput(
-            row is null ? null : Some(row.State),
-            Opt(oldBase?.Record),
-            Opt(theirs?.Record),
-            Opt(local),
-            new SyncMerge.GroupStamps(Opt(row?.ContentStamp), Opt(row?.StickyStamp), Opt(row?.TierStamp)),
-            SyncApply.PushingStamps.decode(row?.PushingStamps!),
-            proven,
-            null);
-        var decision = SyncMerge.decide(input);
+        var decision = SyncMerge.decide(BuildInput(row, oldBase, theirs, local, proven, held));
 
         if (SyncApply.postponement(decision) is { } postponed)
             return new EntryResult.Postponed(SyncApply.reasonName(postponed.Value));
         if (decision.Entry.IsDefer)
             return new EntryResult.Deferred("the merge rules leave this entry for the next pull", Busy: false);
         if (decision.Entry.IsDropRow)
-            return ApplyDrop(id, row, read);
+            return ApplyDrop(id, decision, row, read, held);
 
         StorePlan plan;
         try
@@ -174,8 +177,9 @@ public sealed partial class GitSyncApplier
             }
         }
 
-        // Decision 13: a decision that changes nothing opens no transaction (unless a stamp must be issued).
-        if (!plan.HasStoreOps && !HasRestamp(decision))
+        // Decision 13: a decision that changes nothing opens no transaction (unless a stamp must be issued). A held-delete
+        // write or close, and a decision with notes, always change something (milestone 1b-ii, D9).
+        if (!plan.HasStoreOps && !HasRestamp(decision) && !TouchesHeldItem(decision) && decision.Notes.IsEmpty)
         {
             var (preview, error) = BuildRow(id, decision, row, oldBase, theirs, local, hadEntry: local is not null, plan.Colder, _ => null);
             if (error is not null)
@@ -200,7 +204,7 @@ public sealed partial class GitSyncApplier
             var phase = "reread";
             try
             {
-                return CarryOut(id, tx, decision, plan, vector, row, read, oldBase, theirs, local, p => phase = p);
+                return CarryOut(id, tx, decision, plan, vector, row, read, held, proven, blobSha, oldBase, theirs, local, p => phase = p);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
             {
@@ -209,9 +213,40 @@ public sealed partial class GitSyncApplier
         }
     }
 
+    /// <summary>
+    /// The input of <c>SyncMerge.decide</c> for one id from what was read of it: the row (state, pending stamps,
+    /// <c>pushing_stamps</c>), its parsed base, the record at <c>R</c>, the local entry, whether the apply is proven, and
+    /// the direction of its open held-delete item (milestone 1b-ii, D2 and D8). The one place the input is built, so every
+    /// decision about an id sees the same input.
+    /// </summary>
+    private static SyncMerge.MergeInput BuildInput(
+        GitSyncRow? row, ParsedRecord? oldBase, ParsedRecord? theirs, SyncMerge.LocalEntry? local, bool proven, HeldItem? held) =>
+        new(
+            row is null ? null : Some(row.State),
+            Opt(oldBase?.Record),
+            Opt(theirs?.Record),
+            Opt(local),
+            new SyncMerge.GroupStamps(Opt(row?.ContentStamp), Opt(row?.StickyStamp), Opt(row?.TierStamp)),
+            SyncApply.PushingStamps.decode(row?.PushingStamps!),
+            proven,
+            held?.Direction switch
+            {
+                "remote" => Some(SyncMerge.Direction.RemoteDeletion),
+                "local" => Some(SyncMerge.Direction.LocalDeletion),
+                _ => null, // no item (the column admits only these two words)
+            });
+
     private static bool HasRestamp(SyncMerge.MergeDecision d) =>
-        d.Entry is SyncMerge.EntryOutcome.MergeGroups m
+        d.FreshContentStamp
+        || d.Entry is SyncMerge.EntryOutcome.MergeGroups m
         && (m.Item.Content.Item2.IsRestampPending || m.Item.Sticky.Item2.IsRestampPending || m.Item.Tier.Item2.IsRestampPending);
+
+    /// <summary>The decision writes a held-delete item or closes the open one.</summary>
+    private static bool TouchesHeldItem(SyncMerge.MergeDecision d) => d.CloseHeldDelete || d.Entry.IsHoldDeletion;
+
+    /// <summary>The decision's notes as the words of <see cref="NoteEntry"/>.</summary>
+    private static IReadOnlyList<string> NoteWords(SyncMerge.MergeDecision d) =>
+        d.Notes.Select(n => n.IsEditBeatsDeletion ? "edit-beats-deletion" : "pending-changes-dropped").ToList();
 
     private static bool AnyBaseBecomesTheirs(SyncMerge.BaseUpdate u) =>
         u.Content.IsBaseBecomesTheirs || u.Tags.IsBaseBecomesTheirs || u.Sticky.IsBaseBecomesTheirs || u.Tier.IsBaseBecomesTheirs;
@@ -219,6 +254,10 @@ public sealed partial class GitSyncApplier
     // ---------------------------------------------------------------------------------------------
     // What the decision does to the store
 
+    /// <summary>
+    /// The store operations of a decision. <see cref="Delete"/>: a remote deletion removes the entry and its vector
+    /// (milestone 1b-ii, D6); the entry is gone afterwards, so it is not read back.
+    /// </summary>
     private sealed record StorePlan(
         bool Insert,
         Tier? InsertTier,
@@ -226,11 +265,12 @@ public sealed partial class GitSyncApplier
         UpdateEntryOpts? Update,
         Tier? MoveTo,
         bool TextChanged,
-        bool Colder)
+        bool Colder,
+        bool Delete)
     {
         public bool NeedsVector => Insert || TextChanged;
 
-        public bool HasStoreOps => Insert || Unpin || Update is not null || MoveTo is not null || TextChanged;
+        public bool HasStoreOps => Insert || Unpin || Update is not null || MoveTo is not null || TextChanged || Delete;
     }
 
     private StorePlan PlanStore(SyncMerge.MergeDecision d, SyncRecord? theirs, SyncMerge.LocalEntry? local)
@@ -239,11 +279,18 @@ public sealed partial class GitSyncApplier
         {
             var record = theirs ?? throw new InvalidOperationException("an insert needs a record");
             var colder = SyncApply.demotesToWarm(_options.HotMaxContentChars, d, record, null);
-            return new StorePlan(true, colder ? Tier.Warm : record.Placement.Tier, false, null, null, true, colder);
+            return new StorePlan(true, colder ? Tier.Warm : record.Placement.Tier, false, null, null, true, colder, false);
+        }
+
+        if (d.Entry.IsDeleteEntry)
+        {
+            if (local is null)
+                throw new InvalidOperationException("a deletion needs the local entry");
+            return new StorePlan(false, null, false, null, null, false, false, true);
         }
 
         if (d.Entry is not SyncMerge.EntryOutcome.MergeGroups merge)
-            return new StorePlan(false, null, false, null, null, false, false);
+            return new StorePlan(false, null, false, null, null, false, false, false);
 
         var m = merge.Item;
         var l = local ?? throw new InvalidOperationException("a merge needs the local entry");
@@ -277,7 +324,7 @@ public sealed partial class GitSyncApplier
         if (colderResult)
             desired = Tier.Warm;
         Tier? moveTo = desired.Equals(l.Tier) ? null : desired;
-        return new StorePlan(false, null, m.Sticky.Item1.IsUnpinLocally, update, moveTo, textChanged, colderResult);
+        return new StorePlan(false, null, m.Sticky.Item1.IsUnpinLocally, update, moveTo, textChanged, colderResult, false);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -291,6 +338,9 @@ public sealed partial class GitSyncApplier
         float[]? vector,
         GitSyncRow? row,
         LocalRead read,
+        HeldItem? held,
+        bool proven,
+        string? blobSha,
         ParsedRecord? oldBase,
         ParsedRecord? theirs,
         SyncMerge.LocalEntry? local,
@@ -304,14 +354,19 @@ public sealed partial class GitSyncApplier
         Step(id, "reread");
         var rowNow = GitSyncRows.Read(conn, id, dbTx);
         var readNow = LocalEntryReader.Read(t => tx.Get(t, ContentType.Memory, id), () => tx.IsSticky(ContentType.Memory, id));
-        if (!Equals(row, rowNow) || !read.Equals(readNow) || !AgreesWithRow(rowNow, readNow))
+        var heldNow = GitSyncReviews.ReadOpenHeldItem(conn, id, dbTx);
+        if (!Equals(row, rowNow) || !read.Equals(readNow) || !AgreesWithRow(rowNow, readNow) || !Equals(held, heldNow))
             return new EntryResult.Deferred("the entry changed since the decision was made", Busy: false);
         if (plan.Insert && InKnowledge(tx, id))
             return new EntryResult.Deferred("the id now exists as a knowledge entry", Busy: false);
 
         phase("work");
         var current = (read as LocalRead.Present)?.Tier;
-        if (plan.Insert)
+        if (plan.Delete)
+        {
+            tx.Delete(current!, ContentType.Memory, id);
+        }
+        else if (plan.Insert)
         {
             var record = theirs!.Record;
             tx.Insert(
@@ -341,12 +396,16 @@ public sealed partial class GitSyncApplier
 
         var storedRead = LocalEntryReader.Read(t => tx.Get(t, ContentType.Memory, id), () => tx.IsSticky(ContentType.Memory, id));
         var stored = (storedRead as LocalRead.Present)?.View;
-        if (plan.HasStoreOps && stored is null)
+        if (plan.Delete && storedRead is not LocalRead.Absent)
+            throw new InvalidOperationException("the entry is still there after it was deleted");
+        if (plan.HasStoreOps && !plan.Delete && stored is null)
             throw new InvalidOperationException("the entry cannot be read back after it was written");
 
+        // A deleted entry's row is planned with no stored entry, so its scanned comparison columns are left as they are.
         Step(id, "row");
         var (next, error) = BuildRow(
-            id, decision, row, oldBase, theirs, stored ?? local, hadEntry: local is not null, plan.Colder, floor => IssueStamp(conn, dbTx, floor));
+            id, decision, row, oldBase, theirs, plan.Delete ? null : stored ?? local, hadEntry: local is not null, plan.Colder,
+            floor => IssueStamp(conn, dbTx, floor));
         if (error is not null)
             throw new InvalidOperationException(error);
         var rowWritten = false;
@@ -364,6 +423,22 @@ public sealed partial class GitSyncApplier
             tx.LogImport("git-sync", "sync:" + id, hash, id, stored!.Tier, ContentType.Memory);
         }
 
+        // Milestone 1b-ii, D7 and D8: the close runs before the hold's upsert, so a decision with both leaves one open item.
+        if (decision.CloseHeldDelete)
+        {
+            Step(id, "close");
+            GitSyncReviews.DeleteHeld(conn, id, dbTx);
+        }
+        HeldEntry? heldEntry = null;
+        if (decision.Entry is SyncMerge.EntryOutcome.HoldDeletion hold)
+        {
+            Step(id, "hold");
+            var direction = SyncDeletion.directionName(hold.Item);
+            var cause = SyncDeletion.holdCause(proven, false, hold.Item);
+            GitSyncReviews.UpsertHeld(conn, new HeldItem(id, direction, theirs is null ? null : blobSha, cause, _nowMs()), dbTx);
+            heldEntry = new HeldEntry(id, direction, cause);
+        }
+
         phase("issue");
         Step(id, "issue");
         GitSyncIssues.Delete(conn, id, GitSyncIssues.ApplyFailed, dbTx);
@@ -372,14 +447,15 @@ public sealed partial class GitSyncApplier
         Step(id, "commit");
         tx.Commit();
 
+        var effects = new EntryEffects(plan.Delete, heldEntry, decision.CloseHeldDelete, NoteWords(decision));
         if (plan.Insert)
-            return new EntryResult.Carried(CarriedKind.Inserted, plan.Colder);
-        return plan.HasStoreOps || rowWritten
-            ? new EntryResult.Carried(CarriedKind.Updated, plan.Colder)
+            return new EntryResult.Carried(CarriedKind.Inserted, plan.Colder, effects);
+        return plan.HasStoreOps || rowWritten || TouchesHeldItem(decision)
+            ? new EntryResult.Carried(CarriedKind.Updated, plan.Colder, effects)
             : new EntryResult.NoOp();
     }
 
-    private EntryResult ApplyDrop(string id, GitSyncRow? row, LocalRead read)
+    private EntryResult ApplyDrop(string id, SyncMerge.MergeDecision decision, GitSyncRow? row, LocalRead read, HeldItem? held)
     {
         BeforeTransaction?.Invoke(id);
         SqliteStoreTransaction tx;
@@ -401,18 +477,25 @@ public sealed partial class GitSyncApplier
                 Step(id, "reread");
                 var rowNow = GitSyncRows.Read(tx.Connection, id, tx.Transaction);
                 var readNow = LocalEntryReader.Read(t => tx.Get(t, ContentType.Memory, id), () => tx.IsSticky(ContentType.Memory, id));
-                if (!Equals(row, rowNow) || !read.Equals(readNow) || readNow is not LocalRead.Absent)
+                var heldNow = GitSyncReviews.ReadOpenHeldItem(tx.Connection, id, tx.Transaction);
+                if (!Equals(row, rowNow) || !read.Equals(readNow) || readNow is not LocalRead.Absent || !Equals(held, heldNow))
                     return new EntryResult.Deferred("the entry changed since the decision was made", Busy: false);
                 phase = "work";
                 Step(id, "row");
                 GitSyncRows.Delete(tx.Connection, id, tx.Transaction);
+                if (decision.CloseHeldDelete)
+                {
+                    Step(id, "close");
+                    GitSyncReviews.DeleteHeld(tx.Connection, id, tx.Transaction);
+                }
                 phase = "issue";
                 Step(id, "issue");
                 GitSyncIssues.Delete(tx.Connection, id, GitSyncIssues.ApplyFailed, tx.Transaction);
                 phase = "commit";
                 Step(id, "commit");
                 tx.Commit();
-                return new EntryResult.Carried(CarriedKind.Dropped, false);
+                return new EntryResult.Carried(
+                    CarriedKind.Dropped, false, EntryEffects.None with { Closed = decision.CloseHeldDelete });
             }
             catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
             {
@@ -466,7 +549,8 @@ public sealed partial class GitSyncApplier
             row is null ? null : Some(row.State),
             new SyncMerge.GroupStamps(Opt(row?.ContentStamp), Opt(row?.StickyStamp), Opt(row?.TierStamp)),
             Opt(row?.PushingStamps),
-            Opt(oldBase?.Record.Placement.Tier));
+            Opt(oldBase?.Record.Placement.Tier),
+            Opt(oldBase?.Record.ContentStamp));
         var planned = SyncApply.planRow(
             decision, before, Opt(theirs?.Record), Opt(stored), hadEntry, colder,
             FuncConvert.FromFunc(issue));
