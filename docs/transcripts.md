@@ -6,7 +6,7 @@
 
 The transcript archive is an opt-in store for the dialogue of your agent sessions: your prompts and the assistant's replies, kept so that a later session can look back at what was said, not only at the memories that were distilled from it. It is separate from the memory tiers and the knowledge base: nothing in the archive is injected at session start, and nothing in it is a memory.
 
-It is **off by default**. Only you can turn it on, from a terminal. An assistant cannot enable, disable or redirect it (see [Changing the settings](#the-transcripts-settings)).
+It is **off by default**. Only you can turn it on, from a terminal or by editing `config.toml`. An assistant cannot enable, disable or redirect it through `config_set`, the web UI or `config set` (see [Changing the settings](#the-transcripts-settings)).
 
 ## What will be stored
 
@@ -19,7 +19,7 @@ How it is kept:
 
 - **Locally.** The archive lives in a SQLite database on your machine: in the main database (`~/.total-recall/total-recall.db` by default) or, if you set `transcripts.db_path`, in a separate file.
 - **With secrets redacted.** Text is meant to be scrubbed of secrets before it is stored.
-- **Never synced.** The archive is not sent to Cortex and is not part of git sync. Nothing that syncs reads or writes its tables.
+- **Never synced by total-recall.** The archive is not sent to Cortex and is not part of git sync. Nothing that syncs reads or writes its tables. This is about total-recall's own sync: if the main database, or the `transcripts.db_path` file, sits in a folder that another service shares (Dropbox, iCloud, OneDrive), that service copies the archive, and `forget` cannot reach those copies.
 
 In this version none of this happens yet: enabling the archive creates empty tables and nothing else.
 
@@ -27,6 +27,7 @@ In this version none of this happens yet: enabling the archive creates empty tab
 
 - The archive is off until you run `total-recall transcripts enable` in a terminal and confirm. The confirmation says what will be stored.
 - The archive text is embedded only by the local model. It is never sent to a remote embedding service unless you set `allow_remote_embedding = true` (see [The `[transcripts]` settings](#the-transcripts-settings)).
+- If the archive file is in a folder that another service shares, that service copies it; total-recall does not sync it, and deleting it with `forget` does not remove the service's copies.
 - You can delete all of it, or one session or one project, at any time (see [Forgetting and unforgetting](#forgetting-and-unforgetting)), and keep it from being archived again.
 - The archive is not supported with Postgres storage (`[storage] connection_string`, or `mode = "postgres"`): `enable` refuses, and the archive stays off.
 
@@ -130,7 +131,7 @@ See [MCP tools](tools.md) for the full tool list.
 
 ## Unix file permissions
 
-On Linux and macOS a separate archive file (the `db_path` file) is created readable only by you (mode 0600), and the directory holding the marker file (`<data directory>/live/`) is created 0700, with the marker file 0600. The main database file is not changed: when the archive lives in the main database, it has the permissions that file already has.
+On Linux and macOS a separate archive file (the `db_path` file) is created readable only by you (mode 0600), with any missing parent directories created 0700, and the directory holding the marker file (`<data directory>/live/`) is created 0700, with the marker file 0600. The main database file is not changed: when the archive lives in the main database, it has the permissions that file already has.
 
 On Windows total-recall sets nothing beyond the defaults: access follows the permissions of your user profile.
 

@@ -23,7 +23,7 @@ By default, total-recall stores the following data in a SQLite database on your 
 | Session metadata (timestamps, access counts, compaction log) | Tier management and eval reporting |
 | Retrieval event logs | Local eval framework (`eval_report`, `eval_compare`) |
 | Config snapshots | Track how config changes affect retrieval quality |
-| Transcript archive (opt-in, off by default): the dialogue of agent sessions, secrets redacted, once a later release can fill it; nothing is stored yet | Let a later session look back at what was said. Kept locally, in the main database or in the file `transcripts.db_path` names, and never synced. See [Transcript archive](docs/transcripts.md) |
+| Transcript archive (opt-in, off by default): the dialogue of agent sessions, with secrets meant to be redacted, once a later release can fill it; nothing is stored yet | Let a later session look back at what was said. Kept locally, in the main database or in the file `transcripts.db_path` names, and never synced by total-recall's own sync (Cortex and git). An archive in a folder that another service shares (Dropbox, iCloud, OneDrive) is copied by that service. See [Transcript archive](docs/transcripts.md) |
 
 You control where the database lives by setting `TOTAL_RECALL_DB_PATH`.
 
@@ -99,7 +99,7 @@ To delete only memories while keeping config:
 rm ~/.total-recall/total-recall.db
 ```
 
-The opt-in transcript archive is deleted with `total-recall transcripts forget` (a session, a project or everything; see [Transcript archive](docs/transcripts.md)), which also removes the deleted text from the file and keeps it from being archived again. Deleting `total-recall.db` also deletes an archive that is kept in it (the default); an archive in its own file (`transcripts.db_path`) is a separate file to delete.
+The opt-in transcript archive is deleted with `total-recall transcripts forget` (a session, a project or everything; see [Transcript archive](docs/transcripts.md)), which also removes the deleted text from the file (and tells you when it could not) and keeps it from being archived again. `forget` cannot reach copies that another service made of a database or archive file in a folder it shares (Dropbox, iCloud, OneDrive). Deleting `total-recall.db` also deletes an archive that is kept in it (the default); an archive in its own file (`transcripts.db_path`) is a separate file to delete.
 
 By default there is no remote copy to request deletion of. The commands above do not remove a copy in Postgres or Cortex; delete it in that system.
 
