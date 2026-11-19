@@ -14,11 +14,22 @@ namespace TotalRecall.Infrastructure.Tests.GitSync;
 /// </summary>
 internal sealed class PushRig : IDisposable
 {
-    public PullRig Pull { get; } = new();
-    public BareRemote Remote { get; } = BareRemote.Create(commits: 0);
+    public PullRig Pull { get; }
+    public BareRemote Remote { get; }
     public CountingEmbedder Embedder { get; } = new();
     public long Now { get; set; } = 1_800_000_000_000L;
     public const string Label = "testbox";
+
+    /// <param name="configuredRemote">
+    /// True: the machine's configured remote (guard, paths, stored identity) is the bare remote's own address, so a clone the
+    /// sync cycle makes really clones it. False (the default): the remote text is a placeholder, and only the test's own
+    /// clone of the bare remote talks to it.
+    /// </param>
+    public PushRig(bool configuredRemote = false)
+    {
+        Remote = BareRemote.Create(commits: 0);
+        Pull = new PullRig(configuredRemote ? Remote.Url : null);
+    }
 
     public SqliteStore Store => Pull.Store;
     public GitSyncPaths Paths => Pull.Paths;
