@@ -11,6 +11,7 @@
     <Compile Include="SyncRecord.fs" />
     <Compile Include="SyncValidation.fs" />
     <Compile Include="SyncMerge.fs" />
+    <Compile Include="SyncDeletion.fs" />
     <Compile Include="Config.fs" />
     <Compile Include="SyncGit.fs" />
     <Compile Include="SyncTree.fs" />

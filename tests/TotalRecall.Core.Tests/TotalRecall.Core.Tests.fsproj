@@ -18,6 +18,7 @@
     <Compile Include="SyncRecordTests.fs" />
     <Compile Include="SyncValidationTests.fs" />
     <Compile Include="SyncMergeTests.fs" />
+    <Compile Include="SyncDeletionTests.fs" />
     <Compile Include="GitSyncConfigTests.fs" />
     <Compile Include="SyncGitTests.fs" />
     <Compile Include="SyncTreeTests.fs" />
