@@ -376,7 +376,7 @@ Guarantees (each has a test): a second run changes nothing, **including row ids 
 **any** cut point (a line boundary inside an exchange, between exchanges, just after a compaction summary, in the middle of a line)
 equals the same file ingested once (all `tx_session` columns except `id` and `source_mtime`, and all `tx_chunk` columns except `id`,
 compared as ordered sets); deleting the source file afterwards leaves every chunk and the session row; a session forgotten before still
-has its file but stays out; a session that straddles the forget-everything cutoff contributes only its records after it, also when the
+has its file but stays out; a replaced or shortened source file keeps the stored chunks and counts `changed`; a session that straddles the forget-everything cutoff contributes only its records after it, also when the
 forget happens **while** a pass is running (`Stale`), and the records the cutoff had hidden are ingested after `unforget --cutoff`;
 two passes over the same session at once end in the same state as one (`Conflict`).
 
@@ -387,8 +387,8 @@ Names are the builder's; the behaviour is fixed.
 - `SessionIngestState? GetIngestState(string host, string hostSessionId)`: `source_size`, `source_mtime`, `source_fingerprint`,
   `ingested_offset`, `exchange_count`, `settled_user_turns`, `kind`, `project_key`, `project_root`, `title`, `started_at`, `ended_at`, `built_under_cutoff`.
 - `IngestNotBefore()`: the global cutoff, or null, as both the parsed time and the raw stored text (`built_under_cutoff` is written and compared as that text).
-- `IngestOutcome ApplyIngest(SessionIngest ingest)`: `SessionIngest` carries the session fields (host, id, project key and source, cwd,
-  started/ended, kind, title, the source stat fields, offset, counts, the cutoff it was built under), the **expected prior state** (the
+- `IngestOutcome ApplyIngest(SessionIngest ingest)`: `SessionIngest` carries the session fields (host, id, project key and source, project root, cwd,
+  started/ended, kind, title, the source stat fields, offset, `exchange_count`, `settled_user_turns`, the cutoff it was built under), the **expected prior state** (the
   state read in step 2, or "none"), the first rebuilt unit number (0 means every chunk) and the new chunks. Outcomes: `Applied(chunksNew,
   chunksChanged, chunksUnchanged, chunksRemoved, created)`, `Excluded`, `Stale`, `Conflict`. The checks of section 7 step 6 run inside
   the store's own transaction through private, transaction-aware variants of `IsExcluded` and the cutoff read.
@@ -512,7 +512,11 @@ new locations.
 - With the archive off, backfill refuses and reads nothing from the host directory: command test with a failing adapter double.
 - Kind and project identity: rule tests (sdk entrypoint, openings, 1,500 characters, a kind flip on growth, a missing worktree directory,
   a repository with a remote).
-- The documentation lists what is detected and what is not: the docs test suite and review.
+- A compaction summary is stored as its own `compaction-summary` chunk type: chunker and ingest tests.
+- Records hidden by a cutoff are stored after `unforget --cutoff` although the file is unchanged: ingest test (section 7 guarantees).
+- A replaced or shortened source file keeps its stored chunks and is reported `changed` with its `host:id`: ingest and command tests.
+- One unreadable file is reported and counted `failed`, the others are stored, and the exit code is 1: command test.
+- The documentation lists what is detected and what is not, and `PRIVACY.md` says what the archive holds: the docs test suite and review.
 
 ## Left to the builder
 
