@@ -118,6 +118,21 @@ public sealed class UnforgetCommandTests : IDisposable
     }
 
     [Fact]
+    public void AMalformedConfig_ExitsOne_DoesNotSayNothingIsStored_AndLeavesASeparateArchiveIntact()
+    {
+        var archive = _h.CreateSeparateArchive();
+        _h.WriteMalformedConfig(archive);
+
+        var code = Unforget("--cutoff");
+
+        Assert.Equal(1, code);
+        Assert.Contains("could not read the configuration", _h.Err.ToString());
+        Assert.DoesNotContain("nothing is stored", _h.Out.ToString() + _h.Err.ToString());
+        Assert.Empty(_h.Prompts);
+        Assert.Equal((1L, 1L), _h.ArchiveCounts(archive));
+    }
+
+    [Fact]
     public void TheCommand_IsInTheTranscriptsGroup_AndVisible()
     {
         var command = new UnforgetCommand();

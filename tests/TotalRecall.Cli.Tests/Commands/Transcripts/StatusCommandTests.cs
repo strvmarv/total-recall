@@ -161,6 +161,23 @@ public sealed class StatusCommandTests : IDisposable
     }
 
     [Fact]
+    public void AMalformedConfig_ExitsOne_PrintsTheError_NoSettingNoNothingStored_AndTheSearchLine()
+    {
+        var archive = _h.CreateSeparateArchive();
+        _h.WriteMalformedConfig(archive);
+
+        var code = Status();
+
+        Assert.Equal(1, code);
+        Assert.Contains("could not read the configuration", _h.Err.ToString());
+        var all = Output;
+        Assert.DoesNotContain("nothing stored", all);
+        Assert.DoesNotContain("enabled =", all);
+        Assert.Contains(SearchLine, _h.Out.ToString());
+        Assert.Equal((1L, 1L), _h.ArchiveCounts(archive));
+    }
+
+    [Fact]
     public void ExtraArguments_AreAUsageError()
     {
         Assert.Equal(2, Status("--json"));

@@ -139,6 +139,11 @@ public abstract class TranscriptsCommandBase : ICliCommand
     /// </summary>
     protected TranscriptLocation? ResolveLocation(TranscriptsSettings settings)
     {
+        // A malformed config.toml makes the settings loader fall back to the defaults, which would point these
+        // commands at the main database while a separate archive file exists: read the configuration strictly first.
+        if (!ConfigReadable())
+            return null;
+
         string mainDbPath;
         try
         {
@@ -156,6 +161,24 @@ public abstract class TranscriptsCommandBase : ICliCommand
         if (location is null)
             Err.WriteLine($"{Prefix}: the archive is unavailable: {error}");
         return location;
+    }
+
+    /// <summary>
+    /// True when the configuration parses (the strict read throws on a malformed file); else prints
+    /// "could not read the configuration" and returns false.
+    /// </summary>
+    protected bool ConfigReadable()
+    {
+        try
+        {
+            ReadStorageMode();
+            return true;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Fail($"could not read the configuration: {ex.Message}");
+            return false;
+        }
     }
 
     /// <summary>How a location reads in output and prompts (the form <c>Status().Location</c> uses).</summary>

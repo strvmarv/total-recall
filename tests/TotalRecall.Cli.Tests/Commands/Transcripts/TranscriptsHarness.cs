@@ -73,8 +73,13 @@ internal sealed class TranscriptsHarness : IDisposable
 
     public string ReadStorageMode() => TranscriptSentinel.EffectiveStorageMode(new ConfigLoader().LoadEffectiveConfig(ConfigPath));
 
+    /// <summary>When set, the confirmation seam throws this (a production prompt that fails).</summary>
+    public Exception? ConfirmThrows { get; set; }
+
     private bool Confirm(string prompt)
     {
+        if (ConfirmThrows is not null)
+            throw ConfirmThrows;
         Prompts.Add(prompt);
         OutputAtPrompt.Add(Out.ToString());
         return Answer;
@@ -126,6 +131,47 @@ internal sealed class TranscriptsHarness : IDisposable
         result.Store.Dispose();
         MsSqliteConnection.ClearAllPools();
     }
+
+    /// <summary>
+    /// Creates a separate archive file (a <c>transcripts.db_path</c> target) holding one session and one chunk, and
+    /// returns its path; its row counts are read with <see cref="ArchiveCounts"/>.
+    /// </summary>
+    public string CreateSeparateArchive(string name = "archive.db")
+    {
+        Directory.CreateDirectory(DataDir);
+        var path = Path.Combine(DataDir, name);
+        var result = TranscriptStore.Open(new TranscriptLocation(path, IsMainDatabase: false), create: true);
+        if (result.Status != TranscriptOpenStatus.Opened || result.Store is null)
+            throw new InvalidOperationException($"could not create the test archive: {result.Status} {result.Message}");
+        result.Store.Dispose();
+        MsSqliteConnection.ClearAllPools();
+        using (var conn = SqliteOpener.Open(path, pooling: false))
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                "INSERT INTO tx_session (host, host_session_id, project_key, project_key_source, kind) " +
+                "VALUES ('claude-code', 's1', 'owner/repo', 'remote', 'interactive'); " +
+                "INSERT INTO tx_chunk (session_id, exchange_start, exchange_end, part, chunk_type, redaction_version, content) " +
+                "VALUES (last_insert_rowid(), 0, 0, 0, 'dialogue', 1, 'precious');";
+            cmd.ExecuteNonQuery();
+        }
+        MsSqliteConnection.ClearAllPools();
+        return path;
+    }
+
+    public (long Sessions, long Chunks) ArchiveCounts(string path)
+    {
+        using var conn = SqliteOpener.Open(path, pooling: false);
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT (SELECT count(*) FROM tx_session), (SELECT count(*) FROM tx_chunk)";
+        using var r = cmd.ExecuteReader();
+        r.Read();
+        return (r.GetInt64(0), r.GetInt64(1));
+    }
+
+    /// <summary>A config.toml that selects <paramref name="archivePath"/> and is not valid TOML.</summary>
+    public void WriteMalformedConfig(string archivePath) =>
+        WriteConfig($"[transcripts]\nenabled = true\ndb_path = \"{archivePath.Replace("\\", "\\\\")}\"\n[broken\nthis is = = not toml\n");
 
     /// <summary>Opens the existing archive in the main database (never creates it).</summary>
     public ITranscriptStore OpenArchive()

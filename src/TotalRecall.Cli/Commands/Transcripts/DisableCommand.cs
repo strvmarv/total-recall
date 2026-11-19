@@ -39,23 +39,42 @@ public sealed class DisableCommand : TranscriptsCommandBase
         if (!RequireAbsolute(configPath) || !RequireAbsolute(sentinel.Path))
             return 1;
 
+        // Turning off is the safe direction: the sentinel is removed even when the setting cannot be written.
+        string? writeError = null;
         try
         {
             ConfigWriter.SaveUserOverride(configPath, "transcripts.enabled", false);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            return Fail($"could not write {configPath}: {ex.Message}; the setting was not changed");
+            writeError = ex.Message;
         }
 
+        string? removeError = null;
         try
         {
             sentinel.Remove();
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
+            removeError = ex.Message;
+        }
+
+        if (writeError is not null && removeError is not null)
+        {
+            return Fail($"could not write {configPath}: {writeError}; and the sentinel {sentinel.Path} could not be " +
+                        $"removed either ({removeError}); the archive is still on");
+        }
+        if (writeError is not null)
+        {
+            return Fail($"could not write {configPath}: {writeError}; the setting was not changed, but the sentinel " +
+                        "was removed, so the archive is off for now; transcripts.enabled is still true and the next " +
+                        "engine start turns it on again, so fix the file and run disable again");
+        }
+        if (removeError is not null)
+        {
             return Fail($"transcripts.enabled is now false, but the sentinel {sentinel.Path} could not be removed " +
-                        $"({ex.Message}); the next engine start removes it");
+                        $"({removeError}); the next engine start removes it");
         }
 
         Out.WriteLine("the transcript archive is disabled");

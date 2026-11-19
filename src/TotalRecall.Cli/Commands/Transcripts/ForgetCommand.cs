@@ -91,9 +91,13 @@ public sealed class ForgetCommand : TranscriptsCommandBase
                     _ => store.ForgetAll(DateTimeOffset.UtcNow),
                 };
 
-                Out.WriteLine($"forgot {Plural(result.Sessions, "session")} and {Plural(result.Chunks, "chunk")}");
+                var counts = $"{Plural(result.Sessions, "session")} and {Plural(result.Chunks, "chunk")}";
                 if (!result.WalTruncated)
-                    return Fail(result.Warning ?? "the write-ahead log could not be truncated; run the command again");
+                {
+                    return Fail($"deleted {counts}, but the write-ahead log could not be truncated: " +
+                                (result.Warning ?? "run the command again"));
+                }
+                Out.WriteLine($"forgot {counts}");
                 return 0;
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)

@@ -147,8 +147,27 @@ public sealed class ForgetCommandTests : IDisposable
 
         Assert.Equal(1, code);
         Assert.Contains("write-ahead log", _h.Err.ToString());
+        // a blocked checkpoint is never reported as a clean delete
+        Assert.DoesNotContain("forgot", _h.Out.ToString());
+        Assert.DoesNotContain("forgot", _h.Err.ToString());
+        Assert.Contains("deleted 1 session and 1 chunk, but the write-ahead log could not be truncated", _h.Err.ToString());
         tx.Rollback();
         Assert.Equal(2, _h.Scalar("SELECT count(*) FROM tx_session"));
+    }
+
+    [Fact]
+    public void AMalformedConfig_ExitsOne_DoesNotSayNothingIsStored_AndLeavesASeparateArchiveIntact()
+    {
+        var archive = _h.CreateSeparateArchive();
+        _h.WriteMalformedConfig(archive);
+
+        var code = Forget("--all");
+
+        Assert.Equal(1, code);
+        Assert.Contains("could not read the configuration", _h.Err.ToString());
+        Assert.DoesNotContain("nothing is stored", _h.Out.ToString() + _h.Err.ToString());
+        Assert.Empty(_h.Prompts);
+        Assert.Equal((1L, 1L), _h.ArchiveCounts(archive));
     }
 
     [Fact]

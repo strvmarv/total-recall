@@ -46,6 +46,21 @@ public sealed class DisableCommandTests : IDisposable
     }
 
     [Fact]
+    public void WhenTheConfigCannotBeWritten_StillRemovesTheSentinel_ExitsOne_AndSaysSo()
+    {
+        Directory.CreateDirectory(_h.ConfigPath); // a directory where config.toml should be: the write fails
+        _h.Sentinel.Write();
+
+        var code = _h.Run(h => h.Disable());
+
+        Assert.Equal(1, code);
+        Assert.False(File.Exists(_h.Sentinel.Path));
+        var err = _h.Err.ToString();
+        Assert.Contains("could not write", err);
+        Assert.Contains("sentinel was removed", err);
+    }
+
+    [Fact]
     public void ExtraArguments_AreAUsageError()
     {
         var code = _h.Run(h => h.Disable(), "--now");

@@ -70,7 +70,16 @@ public sealed class EnableCommand : TranscriptsCommandBase
             "of your agent sessions (your prompts and the assistant's replies) in " + The(location) + ", locally on this " +
             "machine, with secrets redacted, and never synced. Nothing is stored yet in this version. " +
             "You can delete it at any time with 'total-recall transcripts forget'. Continue?";
-        if (!Confirm(prompt))
+        bool confirmed;
+        try
+        {
+            confirmed = Confirm(prompt);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return Fail($"could not ask for confirmation: {ex.Message}; nothing was changed");
+        }
+        if (!confirmed)
         {
             Out.WriteLine("aborted; nothing was changed");
             return 0;
@@ -90,7 +99,8 @@ public sealed class EnableCommand : TranscriptsCommandBase
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            return Fail($"could not write {configPath}: {ex.Message}; the setting was not changed");
+            return Fail($"could not write {configPath}: {ex.Message}; the setting was not changed " +
+                        $"(empty archive tables may have been created at {where})");
         }
 
         try

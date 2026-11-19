@@ -156,6 +156,33 @@ public sealed class EnableCommandTests : IDisposable
     }
 
     [Fact]
+    public void WhenTheConfirmationThrows_ExitsOne_WithAMessage_AndChangesNothing()
+    {
+        _h.ConfirmThrows = new InvalidOperationException("no console");
+
+        var code = Enable();
+
+        Assert.Equal(1, code);
+        Assert.Contains("no console", _h.Err.ToString());
+        AssertNothingWritten();
+    }
+
+    [Fact]
+    public void WhenTheConfigCannotBeWritten_ExitsOne_SaysEmptyTablesMayExist_AndWritesNoSentinel()
+    {
+        Directory.CreateDirectory(_h.ConfigPath); // a directory where config.toml should be
+
+        var code = Enable();
+
+        Assert.Equal(1, code);
+        var err = _h.Err.ToString();
+        Assert.Contains("could not write", err);
+        Assert.Contains("empty archive tables may have been created", err);
+        Assert.False(File.Exists(_h.Sentinel.Path));
+        Assert.True(_h.ArchiveExists());
+    }
+
+    [Fact]
     public void AnOpenRefusal_ExitsOne_AndChangesNeitherSettingNorSentinel()
     {
         // a legacy (TypeScript-format) database: tables but no _schema_version

@@ -53,32 +53,32 @@ public sealed class StatusCommand : TranscriptsCommandBase
     private int Report()
     {
         var exit = 0;
-        var settings = ReadSettings();
-        Out.WriteLine($"enabled = {(settings.Enabled ? "true" : "false")}");
 
-        string? storageMode = null;
+        // An unreadable configuration makes the settings loader return defaults: say nothing about the setting or
+        // the contents then, only why.
+        string storageMode;
         try
         {
             storageMode = ReadStorageMode();
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            exit = Fail($"could not read the configuration: {ex.Message}");
+            return Fail($"could not read the configuration: {ex.Message}");
         }
+
+        var settings = ReadSettings();
+        Out.WriteLine($"enabled = {(settings.Enabled ? "true" : "false")}");
 
         var sentinel = Sentinel;
         if (RequireAbsolute(sentinel.Path))
         {
             var active = sentinel.IsEnabled();
             Out.WriteLine($"active: {(active ? "yes" : "no")} (sentinel {sentinel.Path} {(active ? "present" : "absent")})");
-            if (storageMode is not null)
+            if (string.Equals(storageMode, "postgres", StringComparison.OrdinalIgnoreCase))
+                Out.WriteLine("storage: postgres, where the transcript archive is not supported");
+            if (TranscriptSentinel.IsActive(settings.Enabled, storageMode) != active)
             {
-                if (string.Equals(storageMode, "postgres", StringComparison.OrdinalIgnoreCase))
-                    Out.WriteLine("storage: postgres, where the transcript archive is not supported");
-                if (TranscriptSentinel.IsActive(settings.Enabled, storageMode) != active)
-                {
-                    Out.WriteLine("note: the setting and the sentinel differ; this applies at the next engine start");
-                }
+                Out.WriteLine("note: the setting and the sentinel differ; this applies at the next engine start");
             }
         }
         else
