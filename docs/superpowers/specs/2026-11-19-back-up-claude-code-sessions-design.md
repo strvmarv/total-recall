@@ -29,8 +29,12 @@ or chunks**: tests insert with raw SQL.
 This part adds, inside `TotalRecall.Infrastructure.Transcripts` (plus the CLI command):
 
 - a **second archive migration** (`TranscriptMigrationRunner`, own list, own version table) adding to `tx_session`:
-  `settled_user_turns INTEGER NOT NULL DEFAULT 0` and `built_under_cutoff TEXT NULL` (section 7), and an index on
-  `tx_session(project_key, kind)` for the counts of `status`;
+  `settled_user_turns INTEGER NOT NULL DEFAULT 0`, `built_under_cutoff TEXT NULL` (section 7) and `project_root TEXT NULL`
+  (section 6), and an index on `tx_session(project_key, kind)` for the counts of `status`. Part 1's tests that pin the archive schema
+  (`TranscriptSchemaTests`: the object list, the `tx_session` columns, `Run_RecordsVersion1`; `TranscriptStoreTests` and
+  `TranscriptOpenTests`: `SchemaVersion == 1`) are updated to version 2;
+- a change to Part 1's **`ForgetProject`**: the roots it records are the sessions' `project_root` values, not their `cwd` values
+  (section 6; Part 1's spec left that reduction to this part), and its tests are updated;
 - store methods for the ingest (section 8);
 - the adapter, the exclusion-aware ingester, the exchange builder, the chunker, the redactor, the kind and project rules (sections 2 to 7);
 - `transcripts backfill`, and the per-project and per-kind counts in `transcripts status` (section 9);
@@ -107,12 +111,14 @@ enum RecordKind { UserText, AssistantText, ToolStub, ToolError, CompactionBounda
 setups); entries beneath it are checked. `<id>` (the file name without `.jsonl`) is the `host_session_id` and must match
 `^[A-Za-z0-9._-]{1,128}$` (anything else is skipped and counted). Not read: nested directories (subagent files under
 `<session>/subagents/`), symbolic links beneath the root (files or directories) and anything that is not a regular file. When the same
-id appears in two project directories, the file with the newest mtime wins and the other is skipped and counted. A file whose head has
+id appears in two project directories, the file whose path is the stored `source_path` of that session wins, else the one with the newest
+mtime, and the other is skipped and counted. A file whose head has
 no complete line yet is skipped this pass (a fresh session being written).
 
 **Reading.** Streamed as **bytes**, line by line (split on `0x0A`), never loaded whole, because the watermark is a byte offset. A
 trailing partial line (no `0x0A`) is never consumed and never parsed. A line over 16 MiB is skipped and counted (`skippedLines`) rather
-than parsed. A line that is not valid JSON, or a record of an unknown type, is skipped. Each record yields zero or more
+than parsed. A line that is not valid JSON, is valid JSON but not an object, has a `message` that is not an object, fails to decode (a
+lone surrogate escape), or is a record of an unknown type is skipped (and counted); one bad line never fails the file. Each record yields zero or more
 `TranscriptRecord`s with the byte offsets of its line (a user record with text and errors yields the text first, then the errors).
 `ReadHead` reads at most the first 200 complete lines and returns the first `cwd`, the first `entrypoint`, the first `timestamp`, and
 `Fingerprint`: the SHA-256 (hex) of the first complete line (a first line over 16 MiB has no fingerprint, and the session is skipped and
@@ -142,11 +148,12 @@ blocks):
 ## 3. What is kept (decision 3)
 
 Kept: user text, assistant text, one-line tool stubs and the error output of a failed tool call. Dropped: everything else in the table
-above, and inside user and assistant text:
+above, and inside **user** text (assistant text is the model's own words and is kept as written, so a message that talks about these tags
+loses nothing):
 
 - these blocks, whole, with their tags: `<system-reminder>`, `<task-notification>`, `<local-command-stdout>`, `<local-command-stderr>`,
   `<local-command-caveat>`, `<command-message>`, `<bash-stdout>`, `<bash-stderr>`, `<EXTREMELY_IMPORTANT>` (a block with no closing tag is
-  dropped to the end of the text); the builder adds the hosts' `<ide_*>` context tags the fixtures show;
+  dropped to the end of the text only when its opening tag starts the text or a line); the builder adds the hosts' `<ide_*>` context tags the fixtures show;
 - a slash command is kept as plain text: `<command-name>/develop</command-name><command-args>148</command-args>` becomes `/develop 148`,
   and `<bash-input>ls -l</bash-input>` (the `!` shell mode) becomes a `ToolStub` record `[Bash: ls -l]` (it joins the open unit; it is not a user turn and does not start a unit or give the title);
 - a user text that is only a host interruption notice (`[Request interrupted by user...]`) is dropped, and is not a real user turn.
@@ -175,18 +182,19 @@ of these categories:
 
 | category | what it matches | what is replaced |
 |---|---|---|
-| `token` | the existing shapes (`ghp_`/`gho_`/`ghu_`/`ghs_`/`ghr_`, `github_pat_`, `glpat-`, `xox[baprs]-`, `AKIA`) and `sk-` keys **including `sk-ant-...`, `sk-proj-...`, `sk-svcacct-...` and `sk-admin-...`** (the likeliest secrets in a Claude Code transcript; the existing `sk-[A-Za-z0-9]{16,}` misses them because of the hyphens) | the token |
+| `token` | the existing shapes (`ghp_`/`gho_`/`ghu_`/`ghs_`/`ghr_`, `github_pat_`, `glpat-`, `xox[baprs]-`, `AKIA`) and `sk-` keys **including `sk-ant-...`, `sk-proj-...`, `sk-svcacct-...` and `sk-admin-...`** (the likeliest secrets in a Claude Code transcript; the existing `sk-[A-Za-z0-9]{16,}` misses them because of the hyphens). The `sk-` shapes need a left boundary (not preceded by a letter or digit, so `task-list-management-and-more` is not a key) and the extended forms at least 20 characters after the prefix | the token |
 | `private-key` | `-----BEGIN [A-Z ]{0,40}PRIVATE KEY( BLOCK)?-----` | from the BEGIN line to the end of the matching `-----END ...-----` line, **or to the end of the text when the END line is missing** |
 | `bearer` | `Authorization: <scheme> <value>` (also `=`; quotes allowed; scheme `Bearer`, `Basic`, `Token`, `Digest` or none), `x-api-key: <value>`, and a bare `Bearer <value>` | the value (at least 8 characters after `Authorization` or `x-api-key`, 16 after a bare `Bearer`) |
-| `url-credentials` | `scheme://user:password@host` | the password only (the user name and the host stay searchable) |
-| `secret-assignment` | an assignment (`=` or `:`, quoted or not, also JSON `"name": "value"`) to a secret-named variable: names ending in `_KEY`, `_TOKEN`, `_SECRET`, `_PASSWORD`, `_PASSWD`, or equal to `PASSWORD`, `PASSWD`, `SECRET`, `TOKEN`, `API_KEY`, `APIKEY`, `PASSPHRASE`, `CLIENT_SECRET`, `ACCESS_KEY`, `AUTH_TOKEN` (any case); also the command-line flags `--password`, `--passwd`, `--token`, `--api-key`, `--secret` and `--auth-token` followed by `=` or whitespace | the value; an unquoted value ends at whitespace, a quote, `&`, `;`, `,` or `)` |
+| `url-credentials` | `scheme://user:password@host` | the password only (the user name and the host stay searchable). The user information is the text after `scheme://` up to the first `/`, `?`, `#` or whitespace, split at its **last** `@`; the password is what lies between the first `:` and that `@` (so `mysql://root:P@ssw0rd@localhost` is one password) |
+| `secret-assignment` | an assignment (`=` or `:`, quoted or not, also JSON `"name": "value"` **and its backslash-escaped form `\"name\": \"value\"`**, which is how a credential appears inside a decoded command string; optional backslashes are allowed around the name, the separator and the value quotes) to a secret-named variable: names ending in `_KEY`, `_TOKEN`, `_SECRET`, `_PASSWORD`, `_PASSWD`, or equal to `PASSWORD`, `PASSWD`, `SECRET`, `TOKEN`, `API_KEY`, `APIKEY`, `PASSPHRASE`, `CLIENT_SECRET`, `ACCESS_KEY`, `AUTH_TOKEN` (any case); also the command-line flags `--password`, `--passwd`, `--token`, `--api-key`, `--secret` and `--auth-token` followed by `=` or whitespace | the value: a quoted value ends at its closing quote; a `$(...)` or backtick command substitution is one value (balanced parentheses); any other unquoted value is the whole run of non-whitespace characters (so a `,`, `;`, `&` or `)` inside a password does not leave a suffix behind). A multi-word unquoted value is a residual risk |
 | `unprocessable` | a text that a detector could not finish (the timeout below) | the whole text |
 
 Rules that every detector follows:
 
 - **Overlaps merge** (the union of the spans is replaced by one marker, the category of the span that starts first).
 - **Only a reference or a placeholder is left alone**, and only when the **whole value** is one: `$NAME`, `${NAME}` or `%NAME%` with
-  `NAME` matching `[A-Za-z_][A-Za-z0-9_]*` (so `${X:-literal}` and `$(echo hunter2)` are not exempt), `<word-ish>`, `{{ ... }}`, or one of
+  `NAME` matching `[A-Za-z_][A-Za-z0-9_]*` **when the value is unquoted or double-quoted** (so `${X:-literal}`, `$(echo hunter2)` and
+  `'$Tr0ub4dor9'` in single quotes, where a shell does not expand it, are not exempt), `<word-ish>`, `{{ ... }}`, or one of
   `true`, `false`, `null`, `none`, `undefined`, or empty. `GH_TOKEN="$t" gh api ...`, which fills this
   repository's own history, is therefore not redacted. **There is no exemption by length or by first character**: a short password is
   still a password, and `PASSWORD='$ecret!9'` or a value that merely starts with `<`, `{` or `%` is redacted. The table test pins both
@@ -247,8 +255,8 @@ A summary chunk has the header and the paragraphs of the summary, no labels. `ha
 `embedded` is 0.
 
 **Size.** The body of a chunk is at most **1,800 characters** (the header is not counted). A unit whose blocks do not fit is split into
-parts (`part` = 0, 1, 2, ... within the unit; a unit that fits is one part, part 0) at block boundaries; a block longer than 1,800
-characters is split on paragraph boundaries (`\n\n`), then on line boundaries, then, if a line is still too long, on whitespace, and
+parts (`part` = 0, 1, 2, ... within the unit; a unit that fits is one part, part 0) at block boundaries; a block longer than the
+**capacity left in its part** (1,800 minus what the part already holds, including the repeated-question line of a later part) is split on paragraph boundaries (`\n\n`), then on line boundaries, then, if a line is still too long, on whitespace, and
 only as a last resort at the limit (never inside a marker or a surrogate pair). **Every part after the first begins with the question
 repeated** (call 10): a line `User (continued): <the user text cut to 300 characters>`, which counts toward the 1,800. A unit with no
 user part repeats nothing. Every part has its own header (the same unit numbers).
@@ -289,6 +297,16 @@ that; a session with no real user turn has a null title.
 4. `project_key_source` is `remote` when the key contains `/`, else `path` (a folder name never does). A null or empty result falls back
    to the folder name of the `cwd`, and to `unknown` (source `path`) when there is no `cwd` at all.
 
+5. Paths are split on both `/` and `\` (a Windows `cwd`), for the worktree rule and for the last segment.
+6. **`project_root`** (a new column) is the repository's directory when one is known, else null: the directory that holds the `.git`
+   entry found by the resolver's walk up from the `cwd`, or the part before the `/.claude/worktrees/` or `/.zoid/worktrees/` segment of
+   a path whose directory is gone. A directory that is a filesystem root or the user's home directory is never a root. A session with no
+   repository (a `cwd` of `/tmp`, a home directory, a missing directory with no worktree segment) has a null root.
+   Part 1's `forget` of a project stores the **`project_root` values** of the sessions it removes (not their `cwd`), so a project that
+   has no repository is excluded by its key only, and forgetting the project of `/home/user` cannot exclude every project under it.
+7. A key derived with source `path` never replaces a stored key with source `remote` for the same session (a deleted repository
+   directory would otherwise re-key and rewrite the session); re-keying is Part 8's `reproject`.
+
 `cwd` is stored on the session (the key is recomputable without a migration). The adapter and the key rule do not run before the
 cheap exclusion check of section 7, step 1.
 
@@ -299,16 +317,21 @@ One `TranscriptIngester.IngestSession(source)` does, for one source file:
 1. **Exclusion by id.** `store.IsExcluded(host, id, null, null)`: when true the file is **not opened**; count `excluded`.
 2. **State.** Read the cutoff once, `cutoff = store.IngestNotBefore()`, and `store.GetIngestState(host, id)` (the session row, or null).
    If a row exists and `source_size` equals the file's current size, `source_mtime` equals its mtime **and `built_under_cutoff` equals
-   `cutoff`**, the file is unchanged: count `unchanged`, stop (no read). (`source_size` is the file's **stat size observed before the
+   `cutoff` (compared as the text stored in `tx_state`)**, the file is unchanged: count `unchanged`, stop (no read). (`source_size` is the file's **stat size observed before the
    read**, so a file that ends in a partial line is not re-read until it changes. A changed cutoff makes the row stale even when the file
    did not change: that is how records hidden by a cutoff come back after `unforget --cutoff`.)
+   When there is a cutoff and the file's mtime is at or before it, the file cannot hold a record after it: count `excluded`, stop (no
+   read; this also keeps every older file from being re-read on each run after a forget-everything).
 3. **Head.** `ReadHead`. No fingerprint -> count `skipped`, stop. Compute the project identity (section 6) and call `store.IsExcluded(host,
    id, key, cwd)`: when true, count `excluded`, stop. (This is the first read of the file; nothing from it is stored.)
-4. **Mode.** No row: **fresh** (start 0). A **rewritten** pass (start 0, replace every chunk of the session) when the row's
-   `source_fingerprint` differs from the head's, or `source_size` is larger than the file's current size (replaced or truncated), or the
-   `ingested_offset` is above 0 and the byte before it is not `0x0A`, or the row has `exchange_count = 0`, or the row's `project_key` or `kind` differs from what this pass derives, or the row's
-   `built_under_cutoff` differs from `cutoff` (the cutoff was cleared by `unforget`, so the records it had hidden must come back).
-   Otherwise **resume**: start at `ingested_offset`.
+4. **Mode.** No row: **fresh** (start 0). A row whose `source_fingerprint` differs from the head's, or whose `source_size` is larger
+   than the file's current size, or whose `ingested_offset` is above 0 with a byte before it that is not `0x0A`: the **source changed**
+   (the host replaced or truncated the file): the session is **not ingested**, its stored chunks are **kept** (the archive keeps what the
+   host loses), the run counts it `changed`, and the user can `forget` the session and run backfill to store the new file. A row with
+   `exchange_count = 0`, or whose `built_under_cutoff` differs from `cutoff` (the cutoff was cleared by `unforget`, so the records it
+   had hidden must come back), or whose `project_key` differs from the key derived now (item 7 of section 6 aside): a **rewritten** pass
+   (start 0, replace every chunk of the session, the settled turn count starts at 0). Otherwise **resume**: start at `ingested_offset`.
+   A pass that starts at offset 0 always counts turns from 0, never from the stored `settled_user_turns`.
 5. **Read** from the start offset to the end of the last complete line, build units, chunk them, derive kind and title (section 6).
    - The **watermark** (`ingested_offset`) is the `StartOffset` of the first record of the **last unit**: the last unit may still receive
      records, so each pass re-reads from there and rebuilds it. `exchange_count` is the number of the last unit + 1. The unit numbering of a
@@ -319,9 +342,10 @@ One `TranscriptIngester.IngestSession(source)` does, for one source file:
      when none); `started_at` is the first `Ts` of any kept record of the session, `ended_at` the largest `Ts` of a kept
      record (a rewritten pass recomputes both, and the title, from scratch; a resumed pass keeps the stored `started_at` and title once
      set and takes `ended_at` as the larger of the stored value and this pass's); `source_path` is the current path.
-   - A kind or project key that differs from the stored one makes this a rewritten pass (headers carry both, so the chunks of the
-     earlier units would otherwise keep a stale header and a grown session would not equal the same session ingested once); the pass is
-     redone from offset 0 once, with the new values.
+   - Headers carry the kind and the project key. A **resumed** pass that derives a kind different from the stored one (the project key
+     case is decided in step 4) is **redone once as a rewritten pass** (start 0, turns counted from 0, replace every chunk, with the new
+     kind): the kind of a whole-file read is deterministic, so the redo cannot change it again and cannot loop. Otherwise the chunks of
+     the earlier units would keep a stale header and a grown session would not equal the same session ingested once.
    - A pass over a session with **no kept content**: with no row it stores nothing (the file is read again on the next run, which is
      cheap and counted `empty`); with a row (a rewritten file that now keeps nothing, or a cutoff that hides everything) it **deletes the
      session's chunks** and sets the row to: `ingested_offset` 0, `exchange_count` 0, `settled_user_turns` 0, null title, `started_at` and
@@ -329,13 +353,14 @@ One `TranscriptIngester.IngestSession(source)` does, for one source file:
      rewritten pass next time (step 4), so the numbering never starts from -1.
 6. **Apply** with `store.ApplyIngest(...)` (section 8): one `BEGIN IMMEDIATE` transaction that checks, inside it, that (a) the session is
    not excluded (a `forget` that committed since step 3 wins: outcome `Excluded`, nothing written), (b) `ingest_not_before` still equals
-   the `cutoff` the pass was built under (a forget-everything that committed since: outcome `Stale`), and (c) the session row still equals
+   the `cutoff` the pass was built under, compared as the stored text (a forget-everything that committed since: outcome `Stale`), and (c) the session row still equals
    the state the pass started from (**every field of the state read in step 2**; or still absent for a fresh pass; another pass committed
    since: outcome `Conflict`). On `Stale` or `Conflict` nothing is written and the ingester redoes the
    session **once** from step 2; a second one counts the session `retry` and leaves it for the next run. The write is an **upsert by
    `(session_id, exchange_start, part)`**: a chunk row whose content and metadata are identical is left untouched (its id and `embedded`
    are kept), a changed one is updated (`embedded` reset to 0), and the rows of the rebuilt range that no longer exist are deleted. Then
-   the session row is upserted and the transaction commits. A later pass never resurrects a forgotten session.
+   the transaction commits. The **session row is upserted first and the chunks after it** (the chunks reference the row, and foreign keys
+   are on). A later pass never resurrects a forgotten session.
 
 Guarantees (each has a test): a second run changes nothing, **including row ids and `embedded`**; a session grown across two passes at
 **any** cut point (a line boundary inside an exchange, between exchanges, just after a compaction summary, in the middle of a line)
@@ -350,7 +375,7 @@ two passes over the same session at once end in the same state as one (`Conflict
 Names are the builder's; the behaviour is fixed.
 
 - `SessionIngestState? GetIngestState(string host, string hostSessionId)`: `source_size`, `source_mtime`, `source_fingerprint`,
-  `ingested_offset`, `exchange_count`, `settled_user_turns`, `kind`, `project_key`, `title`, `started_at`, `built_under_cutoff`.
+  `ingested_offset`, `exchange_count`, `settled_user_turns`, `kind`, `project_key`, `project_root`, `title`, `started_at`, `ended_at`, `built_under_cutoff`.
 - `DateTimeOffset? IngestNotBefore()`: the global cutoff, or null.
 - `IngestOutcome ApplyIngest(SessionIngest ingest)`: `SessionIngest` carries the session fields (host, id, project key and source, cwd,
   started/ended, kind, title, the source stat fields, offset, counts, the cutoff it was built under), the **expected prior state** (the
@@ -378,7 +403,7 @@ from the host directory** (a test double adapter that fails if it is ever enumer
 confirmation.
 
 Output: a progress line every 50 sessions, then a summary: sessions seen, `new`, `updated`, `unchanged`, `excluded`, `empty` (nothing
-kept), `skipped` (no complete first line, unreadable name, duplicate id), `retry` (left for the next run), `failed` (an error on that
+kept), `skipped` (no complete first line, unreadable name, duplicate id), `changed` (the host replaced or truncated the file; kept as it was), `retry` (left for the next run), `failed` (an error on that
 file, logged), chunks new, changed, unchanged and removed. Exit 0 when no file failed, 1 when any failed (the others were still done), 2
 for a usage error. Sessions are processed newest file first. A Ctrl+C stops after the current session and prints the summary so far.
 
@@ -395,7 +420,7 @@ either way works).
 
 | Fixture | Content |
 |---|---|
-| `decision` | interactive (`entrypoint: cli`), three turns, tool stubs, a successful tool result carrying a unique marker, a `system-reminder` block, a `thinking` block, an `isMeta` record, an `isSidechain` record, a slash command, a `task-notification` user record and a queued human prompt (with and without a duplicate `user` record) |
+| `decision` | interactive (`entrypoint: cli`), three turns, tool stubs, a successful tool result carrying a unique marker, a `system-reminder` block, a `thinking` block, an `isMeta` record, an `isSidechain` record, a slash command, a `task-notification` user record and a queued human prompt (the `attachment` shape) |
 | `compaction` | turns, a `compact_boundary`, an `isCompactSummary` record (several paragraphs), more turns |
 | `error` | a failed `Bash` call whose error text holds an exact string a later part will search for |
 | `automated-sdk` | `entrypoint: sdk-py`, a long prompt and a `StructuredOutput` answer |
@@ -448,6 +473,11 @@ new locations.
 - A second archive migration adds `settled_user_turns` and `built_under_cutoff` to `tx_session`; the parent's sketch of `tx_session` does
   not list them. `built_under_cutoff` is what lets a pass notice that a forget-everything raced it or that `unforget --cutoff` revealed
   records it had dropped.
+- Part 1's `ForgetProject` now records the sessions' repository roots instead of their working directories (section 6, item 6), as Part 1's
+  own spec said Part 2 would do; a project with no repository is excluded by key only.
+- Known limits: a file replaced by a larger one that keeps the same first line, and whose old offset happens to start a line, is not
+  detected and is resumed from the stale offset; a host that rewrites a session file (none observed: Claude Code appends) leaves the stored
+  session as it was until the user forgets it and runs backfill again.
 - Notes for later parts: Part 8's `rescan` and `reproject` will have to rebuild the **header line** of a stored chunk (it carries the
   project key and the kind), not only the redacted body. Part 5 accepts a marker's transcript path only under the host's transcript root
   (decision 12): with `CLAUDE_CONFIG_DIR` honoured here, that root is `ITranscriptAdapter.Root`, not a fixed `~/.claude/projects`.
