@@ -466,21 +466,40 @@ public sealed class GitSyncPusherFinalizeTests : IDisposable
     }
 
     [GitFact]
-    public async Task FinalizeDoesNotForgetAnEntryThatExistsAgain()
+    public async Task FinalizeForgetsTheRow_EvenWhenTheMemoryExistsAgain_AndTheNextCycleRepublishesIt()
     {
         await SyncedThenDeleted();
-        GitSyncRow? before = null;
+        var text = Rec(A).Content;
 
-        var (outcome, _, _, _) = await PullAndPush(p => p.BeforePush = () =>
-        {
-            _rig.AddMemory(Tier.Warm, A, content: "back again");
-            before = Row(A);
-        });
+        // the memory is re-created with the same id and text after the apply decided the deletion (an import keeps ids)
+        var (outcome, _, _, _) = await PullAndPush(p => p.BeforePush = () => _rig.AddMemory(Tier.Warm, A, content: text));
 
         Assert.Equal([A], Is<PushOutcome.Pushed>(outcome).Summary.Removed);
         Assert.False(RemoteHas(A));
-        Assert.Equal(before, Row(A));   // still active, untouched
+        Assert.Equal(SyncMerge.RowState.Forgotten, Row(A).State);
+        Assert.NotNull(Row(A).BaseJson);
+        Assert.Equal(_rig.Remote.Head(), _rig.Pull.Last);
+
+        // the next scan reactivates the row: active, base cleared, the entry stamped as new
+        _rig.Now += 1000;
+        _rig.Scan();
         Assert.Equal(SyncMerge.RowState.Active, Row(A).State);
+        Assert.Null(Row(A).BaseJson);
+        Assert.NotNull(Row(A).ContentStamp);
+
+        // the next pull keeps the memory, and the next push writes its record back
+        _rig.Now += 1000;
+        var (apply, scan) = await _rig.PullAsync();
+        Assert.Empty(apply.Deleted);
+        Assert.Equal(text, _rig.Store.Get(Tier.Warm, ContentType.Memory, A)!.Content);
+
+        var pushed = Is<PushOutcome.Pushed>(await _rig.Push(apply, scan));
+
+        Assert.Equal([A], pushed.Summary.Written);
+        Assert.Empty(pushed.Summary.Removed);
+        Assert.True(RemoteHas(A));
+        Assert.Equal(text, JsonNode.Parse(RemoteText(A))!.AsObject()["content"]!.GetValue<string>());
+        Assert.Equal(RemoteText(A), Row(A).BaseJson);
         Assert.Equal(_rig.Remote.Head(), _rig.Pull.Last);
     }
 
