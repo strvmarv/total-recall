@@ -23,10 +23,12 @@ public sealed partial class GitSyncCycle
 
     private static CycleOutcome Cancelled() => new CycleOutcome.Cancelled();
 
-    private void Enter(RunState state, SyncCycle.Step step)
+    /// <summary>Starts a step: names it, tells <see cref="OnStep"/> and checks the token (decision 11: checked before each step).</summary>
+    private void Enter(RunState state, SyncCycle.Step step, CancellationToken ct)
     {
         state.Step = SyncCycle.stepName(step);
         OnStep?.Invoke(state.Step);
+        ct.ThrowIfCancellationRequested();
     }
 
     private static CycleOutcome.Failed Fail(string step, string kind, string message) =>
@@ -41,7 +43,7 @@ public sealed partial class GitSyncCycle
         var state = new RunState();
         try
         {
-            Enter(state, SyncCycle.Step.Identity);
+            Enter(state, SyncCycle.Step.Identity, ct);
             var identity = await _fetcher.CheckIdentityAsync(ct).ConfigureAwait(false);
             if (ct.IsCancellationRequested)
                 return Cancelled();
@@ -53,7 +55,7 @@ public sealed partial class GitSyncCycle
                     return new CycleOutcome.Refused(refused.Text, state.Step);
             }
 
-            Enter(state, SyncCycle.Step.Locks);
+            Enter(state, SyncCycle.Step.Locks, ct);
             try
             {
                 _client.RemoveStaleLocks();
@@ -91,7 +93,11 @@ public sealed partial class GitSyncCycle
     /// </summary>
     private async Task<CycleOutcome?> AttemptAsync(RunState state, CancellationToken ct)
     {
-        Enter(state, SyncCycle.Step.Scan);
+        state.Fetch = null;
+        state.Apply = null;
+        state.Push = null;
+        state.PushSkipped = null;
+        Enter(state, SyncCycle.Step.Scan, ct);
         var scan = new GitSyncScanner(_store.Connection, _nowMs).Scan();
         if (ct.IsCancellationRequested)
             return Cancelled();
@@ -112,7 +118,7 @@ public sealed partial class GitSyncCycle
             return Cancelled();
 
         // the fetch
-        Enter(state, SyncCycle.Step.Fetch);
+        Enter(state, SyncCycle.Step.Fetch, ct);
         var fetched = await _fetcher.FetchAsync(ct).ConfigureAwait(false);
         if (ct.IsCancellationRequested)
             return Cancelled();
@@ -136,7 +142,7 @@ public sealed partial class GitSyncCycle
                 {
                     if (ct.IsCancellationRequested)
                         return Cancelled();
-                    Enter(state, SyncCycle.Step.Clone);
+                    Enter(state, SyncCycle.Step.Clone, ct);
                     // null on success: another attempt from the scan; otherwise the outcome that ends the cycle
                     return await ReplaceDamagedCloneAsync(state, ct).ConfigureAwait(false);
                 }
@@ -148,7 +154,7 @@ public sealed partial class GitSyncCycle
         state.Fetch = pulled;
 
         // the apply, after both a fetch and a "nothing new" (it retries deferred and failed entries)
-        Enter(state, SyncCycle.Step.Apply);
+        Enter(state, SyncCycle.Step.Apply, ct);
         var applied = await new GitSyncApplier(_client, _store, _embedder, new ApplyOptions(_settings.HotMaxContentChars), _nowMs)
             .ApplyAsync(pulled, state.Scan, ct).ConfigureAwait(false);
         if (ct.IsCancellationRequested)
@@ -167,8 +173,4 @@ public sealed partial class GitSyncCycle
 
         return await PushAsync(state, ct).ConfigureAwait(false);
     }
-
-    /// <summary>The push step. Filled in by the next task: for now a complete pull ends the cycle without a push.</summary>
-    private Task<CycleOutcome?> PushAsync(RunState state, CancellationToken ct) =>
-        Task.FromResult<CycleOutcome?>(new CycleOutcome.Done(state.ToSummary()));
 }

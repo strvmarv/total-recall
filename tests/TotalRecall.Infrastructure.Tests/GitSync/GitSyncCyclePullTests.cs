@@ -32,7 +32,7 @@ public sealed class GitSyncCyclePullTests : IDisposable
         var summary = Done(await _rig.Run());
 
         Assert.True(StoreHas(A));
-        Assert.Equal(["lock", "identity", "locks", "scan", "fetch", "apply", "record"], _rig.Steps);
+        Assert.Equal(["lock", "identity", "locks", "scan", "fetch", "apply", "push", "record"], _rig.Steps);
         Assert.NotNull(summary.Fetch);
         Assert.Equal(1, summary.Apply!.Inserted);
         Assert.True(summary.Apply.Complete);

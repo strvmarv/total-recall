@@ -32,7 +32,7 @@ public sealed partial class GitSyncCycle
         if (_client.CloneIsSound())
             return null;
 
-        Enter(state, SyncCycle.Step.Clone);
+        Enter(state, SyncCycle.Step.Clone, ct);
         if (Directory.Exists(_paths.CloneDirectory))
             return await ReplaceDamagedCloneAsync(state, ct).ConfigureAwait(false);
         return await CloneFreshAsync(state, ct).ConfigureAwait(false);

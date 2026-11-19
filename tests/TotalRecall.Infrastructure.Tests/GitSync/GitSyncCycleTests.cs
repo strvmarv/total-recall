@@ -231,8 +231,7 @@ public sealed class GitSyncCycleTests : IDisposable
 
         Assert.IsType<CycleOutcome.Done>(await cycle.RunAsync());
 
-        Assert.True(goneAtScan);
-        Assert.Equal(0, _rig.Pull.Count(c => c.IsResetHard || c.IsClean || c.IsFetch || c.IsPush || c.IsStage || c.IsCommit));
+        Assert.True(goneAtScan); // the order against the commands that write is tested with the push
     }
 
     // ---- decision 10: recording ----
@@ -254,7 +253,7 @@ public sealed class GitSyncCycleTests : IDisposable
         Assert.Equal(SyncCycle.okValue(_rig.Now), writes[1].Value);
         Assert.Null(_rig.LastError);
         Assert.Equal("2026-11-19T01:02:03.456Z", _rig.LastOk);
-        Assert.Equal(["lock", "identity", "locks", "scan", "record"], _rig.Steps);
+        Assert.Equal(["lock", "identity", "locks", "scan", "fetch", "apply", "push", "record"], _rig.Steps);
     }
 
     [GitFact]
