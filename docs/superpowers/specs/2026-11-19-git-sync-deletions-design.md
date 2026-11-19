@@ -259,8 +259,7 @@ pusher and cycle rigs with an in-process bare repository, one or two stores and 
 (The ticket copies these, refined.)
 
 1. A forget on machine A is applied on machine B by one cycle each; B's unpushed tag, project or promotion change does not keep the memory, B's unpushed text edit keeps it on both machines in either push order, and a pending pin change on B holds it (criterion 3).
-2. A memory forgotten on one machine is not re-inserted on another by a record with the same text, nor by older text after a reset; a newer text edit
-   re-inserts it (non-sticky) and the summary notes it.
+2. A memory forgotten on one machine is not re-inserted on another by a record with the same text, nor by older text after a reset; a newer text edit that does not pin it re-inserts it (non-sticky) and the summary notes it (a record that pins goes to review and is postponed, as before).
 3. A memory pinned on B is held (not deleted) when another machine deletes it, with cause `sticky`, also when the pin is only pending (not yet in the repository); the entry and its pin remain.
 4. When more than `max(10, delete_guard_percent of the active rows at the start of the pull, rounded down)` deletions in one direction would be applied or pushed, none of that direction is applied,
    each becomes an open `held-delete` item with cause `guard`, the pull is complete, `L` advances, other changes are still pushed, and the summary has the count
@@ -275,8 +274,7 @@ pusher and cycle rigs with an in-process bare repository, one or two stores and 
    the push and before the finalize leaves no duplicate commit and the next cycle repairs the row.
 9. A local deletion whose record in the repository is rejected, or accepted by path but invalid, is skipped and reported, holds neither `L` nor the other pushes, and nothing is
    removed.
-10. A row that is `active` with a base, whose entry is present and unchanged and whose record is absent from the trees of both `L` and `R` (so it is
-    absent from the `L..R` diff: the record was added and deleted inside one catch-up) is decided as a deletion in a proven pull and is deleted, the row
+10. A row that is `active` with a base, whose entry is present and unchanged and whose record is absent from the trees of both `L` and `R` (so it is absent from the `L..R` diff: the record was added and deleted between two pulls of this machine) is decided as a deletion in a proven pull and is deleted, the row
     `forgotten`; `sync init --url <new repository>` on a machine with rows deletes
     nothing; a blocked, never-pushed entry survives a lost clone.
 11. After a pull no postponement has the reason `deletion` or `repush`; `review` still postpones. A no-base row whose accepted path holds an invalid record is not overwritten by a push; a
