@@ -79,7 +79,8 @@ My calls, to confirm at sign-off.
 ### 1. Settings
 
 A `[transcripts]` table in `Config/defaults.toml` with comments, and static readers in `ConfigLoader` following `LoadUpdatesNoticeEnabled`
-(a missing table, wrong type or broken TOML gives the default; the readers never throw):
+(a missing table or broken TOML gives the defaults and the readers never throw; a `db_path` that is present but not a string, or is invalid,
+yields an explicit "invalid" state, not the default, so a typo never silently moves the archive into the main database):
 
 - `enabled` (bool, default `false`);
 - `db_path` (string, default empty: the archive lives in the main database; when set, it follows the rules of
@@ -163,6 +164,8 @@ first. The rules, for the path the store resolves:
 - **Open without creating** (`create: false`, used by `status`, `forget`, `unforget`): never calls `SqliteConnection.Open` on a file that
   is missing (that would create it, switch it to WAL and give it default permissions). It checks existence and the presence of
   `tx_schema_version` read-only (as `ReadOnlyDatabase` does), and returns null when either is absent.
+- If the probe or the read-only check throws (an unreadable file, a pending write-ahead log, an unknown state), `status`, `forget`,
+  `unforget` and `enable` print the message and exit 1, and `status` does not then report "nothing stored".
 - **Open creating** (`create: true`, used by `enable`), main database only: first run `GitSync/LegacyDatabaseProbe.Check` on the path and
   refuse with its refusal text when it returns one (it covers an orphan `.ts-backup`, a TypeScript-format file and a version below 5); a
   missing or empty file then gets `MigrationRunner.RunMigrations` (a normal new database); a file with `_schema_version` gets the archive
@@ -176,8 +179,8 @@ first. The rules, for the path the store resolves:
 
 Operations (all synchronous, small, fully tested):
 
-- `Status()`: schema version, location (main database or the path), session count, chunk count, counts by `kind`, forgotten sessions,
-  forgotten projects, the cutoff time.
+- `Status()`: schema version, location (main database or the path), session count, chunk count, counts by `kind`, and each forgotten session id and each forgotten project key with its time (identifiers, not text, and the user needs
+  them to `unforget`), and the cutoff time.
 - `ForgetSession(host, hostSessionId)`, `ForgetProject(projectKey)`, `ForgetAll(now)`: each runs in one transaction, deletes chunks
   explicitly and then sessions, writes its exclusion (a `session` record; a `project` record whose `roots` are the distinct `cwd`
   values of the sessions it removed, plus the key, which also covers a key the user types for a project that was never archived, as long as the archive tables exist; for
@@ -214,8 +217,8 @@ conversation text and the session's own metadata: three unique markers are put i
 `cwd` (and `source_path`). The text index case-folds and splits on punctuation, so the markers are lowercase alphanumeric tokens, the
 test first asserts each marker is present before the forget, and the scan is case-insensitive. After `ForgetSession` and `ForgetAll`
 none of the three may appear. After `ForgetProject` the content and title markers may not appear, while the project's roots (its
-sessions' `cwd` values) intentionally survive in the exclusion record, so the `cwd` marker is asserted present there and absent from
-every other place. Session ids and project keys in exclusion records are identifiers, not text, and are not scanned for. A
+sessions' `cwd` values) intentionally survive in the exclusion record: the assertion is an occurrence count, the `cwd` marker appears
+exactly once in the database and `-wal` files together and the content and title markers zero times. Session ids and project keys in exclusion records are identifiers, not text, and are not scanned for. A
 checkpoint-blocked case (a second connection holding a read transaction) asserts the failure is reported and the exit code is 1.
 
 ### 8. The `transcripts` commands
@@ -226,14 +229,15 @@ sentinel, output writers, `Func<bool> isInteractive`, `Func<string, bool> confir
 - `transcripts enable`: refuses under Postgres storage; needs a terminal and a confirmation that says what will be stored once the later
   parts land (the dialogue of agent sessions, locally, redacted, never synced); validates `db_path`; opens the store with `create = true`
   (section 6, creating the tables); then writes `transcripts.enabled = true` with `ConfigWriter.SaveUserOverride` (the writer, not
-  `config set`: the guard is in the callers); then creates the sentinel; prints the state. The order means a failure leaves the setting
-  and the sentinel as they were.
+  `config set`: the guard is in the callers); then creates the sentinel; prints the state. The order means a failure before the setting is written leaves everything as it was; if only the last step (the sentinel) fails, the
+  command reports it, the setting stays true and the next engine start mirrors the sentinel.
 - `transcripts disable`: no gate; writes `false`, removes the sentinel; keeps the data.
 - `transcripts status`: no gate; prints the setting (`enabled = true`/`false`), whether it is active (the sentinel; a difference between
   the two is said, with "applies at the next engine start"), the location, the counts of section 6 and the line `search: not available
   in this version yet`. It opens the store only when the archive tables already exist (it never creates them), so it shows the counts of
-  a disabled archive that still holds data, and for one that was never enabled it says nothing is stored.
-- `transcripts forget (--session <host>:<id> | --project <key> | --all)`: exactly one selector; needs a terminal; prints how many
+  a disabled archive that still holds data, and for one that was never enabled it says nothing is stored. It lists the forgotten sessions and projects themselves, not only counts.
+- `transcripts forget (--session <host>:<id> | --project <key> | --all)` (a session selector splits at the first colon; an empty host or
+  id is a usage error, exit 2): exactly one selector; needs a terminal; prints how many
   sessions and chunks will go and asks; runs the matching `Forget*`; prints the counts or the section 7 failure. It works whether
   or not the archive is enabled (the user may disable first); with no archive tables there is nothing to forget and it says so.
 - `transcripts unforget (--session <host>:<id> | --project <key> | --cutoff)`: needs a terminal; asks; removes the record or cutoff.
@@ -284,7 +288,7 @@ Two tests in `tests/TotalRecall.Infrastructure.Tests/` (not `Integration`):
 ### 11. Documentation
 
 `docs/transcripts.md` (new; linked from the README Documentation table; a status banner that says the archive can be enabled, inspected
-and emptied but not searched yet, and that Parts 1 to 3 are announced together; sections for what it is, what is stored later, privacy,
+and emptied but not searched yet, and that search will arrive in a later release (no part numbers in user-facing text); sections for what it is, what is stored later, privacy,
 enabling, status, forgetting and unforgetting), the `[transcripts]` block in `docs/configuration.md`, the commands in `docs/commands.md`,
 the tool rows (section 9), `PRIVACY.md` (a row in the stored-data table, and under "Configurations you opt in to" the statement that the
 archive is never sent to a remote embedding service unless `allow_remote_embedding = true`, keeping every Rule 16 needle and phrase),
@@ -301,6 +305,10 @@ deleting `total-recall.db` also deletes an archive kept in it, and the migration
 - The parent says Parts 1 to 3 are announced together, not before. This part still adds a visible `transcripts` command group, a README
   link (Rule 13 forces a link to every top-level docs page) and a changelog entry. They are marked as not searchable yet and as
   unreleased; the announcement itself (release notes, the what's-new line) is a release-time act that this part does not perform.
+- The parent's decision 10 has the engine mirror `transcripts.enabled`; this part also requires the storage mode not to be `postgres`
+  (a tightening, so the Postgres fallback to the local file cannot report the archive on).
+- The parent's decision 7 places the global cutoff among the exclusion records; this part stores it in a small key/value table
+  (`tx_state`) beside them, with the same effect.
 - The parent's decision 7 says a project exclusion stores "the root directories its sessions had". This part stores the distinct `cwd`
   values of the removed sessions; reducing them to repository roots is the project-identity work of Part 2 and the `reproject` of Part 8,
   and the stored shape (a JSON array of directories) does not change.
@@ -315,6 +323,9 @@ deleting `total-recall.db` also deletes an archive kept in it, and the migration
   `IsExcluded`/`IsBeforeCutoff` answer as decision 7 says: store tests.
 - The archive tables appear in the main database or in the `db_path` file, and the main `_schema_version` is unchanged (still 18 rows):
   migration tests.
+- The sentinel mirror writes the file when the setting is true and the storage mode is not Postgres, deletes it otherwise, and swallows an
+  IO failure: unit tests. `enable` refuses under Postgres and the Postgres registry holds none of the three tools: command and
+  registry tests.
 - The three tools answer off, and `available: false` when on: handler tests, plus `catalog.json`, `docs/tools.md` and the counts agree
   (the verify commands and `host-docs.test.js`).
 - The sync-isolation tests pass.
