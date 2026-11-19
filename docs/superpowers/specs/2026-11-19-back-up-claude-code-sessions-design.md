@@ -26,37 +26,48 @@ Part 1 gives: the `tx_session`, `tx_chunk` (+ `tx_chunk_fts` and its triggers), 
 `IsBeforeCutoff(ts)`); the `transcripts` command group; the sentinel; `[transcripts]` settings. **It has no write path for sessions
 or chunks**: tests insert with raw SQL.
 
-This part adds, all inside the `tx_` world and `TotalRecall.Infrastructure.Transcripts` (plus the CLI command):
+This part adds, inside `TotalRecall.Infrastructure.Transcripts` (plus the CLI command):
 
-- a **second archive migration** (`TranscriptMigrationRunner`, own list, own version table): `tx_session.settled_user_turns INTEGER NOT
-  NULL DEFAULT 0` (section 7) and an index on `tx_session(project_key, kind)` for the counts of `status`;
+- a **second archive migration** (`TranscriptMigrationRunner`, own list, own version table) adding to `tx_session`:
+  `settled_user_turns INTEGER NOT NULL DEFAULT 0` and `built_under_cutoff TEXT NULL` (section 7), and an index on
+  `tx_session(project_key, kind)` for the counts of `status`;
 - store methods for the ingest (section 8);
 - the adapter, the exclusion-aware ingester, the exchange builder, the chunker, the redactor, the kind and project rules (sections 2 to 7);
 - `transcripts backfill`, and the per-project and per-kind counts in `transcripts status` (section 9);
 - the fixture corpus and harness (section 10) and the documentation (section 11).
 
-Nothing in the main migration chain, the memory or KB tables, `SessionLifecycle` or the MCP tool list changes.
+The adapter interface, the ingest records and `TranscriptBackfill` are `public` (the CLI assembly and its tests use them); the rest may
+be `internal`. Nothing in the main migration chain, the memory or KB tables, `SessionLifecycle` or the MCP tool list changes.
 
 ## Calls made here (the person can overrule them at sign-off)
 
 1. **Claude Code's session directory** is `$CLAUDE_CONFIG_DIR/projects` when that variable is set and non-empty, else
    `~/.claude/projects` (the `UserProfile` folder, as `ClaudeCodeUsageImporter` does). The existing importers ignore `CLAUDE_CONFIG_DIR`;
-   this adapter honours it because Claude Code does, and leaves the others alone.
+   this adapter honours it because Claude Code does, exposes the resolved root, and leaves the others alone.
 2. **`backfill` is not terminal-gated.** The parent gates only `enable`, `forget`, `unforget` and `prune` (decision 10): backfill stores
    what the already-enabled archive is meant to store, and it is the way scripts and `cron` keep the archive current. It refuses unless
    the archive is on.
-3. **Session kind uses the file's `entrypoint` as well** (section 6): in the author's history 88 of 100 sessions carry `entrypoint:
-   sdk-py` (reviewer and subagent runs), a stronger signal than the prompt text. The parent leaves the rule to the builder ("the builder
-   refines it").
+3. **Session kind uses the file's `entrypoint` as well** (section 6): in the author's history 88 of 101 sessions carry `entrypoint:
+   sdk-py` (reviewer and subagent runs), a stronger signal than the prompt text. The parent leaves the rule to the builder.
 4. **Each stored text is capped at 100,000 characters** (after redaction), so a pasted multi-megabyte log cannot turn one prompt into
    thousands of chunks; the cut is marked `[... N more characters not stored]`. The parent sets no cap.
 5. **The chunk header names the project by its key** (`strvmarv/total-recall`, or the folder name), not by a path. The parent writes
    `project <path>`; the key is what every later scope and filter uses, and a path would put a user's directory layout into every
    embedding.
 6. **Cutoff comparison is "at or before"**, as decision 7 says. Part 1's `IsBeforeCutoff` is strict (`<`) and has tests that pin that, so
-   it is left alone; ingestion reads the cutoff once per session pass through a new `IngestNotBefore()` and compares itself.
+   it is left alone; ingestion reads the cutoff once per pass through a new `IngestNotBefore()` and compares itself.
 7. **Fake secrets in fixtures are assembled at test time**, never written as literals in committed files, so repository secret scanning
    and push protection do not flag the corpus (section 10).
+8. **Some tool inputs are the assistant's answer and are stored as assistant text, not as a stub**: `StructuredOutput` (the whole answer
+   of an SDK run: 70 of the author's 88 SDK sessions contain no other assistant text) and `ExitPlanMode` (its `plan`). `AskUserQuestion` is
+   stored as a stub of its question text; the user's choice lives in a successful tool result, which is dropped, and this is a known loss.
+9. **A record without a timestamp is not given one.** Decision 7 has it take the timestamp of the record before it, which depends on where
+   a pass starts and so cannot give the same result for a resumed pass as for a whole-file pass. Claude Code writes a `timestamp` on every
+   user and assistant record (checked on 101 files, 0 exceptions), so the rule costs nothing in practice: such a record is dropped while a
+   cutoff exists and kept otherwise, and the unit's date and `ts` come from its other records.
+10. **A chunk never spans units**, so `exchange_start = exchange_end` always (the header still reads `exchanges a-b`, with `a = b`); the
+    repeated question in later parts of a long exchange is cut to 300 characters; the fingerprint hashes the first line, not the first N bytes
+    (a small file that grows would change an N-byte fingerprint).
 
 ## 1. Data flow
 
@@ -64,7 +75,7 @@ Nothing in the main migration chain, the memory or KB tables, `SessionLifecycle`
 backfill (CLI)  ->  ClaudeCodeAdapter.EnumerateSessions()  ->  for each session file (newest first):
    exclusion + unchanged checks  ->  ReadHead  ->  project identity  ->  exclusion check with the key  ->
    ReadRecords(from the watermark)  ->  ExchangeBuilder (drop rules, cutoff filter, redaction, units)  ->
-   TranscriptChunker  ->  store.ApplyIngest(...)  (one transaction, exclusion re-checked inside it)
+   TranscriptChunker  ->  store.ApplyIngest(...)  (one transaction; exclusion, cutoff and prior state re-checked inside it)
 ```
 
 The adapter is pure (it reads files and never writes anything). `TranscriptIngester` is the only code that touches the store.
@@ -75,9 +86,10 @@ is logged through `ExceptionLogger.LogChain`, counted, and never stops the other
 ## 2. The adapter and the common record (decision 2)
 
 ```csharp
-internal interface ITranscriptAdapter            // namespace TotalRecall.Infrastructure.Transcripts
+public interface ITranscriptAdapter              // namespace TotalRecall.Infrastructure.Transcripts
 {
     string Host { get; }                                       // "claude-code"
+    string Root { get; }                                       // the resolved projects directory (call 1)
     bool Detect();                                             // cheap: the projects directory exists
     IEnumerable<SessionSource> EnumerateSessions();            // sources, unordered
     SessionHead ReadHead(SessionSource source);                // cheap: first lines only
@@ -91,86 +103,103 @@ enum RecordKind { UserText, AssistantText, ToolStub, ToolError, CompactionBounda
 
 (Names and exact shapes are the builder's; what is fixed is the content below.)
 
-**Enumeration.** `<projects>/<encoded-cwd>/<id>.jsonl`, one directory level only. `<id>` (the file name without `.jsonl`) is the
-`host_session_id` and must match `^[A-Za-z0-9._-]{1,128}$` (anything else is skipped). Not read: nested directories (subagent files under
-`<session>/subagents/`), symbolic links (files or directories) and anything that is not a regular file. A file whose head has no complete
-line yet is skipped this pass (a fresh session being written).
+**Enumeration.** `<projects>/<encoded-cwd>/<id>.jsonl`, one directory level only. The root itself may be a symbolic link (dotfile
+setups); entries beneath it are checked. `<id>` (the file name without `.jsonl`) is the `host_session_id` and must match
+`^[A-Za-z0-9._-]{1,128}$` (anything else is skipped and counted). Not read: nested directories (subagent files under
+`<session>/subagents/`), symbolic links beneath the root (files or directories) and anything that is not a regular file. When the same
+id appears in two project directories, the file with the newest mtime wins and the other is skipped and counted. A file whose head has
+no complete line yet is skipped this pass (a fresh session being written).
 
 **Reading.** Streamed as **bytes**, line by line (split on `0x0A`), never loaded whole, because the watermark is a byte offset. A
 trailing partial line (no `0x0A`) is never consumed and never parsed. A line over 16 MiB is skipped and counted (`skippedLines`) rather
 than parsed. A line that is not valid JSON, or a record of an unknown type, is skipped. Each record yields zero or more
-`TranscriptRecord`s with the byte offsets of its line. `ReadHead` reads at most the first 200 complete lines and returns the first `cwd`,
-the first `entrypoint`, the first `timestamp`, and `Fingerprint`: the SHA-256 (hex) of the first complete line
-(a first line over 16 MiB has no fingerprint, and the session is skipped and counted).
+`TranscriptRecord`s with the byte offsets of its line (a user record with text and errors yields the text first, then the errors).
+`ReadHead` reads at most the first 200 complete lines and returns the first `cwd`, the first `entrypoint`, the first `timestamp`, and
+`Fingerprint`: the SHA-256 (hex) of the first complete line (a first line over 16 MiB has no fingerprint, and the session is skipped and
+counted).
 
 **Claude Code record mapping** (verified on current Claude Code files, 2026-11-19: records carry `type`, `uuid`, `timestamp`, `cwd`,
-`sessionId`, `entrypoint`, `isMeta`, `isSidechain`; message content is a string or an array of blocks):
+`sessionId`, `entrypoint`, `isMeta`, `isSidechain`, and user records an `origin` object; message content is a string or an array of
+blocks):
 
 | Record | Result |
 |---|---|
-| `type: "user"`, not `isMeta`, not `isSidechain`, not `isCompactSummary`, `message.content` a string or with `text` blocks | `UserText` (the text after the dropped-text rules of section 3; no record if nothing is left) |
-| the same with `tool_result` blocks, `is_error: true` | `ToolError` (the block's text: a string, or the concatenation of its `text` blocks) |
-| the same with `tool_result` blocks, not an error | nothing (successful tool output is dropped, decision 3) |
+| `type: "user"`, not `isMeta`, not `isSidechain`, not `isCompactSummary`, `origin` absent or `origin.kind == "human"`, `message.content` a string or with `text` blocks | `UserText` (the text after the dropped-text rules of section 3; no record if nothing is left) |
+| a `user` record whose `origin.kind` is present and is anything else (the author's files hold 148 `task-notification` records: results of background tasks and subagents, injected by the host) | nothing |
+| `type: "attachment"` with `attachment.type == "queued_command"`, `commandMode == "prompt"` and `origin.kind == "human"` (a prompt the user typed while the agent was working; in the author's files some exist only here) | `UserText` of its `prompt` text. **De-duplication:** the same prompt can also arrive as a `user` record; a queued-command `UserText` is dropped when the previous kept `UserText` of the session has the same text |
+| a `user` record with `tool_result` blocks, `is_error: true` | `ToolError` (the block's text: a string, or the concatenation of its `text` blocks) |
+| the same, not an error | nothing (successful tool output is dropped, decision 3) |
 | `type: "assistant"`, not `isSidechain`, `text` block | `AssistantText` |
-| `type: "assistant"`, `tool_use` block | `ToolStub` (`ToolName`, and the stub text of section 3) |
+| `type: "assistant"`, `tool_use` block named `StructuredOutput` or `ExitPlanMode` (call 8) | `AssistantText`: for `ExitPlanMode` its `plan`; for `StructuredOutput` its input rendered as `key: value` lines (strings as they are, other values as compact JSON) |
+| `type: "assistant"`, any other `tool_use` block | `ToolStub` (`ToolName` and the stub text of section 3) |
 | `thinking` blocks, `image` blocks, any other block type | nothing |
 | `type: "system"`, `subtype: "compact_boundary"` | `CompactionBoundary` |
 | a `user` record with `isCompactSummary: true` | `CompactionSummary` (its text; a string or `text` blocks) |
-| `isMeta: true`, `isSidechain: true`, and every other record type (`attachment`, `last-prompt`, `file-history-snapshot`, `system` with another subtype, `api-request*`, `cost-state`, ...) | nothing |
+| `isMeta: true`, `isSidechain: true`, and every other record type (other `attachment` types, `last-prompt`, `file-history-snapshot`, `system` with another subtype, `api-request*`, `cost-state`, ...) | nothing |
 
-`Ts` is the record's `timestamp` (ISO 8601, any offset, normalised to UTC), or null when absent.
+`Ts` is the record's `timestamp` (ISO 8601, any offset, normalised to UTC), or null when absent (call 9).
 
 ## 3. What is kept (decision 3)
 
 Kept: user text, assistant text, one-line tool stubs and the error output of a failed tool call. Dropped: everything else in the table
 above, and inside user and assistant text:
 
-- these blocks, whole, with their tags: `<system-reminder>`, `<local-command-stdout>`, `<local-command-stderr>`, `<local-command-caveat>`,
-  `<command-message>`, `<EXTREMELY_IMPORTANT>` (a block with no closing tag is dropped to the end of the text); the builder adds the
-  hosts' `<ide_*>` context tags the fixtures show;
-- a slash command is kept as plain text: `<command-name>/develop</command-name><command-args>148</command-args>` becomes `/develop 148`.
+- these blocks, whole, with their tags: `<system-reminder>`, `<task-notification>`, `<local-command-stdout>`, `<local-command-stderr>`,
+  `<local-command-caveat>`, `<command-message>`, `<bash-stdout>`, `<bash-stderr>`, `<EXTREMELY_IMPORTANT>` (a block with no closing tag is
+  dropped to the end of the text); the builder adds the hosts' `<ide_*>` context tags the fixtures show;
+- a slash command is kept as plain text: `<command-name>/develop</command-name><command-args>148</command-args>` becomes `/develop 148`,
+  and `<bash-input>ls -l</bash-input>` (the `!` shell mode) becomes `[Bash: ls -l]` (a stub, section below);
+- a user text that is only a host interruption notice (`[Request interrupted by user...]`) is dropped, and is not a real user turn.
 
 **Tool stub** text: `[<ToolName>: <detail>]`, where the detail is one field of the tool's input chosen by tool name (`Bash`: `command`;
-`Read`, `Edit`, `Write`, `NotebookEdit`: `file_path`; `Grep`, `Glob`: `pattern`; `WebFetch`: `url`; `WebSearch`: `query`; `Task` and
-`Agent`: `description`; any other tool: the first string-valued field, in document order), with newlines folded to spaces and runs of
-whitespace collapsed. **Redaction runs on that whole field first**, then the result is cut to 160 characters (section 4's rule that a cut
-never lands inside a marker); a tool whose chosen field is missing or empty gives `[<ToolName>]`.
+`Read`, `Edit`, `Write`, `NotebookEdit`: `file_path`; `Grep`, `Glob`: `pattern`; `WebFetch`: `url`; `WebSearch`: `query`; `Task`, `Agent`:
+`description`; `AskUserQuestion`: the text of its first question; any other tool: the first string-valued field, in document order). The
+order is **redact the raw field, then fold newlines to spaces and collapse whitespace, then cut to 160 characters** (the cut is marker-safe,
+section 4); the `[Name: ` and `]` wrapper is added after and is not counted. A tool whose chosen field is missing or empty gives `[<ToolName>]`.
 
-**Error text**: `[error: <text>]`, redacted whole, then cut to 500 characters, with newlines kept (a stack trace is what is searched for).
-An error whose text is empty gives `[error]`.
+**Error text**: `[error: <text>]`: the text redacted whole, then cut to **500 characters** with `...` appended (marker-safe), newlines kept
+(a stack trace is what is searched for). An empty error gives `[error]`. Errors are not subject to the 100,000-character rule.
 
-**Text cap** (call 4): a user or assistant text, a compaction summary or an error is cut, after redaction, at 100,000 characters with
+**Text cap** (call 4): a user or assistant text or a compaction summary is cut, after redaction, at 100,000 characters with
 `[... N more characters not stored]` appended (N counts characters of the redacted text).
+
+**"Characters"** in this document means UTF-16 code units, counted the same way everywhere, and every cut avoids splitting a surrogate pair.
 
 ## 4. Redaction (decision 6)
 
 **API.** `SensitiveContentScanner.Redact(string? text)` returns `RedactionResult(string Text, int Count, IReadOnlyList<string> Categories)`
 (null or empty in, the same out with count 0). The existing `Scan`, `ScanSecrets` and `Detectors` keep their behaviour and tests
-unchanged; `Redact` reuses the token regex (one source for the shapes). `public const int RedactionVersion = 1`, written to every chunk's
-`redaction_version`. A marker is exactly `[redacted:<category>]` with one of these categories:
+unchanged; `Redact` builds on the same token shapes and extends the `sk-` shape (below) in its own pattern set only.
+`public const int RedactionVersion = 1`, written to every chunk's `redaction_version`. A marker is exactly `[redacted:<category>]` with one
+of these categories:
 
 | category | what it matches | what is replaced |
 |---|---|---|
-| `token` | the existing token shapes: `ghp_`/`gho_`/`ghu_`/`ghs_`/`ghr_`, `github_pat_`, `glpat-`, `xox[baprs]-`, `sk-`, `AKIA` | the token |
+| `token` | the existing shapes (`ghp_`/`gho_`/`ghu_`/`ghs_`/`ghr_`, `github_pat_`, `glpat-`, `xox[baprs]-`, `AKIA`) and `sk-` keys **including `sk-ant-...`, `sk-proj-...`, `sk-svcacct-...` and `sk-admin-...`** (the likeliest secrets in a Claude Code transcript; the existing `sk-[A-Za-z0-9]{16,}` misses them because of the hyphens) | the token |
 | `private-key` | `-----BEGIN [A-Z ]*PRIVATE KEY( BLOCK)?-----` | from the BEGIN line to the end of the matching `-----END ...-----` line, **or to the end of the text when the END line is missing** |
-| `bearer` | `Authorization: <scheme> <value>` (also `=`; quotes allowed; scheme `Bearer`, `Basic`, `Token`, `Digest` or none) and a bare `Bearer <value>` | the value (at least 8 characters for `Authorization`, 16 for a bare `Bearer`) |
+| `bearer` | `Authorization: <scheme> <value>` (also `=`; quotes allowed; scheme `Bearer`, `Basic`, `Token`, `Digest` or none), `x-api-key: <value>`, and a bare `Bearer <value>` | the value (at least 8 characters after `Authorization` or `x-api-key`, 16 after a bare `Bearer`) |
 | `url-credentials` | `scheme://user:password@host` | the password only (the user name and the host stay searchable) |
-| `secret-assignment` | an assignment (`=` or `:`, quoted or not, also JSON `"name": "value"`) to a secret-named variable: names ending in `_KEY`, `_TOKEN`, `_SECRET`, `_PASSWORD`, `_PASSWD`, or equal to `PASSWORD`, `PASSWD`, `SECRET`, `TOKEN`, `API_KEY`, `APIKEY`, `PASSPHRASE`, `CLIENT_SECRET`, `ACCESS_KEY`, `AUTH_TOKEN` (any case) | the value |
+| `secret-assignment` | an assignment (`=` or `:`, quoted or not, also JSON `"name": "value"`) to a secret-named variable: names ending in `_KEY`, `_TOKEN`, `_SECRET`, `_PASSWORD`, `_PASSWD`, or equal to `PASSWORD`, `PASSWD`, `SECRET`, `TOKEN`, `API_KEY`, `APIKEY`, `PASSPHRASE`, `CLIENT_SECRET`, `ACCESS_KEY`, `AUTH_TOKEN` (any case) | the value; an unquoted value ends at whitespace, a quote, `&`, `;`, `,` or `)` |
+| `unprocessable` | a text that a detector could not finish (the timeout below) | the whole text |
 
 Rules that every detector follows:
 
-- **Overlaps merge** (the union of the spans is replaced by one marker, the category of the first span).
-- **A value that is clearly not a secret is left alone**, so shell and config prose stays searchable: shorter than 6 characters, or
-  starting with `$`, `<`, `{`, `%`, or a variable reference or placeholder such as `${TOKEN}`, `$t`, `<your-token>`, `{{ secret }}`.
-  (`GH_TOKEN="$t" gh api ...`, which fills this repository's own history, is not redacted.) A table test pins positive and negative
-  examples per category; the builder writes the exact patterns.
-- **All quantifiers are bounded and every regex has a match timeout** (1 second). A regex that times out **fails closed**: the whole text
-  becomes `[redacted:unprocessable]` (count 1); nothing from it is stored. Interpreted regexes only (NativeAOT: no `RegexOptions.Compiled`).
+- **Overlaps merge** (the union of the spans is replaced by one marker, the category of the span that starts first).
+- **Only a reference or a placeholder is left alone**, and only when the **whole value** is one: `$NAME`, `${NAME}`, `$(...)`, `<word-ish>`,
+  `{{ ... }}`, `%NAME%`, or one of `true`, `false`, `null`, `none`, `undefined`, or empty. `GH_TOKEN="$t" gh api ...`, which fills this
+  repository's own history, is therefore not redacted. **There is no exemption by length or by first character**: a short password is
+  still a password, and `PASSWORD='$ecret!9'` or a value that merely starts with `<`, `{` or `%` is redacted. The table test pins both
+  directions with positive and negative examples per category; the builder writes the exact patterns.
+- **No nested or ambiguous quantifiers** (every repeated element is a character class that cannot also match what follows it), and every
+  regex has a match timeout of 5 seconds as a **backstop**, not an everyday path: the builder verifies that each pattern finishes in well
+  under a second on adversarial 1 MiB inputs (a long run of identifier characters, of `=`, of `:`, of quotes). A timeout **fails
+  closed**: the whole text becomes `[redacted:unprocessable]` (count 1) and nothing from it is stored. Interpreted regexes only (NativeAOT:
+  no `RegexOptions.Compiled`; the non-backtracking engine is not used because it has no lookbehind).
 - Redaction runs on the **full, untruncated text, before any truncation and before chunking** (so a token cannot be cut or split), on
   every text this part stores: user and assistant text, stub details, error text, compaction summaries, and the session title (which is
   derived from already-redacted text).
-- **Cutting.** One function cuts text to a limit and never lands inside a marker: when the limit falls inside `[redacted:...]`, the cut
-  goes **before** the marker and `...` is appended. This is what keeps a token that straddles character 160 or 500 from leaving a prefix.
+- **Cutting.** One tested function cuts text to a limit and never lands inside a marker: when the limit falls inside `[redacted:...]`, the
+  cut goes **before** the marker and `...` is appended. This is what keeps a token that straddles character 160 or 500 from leaving a prefix.
 - Emails are not redacted (parent decision 6).
 
 Residual risk, documented in `docs/transcripts.md`: only the listed shapes are detected. Not detected: a password or key written in prose
@@ -183,23 +212,23 @@ outside a URL or a listed variable), anything a user pastes in a different encod
 counted from 0 over the session as stored. A unit is one of:
 
 - a **dialogue exchange**: it starts at a `UserText` record and takes every following `AssistantText`, `ToolStub` and `ToolError` record
-  until the next `UserText`, a `CompactionBoundary` or a `CompactionSummary`;
+  until the next `UserText`, a `CompactionBoundary` or a `CompactionSummary` (consecutive `UserText` records each start a unit);
 - a **summary unit**: one `CompactionSummary` record;
-- an assistant-only run (records after a cutoff, or at the start of a resumed file, that have no `UserText` before them) is a dialogue
-  exchange with no user part.
+- an **assistant-only exchange**: assistant, stub or error records with no `UserText` before them (records after a cutoff, or after a
+  boundary) form a dialogue exchange with no user part. An error never starts a unit by itself unless nothing else is open.
 
-A `CompactionBoundary` closes the open unit and starts nothing. A unit with no kept content is not a unit (no number is consumed).
-Each unit remembers the `StartOffset` of its first record and the `Ts` of its first record with a timestamp.
+A `CompactionBoundary` closes the open unit and starts nothing. A unit with no kept content is not a unit (no number is consumed). Each
+unit remembers the `StartOffset` of its first record and the `Ts` of its first record that has one; with none, the header date is
+`unknown` and the chunk's `ts` is null.
 
-**Cutoff filter** (decision 7), applied to records **before** they form units, with the cutoff read once per session pass
-(`IngestNotBefore()`): a record with `Ts <= cutoff` is dropped. A record without `Ts` takes the `Ts` of the record before it in the file
-(for the first record after the watermark, the session's `started_at`; if none is known and a cutoff exists, it is dropped). So an
-exchange whose question is before the cutoff and whose answer is after it contributes the answer only.
+**Cutoff filter** (decision 7, call 9), applied to records **before** they form units, with the cutoff read once per session pass
+(`IngestNotBefore()`): a record with `Ts <= cutoff` is dropped; a record with no `Ts` is dropped while a cutoff exists. So an exchange
+whose question is before the cutoff and whose answer is after it contributes the answer only (as an assistant-only exchange).
 
 **Chunk text.** A chunk's `content` is a header line, a blank line and a body:
 
 ```
-claude-code session <first 8 characters of the id> | project <project_key> | <yyyy-MM-dd of the unit's first Ts, UTC> | <kind> | <dialogue|compaction-summary> | exchanges <a>-<b>
+claude-code session <first 8 characters of the id> | project <project_key> | <yyyy-MM-dd of the unit's first Ts, UTC, or unknown> | <kind> | <dialogue|compaction-summary> | exchanges <a>-<a>
 
 User: <the user text>
 
@@ -212,14 +241,15 @@ Assistant: <text>
 
 Blocks appear in record order, separated by one blank line, each starting with its label (`User:`, `Assistant:`, a stub, an error).
 A summary chunk has the header and the paragraphs of the summary, no labels. `has_error = 1` when the chunk contains an error block.
-`chunk_type` is `dialogue` or `compaction-summary`; `ts` is the unit's first `Ts` (ISO 8601 UTC); `redaction_version` is 1; `embedded` is 0.
+`chunk_type` is `dialogue` or `compaction-summary`; `ts` is the unit's first `Ts` (ISO 8601 UTC) or null; `redaction_version` is 1;
+`embedded` is 0.
 
 **Size.** The body of a chunk is at most **1,800 characters** (the header is not counted). A unit whose blocks do not fit is split into
 parts (`part` = 0, 1, 2, ... within the unit; a unit that fits is one part, part 0) at block boundaries; a block longer than 1,800
 characters is split on paragraph boundaries (`\n\n`), then on line boundaries, then, if a line is still too long, on whitespace, and
-only as a last resort at the limit (never inside a marker). **Every part after the first begins with the question repeated**: a line
-`User (continued): <the user text cut to 300 characters>`, which counts toward the 1,800. A unit with no user part repeats nothing. A
-`part` has its own header with the same unit numbers.
+only as a last resort at the limit (never inside a marker or a surrogate pair). **Every part after the first begins with the question
+repeated** (call 10): a line `User (continued): <the user text cut to 300 characters>`, which counts toward the 1,800. A unit with no
+user part repeats nothing. Every part has its own header (the same unit numbers).
 
 The chunker is a pure function: `Chunk(unit, header facts) -> list of chunks`.
 
@@ -229,17 +259,21 @@ The chunker is a pure function: `Chunk(unit, header facts) -> list of chunks`.
 that applies wins:
 
 1. the session's `entrypoint` (from the head) starts with `sdk` (case-insensitive) -> `automated`;
-2. exactly one real user turn so far (a `UserText` record) and either its text starts with a known automation opening (a list in code,
-   from the prototype: `Review this change for security`, `You previously flagged`, `Scope:`, `You are reviewing`, `Read the full review
-   brief`, `Round <n>`) or is longer than 1,500 characters (measured on the redacted text) -> `automated`;
-3. otherwise `interactive`.
+2. exactly one real user turn in the whole session (a `UserText` record after the cutoff filter) and either its text starts, after
+   trimming, with a known automation opening (a list in code, matched case-insensitively, from the prototype: `Review this change for
+   security`, `You previously flagged`, `Scope:`, `You are reviewing`, `Read the full review brief`, `Round <n>`) or is longer than 1,500
+   characters (measured on the redacted text) -> `automated`;
+3. otherwise `interactive` (this includes a session with no real user turn).
 
 The number of real user turns is `settled_user_turns` (the turns in the units before the watermark, kept on the session row; section 7)
-plus the turns in this pass. Once there are two, rule 2 no longer applies, so a session can move from `automated` to `interactive`
-when it grows, never the other way (rule 1 aside). A session with no kept content stores nothing, so it has no kind.
+plus the turns in this pass. With a total of two or more, rule 2 does not apply. When the total is exactly one and that turn is not in
+the part this pass re-read (`settled_user_turns = 1`), rule 2 cannot be evaluated and the stored kind is kept. A kind that changes
+between passes (for example a first prompt of 1,400 characters followed by a second turn) triggers the redo of section 7, so the two
+directions are both allowed. A session with no kept content stores nothing, so it has no kind.
 
-**Title.** The first real user turn of the session, redacted, newlines folded to spaces, cut to 120 characters (marker-safe), set when a
-session is first stored or re-read from the start and kept after that (a session with no real user turn has a null title).
+**Title.** The first real user turn of the session, redacted, newlines folded to spaces, cut to 120 characters (marker-safe). It is set
+when the stored title is null (a first pass, a rewritten pass, or a later pass that finds the session's first real turn) and kept after
+that; a session with no real user turn has a null title.
 
 **Project identity.** `project_key` and `project_key_source` are computed once per pass from the session's `cwd`:
 
@@ -251,63 +285,75 @@ session is first stored or re-read from the start and kept after that (a session
    `/.zoid/worktrees/<name>` segment is cut back to the part before that segment (the repository that held the worktree); the resolver
    runs on that root if it exists; otherwise the key is the last path segment of the root, lower case.
 4. `project_key_source` is `remote` when the key contains `/`, else `path` (a folder name never does). A null or empty result falls back
-   to the folder name of the `cwd`, and to `unknown` when there is no `cwd` at all.
+   to the folder name of the `cwd`, and to `unknown` (source `path`) when there is no `cwd` at all.
 
 `cwd` is stored on the session (the key is recomputable without a migration). The adapter and the key rule do not run before the
-cheap exclusion check of section 7, step 2.
+cheap exclusion check of section 7, step 1.
 
 ## 7. Per-session ingest: watermark, resume, exclusion
 
 One `TranscriptIngester.IngestSession(source)` does, for one source file:
 
 1. **Exclusion by id.** `store.IsExcluded(host, id, null, null)`: when true the file is **not opened**; count `excluded`.
-2. **State.** `store.GetIngestState(host, id)` (the session row, or null). If a row exists and `size == source_size` and `mtime ==
-   source_mtime`, the file is unchanged: count `unchanged`, stop (no read).
+2. **State.** `store.GetIngestState(host, id)` (the session row, or null). If a row exists and `source_size` equals the file's current
+   size and `source_mtime` equals its mtime, the file is unchanged: count `unchanged`, stop (no read). (`source_size` is the file's
+   **stat size observed before the read**, so a file that ends in a partial line is not re-read until it changes.)
 3. **Head.** `ReadHead`. No fingerprint -> count `skipped`, stop. Compute the project identity (section 6) and call `store.IsExcluded(host,
-   id, key, cwd)`: when true, count `excluded`, stop. (This is the first read of the file; nothing from it is stored.)
-4. **Mode.** No row: **fresh** (start 0, cutoff-filtered). A row whose `source_fingerprint` differs from the head's, or whose
-   `source_size` is larger than the file's current size (the file was rewritten, replaced or truncated): **rewritten** (start 0, replace
-   every chunk of the session). Otherwise **resume**: start at `ingested_offset`.
+   id, key, cwd)`: when true, count `excluded`, stop. (This is the first read of the file; nothing from it is stored.) Read the cutoff
+   once: `cutoff = store.IngestNotBefore()`.
+4. **Mode.** No row: **fresh** (start 0). A **rewritten** pass (start 0, replace every chunk of the session) when the row's
+   `source_fingerprint` differs from the head's, or `source_size` is larger than the file's current size (replaced or truncated), or the
+   byte before `ingested_offset` is not `0x0A`, or the row's `project_key` or `kind` differs from what this pass derives, or the row's
+   `built_under_cutoff` differs from `cutoff` (the cutoff was cleared by `unforget`, so the records it had hidden must come back).
+   Otherwise **resume**: start at `ingested_offset`.
 5. **Read** from the start offset to the end of the last complete line, build units, chunk them, derive kind and title (section 6).
    - The **watermark** (`ingested_offset`) is the `StartOffset` of the first record of the **last unit**: the last unit may still receive
      records, so each pass re-reads from there and rebuilds it. `exchange_count` is the number of the last unit + 1. The unit numbering of a
      resumed pass continues from `exchange_count - 1` (the number of the unit that is read again). `settled_user_turns` is the real user
      turns in all units before the last unit.
-   - **A pass replaces all chunks of every unit it rebuilds as one set** (delete the rows with `exchange_start >= <first rebuilt unit>`,
-     insert the new ones, so a changed number of parts leaves no orphan), in one transaction with the session row.
-   - `source_size` is the offset after the last complete line consumed; `source_mtime` is the file's mtime in milliseconds read **before**
-     the read began (a file that grew during the read is therefore read again next pass, never skipped); `source_fingerprint` is the head's.
-     `started_at` is the first `Ts` of the session, `ended_at` the largest `Ts` seen, `source_path` the current path.
-   - A pass over a session with no kept content stores nothing when there is no row; when there is a row it only updates the source
-     fields.
-   - **Headers carry the kind and the project key**, so when a resumed pass derives a kind or a project key that differs from the stored
-     one (a session that grew from one long prompt to two turns; a repository that gained a remote), the pass is **redone as rewritten**
-     (start 0, replace every chunk). Otherwise the chunks of the earlier units would keep a stale header and a grown session would not
-     equal the same session ingested once.
-6. **Apply** with `store.ApplyIngest(...)`: one `BEGIN IMMEDIATE` transaction that **re-checks the exclusion inside it** (a `forget`
-   that committed between step 3 and here wins: the outcome is `Excluded`, nothing is written), re-reads the session row (two passes at
-   once cannot lose an update), upserts the session row, replaces the chunks and commits. A later pass never resurrects a forgotten
-   session.
+   - `source_size` and `source_mtime` (milliseconds) are the stat values observed **before** the read began (a file that grew during the
+     read is therefore read again next pass, never skipped); `source_fingerprint` is the head's; `built_under_cutoff` is `cutoff` (null
+     when none); `started_at` is the first `Ts` of any kept record of the session (kept once set), `ended_at` the largest `Ts` of a kept
+     record; `source_path` is the current path.
+   - A kind or project key that differs from the stored one makes this a rewritten pass (headers carry both, so the chunks of the
+     earlier units would otherwise keep a stale header and a grown session would not equal the same session ingested once); the pass is
+     redone from offset 0 once, with the new values.
+   - A pass over a session with **no kept content**: with no row it stores nothing (the file is read again on the next run, which is
+     cheap and counted `empty`); with a row (a rewritten file that now keeps nothing, or a cutoff that hides everything) it **deletes the
+     session's chunks** and updates the row's source fields, counts and cutoff.
+6. **Apply** with `store.ApplyIngest(...)` (section 8): one `BEGIN IMMEDIATE` transaction that checks, inside it, that (a) the session is
+   not excluded (a `forget` that committed since step 3 wins: outcome `Excluded`, nothing written), (b) `ingest_not_before` still equals
+   the `cutoff` the pass was built under (a forget-everything that committed since: outcome `Stale`), and (c) the session row still equals
+   the state the pass started from (`ingested_offset`, `exchange_count`, `source_fingerprint`, `source_size`; or still absent for a
+   fresh pass; another pass committed since: outcome `Conflict`). On `Stale` or `Conflict` nothing is written and the ingester redoes the
+   session **once** from step 2; a second one counts the session `retry` and leaves it for the next run. The write is an **upsert by
+   `(session_id, exchange_start, part)`**: a chunk row whose content and metadata are identical is left untouched (its id and `embedded`
+   are kept), a changed one is updated (`embedded` reset to 0), and the rows of the rebuilt range that no longer exist are deleted. Then
+   the session row is upserted and the transaction commits. A later pass never resurrects a forgotten session.
 
-Guarantees (each has a test): a second run changes nothing; a session grown across two passes at **any** cut point (a line boundary
-inside an exchange, between exchanges, just after a compaction summary, in the middle of a line) equals the same file ingested once
-(all `tx_session` columns except `id`, `source_mtime`, and all `tx_chunk` columns except `id`, compared as ordered sets); deleting the
-source file afterwards leaves every chunk and the session row; a session forgotten before still has its file but stays out, and a
-session that straddles the forget-everything cutoff contributes only its records after it.
+Guarantees (each has a test): a second run changes nothing, **including row ids and `embedded`**; a session grown across two passes at
+**any** cut point (a line boundary inside an exchange, between exchanges, just after a compaction summary, in the middle of a line)
+equals the same file ingested once (all `tx_session` columns except `id` and `source_mtime`, and all `tx_chunk` columns except `id`,
+compared as ordered sets); deleting the source file afterwards leaves every chunk and the session row; a session forgotten before still
+has its file but stays out; a session that straddles the forget-everything cutoff contributes only its records after it, also when the
+forget happens **while** a pass is running (`Stale`), and the records the cutoff had hidden are ingested after `unforget --cutoff`;
+two passes over the same session at once end in the same state as one (`Conflict`).
 
 ## 8. Store additions (`ITranscriptStore`)
 
 Names are the builder's; the behaviour is fixed.
 
 - `SessionIngestState? GetIngestState(string host, string hostSessionId)`: `source_size`, `source_mtime`, `source_fingerprint`,
-  `ingested_offset`, `exchange_count`, `settled_user_turns`, `kind`, `title`, `started_at`.
+  `ingested_offset`, `exchange_count`, `settled_user_turns`, `kind`, `project_key`, `title`, `started_at`, `built_under_cutoff`.
 - `DateTimeOffset? IngestNotBefore()`: the global cutoff, or null.
 - `IngestOutcome ApplyIngest(SessionIngest ingest)`: `SessionIngest` carries the session fields (host, id, project key and source, cwd,
-  started/ended, kind, title, the source stat fields, offset, counts), `ReplaceFromExchange` (0 means every chunk) and the new chunks.
-  Outcomes: `Applied(chunksWritten, chunksRemoved, created)` or `Excluded`.
-- A second migration in the archive runner (see "What exists today"): `settled_user_turns` and the index.
-- `Status()` gains the rows of `(project_key, kind, sessions, chunks)` (a left join, ordered by chunks descending), in addition to the
-  existing totals.
+  started/ended, kind, title, the source stat fields, offset, counts, the cutoff it was built under), the **expected prior state** (the
+  state read in step 2, or "none"), the first rebuilt unit number (0 means every chunk) and the new chunks. Outcomes: `Applied(chunksNew,
+  chunksChanged, chunksUnchanged, chunksRemoved, created)`, `Excluded`, `Stale`, `Conflict`. The checks of section 7 step 6 run inside
+  the store's own transaction through private, transaction-aware variants of `IsExcluded` and the cutoff read.
+- A second migration in the archive runner (see "What exists today").
+- `Status()` gains the rows of `(project_key, kind, sessions, chunks)`, ordered by chunks descending, returned whole (the command
+  truncates for display). `TranscriptStatus` gets them as a new member with a default of empty.
 
 All SQL is parameterised; the store keeps its own connection and `secure_delete`; every write goes through the store (the ingester never
 opens SQLite itself).
@@ -319,14 +365,15 @@ the only host is `claude-code`; Part 7 adds `pi`).
 
 Order: parse arguments -> read the configuration strictly (a malformed config exits 1, as the other commands) -> the archive must be on
 (`[transcripts] enabled = true`) and the storage mode must not be Postgres -> `TranscriptStore.Open(location, create: false)` (absent
-tables mean the archive was never enabled) -> only then create the adapter and touch the host directory. **While the archive is off,
-backfill prints that it is off and how to enable it, exits 1, and has read nothing from the host directory** (a test double adapter that
-fails if it is ever enumerated proves it). It needs no terminal and takes no confirmation.
+tables mean the archive was never enabled; an older archive is migrated to the second migration here) -> only then create the adapter and
+touch the host directory. **While the archive is off, backfill prints that it is off and how to enable it, exits 1, and has read nothing
+from the host directory** (a test double adapter that fails if it is ever enumerated proves it). It needs no terminal and takes no
+confirmation.
 
 Output: a progress line every 50 sessions, then a summary: sessions seen, `new`, `updated`, `unchanged`, `excluded`, `empty` (nothing
-kept), `skipped` (no complete first line, unreadable name), `failed` (an error on that file, logged), chunks written and removed. Exit 0
-when no file failed, 1 when any failed (the others were still done), 2 for a usage error. Sessions are processed newest file first. A
-Ctrl+C stops after the current session and prints the summary so far.
+kept), `skipped` (no complete first line, unreadable name, duplicate id), `retry` (left for the next run), `failed` (an error on that
+file, logged), chunks new, changed, unchanged and removed. Exit 0 when no file failed, 1 when any failed (the others were still done), 2
+for a usage error. Sessions are processed newest file first. A Ctrl+C stops after the current session and prints the summary so far.
 
 `transcripts status` keeps its lines and adds, under the totals, one line per `(project, kind)` with its sessions and chunks (at most 30
 lines, then `and N more`). The line `search: not available in this version yet` stays.
@@ -334,69 +381,90 @@ lines, then `and N more`). The line `search: not available in this version yet` 
 ## 10. Fixture corpus and harness (decision 13)
 
 A committed corpus of **synthetic** Claude Code sessions (written for the tests; nobody's history) under
-`tests/fixtures/transcripts/claude-code/`, plus a harness `ClaudeFixtureHome` that builds a temporary `projects/` tree from them:
+`tests/fixtures/transcripts/claude-code/`, plus a harness `ClaudeFixtureHome` that builds a temporary `projects/` tree from them. The
+harness is one source file used by both test projects that need it (`Infrastructure.Tests` and `Cli.Tests`, linked into the second), and
+the fixtures are copied to or found from each test output by the csproj (the existing `tests/fixtures/skills` is found by walking up;
+either way works).
 
 | Fixture | Content |
 |---|---|
-| `decision` | interactive (`entrypoint: cli`), three turns, tool stubs, a successful tool result carrying a unique marker, a `system-reminder` block, a `thinking` block, an `isMeta` record, an `isSidechain` record, a slash command |
+| `decision` | interactive (`entrypoint: cli`), three turns, tool stubs, a successful tool result carrying a unique marker, a `system-reminder` block, a `thinking` block, an `isMeta` record, an `isSidechain` record, a slash command, a `task-notification` user record and a queued human prompt (with and without a duplicate `user` record) |
 | `compaction` | turns, a `compact_boundary`, an `isCompactSummary` record (several paragraphs), more turns |
 | `error` | a failed `Bash` call whose error text holds an exact string a later part will search for |
-| `automated-sdk` | `entrypoint: sdk-py`, one long prompt |
-| `automated-opening` | `entrypoint: cli`, one prompt starting `Review this change for security` |
-| `secrets` | one planted secret per category (token shapes `ghp_`, `github_pat_`, `glpat-`, `xox`, `sk-`, `AKIA`; a private key; `Authorization: Bearer`; `https://user:pass@host`; `API_KEY=...`), also inside a tool stub, inside an error, in the first prompt (the title), a token that straddles character 160 of a stub and one that straddles character 500 of an error, and a private key whose END line is cut off |
+| `automated-sdk` | `entrypoint: sdk-py`, a long prompt and a `StructuredOutput` answer |
+| `automated-opening` | `entrypoint: cli`, one prompt starting `Review this change for security`; a copy of it with a second turn appended by the harness (kind flips to interactive) |
+| `secrets` | one planted secret per category (token shapes `ghp_`, `github_pat_`, `glpat-`, `xox`, `sk-`, `sk-ant-`, `sk-proj-`, `AKIA`; a private key; `Authorization: Bearer`; `https://user:pass@host`; `API_KEY=...`), also inside a tool stub, inside an error, in the first prompt (the title), a token that straddles character 160 of a stub and one that straddles character 500 of an error, a private key whose END line is cut off, and the placeholder forms that must **not** be redacted (`GH_TOKEN="$t"`) |
 | `worktree` | `cwd` under `/.../.claude/worktrees/<name>` of a directory that does not exist, and another session in a repository the test creates with a remote |
 | `no-kept` | attachments, a sidechain, a meta record, a hook output: nothing to keep |
-| `straddle` | timestamps arranged around a cutoff the test sets |
+| `straddle` | records whose timestamps lie around a cutoff the test sets |
 
-**Secrets are never literals in the corpus.** The fixtures use placeholders (`{{SECRET:github-token}}`, `{{SECRET:aws-key}}`, ...) and
-the harness substitutes a fake that matches the detector (assembled in code from parts, for example `"ghp_" + new string('a', 36)`),
-together with `{{CWD}}` and `{{ID}}`. The planted value is also available to the test, which asserts that **no substring of 4 or more
-characters of it** (other than the marker's own text) is present anywhere in the stored `tx_session` and `tx_chunk` rows or in the
-FTS shadow tables.
+**Placeholders.** Fixtures never hold a secret as a literal (call 7): they hold `{{SECRET:github-token}}`, `{{SECRET:aws-key}}`, ...,
+`{{CWD}}`, `{{ID}}` and `{{T+n}}` (a timestamp `n` seconds after a base the test chooses). The harness substitutes them **after
+JSON-escaping** the value, so a multi-line private key is valid in a JSON string. The fakes are assembled in code from parts, are at least
+12 characters, look random and match their detector (for example `"ghp_" + 36 random letters`). Padding that makes a secret straddle
+character 160 or 500 is computed by the harness from the substituted length. The directory name of a placed session is the harness's
+encoding of `{{CWD}}` (every non-alphanumeric character becomes `-`, as Claude Code does).
 
-The harness can also append to a placed session (a line, a partial line, a whole exchange) to simulate growth, and delete a source.
+The planted value is also available to the test, which asserts that **no substring of 8 or more characters of it** (case-insensitive) is
+present in any `tx_session` or `tx_chunk` row, in the text index's tables, or in the database, WAL and shared-memory files, and that the
+marker of its category is.
+
+The harness can also append to a placed session (a line, a partial line, a whole exchange) to simulate growth, replace a session's file,
+and delete a source.
 
 ## 11. Documentation
 
 `docs/transcripts.md`: the status banner and the sections that say "nothing is stored yet" are corrected (the archive can be enabled,
 backed up with `backfill`, inspected and emptied; it cannot be searched yet); new sections: what `backfill` reads and stores, what is
-kept and dropped, **what is redacted and what is not (the residual risk of section 4)**, where Claude Code's files are
-(`CLAUDE_CONFIG_DIR`), how resume works in two lines. `docs/commands.md`: the `backfill` row. `PRIVACY.md`: the stored-data row now says
-that after `backfill` the archive holds the dialogue of the user's Claude Code sessions, locally, with known secret shapes redacted, and
-what is not covered; the retention paragraph says nothing the host deletes later is removed from the archive. `docs/configuration.md`,
-`README.md` and `CHANGELOG.md` (unreleased, internal) are corrected where they say nothing is stored. The enable confirmation text and
-the line that `enable` prints (`EnableCommand`: "Nothing is stored yet in this version") are corrected to match, with their tests. The
-announcement of the feature stays with the release that completes Parts 1 to 3; nothing here is announced.
-`src/TotalRecall.Infrastructure/AGENTS.md` (the archive migration list) and the root `AGENTS.md` table get the new locations.
+kept and dropped (including the loss of the user's `AskUserQuestion` choice), **what is redacted and what is not (the categories and the
+residual risk of section 4)**, where Claude Code's files are (`CLAUDE_CONFIG_DIR`), how resume works in two lines. `docs/commands.md`: the
+`backfill` row. `PRIVACY.md`: the stored-data row now says that after `backfill` the archive holds the dialogue of the user's Claude Code
+sessions, locally, with known secret shapes redacted, and what is not covered; the retention paragraph says nothing the host deletes later
+is removed from the archive. `docs/configuration.md`, `README.md` and `CHANGELOG.md` (unreleased, internal) are corrected where they say
+nothing is stored. The enable confirmation text and the line that `enable` prints (`EnableCommand`: "Nothing is stored yet in this
+version") are corrected to match, with their tests. The announcement of the feature stays with the release that completes Parts 1 to 3;
+nothing here is announced. `src/TotalRecall.Infrastructure/AGENTS.md` (the archive migration list) and the root `AGENTS.md` table get the
+new locations.
 
 ## Deviation from the parent design
 
 - Session kind adds the `entrypoint` rule (call 3). The parent leaves the rule to the builder.
 - The cutoff is compared "at or before" inside the ingester through a new `IngestNotBefore()`; Part 1's strict `IsBeforeCutoff` is
-  unchanged (call 6).
-- A cap of 100,000 characters per stored text (call 4) and `CLAUDE_CONFIG_DIR` (call 1).
-- The chunk header says `project <key>`, not `project <path>` (call 5).
-- A second archive migration adds `settled_user_turns` to `tx_session`; the parent's sketch of `tx_session` does not list it.
-- Part 8's `rescan` and `reproject` will have to rebuild the **header line** of a stored chunk (it carries the project key and the kind),
-  not only the redacted body. The header is built from the session row at ingest; recording it here so that Part 8 plans for it.
+  unchanged (call 6). A record without a timestamp is not given its predecessor's (call 9): decision 7's rule cannot be applied the same way
+  to a resumed pass.
+- A cap of 100,000 characters per stored text (call 4), `CLAUDE_CONFIG_DIR` (call 1), and two tool inputs stored as assistant text (call 8):
+  decision 3 keeps stubs only, and these two are the assistant's answer.
+- The chunk header says `project <key>`, not `project <path>`; a chunk never spans units; the repeated question is cut to 300
+  characters; the fingerprint hashes the first line (calls 5 and 10).
+- A second archive migration adds `settled_user_turns` and `built_under_cutoff` to `tx_session`; the parent's sketch of `tx_session` does
+  not list them. `built_under_cutoff` is what lets a pass notice that a forget-everything raced it or that `unforget --cutoff` revealed
+  records it had dropped.
+- Notes for later parts: Part 8's `rescan` and `reproject` will have to rebuild the **header line** of a stored chunk (it carries the
+  project key and the kind), not only the redacted body. Part 5 accepts a marker's transcript path only under the host's transcript root
+  (decision 12): with `CLAUDE_CONFIG_DIR` honoured here, that root is `ITranscriptAdapter.Root`, not a fixed `~/.claude/projects`.
 
 ## Acceptance (the parent's Done when, mapped)
 
 - Backfill of the fixture sessions stores them, and `status` and a direct read of the store show sessions and chunks per project and kind:
   ingest and command tests.
-- A second run adds nothing; a grown session equals one ingested at once at every cut point: ingest tests (section 7).
-- Successful tool output, thinking and reminders are not stored; errors are, cut to 500: kept-and-dropped tests.
-- A planted secret of each shape (also in a stub, an error, a first prompt, straddling 160 and 500, an unterminated key) is stored as a
-  marker with no prefix left: redaction and corpus tests (section 10).
+- A second run adds or changes nothing (ids and `embedded` included); a grown session equals one ingested at once at every cut point; a
+  forget-everything during a pass and two simultaneous passes end correctly: ingest tests (section 7).
+- Successful tool output, thinking, reminders, host-injected `task-notification` text and the model's other tool inputs are not stored;
+  errors are, cut to 500; the answers of `StructuredOutput` and `ExitPlanMode` are: kept-and-dropped tests.
+- A planted secret of each shape (also in a stub, an error, a first prompt, straddling 160 and 500, an unterminated key, Anthropic and
+  OpenAI key shapes) is stored as a marker with no prefix left, and a reference such as `$t` is not redacted: redaction and corpus tests
+  (section 10).
 - Deleting a source file after ingest keeps its chunks: ingest test.
 - A forgotten session or project whose file exists stays out; a session straddling the cutoff contributes only what follows: ingest tests
   against the real Part 1 store.
 - With the archive off, backfill refuses and reads nothing from the host directory: command test with a failing adapter double.
-- Kind and project identity: rule tests (sdk entrypoint, openings, 1,500 characters, a missing worktree directory, a repository with a
-  remote).
+- Kind and project identity: rule tests (sdk entrypoint, openings, 1,500 characters, a kind flip on growth, a missing worktree directory,
+  a repository with a remote).
 - The documentation lists what is detected and what is not: the docs test suite and review.
 
 ## Left to the builder
 
-Exact class and record names, the regexes of section 4 (pinned by the table test), the automation-opening list beyond the prototype's,
-the extra `<ide_*>` tags, the exact `status` layout, the buffer size of the byte reader, and the shape of the tested helper that cuts a text without landing inside a marker. The 16 MiB line limit, the 1,800 and 100,000 character limits and the 160 and 500 character limits are fixed.
+Exact class and record names, the regexes of section 4 (pinned by the table test and the adversarial-input timing check), the
+automation-opening list beyond the prototype's, the extra `<ide_*>` tags, the exact `status` layout, the buffer size of the byte reader,
+how the harness file is shared between the two test projects, and the shape of the tested helper that cuts a text without landing inside
+a marker. The 16 MiB line limit, the 1,800 and 100,000 character limits and the 160 and 500 character limits are fixed.
