@@ -449,7 +449,7 @@ public sealed class GitSyncCycleDeletionTests : IDisposable
         var oldHead = Remote.Head();
 
         using var fresh = BareRemote.Create(commits: 0);
-        var init = await new SyncSetupService(SetupEnvironment(machine, fresh.Url)).InitAsync(fresh.Url, null);
+        var init = await new SyncSetupService(SetupEnvironment(machine)).InitAsync(fresh.Url, null);
         Assert.Equal(0, init.ExitCode);
         Assert.Empty(GitSyncRows.ReadAll(machine.Pull.Connection));
 
@@ -469,7 +469,8 @@ public sealed class GitSyncCycleDeletionTests : IDisposable
         Assert.True(RemoteHas(X));
     }
 
-    private static SyncSetupEnvironment SetupEnvironment(CycleRig machine, string address) =>
+    /// <summary>The setup service's environment for <paramref name="machine"/>'s database, with its git home and host identity.</summary>
+    private static SyncSetupEnvironment SetupEnvironment(CycleRig machine) =>
         new(
             machine.Pull.DbPath,
             false,
