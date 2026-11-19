@@ -477,15 +477,6 @@ public sealed class GitSyncApplierEntryTests : IDisposable
     }
 
     [Fact]
-    public void APostponedLocalDeletion_WithTheRecordPresent_ChangesNothing()
-    {
-        _rig.Apply(ApplyRig.Rec(Id2, minute: 10));
-        _rig.Scan.Store.Delete(Tier.Warm, ContentType.Memory, Id2);
-
-        AssertPostponed("deletion", () => _rig.Apply(ApplyRig.Rec(Id2, minute: 10), proven: true));
-    }
-
-    [Fact]
     public void APostponedRepush_ChangesNothing()
     {
         _rig.Apply(ApplyRig.Rec(Id, content: "Newer.", minute: 20));
@@ -854,6 +845,207 @@ public sealed class GitSyncApplierEntryTests : IDisposable
         Assert.NotNull(row.BaseJson);
         Assert.Null(row.ContentStamp);
         Assert.Null(_rig.Entry(Id));
+    }
+
+    // ---- local deletions (milestone 1b-ii, D7 to D9 and D12) ----
+
+    private const string BlobSha = "0123456789abcdef0123456789abcdef01234567";
+
+    /// <summary>A synced entry (row active with a base at minute 10) that is then deleted here; the scan reports it.</summary>
+    private void SyncedThenDeletedHere()
+    {
+        _rig.Apply(ApplyRig.Rec(Id, minute: 10));
+        _rig.Scan.Store.Delete(Tier.Warm, ContentType.Memory, Id);
+        Assert.Contains(_rig.RunScan().LocalDeletions, d => d.Id == Id);
+    }
+
+    private static SyncRecord.SyncRecord BaseOf(GitSyncRow row) =>
+        RecordReader.Parse(System.Text.Encoding.UTF8.GetBytes(row.BaseJson!), SyncValidation.recordPath(row.EntryId)).Parsed!.Record;
+
+    [Fact]
+    public void ProvenLocalDeletion_WithTheRecordUnchanged_IsListedInPushDeletions_AndChangesNoStoreRow()
+    {
+        SyncedThenDeletedHere();
+        SetRowColumn("tier_stamp", SyncStamp.StampModule.format(ApplyRig.St(30))); // a change made before the deletion
+        var baseJson = Row().BaseJson;
+        var dump = _rig.Scan.Dump();
+
+        var effects = Effects(_rig.Apply(ApplyRig.Rec(Id, minute: 10)));
+
+        Assert.True(effects.PushDeletion);
+        Assert.False(effects.Deleted);
+        Assert.Null(effects.Held);
+        Assert.False(effects.Closed);
+        Assert.Empty(effects.Notes);
+        Assert.Equal(dump, _rig.Scan.Dump()); // no store row is written
+        Assert.Null(_rig.Entry(Id));
+        var row = Row();
+        Assert.Equal(SyncMerge.RowState.Active, row.State); // forgotten only once the push removed the record
+        Assert.Equal(baseJson, row.BaseJson);               // W8.3: the record equals the base
+        Assert.Null(row.ContentStamp);
+        Assert.Null(row.StickyStamp);
+        Assert.Null(row.TierStamp);
+        Assert.Equal(0, _rig.ReviewRows());
+
+        // the row now agrees with the decision: the id is still reported, as an unchanged entry
+        var again = Is<EntryResult.Carried>(_rig.Apply(ApplyRig.Rec(Id, minute: 10)));
+        Assert.Equal(CarriedKind.Unchanged, again.Kind);
+        Assert.True(again.Effects.PushDeletion);
+        Assert.Equal(row, Row());
+        Assert.Equal(dump, _rig.Scan.Dump());
+    }
+
+    [Fact]
+    public void ProvenLocalDeletion_TakesTheRecordsNewerPlacementIntoTheBase()
+    {
+        SyncedThenDeletedHere();
+
+        var effects = Effects(_rig.Apply(ApplyRig.Rec(Id, tier: Tier.Hot, minute: 10, tierMinute: 20)));
+
+        Assert.True(effects.PushDeletion);
+        var b = BaseOf(Row());
+        Assert.Equal(Tier.Hot, b.Placement.Tier);
+        Assert.Equal(ApplyRig.St(20), b.Placement.TierStamp);
+        Assert.Equal(ApplyRig.St(10), b.ContentStamp);
+        Assert.Null(_rig.Entry(Id));
+    }
+
+    [Fact]
+    public void ProvenLocalDeletion_WithAnOpenFailure_RemovesTheFailureRow()
+    {
+        SyncedThenDeletedHere();
+        _rig.Scan.Exec($"INSERT INTO git_sync_issue (entry_id, kind, record_hash, attempts, detail) VALUES ('{Id}', 'apply-failed', 'old', 2, 'old')");
+
+        Assert.True(Is<EntryResult.Carried>(_rig.Apply(ApplyRig.Rec(Id, minute: 10))).Effects.PushDeletion);
+
+        Assert.Empty(_rig.Scan.Issues());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void OwnPushWithNoBase_AndTheRecordInR_IsAPushDeletion(bool proven)
+    {
+        _rig.Scan.AddMemory(Tier.Warm, Id);
+        _rig.RunScan(); // a row with no base and pending stamps
+        SetRowColumn("pushing_stamps", "{\"content\":\"" + SyncStamp.StampModule.format(ApplyRig.St(10)) + "\"}"); // this row sent the record
+        _rig.Scan.Store.Delete(Tier.Warm, ContentType.Memory, Id);
+        var dump = _rig.Scan.Dump();
+
+        var effects = Effects(_rig.Apply(ApplyRig.Rec(Id, minute: 10), proven));
+
+        Assert.True(effects.PushDeletion);
+        Assert.Null(effects.Held);
+        Assert.Equal(dump, _rig.Scan.Dump());
+        var row = Row();
+        Assert.Equal(SyncMerge.RowState.Active, row.State);
+        Assert.Equal(ApplyRig.St(10), BaseOf(row).ContentStamp); // the own push is adopted as the base
+        Assert.Null(row.ContentStamp);
+        Assert.Null(row.StickyStamp);
+        Assert.Null(row.TierStamp);
+        Assert.Equal(0, _rig.ReviewRows());
+    }
+
+    [Fact]
+    public void NoBaseRecordPresentNotOwnPush_BecomesForgottenWithTheBaseTheRecord()
+    {
+        _rig.Scan.AddMemory(Tier.Warm, Id);
+        _rig.RunScan(); // a row with no base, never pushed
+        _rig.Scan.Store.Delete(Tier.Warm, ContentType.Memory, Id);
+
+        var effects = Effects(_rig.Apply(ApplyRig.Rec(Id, minute: 10), proven: true));
+
+        Assert.False(effects.PushDeletion);
+        Assert.Null(effects.Held);
+        var row = Row();
+        Assert.Equal(SyncMerge.RowState.Forgotten, row.State);
+        Assert.Equal(ApplyRig.St(10), BaseOf(row).ContentStamp);
+        Assert.Null(row.ContentStamp);
+        Assert.Empty(_rig.RunScan().LocalDeletions);
+        Assert.Null(_rig.Entry(Id));
+    }
+
+    [Fact]
+    public void LocalDeletion_InAnUnprovenApply_IsHeldLocalWithCauseUnproven_AndNotListedForPush()
+    {
+        SyncedThenDeletedHere();
+        SetRowColumn("tier_stamp", SyncStamp.StampModule.format(ApplyRig.St(30)));
+        var baseJson = Row().BaseJson;
+        var dump = _rig.Scan.Dump();
+
+        var effects = Effects(_rig.Apply(ApplyRig.Rec(Id, minute: 10), proven: false, blobSha: BlobSha));
+
+        Assert.Equal(new HeldEntry(Id, "local", "unproven"), effects.Held);
+        Assert.False(effects.PushDeletion);
+        Assert.False(effects.Deleted);
+        var item = Assert.Single(GitSyncReviews.ReadOpenHeld(_rig.Scan.Connection)).Value;
+        Assert.Equal(new HeldItem(Id, "local", BlobSha, "unproven", _rig.Now), item);
+        Assert.Equal(dump, _rig.Scan.Dump()); // the entry stays absent
+        var row = Row();
+        Assert.Equal(SyncMerge.RowState.Active, row.State);
+        Assert.Equal(baseJson, row.BaseJson); // the base keeps the text a later restore needs
+        Assert.Null(row.TierStamp);           // the pending stamps are cleared: the entry is gone
+    }
+
+    [Fact]
+    public void LocalDeletion_WhenTheRecordTextIsNewer_ReinsertsTheEntry()
+    {
+        SyncedThenDeletedHere();
+
+        var carried = Is<EntryResult.Carried>(_rig.Apply(ApplyRig.Rec(Id, content: "Newer text.", minute: 20)));
+
+        Assert.Equal(CarriedKind.Inserted, carried.Kind);
+        Assert.False(carried.Effects.PushDeletion);
+        Assert.Equal(["edit-beats-deletion"], carried.Effects.Notes);
+        Assert.Equal("Newer text.", _rig.Entry(Id)!.Row.Content);
+        Assert.False(_rig.Scan.Store.IsSticky(ContentType.Memory, Id));
+        Assert.Equal(SyncMerge.RowState.Active, Row().State);
+        Assert.Empty(_rig.RunScan().LocalDeletions);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void OpenLocalItem_LeavesTheDeletionHeld(bool proven)
+    {
+        SyncedThenDeletedHere();
+        _rig.SeedHeld(Id, "local");
+        var before = _rig.Full();
+
+        Assert.IsType<EntryResult.NoOp>(_rig.Apply(ApplyRig.Rec(Id, minute: 10), proven, BlobSha));
+
+        Assert.Equal(before, _rig.Full());
+        Assert.NotNull(_rig.Held(Id));
+    }
+
+    [Fact]
+    public void OpenRemoteItem_ThenEntryDeletedHere_ReplacesItWithOneLocalItem()
+    {
+        _rig.Apply(ApplyRig.Rec(Id, minute: 10));
+        _rig.SeedHeld(Id, "remote");
+        _rig.Scan.Store.Delete(Tier.Warm, ContentType.Memory, Id);
+        _rig.RunScan();
+
+        var effects = Effects(_rig.Apply(ApplyRig.Rec(Id, minute: 10), proven: false, blobSha: BlobSha));
+
+        Assert.True(effects.Closed);
+        Assert.Equal(new HeldEntry(Id, "local", "unproven"), effects.Held);
+        Assert.Equal(1, _rig.ReviewRows());
+        Assert.Equal(new HeldItem(Id, "local", BlobSha, "unproven", _rig.Now), _rig.Held(Id));
+    }
+
+    [Fact]
+    public void ForgottenRow_FromADeletionThatPushed_IsNotAVisitedLocalDeletionAgain()
+    {
+        SyncedThenDeletedHere();
+        Assert.True(Is<EntryResult.Carried>(_rig.Apply(ApplyRig.Rec(Id, minute: 10))).Effects.PushDeletion);
+        SetRowColumn("state", "forgotten"); // what the finalize of the push that removed the record does
+
+        Assert.Empty(_rig.RunScan().LocalDeletions);
+        var before = _rig.Full();
+        Assert.IsType<EntryResult.NoOp>(_rig.Apply(ApplyRig.Rec(Id, minute: 10))); // the record still at R
+        Assert.IsType<EntryResult.NoOp>(_rig.Apply(Id, null));                      // the record removed
+        Assert.Equal(before, _rig.Full());
     }
 
     // ---- defer and skip ----

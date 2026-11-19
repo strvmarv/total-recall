@@ -146,7 +146,6 @@ public sealed class GitSyncCyclePullTests : IDisposable
         Assert.NotEmpty(summary.Apply.Postponed);
         Assert.Equal("pull-incomplete", summary.PushSkipped);
         Assert.Null(summary.Push);
-        Assert.True(StoreHas(B));
         Assert.False(StoreHas(C));
         Assert.Equal(0, _rig.PushCalls());
         Assert.Equal(SyncCycle.okValue(_rig.Now), _rig.LastOk);

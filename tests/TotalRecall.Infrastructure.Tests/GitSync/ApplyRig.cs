@@ -90,12 +90,15 @@ internal sealed class ApplyRig : IDisposable
         RecordReader.Parse(RecordWriter.Write(record).Bytes!, SyncValidation.recordPath(record.Id)).Parsed
         ?? throw new InvalidOperationException("the record is not valid");
 
-    public EntryResult Apply(SyncRecordModule.SyncRecord? record, bool proven = true) =>
-        Apply(record?.Id ?? throw new ArgumentNullException(nameof(record)), record, proven);
+    public EntryResult Apply(SyncRecordModule.SyncRecord? record, bool proven = true, string? blobSha = null) =>
+        Apply(record?.Id ?? throw new ArgumentNullException(nameof(record)), record, proven, blobSha);
 
-    /// <summary>Applies one id with the open held-delete item the pull would pass for it (read from the store, as the pull reads them).</summary>
-    public EntryResult Apply(string id, SyncRecordModule.SyncRecord? record, bool proven = true) =>
-        Applier.ApplyOne(id, record is null ? null : Parsed(record), proven, Held(id));
+    /// <summary>
+    /// Applies one id with the open held-delete item the pull would pass for it (read from the store, as the pull reads them)
+    /// and, when given, the record's blob id.
+    /// </summary>
+    public EntryResult Apply(string id, SyncRecordModule.SyncRecord? record, bool proven = true, string? blobSha = null) =>
+        Applier.ApplyOne(id, record is null ? null : Parsed(record), proven, Held(id), blobSha);
 
     // ---- held-delete items ----
 

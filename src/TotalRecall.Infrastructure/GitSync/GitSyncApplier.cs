@@ -68,9 +68,11 @@ public abstract record ApplyOutcome
 /// <summary>
 /// The apply of the pull (milestone 1b-i-2): reads the repository tree at the fetched head and carries the pure merge
 /// decisions out on this machine's memories, one entry in one immediate transaction at a time. Milestone 1b-ii carries
-/// remote deletions out: a proven one is applied, one that is unproven or would remove a pin is held as an open
-/// <c>held-delete</c> item, and a pending text edit beats it (D6 to D12). A decision that needs a part not built yet (a
-/// local deletion, a review item, a re-push) is postponed and changes nothing. Nothing calls it yet.
+/// deletions out (D6 to D13): a proven remote deletion is applied, one that is unproven or would remove a pin is held as an
+/// open <c>held-delete</c> item, and a pending text edit beats it; a proven local deletion is listed for the push
+/// (<see cref="ApplySummary.PushDeletions"/>), an unproven one is held, and one whose record in <c>R</c> is rejected or
+/// invalid is skipped. A decision that needs a part not built yet (a review item, a re-push) is postponed and changes
+/// nothing. Nothing calls it yet.
 /// </summary>
 public sealed partial class GitSyncApplier
 {

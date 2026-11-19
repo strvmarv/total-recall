@@ -3,8 +3,8 @@
 /// touching anything: which decisions this milestone does not carry out (`postponement`), the `pushing_stamps` column
 /// text, the hot-tier limit, which entries the apply looks at (`visitSet`) and the row an entry has afterwards
 /// (`planRow`). Pure and total: no I/O, no clock (a stamp is issued by the caller through a function). Milestone 1b-ii
-/// carries remote deletions out (D6 to D12): `postponement` narrows and `planRow` handles a fresh content stamp and an
-/// applied deletion.
+/// carries deletions out in both directions (D6 to D13): `postponement` narrows and `planRow` handles a fresh content
+/// stamp and an applied deletion.
 module TotalRecall.Core.SyncApply
 
 open System
@@ -18,8 +18,6 @@ open TotalRecall.Core.SyncMerge
 
 /// Why a decision is not carried out here: it needs a part of git sync that a later milestone builds.
 type PostponeReason =
-    /// A local deletion: pushing it, or holding it (milestone 1b-ii carries remote deletions out; local ones follow).
-    | Deletion
     /// The decision opens a review item (a pin, a pin-edit, a conflict).
     | Review
     /// A group's value is re-pushed from the base.
@@ -27,22 +25,14 @@ type PostponeReason =
 
 let reasonName (r: PostponeReason) : string =
     match r with
-    | Deletion -> "deletion"
     | Review -> "review"
     | Repush -> "repush"
 
 /// `Some reason` when the decision must not be carried out by this milestone (in this order of precedence); `None` when it is.
-/// A remote deletion (applied or held), a note, a fresh content stamp, a held-delete close and a `forgotten` row are
-/// carried out (milestone 1b-ii, D6 to D12).
+/// A deletion in either direction (applied, pushed or held), a note, a fresh content stamp, a held-delete close and a
+/// `forgotten` row are carried out (milestone 1b-ii, D6 to D12).
 let postponement (d: MergeDecision) : PostponeReason option =
-    let localDeletion =
-        match d.Entry with
-        | PushDeletion
-        | HoldDeletion LocalDeletion -> true
-        | _ -> false
-    if localDeletion then
-        Some Deletion
-    elif not d.Reviews.IsEmpty then
+    if not d.Reviews.IsEmpty then
         Some Review
     else
         match d.Entry with

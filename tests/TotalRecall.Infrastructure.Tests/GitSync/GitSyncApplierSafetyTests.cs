@@ -16,6 +16,8 @@ public sealed class GitSyncApplierSafetyTests
     /// <summary>A scenario: a rig set up to the point just before the apply, and the apply's arguments.</summary>
     private sealed record Scenario(ApplyRig Rig, string Id, SyncRecordModule.SyncRecord? Record) : IDisposable
     {
+        public bool Proven { get; init; } = true;
+
         public void Dispose() => Rig.Dispose();
     }
 
@@ -81,7 +83,7 @@ public sealed class GitSyncApplierSafetyTests
     };
 
     private static EntryResult Run(Scenario s) =>
-        s.Rig.Applier.ApplyOne(s.Id, s.Record is null ? null : ApplyRig.Parsed(s.Record), proven: true, s.Rig.Held(s.Id), blobSha: "abc");
+        s.Rig.Applier.ApplyOne(s.Id, s.Record is null ? null : ApplyRig.Parsed(s.Record), s.Proven, s.Rig.Held(s.Id), blobSha: "abc");
 
     // ---- the deletion decisions (milestone 1b-ii) ----
 
@@ -123,14 +125,39 @@ public sealed class GitSyncApplierSafetyTests
         return new Scenario(rig, Id, null);
     }
 
+    /// <summary>A synced entry deleted here, with a pending stamp, whose record is unchanged: a push deletion that clears the stamp.</summary>
+    private static Scenario PushDelete()
+    {
+        var rig = new ApplyRig();
+        rig.Apply(ApplyRig.Rec(Id, minute: 10));
+        rig.Scan.Store.Delete(Tier.Warm, ContentType.Memory, Id);
+        rig.RunScan();
+        ScanRig.Exec(rig.Scan.Connection, $"UPDATE git_sync_entry SET tier_stamp = '2026-11-12T09:30:00.000Z.000000.7b3d1e55' WHERE entry_id = '{Id}'");
+        return new Scenario(rig, Id, ApplyRig.Rec(Id, minute: 10));
+    }
+
+    /// <summary>An open remote item, then the entry deleted here while the record is in R: closed, then held local (unproven).</summary>
+    private static Scenario LocalHold()
+    {
+        var rig = new ApplyRig();
+        rig.Apply(ApplyRig.Rec(Id, minute: 10));
+        rig.SeedHeld(Id, "remote");
+        rig.Scan.Store.Delete(Tier.Warm, ContentType.Memory, Id);
+        rig.RunScan();
+        return new Scenario(rig, Id, ApplyRig.Rec(Id, minute: 10)) { Proven = false };
+    }
+
     public static IEnumerable<object[]> DeletionScenarios() =>
-        new[] { nameof(RemoteDelete), nameof(RemoteHold), nameof(CloseOnly), nameof(FreshStamp) }.Select(n => new object[] { n });
+        new[] { nameof(RemoteDelete), nameof(RemoteHold), nameof(CloseOnly), nameof(FreshStamp), nameof(PushDelete), nameof(LocalHold) }
+            .Select(n => new object[] { n });
 
     private static Scenario BuildDeletion(string name) => name switch
     {
         nameof(RemoteDelete) => RemoteDelete(),
         nameof(RemoteHold) => RemoteHold(),
         nameof(CloseOnly) => CloseOnly(),
+        nameof(PushDelete) => PushDelete(),
+        nameof(LocalHold) => LocalHold(),
         _ => FreshStamp(),
     };
 
@@ -150,6 +177,8 @@ public sealed class GitSyncApplierSafetyTests
             nameof(RemoteDelete) => new[] { "delete-vec", "delete-row" },
             nameof(RemoteHold) => ["hold"],
             nameof(CloseOnly) => ["close"],
+            nameof(PushDelete) => ["row"],
+            nameof(LocalHold) => ["row", "close", "hold"],
             _ => ["close", "row"],
         };
         Assert.All(expected, step => Assert.Contains(step, steps));
@@ -322,6 +351,37 @@ public sealed class GitSyncApplierSafetyTests
         Assert.Equal(after, s.Rig.Full());
         Assert.Empty(s.Rig.Scan.Issues());
         Assert.NotEqual("Newer text.", s.Rig.Entry(Id)!.Row.Content);
+    }
+
+    [Theory]
+    [InlineData("text")]
+    [InlineData("pin")]
+    [InlineData("move")]
+    public void AnEditAfterTheDecisionToDelete_IsDeferred_AndTheEntryStays(string edit)
+    {
+        using var s = RemoteDelete();
+        string? after = null;
+        s.Rig.Applier.BeforeTransaction = _ =>
+        {
+            EditElsewhere(s.Rig, store =>
+            {
+                switch (edit)
+                {
+                    case "text": store.Update(Tier.Warm, ContentType.Memory, Id, new UpdateEntryOpts { Content = "A local edit." }); break;
+                    case "pin": store.Move(Tier.Warm, ContentType.Memory, Tier.Hot, ContentType.Memory, Id); store.SetSticky(ContentType.Memory, Id, true); break;
+                    default: store.Move(Tier.Warm, ContentType.Memory, Tier.Cold, ContentType.Memory, Id); break;
+                }
+            });
+            after = s.Rig.Full();
+        };
+
+        var result = Run(s);
+
+        Assert.IsType<EntryResult.Deferred>(result);
+        Assert.Equal(after, s.Rig.Full()); // the row, the store and the held items as the edit left them
+        Assert.Empty(s.Rig.Scan.Issues());
+        Assert.NotNull(s.Rig.Entry(Id));
+        Assert.Equal(SyncMerge.RowState.Active, s.Rig.Scan.Rows()[Id].State);
     }
 
     [Fact]

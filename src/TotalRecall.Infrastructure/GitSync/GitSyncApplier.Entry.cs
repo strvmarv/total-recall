@@ -9,16 +9,22 @@ using SyncRecordModule = TotalRecall.Core.SyncRecord;
 
 namespace TotalRecall.Infrastructure.GitSync;
 
-internal enum CarriedKind { Inserted, Updated, Dropped }
+/// <summary>
+/// How a carried-out decision counts: an entry inserted, updated (a store, row or held-item write) or whose row was dropped,
+/// or <see cref="Unchanged"/>: nothing was written but the decision still reports something (a push deletion whose row
+/// already agrees, milestone 1b-ii D9).
+/// </summary>
+internal enum CarriedKind { Inserted, Updated, Dropped, Unchanged }
 
 /// <summary>
 /// What a carried-out decision did besides its kind (milestone 1b-ii, D6 to D11 and D20): the entry was deleted by a remote
-/// deletion, a held-delete item was written (its direction and cause), the open item was closed, and the decision's notes
-/// (<c>edit-beats-deletion</c>, <c>pending-changes-dropped</c>).
+/// deletion, its local deletion is for the push to carry out (<paramref name="PushDeletion"/>), a held-delete item was
+/// written (its direction and cause), the open item was closed, and the decision's notes (<c>edit-beats-deletion</c>,
+/// <c>pending-changes-dropped</c>).
 /// </summary>
-internal sealed record EntryEffects(bool Deleted, HeldEntry? Held, bool Closed, IReadOnlyList<string> Notes)
+internal sealed record EntryEffects(bool Deleted, bool PushDeletion, HeldEntry? Held, bool Closed, IReadOnlyList<string> Notes)
 {
-    public static readonly EntryEffects None = new(false, null, false, []);
+    public static readonly EntryEffects None = new(false, false, null, false, []);
 }
 
 /// <summary>What applying one entry came to (decisions 7 to 13).</summary>
@@ -178,8 +184,10 @@ public sealed partial class GitSyncApplier
         }
 
         // Decision 13: a decision that changes nothing opens no transaction (unless a stamp must be issued). A held-delete
-        // write or close, and a decision with notes, always change something (milestone 1b-ii, D9).
-        if (!plan.HasStoreOps && !HasRestamp(decision) && !TouchesHeldItem(decision) && decision.Notes.IsEmpty)
+        // write or close, and a decision with notes, always change something, and a push deletion is reported even when its
+        // row already agrees (milestone 1b-ii, D9).
+        if (!plan.HasStoreOps && !HasRestamp(decision) && !TouchesHeldItem(decision) && decision.Notes.IsEmpty
+            && !decision.Entry.IsPushDeletion)
         {
             var (preview, error) = BuildRow(id, decision, row, oldBase, theirs, local, hadEntry: local is not null, plan.Colder, _ => null);
             if (error is not null)
@@ -447,12 +455,13 @@ public sealed partial class GitSyncApplier
         Step(id, "commit");
         tx.Commit();
 
-        var effects = new EntryEffects(plan.Delete, heldEntry, decision.CloseHeldDelete, NoteWords(decision));
+        var pushDeletion = decision.Entry.IsPushDeletion;
+        var effects = new EntryEffects(plan.Delete, pushDeletion, heldEntry, decision.CloseHeldDelete, NoteWords(decision));
         if (plan.Insert)
             return new EntryResult.Carried(CarriedKind.Inserted, plan.Colder, effects);
-        return plan.HasStoreOps || rowWritten || TouchesHeldItem(decision)
-            ? new EntryResult.Carried(CarriedKind.Updated, plan.Colder, effects)
-            : new EntryResult.NoOp();
+        if (plan.HasStoreOps || rowWritten || TouchesHeldItem(decision))
+            return new EntryResult.Carried(CarriedKind.Updated, plan.Colder, effects);
+        return pushDeletion ? new EntryResult.Carried(CarriedKind.Unchanged, false, effects) : new EntryResult.NoOp();
     }
 
     private EntryResult ApplyDrop(string id, SyncMerge.MergeDecision decision, GitSyncRow? row, LocalRead read, HeldItem? held)

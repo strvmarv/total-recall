@@ -6,6 +6,12 @@ namespace TotalRecall.Infrastructure.GitSync;
 
 public sealed partial class GitSyncApplier
 {
+    /// <summary>The reason a local deletion whose path in <c>R</c> the listing rejects is skipped (milestone 1b-ii, D13).</summary>
+    internal const string RecordRejected = "the record is rejected";
+
+    /// <summary>The reason a local deletion whose accepted path in <c>R</c> holds a record that does not parse is skipped (D13).</summary>
+    internal const string RecordInvalid = "the record is invalid";
+
     /// <summary>
     /// Applies the fetched repository (decisions 4 to 6, 10 and 14 to 16): reads the tree at <c>R</c>, builds the visit
     /// set, decides each entry in ordinal id order (one transaction each), records the rejections, sweeps the cleared
@@ -83,6 +89,7 @@ public sealed partial class GitSyncApplier
         var heldNow = new List<HeldEntry>();
         var closedHeld = new List<string>();
         var notes = new List<NoteEntry>();
+        var pushDeletions = new List<string>(); // in ordinal id order, each id once, as the ids are visited
         var stopped = false;
         var everyIdProcessed = true; // false on a stop or a cancellation
         var blobReadFailed = false;
@@ -123,9 +130,10 @@ public sealed partial class GitSyncApplier
 
             if (view.Present.Contains(id) && !view.Accepted.ContainsKey(id))
             {
-                // A rejected path of this id: never decided, never read as a deletion.
+                // A rejected path of this id: never decided, never read as a deletion. A local deletion of it is skipped,
+                // not postponed, so one bad record cannot stop every push (milestone 1b-ii, D13).
                 if (localDeletions.Contains(id))
-                    postponed.Add(new PostponedEntry(id, SyncApply.reasonName(SyncApply.PostponeReason.Deletion)));
+                    skipped.Add(new SkippedItem(id, null, RecordRejected));
                 continue;
             }
 
@@ -156,7 +164,7 @@ public sealed partial class GitSyncApplier
                     keys.Add(key);
                     rejectedNow[key] = (sha, OneLine(SyncValidation.RejectModule.describe(parsed.Rejected!)));
                     if (localDeletions.Contains(id))
-                        postponed.Add(new PostponedEntry(id, SyncApply.reasonName(SyncApply.PostponeReason.Deletion)));
+                        skipped.Add(new SkippedItem(id, null, RecordInvalid)); // D13, as for a rejected path
                     continue;
                 }
                 theirs = parsed.Parsed;
@@ -171,9 +179,11 @@ public sealed partial class GitSyncApplier
                     case EntryResult.Carried c:
                         if (c.Kind == CarriedKind.Inserted) inserted++;
                         else if (c.Kind == CarriedKind.Updated) updated++;
+                        else if (c.Kind == CarriedKind.Unchanged) unchanged++;
                         else dropped++;
                         if (c.Colder) colder.Add(id);
                         if (c.Effects.Deleted) deleted.Add(id);
+                        if (c.Effects.PushDeletion) pushDeletions.Add(id);
                         if (c.Effects.Held is { } h) heldNow.Add(h);
                         if (c.Effects.Closed) closedHeld.Add(id);
                         notes.AddRange(c.Effects.Notes.Select(n => new NoteEntry(id, n)));
@@ -235,7 +245,7 @@ public sealed partial class GitSyncApplier
             inserted, updated, dropped, unchanged, notAttempted, complete, fetch.Head, fetch.Proven,
             postponed, deferred, failed,
             rejectedNow.Select(p => new RejectedItem(p.Key, p.Value.Reason)).OrderBy(r => r.Key, StringComparer.Ordinal).ToList(),
-            skipped, colder, deleted, heldNow, [], [], closedHeld, notes, []));
+            skipped, colder, deleted, heldNow, [], pushDeletions, closedHeld, notes, []));
     }
 
     /// <summary>Writes a <c>rejected-record</c> row for each rejection that has none or a different one. False when it could not be written.</summary>

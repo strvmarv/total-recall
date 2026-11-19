@@ -217,23 +217,63 @@ public sealed class GitSyncApplierPullTests : IDisposable
         Assert.Empty(GitSyncReviews.ReadOpenHeld(_rig.Connection));
     }
 
-    // ---- postponed ----
+    // ---- local deletions (milestone 1b-ii) ----
 
     [GitFact]
-    public async Task ALocalDeletion_WithTheRecordUnchanged_IsPostponed_AndLStays()
+    public async Task ALocalDeletion_WithTheRecordUnchanged_IsListedForThePush_AndLAdvances()
     {
-        var first = PushRecords(Rec(A));
+        PushRecords(Rec(A));
         await Pull();
         _rig.Store.Delete(Tier.Warm, ContentType.Memory, A);
+        _rig.PutText("README", "x");
+        var head = _rig.Commit("another commit");
+
+        var summary = await Pull();
+
+        Assert.True(summary.Complete);
+        Assert.Empty(summary.Postponed);
+        Assert.Equal([A], summary.PushDeletions);
+        Assert.Empty(summary.Held);
+        Assert.Equal(head, Meta(SyncIdentity.MetaKeys.LastSha));
+        Assert.False(Has(A));
+        Assert.Equal(SyncMerge.RowState.Active, GitSyncRows.Read(_rig.Connection, A)!.State);
+    }
+
+    [GitFact]
+    public async Task ALocalDeletion_InAnUnprovenPull_IsHeldWithTheRecordsBlobId_AndLAdvances()
+    {
+        PushRecords(Rec(A));
+        await Pull();
+        _rig.Store.Delete(Tier.Warm, ContentType.Memory, A);
+        _rig.CloneGit("update-ref", "-d", "refs/total-recall/last-synced"); // no L: an unproven pull
+
+        var summary = await Pull();
+
+        Assert.False(summary.Proven);
+        Assert.True(summary.Complete);
+        Assert.Empty(summary.PushDeletions);
+        Assert.Equal([new HeldEntry(A, "local", "unproven")], summary.Held);
+        Assert.Equal(BlobOf($"memories/{A[..2]}/{A}.json"), GitSyncReviews.ReadOpenHeld(_rig.Connection)[A].RecordHash);
+        Assert.Equal(_rig.Head, _rig.CloneRef("refs/total-recall/last-synced"));
+    }
+
+    [GitFact]
+    public async Task PushDeletions_AreOrdinalSortedAndDistinct()
+    {
+        PushRecords(Rec(C, "Third."), Rec(A), Rec(B, "Other."));
+        await Pull();
+        foreach (var id in new[] { C, A, B })
+            _rig.Store.Delete(Tier.Warm, ContentType.Memory, id);
         _rig.PutText("README", "x");
         _rig.Commit("another commit");
 
         var summary = await Pull();
 
-        Assert.False(summary.Complete);
-        Assert.Equal("deletion", Assert.Single(summary.Postponed).Reason);
-        Assert.Equal(first, Meta(SyncIdentity.MetaKeys.LastSha));
+        Assert.True(summary.Complete);
+        Assert.Equal([A, B, C], summary.PushDeletions);
     }
+
+    // ---- postponed ----
 
     [GitFact]
     public async Task ANewPinAndANoBaseTextDifference_AreReviewsThatHoldL()
@@ -334,20 +374,55 @@ public sealed class GitSyncApplierPullTests : IDisposable
         Assert.Equal("Fixed.", Content(A));
     }
 
-    [GitFact]
-    public async Task ARejectedIdThatWasDeletedHere_IsPostponedAsADeletion()
+    /// <summary>A pull over a record of A that is not read as a record, after A was deleted here: skipped, nothing written, L moves.</summary>
+    private async Task AssertDeletedIdSkipped(Action replaceRecord, string reason)
     {
-        PushRecords(Rec(A));
+        PushRecords(Rec(A), Rec(B, "Other."));
         await Pull();
         _rig.Store.Delete(Tier.Warm, ContentType.Memory, A);
-        _rig.Remove($"memories/{A[..2]}/{A}.json");
-        _rig.PutRaw($"memories/{A[..2]}/{A}.json", Encoding.UTF8.GetBytes("../x"), "120000");
-        _rig.Commit("symlink");
+        replaceRecord();
+        _rig.PutRecord(Rec(B, "Other, edited.", minute: 20));
+        var head = _rig.Commit("a record of A that is not read");
+        var row = GitSyncRows.Read(_rig.Connection, A);
+        Assert.Contains(Scan().LocalDeletions, d => d.Id == A);
 
         var summary = await Pull();
 
-        Assert.Equal("deletion", Assert.Single(summary.Postponed).Reason);
-        Assert.False(summary.Complete);
+        Assert.True(summary.Complete);
+        Assert.Empty(summary.Postponed);
+        Assert.Contains(new SkippedItem(A, null, reason), summary.Skipped);
+        Assert.Empty(summary.PushDeletions);
+        Assert.Empty(summary.Held);
+        Assert.Empty(summary.Deleted);
+        Assert.Empty(summary.Failed);
+        Assert.Equal(1, summary.Updated); // only B: A is never decided or counted
+        Assert.Single(summary.Rejected);
+        Assert.Equal(head, Meta(SyncIdentity.MetaKeys.LastSha));
+        Assert.Equal(row, GitSyncRows.Read(_rig.Connection, A));
+        Assert.Empty(GitSyncReviews.ReadOpenHeld(_rig.Connection));
+        Assert.Empty(Issues("apply-failed"));
+        Assert.False(Has(A));
+        Assert.Equal("Other, edited.", Content(B));
+    }
+
+    [GitFact]
+    public async Task ADeletedIdWithARejectedPath_IsSkippedNotPostponed_AndLIsNotHeld()
+    {
+        await AssertDeletedIdSkipped(
+            () =>
+            {
+                _rig.Remove($"memories/{A[..2]}/{A}.json");
+                _rig.PutRaw($"memories/{A[..2]}/{A}.json", Encoding.UTF8.GetBytes("../x"), "120000");
+            },
+            "the record is rejected");
+    }
+
+    [GitFact]
+    public async Task ADeletedIdWithAnAcceptedButUnparsableRecord_IsSkippedNotPostponed()
+    {
+        await AssertDeletedIdSkipped(
+            () => _rig.PutText($"memories/{A[..2]}/{A}.json", "{\"format\":\"total-recall/memory/v9\"}"),
+            "the record is invalid");
     }
 
     [GitFact]

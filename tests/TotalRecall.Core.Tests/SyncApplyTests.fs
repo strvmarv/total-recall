@@ -65,9 +65,10 @@ let private isNone (r: PostponeReason option) = r.IsNone
 [<Tests>]
 let postponementTests =
     testList "SyncApply.postponement (decision 8; milestone 1b-ii D19, staged)" [
-        testCase "PushDeletion and a local-deletion hold are deletion" <| fun () ->
+        testCase "PushDeletion and a local-deletion hold are carried out, also when they close an item" <| fun () ->
             for e in [ PushDeletion; HoldDeletion LocalDeletion ] do
-                Expect.equal (postponement { plain with Entry = e }) (Some Deletion) (sprintf "%A" e)
+                Expect.isNone (postponement { plain with Entry = e }) (sprintf "%A" e)
+                Expect.isNone (postponement { plain with Entry = e; CloseHeldDelete = true }) (sprintf "%A closing" e)
 
         testCase "DeleteEntry, a remote-deletion hold, a note, FreshContentStamp, CloseHeldDelete and a forgotten row state are carried out" <| fun () ->
             Expect.isNone (postponement { plain with Entry = DeleteEntry; RowState = Some Forgotten; Notes = [ PendingChangesDropped ] }) "delete"
@@ -91,10 +92,10 @@ let postponementTests =
             Expect.equal (postponement (mergeWith (fun m -> { m with Repush = { noRepush with Sticky = true } }))) (Some Repush) "sticky"
             Expect.equal (postponement (mergeWith (fun m -> { m with Repush = { noRepush with Tier = true } }))) (Some Repush) "tier"
 
-        testCase "precedence is deletion over review over repush" <| fun () ->
+        testCase "precedence is review over repush" <| fun () ->
             let repush = mergeWith (fun m -> { m with Repush = { noRepush with Tier = true } })
             Expect.equal (postponement { repush with Reviews = [ NewPin ] }) (Some Review) "review over repush"
-            Expect.equal (postponement { plain with Entry = PushDeletion; Reviews = [ NewPin ] }) (Some Deletion) "deletion over review"
+            Expect.equal (postponement { plain with Entry = PushDeletion; Reviews = [ NewPin ] }) (Some Review) "a review on any outcome"
             Expect.equal (postponement { repush with Reviews = [ NewPin ]; Notes = [ EditBeatsDeletion ] }) (Some Review) "a note does not postpone"
 
         testCase "Defer, Ignore, DropRow, LeaveEntry, an insert and a plain merge are carried out" <| fun () ->
@@ -113,8 +114,8 @@ let postponementTests =
 [<Tests>]
 let reasonNameTests =
     testList "SyncApply.reasonName" [
-        testCase "the words are deletion, review and repush" <| fun () ->
-            Expect.equal [ reasonName Deletion; reasonName Review; reasonName Repush ] [ "deletion"; "review"; "repush" ] "words"
+        testCase "the words are review and repush" <| fun () ->
+            Expect.equal [ reasonName Review; reasonName Repush ] [ "review"; "repush" ] "words"
     ]
 
 // ---- pushing_stamps ----
@@ -350,17 +351,13 @@ let totalityTests =
 
         testPropertyWithConfig
             { FsCheckConfig.defaultConfig with maxTest = 2000 }
-            "only a PushDeletion, a local-deletion hold, a review or a repush flag postpones"
+            "only a review or a repush flag postpones"
             (Prop.forAll (Arb.fromGen genDecision) (fun d ->
                 let repush =
                     match d.Entry with
                     | MergeGroups m -> m.Repush.Content || m.Repush.Sticky || m.Repush.Tier
                     | _ -> false
-                let localDeletion =
-                    match d.Entry with
-                    | PushDeletion | HoldDeletion LocalDeletion -> true
-                    | _ -> false
-                let expected = localDeletion || not d.Reviews.IsEmpty || repush
+                let expected = not d.Reviews.IsEmpty || repush
                 (postponement d).IsSome = expected))
 
         testPropertyWithConfig
