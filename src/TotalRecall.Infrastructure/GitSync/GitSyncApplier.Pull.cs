@@ -182,6 +182,8 @@ public sealed partial class GitSyncApplier
                 theirs = parsed.Parsed;
             }
 
+            // A deletion decided here for an id the preview did not count (the entry was deleted after the scan, or changed
+            // concurrently) is carried out under this untripped verdict: an accepted race (D1).
             Tally(ApplyOne(id, theirs, fetch.Proven, openHeld.GetValueOrDefault(id), sha, preview.Verdict));
 
             void Tally(EntryResult result)
@@ -263,7 +265,7 @@ public sealed partial class GitSyncApplier
     }
 
     /// <summary>The guard's verdict for one pull and the directions it tripped, each with its count and the limit.</summary>
-    private sealed record DeletionPreview(GuardVerdict Verdict, IReadOnlyList<GuardTrip> Trips);
+    private sealed record DeletionPreview(DeleteGuardVerdict Verdict, IReadOnlyList<GuardTrip> Trips);
 
     /// <summary>
     /// The deletion preview (milestone 1b-ii, D1 to D4), before the first entry transaction. The candidates are the visited
@@ -330,7 +332,7 @@ public sealed partial class GitSyncApplier
             trips.Add(new GuardTrip(SyncDeletion.directionName(SyncMerge.Direction.RemoteDeletion), remote, limit));
         if (localTripped)
             trips.Add(new GuardTrip(SyncDeletion.directionName(SyncMerge.Direction.LocalDeletion), local, limit));
-        return new DeletionPreview(new GuardVerdict(remoteTripped, localTripped), trips);
+        return new DeletionPreview(new DeleteGuardVerdict(remoteTripped, localTripped), trips);
     }
 
     /// <summary>

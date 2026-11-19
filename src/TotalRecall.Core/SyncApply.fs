@@ -185,7 +185,7 @@ let repushMarker (d: MergeDecision) : MarkerChange =
     match d.Entry, d.RowState with
     | MergeGroups m, _ -> SetMarker(SyncDeletion.RepushGroups.encode m.Repush)
     | (DeleteEntry | HoldDeletion _), _
-    | _, Some(Forgotten | Left) -> SetMarker None
+    | _, Some(Forgotten | Left) -> SetMarker None   // `Left` cannot come from `decide`: only the scanner makes a row `left`, and it clears the marker (GitSyncScanner.Plan.cs)
     | _ -> KeepMarker
 
 let private warmer (a: Tier) (b: Tier) : bool = tierRank a < tierRank b

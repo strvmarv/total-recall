@@ -91,8 +91,8 @@ type ExclusionFacts =
 
 /// The first exclusion that matches, in the order of decision 5. An entry with an open held item writes nothing, whatever
 /// it has pending (D17). `not-reconciled` is unchanged: a no-base row over an accepted record, even one that does not
-/// parse, is never written over it. `record-missing` is only a row with a base, no accepted record and no pending text
-/// change: nothing the push may write from nothing. After a complete pull it is defensive (a deleted entry is no
+/// parse, is never written over it. `record-missing` is only a row with a base, no accepted record and no pending content
+/// stamp: nothing the push may write from nothing. After a complete pull it is defensive (a deleted entry is no
 /// candidate, a held one is excluded above); a row with a base, no record and a pending content stamp is written back
 /// from its base (D15, D18).
 let exclusion (f: ExclusionFacts) : Exclusion option =
@@ -385,6 +385,7 @@ let repushPlan (baseRecord: SyncRecord) (flags: GroupFlags) (pending: GroupStamp
         else
             None }
 
+/// A repush plan that names no group: there is nothing to republish from the base.
 let nothingToRepush (r: RepushPlan) : bool =
     r.Content.IsNone && r.Sticky.IsNone && r.Tier.IsNone
 

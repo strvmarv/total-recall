@@ -59,10 +59,10 @@ public sealed partial class GitSyncApplier
 {
     /// <summary>
     /// The delete guard's verdict for one pull (milestone 1b-ii, D3 and D4): a tripped direction carries none of its
-    /// deletions out. The default trips neither. (Nested: <see cref="TotalRecall.Infrastructure.GitSync.GuardVerdict"/> is the
-    /// repository guard's.)
+    /// deletions out. The default trips neither; <see cref="ApplyOne"/> takes it explicitly. (Named apart:
+    /// <see cref="TotalRecall.Infrastructure.GitSync.GuardVerdict"/> is the repository guard's.)
     /// </summary>
-    internal readonly record struct GuardVerdict(bool RemoteTripped, bool LocalTripped)
+    internal readonly record struct DeleteGuardVerdict(bool RemoteTripped, bool LocalTripped)
     {
         /// <summary>The decision is a deletion of a tripped direction: a <c>DeleteEntry</c> (remote) or a <c>PushDeletion</c> (local).</summary>
         public bool Converts(SyncMerge.MergeDecision d) =>
@@ -103,10 +103,10 @@ public sealed partial class GitSyncApplier
     /// not carry out, computes the vector, then carries the decision out in one immediate transaction that first
     /// re-reads the entry (decisions 7 to 13). <paramref name="theirs"/> is null when the id has no accepted record;
     /// <paramref name="held"/> is the id's open held-delete item as the pull read it (milestone 1b-ii, D8), null when it
-    /// has none; <paramref name="blobSha"/> is the record's blob id; <paramref name="guard"/> is the pull's guard verdict,
+    /// has none; <paramref name="blobSha"/> is the record's blob id; <paramref name="guard"/> is the pull's delete guard verdict (required: <c>default</c> trips nothing),
     /// which turns a deletion of a tripped direction into a held item with the cause <c>guard</c> (D4).
     /// </summary>
-    internal EntryResult ApplyOne(string id, ParsedRecord? theirs, bool proven, HeldItem? held, string? blobSha = null, GuardVerdict guard = default)
+    internal EntryResult ApplyOne(string id, ParsedRecord? theirs, bool proven, HeldItem? held, string? blobSha, DeleteGuardVerdict guard)
     {
         var result = ApplyCore(id, theirs, proven, held, blobSha, guard);
         return result switch
@@ -118,7 +118,7 @@ public sealed partial class GitSyncApplier
         };
     }
 
-    private EntryResult ApplyCore(string id, ParsedRecord? theirs, bool proven, HeldItem? held, string? blobSha, GuardVerdict guard)
+    private EntryResult ApplyCore(string id, ParsedRecord? theirs, bool proven, HeldItem? held, string? blobSha, DeleteGuardVerdict guard)
     {
         BeforeEntry?.Invoke(id);
         var conn = _store.Connection;

@@ -98,7 +98,7 @@ internal sealed class ApplyRig : IDisposable
     /// and, when given, the record's blob id.
     /// </summary>
     public EntryResult Apply(string id, SyncRecordModule.SyncRecord? record, bool proven = true, string? blobSha = null) =>
-        Applier.ApplyOne(id, record is null ? null : Parsed(record), proven, Held(id), blobSha);
+        Applier.ApplyOne(id, record is null ? null : Parsed(record), proven, Held(id), blobSha, guard: default);
 
     // ---- held-delete items ----
 

@@ -340,7 +340,7 @@ public sealed class GitSyncApplierRepushTests : IDisposable
 
     // ---- what clears the marker, and a fault at every step ----
 
-    private static EntryResult Run(ApplyRig rig, SyncRecordModule.SyncRecord? record, bool proven = true, GitSyncApplier.GuardVerdict guard = default) =>
+    private static EntryResult Run(ApplyRig rig, SyncRecordModule.SyncRecord? record, bool proven = true, GitSyncApplier.DeleteGuardVerdict guard = default) =>
         rig.Applier.ApplyOne(Id, record is null ? null : ApplyRig.Parsed(record), proven, rig.Held(Id), "abc", guard);
 
     /// <summary>A synced entry (base at minute 20) whose row carries the marker <c>tier</c>.</summary>
@@ -371,7 +371,7 @@ public sealed class GitSyncApplierRepushTests : IDisposable
         {
             "delete" => Run(rig, null),
             "remote-hold" => Run(rig, null, proven: false),
-            "guard-hold" => Run(rig, null, guard: new GitSyncApplier.GuardVerdict(RemoteTripped: true, LocalTripped: false)),
+            "guard-hold" => Run(rig, null, guard: new GitSyncApplier.DeleteGuardVerdict(RemoteTripped: true, LocalTripped: false)),
             "local-hold" => Run(rig, ApplyRig.Rec(Id, minute: 20), proven: false),
             _ => Run(rig, null), // W10: the record and the entry are gone, the row becomes forgotten
         };

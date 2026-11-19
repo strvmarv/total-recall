@@ -83,7 +83,7 @@ public sealed class GitSyncApplierSafetyTests
     };
 
     private static EntryResult Run(Scenario s) =>
-        s.Rig.Applier.ApplyOne(s.Id, s.Record is null ? null : ApplyRig.Parsed(s.Record), s.Proven, s.Rig.Held(s.Id), blobSha: "abc");
+        s.Rig.Applier.ApplyOne(s.Id, s.Record is null ? null : ApplyRig.Parsed(s.Record), s.Proven, s.Rig.Held(s.Id), blobSha: "abc", guard: default);
 
     // ---- the deletion decisions (milestone 1b-ii) ----
 

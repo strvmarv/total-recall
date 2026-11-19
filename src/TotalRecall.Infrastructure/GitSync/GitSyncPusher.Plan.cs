@@ -219,8 +219,9 @@ public sealed partial class GitSyncPusher
             if (writeBack && plan.Content is null)
             {
                 // only a pending text change newer than the base may write a vanished record back (D15, D18): a stale
-                // content stamp is listed as stale above, a content stamp that is gone since the preparation as missing
-                if (!plan.Stale.Contains("content"))
+                // content stamp is listed as stale above, a content stamp that is gone since the preparation as missing (and
+                // only when nothing else was listed stale, so one id is not listed twice)
+                if (plan.Stale.IsEmpty)
                     skipped.Add(new PushItem(id, SyncPush.exclusionName(SyncPush.Exclusion.RecordMissing)));
                 return;
             }
@@ -317,6 +318,7 @@ public sealed partial class GitSyncPusher
         if (repush?.Content is { } rc)
         {
             var r = rc.Value;
+            // an unparsed base source cannot be written: the repush keeps R's source, and every machine still writes the same bytes
             Change<SourceTool> source = r.Source is { } tool
                 ? Change<SourceTool>.Set(tool.Value)
                 : baseRecord.UnknownSource is null ? Change<SourceTool>.Clear : Change<SourceTool>.Keep;
