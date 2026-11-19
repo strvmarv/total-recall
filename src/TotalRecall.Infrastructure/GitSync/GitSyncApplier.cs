@@ -29,7 +29,10 @@ public sealed record GuardTrip(string Direction, int Count, int Limit);
 /// <summary>An entry the pull has a one-line note about.</summary>
 public sealed record NoteEntry(string Id, string Note);
 
-/// <summary>An entry whose record the next push writes again, with the groups (<c>content,sticky,tier</c>) marked for it.</summary>
+/// <summary>
+/// An entry whose record the next push writes again, with the groups (<c>content,sticky,tier</c>) marked for it: a pull lists
+/// every entry it decided whose decision sets a marker, also when the row already held it (milestone 1b-ii, D16).
+/// </summary>
 public sealed record RepushEntry(string Id, string Groups);
 
 /// <summary>What one pull did. <see cref="Complete"/> is true when every id of the set was processed and none was postponed or deferred.</summary>
@@ -74,8 +77,9 @@ public abstract record ApplyOutcome
 /// (<see cref="ApplySummary.PushDeletions"/>), an unproven one is held, and one whose record in <c>R</c> is rejected or
 /// invalid is skipped. Before the first entry a preview counts each direction's deletions (D1 to D4); a direction over
 /// the limit carries none of them out and holds each with the cause <c>guard</c> (<see cref="ApplySummary.GuardTripped"/>),
-/// and the pull is still complete. A decision that needs a part not built yet (a review item, a re-push) is postponed and
-/// changes nothing. Nothing calls it yet.
+/// and the pull is still complete. A record whose stamp for a group is older than the base's (a reset reverted it) leaves
+/// the entry alone and marks the group in the row's <c>repush_groups</c> for the push (D16); a marked row is decided on every
+/// pull. Only a decision that opens a review item is postponed (D19), and it changes nothing. Nothing calls it yet.
 /// </summary>
 public sealed partial class GitSyncApplier
 {

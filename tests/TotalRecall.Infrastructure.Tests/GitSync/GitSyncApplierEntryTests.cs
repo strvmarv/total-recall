@@ -477,12 +477,22 @@ public sealed class GitSyncApplierEntryTests : IDisposable
     }
 
     [Fact]
-    public void APostponedRepush_ChangesNothing()
+    public void ARecordOlderThanTheBase_IsCarriedOut_MarksTheRevertedGroups_AndLeavesTheEntryAndTheBase()
     {
         _rig.Apply(ApplyRig.Rec(Id, content: "Newer.", minute: 20));
+        var before = Row();
+        var calls = _rig.Embedder.Calls;
 
-        // a record older than the base: the base's value is re-published by the push, which a later milestone builds
-        AssertPostponed("repush", () => _rig.Apply(ApplyRig.Rec(Id, content: "Older.", minute: 10)));
+        // a record older than the base (a reset reverted it): no longer postponed, the groups are marked for the push to
+        // re-publish from the base (milestone 1b-ii, D16 and D19)
+        var carried = Is<EntryResult.Carried>(_rig.Apply(ApplyRig.Rec(Id, content: "Older.", minute: 10)));
+
+        Assert.Equal(CarriedKind.Updated, carried.Kind);
+        Assert.Equal("content,sticky,tier", carried.Effects.Repush);
+        Assert.Equal(before with { RepushGroups = "content,sticky,tier" }, Row());
+        Assert.Equal("Newer.", _rig.Entry(Id)!.Row.Content);
+        Assert.Equal(calls, _rig.Embedder.Calls);
+        AssertScanQuiet();
     }
 
     [Fact]

@@ -3,8 +3,9 @@
 /// touching anything: which decisions this milestone does not carry out (`postponement`), the `pushing_stamps` column
 /// text, the hot-tier limit, which entries the apply looks at (`visitSet`) and the row an entry has afterwards
 /// (`planRow`). Pure and total: no I/O, no clock (a stamp is issued by the caller through a function). Milestone 1b-ii
-/// carries deletions out in both directions (D6 to D13): `postponement` narrows and `planRow` handles a fresh content
-/// stamp and an applied deletion.
+/// carries deletions out in both directions (D6 to D13) and marks the groups a reset reverted (D16): `postponement`
+/// keeps only reviews (D19), the visit set gains the marked rows, and `planRow` handles a fresh content stamp, an
+/// applied deletion and the `repush_groups` marker.
 module TotalRecall.Core.SyncApply
 
 open System
@@ -20,24 +21,16 @@ open TotalRecall.Core.SyncMerge
 type PostponeReason =
     /// The decision opens a review item (a pin, a pin-edit, a conflict).
     | Review
-    /// A group's value is re-pushed from the base.
-    | Repush
 
 let reasonName (r: PostponeReason) : string =
     match r with
     | Review -> "review"
-    | Repush -> "repush"
 
-/// `Some reason` when the decision must not be carried out by this milestone (in this order of precedence); `None` when it is.
-/// A deletion in either direction (applied, pushed or held), a note, a fresh content stamp, a held-delete close and a
-/// `forgotten` row are carried out (milestone 1b-ii, D6 to D12).
+/// `Some Review` when the decision opens a review item, which milestone 1b-iii answers; `None` when it is carried out.
+/// Everything else is carried out (milestone 1b-ii, D19): a deletion in either direction (applied, pushed or held), a
+/// note, a fresh content stamp, a held-delete close, a `forgotten` row and the groups a reset reverted (D16).
 let postponement (d: MergeDecision) : PostponeReason option =
-    if not d.Reviews.IsEmpty then
-        Some Review
-    else
-        match d.Entry with
-        | MergeGroups m when m.Repush.Content || m.Repush.Sticky || m.Repush.Tier -> Some Repush
-        | _ -> None
+    if d.Reviews.IsEmpty then None else Some Review
 
 // ---------------------------------------------------------------------------------------------
 // The `pushing_stamps` column
@@ -129,7 +122,9 @@ type VisitInput =
       /// `active` rows with a base.
       ActiveWithBase: Set<string>
       /// The scan's `LocalDeletions`.
-      LocalDeletions: Set<string> }
+      LocalDeletions: Set<string>
+      /// Rows whose `repush_groups` is not NULL (milestone 1b-ii, D16): decided on every pull, so the marker follows R.
+      RepushRows: Set<string> }
 
 /// The entries to decide, in ordinal id order, distinct.
 let visitSet (v: VisitInput) : string list =
@@ -140,7 +135,8 @@ let visitSet (v: VisitInput) : string list =
           v.ApplyFailed
           v.Revisit
           Set.difference v.ActiveWithBase v.Present
-          v.LocalDeletions ]
+          v.LocalDeletions
+          v.RepushRows ]
     |> Set.toList
     |> List.sortWith (fun a b -> String.CompareOrdinal(a, b))
 
@@ -165,13 +161,32 @@ type Comparison =
       Sticky: bool
       Tier: Tier }
 
-/// The row's new state, pending stamps, `pushing_stamps` text and comparison columns. The base is not here: the
-/// caller renders it from the decision's `Base` and the record. `Comparison = None`: leave the columns as they are.
+/// What the decision does to the row's `repush_groups` marker (milestone 1b-ii, D16).
+type MarkerChange =
+    /// Leave the column as it is.
+    | KeepMarker
+    /// Write the column: the groups in `SyncDeletion.RepushGroups` text, or NULL for `None`.
+    | SetMarker of string option
+
+/// The row's new state, pending stamps, `pushing_stamps` text, comparison columns and `repush_groups` marker. The base
+/// is not here: the caller renders it from the decision's `Base` and the record. `Comparison = None`: leave the columns
+/// as they are.
 type RowAfter =
     { State: RowState
       Pending: GroupStamps
       PushingText: string option
-      Comparison: Comparison option }
+      Comparison: Comparison option
+      Repush: MarkerChange }
+
+/// The marker a carried-out decision leaves (D16). A `MergeGroups` replaces it with this decision's flags (a group the
+/// repository caught up on, or that now has a pending change, is cleared). A `DeleteEntry`, a `HoldDeletion` of either
+/// direction and a row that becomes `forgotten` or `left` clear it. Every other outcome keeps it.
+let repushMarker (d: MergeDecision) : MarkerChange =
+    match d.Entry, d.RowState with
+    | MergeGroups m, _ -> SetMarker(SyncDeletion.RepushGroups.encode m.Repush)
+    | (DeleteEntry | HoldDeletion _), _
+    | _, Some(Forgotten | Left) -> SetMarker None
+    | _ -> KeepMarker
 
 let private warmer (a: Tier) (b: Tier) : bool = tierRank a < tierRank b
 
@@ -180,7 +195,8 @@ let private warmer (a: Tier) (b: Tier) : bool = tierRank a < tierRank b
 /// is an `Error`). `stored` is the entry as it is stored **after** the store operations; `hadEntry` whether an entry
 /// existed when the decision was made; `colderTier` whether the hot limit stored or moved it to the warm tier. A
 /// `LeaveEntry` with `FreshContentStamp` issues the pending content stamp above the greater of the pending one and the
-/// base's (D10); a `DeleteEntry` that makes the row `forgotten` also clears `pushing_stamps` (D6).
+/// base's (D10); a `DeleteEntry` that makes the row `forgotten` also clears `pushing_stamps` (D6); the marker follows
+/// `repushMarker` (D16).
 let planRow
     (d: MergeDecision)
     (before: RowBefore)
@@ -269,5 +285,6 @@ let planRow
                     { State = defaultArg d.RowState (defaultArg before.State Active)
                       Pending = pending
                       PushingText = pushingText
-                      Comparison = comparison }
+                      Comparison = comparison
+                      Repush = repushMarker d }
             )

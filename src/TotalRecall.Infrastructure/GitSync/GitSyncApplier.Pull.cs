@@ -14,9 +14,10 @@ public sealed partial class GitSyncApplier
 
     /// <summary>
     /// Applies the fetched repository (decisions 4 to 6, 10 and 14 to 16): reads the tree at <c>R</c>, builds the visit
-    /// set, previews the deletions for the delete guard (milestone 1b-ii, D1 to D4), decides each entry in ordinal id order
-    /// (one transaction each), records the rejections, sweeps the cleared ones, and advances <c>L</c> only for a complete
-    /// pull (a tripped guard does not hold it back). Never throws for a bad record, a busy database or a failed entry; the
+    /// set (the rows with a <c>repush_groups</c> marker included, milestone 1b-ii D16), previews the deletions for the
+    /// delete guard (D1 to D4), decides each entry in ordinal id order (one transaction each), records the rejections,
+    /// sweeps the cleared ones, and advances <c>L</c> only for a complete pull (a tripped guard does not hold it back, nor
+    /// does a repush marker, D19). Never throws for a bad record, a busy database or a failed entry; the
     /// token stops it between entries.
     /// </summary>
     public async Task<ApplyOutcome> ApplyAsync(FetchResult fetch, ScanSummary scan, CancellationToken cancellationToken = default)
@@ -63,7 +64,8 @@ public sealed partial class GitSyncApplier
             SetModule.OfSeq(failures.Keys),
             SetModule.OfSeq(revisit),
             SetModule.OfSeq(rows.Values.Where(r => r.BaseJson is not null && r.State.IsActive).Select(r => r.EntryId)),
-            SetModule.OfSeq(localDeletions));
+            SetModule.OfSeq(localDeletions),
+            SetModule.OfSeq(rows.Values.Where(r => r.RepushGroups is not null).Select(r => r.EntryId)));
         var ids = SyncApply.visitSet(input)
             .Concat(skippedByScan.Keys)
             .Distinct(StringComparer.Ordinal)
@@ -97,6 +99,7 @@ public sealed partial class GitSyncApplier
         var closedHeld = new List<string>();
         var notes = new List<NoteEntry>();
         var pushDeletions = new List<string>(); // in ordinal id order, each id once, as the ids are visited
+        var repushMarked = new List<RepushEntry>(); // likewise
         var stopped = false;
         var everyIdProcessed = true; // false on a stop or a cancellation
         var blobReadFailed = false;
@@ -196,9 +199,11 @@ public sealed partial class GitSyncApplier
                         if (c.Effects.Held is { } h) heldNow.Add(h);
                         if (c.Effects.Closed) closedHeld.Add(id);
                         notes.AddRange(c.Effects.Notes.Select(n => new NoteEntry(id, n)));
+                        if (c.Effects.Repush is { } marked) repushMarked.Add(new RepushEntry(id, marked));
                         break;
-                    case EntryResult.NoOp:
+                    case EntryResult.NoOp n:
                         unchanged++;
+                        if (n.Repush is { } kept) repushMarked.Add(new RepushEntry(id, kept));
                         break;
                     case EntryResult.Postponed p:
                         postponed.Add(new PostponedEntry(id, p.Reason));
@@ -254,7 +259,7 @@ public sealed partial class GitSyncApplier
             inserted, updated, dropped, unchanged, notAttempted, complete, fetch.Head, fetch.Proven,
             postponed, deferred, failed,
             rejectedNow.Select(p => new RejectedItem(p.Key, p.Value.Reason)).OrderBy(r => r.Key, StringComparer.Ordinal).ToList(),
-            skipped, colder, deleted, heldNow, preview.Trips, pushDeletions, closedHeld, notes, []));
+            skipped, colder, deleted, heldNow, preview.Trips, pushDeletions, closedHeld, notes, repushMarked));
     }
 
     /// <summary>The guard's verdict for one pull and the directions it tripped, each with its count and the limit.</summary>

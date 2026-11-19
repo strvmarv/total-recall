@@ -64,7 +64,7 @@ let private isNone (r: PostponeReason option) = r.IsNone
 
 [<Tests>]
 let postponementTests =
-    testList "SyncApply.postponement (decision 8; milestone 1b-ii D19, staged)" [
+    testList "SyncApply.postponement (decision 8; milestone 1b-ii D19)" [
         testCase "PushDeletion and a local-deletion hold are carried out, also when they close an item" <| fun () ->
             for e in [ PushDeletion; HoldDeletion LocalDeletion ] do
                 Expect.isNone (postponement { plain with Entry = e }) (sprintf "%A" e)
@@ -87,16 +87,16 @@ let postponementTests =
             Expect.equal (postponement { plain with Reviews = [ conflict ] }) (Some Review) "conflict"
             Expect.equal (postponement { plain with Entry = InsertFromRecord; Reviews = [ NewPin ] }) (Some Review) "insert of a pin"
 
-        testCase "a Repush flag is repush, one test per group" <| fun () ->
-            Expect.equal (postponement (mergeWith (fun m -> { m with Repush = { noRepush with Content = true } }))) (Some Repush) "content"
-            Expect.equal (postponement (mergeWith (fun m -> { m with Repush = { noRepush with Sticky = true } }))) (Some Repush) "sticky"
-            Expect.equal (postponement (mergeWith (fun m -> { m with Repush = { noRepush with Tier = true } }))) (Some Repush) "tier"
-
-        testCase "precedence is review over repush" <| fun () ->
-            let repush = mergeWith (fun m -> { m with Repush = { noRepush with Tier = true } })
-            Expect.equal (postponement { repush with Reviews = [ NewPin ] }) (Some Review) "review over repush"
+        testCase "postponement_is_review_only" <| fun () ->
+            for flags in [ { noRepush with Content = true }
+                           { noRepush with Sticky = true }
+                           { noRepush with Tier = true }
+                           { GroupFlags.Content = true; Sticky = true; Tier = true } ] do
+                let repush = mergeWith (fun m -> { m with Repush = flags })
+                Expect.isNone (postponement repush) (sprintf "a repush flag is carried out: %A" flags)
+                Expect.equal (postponement { repush with Reviews = [ NewPin ] }) (Some Review) (sprintf "a review with %A" flags)
             Expect.equal (postponement { plain with Entry = PushDeletion; Reviews = [ NewPin ] }) (Some Review) "a review on any outcome"
-            Expect.equal (postponement { repush with Reviews = [ NewPin ]; Notes = [ EditBeatsDeletion ] }) (Some Review) "a note does not postpone"
+            Expect.equal (postponement { plain with Reviews = [ PinEdit ]; Notes = [ EditBeatsDeletion ] }) (Some Review) "a note does not change it"
 
         testCase "Defer, Ignore, DropRow, LeaveEntry, an insert and a plain merge are carried out" <| fun () ->
             for e in [ Defer; Ignore; DropRow; LeaveEntry; InsertFromRecord ] do
@@ -114,8 +114,8 @@ let postponementTests =
 [<Tests>]
 let reasonNameTests =
     testList "SyncApply.reasonName" [
-        testCase "the words are review and repush" <| fun () ->
-            Expect.equal [ reasonName Review; reasonName Repush ] [ "review"; "repush" ] "words"
+        testCase "the word is review" <| fun () ->
+            Expect.equal (reasonName Review) "review" "word"
     ]
 
 // ---- pushing_stamps ----
@@ -239,7 +239,8 @@ let private emptyInput : VisitInput =
       ApplyFailed = Set.empty
       Revisit = Set.empty
       ActiveWithBase = Set.empty
-      LocalDeletions = Set.empty }
+      LocalDeletions = Set.empty
+      RepushRows = Set.empty }
 
 let private ids (l: string list) = Set.ofList l
 
@@ -268,6 +269,12 @@ let visitSetTests =
             let v = { emptyInput with LocalDeletions = ids [ "d" ]; Present = ids [ "d" ]; Accepted = ids [ "d" ] }
             Expect.equal (visitSet v) [ "d" ] "d"
 
+        testCase "visitSet_includes_rows_with_a_repush_marker" <| fun () ->
+            // a proven pull with nothing new: the marked rows are still decided, whatever R holds for them
+            let v = { emptyInput with RepushRows = ids [ "m"; "n" ]; Present = ids [ "m"; "n" ]; Accepted = ids [ "m"; "n"; "o" ] }
+            Expect.equal (visitSet v) [ "m"; "n" ] "the marked rows only"
+            Expect.equal (visitSet { v with Changed = ids [ "o" ] }) [ "m"; "n"; "o" ] "with the changed ones"
+
         testCase "the result is ordinal-sorted and distinct" <| fun () ->
             let v =
                 { emptyInput with
@@ -294,6 +301,7 @@ let private genVisit : Gen<VisitInput> =
         let! revisit = genSet
         let! activeBase = genSet
         let! deletions = genSet
+        let! marked = genSet
         return
             { Unproven = unproven
               Accepted = accepted
@@ -303,7 +311,8 @@ let private genVisit : Gen<VisitInput> =
               ApplyFailed = failed
               Revisit = revisit
               ActiveWithBase = activeBase
-              LocalDeletions = deletions }
+              LocalDeletions = deletions
+              RepushRows = marked }
     }
 
 let private genOutcome : Gen<EntryOutcome> =
@@ -351,14 +360,8 @@ let totalityTests =
 
         testPropertyWithConfig
             { FsCheckConfig.defaultConfig with maxTest = 2000 }
-            "only a review or a repush flag postpones"
-            (Prop.forAll (Arb.fromGen genDecision) (fun d ->
-                let repush =
-                    match d.Entry with
-                    | MergeGroups m -> m.Repush.Content || m.Repush.Sticky || m.Repush.Tier
-                    | _ -> false
-                let expected = not d.Reviews.IsEmpty || repush
-                (postponement d).IsSome = expected))
+            "only a review postpones"
+            (Prop.forAll (Arb.fromGen genDecision) (fun d -> postponement d = (if d.Reviews.IsEmpty then None else Some Review)))
 
         testPropertyWithConfig
             { FsCheckConfig.defaultConfig with maxTest = 2000 }
@@ -521,6 +524,42 @@ let planRowTests =
             Expect.equal r.Pending noStamps "pending stamps cleared"
             Expect.isNone r.PushingText "pushing_stamps cleared"
             Expect.isNone r.Comparison "no stored entry: the comparison columns are left alone"
+
+        testCase "planRow_merge_groups_sets_the_marker_from_the_repush_flags" <| fun () ->
+            let marker flags =
+                (plan (mergeWith (fun m -> { m with Repush = flags })) rowBefore (Some theirsRec) (Some(local "a" Warm false)) true false (issuer 9)).Repush
+            Expect.equal (marker { noRepush with Content = true; Tier = true }) (SetMarker(Some "content,tier")) "content and tier"
+            Expect.equal (marker { GroupFlags.Content = true; Sticky = true; Tier = true }) (SetMarker(Some "content,sticky,tier")) "all three"
+            Expect.equal (marker { noRepush with Sticky = true }) (SetMarker(Some "sticky")) "sticky"
+            // no flag: the marker a row had is replaced by none (the repository caught up, or the group has a pending change)
+            Expect.equal (marker noRepush) (SetMarker None) "cleared"
+            Expect.equal
+                (plan (mergeWith id) { rowBefore with State = None } (Some theirsRec) (Some(local "a" Warm false)) true false (issuer 9)).Repush
+                (SetMarker None)
+                "a new row from a merge"
+
+        testCase "planRow_keeps_the_marker_for_leave_entry_and_defer" <| fun () ->
+            let keeps (d: MergeDecision) hadEntry =
+                Expect.equal (plan d rowBefore None (Some(local "a" Warm false)) hadEntry false (issuer 9)).Repush KeepMarker (sprintf "%A" d)
+            keeps { plain with Entry = LeaveEntry } true
+            keeps { plain with Entry = LeaveEntry; FreshContentStamp = true; Notes = [ EditBeatsDeletion ]; CloseHeldDelete = true } true
+            keeps { plain with Entry = Defer } true
+            keeps { plain with Entry = Ignore } false
+            keeps { plain with Entry = Ignore; RowState = Some Active } false
+            keeps { plain with Entry = PushDeletion; Base = { keepAll with Content = BaseBecomesTheirs } } false
+            keeps { plain with Entry = InsertFromRecord; RowState = Some Active; Notes = [ EditBeatsDeletion ] } false
+            keeps { plain with Entry = DropRow } false
+
+        testCase "planRow_clears_the_marker_for_delete_hold_forgotten" <| fun () ->
+            let clears (d: MergeDecision) =
+                Expect.equal (plan d rowBefore None None true false (issuer 9)).Repush (SetMarker None) (sprintf "%A" d)
+            clears { plain with Entry = DeleteEntry; RowState = Some Forgotten; Notes = [ PendingChangesDropped ] }
+            clears { plain with Entry = HoldDeletion RemoteDeletion }
+            clears { plain with Entry = HoldDeletion LocalDeletion; CloseHeldDelete = true }
+            clears (SyncDeletion.holdInstead { plain with Entry = DeleteEntry; RowState = Some Forgotten }) // a guard conversion
+            clears (SyncDeletion.holdInstead { plain with Entry = PushDeletion })
+            clears { plain with Entry = Ignore; RowState = Some Forgotten } // W10, and W9's second branch
+            clears { plain with Entry = Ignore; RowState = Some Left }
 
         testCase "the hot limit uses the record's tier when the tier group's base became the record's" <| fun () ->
             let before = { rowBefore with Pending = { noStamps with Tier = Some(st 5) }; BaseTier = Some Cold }

@@ -17,14 +17,15 @@ namespace TotalRecall.Infrastructure.GitSync;
 internal enum CarriedKind { Inserted, Updated, Dropped, Unchanged }
 
 /// <summary>
-/// What a carried-out decision did besides its kind (milestone 1b-ii, D6 to D11 and D20): the entry was deleted by a remote
-/// deletion, its local deletion is for the push to carry out (<paramref name="PushDeletion"/>), a held-delete item was
-/// written (its direction and cause), the open item was closed, and the decision's notes (<c>edit-beats-deletion</c>,
-/// <c>pending-changes-dropped</c>).
+/// What a carried-out decision did besides its kind (milestone 1b-ii, D6 to D11, D16 and D20): the entry was deleted by a
+/// remote deletion, its local deletion is for the push to carry out (<paramref name="PushDeletion"/>), a held-delete item
+/// was written (its direction and cause), the open item was closed, the decision's notes (<c>edit-beats-deletion</c>,
+/// <c>pending-changes-dropped</c>), and the <c>repush_groups</c> marker it set (<paramref name="Repush"/>; null when it set
+/// none or left the marker as it was).
 /// </summary>
-internal sealed record EntryEffects(bool Deleted, bool PushDeletion, HeldEntry? Held, bool Closed, IReadOnlyList<string> Notes)
+internal sealed record EntryEffects(bool Deleted, bool PushDeletion, HeldEntry? Held, bool Closed, IReadOnlyList<string> Notes, string? Repush)
 {
-    public static readonly EntryEffects None = new(false, false, null, false, []);
+    public static readonly EntryEffects None = new(false, false, null, false, [], null);
 }
 
 /// <summary>What applying one entry came to (decisions 7 to 13).</summary>
@@ -35,8 +36,11 @@ internal abstract record EntryResult
     /// <summary>The decision was carried out. <paramref name="Colder"/>: the hot limit stored or moved the entry to the warm tier.</summary>
     public sealed record Carried(CarriedKind Kind, bool Colder, EntryEffects Effects) : EntryResult;
 
-    /// <summary>Nothing needed doing (the resulting row equals the stored one and the store is untouched).</summary>
-    public sealed record NoOp : EntryResult;
+    /// <summary>
+    /// Nothing needed doing (the resulting row equals the stored one and the store is untouched). <paramref name="Repush"/>:
+    /// the <c>repush_groups</c> marker the decision set, already on the row (milestone 1b-ii, D16).
+    /// </summary>
+    public sealed record NoOp(string? Repush = null) : EntryResult;
 
     /// <summary>The decision needs a part of git sync that is not built; nothing was changed.</summary>
     public sealed record Postponed(string Reason) : EntryResult;
@@ -209,7 +213,7 @@ public sealed partial class GitSyncApplier
             if (error is not null)
                 return new EntryResult.Failed(OneLine(error));
             if (Equals(preview, row))
-                return new EntryResult.NoOp();
+                return new EntryResult.NoOp(MarkerSet(decision));
         }
 
         BeforeTransaction?.Invoke(id);
@@ -271,6 +275,10 @@ public sealed partial class GitSyncApplier
 
     /// <summary>The decision writes a held-delete item or closes the open one.</summary>
     private static bool TouchesHeldItem(SyncMerge.MergeDecision d) => d.CloseHeldDelete || d.Entry.IsHoldDeletion;
+
+    /// <summary>The <c>repush_groups</c> text the decision writes (milestone 1b-ii, D16); null when it clears or keeps the marker.</summary>
+    private static string? MarkerSet(SyncMerge.MergeDecision d) =>
+        SyncApply.repushMarker(d) is SyncApply.MarkerChange.SetMarker set ? Unopt(set.Item) : null;
 
     /// <summary>The decision's notes as the words of <see cref="NoteEntry"/>.</summary>
     private static IReadOnlyList<string> NoteWords(SyncMerge.MergeDecision d) =>
@@ -477,12 +485,12 @@ public sealed partial class GitSyncApplier
         tx.Commit();
 
         var pushDeletion = decision.Entry.IsPushDeletion;
-        var effects = new EntryEffects(plan.Delete, pushDeletion, heldEntry, decision.CloseHeldDelete, NoteWords(decision));
+        var effects = new EntryEffects(plan.Delete, pushDeletion, heldEntry, decision.CloseHeldDelete, NoteWords(decision), MarkerSet(decision));
         if (plan.Insert)
             return new EntryResult.Carried(CarriedKind.Inserted, plan.Colder, effects);
         if (plan.HasStoreOps || rowWritten || TouchesHeldItem(decision))
             return new EntryResult.Carried(CarriedKind.Updated, plan.Colder, effects);
-        return pushDeletion ? new EntryResult.Carried(CarriedKind.Unchanged, false, effects) : new EntryResult.NoOp();
+        return pushDeletion ? new EntryResult.Carried(CarriedKind.Unchanged, false, effects) : new EntryResult.NoOp(effects.Repush);
     }
 
     private EntryResult ApplyDrop(string id, SyncMerge.MergeDecision decision, GitSyncRow? row, LocalRead read, HeldItem? held)
@@ -562,7 +570,8 @@ public sealed partial class GitSyncApplier
 
     /// <summary>
     /// The row the entry has after the decision (decision 12.3): <c>null</c> when no row is to be written. The base is
-    /// rendered only when a group's base becomes the record's.
+    /// rendered only when a group's base becomes the record's; <c>repush_groups</c> is written or kept as <c>planRow</c>
+    /// says (milestone 1b-ii, D16; an <c>older</c> group keeps its base, which a later repush reads).
     /// </summary>
     private (GitSyncRow? Row, string? Error) BuildRow(
         string id,
@@ -609,6 +618,7 @@ public sealed partial class GitSyncApplier
             StickyStamp = Unopt(after.Pending.Sticky),
             TierStamp = Unopt(after.Pending.Tier),
             PushingStamps = Unopt(after.PushingText),
+            RepushGroups = after.Repush is SyncApply.MarkerChange.SetMarker set ? Unopt(set.Item) : next.RepushGroups,
         };
         if (after.Comparison is not null)
         {
