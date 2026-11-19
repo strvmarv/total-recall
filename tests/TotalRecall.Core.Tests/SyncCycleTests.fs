@@ -115,6 +115,8 @@ let textTests =
         testCase "control characters, newlines, U+2028 and U+2029 become a space" <| fun () ->
             let line = errorLine at "push" "Other" "a\nb\tc\r\nd\u2028e\u2029f\u0000g"
             Expect.equal line "2026-11-19T01:02:03.456Z push Other: a b c  d e f g" "spaces"
+        testCase "a control character in the step or the kind is cleaned too" <| fun () ->
+            Expect.equal (errorLine at "fe\ntch" "Ne\u2028twork" "x") "2026-11-19T01:02:03.456Z fe tch Ne twork: x" "head"
         testCase "an empty or null message leaves no trailing space" <| fun () ->
             Expect.equal (errorLine at "scan" "Store" "") "2026-11-19T01:02:03.456Z scan Store:" "empty"
             Expect.equal (errorLine at "scan" "Store" null) "2026-11-19T01:02:03.456Z scan Store:" "null"

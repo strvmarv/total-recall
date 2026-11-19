@@ -126,15 +126,18 @@ let okValue (now: DateTimeOffset) : string =
 let maxErrorLineChars = 500
 
 /// `git_sync_last_error`: `<time> <step> <kind>: <message>` on one line. Control characters and U+2028 / U+2029 in the
-/// message become a space; the line is cut to 500 code units without splitting a surrogate pair; an empty or null
+/// message, the step and the kind become a space; the line is cut to 500 code units without splitting a surrogate pair; an empty or null
 /// message leaves `<time> <step> <kind>:` with no trailing space.
 let errorLine (now: DateTimeOffset) (step: string) (kind: string) (message: string) : string =
-    let cleaned = StringBuilder()
-    let source = if isNull message then "" else message
-    for c in source do
-        cleaned.Append(if Char.IsControl c || c = '\u2028' || c = '\u2029' then ' ' else c) |> ignore
-    let head = sprintf "%s %s %s:" (okValue now) (if isNull step then "" else step) (if isNull kind then "" else kind)
-    let line = if cleaned.Length = 0 then head else head + " " + cleaned.ToString()
+    let oneLine (text: string) =
+        let cleaned = StringBuilder()
+        if not (isNull text) then
+            for c in text do
+                cleaned.Append(if Char.IsControl c || c = '\u2028' || c = '\u2029' then ' ' else c) |> ignore
+        cleaned.ToString()
+    let head = sprintf "%s %s %s:" (okValue now) (oneLine step) (oneLine kind)
+    let body = oneLine message
+    let line = if body.Length = 0 then head else head + " " + body
     if line.Length <= maxErrorLineChars then line
     else
         let cut = if Char.IsHighSurrogate line.[maxErrorLineChars - 1] then maxErrorLineChars - 1 else maxErrorLineChars

@@ -57,7 +57,14 @@ public sealed partial class GitSyncCycle
             }
 
             Enter(state, SyncCycle.Step.Locks);
-            _client.RemoveStaleLocks();
+            try
+            {
+                _client.RemoveStaleLocks();
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
+            {
+                // best effort (decision 2): a lock file that cannot be removed fails the step that needs the clone, not this one
+            }
 
             return await AttemptAsync(state, ct).ConfigureAwait(false);
         }

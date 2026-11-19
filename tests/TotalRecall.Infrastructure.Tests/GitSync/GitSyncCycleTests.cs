@@ -110,13 +110,19 @@ public sealed class GitSyncCycleTests : IDisposable
         {
             if (step != "scan")
                 return;
-            atScan.SetResult();
+            atScan.TrySetResult();
             gate.Task.Wait();
         };
         var running = Task.Run(() => first.RunAsync());
-        await atScan.Task.WaitAsync(TimeSpan.FromSeconds(30));
-        Assert.IsType<CycleOutcome.Busy>(await second.RunAsync());
-        gate.SetResult();
+        try
+        {
+            await atScan.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.IsType<CycleOutcome.Busy>(await second.RunAsync());
+        }
+        finally
+        {
+            gate.TrySetResult(); // never leave the first cycle holding the lock
+        }
         Assert.IsType<CycleOutcome.Done>(await running);
 
         // released: a new cycle runs
@@ -255,12 +261,18 @@ public sealed class GitSyncCycleTests : IDisposable
     public async Task AFailureToWrite_IsSwallowed_AndTheOutcomeIsUnchanged()
     {
         Joined();
+        _rig.Pull.Store.SetMeta(SyncIdentity.MetaKeys.LastError, "an old error");
         var cycle = _rig.Cycle();
-        cycle.BeforeMetaWrite = (_, _) => throw new InvalidOperationException("the store is read-only");
+        cycle.BeforeMetaWrite = (key, _) =>
+        {
+            if (key == SyncIdentity.MetaKeys.LastOk)
+                throw new InvalidOperationException("the store is read-only");
+        };
 
         Assert.IsType<CycleOutcome.Done>(await cycle.RunAsync());
 
-        Assert.Null(_rig.LastOk);
+        Assert.Null(_rig.LastOk);    // the second write failed and was swallowed
+        Assert.Null(_rig.LastError); // the first one had already been made
     }
 
     [GitFact]
