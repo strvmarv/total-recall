@@ -80,5 +80,47 @@ internal sealed partial class CycleRig : IDisposable
         return Directory.Exists(parent) ? Directory.GetDirectories(parent, $"repo.{label}-*") : [];
     }
 
+    // ---- the remote ----
+
+    /// <summary>Another machine deletes a record: the remote moves ahead without it.</summary>
+    public void RemoveRecordOnRemote(string id)
+    {
+        Pull.Remove(SyncValidation.recordPath(id));
+        Pull.Commit("another machine removes " + id);
+        Pull.Source.PushTo(Push.Remote.Path);
+    }
+
+    /// <summary>Another machine replaces the manifest.</summary>
+    public void ReplaceManifestOnRemote(byte[] bytes)
+    {
+        Pull.PutManifest(bytes);
+        Pull.Commit("another machine replaces the manifest");
+        Pull.Source.PushTo(Push.Remote.Path);
+    }
+
+    /// <summary>A canned result for the first command of a kind only (a later command runs for real).</summary>
+    public void FaultOnce(Func<SyncGit.GitCommand, bool> kind, GitResult result, Action? before = null)
+    {
+        var fired = false;
+        Pull.Fault = command =>
+        {
+            if (fired || !kind(command))
+                return null;
+            fired = true;
+            before?.Invoke();
+            return result;
+        };
+    }
+
+    /// <summary>Makes a partial clone directory the way a killed <c>git clone</c> leaves one.</summary>
+    public void LeavePartialClone()
+    {
+        var objects = Path.Combine(Pull.Paths.CloneDirectory, ".git", "objects", "pack");
+        Directory.CreateDirectory(objects);
+        var file = Path.Combine(objects, "tmp_pack_partial");
+        File.WriteAllText(file, "partial");
+        File.SetAttributes(file, FileAttributes.ReadOnly);
+    }
+
     public void Dispose() => Push.Dispose();
 }
