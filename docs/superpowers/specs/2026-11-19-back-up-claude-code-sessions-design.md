@@ -185,8 +185,8 @@ of these categories:
 | `token` | the existing shapes (`ghp_`/`gho_`/`ghu_`/`ghs_`/`ghr_`, `github_pat_`, `glpat-`, `xox[baprs]-`, `AKIA`) and `sk-` keys **including `sk-ant-...`, `sk-proj-...`, `sk-svcacct-...` and `sk-admin-...`** (the likeliest secrets in a Claude Code transcript; the existing `sk-[A-Za-z0-9]{16,}` misses them because of the hyphens). The `sk-` shapes need a left boundary (not preceded by a letter or digit, so `task-list-management-and-more` is not a key) and the extended forms at least 20 characters after the prefix | the token |
 | `private-key` | `-----BEGIN [A-Z ]{0,40}PRIVATE KEY( BLOCK)?-----` | from the BEGIN line to the end of the matching `-----END ...-----` line, **or to the end of the text when the END line is missing** |
 | `bearer` | `Authorization: <scheme> <value>` (also `=`; quotes allowed; scheme `Bearer`, `Basic`, `Token`, `Digest` or none), `x-api-key: <value>`, and a bare `Bearer <value>` | the value (at least 8 characters after `Authorization` or `x-api-key`, 16 after a bare `Bearer`) |
-| `url-credentials` | `scheme://user:password@host` | the password only (the user name and the host stay searchable). The user information is the text after `scheme://` up to the first `/`, `?`, `#` or whitespace, split at its **last** `@`; the password is what lies between the first `:` and that `@` (so `mysql://root:P@ssw0rd@localhost` is one password) |
-| `secret-assignment` | an assignment (`=` or `:`, quoted or not, also JSON `"name": "value"` **and its backslash-escaped form `\"name\": \"value\"`**, which is how a credential appears inside a decoded command string; optional backslashes are allowed around the name, the separator and the value quotes) to a secret-named variable: names ending in `_KEY`, `_TOKEN`, `_SECRET`, `_PASSWORD`, `_PASSWD`, or equal to `PASSWORD`, `PASSWD`, `SECRET`, `TOKEN`, `API_KEY`, `APIKEY`, `PASSPHRASE`, `CLIENT_SECRET`, `ACCESS_KEY`, `AUTH_TOKEN` (any case); also the command-line flags `--password`, `--passwd`, `--token`, `--api-key`, `--secret` and `--auth-token` followed by `=` or whitespace | the value: a quoted value ends at its closing quote; a `$(...)` or backtick command substitution is one value (balanced parentheses); any other unquoted value is the whole run of non-whitespace characters (so a `,`, `;`, `&` or `)` inside a password does not leave a suffix behind). A multi-word unquoted value is a residual risk |
+| `url-credentials` | `scheme://user:password@host` | the password only (the user name and the host stay searchable). The user information is the text after `scheme://` up to the **last `@` before the next whitespace**, provided the text before that `@` holds a `:`; the password is what lies between the first `:` and that `@` (so `mysql://root:P@ssw0rd@localhost` and a password with `/` or `+` are each one password; a URL whose query happens to hold `a:b@c` is over-redacted, which is accepted) |
+| `secret-assignment` | an assignment (`=` or `:`, quoted or not, also JSON `"name": "value"` **and its backslash-escaped form `\"name\": \"value\"`**, which is how a credential appears inside a decoded command string; optional backslashes are allowed around the name, the separator and the value quotes) to a secret-named variable: names ending in `_KEY`, `_TOKEN`, `_SECRET`, `_PASSWORD`, `_PASSWD`, or equal to `PASSWORD`, `PASSWD`, `SECRET`, `TOKEN`, `API_KEY`, `APIKEY`, `PASSPHRASE`, `CLIENT_SECRET`, `ACCESS_KEY`, `AUTH_TOKEN` (any case); also the command-line flags `--password`, `--passwd`, `--token`, `--api-key`, `--secret` and `--auth-token` followed by `=` or whitespace | the value: a quoted value ends at its closing quote; a `$(...)` or backtick command substitution is one value (balanced parentheses); any other unquoted value is the whole run of non-whitespace characters (so a `,`, `;`, `&` or `)` inside a password does not leave a suffix behind; an empty value, as in `KEY=` followed by a newline, is not a value). A double-quoted value ends at the first quote not preceded by a backslash, and an escaped quote inside it is part of the value. A multi-word unquoted value is a residual risk |
 | `unprocessable` | a text that a detector could not finish (the timeout below) | the whole text |
 
 Rules that every detector follows:
@@ -298,12 +298,17 @@ that; a session with no real user turn has a null title.
    to the folder name of the `cwd`, and to `unknown` (source `path`) when there is no `cwd` at all.
 
 5. Paths are split on both `/` and `\` (a Windows `cwd`), for the worktree rule and for the last segment.
-6. **`project_root`** (a new column) is the repository's directory when one is known, else null: the directory that holds the `.git`
-   entry found by the resolver's walk up from the `cwd`, or the part before the `/.claude/worktrees/` or `/.zoid/worktrees/` segment of
-   a path whose directory is gone. A directory that is a filesystem root or the user's home directory is never a root. A session with no
-   repository (a `cwd` of `/tmp`, a home directory, a missing directory with no worktree segment) has a null root.
-   Part 1's `forget` of a project stores the **`project_root` values** of the sessions it removes (not their `cwd`), so a project that
-   has no repository is excluded by its key only, and forgetting the project of `/home/user` cannot exclude every project under it.
+6. **`project_root`** (a new column) is the directory the project's sessions are excluded under:
+   - for a `.git` **directory**, the directory that holds it (the walk up from the `cwd` is the resolver's); for a `.git` **file** (a
+     linked worktree), the main repository's directory, found as the resolver already does through `gitdir` and `commondir` (the parent
+     of the common git directory), so a live worktree and a deleted one give the same root;
+   - for a directory that no longer exists: the part before the `/.claude/worktrees/` or `/.zoid/worktrees/` segment, else the `cwd`;
+   - for a directory with no repository: the `cwd` itself;
+   - **never** a filesystem root, the user's home directory or an ancestor of it: the root is then null and the project is excluded by
+     its key only (this is what stops `forget --project` of a session run from `/home/user` or `/tmp` from excluding every project
+     under it).
+   Part 1's `forget` of a project stores the **`project_root` values** of the sessions it removes (not their `cwd`), and a null root is
+   skipped.
 7. A key derived with source `path` never replaces a stored key with source `remote` for the same session (a deleted repository
    directory would otherwise re-key and rewrite the session); re-keying is Part 8's `reproject`.
 
@@ -327,7 +332,8 @@ One `TranscriptIngester.IngestSession(source)` does, for one source file:
 4. **Mode.** No row: **fresh** (start 0). A row whose `source_fingerprint` differs from the head's, or whose `source_size` is larger
    than the file's current size, or whose `ingested_offset` is above 0 with a byte before it that is not `0x0A`: the **source changed**
    (the host replaced or truncated the file): the session is **not ingested**, its stored chunks are **kept** (the archive keeps what the
-   host loses), the run counts it `changed`, and the user can `forget` the session and run backfill to store the new file. A row with
+   host loses), the run counts it `changed`. To store the new file the user runs `forget --session <host>:<id>` (which removes the old chunks and records
+   the exclusion), then `unforget --session <host>:<id>`, then backfill; the spec does not add a way to keep both versions. A row with
    `exchange_count = 0`, or whose `built_under_cutoff` differs from `cutoff` (the cutoff was cleared by `unforget`, so the records it
    had hidden must come back), or whose `project_key` differs from the key derived now (item 7 of section 6 aside): a **rewritten** pass
    (start 0, replace every chunk of the session, the settled turn count starts at 0). Otherwise **resume**: start at `ingested_offset`.
@@ -477,7 +483,8 @@ new locations.
   own spec said Part 2 would do; a project with no repository is excluded by key only.
 - Known limits: a file replaced by a larger one that keeps the same first line, and whose old offset happens to start a line, is not
   detected and is resumed from the stale offset; a host that rewrites a session file (none observed: Claude Code appends) leaves the stored
-  session as it was until the user forgets it and runs backfill again.
+  session as it was until the user runs forget, unforget and backfill for it (the old chunks are then lost: a stored session and a new
+  version of its file cannot both be kept).
 - Notes for later parts: Part 8's `rescan` and `reproject` will have to rebuild the **header line** of a stored chunk (it carries the
   project key and the kind), not only the redacted body. Part 5 accepts a marker's transcript path only under the host's transcript root
   (decision 12): with `CLAUDE_CONFIG_DIR` honoured here, that root is `ITranscriptAdapter.Root`, not a fixed `~/.claude/projects`.
