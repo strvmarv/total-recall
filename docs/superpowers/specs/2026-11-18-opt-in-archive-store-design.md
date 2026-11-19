@@ -205,11 +205,11 @@ failure is reported and the exit code is 1.
 One group, five commands, each a small `ICliCommand` in `Commands/Transcripts/` with injected seams (settings reader, store factory,
 sentinel, output writers, `Func<bool> isInteractive`, `Func<string, bool> confirm`) like `WhatsNewCommand` and `RemoveCommand`:
 
-- `transcripts enable`: refuses under Postgres storage; needs a terminal and a confirmation that says what will be stored once the later parts land (the dialogue of
-  agent sessions, locally, redacted, never synced); validates `db_path`; writes `transcripts.enabled = true` with
-  `ConfigWriter.SaveUserOverride` (the writer, not `config set`: the guard is in the callers); opens the store with
-  `create = true` (section 6, creating the tables); only then creates the sentinel; prints the state. A failure in any step leaves the
-  setting and the sentinel as they were (the setting is written last but one, the sentinel last).
+- `transcripts enable`: refuses under Postgres storage; needs a terminal and a confirmation that says what will be stored once the later
+  parts land (the dialogue of agent sessions, locally, redacted, never synced); validates `db_path`; opens the store with `create = true`
+  (section 6, creating the tables); then writes `transcripts.enabled = true` with `ConfigWriter.SaveUserOverride` (the writer, not
+  `config set`: the guard is in the callers); then creates the sentinel; prints the state. The order means a failure leaves the setting
+  and the sentinel as they were.
 - `transcripts disable`: no gate; writes `false`, removes the sentinel; keeps the data.
 - `transcripts status`: no gate; prints the setting (`enabled = true`/`false`), whether it is active (the sentinel; a difference between
   the two is said, with "applies at the next engine start"), the location, the counts of section 6 and the line `search: not available
