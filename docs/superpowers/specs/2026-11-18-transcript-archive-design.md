@@ -99,7 +99,8 @@ sync triggers, as the existing tables have. The vector table arrives with the se
 `(host, host_session_id, exchange_start, part)`.
 
 Safety of the file. The archive connection sets `secure_delete` (or the delete commands vacuum), so deleted text does not linger in free
-pages, the write-ahead log or the FTS and vector shadow tables; the archive file, when it is separate, and everything under `<dataDir>/live/`
+pages, the write-ahead log or the vector shadow tables, and the text index is cleaned too (the FTS5 `secure-delete` option, or an
+`optimize` or `rebuild` after `forget` and `prune`: `secure_delete` alone does not scrub FTS5 index segments); the archive file, when it is separate, and everything under `<dataDir>/live/`
 are created user-only (0600, directories 0700).
 
 Growth. The prototype turned 100 Claude Code sessions into 2,352 chunks and 3.3 MB of text; the author's pi history alone is 416
@@ -118,7 +119,7 @@ record with `subtype: compact_boundary` followed by a user record with `isCompac
 ### 3. What is kept
 
 Kept: user text, assistant text, one-line tool stubs (`[Bash: <first 160 chars>]`) and the **error output** of a failed tool call
-(truncated to 500 characters). Dropped: successful tool output, thinking blocks, `system-reminder` and `local-command` blocks, the
+(truncated to 500 characters). Truncation happens **after** redaction (decision 6), never before. Dropped: successful tool output, thinking blocks, `system-reminder` and `local-command` blocks, the
 `EXTREMELY_IMPORTANT` startup injections and host-injected context (pi's `total-recall-context` message), and messages flagged `isMeta`
 or `isSidechain`.
 
@@ -134,8 +135,7 @@ sessions). In the author's history 93 of 100 Claude Code sessions are single-pro
 security vulnerabilities", `/develop` reviewer rounds). Prototype rule: a session with one real user turn that either matches a known
 automation opening or is longer than 1,500 characters is `automated`. For pi the file signal is a header that names a `parentSession`
 **and** at most one real user turn (a child gets one task prompt; a `/fork` of a real conversation also names a parent, but carries the
-parent's many turns, so it stays `interactive`). A live pi session may carry the authoritative kind in its marker (decision 12). The
-rule is a heuristic, the builder refines it, and the kind is stored so it can be re-evaluated. Automated sessions are ingested but
+parent's many turns, so it stays `interactive`). The rule is a heuristic, the builder refines it, and the kind is stored so it can be re-evaluated. Automated sessions are ingested but
 excluded from search unless the caller asks (`include_automated`): a reviewer prompt is a real thing to look for, so down-ranking would
 hide it and exclusion with an opt-in does not.
 
@@ -161,7 +161,9 @@ extra set**, because tool stubs (commands) and error output are where bearer tok
 (`*_KEY`, `*_TOKEN`, `*_SECRET`, `PASSWORD`, `PASSWD`). Anything beyond that is the builder's to settle; the documentation lists exactly
 what is detected and what is not, and states the residual risk.
 
-Redaction runs on the record text **before chunking**, so a token cannot be split across a chunk boundary and missed. Chunks carry
+Redaction runs on the full, untruncated record text **before truncation and before chunking**, so a token cannot be cut or split and
+leave a stored prefix. A private key whose `END` line is missing is redacted to the end of the text. The session `title` is derived from
+redacted text. Chunks carry
 `redaction_version`; when a later release extends the detector set, `transcripts rescan` re-applies it to the stored text in place (the
 archive keeps the text, so this works after the host's file is gone), and a chunk written under an older set keeps what it had until a
 rescan runs. Dropping successful tool output (decision 3) already removes the largest source of leaked secrets.
@@ -204,7 +206,8 @@ enable|disable|backfill|embed|status|prune|forget|rescan|reproject`), never MCP.
 - `transcript_search { query, scope: "session"|"project"|"all", project?, session?, since?, include_automated?, top_k }`. Default scope
   `project`. The project and the current session come from, in order: the explicit `project` and `session` arguments; the live marker of
   decision 12 (its recorded `cwd` and session); the engine's working directory **only for a host whose server inherits the user's
-  directory** (pi), never under Claude Code, where it is the plugin directory. With none of them the default is `all` (my call: unlike
+  directory** (pi, using the `host` the shim passes to `session_start`; added by Part 7), never under Claude Code, where it is the plugin
+  directory. With none of them the default is `all` (my call: unlike
   pins this is the user's own history, and failing closed would make the tool useless outside a repository). Until the marker exists
   (Parts 1 to 4) a default-scope call from Claude Code therefore searches everything, and the explicit arguments are how the scopes are
   tested.
@@ -217,7 +220,8 @@ Scoped vector search. A plain `vec0` table is searched by a global nearest-neigh
 part therefore decides, with a spike on sqlite-vec 0.1.9 (believed to support partition keys and metadata columns; unconfirmed), how
 the vector table is built: a partition key on the project (and a metadata column for the session), or, if that is not available, an
 over-fetch that grows `k` until the scoped result is full or a cap is reached, with the text candidates always merged in. The vector
-table is created by that part's own migration, so its shape is free until then. "Text index first, rank only its candidates" is **not**
+table is created by that part's own migration, so its shape is free until then; whatever scope keys it carries must be rewritable,
+because `transcripts reproject` (decision 8) changes a project key and has to update them in the same pass. "Text index first, rank only its candidates" is **not**
 used for vector retrieval: it would lose paraphrase hits.
 
 Ranking is its own, not the memory ranker: candidates from the vector and text indexes together; scores used **relatively** (raw scores
@@ -259,12 +263,18 @@ The MCP server knows neither the host session id nor the transcript path, and th
 so "newest file for this cwd" is wrong exactly when it matters. Proposal, to be confirmed by a spike: **key a marker by the host process,
 not the directory.** Each host session runs its own MCP server, spawned by the shim, which the host spawned; the hook or extension that
 handles the same session runs under the same host process. The hook (Claude Code) or the extension (pi) writes
-`<dataDir>/live/<host>-<host process id>.json` (`{session_id, transcript_path, cwd, kind?, at}`) and the engine finds its own entry by
+`<dataDir>/live/<host>-<host process id>.json` (`{session_id, transcript_path, cwd, at}`) and the engine finds its own entry by
 walking its ancestor process ids (Linux and macOS; Windows needs its own method, which the spike settles or declares unsupported). The
 writer is a separate, cheap, pure-node step on `SessionStart` and on every prompt, **independent of the pinned floor** (it works with
 `floor_enabled = false` and does not need the engine to be provisioned); stale markers are pruned. The engine accepts a marker's
-`transcript_path` only under the host's own transcript root (`~/.claude/projects`, `~/.pi/agent/sessions`), so a marker cannot make it
-ingest an arbitrary file. If the match fails, sync-on-read falls back to the most recently modified session file for the project and the
+`transcript_path` only when its real path (symlinks resolved, `..` removed) lies under the host's own transcript root
+(`~/.claude/projects`, `~/.pi/agent/sessions`), so a marker cannot make it ingest an arbitrary file.
+
+pi is the exception to "one session per host process": pi-subagents builds its children in the same process and they keep the same MCP
+server (`pi/extension.js`, `docs/hosts/pi.md`), and the extension already assumes one user session per process and skips every hook for a
+child. So for pi the extension writes a marker for the **user's session only**, never for a child; a child's own tool calls resolve to
+the user's session (a documented limit, accepted: children do not search the archive), and the kind of any pi session comes from its
+file (decision 4). If the match fails, sync-on-read falls back to the most recently modified session file for the project and the
 tool response says `currentSession: "guessed"`.
 
 ### 13. Fixtures
@@ -280,7 +290,9 @@ script runs the same checks against the user's own archive and is not a gate.
 
 Each part that adds or changes a tool regenerates `catalog.json` (the drift guard in `.github/develop.md` fails otherwise), keeps the
 handler count in `AGENTS.md` and the docs that state it correct, and updates the announce files that list tools and the host pages it
-touches (`docs/hosts/`); each documents the surface it ships. The what's-new notice is written at release time, not by a part.
+touches (`docs/hosts/`); each documents the surface it ships, in its own section of the feature overview page that Part 1 creates (`docs/transcripts.md`). Part 1
+also updates the table of stored data in `PRIVACY.md`, which the archive makes stale. The what's-new notice is written at release time, not
+by a part.
 
 ### 15. Evidence and what was not checked
 
@@ -297,14 +309,14 @@ relied on.)
 ## Breakdown
 
 ### Part 1: Opt-in, the archive store, forgetting and isolation from sync
-Scope: The `[transcripts]` settings and the `transcripts` commands `enable`, `disable`, `status` and `forget` (by session, project or everything), with enable and forget asking on a terminal and refusing otherwise; the whole `transcripts` table refused by `config_set` over MCP and the CLI (decision 10); the sentinel file mirrored by the engine and written by enable and disable; the refactor that lets `MigrationRunner` run a named migration list against a named version table on a chosen connection; the first archive migration, creating `tx_session`, `tx_chunk` and the text index with its triggers; `ITranscriptStore` with the optional `db_path`; `secure_delete` and the user-only file modes (decision 1); the three tools registered with their off-state answer only; the test that no Cortex or git sync path carries an archive entry type. Leaves to other parts: every adapter, redaction, ingestion, vectors and the search behaviour of the tools.
+Scope: The `[transcripts]` settings and the `transcripts` commands `enable`, `disable`, `status` and `forget` (by session, project or everything), with enable and forget asking on a terminal and refusing otherwise; the whole `transcripts` table refused by `config_set` over MCP and the CLI (decision 10); the sentinel file mirrored by the engine and written by enable and disable; the refactor that lets `MigrationRunner` run a named migration list against a named version table on a chosen connection; the first archive migration, creating `tx_session`, `tx_chunk` and the text index with its triggers; `ITranscriptStore` with the optional `db_path`; `secure_delete` and the user-only file modes (decision 1); the three tools registered with their off-state answer only; the test that no Cortex or git sync path carries an archive entry type; the overview page `docs/transcripts.md` and the `PRIVACY.md` update (decision 14). An enabled archive answers that search is not built yet until Part 3; Parts 1 to 3 are announced and documented as usable together, not before. Leaves to other parts: every adapter, redaction, ingestion, vectors and the search behaviour of the tools.
 Depends on: none
-Done when: Enabling and disabling work only from a terminal and write the sentinel; `config_set` over MCP and the CLI refuses every key under `transcripts`; with test rows in the store, `forget` removes them from the tables and the text index and leaves none of their text in the file; the archive tables appear in the main database or in the `db_path` file while the main version table is unchanged; the three tools answer that the archive is off until it is enabled; the sync-isolation test passes.
+Done when: Enabling and forgetting work only from a terminal (disabling is not gated) and enable and disable write the sentinel; `config_set` over MCP and the CLI refuses every key under `transcripts`; with test rows in the store, `forget` removes them from the tables and the text index and leaves none of their text in the file, its text-index shadow tables or the write-ahead log (a test reads them); the archive tables appear in the main database or in the `db_path` file while the main version table is unchanged; the three tools answer that the archive is off until it is enabled; the sync-isolation test passes.
 
 ### Part 2: Back up Claude Code sessions, with secrets redacted
-Scope: The Claude Code adapter and the common record (decision 2); the kept and dropped rules and compaction markers (decision 3); session kind (decision 4); project identity (decision 8); the chunker (decision 5); span-returning redaction in `SensitiveContentScanner` with the detector set of decision 6, applied before chunking and to tool stubs and error text; per-session watermarks with the resume rule of decision 7; `transcripts backfill` and the counts in `status`; the fixture corpus and harness of decision 13. Chunks are stored as text (`embedded = 0`) and no tool finds them yet. Leaves to other parts: vectors and embedding, every tool's behaviour, the `session_start` pass, the live session, the breadcrumb, pi, prune, rescan, reproject and the re-embed.
+Scope: The Claude Code adapter and the common record (decision 2); the kept and dropped rules and compaction markers (decision 3); session kind (decision 4); project identity (decision 8); the chunker (decision 5); span-returning redaction in `SensitiveContentScanner` with the detector set of decision 6, applied before chunking and to tool stubs and error text; per-session watermarks with the resume rule of decision 7; `transcripts backfill` and the counts in `status`; the fixture corpus and harness of decision 13. What it ships on its own is preservation: the history the host will delete is kept, redacted. Chunks are stored as text (`embedded = 0`) and no tool finds them yet. Leaves to other parts: vectors and embedding, every tool's behaviour, the `session_start` pass, the live session, the breadcrumb, pi, prune, rescan, reproject and the re-embed.
 Depends on: Part 1
-Done when: With the archive enabled, backfill of the fixture sessions (one with a compaction, one with an error, one automated) stores them so that `status` and a direct read of the store show sessions and chunks per project and kind; a second run adds nothing; a session grown across two passes equals the same session ingested once; successful tool output is not stored; a planted secret of each listed shape, also one inside a tool stub and one inside an error, is stored as a redaction marker; deleting a source file after ingest leaves its chunks in the archive; with the archive off, backfill refuses and reads nothing from the host directory.
+Done when: With the archive enabled, backfill of the fixture sessions (one with a compaction, one with an error, one automated) stores them so that `status` and a direct read of the store show sessions and chunks per project and kind; a second run adds nothing; a session grown across two passes equals the same session ingested once; successful tool output is not stored; a planted secret of each listed shape, also one inside a tool stub, one inside an error, one in a session's first prompt (so in its title), a token straddling the 160 and 500 character limits and a private key whose `END` line was cut off, is stored as a redaction marker with no prefix left behind; deleting a source file after ingest leaves its chunks in the archive; with the archive off, backfill refuses and reads nothing from the host directory.
 
 ### Part 3: Search the archive by meaning and by words
 Scope: The behaviour of `transcript_search`; the spike and the migration for the vector table (a partition key and a metadata column if sqlite-vec 0.1.9 supports them, else the growing over-fetch; decision 9); the background embedding worker with a per-pass budget, resumable, running on text alone when the embedder is not ready, and the embedder fingerprint of decision 7; its triggers: `transcripts backfill`, a new `transcripts embed` command and the bounded background pass from `session_start` (which also ingests new sessions); the merge of vector and text candidates, `pendingEmbedding`, the ranking and arguments of decision 9 (`include_automated`, `project`, `session`, `since`, the three scopes); embedding progress in `status`; the fixture query set. Default-scope resolution from the live marker is Part 5's. Leaves to other parts: `transcript_get`, `transcript_sessions`, sync-on-read, the breadcrumb, pi, and the re-embed on a model change.
@@ -317,9 +329,9 @@ Depends on: Part 3
 Done when: Given a hit from search, `transcript_get` returns the surrounding exchanges within the budget and flags truncation; `transcript_sessions` lists a project's sessions newest first with their titles and hides automated ones unless asked; both answer that the archive is off while it is off.
 
 ### Part 5: Make the current Claude Code session searchable while it runs
-Scope: The process-keyed marker and its pure-node writer, a second hook entry on `SessionStart` and `UserPromptSubmit` beside the floor's and independent of it, that tests the sentinel in shell before starting node (decisions 10 and 12); finding the current session by ancestor process ids, accepting a transcript path only under the host's transcript root, with the disclosed `currentSession: "guessed"` fallback; sync-on-read for the three tools with the small embed budget (decision 7); default-scope resolution from the marker (decision 9); a spike that confirms the marker approach on Linux and macOS and states what Windows can do. Leaves to other parts: the breadcrumb, pi, and any host other than Claude Code.
+Scope: The process-keyed marker and its pure-node writer, a second hook entry on `SessionStart` and `UserPromptSubmit` beside the floor's and independent of it, that tests the sentinel in shell before starting node (decisions 10 and 12); finding the current session by ancestor process ids, accepting a transcript path only when its real path lies under the host's transcript root, with the disclosed `currentSession: "guessed"` fallback; sync-on-read for the three tools with the small embed budget (decision 7); default-scope resolution from the marker (decision 9); a spike that confirms the marker approach on Linux and macOS and states what Windows can do. Leaves to other parts: the breadcrumb, pi, and any host other than Claude Code.
 Depends on: Part 4
-Done when: Text added to a running Claude Code session after the last pass is found by `transcript_search` with no hook running other than the marker writer, including text a compaction removed from the model's context; two parallel sessions in one directory each resolve to their own file on Linux and macOS (simulated host processes in the tests, plus a manual check on a real Claude Code; or the spike's finding for a platform is recorded as a known limit); a marker pointing outside the transcript root is ignored; with the archive on, `session_start` and `memory_search` stay within the bounds of Part 3 once sync-on-read exists.
+Done when: Text added to a running Claude Code session after the last pass is found by `transcript_search` with no hook running other than the marker writer, including text a compaction removed from the model's context; two parallel sessions in one directory each resolve to their own file on Linux and macOS (simulated host processes in the tests, plus a manual check on a real Claude Code; or the spike's finding for a platform is recorded as a known limit); a marker pointing outside the transcript root, by a `..` or a symlink as well, is ignored; with the archive on, `session_start` and `memory_search` stay within the bounds of Part 3 once sync-on-read exists.
 
 ### Part 6: Tell Claude Code's agent what compaction removed
 Scope: The breadcrumb text of decision 11 delivered by the existing `SessionStart` hook when its source is `compact`, once per compaction, checking the sentinel and saying nothing while the archive is off; the instruction text that tells the model what to do with it. No engine change and no tool-response hint. Leaves to other parts: pi.
@@ -327,11 +339,11 @@ Depends on: Part 5
 Done when: After a compaction in Claude Code the model's next turn carries the breadcrumb exactly once and a `transcript_search` with scope `session` finds text the compaction removed; with the archive off nothing is added; startup, resume and clear add nothing.
 
 ### Part 7: Archive pi sessions and tell pi's agent what compaction removed
-Scope: The pi adapter (the `compaction` entry, the kept and dropped rules, the session kind rule with `parentSession` and one user turn of decision 4), registered beside the Claude Code adapter; the pi extension's marker writer (with the authoritative kind of a live session) and its existing after-compaction message carrying the breadcrumb; pi sessions in `backfill`, `status`, the `session_start` pass and the three tools; the pi fixture sessions of decision 13. Leaves to other parts: other hosts.
+Scope: The pi adapter (the `compaction` entry, the kept and dropped rules, the session kind rule with `parentSession` and one user turn of decision 4), registered beside the Claude Code adapter; the pi extension's marker writer, for the user's session only and never for an in-process child (decision 12), and its existing after-compaction message carrying the breadcrumb; the engine-cwd fallback for host `pi` (decision 9); pi sessions in `backfill`, `status`, the `session_start` pass and the three tools; the pi fixture sessions of decision 13. Leaves to other parts: other hosts.
 Depends on: Part 5
-Done when: A fixture of pi sessions (with a compaction, an error, a subagent child and a fork of a real conversation) backfills and is searchable like the Claude Code fixture, the child as `automated` and the fork as `interactive`; text added to a running pi session is found by search; after a pi compaction the next turn carries the breadcrumb once.
+Done when: A fixture of pi sessions (with a compaction, an error, a subagent child and a fork of a real conversation) backfills and is searchable like the Claude Code fixture, the child as `automated` and the fork as `interactive`; text added to a running pi session is found by search; with a user session and an in-process child both live, only the user's session has a marker and search from either resolves to it; after a pi compaction the next turn carries the breadcrumb once.
 
 ### Part 8: Retention, repair and re-embedding
-Scope: `[transcripts] retention_days` (default 0, keep forever: the archive exists to keep what the host deletes) and `transcripts prune --older-than`, asking on a terminal; `transcripts rescan` (re-apply redaction to stored text) and `transcripts reproject`; the archive's vectors in `EmbedderMigration` and `ReindexCoordinator`, memories first so `memory_search` recovers first and transcript search on text alone meanwhile, with `backgroundTasks.transcripts` in `session_start` and `status`; the user documentation for these commands and a feature overview page that links every part's page. Leaves to other parts: everything built by Parts 1 to 7.
+Scope: `[transcripts] retention_days` (default 0, keep forever: the archive exists to keep what the host deletes) and `transcripts prune --older-than`, asking on a terminal; `transcripts rescan` (re-apply redaction to stored text) and `transcripts reproject`; `reproject` also rewrites the scope keys of the vector table (decision 9); the archive's vectors in `EmbedderMigration` and `ReindexCoordinator`, memories first so `memory_search` recovers first and transcript search on text alone meanwhile, with `backgroundTasks.transcripts` in `session_start` and `status`; the documentation of these commands in the overview page. Leaves to other parts: everything built by Parts 1 to 7.
 Depends on: Part 3
-Done when: Prune removes exactly the sessions older than the given age and their chunks and vectors, and the retention setting does the same at start; rescan redacts a planted token that an older detector set missed; reproject recomputes project keys from the stored directories; after an embedder change the archive re-embeds in the background while search keeps working on text; the overview page links every part's page.
+Done when: Prune removes exactly the sessions older than the given age and their chunks and vectors, and the retention setting does the same at start; rescan redacts a planted token that an older detector set missed; reproject recomputes project keys from the stored directories and a project-scope search still finds the moved chunks afterwards; after an embedder change the archive re-embeds in the background while search keeps working on text; the overview page documents these commands.
