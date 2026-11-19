@@ -46,7 +46,9 @@ public abstract record ScanOutcome
 /// <c>git_sync_entry</c> row and records what changed locally, stamping it with this machine's clock. It reads one
 /// snapshot, decides in memory with <see cref="SyncScan"/>, and writes in one transaction. It takes no lock, runs no
 /// <c>git</c>, uses no network, and never writes a memory, knowledge, vector, <c>import_log</c> or
-/// <c>compaction_log</c> row: only <c>git_sync_entry</c>, <c>git_sync_issue</c> and the two clock keys of <c>_meta</c>.
+/// <c>compaction_log</c> row: only <c>git_sync_entry</c>, <c>git_sync_issue</c> and the two clock keys of <c>_meta</c>, and
+/// it removes the <c>held-delete</c> item of a row it moves to <c>left</c> or reactivates (milestone 1b-ii: the item
+/// cannot outlive the base it was opened for; no other <c>git_sync_review</c> row is touched).
 /// </summary>
 public sealed partial class GitSyncScanner
 {

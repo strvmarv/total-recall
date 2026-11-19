@@ -397,6 +397,37 @@ public sealed class GitSyncCycleDeletionTests : IDisposable
         Assert.False(RemoteHas(Z));
     }
 
+    [GitFact]
+    public async Task AHeldEntryDemotedToKnowledgeAndPromotedBack_IsPushedAsANewRecord_NotExcludedAsHeld()
+    {
+        await BothSynced(Rec(X, "Text of X"));
+        Forget(_rig.A, X);
+        Assert.Equal([X], Pushed(Done(await _rig.RunA())).Removed);
+        _rig.B.DeleteClone();
+        var held = Done(await _rig.RunB());
+        Assert.Equal([new HeldEntry(X, "remote", "unproven")], held.Apply!.Held);
+
+        // demoted to knowledge: the scan moves the row to left, which ends its base and the item opened for it
+        _rig.B.Push.Store.Move(Tier.Warm, ContentType.Memory, Tier.Warm, ContentType.Knowledge, X);
+        Tick();
+        var demoted = Done(await _rig.RunB());
+        Assert.Equal(1, demoted.Scan.Left);
+        Assert.Empty(HeldOn(_rig.B));
+
+        // promoted back to a memory: a fresh no-base row, pushed as a new record
+        _rig.B.Push.Store.Move(Tier.Warm, ContentType.Knowledge, Tier.Warm, ContentType.Memory, X);
+        Tick();
+        var promoted = Done(await _rig.RunB());
+
+        Assert.Equal(1, promoted.Scan.Reactivated);
+        var push = Pushed(promoted);
+        Assert.Equal([X], push.Written);
+        Assert.Equal(1, push.New);
+        Assert.DoesNotContain(push.Skipped, s => s.Id == X);
+        Assert.Equal("Text of X", ReadRecord(RemoteText(X), X).Content);
+        Assert.Empty(HeldOn(_rig.B));
+    }
+
     // ---- AC 10: a record added and deleted between two pulls; sync init; a lost clone ----
 
     [GitFact]
