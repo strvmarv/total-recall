@@ -79,10 +79,9 @@ The merge tables are fixed by the umbrella, so the choice was where the decision
    set that have **no accepted record** in R's listing and no rejected path (`DeleteEntry` and every hold for a vanished
    record come from these), and every id of the scan's `LocalDeletions` that has an accepted record (`PushDeletion`, and the hold of
    an unproven apply). Ids the scan skipped and ids with a rejected path are never candidates.
-2. **The preview** runs before the first entry transaction. For each candidate it builds the same `MergeInput` as the real
-   decision (one shared function; the record's blob is read only for a `LocalDeletions` id that has one) and runs
+2. **The preview** runs before the first entry transaction. For each candidate it builds the same `MergeInput` as the real decision, **including `HeldDelete` from the open items** (that is what leaves an entry with an open item out of the count, as the umbrella requires; one shared function; the record's blob is read only for a `LocalDeletions` id that has one) and runs
    `SyncMerge.decide`, reading nothing it will write. It counts the decisions whose entry outcome is `DeleteEntry` (**remote**)
-   and `PushDeletion` (**local**). A candidate the preview cannot decide (an unreadable row, base or blob) is not counted;
+   and `PushDeletion` (**local**). A candidate the preview cannot decide (an unreadable row, base or blob, or a record that does not parse) is not counted;
    the real decision reports it as it does today.
 3. **The limit** is `max(10, N * delete_guard_percent / 100)` with integer division (rounded down), where `N` is the number of
    `active` rows at the start of the pull (rows with and without a base; a `forgotten` or `left` row is not an entry). A direction
@@ -90,13 +89,12 @@ The merge tables are fixed by the umbrella, so the choice was where the decision
    0 to 100 as the config already does); `ApplyOptions` and `CycleSettings` carry it (a new member with the default of 20, so
    existing constructions are unchanged).
 4. **A tripped direction applies none of its deletions.** For every candidate of that direction the real decision's
-   `DeleteEntry` / `PushDeletion` is replaced by `HoldDeletion <direction>` (`SyncDeletion.holdInstead`, pure: the decision keeps
-   its row, base, notes dropped, `RowState` and the stamps untouched, nothing deleted). An untripped direction is carried out as decided. A hold that
+   `DeleteEntry` / `PushDeletion` is replaced by `HoldDeletion <direction>` (`SyncDeletion.holdInstead`, pure: the decision keeps its `Base` update, **drops its `Notes` and sets `RowState` to `None`** (a `DeleteEntry` decision says `Forgotten`; the entry stays, so the row must not become `forgotten`), and `CloseHeldDelete` as decided; nothing is deleted). An untripped direction is carried out as decided. A hold that
    `decide` itself returns (a pin held, an unproven apply) is never counted and never converted. The count and limit of a tripped direction are in the summary
    (`GuardTripped`). **A guard never blocks the cycle**: held items let `L` advance and the push proceed.
 5. **Unproven applies** need no new fetch logic. When `ApplyProven` is false `decide` already returns `HoldDeletion` for every
    `active` row with a base whose entry exists and whose record is absent (remote), and for every pending local deletion
-   (local); no preview count can trip, whatever the percentage, and nothing is deleted or re-pushed blind. The visit set already
+   (local); no `DeleteEntry` exists to count, so no remote hold is guard-tripped, whatever the percentage, and nothing is deleted or re-pushed blind. (`decide`'s W9 still returns `PushDeletion` in an unproven apply: a row with no base whose own `pushing_stamps` prove the record in R is its own push. That is a counted local deletion like any other, and the guard can convert it.) The visit set already
    contains those rows (`ActiveWithBase` minus `Present`, `LocalDeletions`).
 
 ### What each outcome does
@@ -127,8 +125,7 @@ The merge tables are fixed by the umbrella, so the choice was where the decision
 9. **`PushDeletion`** (a local deletion with proof): the apply writes nothing to the store; the row's base follows the
    decision (the own-push case adopts the record as the base), the pending stamps are cleared as `clearsPending` says, and the id
    is added to `ApplySummary.PushDeletions`. The row stays `active`; it becomes `forgotten` when the push that removed the
-   record is finalized (decision 14). A crash in between is harmless: the next scan reports the deletion again, and the next
-   apply decides it again.
+   record is finalized (decision 14). A crash in between is harmless: the next scan reports the deletion again, and the next apply decides it again. **The applier's existing "the decision changes nothing, so open no transaction" shortcut must account for what is new**: a hold (the item is written), a close (the item is removed) and a `PushDeletion` (the id is reported in `PushDeletions`) are never short-circuited to a no-op because the row happens to be unchanged.
 10. **`LeaveEntry` with `FreshContentStamp`** (a pending text edit beats a remote deletion): the apply issues a **fresh
     content stamp** above the greater of the row's pending content stamp and its base's content stamp, stores it as the row's
     pending content stamp (through the applier's existing `IssueStamp`, inside the entry's transaction at the existing `row` step, as
@@ -137,23 +134,19 @@ The merge tables are fixed by the umbrella, so the choice was where the decision
 11. **`InsertFromRecord` with `EditBeatsDeletion`** (the record's text is newer than the deletion, the entry is gone): the existing
     non-sticky insert, the base becomes the record, the note goes to the summary, any held item is closed. A record that pins still
     produces a `NewPin` review request, so it is postponed with the reason `review` (1b-iii), as before.
-12. **Row states.** The apply creates `forgotten` rows in exactly two places: `DeleteEntry` (decision 6) and the decisions whose
-    `RowState` is `Forgotten` with the entry already gone (record absent, base present: the deletion was already made, possibly
-    by this machine before a crash; the own-push case with no record). `DropRow`, `Ignore` and `Defer` are carried out as
+12. **Row states.** The apply creates `forgotten` rows only where `decide` says so: `DeleteEntry` (decision 6), and the decisions whose `RowState` is `Forgotten` with the entry already gone: W10 (record absent, base present: the deletion was already made, possibly by this machine before a crash) and W9's second branch (no base, record present and not this row's own push: the base becomes the record and the row `forgotten`). An own push whose record is gone and whose row has no base is W11 (`DropRow`). `DropRow`, `Ignore` and `Defer` are carried out as
     today. Nothing else creates a `forgotten` row except decision 14. The scan's reactivation of a `forgotten` or `left` row whose memory
     exists again is unchanged.
-13. **A rejected path of a locally deleted id.** Today an id with a rejected path that the scan reports as a local deletion is
-    postponed as a `deletion`. With deletion handling real that would stall every push on one bad record, which the umbrella
-    forbids ("one bad record cannot stop every push"). Such an id is **not decided and not postponed**: it is listed in the
-    summary's `Skipped` with the reason `the record is rejected`, `L` is not held back, nothing is written for it, and it stays in the visit
-    set through `LocalDeletions` until the path is valid or gone. (My call; the pull design only said "never read as a deletion".)
+13. **A rejected path of a locally deleted id, or an accepted path whose record does not parse.** Today an id with a rejected path, or an accepted path whose blob is invalid, that the scan reports as a local deletion is postponed as a `deletion` (two branches of the pull). With deletion handling real that would stall every push on one bad record, which the umbrella
+    forbids ("one bad record cannot stop every push"). Such an id is **not decided and not postponed**: it is listed in the summary's `Skipped` with the reason `the record is rejected` (or `the record is invalid`), `L` is not held back, nothing is written for it, and it stays in the visit
+    set through `LocalDeletions` until the path is valid or gone. The preview does not count it. (My call; the pull design only said "never read as a deletion".)
 
 ### The push
 
 14. **A local deletion is pushed.** The pusher receives the apply's `PushDeletions`. For each id still in the scan's `LocalDeletions` it
     removes the file `memories/<shard>/<id>.json` from the clone (the record the clone holds at `L`; a record that is missing or
     that fails the tree rules is left alone and reported), stages the removal, and counts it in the commit message
-    (`sync: <machine> +<added> ~<changed> -<removed>`, where `-0` was a constant before). A push with removals and no other change is a
+    (`sync: <machine> +<added> ~<changed> -<removed>`, where `-0` was a constant before; a write-back counts as `+`, a record that is new in the repository, and a repush or edit as `~`). The writer's "nothing to write" stop and its staged-set check (`SyncPush.stagedSetMatches`, which accepts only added and modified files today) both change: a removal-only push is a push, and a deleted file is an expected staged entry. A push with removals and no other change is a
     normal push. After a **successful** push the finalize transaction sets each removed id's row `forgotten` (base kept, pending,
     `pushing_stamps` and `repush_groups` cleared). A failed or non-fast-forward push removes nothing from the rows; the clone is
     reset to `L` by the next push as today. A crash after the push and before the finalize is repaired by the table's "record absent,
@@ -166,11 +159,9 @@ The merge tables are fixed by the umbrella, so the choice was where the decision
     (a reset reverted it) and the group has no pending local change. The apply writes the row's **`repush_groups`** as the
     **flags of this decision** when it carries a `MergeGroups` decision out (replacing the old marker: a group the repository has
     caught up on, or that now has a pending change, is cleared). Every other outcome leaves the marker as it is, except that
-    `DeleteEntry`, a row that becomes `forgotten` or `left`, and the finalize of a pushed deletion clear it; a deferred, failed or
-    postponed entry keeps it. A marker on a row whose record is absent from R (the entry is held, or about to go) is ignored by the writer
-    (there is nothing to patch). The marker is formatted by `SyncDeletion.RepushGroups` as the group names in the fixed order `content,sticky,tier`
-    joined by commas, NULL when none. The visit set gains the rows whose `repush_groups` is not NULL (`SyncApply.visitInput`
-    field `RepushRows`), so a pull with nothing new still decides them and the marker survives a failed push, a non-fast-forward
+    `DeleteEntry`, a row that becomes `forgotten` or `left`, a `HoldDeletion` of either direction, and the finalize of a pushed deletion clear it; a deferred, failed or
+    postponed entry keeps it. (A marker cannot outlive a hold, so the writer never meets one on a row whose record is absent from R.) The marker is formatted by `SyncDeletion.RepushGroups` as the group names in the fixed order `content,sticky,tier`
+    joined by commas, NULL when none. The visit set gains the rows whose `repush_groups` is not NULL (`SyncApply.VisitInput` field `RepushRows`), so a pull with nothing new still decides them and the marker survives a failed push, a non-fast-forward
     retry and `L` moving to `R`. A row with a marker is a **push candidate** even with no pending stamp. For each flagged group the writer
     patches the record **at R** by setting that group's value and stamp to the **base's value and stamp** (no new stamp, no
     clock call; a local-only state such as a declined pin, a held pin edit or a local demotion never enters the record). It
@@ -181,13 +172,11 @@ The merge tables are fixed by the umbrella, so the choice was where the decision
     with the new reason `held-delete` and writes nothing: a tag, a pin or a promotion on it can no longer write the vanished record
     back. The only thing that writes it back is a pending text change, and the apply has already closed the item then
     (decision 10). A row whose item is `local` is a `LocalDeletions` row and was never a candidate.
-18. **Exclusions retired.** `not-reconciled` (no base, record accepted) and the `record-missing` of "base, no record" are
-    unreachable after a complete pull: the first is decided into a base by the pull, the second is a delete, a hold, or the
-    write-back of decision 15. They are removed from `SyncPush.Exclusion` and from the order of decision 5 of the push design. The pusher's **gate**
-    is unchanged: it runs only after a complete pull (`SyncCycle.pushDecision`), which is the guarantee. A pusher call that nevertheless meets
-    a base-and-no-record row without a pending text change, or a row with no base and an accepted record, must **not write the record blind**;
-    how it leaves such a row out (a defensive exclusion, kept or renamed) is the builder's call, and the acceptance criteria require only that
-    no path writes a vanished or unreconciled record.
+18. **Exclusions narrowed.** After a complete pull the push candidate with a base and no record is one of: deleted (not a candidate), held (excluded, decision 17), or saved by a text edit
+    (written back, decision 15). The `record-missing` exclusion therefore stays only for a base-and-no-record row **with no pending change of the text** (nothing the pusher may write
+    from nothing) and is documented as defensive; a row with a base, no record and a pending text change leaves it. **`not-reconciled` stays, unchanged**: it is reachable, because a path
+    that the listing accepts but whose blob does not parse is a rejection the pull never decides (decision 13), so a no-base row over such a record must not be written over it blind, and the pusher
+    reads a record only for rows with a base. The pusher's **gate** is unchanged: it runs only after a complete pull (`SyncCycle.pushDecision`).
 
 ### The pull's result and `L`
 
@@ -216,7 +205,7 @@ The merge tables are fixed by the umbrella, so the choice was where the decision
 
 - The pull design postponed `deletion` and `repush`; this milestone carries them out and keeps only `review`.
 - The pull design left a rejected path of a locally deleted id postponed as `deletion`; it is now skipped (decision 13).
-- The push design's `record-missing` and `not-reconciled` exclusions are removed (decision 18) and its commit message counts removals.
+- The push design's `record-missing` exclusion narrows to a row with no pending text change, `not-reconciled` is kept, and the commit message counts removals (decisions 14 and 18).
 - The cycle design's "pull-incomplete" skip now arises only from a review item, a deferral or a cancellation.
 - The draft acceptance criteria for 1b-ii listed `accept`, `restore` and the bulk forms; they move to 1b-iii (this milestone updates the companion
   criteria file accordingly).
@@ -240,7 +229,7 @@ The merge tables are fixed by the umbrella, so the choice was where the decision
   `RepushGroups.encode/decode`. All pure and total.
 - `Core.SyncApply`: `postponement` review-only; `VisitInput.RepushRows`; `planRow` handles `FreshContentStamp` (needs the base's content
   stamp in `RowBefore`), the `repush_groups` replacement and a `Forgotten` row from `DeleteEntry`.
-- `Core.SyncPush`: `isCandidate` accepts a row with a marker; `Exclusion` loses two cases and gains `HeldDelete`; the writer's pure plan gains the removal
+- `Core.SyncPush`: `isCandidate` accepts a row with a marker; `stagedSetMatches` accepts a deleted file; `Exclusion` gains `HeldDelete` and `RecordMissing` narrows (decision 18); the writer's pure plan gains the removal
   list, the write-back and the repush patch; `commitMessage` takes the removal count.
 - `Infrastructure.GitSync.GitSyncReviews` (new): `ReadOpenHeld`, `UpsertHeld`, `Delete`, each with the caller's transaction.
 - `GitSyncApplier`: `ApplyOptions` gains `DeleteGuardPercent`; the preview; the carry-out of `DeleteEntry`, `HoldDeletion`, `PushDeletion`,
@@ -254,7 +243,7 @@ pusher and cycle rigs with an in-process bare repository, one or two stores and 
 
 - **Core**: every `guardLimit` and `guardTrips` boundary (9, 10, 11 deletions, 100 entries at 20 %, 0 %, 100 %, no entries); `holdInstead` on
   every entry outcome; `holdCause`; the `repush_groups` codec round trip and its rejection of any other text; `postponement` returns only `review`;
-  `visitSet` with a marker row; `planRow` for each new outcome; `isCandidate` and the exclusion order without the two retired cases.
+  `visitSet` with a marker row; `planRow` for each new outcome; `isCandidate` and the narrowed `record-missing`; `holdInstead` clears `RowState` and notes.
 - **Applier**: each outcome of decisions 6 to 12 against a real store (the existing fault-injection steps at every transaction step leave content,
   vector, row, held item and issue exactly as before the rollback); a preview that trips only the remote direction, only the local direction
   and both; a pull with the guard tripped still advances `L`; the cause words; the held item is closed by a reappearing record and by a pending text
@@ -269,12 +258,11 @@ pusher and cycle rigs with an in-process bare repository, one or two stores and 
 
 (The ticket copies these, refined.)
 
-1. A forget on machine A is applied on machine B by one cycle each; B's unpushed tag, pin, project or promotion change does not keep the
-   memory, and B's unpushed text edit keeps it on both machines, in either push order.
+1. A forget on machine A is applied on machine B by one cycle each; B's unpushed tag, project or promotion change does not keep the memory, B's unpushed text edit keeps it on both machines in either push order, and a pending pin change on B holds it (criterion 3).
 2. A memory forgotten on one machine is not re-inserted on another by a record with the same text, nor by older text after a reset; a newer text edit
    re-inserts it (non-sticky) and the summary notes it.
-3. A memory pinned on B is held (not deleted) when another machine deletes it, with cause `sticky`; the entry and its pin remain.
-4. When more than `max(10, delete_guard_percent of the active rows)` deletions in one direction would be applied or pushed, none of that direction is applied,
+3. A memory pinned on B is held (not deleted) when another machine deletes it, with cause `sticky`, also when the pin is only pending (not yet in the repository); the entry and its pin remain.
+4. When more than `max(10, delete_guard_percent of the active rows at the start of the pull, rounded down)` deletions in one direction would be applied or pushed, none of that direction is applied,
    each becomes an open `held-delete` item with cause `guard`, the pull is complete, `L` advances, other changes are still pushed, and the summary has the count
    and the limit; at exactly the limit all are applied; the other direction is judged on its own.
 5. A hand-reset remote (six of nine records, and one case above the guard), after two cycles per machine with an unrelated push between: nothing is deleted
@@ -285,14 +273,14 @@ pusher and cycle rigs with an in-process bare repository, one or two stores and 
    the record is written back from the base with a stamp newer than the deletion); a record that reappears closes the item; an unrelated entry's item is untouched.
 8. A local deletion on A is removed from the repository by the next cycle (one commit whose message counts it), and the row is `forgotten` with its base; a kill after
    the push and before the finalize leaves no duplicate commit and the next cycle repairs the row.
-9. A local deletion whose record path is rejected (invalid) in the repository is skipped and reported, holds neither `L` nor the other pushes, and nothing is
+9. A local deletion whose record in the repository is rejected, or accepted by path but invalid, is skipped and reported, holds neither `L` nor the other pushes, and nothing is
    removed.
 10. A row that is `active` with a base, whose entry is present and unchanged and whose record is absent from the trees of both `L` and `R` (so it is
     absent from the `L..R` diff: the record was added and deleted inside one catch-up) is decided as a deletion in a proven pull and is deleted, the row
     `forgotten`; `sync init --url <new repository>` on a machine with rows deletes
     nothing; a blocked, never-pushed entry survives a lost clone.
-11. After a complete pull no postponement has the reason `deletion` or `repush`; `review` still postpones. The retired `not-reconciled` and `record-missing` exclusions no
-    longer exist and no path of the push writes a vanished or an unreconciled record blind.
+11. After a pull no postponement has the reason `deletion` or `repush`; `review` still postpones. A no-base row whose accepted path holds an invalid record is not overwritten by a push; a
+    base-and-no-record row with no pending text change writes nothing.
 12. A fault injected at every step of an entry's transaction (delete, hold, close, the `row` step that issues the fresh stamp and writes the repush marker) leaves the content row, the vector row, the entry's row,
     its held item and its issue exactly as before.
 13. Nothing outside the existing cycle, pusher and applier files calls them (`GitSyncCycleCallerTests` passes unchanged); the draft acceptance-criteria file moves
