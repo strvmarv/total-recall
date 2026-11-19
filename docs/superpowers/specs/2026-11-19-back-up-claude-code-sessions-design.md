@@ -347,7 +347,7 @@ One `TranscriptIngester.IngestSession(source)` does, for one source file:
      kind): the kind of a whole-file read is deterministic, so the redo cannot change it again and cannot loop. Otherwise the chunks of
      the earlier units would keep a stale header and a grown session would not equal the same session ingested once.
    - A pass over a session with **no kept content**: with no row it stores nothing (the file is read again on the next run, which is
-     cheap and counted `empty`); with a row (a rewritten file that now keeps nothing, or a cutoff that hides everything) it **deletes the
+     cheap and counted `empty`); with a row (a rewritten pass, as after a cutoff change, that now keeps nothing, or a cutoff that hides everything) it **deletes the
      session's chunks** and sets the row to: `ingested_offset` 0, `exchange_count` 0, `settled_user_turns` 0, null title, `started_at` and
      `ended_at`, the stored kind kept (it is NOT NULL), and the new source fields and cutoff. A row with `exchange_count = 0` is read as a
      rewritten pass next time (step 4), so the numbering never starts from -1.
