@@ -78,7 +78,7 @@ src/
 │   ├── Diagnostics/              — ExceptionLogger.LogChain (walks InnerException chain, AOT-safe)
 │   └── Config/                   — TOML loader, defaults.toml as embedded resource
 │
-├── TotalRecall.Server/           — JSON-RPC stdio MCP server, 42 core tool handlers (50–51 with mode-dependent tools)
+├── TotalRecall.Server/           — JSON-RPC stdio MCP server, 42 core tool handlers (53–54 with mode-dependent tools)
 │   ├── McpServer.cs              — request dispatch, lifecycle, error translation
 │   ├── Handlers/                 — one file per MCP tool (memory_*, kb_*, eval_*, session_*, status, …)
 │   └── AutoMigrationGuard.cs     — 5-state migration state machine (TS → .NET on first launch)

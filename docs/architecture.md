@@ -11,7 +11,7 @@ npm wrapper layer (Node, zero runtime dependencies):
 MCP Server (.NET 10 NativeAOT — C# imperative shell + F# functional core)
 ├── TotalRecall.Core (F#)        — pure functions: tokenizer, decay, hybrid ranking, parsers, chunker
 ├── TotalRecall.Infrastructure   — SQLite/Postgres storage, ONNX/remote embedder, importers, migrations
-├── TotalRecall.Server           — MCP JSON-RPC server, 42 core tool handlers (50–51 with mode-dependent tools), lifecycle
+├── TotalRecall.Server           — MCP JSON-RPC server, 42 core tool handlers (53–54 with mode-dependent tools), lifecycle
 ├── TotalRecall.Web              — embedded ASP.NET Core minimal API + React SPA (the web UI)
 ├── TotalRecall.Cli              — CLI commands (status, eval, kb, memory, config, migrate, ui)
 └── TotalRecall.Host             — composition root, AOT entry point, migration guard

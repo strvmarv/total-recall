@@ -88,6 +88,8 @@ public sealed class SetCommandTests : IDisposable
     [InlineData("storage.mode.x")]
     [InlineData("GIT_SYNC.interval_seconds")]
     [InlineData("storage")]
+    [InlineData("transcripts.enabled")]
+    [InlineData("transcripts")]
     public async Task ProtectedKey_Exit2_NothingWritten_NoSnapshot(string key)
     {
         var path = TempConfigPath();

@@ -55,6 +55,12 @@ notice = true                     # Tell the user once per host and version what
 check = true                      # Ask GitHub in the background whether a newer release exists, and tell the user once per release; never runs while notice = false (set false to turn the check off)
 check_interval_hours = 24         # Minimum hours between answered checks; a failed attempt is retried after an hour (a whole number from 1 to 8760; anything else means 24)
 
+[transcripts]
+enabled = false                   # Opt-in transcript archive (off by default)
+db_path = ""                      # Empty: the main database; else an absolute path or one starting with ~/
+retention_days = 0                # Reserved: no effect yet (0 keeps archived text forever)
+allow_remote_embedding = false    # Reserved: no effect yet (true would let a remote embedder embed archive text)
+
 [embedding]
 model = "bge-small-en-v1.5"      # Embedding model name
 dimensions = 384                  # Embedding dimensions
@@ -81,6 +87,8 @@ dimensions = 384                  # Embedding dimensions
 ```
 
 **The update check:** with `updates.check = true` (the default) the server asks GitHub in the background, no earlier than 60 seconds after it starts and only when the last answer is older than the interval, whether a newer release exists, and a host that was already told its version gets one "is available" line per release. After an answer it waits the full `updates.check_interval_hours` before asking again; after a failed attempt it tries again no sooner than an hour later. It never runs while `updates.notice = false`, and a development build never runs it. The request carries only the version you run in its `User-Agent` header; see [PRIVACY.md](../PRIVACY.md). The environment variable `TOTAL_RECALL_NO_UPDATE_CHECK` turns the check off without a config file when it is set to any non-empty value other than `0` or `false` (any case, spaces trimmed); `0`, `false` or empty leave `updates.check` to decide. Codex forwards the variable to its server. Cursor does not pass it to its plugin server (a sanitized environment), so use `updates.check = false` there. A variable set only in an MCP `env` block is not seen by the Claude Code hook that shows the notice, which can still show a release an earlier check recorded.
+
+**The transcript archive:** the `[transcripts]` settings belong to the opt-in [transcript archive](transcripts.md), which can be enabled, inspected and emptied but not searched yet. They are changed by editing `config.toml` by hand or by the `total-recall transcripts` commands (`enable` and `disable` write `enabled`), never by `config_set`, the web UI or `total-recall config set`, which refuse every `transcripts.*` key. `retention_days` and `allow_remote_embedding` are defined for a later release and have no effect in this version, because nothing is stored or embedded yet. A `db_path` that is present but invalid makes the archive unavailable instead of moving it into the main database.
 
 **Relocating the database:** set `TOTAL_RECALL_DB_PATH` to an absolute path or `~/`-prefixed path. See [Relocating the database](database-location.md) for cloud-sync and shared-workspace guidance.
 

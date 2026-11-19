@@ -39,6 +39,10 @@ public sealed class ToolAllowlistTests
     // memory_feedback is assistant-only: registered in the MCP ToolRegistry
     // but deliberately NOT browser-reachable, so it must stay off the allowlist.
     [InlineData("memory_feedback")]
+    // The archive tools are assistant-facing and off by default: not browser-reachable.
+    [InlineData("transcript_search")]
+    [InlineData("transcript_get")]
+    [InlineData("transcript_sessions")]
     [InlineData("")]
     [InlineData(null)]
     [InlineData("does_not_exist")]

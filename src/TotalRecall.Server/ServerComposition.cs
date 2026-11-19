@@ -654,6 +654,13 @@ public static class ServerComposition
             registry.Register(new SkillImportHostHandler(
                 sqliteSkillService, () => Environment.CurrentDirectory));
 
+            // Opt-in transcript archive tools (off by default; the gate reads the sentinel on every call so the
+            // answer follows `transcripts enable|disable` without a restart). sqlite and cortex only.
+            var transcriptSentinel = new Infrastructure.Transcripts.TranscriptSentinel(ConfigLoader.GetDataDir());
+            registry.Register(new TranscriptSearchHandler(transcriptSentinel.IsEnabled));
+            registry.Register(new TranscriptGetHandler(transcriptSentinel.IsEnabled));
+            registry.Register(new TranscriptSessionsHandler(transcriptSentinel.IsEnabled));
+
             return new ServerCompositionHandles(conn, registry, store, storageMode, reindexProgress: reindexProgress, reindexCts: reindexCts);
         }
         catch
@@ -984,6 +991,13 @@ public static class ServerComposition
             registry.Register(new SkillDeleteHandler(skillClient));
             registry.Register(new SkillImportHostHandler(
                 skillImportService, () => Environment.CurrentDirectory));
+
+            // Opt-in transcript archive tools (off by default; the gate reads the sentinel on every call so the
+            // answer follows `transcripts enable|disable` without a restart). sqlite and cortex only.
+            var transcriptSentinel = new Infrastructure.Transcripts.TranscriptSentinel(ConfigLoader.GetDataDir());
+            registry.Register(new TranscriptSearchHandler(transcriptSentinel.IsEnabled));
+            registry.Register(new TranscriptGetHandler(transcriptSentinel.IsEnabled));
+            registry.Register(new TranscriptSessionsHandler(transcriptSentinel.IsEnabled));
 
             return new ServerCompositionHandles(conn, registry, routingStore, storageMode, periodicSync, reindexProgress, reindexCts, skillAutoImportEnabled: autoImportEnabled);
         }

@@ -2,7 +2,7 @@
 //
 // Contract test for CatalogDumper.DumpLocalCatalogJson():
 //   - output is valid JSON with shape { "tools": [...] }
-//   - at least 40 tools (local/sqlite mode registers 50: 42 core + 8 sqlite-only)
+//   - exactly 53 tools (local/sqlite mode registers 53: 42 core + 8 sqlite-only + 3 archive tools)
 //   - contains memory_store and usage_status (always in local mode)
 //   - does NOT contain skill_delete (cortex-only)
 
@@ -22,7 +22,7 @@ public class DumpCatalogTests
         var json = CatalogDumper.DumpLocalCatalogJson();
         using var doc = JsonDocument.Parse(json);
         var tools = doc.RootElement.GetProperty("tools");
-        Assert.True(tools.GetArrayLength() >= 40);
+        Assert.Equal(53, tools.GetArrayLength());
 
         var names = new System.Collections.Generic.HashSet<string>();
         foreach (var t in tools.EnumerateArray())
@@ -30,6 +30,9 @@ public class DumpCatalogTests
 
         Assert.Contains("memory_store", names);
         Assert.Contains("usage_status", names);   // local registers usage/cache/skill
+        Assert.Contains("transcript_search", names);
+        Assert.Contains("transcript_get", names);
+        Assert.Contains("transcript_sessions", names);
         Assert.DoesNotContain("skill_delete", names); // cortex-only
     }
 }

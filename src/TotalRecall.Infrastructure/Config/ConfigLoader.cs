@@ -96,18 +96,29 @@ public sealed class ConfigLoader : IConfigLoader
             return Path.Combine(GetDataDir(), "total-recall.db");
         }
 
+        return ValidateDbPath(raw, "TOTAL_RECALL_DB_PATH");
+    }
+
+    /// <summary>
+    /// The validation shared by <c>TOTAL_RECALL_DB_PATH</c> and <c>transcripts.db_path</c>:
+    /// trim, reject a trailing separator and a bare <c>~</c>, expand a leading
+    /// <c>~/</c>, and require an absolute path. Throws <see cref="SqliteDbPathException"/>;
+    /// the message names <paramref name="settingName"/>.
+    /// </summary>
+    internal static string ValidateDbPath(string raw, string settingName)
+    {
         var trimmed = raw.Trim();
 
         if (trimmed.EndsWith('/') || trimmed.EndsWith('\\'))
         {
             throw new SqliteDbPathException(
-                $"TOTAL_RECALL_DB_PATH must be a file path, not a directory. Got: \"{trimmed}\"");
+                $"{settingName} must be a file path, not a directory. Got: \"{trimmed}\"");
         }
 
         if (trimmed == "~")
         {
             throw new SqliteDbPathException(
-                "TOTAL_RECALL_DB_PATH must be a file path, not a directory. Got: \"~\"");
+                $"{settingName} must be a file path, not a directory. Got: \"~\"");
         }
 
         var expanded = trimmed;
@@ -127,7 +138,7 @@ public sealed class ConfigLoader : IConfigLoader
         if (!Path.IsPathRooted(expanded))
         {
             throw new SqliteDbPathException(
-                $"TOTAL_RECALL_DB_PATH must be absolute or start with ~/. Got: \"{trimmed}\"");
+                $"{settingName} must be absolute or start with ~/. Got: \"{trimmed}\"");
         }
 
         return expanded;
@@ -178,6 +189,71 @@ public sealed class ConfigLoader : IConfigLoader
             // Any read or parse problem leaves the notice on.
         }
         return true;
+    }
+
+    /// <summary>
+    /// Read the <c>[transcripts]</c> settings of the opt-in archive from the effective
+    /// config. Fail-safe: a missing table, a value of another type, or an unreadable or
+    /// unparsable config file reads as the defaults (disabled, main database, no
+    /// retention, no remote embedding). <c>enabled</c> and <c>allow_remote_embedding</c>
+    /// are on only for the boolean <c>true</c>; <c>retention_days</c> below 1 reads 0.
+    /// <c>db_path</c> is validated with the rules of <c>TOTAL_RECALL_DB_PATH</c>: a
+    /// non-string or invalid value sets <c>DbPathError</c> and leaves <c>DbPath</c> empty.
+    /// </summary>
+    public static TranscriptsSettings LoadTranscriptsSettings(string? userConfigPath = null)
+    {
+        try
+        {
+            var table = new ConfigLoader().LoadEffectiveTable(userConfigPath);
+            if (!table.TryGetValue("transcripts", out var tObj) || tObj is not TomlTable t)
+            {
+                return new TranscriptsSettings(false, string.Empty, null, 0, false);
+            }
+
+            var enabled = t.TryGetValue("enabled", out var e) && e is bool eb && eb;
+            var allowRemote = t.TryGetValue("allow_remote_embedding", out var a) && a is bool ab && ab;
+
+            var retention = 0;
+            if (t.TryGetValue("retention_days", out var r) && r is long rl && rl > 0)
+            {
+                retention = rl > int.MaxValue ? int.MaxValue : (int)rl;
+            }
+
+            var dbPath = string.Empty;
+            string? dbPathError = null;
+            if (t.TryGetValue("db_path", out var d))
+            {
+                if (d is string ds)
+                {
+                    if (!string.IsNullOrWhiteSpace(ds))
+                    {
+                        try
+                        {
+                            dbPath = ValidateDbPath(ds, "transcripts.db_path");
+                            // On Windows "C:archive.db" and "\\archive.db" are rooted but relative to the current
+                            // directory, so a later command run elsewhere would look in the wrong place.
+                            if (!Path.IsPathFullyQualified(dbPath))
+                            {
+                                dbPath = string.Empty;
+                                dbPathError = $"transcripts.db_path must be an absolute path or start with ~/. Got: \"{ds.Trim()}\"";
+                            }
+                        }
+                        catch (SqliteDbPathException ex) { dbPathError = ex.Message; }
+                    }
+                }
+                else
+                {
+                    dbPathError = "transcripts.db_path must be a string.";
+                }
+            }
+
+            return new TranscriptsSettings(enabled, dbPath, dbPathError, retention, allowRemote);
+        }
+        catch (Exception)
+        {
+            // Any read or parse problem leaves the archive off.
+            return new TranscriptsSettings(false, string.Empty, null, 0, false);
+        }
     }
 
     /// <summary>

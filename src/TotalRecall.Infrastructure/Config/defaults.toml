@@ -150,3 +150,17 @@ check_interval_hours = 24
 # substrings. Blocked candidates stay pending so you can review/redact them.
 # [eval.grow]
 # sensitive_terms = ["acme-internal", "project-codename"]
+
+[transcripts]
+# Opt-in archive of conversation transcripts. Off by default; only the user can
+# turn it on (config_set and `config set` refuse every transcripts.* key), by
+# editing config.toml.
+enabled = false
+# Database file for the archive. Empty means the main database. Otherwise an
+# absolute path or one starting with ~/ (same rules as TOTAL_RECALL_DB_PATH).
+db_path = ""
+# Delete archived transcripts older than this many days. 0 keeps them forever.
+retention_days = 0
+# Allow a remote embedding provider to embed transcript text. Off: transcripts
+# are embedded only by the local model.
+allow_remote_embedding = false

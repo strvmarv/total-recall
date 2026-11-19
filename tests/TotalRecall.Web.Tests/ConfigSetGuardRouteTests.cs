@@ -56,6 +56,8 @@ public sealed class ConfigSetGuardRouteTests : IAsyncLifetime
     [InlineData("git_sync.remote")]
     [InlineData("storage.mode")]
     [InlineData("storage.connection_string")]
+    [InlineData("transcripts.enabled")]
+    [InlineData("transcripts.db_path")]
     public async Task ProtectedKey_IsRefused_AndTheFileIsNotWritten(string key)
     {
         var resp = await Post($$"""{"key":"{{key}}","value":"x"}""");

@@ -51,6 +51,9 @@ public sealed class ConfigSetHandlerTests : IDisposable
     [InlineData("GIT_SYNC.interval_seconds")]
     [InlineData("storage")]
     [InlineData(" storage . connection_string ")]
+    [InlineData("transcripts.enabled")]
+    [InlineData("transcripts")]
+    [InlineData("Transcripts.DB_Path")]
     public async Task ProtectedKey_IsRefused_BeforeAnythingIsReadOrWritten(string key)
     {
         var providerCalls = 0;

@@ -14,7 +14,7 @@ This file is the operational handbook for AI agents and human contributors worki
 ### Layer Diagram
 ```
 TotalRecall.Host (C#)          ← AOT entry point + composition root
-├── TotalRecall.Server (C#)    ← MCP JSON-RPC over stdio; 51 handlers (one file each; 50 are served in SQLite mode, 51 in Cortex mode)
+├── TotalRecall.Server (C#)    ← MCP JSON-RPC over stdio; 54 handlers (one file each; 53 are served in SQLite mode, 54 in Cortex mode)
 ├── TotalRecall.Web (C#)       ← embedded minimal-API + React SPA (web UI), dispatches to ToolRegistry
 ├── TotalRecall.Cli (C#)       ← CLI commands (Spectre.Console), including `total-recall ui`; the git sync `sync init|join|leave|status` commands exist but are hidden until milestone 1b-iii
 ├── TotalRecall.Infrastructure (C#) ← SQLite/Postgres, ONNX embedder, importers, migrations
@@ -92,6 +92,7 @@ npm wrapper layer (zero-dep Node):
 | Git sync push (write this machine's changed memories into the clone, commit, push without force, finalize the rows; deletions: removes the record of each proven local deletion and marks the row `forgotten`, writes back a record a text edit saved, republishes reverted groups, skips held entries; **nothing calls it but the cycle of 1b-i-4**, which nothing calls until the secret scan of 1b-iii has merged) | `src/TotalRecall.Core/SyncPush.fs`; `src/TotalRecall.Infrastructure/GitSync/GitSyncPusher*.cs` (partial: `.cs`, `.Prepare.cs`, `.Plan.cs`, `.Write.cs`, `.Finalize.cs`); the two closed git commands `StagePaths` and `StagedSet` in `src/TotalRecall.Core/SyncGit.fs` and `GitClient.Write.cs` |
 | Git sync pull (fetch the repository, apply other machines' memories; deletions: applies a proven remote deletion, holds an unproven, pinned or guard-tripped one as an open `held-delete` item, lists proven local deletions for the push; called only by the cycle, which nothing calls until 1b-iii has merged) | `src/TotalRecall.Core/SyncApply.fs`, `SyncDeletion.fs`; `src/TotalRecall.Infrastructure/GitSync/GitSyncFetcher.cs`, `PullTree.cs`, `GitSyncApplier*.cs`, `LocalEntryReader.cs`, `BaseRenderer.cs`, `GitSyncIssues.cs`, `GitSyncReviews.cs` |
 | Git sync setup verbs (hidden `sync init`/`join`/`leave`/`status`) | `src/TotalRecall.Cli/Commands/Sync/*.cs`, `src/TotalRecall.Infrastructure/GitSync/SyncSetupService*.cs`, `GitSyncStateStore.cs`, `ReadOnlyDatabase.cs`, `LegacyDatabaseProbe.cs`, `CloneSideline.cs`, `UserConfigFile.cs`; `src/TotalRecall.Core/SyncSetup.fs` |
+| Opt-in transcript archive (settings, commands, store, sentinel, tools; off by default, not searchable yet; see `docs/transcripts.md`) | settings `src/TotalRecall.Infrastructure/Config/defaults.toml` `[transcripts]` and `ConfigLoader.LoadTranscriptsSettings`; commands `src/TotalRecall.Cli/Commands/Transcripts/*.cs`; store `src/TotalRecall.Infrastructure/Transcripts/TranscriptStore.cs` and `Storage/TranscriptSchema.cs` (own `tx_schema_version`); sentinel `Transcripts/TranscriptSentinel.cs` (`<dataDir>/live/enabled`); tools `src/TotalRecall.Server/Handlers/Transcript*Handler.cs`; `config_set` guard `src/TotalRecall.Core/SyncSettingsGuard.fs` |
 | Core domain types | `src/TotalRecall.Core/Types.fs` |
 | Pure logic (decay, ranking) | `src/TotalRecall.Core/*.fs` |
 | Migration guard | `src/TotalRecall.Server/AutoMigrationGuard.cs` |
@@ -403,7 +404,7 @@ The root cause is Windows Defender mid-scanning the freshly-extracted `total-rec
 
 There is no `ToolContext` object (a leftover from the TypeScript design). Each handler receives its dependencies (store, embedder, config, session lifecycle, event logs) through its constructor, wired in `ServerComposition.BuildRegistry()`; see `src/TotalRecall.Server/Handlers/AGENTS.md`. Handlers that log retrieval or compaction events take the shared `SessionConfigSnapshot` and tag events with its id (`"default"` or `""` only when it is absent or the store fails).
 
-The composition root in `src/TotalRecall.Host/Program.cs` wires up all dependencies (storage, embedder, importers, MCP server, migration guard) and is the AOT entry point. The 51 MCP handlers live in `src/TotalRecall.Server/Handlers/` — one file per handler.
+The composition root in `src/TotalRecall.Host/Program.cs` wires up all dependencies (storage, embedder, importers, MCP server, migration guard) and is the AOT entry point. The 54 MCP handlers live in `src/TotalRecall.Server/Handlers/` — one file per handler.
 
 ---
 
