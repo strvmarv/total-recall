@@ -9,11 +9,12 @@ let tests =
         testCase "the storage mode, the connection string, git_sync and everything beneath them are protected" <| fun _ ->
             for key in [ "storage.mode"; "storage.connection_string"; "storage.mode.x"; "storage.connection_string.x"; "storage"
                          "git_sync"; "git_sync.remote"; "git_sync.a.b"; " Git_Sync . remote "; "STORAGE.MODE"
-                         "storage . connection_string"; "storage..mode"; ""; "."; "git_sync." ] do
+                         "storage . connection_string"; "storage..mode"; ""; "."; "git_sync."
+                         "transcripts"; "transcripts.enabled"; "transcripts.db_path"; "Transcripts.Enabled"; " transcripts . x " ] do
                 Expect.isTrue (isProtectedKey key) (sprintf "%A" key)
 
         testCase "look-alikes and ordinary keys stay writable" <| fun _ ->
-            for key in [ "storagex.mode"; "storage.other"; "git_syncx.remote"; "tiers.hot.max_entries"; "embedding.provider"; "x.storage.mode" ] do
+            for key in [ "storagex.mode"; "storage.other"; "git_syncx.remote"; "tiers.hot.max_entries"; "embedding.provider"; "x.storage.mode"; "transcriptsx.enabled"; "transcript.enabled" ] do
                 Expect.isFalse (isProtectedKey key) key
 
         testCase "the refusal names the key and says the user changes it, without naming sync commands" <| fun _ ->
