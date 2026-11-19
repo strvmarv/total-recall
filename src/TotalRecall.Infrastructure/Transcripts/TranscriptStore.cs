@@ -128,7 +128,9 @@ public sealed class TranscriptStore : ITranscriptStore
         }
     }
 
-    private enum FileState { Missing, Empty, Archive, MainSchema, Other }
+    // ArchiveOnly: tx_schema_version without _schema_version (a former separate archive file). Fine as a separate
+    // archive, refused at the main database path. Archive: tx_schema_version and _schema_version (a main database).
+    private enum FileState { Missing, Empty, Archive, ArchiveOnly, MainSchema, Other }
 
     /// <summary>Classifies the file read-only (no sidecar, no pragma); null state with a message when it cannot be read.</summary>
     private static (FileState State, string? Unknown) Inspect(string path)
@@ -141,7 +143,11 @@ public sealed class TranscriptStore : ITranscriptStore
 
         using var conn = open.Connection;
         if (CountRo(conn, "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'tx_schema_version'") > 0)
-            return (FileState.Archive, null);
+        {
+            return CountRo(conn, "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = '_schema_version'") > 0
+                ? (FileState.Archive, null)
+                : (FileState.ArchiveOnly, null);
+        }
         if (CountRo(conn, "SELECT count(*) FROM sqlite_master") == 0)
             return (FileState.Empty, null);
         if (CountRo(conn, "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = '_schema_version'") > 0)
@@ -154,6 +160,10 @@ public sealed class TranscriptStore : ITranscriptStore
         var (state, unknown) = Inspect(path);
         if (unknown is not null)
             return new TranscriptOpenResult(TranscriptOpenStatus.Failed, null, unknown);
+
+        // An archive-only file at the main path is not a main database, with or without create: refuse before any write.
+        if (state == FileState.ArchiveOnly)
+            return new TranscriptOpenResult(TranscriptOpenStatus.Refused, null, LegacyDatabaseProbe.RefusalText);
 
         if (!create)
         {
@@ -192,7 +202,7 @@ public sealed class TranscriptStore : ITranscriptStore
 
         if (!create)
         {
-            return state == FileState.Archive
+            return state is FileState.Archive or FileState.ArchiveOnly
                 ? Opened(OpenStore(path, isMain: false, runMainSchema: false))
                 : new TranscriptOpenResult(TranscriptOpenStatus.Absent, null, null);
         }
@@ -209,6 +219,7 @@ public sealed class TranscriptStore : ITranscriptStore
                 PrivateFiles.CreateEmptyFile(path); // keeps the (empty) content, tightens the mode
                 return Opened(OpenStore(path, isMain: false, runMainSchema: false));
             case FileState.Archive:
+            case FileState.ArchiveOnly:
                 return Opened(OpenStore(path, isMain: false, runMainSchema: false));
             default:
                 return new TranscriptOpenResult(TranscriptOpenStatus.Refused, null,
