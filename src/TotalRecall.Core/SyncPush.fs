@@ -3,7 +3,13 @@
 /// without force. This module decides, without touching anything: which rows are candidates, which candidates are left
 /// out and why (`exclusion`, `pathOccupied`), what happens to a block mark (`markAction`), which groups of an entry are
 /// written (`planChanged`), the new record (`newRecord`), the row after a push (`afterPush`), the commit message, the
-/// machine label, the `published` mapping of a failed push and the staged-set check. Pure and total: no I/O, no clock.
+/// machine label, the `published` mapping of a failed push and the staged-set check. Milestone 1b-ii (D14) adds the
+/// removal of a locally deleted memory's record: which ones can be removed (`removable`), the `-` count of the commit
+/// message and a deleted path in the staged set; the `held-delete` exclusion of an entry with an open held item (D17);
+/// and the narrowed `record-missing` (D18), which no longer covers a row whose pending text edit saved it from a remote
+/// deletion (that row is written back from its base, D15). It also adds the repush of the groups a reset repository
+/// reverted (D16): a row with a `repush_groups` marker is a candidate, and `repushPlan` takes each flagged group that has
+/// no pending stamp from the base, with the base's stamp. Pure and total: no I/O, no clock.
 module TotalRecall.Core.SyncPush
 
 open System
@@ -16,19 +22,23 @@ open TotalRecall.Core.SyncMerge
 
 /// What the pusher reads of a `git_sync_entry` row to decide whether it is a candidate (decision 4). `BaseTagsHash` is
 /// `SyncScan.tagsHash` of the base's tags (`None`: no base, or one that cannot be read); `ScannedTagsHash` the row's
-/// `scanned_tags_hash` (`None`: nothing seen).
+/// `scanned_tags_hash` (`None`: nothing seen). `HasRepushMarker`: the row's `repush_groups` names at least one group
+/// (milestone 1b-ii, D16).
 type RowFacts =
     { State: RowState
       HasBase: bool
       BaseTagsHash: string option
       ScannedTagsHash: string option
-      Pending: GroupStamps }
+      Pending: GroupStamps
+      HasRepushMarker: bool }
 
 /// An `active` row is a candidate when it has no base, or a pending content, sticky or tier stamp, or tags that differ
-/// from its base's (the scan stores the entry's tags hash; a NULL hash is "nothing seen" and is no difference).
+/// from its base's (the scan stores the entry's tags hash; a NULL hash is "nothing seen" and is no difference), or a
+/// repush marker (D16: the groups a reset reverted are written back even with nothing pending).
 let isCandidate (row: RowFacts) : bool =
     row.State = Active
     && (not row.HasBase
+        || row.HasRepushMarker
         || row.Pending.Content.IsSome
         || row.Pending.Sticky.IsSome
         || row.Pending.Tier.IsSome
@@ -36,10 +46,11 @@ let isCandidate (row: RowFacts) : bool =
             | Some scanned, Some baseHash -> scanned <> baseHash
             | _ -> false))
 
-/// Why a candidate is left out of this push (decision 5).
+/// Why a candidate is left out of this push (decision 5; `HeldDelete` from milestone 1b-ii, D17).
 type Exclusion =
     | Issue
     | RejectedRecord
+    | HeldDelete
     | NotReconciled
     | RecordMissing
     | RecordUnreadable
@@ -52,6 +63,7 @@ let exclusionName (e: Exclusion) : string =
     match e with
     | Issue -> "issue"
     | RejectedRecord -> "rejected-record"
+    | HeldDelete -> "held-delete"
     | NotReconciled -> "not-reconciled"
     | RecordMissing -> "record-missing"
     | RecordUnreadable -> "record-unreadable"
@@ -61,24 +73,34 @@ let exclusionName (e: Exclusion) : string =
     | UnreadableEntry -> "unreadable-entry"
 
 /// The facts the exclusion order reads. `HasIssueOrSkip`: an open `apply-failed` issue or an id the scan skipped.
-/// `RejectedNamesId`: a rejected path of the tree names this id. `RecordAccepted`: the tree holds an accepted record.
+/// `RejectedNamesId`: a rejected path of the tree names this id. `HeldDelete`: the id has an open `held-delete` item
+/// (milestone 1b-ii, D17). `RecordAccepted`: the tree holds an accepted record. `PendingContent`: the row has a pending
+/// content stamp (D18).
 type ExclusionFacts =
     { HasIssueOrSkip: bool
       RejectedNamesId: bool
+      HeldDelete: bool
       HasBase: bool
       RecordAccepted: bool
+      PendingContent: bool
       RecordUnreadable: bool
       BaseUnreadable: bool
       PathOccupied: bool
       BlockedElsewhere: bool
       EntryUnreadable: bool }
 
-/// The first exclusion that matches, in the order of decision 5.
+/// The first exclusion that matches, in the order of decision 5. An entry with an open held item writes nothing, whatever
+/// it has pending (D17). `not-reconciled` is unchanged: a no-base row over an accepted record, even one that does not
+/// parse, is never written over it. `record-missing` is only a row with a base, no accepted record and no pending content
+/// stamp: nothing the push may write from nothing. After a complete pull it is defensive (a deleted entry is no
+/// candidate, a held one is excluded above); a row with a base, no record and a pending content stamp is written back
+/// from its base (D15, D18).
 let exclusion (f: ExclusionFacts) : Exclusion option =
     if f.HasIssueOrSkip then Some Issue
     elif f.RejectedNamesId then Some RejectedRecord
+    elif f.HeldDelete then Some HeldDelete
     elif not f.HasBase && f.RecordAccepted then Some NotReconciled
-    elif f.HasBase && not f.RecordAccepted then Some RecordMissing
+    elif f.HasBase && not f.RecordAccepted && not f.PendingContent then Some RecordMissing
     elif f.RecordAccepted && f.RecordUnreadable then Some RecordUnreadable
     elif f.BaseUnreadable then Some UnreadableBase
     elif f.PathOccupied then Some PathOccupied
@@ -112,6 +134,13 @@ let pathOccupied (id: string) (listed: string seq) : bool =
                         && not (String.Equals(segments.[0], "memories", ord) && String.Equals(segments.[1], SyncValidation.shard id, ord))
                     | _ -> false)
         listed |> Seq.exists collides
+
+/// Whether the record of a local deletion the apply proved (`ApplySummary.PushDeletions`) can be removed from the clone
+/// (milestone 1b-ii, D14): the id is still one of the scan's local deletions, the tree at `L` holds an accepted record
+/// for it, no listed path is in the way of that record, and no rejected path names the id. Any other id is left alone
+/// and reported.
+let removable (localDeletion: bool) (recordAccepted: bool) (pathOccupied: bool) (rejectedNamesId: bool) : bool =
+    localDeletion && recordAccepted && not pathOccupied && not rejectedNamesId
 
 // ---------------------------------------------------------------------------------------------
 // Block marks
@@ -294,6 +323,81 @@ let afterPush (pending: GroupStamps) (pushingText: string option) (pushed: Group
               Tier = drop current.Tier pushed.Tier } }
 
 // ---------------------------------------------------------------------------------------------
+// The repush of reverted groups (milestone 1b-ii, D16)
+
+/// The groups a row's `repush_groups` text names (`SyncDeletion.RepushGroups.decode`: any text that is not exactly a
+/// list in the order `content,sticky,tier` names none).
+let repushGroupsOf (marker: string) : GroupFlags = SyncDeletion.RepushGroups.decode marker
+
+/// The base's content group: text, entry type, project, scope and source, with the base's content stamp.
+type ContentRepush =
+    { Text: string
+      EntryType: EntryType
+      Stamp: Stamp
+      Project: string option
+      Scope: string option
+      Source: SourceTool option }
+
+/// The base's pin flag and sticky stamp; `TierStamp` is the base's tier stamp when the base is sticky (a pin written over
+/// a colder record raises it to hot with that stamp), else `None`.
+type StickyRepush =
+    { Sticky: bool
+      Stamp: Stamp
+      TierStamp: Stamp option }
+
+/// The base's tier and tier stamp.
+type TierRepush = { Tier: Tier; Stamp: Stamp }
+
+/// The groups a repush writes, each from the base; `None`: the group is not written by the repush.
+type RepushPlan =
+    { Content: ContentRepush option
+      Sticky: StickyRepush option
+      Tier: TierRepush option }
+
+/// The repush of a marked row (D16): each flagged group that has no pending stamp is set to the base's value and stamp
+/// (no new stamp, so every machine that holds the same base writes the same bytes, and nothing local-only, such as a
+/// declined pin, a held pin edit or a local demotion, enters the record). A flagged group with a pending stamp takes the
+/// normal path (`planChanged`), and tags are never repushed.
+let repushPlan (baseRecord: SyncRecord) (flags: GroupFlags) (pending: GroupStamps) : RepushPlan =
+    let placement = baseRecord.Placement
+    { RepushPlan.Content =
+        if flags.Content && pending.Content.IsNone then
+            Some
+                { ContentRepush.Text = baseRecord.Content
+                  EntryType = baseRecord.EntryType
+                  Stamp = baseRecord.ContentStamp
+                  Project = baseRecord.Project
+                  Scope = baseRecord.Scope
+                  Source = baseRecord.Source }
+        else
+            None
+      Sticky =
+        if flags.Sticky && pending.Sticky.IsNone then
+            Some
+                { StickyRepush.Sticky = placement.Sticky
+                  Stamp = placement.StickyStamp
+                  TierStamp = if placement.Sticky then Some placement.TierStamp else None }
+        else
+            None
+      Tier =
+        if flags.Tier && pending.Tier.IsNone then
+            Some { TierRepush.Tier = placement.Tier; Stamp = placement.TierStamp }
+        else
+            None }
+
+/// A repush plan that names no group: there is nothing to republish from the base.
+let nothingToRepush (r: RepushPlan) : bool =
+    r.Content.IsNone && r.Sticky.IsNone && r.Tier.IsNone
+
+/// The stamps a marked row pushes: the written groups' pending stamps (`pushedStamps`) and the base's stamp of each
+/// repushed group (the two never name the same group: a repush leaves out a group with a pending stamp).
+let repushedStamps (plan: GroupPlan) (repush: RepushPlan) : GroupStamps =
+    let written = pushedStamps plan
+    { GroupStamps.Content = written.Content |> Option.orElse (repush.Content |> Option.map (fun c -> c.Stamp))
+      Sticky = written.Sticky |> Option.orElse (repush.Sticky |> Option.map (fun s -> s.Stamp))
+      Tier = written.Tier |> Option.orElse (repush.Tier |> Option.map (fun t -> t.Stamp)) }
+
+// ---------------------------------------------------------------------------------------------
 // The result of a push, the commit message, the label
 
 /// Whether a failed push may have reached the remote (decision 11).
@@ -325,9 +429,9 @@ let publishedAfterPush (kind: SyncGit.FailureKind) (stderr: string) : Published 
     | SyncGit.FailureKind.RemoteBranchMissing
     | SyncGit.FailureKind.NotARepository -> No
 
-/// `sync: <label> +<added> ~<changed> -0`: the push never deletes.
-let commitMessage (added: int) (changed: int) (label: string) : string =
-    sprintf "sync: %s +%d ~%d -0" label added changed
+/// `sync: <label> +<added> ~<changed> -<removed>` (milestone 1b-ii, D14: a removed record counts as `-`).
+let commitMessage (added: int) (changed: int) (removed: int) (label: string) : string =
+    sprintf "sync: %s +%d ~%d -%d" label added changed removed
 
 /// The OS machine name reduced to `A-Z a-z 0-9 . _ -` (every other character removed), at most 40 characters, else
 /// `unknown`. Display only: never identity, never in a path.
@@ -371,9 +475,14 @@ let parseStagedSet (stdout: byte[]) : Result<StagedEntry list, string> =
                 | Some bad -> Error(sprintf "an unexpected status '%s'" bad.Status)
                 | None -> Ok entries
 
-/// True when every written path is staged exactly once as an addition or a modification and nothing else is staged.
-let stagedSetMatches (written: string list) (staged: StagedEntry list) : bool =
-    let stagedPaths = staged |> List.map (fun e -> e.Path)
-    staged |> List.forall (fun e -> e.Status = "A" || e.Status = "M")
-    && List.sort stagedPaths = List.sort written
-    && (List.distinct written).Length = written.Length
+/// True when every written path is staged exactly once as an addition or a modification, every removed path exactly
+/// once as a deletion (milestone 1b-ii, D14), and nothing else is staged. A path listed twice, or both written and
+/// removed, never matches.
+let stagedSetMatches (written: string list) (removed: string list) (staged: StagedEntry list) : bool =
+    let expected = written @ removed
+    let removedSet = Set.ofList removed
+    (List.distinct expected).Length = expected.Length
+    && List.sort (staged |> List.map (fun e -> e.Path)) = List.sort expected
+    && staged
+       |> List.forall (fun e ->
+           if removedSet.Contains e.Path then e.Status = "D" else e.Status = "A" || e.Status = "M")

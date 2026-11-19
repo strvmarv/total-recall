@@ -66,12 +66,12 @@ internal sealed class PullRig : IDisposable
     public GitSyncFetcher Fetcher(string branch = "main") => new(Client, Guard, Store, branch);
 
     /// <summary>The identity keys a joined machine has, and a machine id so the scan and the apply can stamp.</summary>
-    public void Join(string repoId = RepoId, string? host = null)
+    public void Join(string repoId = RepoId, string? host = null, string machineId = MachineId)
     {
         Store.SetMeta(SyncIdentity.MetaKeys.Remote, RemoteAddress);
         Store.SetMeta(SyncIdentity.MetaKeys.RepoId, repoId);
         Store.SetMeta(SyncIdentity.MetaKeys.Host, host ?? Host.Fingerprint!);
-        Store.SetMeta(SyncIdentity.MetaKeys.Machine, MachineId);
+        Store.SetMeta(SyncIdentity.MetaKeys.Machine, machineId);
     }
 
     // ---- the remote ----

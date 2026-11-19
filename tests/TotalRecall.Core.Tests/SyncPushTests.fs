@@ -18,7 +18,8 @@ let private row : RowFacts =
       HasBase = true
       BaseTagsHash = Some "h1"
       ScannedTagsHash = Some "h1"
-      Pending = noStamps }
+      Pending = noStamps
+      HasRepushMarker = false }
 
 [<Tests>]
 let candidateTests =
@@ -45,8 +46,10 @@ let candidateTests =
 let private none : ExclusionFacts =
     { HasIssueOrSkip = false
       RejectedNamesId = false
+      HeldDelete = false
       HasBase = true
       RecordAccepted = true
+      PendingContent = false
       RecordUnreadable = false
       BaseUnreadable = false
       PathOccupied = false
@@ -63,6 +66,7 @@ let exclusionTests =
             let cases =
                 [ { none with HasIssueOrSkip = true }, Issue
                   { none with RejectedNamesId = true }, RejectedRecord
+                  { none with HeldDelete = true }, HeldDelete
                   { none with HasBase = false }, NotReconciled
                   { none with RecordAccepted = false }, RecordMissing
                   { none with RecordUnreadable = true }, RecordUnreadable
@@ -76,8 +80,10 @@ let exclusionTests =
             let all =
                 { HasIssueOrSkip = true
                   RejectedNamesId = true
+                  HeldDelete = true
                   HasBase = false
                   RecordAccepted = true
+                  PendingContent = true
                   RecordUnreadable = true
                   BaseUnreadable = true
                   PathOccupied = true
@@ -86,7 +92,9 @@ let exclusionTests =
             Expect.equal (exclusion all) (Some Issue) "issue first"
             let a = { all with HasIssueOrSkip = false }
             Expect.equal (exclusion a) (Some RejectedRecord) "rejected next"
-            let b = { a with RejectedNamesId = false }
+            let held = { a with RejectedNamesId = false }
+            Expect.equal (exclusion held) (Some HeldDelete) "held-delete next"
+            let b = { held with HeldDelete = false }
             Expect.equal (exclusion b) (Some NotReconciled) "not-reconciled next (no base, record accepted)"
             let c = { b with HasBase = true }
             Expect.equal (exclusion c) (Some RecordUnreadable) "record-unreadable next"
@@ -103,10 +111,37 @@ let exclusionTests =
             Expect.equal (exclusion { none with RecordAccepted = false; BaseUnreadable = true }) (Some RecordMissing) "record-missing before unreadable-base"
         testCase "the reason words are the spec's" <| fun () ->
             Expect.equal
-                ([ Issue; RejectedRecord; NotReconciled; RecordMissing; RecordUnreadable; UnreadableBase; PathOccupied; BlockedElsewhere; UnreadableEntry ]
+                ([ Issue; RejectedRecord; HeldDelete; NotReconciled; RecordMissing; RecordUnreadable; UnreadableBase; PathOccupied; BlockedElsewhere; UnreadableEntry ]
                  |> List.map exclusionName)
-                [ "issue"; "rejected-record"; "not-reconciled"; "record-missing"; "record-unreadable"; "unreadable-base"; "path-occupied"; "blocked-elsewhere"; "unreadable-entry" ]
+                [ "issue"; "rejected-record"; "held-delete"; "not-reconciled"; "record-missing"; "record-unreadable"; "unreadable-base"; "path-occupied"; "blocked-elsewhere"; "unreadable-entry" ]
                 "names"
+    ]
+
+[<Tests>]
+let deletionExclusionTests =
+    testList "SyncPush.exclusion (milestone 1b-ii, D15, D17, D18)" [
+        testCase "exclusion_order_puts_held_delete_after_rejected_record" <| fun () ->
+            let held = { none with HeldDelete = true }
+            Expect.equal (exclusion { held with HasIssueOrSkip = true }) (Some Issue) "an issue comes first"
+            Expect.equal (exclusion { held with RejectedNamesId = true }) (Some RejectedRecord) "a rejected path comes before the hold"
+            Expect.equal (exclusion { held with HasBase = false }) (Some HeldDelete) "the hold comes before not-reconciled"
+            Expect.equal (exclusion { held with RecordAccepted = false }) (Some HeldDelete) "and before record-missing"
+            Expect.equal (exclusion { held with RecordAccepted = false; PendingContent = true }) (Some HeldDelete) "a pending text edit does not lift an open item"
+            Expect.equal (exclusion { held with RecordUnreadable = true; PathOccupied = true }) (Some HeldDelete) "and before every later reason"
+        testCase "recordMissing_does_not_apply_when_a_content_stamp_is_pending" <| fun () ->
+            let saved = { none with RecordAccepted = false; PendingContent = true }
+            Expect.isNone (exclusion saved) "a base, no record and a pending text edit is a write-back"
+            Expect.equal (exclusion { saved with BaseUnreadable = true }) (Some UnreadableBase) "a write-back needs a readable base"
+            Expect.equal (exclusion { saved with PathOccupied = true }) (Some PathOccupied) "and a free path"
+            Expect.equal (exclusion { saved with BlockedElsewhere = true }) (Some BlockedElsewhere) "and no foreign block"
+            Expect.equal (exclusion { saved with PendingContent = false }) (Some RecordMissing) "no pending text: record-missing"
+            Expect.isNone (exclusion { saved with RecordUnreadable = true }) "record-unreadable needs an accepted record"
+        testCase "notReconciled_is_unchanged" <| fun () ->
+            for pending in [ false; true ] do
+                let noBase = { none with HasBase = false; PendingContent = pending }
+                Expect.equal (exclusion noBase) (Some NotReconciled) (sprintf "no base and an accepted record (pending %b)" pending)
+                Expect.equal (exclusion { noBase with RecordUnreadable = true }) (Some NotReconciled) "also over a record that does not parse"
+                Expect.isNone (exclusion { noBase with RecordAccepted = false }) "no base and no record is a new entry"
     ]
 
 // ---- the path rule ----
@@ -321,6 +356,72 @@ let afterPushTests =
             Expect.equal (afterPush noStamps None noStamps).PushingText None "nothing at all"
     ]
 
+// ---- the repush of reverted groups (milestone 1b-ii, D16) ----
+
+let private flags (c: bool) (s: bool) (t: bool) : GroupFlags = { Content = c; Sticky = s; Tier = t }
+
+/// The base the repush reads: every group differs from `baseRecord` (the record a reset left at R).
+let private agreed : SyncRecord =
+    { baseRecord with
+        Content = "agreed text"
+        EntryType = Preference
+        Source = Some Cursor
+        Project = Some "o/r"
+        Scope = None
+        Placement = { Placement.Tier = Hot; TierStamp = st 7; Sticky = false; StickyStamp = st 8 }
+        ContentStamp = st 9 }
+
+[<Tests>]
+let repushTests =
+    testList "SyncPush repush (milestone 1b-ii, D16)" [
+        testCase "isCandidate_is_true_for_a_marker_row" <| fun () ->
+            Expect.isTrue (isCandidate { row with HasRepushMarker = true }) "a marker with nothing pending"
+            for s in [ Forgotten; Left ] do
+                Expect.isFalse (isCandidate { row with State = s; HasRepushMarker = true }) (sprintf "only an active row (%A)" s)
+        testCase "repushGroupsOf_decodes" <| fun () ->
+            Expect.equal (repushGroupsOf "content,sticky,tier") (flags true true true) "all three"
+            Expect.equal (repushGroupsOf "content,tier") (flags true false true) "two"
+            Expect.equal (repushGroupsOf "sticky") (flags false true false) "one"
+            for text in [ null; ""; "tier,content"; "content,content"; "tags" ] do
+                Expect.equal (repushGroupsOf text) (flags false false false) (sprintf "%A is no group" text)
+        testCase "repushPlan_takes_each_flagged_group_from_the_base_with_the_bases_stamp" <| fun () ->
+            let p = repushPlan agreed (flags true true true) noStamps
+            Expect.equal
+                p.Content
+                (Some { Text = "agreed text"; EntryType = Preference; Stamp = st 9; Project = Some "o/r"; Scope = None; Source = Some Cursor })
+                "content"
+            Expect.equal p.Sticky (Some { Sticky = false; Stamp = st 8; TierStamp = None }) "sticky"
+            Expect.equal p.Tier (Some { Tier = Hot; Stamp = st 7 }) "tier"
+        testCase "repushPlan_names_only_the_flagged_groups" <| fun () ->
+            let p = repushPlan agreed (flags false false true) noStamps
+            Expect.isNone p.Content "content not flagged"
+            Expect.isNone p.Sticky "sticky not flagged"
+            Expect.equal p.Tier (Some { Tier = Hot; Stamp = st 7 }) "tier"
+            Expect.isTrue (nothingToRepush (repushPlan agreed (flags false false false) noStamps)) "no flag, nothing"
+        testCase "repushPlan_leaves_out_a_flagged_group_with_a_pending_stamp" <| fun () ->
+            let pending = { GroupStamps.Content = Some(st 20); Sticky = None; Tier = Some(st 21) }
+            let p = repushPlan agreed (flags true true true) pending
+            Expect.isNone p.Content "pending content takes the normal path"
+            Expect.isSome p.Sticky "sticky has no pending stamp"
+            Expect.isNone p.Tier "pending tier takes the normal path"
+            let allPending = { GroupStamps.Content = Some(st 20); Sticky = Some(st 20); Tier = Some(st 20) }
+            Expect.isTrue (nothingToRepush (repushPlan agreed (flags true true true) allPending)) "every group pending"
+        testCase "repushPlan_a_sticky_base_carries_its_tier_stamp_for_the_raise" <| fun () ->
+            let pinned = { agreed with Placement = { agreed.Placement with Sticky = true } }
+            Expect.equal
+                (repushPlan pinned (flags false true false) noStamps).Sticky
+                (Some { Sticky = true; Stamp = st 8; TierStamp = Some(st 7) })
+                "a pin"
+        testCase "repushedStamps_merges_the_written_groups_with_the_bases_stamps" <| fun () ->
+            let plan = planChanged baseRecord false localEntry { noStamps with Content = Some(st 30) }
+            let repush = repushPlan agreed (flags true true true) { noStamps with Content = Some(st 30) }
+            Expect.equal
+                (repushedStamps plan repush)
+                { GroupStamps.Content = Some(st 30); Sticky = Some(st 8); Tier = Some(st 7) }
+                "content from the plan, sticky and tier from the base"
+            Expect.equal (repushedStamps plan (repushPlan agreed (flags false false false) noStamps)) (pushedStamps plan) "no repush"
+    ]
+
 [<Tests>]
 let resultTests =
     testList "SyncPush published, message and label" [
@@ -339,7 +440,16 @@ let resultTests =
             Expect.equal (publishedAfterPush other "remote: error: hook declined to update refs/heads/main") No "hook declined"
             Expect.equal (publishedAfterPush other null) Unknown "null stderr"
         testCase "commitMessage" <| fun () ->
-            Expect.equal (commitMessage 2 3 "box") "sync: box +2 ~3 -0" "message"
+            Expect.equal (commitMessage 2 3 0 "box") "sync: box +2 ~3 -0" "message"
+        testCase "commitMessage_counts_removals" <| fun () ->
+            Expect.equal (commitMessage 0 0 1 "box") "sync: box +0 ~0 -1" "a removal only"
+            Expect.equal (commitMessage 1 2 3 "box") "sync: box +1 ~2 -3" "all three counts"
+        testCase "removable wants a local deletion with an accepted record, no occupied path and no rejected path" <| fun () ->
+            Expect.isTrue (removable true true false false) "removable"
+            Expect.isFalse (removable false true false false) "not a local deletion"
+            Expect.isFalse (removable true false false false) "no accepted record"
+            Expect.isFalse (removable true true true false) "a path in the way"
+            Expect.isFalse (removable true true false true) "a rejected path names the id"
         testCase "machineLabel removes what is not allowed and falls back to unknown" <| fun () ->
             Expect.equal (machineLabel "Joe's PC") "JoesPC" "quote and space"
             Expect.equal (machineLabel "ünï") "n" "non-ASCII"
@@ -381,10 +491,24 @@ let stagedTests =
         testCase "stagedSetMatches wants exactly the written paths as additions or modifications" <| fun () ->
             let a = { Status = "A"; Path = "memories/ab/x.json" }
             let m = { Status = "M"; Path = "memories/cd/y.json" }
-            Expect.isTrue (stagedSetMatches [ a.Path; m.Path ] [ m; a ]) "both, any order"
-            Expect.isFalse (stagedSetMatches [ a.Path; m.Path ] [ a ]) "a missing path"
-            Expect.isFalse (stagedSetMatches [ a.Path ] [ a; m ]) "an extra path"
-            Expect.isFalse (stagedSetMatches [ a.Path ] [ { a with Status = "D" } ]) "a deletion"
-            Expect.isFalse (stagedSetMatches [ a.Path; a.Path ] [ a; a ]) "a duplicated written path"
-            Expect.isTrue (stagedSetMatches [] []) "nothing"
+            Expect.isTrue (stagedSetMatches [ a.Path; m.Path ] [] [ m; a ]) "both, any order"
+            Expect.isFalse (stagedSetMatches [ a.Path; m.Path ] [] [ a ]) "a missing path"
+            Expect.isFalse (stagedSetMatches [ a.Path ] [] [ a; m ]) "an extra path"
+            Expect.isFalse (stagedSetMatches [ a.Path ] [] [ { a with Status = "D" } ]) "a deletion"
+            Expect.isFalse (stagedSetMatches [ a.Path; a.Path ] [] [ a; a ]) "a duplicated written path"
+            Expect.isTrue (stagedSetMatches [] [] []) "nothing"
+        testCase "stagedSetMatches_accepts_a_deleted_removal_path_and_rejects_a_deleted_unexpected_path" <| fun () ->
+            let a = { Status = "A"; Path = "memories/ab/x.json" }
+            let d = { Status = "D"; Path = "memories/ef/z.json" }
+            Expect.isTrue (stagedSetMatches [] [ d.Path ] [ d ]) "a removal only"
+            Expect.isTrue (stagedSetMatches [ a.Path ] [ d.Path ] [ d; a ]) "a written and a removed path, any order"
+            Expect.isFalse (stagedSetMatches [ a.Path ] [] [ a; d ]) "a deleted path nobody removed"
+            Expect.isFalse (stagedSetMatches [] [ d.Path ] []) "a removal that is not staged"
+            Expect.isFalse (stagedSetMatches [] [ d.Path; d.Path ] [ d; d ]) "a duplicated removed path"
+            Expect.isFalse (stagedSetMatches [ d.Path ] [ d.Path ] [ d ]) "a path both written and removed"
+            Expect.isFalse (stagedSetMatches [ a.Path ] [] [ { a with Status = "D" } ]) "a written path staged as a deletion"
+        testCase "stagedSetMatches_rejects_a_removed_path_staged_as_modified" <| fun () ->
+            let d = { Status = "D"; Path = "memories/ef/z.json" }
+            Expect.isFalse (stagedSetMatches [] [ d.Path ] [ { d with Status = "M" } ]) "modified"
+            Expect.isFalse (stagedSetMatches [] [ d.Path ] [ { d with Status = "A" } ]) "added"
     ]

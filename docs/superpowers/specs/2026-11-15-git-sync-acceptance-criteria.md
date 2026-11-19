@@ -81,8 +81,9 @@ pass/fail. Where the spec names a table or test group, that is the source of tru
 - [ ] An oversized entry and an ineligible id are listed and not pushed.
 
 ## 1b-ii. Deletions
-- [ ] A forget on A deletes on B. B's unpushed tag, pin, project or promotion change does not keep it;
-      B's unpushed text edit keeps it on both machines, in either push order.
+- [ ] A forget on A deletes on B. B's unpushed tag, project or promotion change does not keep it;
+      B's unpushed text edit keeps it on both machines, in either push order; B's pending pin holds it
+      (see the pin item below).
 - [ ] A forgotten memory is not re-inserted by a re-import on a new machine, a promotion elsewhere, a
       same-text restore elsewhere, or older text after a reset.
 - [ ] A pin that is sticky on B is held (not deleted) when another machine deletes it.
@@ -92,14 +93,33 @@ pass/fail. Where the spec names a table or test group, that is the source of tru
       with an unrelated push between: nothing deleted locally, each vanished record held, each reverted
       group republished from its base value, and B's declined pin does not unpin A.
 - [ ] A push that fails after an unproven apply still republishes the reverted groups next cycle.
-- [ ] A held entry is not written back by a tag, pin or promotion while unanswered; answering some items
-      leaves the rest held.
-- [ ] `accept` and `restore` work in both directions; `restore` never yields a sticky entry; bulk forms
-      refuse without a terminal.
+- [ ] A held entry is not written back by a tag, pin or promotion while unanswered.
 - [ ] `sync init --url <new repository>` on a machine with rows deletes nothing; a blocked, never-pushed
       entry survives a lost clone; an entry added and deleted inside one catch-up is deleted.
 
+What 1b-ii leaves for 1b-iii to rely on (from `2026-11-19-git-sync-deletions-design.md`; answering held
+items moved to 1b-iii, see that section):
+
+- A held deletion is one `git_sync_review` row per entry with `kind = 'held-delete'` and `state = 'open'`
+  (1b-ii creates only open items and deletes an item when it closes it; it never leaves an answered one).
+- `direction` is `remote` (the record is gone from the repository, the entry is kept here) or `local` (the
+  entry is gone here, the record is kept in the repository).
+- `payload_json` is `{"cause":"guard"}`, `{"cause":"unproven"}` or `{"cause":"sticky"}`; `machine` is NULL;
+  `arrived_at` is the applier clock in milliseconds.
+- `record_hash` is the blob id of the record in the repository at the pull that held it: set for a `local`
+  hold, NULL when the repository has no record (a `remote` hold). The text of a `local` hold for a restore is
+  the row's `base_json`.
+- 1b-ii closes an item only when the situation it was opened for is over (`SyncMerge.decide`'s
+  `CloseHeldDelete`: a `remote` item when the record reappears or the entry is gone; a `local` item when the
+  entry exists again, the record is gone, or newer text re-inserts it) or a pending text edit saves the entry;
+  an open item is otherwise never re-decided (not when the guard count falls, not by a later proven pull).
+- A repush of reverted groups whose base has a `source` this version cannot parse keeps the repository
+  record's `source` (the patch cannot write the unparsed text, and clearing it would lose a source).
+
 ## 1b-iii. Review and secrets
+- [ ] `accept` and `restore` work in both directions; `restore` never yields a sticky entry; bulk forms
+      refuse without a terminal.
+- [ ] Answering some held items leaves the rest held.
 - [ ] A pin from A is an ordinary hot entry on B and absent from the pinned block until approved; approval
       with the shown hash pins without a push; a stale hash is refused; decline does not unpin A; a remote
       unpin applies.

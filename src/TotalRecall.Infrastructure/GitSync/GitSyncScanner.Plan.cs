@@ -13,12 +13,19 @@ public sealed partial class GitSyncScanner
         public List<GitSyncRow> Rows { get; } = [];
         public List<(string Id, string Detail)> IssueUpserts { get; } = [];
         public List<string> IssueDeletes { get; } = [];
+
+        /// <summary>
+        /// The entries whose <c>held-delete</c> item goes with their base: a row moved to <c>left</c> or reactivated
+        /// (milestone 1b-ii), so an item never outlives the base it was opened for.
+        /// </summary>
+        public List<string> HeldDeletes { get; } = [];
         public string? ClockText { get; set; }
         public string? WarningText { get; set; }
         public ScanSummary Summary { get; set; } = ScanSummary.Empty;
 
         public bool HasWrites =>
-            Rows.Count > 0 || IssueUpserts.Count > 0 || IssueDeletes.Count > 0 || ClockText is not null || WarningText is not null;
+            Rows.Count > 0 || IssueUpserts.Count > 0 || IssueDeletes.Count > 0 || HeldDeletes.Count > 0
+            || ClockText is not null || WarningText is not null;
     }
 
     /// <summary>Issues stamps from the persisted clock, in order, and remembers what happened to the clock.</summary>
@@ -113,11 +120,20 @@ public sealed partial class GitSyncScanner
                 if (fresh is null)
                     continue;
                 plan.Rows.Add(fresh);
-                if (action.IsNewRow) created++; else reactivated++;
+                if (action.IsNewRow)
+                {
+                    created++;
+                }
+                else
+                {
+                    plan.HeldDeletes.Add(id); // the old row's base ends here
+                    reactivated++;
+                }
             }
             else if (action.IsMoveToLeft)
             {
                 plan.Rows.Add(row! with { State = SyncMerge.RowState.Left, ContentStamp = null, StickyStamp = null, TierStamp = null, RepushGroups = null });
+                plan.HeldDeletes.Add(id); // a left row is not an entry: nothing is left to hold
                 left++;
             }
             else if (action is SyncScan.ScanAction.ReportDeletion report)

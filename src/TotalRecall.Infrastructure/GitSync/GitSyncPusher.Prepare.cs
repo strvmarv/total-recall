@@ -14,7 +14,12 @@ internal sealed record CandidateInfo(
     bool RecordUnreadable,
     bool BaseUnreadable);
 
-/// <summary>The clone, the tree at <c>L</c>, every row and the candidates with the exclusions already decided.</summary>
+/// <summary>
+/// The clone, the tree at <c>L</c>, every row and the candidates with the exclusions already decided. <see cref="Removals"/>
+/// are the local deletions whose record this push removes (milestone 1b-ii, D14), ordinal; <see cref="NotRemovable"/> the
+/// other ids the apply listed for removal, ordinal, which are left alone and reported. <see cref="Held"/> are the open
+/// <c>held-delete</c> items by entry id, read when preparing (D17): a candidate with one is excluded as <c>held-delete</c>.
+/// </summary>
 internal sealed record PushPrepared(
     string Head,
     TreeView Tree,
@@ -22,7 +27,10 @@ internal sealed record PushPrepared(
     IReadOnlyDictionary<string, CandidateInfo> Candidates,
     IReadOnlyDictionary<string, SyncPush.Exclusion> Excluded,
     IReadOnlyList<string> ListedPaths,
-    IReadOnlySet<string> Deleted);
+    IReadOnlySet<string> Deleted,
+    IReadOnlyList<string> Removals,
+    IReadOnlyList<string> NotRemovable,
+    IReadOnlyDictionary<string, HeldItem> Held);
 
 internal abstract record PrepareResult
 {
@@ -45,7 +53,12 @@ public sealed partial class GitSyncPusher
 
     /// <summary>
     /// Decisions 1 to 5: readiness, the reset of the clone (attributes file first), the tree at <c>L</c>, and the
-    /// candidates with their exclusions. Writes nothing to the store.
+    /// candidates with their exclusions; and the removals of milestone 1b-ii (D14): each id of
+    /// <see cref="ApplySummary.PushDeletions"/> that is still a local deletion of the scan and whose accepted record at
+    /// <c>L</c> nothing is in the way of. A candidate with an open held item is excluded (D17); one with a base, no
+    /// accepted record and a pending content stamp is not excluded: the plan writes it back from its base (D15, D18). A
+    /// row with a <c>repush_groups</c> marker is a candidate (D16); with no accepted record and no pending text change it
+    /// has nothing to patch and is excluded as <c>record-missing</c>. Writes nothing to the store.
     /// </summary>
     internal async Task<PrepareResult> PrepareAsync(ApplySummary apply, ScanSummary scan, CancellationToken ct)
     {
@@ -96,13 +109,15 @@ public sealed partial class GitSyncPusher
         }
         var view = ((TreeRead.Ok)read).View;
 
-        // the rows and the open apply failures
+        // the rows, the open apply failures and the open held items
         Dictionary<string, GitSyncRow> rows;
         Dictionary<string, IssueRow> failures;
+        Dictionary<string, HeldItem> held;
         try
         {
             rows = GitSyncRows.ReadAll(_store.Connection);
             failures = GitSyncIssues.ReadOpen(_store.Connection, GitSyncIssues.ApplyFailed);
+            held = GitSyncReviews.ReadOpenHeld(_store.Connection);
         }
         catch (Exception ex) when (ex is FormatException or SqliteException or InvalidOperationException)
         {
@@ -133,12 +148,14 @@ public sealed partial class GitSyncPusher
             }
 
             var pending = new SyncMerge.GroupStamps(Opt(row.ContentStamp), Opt(row.StickyStamp), Opt(row.TierStamp));
+            var marked = SyncPush.repushGroupsOf(row.RepushGroups);
             var facts = new SyncPush.RowFacts(
                 row.State,
                 row.BaseJson is not null,
                 parsedBase is null ? null : FSharpOption<string>.Some(SyncScan.tagsHash(parsedBase.Record.Tags)),
                 row.ScannedTagsHash is null ? null : FSharpOption<string>.Some(row.ScannedTagsHash),
-                pending);
+                pending,
+                marked.Content || marked.Sticky || marked.Tier);
             if (!SyncPush.isCandidate(facts))
                 continue;
 
@@ -146,8 +163,10 @@ public sealed partial class GitSyncPusher
             var exclusionFacts = new SyncPush.ExclusionFacts(
                 hasIssueOrSkip: failures.ContainsKey(id) || skipped.Contains(id),
                 rejectedNamesId: rejectedIds.Contains(id),
+                heldDelete: held.ContainsKey(id),
                 hasBase: row.BaseJson is not null,
                 recordAccepted: accepted,
+                pendingContent: row.ContentStamp is not null,
                 recordUnreadable: false,
                 baseUnreadable: baseUnreadable,
                 pathOccupied: occupation.Occupied(id),
@@ -178,8 +197,9 @@ public sealed partial class GitSyncPusher
                 }
                 if (recordUnreadable)
                     found = SyncPush.exclusion(new SyncPush.ExclusionFacts(
-                        exclusionFacts.HasIssueOrSkip, exclusionFacts.RejectedNamesId, exclusionFacts.HasBase, exclusionFacts.RecordAccepted,
-                        true, exclusionFacts.BaseUnreadable, exclusionFacts.PathOccupied, exclusionFacts.BlockedElsewhere, exclusionFacts.EntryUnreadable));
+                        exclusionFacts.HasIssueOrSkip, exclusionFacts.RejectedNamesId, exclusionFacts.HeldDelete, exclusionFacts.HasBase,
+                        exclusionFacts.RecordAccepted, exclusionFacts.PendingContent, true, exclusionFacts.BaseUnreadable,
+                        exclusionFacts.PathOccupied, exclusionFacts.BlockedElsewhere, exclusionFacts.EntryUnreadable));
             }
 
             candidates[id] = new CandidateInfo(row, parsedBase, record, bytes, recordUnreadable, baseUnreadable);
@@ -187,7 +207,20 @@ public sealed partial class GitSyncPusher
                 excluded[id] = found.Value;
         }
 
-        return new PrepareResult.Ready(new PushPrepared(apply.Head, view, rows, candidates, excluded, listed, deleted));
+        // the removals: the apply decided them, the tree at L must still allow them
+        var removals = new List<string>();
+        var notRemovable = new List<string>();
+        foreach (var id in apply.PushDeletions.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal))
+        {
+            var removable = SyncPush.removable(
+                deleted.Contains(id),
+                view.Accepted.ContainsKey(id),
+                occupation.Occupied(id),
+                rejectedIds.Contains(id));
+            (removable ? removals : notRemovable).Add(id);
+        }
+
+        return new PrepareResult.Ready(new PushPrepared(apply.Head, view, rows, candidates, excluded, listed, deleted, removals, notRemovable, held));
     }
 
     /// <summary>

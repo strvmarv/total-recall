@@ -16,6 +16,8 @@ public sealed class GitSyncApplierSafetyTests
     /// <summary>A scenario: a rig set up to the point just before the apply, and the apply's arguments.</summary>
     private sealed record Scenario(ApplyRig Rig, string Id, SyncRecordModule.SyncRecord? Record) : IDisposable
     {
+        public bool Proven { get; init; } = true;
+
         public void Dispose() => Rig.Dispose();
     }
 
@@ -81,7 +83,151 @@ public sealed class GitSyncApplierSafetyTests
     };
 
     private static EntryResult Run(Scenario s) =>
-        s.Rig.Applier.ApplyOne(s.Id, s.Record is null ? null : ApplyRig.Parsed(s.Record), proven: true, blobSha: "abc");
+        s.Rig.Applier.ApplyOne(s.Id, s.Record is null ? null : ApplyRig.Parsed(s.Record), s.Proven, s.Rig.Held(s.Id), blobSha: "abc", guard: default);
+
+    // ---- the deletion decisions (milestone 1b-ii) ----
+
+    /// <summary>A synced entry whose record is gone from the repository: a proven remote deletion.</summary>
+    private static Scenario RemoteDelete()
+    {
+        var rig = new ApplyRig();
+        rig.Apply(ApplyRig.Rec(Id, tags: ["a"], minute: 10));
+        return new Scenario(rig, Id, null);
+    }
+
+    /// <summary>A pinned entry whose record is gone: held with cause <c>sticky</c>.</summary>
+    private static Scenario RemoteHold()
+    {
+        var rig = new ApplyRig();
+        rig.Apply(ApplyRig.Rec(Id, tier: Tier.Hot, minute: 10));
+        rig.Scan.Pin(Id);
+        rig.RunScan();
+        return new Scenario(rig, Id, null);
+    }
+
+    /// <summary>An open remote item whose record reappears unchanged: the item is closed.</summary>
+    private static Scenario CloseOnly()
+    {
+        var rig = new ApplyRig();
+        rig.Apply(ApplyRig.Rec(Id, minute: 10));
+        rig.SeedHeld(Id);
+        return new Scenario(rig, Id, ApplyRig.Rec(Id, minute: 10));
+    }
+
+    /// <summary>A pending text edit and an open remote item, the record gone: a fresh content stamp and a close.</summary>
+    private static Scenario FreshStamp()
+    {
+        var rig = new ApplyRig();
+        rig.Apply(ApplyRig.Rec(Id, minute: 10));
+        rig.Scan.Store.Update(Tier.Warm, ContentType.Memory, Id, new UpdateEntryOpts { Content = "A local edit." });
+        rig.RunScan();
+        rig.SeedHeld(Id);
+        return new Scenario(rig, Id, null);
+    }
+
+    /// <summary>A synced entry deleted here, with a pending stamp, whose record is unchanged: a push deletion that clears the stamp.</summary>
+    private static Scenario PushDelete()
+    {
+        var rig = new ApplyRig();
+        rig.Apply(ApplyRig.Rec(Id, minute: 10));
+        rig.Scan.Store.Delete(Tier.Warm, ContentType.Memory, Id);
+        rig.RunScan();
+        ScanRig.Exec(rig.Scan.Connection, $"UPDATE git_sync_entry SET tier_stamp = '2026-11-12T09:30:00.000Z.000000.7b3d1e55' WHERE entry_id = '{Id}'");
+        return new Scenario(rig, Id, ApplyRig.Rec(Id, minute: 10));
+    }
+
+    /// <summary>An open remote item, then the entry deleted here while the record is in R: closed, then held local (unproven).</summary>
+    private static Scenario LocalHold()
+    {
+        var rig = new ApplyRig();
+        rig.Apply(ApplyRig.Rec(Id, minute: 10));
+        rig.SeedHeld(Id, "remote");
+        rig.Scan.Store.Delete(Tier.Warm, ContentType.Memory, Id);
+        rig.RunScan();
+        return new Scenario(rig, Id, ApplyRig.Rec(Id, minute: 10)) { Proven = false };
+    }
+
+    public static IEnumerable<object[]> DeletionScenarios() =>
+        new[] { nameof(RemoteDelete), nameof(RemoteHold), nameof(CloseOnly), nameof(FreshStamp), nameof(PushDelete), nameof(LocalHold) }
+            .Select(n => new object[] { n });
+
+    private static Scenario BuildDeletion(string name) => name switch
+    {
+        nameof(RemoteDelete) => RemoteDelete(),
+        nameof(RemoteHold) => RemoteHold(),
+        nameof(CloseOnly) => CloseOnly(),
+        nameof(PushDelete) => PushDelete(),
+        nameof(LocalHold) => LocalHold(),
+        _ => FreshStamp(),
+    };
+
+    [Theory]
+    [MemberData(nameof(DeletionScenarios))]
+    public void HeldAndDeletionDecisions_FaultAtEveryStep_RollBackEverything(string scenario)
+    {
+        var steps = new List<string>();
+        using (var probe = BuildDeletion(scenario))
+        {
+            probe.Rig.Applier.BeforeEntryStep = (_, step) => steps.Add(step);
+            Is<EntryResult.Carried>(Run(probe));
+        }
+        Assert.Contains("commit", steps);
+        var expected = scenario switch
+        {
+            nameof(RemoteDelete) => new[] { "delete-vec", "delete-row" },
+            nameof(RemoteHold) => ["hold"],
+            nameof(CloseOnly) => ["close"],
+            nameof(PushDelete) => ["row"],
+            nameof(LocalHold) => ["row", "close", "hold"],
+            _ => ["close", "row"],
+        };
+        Assert.All(expected, step => Assert.Contains(step, steps));
+
+        foreach (var step in steps.Distinct())
+        {
+            using var s = BuildDeletion(scenario);
+            var before = s.Rig.Full(issues: false); // content, vectors, import log, rows, held items, clock
+            var beforeIssues = s.Rig.Scan.Issues();
+            s.Rig.Applier.BeforeEntryStep = (_, current) =>
+            {
+                if (current == step)
+                    throw new InvalidOperationException("fault at " + step);
+            };
+
+            var result = Run(s);
+
+            Assert.Equal(before, s.Rig.Full(issues: false));
+            if (step is "reread" or "issue")
+            {
+                Assert.True(result is EntryResult.Deferred, $"{scenario}/{step}: {result}");
+                Assert.Equal(beforeIssues, s.Rig.Scan.Issues());
+            }
+            else
+            {
+                Assert.True(result is EntryResult.Failed { Attempts: 1 }, $"{scenario}/{step}: {result}");
+                var issue = Assert.Single(s.Rig.Scan.Issues());
+                Assert.Equal((Id, "apply-failed"), (issue.Id, issue.Kind));
+                Assert.Contains("fault at " + step, issue.Detail);
+            }
+        }
+    }
+
+    [Fact]
+    public void AHeldItemChangedAfterTheDecision_IsDeferred_AndNothingChanges()
+    {
+        using var s = CloseOnly();
+        string? after = null;
+        s.Rig.Applier.BeforeTransaction = _ =>
+        {
+            var (conn, _) = s.Rig.Scan.Other();
+            using (conn)
+                GitSyncReviews.UpsertHeld(conn, new HeldItem(Id, "remote", null, "guard", 5));
+            after = s.Rig.Full();
+        };
+
+        Assert.IsType<EntryResult.Deferred>(Run(s));
+        Assert.Equal(after, s.Rig.Full());
+    }
 
     // ---- a fault at every step rolls everything back ----
 
@@ -177,6 +323,17 @@ public sealed class GitSyncApplierSafetyTests
             edit(store);
     }
 
+    /// <summary>A local edit of the warm memory <see cref="Id"/>: its text, a pin (which promotes it) or a move to cold.</summary>
+    private static void ApplyEdit(SqliteStore store, string edit)
+    {
+        switch (edit)
+        {
+            case "text": store.Update(Tier.Warm, ContentType.Memory, Id, new UpdateEntryOpts { Content = "A local edit." }); break;
+            case "pin": store.Move(Tier.Warm, ContentType.Memory, Tier.Hot, ContentType.Memory, Id); store.SetSticky(ContentType.Memory, Id, true); break;
+            default: store.Move(Tier.Warm, ContentType.Memory, Tier.Cold, ContentType.Memory, Id); break;
+        }
+    }
+
     [Theory]
     [InlineData("text")]
     [InlineData("pin")]
@@ -187,15 +344,7 @@ public sealed class GitSyncApplierSafetyTests
         string? after = null;
         s.Rig.Applier.BeforeTransaction = _ =>
         {
-            EditElsewhere(s.Rig, store =>
-            {
-                switch (edit)
-                {
-                    case "text": store.Update(Tier.Warm, ContentType.Memory, Id, new UpdateEntryOpts { Content = "A local edit." }); break;
-                    case "pin": store.Move(Tier.Warm, ContentType.Memory, Tier.Hot, ContentType.Memory, Id); store.SetSticky(ContentType.Memory, Id, true); break;
-                    default: store.Move(Tier.Warm, ContentType.Memory, Tier.Cold, ContentType.Memory, Id); break;
-                }
-            });
+            EditElsewhere(s.Rig, store => ApplyEdit(store, edit));
             after = s.Rig.Full();
         };
 
@@ -205,6 +354,29 @@ public sealed class GitSyncApplierSafetyTests
         Assert.Equal(after, s.Rig.Full());
         Assert.Empty(s.Rig.Scan.Issues());
         Assert.NotEqual("Newer text.", s.Rig.Entry(Id)!.Row.Content);
+    }
+
+    [Theory]
+    [InlineData("text")]
+    [InlineData("pin")]
+    [InlineData("move")]
+    public void AnEditAfterTheDecisionToDelete_IsDeferred_AndTheEntryStays(string edit)
+    {
+        using var s = RemoteDelete();
+        string? after = null;
+        s.Rig.Applier.BeforeTransaction = _ =>
+        {
+            EditElsewhere(s.Rig, store => ApplyEdit(store, edit));
+            after = s.Rig.Full();
+        };
+
+        var result = Run(s);
+
+        Assert.IsType<EntryResult.Deferred>(result);
+        Assert.Equal(after, s.Rig.Full()); // the row, the store and the held items as the edit left them
+        Assert.Empty(s.Rig.Scan.Issues());
+        Assert.NotNull(s.Rig.Entry(Id));
+        Assert.Equal(SyncMerge.RowState.Active, s.Rig.Scan.Rows()[Id].State);
     }
 
     [Fact]

@@ -423,6 +423,132 @@ public sealed class GitSyncScannerStampTests
         Assert.Equal(0, summary.New);
     }
 
+    // ---- held-delete items end with the base they were opened for (milestone 1b-ii, final review F2) ----
+
+    private static readonly HeldItem HeldA = new(A, "remote", null, "unproven", 1_700_000_000_000L);
+
+    /// <summary>An open held-delete item and a <c>new-pin</c> review row for A (a review of another kind with the same id).</summary>
+    private static void SeedReviews(ScanRig rig)
+    {
+        GitSyncReviews.UpsertHeld(rig.Connection, HeldA);
+        rig.Exec($"INSERT INTO git_sync_review (entry_id, kind, state, arrived_at) VALUES ('{A}', 'new-pin', 'open', 1)");
+    }
+
+    private static bool HasNewPin(ScanRig rig)
+    {
+        using var cmd = rig.Connection.CreateCommand();
+        cmd.CommandText = $"SELECT count(*) FROM git_sync_review WHERE entry_id = '{A}' AND kind = 'new-pin'";
+        return Convert.ToInt64(cmd.ExecuteScalar()) == 1;
+    }
+
+    private static GitSyncRow SyncedRow(ScanRig rig) =>
+        rig.Rows()[A] with { BaseJson = BaseJson(A, Tier.Warm, Stamp(1000), Stamp(2000), Stamp(3000)) };
+
+    [Fact]
+    public void MoveToLeft_RemovesTheEntrysHeldItem_InTheSameTransaction_AndKeepsOtherReviewRows()
+    {
+        using var rig = new ScanRig();
+        rig.AddMemory(Tier.Warm, A, "one");
+        Scan(rig, T1);
+        GitSyncRows.Write(rig.Connection, SyncedRow(rig));
+        SeedReviews(rig);
+        rig.Store.Move(Tier.Warm, ContentType.Memory, Tier.Warm, ContentType.Knowledge, A);
+
+        var summary = Scan(rig, T2);
+
+        Assert.Equal(1, summary.Left);
+        Assert.True(rig.Rows()[A].State.IsLeft);
+        Assert.Empty(GitSyncReviews.ReadOpenHeld(rig.Connection));
+        Assert.True(HasNewPin(rig));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Reactivate_RemovesTheEntrysHeldItem_AndKeepsOtherReviewRows(bool forgotten)
+    {
+        using var rig = new ScanRig();
+        rig.AddMemory(Tier.Warm, A, "one");
+        GitSyncRows.Write(rig.Connection, Row(A, forgotten ? SyncMerge.RowState.Forgotten : SyncMerge.RowState.Left) with
+        {
+            BaseJson = BaseJson(A, Tier.Warm, Stamp(1000), Stamp(2000), Stamp(3000)),
+        });
+        SeedReviews(rig);
+
+        var summary = Scan(rig, T1);
+
+        Assert.Equal(1, summary.Reactivated);
+        Assert.Empty(GitSyncReviews.ReadOpenHeld(rig.Connection));
+        Assert.True(HasNewPin(rig));
+    }
+
+    [Theory]
+    [InlineData("new")]
+    [InlineData("update")]
+    [InlineData("deletion")]
+    [InlineData("no-change")]
+    [InlineData("forgotten-gone")]
+    [InlineData("skipped")]
+    public void EveryOtherScanAction_LeavesTheHeldItemAlone(string action)
+    {
+        using var rig = new ScanRig();
+        if (action != "new")
+        {
+            rig.AddMemory(Tier.Warm, A, "one");
+            Scan(rig, T1);
+            GitSyncRows.Write(rig.Connection, SyncedRow(rig));
+        }
+        switch (action)
+        {
+            case "new":
+                rig.AddMemory(Tier.Warm, A, "one"); // a memory with no row
+                break;
+            case "update":
+                rig.Store.Update(Tier.Warm, ContentType.Memory, A, new UpdateEntryOpts { Content = "one, edited" });
+                break;
+            case "deletion":
+                rig.Store.Delete(Tier.Warm, ContentType.Memory, A);
+                break;
+            case "forgotten-gone":
+                rig.Store.Delete(Tier.Warm, ContentType.Memory, A);
+                GitSyncRows.Write(rig.Connection, rig.Rows()[A] with { State = SyncMerge.RowState.Forgotten });
+                break;
+            case "skipped":
+                rig.Exec($"INSERT INTO cold_memories SELECT * FROM warm_memories WHERE id = '{A}'"); // in two tiers
+                break;
+        }
+        SeedReviews(rig);
+
+        var summary = Scan(rig, T2);
+
+        Assert.Equal(0, summary.Left + summary.Reactivated);
+        Assert.Equal(HeldA, GitSyncReviews.ReadOpenHeld(rig.Connection)[A]);
+        Assert.True(HasNewPin(rig));
+    }
+
+    [Fact]
+    public void AFailedScanWrite_KeepsTheHeldItem_AndTheRow()
+    {
+        using var rig = new ScanRig();
+        rig.AddMemory(Tier.Warm, A, "one");
+        Scan(rig, T1);
+        var synced = SyncedRow(rig);
+        GitSyncRows.Write(rig.Connection, synced);
+        SeedReviews(rig);
+        rig.Store.Move(Tier.Warm, ContentType.Memory, Tier.Warm, ContentType.Knowledge, A);
+        var scanner = rig.Scanner(T2);
+        scanner.BeforeWrite = step =>
+        {
+            if (step == "issues")
+                throw new InvalidOperationException("fault");
+        };
+
+        Assert.IsType<ScanOutcome.Failed>(scanner.Scan());
+
+        Assert.Equal(synced, rig.Rows()[A]);
+        Assert.Equal(HeldA, GitSyncReviews.ReadOpenHeld(rig.Connection)[A]);
+    }
+
     [Fact]
     public void AnUnreadableOrDuplicatedEntryWithAnActiveRow_IsNotADeletion_RowUntouched_OthersStamped()
     {

@@ -1,4 +1,5 @@
 using TotalRecall.Core;
+using TotalRecall.Infrastructure.Storage;
 using Microsoft.Data.Sqlite;
 
 namespace TotalRecall.Infrastructure.GitSync;
@@ -39,6 +40,46 @@ public sealed partial class GitSyncApplier
         catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
         {
             return new EntryResult.Deferred("the failure could not be recorded: " + OneLine(ex.Message), Busy: ex is SqliteException s && IsBusy(s));
+        }
+    }
+
+    /// <summary>
+    /// The fallback hold of an unproven pull (milestone 1b-ii, D5 and D7; the umbrella's "a missing file is never proof"):
+    /// a deletion candidate whose entry ended failed, skipped or scan-skipped got no hold from its own transaction (rolled
+    /// back, or never opened), so it is held here, in a small transaction of its own opened after that rollback, as
+    /// <see cref="RecordFailure"/> records the failure. Inside the transaction the row must still be <c>active</c> with a
+    /// base, the entry must exist for a <paramref name="direction"/> of <c>remote</c> and be gone for <c>local</c>, and an
+    /// open item of the id is never replaced; otherwise nothing is written and both results are null. The item is open,
+    /// with the cause <c>unproven</c>, <paramref name="recordSha"/> (the blob id of the record in <c>R</c>, null when it has
+    /// none) and the applier clock. When it cannot be written (a busy lock or a failure) the result is a deferral, which
+    /// holds <c>L</c> back.
+    /// </summary>
+    private (HeldEntry? Held, EntryResult.Deferred? Deferred) HoldUnprovenCandidate(string id, SyncMerge.Direction direction, string? recordSha)
+    {
+        try
+        {
+            using var tx = _store.BeginImmediateTransaction();
+            TransactionCount++;
+            var conn = tx.Connection;
+            var row = GitSyncRows.Read(conn, id, tx.Transaction);
+            if (row is null || !row.State.IsActive || row.BaseJson is null)
+                return (null, null);
+            var absent = LocalEntryReader.Read(t => tx.Get(t, ContentType.Memory, id), () => tx.IsSticky(ContentType.Memory, id)) is LocalRead.Absent;
+            if (absent != direction.IsLocalDeletion)
+                return (null, null); // a remote candidate whose entry is gone, or a local one whose entry is back
+            if (GitSyncReviews.ReadOpenHeldItem(conn, id, tx.Transaction) is not null)
+                return (null, null);
+            Step(id, "hold-unproven");
+            var name = SyncDeletion.directionName(direction);
+            var cause = SyncDeletion.holdCause(false, false, direction); // unproven
+            GitSyncReviews.UpsertHeld(conn, new HeldItem(id, name, recordSha, cause, _nowMs()), tx.Transaction);
+            tx.Commit();
+            return (new HeldEntry(id, name, cause), null);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
+        {
+            return (null, new EntryResult.Deferred(
+                "an unproven deletion candidate could not be held: " + OneLine(ex.Message), Busy: ex is SqliteException s && IsBusy(s)));
         }
     }
 

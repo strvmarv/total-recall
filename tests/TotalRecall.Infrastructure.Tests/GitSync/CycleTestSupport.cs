@@ -14,10 +14,13 @@ internal sealed partial class CycleRig : IDisposable
 {
     public static readonly DateTimeOffset StartTime = new(2026, 11, 19, 1, 2, 3, 456, TimeSpan.Zero);
 
-    public PushRig Push { get; } = new(configuredRemote: true);
+    public PushRig Push { get; }
     public PullRig Pull => Push.Pull;
     public List<string> Steps { get; } = [];
     public DateTimeOffset Now { get; set; } = StartTime;
+
+    /// <param name="sharedRemote">The bare remote of another machine (see <see cref="TwoMachineRig"/>); none: this rig makes its own.</param>
+    public CycleRig(BareRemote? sharedRemote = null) => Push = new PushRig(configuredRemote: true, sharedRemote);
 
     public CycleSettings Settings(TimeSpan? lockWait = null, string? address = null) =>
         new(address ?? Pull.RemoteAddress, "main", PushRig.Label, 0, lockWait ?? TimeSpan.Zero);
@@ -87,6 +90,14 @@ internal sealed partial class CycleRig : IDisposable
     {
         Pull.Remove(SyncValidation.recordPath(id));
         Pull.Commit("another machine removes " + id);
+        Pull.Source.PushTo(Push.Remote.Path);
+    }
+
+    /// <summary>Another machine adds a record: the remote moves ahead with it.</summary>
+    public void AddRecordOnRemote(SyncRecord.SyncRecord record)
+    {
+        Pull.PutRecord(record);
+        Pull.Commit("another machine adds " + record.Id);
         Pull.Source.PushTo(Push.Remote.Path);
     }
 

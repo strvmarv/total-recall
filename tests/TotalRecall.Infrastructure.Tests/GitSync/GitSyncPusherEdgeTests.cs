@@ -6,7 +6,10 @@ using static TotalRecall.Infrastructure.Tests.GitSync.ApplyRig;
 
 namespace TotalRecall.Infrastructure.Tests.GitSync;
 
-/// <summary>The spec's remaining tests: shapes a real pull never produces (deletions), bulk finalization, and a left-over commit after a failed push.</summary>
+/// <summary>
+/// The spec's remaining tests: shapes a real pull never leaves (deletions built by hand, so the pusher is seen alone), bulk
+/// finalization, and a left-over commit after a failed push.
+/// </summary>
 public sealed class GitSyncPusherEdgeTests : IDisposable
 {
     private const string A = "a1b2c3d4";
@@ -18,18 +21,19 @@ public sealed class GitSyncPusherEdgeTests : IDisposable
     public void Dispose() => _rig.Dispose();
 
     [GitFact]
-    public async Task ALocalDeletion_AMissingRecord_AndANotReconciledRow_WriteAndRemoveNothing_WhileTheOthersGoOut()
+    public async Task ALocalDeletion_AndARowWhoseRecordIsMissing_WriteAndRemoveNothing_WhileANewEntryGoesOut()
     {
-        // a real pull that holds a deletion is incomplete (1b-ii), so the completed summary is built by hand
+        // a real pull would decide both deletions (A listed for removal, B deleted), so the completed summary is built by
+        // hand and lists no removal: the pusher alone must leave A's record and B's missing one alone
         var head = _rig.Seed(Rec(A, content: "kept in the repository"), Rec(B, content: "old"));
         await _rig.PullAsync();
         _rig.Store.Delete(Tier.Warm, ContentType.Memory, A);               // a local deletion
-        _rig.Edit(Tier.Warm, B, new UpdateEntryOpts { Content = "edited" });
+        _rig.Edit(Tier.Warm, B, new UpdateEntryOpts { Tags = ["edited"] });   // no pending text: nothing to write back (D18)
         _rig.AddMemory(Tier.Warm, C, content: "new here");
         _rig.Now += 1000;
         var scan = _rig.Scan();
         Assert.Contains(scan.LocalDeletions, d => d.Id == A);
-        // a row with a base whose record is gone from the tree, and a new row whose record is accepted
+        // B: a row with a base whose record is gone from the tree (a tags edit leaves nothing to write back); C: a new entry
         _rig.Pull.CloneGit("rm", "-q", SyncValidation.recordPath(B));
         _rig.Pull.CloneGit("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "remote deletion");
         var removedHead = _rig.CloneHead()!;
@@ -46,6 +50,44 @@ public sealed class GitSyncPusherEdgeTests : IDisposable
         Assert.Equal($"A\t{SyncValidation.recordPath(C)}", changed);   // nothing of A's is touched or removed by the push
         Assert.Equal("sync: testbox +1 ~0 -0", _rig.Remote.Git("log", "-1", "--format=%s", "main").Trim());
         Assert.Equal(head, _rig.Remote.Git("rev-parse", "main~2").Trim());   // only the remote deletion and this push are above the seed
+    }
+
+    [GitFact]
+    public async Task ALocalDeletion_ATextEditedRowWithNoRecord_AndANewEntry_WriteBackAndAdd_AndRemoveNothing()
+    {
+        // as above, but B's text was edited: its pending content stamp writes the record back from B's base (D15)
+        _rig.Seed(Rec(A, content: "kept in the repository"), Rec(B, content: "old", tags: ["t"]));
+        await _rig.PullAsync();
+        _rig.Store.Delete(Tier.Warm, ContentType.Memory, A);
+        _rig.Edit(Tier.Warm, B, new UpdateEntryOpts { Content = "edited" });
+        _rig.AddMemory(Tier.Warm, C, content: "new here");
+        _rig.Now += 1000;
+        var scan = _rig.Scan();
+        _rig.Pull.CloneGit("rm", "-q", SyncValidation.recordPath(B));
+        _rig.Pull.CloneGit("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "remote deletion");
+        var removedHead = _rig.CloneHead()!;
+        _rig.Pull.SetLast(removedHead);
+        var pending = GitSyncRows.ReadAll(_rig.Pull.Connection)[B].ContentStamp;
+        Assert.NotNull(pending);
+
+        var outcome = await _rig.Pusher().PushAsync(PushRig.Summary(removedHead), scan);
+
+        var pushed = Assert.IsType<PushOutcome.Pushed>(outcome);
+        Assert.Equal([B, C], pushed.Summary.Written);
+        Assert.Equal(2, pushed.Summary.New);
+        Assert.Empty(pushed.Summary.Skipped);
+        var changed = _rig.Remote.Git("diff-tree", "--no-commit-id", "--name-status", "-r", removedHead, "main").Trim().Split('\n');
+        Assert.Equal([$"A\t{SyncValidation.recordPath(B)}", $"A\t{SyncValidation.recordPath(C)}"], changed);
+        Assert.Equal("sync: testbox +2 ~0 -0", _rig.Remote.Git("log", "-1", "--format=%s", "main").Trim());
+        var written = _rig.RemoteFile(SyncValidation.recordPath(B));
+        var record = RecordReader.Parse(System.Text.Encoding.UTF8.GetBytes(written), SyncValidation.recordPath(B)).Parsed!.Record;
+        Assert.Equal("edited", record.Content);
+        Assert.Equal(["t"], record.Tags);   // the base's tags, unchanged
+        Assert.Equal(pending, record.ContentStamp);
+        var row = GitSyncRows.ReadAll(_rig.Pull.Connection)[B];
+        Assert.Equal(written, row.BaseJson);
+        Assert.Null(row.ContentStamp);
+        Assert.Null(row.PushingStamps);
     }
 
     [GitFact]

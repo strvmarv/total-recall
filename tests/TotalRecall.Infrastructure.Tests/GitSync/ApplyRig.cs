@@ -90,11 +90,29 @@ internal sealed class ApplyRig : IDisposable
         RecordReader.Parse(RecordWriter.Write(record).Bytes!, SyncValidation.recordPath(record.Id)).Parsed
         ?? throw new InvalidOperationException("the record is not valid");
 
-    public EntryResult Apply(SyncRecordModule.SyncRecord? record, bool proven = true) =>
-        Applier.ApplyOne(record?.Id ?? throw new ArgumentNullException(nameof(record)), Parsed(record), proven);
+    public EntryResult Apply(SyncRecordModule.SyncRecord? record, bool proven = true, string? blobSha = null) =>
+        Apply(record?.Id ?? throw new ArgumentNullException(nameof(record)), record, proven, blobSha);
 
-    public EntryResult Apply(string id, SyncRecordModule.SyncRecord? record, bool proven = true) =>
-        Applier.ApplyOne(id, record is null ? null : Parsed(record), proven);
+    /// <summary>
+    /// Applies one id with the open held-delete item the pull would pass for it (read from the store, as the pull reads them)
+    /// and, when given, the record's blob id.
+    /// </summary>
+    public EntryResult Apply(string id, SyncRecordModule.SyncRecord? record, bool proven = true, string? blobSha = null) =>
+        Applier.ApplyOne(id, record is null ? null : Parsed(record), proven, Held(id), blobSha, guard: default);
+
+    // ---- held-delete items ----
+
+    public HeldItem? Held(string id) => GitSyncReviews.ReadOpenHeld(Scan.Connection).GetValueOrDefault(id);
+
+    public void SeedHeld(string id, string direction = "remote", string cause = "unproven") =>
+        GitSyncReviews.UpsertHeld(Scan.Connection, new HeldItem(id, direction, null, cause, 1_700_000_000_000L));
+
+    public int ReviewRows()
+    {
+        using var cmd = Scan.Connection.CreateCommand();
+        cmd.CommandText = "SELECT count(*) FROM git_sync_review";
+        return Convert.ToInt32(cmd.ExecuteScalar());
+    }
 
     // ---- looking ----
 
@@ -106,6 +124,18 @@ internal sealed class ApplyRig : IDisposable
         if (issues)
             foreach (var issue in Scan.Issues())
                 sb.Append(issue).Append('\n');
+        using (var cmd = Scan.Connection.CreateCommand())
+        {
+            cmd.CommandText = "SELECT * FROM git_sync_review ORDER BY entry_id, kind";
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+            {
+                sb.Append("review ");
+                for (var i = 0; i < r.FieldCount; i++)
+                    sb.Append(r.IsDBNull(i) ? "NULL" : r.GetValue(i)).Append('|');
+                sb.Append('\n');
+            }
+        }
         sb.Append("hlc=").Append(Scan.Meta("git_sync_hlc")).Append('\n');
         return sb.ToString();
     }

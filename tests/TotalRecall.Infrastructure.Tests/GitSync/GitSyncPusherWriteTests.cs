@@ -290,6 +290,194 @@ public sealed class GitSyncPusherWriteTests : IDisposable
         Assert.Equal(head, _rig.Remote.Head());
     }
 
+    // ---- removals (milestone 1b-ii, D14) ----
+
+    private void DeleteHere(string id) => _rig.Store.Delete(Tier.Warm, ContentType.Memory, id);
+
+    private bool RemoteHas(string id) =>
+        _rig.Remote.Git("ls-tree", "--name-only", "main", "--", SyncValidation.recordPath(id)).Trim() != "";
+
+    [GitFact]
+    public async Task RemovalOnlyPush_CommitsOneRemoval_WithMessageMinusOne_AndTheRecordIsGoneAtTheRemote()
+    {
+        _rig.Seed(Rec(A), Rec(B, content: "stays"));
+        await _rig.PullAsync();
+        DeleteHere(A);
+        var (plan, pusher, head) = await ReadyAsync();
+        Assert.Equal([A], plan.Removals);
+        Assert.Empty(plan.Entries);
+
+        var committed = Assert.IsType<WriteOutcome.Committed>(await pusher.WriteAsync(head, plan, default));
+
+        Assert.Equal(_rig.Remote.Head(), committed.Commit);
+        var log = _rig.Remote.Git("log", "-1", "--format=%P|%s", "main").Trim();
+        Assert.Equal($"{head}|sync: testbox +0 ~0 -1", log);
+        Assert.Equal($"D\t{SyncValidation.recordPath(A)}", _rig.Remote.Git("diff-tree", "--no-commit-id", "--name-status", "-r", "main").Trim());
+        Assert.False(RemoteHas(A));
+        Assert.True(RemoteHas(B));
+        var summary = plan.Summary(committed.Commit);
+        Assert.Equal([A], summary.Removed);
+        Assert.Equal(0, summary.New);
+        Assert.Equal(0, summary.Changed);
+        Assert.Empty(summary.Written);
+        Assert.Equal("", _rig.Status().Trim());
+    }
+
+    [GitFact]
+    public async Task AdditionsChangesAndRemovals_AreOneCommitWithAllThreeCounts()
+    {
+        const string C = "c3d4e5f6";
+        _rig.Seed(Rec(A, content: "old"), Rec(C, content: "to forget"));
+        await _rig.PullAsync();
+        _rig.Edit(Tier.Warm, A, new UpdateEntryOpts { Content = "changed text" });
+        _rig.AddMemory(Tier.Warm, B, content: "brand new");
+        DeleteHere(C);
+        _rig.Now += 1000;
+        var (apply, scan) = await _rig.PullAsync();
+        Assert.Equal([C], apply.PushDeletions);
+
+        var outcome = await _rig.Push(apply, scan);
+
+        var summary = Assert.IsType<PushOutcome.Pushed>(outcome).Summary;
+        Assert.Equal(1, summary.New);
+        Assert.Equal(1, summary.Changed);
+        Assert.Equal([A, B], summary.Written);
+        Assert.Equal([C], summary.Removed);
+        Assert.Empty(summary.Skipped);
+        Assert.Equal(apply.Head, _rig.Remote.Git("rev-parse", "main~1").Trim());   // one commit
+        Assert.Equal("sync: testbox +1 ~1 -1", _rig.Remote.Git("log", "-1", "--format=%s", "main").Trim());
+        var changed = _rig.Remote.Git("diff-tree", "--no-commit-id", "--name-status", "-r", "main").Trim().Split('\n').Order(StringComparer.Ordinal);
+        Assert.Equal(
+            new[] { $"A\t{SyncValidation.recordPath(B)}", $"D\t{SyncValidation.recordPath(C)}", $"M\t{SyncValidation.recordPath(A)}" },
+            changed);
+    }
+
+    [GitTheory]
+    [InlineData("non-fast-forward")]
+    [InlineData("push-command")]
+    [InlineData("commit")]
+    public async Task FailedPushAfterARemoval_LeavesTheRowsAndTheCloneAsTheyWere(string how)
+    {
+        _rig.Seed(Rec(A), Rec(B, content: "stays"));
+        await _rig.PullAsync();
+        DeleteHere(A);
+        _rig.Now += 1000;
+        var (apply, scan) = await _rig.PullAsync();
+        Assert.Equal([A], apply.PushDeletions);
+        var head = apply.Head;
+        var rows = _rig.RowDump();
+        var pusher = _rig.Pusher();
+        switch (how)
+        {
+            case "non-fast-forward": pusher.BeforePush = () => _rig.MoveRemote(); break;
+            case "push-command": _rig.Pull.Fault = c => c.IsPush ? FaultingGitProcess.Failure(SyncGit.FailureKind.Auth, "authentication failed") : null; break;
+            default: _rig.Pull.Fault = c => c.IsCommit ? FaultingGitProcess.Failure(SyncGit.FailureKind.Other, "canned commit failure") : null; break;
+        }
+
+        var outcome = await pusher.PushAsync(apply, scan);
+
+        switch (how)
+        {
+            case "non-fast-forward":
+                Assert.Equal([A], Assert.IsType<PushOutcome.NonFastForward>(outcome).Summary.Removed);
+                break;
+            case "push-command":
+                Assert.Equal(SyncPush.Published.No, Assert.IsType<PushOutcome.Failed>(outcome).Published);
+                break;
+            default:
+                Assert.Equal("Commit", Assert.IsType<PushOutcome.Failed>(outcome).Kind);
+                AssertCloneIsAt(head);                    // a failure before the push command resets the clone at once
+                Assert.True(File.Exists(RecordFile(A)));   // the reset restored the deleted tracked file
+                break;
+        }
+        _rig.Pull.Fault = _ => null;
+        Assert.Equal(rows, _rig.RowDump());   // the row stays active with its base, nothing is forgotten
+        Assert.True(RemoteHas(A));
+        Assert.Equal(SyncMerge.RowState.Active, GitSyncRows.ReadAll(_rig.Pull.Connection)[A].State);
+
+        // the next push starts from L: the record file is back in the clone
+        Assert.IsType<PrepareResult.Ready>(await _rig.Pusher().PrepareAsync(PushRig.Summary(head), ScanSummary.Empty, default));
+        AssertCloneIsAt(head);
+        Assert.True(File.Exists(RecordFile(A)));
+    }
+
+    [GitTheory]
+    [InlineData("reread")]
+    [InlineData("plan")]
+    [InlineData("pushing")]
+    [InlineData("block")]
+    [InlineData("write")]
+    [InlineData("stage")]
+    [InlineData("commit")]
+    [InlineData("finalize")]
+    [InlineData("forget")]
+    [InlineData("meta")]
+    [InlineData("ref")]
+    public async Task FaultAtEveryPusherStep_WithARemoval_PublishesItOnceAndTheRowEndsForgotten(string step)
+    {
+        const string C = "c3d4e5f6";
+        _rig.Seed(Rec(A), Rec(B, content: "old"));
+        await _rig.PullAsync();
+        DeleteHere(A);
+        _rig.Edit(Tier.Warm, B, new UpdateEntryOpts { Content = "edited" });
+        _rig.AddMemory(Tier.Warm, C, content: "new");
+        _rig.Now += 1000;
+        var (apply, scan) = await _rig.PullAsync();
+        Assert.Equal([A], apply.PushDeletions);
+        var head = apply.Head;
+        var rowA = GitSyncRows.ReadAll(_rig.Pull.Connection)[A];
+        var seen = new List<string>();
+        var pusher = _rig.Pusher();
+        pusher.BeforeStep = (_, s) =>
+        {
+            seen.Add(s);
+            if (s == step)
+                throw new InvalidOperationException("injected");
+        };
+
+        var failed = Assert.IsType<PushOutcome.Failed>(await pusher.PushAsync(apply, scan));
+
+        Assert.Contains(step, seen);
+        var afterThePush = step is "finalize" or "forget" or "meta" or "ref";
+        Assert.Equal(afterThePush ? SyncPush.Published.Yes : SyncPush.Published.No, failed.Published);
+        if (afterThePush)
+            Assert.False(RemoteHas(A));
+        else
+        {
+            Assert.Equal(head, _rig.Remote.Head());
+            Assert.True(RemoteHas(A));
+            AssertCloneIsAt(head);
+            Assert.True(File.Exists(RecordFile(A)));
+            Assert.Equal(rowA, GitSyncRows.ReadAll(_rig.Pull.Connection)[A]);
+        }
+        var published = _rig.Remote.Head();
+
+        _rig.Now += 1000;
+        var (apply2, scan2) = await _rig.PullAsync();
+        var again = await _rig.Push(apply2, scan2);
+
+        if (afterThePush)
+        {
+            Assert.IsType<PushOutcome.NothingToPush>(again);
+            Assert.Equal(published, _rig.Remote.Head());   // no second commit
+        }
+        else
+        {
+            Assert.Equal([A], Assert.IsType<PushOutcome.Pushed>(again).Summary.Removed);
+            Assert.Equal(head, _rig.Remote.Git("rev-parse", "main~1").Trim());
+        }
+        Assert.False(RemoteHas(A));
+        var row = GitSyncRows.ReadAll(_rig.Pull.Connection)[A];
+        Assert.Equal(SyncMerge.RowState.Forgotten, row.State);
+        Assert.Equal(rowA.BaseJson, row.BaseJson);
+        Assert.Null(row.ContentStamp);
+        Assert.Null(row.StickyStamp);
+        Assert.Null(row.TierStamp);
+        Assert.Null(row.PushingStamps);
+        Assert.Null(row.RepushGroups);
+        Assert.Equal(_rig.Remote.Head(), _rig.Pull.Last);
+    }
+
     // ---- cancellation ----
 
     [GitFact]

@@ -6,7 +6,8 @@ namespace TotalRecall.Infrastructure.GitSync;
 public sealed partial class GitSyncScanner
 {
     /// <summary>
-    /// Writes the whole plan in one <c>BEGIN IMMEDIATE</c> transaction (decision 13): the rows, the issue rows, the
+    /// Writes the whole plan in one <c>BEGIN IMMEDIATE</c> transaction (decision 13): the rows, the <c>held-delete</c>
+    /// items that end with a row's base (milestone 1b-ii: a row moved to <c>left</c> or reactivated), the issue rows, the
     /// clock and the warning. A failure (or a lock timeout on <c>BEGIN IMMEDIATE</c>) leaves everything as it was.
     /// </summary>
     private void Write(ScanPlan plan)
@@ -18,6 +19,8 @@ public sealed partial class GitSyncScanner
             BeforeWrite?.Invoke("rows");
             foreach (var row in plan.Rows)
                 GitSyncRows.Write(_conn, row);
+            foreach (var id in plan.HeldDeletes)
+                GitSyncReviews.DeleteHeld(_conn, id);
 
             BeforeWrite?.Invoke("issues");
             foreach (var (id, detail) in plan.IssueUpserts)
