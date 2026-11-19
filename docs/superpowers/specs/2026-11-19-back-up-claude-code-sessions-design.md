@@ -126,7 +126,7 @@ blocks):
 |---|---|
 | `type: "user"`, not `isMeta`, not `isSidechain`, not `isCompactSummary`, `origin` absent or `origin.kind == "human"`, `message.content` a string or with `text` blocks | `UserText` (the text after the dropped-text rules of section 3; no record if nothing is left) |
 | a `user` record whose `origin.kind` is present and is anything else (the author's files hold 148 `task-notification` records: results of background tasks and subagents, injected by the host) | nothing |
-| `type: "attachment"` with `attachment.type == "queued_command"`, `commandMode == "prompt"` and `origin.kind == "human"` (a prompt the user typed while the agent was working; in the author's files some exist only here) | `UserText` of its `prompt` text. **De-duplication:** the same prompt can also arrive as a `user` record; a queued-command `UserText` is dropped when the previous kept `UserText` of the session has the same text |
+| `type: "attachment"` with `attachment.type == "queued_command"`, `attachment.commandMode == "prompt"` and `attachment.origin.kind == "human"` (a prompt the user typed while the agent was working; the fields all sit inside `attachment`, the record has no `origin` of its own; in the author's files some such prompts exist only here) | `UserText` of `attachment.prompt`. No de-duplication rule: no prompt that is both a queued attachment and a `user` record was observed (19 queued attachments in 101 files), and fixtures use the attachment shape only |
 | a `user` record with `tool_result` blocks, `is_error: true` | `ToolError` (the block's text: a string, or the concatenation of its `text` blocks) |
 | the same, not an error | nothing (successful tool output is dropped, decision 3) |
 | `type: "assistant"`, not `isSidechain`, `text` block | `AssistantText` |
@@ -148,7 +148,7 @@ above, and inside user and assistant text:
   `<local-command-caveat>`, `<command-message>`, `<bash-stdout>`, `<bash-stderr>`, `<EXTREMELY_IMPORTANT>` (a block with no closing tag is
   dropped to the end of the text); the builder adds the hosts' `<ide_*>` context tags the fixtures show;
 - a slash command is kept as plain text: `<command-name>/develop</command-name><command-args>148</command-args>` becomes `/develop 148`,
-  and `<bash-input>ls -l</bash-input>` (the `!` shell mode) becomes `[Bash: ls -l]` (a stub, section below);
+  and `<bash-input>ls -l</bash-input>` (the `!` shell mode) becomes a `ToolStub` record `[Bash: ls -l]` (it joins the open unit; it is not a user turn and does not start a unit or give the title);
 - a user text that is only a host interruption notice (`[Request interrupted by user...]`) is dropped, and is not a real user turn.
 
 **Tool stub** text: `[<ToolName>: <detail>]`, where the detail is one field of the tool's input chosen by tool name (`Bash`: `command`;
@@ -176,21 +176,23 @@ of these categories:
 | category | what it matches | what is replaced |
 |---|---|---|
 | `token` | the existing shapes (`ghp_`/`gho_`/`ghu_`/`ghs_`/`ghr_`, `github_pat_`, `glpat-`, `xox[baprs]-`, `AKIA`) and `sk-` keys **including `sk-ant-...`, `sk-proj-...`, `sk-svcacct-...` and `sk-admin-...`** (the likeliest secrets in a Claude Code transcript; the existing `sk-[A-Za-z0-9]{16,}` misses them because of the hyphens) | the token |
-| `private-key` | `-----BEGIN [A-Z ]*PRIVATE KEY( BLOCK)?-----` | from the BEGIN line to the end of the matching `-----END ...-----` line, **or to the end of the text when the END line is missing** |
+| `private-key` | `-----BEGIN [A-Z ]{0,40}PRIVATE KEY( BLOCK)?-----` | from the BEGIN line to the end of the matching `-----END ...-----` line, **or to the end of the text when the END line is missing** |
 | `bearer` | `Authorization: <scheme> <value>` (also `=`; quotes allowed; scheme `Bearer`, `Basic`, `Token`, `Digest` or none), `x-api-key: <value>`, and a bare `Bearer <value>` | the value (at least 8 characters after `Authorization` or `x-api-key`, 16 after a bare `Bearer`) |
 | `url-credentials` | `scheme://user:password@host` | the password only (the user name and the host stay searchable) |
-| `secret-assignment` | an assignment (`=` or `:`, quoted or not, also JSON `"name": "value"`) to a secret-named variable: names ending in `_KEY`, `_TOKEN`, `_SECRET`, `_PASSWORD`, `_PASSWD`, or equal to `PASSWORD`, `PASSWD`, `SECRET`, `TOKEN`, `API_KEY`, `APIKEY`, `PASSPHRASE`, `CLIENT_SECRET`, `ACCESS_KEY`, `AUTH_TOKEN` (any case) | the value; an unquoted value ends at whitespace, a quote, `&`, `;`, `,` or `)` |
+| `secret-assignment` | an assignment (`=` or `:`, quoted or not, also JSON `"name": "value"`) to a secret-named variable: names ending in `_KEY`, `_TOKEN`, `_SECRET`, `_PASSWORD`, `_PASSWD`, or equal to `PASSWORD`, `PASSWD`, `SECRET`, `TOKEN`, `API_KEY`, `APIKEY`, `PASSPHRASE`, `CLIENT_SECRET`, `ACCESS_KEY`, `AUTH_TOKEN` (any case); also the command-line flags `--password`, `--passwd`, `--token`, `--api-key`, `--secret` and `--auth-token` followed by `=` or whitespace | the value; an unquoted value ends at whitespace, a quote, `&`, `;`, `,` or `)` |
 | `unprocessable` | a text that a detector could not finish (the timeout below) | the whole text |
 
 Rules that every detector follows:
 
 - **Overlaps merge** (the union of the spans is replaced by one marker, the category of the span that starts first).
-- **Only a reference or a placeholder is left alone**, and only when the **whole value** is one: `$NAME`, `${NAME}`, `$(...)`, `<word-ish>`,
-  `{{ ... }}`, `%NAME%`, or one of `true`, `false`, `null`, `none`, `undefined`, or empty. `GH_TOKEN="$t" gh api ...`, which fills this
+- **Only a reference or a placeholder is left alone**, and only when the **whole value** is one: `$NAME`, `${NAME}` or `%NAME%` with
+  `NAME` matching `[A-Za-z_][A-Za-z0-9_]*` (so `${X:-literal}` and `$(echo hunter2)` are not exempt), `<word-ish>`, `{{ ... }}`, or one of
+  `true`, `false`, `null`, `none`, `undefined`, or empty. `GH_TOKEN="$t" gh api ...`, which fills this
   repository's own history, is therefore not redacted. **There is no exemption by length or by first character**: a short password is
   still a password, and `PASSWORD='$ecret!9'` or a value that merely starts with `<`, `{` or `%` is redacted. The table test pins both
   directions with positive and negative examples per category; the builder writes the exact patterns.
-- **No nested or ambiguous quantifiers** (every repeated element is a character class that cannot also match what follows it), and every
+- **Every repeated element is bounded or unambiguous** (no nested quantifiers, and a class that can also match what follows it carries an
+  upper bound), and every
   regex has a match timeout of 5 seconds as a **backstop**, not an everyday path: the builder verifies that each pattern finishes in well
   under a second on adversarial 1 MiB inputs (a long run of identifier characters, of `=`, of `:`, of quotes). A timeout **fails
   closed**: the whole text becomes `[redacted:unprocessable]` (count 1) and nothing from it is stored. Interpreted regexes only (NativeAOT:
@@ -198,7 +200,7 @@ Rules that every detector follows:
 - Redaction runs on the **full, untruncated text, before any truncation and before chunking** (so a token cannot be cut or split), on
   every text this part stores: user and assistant text, stub details, error text, compaction summaries, and the session title (which is
   derived from already-redacted text).
-- **Cutting.** One tested function cuts text to a limit and never lands inside a marker: when the limit falls inside `[redacted:...]`, the
+- **Cutting.** One tested function cuts text to a limit and **every cut in this part uses it** (the 160-, 500-, 120- and 300-character cuts, the 1,800-character chunk limit and the 100,000-character cap) and never lands inside a marker: when the limit falls inside `[redacted:...]`, the
   cut goes **before** the marker and `...` is appended. This is what keeps a token that straddles character 160 or 500 from leaving a prefix.
 - Emails are not redacted (parent decision 6).
 
@@ -255,7 +257,7 @@ The chunker is a pure function: `Chunk(unit, header facts) -> list of chunks`.
 
 ## 6. Session kind (decision 4) and project identity (decision 8)
 
-**Kind** is `interactive` or `automated` and is decided from the file alone (it is stored, so it can be re-evaluated). The first rule
+**Kind** is `interactive` or `automated` and is decided from the kept records of the file (after the cutoff filter; it is stored, so it can be re-evaluated). The first rule
 that applies wins:
 
 1. the session's `entrypoint` (from the head) starts with `sdk` (case-insensitive) -> `automated`;
@@ -295,15 +297,16 @@ cheap exclusion check of section 7, step 1.
 One `TranscriptIngester.IngestSession(source)` does, for one source file:
 
 1. **Exclusion by id.** `store.IsExcluded(host, id, null, null)`: when true the file is **not opened**; count `excluded`.
-2. **State.** `store.GetIngestState(host, id)` (the session row, or null). If a row exists and `source_size` equals the file's current
-   size and `source_mtime` equals its mtime, the file is unchanged: count `unchanged`, stop (no read). (`source_size` is the file's
-   **stat size observed before the read**, so a file that ends in a partial line is not re-read until it changes.)
+2. **State.** Read the cutoff once, `cutoff = store.IngestNotBefore()`, and `store.GetIngestState(host, id)` (the session row, or null).
+   If a row exists and `source_size` equals the file's current size, `source_mtime` equals its mtime **and `built_under_cutoff` equals
+   `cutoff`**, the file is unchanged: count `unchanged`, stop (no read). (`source_size` is the file's **stat size observed before the
+   read**, so a file that ends in a partial line is not re-read until it changes. A changed cutoff makes the row stale even when the file
+   did not change: that is how records hidden by a cutoff come back after `unforget --cutoff`.)
 3. **Head.** `ReadHead`. No fingerprint -> count `skipped`, stop. Compute the project identity (section 6) and call `store.IsExcluded(host,
-   id, key, cwd)`: when true, count `excluded`, stop. (This is the first read of the file; nothing from it is stored.) Read the cutoff
-   once: `cutoff = store.IngestNotBefore()`.
+   id, key, cwd)`: when true, count `excluded`, stop. (This is the first read of the file; nothing from it is stored.)
 4. **Mode.** No row: **fresh** (start 0). A **rewritten** pass (start 0, replace every chunk of the session) when the row's
    `source_fingerprint` differs from the head's, or `source_size` is larger than the file's current size (replaced or truncated), or the
-   byte before `ingested_offset` is not `0x0A`, or the row's `project_key` or `kind` differs from what this pass derives, or the row's
+   `ingested_offset` is above 0 and the byte before it is not `0x0A`, or the row has `exchange_count = 0`, or the row's `project_key` or `kind` differs from what this pass derives, or the row's
    `built_under_cutoff` differs from `cutoff` (the cutoff was cleared by `unforget`, so the records it had hidden must come back).
    Otherwise **resume**: start at `ingested_offset`.
 5. **Read** from the start offset to the end of the last complete line, build units, chunk them, derive kind and title (section 6).
@@ -313,19 +316,22 @@ One `TranscriptIngester.IngestSession(source)` does, for one source file:
      turns in all units before the last unit.
    - `source_size` and `source_mtime` (milliseconds) are the stat values observed **before** the read began (a file that grew during the
      read is therefore read again next pass, never skipped); `source_fingerprint` is the head's; `built_under_cutoff` is `cutoff` (null
-     when none); `started_at` is the first `Ts` of any kept record of the session (kept once set), `ended_at` the largest `Ts` of a kept
-     record; `source_path` is the current path.
+     when none); `started_at` is the first `Ts` of any kept record of the session, `ended_at` the largest `Ts` of a kept
+     record (a rewritten pass recomputes both, and the title, from scratch; a resumed pass keeps the stored `started_at` and title once
+     set and takes `ended_at` as the larger of the stored value and this pass's); `source_path` is the current path.
    - A kind or project key that differs from the stored one makes this a rewritten pass (headers carry both, so the chunks of the
      earlier units would otherwise keep a stale header and a grown session would not equal the same session ingested once); the pass is
      redone from offset 0 once, with the new values.
    - A pass over a session with **no kept content**: with no row it stores nothing (the file is read again on the next run, which is
      cheap and counted `empty`); with a row (a rewritten file that now keeps nothing, or a cutoff that hides everything) it **deletes the
-     session's chunks** and updates the row's source fields, counts and cutoff.
+     session's chunks** and sets the row to: `ingested_offset` 0, `exchange_count` 0, `settled_user_turns` 0, null title, `started_at` and
+     `ended_at`, the stored kind kept (it is NOT NULL), and the new source fields and cutoff. A row with `exchange_count = 0` is read as a
+     rewritten pass next time (step 4), so the numbering never starts from -1.
 6. **Apply** with `store.ApplyIngest(...)` (section 8): one `BEGIN IMMEDIATE` transaction that checks, inside it, that (a) the session is
    not excluded (a `forget` that committed since step 3 wins: outcome `Excluded`, nothing written), (b) `ingest_not_before` still equals
    the `cutoff` the pass was built under (a forget-everything that committed since: outcome `Stale`), and (c) the session row still equals
-   the state the pass started from (`ingested_offset`, `exchange_count`, `source_fingerprint`, `source_size`; or still absent for a
-   fresh pass; another pass committed since: outcome `Conflict`). On `Stale` or `Conflict` nothing is written and the ingester redoes the
+   the state the pass started from (**every field of the state read in step 2**; or still absent for a fresh pass; another pass committed
+   since: outcome `Conflict`). On `Stale` or `Conflict` nothing is written and the ingester redoes the
    session **once** from step 2; a second one counts the session `retry` and leaves it for the next run. The write is an **upsert by
    `(session_id, exchange_start, part)`**: a chunk row whose content and metadata are identical is left untouched (its id and `embedded`
    are kept), a changed one is updated (`embedded` reset to 0), and the rows of the rebuilt range that no longer exist are deleted. Then
@@ -365,7 +371,8 @@ the only host is `claude-code`; Part 7 adds `pi`).
 
 Order: parse arguments -> read the configuration strictly (a malformed config exits 1, as the other commands) -> the archive must be on
 (`[transcripts] enabled = true`) and the storage mode must not be Postgres -> `TranscriptStore.Open(location, create: false)` (absent
-tables mean the archive was never enabled; an older archive is migrated to the second migration here) -> only then create the adapter and
+tables, as after a hand edit of `config.toml` that never ran `enable`, print that the archive tables do not exist and that `total-recall
+transcripts enable` creates them, and exit 1; an older archive is migrated to the second migration here) -> only then create the adapter and
 touch the host directory. **While the archive is off, backfill prints that it is off and how to enable it, exits 1, and has read nothing
 from the host directory** (a test double adapter that fails if it is ever enumerated proves it). It needs no terminal and takes no
 confirmation.
@@ -432,6 +439,8 @@ new locations.
 - The cutoff is compared "at or before" inside the ingester through a new `IngestNotBefore()`; Part 1's strict `IsBeforeCutoff` is
   unchanged (call 6). A record without a timestamp is not given its predecessor's (call 9): decision 7's rule cannot be applied the same way
   to a resumed pass.
+- Kind is decided from the **kept** records, so a session that straddles a forget-everything is classified on what remains (decision 4
+  says "from the session file alone"); counting the hidden turns would need them to be read again on every pass.
 - A cap of 100,000 characters per stored text (call 4), `CLAUDE_CONFIG_DIR` (call 1), and two tool inputs stored as assistant text (call 8):
   decision 3 keeps stubs only, and these two are the assistant's answer.
 - The chunk header says `project <key>`, not `project <path>`; a chunk never spans units; the repeated question is cut to 300
