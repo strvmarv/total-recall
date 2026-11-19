@@ -12,6 +12,9 @@ namespace TotalRecall.Infrastructure.GitSync;
 /// An entry whose file will be written: a new record, the record at <c>L</c> patched, or (milestone 1b-ii, D15) a
 /// write-back: the row's base patched with the entry's groups, for a record a text edit saved from a remote deletion.
 /// <see cref="IsNew"/> is true when the file is new in the repository (a new entry or a write-back; counted as <c>+</c>).
+/// <see cref="Plan"/> holds the groups with a pending change; <see cref="Repush"/> the groups a reset reverted that the
+/// record at <c>L</c> gets back from the row's base (D16; null when there are none), and <see cref="Pushed"/> the stamps
+/// of both (a repushed group's stamp is the base's).
 /// </summary>
 internal sealed record PlannedEntry(
     string Id,
@@ -19,11 +22,8 @@ internal sealed record PlannedEntry(
     byte[] Bytes,
     SyncRecordModule.SyncRecord Record,
     SyncPush.GroupPlan? Plan,
-    SyncMerge.GroupStamps Pushed)
-{
-    /// <summary>A write-back (D15): a new file planned from the row's base, so it has a group plan.</summary>
-    public bool WriteBack => IsNew && Plan is not null;
-}
+    SyncMerge.GroupStamps Pushed,
+    SyncPush.RepushPlan? Repush);
 
 /// <summary>An entry that needs no file: the record at <c>L</c> already says what the entry says (decision 6).</summary>
 internal sealed record UnchangedEntry(string Id, string BaseText, SyncMerge.GroupStamps Pushed);
@@ -70,7 +70,9 @@ public sealed partial class GitSyncPusher
     /// still agrees with its row, builds the record to write, and writes the block marks and the <c>pushing_stamps</c>
     /// of the entries that will be written. A candidate with a base and no accepted record at <c>L</c> is a write-back
     /// (milestone 1b-ii, D15): its record is the row's base patched like a changed entry's, and only a content group that
-    /// is written lets it out. Writes no file. A failure rolls the whole transaction back.
+    /// is written lets it out. A row with a <c>repush_groups</c> marker (D16) also gets back, in the record at <c>L</c>, each
+    /// flagged group that has no pending stamp, from its base with the base's stamp (no clock call). Writes no file. A
+    /// failure rolls the whole transaction back.
     /// </summary>
     internal PlanResult Plan(PushPrepared prepared, CancellationToken ct)
     {
@@ -175,6 +177,8 @@ public sealed partial class GitSyncPusher
         byte[]? bytes;
         SyncRecordModule.SyncRecord? record;
         SyncPush.GroupPlan? plan = null;
+        SyncPush.RepushPlan? repush = null;
+        var pushed = pending;
         var isNew = row.BaseJson is null;
         var writeBack = !isNew && !prepared.Tree.Accepted.ContainsKey(id);
         SyncValidation.Block? violation = null;
@@ -203,6 +207,13 @@ public sealed partial class GitSyncPusher
                 return;
             }
             plan = SyncPush.planChanged(start.Record, start.UnknownSource is not null, local, pending);
+            // the groups a reset reverted, from the base (D16); a write-back starts from the base, so it has none to add
+            if (!writeBack)
+            {
+                var flagged = SyncPush.repushPlan(info.Base!.Record, SyncPush.repushGroupsOf(row.RepushGroups), pending);
+                repush = SyncPush.nothingToRepush(flagged) ? null : flagged;
+            }
+            pushed = repush is null ? SyncPush.pushedStamps(plan) : SyncPush.repushedStamps(plan, repush);
             if (!plan.Stale.IsEmpty)
                 skipped.Add(new PushItem(id, "stale-stamp"));
             if (writeBack && plan.Content is null)
@@ -213,14 +224,14 @@ public sealed partial class GitSyncPusher
                     skipped.Add(new PushItem(id, SyncPush.exclusionName(SyncPush.Exclusion.RecordMissing)));
                 return;
             }
-            if (SyncPush.nothingToWrite(plan))
+            if (SyncPush.nothingToWrite(plan) && repush is null)
             {
-                unchanged.Add(Unchanged(id, info, SyncPush.pushedStamps(plan)));
+                unchanged.Add(Unchanged(id, info, pushed));
                 ApplyMark(tx, row, local, violation: null, candidate: true, pushing: null, keepPushing: true, id);
                 return;
             }
 
-            var patched = RecordPatcher.Patch(start, ToPatch(plan, local));
+            var patched = RecordPatcher.Patch(start, ToPatch(plan, local, repush, info.Base!));
             if (patched.Failure == PatchFailure.MissingTierStamp)
             {
                 skipped.Add(new PushItem(id, "missing-stamp"));
@@ -244,13 +255,13 @@ public sealed partial class GitSyncPusher
 
         if (!isNew && !writeBack && bytes!.AsSpan().SequenceEqual(info.RecordBytes!))
         {
-            unchanged.Add(Unchanged(id, info, SyncPush.pushedStamps(plan!)));
+            // also a repush whose record at L already says what the base says: nothing to write, the finalize clears the marker
+            unchanged.Add(Unchanged(id, info, pushed));
             ApplyMark(tx, row, local, violation: null, candidate: true, pushing: null, keepPushing: true, id);
             return;
         }
 
-        var pushed = isNew ? pending : SyncPush.pushedStamps(plan!);
-        entries.Add(new PlannedEntry(id, isNew || writeBack, bytes!, record!, plan, pushed));
+        entries.Add(new PlannedEntry(id, isNew || writeBack, bytes!, record!, plan, pushed, repush));
         Step(id, "pushing");
         ApplyMark(tx, row, local, violation: null, candidate: true, pushing: SyncApply.PushingStamps.encode(pushed), keepPushing: false, id);
     }
@@ -294,11 +305,30 @@ public sealed partial class GitSyncPusher
         return r.Read() ? new SyncRecordModule.Origin(r.GetString(0), r.GetString(1)) : null;
     }
 
-    /// <summary>The patch that writes a <see cref="SyncPush.GroupPlan"/>: the groups it names and nothing else.</summary>
-    private static RecordPatch ToPatch(SyncPush.GroupPlan plan, SyncMerge.LocalEntry local)
+    /// <summary>
+    /// The patch that writes a <see cref="SyncPush.GroupPlan"/> and a <see cref="SyncPush.RepushPlan"/> (D16): the groups they
+    /// name and nothing else (the two never name the same group). A repushed group takes the base's values and stamp. The
+    /// base's source is set, or cleared when the base has none; a base whose source this version cannot parse keeps the
+    /// record's source (the patch cannot write the unparsed text, and clearing it would lose a source).
+    /// </summary>
+    private static RecordPatch ToPatch(SyncPush.GroupPlan plan, SyncMerge.LocalEntry local, SyncPush.RepushPlan? repush, ParsedRecord baseRecord)
     {
         ContentPatch? content = null;
-        if (plan.Content is { } c)
+        if (repush?.Content is { } rc)
+        {
+            var r = rc.Value;
+            Change<SourceTool> source = r.Source is { } tool
+                ? Change<SourceTool>.Set(tool.Value)
+                : baseRecord.UnknownSource is null ? Change<SourceTool>.Clear : Change<SourceTool>.Keep;
+            content = new ContentPatch(
+                r.Text,
+                r.EntryType,
+                r.Stamp,
+                r.Project is { } p ? Change<string>.Set(p.Value) : Change<string>.Clear,
+                r.Scope is { } s ? Change<string>.Set(s.Value) : Change<string>.Clear,
+                source);
+        }
+        else if (plan.Content is { } c)
         {
             var w = c.Value;
             Change<SourceTool> source = w.Source switch
@@ -319,7 +349,11 @@ public sealed partial class GitSyncPusher
         IReadOnlyList<string>? tags = plan.Tags is { } t ? [.. t.Value] : null;
         var tierStamp = plan.Tier?.Value;
         StickyPatch? sticky = plan.Sticky is { } st ? new StickyPatch(local.Sticky, st.Value, local.Sticky ? tierStamp : null) : null;
+        if (repush?.Sticky is { } rs)
+            sticky = new StickyPatch(rs.Value.Sticky, rs.Value.Stamp, rs.Value.TierStamp?.Value);
         TierPatch? tier = tierStamp is { } ts ? new TierPatch(local.Tier, ts) : null;
+        if (repush?.Tier is { } rt)
+            tier = new TierPatch(rt.Value.Tier, rt.Value.Stamp);
         return new RecordPatch(content, tags, sticky, tier);
     }
 }

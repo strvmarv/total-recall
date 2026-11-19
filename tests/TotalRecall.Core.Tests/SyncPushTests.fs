@@ -18,7 +18,8 @@ let private row : RowFacts =
       HasBase = true
       BaseTagsHash = Some "h1"
       ScannedTagsHash = Some "h1"
-      Pending = noStamps }
+      Pending = noStamps
+      HasRepushMarker = false }
 
 [<Tests>]
 let candidateTests =
@@ -353,6 +354,72 @@ let afterPushTests =
         testCase "pushing_stamps becomes none when every group was pushed" <| fun () ->
             Expect.equal (afterPush all text all).PushingText None "none"
             Expect.equal (afterPush noStamps None noStamps).PushingText None "nothing at all"
+    ]
+
+// ---- the repush of reverted groups (milestone 1b-ii, D16) ----
+
+let private flags (c: bool) (s: bool) (t: bool) : GroupFlags = { Content = c; Sticky = s; Tier = t }
+
+/// The base the repush reads: every group differs from `baseRecord` (the record a reset left at R).
+let private agreed : SyncRecord =
+    { baseRecord with
+        Content = "agreed text"
+        EntryType = Preference
+        Source = Some Cursor
+        Project = Some "o/r"
+        Scope = None
+        Placement = { Placement.Tier = Hot; TierStamp = st 7; Sticky = false; StickyStamp = st 8 }
+        ContentStamp = st 9 }
+
+[<Tests>]
+let repushTests =
+    testList "SyncPush repush (milestone 1b-ii, D16)" [
+        testCase "isCandidate_is_true_for_a_marker_row" <| fun () ->
+            Expect.isTrue (isCandidate { row with HasRepushMarker = true }) "a marker with nothing pending"
+            for s in [ Forgotten; Left ] do
+                Expect.isFalse (isCandidate { row with State = s; HasRepushMarker = true }) (sprintf "only an active row (%A)" s)
+        testCase "repushGroupsOf_decodes" <| fun () ->
+            Expect.equal (repushGroupsOf "content,sticky,tier") (flags true true true) "all three"
+            Expect.equal (repushGroupsOf "content,tier") (flags true false true) "two"
+            Expect.equal (repushGroupsOf "sticky") (flags false true false) "one"
+            for text in [ null; ""; "tier,content"; "content,content"; "tags" ] do
+                Expect.equal (repushGroupsOf text) (flags false false false) (sprintf "%A is no group" text)
+        testCase "repushPlan_takes_each_flagged_group_from_the_base_with_the_bases_stamp" <| fun () ->
+            let p = repushPlan agreed (flags true true true) noStamps
+            Expect.equal
+                p.Content
+                (Some { Text = "agreed text"; EntryType = Preference; Stamp = st 9; Project = Some "o/r"; Scope = None; Source = Some Cursor })
+                "content"
+            Expect.equal p.Sticky (Some { Sticky = false; Stamp = st 8; TierStamp = None }) "sticky"
+            Expect.equal p.Tier (Some { Tier = Hot; Stamp = st 7 }) "tier"
+        testCase "repushPlan_names_only_the_flagged_groups" <| fun () ->
+            let p = repushPlan agreed (flags false false true) noStamps
+            Expect.isNone p.Content "content not flagged"
+            Expect.isNone p.Sticky "sticky not flagged"
+            Expect.equal p.Tier (Some { Tier = Hot; Stamp = st 7 }) "tier"
+            Expect.isTrue (nothingToRepush (repushPlan agreed (flags false false false) noStamps)) "no flag, nothing"
+        testCase "repushPlan_leaves_out_a_flagged_group_with_a_pending_stamp" <| fun () ->
+            let pending = { GroupStamps.Content = Some(st 20); Sticky = None; Tier = Some(st 21) }
+            let p = repushPlan agreed (flags true true true) pending
+            Expect.isNone p.Content "pending content takes the normal path"
+            Expect.isSome p.Sticky "sticky has no pending stamp"
+            Expect.isNone p.Tier "pending tier takes the normal path"
+            let allPending = { GroupStamps.Content = Some(st 20); Sticky = Some(st 20); Tier = Some(st 20) }
+            Expect.isTrue (nothingToRepush (repushPlan agreed (flags true true true) allPending)) "every group pending"
+        testCase "repushPlan_a_sticky_base_carries_its_tier_stamp_for_the_raise" <| fun () ->
+            let pinned = { agreed with Placement = { agreed.Placement with Sticky = true } }
+            Expect.equal
+                (repushPlan pinned (flags false true false) noStamps).Sticky
+                (Some { Sticky = true; Stamp = st 8; TierStamp = Some(st 7) })
+                "a pin"
+        testCase "repushedStamps_merges_the_written_groups_with_the_bases_stamps" <| fun () ->
+            let plan = planChanged baseRecord false localEntry { noStamps with Content = Some(st 30) }
+            let repush = repushPlan agreed (flags true true true) { noStamps with Content = Some(st 30) }
+            Expect.equal
+                (repushedStamps plan repush)
+                { GroupStamps.Content = Some(st 30); Sticky = Some(st 8); Tier = Some(st 7) }
+                "content from the plan, sticky and tier from the base"
+            Expect.equal (repushedStamps plan (repushPlan agreed (flags false false false) noStamps)) (pushedStamps plan) "no repush"
     ]
 
 [<Tests>]

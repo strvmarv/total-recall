@@ -56,8 +56,9 @@ public sealed partial class GitSyncPusher
     /// candidates with their exclusions; and the removals of milestone 1b-ii (D14): each id of
     /// <see cref="ApplySummary.PushDeletions"/> that is still a local deletion of the scan and whose accepted record at
     /// <c>L</c> nothing is in the way of. A candidate with an open held item is excluded (D17); one with a base, no
-    /// accepted record and a pending content stamp is not excluded: the plan writes it back from its base (D15, D18).
-    /// Writes nothing to the store.
+    /// accepted record and a pending content stamp is not excluded: the plan writes it back from its base (D15, D18). A
+    /// row with a <c>repush_groups</c> marker is a candidate (D16); with no accepted record and no pending text change it
+    /// has nothing to patch and is excluded as <c>record-missing</c>. Writes nothing to the store.
     /// </summary>
     internal async Task<PrepareResult> PrepareAsync(ApplySummary apply, ScanSummary scan, CancellationToken ct)
     {
@@ -147,12 +148,14 @@ public sealed partial class GitSyncPusher
             }
 
             var pending = new SyncMerge.GroupStamps(Opt(row.ContentStamp), Opt(row.StickyStamp), Opt(row.TierStamp));
+            var marked = SyncPush.repushGroupsOf(row.RepushGroups);
             var facts = new SyncPush.RowFacts(
                 row.State,
                 row.BaseJson is not null,
                 parsedBase is null ? null : FSharpOption<string>.Some(SyncScan.tagsHash(parsedBase.Record.Tags)),
                 row.ScannedTagsHash is null ? null : FSharpOption<string>.Some(row.ScannedTagsHash),
-                pending);
+                pending,
+                marked.Content || marked.Sticky || marked.Tier);
             if (!SyncPush.isCandidate(facts))
                 continue;
 

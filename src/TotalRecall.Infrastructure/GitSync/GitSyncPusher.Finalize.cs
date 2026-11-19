@@ -12,15 +12,17 @@ public sealed partial class GitSyncPusher
     /// commit was pushed) <c>_meta.git_sync_last_sha</c>, then the protective ref. Returns
     /// the failure, or null. <paramref name="commit"/> is null when nothing was pushed (only the unchanged entries are
     /// finalized then, and <c>L</c> does not move). After a pushed commit each removed id's row becomes <c>forgotten</c>
-    /// (milestone 1b-ii, D14), in the same transaction: see <see cref="Forget"/>. A pushed write-back (D15) also clears the
-    /// row's <c>repush_groups</c>: its record was written from the base, so every group it did not change carries the base's
-    /// value and stamp, and the base it becomes needs no repush. The token is never consulted: the steps are local and short.
+    /// (milestone 1b-ii, D14), in the same transaction: see <see cref="Forget"/>. Every finalized row also loses its
+    /// <c>repush_groups</c> (D16): its base becomes the record now in the repository, so no group of that record is older
+    /// than the base. That covers a pushed repush, a repush whose record already said what the base says (an unchanged
+    /// entry), and a write-back (D15), whose record was written from the base. A failed or non-fast-forward push finalizes
+    /// no written entry, so their markers stay. The token is never consulted: the steps are local and short.
     /// </summary>
     internal async Task<PushOutcome.Failed?> FinalizeAsync(PlanResult.Planned plan, string? commit)
     {
         var published = commit is null ? SyncPush.Published.No : SyncPush.Published.Yes;
-        var finalized = plan.Unchanged.Select(u => (u.Id, Text: u.BaseText, u.Pushed, WriteBack: false))
-            .Concat(commit is null ? [] : plan.Entries.Select(e => (e.Id, Text: StrictUtf8.GetString(e.Bytes), e.Pushed, e.WriteBack)))
+        var finalized = plan.Unchanged.Select(u => (u.Id, Text: u.BaseText, u.Pushed))
+            .Concat(commit is null ? [] : plan.Entries.Select(e => (e.Id, Text: StrictUtf8.GetString(e.Bytes), e.Pushed)))
             .OrderBy(e => e.Id, StringComparer.Ordinal)
             .ToList();
         if (finalized.Count == 0 && commit is null)
@@ -41,7 +43,7 @@ public sealed partial class GitSyncPusher
             var phase = "Finalize";
             try
             {
-                foreach (var (id, text, pushed, writeBack) in finalized)
+                foreach (var (id, text, pushed) in finalized)
                 {
                     Step(id, "finalize");
                     var row = GitSyncRows.Read(tx.Connection, id, tx.Transaction);
@@ -57,7 +59,7 @@ public sealed partial class GitSyncPusher
                         StickyStamp = after.Pending.Sticky?.Value,
                         TierStamp = after.Pending.Tier?.Value,
                         PushingStamps = after.PushingText?.Value,
-                        RepushGroups = writeBack ? null : row.RepushGroups,
+                        RepushGroups = null,
                         BlockedReason = ownMark ? null : row.BlockedReason,
                         BlockedHash = ownMark ? null : row.BlockedHash,
                     }, tx.Transaction);
