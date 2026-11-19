@@ -21,7 +21,7 @@ public sealed class GitSyncPusherEdgeTests : IDisposable
     public void Dispose() => _rig.Dispose();
 
     [GitFact]
-    public async Task ALocalDeletion_AMissingRecord_AndANotReconciledRow_WriteAndRemoveNothing_WhileTheOthersGoOut()
+    public async Task ALocalDeletion_AndARowWhoseRecordIsMissing_WriteAndRemoveNothing_WhileANewEntryGoesOut()
     {
         // a real pull would decide both deletions (A listed for removal, B deleted), so the completed summary is built by
         // hand and lists no removal: the pusher alone must leave A's record and B's missing one alone
@@ -33,7 +33,7 @@ public sealed class GitSyncPusherEdgeTests : IDisposable
         _rig.Now += 1000;
         var scan = _rig.Scan();
         Assert.Contains(scan.LocalDeletions, d => d.Id == A);
-        // a row with a base whose record is gone from the tree, and a new row whose record is accepted
+        // B: a row with a base whose record is gone from the tree (a tags edit leaves nothing to write back); C: a new entry
         _rig.Pull.CloneGit("rm", "-q", SyncValidation.recordPath(B));
         _rig.Pull.CloneGit("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "remote deletion");
         var removedHead = _rig.CloneHead()!;

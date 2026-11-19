@@ -28,6 +28,9 @@ public sealed class TwoMachineTests : IDisposable
         var onB = _rig.B.Pull.Store.Get(Tier.Warm, ContentType.Memory, Id);
         Assert.NotNull(onB);
         Assert.Equal("Use bun, not npm.", onB!.Content);
+        Assert.Equal(PullRig.MachineId, _rig.A.Pull.Store.GetMeta(SyncIdentity.MetaKeys.Machine));
+        Assert.Equal(TwoMachineRig.MachineB, _rig.B.Pull.Store.GetMeta(SyncIdentity.MetaKeys.Machine));
+        Assert.NotEqual(_rig.A.Pull.Store.GetMeta(SyncIdentity.MetaKeys.Machine), _rig.B.Pull.Store.GetMeta(SyncIdentity.MetaKeys.Machine));
         Assert.NotEqual(_rig.A.Pull.DbPath, _rig.B.Pull.DbPath);
         Assert.NotEqual(_rig.A.Pull.Paths.CloneDirectory, _rig.B.Pull.Paths.CloneDirectory);
     }
@@ -115,6 +118,14 @@ public sealed class TwoMachineTests : IDisposable
         Assert.Contains(edited, _rig.A.Push.Remote.Git("show", "main:" + SyncValidation.recordPath(Id)));
         Assert.Empty(GitSyncReviews.ReadOpenHeld(_rig.A.Pull.Connection));
         Assert.Empty(GitSyncReviews.ReadOpenHeld(_rig.B.Pull.Connection));
+
+        // converged: another cycle on each machine neither resurrects the record nor republishes it
+        var head = _rig.A.Push.Remote.Head();
+        var settledA = Done(await _rig.RunA());
+        var settledB = Done(await _rig.RunB());
+        Assert.IsType<PushOutcome.NothingToPush>(settledA.Push);
+        Assert.IsType<PushOutcome.NothingToPush>(settledB.Push);
+        Assert.Equal(head, _rig.A.Push.Remote.Head());
     }
 
     // ---- a hand-reset repository (milestone 1b-ii, D5 and D16) ----
@@ -171,6 +182,16 @@ public sealed class TwoMachineTests : IDisposable
         var vanished = ids[keptCount..];
         var (reset, newer) = await BothSyncedTwice(kept, vanished);
         var demoted = kept[0];
+        var pinned = kept[1];
+        // A pins a kept record and publishes it; B, which declined the pin, holds it unpinned: its base is the pinned record
+        // while its entry stays unpinned (the state an answered new-pin review leaves)
+        _rig.A.Push.Now += 60_000;
+        _rig.A.Push.Pin(pinned);
+        Done(await _rig.RunA());
+        var pinnedText = RemoteText(pinned);
+        Assert.True(ReadSticky(pinnedText, pinned));
+        GitSyncRows.Write(_rig.B.Pull.Connection, RowOf(_rig.B, pinned) with { BaseJson = pinnedText });
+        Assert.False(_rig.B.Pull.Store.IsSticky(ContentType.Memory, pinned));
         _rig.B.Push.Store.Move(Tier.Hot, ContentType.Memory, Tier.Warm, ContentType.Memory, demoted);   // a local demotion on B
         var remote = _rig.A.Push.Remote;
         remote.AddRef("refs/heads/main", reset);   // the hand reset: six of nine records, each at minute 10
@@ -217,13 +238,21 @@ public sealed class TwoMachineTests : IDisposable
             Assert.All(kept, id => Assert.Null(RowOf(machine, id).RepushGroups));
         }
         // each reverted group is republished from its base value and stamp: the records are the ones both machines agreed on
-        Assert.All(kept, id => Assert.Equal(RemoteText(id, newer), RemoteText(id)));
+        Assert.All(kept.Where(id => id != pinned), id => Assert.Equal(RemoteText(id, newer), RemoteText(id)));
         Assert.All(vanished, id => Assert.False(RemoteHas(id)));
+        // B's declined pin does not unpin A: the record stays pinned in the repository and on A
+        Assert.Equal(pinnedText, RemoteText(pinned));
+        Assert.True(ReadSticky(RemoteText(pinned), pinned));
+        Assert.True(_rig.A.Pull.Store.IsSticky(ContentType.Memory, pinned));
+        Assert.False(_rig.B.Pull.Store.IsSticky(ContentType.Memory, pinned));
         // the local demotion on B never enters the record
         Assert.Equal(Tier.Hot, ReadTier(RemoteText(demoted), demoted));
         Assert.NotNull(_rig.B.Pull.Store.Get(Tier.Warm, ContentType.Memory, demoted));
         Assert.NotNull(_rig.A.Pull.Store.Get(Tier.Hot, ContentType.Memory, demoted));
     }
+
+    private static bool ReadSticky(string text, string id) =>
+        RecordReader.Parse(System.Text.Encoding.UTF8.GetBytes(text), SyncValidation.recordPath(id)).Parsed!.Record.Placement.Sticky;
 
     private static Tier ReadTier(string text, string id) =>
         RecordReader.Parse(System.Text.Encoding.UTF8.GetBytes(text), SyncValidation.recordPath(id)).Parsed!.Record.Placement.Tier;
@@ -247,11 +276,14 @@ public sealed class TwoMachineTests : IDisposable
 
         // the next cycle: a pull with nothing new keeps the marker; its first push loses the race and the retry pushes
         string?[]? atRetry = null;
+        string?[]? afterRace = null;
         var pushes = 0;
         _rig.A.Pull.Fault = c =>
         {
             if (c.IsPush && pushes++ == 0)
                 remote.PushCommit("unrelated.txt");
+            else if (c.IsFetch && pushes == 1)   // the retry's fetch: before its apply could set the marker again
+                afterRace = [.. kept.Select(id => RowOf(_rig.A, id).RepushGroups)];
             else if (c.IsPush)
                 atRetry = [.. kept.Select(id => RowOf(_rig.A, id).RepushGroups)];
             return null;
@@ -262,8 +294,10 @@ public sealed class TwoMachineTests : IDisposable
 
         Assert.Equal(2, summary.Attempts);
         Assert.Equal(kept, Assert.IsType<PushOutcome.Pushed>(summary.Push).Summary.Written);
+        Assert.NotNull(afterRace);
+        Assert.All(afterRace!, marker => Assert.Equal("content,sticky,tier", marker));   // the non-fast-forward kept the marker
         Assert.NotNull(atRetry);
-        Assert.All(atRetry!, marker => Assert.Equal("content,sticky,tier", marker));   // the non-fast-forward kept the marker
+        Assert.All(atRetry!, marker => Assert.Equal("content,sticky,tier", marker));
         Assert.All(kept, id =>
         {
             Assert.Equal(RemoteText(id, newer), RemoteText(id));

@@ -323,6 +323,17 @@ public sealed class GitSyncApplierSafetyTests
             edit(store);
     }
 
+    /// <summary>A local edit of the warm memory <see cref="Id"/>: its text, a pin (which promotes it) or a move to cold.</summary>
+    private static void ApplyEdit(SqliteStore store, string edit)
+    {
+        switch (edit)
+        {
+            case "text": store.Update(Tier.Warm, ContentType.Memory, Id, new UpdateEntryOpts { Content = "A local edit." }); break;
+            case "pin": store.Move(Tier.Warm, ContentType.Memory, Tier.Hot, ContentType.Memory, Id); store.SetSticky(ContentType.Memory, Id, true); break;
+            default: store.Move(Tier.Warm, ContentType.Memory, Tier.Cold, ContentType.Memory, Id); break;
+        }
+    }
+
     [Theory]
     [InlineData("text")]
     [InlineData("pin")]
@@ -333,15 +344,7 @@ public sealed class GitSyncApplierSafetyTests
         string? after = null;
         s.Rig.Applier.BeforeTransaction = _ =>
         {
-            EditElsewhere(s.Rig, store =>
-            {
-                switch (edit)
-                {
-                    case "text": store.Update(Tier.Warm, ContentType.Memory, Id, new UpdateEntryOpts { Content = "A local edit." }); break;
-                    case "pin": store.Move(Tier.Warm, ContentType.Memory, Tier.Hot, ContentType.Memory, Id); store.SetSticky(ContentType.Memory, Id, true); break;
-                    default: store.Move(Tier.Warm, ContentType.Memory, Tier.Cold, ContentType.Memory, Id); break;
-                }
-            });
+            EditElsewhere(s.Rig, store => ApplyEdit(store, edit));
             after = s.Rig.Full();
         };
 
@@ -363,15 +366,7 @@ public sealed class GitSyncApplierSafetyTests
         string? after = null;
         s.Rig.Applier.BeforeTransaction = _ =>
         {
-            EditElsewhere(s.Rig, store =>
-            {
-                switch (edit)
-                {
-                    case "text": store.Update(Tier.Warm, ContentType.Memory, Id, new UpdateEntryOpts { Content = "A local edit." }); break;
-                    case "pin": store.Move(Tier.Warm, ContentType.Memory, Tier.Hot, ContentType.Memory, Id); store.SetSticky(ContentType.Memory, Id, true); break;
-                    default: store.Move(Tier.Warm, ContentType.Memory, Tier.Cold, ContentType.Memory, Id); break;
-                }
-            });
+            EditElsewhere(s.Rig, store => ApplyEdit(store, edit));
             after = s.Rig.Full();
         };
 

@@ -237,6 +237,13 @@ public sealed class GitSyncApplierPullTests : IDisposable
         Assert.Equal(head, Meta(SyncIdentity.MetaKeys.LastSha));
         Assert.False(Has(A));
         Assert.Equal(SyncMerge.RowState.Active, GitSyncRows.Read(_rig.Connection, A)!.State);
+
+        // before any push, the next pull lists the deletion again and changes nothing (the unchanged carry)
+        var again = await Pull();
+
+        Assert.Equal([A], again.PushDeletions);
+        Assert.True(again.Unchanged >= 1);
+        Assert.Equal(0, again.Updated);
     }
 
     [GitFact]
