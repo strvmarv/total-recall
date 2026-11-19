@@ -16,11 +16,14 @@ public sealed partial class GitSyncCycle
             .PushAsync(state.Apply!, state.Scan, ct).ConfigureAwait(false);
         state.Push = result;
 
-        // Once the push command has succeeded the push has finalized whatever the token says: that is a Done (decision 11).
-        if (result is PushOutcome.Pushed or PushOutcome.NothingToPush)
+        // Once the push command has succeeded the push has finalized whatever the token says: that is a Done, and a
+        // failure after it (published Yes) is reported as the failure it is, never as a cancel (decision 11).
+        if (result is PushOutcome.Pushed)
             return new CycleOutcome.Done(state.ToSummary());
-        if (ct.IsCancellationRequested)
+        if (ct.IsCancellationRequested && result is not PushOutcome.Failed { Published.IsYes: true })
             return Cancelled();
+        if (result is PushOutcome.NothingToPush)
+            return new CycleOutcome.Done(state.ToSummary());
 
         var step = SyncCycle.stepName(SyncCycle.Step.Push);
         switch (result)
@@ -39,7 +42,7 @@ public sealed partial class GitSyncCycle
             case PushOutcome.Failed failed:
             {
                 var kind = SyncCycle.parseKind(failed.Kind);
-                if (kind.IsCancelled)
+                if (kind.IsCancelled && !failed.Published.IsYes)
                     return Cancelled();
                 // the push's own reset, clean or HEAD check failed: damage when a local probe says so (the kind maps to Other)
                 if (failed.Kind == "Clone" && await IsDamageAsync(SyncGit.FailureKind.Other, ct).ConfigureAwait(false))
@@ -50,7 +53,7 @@ public sealed partial class GitSyncCycle
                     Enter(state, SyncCycle.Step.Clone, ct);
                     return await ReplaceDamagedCloneAsync(state, ct).ConfigureAwait(false);
                 }
-                if (ct.IsCancellationRequested) // a probe cut short by the token says nothing: decision 11
+                if (ct.IsCancellationRequested && !failed.Published.IsYes) // a probe cut short by the token says nothing: decision 11
                     return Cancelled();
                 return Fail(step, failed.Kind, failed.Message, failed.Published);
             }

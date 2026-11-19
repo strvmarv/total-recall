@@ -72,14 +72,10 @@ public sealed class GitSyncFetcher(GitClient client, RepoGuard guard, IMetaStore
     public async Task<IdentityCheck> CheckIdentityAsync(CancellationToken cancellationToken = default)
     {
         var verdict = await _guard.EvaluateIdentityAsync(null, cancellationToken).ConfigureAwait(false);
-        if (verdict.Join is SyncIdentity.JoinState.NotJoined notJoined)
-        {
-            var text = SyncIdentity.reasonText(notJoined.Item);
-            return notJoined.Item.IsNeverJoined ? new IdentityCheck.NotJoined(text) : new IdentityCheck.Refused(text);
-        }
-        if (verdict.HostUnverified)
-            return new IdentityCheck.Refused("host identity could not be determined");
-        return new IdentityCheck.Joined();
+        if (IdentityRefusal(verdict) is not { } text)
+            return new IdentityCheck.Joined();
+        var never = verdict.Join is SyncIdentity.JoinState.NotJoined { Item.IsNeverJoined: true };
+        return never ? new IdentityCheck.NotJoined(text) : new IdentityCheck.Refused(text);
     }
 
     private async Task<FetchOutcome> FetchCoreAsync(CancellationToken ct)
@@ -252,7 +248,7 @@ public sealed class GitSyncFetcher(GitClient client, RepoGuard guard, IMetaStore
         return new FetchOutcome.Failed(kind, text);
     }
 
-    private static string OneLine(string text)
+    internal static string OneLine(string text)
     {
         var sb = new StringBuilder();
         foreach (var c in text.Trim())

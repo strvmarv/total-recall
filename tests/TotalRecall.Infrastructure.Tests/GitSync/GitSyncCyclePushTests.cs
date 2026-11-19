@@ -420,6 +420,27 @@ public sealed class GitSyncCyclePushTests : IDisposable
     }
 
     [GitFact]
+    public async Task AFailureAfterThePushWasAccepted_IsReportedAsThatFailure_NotAsACancel()
+    {
+        await SyncedWithAPendingMemory();
+        using var cts = new CancellationTokenSource();
+        _rig.Pull.After = (command, result) =>
+        {
+            if (command.IsPush)
+                cts.Cancel(); // the push is on the remote; the token is cancelled while the rows are finalized
+            return result;
+        };
+        _rig.Pull.Fault = c => c.IsUpdateLastSynced ? FaultingGitProcess.Failure(SyncGit.FailureKind.Other, "ref update failed") : null;
+
+        var failed = Assert.IsType<CycleOutcome.Failed>(await _rig.Run(cts.Token));
+
+        Assert.Equal("push", failed.Step);
+        Assert.Equal(SyncPush.Published.Yes, failed.Published);
+        Assert.True(RemoteHas(C));
+        Assert.Matches(CycleRig.ErrorLine("push", failed.Kind), _rig.LastError!);
+    }
+
+    [GitFact]
     public async Task EntryLevelApplyFailures_DoNotStopThePushOfTheOtherEntries()
     {
         _rig.Push.Seed(Rec(A, "Use bun."), Rec(B, "Use pnpm."));

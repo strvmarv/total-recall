@@ -175,12 +175,6 @@ public sealed partial class GitSyncCycle
     }
 
     /// <summary>One line of the git error text, cut at 200 characters (the fetcher's rule).</summary>
-    private static string Describe(GitResult failure)
-    {
-        var text = string.IsNullOrWhiteSpace(failure.StderrText) ? "the git call failed" : failure.StderrText.Trim();
-        var line = new System.Text.StringBuilder();
-        foreach (var c in text)
-            line.Append(char.IsControl(c) ? ' ' : c);
-        return line.Length > 200 ? line.ToString(0, 200) : line.ToString();
-    }
+    private static string Describe(GitResult failure) =>
+        GitSyncFetcher.OneLine(string.IsNullOrWhiteSpace(failure.StderrText) ? "the git call failed" : failure.StderrText);
 }
