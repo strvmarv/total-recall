@@ -1,6 +1,6 @@
 /// Git sync, milestone 1b-ii: the pure rules of deletions. A deletion is carried out only inside the guard
 /// (decisions D3 to D5) and a decision that the guard or an unproven apply stops becomes a held item whose cause
-/// is recorded (D16). This module holds what is decided without touching anything: the guard's limit and verdict,
+/// is recorded (D7). This module holds what is decided without touching anything: the guard's limit and verdict,
 /// the conversion of a deletion decision into a hold, the hold's cause word, and the text form of the
 /// `repush_groups` column. Pure and total: no I/O, no clock.
 module TotalRecall.Core.SyncDeletion
