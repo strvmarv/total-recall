@@ -67,6 +67,7 @@ using TotalRecall.Infrastructure.Config;
 using TotalRecall.Infrastructure.Diagnostics;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Migration;
+using TotalRecall.Infrastructure.Transcripts;
 using TotalRecall.Infrastructure.WhatsNew;
 using TotalRecall.Server;
 using TotalRecall.Web;
@@ -203,6 +204,23 @@ internal static class Program
         {
             ExceptionLogger.LogChain("total-recall: failed to open composition", ex);
             return 1;
+        }
+
+        // Mirror the archive setting into the host-side sentinel (<dataDir>/live/enabled), once per
+        // engine start. Started here and nowhere else: `ui`, `dump-catalog` and ServerComposition do
+        // not touch it. It is one config read, one stat and at most one tiny write, never touches
+        // stdout, and Mirror itself swallows and logs its failures; the try/catch also covers a
+        // failing config read, so nothing here can delay or fail the MCP handshake.
+        try
+        {
+            var transcripts = ConfigLoader.LoadTranscriptsSettings();
+            var effective = new ConfigLoader().LoadEffectiveConfig();
+            new TranscriptSentinel(ConfigLoader.GetDataDir())
+                .Mirror(transcripts.Enabled, TranscriptSentinel.EffectiveStorageMode(effective));
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"total-recall: transcript sentinel mirror skipped: {ex.Message}");
         }
 
         // Background update check (what's-new "available" notice). Started here and nowhere else:
