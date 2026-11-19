@@ -20,15 +20,16 @@ public sealed partial class GitSyncPusher
 
     /// <summary>
     /// Decision 10 and 11: writes the planned records into the clone (temporary file under <c>.git</c>, then a rename
-    /// over the record path), stages exactly those paths, checks the staged set, commits once and pushes without force.
-    /// Any failure up to the push command resets and cleans the clone. A rejected push leaves the clone as it is (the next
-    /// push resets it); the finalize is the caller's.
+    /// over the record path), deletes the record files of the removals (milestone 1b-ii, D14), stages exactly those
+    /// paths (a deleted path stages as a removal), checks the staged set, commits once and pushes without force. A push
+    /// with removals only is a push. Any failure up to the push command resets and cleans the clone (the reset restores a
+    /// deleted record file). A rejected push leaves the clone as it is (the next push resets it); the finalize is the caller's.
     /// </summary>
     internal async Task<WriteOutcome> WriteAsync(string head, PlanResult.Planned plan, CancellationToken ct)
     {
         if (ct.IsCancellationRequested)
             return new WriteOutcome.Stop(Cancelled());
-        if (plan.Entries.Count == 0)
+        if (plan.Entries.Count == 0 && plan.Removals.Count == 0)
             return new WriteOutcome.Stop(new PushOutcome.NothingToPush(plan.Summary(null)));
 
         var clone = _client.CloneDirectory;
@@ -36,6 +37,7 @@ public sealed partial class GitSyncPusher
         var temps = new List<string>();
         var newPaths = new List<string>();
         var paths = new List<string>();
+        var removed = new List<string>();
         var phase = "Write";
         try
         {
@@ -62,9 +64,20 @@ public sealed partial class GitSyncPusher
                 temps.Remove(temp);
             }
 
+            // the removals: the record the clone holds at L leaves the working tree
+            foreach (var id in plan.Removals)
+            {
+                if (ct.IsCancellationRequested)
+                    return await Abandon(head, temps, newPaths, Cancelled()).ConfigureAwait(false);
+                var relative = SyncValidation.recordPath(id);
+                removed.Add(relative);
+                Step(id, "write");
+                File.Delete(Path.Combine(clone, relative.Replace('/', Path.DirectorySeparatorChar)));
+            }
+
             // 2. stage the written paths only, in batches, and check the staged set
             phase = "Stage";
-            foreach (var batch in paths.Chunk(StageBatch))
+            foreach (var batch in paths.Concat(removed).Chunk(StageBatch))
             {
                 if (ct.IsCancellationRequested)
                     return await Abandon(head, temps, newPaths, Cancelled()).ConfigureAwait(false);
@@ -78,10 +91,10 @@ public sealed partial class GitSyncPusher
             var set = await _client.StagedSetAsync(ct).ConfigureAwait(false);
             if (!set.IsOk)
                 return await Abandon(head, temps, newPaths, FailedFrom("StagedSet", set.Failure, SyncPush.Published.No)).ConfigureAwait(false);
-            if (!SyncPush.stagedSetMatches(ListModule.OfSeq(paths), ListModule.OfSeq(set.Value)))
+            if (!SyncPush.stagedSetMatches(ListModule.OfSeq(paths), ListModule.OfSeq(removed), ListModule.OfSeq(set.Value)))
             {
                 return await Abandon(head, temps, newPaths,
-                    Fail("StagedSet", "the staged files are not exactly the files this push wrote", SyncPush.Published.No)).ConfigureAwait(false);
+                    Fail("StagedSet", "the staged files are not exactly the files this push wrote and removed", SyncPush.Published.No)).ConfigureAwait(false);
             }
             var any = await _client.HasStagedAsync(ct).ConfigureAwait(false);
             if (!any.IsOk)
@@ -97,7 +110,7 @@ public sealed partial class GitSyncPusher
             if (ct.IsCancellationRequested)
                 return await Abandon(head, temps, newPaths, Cancelled()).ConfigureAwait(false);
             Step("", "commit");
-            var message = SyncPush.commitMessage(plan.Entries.Count(e => e.IsNew), plan.Entries.Count(e => !e.IsNew), _label);
+            var message = SyncPush.commitMessage(plan.Entries.Count(e => e.IsNew), plan.Entries.Count(e => !e.IsNew), plan.Removals.Count, _label);
             var committed = await _client.CommitAsync(message, ct).ConfigureAwait(false);
             if (!committed.IsOk)
                 return await Abandon(head, temps, newPaths, FailedFrom("Commit", committed.Failure, SyncPush.Published.No)).ConfigureAwait(false);

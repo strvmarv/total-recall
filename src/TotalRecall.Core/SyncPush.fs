@@ -3,7 +3,9 @@
 /// without force. This module decides, without touching anything: which rows are candidates, which candidates are left
 /// out and why (`exclusion`, `pathOccupied`), what happens to a block mark (`markAction`), which groups of an entry are
 /// written (`planChanged`), the new record (`newRecord`), the row after a push (`afterPush`), the commit message, the
-/// machine label, the `published` mapping of a failed push and the staged-set check. Pure and total: no I/O, no clock.
+/// machine label, the `published` mapping of a failed push and the staged-set check. Milestone 1b-ii (D14) adds the
+/// removal of a locally deleted memory's record: which ones can be removed (`removable`), the `-` count of the commit
+/// message and a deleted path in the staged set. Pure and total: no I/O, no clock.
 module TotalRecall.Core.SyncPush
 
 open System
@@ -112,6 +114,13 @@ let pathOccupied (id: string) (listed: string seq) : bool =
                         && not (String.Equals(segments.[0], "memories", ord) && String.Equals(segments.[1], SyncValidation.shard id, ord))
                     | _ -> false)
         listed |> Seq.exists collides
+
+/// Whether the record of a local deletion the apply proved (`ApplySummary.PushDeletions`) can be removed from the clone
+/// (milestone 1b-ii, D14): the id is still one of the scan's local deletions, the tree at `L` holds an accepted record
+/// for it, no listed path is in the way of that record, and no rejected path names the id. Any other id is left alone
+/// and reported.
+let removable (localDeletion: bool) (recordAccepted: bool) (pathOccupied: bool) (rejectedNamesId: bool) : bool =
+    localDeletion && recordAccepted && not pathOccupied && not rejectedNamesId
 
 // ---------------------------------------------------------------------------------------------
 // Block marks
@@ -325,9 +334,9 @@ let publishedAfterPush (kind: SyncGit.FailureKind) (stderr: string) : Published 
     | SyncGit.FailureKind.RemoteBranchMissing
     | SyncGit.FailureKind.NotARepository -> No
 
-/// `sync: <label> +<added> ~<changed> -0`: the push never deletes.
-let commitMessage (added: int) (changed: int) (label: string) : string =
-    sprintf "sync: %s +%d ~%d -0" label added changed
+/// `sync: <label> +<added> ~<changed> -<removed>` (milestone 1b-ii, D14: a removed record counts as `-`).
+let commitMessage (added: int) (changed: int) (removed: int) (label: string) : string =
+    sprintf "sync: %s +%d ~%d -%d" label added changed removed
 
 /// The OS machine name reduced to `A-Z a-z 0-9 . _ -` (every other character removed), at most 40 characters, else
 /// `unknown`. Display only: never identity, never in a path.
@@ -371,9 +380,14 @@ let parseStagedSet (stdout: byte[]) : Result<StagedEntry list, string> =
                 | Some bad -> Error(sprintf "an unexpected status '%s'" bad.Status)
                 | None -> Ok entries
 
-/// True when every written path is staged exactly once as an addition or a modification and nothing else is staged.
-let stagedSetMatches (written: string list) (staged: StagedEntry list) : bool =
-    let stagedPaths = staged |> List.map (fun e -> e.Path)
-    staged |> List.forall (fun e -> e.Status = "A" || e.Status = "M")
-    && List.sort stagedPaths = List.sort written
-    && (List.distinct written).Length = written.Length
+/// True when every written path is staged exactly once as an addition or a modification, every removed path exactly
+/// once as a deletion (milestone 1b-ii, D14), and nothing else is staged. A path listed twice, or both written and
+/// removed, never matches.
+let stagedSetMatches (written: string list) (removed: string list) (staged: StagedEntry list) : bool =
+    let expected = written @ removed
+    let removedSet = Set.ofList removed
+    (List.distinct expected).Length = expected.Length
+    && List.sort (staged |> List.map (fun e -> e.Path)) = List.sort expected
+    && staged
+       |> List.forall (fun e ->
+           if removedSet.Contains e.Path then e.Status = "D" else e.Status = "A" || e.Status = "M")

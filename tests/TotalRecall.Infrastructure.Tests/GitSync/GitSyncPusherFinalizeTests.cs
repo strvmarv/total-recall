@@ -405,6 +405,130 @@ public sealed class GitSyncPusherFinalizeTests : IDisposable
         Assert.Equal(SyncPush.Published.No, failed.Published);
     }
 
+    // ---- removals (milestone 1b-ii, D14) ----
+
+    private bool RemoteHas(string id) =>
+        _rig.Remote.Git("ls-tree", "--name-only", "main", "--", SyncValidation.recordPath(id)).Trim() != "";
+
+    /// <summary>A and B synced, then A deleted here: the next pull lists A for the push.</summary>
+    private async Task SyncedThenDeleted()
+    {
+        _rig.Seed(Rec(A), Rec(B, content: "stays"));
+        await _rig.PullAsync();
+        _rig.Store.Delete(Tier.Warm, ContentType.Memory, A);
+    }
+
+    [GitFact]
+    public async Task FinalizeSetsForgotten_KeepingTheBase_ClearingPendingPushingAndRepush()
+    {
+        await SyncedThenDeleted();
+        GitSyncRow? before = null;
+
+        // the apply clears the pending stamps of a pushed deletion; the columns are set by hand after the plan
+        var (outcome, pusher, apply, _) = await PullAndPush(p => p.BeforePush = () =>
+        {
+            before = Row(A) with
+            {
+                ContentStamp = St(20),
+                StickyStamp = St(21),
+                TierStamp = St(22),
+                PushingStamps = SyncApply.PushingStamps.encode(new SyncMerge.GroupStamps(St(20), null, null)).Value,
+                RepushGroups = "tier",
+            };
+            GitSyncRows.Write(_rig.Pull.Connection, before);
+        });
+
+        Assert.Equal([A], apply.PushDeletions);
+        var pushed = Is<PushOutcome.Pushed>(outcome);
+        Assert.Equal([A], pushed.Summary.Removed);
+        Assert.Equal(1, pusher.TransactionCount);   // only the finalize: a removal needs no plan transaction
+        Assert.False(RemoteHas(A));
+        Assert.Equal(
+            before! with
+            {
+                State = SyncMerge.RowState.Forgotten,
+                ContentStamp = null,
+                StickyStamp = null,
+                TierStamp = null,
+                PushingStamps = null,
+                RepushGroups = null,
+            },
+            Row(A));
+        Assert.NotNull(Row(A).BaseJson);
+        Assert.Equal(_rig.Remote.Head(), _rig.Pull.Last);
+        Assert.Equal(_rig.Remote.Head(), LastRef);
+
+        // a scan right after stamps nothing and writes nothing for the forgotten row
+        var dump = _rig.RowDump();
+        _rig.Now += 1000;
+        Assert.Empty(_rig.Scan().LocalDeletions);
+        Assert.Equal(dump, _rig.RowDump());
+    }
+
+    [GitFact]
+    public async Task FinalizeDoesNotForgetAnEntryThatExistsAgain()
+    {
+        await SyncedThenDeleted();
+        GitSyncRow? before = null;
+
+        var (outcome, _, _, _) = await PullAndPush(p => p.BeforePush = () =>
+        {
+            _rig.AddMemory(Tier.Warm, A, content: "back again");
+            before = Row(A);
+        });
+
+        Assert.Equal([A], Is<PushOutcome.Pushed>(outcome).Summary.Removed);
+        Assert.False(RemoteHas(A));
+        Assert.Equal(before, Row(A));   // still active, untouched
+        Assert.Equal(SyncMerge.RowState.Active, Row(A).State);
+        Assert.Equal(_rig.Remote.Head(), _rig.Pull.Last);
+    }
+
+    [GitTheory]
+    [InlineData("finalize")]
+    [InlineData("forget")]
+    public async Task KillAfterPushBeforeFinalize_NextApplyMakesTheRowForgotten_AndNoSecondCommitIsMade(string step)
+    {
+        await SyncedThenDeleted();
+        _rig.AddMemory(Tier.Warm, C, content: "new here");   // a written entry, so the per-entry finalize step runs
+
+        var (outcome, _, apply, _) = await PullAndPush(p => p.BeforeStep = (_, s) =>
+        {
+            if (s == step)
+                throw new InvalidOperationException("killed");
+        });
+
+        var failed = Is<PushOutcome.Failed>(outcome);
+        Assert.Equal(SyncPush.Published.Yes, failed.Published);
+        var published = _rig.Remote.Head();
+        Assert.False(RemoteHas(A));
+        Assert.Equal(apply.Head, _rig.Pull.Last);                      // the finalize rolled back whole
+        Assert.Equal(SyncMerge.RowState.Active, Row(A).State);
+        Assert.Null(Row(A).PushingStamps);                             // a removal writes no pushing_stamps
+        var rowA = Row(A);                                             // the row the finalize would have written over
+
+        var (again, _, apply2, scan2) = await PullAndPush();
+
+        Assert.Contains(A, scan2.LocalDeletions.Select(d => d.Id));
+        Assert.Empty(apply2.PushDeletions);                            // the record is gone from R: nothing to remove
+        Is<PushOutcome.NothingToPush>(again);
+        Assert.Equal(published, _rig.Remote.Head());                   // no second commit
+        Assert.Equal(published, _rig.Pull.Last);
+        // the repaired row is the row a finalize would have written
+        Assert.Equal(
+            rowA with
+            {
+                State = SyncMerge.RowState.Forgotten,
+                ContentStamp = null,
+                StickyStamp = null,
+                TierStamp = null,
+                PushingStamps = null,
+                RepushGroups = null,
+            },
+            Row(A));
+        Assert.Equal(RemoteText(C), Row(C).BaseJson);
+    }
+
     [GitFact]
     public async Task AnIncompletePull_IsNotReady_AndNothingChanges()
     {

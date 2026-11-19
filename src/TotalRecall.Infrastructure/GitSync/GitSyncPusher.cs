@@ -9,7 +9,8 @@ public sealed record PushItem(string Id, string Reason);
 /// <summary>
 /// What one push did, as plain data (decision 13). <paramref name="New"/> and <paramref name="Changed"/> count the
 /// entries whose bytes changed (they are also the commit message's <c>+</c> and <c>~</c>); <paramref name="Unchanged"/>
-/// the entries finalized with no change. It holds no text for the user.
+/// the entries finalized with no change; <paramref name="Removed"/> the ids whose record the commit removes, ordinal
+/// (milestone 1b-ii, D14: the commit message's <c>-</c>). It holds no text for the user.
 /// </summary>
 public sealed record PushSummary(
     string? Commit,
@@ -17,11 +18,12 @@ public sealed record PushSummary(
     int Changed,
     int Unchanged,
     IReadOnlyList<string> Written,
+    IReadOnlyList<string> Removed,
     IReadOnlyList<PushItem> Blocked,
     IReadOnlyList<PushItem> Deferred,
     IReadOnlyList<PushItem> Skipped)
 {
-    public static PushSummary Empty { get; } = new(null, 0, 0, 0, [], [], [], []);
+    public static PushSummary Empty { get; } = new(null, 0, 0, 0, [], [], [], [], []);
 }
 
 public abstract record PushOutcome
@@ -51,7 +53,9 @@ public abstract record PushOutcome
 /// <summary>
 /// The push of the sync cycle (milestone 1b-i-3): after a complete pull, writes this machine's changed memories into
 /// the local clone as patches of the records already there (a new memory becomes a new record), commits once, pushes
-/// without force, and makes the rows and <c>L</c> say what was pushed. The caller holds the sync lock, has just run the
+/// without force, and makes the rows and <c>L</c> say what was pushed. Milestone 1b-ii (D14) adds removals: the record
+/// of each local deletion the apply proved (<see cref="ApplySummary.PushDeletions"/>) is removed in the same commit, and
+/// after the push the row says the memory is <c>forgotten</c>. The caller holds the sync lock, has just run the
 /// scan and a complete pull, and passes both summaries. Nothing calls it yet: the cycle (1b-i-4) will, after the secret
 /// scan of 1b-iii has merged.
 /// </summary>
@@ -77,8 +81,9 @@ public sealed partial class GitSyncPusher
     /// <summary>
     /// Test seam: called with an id (or <c>""</c> for a step that is not per entry) and a step name. In the plan
     /// transaction <c>reread</c>, <c>plan</c>, <c>pushing</c> and <c>block</c>; between steps <c>write</c> (per file,
-    /// before the rename), <c>stage</c> (before each batch) and <c>commit</c>; in the finalize transaction
-    /// <c>finalize</c> (per entry) and <c>meta</c>; after it <c>ref</c>. A hook that throws is the fault of its step.
+    /// before the rename, or before the delete of a removed record), <c>stage</c> (before each batch) and <c>commit</c>;
+    /// in the finalize transaction <c>finalize</c> (per entry), <c>forget</c> (per removed record) and <c>meta</c>; after
+    /// it <c>ref</c>. A hook that throws is the fault of its step.
     /// </summary>
     internal Action<string, string>? BeforeStep { get; set; }
 

@@ -407,6 +407,99 @@ public sealed class GitSyncPusherPrepareTests : IDisposable
         Assert.Equal("Cancelled", failed.Kind);
     }
 
+    // ---- removals (milestone 1b-ii, D14) ----
+
+    /// <summary>Another commit on the remote, fetched into the clone and made <c>L</c> by hand: a tree a real pull would not leave.</summary>
+    private string MoveL(Action<PullRig> change)
+    {
+        change(_rig.Pull);
+        var head = _rig.Pull.Commit("changed by hand");
+        _rig.Pull.Source.PushTo(_rig.Remote.Path);
+        _rig.Pull.CloneGit("fetch", "-q", "origin");
+        _rig.Pull.SetLast(head);
+        return head;
+    }
+
+    private PushSummary AssertNothingRemoved(PushOutcome outcome, string head, string rows)
+    {
+        var summary = Assert.IsType<PushOutcome.NothingToPush>(outcome).Summary;
+        Assert.Empty(summary.Removed);
+        Assert.Equal(head, _rig.Remote.Head());
+        Assert.Equal(head, _rig.Pull.Last);
+        Assert.Equal(rows, _rig.RowDump());
+        return summary;
+    }
+
+    [GitFact]
+    public async Task RemovalOfARecordMissingFromTheClone_IsSkipped_AndNothingElseChanges()
+    {
+        const string C = "c3d4e5f6";
+        const string Unknown = "d4e5f6a7";
+        _rig.Seed(Rec(A), Rec(C, content: "still here"));
+        await _rig.PullAsync();
+        _rig.Store.Delete(Tier.Warm, ContentType.Memory, A);
+        _rig.Now += 1000;
+        var scan = _rig.Scan();
+        Assert.Contains(A, scan.LocalDeletions.Select(d => d.Id));
+        var head = MoveL(pull => pull.Remove(SyncValidation.recordPath(A)));
+        // A: a local deletion whose record is gone at L; C: a record, but not a local deletion; Unknown: neither
+        var apply = PushRig.Summary(head) with { PushDeletions = [A, C, Unknown] };
+        var rows = _rig.RowDump();
+
+        var prepared = Ready(await Prepare(apply, scan));
+        Assert.Empty(prepared.Removals);
+        var summary = AssertNothingRemoved(await _rig.Push(apply, scan), head, rows);
+
+        Assert.Equal(
+            [new PushItem(A, "removal-not-possible"), new PushItem(C, "removal-not-possible"), new PushItem(Unknown, "removal-not-possible")],
+            summary.Skipped);
+        Assert.NotNull(_rig.Store.Get(Tier.Warm, ContentType.Memory, C));
+        Assert.Equal("", _rig.Status().Trim());
+    }
+
+    [GitTheory]
+    [InlineData("occupied")]
+    [InlineData("rejected")]
+    public async Task RemovalOfAnOccupiedOrRejectedPath_IsSkipped(string shape)
+    {
+        _rig.Seed(Rec(A), Rec(B, content: "stays"));
+        await _rig.PullAsync();
+        _rig.Store.Delete(Tier.Warm, ContentType.Memory, A);
+        _rig.Now += 1000;
+        var scan = _rig.Scan();
+        var head = MoveL(pull =>
+        {
+            if (shape == "occupied")
+                pull.PutText($"memories/{A[..2].ToUpperInvariant()}/x.json", "{}");   // a case-folded shard beside the record
+            else
+                pull.PutRaw(SyncValidation.recordPath(A), Bytes("../../etc/passwd"), "120000");   // a symlink at the record
+        });
+        var apply = PushRig.Summary(head) with { PushDeletions = [A] };
+        var rows = _rig.RowDump();
+
+        var prepared = Ready(await Prepare(apply, scan));
+        Assert.Empty(prepared.Removals);
+        var summary = AssertNothingRemoved(await _rig.Push(apply, scan), head, rows);
+
+        Assert.Equal([new PushItem(A, "removal-not-possible")], summary.Skipped);
+        Assert.NotEqual("", _rig.Remote.Git("ls-tree", "--name-only", "main", "--", SyncValidation.recordPath(A)).Trim());
+    }
+
+    [GitFact]
+    public async Task APushDeletionWithItsRecordAtL_IsARemoval()
+    {
+        _rig.Seed(Rec(A), Rec(B, content: "stays"));
+        await _rig.PullAsync();
+        _rig.Store.Delete(Tier.Warm, ContentType.Memory, A);
+        _rig.Now += 1000;
+        var (apply, scan) = await _rig.PullAsync();
+
+        var prepared = Ready(await Prepare(apply, scan));
+
+        Assert.Equal([A], prepared.Removals);
+        Assert.Empty(prepared.Candidates);
+    }
+
     [GitFact]
     public async Task AnIneligibleIdNeverReachesAPath_AndABlobThatCannotBeReadIsUnreadable()
     {

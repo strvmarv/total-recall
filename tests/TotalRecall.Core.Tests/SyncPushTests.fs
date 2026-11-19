@@ -339,7 +339,16 @@ let resultTests =
             Expect.equal (publishedAfterPush other "remote: error: hook declined to update refs/heads/main") No "hook declined"
             Expect.equal (publishedAfterPush other null) Unknown "null stderr"
         testCase "commitMessage" <| fun () ->
-            Expect.equal (commitMessage 2 3 "box") "sync: box +2 ~3 -0" "message"
+            Expect.equal (commitMessage 2 3 0 "box") "sync: box +2 ~3 -0" "message"
+        testCase "commitMessage_counts_removals" <| fun () ->
+            Expect.equal (commitMessage 0 0 1 "box") "sync: box +0 ~0 -1" "a removal only"
+            Expect.equal (commitMessage 1 2 3 "box") "sync: box +1 ~2 -3" "all three counts"
+        testCase "removable wants a local deletion with an accepted record, no occupied path and no rejected path" <| fun () ->
+            Expect.isTrue (removable true true false false) "removable"
+            Expect.isFalse (removable false true false false) "not a local deletion"
+            Expect.isFalse (removable true false false false) "no accepted record"
+            Expect.isFalse (removable true true true false) "a path in the way"
+            Expect.isFalse (removable true true false true) "a rejected path names the id"
         testCase "machineLabel removes what is not allowed and falls back to unknown" <| fun () ->
             Expect.equal (machineLabel "Joe's PC") "JoesPC" "quote and space"
             Expect.equal (machineLabel "ünï") "n" "non-ASCII"
@@ -381,10 +390,24 @@ let stagedTests =
         testCase "stagedSetMatches wants exactly the written paths as additions or modifications" <| fun () ->
             let a = { Status = "A"; Path = "memories/ab/x.json" }
             let m = { Status = "M"; Path = "memories/cd/y.json" }
-            Expect.isTrue (stagedSetMatches [ a.Path; m.Path ] [ m; a ]) "both, any order"
-            Expect.isFalse (stagedSetMatches [ a.Path; m.Path ] [ a ]) "a missing path"
-            Expect.isFalse (stagedSetMatches [ a.Path ] [ a; m ]) "an extra path"
-            Expect.isFalse (stagedSetMatches [ a.Path ] [ { a with Status = "D" } ]) "a deletion"
-            Expect.isFalse (stagedSetMatches [ a.Path; a.Path ] [ a; a ]) "a duplicated written path"
-            Expect.isTrue (stagedSetMatches [] []) "nothing"
+            Expect.isTrue (stagedSetMatches [ a.Path; m.Path ] [] [ m; a ]) "both, any order"
+            Expect.isFalse (stagedSetMatches [ a.Path; m.Path ] [] [ a ]) "a missing path"
+            Expect.isFalse (stagedSetMatches [ a.Path ] [] [ a; m ]) "an extra path"
+            Expect.isFalse (stagedSetMatches [ a.Path ] [] [ { a with Status = "D" } ]) "a deletion"
+            Expect.isFalse (stagedSetMatches [ a.Path; a.Path ] [] [ a; a ]) "a duplicated written path"
+            Expect.isTrue (stagedSetMatches [] [] []) "nothing"
+        testCase "stagedSetMatches_accepts_a_deleted_removal_path_and_rejects_a_deleted_unexpected_path" <| fun () ->
+            let a = { Status = "A"; Path = "memories/ab/x.json" }
+            let d = { Status = "D"; Path = "memories/ef/z.json" }
+            Expect.isTrue (stagedSetMatches [] [ d.Path ] [ d ]) "a removal only"
+            Expect.isTrue (stagedSetMatches [ a.Path ] [ d.Path ] [ d; a ]) "a written and a removed path, any order"
+            Expect.isFalse (stagedSetMatches [ a.Path ] [] [ a; d ]) "a deleted path nobody removed"
+            Expect.isFalse (stagedSetMatches [] [ d.Path ] []) "a removal that is not staged"
+            Expect.isFalse (stagedSetMatches [] [ d.Path; d.Path ] [ d; d ]) "a duplicated removed path"
+            Expect.isFalse (stagedSetMatches [ d.Path ] [ d.Path ] [ d ]) "a path both written and removed"
+            Expect.isFalse (stagedSetMatches [ a.Path ] [] [ { a with Status = "D" } ]) "a written path staged as a deletion"
+        testCase "stagedSetMatches_rejects_a_removed_path_staged_as_modified" <| fun () ->
+            let d = { Status = "D"; Path = "memories/ef/z.json" }
+            Expect.isFalse (stagedSetMatches [] [ d.Path ] [ { d with Status = "M" } ]) "modified"
+            Expect.isFalse (stagedSetMatches [] [ d.Path ] [ { d with Status = "A" } ]) "added"
     ]

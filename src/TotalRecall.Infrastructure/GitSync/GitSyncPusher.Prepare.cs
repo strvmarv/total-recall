@@ -14,7 +14,11 @@ internal sealed record CandidateInfo(
     bool RecordUnreadable,
     bool BaseUnreadable);
 
-/// <summary>The clone, the tree at <c>L</c>, every row and the candidates with the exclusions already decided.</summary>
+/// <summary>
+/// The clone, the tree at <c>L</c>, every row and the candidates with the exclusions already decided. <see cref="Removals"/>
+/// are the local deletions whose record this push removes (milestone 1b-ii, D14), ordinal; <see cref="NotRemovable"/> the
+/// other ids the apply listed for removal, ordinal, which are left alone and reported.
+/// </summary>
 internal sealed record PushPrepared(
     string Head,
     TreeView Tree,
@@ -22,7 +26,9 @@ internal sealed record PushPrepared(
     IReadOnlyDictionary<string, CandidateInfo> Candidates,
     IReadOnlyDictionary<string, SyncPush.Exclusion> Excluded,
     IReadOnlyList<string> ListedPaths,
-    IReadOnlySet<string> Deleted);
+    IReadOnlySet<string> Deleted,
+    IReadOnlyList<string> Removals,
+    IReadOnlyList<string> NotRemovable);
 
 internal abstract record PrepareResult
 {
@@ -45,7 +51,9 @@ public sealed partial class GitSyncPusher
 
     /// <summary>
     /// Decisions 1 to 5: readiness, the reset of the clone (attributes file first), the tree at <c>L</c>, and the
-    /// candidates with their exclusions. Writes nothing to the store.
+    /// candidates with their exclusions; and the removals of milestone 1b-ii (D14): each id of
+    /// <see cref="ApplySummary.PushDeletions"/> that is still a local deletion of the scan and whose accepted record at
+    /// <c>L</c> nothing is in the way of. Writes nothing to the store.
     /// </summary>
     internal async Task<PrepareResult> PrepareAsync(ApplySummary apply, ScanSummary scan, CancellationToken ct)
     {
@@ -187,7 +195,20 @@ public sealed partial class GitSyncPusher
                 excluded[id] = found.Value;
         }
 
-        return new PrepareResult.Ready(new PushPrepared(apply.Head, view, rows, candidates, excluded, listed, deleted));
+        // the removals: the apply decided them, the tree at L must still allow them
+        var removals = new List<string>();
+        var notRemovable = new List<string>();
+        foreach (var id in apply.PushDeletions.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal))
+        {
+            var removable = SyncPush.removable(
+                deleted.Contains(id),
+                view.Accepted.ContainsKey(id),
+                occupation.Occupied(id),
+                rejectedIds.Contains(id));
+            (removable ? removals : notRemovable).Add(id);
+        }
+
+        return new PrepareResult.Ready(new PushPrepared(apply.Head, view, rows, candidates, excluded, listed, deleted, removals, notRemovable));
     }
 
     /// <summary>

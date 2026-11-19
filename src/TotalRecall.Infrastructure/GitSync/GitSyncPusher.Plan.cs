@@ -20,6 +20,10 @@ internal sealed record PlannedEntry(
 /// <summary>An entry that needs no file: the record at <c>L</c> already says what the entry says (decision 6).</summary>
 internal sealed record UnchangedEntry(string Id, string BaseText, SyncMerge.GroupStamps Pushed);
 
+/// <summary>
+/// The plan's result. <see cref="Planned.Removals"/> are the ids whose record the push removes (milestone 1b-ii, D14): the
+/// apply decided them, so the plan transaction reads and writes nothing for them.
+/// </summary>
 internal abstract record PlanResult
 {
     private PlanResult() { }
@@ -31,7 +35,8 @@ internal abstract record PlanResult
         IReadOnlyList<UnchangedEntry> Unchanged,
         IReadOnlyList<PushItem> Blocked,
         IReadOnlyList<PushItem> Deferred,
-        IReadOnlyList<PushItem> Skipped) : PlanResult
+        IReadOnlyList<PushItem> Skipped,
+        IReadOnlyList<string> Removals) : PlanResult
     {
         public PushSummary Summary(string? commit) =>
             new(
@@ -40,6 +45,7 @@ internal abstract record PlanResult
                 Entries.Count(e => !e.IsNew),
                 Unchanged.Count,
                 [.. Entries.Select(e => e.Id).Order(StringComparer.Ordinal)],
+                Removals,
                 Blocked, Deferred, Skipped);
     }
 }
@@ -47,6 +53,9 @@ internal abstract record PlanResult
 public sealed partial class GitSyncPusher
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+
+    /// <summary>The skip reason of an id the apply listed for removal whose record this push cannot remove (D14).</summary>
+    internal const string RemovalNotPossible = "removal-not-possible";
 
     /// <summary>
     /// Decisions 6 to 9: in one immediate transaction, re-reads each candidate that was not left out, requires that it
@@ -66,9 +75,11 @@ public sealed partial class GitSyncPusher
             .Order(StringComparer.Ordinal)
             .ToList();
         var work = prepared.Candidates.Keys.Where(id => !prepared.Excluded.ContainsKey(id)).ToList();
-        var skipped = prepared.Excluded.Select(p => new PushItem(p.Key, SyncPush.exclusionName(p.Value))).ToList();
+        var skipped = prepared.Excluded.Select(p => new PushItem(p.Key, SyncPush.exclusionName(p.Value)))
+            .Concat(prepared.NotRemovable.Select(id => new PushItem(id, RemovalNotPossible)))
+            .ToList();
         if (work.Count == 0 && clearable.Count == 0)
-            return new PlanResult.Planned([], [], [], [], skipped);
+            return new PlanResult.Planned([], [], [], [], skipped, prepared.Removals);
 
         SqliteStoreTransaction tx;
         try
@@ -99,7 +110,7 @@ public sealed partial class GitSyncPusher
                     ClearMarkOf(tx, id);
 
                 tx.Commit();
-                return new PlanResult.Planned(entries, unchanged, blocked, deferred, skipped);
+                return new PlanResult.Planned(entries, unchanged, blocked, deferred, skipped, prepared.Removals);
             }
             catch (SqliteException ex) when (SyncSql.IsBusy(ex))
             {

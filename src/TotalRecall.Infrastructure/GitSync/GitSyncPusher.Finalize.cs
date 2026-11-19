@@ -11,7 +11,9 @@ public sealed partial class GitSyncPusher
     /// Decision 12: one immediate transaction that makes the rows say what is now in the repository, then (after a
     /// commit was pushed) <c>_meta.git_sync_last_sha</c>, then the protective ref. Returns
     /// the failure, or null. <paramref name="commit"/> is null when nothing was pushed (only the unchanged entries are
-    /// finalized then, and <c>L</c> does not move). The token is never consulted: the steps are local and short.
+    /// finalized then, and <c>L</c> does not move). After a pushed commit each removed id's row becomes <c>forgotten</c>
+    /// (milestone 1b-ii, D14), in the same transaction: see <see cref="Forget"/>. The token is never consulted: the steps
+    /// are local and short.
     /// </summary>
     internal async Task<PushOutcome.Failed?> FinalizeAsync(PlanResult.Planned plan, string? commit)
     {
@@ -61,6 +63,8 @@ public sealed partial class GitSyncPusher
 
                 if (commit is not null)
                 {
+                    foreach (var id in plan.Removals)
+                        Forget(tx, id);
                     phase = "Meta";
                     Step("", "meta");
                     SyncSql.SetMeta(tx.Connection, SyncIdentity.MetaKeys.LastSha, commit, tx.Transaction);
@@ -90,5 +94,31 @@ public sealed partial class GitSyncPusher
             return Fail("Ref", ex.Message, SyncPush.Published.Yes);
         }
         return null;
+    }
+
+    /// <summary>
+    /// D14: the row of a removed record says the memory is forgotten. Only a row that is still <c>active</c> and whose
+    /// memory does not exist (an entry with the id that came back since the scan is never marked) is written: state
+    /// <c>forgotten</c>, the base kept, the pending stamps, <c>pushing_stamps</c> and <c>repush_groups</c> cleared, every
+    /// other column as it was. Anything else is left untouched (the next scan and pull see it as it is).
+    /// </summary>
+    private void Forget(SqliteStoreTransaction tx, string id)
+    {
+        Step(id, "forget");
+        var row = GitSyncRows.Read(tx.Connection, id, tx.Transaction);
+        if (row is null || row.State != SyncMerge.RowState.Active)
+            return;
+        var read = LocalEntryReader.Read(t => tx.Get(t, ContentType.Memory, id), () => tx.IsSticky(ContentType.Memory, id));
+        if (read is not LocalRead.Absent)
+            return;
+        GitSyncRows.Write(tx.Connection, row with
+        {
+            State = SyncMerge.RowState.Forgotten,
+            ContentStamp = null,
+            StickyStamp = null,
+            TierStamp = null,
+            PushingStamps = null,
+            RepushGroups = null,
+        }, tx.Transaction);
     }
 }
