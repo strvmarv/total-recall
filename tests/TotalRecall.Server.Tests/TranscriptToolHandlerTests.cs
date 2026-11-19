@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 using TotalRecall.Server.Handlers;
 using Xunit;
 
+[Collection("process-environment-console")]
 public sealed class TranscriptToolHandlerTests
 {
     private const string OffText =

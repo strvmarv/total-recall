@@ -10,6 +10,7 @@ namespace TotalRecall.Infrastructure.Tests.Config;
 /// boolean true; any read problem gives the defaults; a bad db_path is reported
 /// in DbPathError and leaves DbPath empty.
 /// </summary>
+[Collection("process-environment")]
 public sealed class ConfigLoaderTranscriptsTests : IDisposable
 {
     private readonly string _dir;
