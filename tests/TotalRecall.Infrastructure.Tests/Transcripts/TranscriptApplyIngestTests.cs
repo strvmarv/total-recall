@@ -235,6 +235,63 @@ public sealed class TranscriptApplyIngestTests : IDisposable
         Assert.Equal(0, Hits("beta0"));
     }
 
+    [Theory]
+    [InlineData("BuiltUnderCutoff")]
+    [InlineData("ProjectRoot")]
+    [InlineData("Kind")]
+    public void PriorStateDiffersInOneField_IsConflict(string field)
+    {
+        Store.ApplyIngest(Ingest(Units(2)));
+        var read = Store.GetIngestState(Host, Id)!;
+        var expected = field switch
+        {
+            "BuiltUnderCutoff" => read with { BuiltUnderCutoff = "2026-11-18T10:00:00.0000000Z" },
+            "ProjectRoot" => read with { ProjectRoot = "/w/other" },
+            _ => read with { Kind = "automated" },
+        };
+
+        var outcome = Store.ApplyIngest(Ingest(Units(3, "beta"), expectedPrior: expected));
+
+        Assert.Equal(new IngestOutcome(IngestOutcomeKind.Conflict), outcome);
+        Assert.Equal(2, _db.Scalar("SELECT count(*) FROM tx_chunk"));
+        Assert.Equal(0, Hits("beta0"));
+    }
+
+    [Fact]
+    public void NegativeFirstRebuiltUnit_Throws_WritesNothing()
+    {
+        Assert.Throws<ArgumentException>(() => Store.ApplyIngest(Ingest(Units(2), firstRebuiltUnit: -1)));
+
+        Assert.Equal(0, _db.Scalar("SELECT count(*) FROM tx_session"));
+        Assert.Equal(0, _db.Scalar("SELECT count(*) FROM tx_chunk"));
+    }
+
+    [Fact]
+    public void ChunkBelowFirstRebuiltUnit_Throws_WritesNothing()
+    {
+        Store.ApplyIngest(Ingest(Units(3)));
+        var prior = Store.GetIngestState(Host, Id);
+        var chunks = new List<IngestChunk> { Chunk(1, 0, "beta1 below"), Chunk(2, 0, "beta2 text") };
+
+        Assert.Throws<ArgumentException>(() =>
+            Store.ApplyIngest(Ingest(chunks, expectedPrior: prior, firstRebuiltUnit: 2, offset: 30)));
+
+        Assert.Equal(prior, Store.GetIngestState(Host, Id));
+        Assert.Equal(0, Hits("beta1"));
+        Assert.Equal(0, Hits("beta2"));
+    }
+
+    [Fact]
+    public void DuplicateUnitAndPart_Throws_WritesNothing()
+    {
+        var chunks = new List<IngestChunk> { Chunk(0, 0, "alpha0 first"), Chunk(0, 1, "alpha0 second"), Chunk(0, 0, "alpha0 again") };
+
+        Assert.Throws<ArgumentException>(() => Store.ApplyIngest(Ingest(chunks)));
+
+        Assert.Equal(0, _db.Scalar("SELECT count(*) FROM tx_session"));
+        Assert.Equal(0, _db.Scalar("SELECT count(*) FROM tx_chunk"));
+    }
+
     [Fact]
     public void FreshButRowAppeared_IsConflict()
     {

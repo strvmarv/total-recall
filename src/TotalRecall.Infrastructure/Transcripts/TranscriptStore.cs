@@ -637,12 +637,34 @@ public sealed class TranscriptStore : ITranscriptStore
         return new IngestCutoff(TranscriptTime.TryParse(raw, out var at) ? at : DateTimeOffset.MinValue, raw);
     }
 
+    /// <summary>
+    /// Rejects a pass the rebuild rule cannot apply, before any transaction: a negative first rebuilt unit, a chunk below
+    /// it (it would survive the removal of vanished parts only by chance) or two chunks with the same unit and part.
+    /// </summary>
+    private static void ValidateChunks(SessionIngest ingest)
+    {
+        if (ingest.FirstRebuiltUnit < 0)
+            throw new ArgumentException(
+                $"FirstRebuiltUnit must not be negative (got {ingest.FirstRebuiltUnit}).", nameof(ingest));
+        var seen = new HashSet<(int Start, int Part)>();
+        foreach (var chunk in ingest.Chunks)
+        {
+            if (chunk.ExchangeStart < ingest.FirstRebuiltUnit)
+                throw new ArgumentException(
+                    $"Chunk at unit {chunk.ExchangeStart} is below FirstRebuiltUnit {ingest.FirstRebuiltUnit}.", nameof(ingest));
+            if (!seen.Add((chunk.ExchangeStart, chunk.Part)))
+                throw new ArgumentException(
+                    $"Duplicate chunk at unit {chunk.ExchangeStart}, part {chunk.Part}.", nameof(ingest));
+        }
+    }
+
     public IngestOutcome ApplyIngest(SessionIngest ingest)
     {
         ArgumentNullException.ThrowIfNull(ingest);
         ArgumentNullException.ThrowIfNull(ingest.Chunks);
+        ValidateChunks(ingest);
 
-        using var tx = _conn.BeginTransaction(); // immediate: the checks and the writes see one state
+        using var tx = _conn.BeginTransaction(deferred: false); // immediate: the checks and the writes see one state
 
         if (IsExcludedCore(tx, ingest.Host, ingest.HostSessionId, ingest.ProjectKey, ingest.Cwd))
             return new IngestOutcome(IngestOutcomeKind.Excluded);

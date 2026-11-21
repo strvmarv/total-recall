@@ -75,6 +75,9 @@ public interface ITranscriptStore : IDisposable
     /// excluded, the cutoff still equals the one the pass was built under and the session row still equals the pass's
     /// expected prior state. Anything else writes nothing and reports why.
     /// </summary>
+    /// <exception cref="ArgumentException">
+    /// Before any transaction: <c>FirstRebuiltUnit</c> is negative, a chunk lies below it, or two chunks share a unit and part.
+    /// </exception>
     IngestOutcome ApplyIngest(SessionIngest ingest);
 
     /// <summary>True when a cutoff is set and <paramref name="timestamp"/> is earlier than it.</summary>
