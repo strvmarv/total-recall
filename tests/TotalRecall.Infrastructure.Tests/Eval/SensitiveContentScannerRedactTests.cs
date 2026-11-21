@@ -289,6 +289,11 @@ public sealed class SensitiveContentScannerRedactTests
             { "PASSWORD=\"abc\"def123456 next", "PASSWORD=\"" + SecretAssignment + " next" },
             { "export DB_PASSWORD='hunter'_2-extra", "export DB_PASSWORD='" + SecretAssignment },
             { "PASSWORD='pässw'örd9", "PASSWORD='" + SecretAssignment },
+            // The shlex.quote form: a piece of the other kind that holds only the value's own quote is part of the word.
+            { "export DB_PASSWORD='It'\"'\"'s-a-long-passphrase'", "export DB_PASSWORD='" + SecretAssignment + "'" },
+            { "tool --password='p'\"'\"'w0rd-tail' -v", "tool --password='" + SecretAssignment + "' -v" },
+            { "PASSWORD=\"It\"'\"'\"s-long-passphrase\"", "PASSWORD=\"" + SecretAssignment + "\"" },
+            { "PASSWORD='a'\"''\"'bc' next", "PASSWORD='" + SecretAssignment + "' next" },
             // ... but not across a quote of the other kind (usually the end of an enclosing string), a quoted piece with
             // no closing quote on the line, or a shell operator or closing structure.
             { "PASSWORD=\"abc\"'d e f' next", "PASSWORD=\"" + SecretAssignment + "\"'d e f' next" },
@@ -444,6 +449,11 @@ public sealed class SensitiveContentScannerRedactTests
     [InlineData("TOKEN='a'_")]
     [InlineData("TOKEN='a'b'")]
     [InlineData("TOKEN='a'\u00f6")]
+    [InlineData("'\"'")]
+    [InlineData("'\"'\"'")]
+    [InlineData("TOKEN='a'\"'\"'")]
+    [InlineData("TOKEN=\"a\"'\"'\"")]
+    [InlineData("TOKEN='a'\"''''")]
     public void Redact_AdversarialInputs_FinishWellUnderASecond(string unit)
     {
         var text = Repeat(unit, OneMiB);

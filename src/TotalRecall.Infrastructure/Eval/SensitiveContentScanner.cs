@@ -520,7 +520,8 @@ public static class SensitiveContentScanner
     /// to the next <c>'</c>, double to the next <c>"</c> not preceded by a backslash), backslash escapes and any other
     /// character up to a blank, a shell operator or closing structure (<see cref="EndsShellWord"/>) or the end of the
     /// line. It ends before a quote of the other kind (or a backslash and one), which usually closes an enclosing string (<c>sh -c "PASSWORD='x'" &amp;&amp; ...</c>), and before a
-    /// quoted piece with no closing quote on the line. A word that ends in a quoted piece ends before that piece's closing
+    /// quoted piece with no closing quote on the line. The one piece of the other kind it takes is one that holds only the
+    /// value's own quote character (<c>'It'"'"'s-long'</c>, the shlex.quote form, and its double-quoted mirror). A word that ends in a quoted piece ends before that piece's closing
     /// quote, so the marker keeps the outer quotes. Linear: the index only moves forward, and a piece found unclosed leaves
     /// no quote of its kind later on the line for another value to scan to.
     /// </summary>
@@ -533,8 +534,15 @@ public static class SensitiveContentScanner
         while (j < text.Length)
         {
             var c = text[j];
-            if (char.IsWhiteSpace(c) || EndsShellWord(c) || c == other) break;
-            if (c == quote)
+            if (char.IsWhiteSpace(c) || EndsShellWord(c)) break;
+            if (c == other)
+            {
+                var k = j + 1;
+                while (k < text.Length && text[k] == quote) k++;
+                if (k == j + 1 || k >= text.Length || text[k] != other) break; // more than the value's own quote: an enclosing string
+                j = k + 1;
+            }
+            else if (c == quote)
             {
                 var k = j + 1;
                 while (k < text.Length && text[k] is not ('\n' or '\r')
