@@ -13,8 +13,9 @@ internal sealed record CleanedUserText(string? Text, IReadOnlyList<string> Shell
 /// <summary>
 /// The dropped-text rules for <b>user</b> text (spec section 3). One left-to-right pass over the string with ordinal
 /// comparisons only (no regular expression): a closer is looked up at most once per stretch of text (the position of
-/// the next one, or its absence, is remembered per tag name), so the work stays linear however many unclosed tags the
-/// text holds.
+/// the next one, or its absence, is remembered per tag name, and the closers of the whole <c>ide_*</c> family are indexed
+/// in one pass), so the work stays linear however many unclosed tags the text holds. Command name and args blocks are
+/// kept as <c>/name args</c>, <c>bash-input</c> commands are returned apart, every other listed block is dropped.
 /// </summary>
 internal static class UserTextCleaner
 {
