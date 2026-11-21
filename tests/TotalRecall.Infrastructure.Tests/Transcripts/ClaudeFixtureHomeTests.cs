@@ -124,6 +124,20 @@ public sealed class ClaudeFixtureHomeTests
             Assert.DoesNotContain(window, result.Text, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [MemberData(nameof(FixtureNames))]
+    public void RenderText_OfACrlfCheckout_EqualsTheLfRendering(string fixture)
+    {
+        using var home = new ClaudeFixtureHome();
+        var lf = File.ReadAllText(Path.Combine(ClaudeFixtureHome.FixturesDir, fixture + ".jsonl")).Replace("\r\n", "\n");
+
+        var fromCrlf = home.RenderText(lf.Replace("\n", "\r\n"), Cwd, Id);
+
+        Assert.Equal(home.RenderText(lf, Cwd, Id), fromCrlf);
+        Assert.Equal(home.Render(fixture, Cwd, Id), fromCrlf);
+        Assert.DoesNotContain((byte)'\r', fromCrlf);
+    }
+
     [Fact]
     public void PrivateKey_SurvivesJsonEscaping()
     {
@@ -310,6 +324,56 @@ public sealed class ClaudeFixtureHomeTests
         // The scan can fail: a stored window of the planted value (here upper-cased, so case is ignored) is found.
         var ex = Assert.Throws<InvalidOperationException>(() => LeakScan.AssertNotStored(db.Path, secret));
         Assert.Contains("planted secret", ex.Message);
+    }
+
+    [Fact]
+    public void LeakScan_FindsAWindowThatIsOnlyInTheWal()
+    {
+        using var db = new TranscriptTestDb();
+        var secret = new FakeSecrets(3).Get("github-token");
+        var session = db.AddSession("claude-code", "s1");
+        // The store keeps its connection open, so this commit stays in the WAL (no checkpoint into the main file).
+        db.AddChunk(session, "the token was " + secret + " and then it was used");
+        Assert.DoesNotContain(secret, Latin1(db.Path));
+        Assert.Contains(secret, Latin1(db.Path + "-wal"));
+
+        var ex = Assert.Throws<InvalidOperationException>(() => LeakScan.AssertNotStored(db.Path, secret));
+        Assert.EndsWith("in the bytes of archive.db-wal", ex.Message);
+    }
+
+    [Fact]
+    public void LeakScan_FindsANonAsciiWindowInTheTableText()
+    {
+        using var db = new TranscriptTestDb();
+        // Not ASCII, so its UTF-8 bytes read as Latin-1 never match: only the table text scan can find it.
+        var planted = "\u0441\u0435\u043a\u0440\u0435\u0442\u043d\u044b\u0439\u043a\u043b\u044e\u0447";
+        var session = db.AddSession("claude-code", "s1");
+        db.AddChunk(session, "the value was " + planted + " then");
+
+        var ex = Assert.Throws<InvalidOperationException>(() => LeakScan.AssertNotStored(db.Path, planted));
+        Assert.EndsWith("in tx_chunk.content", ex.Message);
+    }
+
+    [Fact]
+    public void LeakScan_FindsAWindowThatIsOnlyInTheTextIndex()
+    {
+        using var db = new TranscriptTestDb();
+        var planted = "\u0441\u0435\u043a\u0440\u0435\u0442\u043d\u044b\u0439\u043a\u043b\u044e\u0447";
+        var session = db.AddSession("claude-code", "s1");
+        db.AddChunk(session, "nothing to see here");
+        // A stale index entry: written to the external-content index only, so tx_chunk never holds it.
+        db.Exec("INSERT INTO tx_chunk_fts(rowid, content) VALUES (999, 'stale " + planted + "')");
+
+        var ex = Assert.Throws<InvalidOperationException>(() => LeakScan.AssertNotStored(db.Path, planted));
+        Assert.EndsWith("in the tx_chunk_fts index", ex.Message);
+    }
+
+    private static string Latin1(string path)
+    {
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var ms = new MemoryStream();
+        fs.CopyTo(ms);
+        return Encoding.Latin1.GetString(ms.ToArray());
     }
 
     [Fact]

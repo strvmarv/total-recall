@@ -76,12 +76,19 @@ public sealed class ClaudeFixtureHome : IDisposable
     }
 
     /// <summary>The bytes of a fixture with every placeholder substituted (UTF-8, no BOM, every line ends in LF).</summary>
-    public byte[] Render(string fixture, string cwd, string id)
+    public byte[] Render(string fixture, string cwd, string id) =>
+        RenderText(File.ReadAllText(System.IO.Path.Combine(FixturesDir, fixture + ".jsonl"), Utf8), cwd, id);
+
+    /// <summary>
+    /// The bytes of fixture text with every placeholder substituted. A trailing CR on a line is dropped, so a checkout
+    /// with CRLF line ends renders the same bytes as one with LF.
+    /// </summary>
+    public byte[] RenderText(string raw, string cwd, string id)
     {
-        var raw = File.ReadAllText(System.IO.Path.Combine(FixturesDir, fixture + ".jsonl"), Utf8);
         var sb = new StringBuilder(raw.Length + 256);
-        foreach (var line in raw.Split('\n'))
+        foreach (var rawLine in raw.Split('\n'))
         {
+            var line = rawLine.EndsWith('\r') ? rawLine[..^1] : rawLine;
             if (line.Length == 0) continue;
             sb.Append(RenderLine(line, cwd, id)).Append('\n');
         }

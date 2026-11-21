@@ -11,6 +11,13 @@ namespace TotalRecall.TestSupport.Transcripts;
 /// in any text of the archive tables, in the text index, or in the bytes of the database, WAL and shared-memory files.
 /// Reads the database through Microsoft.Data.Sqlite directly, so it needs no internal API.
 /// </summary>
+/// <remarks>
+/// Each path covers what the others miss. The file bytes (read as Latin-1) cover every ASCII window wherever it lies,
+/// committed or still in the WAL, free pages included. The table texts cover windows that are not ASCII (their UTF-8
+/// bytes never match). The text index is read through <c>fts5vocab</c>: <c>tx_chunk_fts</c> is an external-content
+/// table, so its <c>content</c> column is only <c>tx_chunk</c> again, while its terms live in prefix-compressed blobs that
+/// a byte scan does not reliably find.
+/// </remarks>
 public static class LeakScan
 {
     /// <summary>Every window of <paramref name="width"/> characters of <paramref name="planted"/> (the text itself when it is shorter).</summary>
@@ -42,13 +49,18 @@ public static class LeakScan
             foreach (var w in windows)
                 if (value.Contains(w, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidOperationException($"a window of the planted secret is in {table}.{column}");
+
+        foreach (var term in IndexTerms(dbPath))
+            foreach (var w in windows)
+                if (term.Contains(w, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("a window of the planted secret is in the tx_chunk_fts index");
     }
 
     /// <summary>Throws unless <paramref name="text"/> is found (ordinal) in some text of <c>tx_session</c> or <c>tx_chunk</c>.</summary>
     public static void AssertStored(string dbPath, string text)
     {
-        foreach (var (table, _, value) in TextValues(dbPath))
-            if (table != "tx_chunk_fts" && value.Contains(text, StringComparison.Ordinal)) return;
+        foreach (var (_, _, value) in TextValues(dbPath))
+            if (value.Contains(text, StringComparison.Ordinal)) return;
         throw new InvalidOperationException("the text is not stored in tx_session or tx_chunk: " + text);
     }
 
@@ -61,7 +73,7 @@ public static class LeakScan
         return Encoding.Latin1.GetString(ms.GetBuffer(), 0, (int)ms.Length);
     }
 
-    private static IEnumerable<(string Table, string Column, string Value)> TextValues(string dbPath)
+    private static SqliteConnection OpenReadOnly(string dbPath)
     {
         var csb = new SqliteConnectionStringBuilder
         {
@@ -69,14 +81,36 @@ public static class LeakScan
             Mode = SqliteOpenMode.ReadOnly,
             Pooling = false,
         };
-        var found = new List<(string, string, string)>();
-        using var conn = new SqliteConnection(csb.ToString());
+        var conn = new SqliteConnection(csb.ToString());
         conn.Open();
+        return conn;
+    }
+
+    /// <summary>Every term of the <c>tx_chunk_fts</c> index, through a temporary <c>fts5vocab</c> table (the main file stays read-only).</summary>
+    private static List<string> IndexTerms(string dbPath)
+    {
+        var terms = new List<string>();
+        using var conn = OpenReadOnly(dbPath);
+        using (var create = conn.CreateCommand())
+        {
+            create.CommandText = "CREATE VIRTUAL TABLE temp.leak_scan_vocab USING fts5vocab(main, tx_chunk_fts, row)";
+            create.ExecuteNonQuery();
+        }
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT term FROM temp.leak_scan_vocab";
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read()) terms.Add(reader.GetString(0));
+        return terms;
+    }
+
+    private static IEnumerable<(string Table, string Column, string Value)> TextValues(string dbPath)
+    {
+        var found = new List<(string, string, string)>();
+        using var conn = OpenReadOnly(dbPath);
         foreach (var (table, columns) in new (string, string[])[]
                  {
                      ("tx_session", Columns(conn, "tx_session")),
                      ("tx_chunk", Columns(conn, "tx_chunk")),
-                     ("tx_chunk_fts", ["content"]),
                  })
         {
             foreach (var column in columns)
