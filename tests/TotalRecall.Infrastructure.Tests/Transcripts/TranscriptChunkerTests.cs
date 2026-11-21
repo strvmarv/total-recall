@@ -218,16 +218,16 @@ public sealed class TranscriptChunkerTests
     public void LongBlock_UsesCapacityLeftInPart()
     {
         var first = Plain(new string('p', 1000));
-        var second = Plain(new string('q', 3000));       // longer than a fresh part
+        var word = new string('q', 99);
+        var second = Plain(string.Join(' ', Enumerable.Repeat(word, 30)));       // 2,999 characters, longer than a fresh part
 
         var chunks = TranscriptChunker.Chunk(AssistantOnly(first, second), Facts);
 
-        // 1,800 - 1,000 - 2 (the blank line) = 798 characters of the second block fit in the first part.
-        Assert.Equal(3, chunks.Count);
-        Assert.Equal(first.Text + "\n\n" + new string('q', 798), Body(chunks[0]));
-        Assert.Equal(1800, Body(chunks[0]).Length);
-        Assert.Equal(new string('q', 1800), Body(chunks[1]));
-        Assert.Equal(new string('q', 3000 - 798 - 1800), Body(chunks[2]));
+        // 1,800 - 1,000 - 2 (the blank line) = 798 characters are left; the last space at or before 798 ends the piece.
+        var piece = string.Join(' ', Enumerable.Repeat(word, 7));
+        Assert.Equal(first.Text + "\n\n" + piece, Body(chunks[0]));
+        Assert.Equal(Squash(first.Text + second.Text), NoLabels(chunks, false));
+        Assert.All(chunks, c => Assert.True(Body(c).Length <= TranscriptChunker.BodyLimit));
     }
 
     [Fact]
@@ -309,6 +309,79 @@ public sealed class TranscriptChunkerTests
         });
     }
 
+    private static string AfterContinued(IngestChunk chunk, bool hasUser)
+    {
+        var body = Body(chunk);
+        return hasUser && chunk.Part > 0 ? body[(body.IndexOf("\n\n", StringComparison.Ordinal) + 2)..] : body;
+    }
+
+    [Fact]
+    public void HardCut_WithNoRoomForASafePiece_OpensANewPart_NeverSplitsASurrogatePair()
+    {
+        var chunks = TranscriptChunker.Chunk(
+            AssistantOnly(Plain(new string('a', 1797)), Plain("\U0001F600" + new string('x', 3000))), Facts);
+
+        Assert.Equal(new string('a', 1797), Body(chunks[0]));
+        Assert.StartsWith("\U0001F600", Body(chunks[1]));
+        Assert.All(chunks, c => Assert.False(char.IsHighSurrogate(c.Content[^1])));
+        Assert.All(chunks, c => Assert.True(Body(c).Length <= TranscriptChunker.BodyLimit));
+        Assert.Equal(new string('a', 1797) + "\U0001F600" + new string('x', 3000), NoLabels(chunks, false));
+    }
+
+    [Fact]
+    public void HardCut_WithNoRoomForASafePiece_OpensANewPart_NeverSplitsAMarker()
+    {
+        var chunks = TranscriptChunker.Chunk(
+            AssistantOnly(Plain(new string('a', 1793)), Plain("[redacted:token]" + new string('x', 3000))), Facts);
+
+        Assert.Equal(new string('a', 1793), Body(chunks[0]));
+        Assert.StartsWith("[redacted:token]", Body(chunks[1]));
+        Assert.Equal(new string('a', 1793) + "[redacted:token]" + new string('x', 3000), NoLabels(chunks, false));
+    }
+
+    [Fact]
+    public void LongAssistantBlock_AfterAFullPart_StartsANewPart_NotCutThroughItsLabel()
+    {
+        var chunks = TranscriptChunker.Chunk(
+            AssistantOnly(Plain(new string('a', 1795)), Asst(new string('x', 2000))), Facts);
+
+        Assert.Equal(new string('a', 1795), Body(chunks[0]));
+        Assert.StartsWith("Assistant:", Body(chunks[1]));
+        Assert.Equal(new string('a', 1795) + "Assistant:" + new string('x', 2000), NoLabels(chunks, false));
+    }
+
+    [Fact]
+    public void TrailingNewline_DoesNotPushALastWordIntoASecondPart()
+    {
+        var text = "Assistant: " + string.Join(' ', Enumerable.Repeat("word", 400))[..1789] + "\n";
+        Assert.Equal(1801, text.Length);
+        var block = new UnitBlock(BlockKind.Assistant, text);
+
+        var chunk = Assert.Single(TranscriptChunker.Chunk(AssistantOnly(block), Facts));
+
+        Assert.Equal(block.Text.TrimEnd(), Body(chunk));
+    }
+
+    [Fact]
+    public void TrailingWhitespace_NeverLeavesAPartWithOnlyTheContinuedLine()
+    {
+        var text = "Assistant: " + new string('a', 1789) + "\n\n  ";
+        var chunks = TranscriptChunker.Chunk(Unit(4, "Q", new UnitBlock(BlockKind.Assistant, text)), Facts);
+
+        var chunk = Assert.Single(chunks);
+        Assert.Equal(text.TrimEnd(), Body(chunk));
+    }
+
+    [Fact]
+    public void WhitespaceOnlyBlock_AndWhitespaceTail_AreNotCountedOrKept()
+    {
+        var chunks = TranscriptChunker.Chunk(
+            Unit(4, "Q", Asst(new string('a', 5000) + "\n\n  \t"), Plain("  \n ")), Facts);
+
+        Assert.All(chunks, c => Assert.False(string.IsNullOrWhiteSpace(AfterContinued(c, true))));
+        Assert.All(chunks, c => Assert.False(char.IsWhiteSpace(c.Content[^1])));
+    }
+
     private static string Squash(string text) => new(text.Where(c => !char.IsWhiteSpace(c)).ToArray());
 
     private static string NoLabels(IReadOnlyList<IngestChunk> chunks, bool hasUser)
@@ -378,6 +451,7 @@ public sealed class TranscriptChunkerTests
             Assert.Equal(expected, NoLabels(chunks, user is not null));
             Assert.All(chunks, c => Assert.True(Body(c).Length <= TranscriptChunker.BodyLimit, $"round {round}"));
             Assert.Equal(Enumerable.Range(0, chunks.Count), chunks.Select(c => c.Part));
+            Assert.All(chunks, c => Assert.False(string.IsNullOrWhiteSpace(AfterContinued(c, user is not null)), $"round {round}"));
         }
     }
 }

@@ -37,8 +37,9 @@ internal static class TranscriptChunker
 
         foreach (var block in unit.Blocks)
         {
-            var text = block.Text;
-            if (string.IsNullOrWhiteSpace(text)) continue;
+            // Trailing whitespace is neither counted nor kept: it would push a last word into a part of its own.
+            var text = block.Text.TrimEnd();
+            if (text.Length == 0) continue;
             var isError = block.Kind == BlockKind.Error;
 
             var current = parts[^1];
@@ -67,18 +68,27 @@ internal static class TranscriptChunker
                     continue;
                 }
 
-                var (piece, remainder) = Take(rest, capacity);
+                var (piece, remainder, hardCut) = Take(rest, capacity);
+                if (hardCut && current.HasBlocks)
+                {
+                    // A block boundary is available and ranks above the last resort: never cut through a label,
+                    // a marker or a pair to squeeze a few characters into a part that already holds blocks.
+                    parts.Add(new Part(continued));
+                    continue;
+                }
+
                 if (piece.Length == 0)
                 {
-                    if (current.HasBlocks)
-                    {
-                        parts.Add(new Part(continued));
-                        continue;
-                    }
+                    // Unreachable with the real limits (a marker is far shorter than a fresh part).
+                    throw new InvalidOperationException("The chunker cannot cut a block inside an empty part.");
+                }
 
-                    // Unreachable with the real limits (a marker is far shorter than a part); keeps the loop finite.
-                    piece = rest[..Math.Min(capacity, rest.Length)];
-                    remainder = rest[piece.Length..];
+                if (string.IsNullOrWhiteSpace(piece)) piece = "";
+                if (string.IsNullOrWhiteSpace(remainder)) remainder = "";
+                if (piece.Length == 0)
+                {
+                    rest = remainder;
+                    continue;
                 }
 
                 current.Add(piece, isError);
@@ -125,9 +135,9 @@ internal static class TranscriptChunker
     /// paragraph, else a line, else a whitespace boundary, else (last resort) at the safe length; and what remains.
     /// The whitespace at the boundary belongs to neither.
     /// </summary>
-    private static (string Piece, string Remainder) Take(string text, int capacity)
+    private static (string Piece, string Remainder, bool HardCut) Take(string text, int capacity)
     {
-        if (text.Length <= capacity) return (text, "");
+        if (text.Length <= capacity) return (text, "", false);
 
         var limit = TextCut.SafeLength(text, capacity);
 
@@ -153,11 +163,11 @@ internal static class TranscriptChunker
             if (char.IsWhiteSpace(text[i]) && TryBreak(text, i, SkipWhitespace(text, i), out var result)) return result;
         }
 
-        var cut = limit > 0 ? limit : Math.Min(capacity, text.Length);
-        return (text[..cut], text[cut..]);
+        // The last resort: the safe length itself, which can be 0 (the piece is then empty and the caller opens a part).
+        return (text[..limit], text[limit..], true);
     }
 
-    private static bool TryBreak(string text, int end, int restStart, out (string Piece, string Remainder) result)
+    private static bool TryBreak(string text, int end, int restStart, out (string Piece, string Remainder, bool HardCut) result)
     {
         var piece = text[..end].TrimEnd();
         if (piece.Length == 0 || restStart >= text.Length)
@@ -166,7 +176,7 @@ internal static class TranscriptChunker
             return false;
         }
 
-        result = (piece, text[restStart..]);
+        result = (piece, text[restStart..], false);
         return true;
     }
 
