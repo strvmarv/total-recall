@@ -445,17 +445,11 @@ public sealed class ClaudeRecordMapperTests
     }
 
     [Fact]
-    public void UndecodableStringInStructuredOutput_Throws_OrIsPlainText()
+    public void UndecodableStringInStructuredOutput_Throws()
     {
         using var doc = JsonDocument.Parse(
             Assistant(ToolUse("StructuredOutput", "{\"a\":\"\\ud800\"}")));
-        // The rendering must either reject the string (a counted line) or carry it through; it must never fail another way.
-        try
-        {
-            var records = ClaudeRecordMapper.Map(doc.RootElement, 0, 1);
-            Assert.Single(records);
-        }
-        catch (InvalidOperationException) { }
+        Assert.Throws<InvalidOperationException>(() => ClaudeRecordMapper.Map(doc.RootElement, 0, 1));
     }
 
     [Fact]

@@ -181,7 +181,6 @@ public sealed class ClaudeCodeAdapter : ITranscriptAdapter
         }
         catch (JsonException) { return null; }               // not JSON, invalid UTF-8, nested deeper than the limit
         catch (InvalidOperationException) { return null; }   // not a record, or a string that does not decode
-        catch (ArgumentException) { return null; }
     }
 
     /// <summary>Empty, or only the ASCII white space a line can carry (a CR from CRLF, indentation).</summary>

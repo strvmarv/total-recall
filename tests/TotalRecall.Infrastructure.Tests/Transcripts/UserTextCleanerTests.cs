@@ -87,7 +87,18 @@ public sealed class UserTextCleanerTests
     public void SlashCommand_RealisticLayout_DropsCommandMessage()
     {
         var text = "<command-message>develop is running</command-message>\n<command-name>/develop</command-name>\n<command-args>148 now</command-args>";
-        Assert.Equal("/develop\n148 now", UserTextCleaner.Clean(text).Text);
+        Assert.Equal("/develop 148 now", UserTextCleaner.Clean(text).Text);
+    }
+
+    [Theory]
+    [InlineData("<command-name>/cd</command-name>\n            <command-message>cd</command-message>\n            <command-args>~/source</command-args>", "/cd ~/source")]
+    [InlineData("<command-name>/cd</command-name><command-message>cd</command-message><command-args>~/source</command-args>", "/cd ~/source")]
+    [InlineData("<command-name>/develop</command-name>\n            <command-message>develop</command-message>\n            <command-args></command-args>", "/develop")]
+    [InlineData("<command-name>/develop</command-name>\n            <command-message>develop</command-message>\n            <command-args>  \n </command-args>\n", "/develop")]
+    [InlineData("<command-name>/develop</command-name>\n   <command-message>develop</command-message>", "/develop")]
+    public void SlashCommand_IndentedLayout_IsOneLine(string text, string expected)
+    {
+        Assert.Equal(expected, UserTextCleaner.Clean(text).Text);
     }
 
     [Fact]
@@ -184,12 +195,25 @@ public sealed class UserTextCleanerTests
         var ide = string.Concat(Enumerable.Repeat("a<ide_selection>", 70_000));
         var mixed = string.Concat(Enumerable.Repeat("a<system-reminder><bash-input><command-name>", 25_000));
 
+        var distinct = string.Concat(Enumerable.Range(0, 60_000).Select(k => "a<ide_" + Letters(k) + ">"));
+        var distinctWithOtherCloser = string.Concat(Enumerable.Range(0, 30_000).Select(k => "a<ide_" + Letters(k) + ">"))
+            + string.Concat(Enumerable.Repeat("</ide_zzzzzzzzzz>", 30_000));
+
         var sw = Stopwatch.StartNew();
+        Assert.Equal(distinct, UserTextCleaner.Clean(distinct).Text);
+        Assert.Equal(distinctWithOtherCloser, UserTextCleaner.Clean(distinctWithOtherCloser).Text);
         Assert.Null(UserTextCleaner.Clean(atStart).Text);
         Assert.Equal(midLine, UserTextCleaner.Clean(midLine).Text);
         Assert.Equal(ide, UserTextCleaner.Clean(ide).Text);
         Assert.Equal(mixed, UserTextCleaner.Clean(mixed).Text);
         Assert.True(sw.ElapsedMilliseconds < 1000, "took " + sw.ElapsedMilliseconds + " ms");
+    }
+
+    private static string Letters(int k)
+    {
+        var sb = new System.Text.StringBuilder();
+        do { sb.Append((char)('a' + k % 26)); k /= 26; } while (k > 0);
+        return sb.ToString();
     }
 
     [Fact]

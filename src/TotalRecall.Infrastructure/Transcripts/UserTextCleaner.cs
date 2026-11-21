@@ -45,6 +45,8 @@ internal static class UserTextCleaner
         var sb = new StringBuilder(text.Length);
         List<string>? shell = null;
         var closers = new Dictionary<string, int>(StringComparer.Ordinal);   // name -> index of its next closer, or -1
+        IdeClosers? ide = null;                                       // built once, only if an <ide_*> opener needs a closer
+        var afterName = -1;                                           // builder length right after the last command name, or -1
         var n = text.Length;
         var i = 0;
 
@@ -65,7 +67,7 @@ internal static class UserTextCleaner
                 continue;
             }
 
-            var closer = FindCloser(text, closers, name, afterOpen);
+            var closer = FindCloser(text, closers, ref ide, name, afterOpen);
             if (closer < 0)
             {
                 // Dropped block with no closer: gone to the end of the text only when its opener starts the text or a line.
@@ -84,12 +86,24 @@ internal static class UserTextCleaner
                     break;
                 case Tag.CommandName:
                     sb.Append(inner);
+                    afterName = sb.Length;
                     break;
                 case Tag.CommandArgs:
-                    if (inner.Length > 0)
+                    // The host lays the tags out over several indented lines; only white space between the name and
+                    // the args is layout, so it is cut and the args follow the name after one space.
+                    if (afterName >= 0 && IsWhiteSpaceFrom(sb, afterName))
                     {
-                        if (sb.Length > 0 && !char.IsWhiteSpace(sb[^1])) sb.Append(' ');
-                        sb.Append(inner);
+                        sb.Length = afterName;
+                        if (inner.Length > 0) sb.Append(' ').Append(inner);
+                    }
+                    else
+                    {
+                        afterName = -1;
+                        if (inner.Length > 0)
+                        {
+                            if (sb.Length > 0 && !char.IsWhiteSpace(sb[^1])) sb.Append(' ');
+                            sb.Append(inner);
+                        }
                     }
                     break;
             }
@@ -100,6 +114,13 @@ internal static class UserTextCleaner
         var shellInputs = (IReadOnlyList<string>?)shell ?? Array.Empty<string>();
         if (cleaned.Length == 0 || IsInterruptionNotice(cleaned)) return new CleanedUserText(null, shellInputs);
         return new CleanedUserText(cleaned, shellInputs);
+    }
+
+    private static bool IsWhiteSpaceFrom(StringBuilder sb, int from)
+    {
+        for (var k = from; k < sb.Length; k++)
+            if (!char.IsWhiteSpace(sb[k])) return false;
+        return true;
     }
 
     /// <summary>A text that is one host notice such as <c>[Request interrupted by user for tool use]</c> and nothing else.</summary>
@@ -160,13 +181,48 @@ internal static class UserTextCleaner
 
     /// <summary>
     /// Index of the first <c>&lt;/name&gt;</c> at or after <paramref name="from"/>, or -1. The answer is remembered: scanning
-    /// moves forward only, so an index at or after <paramref name="from"/> is still the first one and a -1 stays -1.
+    /// moves forward only, so an index at or after <paramref name="from"/> is still the first one and a -1 stays -1. The
+    /// <c>ide_*</c> family shares one index of all its closers (<see cref="IdeClosers"/>), so distinct unclosed names do
+    /// not each search to the end of the text.
     /// </summary>
-    private static int FindCloser(string text, Dictionary<string, int> closers, string name, int from)
+    private static int FindCloser(string text, Dictionary<string, int> closers, ref IdeClosers? ide, string name, int from)
     {
+        if (name.StartsWith("ide_", StringComparison.Ordinal))
+            return (ide ??= new IdeClosers(text)).Next(name, from);
         if (closers.TryGetValue(name, out var known) && (known < 0 || known >= from)) return known;
         var found = text.IndexOf("</" + name + ">", from, StringComparison.Ordinal);
         closers[name] = found;
         return found;
+    }
+
+    /// <summary>Every <c>&lt;/ide_[a-z_]+&gt;</c> of a text by name, found in one pass; a lookup is a binary search.</summary>
+    private sealed class IdeClosers
+    {
+        private readonly Dictionary<string, List<int>> _byName = new(StringComparer.Ordinal);
+
+        public IdeClosers(string text)
+        {
+            var pos = 0;
+            while ((pos = text.IndexOf("</ide_", pos, StringComparison.Ordinal)) >= 0)
+            {
+                var j = pos + 6;
+                while (j < text.Length && (text[j] is (>= 'a' and <= 'z') or '_')) j++;
+                if (j > pos + 6 && j < text.Length && text[j] == '>')
+                {
+                    var name = text.Substring(pos + 2, j - pos - 2);
+                    if (!_byName.TryGetValue(name, out var list)) _byName[name] = list = new List<int>();
+                    list.Add(pos);
+                }
+                pos += 2;
+            }
+        }
+
+        public int Next(string name, int from)
+        {
+            if (!_byName.TryGetValue(name, out var list)) return -1;
+            var k = list.BinarySearch(from);
+            if (k < 0) k = ~k;
+            return k < list.Count ? list[k] : -1;
+        }
     }
 }
