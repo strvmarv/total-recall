@@ -127,6 +127,76 @@ public sealed class ProjectIdentityRuleTests : IDisposable
     }
 
     [Fact]
+    public void Identity_MissingWorktree_CutBackDirWithoutRepo_RootNull_KeyCutBackFolder()
+    {
+        var dir = Path.Combine(_root, "Source");
+        Directory.CreateDirectory(dir);
+        var id = Derive(Path.Combine(dir, ".claude", "worktrees", "x"));
+        Assert.Null(id.Root);
+        Assert.Equal("source", id.Key);
+        Assert.Equal("path", id.KeySource);
+    }
+
+    [Fact]
+    public void Identity_MissingWorktree_CutBackInsideARepo_MainRepoRoot()
+    {
+        var repo = MakeRepo("Main", "https://github.com/o/Main.git");
+        var package = Path.Combine(repo, "packages", "lib");
+        Directory.CreateDirectory(package);
+        var id = Derive(Path.Combine(package, ".claude", "worktrees", "x"));
+        Assert.Equal(repo, id.Root);
+        Assert.Equal("o/main", id.Key);
+        Assert.Equal("remote", id.KeySource);
+    }
+
+    [Theory]
+    [InlineData("relative/Repo/.claude/worktrees/x", "repo")]
+    [InlineData("Plain", "plain")]
+    [InlineData(@"C:Repo\.claude\worktrees\x", "c:repo")]
+    [InlineData(@"\Repo\sub", "sub")]
+    public void Identity_RelativeOrDriveRelativeCwd_HasNoRoot(string cwd, string key)
+    {
+        var id = Derive(cwd);
+        Assert.Null(id.Root);
+        Assert.Equal(key, id.Key);
+        Assert.Equal("path", id.KeySource);
+    }
+
+    [Fact]
+    public void Identity_RelativeCwdThatExists_SkipsTheResolver()
+    {
+        // "." exists relative to the test process (inside the checkout, a repository); it must not be resolved.
+        var id = Derive(".");
+        Assert.Null(id.Root);
+        Assert.Equal("path", id.KeySource);
+    }
+
+    [Fact]
+    public void Identity_HomeThatTrimsToEmpty_OnlyTheFilesystemRootCheck()
+    {
+        var repo = MakeRepo("x", "https://github.com/o/x.git");
+        Assert.Equal(repo, Derive(repo, home: "/").Root);
+        Assert.Equal("/gone/Plain", Derive("/gone/Plain", home: "/").Root);
+        Assert.Null(Derive("/", home: "/").Root);
+    }
+
+    [Theory]
+    [InlineData(@"C:\Users", @"C:\Users\me")]
+    [InlineData(@"C:\Users\me", @"C:/Users/me")]
+    [InlineData(@"C:/Users", @"C:\Users\me\")]
+    public void Identity_WindowsHome_AncestorRejectedWhateverTheSeparators(string cwd, string home)
+    {
+        Assert.Null(Derive(cwd, home: home).Root);
+    }
+
+    [Fact]
+    public void Identity_WindowsHome_SiblingOrDeeperRootKept()
+    {
+        Assert.Equal(@"C:\Users\me\src\Other", Derive(@"C:\Users\me\src\Other", home: @"C:/Users/me").Root);
+        Assert.Equal(@"C:\Users\meta", Derive(@"C:\Users\meta", home: @"C:\Users\me").Root);
+    }
+
+    [Fact]
     public void Identity_ExistingDirNoRepo_RootNull_KeyFolder()
     {
         var dir = Path.Combine(_root, "NoRepoHere");

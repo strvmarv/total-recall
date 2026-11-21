@@ -39,7 +39,7 @@ internal static class ProjectIdentityRule
         string? key;
         string? root;
         var folderOf = cwd; // the path whose last segment names the project when the resolver gives no key
-        if (DirectoryExists(cwd))
+        if (IsAbsolute(cwd) && DirectoryExists(cwd))
         {
             // An existing directory: the resolver's walk gives the key and the root; no repository means no root.
             key = resolver.Resolve(cwd);
@@ -48,9 +48,16 @@ internal static class ProjectIdentityRule
         else
         {
             // A missing directory (a deleted worktree is the common case): the repository that held it, else the cwd.
+            // A path that is not absolute names no directory of its own (it would resolve against this process's
+            // working directory), so it has no root and is never looked up; its last segment still gives the key.
             var candidate = CutBackWorktree(cwd);
             folderOf = candidate;
-            if (DirectoryExists(candidate))
+            if (!IsAbsolute(candidate))
+            {
+                key = null;
+                root = null;
+            }
+            else if (DirectoryExists(candidate))
             {
                 key = resolver.Resolve(candidate);
                 root = resolver.ResolveRoot(candidate);
@@ -83,7 +90,10 @@ internal static class ProjectIdentityRule
             if (Array.IndexOf(WorktreeParents, segments[i].Value) < 0) continue;
             if (segments[i + 1].Value != "worktrees") continue;
             // The root is everything before ".claude"/".zoid", in the original text and separators (empty at the top).
-            return i == 0 ? string.Empty : cwd[..segments[i - 1].End];
+            // A drive root keeps its separator: "C:" alone would be relative to the drive's current directory.
+            if (i == 0) return string.Empty;
+            var end = segments[i - 1].End;
+            return i == 1 && IsDrive(segments[0].Value) ? cwd[..(end + 1)] : cwd[..end];
         }
 
         return cwd;
@@ -105,6 +115,19 @@ internal static class ProjectIdentityRule
 
         return list;
     }
+
+    private static bool IsDrive(string segment) =>
+        segment.Length == 2 && char.IsAsciiLetter(segment[0]) && segment[1] == ':';
+
+    /// <summary>
+    /// A path that names one directory whatever the current directory: a leading <c>/</c> (on every system: a Windows
+    /// session's cwd always carries a drive), a UNC <c>\\server</c> or a drive followed by a separator. A relative path,
+    /// a drive-relative <c>C:dir</c> and a rooted <c>\dir</c> are not.
+    /// </summary>
+    private static bool IsAbsolute(string path) =>
+        path.StartsWith('/')
+        || path.StartsWith(@"\\", StringComparison.Ordinal)
+        || (path.Length >= 3 && IsDrive(path[..2]) && path[2] is '/' or '\\');
 
     private static string? LastSegment(string path)
     {
@@ -130,8 +153,10 @@ internal static class ProjectIdentityRule
 
         if (userHome.Length == 0) return true;
         var home = TrimSeparators(userHome);
-        if (home.Length == 0) return false;
-        return !TranscriptStore.IsUnder(home, trimmed);
+        // A home such as "/" trims to nothing: the filesystem-root check above is all that applies.
+        if (home.Length == 0) return true;
+        // Both separators count, so a Windows home and root compare alike whichever separators they use.
+        return !TranscriptStore.IsUnder(home.Replace('\\', '/'), trimmed.Replace('\\', '/'));
     }
 
     private static bool DirectoryExists(string path)

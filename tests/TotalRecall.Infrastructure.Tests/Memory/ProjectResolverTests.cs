@@ -152,6 +152,24 @@ public class ProjectResolverTests : IDisposable
         Assert.Equal(sub, r.ResolveRoot(deeper));
     }
 
+    public static TheoryData<string> OddStarts() => new()
+    {
+        "",
+        "no-such-relative-dir-" + Guid.NewGuid().ToString("N"),
+        "/tmp/with\0nul",
+        "/" + new string('a', 5000),
+    };
+
+    [Theory]
+    [MemberData(nameof(OddStarts))]
+    public void ResolveRoot_OddInput_NeverThrows_IsNull(string start)
+    {
+        string? root = "not called";
+        var thrown = Record.Exception(() => root = new ProjectResolver().ResolveRoot(start));
+        Assert.Null(thrown);
+        Assert.Null(root);
+    }
+
     [Fact]
     public void ResolveRoot_NoRepoOrMissing_IsNull()
     {
