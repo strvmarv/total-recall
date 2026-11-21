@@ -64,7 +64,7 @@ total-recall transcripts backfill [--host claude-code]
 
 - **No terminal and no confirmation.** It needs neither, so a script or `cron` can run it. It refuses unless the archive is on: while `[transcripts] enabled` is false it prints how to enable it, exits 1 and has not read anything from Claude Code's directory. It also refuses under Postgres storage, and when the archive tables do not exist (a hand edit of `config.toml` that never ran `enable`), where it says that `total-recall transcripts enable` creates them.
 - **Where the files are.** `$CLAUDE_CONFIG_DIR/projects` when `CLAUDE_CONFIG_DIR` is set and not empty, else `~/.claude/projects`. Only files of the form `<projects>/<project directory>/<session id>.jsonl` are read, one directory level down. The projects directory itself may be a symbolic link; symbolic links beneath it are not followed. The files under `<session>/subagents/` (subagent runs) are not read, and neither is a file whose name, without `.jsonl`, is not made of letters, digits, `.`, `_` and `-` (at most 128 characters). When Claude Code has no such directory, it prints `no Claude Code sessions found at <path>` and exits 0.
-- **Order and interruption.** Newest file first. It prints a progress line every 50 sessions and a summary at the end. Ctrl+C stops after the session in progress and prints the summary so far (the remaining sessions are listed as not processed; the exit code is that of the sessions done).
+- **Order and interruption.** Newest file first. It prints a progress line every 50 sessions and a summary at the end. Ctrl+C stops (the session in progress is left for the next run) and prints the summary so far with an `interrupted: the remaining sessions were not processed` line; the exit code is that of the sessions done.
 - **Safe to repeat.** A second run stores nothing new. A session that grew since is read again from the start of its last exchange (see [How resume works](#how-resume-works)). Deleting a session file afterwards leaves what was stored.
 - **What stays out.** A session you forgot, a session of a project you forgot, and everything before the cutoff of `forget --all` are not stored, even though their files exist (see [Forgetting and unforgetting](#forgetting-and-unforgetting)).
 
@@ -78,7 +78,7 @@ backfill claude-code: 120 sessions seen
 
 | Count | Meaning |
 |---|---|
-| `new`, `updated`, `unchanged` | Sessions stored for the first time, stored again because they grew or their rules changed, and left as they were. |
+| `new`, `updated`, `unchanged` | Sessions stored for the first time, stored again because they grew, or the cutoff or their project key changed, and left as they were. |
 | `excluded` | Left out because you forgot them (the session, its project, or everything before the cutoff). |
 | `empty` | Nothing in the file is kept (only tool output, hook notices and the like); nothing is stored. It is looked at again on the next run. |
 | `skipped` | No complete first line yet (a session being written), a file name that is not a valid session id, or a session id that appears in two project directories (the other copy is skipped). |
@@ -113,20 +113,20 @@ Limits. Every text is cut at **100,000** characters after redaction, with `[... 
 
 ## What is redacted and what is not
 
-Before anything is cut or split, every text that is stored (your text, the assistant's text, stub details, error text, compaction summaries and the session title) is scanned, and what is found is replaced by a marker, `[redacted:<category>]`. The text of the secret is not stored, and no part of it is left behind. Two things hold for every marker: an overlap of two findings becomes one marker, and a cut to 160, 500 or any other limit never lands inside a marker (it goes before the marker and adds `...`, so a token that straddles the limit leaves no prefix).
+Before anything is cut or split, every text that is stored (your text, the assistant's text, stub details, error text, compaction summaries and the session title) is scanned, and what is found is replaced by a marker, `[redacted:<category>]`. The text of the secret is not stored, and no part of it is left behind. Two things hold for every marker: an overlap of two findings becomes one marker, and a cut to 160, 500 or any other limit never lands inside a marker (it goes before the marker and adds `...`, or the not-stored note at the 100,000 cap, so a token that straddles the limit leaves no prefix).
 
 | Marker | What is found | What is replaced |
 |---|---|---|
 | `[redacted:token]` | GitHub tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`), GitLab `glpat-`, Slack `xox[baprs]-`, AWS access key ids `AKIA...`, and `sk-` keys (including `sk-ant-`, `sk-proj-`, `sk-svcacct-`, `sk-admin-`, `sk-None-` and `sk-or-v1-` forms; at least 20 characters after the prefix, and not inside a longer word) | the token |
 | `[redacted:private-key]` | a `-----BEGIN ... PRIVATE KEY-----` block | from the BEGIN line to the END line, or to the end of the text when the END line is missing |
-| `[redacted:bearer]` | `Authorization: <scheme> <value>` (also with `=`, quotes, and the schemes `Bearer`, `Basic`, `Token`, `Digest`), `x-api-key: <value>`, and a bare `Bearer <value>` | the value |
+| `[redacted:bearer]` | `Authorization: <scheme> <value>` (also with `=`, quotes, and the schemes `Bearer`, `Basic`, `Token`, `Digest`), `x-api-key: <value>`, and a bare `Bearer <value>` (a value of at least 8 characters after `Authorization` or `x-api-key`, at least 16 after a bare `Bearer`) | the value |
 | `[redacted:url-credentials]` | `scheme://user:password@host` | the password only; the user name and host stay |
 | `[redacted:secret-assignment]` | a value assigned (`=` or `:`, quoted or not, also JSON and its backslash-escaped form inside a command string) to a name ending in `_KEY`, `_TOKEN`, `_SECRET`, `_PASSWORD` or `_PASSWD`, or to `PASSWORD`, `PASSWD`, `SECRET`, `TOKEN`, `APIKEY` or `PASSPHRASE` (any case), and the flags `--password`, `--passwd`, `--token`, `--api-key`, `--secret`, `--auth-token` | the value (a quoted value to its closing quote; a `$(...)` or backtick command as one value; otherwise the whole run up to a space) |
 | `[redacted:unprocessable]` | a text the redactor could not finish within its 5 second limit | the whole text |
 
 A timeout **fails closed**: the whole text becomes `[redacted:unprocessable]` and nothing from it is stored. It does not happen on ordinary input.
 
-**What is left alone.** A value is not redacted when the whole value is a reference or a placeholder: `$NAME`, `${NAME}` or `%NAME%` (unquoted or in double quotes; in single quotes a shell does not expand it, so it is redacted), `<something>`, `{{ ... }}`, `true`, `false`, `null`, `none`, `undefined`, or empty. So `GH_TOKEN="$t" gh api ...` is stored as it is. There is no exemption for a short value or by first character: `PASSWORD='$ecret!9'` is redacted. Email addresses are not redacted.
+**What is left alone.** A value is not redacted when the whole value is a reference or a placeholder: `$NAME`, `${NAME}` or `%NAME%` (unquoted or in double quotes; in single quotes a shell does not expand it, so it is redacted), `<something>`, `{{ ... }}`, `true`, `false`, `null`, `none`, `undefined`, or empty. So `GH_TOKEN="$t" gh api ...` is stored as it is. For secret assignments and URL passwords there is no exemption for a short value or by first character: `PASSWORD='$ecret!9'` is redacted. Email addresses are not redacted.
 
 **What is over-redacted.** The rules prefer losing text to keeping a secret, so some harmless text goes too:
 
@@ -142,9 +142,10 @@ A timeout **fails closed**: the whole text becomes `[redacted:unprocessable]` an
 - a secret in a format that is not listed: cloud keys other than `AKIA`, JWTs, database passwords outside a URL or a listed variable;
 - anything you paste in a different encoding (a name that is encoded twice inside a JSON string, such as `\\\"password\\\":`, is not recognised);
 - a secret split across two messages;
-- a multi-word value written without quotes (only the first word is replaced).
+- a multi-word value written without quotes (only the first word is replaced);
+- a header value shorter than the minima in the `[redacted:bearer]` row.
 
-Treat the archive as sensitive data: it is as private as the session files Claude Code keeps itself, and as private as your own user account. Redaction is a safety net, not a guarantee. `forget` is how you remove what should not be there.
+Treat the archive as sensitive data. When it lives in the main database it has the permissions that file already has, which on Linux and macOS may let other local users read it; a separate `transcripts.db_path` file is created readable only by you (0600, see Unix file permissions below). Redaction is a safety net, not a guarantee. `forget` is how you remove what should not be there.
 
 ## How resume works
 
@@ -152,7 +153,7 @@ Each stored session remembers, as a byte position, where its last exchange start
 
 ## Project and kind
 
-**Project.** The key comes from the working directory the session ran in: `owner/repo` from the repository's `origin` remote, else the folder name of the repository, in lower case. A worktree of a repository gives the repository's key, also when the worktree was deleted afterwards (a path with a `/.claude/worktrees/<name>` segment is cut back to the repository that held it). A session whose file records no working directory takes it from the name of Claude Code's project directory (decoded; the decoding is lossy).
+**Project.** The key comes from the working directory the session ran in: `owner/repo` from the repository's `origin` remote, else the folder name of the repository or, outside a repository, of the working directory, in lower case. A worktree of a repository gives the repository's key, also when the worktree was deleted afterwards (a path with a `/.claude/worktrees/<name>` or `/.zoid/worktrees/<name>` segment is cut back to the repository that held it). A session whose file records no working directory takes it from the name of Claude Code's project directory (decoded; the decoding is lossy).
 
 **Kind.** `interactive` or `automated`, decided from the file when it is stored. A session whose `entrypoint` starts with `sdk` (the SDK runs of reviewers and subagents) is `automated`. Otherwise a session with exactly one prompt is `automated` when that prompt starts with a known automation opening (`Review this change for security`, `You previously flagged`, `Scope:`, `You are reviewing`, `Read the full review brief`, `Round <n>`) or is longer than 1,500 characters; any other session is `interactive`. When a session grows, its kind is decided again. The kind is stored so that a later release can keep automated runs out of search results by default.
 
