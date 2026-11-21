@@ -62,7 +62,7 @@ public sealed class EnableCommandTests : IDisposable
     }
 
     [Fact]
-    public void TheConfirmation_SaysWhatWillBeStored_AndThatNothingIsStoredYet()
+    public void TheConfirmation_SaysWhatWillBeStored_AndThatNothingIsReadUntilBackfill()
     {
         _h.Answer = false;
 
@@ -72,7 +72,9 @@ public sealed class EnableCommandTests : IDisposable
         Assert.Contains("dialogue", prompt);
         Assert.Contains("redacted", prompt);
         Assert.Contains("never synced", prompt);
-        Assert.Contains("Nothing is stored yet in this version", prompt);
+        Assert.Contains("transcripts backfill", prompt);
+        Assert.Contains("cannot be searched yet", prompt);
+        Assert.DoesNotContain("Nothing is stored yet", prompt);
         Assert.Contains(_h.DbPath, prompt);
     }
 
@@ -120,7 +122,8 @@ public sealed class EnableCommandTests : IDisposable
         var output = _h.Out.ToString();
         Assert.Contains("enabled", output);
         Assert.Contains(_h.DbPath, output);
-        Assert.Contains("Nothing is stored yet", output);
+        Assert.Contains("Run 'total-recall transcripts backfill' to back up your Claude Code sessions; searching the archive arrives in a later release.", output);
+        Assert.DoesNotContain("Nothing is stored yet", output);
     }
 
     [Fact]

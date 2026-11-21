@@ -41,11 +41,12 @@ Benchmark candidates captured from retrieval misses are reviewed (accepted or re
 
 ## Transcript archive commands
 
-The opt-in [transcript archive](transcripts.md) is managed with the `total-recall transcripts` command line (not the `/total-recall:commands` skill). It can be enabled, inspected and emptied but not searched yet.
+The opt-in [transcript archive](transcripts.md) is managed with the `total-recall transcripts` command line (not the `/total-recall:commands` skill). It can be enabled, filled from your Claude Code sessions, inspected and emptied but not searched yet.
 
 | Command | Description |
 |---|---|
 | `total-recall transcripts enable` | Turn the archive on (asks first; needs a terminal) |
+| `total-recall transcripts backfill [--host claude-code]` | Store your existing Claude Code sessions in the archive, with known secret shapes redacted (no terminal needed; refuses while the archive is off; safe to repeat) |
 | `total-recall transcripts disable` | Turn the archive off (no terminal needed; what it holds is kept) |
 | `total-recall transcripts status` | Show whether it is on, where it is and what it holds |
 | `total-recall transcripts forget --session <host>:<id>` | Delete one session and keep it from being archived again (asks first; needs a terminal) |

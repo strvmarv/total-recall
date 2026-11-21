@@ -14,3 +14,6 @@ codex/bootstrap.cjs text eol=lf
 
 # Tag message fixtures for the release notes tests: pin to LF so a Windows checkout keeps them byte-exact.
 scripts/fixtures/tag-messages/*.txt text eol=lf
+
+# Transcript fixtures are rendered line by line: pin them to LF so a Windows checkout gives the same bytes.
+tests/fixtures/transcripts/**/*.jsonl text eol=lf

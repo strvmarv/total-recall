@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using TotalRecall.Infrastructure.Config;
 using TotalRecall.Infrastructure.Transcripts;
 
@@ -15,6 +16,8 @@ namespace TotalRecall.Cli.Commands.Transcripts;
 /// </summary>
 public sealed class StatusCommand : TranscriptsCommandBase
 {
+    private const int MaxProjectRows = 30;
+
     public StatusCommand() { }
 
     public StatusCommand(
@@ -132,6 +135,15 @@ public sealed class StatusCommand : TranscriptsCommandBase
         Out.WriteLine($"schema version: {s.SchemaVersion.ToString(CultureInfo.InvariantCulture)}");
         Out.WriteLine($"sessions: {N(s.Sessions)} (interactive {N(interactive)}, automated {N(automated)})");
         Out.WriteLine($"chunks: {N(s.Chunks)}");
+
+        if (s.ByProjectAndKind.Count > 0)
+        {
+            Out.WriteLine("by project and kind:");
+            foreach (var row in s.ByProjectAndKind.Take(MaxProjectRows))
+                Out.WriteLine($"  {row.ProjectKey} {row.Kind}: {N(row.Sessions)} sessions, {N(row.Chunks)} chunks");
+            if (s.ByProjectAndKind.Count > MaxProjectRows)
+                Out.WriteLine($"  and {N(s.ByProjectAndKind.Count - MaxProjectRows)} more");
+        }
 
         if (s.ForgottenSessions.Count == 0)
         {

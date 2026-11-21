@@ -86,6 +86,67 @@ public sealed class StatusCommandTests : IDisposable
     }
 
     [Fact]
+    public void Status_PrintsProjectKindRows()
+    {
+        _h.CreateArchive();
+        var a = _h.AddSession("claude-code", "s1", projectKey: "owner/repo");
+        var b = _h.AddSession("claude-code", "s2", projectKey: "owner/repo", kind: "automated");
+        var c = _h.AddSession("claude-code", "s3", projectKey: "other");
+        var d = _h.AddSession("claude-code", "s4", projectKey: "other");
+        _h.AddChunk(a, "one");
+        _h.AddChunk(a, "two", exchangeStart: 1);
+        _h.AddChunk(a, "three", exchangeStart: 2);
+        _h.AddChunk(b, "four");
+        _h.AddChunk(c, "five");
+        _h.AddChunk(d, "six");
+
+        var code = Status();
+
+        Assert.Equal(0, code);
+        var lines = _h.Out.ToString().Replace("\r", "").Split('\n');
+        var at = Array.IndexOf(lines, "by project and kind:");
+        Assert.True(at > Array.FindIndex(lines, l => l.StartsWith("chunks:", StringComparison.Ordinal)));
+        Assert.Equal("  owner/repo interactive: 1 sessions, 3 chunks", lines[at + 1]);
+        Assert.Equal("  other interactive: 2 sessions, 2 chunks", lines[at + 2]);
+        Assert.Equal("  owner/repo automated: 1 sessions, 1 chunks", lines[at + 3]);
+    }
+
+    [Fact]
+    public void Status_NoRows_PrintsNoProjectSection()
+    {
+        _h.CreateArchive();
+
+        Assert.Equal(0, Status());
+        Assert.DoesNotContain("by project and kind:", _h.Out.ToString());
+    }
+
+    [Fact]
+    public void Status_MoreThan30Rows_PrintsAndNMore()
+    {
+        _h.CreateArchive();
+        for (var i = 0; i < 31; i++)
+            _h.AddSession("claude-code", $"s{i:D2}", projectKey: $"p{i:D2}");
+
+        var code = Status();
+
+        Assert.Equal(0, code);
+        var lines = _h.Out.ToString().Replace("\r", "").Split('\n');
+        var rows = Array.FindAll(lines, l => System.Text.RegularExpressions.Regex.IsMatch(l, @"^  p\d\d interactive: "));
+        Assert.Equal(30, rows.Length);
+        Assert.Contains("  and 1 more", lines);
+    }
+
+    [Fact]
+    public void Status_KeepsSearchNotAvailableLine()
+    {
+        _h.CreateArchive();
+        _h.AddSession("claude-code", "s1");
+
+        Assert.Equal(0, Status());
+        Assert.Contains(SearchLine, _h.Out.ToString());
+    }
+
+    [Fact]
     public void ADisabledArchiveThatStillHoldsData_ShowsItsCounts()
     {
         _h.CreateArchive();
