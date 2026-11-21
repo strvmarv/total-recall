@@ -287,13 +287,17 @@ public sealed class SensitiveContentScannerRedactTests
             { "export DB_PASSWORD='It'\\''s-a-long-passphrase'", "export DB_PASSWORD='" + SecretAssignment + "'" },
             { "tool --password='p4ss'\\''w0rd-long-tail' -v", "tool --password='" + SecretAssignment + "' -v" },
             { "PASSWORD=\"abc\"def123456 next", "PASSWORD=\"" + SecretAssignment + " next" },
+            { "export DB_PASSWORD='hunter'_2-extra", "export DB_PASSWORD='" + SecretAssignment },
+            { "PASSWORD='pässw'örd9", "PASSWORD='" + SecretAssignment },
             // ... but not across a quote of the other kind (usually the end of an enclosing string), a quoted piece with
-            // no closing quote on the line.
+            // no closing quote on the line, or a shell operator or closing structure.
             { "PASSWORD=\"abc\"'d e f' next", "PASSWORD=\"" + SecretAssignment + "\"'d e f' next" },
             { "sh -c \"PASSWORD='x'\" && echo done", "sh -c \"PASSWORD='" + SecretAssignment + "'\" && echo done" },
             { "run(\"TOKEN='abc'\", shell=True); print(\"done\")", "run(\"TOKEN='" + SecretAssignment + "'\", shell=True); print(\"done\")" },
             { "{\"cmd\":\"sh -c \\\"PASSWORD='x'\\\" && echo done\"}", "{\"cmd\":\"sh -c \\\"PASSWORD='" + SecretAssignment + "'\\\" && echo done\"}" },
             { "PASSWORD='ab'cd'ef gh", "PASSWORD='" + SecretAssignment + "'ef gh" },
+            { "PASSWORD='ab'cd;echo done", "PASSWORD='" + SecretAssignment + ";echo done" },
+            { "Run `PASSWORD='x'` first", "Run `PASSWORD='" + SecretAssignment + "'` first" },
             // ... but a quoted value followed by a blank or by structure ends at its closing quote.
             { "PASSWORD='x' && echo done", "PASSWORD='" + SecretAssignment + "' && echo done" },
             { "PASSWORD=\"x\"&& echo done", "PASSWORD=\"" + SecretAssignment + "\"&& echo done" },
@@ -437,7 +441,9 @@ public sealed class SensitiveContentScannerRedactTests
     [InlineData("PASSWORD='x'\\''")]
     [InlineData("TOKEN=\"a\"b")]
     [InlineData("TOKEN='a'\"")]
+    [InlineData("TOKEN='a'_")]
     [InlineData("TOKEN='a'b'")]
+    [InlineData("TOKEN='a'\u00f6")]
     public void Redact_AdversarialInputs_FinishWellUnderASecond(string unit)
     {
         var text = Repeat(unit, OneMiB);
