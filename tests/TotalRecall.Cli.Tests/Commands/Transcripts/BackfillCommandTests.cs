@@ -142,6 +142,46 @@ public sealed class BackfillCommandTests : IDisposable
     }
 
     [Fact]
+    public void RepeatedHost_Exit2()
+    {
+        EnableArchive();
+
+        var code = Backfill(ThrowingFactory(), default, "--host", "claude-code", "--host", "claude-code");
+
+        Assert.Equal(2, code);
+        Assert.Empty(_factoryCalls);
+        Assert.Contains("--host is given once", _h.Err.ToString());
+    }
+
+    [Fact]
+    public void UnreadableArchive_SaysCouldNotRead_Exit1_FactoryNeverCalled()
+    {
+        _h.WriteConfig("[transcripts]\nenabled = true\n");
+        Directory.CreateDirectory(_h.DataDir);
+        File.WriteAllText(_h.DbPath, "this is not a database, it only has the name of one. ".PadRight(4096, 'x'));
+
+        var code = Backfill(ThrowingFactory());
+
+        Assert.Equal(1, code);
+        Assert.Empty(_factoryCalls);
+        Assert.Contains($"transcripts backfill: could not read the archive at main database ({_h.DbPath}): ", _h.Err.ToString());
+    }
+
+    [Fact]
+    public void CancelKey_FirstPressStopsTheRun_SecondPressEndsTheProcess()
+    {
+        using var cts = new CancellationTokenSource();
+
+        Assert.True(BackfillCommand.KeepProcessOnCancelKey(cts));    // e.Cancel = true: the process stays
+        Assert.True(cts.IsCancellationRequested);
+        Assert.False(BackfillCommand.KeepProcessOnCancelKey(cts));   // a second press: the process ends as usual
+
+        var disposed = new CancellationTokenSource();
+        disposed.Dispose();
+        Assert.True(BackfillCommand.KeepProcessOnCancelKey(disposed));
+    }
+
+    [Fact]
     public void UnexpectedArgument_Exit2()
     {
         EnableArchive();

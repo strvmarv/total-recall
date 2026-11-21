@@ -271,6 +271,10 @@ public abstract class TranscriptsCommandBase : ICliCommand
     /// Opens an existing archive without creating anything. Returns the store, or null with <paramref name="exitCode"/>
     /// set: 0 after saying nothing is stored, 1 after printing why it could not be read.
     /// </summary>
+    /// <summary>The wording for an archive that exists but could not be opened (backfill and <see cref="OpenExisting"/>).</summary>
+    protected string CouldNotRead(TranscriptLocation location, TranscriptOpenResult result) =>
+        $"could not read the archive at {Describe(location)}: {result.Message ?? result.Status.ToString()}";
+
     protected ITranscriptStore? OpenExisting(TranscriptLocation location, string nothingToDo, out int exitCode)
     {
         var result = TranscriptStore.Open(location, create: false);
@@ -284,7 +288,7 @@ public abstract class TranscriptsCommandBase : ICliCommand
                 exitCode = 0;
                 return null;
             default:
-                exitCode = Fail($"could not read the archive at {Describe(location)}: {result.Message}");
+                exitCode = Fail(CouldNotRead(location, result));
                 return null;
         }
     }

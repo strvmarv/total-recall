@@ -13,7 +13,8 @@ namespace TotalRecall.Cli.Commands.Transcripts;
 /// the configuration (strictly), the archive on and the storage mode not postgres, the archive's location, the archive
 /// opened without creating anything (an older one is migrated here), and only then the adapter, so that while the
 /// archive is off nothing under the host's directory is read. Exit 0 when no file failed (also an interrupted run), 1
-/// when a file failed or the archive cannot be used, 2 for a usage error. Ctrl+C stops after the current session.
+/// when a file failed or the archive cannot be used, 2 for a usage error. Ctrl+C stops after the current session; a
+/// second Ctrl+C ends the process.
 /// </summary>
 public sealed class BackfillCommand : TranscriptsCommandBase
 {
@@ -83,7 +84,7 @@ public sealed class BackfillCommand : TranscriptsCommandBase
                             "'total-recall transcripts enable' creates them");
             default:
                 opened.Store?.Dispose();
-                return Fail($"could not read the archive at {Describe(location)}: {opened.Message ?? opened.Status.ToString()}");
+                return Fail(CouldNotRead(location, opened));
         }
 
         using var store = opened.Store;
@@ -104,11 +105,7 @@ public sealed class BackfillCommand : TranscriptsCommandBase
         else
         {
             using var cts = new CancellationTokenSource();
-            ConsoleCancelEventHandler handler = (_, e) =>
-            {
-                e.Cancel = true; // stop after the current session instead of ending the process
-                try { cts.Cancel(); } catch (ObjectDisposedException) { }
-            };
+            ConsoleCancelEventHandler handler = (_, e) => e.Cancel = KeepProcessOnCancelKey(cts);
             Console.CancelKeyPress += handler;
             try
             {
@@ -122,6 +119,19 @@ public sealed class BackfillCommand : TranscriptsCommandBase
 
         Print(adapter.Host, summary);
         return summary.Failed == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// The Ctrl+C handler's decision, the value for <see cref="ConsoleCancelEventArgs.Cancel"/>. The first press cancels
+    /// <paramref name="cts"/> and keeps the process, so the run stops after the current session and prints what it did;
+    /// a second press (the run is already stopping) returns false and ends the process as usual.
+    /// </summary>
+    public static bool KeepProcessOnCancelKey(CancellationTokenSource cts)
+    {
+        ArgumentNullException.ThrowIfNull(cts);
+        var keep = !cts.IsCancellationRequested;
+        try { cts.Cancel(); } catch (ObjectDisposedException) { }
+        return keep;
     }
 
     private BackfillSummary Run(ITranscriptStore store, ITranscriptAdapter adapter, CancellationToken ct) =>
