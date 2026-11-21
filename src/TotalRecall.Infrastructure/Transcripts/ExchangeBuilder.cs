@@ -36,6 +36,7 @@ internal sealed record BuildResult(
 internal static class ExchangeBuilder
 {
     public const int StubLimit = 160;
+    public const int ToolNameLimit = 64;
     public const int ErrorLimit = 500;
     public const int TextCap = 100_000;
 
@@ -130,7 +131,11 @@ internal static class ExchangeBuilder
 
     private static string Stub(string? toolName, string? raw)
     {
-        var name = string.IsNullOrEmpty(toolName) ? "Tool" : toolName;
+        // The tool name is redacted and cut like every other part of the stub (marker-safe).
+        var name = string.IsNullOrEmpty(toolName)
+            ? "Tool"
+            : TextCut.Cut(TextCut.Fold(SensitiveContentScanner.Redact(toolName).Text), ToolNameLimit);
+        if (name.Length == 0) name = "Tool";
         var detail = TextCut.Cut(TextCut.Fold(SensitiveContentScanner.Redact(raw).Text), StubLimit);
         return detail.Length == 0 ? "[" + name + "]" : "[" + name + ": " + detail + "]";
     }

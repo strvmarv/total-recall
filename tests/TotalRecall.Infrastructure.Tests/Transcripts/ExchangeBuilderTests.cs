@@ -207,6 +207,33 @@ public sealed class ExchangeBuilderTests
     }
 
     [Fact]
+    public void Stub_LongToolName_IsCutTo64()
+    {
+        var tool = new string('n', 200);
+        var text = Assert.Single(Assert.Single(Build(S(1, "ls", tool)).Units).Blocks).Text;
+        Assert.Equal("[" + new string('n', 64) + "...: ls]", text);
+    }
+
+    [Fact]
+    public void Stub_ToolNameHoldingAToken_IsRedacted()
+    {
+        var secret = new FakeSecrets(6).Get("github-token");
+        var text = Assert.Single(Assert.Single(Build(S(1, "ls", "mcp__" + secret)).Units).Blocks).Text;
+        Assert.Equal("[mcp__[redacted:token]: ls]", text);
+        AssertNoWindow(text, secret);
+    }
+
+    [Fact]
+    public void Stub_ToolNameCutNeverLandsInsideAMarker()
+    {
+        // The marker would start at index 60 and run past 64: the cut goes before it.
+        var secret = new FakeSecrets(7).Get("github-token");
+        var text = Assert.Single(Assert.Single(Build(S(1, null, new string('n', 59) + " " + secret)).Units).Blocks).Text;
+        Assert.Equal("[" + new string('n', 59) + " ...]", text);
+        AssertNoWindow(text, secret);
+    }
+
+    [Fact]
     public void Cutoff_RecordAtCutoffDropped_AfterKept()
     {
         var r = Build(At(10), 0, U(9, "before"), U(10, "at"), U(11, "after"));

@@ -98,7 +98,7 @@ Kept:
 
 - **Your text**: your prompts, including a prompt you typed while the agent was still working, and a slash command as plain text (`/develop 148`).
 - **The assistant's text.** Two tool inputs are the assistant's own answer and are stored as assistant text, not as stubs: `StructuredOutput` (the whole answer of an SDK run, as `key: value` lines) and `ExitPlanMode` (its plan).
-- **One-line tool stubs**: `[Bash: git status]`, `[Read: /path/file]`, ... one field of the tool's input chosen by tool name (a command, a file path, a pattern, a URL, a query, a description, or the first string field), folded to one line and cut to **160** characters. A command you ran in the shell mode (`!`) is a stub too. For `AskUserQuestion` the stub holds the text of its first question; **the choice you made lives in the tool's result, which is dropped, so your answer to that question is not kept.** This is a known loss.
+- **One-line tool stubs**: `[Bash: git status]`, `[Read: /path/file]`, ... one field of the tool's input chosen by tool name (a command, a file path, a pattern, a URL, a query, a description, or the first string field), folded to one line and cut to **160** characters (the tool name is cut to 64). A command you ran in the shell mode (`!`) is a stub too. For `AskUserQuestion` the stub holds the text of its first question; **the choice you made lives in the tool's result, which is dropped, so your answer to that question is not kept.** This is a known loss.
 - **The error output of a failed tool call**: `[error: ...]`, cut to **500** characters, line breaks kept (a stack trace is what you will look for).
 - **Compaction summaries**, as their own `compaction-summary` chunks.
 
@@ -113,7 +113,7 @@ Limits. Every text is cut at **100,000** characters after redaction, with `[... 
 
 ## What is redacted and what is not
 
-Before anything is cut or split, every text that is stored (your text, the assistant's text, stub details, error text, compaction summaries and the session title) is scanned, and what is found is replaced by a marker, `[redacted:<category>]`. The text of the secret is not stored, and no part of it is left behind. Two things hold for every marker: an overlap of two findings becomes one marker, and a cut to 160, 500 or any other limit never lands inside a marker (it goes before the marker and adds `...`, or the not-stored note at the 100,000 cap, so a token that straddles the limit leaves no prefix).
+Before anything is cut or split, every text that is stored (your text, the assistant's text, stub details and tool names, error text, compaction summaries and the session title) is scanned, and what is found is replaced by a marker, `[redacted:<category>]`. The text of the secret is not stored, and no part of it is left behind. Two things hold for every marker: an overlap of two findings becomes one marker, and a cut to 160, 500 or any other limit never lands inside a marker (it goes before the marker and adds `...`, or the not-stored note at the 100,000 cap, so a token that straddles the limit leaves no prefix).
 
 | Marker | What is found | What is replaced |
 |---|---|---|
