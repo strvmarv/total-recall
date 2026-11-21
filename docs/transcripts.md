@@ -117,7 +117,7 @@ Before anything is cut or split, every text that is stored (your text, the assis
 
 | Marker | What is found | What is replaced |
 |---|---|---|
-| `[redacted:token]` | GitHub tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`), GitLab `glpat-`, Slack `xox[baprs]-`, AWS access key ids `AKIA...`, and `sk-` keys (including `sk-ant-`, `sk-proj-`, `sk-svcacct-`, `sk-admin-`, `sk-None-` and `sk-or-v1-` forms; at least 20 characters after the prefix, and not inside a longer word) | the token |
+| `[redacted:token]` | GitHub tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`), GitLab `glpat-`, Slack `xox[baprs]-`, AWS access key ids `AKIA...`, and `sk-` keys (including `sk-ant-`, `sk-proj-`, `sk-svcacct-`, `sk-admin-`, `sk-None-` and `sk-or-v1-` forms; at least 20 characters after the prefix (16 for the plain alphanumeric form `sk-` followed by letters and digits only), and not inside a longer word) | the token |
 | `[redacted:private-key]` | a `-----BEGIN ... PRIVATE KEY-----` block | from the BEGIN line to the END line, or to the end of the text when the END line is missing |
 | `[redacted:bearer]` | `Authorization: <scheme> <value>` (also with `=`, quotes, and the schemes `Bearer`, `Basic`, `Token`, `Digest`), `x-api-key: <value>`, and a bare `Bearer <value>` (a value of at least 8 characters after `Authorization` or `x-api-key`, at least 16 after a bare `Bearer`) | the value |
 | `[redacted:url-credentials]` | `scheme://user:password@host` | the password only; the user name and host stay |
