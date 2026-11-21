@@ -203,6 +203,74 @@ public sealed class TranscriptStoreTests : IDisposable
     }
 
     [Fact]
+    public void ForgetProject_CwdOutsideItsRoot_IsRecordedAsARootToo()
+    {
+        // A sibling worktree (git worktree add ../app-hotfix): its root is the main repository, its cwd lies beside it.
+        _db.AddSession("claude-code", "s1", projectKey: "owner/app", cwd: "/src/app-hotfix", projectRoot: "/src/app");
+
+        Store.ForgetProject("owner/app");
+
+        var fp = Assert.Single(Store.Status().ForgottenProjects);
+        Assert.Equal(new[] { "/src/app", "/src/app-hotfix" }, fp.Roots.OrderBy(r => r, StringComparer.Ordinal).ToArray());
+        // Once the worktree is removed it derives the path key "app-hotfix": the recorded cwd keeps it out.
+        Assert.True(Store.IsExcluded("claude-code", "s1", "app-hotfix", "/src/app-hotfix"));
+        Assert.False(Store.IsExcluded("claude-code", "s2", "app-hotfix2", "/src/app-hotfix2"));
+    }
+
+    [Fact]
+    public void ForgetProject_CwdUnderItsRoot_RecordsNoExtraRoot()
+    {
+        _db.AddSession("pi", "s1", projectKey: "k", cwd: "/w/a/deep/sub", projectRoot: "/w/a");
+        _db.AddSession("pi", "s2", projectKey: "k", cwd: "/w/a/", projectRoot: "/w/a");
+
+        Store.ForgetProject("k");
+
+        Assert.Equal(new[] { "/w/a" }, Assert.Single(Store.Status().ForgottenProjects).Roots);
+    }
+
+    [Fact]
+    public void ForgetProject_NullRoot_RecordsNoRootEvenForItsCwd()
+    {
+        // A cwd with no repository (a parent folder such as ~/source) is excluded by its key only (spec section 6, item 6).
+        _db.AddSession("pi", "s1", projectKey: "source", cwd: "/w/source", projectRoot: null);
+        _db.AddSession("pi", "s2", projectKey: "source", cwd: "/w/source", projectRoot: "");
+
+        Store.ForgetProject("source");
+
+        Assert.Empty(Assert.Single(Store.Status().ForgottenProjects).Roots);
+        Assert.False(Store.IsExcluded("pi", "s3", "other/repo", "/w/source/other"));
+    }
+
+    [Theory]
+    [InlineData("/home/me")]       // the home directory
+    [InlineData("/home/me/")]
+    [InlineData("/home")]          // an ancestor of home
+    [InlineData("/")]              // a filesystem root
+    [InlineData("relative/dir")]   // names no directory of its own
+    public void ForgetProject_CwdOutsideItsRoot_NeverRecordsHomeAncestorsOrRoots(string cwd)
+    {
+        using var db = new TranscriptTestDb(userHome: "/home/me");
+        db.AddSession("pi", "s1", projectKey: "k", cwd: cwd, projectRoot: "/w/a");
+
+        db.Store.ForgetProject("k");
+
+        Assert.Equal(new[] { "/w/a" }, Assert.Single(db.Store.Status().ForgottenProjects).Roots);
+    }
+
+    [Fact]
+    public void ForgetProject_UnknownHome_SkipsOnlyTheHomeCheck()
+    {
+        using var db = new TranscriptTestDb(userHome: "");
+        db.AddSession("pi", "s1", projectKey: "k", cwd: "/home/me", projectRoot: "/w/a");
+        db.AddSession("pi", "s2", projectKey: "k", cwd: "/", projectRoot: "/w/b");
+
+        db.Store.ForgetProject("k");
+
+        Assert.Equal(new[] { "/home/me", "/w/a", "/w/b" },
+            Assert.Single(db.Store.Status().ForgottenProjects).Roots.OrderBy(r => r, StringComparer.Ordinal).ToArray());
+    }
+
+    [Fact]
     public void ForgetProject_NeverArchivedKey_WritesRecordWithNoRoots()
     {
         var result = Store.ForgetProject("ghost/repo");

@@ -37,7 +37,7 @@ internal sealed class IngestHarness : IDisposable
 
     public TranscriptTestDb NewDb()
     {
-        var db = new TranscriptTestDb();
+        var db = new TranscriptTestDb(userHome: UserHome);
         _dbs.Add(db);
         return db;
     }
@@ -367,6 +367,39 @@ public sealed class TranscriptIngesterTests : IDisposable
 
         Assert.Equal(SessionIngestStatus.Excluded, result.Status);
         Assert.Equal(1, adapter.ReadHeadCalls);
+        Assert.Equal(0, adapter.ReadRecordsCalls);
+        Assert.Equal(0, _h.Sessions(Db));
+        Assert.Equal(0, _h.Chunks(Db));
+    }
+
+    [Fact]
+    public void ForgottenProject_SiblingWorktreeRemovedLater_StaysOut()
+    {
+        // /src/app has the remote; `git worktree add ../app-hotfix` makes a sibling whose .git file leads back to it.
+        var repo = IngestHarness.MakeRepo(Path.Combine(Home.Root, "src", "app"), "https://github.com/Owner/App.git");
+        var worktree = Path.Combine(Home.Root, "src", "app-hotfix");
+        var admin = Path.Combine(repo, ".git", "worktrees", "app-hotfix");
+        Directory.CreateDirectory(admin);
+        File.WriteAllText(Path.Combine(admin, "commondir"), "../..\n");
+        Directory.CreateDirectory(worktree);
+        File.WriteAllText(Path.Combine(worktree, ".git"), $"gitdir: {admin}\n");
+        var s = Home.Place("decision", worktree, "sibling-1");
+
+        Assert.Equal(SessionIngestStatus.New, _h.Ingest(Db, s).Status);
+        Assert.Equal("owner/app", Col("project_key", s.Id));
+        Assert.Equal(repo, Col("project_root", s.Id));
+        Db.Store.ForgetProject("owner/app");
+
+        // `git worktree remove`: the session's file stays, its directory and the admin entry go.
+        Directory.Delete(worktree, recursive: true);
+        Directory.Delete(admin, recursive: true);
+        Assert.Equal("app-hotfix", ProjectIdentityRule.Derive(worktree, "x", new ProjectResolver(), _h.UserHome).Key);
+        Assert.True(File.Exists(s.Path));
+
+        var adapter = _h.Adapter();
+        var result = _h.Ingest(Db, s, adapter);
+
+        Assert.Equal(SessionIngestStatus.Excluded, result.Status);
         Assert.Equal(0, adapter.ReadRecordsCalls);
         Assert.Equal(0, _h.Sessions(Db));
         Assert.Equal(0, _h.Chunks(Db));

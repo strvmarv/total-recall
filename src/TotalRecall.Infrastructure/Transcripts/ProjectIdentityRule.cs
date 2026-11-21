@@ -142,6 +142,18 @@ internal static class ProjectIdentityRule
         return path[..end];
     }
 
+    /// <summary>
+    /// The form of <paramref name="cwd"/> that may be recorded as an exclusion root (separators trimmed), or null when it
+    /// names no directory of its own (not absolute) or is a filesystem root, the home directory or an ancestor of it.
+    /// </summary>
+    internal static string? AcceptableCwdRoot(string cwd, string userHome)
+    {
+        ArgumentNullException.ThrowIfNull(cwd);
+        ArgumentNullException.ThrowIfNull(userHome);
+        if (!IsAbsolute(cwd) || !IsAcceptableRoot(cwd, userHome)) return null;
+        return TrimSeparators(cwd);
+    }
+
     /// <summary>False for a filesystem root, the home directory or an ancestor of it.</summary>
     private static bool IsAcceptableRoot(string root, string userHome)
     {

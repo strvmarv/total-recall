@@ -51,11 +51,13 @@ public sealed class TranscriptStore : ITranscriptStore
     private readonly MsSqliteConnection _conn;
     private readonly string _location;
     private readonly string _path;
+    private readonly string _userHome;
 
-    private TranscriptStore(MsSqliteConnection conn, string path, bool isMain)
+    private TranscriptStore(MsSqliteConnection conn, string path, bool isMain, string userHome)
     {
         _conn = conn;
         _path = path;
+        _userHome = userHome;
         _location = isMain ? $"main database ({path})" : path;
     }
 
@@ -113,13 +115,18 @@ public sealed class TranscriptStore : ITranscriptStore
     /// before the archive runner; a separate file is created user-only, and an existing database there that is not
     /// an archive is refused.
     /// </summary>
-    public static TranscriptOpenResult Open(TranscriptLocation location, bool create)
+    /// <param name="userHome">
+    /// The home directory <see cref="ForgetProject"/> never records as a root; null means the UserProfile folder
+    /// (an empty string when that is unknown, which skips only the home check).
+    /// </param>
+    public static TranscriptOpenResult Open(TranscriptLocation location, bool create, string? userHome = null)
     {
         ArgumentNullException.ThrowIfNull(location);
         try
         {
             var path = Path.GetFullPath(location.Path);
-            return location.IsMainDatabase ? OpenMain(path, create) : OpenSeparate(path, create);
+            var home = userHome ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) ?? string.Empty;
+            return location.IsMainDatabase ? OpenMain(path, create, home) : OpenSeparate(path, create, home);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -155,7 +162,7 @@ public sealed class TranscriptStore : ITranscriptStore
         return (FileState.Other, null);
     }
 
-    private static TranscriptOpenResult OpenMain(string path, bool create)
+    private static TranscriptOpenResult OpenMain(string path, bool create, string userHome)
     {
         var (state, unknown) = Inspect(path);
         if (unknown is not null)
@@ -172,7 +179,7 @@ public sealed class TranscriptStore : ITranscriptStore
         if (!create)
         {
             return state == FileState.Archive
-                ? Opened(OpenStore(path, isMain: true, runMainSchema: false))
+                ? Opened(OpenStore(path, isMain: true, runMainSchema: false, userHome))
                 : new TranscriptOpenResult(TranscriptOpenStatus.Absent, null, null);
         }
 
@@ -189,16 +196,16 @@ public sealed class TranscriptStore : ITranscriptStore
                 var dir = Path.GetDirectoryName(path);
                 if (!string.IsNullOrEmpty(dir))
                     Directory.CreateDirectory(dir); // as the main store does: the main database is not made user-only
-                return Opened(OpenStore(path, isMain: true, runMainSchema: true));
+                return Opened(OpenStore(path, isMain: true, runMainSchema: true, userHome));
             case FileState.Archive:
             case FileState.MainSchema:
-                return Opened(OpenStore(path, isMain: true, runMainSchema: false));
+                return Opened(OpenStore(path, isMain: true, runMainSchema: false, userHome));
             default:
                 return new TranscriptOpenResult(TranscriptOpenStatus.Refused, null, LegacyDatabaseProbe.RefusalText);
         }
     }
 
-    private static TranscriptOpenResult OpenSeparate(string path, bool create)
+    private static TranscriptOpenResult OpenSeparate(string path, bool create, string userHome)
     {
         var (state, unknown) = Inspect(path);
         if (unknown is not null)
@@ -207,7 +214,7 @@ public sealed class TranscriptStore : ITranscriptStore
         if (!create)
         {
             return state is FileState.Archive or FileState.ArchiveOnly
-                ? Opened(OpenStore(path, isMain: false, runMainSchema: false))
+                ? Opened(OpenStore(path, isMain: false, runMainSchema: false, userHome))
                 : new TranscriptOpenResult(TranscriptOpenStatus.Absent, null, null);
         }
 
@@ -218,13 +225,13 @@ public sealed class TranscriptStore : ITranscriptStore
                 if (!string.IsNullOrEmpty(dir))
                     PrivateFiles.EnsureDirectory(dir);
                 PrivateFiles.CreateEmptyFile(path);
-                return Opened(OpenStore(path, isMain: false, runMainSchema: false));
+                return Opened(OpenStore(path, isMain: false, runMainSchema: false, userHome));
             case FileState.Empty:
                 PrivateFiles.CreateEmptyFile(path); // keeps the (empty) content, tightens the mode
-                return Opened(OpenStore(path, isMain: false, runMainSchema: false));
+                return Opened(OpenStore(path, isMain: false, runMainSchema: false, userHome));
             case FileState.Archive:
             case FileState.ArchiveOnly:
-                return Opened(OpenStore(path, isMain: false, runMainSchema: false));
+                return Opened(OpenStore(path, isMain: false, runMainSchema: false, userHome));
             default:
                 return new TranscriptOpenResult(TranscriptOpenStatus.Refused, null,
                     $"{path} is an existing database that does not hold the transcript archive; " +
@@ -235,7 +242,7 @@ public sealed class TranscriptStore : ITranscriptStore
     private static TranscriptOpenResult Opened(TranscriptStore store) =>
         new(TranscriptOpenStatus.Opened, store, null);
 
-    private static TranscriptStore OpenStore(string path, bool isMain, bool runMainSchema)
+    private static TranscriptStore OpenStore(string path, bool isMain, bool runMainSchema, string userHome)
     {
         var conn = SqliteOpener.Open(path, pooling: false);
         try
@@ -248,7 +255,7 @@ public sealed class TranscriptStore : ITranscriptStore
             if (runMainSchema)
                 MigrationRunner.RunMigrations(conn);
             TranscriptMigrationRunner.Run(conn);
-            return new TranscriptStore(conn, path, isMain);
+            return new TranscriptStore(conn, path, isMain, userHome);
         }
         catch
         {
@@ -404,8 +411,12 @@ public sealed class TranscriptStore : ITranscriptStore
                 if (cmd.ExecuteScalar() is string existing)
                     roots.AddRange(ParseRoots(existing));
             }
+            // Each session's project_root (a null root records nothing: such a project is excluded by its key only).
+            // A cwd outside its own root (a sibling worktree such as ../app-hotfix) is recorded too: once that worktree
+            // is removed its sessions derive a path key and a root of their own, which neither the key nor the main
+            // repository's root would keep out. A filesystem root, the home directory or an ancestor of it never is.
             using (var cmd = Command(tx,
-                       "SELECT DISTINCT project_root FROM tx_session WHERE project_key = $k AND project_root IS NOT NULL AND project_root <> '' ORDER BY project_root",
+                       "SELECT DISTINCT project_root, cwd FROM tx_session WHERE project_key = $k AND project_root IS NOT NULL AND project_root <> '' ORDER BY project_root, cwd",
                        ("$k", projectKey)))
             using (var r = cmd.ExecuteReader())
             {
@@ -414,6 +425,13 @@ public sealed class TranscriptStore : ITranscriptStore
                     var root = r.GetString(0);
                     if (!roots.Contains(root, StringComparer.Ordinal))
                         roots.Add(root);
+
+                    if (r.IsDBNull(1)) continue;
+                    var cwd = r.GetString(1);
+                    if (cwd.Length == 0 || IsUnder(cwd, root)) continue;
+                    var extra = ProjectIdentityRule.AcceptableCwdRoot(cwd, _userHome);
+                    if (extra is not null && !roots.Contains(extra, StringComparer.Ordinal))
+                        roots.Add(extra);
                 }
             }
 

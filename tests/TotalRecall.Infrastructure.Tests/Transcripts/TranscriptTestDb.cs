@@ -19,12 +19,13 @@ internal sealed class TranscriptTestDb : IDisposable
     /// Open the file as the main database location (<c>IsMainDatabase: true</c>, created on a missing file, so the
     /// main schema exists beside the archive tables) instead of as a separate archive file.
     /// </param>
-    public TranscriptTestDb(bool mainDatabase = false)
+    /// <param name="userHome">The home directory the store's forget guard uses; null means the real one.</param>
+    public TranscriptTestDb(bool mainDatabase = false, string? userHome = null)
     {
         Dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "tr-store-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Dir);
         Path = System.IO.Path.Combine(Dir, mainDatabase ? "total-recall.db" : "archive.db");
-        var result = TranscriptStore.Open(new TranscriptLocation(Path, IsMainDatabase: mainDatabase), create: true);
+        var result = TranscriptStore.Open(new TranscriptLocation(Path, IsMainDatabase: mainDatabase), create: true, userHome);
         if (result.Status != TranscriptOpenStatus.Opened || result.Store is null)
             throw new InvalidOperationException($"could not open the test archive: {result.Status} {result.Message}");
         Store = result.Store;

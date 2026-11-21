@@ -32,11 +32,12 @@ public sealed class TranscriptForgetTests : IDisposable
 
     private static string Marker(string what) => "zq" + what + Guid.NewGuid().ToString("N");
 
-    private Markers AddMarkedSession(string host, string id, string projectKey)
+    /// <param name="cwdUnderRoot">Put the cwd under the root (a cwd outside its root is recorded as a root itself).</param>
+    private Markers AddMarkedSession(string host, string id, string projectKey, bool cwdUnderRoot = false)
     {
         var m = new Markers(Marker("content"), Marker("title"), Marker("cwd"), Marker("source"), Marker("root"));
         var sid = _db.AddSession(host, id, projectKey: projectKey,
-            cwd: "/work/" + m.Cwd, projectRoot: "/roots/" + m.Root, title: "Session " + m.Title, sourcePath: "/logs/" + m.Source + ".jsonl");
+            cwd: (cwdUnderRoot ? "/roots/" + m.Root + "/" : "/work/") + m.Cwd, projectRoot: "/roots/" + m.Root, title: "Session " + m.Title, sourcePath: "/logs/" + m.Source + ".jsonl");
         _db.AddChunk(sid, "the user said " + m.Content + " and then more words");
         _db.AddChunk(sid, "a second exchange mentioning " + m.Content.ToUpperInvariant(), exchangeStart: 1);
         return m;
@@ -135,7 +136,7 @@ public sealed class TranscriptForgetTests : IDisposable
     [Fact]
     public void ForgetProject_LeavesOnlyTheRootInTheExclusionRecord()
     {
-        var m = AddMarkedSession("pi", "s1", "owner/repo");
+        var m = AddMarkedSession("pi", "s1", "owner/repo", cwdUnderRoot: true);
         AssertAllPresent(m);
 
         var result = _db.Store.ForgetProject("owner/repo");

@@ -178,7 +178,7 @@ Exactly one selector. The command must be run in a terminal. It prints how many 
 `forget` also keeps the text from coming back:
 
 - `--session <host>:<id>` deletes that session and records the session so it is not archived again. A session is written as the host name, a colon and the host's session id; the identifier is split at the first colon.
-- `--project <key>` deletes the sessions of that project and records the project and the repository directories its sessions belong to (the `project_root` of each stored session; a project whose directory exists but holds no repository is excluded by its key only, and so is one whose root would be a filesystem root, your home directory or a directory above it), so it is not archived again.
+- `--project <key>` deletes the sessions of that project and records the project and the repository directories its sessions belong to (the `project_root` of each stored session; a project whose directory exists but holds no repository is excluded by its key only, and so is one whose root would be a filesystem root, your home directory or a directory above it), so it is not archived again. For a session that ran in a worktree outside its repository (one made with `git worktree add ../app-hotfix`, say), the worktree's directory is recorded as well, so its sessions stay out after the worktree is removed; that directory is never recorded when it is a filesystem root, your home directory or a directory above it, and a session whose project has no repository directory records no directory at all.
 - `--all` deletes everything and sets a cutoff: nothing from before the moment you ran it is archived later.
 
 The records hold identifiers, project keys and directory names, never conversation text.
