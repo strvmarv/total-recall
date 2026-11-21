@@ -165,7 +165,39 @@ public sealed class SensitiveContentScannerRedactTests
             { "\"Authorization\": \"ApiKey " + v + "\"", "\"Authorization\": \"ApiKey " + Bearer + "\"" },
             // A scheme-less credential followed by more words is still redacted.
             { "Authorization: " + v + " ok", "Authorization: " + Bearer + " ok" },
+            // A letter-led word of 8 to 31 characters followed by more words: unquoted, the word is redacted on its own.
+            { "Authorization: " + Word(8) + " ok", "Authorization: " + Bearer + " ok" },
+            { "Authorization: " + Word(20) + " ok", "Authorization: " + Bearer + " ok" },
+            { "Authorization: " + Word(31) + " ok", "Authorization: " + Bearer + " ok" },
+            // Quoted, the whole quoted content is the value.
+            { "\"Authorization\": \"" + Word(20) + " and more\"", "\"Authorization\": \"" + Bearer + "\"" },
+            // A short unlisted word whose remainder is under 8 characters: the whole quoted content is judged.
+            { "\"Authorization\": \"Key abc123\"", "\"Authorization\": \"" + Bearer + "\"" },
         };
+    }
+
+    /// <summary>A letter-led credential-like word of <paramref name="length"/> characters (at most 33).</summary>
+    private static string Word(int length) => "Q" + Fakes.Get("bearer-token")[..(length - 1)];
+
+    [Fact]
+    public void Redact_UnlistedLongWordThenCredential_RedactsBoth()
+    {
+        var v = Fakes.Get("bearer-token");
+
+        var result = SensitiveContentScanner.Redact("Authorization: " + Word(12) + " " + v);
+
+        Assert.Equal("Authorization: " + Bearer + " " + Bearer, result.Text);
+        Assert.Equal(2, result.Count);
+    }
+
+    [Fact]
+    public void Redact_UnlistedSevenCharacterWord_IsKeptAsScheme()
+    {
+        var v = Fakes.Get("bearer-token");
+
+        var result = SensitiveContentScanner.Redact("Authorization: " + Word(7) + " " + v);
+
+        Assert.Equal("Authorization: " + Word(7) + " " + Bearer, result.Text);
     }
 
     [Theory]

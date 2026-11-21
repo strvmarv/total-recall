@@ -303,12 +303,18 @@ public static class SensitiveContentScanner
                 p = SkipScheme(text, p, out var listed, out var wordEnd);
                 // An unlisted word is kept as a scheme only while it is too short to be a credential itself. A longer
                 // one may be a scheme-less credential followed by more words: inside quotes the whole content is then
-                // the value; unquoted, the word is redacted on its own as well as the run after it.
+                // the value; unquoted, the word is redacted on its own as well as the run after it. A shorter unlisted
+                // word inside quotes is kept as a scheme only while the rest is long enough to be judged on its own
+                // ("Key abc123" is judged whole).
                 var word = new Value(wordStart, wordEnd, QuoteKind.None);
                 if (!listed && p > wordStart && word.Length >= 8)
                 {
                     if (quote != QuoteKind.None) p = wordStart;
                     else if (!IsExempt(text, word)) spans.Add(new Span(word.Start, word.End, CatBearer));
+                }
+                else if (!listed && p > wordStart && quote != QuoteKind.None && CloseQuote(text, p, quote) - p < 8)
+                {
+                    p = wordStart;
                 }
             }
 
