@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using TotalRecall.Cli.Commands.Transcripts;
 using TotalRecall.Infrastructure.Config;
 using TotalRecall.Infrastructure.Transcripts;
@@ -94,6 +95,10 @@ internal sealed class TranscriptsHarness : IDisposable
 
     public StatusCommand Status() =>
         new(ReadSettings, DbPath, ReadStorageMode, Sentinel, () => Interactive, Confirm, Out, Err, ConfigPath);
+
+    public BackfillCommand Backfill(Func<string, ITranscriptAdapter> adapterFactory, CancellationToken cancellation = default) =>
+        new(ReadSettings, DbPath, ReadStorageMode, Sentinel, () => Interactive, Confirm, Out, Err, ConfigPath,
+            adapterFactory, cancellation);
 
     public ForgetCommand Forget() =>
         new(ReadSettings, DbPath, ReadStorageMode, Sentinel, () => Interactive, Confirm, Out, Err, ConfigPath);

@@ -10,7 +10,7 @@ namespace TotalRecall.Cli.Tests.Commands.Transcripts;
 [Collection("ConsoleCapture")]
 public sealed class TranscriptsCliTests : IDisposable
 {
-    private static readonly string[] Verbs = ["enable", "disable", "status", "forget", "unforget"];
+    private static readonly string[] Verbs = ["enable", "disable", "status", "backfill", "forget", "unforget"];
 
     private readonly TranscriptsHarness _h = new();
     private readonly TextWriter _origOut = Console.Out;
@@ -43,7 +43,7 @@ public sealed class TranscriptsCliTests : IDisposable
     }
 
     [Fact]
-    public async Task TheGroupHelp_ListsTheFiveVerbs_AndEachAnswersItsOwnHelp()
+    public async Task TheGroupHelp_ListsTheSixVerbs_AndEachAnswersItsOwnHelp()
     {
         var group = await Capture("transcripts", "--help");
         Assert.Equal(0, group.Code);
