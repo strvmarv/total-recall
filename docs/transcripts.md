@@ -64,7 +64,7 @@ total-recall transcripts backfill [--host claude-code]
 
 - **No terminal and no confirmation.** It needs neither, so a script or `cron` can run it. It refuses unless the archive is on: while `[transcripts] enabled` is false it prints how to enable it, exits 1 and has not read anything from Claude Code's directory. It also refuses under Postgres storage, and when the archive tables do not exist (a hand edit of `config.toml` that never ran `enable`), where it says that `total-recall transcripts enable` creates them.
 - **Where the files are.** `$CLAUDE_CONFIG_DIR/projects` when `CLAUDE_CONFIG_DIR` is set and not empty, else `~/.claude/projects`. Only files of the form `<projects>/<project directory>/<session id>.jsonl` are read, one directory level down. The projects directory itself may be a symbolic link; symbolic links beneath it are not followed. The files under `<session>/subagents/` (subagent runs) are not read, and neither is a file whose name, without `.jsonl`, is not made of letters, digits, `.`, `_` and `-` (at most 128 characters). When Claude Code has no such directory, it prints `no Claude Code sessions found at <path>` and exits 0.
-- **Order and interruption.** Newest file first. It prints a progress line every 50 sessions and a summary at the end. Ctrl+C stops (the session in progress is left for the next run) and prints the summary so far with an `interrupted: the remaining sessions were not processed` line; the exit code is that of the sessions done.
+- **Order and interruption.** Newest file first. It prints a progress line every 50 sessions and a summary at the end. Ctrl+C stops (the session being read is left for the next run) and prints the summary so far with an `interrupted: the remaining sessions were not processed` line; the exit code is that of the sessions done.
 - **Safe to repeat.** A second run stores nothing new. A session that grew since is read again from the start of its last exchange (see [How resume works](#how-resume-works)). Deleting a session file afterwards leaves what was stored.
 - **What stays out.** A session you forgot, a session of a project you forgot, and everything before the cutoff of `forget --all` are not stored, even though their files exist (see [Forgetting and unforgetting](#forgetting-and-unforgetting)).
 
@@ -145,7 +145,7 @@ A timeout **fails closed**: the whole text becomes `[redacted:unprocessable]` an
 - a multi-word value written without quotes (only the first word is replaced);
 - a header value shorter than the minima in the `[redacted:bearer]` row.
 
-Treat the archive as sensitive data. When it lives in the main database it has the permissions that file already has, which on Linux and macOS may let other local users read it; a separate `transcripts.db_path` file is created readable only by you (0600, see Unix file permissions below). Redaction is a safety net, not a guarantee. `forget` is how you remove what should not be there.
+Treat the archive as sensitive data. When it lives in the main database it has the permissions that file already has, which on Linux and macOS may let other local users read it; a separate `transcripts.db_path` file is created readable only by you on Linux and macOS (0600, see Unix file permissions below), and on Windows it follows your profile's permissions. Redaction is a safety net, not a guarantee. `forget` is how you remove what should not be there.
 
 ## How resume works
 
