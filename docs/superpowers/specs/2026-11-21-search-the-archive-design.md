@@ -95,7 +95,9 @@ tx_session_vec_ku AFTER UPDATE OF kind, project_key ON tx_session
                   -> UPDATE tx_chunk_vec SET kind = new.kind, project = new.project_key
                      WHERE rowid IN (SELECT id FROM tx_chunk WHERE session_id = new.id)
 tx_chunk_fts_au   (dropped and recreated) AFTER UPDATE OF content ON tx_chunk   -- was: after any update
-idx_tx_chunk_unembedded  ON tx_chunk(id) WHERE embedded = 0
+ALTER TABLE tx_chunk ADD COLUMN embed_attempts INTEGER NOT NULL DEFAULT 0        -- failed embed tries of this chunk (section 3)
+tx_chunk_attempts_au AFTER UPDATE OF content ON tx_chunk -> UPDATE tx_chunk SET embed_attempts = 0 WHERE id = new.id
+idx_tx_chunk_unembedded  ON tx_chunk(id) WHERE embedded = 0 AND embed_attempts < 3
 UPDATE tx_chunk SET embedded = 0 WHERE embedded <> 0       -- no vector exists yet, so a 1 is wrong (Part 1 and 2 tests wrote it)
 ```
 
@@ -107,6 +109,9 @@ UPDATE tx_chunk SET embedded = 0 WHERE embedded <> 0       -- no vector exists y
 - `tx_chunk_fts_au` narrows to `UPDATE OF content`: the existing trigger fires on any column, so marking a chunk embedded would delete and
   re-insert its text-index entry for nothing (and write the text again into the index's pages). A changed chunk (Part 2's
   `ApplyIngest` sets `content` and `embedded = 0`) still fires it. The `secure-delete` option of the index is unaffected.
+- `embed_attempts` exists so one chunk that can never be embedded cannot block the ones behind it (section 3 item 6); a chunk
+  whose content changes gets a fresh count. A chunk with three failed tries leaves the partial index, so the worker no longer picks
+  it up; it stays `embedded = 0` (searchable by words, counted in `pendingEmbedding`) and `status` counts it as "could not be embedded".
 - The embedding dimension is 384, fixed by the table (parent: "`vec0` is `float[384]` today"). A model of another size cannot fill it
   (section 3, the gate).
 - **Existing tests that pin the archive's schema** (`TranscriptSchemaTests` object list and version, `TranscriptOpenTests`,
@@ -151,7 +156,7 @@ fingerprint, the embedder's readiness. First failing rule wins; each gives a sta
 |---|---|---|---|
 | 1 | archive off, or storage mode postgres | not applicable | does not run |
 | 2 | provider is not `local` and `allow_remote_embedding` is not `true` | `words only: the embedding provider is remote and allow_remote_embedding is off` | does not run; **no archive text reaches the provider**, and the search does not embed the query either |
-| 3 | provider is not `local` (opted in) and `Descriptor.Dimensions` is not 384 | `words only: the provider's vectors have N dimensions; the archive holds 384` | does not run |
+| 3 | `Descriptor.Dimensions` is not 384 (any provider; in practice an opted-in remote model) | `words only: the provider's vectors have N dimensions; the archive holds 384` | does not run |
 | 4 | stored fingerprint `Mismatch` | `words only: vectors were made by <stored>; the running embedder is <current>` | does not run |
 | 5 | the local model is not ready (files missing, wrong size) | `words only: embedding model not ready (<reason>)` | does not run; retried on the next pass |
 | 6 | (server pass only) the memory store's re-embed is running (`ReindexProgress` `Running`) | `waiting: the memory re-embed is running` | defers |
@@ -169,10 +174,12 @@ fingerprint, the embedder's readiness. First failing rule wins; each gives a sta
 ### The worker (`TranscriptEmbedWorker.Run(store, embedder, gate, budget, ct, progress)`)
 
 1. **Lease.** One worker per archive at a time across processes (a Claude Code engine and a pi engine can both start a pass). The
-   lease is a `tx_state` row `embed.lease` = `"<pid>:<unix ms>"`, taken in `BEGIN IMMEDIATE` (insert, or update when the stored time
-   is more than 10 minutes old, so a crashed holder expires; the check and write are one statement under the write lock, unlike the
-   memory re-embed's advisory lock), renewed at every batch, released in `finally`. A pass that cannot take it ends with state
-   `another embed run is active` and no error. `transcripts embed` and the embed step of `backfill` take it too.
+   lease is a `tx_state` row `embed.lease` = `"<machine>:<pid>:<unix ms>"`, taken in `BEGIN IMMEDIATE` (insert, or take over when the
+   stored time is more than 10 minutes old, **or** when the holder's machine name is this machine's and no process with that pid
+   exists, so a second Ctrl+C or a crash does not lock others out for ten minutes; the check and write are one operation under the
+   write lock, unlike the memory re-embed's advisory lock), renewed at every batch, released in `finally`. A pass that cannot take it
+   ends with state `another embed run is active` and no error. `transcripts embed` and the embed step of `backfill` take it too (their
+   handling when it is held is in section 4).
 2. **Batch loop.** Until the budget, the cancellation or no unembedded chunk is left: read up to 16 chunks with `embedded = 0` (index
    `idx_tx_chunk_unembedded`, ascending `id`, which is the order Part 2 ingests: newest sessions first); embed their `content` with
    `IEmbedder.Embed` **outside any write transaction**; then one `BEGIN IMMEDIATE` transaction that (a) re-checks the gate's fingerprint
@@ -190,8 +197,13 @@ fingerprint, the embedder's readiness. First failing rule wins; each gives a sta
 5. **Threading.** The pass runs the worker on its own thread at below-normal priority with its own connection and its own embedder
    instance (the pattern of `MaybeStartBackgroundReindex`; sharing the server's instance is the builder's option if its tokenizer is
    proven thread-safe, which the code does not say). It never touches the MCP stdio streams and writes nothing to stdout.
-6. **Failure.** An exception in a batch rolls the transaction back, logs through `ExceptionLogger.LogChain`, records the pass result,
-   and ends the run: the unembedded chunks stay as they are. Nothing a pass does can fail `session_start`.
+6. **Failure, and the chunk that never works.** A failure that says the embedder cannot run at all (the model missing or unloadable,
+   as in the gate's rule 5) ends the run with that state and changes no `embed_attempts`. Any other exception in a batch (the
+   embedder throws on a text, the insert rejects a value) rolls the batch back, logs through `ExceptionLogger.LogChain`, and the batch
+   is **retried one chunk at a time**; a chunk that fails alone gets `embed_attempts + 1` (written in its own small transaction) and is
+   skipped for this run; after three failed tries it leaves the work list (section 1). When the first three chunks of a run all fail
+   alone, the run ends with state `embedding failed: <message>` (a broken remote provider must not burn every chunk's tries in one
+   run). The run's result records the count of chunks it gave up on. Nothing a pass does can fail `session_start`.
 7. **Last result.** After a run the worker writes `embed.last_run` (`{at, embedded, remaining, state}` JSON, no text) to `tx_state`
    for `status`.
 
@@ -234,14 +246,15 @@ is serialised by the lease.
 batches, a second ends the process, as `backfill` does), printing `embedded N of M (K remaining)` about every 5 seconds. Gates like
 `backfill`: refuses unless the archive is on, refuses on Postgres, opens with `create:false`. It is **not** terminal-gated (it reads the
 archive and writes vectors; text goes only to the local model unless the person opted in by hand). Exit 0 when it finished, was
-cancelled, or found nothing to do; 1 when the gate says the worker cannot run (it prints the state text of section 3) or a batch
-failed; 2 on a usage error.
+cancelled, or found nothing to do; 1 when the gate says the worker cannot run (it prints the state text of section 3), when the
+lease is held by another run (it prints `another embed run is active; try again later`) or when the run ended on `embedding failed`;
+2 on a usage error. Chunks that failed alone are listed in the closing line (`N could not be embedded`) and do not change the code.
 
 ### `transcripts backfill`
 
 Unchanged until its ingest is done. Then, unless `--no-embed`, it runs the same worker (no budget, Ctrl+C-safe, progress lines). Its
-exit code stays the ingest's (0, 1 or 2 as Part 2 defined it): an embed that cannot run is reported in the summary ("N chunks wait for
-embedding: <state>") and does not change the code. `--no-embed` prints nothing about embedding but the waiting count.
+exit code stays the ingest's (0, 1 or 2 as Part 2 defined it): an embed that cannot run (the gate, a held lease, a failure) is reported in the
+summary ("N chunks wait for embedding: <state>") and does not change the code. `--no-embed` prints nothing about embedding but the waiting count.
 
 ## 5. `transcript_search`
 
@@ -249,7 +262,8 @@ embedding: <state>") and does not change the code. `--no-embed` prints nothing a
 
 The schema Part 1 registered is unchanged: `query` (required), `scope` (`session|project|all`), `project`, `session`
 (`<host>:<host_session_id>`, split at the first colon), `since` (ISO-8601), `include_automated`, `top_k` (1 to 50, default 10). Only
-the description changes. A `since` that does not parse, an empty `query` or a `session` without a colon is an argument error through
+the description changes and the schema's `default: "project"` on `scope` is removed (it would be wrong until Part 5: the effective
+default is described in the tool description), which the pinned handler tests and `catalog.json` follow. A `since` that does not parse, an empty `query` or a `session` without a colon is an argument error through
 `ArgumentParsing`/`ErrorTranslator` like the memory tools' own.
 
 **Effective scope** (parent decision 9; the marker of decision 12 is Part 5's): an explicit `scope` wins; otherwise `session` when a
@@ -259,7 +273,9 @@ ignores `project`. (Until Part 5 a default-scope call from Claude Code therefore
 
 **Filters** (each applies to **both** candidate sources, inside the query, never afterwards): the session (`session_id` of the named
 `<host>:<id>`; an unknown session returns no results and says so), the project (`project_key` equals the argument exactly), `since`
-(chunk `ts` at or after it), and `kind = 'interactive'` unless `include_automated`.
+(chunk `ts` at or after it), and `kind = 'interactive'` unless `include_automated` **or the effective scope is `session`** (naming a session is explicit intent, and
+the id of an automated session comes from Part 4's `transcript_sessions`; the kind filter is for project and all-sessions searches).
+`since` accepts a full ISO-8601 instant or a date alone (read as 00:00:00 UTC).
 
 ### Candidates
 
@@ -337,7 +353,7 @@ Scores are used **relatively**: raw similarity ran 0.2 to 0.6 in the prototype, 
 (three test files pin it; they are updated):
 
 ```text
-embedding: 4,210 of 4,388 chunks embedded (178 waiting)
+embedding: 4,210 of 4,388 chunks embedded (178 waiting, 3 could not be embedded)
 embedder:  local bge-small-en-v1.5 (ready)               | words only: <state text of section 3>
 vectors:   made by local bge-small-en-v1.5               | none yet | made by <other> (not used)
 last embed run: 2026-11-21 10:44, embedded 60, 118 remaining, stopped by budget
@@ -384,7 +400,8 @@ The queries (each asserts the expected session is **in the top three** unless sa
 3. an **exact error string** (words and punctuation as in an error chunk);
 4. a **session-scope paraphrase** query, with the session argument, where the 39 other sessions would fill a global top-k, and
    the expected chunk is found (the headline use of decision 9);
-5. an **automated** session's chunk: not in the results without `include_automated`, in them with it, for a query that matches it;
+5. an **automated** session's chunk: not in a project or all-sessions result without `include_automated`, in it with it, and found
+   without the flag when its session is named in a session-scope query;
 6. a **project** scope query returns only that project's sessions, and `since` excludes older chunks;
 7. a chunk **without a vector** (`embedded = 0`, the worker held back by a test gate): found by its words, `pendingEmbedding` counts
    it, `search.meaning` is `on` for the others;
@@ -400,7 +417,9 @@ The queries (each asserts the expected session is **in the top three** unless sa
     checkpoint; a session whose kind flips has its vector rows' kind changed; a chunk id reused after a delete meets no old vector;
 12. **resume and races**: a worker stopped by the budget or by cancellation resumes with no chunk embedded twice and none lost;
     a chunk changed between read and write stays `embedded = 0`; two workers (two connections) do not both embed (the lease);
-    a stale lease (older than 10 minutes) is taken over;
+    a stale lease (older than 10 minutes) is taken over, and so is one whose pid on this machine no longer exists (a live pid on
+    another machine name is not); a chunk whose embedding fails alone does not block the chunks behind it, is skipped after three
+    tries, stays `embedded = 0`, and gets a fresh count when its content changes; the first three failing chunks of a run end it;
 13. **through the triggers, not the worker** (the parent's rule): the queries 1 to 4 run after `transcripts backfill` (the command's
     own embed step, through `BackfillCommand` with the Part 2 seams), and again after a `session_start` on a server built with the
     archive on (an `ArchivePass` that the test awaits through its `WaitIdleAsync`/last-result seam, never the worker directly);
