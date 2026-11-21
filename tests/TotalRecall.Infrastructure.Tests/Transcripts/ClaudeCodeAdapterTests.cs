@@ -327,13 +327,235 @@ public sealed class ClaudeCodeAdapterTests : IDisposable
     }
 
     [Fact]
-    public void ReadRecords_ReadsLines_YieldsNoRecordYet_AndCountsOverLimitLines()
+    public void ReadRecords_OverLimitLines_AreSkippedAndCounted_AndTheRestIsRead()
     {
         var s = _home.Place("decision", Cwd, "rr");
-        _home.Write(s, Encoding.UTF8.GetBytes("{\"a\":1}\n" + new string('x', 3000) + "\n{\"b\":2}\n"));
+        var good = Line("user", "\"b\"");
+        _home.Write(s, Encoding.UTF8.GetBytes(good + "\n" + new string('x', 3000) + "\n" + good + "\n"));
         var stats = new ReadStats();
         var a = new ClaudeCodeAdapter(_home.ProjectsDir, 1024);
-        Assert.Empty(a.ReadRecords(Source(s), 0, stats, CancellationToken.None));
+        var records = a.ReadRecords(Source(s), 0, stats, CancellationToken.None).ToList();
+        Assert.Equal(2, records.Count);
         Assert.Equal(1, stats.SkippedLines);
+    }
+
+    private static string Line(string type, string content) =>
+        "{\"type\":\"" + type + "\",\"timestamp\":\"2026-01-01T00:00:05.000Z\",\"message\":{\"content\":" + content + "}}";
+
+    private List<TranscriptRecord> Read(PlacedSession s, ReadStats? stats = null, long start = 0) =>
+        Adapter().ReadRecords(Source(s), start, stats ?? new ReadStats(), CancellationToken.None).ToList();
+
+    private static string Describe(TranscriptRecord r) =>
+        r.Kind + (r.ToolName is null ? "" : "(" + r.ToolName + ")");
+
+    [Fact]
+    public void ReadRecords_Decision_YieldsExpectedKindsInOrder()
+    {
+        var s = _home.Place("decision", Cwd, "dec");
+        var stats = new ReadStats();
+        var records = Read(s, stats);
+
+        var expected = new[]
+        {
+            "UserText",                                    // the human prompt, system reminder dropped
+            "AssistantText", "ToolStub(Read)",             // thinking dropped
+            "ToolStub(Bash)",                              // successful results dropped
+            "AssistantText",
+            "UserText",                                    // slash command as plain text
+            "ToolStub(AskUserQuestion)",
+            "ToolStub(Edit)",
+            "ToolStub(mcp__fixture__lookup)",
+            "AssistantText",                               // ExitPlanMode plan
+            "AssistantText",
+            "UserText",
+            "UserText",                                    // queued human prompt
+            "ToolStub(Bash)",                              // <bash-input>
+            "AssistantText",
+            "AssistantText",                               // after the interruption notice (dropped)
+        };
+        Assert.Equal(expected, records.Select(Describe));
+        Assert.Equal(0, stats.SkippedLines);   // the queue-operation record is a routine unlisted type, not a bad line
+
+        var texts = records.Select(r => r.Text).ToList();
+        Assert.Equal("Please look at the schema migration and plan a fix.", texts[0]);
+        Assert.Equal("src/Schema.cs", texts[2]);
+        Assert.Equal("/develop 148", texts[5]);
+        Assert.StartsWith("zqxquestion", texts[6]);
+        Assert.Equal("zqxunknowninput", texts[8]);
+        Assert.StartsWith("zqxplan", texts[9]);
+        Assert.StartsWith("zqxqueued", texts[12]);
+        Assert.Equal("ls -l", texts[13]);
+
+        foreach (var marker in new[] { "zqxtoolresult", "zqxthinking", "zqxreminder", "zqxmeta", "zqxsidechain", "zqxnotification" })
+            Assert.DoesNotContain(records, r => r.Text is not null && r.Text.Contains(marker, StringComparison.Ordinal));
+
+        // offsets are those of the file's lines, increasing, and every end is a line start
+        var bytes = File.ReadAllBytes(s.Path);
+        Assert.All(records, r =>
+        {
+            Assert.True(r.Ts is not null);
+            Assert.Equal((byte)'\n', bytes[r.EndOffset - 1]);
+            Assert.True(r.StartOffset == 0 || bytes[r.StartOffset - 1] == (byte)'\n');
+            Assert.True(r.StartOffset < r.EndOffset);
+        });
+        Assert.Equal(records.OrderBy(r => r.StartOffset).Select(Describe), records.Select(Describe));
+    }
+
+    [Fact]
+    public void ReadRecords_FromAnOffset_StartsAtThatLine()
+    {
+        var s = _home.Place("decision", Cwd, "from");
+        var all = Read(s);
+        var third = all[3];
+        var rest = Read(s, start: third.StartOffset);
+        Assert.Equal(all.Skip(3).Select(r => (r.Kind, r.StartOffset, r.EndOffset, r.Text)), rest.Select(r => (r.Kind, r.StartOffset, r.EndOffset, r.Text)));
+    }
+
+    [Fact]
+    public void ReadRecords_Compaction_YieldsBoundaryAndSummary()
+    {
+        var s = _home.Place("compaction", Cwd, "cmp");
+        var kinds = Read(s).Select(r => r.Kind).ToList();
+        Assert.Contains(RecordKind.CompactionBoundary, kinds);
+        Assert.Contains(RecordKind.CompactionSummary, kinds);
+        Assert.DoesNotContain(Read(s), r => r.Kind == RecordKind.UserText && r.Text!.Contains("being continued", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ReadRecords_Error_YieldsToolError()
+    {
+        var s = _home.Place("error", Cwd, "err");
+        Assert.Contains(Read(s), r => r.Kind == RecordKind.ToolError && !string.IsNullOrEmpty(r.Text));
+    }
+
+    public static IEnumerable<object[]> OddLines()
+    {
+        yield return new object[] { "invalid json", Encoding.UTF8.GetBytes("{\"type\":\"user\",") };
+        yield return new object[] { "a JSON array", Encoding.UTF8.GetBytes("[{\"type\":\"user\"}]") };
+        yield return new object[] { "a JSON string", Encoding.UTF8.GetBytes("\"user\"") };
+        yield return new object[] { "type is a number", Encoding.UTF8.GetBytes("{\"type\":5,\"message\":{\"content\":\"x\"}}") };
+        yield return new object[] { "type is absent", Encoding.UTF8.GetBytes("{\"message\":{\"content\":\"x\"}}") };
+        yield return new object[] { "message is a string", Encoding.UTF8.GetBytes("{\"type\":\"user\",\"message\":\"x\"}") };
+        yield return new object[] { "lone surrogate escape", Encoding.UTF8.GetBytes("{\"type\":\"user\",\"message\":{\"content\":\"a \\ud800 b\"}}") };
+        yield return new object[] { "invalid UTF-8", Concat(Encoding.UTF8.GetBytes("{\"type\":\"user\",\"message\":{\"content\":\"a "), new byte[] { 0xFF, 0xFE }, Encoding.UTF8.GetBytes(" b\"}}")) };
+        yield return new object[] { "70 nested arrays", Encoding.UTF8.GetBytes("{\"type\":\"user\",\"x\":" + new string('[', 70) + new string(']', 70) + "}") };
+    }
+
+    private static byte[] Concat(params byte[][] parts) => parts.SelectMany(p => p).ToArray();
+
+    [Theory]
+    [MemberData(nameof(OddLines))]
+    public void Reader_OddLines_SkippedAndCounted(string name, byte[] oddLine)
+    {
+        var s = _home.Place("decision", Cwd, "odd");
+        var good = Encoding.UTF8.GetBytes(Line("user", "\"the next good line\"") + "\n");
+        _home.Write(s, Concat(oddLine, new byte[] { 0x0A }, good, oddLine, new byte[] { 0x0A }));
+        var stats = new ReadStats();
+        var records = Read(s, stats);
+        Assert.True(stats.SkippedLines == 2, name + ": skipped " + stats.SkippedLines);
+        var only = Assert.Single(records);
+        Assert.Equal("the next good line", only.Text);
+        Assert.Equal(oddLine.Length + 1, only.StartOffset);
+        Assert.Equal(oddLine.Length + 1 + good.Length, only.EndOffset);
+    }
+
+    [Fact]
+    public void Reader_NestingAtTheLimit_Parses()
+    {
+        var s = _home.Place("decision", Cwd, "deep");
+        // the record object is depth 1, so 63 arrays reach depth 64
+        var line = "{\"type\":\"user\",\"x\":" + new string('[', 63) + new string(']', 63) + ",\"message\":{\"content\":\"deep ok\"}}\n";
+        _home.Write(s, Encoding.UTF8.GetBytes(line));
+        var stats = new ReadStats();
+        Assert.Equal("deep ok", Assert.Single(Read(s, stats)).Text);
+        Assert.Equal(0, stats.SkippedLines);
+    }
+
+    [Fact]
+    public void Reader_UnlistedRecordTypes_AreNotCounted()
+    {
+        var s = _home.Place("decision", Cwd, "unlisted");
+        _home.Write(s, Encoding.UTF8.GetBytes("{\"type\":\"last-prompt\"}\n{\"type\":\"\"}\n{\"type\":\"file-history-snapshot\",\"snapshot\":{}}\n"));
+        var stats = new ReadStats();
+        Assert.Empty(Read(s, stats));
+        Assert.Equal(0, stats.SkippedLines);
+    }
+
+    [Fact]
+    public void Reader_EmptyAndWhitespaceOnlyLines_AreIgnoredAndNotCounted()
+    {
+        var s = _home.Place("decision", Cwd, "blank");
+        var good = Line("user", "\"after blanks\"");
+        var prefix = "\n   \n\t\r\n\r\n \t \n";
+        _home.Write(s, Encoding.UTF8.GetBytes(prefix + good + "\n \n"));
+        var stats = new ReadStats();
+        var only = Assert.Single(Read(s, stats));
+        Assert.Equal("after blanks", only.Text);
+        Assert.Equal(0, stats.SkippedLines);
+        Assert.Equal(Encoding.UTF8.GetByteCount(prefix), only.StartOffset);
+    }
+
+    [Fact]
+    public void Reader_NonWhitespaceNonJsonLine_IsStillCounted()
+    {
+        var s = _home.Place("decision", Cwd, "nbsp");
+        // U+00A0 is not JSON whitespace: the line is invalid JSON, so it is counted
+        _home.Write(s, Encoding.UTF8.GetBytes("\u00a0\n" + Line("user", "\"x\"") + "\n"));
+        var stats = new ReadStats();
+        Assert.Single(Read(s, stats));
+        Assert.Equal(1, stats.SkippedLines);
+    }
+
+    [Fact]
+    public void Reader_TrailingPartialLine_IsNotParsedNorCounted()
+    {
+        var s = _home.Place("decision", Cwd, "partial");
+        _home.Write(s, Encoding.UTF8.GetBytes(Line("user", "\"whole\"") + "\n{\"type\":\"user\",\"mess"));
+        var stats = new ReadStats();
+        Assert.Equal("whole", Assert.Single(Read(s, stats)).Text);
+        Assert.Equal(0, stats.SkippedLines);
+    }
+
+    [Fact]
+    public void Reader_OddLines_CrlfAndBom_Parse()
+    {
+        var lf = _home.Render("decision", Cwd, "lf");
+        var crlf = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(lf).Replace("\n", "\r\n"));
+        var bom = Concat(new byte[] { 0xEF, 0xBB, 0xBF }, lf);
+
+        var a = _home.Place("decision", Cwd, "lf");
+        var b = _home.Place("decision", Cwd, "crlf");
+        var c = _home.Place("decision", Cwd, "bom");
+        _home.Write(b, crlf);
+        _home.Write(c, bom);
+
+        var lfRecords = Read(a);
+        Assert.NotEmpty(lfRecords);
+        var lfStarts = LineStarts(lf);
+
+        foreach (var (file, bytes) in new[] { (b, crlf), (c, bom) })
+        {
+            var stats = new ReadStats();
+            var records = Read(file, stats);
+            Assert.Equal(0, stats.SkippedLines);
+            Assert.Equal(lfRecords.Select(r => (r.Kind, r.Text, r.ToolName, r.Ts)), records.Select(r => (r.Kind, r.Text, r.ToolName, r.Ts)));
+            var starts = LineStarts(bytes);
+            for (var i = 0; i < records.Count; i++)
+            {
+                var lineNo = Array.IndexOf(lfStarts, lfRecords[i].StartOffset);
+                Assert.True(lineNo >= 0);
+                Assert.Equal(starts[lineNo], records[i].StartOffset);
+                Assert.Equal(starts[lineNo + 1], records[i].EndOffset);
+            }
+        }
+    }
+
+    /// <summary>Byte offset of every line start, plus the offset after the last line.</summary>
+    private static long[] LineStarts(byte[] bytes)
+    {
+        var starts = new List<long> { 0 };
+        for (var i = 0; i < bytes.Length; i++)
+            if (bytes[i] == 0x0A) starts.Add(i + 1);
+        return starts.ToArray();
     }
 }

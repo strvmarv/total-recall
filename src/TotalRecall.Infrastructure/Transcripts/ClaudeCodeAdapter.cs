@@ -9,7 +9,7 @@ namespace TotalRecall.Infrastructure.Transcripts;
 
 /// <summary>
 /// Claude Code's session files, <c>&lt;projects&gt;/&lt;encoded-cwd&gt;/&lt;id&gt;.jsonl</c> (spec section 2). Enumeration, the head
-/// and the byte-exact line reading live here; the mapping of a line to records is added with the record parser.
+/// and the byte-exact line reading live here; <see cref="ClaudeRecordMapper"/> turns each line into records.
 /// </summary>
 public sealed class ClaudeCodeAdapter : ITranscriptAdapter
 {
@@ -19,6 +19,10 @@ public sealed class ClaudeCodeAdapter : ITranscriptAdapter
 
     private const string Extension = ".jsonl";
     private const int MaxIdLength = 128;
+
+    private const int MaxJsonDepth = 64;
+
+    private static readonly JsonDocumentOptions LineOptions = new() { MaxDepth = MaxJsonDepth };
 
     private readonly int _maxLineBytes;
 
@@ -155,9 +159,39 @@ public sealed class ClaudeCodeAdapter : ITranscriptAdapter
                 stats.SkippedLines++;
                 continue;
             }
-            // The mapping of a line to records is added with the record parser.
+            if (IsBlank(line.Bytes.Span)) continue;       // not a record and not a bad line: not counted
+
+            var records = ParseLine(line);
+            if (records is null)
+            {
+                stats.SkippedLines++;
+                continue;
+            }
+            foreach (var record in records) yield return record;
         }
-        yield break;
+    }
+
+    /// <summary>The records of one line, or null when the line cannot be read (it is then counted by the caller).</summary>
+    private static IReadOnlyList<TranscriptRecord>? ParseLine(JsonlLine line)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(line.Bytes, LineOptions);
+            return ClaudeRecordMapper.Map(doc.RootElement, line.Start, line.End);
+        }
+        catch (JsonException) { return null; }               // not JSON, invalid UTF-8, nested deeper than the limit
+        catch (InvalidOperationException) { return null; }   // not a record, or a string that does not decode
+        catch (ArgumentException) { return null; }
+    }
+
+    /// <summary>Empty, or only the ASCII white space a line can carry (a CR from CRLF, indentation).</summary>
+    private static bool IsBlank(ReadOnlySpan<byte> bytes)
+    {
+        foreach (var b in bytes)
+        {
+            if (b is not (0x20 or 0x09 or 0x0D or 0x0B or 0x0C)) return false;
+        }
+        return true;
     }
 
     private static void ReadHeadFields(ReadOnlyMemory<byte> bytes, ref string? cwd, ref string? entrypoint, ref DateTimeOffset? first)
