@@ -66,9 +66,10 @@ public sealed class EnableCommand : TranscriptsCommandBase
 
         var where = Describe(location);
         var prompt =
-            "Enable the transcript archive? Once a later version can fill it, total-recall will keep the dialogue " +
-            "of your agent sessions (your prompts and the assistant's replies) in " + The(location) + ", locally on this " +
-            "machine, with secrets redacted, and never synced. Nothing is stored yet in this version. " +
+            "Enable the transcript archive? total-recall will keep the dialogue of your agent sessions (your prompts " +
+            "and the assistant's replies) in " + The(location) + ", locally on this machine, with known secret shapes " +
+            "redacted, and never synced. Nothing is read until you run 'total-recall transcripts backfill', and the " +
+            "archive cannot be searched yet in this version. " +
             "You can delete it at any time with 'total-recall transcripts forget'. Continue?";
         bool confirmed;
         try
@@ -116,7 +117,7 @@ public sealed class EnableCommand : TranscriptsCommandBase
 
         Out.WriteLine("the transcript archive is enabled");
         Out.WriteLine($"location: {where}");
-        Out.WriteLine("Nothing is stored yet in this version: a later release fills and searches the archive.");
+        Out.WriteLine("Run 'total-recall transcripts backfill' to back up your Claude Code sessions; searching the archive arrives in a later release.");
         return 0;
     }
 }
