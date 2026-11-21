@@ -70,18 +70,30 @@ public sealed class ClaudeCodeAdapterTests : IDisposable
         // A FIFO or device node named <id>.jsonl stats with size 0 and would block in open(2); a zero size must
         // therefore be answered without opening. The path here is a non-empty regular file: opening it would show.
         var s = _home.Place("decision", Cwd, "zero");
-        _home.Write(s, Encoding.UTF8.GetBytes("{\"cwd\":\"/p\"}\nsecond\n"));
+        var content = Encoding.UTF8.GetBytes("{\"cwd\":\"/p\"}\nsecond line\n");
+        _home.Write(s, content);
         var zero = Source(s) with { Size = 0 };
         var a = Adapter();
+        var afterFirstLine = Array.IndexOf(content, (byte)'\n') + 1;   // a true line start if the file were opened
 
         var head = a.ReadHead(zero);
         Assert.Null(head.Fingerprint);
         Assert.Null(head.Cwd);
         Assert.True(a.IsLineStart(zero, 0));
-        Assert.False(a.IsLineStart(zero, 9));
+        Assert.True(a.IsLineStart(Source(s), afterFirstLine));   // proves the offset is a line start in the real file
+        Assert.False(a.IsLineStart(zero, afterFirstLine));
         var stats = new ReadStats();
         Assert.Empty(a.ReadRecords(zero, 0, stats, CancellationToken.None));
         Assert.Equal(0, stats.SkippedLines);
+
+        // With a 4-byte line limit both lines are too long: opening the file counts two skipped lines.
+        var tiny = new ClaudeCodeAdapter(_home.ProjectsDir, maxLineBytes: 4);
+        var tinyStats = new ReadStats();
+        Assert.Empty(tiny.ReadRecords(zero, 0, tinyStats, CancellationToken.None));
+        Assert.Equal(0, tinyStats.SkippedLines);
+        var realStats = new ReadStats();
+        Assert.Empty(tiny.ReadRecords(Source(s), 0, realStats, CancellationToken.None));
+        Assert.Equal(2, realStats.SkippedLines);
 
         Assert.NotNull(a.ReadHead(Source(s)).Fingerprint);   // the same file with its real size is read
     }
