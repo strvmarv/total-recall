@@ -414,7 +414,8 @@ public sealed class TranscriptStore : ITranscriptStore
             // Each session's project_root (a null root records nothing: such a project is excluded by its key only).
             // A cwd outside its own root (a sibling worktree such as ../app-hotfix) is recorded too: once that worktree
             // is removed its sessions derive a path key and a root of their own, which neither the key nor the main
-            // repository's root would keep out. A filesystem root, the home directory or an ancestor of it never is.
+            // repository's root would keep out. A filesystem root, the home directory or an ancestor of it never is,
+            // nor a cwd above its own root (recording it would exclude every sibling project beneath it).
             using (var cmd = Command(tx,
                        "SELECT DISTINCT project_root, cwd FROM tx_session WHERE project_key = $k AND project_root IS NOT NULL AND project_root <> '' ORDER BY project_root, cwd",
                        ("$k", projectKey)))
@@ -428,7 +429,7 @@ public sealed class TranscriptStore : ITranscriptStore
 
                     if (r.IsDBNull(1)) continue;
                     var cwd = r.GetString(1);
-                    if (cwd.Length == 0 || IsUnder(cwd, root)) continue;
+                    if (cwd.Length == 0 || IsUnder(cwd, root) || IsUnder(root, cwd)) continue;
                     var extra = ProjectIdentityRule.AcceptableCwdRoot(cwd, _userHome);
                     if (extra is not null && !roots.Contains(extra, StringComparer.Ordinal))
                         roots.Add(extra);

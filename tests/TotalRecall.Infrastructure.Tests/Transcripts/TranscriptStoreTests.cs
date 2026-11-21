@@ -229,6 +229,18 @@ public sealed class TranscriptStoreTests : IDisposable
     }
 
     [Fact]
+    public void ForgetProject_CwdAboveItsRoot_RecordsNoExtraRoot()
+    {
+        // A cwd that is an ancestor of its own root would, once recorded, exclude every sibling project beneath it.
+        _db.AddSession("pi", "s1", projectKey: "k", cwd: "/src", projectRoot: "/src/app");
+
+        Store.ForgetProject("k");
+
+        Assert.Equal(new[] { "/src/app" }, Assert.Single(Store.Status().ForgottenProjects).Roots);
+        Assert.False(Store.IsExcluded("pi", "s2", "other", "/src/other"));
+    }
+
+    [Fact]
     public void ForgetProject_NullRoot_RecordsNoRootEvenForItsCwd()
     {
         // A cwd with no repository (a parent folder such as ~/source) is excluded by its key only (spec section 6, item 6).
