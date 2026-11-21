@@ -545,6 +545,38 @@ public sealed class TranscriptIngesterTests : IDisposable
         Assert.Contains("| exchanges 0-0", IngestHarness.Contents(Db)[0]);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ResetRow_ReplacedOrTruncatedFile_IsARewrite_NotChanged(bool truncated)
+    {
+        // A reset row holds no chunks, so a replaced or shortened file has nothing to protect: it is a fresh rewrite.
+        var s = Home.Place("decision", _h.Cwd, truncated ? "resetcut-1" : "resetrep-1");
+        var full = File.ReadAllBytes(s.Path);
+        Assert.Equal(SessionIngestStatus.New, _h.Ingest(Db, s).Status);
+        Db.Exec($"INSERT INTO tx_state (key, value) VALUES ('ingest_not_before', '{Iso(Home.BaseTime.AddHours(1))}')");
+        Home.SetMtime(s, Home.BaseTime.AddHours(2));
+        Assert.Equal(SessionIngestStatus.Empty, _h.Ingest(Db, s).Status);
+        Assert.Equal("0", Col("exchange_count", s.Id));
+
+        if (truncated)
+            Home.Write(s, full[..(Array.IndexOf(full, (byte)0x0A) + 1)]);   // the first line only: same fingerprint, smaller
+        else
+            Home.Replace(s, "compaction");                                  // another file: a different fingerprint
+        Home.AppendExchange(s, "A question after the cutoff.", "An answer after the cutoff.", 3 * 3600);
+        Home.SetMtime(s, Home.BaseTime.AddHours(4));
+        if (truncated) Assert.True(new FileInfo(s.Path).Length < full.Length);
+
+        var adapter = _h.Adapter();
+        var result = _h.Ingest(Db, s, adapter);
+
+        Assert.Equal(SessionIngestStatus.Updated, result.Status);
+        Assert.Equal(new long[] { 0 }, adapter.ReadOffsets);
+        Assert.Equal("1", Col("exchange_count", s.Id));
+        Assert.Equal(1, _h.Chunks(Db));
+        Assert.Contains("A question after the cutoff.", IngestHarness.Contents(Db)[0]);
+    }
+
     // ------------------------------------------------------------------
     // Changed source
     // ------------------------------------------------------------------

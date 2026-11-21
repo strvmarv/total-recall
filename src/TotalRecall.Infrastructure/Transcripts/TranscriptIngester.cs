@@ -144,8 +144,9 @@ internal sealed class TranscriptIngester
         if (_store.IsExcluded(host, id, key, cwd))
             return Done(SessionIngestStatus.Excluded);
 
-        // Step 4: the mode.
-        if (state is not null && SourceChanged(state, head, source))
+        // Step 4: the mode. A reset row (exchange_count 0) holds no chunks, so a replaced or shortened file has nothing
+        // to keep: it is a rewrite, checked before the changed-source test (else the session is stuck as changed).
+        if (state is not null && state.ExchangeCount > 0 && SourceChanged(state, head, source))
             return Done(SessionIngestStatus.Changed);
         var rewrite = state is null
             || state.ExchangeCount == 0
