@@ -467,6 +467,9 @@ Listed so the person sees each at sign-off. None edits the parent.
    not terminal-gated (it only adds vectors).
 7. **The whole chunk body is returned** per hit; the parent leaves the hit's shape to this part.
 8. **Words candidates are an `OR` of tokens plus a phrase list**, not the memory FTS's implicit AND, which returns nothing for a sentence.
+9. **A session-scope query ignores the automated filter** (the parent applies `include_automated` to the search as a whole): a named
+   session is explicit intent.
+10. **A per-chunk `embed_attempts` count** (an extra column) so one chunk that cannot be embedded does not block the rest.
 
 ## Acceptance (the parent's Done when, mapped)
 
