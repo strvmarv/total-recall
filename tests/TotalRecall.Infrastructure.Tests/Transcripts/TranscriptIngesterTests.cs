@@ -712,6 +712,21 @@ public sealed class TranscriptIngesterTests : IDisposable
     }
 
     [Fact]
+    public void CancelledDuringTheRead_Throws_AndWritesNothing()
+    {
+        var s = Home.Place("decision", _h.Cwd, "cancel-1");
+        using var cts = new CancellationTokenSource();
+        var adapter = _h.Adapter(_ => cts.Cancel());
+
+        Assert.ThrowsAny<OperationCanceledException>(() =>
+            _h.Ingester(Db.Store, adapter).IngestSession(IngestHarness.Stat(s), cts.Token));
+
+        Assert.Equal(1, adapter.HookFired);
+        Assert.Equal(0, _h.Sessions(Db));
+        Assert.Equal(0, _h.Chunks(Db));
+    }
+
+    [Fact]
     public void GrownBetweenStatAndRead_IsReadAgainNextPass()
     {
         var s = Home.Place("decision", _h.Cwd, "statread-1");

@@ -93,6 +93,9 @@ internal sealed class TranscriptIngester
             return SessionIngestResult.Of(SessionIngestStatus.Excluded);
 
         // Steps 2 to 6; a Stale or Conflict write is redone once from step 2, a second one is left for the next run.
+        // Inside each pass, a resumed read that finds no unit or a changed kind is redone once from the start (the
+        // earlier units' headers carry the kind), so one call reads the file at most four times: two passes of at most
+        // two reads. It cannot loop, because the redo is a whole-file read and a whole-file read is final.
         var first = Pass(source, ct);
         if (first.Result is not null) return first.Result;
         ct.ThrowIfCancellationRequested();
