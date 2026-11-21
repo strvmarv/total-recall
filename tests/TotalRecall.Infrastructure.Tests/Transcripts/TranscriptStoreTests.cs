@@ -25,7 +25,7 @@ public sealed class TranscriptStoreTests : IDisposable
     {
         var s = Store.Status();
 
-        Assert.Equal(1, s.SchemaVersion);
+        Assert.Equal(2, s.SchemaVersion);
         Assert.Equal(_db.Path, s.Location);
         Assert.Equal(0, s.Sessions);
         Assert.Equal(0, s.Chunks);
@@ -55,7 +55,7 @@ public sealed class TranscriptStoreTests : IDisposable
     [Fact]
     public void Status_ListsForgottenRecordsAndCutoff()
     {
-        _db.AddSession("pi", "s1", projectKey: "owner/repo", cwd: "/w/repo");
+        _db.AddSession("pi", "s1", projectKey: "owner/repo", cwd: "/w/repo", projectRoot: "/w/repo");
         Store.ForgetSession("pi", "gone");
         Store.ForgetProject("owner/repo");
         var now = new DateTimeOffset(2026, 11, 18, 10, 0, 0, TimeSpan.Zero);
@@ -166,13 +166,13 @@ public sealed class TranscriptStoreTests : IDisposable
     // ---- ForgetProject ----
 
     [Fact]
-    public void ForgetProject_RemovesSessions_RecordsDistinctCwdRoots()
+    public void ForgetProject_RemovesSessions_RecordsDistinctProjectRoots()
     {
-        _db.AddChunk(_db.AddSession("pi", "s1", projectKey: "k", cwd: "/w/a"), "one");
-        _db.AddChunk(_db.AddSession("pi", "s2", projectKey: "k", cwd: "/w/a"), "two");
-        _db.AddSession("claude-code", "s3", projectKey: "k", cwd: "/w/b");
-        _db.AddSession("pi", "s4", projectKey: "k", cwd: null);
-        _db.AddSession("pi", "s5", projectKey: "other", cwd: "/w/c");
+        _db.AddChunk(_db.AddSession("pi", "s1", projectKey: "k", cwd: "/w/a/sub", projectRoot: "/w/a"), "one");
+        _db.AddChunk(_db.AddSession("pi", "s2", projectKey: "k", cwd: "/w/a", projectRoot: "/w/a"), "two");
+        _db.AddSession("claude-code", "s3", projectKey: "k", cwd: "/w/b/x", projectRoot: "/w/b");
+        _db.AddSession("pi", "s4", projectKey: "k", cwd: "/w/nonroot", projectRoot: null);
+        _db.AddSession("pi", "s5", projectKey: "other", cwd: "/w/c", projectRoot: "/w/c");
 
         var result = Store.ForgetProject("k");
 
@@ -189,10 +189,10 @@ public sealed class TranscriptStoreTests : IDisposable
     [Fact]
     public void ForgetProject_Repeat_MergesRoots()
     {
-        _db.AddSession("pi", "s1", projectKey: "k", cwd: "/w/a");
+        _db.AddSession("pi", "s1", projectKey: "k", cwd: "/w/a", projectRoot: "/w/a");
         Store.ForgetProject("k");
-        _db.AddSession("pi", "s2", projectKey: "k", cwd: "/w/b");
-        _db.AddSession("pi", "s3", projectKey: "k", cwd: "/w/a");
+        _db.AddSession("pi", "s2", projectKey: "k", cwd: "/w/b", projectRoot: "/w/b");
+        _db.AddSession("pi", "s3", projectKey: "k", cwd: "/w/a", projectRoot: "/w/a");
 
         var result = Store.ForgetProject("k");
 
@@ -323,7 +323,7 @@ public sealed class TranscriptStoreTests : IDisposable
     [Fact]
     public void IsExcluded_CwdUnderRoot_OnDirectoryBoundary()
     {
-        _db.AddSession("pi", "s1", projectKey: "k", cwd: "/a/b");
+        _db.AddSession("pi", "s1", projectKey: "k", cwd: "/a/b", projectRoot: "/a/b");
         Store.ForgetProject("k");
 
         Assert.True(Store.IsExcluded("pi", "new", "other", "/a/b"));
@@ -337,7 +337,7 @@ public sealed class TranscriptStoreTests : IDisposable
     [Fact]
     public void IsExcluded_CwdComparison_IsCaseSensitiveExceptOnWindows()
     {
-        _db.AddSession("pi", "s1", projectKey: "k", cwd: "/a/b");
+        _db.AddSession("pi", "s1", projectKey: "k", cwd: "/a/b", projectRoot: "/a/b");
         Store.ForgetProject("k");
 
         Assert.Equal(OperatingSystem.IsWindows(), Store.IsExcluded("pi", "new", "other", "/A/B/c"));
@@ -411,10 +411,89 @@ public sealed class TranscriptStoreTests : IDisposable
     [Fact]
     public void WildcardCwdRoot_IsData()
     {
-        _db.AddSession("pi", "s1", projectKey: "k", cwd: "/a/%");
+        _db.AddSession("pi", "s1", projectKey: "k", cwd: "/a/%", projectRoot: "/a/%");
         Store.ForgetProject("k");
 
         Assert.True(Store.IsExcluded("pi", "n", null, "/a/%/x"));
         Assert.False(Store.IsExcluded("pi", "n", null, "/a/b"));
+    }
+
+    // ---- Ingest reads ----
+
+    [Fact]
+    public void GetIngestState_NoRow_IsNull()
+    {
+        Assert.Null(Store.GetIngestState("claude-code", "nope"));
+    }
+
+    [Fact]
+    public void GetIngestState_ReadsEveryField()
+    {
+        using (var conn = _db.Connect())
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText =
+                "INSERT INTO tx_session (host, host_session_id, project_key, project_key_source, project_root, cwd, " +
+                "started_at, ended_at, kind, title, source_path, source_size, source_mtime, source_fingerprint, " +
+                "ingested_offset, exchange_count, settled_user_turns, built_under_cutoff) VALUES " +
+                "('claude-code', 'abc', 'owner/repo', 'path', '/w/repo', '/w/repo/sub', " +
+                "'2026-01-01T00:00:00.0000000Z', '2026-01-02T00:00:00.0000000Z', 'automated', 'A title', '/logs/abc.jsonl', 1234, 5678, " +
+                "'fp-1', 99, 4, 3, '2026-01-01T12:00:00.0000000Z')";
+            cmd.ExecuteNonQuery();
+        }
+
+        var state = Store.GetIngestState("claude-code", "abc");
+
+        Assert.Equal(
+            new SessionIngestState(1234, 5678, "fp-1", 99, 4, 3, "automated", "owner/repo", "path", "/w/repo",
+                "/w/repo/sub", "A title", "2026-01-01T00:00:00.0000000Z", "2026-01-02T00:00:00.0000000Z",
+                "2026-01-01T12:00:00.0000000Z", "/logs/abc.jsonl"),
+            state);
+    }
+
+    [Fact]
+    public void IngestNotBefore_NoCutoff_IsNull()
+    {
+        Assert.Null(Store.IngestNotBefore());
+    }
+
+    [Fact]
+    public void IngestNotBefore_AfterForgetAll_RawEqualsStatusText_AndAtParses()
+    {
+        var now = new DateTimeOffset(2026, 11, 18, 10, 0, 0, TimeSpan.Zero);
+        Store.ForgetAll(now);
+
+        var cutoff = Store.IngestNotBefore();
+
+        Assert.NotNull(cutoff);
+        Assert.Equal(Store.Status().IngestNotBefore, cutoff!.Raw);
+        Assert.Equal(now, cutoff.At);
+    }
+
+    [Fact]
+    public void Status_ByProjectAndKind_OrderedByChunksDescThenKeyThenKind()
+    {
+        var cInt = _db.AddSession("pi", "c1", projectKey: "c/c");
+        _db.AddChunk(cInt, "x1"); _db.AddChunk(cInt, "x2", exchangeStart: 1); _db.AddChunk(cInt, "x3", exchangeStart: 2);
+        var bInt = _db.AddSession("pi", "b1", projectKey: "b/b");
+        _db.AddChunk(bInt, "y1"); _db.AddChunk(bInt, "y2", exchangeStart: 1);
+        _db.AddChunk(_db.AddSession("pi", "a1", projectKey: "a/a"), "z1");
+        _db.AddChunk(_db.AddSession("pi", "a2", projectKey: "a/a", kind: "automated"), "z2");
+        _db.AddChunk(_db.AddSession("pi", "b2", projectKey: "b/b", kind: "automated"), "z3");
+        _db.AddSession("pi", "c2", projectKey: "c/c", kind: "automated");
+
+        var rows = Store.Status().ByProjectAndKind;
+
+        Assert.Equal(
+            new[]
+            {
+                new ProjectKindCount("c/c", "interactive", 1, 3),
+                new ProjectKindCount("b/b", "interactive", 1, 2),
+                new ProjectKindCount("a/a", "automated", 1, 1),
+                new ProjectKindCount("a/a", "interactive", 1, 1),
+                new ProjectKindCount("b/b", "automated", 1, 1),
+                new ProjectKindCount("c/c", "automated", 1, 0),
+            },
+            rows);
     }
 }

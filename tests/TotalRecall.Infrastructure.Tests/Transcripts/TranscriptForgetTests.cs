@@ -28,15 +28,15 @@ public sealed class TranscriptForgetTests : IDisposable
         Assert.Equal(1, _db.Scalar("SELECT count(*) FROM sqlite_master WHERE name = '_schema_version'"));
     }
 
-    private sealed record Markers(string Content, string Title, string Cwd, string Source);
+    private sealed record Markers(string Content, string Title, string Cwd, string Source, string Root);
 
     private static string Marker(string what) => "zq" + what + Guid.NewGuid().ToString("N");
 
     private Markers AddMarkedSession(string host, string id, string projectKey)
     {
-        var m = new Markers(Marker("content"), Marker("title"), Marker("cwd"), Marker("source"));
+        var m = new Markers(Marker("content"), Marker("title"), Marker("cwd"), Marker("source"), Marker("root"));
         var sid = _db.AddSession(host, id, projectKey: projectKey,
-            cwd: "/work/" + m.Cwd, title: "Session " + m.Title, sourcePath: "/logs/" + m.Source + ".jsonl");
+            cwd: "/work/" + m.Cwd, projectRoot: "/roots/" + m.Root, title: "Session " + m.Title, sourcePath: "/logs/" + m.Source + ".jsonl");
         _db.AddChunk(sid, "the user said " + m.Content + " and then more words");
         _db.AddChunk(sid, "a second exchange mentioning " + m.Content.ToUpperInvariant(), exchangeStart: 1);
         return m;
@@ -79,6 +79,7 @@ public sealed class TranscriptForgetTests : IDisposable
         Assert.True(Count(all, m.Title) > 0, "title marker missing before the forget");
         Assert.True(Count(all, m.Cwd) > 0, "cwd marker missing before the forget");
         Assert.True(Count(all, m.Source) > 0, "source marker missing before the forget");
+        Assert.True(Count(all, m.Root) > 0, "root marker missing before the forget");
     }
 
     private void AssertNoneLeft(Markers m)
@@ -88,6 +89,7 @@ public sealed class TranscriptForgetTests : IDisposable
         Assert.Equal(0, Count(all, m.Title));
         Assert.Equal(0, Count(all, m.Cwd));
         Assert.Equal(0, Count(all, m.Source));
+        Assert.Equal(0, Count(all, m.Root));
     }
 
     [Theory]
@@ -143,7 +145,8 @@ public sealed class TranscriptForgetTests : IDisposable
         Assert.Equal(0, Count(dbAndWal, m.Content));
         Assert.Equal(0, Count(dbAndWal, m.Title));
         Assert.Equal(0, Count(dbAndWal, m.Source));
-        Assert.Equal(1, Count(dbAndWal, m.Cwd));
+        Assert.Equal(0, Count(dbAndWal, m.Cwd));
+        Assert.Equal(1, Count(dbAndWal, m.Root));
         var shm = Bytes("-shm");
         Assert.Equal(0, Count(shm, m.Content));
         Assert.Equal(0, Count(shm, m.Title));

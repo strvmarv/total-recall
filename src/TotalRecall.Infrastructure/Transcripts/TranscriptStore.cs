@@ -302,10 +302,24 @@ public sealed class TranscriptStore : ITranscriptStore
                 forgottenProjects.Add(new ForgottenProject(Str(r, 0), ParseRoots(r.IsDBNull(1) ? null : r.GetString(1)), Str(r, 2)));
         }
 
+        var byProjectAndKind = new List<ProjectKindCount>();
+        using (var cmd = Command(tx,
+                   "SELECT s.project_key, s.kind, count(DISTINCT s.id), count(c.id) " +
+                   "FROM tx_session s LEFT JOIN tx_chunk c ON c.session_id = s.id " +
+                   "GROUP BY s.project_key, s.kind ORDER BY count(c.id) DESC, s.project_key, s.kind"))
+        using (var r = cmd.ExecuteReader())
+        {
+            while (r.Read())
+                byProjectAndKind.Add(new ProjectKindCount(r.GetString(0), r.GetString(1), r.GetInt64(2), r.GetInt64(3)));
+        }
+
         var cutoff = ReadCutoffText(tx);
         tx.Commit();
 
-        return new TranscriptStatus(version, _location, sessions, chunks, byKind, forgottenSessions, forgottenProjects, cutoff);
+        return new TranscriptStatus(version, _location, sessions, chunks, byKind, forgottenSessions, forgottenProjects, cutoff)
+        {
+            ByProjectAndKind = byProjectAndKind,
+        };
     }
 
     private const string SessionIds = "SELECT id FROM tx_session WHERE host = $h AND host_session_id = $s";
@@ -369,7 +383,7 @@ public sealed class TranscriptStore : ITranscriptStore
                 "INSERT INTO tx_forgotten (kind, host, host_session_id, project_key, roots, at) " +
                 "VALUES ('session', $h, $s, NULL, NULL, $at) " +
                 "ON CONFLICT (host, host_session_id) DO UPDATE SET at = excluded.at",
-                ("$h", host), ("$s", hostSessionId), ("$at", Iso(DateTimeOffset.UtcNow)));
+                ("$h", host), ("$s", hostSessionId), ("$at", TranscriptTime.Iso(DateTimeOffset.UtcNow)));
             tx.Commit();
         }
         return Finish(removed);
@@ -391,15 +405,15 @@ public sealed class TranscriptStore : ITranscriptStore
                     roots.AddRange(ParseRoots(existing));
             }
             using (var cmd = Command(tx,
-                       "SELECT DISTINCT cwd FROM tx_session WHERE project_key = $k AND cwd IS NOT NULL AND cwd <> '' ORDER BY cwd",
+                       "SELECT DISTINCT project_root FROM tx_session WHERE project_key = $k AND project_root IS NOT NULL AND project_root <> '' ORDER BY project_root",
                        ("$k", projectKey)))
             using (var r = cmd.ExecuteReader())
             {
                 while (r.Read())
                 {
-                    var cwd = r.GetString(0);
-                    if (!roots.Contains(cwd, StringComparer.Ordinal))
-                        roots.Add(cwd);
+                    var root = r.GetString(0);
+                    if (!roots.Contains(root, StringComparer.Ordinal))
+                        roots.Add(root);
                 }
             }
 
@@ -409,7 +423,7 @@ public sealed class TranscriptStore : ITranscriptStore
                 "INSERT INTO tx_forgotten (kind, host, host_session_id, project_key, roots, at) " +
                 "VALUES ('project', NULL, NULL, $k, $r, $at) " +
                 "ON CONFLICT (project_key) DO UPDATE SET roots = excluded.roots, at = excluded.at",
-                ("$k", projectKey), ("$r", WriteRoots(roots)), ("$at", Iso(DateTimeOffset.UtcNow)));
+                ("$k", projectKey), ("$r", WriteRoots(roots)), ("$at", TranscriptTime.Iso(DateTimeOffset.UtcNow)));
             tx.Commit();
         }
         return Finish(removed);
@@ -425,11 +439,11 @@ public sealed class TranscriptStore : ITranscriptStore
             Exec(tx, "DELETE FROM tx_session");
 
             var cutoff = now.ToUniversalTime();
-            if (TryParseIso(ReadCutoffText(tx), out var existing) && existing > cutoff)
+            if (TranscriptTime.TryParse(ReadCutoffText(tx), out var existing) && existing > cutoff)
                 cutoff = existing;
             Exec(tx,
                 "INSERT INTO tx_state (key, value) VALUES ($k, $v) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-                ("$k", CutoffKey), ("$v", Iso(cutoff)));
+                ("$k", CutoffKey), ("$v", TranscriptTime.Iso(cutoff)));
             tx.Commit();
         }
         return Finish(removed);
@@ -542,13 +556,17 @@ public sealed class TranscriptStore : ITranscriptStore
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(hostSessionId);
+        return IsExcludedCore(null, host, hostSessionId, projectKey, cwd);
+    }
 
-        if (Count(null,
+    private bool IsExcludedCore(SqliteTransaction? tx, string host, string hostSessionId, string? projectKey, string? cwd)
+    {
+        if (Count(tx,
                 "SELECT count(*) FROM tx_forgotten WHERE kind = 'session' AND host = $h AND host_session_id = $s",
                 ("$h", host), ("$s", hostSessionId)) > 0)
             return true;
 
-        if (projectKey is not null && Count(null,
+        if (projectKey is not null && Count(tx,
                 "SELECT count(*) FROM tx_forgotten WHERE kind = 'project' AND project_key = $k",
                 ("$k", projectKey)) > 0)
             return true;
@@ -556,7 +574,7 @@ public sealed class TranscriptStore : ITranscriptStore
         if (string.IsNullOrEmpty(cwd))
             return false;
 
-        using var cmd = Command(null, "SELECT roots FROM tx_forgotten WHERE kind = 'project' AND roots IS NOT NULL");
+        using var cmd = Command(tx, "SELECT roots FROM tx_forgotten WHERE kind = 'project' AND roots IS NOT NULL");
         using var r = cmd.ExecuteReader();
         while (r.Read())
         {
@@ -569,8 +587,177 @@ public sealed class TranscriptStore : ITranscriptStore
         return false;
     }
 
+    // ------------------------------------------------------------------
+    // Ingest
+    // ------------------------------------------------------------------
+
+    public SessionIngestState? GetIngestState(string host, string hostSessionId)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+        ArgumentNullException.ThrowIfNull(hostSessionId);
+        return GetIngestStateCore(null, host, hostSessionId);
+    }
+
+    private SessionIngestState? GetIngestStateCore(SqliteTransaction? tx, string host, string hostSessionId)
+    {
+        using var cmd = Command(tx,
+            "SELECT source_size, source_mtime, source_fingerprint, ingested_offset, exchange_count, settled_user_turns, " +
+            "kind, project_key, project_key_source, project_root, cwd, title, started_at, ended_at, built_under_cutoff, " +
+            "source_path FROM tx_session WHERE host = $h AND host_session_id = $s",
+            ("$h", host), ("$s", hostSessionId));
+        using var r = cmd.ExecuteReader();
+        if (!r.Read())
+            return null;
+        return new SessionIngestState(
+            r.IsDBNull(0) ? null : r.GetInt64(0),
+            r.IsDBNull(1) ? null : r.GetInt64(1),
+            NullableStr(r, 2),
+            r.GetInt64(3),
+            (int)r.GetInt64(4),
+            (int)r.GetInt64(5),
+            r.GetString(6),
+            r.GetString(7),
+            r.GetString(8),
+            NullableStr(r, 9),
+            NullableStr(r, 10),
+            NullableStr(r, 11),
+            NullableStr(r, 12),
+            NullableStr(r, 13),
+            NullableStr(r, 14),
+            NullableStr(r, 15));
+    }
+
+    public IngestCutoff? IngestNotBefore()
+    {
+        var raw = ReadCutoffText(null);
+        if (raw is null)
+            return null;
+        // An unreadable value counts as no cutoff time (as IsBeforeCutoff treats it) but keeps its text, so a pass built
+        // under it still compares equal.
+        return new IngestCutoff(TranscriptTime.TryParse(raw, out var at) ? at : DateTimeOffset.MinValue, raw);
+    }
+
+    public IngestOutcome ApplyIngest(SessionIngest ingest)
+    {
+        ArgumentNullException.ThrowIfNull(ingest);
+        ArgumentNullException.ThrowIfNull(ingest.Chunks);
+
+        using var tx = _conn.BeginTransaction(); // immediate: the checks and the writes see one state
+
+        if (IsExcludedCore(tx, ingest.Host, ingest.HostSessionId, ingest.ProjectKey, ingest.Cwd))
+            return new IngestOutcome(IngestOutcomeKind.Excluded);
+        if (!string.Equals(ReadCutoffText(tx), ingest.BuiltUnderCutoff, StringComparison.Ordinal))
+            return new IngestOutcome(IngestOutcomeKind.Stale);
+        if (GetIngestStateCore(tx, ingest.Host, ingest.HostSessionId) != ingest.ExpectedPrior)
+            return new IngestOutcome(IngestOutcomeKind.Conflict);
+
+        // The session row first: the chunks reference it and foreign keys are on.
+        Exec(tx,
+            "INSERT INTO tx_session (host, host_session_id, project_key, project_key_source, project_root, cwd, " +
+            "started_at, ended_at, kind, title, source_path, source_size, source_mtime, source_fingerprint, " +
+            "ingested_offset, exchange_count, settled_user_turns, built_under_cutoff) VALUES " +
+            "($host, $id, $key, $keysrc, $root, $cwd, $started, $ended, $kind, $title, $path, $size, $mtime, $fp, " +
+            "$offset, $count, $turns, $cutoff) " +
+            "ON CONFLICT (host, host_session_id) DO UPDATE SET project_key = excluded.project_key, " +
+            "project_key_source = excluded.project_key_source, project_root = excluded.project_root, " +
+            "cwd = excluded.cwd, started_at = excluded.started_at, ended_at = excluded.ended_at, " +
+            "kind = excluded.kind, title = excluded.title, source_path = excluded.source_path, " +
+            "source_size = excluded.source_size, source_mtime = excluded.source_mtime, " +
+            "source_fingerprint = excluded.source_fingerprint, ingested_offset = excluded.ingested_offset, " +
+            "exchange_count = excluded.exchange_count, settled_user_turns = excluded.settled_user_turns, " +
+            "built_under_cutoff = excluded.built_under_cutoff",
+            ("$host", ingest.Host), ("$id", ingest.HostSessionId), ("$key", ingest.ProjectKey),
+            ("$keysrc", ingest.ProjectKeySource), ("$root", Db(ingest.ProjectRoot)), ("$cwd", Db(ingest.Cwd)),
+            ("$started", Db(ingest.StartedAt)), ("$ended", Db(ingest.EndedAt)), ("$kind", ingest.Kind),
+            ("$title", Db(ingest.Title)), ("$path", ingest.SourcePath), ("$size", ingest.SourceSize),
+            ("$mtime", ingest.SourceMtime), ("$fp", Db(ingest.SourceFingerprint)), ("$offset", ingest.IngestedOffset),
+            ("$count", ingest.ExchangeCount), ("$turns", ingest.SettledUserTurns), ("$cutoff", Db(ingest.BuiltUnderCutoff)));
+
+        long sessionId;
+        using (var cmd = Command(tx, "SELECT id FROM tx_session WHERE host = $h AND host_session_id = $s",
+                   ("$h", ingest.Host), ("$s", ingest.HostSessionId)))
+            sessionId = Convert.ToInt64(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
+
+        int added = 0, changed = 0, unchanged = 0;
+        var keep = new HashSet<(int Start, int Part)>();
+        foreach (var chunk in ingest.Chunks)
+        {
+            keep.Add((chunk.ExchangeStart, chunk.Part));
+
+            long? existingId = null;
+            var same = false;
+            using (var cmd = Command(tx,
+                       "SELECT id, exchange_end, chunk_type, has_error, ts, redaction_version, content FROM tx_chunk " +
+                       "WHERE session_id = $sid AND exchange_start = $start AND part = $part",
+                       ("$sid", sessionId), ("$start", chunk.ExchangeStart), ("$part", chunk.Part)))
+            using (var r = cmd.ExecuteReader())
+            {
+                if (r.Read())
+                {
+                    existingId = r.GetInt64(0);
+                    same = r.GetInt64(1) == chunk.ExchangeEnd
+                        && r.GetString(2) == chunk.ChunkType
+                        && (r.GetInt64(3) != 0) == chunk.HasError
+                        && string.Equals(NullableStr(r, 4), chunk.Ts, StringComparison.Ordinal)
+                        && r.GetInt64(5) == chunk.RedactionVersion
+                        && string.Equals(r.GetString(6), chunk.Content, StringComparison.Ordinal);
+                }
+            }
+
+            if (existingId is null)
+            {
+                Exec(tx,
+                    "INSERT INTO tx_chunk (session_id, exchange_start, exchange_end, part, chunk_type, has_error, ts, " +
+                    "redaction_version, embedded, content) VALUES ($sid, $start, $end, $part, $type, $err, $ts, $rv, 0, $content)",
+                    ChunkParameters(sessionId, chunk));
+                added++;
+            }
+            else if (same)
+            {
+                unchanged++;
+            }
+            else
+            {
+                Exec(tx,
+                    "UPDATE tx_chunk SET exchange_end = $end, chunk_type = $type, has_error = $err, ts = $ts, " +
+                    "redaction_version = $rv, embedded = 0, content = $content " +
+                    "WHERE session_id = $sid AND exchange_start = $start AND part = $part",
+                    ChunkParameters(sessionId, chunk));
+                changed++;
+            }
+        }
+
+        var vanished = new List<long>();
+        using (var cmd = Command(tx,
+                   "SELECT id, exchange_start, part FROM tx_chunk WHERE session_id = $sid AND exchange_start >= $first",
+                   ("$sid", sessionId), ("$first", ingest.FirstRebuiltUnit)))
+        using (var r = cmd.ExecuteReader())
+        {
+            while (r.Read())
+            {
+                if (!keep.Contains(((int)r.GetInt64(1), (int)r.GetInt64(2))))
+                    vanished.Add(r.GetInt64(0));
+            }
+        }
+        foreach (var id in vanished)
+            Exec(tx, "DELETE FROM tx_chunk WHERE id = $id", ("$id", id));
+
+        tx.Commit();
+        return new IngestOutcome(IngestOutcomeKind.Applied, added, changed, unchanged, vanished.Count,
+            Created: ingest.ExpectedPrior is null);
+    }
+
+    private static (string Name, object Value)[] ChunkParameters(long sessionId, IngestChunk c) => new (string, object)[]
+    {
+        ("$sid", sessionId), ("$start", c.ExchangeStart), ("$end", c.ExchangeEnd), ("$part", c.Part),
+        ("$type", c.ChunkType), ("$err", c.HasError ? 1 : 0), ("$ts", Db(c.Ts)), ("$rv", c.RedactionVersion),
+        ("$content", c.Content),
+    };
+
+    private static object Db(string? value) => value is null ? DBNull.Value : value;
+
     public bool IsBeforeCutoff(DateTimeOffset timestamp) =>
-        TryParseIso(ReadCutoffText(null), out var cutoff) && timestamp < cutoff;
+        TranscriptTime.TryParse(ReadCutoffText(null), out var cutoff) && timestamp < cutoff;
 
     /// <summary>True when <paramref name="path"/> is <paramref name="root"/> or lies under it on a directory boundary.</summary>
     internal static bool IsUnder(string path, string root)
@@ -600,18 +787,6 @@ public sealed class TranscriptStore : ITranscriptStore
     {
         using var cmd = Command(tx, "SELECT value FROM tx_state WHERE key = $k", ("$k", CutoffKey));
         return cmd.ExecuteScalar() as string;
-    }
-
-    private static string Iso(DateTimeOffset t) =>
-        t.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", CultureInfo.InvariantCulture);
-
-    private static bool TryParseIso(string? text, out DateTimeOffset value)
-    {
-        if (text is not null && DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture,
-                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out value))
-            return true;
-        value = default;
-        return false;
     }
 
     private static readonly JsonWriterOptions RootsWriterOptions = new()
@@ -655,6 +830,8 @@ public sealed class TranscriptStore : ITranscriptStore
         }
         return list;
     }
+
+    private static string? NullableStr(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : r.GetString(i);
 
     private static string Str(SqliteDataReader r, int i) => r.IsDBNull(i) ? string.Empty : r.GetString(i);
 

@@ -41,13 +41,14 @@ internal sealed class TranscriptTestDb : IDisposable
         string? cwd = null,
         string kind = "interactive",
         string? title = null,
-        string? sourcePath = null)
+        string? sourcePath = null,
+        string? projectRoot = null)
     {
         using var conn = Connect();
         using var cmd = conn.CreateCommand();
         cmd.CommandText =
-            "INSERT INTO tx_session (host, host_session_id, project_key, project_key_source, cwd, kind, title, source_path) " +
-            "VALUES ($h, $s, $p, 'remote', $c, $k, $t, $sp); SELECT last_insert_rowid();";
+            "INSERT INTO tx_session (host, host_session_id, project_key, project_key_source, cwd, kind, title, source_path, project_root) " +
+            "VALUES ($h, $s, $p, 'remote', $c, $k, $t, $sp, $pr); SELECT last_insert_rowid();";
         cmd.Parameters.AddWithValue("$h", host);
         cmd.Parameters.AddWithValue("$s", hostSessionId);
         cmd.Parameters.AddWithValue("$p", projectKey);
@@ -55,6 +56,7 @@ internal sealed class TranscriptTestDb : IDisposable
         cmd.Parameters.AddWithValue("$k", kind);
         cmd.Parameters.AddWithValue("$t", (object?)title ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$sp", (object?)sourcePath ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$pr", (object?)projectRoot ?? DBNull.Value);
         return Convert.ToInt64(cmd.ExecuteScalar());
     }
 
@@ -70,6 +72,14 @@ internal sealed class TranscriptTestDb : IDisposable
         cmd.Parameters.AddWithValue("$p", part);
         cmd.Parameters.AddWithValue("$c", content);
         return Convert.ToInt64(cmd.ExecuteScalar());
+    }
+
+    public void Exec(string sql)
+    {
+        using var conn = Connect();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.ExecuteNonQuery();
     }
 
     public long Scalar(string sql)

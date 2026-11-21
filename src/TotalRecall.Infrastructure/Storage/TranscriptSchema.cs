@@ -18,6 +18,8 @@ internal static class TranscriptMigrationRunner
     {
         // Migration 1: sessions, chunks, text index, exclusion records, state
         Migration1_Archive,
+        // Migration 2: ingest state (settled turns, cutoff the row was built under, project root) and the status index
+        Migration2_IngestState,
     };
 
     private const string VersionDdl = """
@@ -28,9 +30,13 @@ internal static class TranscriptMigrationRunner
         """;
 
     /// <summary>Apply any pending archive migrations to <paramref name="conn"/> in one transaction.</summary>
-    public static void Run(MsSqliteConnection conn)
+    public static void Run(MsSqliteConnection conn) => Run(conn, Migrations.Length);
+
+    /// <summary>Apply pending archive migrations up to and including <paramref name="targetVersion"/> (tests build an older archive with it).</summary>
+    internal static void Run(MsSqliteConnection conn, int targetVersion)
     {
         ArgumentNullException.ThrowIfNull(conn);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(targetVersion, Migrations.Length);
 
         using var tx = conn.BeginTransaction();
 
@@ -38,7 +44,7 @@ internal static class TranscriptMigrationRunner
         var starting = (int)ReadVersion(conn, tx);
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-        for (var i = starting; i < Migrations.Length; i++)
+        for (var i = starting; i < targetVersion; i++)
         {
             Migrations[i](conn, tx);
             using var cmd = conn.CreateCommand();
@@ -167,6 +173,17 @@ internal static class TranscriptMigrationRunner
                 value TEXT NOT NULL
             )
             """);
+    }
+
+    private static void Migration2_IngestState(
+        MsSqliteConnection conn,
+        Microsoft.Data.Sqlite.SqliteTransaction tx)
+    {
+        Exec(conn, tx, "ALTER TABLE tx_session ADD COLUMN settled_user_turns INTEGER NOT NULL DEFAULT 0");
+        Exec(conn, tx, "ALTER TABLE tx_session ADD COLUMN built_under_cutoff TEXT");
+        Exec(conn, tx, "ALTER TABLE tx_session ADD COLUMN project_root TEXT");
+        Exec(conn, tx,
+            "CREATE INDEX IF NOT EXISTS idx_tx_session_project_kind ON tx_session(project_key, kind)");
     }
 
     private static void Exec(
