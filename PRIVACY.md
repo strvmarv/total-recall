@@ -23,7 +23,7 @@ By default, total-recall stores the following data in a SQLite database on your 
 | Session metadata (timestamps, access counts, compaction log) | Tier management and eval reporting |
 | Retrieval event logs | Local eval framework (`eval_report`, `eval_compare`) |
 | Config snapshots | Track how config changes affect retrieval quality |
-| Transcript archive (opt-in, off by default): the dialogue of agent sessions, with secrets meant to be redacted, once a later release can fill it; nothing is stored yet | Let a later session look back at what was said. Kept locally, in the main database or in the file `transcripts.db_path` names, and never synced by total-recall's own sync (Cortex and git). An archive in a folder that another service shares (Dropbox, iCloud, OneDrive) is copied by that service. See [Transcript archive](docs/transcripts.md) |
+| Transcript archive (opt-in, off by default): once you turn it on and run `total-recall transcripts backfill`, the dialogue of your Claude Code sessions (your prompts, the assistant's replies, one-line stubs of tool calls and the error output of failed ones, with known secret shapes redacted), plus a little metadata per session (working directory, project, title, times); the redaction finds only the shapes it lists, so a secret in another form is stored as written. Nothing is read from Claude Code's files until you run `backfill` | Let a later session look back at what was said. Kept locally, in the main database (which keeps its existing file permissions, so on Linux and macOS other local users may be able to read it) or in the file `transcripts.db_path` names (on Linux and macOS created readable only by you; on Windows it follows your user profile's permissions), and never synced by total-recall's own sync (Cortex and git). An archive in a folder that another service shares (Dropbox, iCloud, OneDrive) is copied by that service. What is kept, what is redacted and what is not: [Transcript archive](docs/transcripts.md) |
 
 You control where the database lives by setting `TOTAL_RECALL_DB_PATH`.
 
@@ -53,7 +53,7 @@ Three optional configurations send data off your machine, to a system you choose
 - **Cortex** (`[storage] mode = "cortex"`): memories and the knowledge base entries you ingest (including the project docs ingested at session start) are synced to the Cortex instance you configure, telemetry (usage, skill usage, retrieval events, the compaction log) is pushed to it, team knowledge base queries go to it, and your skills are uploaded only when `[skills] auto_import` is on.
 - **A remote embedder** (`[embedding] provider = "openai"` or `"bedrock"`): the text to embed is sent to that service.
 
-Separately, the opt-in transcript archive (off by default) is never sent to a remote embedding service unless you set `[transcripts] allow_remote_embedding = true`; archive text is otherwise embedded only by the local model. In this version the archive stores nothing and that setting has no effect yet.
+Separately, the opt-in transcript archive (off by default) is never sent to a remote embedding service unless you set `[transcripts] allow_remote_embedding = true`; archive text is otherwise embedded only by the local model. In this version nothing in the archive is embedded and that setting has no effect yet.
 
 See [Configuration](docs/configuration.md) and [Connecting to Cortex](docs/cortex.md).
 
@@ -86,6 +86,8 @@ On `session_start`, total-recall scans known memory locations for Claude Code, C
 ## Data retention and deletion
 
 All data is yours. Most memories age out automatically (decay moves unused entries to colder tiers over time), but entries you mark **sticky** (via `memory_pin`) are exempt from decay and compaction — they persist indefinitely until you explicitly unpin (`memory_unpin`) or delete them.
+
+The opt-in transcript archive has no retention period (`retention_days` has no effect yet): what `total-recall transcripts backfill` stored stays until you delete it, and nothing the host deletes later, such as a session file Claude Code removes, is removed from the archive.
 
 To delete everything:
 

@@ -93,7 +93,7 @@ public sealed class TranscriptSchemaTests
         Assert.Equal(
             new[]
             {
-                "index:idx_tx_forgotten_project", "index:idx_tx_forgotten_session",
+                "index:idx_tx_forgotten_project", "index:idx_tx_forgotten_session", "index:idx_tx_session_project_kind",
                 "table:tx_chunk", "table:tx_chunk_fts", "table:tx_chunk_fts_config", "table:tx_chunk_fts_data",
                 "table:tx_chunk_fts_docsize", "table:tx_chunk_fts_idx",
                 "table:tx_forgotten", "table:tx_schema_version", "table:tx_session", "table:tx_state",
@@ -119,6 +119,9 @@ public sealed class TranscriptSchemaTests
                 new Column("source_size", "INTEGER", false, 0), new Column("source_mtime", "INTEGER", false, 0),
                 new Column("source_fingerprint", "TEXT", false, 0), new Column("ingested_offset", "INTEGER", true, 0, "0"),
                 new Column("exchange_count", "INTEGER", true, 0, "0"),
+                new Column("settled_user_turns", "INTEGER", true, 0, "0"),
+                new Column("built_under_cutoff", "TEXT", false, 0),
+                new Column("project_root", "TEXT", false, 0),
             },
             Columns(conn, "tx_session"));
     }
@@ -197,10 +200,10 @@ public sealed class TranscriptSchemaTests
     }
 
     [Fact]
-    public void Run_RecordsVersion1_AndIsIdempotent()
+    public void Run_RecordsVersion2_AndIsIdempotent()
     {
         using var conn = Migrated();
-        Assert.Equal(1, TranscriptMigrationRunner.CurrentVersion(conn));
+        Assert.Equal(2, TranscriptMigrationRunner.CurrentVersion(conn));
         Assert.True(TranscriptMigrationRunner.IsMigrated(conn));
         var before = SchemaObjects(conn);
         var versions = Rows(conn, "SELECT version, applied_at FROM tx_schema_version");
@@ -209,7 +212,27 @@ public sealed class TranscriptSchemaTests
 
         Assert.Equal(before, SchemaObjects(conn));
         Assert.Equal(versions, Rows(conn, "SELECT version, applied_at FROM tx_schema_version"));
+        Assert.Equal(2, TranscriptMigrationRunner.CurrentVersion(conn));
+    }
+
+    [Fact]
+    public void Run_UpgradesAVersion1Archive_KeepsRows()
+    {
+        using var conn = TotalRecall.Infrastructure.Storage.SqliteConnection.Open(":memory:");
+        TranscriptMigrationRunner.Run(conn, 1);
         Assert.Equal(1, TranscriptMigrationRunner.CurrentVersion(conn));
+        var sid = AddSession(conn);
+        AddChunk(conn, sid, "upgradekeeps text");
+
+        TranscriptMigrationRunner.Run(conn);
+
+        Assert.Equal(2, TranscriptMigrationRunner.CurrentVersion(conn));
+        Assert.Equal(1, Scalar(conn, "SELECT COUNT(*) FROM tx_session"));
+        Assert.Equal(1, Scalar(conn, "SELECT COUNT(*) FROM tx_chunk"));
+        Assert.Equal(1, FtsHits(conn, "upgradekeeps"));
+        Assert.Equal(0, Scalar(conn, "SELECT settled_user_turns FROM tx_session"));
+        Assert.Equal(0, Scalar(conn, "SELECT COUNT(*) FROM tx_session WHERE built_under_cutoff IS NOT NULL OR project_root IS NOT NULL"));
+        Assert.Equal(1, Scalar(conn, "SELECT COUNT(*) FROM sqlite_master WHERE name = 'idx_tx_session_project_kind'"));
     }
 
     [Fact]
@@ -242,7 +265,7 @@ public sealed class TranscriptSchemaTests
         Assert.Equal(18, Scalar(conn, "SELECT COUNT(*) FROM _schema_version"));
         Assert.Equal(18, Scalar(conn, "SELECT MAX(version) FROM _schema_version"));
         Assert.Equal(meta, Rows(conn, "SELECT key, value FROM _meta ORDER BY key"));
-        Assert.Equal(1, TranscriptMigrationRunner.CurrentVersion(conn));
+        Assert.Equal(2, TranscriptMigrationRunner.CurrentVersion(conn));
     }
 
     [Theory]
