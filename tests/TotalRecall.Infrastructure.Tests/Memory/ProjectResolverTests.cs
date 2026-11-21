@@ -101,4 +101,64 @@ public class ProjectResolverTests : IDisposable
         Assert.Equal("o/a", r.Resolve(a)); // cached
         Assert.Equal("o/b", r.Resolve(b)); // different key re-resolves
     }
+
+    private string MakeWorktree(string main, string name)
+    {
+        var admin = Path.Combine(main, ".git", "worktrees", name);
+        Directory.CreateDirectory(admin);
+        File.WriteAllText(Path.Combine(admin, "commondir"), "../..\n");
+        var wt = Path.Combine(_root, name + "-dir");
+        Directory.CreateDirectory(wt);
+        File.WriteAllText(Path.Combine(wt, ".git"), $"gitdir: {admin}\n");
+        return wt;
+    }
+
+    [Fact]
+    public void ResolveRoot_GitDirectory_IsItsParent()
+    {
+        var repo = MakeRepo("myrepo", null);
+        var nested = Path.Combine(repo, "a", "b");
+        Directory.CreateDirectory(nested);
+        var r = new ProjectResolver();
+        Assert.Equal(repo, r.ResolveRoot(repo));
+        Assert.Equal(repo, r.ResolveRoot(nested));
+    }
+
+    [Fact]
+    public void ResolveRoot_LinkedWorktree_IsMainRepo()
+    {
+        var main = MakeRepo("mainrepo", "https://github.com/o/mainrepo.git");
+        var wt = MakeWorktree(main, "feature");
+        var sub = Path.Combine(wt, "src");
+        Directory.CreateDirectory(sub);
+        var r = new ProjectResolver();
+        Assert.Equal(main, r.ResolveRoot(wt));
+        Assert.Equal(main, r.ResolveRoot(sub));
+    }
+
+    [Fact]
+    public void ResolveRoot_Submodule_IsDirHoldingDotGitFile()
+    {
+        var super = MakeRepo("super", null);
+        var modules = Path.Combine(super, ".git", "modules", "sub");
+        Directory.CreateDirectory(modules);
+        var sub = Path.Combine(super, "vendor", "sub");
+        Directory.CreateDirectory(sub);
+        File.WriteAllText(Path.Combine(sub, ".git"), "gitdir: ../../.git/modules/sub\n");
+        var deeper = Path.Combine(sub, "lib");
+        Directory.CreateDirectory(deeper);
+        var r = new ProjectResolver();
+        Assert.Equal(sub, r.ResolveRoot(sub));
+        Assert.Equal(sub, r.ResolveRoot(deeper));
+    }
+
+    [Fact]
+    public void ResolveRoot_NoRepoOrMissing_IsNull()
+    {
+        var plain = Path.Combine(_root, "plain");
+        Directory.CreateDirectory(plain);
+        var r = new ProjectResolver();
+        Assert.Null(r.ResolveRoot(plain));
+        Assert.Null(r.ResolveRoot(Path.Combine(_root, "missing")));
+    }
 }

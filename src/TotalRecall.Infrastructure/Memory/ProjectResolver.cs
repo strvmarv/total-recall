@@ -25,24 +25,63 @@ public sealed class ProjectResolver
         return _cache.GetOrAdd(key, ResolveUncached);
     }
 
+    /// <summary>
+    /// The root directory of the repository holding <paramref name="startDir"/>, or null when the directory is missing
+    /// or no repository holds it. A <c>.git</c> directory gives the directory that holds it; a linked worktree's
+    /// <c>.git</c> file gives the main repository's directory (the parent of the common git directory, found through
+    /// <c>gitdir</c> and <c>commondir</c>), so a live worktree and a deleted one give the same root; a <c>.git</c> file
+    /// with no <c>commondir</c> (a submodule) gives the directory that holds the file. Not memoized; fail-soft.
+    /// </summary>
+    public string? ResolveRoot(string startDir)
+    {
+        try
+        {
+            var repo = Locate(Path.GetFullPath(startDir));
+            return repo?.Root;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private sealed record Repo(string CommonDir, string Root);
+
+    /// <summary>The shared walk: nearest <c>.git</c> upward from <paramref name="startDir"/>, its common dir and its root.</summary>
+    private static Repo? Locate(string startDir)
+    {
+        if (!Directory.Exists(startDir)) return null;
+
+        var dotGit = FindDotGit(startDir);
+        if (dotGit is null) return null;
+
+        var commonDir = ResolveCommonDir(dotGit, out var hasCommonDir);
+        if (commonDir is null) return null;
+
+        string? root;
+        if (Directory.Exists(dotGit) || hasCommonDir)
+            root = ParentOf(commonDir);
+        else
+            root = Path.GetDirectoryName(dotGit);
+        return root is null ? null : new Repo(commonDir, root);
+    }
+
+    private static string? ParentOf(string dir) =>
+        Path.GetDirectoryName(dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+
     private static string? ResolveUncached(string startDir)
     {
         try
         {
-            if (!Directory.Exists(startDir)) return null;
-
-            var dotGit = FindDotGit(startDir);
-            if (dotGit is null) return null;
-
-            var commonDir = ResolveCommonDir(dotGit);
-            if (commonDir is null) return null;
+            var repo = Locate(startDir);
+            if (repo is null) return null;
+            var commonDir = repo.CommonDir;
 
             var slug = SlugFromConfig(Path.Combine(commonDir, "config"));
             if (slug is not null) return slug;
 
             // No remote: repo-root folder = parent of the common git dir.
-            var repoRoot = Path.GetDirectoryName(commonDir.TrimEnd(
-                Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            var repoRoot = ParentOf(commonDir);
             var folder = repoRoot is null ? null : Path.GetFileName(repoRoot);
             return string.IsNullOrEmpty(folder) ? null : folder.ToLowerInvariant();
         }
@@ -71,8 +110,9 @@ public sealed class ProjectResolver
     /// itself. For a <c>.git</c> FILE (linked worktree/submodule), follow
     /// <c>gitdir:</c> and then a <c>commondir</c> file if present.
     /// </summary>
-    private static string? ResolveCommonDir(string dotGitPath)
+    private static string? ResolveCommonDir(string dotGitPath, out bool hasCommonDir)
     {
+        hasCommonDir = false;
         if (Directory.Exists(dotGitPath)) return dotGitPath;
 
         // .git is a file: "gitdir: <path>"
@@ -92,6 +132,7 @@ public sealed class ProjectResolver
             var common = File.ReadAllText(commonDirFile).Trim();
             if (!Path.IsPathRooted(common))
                 common = Path.GetFullPath(Path.Combine(gitDir, common));
+            hasCommonDir = true;
             return common;
         }
         return gitDir;
