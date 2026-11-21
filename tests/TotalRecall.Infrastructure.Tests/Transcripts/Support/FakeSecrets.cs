@@ -33,7 +33,7 @@ public sealed class FakeSecrets(int seed)
         "private-key" => PrivateKey(name, terminated: true),
         "private-key-unterminated" => PrivateKey(name, terminated: false),
         "bearer-token" => Pick(name, Alnum, 32),
-        "url-password" => Pick(name + "a", Alnum, 4) + "@" + Pick(name + "b", Alnum, 5) + "/" + Pick(name + "c", Alnum, 3)
+        "url-password" => Pick(name + "a", Alnum, 4) + "@" + Pick(name + "b", Alnum, 4) + "/" + Pick(name + "c", Alnum, 3)
                           + "+" + Pick(name + "d", Alnum, 2),
         "api-key-value" => Pick(name + "a", Alnum, 7) + "," + Pick(name + "b", Alnum, 7) + ";" + Pick(name + "c", Alnum, 4)
                            + "&" + Pick(name + "d", Alnum, 3),

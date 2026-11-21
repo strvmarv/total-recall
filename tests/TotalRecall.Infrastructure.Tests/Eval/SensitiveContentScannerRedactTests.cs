@@ -57,7 +57,22 @@ public sealed class SensitiveContentScannerRedactTests
     }
 
     [Theory]
+    [InlineData("None-")]
+    [InlineData("or-v1-")]
+    [InlineData("live_")]
+    public void Redact_GeneralSkKeys_BecomeTokenMarker(string infix)
+    {
+        var secret = "s" + "k-" + infix + Fakes.Get("bearer-token")[..12] + "-" + Fakes.Get("bearer-token")[12..24];
+        var result = SensitiveContentScanner.Redact("key " + secret + " here");
+
+        Assert.Equal("key " + Token + " here", result.Text);
+        Assert.Equal(1, result.Count);
+        AssertNoWindowOf(secret, result.Text);
+    }
+
+    [Theory]
     [InlineData("task-list-management-and-more")]
+    [InlineData("disk-usage-monitoring-tool-extra")]
     [InlineData("mask-abcdefghijklmnopqrst")]
     public void Redact_SkWithoutLeftBoundary_IsKept(string text)
     {
@@ -132,6 +147,24 @@ public sealed class SensitiveContentScannerRedactTests
             { "Proxy-Authorization: Basic " + v + "\r\nHost: x", "Proxy-Authorization: Basic " + Bearer + "\r\nHost: x" },
             { "Authorization: " + v[..8], "Authorization: " + Bearer },
             { "Bearer " + v[..16], "Bearer " + Bearer },
+            // Long runs of blanks around the separator (aligned code, gofmt, terraform fmt).
+            { "Authorization" + new string(' ', 13) + ":" + new string(' ', 11) + "Basic " + v,
+              "Authorization" + new string(' ', 13) + ":" + new string(' ', 11) + "Basic " + Bearer },
+            { "x-api-key:" + new string(' ', 11) + v, "x-api-key:" + new string(' ', 11) + Bearer },
+            { "Bearer" + new string(' ', 11) + v, "Bearer" + new string(' ', 11) + Bearer },
+            // An index, a PHP/Ruby arrow and a quoted name followed by a comma.
+            { "headers[\"Authorization\"] = \"Basic " + v + "==\"", "headers[\"Authorization\"] = \"Basic " + Bearer + "\"" },
+            { "$h = ['Authorization' => 'Basic " + v + "'];", "$h = ['Authorization' => 'Basic " + Bearer + "'];" },
+            { "req.Header.Set(\"Authorization\", \"Basic " + v + "\")", "req.Header.Set(\"Authorization\", \"Basic " + Bearer + "\")" },
+            { "headers['x-api-key'] = '" + v + "'", "headers['x-api-key'] = '" + Bearer + "'" },
+            // Schemes outside the listed four are skipped as one word, so the credential after them is the value.
+            { "Authorization: ApiKey " + v, "Authorization: ApiKey " + Bearer },
+            { "Authorization: SSWS " + v, "Authorization: SSWS " + Bearer },
+            { "Authorization: Key " + v, "Authorization: Key " + Bearer },
+            { "Authorization: Bot " + v, "Authorization: Bot " + Bearer },
+            { "\"Authorization\": \"ApiKey " + v + "\"", "\"Authorization\": \"ApiKey " + Bearer + "\"" },
+            // A scheme-less credential followed by more words is still redacted.
+            { "Authorization: " + v + " ok", "Authorization: " + Bearer + " ok" },
         };
     }
 
@@ -168,6 +201,7 @@ public sealed class SensitiveContentScannerRedactTests
         Assert.Equal(new[] { "url-credentials" }, spec.Categories);
 
         var pw = Fakes.Get("url-password");
+        Assert.Equal(16, pw.Length);
         Assert.Contains("/", pw);
         Assert.Contains("+", pw);
         Assert.Contains("@", pw);
@@ -208,6 +242,15 @@ public sealed class SensitiveContentScannerRedactTests
             { "api_key = \"" + b + "\"", "api_key = \"" + SecretAssignment + "\"" },
             { "AWS_SECRET_ACCESS_KEY=" + b, "AWS_SECRET_ACCESS_KEY=" + SecretAssignment },
             { "TOKEN=\"unterminated " + b, "TOKEN=\"" + SecretAssignment },
+            // Long runs of blanks around the separator (terraform fmt, gofmt, aligned flags).
+            { "password" + new string(' ', 13) + "= \"" + b + "\"", "password" + new string(' ', 13) + "= \"" + SecretAssignment + "\"" },
+            { "Password:" + new string(' ', 11) + "\"" + b + "\",", "Password:" + new string(' ', 11) + "\"" + SecretAssignment + "\"," },
+            { "tool --password" + new string(' ', 11) + b + " -v", "tool --password" + new string(' ', 11) + SecretAssignment + " -v" },
+            // Double-encoded JSON: an escaped quote of the inner layer (\\\") does not close the value.
+            { "{\\\"password\\\": \\\"" + left + "\\\\\\\"" + right + "\\\"}", "{\\\"password\\\": \\\"" + SecretAssignment + "\\\"}" },
+            // Punctuation inside or after an unquoted value is part of the run.
+            { "TOKEN=" + left + "," + right, "TOKEN=" + SecretAssignment },
+            { "TOKEN=" + left + "}", "TOKEN=" + SecretAssignment },
         };
     }
 
@@ -234,6 +277,9 @@ public sealed class SensitiveContentScannerRedactTests
     [InlineData("scheme://user:${PASS}@host")]
     [InlineData("Authorization: Bearer ${GITHUB_TOKEN}")]
     [InlineData("Authorization: Bearer <your-access-token>")]
+    [InlineData("{\"token\": null, \"a\": 1}")]
+    [InlineData("{\"api_key\": true}")]
+    [InlineData("TOKEN=${GH_TOKEN};")]
     public void Redact_ReferencesAndPlaceholders_AreKept(string text)
     {
         var result = SensitiveContentScanner.Redact(text);
@@ -271,7 +317,7 @@ public sealed class SensitiveContentScannerRedactTests
     }
 
     [Fact]
-    public void Redact_NullOrEmpty_ReturnsSameWithCountZero()
+    public void Redact_NullOrEmpty_ReturnsEmptyWithCountZero()
     {
         var empty = SensitiveContentScanner.Redact("");
         Assert.Equal("", empty.Text);
@@ -279,7 +325,7 @@ public sealed class SensitiveContentScannerRedactTests
         Assert.Empty(empty.Categories);
 
         var none = SensitiveContentScanner.Redact(null);
-        Assert.Null(none.Text);
+        Assert.Equal("", none.Text);
         Assert.Equal(0, none.Count);
         Assert.Empty(none.Categories);
     }
@@ -331,6 +377,12 @@ public sealed class SensitiveContentScannerRedactTests
     [InlineData("TOKEN=\"")]
     [InlineData("Bearer ")]
     [InlineData("-----BEGIN RSA PRIVATE KEY-----")]
+    [InlineData("_key            ")]
+    [InlineData("Authorization            ")]
+    [InlineData("Authorization: Key ")]
+    [InlineData("\\")]
+    [InlineData("\\\"api_key\\\": \\\"\\\\\\")]
+    [InlineData("TOKEN=null},")]
     public void Redact_AdversarialInputs_FinishWellUnderASecond(string unit)
     {
         var text = Repeat(unit, OneMiB);
@@ -342,6 +394,30 @@ public sealed class SensitiveContentScannerRedactTests
 
         Assert.True(sw.ElapsedMilliseconds < 1000, $"took {sw.ElapsedMilliseconds} ms");
         Assert.DoesNotContain(Unprocessable, result.Text);
+    }
+
+    [Theory]
+    [InlineData("_key", ' ')]
+    [InlineData("_key", '\t')]
+    [InlineData("password", ' ')]
+    [InlineData("\"token\"", ' ')]
+    [InlineData("Authorization", ' ')]
+    [InlineData("\"Authorization\"", ' ')]
+    [InlineData("x-api-key", ' ')]
+    [InlineData("--password", ' ')]
+    [InlineData("Bearer", ' ')]
+    [InlineData("Authorization: Bearer", ' ')]
+    public void Redact_NameThenAMebibyteOfBlanks_FinishesWellUnderASecond(string name, char blank)
+    {
+        var text = name + new string(blank, OneMiB);
+        SensitiveContentScanner.Redact("warm up the patterns: TOKEN=x");
+
+        var sw = Stopwatch.StartNew();
+        var result = SensitiveContentScanner.Redact(text);
+        sw.Stop();
+
+        Assert.True(sw.ElapsedMilliseconds < 1000, $"took {sw.ElapsedMilliseconds} ms");
+        Assert.Equal(text, result.Text);
     }
 
     [Fact]

@@ -141,7 +141,7 @@ public static class SensitiveContentScanner
 
     /// <summary>
     /// Replace every detected secret in <paramref name="text"/> with <c>[redacted:&lt;category&gt;]</c>. Null or empty
-    /// text comes back as it was (null stays null) with count 0. A detector that runs into its 5-second match timeout
+    /// text comes back as the empty string with count 0 (<see cref="RedactionResult.Text"/> is never null). A detector that runs into its 5-second match timeout
     /// fails closed: the whole text becomes <c>[redacted:unprocessable]</c>.
     /// </summary>
     public static RedactionResult Redact(string? text) => Redact(text, _redaction);
@@ -152,7 +152,7 @@ public static class SensitiveContentScanner
 
     private static RedactionResult Redact(string? text, RedactionPatterns patterns)
     {
-        if (string.IsNullOrEmpty(text)) return new RedactionResult(text!, 0, Array.Empty<string>());
+        if (string.IsNullOrEmpty(text)) return new RedactionResult("", 0, Array.Empty<string>());
 
         var spans = new List<Span>();
         try
@@ -196,13 +196,22 @@ public static class SensitiveContentScanner
         private const RegexOptions Ci = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
 
         // After a secret name: an optional closing quote (escaped or not) and ], blanks, an optionally escaped
-        // separator (:=, =>, = to ===, or a single :), blanks.
-        private const string NameTail = @"(?![A-Za-z0-9_])(?:\\?[""'])?\]?[ \t]{0,10}\\?(?::=|=>|={1,3}|:(?!:))[ \t]{0,10}";
+        // separator (:=, =>, = to ===, or a single :), blanks. The blank runs are unbounded but unambiguous: nothing
+        // that follows them can be a blank, so aligned code (terraform fmt, gofmt) with any number of blanks matches.
+        private const string NameTail = @"(?![A-Za-z0-9_])(?:\\?[""'])?\]?[ \t]*\\?(?::=|=>|={1,3}|:(?!:))[ \t]*";
+
+        // After an Authorization or x-api-key header name: either a closing quote (escaped or not), an optional ] and
+        // a separator that may also be a comma (Header.Set("Authorization", "...")), or an optional ] and a separator;
+        // the separator is =>, or an optionally escaped : or =. Blank runs as in NameTail.
+        private const string HeaderTail =
+            @"(?:\\?[""']\]?[ \t]*(?:=>|,|\\?[:=])|\]?[ \t]*(?:=>|\\?[:=]))[ \t]*";
 
         public RedactionPatterns(TimeSpan timeout)
         {
-            // The existing token shapes, plus sk- keys with a left boundary: the classic sk-<16+ alphanumerics> and the
-            // hyphenated sk-ant-, sk-proj-, sk-svcacct-, sk-admin- forms with at least 20 characters after the prefix.
+            // The existing token shapes, plus sk- keys with a left boundary: the hyphenated sk-ant-, sk-proj-,
+            // sk-svcacct-, sk-admin- forms with at least 20 characters after the prefix, any other sk- followed by 20 or
+            // more of [A-Za-z0-9_-] (sk-None-, sk-or-v1-, ...; the named prefixes keep their own 20-character rule),
+            // and the classic sk-<16+ alphanumerics>.
             Tokens = new[]
             {
                 new Regex(@"gh[pousr]_[A-Za-z0-9]{16,}", Cs, timeout),
@@ -210,19 +219,19 @@ public static class SensitiveContentScanner
                 new Regex(@"glpat-[A-Za-z0-9_\-]{16,}", Cs, timeout),
                 new Regex(@"xox[baprs]-[A-Za-z0-9\-]{10,}", Cs, timeout),
                 new Regex(@"AKIA[0-9A-Z]{16}", Cs, timeout),
-                new Regex(@"(?<![A-Za-z0-9])sk-(?:(?:ant|proj|svcacct|admin)-[A-Za-z0-9_\-]{20,}|[A-Za-z0-9]{16,})", Cs, timeout),
+                new Regex(@"(?<![A-Za-z0-9])sk-(?:(?:ant|proj|svcacct|admin)-[A-Za-z0-9_\-]{20,}|(?!(?:ant|proj|svcacct|admin)-)[A-Za-z0-9_\-]{20,}|[A-Za-z0-9]{16,})", Cs, timeout),
             };
 
             // The BEGIN line; the END line with the same label is found by an ordinal search.
             PrivateKeyBegin = new Regex(@"-----BEGIN (?<label>[A-Z ]{0,40})PRIVATE KEY(?<block> BLOCK)?-----", Cs, timeout);
 
-            // An Authorization or x-api-key header name and its separator (an optional closing quote, escaped or
-            // not, after the name; = or :). The optional opening quote, scheme and value are read by hand.
-            Authorization = new Regex(@"(?<![A-Za-z0-9])authorization(?:\\?[""'])?[ \t]{0,10}\\?[:=][ \t]{0,10}", Ci, timeout);
-            ApiKeyHeader = new Regex(@"(?<![A-Za-z0-9])x-api-key(?:\\?[""'])?[ \t]{0,10}\\?[:=][ \t]{0,10}", Ci, timeout);
+            // An Authorization or x-api-key header name and its separator (see HeaderTail). The optional opening
+            // quote, scheme and value are read by hand.
+            Authorization = new Regex(@"(?<![A-Za-z0-9])authorization" + HeaderTail, Ci, timeout);
+            ApiKeyHeader = new Regex(@"(?<![A-Za-z0-9])x-api-key" + HeaderTail, Ci, timeout);
 
-            // A bare Bearer and the blanks after it.
-            BareBearer = new Regex(@"(?<![A-Za-z0-9])bearer[ \t]{1,10}", Ci, timeout);
+            // A bare Bearer and the blanks after it (a trailing run: nothing follows it in the pattern).
+            BareBearer = new Regex(@"(?<![A-Za-z0-9])bearer[ \t]+", Ci, timeout);
 
             // A secret-named variable and its separator. A name ending in _KEY/_TOKEN/_SECRET/_PASSWORD/_PASSWD is
             // found by its suffix only, so the name's length is unlimited and the match is unambiguous; the bare names
@@ -239,7 +248,7 @@ public static class SensitiveContentScanner
                 new Regex(@"(?<![A-Za-z0-9_])token" + NameTail, Ci, timeout),
                 new Regex(@"(?<![A-Za-z0-9_])apikey" + NameTail, Ci, timeout),
                 new Regex(@"(?<![A-Za-z0-9_])passphrase" + NameTail, Ci, timeout),
-                new Regex(@"(?<![A-Za-z0-9_\-])--(?:password|passwd|token|api-key|secret|auth-token)(?:=|[ \t]{1,10})", Ci, timeout),
+                new Regex(@"(?<![A-Za-z0-9_\-])--(?:password|passwd|token|api-key|secret|auth-token)(?:=|[ \t]+)", Ci, timeout),
             };
         }
 
@@ -288,7 +297,20 @@ public static class SensitiveContentScanner
 
             var p = pos;
             var quote = OpenQuote(text, ref p);
-            if (hasScheme) p = SkipScheme(text, p);
+            if (hasScheme)
+            {
+                var wordStart = p;
+                p = SkipScheme(text, p, out var listed, out var wordEnd);
+                // An unlisted word is kept as a scheme only while it is too short to be a credential itself. A longer
+                // one may be a scheme-less credential followed by more words: inside quotes the whole content is then
+                // the value; unquoted, the word is redacted on its own as well as the run after it.
+                var word = new Value(wordStart, wordEnd, QuoteKind.None);
+                if (!listed && p > wordStart && word.Length >= 8)
+                {
+                    if (quote != QuoteKind.None) p = wordStart;
+                    else if (!IsExempt(text, word)) spans.Add(new Span(word.Start, word.End, CatBearer));
+                }
+            }
 
             Value value;
             if (quote != QuoteKind.None) value = new Value(p, CloseQuote(text, p, quote), quote);
@@ -450,8 +472,14 @@ public static class SensitiveContentScanner
     }
 
     /// <summary>Where the quoted content that starts at <paramref name="start"/> ends: at its closing quote, else at the end of the line.</summary>
+    /// <remarks>
+    /// The escaped-JSON closer <c>\"</c> closes only when the backslashes before the quote decode (one layer) to an even
+    /// number, i.e. their count is 1, 5, 9, ...: <c>\\\"</c> (three) is an escaped quote of the inner layer inside the
+    /// value, not the closer.
+    /// </remarks>
     private static int CloseQuote(string text, int start, QuoteKind quote)
     {
+        var backslashes = 0;
         for (var i = start; i < text.Length; i++)
         {
             var c = text[i];
@@ -461,10 +489,13 @@ public static class SensitiveContentScanner
                 case QuoteKind.Double when c == '"' && text[i - 1] != '\\':
                 case QuoteKind.Single when c == '\'':
                     return i;
-                case QuoteKind.EscapedDouble when c == '\\' && i + 1 < text.Length && text[i + 1] == '"':
+                case QuoteKind.EscapedDouble when c == '"' && backslashes % 4 == 1:
+                    return i - 1;
                 case QuoteKind.EscapedSingle when c == '\\' && i + 1 < text.Length && text[i + 1] == '\'':
                     return i;
             }
+
+            backslashes = c == '\\' ? backslashes + 1 : 0;
         }
 
         return text.Length;
@@ -516,13 +547,35 @@ public static class SensitiveContentScanner
     private static bool IsExempt(string text, Value value)
     {
         var s = text.AsSpan(value.Start, value.Length);
+        if (IsExemptSpan(s, value.Quote)) return true;
+
+        // An unquoted run takes the punctuation that closes the surrounding structure ("token": null, or
+        // {"api_key": true}); judge the value without it. The redacted span still covers the whole run. The value is
+        // tried with up to four trailing characters dropped one at a time (so ${NAME}; keeps its own brace) and with
+        // all of them dropped; a bounded number of checks keeps this linear.
+        if (value.Quote != QuoteKind.None) return false;
+        var cut = s;
+        for (var k = 0; k < 4 && cut.Length > 0 && IsClosingPunctuation(cut[^1]); k++)
+        {
+            cut = cut[..^1];
+            if (IsExemptSpan(cut, value.Quote)) return true;
+        }
+
+        var trimmed = s.TrimEnd(",;})]");
+        return trimmed.Length < cut.Length && IsExemptSpan(trimmed, value.Quote);
+    }
+
+    private static bool IsClosingPunctuation(char c) => c is ',' or ';' or '}' or ')' or ']';
+
+    private static bool IsExemptSpan(ReadOnlySpan<char> s, QuoteKind quote)
+    {
         if (s.IsEmpty) return true;
         if (s.Equals("true", StringComparison.OrdinalIgnoreCase) || s.Equals("false", StringComparison.OrdinalIgnoreCase)
             || s.Equals("null", StringComparison.OrdinalIgnoreCase) || s.Equals("none", StringComparison.OrdinalIgnoreCase)
             || s.Equals("undefined", StringComparison.OrdinalIgnoreCase))
             return true;
         if (IsAnglePlaceholder(s) || IsBracePlaceholder(s)) return true;
-        return value.Quote is QuoteKind.None or QuoteKind.Double or QuoteKind.EscapedDouble && IsReference(s);
+        return quote is QuoteKind.None or QuoteKind.Double or QuoteKind.EscapedDouble && IsReference(s);
     }
 
     private static bool IsReference(ReadOnlySpan<char> s)
@@ -567,21 +620,35 @@ public static class SensitiveContentScanner
 
     private static bool IsAsciiDigit(char c) => c is >= '0' and <= '9';
 
-    // An Authorization scheme (Bearer, Basic, Token, Digest) followed by blanks: the index after the blanks, else p.
-    private static int SkipScheme(string text, int p)
+    /// <summary>
+    /// An Authorization scheme at <paramref name="p"/>: one word <c>[A-Za-z][A-Za-z0-9-]{0,30}</c> followed by blanks
+    /// and then a non-blank character. Returns the index after the blanks (where the credential starts), else
+    /// <paramref name="p"/>. <paramref name="listed"/> tells whether the word is Bearer, Basic, Token or Digest, and
+    /// <paramref name="wordEnd"/> is the index after the word (<paramref name="p"/> when there is no scheme).
+    /// </summary>
+    private static int SkipScheme(string text, int p, out bool listed, out int wordEnd)
     {
+        listed = false;
+        wordEnd = p;
+        if (p >= text.Length || !IsAsciiLetter(text[p])) return p;
+
+        var end = p + 1;
+        while (end < text.Length && end - p <= 31 && (IsAsciiLetter(text[end]) || IsAsciiDigit(text[end]) || text[end] == '-'))
+            end++;
+        if (end - p > 31 || end >= text.Length || text[end] is not (' ' or '\t')) return p;
+
+        var after = end;
+        while (after < text.Length && text[after] is ' ' or '\t') after++;
+        if (after >= text.Length || char.IsWhiteSpace(text[after])) return p;
+
+        var word = text.AsSpan(p, end - p);
         foreach (var scheme in AuthSchemes)
         {
-            var after = p + scheme.Length;
-            if (after < text.Length && text[after] is ' ' or '\t'
-                && text.AsSpan(p, scheme.Length).Equals(scheme, StringComparison.OrdinalIgnoreCase))
-            {
-                while (after < text.Length && text[after] is ' ' or '\t') after++;
-                return after;
-            }
+            if (word.Equals(scheme, StringComparison.OrdinalIgnoreCase)) listed = true;
         }
 
-        return p;
+        wordEnd = end;
+        return after;
     }
 
     private static readonly string[] AuthSchemes = { "Bearer", "Basic", "Token", "Digest" };
