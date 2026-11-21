@@ -283,6 +283,19 @@ public sealed class SensitiveContentScannerRedactTests
             // Punctuation inside or after an unquoted value is part of the run.
             { "TOKEN=" + left + "," + right, "TOKEN=" + SecretAssignment },
             { "TOKEN=" + left + "}", "TOKEN=" + SecretAssignment },
+            // A shell word made of joined quoted pieces is one value (no tail of the secret is left behind).
+            { "export DB_PASSWORD='It'\\''s-a-long-passphrase'", "export DB_PASSWORD='" + SecretAssignment + "'" },
+            { "tool --password='p4ss'\\''w0rd-long-tail' -v", "tool --password='" + SecretAssignment + "' -v" },
+            { "PASSWORD=\"abc\"def123456 next", "PASSWORD=\"" + SecretAssignment + " next" },
+            { "PASSWORD=\"abc\"'d e f' next", "PASSWORD=\"" + SecretAssignment + "' next" },
+            // ... but a quoted value followed by a blank or by structure ends at its closing quote.
+            { "PASSWORD='x' && echo done", "PASSWORD='" + SecretAssignment + "' && echo done" },
+            { "PASSWORD=\"x\"&& echo done", "PASSWORD=\"" + SecretAssignment + "\"&& echo done" },
+            { "PASSWORD=\"x\"; echo done", "PASSWORD=\"" + SecretAssignment + "\"; echo done" },
+            { "f(PASSWORD='x'), g", "f(PASSWORD='" + SecretAssignment + "'), g" },
+            { "{\"password\":\"x\"}", "{\"password\":\"" + SecretAssignment + "\"}" },
+            { "{\"password\": \"x\", \"user\": \"bob\"}", "{\"password\": \"" + SecretAssignment + "\", \"user\": \"bob\"}" },
+            { "\\\"api_key\\\": \\\"v\\\", \\\"user\\\": \\\"bob\\\"", "\\\"api_key\\\": \\\"" + SecretAssignment + "\\\", \\\"user\\\": \\\"bob\\\"" },
         };
     }
 
@@ -415,6 +428,9 @@ public sealed class SensitiveContentScannerRedactTests
     [InlineData("\\")]
     [InlineData("\\\"api_key\\\": \\\"\\\\\\")]
     [InlineData("TOKEN=null},")]
+    [InlineData("PASSWORD='x'\\''")]
+    [InlineData("TOKEN=\"a\"b")]
+    [InlineData("TOKEN='a'\"")]
     public void Redact_AdversarialInputs_FinishWellUnderASecond(string unit)
     {
         var text = Repeat(unit, OneMiB);

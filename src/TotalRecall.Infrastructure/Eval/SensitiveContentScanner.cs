@@ -420,7 +420,10 @@ public static class SensitiveContentScanner
     /// closing quote, or to the end of the line when there is none. Otherwise a $(...) substitution (balanced
     /// parentheses), a backtick substitution or a {{ ... }} placeholder is one piece, and the value is that piece plus
     /// the rest of the run of non-whitespace characters (for bearer values the run also stops at a quote or a
-    /// backslash). No value when the text ends or a blank follows.
+    /// backslash). No value when the text ends or a blank follows. For an assignment (<paramref name="stopAtQuotes"/>
+    /// false), a plain quoted value that a quote, a backslash, a letter or a digit follows right after its closing quote
+    /// is one shell word joined from pieces (<c>'It'\''s-long'</c>, <c>"abc"def</c>): the value runs to the end of that
+    /// word (<see cref="JoinShellWord"/>).
     /// </summary>
     private static bool ReadValue(string text, int pos, bool stopAtQuotes, out Value value)
     {
@@ -431,7 +434,11 @@ public static class SensitiveContentScanner
         var quote = OpenQuote(text, ref p);
         if (quote != QuoteKind.None)
         {
-            value = new Value(p, CloseQuote(text, p, quote), quote);
+            var close = CloseQuote(text, p, quote);
+            if (!stopAtQuotes && quote is QuoteKind.Double or QuoteKind.Single && close < text.Length
+                && text[close] == (quote == QuoteKind.Double ? '"' : '\''))
+                close = JoinShellWord(text, close);
+            value = new Value(p, close, quote);
             return true;
         }
 
@@ -505,6 +512,58 @@ public static class SensitiveContentScanner
         }
 
         return text.Length;
+    }
+
+    /// <summary>
+    /// From the closing quote at <paramref name="close"/> of a plain quoted value: where the value ends when the shell word
+    /// goes on (<paramref name="close"/> itself when it does not). The word goes on when a quote, a backslash, a letter or
+    /// a digit follows the closing quote; it then takes quoted pieces (single to the next <c>'</c>, double to the next
+    /// <c>"</c> not preceded by a backslash), backslash escapes and any other non-blank character, up to a blank or the end
+    /// of the line. A word that ends in a quoted piece ends before that piece's closing quote, so the marker keeps the
+    /// outer quotes. Linear: the index only moves forward.
+    /// </summary>
+    private static int JoinShellWord(string text, int close)
+    {
+        var j = close + 1;
+        if (j >= text.Length) return close;
+        var next = text[j];
+        if (!(next is '"' or '\'' or '\\' || IsAsciiLetter(next) || IsAsciiDigit(next))) return close;
+
+        var end = j;
+        var lastClose = -1;
+        while (j < text.Length)
+        {
+            var c = text[j];
+            if (char.IsWhiteSpace(c)) break;
+            if (c is '\'' or '"')
+            {
+                var k = j + 1;
+                while (k < text.Length && text[k] is not ('\n' or '\r')
+                       && !(text[k] == c && (c == '\'' || text[k - 1] != '\\')))
+                    k++;
+                if (k < text.Length && text[k] == c)
+                {
+                    lastClose = k;
+                    j = k + 1;
+                }
+                else
+                {
+                    j = k; // no closing quote on this line: the value runs to the end of the line
+                }
+            }
+            else if (c == '\\')
+            {
+                j += j + 1 < text.Length && text[j + 1] is not ('\n' or '\r') ? 2 : 1;
+            }
+            else
+            {
+                j++;
+            }
+
+            end = j;
+        }
+
+        return lastClose == end - 1 ? lastClose : end;
     }
 
     // From the '(' of "$(": the index after the matching ')', else the end of the line.
