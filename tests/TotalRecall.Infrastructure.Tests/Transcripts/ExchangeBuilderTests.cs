@@ -167,6 +167,46 @@ public sealed class ExchangeBuilderTests
     }
 
     [Fact]
+    public void AssistantOnlyUnit_StartOffsetIsItsFirstRecord()
+    {
+        var r = Build(A(null, "a", start: 700), S(2, "ls"), E(3, "boom"));
+        Assert.Equal(700, Assert.Single(r.Units).StartOffset);
+
+        var afterBoundary = Build(U(1, "q", start: 100), B(2), A(3, "after", start: 900));
+        Assert.Equal(new long[] { 100, 900 }, afterBoundary.Units.Select(u => u.StartOffset));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("  \n\t \r\n")]
+    public void EmptyOrWhitespaceText_IsNoContent(string blank)
+    {
+        // A blank user text neither starts a unit nor closes the open one; a blank answer or summary adds nothing.
+        var r = Build(U(1, "q"), U(2, blank), A(3, blank), Sum(4, blank), A(5, "a"));
+        var unit = Assert.Single(r.Units);
+        Assert.Equal(
+            new[] { new UnitBlock(BlockKind.User, "User: q"), new UnitBlock(BlockKind.Assistant, "Assistant: a") },
+            unit.Blocks);
+        Assert.Equal(1, r.UserTurns);
+
+        var alone = Build(U(1, blank), A(2, blank), Sum(3, blank));
+        Assert.Empty(alone.Units);
+        Assert.Equal(0, alone.UserTurns);
+        Assert.Null(alone.FirstUserText);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void Stub_WithoutToolName_IsNamedTool(string? tool)
+    {
+        var r = Build(Rec(RecordKind.ToolStub, 1, "x", tool));
+        Assert.Equal("[Tool: x]", Assert.Single(Assert.Single(r.Units).Blocks).Text);
+        Assert.Equal("[Tool]", Build(Rec(RecordKind.ToolStub, 1, null, tool)).Units[0].Blocks[0].Text);
+    }
+
+    [Fact]
     public void Cutoff_RecordAtCutoffDropped_AfterKept()
     {
         var r = Build(At(10), 0, U(9, "before"), U(10, "at"), U(11, "after"));
@@ -227,7 +267,8 @@ public sealed class ExchangeBuilderTests
         Assert.StartsWith("[Bash: ", text);
         Assert.EndsWith("...]", text);
         var detail = text["[Bash: ".Length..^1];
-        Assert.True(detail.Length <= 163, "detail length " + detail.Length);
+        // Folded first, so the cut takes 160 characters of the folded text: 160 plus the ellipsis.
+        Assert.Equal(163, detail.Length);
         Assert.Contains("[redacted:token]", detail);
         Assert.DoesNotContain('\n', text);
         Assert.Contains("echo start echo two ", detail);

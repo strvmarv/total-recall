@@ -79,7 +79,7 @@ internal static class ExchangeBuilder
                 case RecordKind.CompactionSummary:
                 {
                     var text = Prose(record.Text);
-                    if (text.Length == 0) break;
+                    if (string.IsNullOrWhiteSpace(text)) break;   // blank text is no content
                     Close();
                     open = new Open(record.StartOffset, record.Ts, isSummary: true, userText: null, userTurns: 0);
                     open.Blocks.Add(new UnitBlock(BlockKind.Summary, text));
@@ -90,7 +90,7 @@ internal static class ExchangeBuilder
                 case RecordKind.UserText:
                 {
                     var text = Prose(record.Text);
-                    if (text.Length == 0) break;
+                    if (string.IsNullOrWhiteSpace(text)) break;   // blank text is no content
                     Close();
                     open = new Open(record.StartOffset, record.Ts, isSummary: false, userText: text, userTurns: 1);
                     open.Blocks.Add(new UnitBlock(BlockKind.User, "User: " + text));
@@ -100,7 +100,7 @@ internal static class ExchangeBuilder
                 case RecordKind.AssistantText:
                 {
                     var text = Prose(record.Text);
-                    if (text.Length == 0) break;
+                    if (string.IsNullOrWhiteSpace(text)) break;   // blank text is no content
                     Append(ref open, record, new UnitBlock(BlockKind.Assistant, "Assistant: " + text));
                     break;
                 }
