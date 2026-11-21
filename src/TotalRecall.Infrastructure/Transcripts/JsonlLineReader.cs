@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
@@ -33,68 +34,82 @@ internal static class JsonlLineReader
         ct.ThrowIfCancellationRequested();
         stream.Seek(startOffset, SeekOrigin.Begin);
 
-        var buffer = new byte[BufferSize];
-        var pending = new byte[Math.Min(4096, maxLineBytes)];
-        var pendingLen = 0;
-        var discarding = false;          // inside an over-limit line: count its bytes, keep none
-        long lineStart = startOffset;
-        long lineLen = 0;                // bytes of the current line so far, excluding the 0x0A
-        long position = startOffset;     // offset of the next byte to read
-
-        while (true)
+        var pool = ArrayPool<byte>.Shared;
+        var buffer = pool.Rent(BufferSize);
+        var pending = pool.Rent(Math.Min(4096, maxLineBytes));
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            var read = stream.Read(buffer, 0, buffer.Length);
-            if (read <= 0) yield break;
+            var pendingLen = 0;
+            var discarding = false;          // inside an over-limit line: count its bytes, keep none
+            long lineStart = startOffset;
+            long lineLen = 0;                // bytes of the current line so far, excluding the 0x0A
+            long position = startOffset;     // offset of the next byte to read
 
-            var i = 0;
-            while (i < read)
+            while (true)
             {
-                var nl = Array.IndexOf(buffer, (byte)0x0A, i, read - i);
-                var chunkEnd = nl < 0 ? read : nl;
-                var chunk = chunkEnd - i;
+                ct.ThrowIfCancellationRequested();
+                var read = stream.Read(buffer, 0, BufferSize);
+                if (read <= 0) yield break;
 
-                if (chunk > 0)
+                var i = 0;
+                while (i < read)
                 {
-                    lineLen += chunk;
-                    if (!discarding)
+                    var nl = Array.IndexOf(buffer, (byte)0x0A, i, read - i);
+                    var chunkEnd = nl < 0 ? read : nl;
+                    var chunk = chunkEnd - i;
+
+                    if (chunk > 0)
                     {
-                        if (lineLen > maxLineBytes)
+                        lineLen += chunk;
+                        if (!discarding)
                         {
-                            discarding = true;
-                            pendingLen = 0;
-                        }
-                        else
-                        {
-                            if (pendingLen + chunk > pending.Length)
-                                Array.Resize(ref pending, (int)Math.Min(maxLineBytes, Math.Max((long)pending.Length * 2, pendingLen + chunk)));
-                            Buffer.BlockCopy(buffer, i, pending, pendingLen, chunk);
-                            pendingLen += chunk;
+                            if (lineLen > maxLineBytes)
+                            {
+                                discarding = true;
+                                pendingLen = 0;
+                            }
+                            else
+                            {
+                                if (pendingLen + chunk > pending.Length)
+                                {
+                                    var grown = pool.Rent((int)Math.Min(maxLineBytes, Math.Max((long)pending.Length * 2, pendingLen + chunk)));
+                                    Buffer.BlockCopy(pending, 0, grown, 0, pendingLen);
+                                    pool.Return(pending);
+                                    pending = grown;
+                                }
+                                Buffer.BlockCopy(buffer, i, pending, pendingLen, chunk);
+                                pendingLen += chunk;
+                            }
                         }
                     }
+
+                    if (nl < 0) break;
+
+                    var end = position + nl + 1;
+                    if (discarding)
+                        yield return new JsonlLine(lineStart, end, ReadOnlyMemory<byte>.Empty, TooLong: true);
+                    else
+                    {
+                        var skip = lineStart == 0 && HasBom(pending, pendingLen) ? 3 : 0;
+                        var bytes = new byte[pendingLen - skip];
+                        Buffer.BlockCopy(pending, skip, bytes, 0, bytes.Length);
+                        yield return new JsonlLine(lineStart, end, bytes, TooLong: false);
+                    }
+
+                    lineStart = end;
+                    lineLen = 0;
+                    pendingLen = 0;
+                    discarding = false;
+                    i = nl + 1;
                 }
 
-                if (nl < 0) break;
-
-                var end = position + nl + 1;
-                if (discarding)
-                    yield return new JsonlLine(lineStart, end, ReadOnlyMemory<byte>.Empty, TooLong: true);
-                else
-                {
-                    var skip = lineStart == 0 && HasBom(pending, pendingLen) ? 3 : 0;
-                    var bytes = new byte[pendingLen - skip];
-                    Buffer.BlockCopy(pending, skip, bytes, 0, bytes.Length);
-                    yield return new JsonlLine(lineStart, end, bytes, TooLong: false);
-                }
-
-                lineStart = end;
-                lineLen = 0;
-                pendingLen = 0;
-                discarding = false;
-                i = nl + 1;
+                position += read;
             }
-
-            position += read;
+        }
+        finally
+        {
+            pool.Return(buffer);
+            pool.Return(pending);
         }
     }
 

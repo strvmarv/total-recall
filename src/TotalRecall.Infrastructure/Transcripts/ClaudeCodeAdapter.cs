@@ -32,7 +32,7 @@ public sealed class ClaudeCodeAdapter : ITranscriptAdapter
 
     internal ClaudeCodeAdapter(string projectsRoot, int maxLineBytes)
     {
-        ArgumentException.ThrowIfNullOrEmpty(projectsRoot);
+        ArgumentNullException.ThrowIfNull(projectsRoot);   // may be empty: no home directory, nothing is detected
         Root = projectsRoot;
         _maxLineBytes = maxLineBytes;
     }
@@ -41,13 +41,16 @@ public sealed class ClaudeCodeAdapter : ITranscriptAdapter
 
     public string Root { get; }
 
-    /// <summary><c>&lt;dir&gt;/projects</c> when <paramref name="claudeConfigDir"/> is non-empty after trimming, else <c>&lt;userProfile&gt;/.claude/projects</c>.</summary>
+    /// <summary>
+    /// <c>&lt;dir&gt;/projects</c> when <paramref name="claudeConfigDir"/> is non-empty after trimming, else
+    /// <c>&lt;userProfile&gt;/.claude/projects</c>; an empty string when neither is known (a relative path would be
+    /// resolved against the working directory), so that nothing is detected.
+    /// </summary>
     public static string ResolveRoot(string? claudeConfigDir, string userProfile)
     {
         var dir = claudeConfigDir?.Trim();
-        return !string.IsNullOrEmpty(dir)
-            ? Path.Combine(dir, "projects")
-            : Path.Combine(userProfile, ".claude", "projects");
+        if (!string.IsNullOrEmpty(dir)) return Path.Combine(dir, "projects");
+        return string.IsNullOrWhiteSpace(userProfile) ? "" : Path.Combine(userProfile, ".claude", "projects");
     }
 
     public bool Detect() => Directory.Exists(Root);
@@ -95,6 +98,7 @@ public sealed class ClaudeCodeAdapter : ITranscriptAdapter
         ArgumentNullException.ThrowIfNull(source);
         string? cwd = null, entrypoint = null, fingerprint = null;
         DateTimeOffset? first = null;
+        if (IsEmpty(source)) return new SessionHead(null, null, null, null);
         try
         {
             using var fs = OpenRead(source.Path);
@@ -121,7 +125,7 @@ public sealed class ClaudeCodeAdapter : ITranscriptAdapter
     {
         ArgumentNullException.ThrowIfNull(source);
         if (offset == 0) return true;
-        if (offset < 0) return false;
+        if (offset < 0 || IsEmpty(source)) return false;
         try
         {
             using var fs = OpenRead(source.Path);
@@ -142,6 +146,7 @@ public sealed class ClaudeCodeAdapter : ITranscriptAdapter
 
     private IEnumerable<TranscriptRecord> ReadRecordsCore(SessionSource source, long startOffset, ReadStats stats, CancellationToken ct)
     {
+        if (IsEmpty(source)) yield break;
         using var fs = OpenRead(source.Path);
         foreach (var line in JsonlLineReader.Read(fs, startOffset, _maxLineBytes, ct))
         {
@@ -175,6 +180,14 @@ public sealed class ClaudeCodeAdapter : ITranscriptAdapter
 
     private static string? StringProperty(JsonElement obj, string name) =>
         obj.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    /// <summary>
+    /// A source of size 0 has no complete line, so it is answered without opening it. This is what keeps a FIFO or a
+    /// device node named <c>&lt;id&gt;.jsonl</c> from hanging the backup: .NET cannot tell the file type, but such a
+    /// file always stats with size 0, and opening one without a writer blocks in open(2). An empty regular file gives
+    /// the same answers as before.
+    /// </summary>
+    private static bool IsEmpty(SessionSource source) => source.Size <= 0;
 
     private static FileStream OpenRead(string path) =>
         new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, bufferSize: 1);

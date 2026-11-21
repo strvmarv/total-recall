@@ -45,6 +45,47 @@ public sealed class ClaudeCodeAdapterTests : IDisposable
         Assert.Equal(expected, ClaudeCodeAdapter.ResolveRoot(dir, profile));
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("  ")]
+    public void ResolveRoot_NoConfigDirAndNoUserProfile_IsEmpty_AndNothingIsDetected(string? dir)
+    {
+        var root = ClaudeCodeAdapter.ResolveRoot(dir, "");
+        Assert.Equal("", root);
+        var a = new ClaudeCodeAdapter(root, ClaudeCodeAdapter.MaxLineBytes);
+        Assert.False(a.Detect());
+        Assert.Empty(a.EnumerateSessions().Sources);
+    }
+
+    [Fact]
+    public void ResolveRoot_ConfigDirWinsEvenWithoutUserProfile()
+    {
+        Assert.Equal(Path.Combine("/c", "projects"), ClaudeCodeAdapter.ResolveRoot("/c", ""));
+    }
+
+    [Fact]
+    public void ZeroSizeSource_IsNeverOpened()
+    {
+        // A FIFO or device node named <id>.jsonl stats with size 0 and would block in open(2); a zero size must
+        // therefore be answered without opening. The path here is a non-empty regular file: opening it would show.
+        var s = _home.Place("decision", Cwd, "zero");
+        _home.Write(s, Encoding.UTF8.GetBytes("{\"cwd\":\"/p\"}\nsecond\n"));
+        var zero = Source(s) with { Size = 0 };
+        var a = Adapter();
+
+        var head = a.ReadHead(zero);
+        Assert.Null(head.Fingerprint);
+        Assert.Null(head.Cwd);
+        Assert.True(a.IsLineStart(zero, 0));
+        Assert.False(a.IsLineStart(zero, 9));
+        var stats = new ReadStats();
+        Assert.Empty(a.ReadRecords(zero, 0, stats, CancellationToken.None));
+        Assert.Equal(0, stats.SkippedLines);
+
+        Assert.NotNull(a.ReadHead(Source(s)).Fingerprint);   // the same file with its real size is read
+    }
+
     [Fact]
     public void Constants_AndHost()
     {
@@ -75,7 +116,9 @@ public sealed class ClaudeCodeAdapterTests : IDisposable
         File.WriteAllText(Path.Combine(dir, "a b.jsonl"), "{}\n");
         File.WriteAllText(Path.Combine(dir, new string('a', 129) + ".jsonl"), "{}\n");
         File.WriteAllText(Path.Combine(dir, new string('a', 128) + ".jsonl"), "{}\n");
-        File.WriteAllText(Path.Combine(dir, "nl\n.jsonl"), "{}\n");
+        // A name with a newline cannot be created on Windows.
+        var newlineName = !OperatingSystem.IsWindows();
+        if (newlineName) File.WriteAllText(Path.Combine(dir, "nl\n.jsonl"), "{}\n");
         File.WriteAllText(Path.Combine(dir, ".jsonl"), "{}\n");
         File.WriteAllText(Path.Combine(dir, "notes.txt"), "x");
         // A subagent file beneath the session folder, and a loose file directly in the root.
@@ -86,7 +129,7 @@ public sealed class ClaudeCodeAdapterTests : IDisposable
         var e = Adapter().EnumerateSessions();
         Assert.Equal(new[] { new string('a', 128), "good-id.1_x" }, e.Sources.Select(s => s.HostSessionId).OrderBy(x => x, StringComparer.Ordinal).ToArray());
         // "a b", 129 characters, "nl\n" and the empty id.
-        Assert.Equal(4, e.Skipped);
+        Assert.Equal(newlineName ? 4 : 3, e.Skipped);
         Assert.Contains(e.Sources, s => s.Path == good.Path);
     }
 
