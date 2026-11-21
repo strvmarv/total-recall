@@ -340,13 +340,15 @@ public sealed class TranscriptChunkerTests
     }
 
     [Fact]
-    public void LongAssistantBlock_AfterAFullPart_StartsANewPart_NotCutThroughItsLabel()
+    public void LongAssistantBlock_AfterAFullPart_StartsANewPart_KeepsItsLabelWhole()
     {
         var chunks = TranscriptChunker.Chunk(
             AssistantOnly(Plain(new string('a', 1795)), Asst(new string('x', 2000))), Facts);
 
         Assert.Equal(new string('a', 1795), Body(chunks[0]));
-        Assert.StartsWith("Assistant:", Body(chunks[1]));
+        // The label is never cut through; with one unbroken word after it, the label is a part of its own (lossless).
+        Assert.Equal("Assistant:", Body(chunks[1]));
+        Assert.Equal(new[] { 1800, 200 }, chunks.Skip(2).Select(c => Body(c).Length));
         Assert.Equal(new string('a', 1795) + "Assistant:" + new string('x', 2000), NoLabels(chunks, false));
     }
 

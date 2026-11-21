@@ -84,7 +84,6 @@ internal static class TranscriptChunker
                 }
 
                 if (string.IsNullOrWhiteSpace(piece)) piece = "";
-                if (string.IsNullOrWhiteSpace(remainder)) remainder = "";
                 if (piece.Length == 0)
                 {
                     rest = remainder;
