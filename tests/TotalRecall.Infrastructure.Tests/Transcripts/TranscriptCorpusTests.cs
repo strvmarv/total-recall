@@ -279,12 +279,12 @@ public sealed class TranscriptCorpusTests : IDisposable
 
         // Straddlers: a prefix of the token at the 160-character cut of the stub and the 500-character cut of the error.
         var secrets = ContentsOf("secrets");
+        // The fixture pads with 149 (stub) and 489 (error) x's and a space before the token, so its marker would
+        // straddle the cut: the cut moves before the marker and only the padding is kept.
         var stub = BlockWith(secrets, "[Bash: xxx");
-        Assert.DoesNotContain("[redacted", stub);
-        Assert.EndsWith("...]", stub);
+        Assert.Equal("[Bash: " + new string('x', 149) + " ...]", stub);
         var error = BlockWith(secrets, "[error: xxx");
-        Assert.DoesNotContain("[redacted", error);
-        Assert.EndsWith("...]", error);
+        Assert.Equal("[error: " + new string('x', 489) + " ...]", error);
 
         // The title is derived from redacted text.
         Assert.Contains("[redacted:token]", Col("title", "secrets"));

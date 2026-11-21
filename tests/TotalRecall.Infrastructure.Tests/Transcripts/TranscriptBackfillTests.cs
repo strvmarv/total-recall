@@ -134,7 +134,8 @@ public sealed class TranscriptBackfillTests : IDisposable
         var original = Console.Error;
         var captured = new StringWriter();
         Console.SetError(captured);
-        try { summary = Backfill(adapter).Run(CancellationToken.None); }
+        var progress = new List<BackfillProgress>();
+        try { summary = Backfill(adapter).Run(CancellationToken.None, progress.Add); }
         finally { Console.SetError(original); }
         log = captured.ToString();
 
@@ -147,6 +148,8 @@ public sealed class TranscriptBackfillTests : IDisposable
         Assert.Contains("[total-recall] transcripts backfill: ", log);
         Assert.Contains("boom-1.jsonl", log);
         Assert.Contains("planted failure", log);
+        // The failed session is reported like the others.
+        Assert.Equal(new[] { new BackfillProgress(1, 3), new BackfillProgress(2, 3), new BackfillProgress(3, 3) }, progress);
     }
 
     [Fact]
@@ -214,7 +217,7 @@ public sealed class TranscriptBackfillTests : IDisposable
         Assert.True(File.Exists(kept.Path));
     }
 
-    [Fact]
+    [NotOnWindowsFact("Windows resolves the user profile folder from the account, not from HOME or USERPROFILE")]
     public void NullUserHome_ResolvesUserProfile_HomeRepoRootIsNull()
     {
         // The home directory is itself a repository (a dotfiles setup), and a worktree cwd under it, a missing
@@ -244,5 +247,14 @@ public sealed class TranscriptBackfillTests : IDisposable
             Environment.SetEnvironmentVariable("HOME", saved.Home);
             Environment.SetEnvironmentVariable("USERPROFILE", saved.Profile);
         }
+    }
+}
+
+/// <summary>A fact that is skipped, with <paramref name="reason"/>, on Windows.</summary>
+internal sealed class NotOnWindowsFactAttribute : FactAttribute
+{
+    public NotOnWindowsFactAttribute(string reason)
+    {
+        if (OperatingSystem.IsWindows()) Skip = reason;
     }
 }
