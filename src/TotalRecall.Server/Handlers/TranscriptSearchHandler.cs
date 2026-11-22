@@ -2,7 +2,7 @@
 //
 // transcript_search: search the opt-in transcript archive by meaning and by words (search the archive, spec section
 // 5). The gate is the sentinel, read on every call: off gives Part 1's off answer. With no service (a composition that
-// gives none) the answer stays Part 1's "not available". Otherwise the arguments are parsed here (argument errors are
+// gives none) the answer says the search is not set up. Otherwise the arguments are parsed here (argument errors are
 // ArgumentExceptions, which ErrorTranslator turns into "Invalid arguments: ..."), the service opens the archive for the
 // call and closes it, and the answer is serialised through the source-generated JsonContext. A session is always
 // identified as "<host>:<host_session_id>". Registered only by OpenSqlite and OpenCortexCore.
@@ -37,7 +37,7 @@ public sealed class TranscriptSearchHandler : IToolHandler
     private readonly TranscriptSearchService? _service;
 
     /// <param name="isActive">Reads whether the archive is on; evaluated on every call.</param>
-    /// <param name="service">The search; null keeps Part 1's "not available" answer.</param>
+    /// <param name="service">The search; null answers "not set up" while the archive is on.</param>
     public TranscriptSearchHandler(Func<bool> isActive, TranscriptSearchService? service = null)
     {
         _isActive = isActive ?? throw new ArgumentNullException(nameof(isActive));
@@ -60,7 +60,7 @@ public sealed class TranscriptSearchHandler : IToolHandler
     {
         var active = _isActive(); // read once per call
         if (!active || _service is null)
-            return TranscriptToolAnswers.For(() => active);
+            return TranscriptToolAnswers.ForSearchWithoutService(() => active);
 
         if (!arguments.HasValue || arguments.Value.ValueKind != JsonValueKind.Object)
             throw new ArgumentException("transcript_search requires a JSON object of arguments with a query");

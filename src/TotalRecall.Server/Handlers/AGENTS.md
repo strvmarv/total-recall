@@ -154,7 +154,7 @@ Never use `JsonSerializer.Serialize(obj)` with the reflection-based overload.
 | Usage | 1 | usage_status | sqlite + cortex |
 | Cache | 2 | cache_check, cache_store | sqlite + cortex |
 | Skill | 4–5 | search, get, list, import_host (sqlite); + delete (cortex) | mode-dependent |
-| Transcript archive | 3 | transcript_search, transcript_get, transcript_sessions (off by default; gate is a `Func<bool>` reading the sentinel per call; shared answers in `TranscriptToolAnswers.cs`) | sqlite + cortex (never `BuildRegistry`, never Postgres) |
+| Transcript archive | 3 | transcript_search, transcript_get, transcript_sessions (off by default; gate is a `Func<bool>` reading the sentinel per call; `transcript_search` runs `TranscriptSearchService` (opens the archive per call, answers through the source-generated `JsonContext` DTOs in `TranscriptSearchDtos.cs`); `transcript_get` and `transcript_sessions` are still stubs that answer "not available in this version yet"; shared answers in `TranscriptToolAnswers.cs`) | sqlite + cortex (never `BuildRegistry`, never Postgres) |
 
 **Reconciliation:** `BuildRegistry` sum = 19 + 8 + 4 + 5 + 2 + 4 + 1 = **43** (Memory includes the conditional `memory_feedback`). Post-BuildRegistry = 1 (usage_status) + 2 (cache) + 5 (skill files; `skill_delete` is cortex-only but the file exists). Directory file count = **54** handler files (43 + 1 + 2 + 5 skill files + 3 transcript files), plus the helper files. Registered tools: 42 core + 8 sqlite-only + 3 transcript = **53** in SQLite mode; **54** in Cortex mode (adds `skill_delete`).
 

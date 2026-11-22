@@ -62,7 +62,7 @@ public sealed class EnableCommandTests : IDisposable
     }
 
     [Fact]
-    public void TheConfirmation_SaysWhatWillBeStored_AndThatNothingIsReadUntilBackfill()
+    public void TheConfirmation_SaysWhatWillBeReadStoredAndEmbedded()
     {
         _h.Answer = false;
 
@@ -72,8 +72,17 @@ public sealed class EnableCommandTests : IDisposable
         Assert.Contains("dialogue", prompt);
         Assert.Contains("redacted", prompt);
         Assert.Contains("never synced", prompt);
-        Assert.Contains("transcripts backfill", prompt);
-        Assert.Contains("cannot be searched yet", prompt);
+        // Once on, the session files are read in the background at each session start.
+        Assert.Contains("session files", prompt);
+        Assert.Contains("in the background", prompt);
+        Assert.Contains("each session start", prompt);
+        // The text becomes vectors on this machine; a remote service only through the hand-set opt-in.
+        Assert.Contains("vectors", prompt);
+        Assert.Contains("on this machine", prompt);
+        Assert.Contains("allow_remote_embedding", prompt);
+        Assert.Contains("transcripts forget", prompt);
+        Assert.DoesNotContain("Nothing is read until you run", prompt);
+        Assert.DoesNotContain("cannot be searched yet", prompt);
         Assert.DoesNotContain("Nothing is stored yet", prompt);
         Assert.Contains(_h.DbPath, prompt);
     }
@@ -122,7 +131,8 @@ public sealed class EnableCommandTests : IDisposable
         var output = _h.Out.ToString();
         Assert.Contains("enabled", output);
         Assert.Contains(_h.DbPath, output);
-        Assert.Contains("Run 'total-recall transcripts backfill' to back up your Claude Code sessions; searching the archive arrives in a later release.", output);
+        Assert.Contains("From now on each session start archives your Claude Code sessions in the background. Run 'total-recall transcripts backfill' to archive the existing ones now.", output);
+        Assert.DoesNotContain("arrives in a later release", output);
         Assert.DoesNotContain("Nothing is stored yet", output);
     }
 

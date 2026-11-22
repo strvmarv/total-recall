@@ -24,7 +24,9 @@ public sealed class TranscriptToolHandlerTests
     private const string OffText =
         "Run `total-recall transcripts enable` in a terminal to turn the archive on.";
     private const string OnText =
-        "Searching the archive is not available in this version yet.";
+        "This tool is not available in this version yet.";
+    private const string SearchWithoutServiceText =
+        "The archive search is not set up in this server.";
 
     private static readonly string[] ToolNames = { "transcript_search", "transcript_get", "transcript_sessions" };
 
@@ -56,14 +58,29 @@ public sealed class TranscriptToolHandlerTests
         Assert.Equal(OffText, json.GetProperty("hint").GetString());
     }
 
-    [Theory, MemberData(nameof(Names))]
-    public async Task Active_AnswersNotAvailableYet(string name)
+    [Theory]
+    [InlineData("transcript_get")]
+    [InlineData("transcript_sessions")]
+    public async Task Active_GetAndSessions_AnswerNotAvailableYet(string name)
     {
         var json = await Call(Make(name, () => true));
         Assert.Equal(3, json.EnumerateObject().Count());
         Assert.True(json.GetProperty("enabled").GetBoolean());
         Assert.False(json.GetProperty("available").GetBoolean());
         Assert.Equal(OnText, json.GetProperty("hint").GetString());
+        Assert.DoesNotContain("Searching", json.GetProperty("hint").GetString());
+    }
+
+    [Fact]
+    public async Task Active_SearchWithoutAService_NeverSaysSearchIsComingLater()
+    {
+        var json = await Call(Make("transcript_search", () => true));
+        Assert.Equal(3, json.EnumerateObject().Count());
+        Assert.True(json.GetProperty("enabled").GetBoolean());
+        Assert.False(json.GetProperty("available").GetBoolean());
+        var hint = json.GetProperty("hint").GetString();
+        Assert.Equal(SearchWithoutServiceText, hint);
+        Assert.DoesNotContain("not available in this version", hint);
     }
 
     [Theory, MemberData(nameof(Names))]
