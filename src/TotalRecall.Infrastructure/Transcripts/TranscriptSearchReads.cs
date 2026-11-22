@@ -58,6 +58,9 @@ public interface ITranscriptSearchReads : IDisposable
     /// <summary>Chunks in scope; with <paramref name="onlyUnembedded"/> only those with <c>embedded = 0</c>.</summary>
     long CountInScope(ChunkFilter filter, bool onlyUnembedded);
 
+    /// <summary>True when the archive holds at least one chunk (an <c>EXISTS</c>, not a count).</summary>
+    bool AnyChunk();
+
     /// <summary>The rows of the given chunk ids that still exist, by id.</summary>
     IReadOnlyDictionary<long, ChunkRow> Chunks(IReadOnlyCollection<long> ids);
 }
@@ -165,6 +168,12 @@ internal sealed class SqliteTranscriptSearchReads : ITranscriptSearchReads
         using var cmd = Command(sql.ToString());
         BindScope(cmd, filter);
         return Convert.ToInt64(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
+    }
+
+    public bool AnyChunk()
+    {
+        using var cmd = Command("SELECT EXISTS (SELECT 1 FROM tx_chunk)");
+        return Convert.ToInt64(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) != 0;
     }
 
     public IReadOnlyDictionary<long, ChunkRow> Chunks(IReadOnlyCollection<long> ids)

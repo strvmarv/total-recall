@@ -277,6 +277,19 @@ public sealed class TranscriptSearchReadsTests : IDisposable
     }
 
     [Fact]
+    public void AnyChunk_FalseOnAnEmptyArchive_TrueOnceAChunkExists()
+    {
+        using (var reads = _db.Store.BeginSearchReads())
+            Assert.False(reads.AnyChunk());
+
+        using (var conn = _db.Connect())
+            AddChunk(conn, _db.AddSession("pi", "s-any"), "one chunk, no vector", 0);
+
+        using (var reads = _db.Store.BeginSearchReads())
+            Assert.True(reads.AnyChunk());
+    }
+
+    [Fact]
     public void CountInScope_Unembedded_VersusAll()
     {
         var seed = Populate();

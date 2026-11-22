@@ -557,6 +557,63 @@ public sealed class TranscriptSearchServiceTests : IDisposable
         Assert.Empty(embedder.Calls); // no model is loaded for an empty archive
     }
 
+    /// <summary>Forwards to the real reads and records the calls of interest.</summary>
+    private sealed class RecordingReads : ITranscriptSearchReads
+    {
+        private readonly ITranscriptSearchReads _inner;
+        private readonly List<string> _log;
+
+        public RecordingReads(ITranscriptSearchReads inner, List<string> log)
+        {
+            _inner = inner;
+            _log = log;
+        }
+
+        public long? ResolveSession(string host, string hostSessionId) => _inner.ResolveSession(host, hostSessionId);
+        public IReadOnlyList<VectorHit> Vector(float[] query, ChunkFilter filter, int k) => _inner.Vector(query, filter, k);
+        public IReadOnlyList<TextHit> Text(string match, ChunkFilter filter, int limit) => _inner.Text(match, filter, limit);
+
+        public bool AnyChunk()
+        {
+            _log.Add("any");
+            return _inner.AnyChunk();
+        }
+
+        public long CountInScope(ChunkFilter filter, bool onlyUnembedded)
+        {
+            _log.Add($"count:{filter.Project ?? "*"}:{onlyUnembedded}");
+            return _inner.CountInScope(filter, onlyUnembedded);
+        }
+
+        public IReadOnlyDictionary<long, ChunkRow> Chunks(IReadOnlyCollection<long> ids) => _inner.Chunks(ids);
+        public void Dispose() => _inner.Dispose();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Search_DetectsAnEmptyArchiveWithAnyChunk_CountsOnlyThePendingScope(bool populated)
+    {
+        if (populated) Populate();
+        var log = new List<string>();
+        var store = new DecoratingTranscriptStore(_db.Store)
+        {
+            OnBeginSearchReads = () => new RecordingReads(_db.Store.BeginSearchReads(), log),
+        };
+        var svc = new TranscriptSearchService(
+            () => new TranscriptSearchContext(
+                new TranscriptLocation(_db.Path, IsMainDatabase: false), Settings(), "sqlite", Embedding(), new QueryEmbedder()),
+            new ManualTimeProvider(Now),
+            _ => new TranscriptOpenResult(TranscriptOpenStatus.Opened, store, null));
+
+        var r = svc.Search(Req("database locked", scope: "project", project: "owner/repo"), default);
+
+        Assert.Null(r.Error);
+        // The emptiness check is an EXISTS, not a count of the whole archive; the only count is pendingEmbedding's.
+        Assert.Equal(populated ? new[] { "any", "count:owner/repo:True" } : new[] { "any" }, log);
+        Assert.Equal(populated ? null : TranscriptSearchService.NothingArchivedNote, populated ? null : r.Note);
+    }
+
     [Fact]
     public void Search_OpenRefused_ReturnsError()
     {

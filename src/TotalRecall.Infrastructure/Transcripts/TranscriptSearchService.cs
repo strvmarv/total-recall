@@ -98,7 +98,6 @@ public sealed class TranscriptSearchService
     public const int MaxPhraseTokens = 32;
 
     private const string LogPrefix = "[total-recall] transcript_search";
-    private static readonly ChunkFilter Everything = new(null, null, null, false);
 
     private readonly Func<TranscriptSearchContext?> _context;
     private readonly TimeProvider _time;
@@ -237,7 +236,7 @@ public sealed class TranscriptSearchService
         // A first, short read: an empty archive or an unknown session ends here, before any model is loaded.
         using (var pre = store.BeginSearchReads())
         {
-            if (pre.CountInScope(Everything, onlyUnembedded: false) == 0)
+            if (!pre.AnyChunk())
                 return Empty(request, plan, gate, NothingArchivedNote);
             if (plan.Session is { } named && pre.ResolveSession(named.Host, named.Id) is null)
                 return Empty(request, plan, gate, UnknownSession(request.Session!));
