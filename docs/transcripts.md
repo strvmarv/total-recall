@@ -1,6 +1,6 @@
 # Transcript archive
 
-> **Status: back up, embed and search.** Once the archive is on, total-recall archives your Claude Code sessions in the background at each session start (and on demand with `total-recall transcripts backfill`), turns the text into vectors on your machine and lets the assistant search it, by meaning and by words, with `transcript_search`. Backing up, embedding and searching are usable together. Reading a hit in full beyond the chunk the search returns (`transcript_get`), listing sessions (`transcript_sessions`) and other agent hosts arrive in a later release (Part 4 and after): until then those two tools only report whether the archive is on.
+> **Status: back up, embed and search.** Once the archive is on, total-recall archives your Claude Code sessions in the background at each session start (and on demand with `total-recall transcripts backfill`), turns the text into vectors on your machine and lets the assistant search it, by meaning and by words, with `transcript_search`. Backing up, embedding and searching are usable together. Reading a hit in full beyond the chunk the search returns (`transcript_get`), listing sessions (`transcript_sessions`) and other agent hosts arrive in a later release: until then those two tools only report whether the archive is on.
 
 ## What it is
 
@@ -132,7 +132,7 @@ The archive records which embedder made its vectors (provider, model, revision, 
 
 ### How long it takes
 
-Measured on the development machine with the real bundled model: embedding the 83-chunk test corpus took 2.2 to 3.2 seconds (about 26 to 38 chunks a second, default threads, one process); a `session_start` plus its pass took 6.0 seconds in the acceptance test. At that speed a 10,000-chunk first backfill embeds in about 4 to 7 minutes; a slower machine, or the pass's two threads, takes longer, and a session start embeds at most 256 chunks (typically one to a few passes for a few thousand chunks). The pass's second copy of the embedding model costs memory (the model file alone is about 133 MB); `embed` and `backfill` run in a process of their own.
+Measured on the development machine with the real bundled model: a whole `backfill` run (ingest, model load and embedding) over the 83-chunk test corpus took 2.2 to 3.2 seconds, and a `session_start` plus its pass took 6.0 seconds in the acceptance test. These runs include the model load, so they give no per-chunk rate. As an estimate, not a measurement, a first backfill of 10,000 chunks should take under about 7 minutes; a slower machine, or the pass's two threads, takes longer. A session-start pass embeds at most 256 chunks and runs at most once per ten minutes per process, so a few thousand chunks (3,000 need about 12 passes) take a dozen or more session starts; `transcripts embed` or `backfill` does it all at once. The pass's second copy of the embedding model costs memory (the model file alone is about 133 MB); `embed` and `backfill` run in a process of their own.
 
 ### The one-time schema step
 
@@ -159,7 +159,7 @@ The assistant searches with `transcript_search` (see [The three tools](#the-thre
 
 1. Three lists are built: by meaning, by phrase and by words.
 2. They are merged by reciprocal rank fusion (`1 / (60 + rank)` summed over the lists a chunk appears in), so a chunk found by several routes rises.
-3. Then three multipliers on that score: a **compaction summary** x 1.25 (a summary condenses a whole stretch of work, so it is a good place to start); an **error chunk** x 1.20 when the query itself looks like an error (it contains `error`, `exception`, `failed`, `fatal`, `panic`, `traceback`, an all-caps code such as `ENOENT` or `SQLITE_BUSY`, an exit or HTTP status number, or a `...Exception` / `...Error` name), because then the failed tool output is what is wanted; and a **recency** boost of 1 + 0.10 x 2^(-age in days / 180), up to ten percent for a chunk from today, a third of that after six months. These started as the design's guesses and were kept: the acceptance queries (a topic, a compaction-summary-only query, an exact error string, a paraphrase inside one session) pass with them, so none was changed.
+3. Then three multipliers on that score: a **compaction summary** x 1.25 (a summary condenses a whole stretch of work, so it is a good place to start); an **error chunk** x 1.20 when the query itself looks like an error (it contains `error`, `exception`, `failed`, `fatal`, `panic`, `traceback`, an all-caps code such as `ENOENT` or `SQLITE_BUSY`, an exit or HTTP status number, or a `...Exception` / `...Error` name), because then the failed tool output is what is wanted; and a **recency** boost of 1 + 0.10 x 2^(-age in days / 180), up to ten percent for a chunk from today, half of that (five percent) after 180 days, a quarter after a year. These started as the design's guesses and were kept: the acceptance queries (a topic, a compaction-summary-only query, an exact error string, a paraphrase inside one session) pass with them, so none was changed.
 4. Sort by the final score (ties: newer, then lower id). **At most two chunks per session** among the results, so one long session cannot fill the answer, except when the scope is a single session.
 5. `score` in the answer is the final score divided by the best one: a relative number, the top hit is 1.0.
 
@@ -167,9 +167,9 @@ The assistant searches with `transcript_search` (see [The three tools](#the-thre
 
 - **`pendingEmbedding`** counts the chunks in the searched scope that cannot be found by meaning right now: those with no vector, or, when the meaning search is off, all of them. It tells the assistant how much of the scope was covered by words only (for example straight after enabling the archive, before the first passes finished).
 - **Size cap.** The `text` of all hits together is capped at 40,000 characters (about 10,000 tokens). Hits are added in rank order until the next would not fit; `truncated: true` and `truncatedHits` (the number left out) say so. The default of ten hits is at most 18,000 characters.
-- An archive that is absent or empty answers `results: []` with `note: nothing is archived yet; run total-recall transcripts backfill`. The search opens the archive per call and closes it, never opens the memory store, logs no retrieval event and writes nothing.
+- An archive that is absent or empty answers `results: []` with `note: nothing is archived yet; run total-recall transcripts backfill`. The search opens the archive per call and closes it, never opens the memory store, logs no retrieval event and writes nothing (apart from the one-time schema step, see above).
 
-**Measured.** A words query over a synthetic archive of 100,000 chunks (a debug build, twelve common tokens) took 154 to 182 milliseconds unfiltered and about 90 milliseconds with a project filter; `forget --all` on 10,000 chunks, with the vector triggers firing per row, took about one second.
+**Measured.** A words query over a synthetic archive of 100,000 chunks (a debug build, twelve common tokens) took 154 to 182 milliseconds unfiltered (237 milliseconds for the twelve commonest tokens, the worst case) and about 86 to 101 milliseconds with project, kind and `since` filters together; `forget --all` on 10,000 chunks, with the vector triggers firing per row, took about one second.
 
 ## What is kept and what is dropped
 
@@ -252,7 +252,7 @@ last embed run: 2026-11-21 10:44, embedded 60, 118 remaining, stopped by budget
 search:    meaning and words                    or  words only
 ```
 
-The embedder state is computed by the same gate the worker uses. When the archive was never enabled it says nothing is stored. It exits 1 when the archive cannot be located or read (an invalid `db_path`, an unreadable file), and then it does not claim that nothing is stored.
+The embedder state is computed by the same gate the worker uses. While the archive is off, or under Postgres storage, the embedding lines read `embedder:  not applicable (the archive is off)` (or `... (postgres storage)`) and `search:    not available (the archive is off)` (or `... (postgres storage)`); under Postgres status also prints `storage: postgres, where the transcript archive is not supported`. When the archive has no tables yet it prints `on, nothing stored` or `off, nothing stored` after the location line, and nothing more. It exits 1 when the archive cannot be located or read (an invalid `db_path`, an unreadable file), and then it does not claim that nothing is stored.
 
 ## Forgetting and unforgetting
 
