@@ -30,6 +30,14 @@ type Refusal =
     | NeedsAuth
     | Unreachable
     | Failed
+    /// `sync unblock` (#161, D7): the memory exists but its row carries no `secret-detected` mark.
+    | NotBlocked
+    /// `sync unblock`: no memory has the id.
+    | UnknownEntry
+    /// `sync unblock`: the id is in two tiers, or the memory cannot be read.
+    | UnreadableEntry
+    /// `sync unblock`: the memory's pushed fields changed after the block was set.
+    | ChangedSinceBlocked
 
 let refusalName (r: Refusal) : string =
     match r with
@@ -50,6 +58,10 @@ let refusalName (r: Refusal) : string =
     | NeedsAuth -> "needs-auth"
     | Unreachable -> "unreachable"
     | Failed -> "failed"
+    | NotBlocked -> "not-blocked"
+    | UnknownEntry -> "unknown-entry"
+    | UnreadableEntry -> "unreadable-entry"
+    | ChangedSinceBlocked -> "changed-since-blocked"
 
 // ---------------------------------------------------------------------------
 // storage mode

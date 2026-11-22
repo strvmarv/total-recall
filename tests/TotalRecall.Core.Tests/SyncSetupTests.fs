@@ -7,7 +7,8 @@ open TotalRecall.Core.SyncSetup
 
 let private allRefusals =
     [ NoGit; GitTooOld; WrongMode; BadRemote; BadBranch; PublicRepo; RepoExists; NotEmpty; NothingToJoin; NotASyncRepo
-      InvalidManifest; FormatTooNew; HostUnverified; Busy; NeedsAuth; Unreachable; Failed ]
+      InvalidManifest; FormatTooNew; HostUnverified; Busy; NeedsAuth; Unreachable; Failed; NotBlocked; UnknownEntry
+      UnreadableEntry; ChangedSinceBlocked ]
 
 [<Tests>]
 let refusalTests =
@@ -21,7 +22,8 @@ let refusalTests =
                 names
                 [ "no-git"; "git-too-old"; "wrong-mode"; "bad-remote"; "bad-branch"; "public-repo"; "repo-exists"; "not-empty"
                   "nothing-to-join"; "not-a-sync-repo"; "invalid-manifest"; "format-too-new"; "host-unverified"; "busy"
-                  "needs-auth"; "unreachable"; "failed" ]
+                  "needs-auth"; "unreachable"; "failed"; "not-blocked"; "unknown-entry"; "unreadable-entry"
+                  "changed-since-blocked" ]
                 "names"
 
         testCase "effectiveMode reduces like the server does and keeps the text as written" <| fun _ ->
