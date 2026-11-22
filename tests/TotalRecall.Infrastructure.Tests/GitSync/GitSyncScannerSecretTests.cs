@@ -365,7 +365,7 @@ public sealed class GitSyncScannerSecretTests
     }
 
     [Fact]
-    public void email_only_text_is_not_blocked()
+    public void EmailOnlyText_IsNotBlocked()
     {
         using var rig = new ScanRig();
         rig.AddMemory(Tier.Warm, A, "Push to git@github.com:strvmarv/total-recall.git; mail noreply@example.com.");

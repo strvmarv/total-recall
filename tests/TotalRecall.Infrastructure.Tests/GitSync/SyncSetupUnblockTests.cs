@@ -108,8 +108,14 @@ public sealed class SyncSetupUnblockTests : IDisposable
         return token;
     }
 
-    private SyncSetupService Service(Action<SyncSetupService>? configure = null)
+    /// <summary>
+    /// The service over the rig. With <paramref name="cycleRan"/> (the default) the sync directory exists, as it does once a
+    /// cycle has run; the command refuses <c>not-blocked</c> without it, before it creates anything.
+    /// </summary>
+    private SyncSetupService Service(Action<SyncSetupService>? configure = null, bool cycleRan = true)
     {
+        if (cycleRan)
+            GitSyncPaths.ForDatabase(_rig.DbPath, _rig.CaseInsensitive).EnsureCreated();
         var service = _rig.Service();
         configure?.Invoke(service);
         return service;
@@ -434,7 +440,7 @@ public sealed class SyncSetupUnblockTests : IDisposable
     {
         _rig.LoadError = "config.toml is malformed";
 
-        var result = await Service().UnblockAsync(A);
+        var result = await Service(cycleRan: false).UnblockAsync(A);
 
         AssertRefused(result, SyncSetup.Refusal.Failed);
         Assert.Equal("config.toml is malformed", result.RefusalText);
@@ -444,16 +450,40 @@ public sealed class SyncSetupUnblockTests : IDisposable
     [Fact]
     public async Task AMissingDatabase_IsUnknownEntry_AndCreatesNothing()
     {
-        var result = await Service().UnblockAsync(A);
+        var result = await Service(cycleRan: false).UnblockAsync(A);
         AssertRefused(result, SyncSetup.Refusal.UnknownEntry);
         _rig.AssertNothingCreated();
 
         var dataDir = Path.GetDirectoryName(_rig.DbPath)!;
         Directory.Delete(dataDir);
-        var again = await Service().UnblockAsync(A);
+        var again = await Service(cycleRan: false).UnblockAsync(A);
         AssertRefused(again, SyncSetup.Refusal.UnknownEntry);
         Assert.False(Directory.Exists(dataDir), "the data directory was created");
     }
+
+    [Fact]
+    public async Task ADatabaseWithNoSyncDirectory_IsNotBlocked_AndCreatesNothing()
+    {
+        // no cycle ever ran, so no row can be secret-detected: the command must not create the sync directory
+        AddMemory(Tier.Warm, A, "Use bun, not npm.");
+        var dataDir = Path.GetDirectoryName(_rig.DbPath)!;
+        var before = SnapshotOf(dataDir);
+
+        var result = await Service(cycleRan: false).UnblockAsync(A);
+
+        AssertRefused(result, SyncSetup.Refusal.NotBlocked);
+        Assert.Equal("not blocked by a secret; nothing changed", result.RefusalText);
+        Assert.False(Directory.Exists(Path.Combine(dataDir, "sync")), "the sync directory was created");
+        Assert.Equal(before, SnapshotOf(dataDir));
+    }
+
+    /// <summary>Every directory under the path, and every file other than the database's own, as sorted relative paths.</summary>
+    private static string[] SnapshotOf(string dir) =>
+        Directory.EnumerateFileSystemEntries(dir, "*", SearchOption.AllDirectories)
+            .Select(p => Path.GetRelativePath(dir, p))
+            .Where(p => !p.StartsWith("total-recall.db", StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
 
     [Fact]
     public async Task ADatabaseAtAnOlderSchema_IsMigrated_ThenChecked()

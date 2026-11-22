@@ -28,7 +28,7 @@ public sealed partial class SyncSetupService
     /// the row's <c>blocked_hash</c> (different: <c>changed-since-blocked</c>), and writes <c>allowed_hash</c> = the key with
     /// the mark cleared. Only after the commit it runs the detector on the content it read and prints the categories found,
     /// never a value; a detector that throws then still leaves the release done, with a line saying the categories could
-    /// not be checked. A refusal writes nothing; a missing database is refused before anything is opened or created.
+    /// not be checked. A refusal writes nothing; a missing database (<c>unknown-entry</c>) or a missing sync directory (<c>not-blocked</c>: no cycle ever ran) is refused before anything is opened or created.
     /// </summary>
     public async Task<SetupResult> UnblockAsync(string entryId, CancellationToken ct = default)
     {
@@ -41,8 +41,11 @@ public sealed partial class SyncSetupService
             if (!File.Exists(env.DatabasePath))
                 return Refuse(SyncSetup.Refusal.UnknownEntry, UnknownEntryText);
 
-            _phase = "taking the sync lock";
             var paths = GitSyncPaths.ForDatabase(env.DatabasePath, env.CaseInsensitive);
+            if (!Directory.Exists(paths.SyncDirectory))
+                return Refuse(SyncSetup.Refusal.NotBlocked, NotBlockedText); // no cycle ever ran: no row can be secret-detected
+
+            _phase = "taking the sync lock";
             paths.EnsureCreated();
             using var handle = await SyncLock.TryAcquireAsync(paths.LockPath, LockWait, ct).ConfigureAwait(false);
             if (handle is null)
@@ -97,6 +100,7 @@ public sealed partial class SyncSetupService
     }
 
     private const string UnknownEntryText = "no memory has this id";
+    private const string NotBlockedText = "not blocked by a secret; nothing changed";
 
     /// <summary>The checks of decision D7 and the write, inside the caller's transaction; a refusal, or the entry that was released.</summary>
     private static (SetupResult? Refusal, SyncMerge.LocalEntry? Released) ReleaseEntry(SqliteStoreTransaction tx, string entryId)
@@ -115,7 +119,7 @@ public sealed partial class SyncSetupService
 
         var row = GitSyncRows.Read(tx.Connection, entryId, tx.Transaction);
         if (row is null || !row.State.IsActive || row.BlockedReason != SyncSecret.blockReason)
-            return (Refuse(SyncSetup.Refusal.NotBlocked, "not blocked by a secret; nothing changed"), null);
+            return (Refuse(SyncSetup.Refusal.NotBlocked, NotBlockedText), null);
 
         var key = SyncSecret.secretKey(view.Content, view.Tags);
         if (row.BlockedHash != key)

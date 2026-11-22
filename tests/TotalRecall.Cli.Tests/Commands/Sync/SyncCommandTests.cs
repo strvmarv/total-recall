@@ -223,6 +223,8 @@ public sealed class SyncCommandTests : IDisposable
             Assert.Equal("secret-detected", GitSyncRows.Read(conn, id)!.BlockedReason);
         }
         MsSqliteConnection.ClearAllPools();
+        // a block comes from a cycle's scan, and a cycle creates the sync directory; unblock refuses without it
+        GitSyncPaths.ForDatabase(dbPath, OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()).EnsureCreated();
         return token;
     }
 

@@ -101,6 +101,6 @@ public sealed class SensitiveContentScannerSecretsTests
     public void ScanSecrets_NearMissesWithTheDefaultBound_Completes()
     {
         var reasons = SensitiveContentScanner.ScanSecrets(SecretScanNearMisses.Text());
-        Assert.NotNull(reasons);
+        Assert.DoesNotContain(TimedOut, reasons);
     }
 }
