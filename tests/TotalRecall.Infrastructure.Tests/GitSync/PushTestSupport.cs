@@ -85,8 +85,16 @@ internal sealed class PushRig : IDisposable
 
     // ---- the cycle's first three steps ----
 
-    public ScanSummary Scan() =>
-        Assert.IsType<ScanOutcome.Done>(new GitSyncScanner(Pull.Connection, () => Now).Scan()).Summary;
+    /// <summary>The secret detector the scan uses; null keeps the scanner's own (a test makes the scan miss a token with it).</summary>
+    public Func<string?, IReadOnlyList<string>>? ScanDetector { get; set; }
+
+    public ScanSummary Scan()
+    {
+        var scanner = new GitSyncScanner(Pull.Connection, () => Now);
+        if (ScanDetector is not null)
+            scanner.SecretDetector = ScanDetector;
+        return Assert.IsType<ScanOutcome.Done>(scanner.Scan()).Summary;
+    }
 
     public GitSyncApplier Applier() => new(Pull.Client, Pull.Store, Embedder, new ApplyOptions(0), () => Now);
 

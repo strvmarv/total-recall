@@ -15,10 +15,20 @@ internal sealed record CandidateInfo(
     bool BaseUnreadable);
 
 /// <summary>
+/// The secret check of one candidate (#161, decision D5), made by the preparation before the plan transaction opens:
+/// <see cref="Key"/> is the <see cref="SyncSecret.secretKey"/> of the entry as it was read then, <see cref="Hit"/>
+/// whether it must be held back (the detector found something, or the row already blocks these fields; false when the
+/// row allows them).
+/// </summary>
+internal sealed record SecretCheck(string Key, bool Hit);
+
+/// <summary>
 /// The clone, the tree at <c>L</c>, every row and the candidates with the exclusions already decided. <see cref="Removals"/>
 /// are the local deletions whose record this push removes (milestone 1b-ii, D14), ordinal; <see cref="NotRemovable"/> the
 /// other ids the apply listed for removal, ordinal, which are left alone and reported. <see cref="Held"/> are the open
 /// <c>held-delete</c> items by entry id, read when preparing (D17): a candidate with one is excluded as <c>held-delete</c>.
+/// <see cref="Secrets"/> holds the secret check of each candidate that is not excluded and whose entry was readable when
+/// the preparation read it (#161, D5); a candidate without one is deferred by the plan.
 /// </summary>
 internal sealed record PushPrepared(
     string Head,
@@ -30,7 +40,8 @@ internal sealed record PushPrepared(
     IReadOnlySet<string> Deleted,
     IReadOnlyList<string> Removals,
     IReadOnlyList<string> NotRemovable,
-    IReadOnlyDictionary<string, HeldItem> Held);
+    IReadOnlyDictionary<string, HeldItem> Held,
+    IReadOnlyDictionary<string, SecretCheck> Secrets);
 
 internal abstract record PrepareResult
 {
@@ -58,7 +69,9 @@ public sealed partial class GitSyncPusher
     /// <c>L</c> nothing is in the way of. A candidate with an open held item is excluded (D17); one with a base, no
     /// accepted record and a pending content stamp is not excluded: the plan writes it back from its base (D15, D18). A
     /// row with a <c>repush_groups</c> marker is a candidate (D16); with no accepted record and no pending text change it
-    /// has nothing to patch and is excluded as <c>record-missing</c>. Writes nothing to the store.
+    /// has nothing to patch and is excluded as <c>record-missing</c>. The secret check of #161 (D5) runs here, outside any
+    /// transaction: each candidate that is not excluded is read and its key and hit are kept for the plan. Writes nothing
+    /// to the store.
     /// </summary>
     internal async Task<PrepareResult> PrepareAsync(ApplySummary apply, ScanSummary scan, CancellationToken ct)
     {
@@ -207,6 +220,17 @@ public sealed partial class GitSyncPusher
                 excluded[id] = found.Value;
         }
 
+        // the secret check (#161, D5): the detectors run here, so the plan transaction only compares keys
+        Dictionary<string, SecretCheck> secrets;
+        try
+        {
+            secrets = CheckSecrets(candidates, excluded);
+        }
+        catch (Exception ex) when (ex is SqliteException or InvalidOperationException)
+        {
+            return new PrepareResult.Stop(Fail("Store", "the entries could not be read: " + ex.Message, SyncPush.Published.No));
+        }
+
         // the removals: the apply decided them, the tree at L must still allow them
         var removals = new List<string>();
         var notRemovable = new List<string>();
@@ -220,8 +244,50 @@ public sealed partial class GitSyncPusher
             (removable ? removals : notRemovable).Add(id);
         }
 
-        return new PrepareResult.Ready(new PushPrepared(apply.Head, view, rows, candidates, excluded, listed, deleted, removals, notRemovable, held));
+        return new PrepareResult.Ready(new PushPrepared(
+            apply.Head, view, rows, candidates, excluded, listed, deleted, removals, notRemovable, held, secrets));
     }
+
+    /// <summary>
+    /// The secret check of each candidate that is not excluded (#161, D3 and D5): an entry that is not readable now (absent,
+    /// in two tiers, unreadable) gets none. Fields the row allows are no hit and fields it already blocks are a hit, both
+    /// without a scan; any other entry is a hit when the detector finds something in its text, project, scope or a tag. A
+    /// database error propagates to the caller.
+    /// </summary>
+    private Dictionary<string, SecretCheck> CheckSecrets(
+        IReadOnlyDictionary<string, CandidateInfo> candidates, IReadOnlyDictionary<string, SyncPush.Exclusion> excluded)
+    {
+        var secrets = new Dictionary<string, SecretCheck>(StringComparer.Ordinal);
+        foreach (var (id, info) in candidates)
+        {
+            if (excluded.ContainsKey(id))
+                continue;
+            var read = LocalEntryReader.Read(t => _store.Get(t, ContentType.Memory, id), () => _store.IsSticky(ContentType.Memory, id));
+            if (read is not LocalRead.Present present)
+                continue;
+            var view = present.View;
+            var key = SyncSecret.secretKey(view.Content, view.Tags);
+            var row = info.Row;
+            var check = SyncSecret.precheck(Opt(row.BlockedReason), Opt(row.BlockedHash), Opt(row.AllowedHash), key);
+            var hit = check.IsStillBlocked || (check.IsNeedsScan && IsSecretHit(view));
+            secrets[id] = new SecretCheck(key, hit);
+        }
+        return secrets;
+    }
+
+    /// <summary>Whether the detector finds anything in the text, the project, the scope or any tag (#161, decision D2).</summary>
+    private bool IsSecretHit(SyncMerge.LocalEntry view)
+    {
+        var content = view.Content;
+        if (Finds(content.Text) || Finds(content.Project?.Value) || Finds(content.Scope?.Value))
+            return true;
+        foreach (var tag in view.Tags)
+            if (Finds(tag))
+                return true;
+        return false;
+    }
+
+    private bool Finds(string? text) => text is not null && SecretDetector(text).Count > 0;
 
     /// <summary>
     /// Decision 2: writes <c>.git/info/attributes</c> (every filter off), resets the clone to <c>L</c>, cleans it, and
