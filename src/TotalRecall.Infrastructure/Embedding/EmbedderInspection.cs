@@ -21,10 +21,25 @@ public static class EmbedderInspection
     public static EmbedderInspectionResult Inspect(
         Core.Config.EmbeddingConfig cfg,
         int? intraOpThreads = null,
-        Func<Core.Config.EmbeddingConfig, int?, IEmbedder>? factory = null)
+        Func<Core.Config.EmbeddingConfig, int?, IEmbedder>? factory = null) =>
+        Inspect(cfg, intraOpThreads, factory ?? EmbedderFactory.CreateFromConfig, log: true);
+
+    /// <summary>
+    /// The same reading with no side effect: nothing is created on disk (see
+    /// <see cref="EmbedderFactory.CreateFromConfigWithoutSideEffects"/>) and a failure is not logged; its message is
+    /// in the result's readiness (for <c>transcripts status</c>, which reports and never creates anything). The
+    /// embedder is built for inspection only and should not be used to embed.
+    /// </summary>
+    public static EmbedderInspectionResult InspectWithoutSideEffects(Core.Config.EmbeddingConfig cfg) =>
+        Inspect(cfg, null, (c, _) => EmbedderFactory.CreateFromConfigWithoutSideEffects(c), log: false);
+
+    private static EmbedderInspectionResult Inspect(
+        Core.Config.EmbeddingConfig cfg,
+        int? intraOpThreads,
+        Func<Core.Config.EmbeddingConfig, int?, IEmbedder> make,
+        bool log)
     {
         ArgumentNullException.ThrowIfNull(cfg);
-        var make = factory ?? EmbedderFactory.CreateFromConfig;
 
         IEmbedder embedder;
         try
@@ -33,7 +48,8 @@ public static class EmbedderInspection
         }
         catch (Exception ex)
         {
-            ExceptionLogger.LogChain("[total-recall] embedder inspection", ex);
+            if (log)
+                ExceptionLogger.LogChain("[total-recall] embedder inspection", ex);
             return new EmbedderInspectionResult(null, null, new EmbedderReadiness(false, ex.Message), ex.Message);
         }
 
@@ -47,7 +63,8 @@ public static class EmbedderInspection
         catch (Exception ex)
         {
             (embedder as IDisposable)?.Dispose();
-            ExceptionLogger.LogChain("[total-recall] embedder inspection", ex);
+            if (log)
+                ExceptionLogger.LogChain("[total-recall] embedder inspection", ex);
             return new EmbedderInspectionResult(null, null, new EmbedderReadiness(false, ex.Message), ex.Message);
         }
     }

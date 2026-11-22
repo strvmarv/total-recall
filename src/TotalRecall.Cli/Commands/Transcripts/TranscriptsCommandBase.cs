@@ -110,7 +110,7 @@ public abstract class TranscriptsCommandBase : ICliCommand
         var cfg = ReadEmbeddingConfig();
         try
         {
-            return _inspector is not null ? _inspector(cfg) : EmbedderInspection.Inspect(cfg);
+            return _inspector is not null ? _inspector(cfg) : InspectProduction(cfg);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -118,6 +118,9 @@ public abstract class TranscriptsCommandBase : ICliCommand
             return new EmbedderInspectionResult(null, null, new EmbedderReadiness(false, ex.Message), ex.Message);
         }
     }
+
+    /// <summary>The production inspection (no seam injected): builds the embedder the way a run that embeds does.</summary>
+    protected virtual EmbedderInspectionResult InspectProduction(EmbeddingConfig cfg) => EmbedderInspection.Inspect(cfg);
 
     private bool IsInteractive() => _isInteractive is not null ? _isInteractive() : !Console.IsInputRedirected;
 

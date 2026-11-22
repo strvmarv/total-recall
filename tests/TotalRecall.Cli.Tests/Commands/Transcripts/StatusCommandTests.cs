@@ -525,6 +525,35 @@ public sealed class StatusCommandTests : IDisposable
     }
 
     [Fact]
+    public void ProductionInspection_LocalProvider_CreatesNoModelsDirectory_AndLogsNothing()
+    {
+        // No inspector seam: the command's own inspection of the local embedder runs, under the harness's temp HOME.
+        EnableArchive();
+        _h.SeedChunks(1);
+        var userModels = Path.Combine(Environment.GetEnvironmentVariable("HOME")!, ".total-recall", "models");
+        var stderr = new StringWriter();
+        var original = Console.Error;
+        int code;
+        try
+        {
+            Console.SetError(stderr);
+            code = _h.Run(h => new StatusCommand(h.ReadSettings, h.DbPath, h.ReadStorageMode, h.Sentinel, () => false,
+                _ => false, h.Out, h.Err, h.ConfigPath, h.ReadEmbeddingConfig, inspector: null));
+        }
+        finally
+        {
+            Console.SetError(original);
+        }
+
+        Assert.Equal(0, code);
+        Assert.StartsWith("embedder:  ", EmbedBlock()[1]);
+        Assert.Contains("bge-small-en-v1.5", EmbedBlock()[1]);
+        Assert.False(Directory.Exists(userModels), $"status created {userModels}");
+        Assert.False(Directory.Exists(Path.GetDirectoryName(userModels)), "status created the user .total-recall directory");
+        Assert.Equal("", stderr.ToString());
+    }
+
+    [Fact]
     public void ExtraArguments_AreAUsageError()
     {
         Assert.Equal(2, Status("--json"));

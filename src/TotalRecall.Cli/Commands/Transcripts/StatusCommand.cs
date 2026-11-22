@@ -15,7 +15,7 @@ namespace TotalRecall.Cli.Commands.Transcripts;
 /// identifiers, the cutoff, and (search the archive, spec section 6) after the chunk count the embedding lines: the
 /// counts, the embedder and its gate state, whose vectors are stored, the last embed run and how the archive is
 /// searched. Needs no terminal and never creates anything: the store is opened only when the archive tables already
-/// exist. Exit 1 when the archive cannot be located or read (and then it never says that nothing is stored).
+/// exist, and the embedder is inspected without creating its models directory. Exit 1 when the archive cannot be located or read (and then it never says that nothing is stored).
 /// </summary>
 public sealed class StatusCommand : TranscriptsCommandBase
 {
@@ -41,6 +41,13 @@ public sealed class StatusCommand : TranscriptsCommandBase
     public override string Name => "status";
     public override string Description => "Show whether the transcript archive is on, where it is and what it holds";
     protected override string Usage => "Usage: total-recall transcripts status";
+
+    /// <summary>
+    /// Reads the embedder's identity and readiness without a side effect: the local provider's user models directory is
+    /// not created, and a failure is reported in the embedder line, not logged.
+    /// </summary>
+    protected override EmbedderInspectionResult InspectProduction(EmbeddingConfig cfg) =>
+        EmbedderInspection.InspectWithoutSideEffects(cfg);
 
     protected override int Execute(string[] args)
     {
