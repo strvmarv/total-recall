@@ -197,6 +197,57 @@ public sealed class TranscriptSearchReadsTests : IDisposable
     }
 
     [Fact]
+    public void Text_TiesInBm25_AreOrderedByChunkId()
+    {
+        // session ids run opposite to chunk ids, so an outer loop over sessions would yield the higher ids first
+        var later = _db.AddSession("pi", "tie-b", "owner/tie");
+        var earlier = _db.AddSession("pi", "tie-a", "owner/tie");
+        var ids = new List<long>();
+        using (var conn = _db.Connect())
+        {
+            for (var i = 0; i < 6; i++)
+                ids.Add(AddChunk(conn, earlier, "identical tie text", i));
+            for (var i = 0; i < 6; i++)
+                ids.Add(AddChunk(conn, later, "identical tie text", i));
+        }
+
+        using var reads = _db.Store.BeginSearchReads();
+        var match = TranscriptQueryBuilder.Phrase("identical tie text")!;
+        foreach (var filter in new[] { All, All with { Project = "owner/tie" }, All with { InteractiveOnly = true } })
+        {
+            var hits = reads.Text(match, filter, 12);
+            Assert.Single(hits.Select(h => h.Bm25).Distinct());
+            Assert.Equal(ids, hits.Select(h => h.ChunkId).ToList());
+            // a limit inside the tie keeps the lowest ids
+            Assert.Equal(ids.Take(3), reads.Text(match, filter, 3).Select(h => h.ChunkId));
+        }
+    }
+
+    [Fact]
+    public void Vector_TiesInDistance_AreOrderedByRowid()
+    {
+        var later = _db.AddSession("pi", "tie-b", "owner/tie");
+        var earlier = _db.AddSession("pi", "tie-a", "owner/tie");
+        var ids = new List<long>();
+        using (var conn = _db.Connect())
+        {
+            for (var i = 0; i < 5; i++)
+                ids.Add(AddChunk(conn, earlier, "tie " + i, i, angle: 0.4, project: "owner/tie"));
+            for (var i = 0; i < 5; i++)
+                ids.Add(AddChunk(conn, later, "tie " + (i + 5), i, angle: 0.4, project: "owner/tie"));
+        }
+
+        using var reads = _db.Store.BeginSearchReads();
+        foreach (var filter in new[] { All, All with { Project = "owner/tie" }, All with { SessionId = later } })
+        {
+            var hits = reads.Vector(Query(), filter, 10);
+            Assert.Single(hits.Select(h => h.Similarity).Distinct());
+            var expected = filter.SessionId is null ? ids : ids.Skip(5).ToList();
+            Assert.Equal(expected, hits.Select(h => h.ChunkId).ToList());
+        }
+    }
+
+    [Fact]
     public void Text_FiltersApplyInTheQuery()
     {
         var seed = Populate();

@@ -116,6 +116,32 @@ public sealed class TranscriptQueryBuilderTests : IDisposable
     }
 
     [Fact]
+    public void DecomposedQuery_IsNormalisedToOneToken()
+    {
+        // "re\u0301sume" is e + COMBINING ACUTE ACCENT; NFC makes it the single letter \u00e9
+        Assert.Equal("\"r\u00e9sume\"", TranscriptQueryBuilder.Words("re\u0301sume"));
+        Assert.Equal("\"my r\u00e9sume\"", TranscriptQueryBuilder.Phrase("my re\u0301sume"));
+    }
+
+    [Fact]
+    public void LoneSurrogate_DoesNotThrow()
+    {
+        Assert.Equal("\"abc\" OR \"def\"", TranscriptQueryBuilder.Words("abc\uD800def"));
+        Assert.Equal("\"abc def\"", TranscriptQueryBuilder.Phrase("abc\uD800def"));
+    }
+
+    [Fact]
+    public void DecomposedQuery_MatchesTheIndexedWord()
+    {
+        var sid = _db.AddSession("pi", "s1");
+        var hit = _db.AddChunk(sid, "please update the resume template", 0);
+        _db.AddChunk(sid, "nothing relevant here", 1);
+
+        Assert.Equal(new[] { hit }, MatchIds(TranscriptQueryBuilder.Words("re\u0301sume")!));
+        Assert.Equal(new[] { hit }, MatchIds(TranscriptQueryBuilder.Phrase("the re\u0301sume")!));
+    }
+
+    [Fact]
     public void Phrase_MatchesTheTextAsTheTokenizerSplitsIt()
     {
         var sid = _db.AddSession("pi", "s1");

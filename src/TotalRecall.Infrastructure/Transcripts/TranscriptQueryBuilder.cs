@@ -53,15 +53,28 @@ public static class TranscriptQueryBuilder
             .Select(c => Quote(c.Token)));
     }
 
-    /// <summary>Lower-cased runs of Unicode letters and digits.</summary>
+    /// <summary>
+    /// Lower-cased runs of Unicode letters and digits, after NFC normalisation: a decomposed letter (<c>e</c> plus a
+    /// combining accent, which is not a letter) would otherwise split a word in two and miss the indexed form.
+    /// </summary>
     private static List<string> Tokenize(string query)
     {
         var tokens = new List<string>();
         if (string.IsNullOrEmpty(query))
             return tokens;
 
+        string normalised;
+        try
+        {
+            normalised = query.Normalize(NormalizationForm.FormC);
+        }
+        catch (ArgumentException)
+        {
+            normalised = query; // invalid UTF-16 (a lone surrogate): tokenised as it is, the bad unit becomes U+FFFD
+        }
+
         var current = new StringBuilder();
-        foreach (var rune in query.EnumerateRunes())
+        foreach (var rune in normalised.EnumerateRunes())
         {
             if (Rune.IsLetterOrDigit(rune))
             {

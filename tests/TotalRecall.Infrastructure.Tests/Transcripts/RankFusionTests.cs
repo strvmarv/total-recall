@@ -82,13 +82,13 @@ public sealed class RankFusionTests
     {
         var recent = Now.AddDays(-1).ToString("o");
         var older = Now.AddDays(-400).ToString("o");
-        // 1 ranks first but is old; 2 ranks second and is recent
+        // 1 ranks first but is old; 2 ranks second and is recent. 1: (1/61) * 1.0214 = 0.01674; 2: (1/62) * 1.0996 =
+        // 0.01774, so the recent chunk overtakes the one ranked above it.
         var info = Infos((1, Info(1, ts: older)), (2, Info(2, ts: recent)));
         var hits = Rank(new long[] { 1, 2 }, None, None, info);
-        var s1 = (1.0 / 61) * (1 + 0.10 * Math.Pow(2, -400.0 / 180));
-        var s2 = (1.0 / 62) * (1 + 0.10 * Math.Pow(2, -1.0 / 180));
-        Assert.Equal(s1 > s2 ? 1 : 2, hits[0].ChunkId);
-        Assert.Equal(Math.Min(s1, s2) / Math.Max(s1, s2), hits[1].Score, 9);
+        Assert.Equal(new long[] { 2, 1 }, hits.Select(h => h.ChunkId).ToArray());
+        Assert.Equal(1.0, hits[0].Score);
+        Assert.Equal(0.9441, hits[1].Score, 4);
 
         // Same rank (two lists put each first): the newer chunk wins the near tie.
         var info2 = Infos((1, Info(1, ts: older)), (2, Info(2, ts: recent)));
@@ -141,12 +141,23 @@ public sealed class RankFusionTests
     }
 
     [Fact]
-    public void Rank_TopScoreIsOne_WhenTheCapSkipsTheBest()
+    public void Rank_TopScoreIsOne_WhenTopKCutsTheRest()
     {
         var info = Infos((1, Info(1)), (2, Info(2)));
         var hits = Rank(new long[] { 1, 2 }, None, None, info, topK: 1);
         Assert.Single(hits);
         Assert.Equal(1.0, hits[0].Score);
+    }
+
+    [Fact]
+    public void Rank_ScoresStayRelativeToTheBest_WhenTheSessionCapSkipsAChunk()
+    {
+        // two chunks of session 1 fill its cap ahead of a third; session 2's chunk comes in after the skipped one
+        var info = Infos((1, Info(1)), (2, Info(1)), (3, Info(1)), (4, Info(2)));
+        var hits = Rank(new long[] { 1, 2, 3, 4 }, None, None, info, topK: 3);
+        Assert.Equal(new long[] { 1, 2, 4 }, hits.Select(h => h.ChunkId).ToArray());
+        Assert.Equal(1.0, hits[0].Score);
+        Assert.Equal((1.0 / 64) / (1.0 / 61), hits[2].Score, 9); // its own rank (fourth), not its place in the results
     }
 
     [Fact]

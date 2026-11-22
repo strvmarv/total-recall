@@ -45,11 +45,14 @@ public interface ITranscriptSearchReads : IDisposable
     /// <summary>The session row id of <c>&lt;host&gt;:&lt;hostSessionId&gt;</c>, or null when there is none.</summary>
     long? ResolveSession(string host, string hostSessionId);
 
-    /// <summary>Up to <paramref name="k"/> nearest chunks by cosine similarity, best first; the filter applies inside the search.</summary>
+    /// <summary>
+    /// Up to <paramref name="k"/> nearest chunks by cosine similarity, best first, ties by chunk id; the filter applies
+    /// inside the search.
+    /// </summary>
     /// <exception cref="ArgumentException">The query is not 384 floats.</exception>
     IReadOnlyList<VectorHit> Vector(float[] query, ChunkFilter filter, int k);
 
-    /// <summary>Up to <paramref name="limit"/> chunks matching the FTS5 <paramref name="match"/> string, best bm25 first.</summary>
+    /// <summary>Up to <paramref name="limit"/> chunks matching the FTS5 <paramref name="match"/> string, best bm25 first, ties by chunk id.</summary>
     IReadOnlyList<TextHit> Text(string match, ChunkFilter filter, int limit);
 
     /// <summary>Chunks in scope; with <paramref name="onlyUnembedded"/> only those with <c>embedded = 0</c>.</summary>
@@ -101,6 +104,7 @@ internal sealed class SqliteTranscriptSearchReads : ITranscriptSearchReads
         if (filter.Project is not null) sql.Append(" AND project = $project");
         if (filter.InteractiveOnly) sql.Append(" AND kind = 'interactive'");
         if (filter.SinceEpoch is not null) sql.Append(" AND ts >= $since");
+        // vec0 accepts no second ORDER BY term, so ties are broken below
         sql.Append(" ORDER BY distance");
 
         using var cmd = Command(sql.ToString());
@@ -112,6 +116,14 @@ internal sealed class SqliteTranscriptSearchReads : ITranscriptSearchReads
         using var r = cmd.ExecuteReader();
         while (r.Read())
             hits.Add(new VectorHit(r.GetInt64(0), 1.0 - r.GetDouble(1)));
+
+        // vec0 returns equal distances in no stated order (observed: descending rowid); the chunk id breaks ties so
+        // the order is the same every time. Which tied rows a k cut keeps is still vec0's choice.
+        hits.Sort(static (a, b) =>
+        {
+            var bySimilarity = b.Similarity.CompareTo(a.Similarity);
+            return bySimilarity != 0 ? bySimilarity : a.ChunkId.CompareTo(b.ChunkId);
+        });
         return hits;
     }
 
@@ -128,7 +140,8 @@ internal sealed class SqliteTranscriptSearchReads : ITranscriptSearchReads
             "JOIN tx_session s ON s.id = c.session_id " +
             "WHERE tx_chunk_fts MATCH $match");
         AppendScope(sql, filter);
-        sql.Append(" ORDER BY score LIMIT $limit");
+        // the chunk id breaks ties so equal scores (and the cut a limit makes inside them) are the same every time
+        sql.Append(" ORDER BY score, c.id LIMIT $limit");
 
         using var cmd = Command(sql.ToString());
         cmd.Parameters.AddWithValue("$match", match);
