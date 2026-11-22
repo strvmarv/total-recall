@@ -45,7 +45,11 @@ internal static class TranscriptMigrationRunner
         // not exist yet, so CurrentVersion probes for it and returns 0.
         if (CurrentVersion(conn) >= targetVersion) return;
 
-        using var tx = conn.BeginTransaction();
+        // BEGIN IMMEDIATE, spelled out: it takes the write lock up front (waiting behind the busy timeout), so the
+        // re-read below sees the latest version. A deferred BEGIN would read at a snapshot and then fail at once with
+        // "database is locked" on its first write when another writer committed meanwhile (a read-to-write upgrade
+        // does not use the busy handler).
+        using var tx = conn.BeginTransaction(deferred: false);
 
         Exec(conn, tx, VersionDdl);
         // Re-read under the write lock: another process may have migrated between the check above and BEGIN.

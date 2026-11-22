@@ -313,6 +313,35 @@ public sealed class TranscriptVectorSchemaTests : IDisposable
     }
 
     [Fact]
+    public async Task Run_PendingMigration_BehindAWriter_WaitsAndMigrates()
+    {
+        // A second process opens a version-2 archive while another connection holds the write lock with a write
+        // of its own. A deferred BEGIN would read the version at the old snapshot and then fail at once on its first
+        // write with "database is locked" (WAL: a stale read snapshot cannot be upgraded, the busy handler is not
+        // used). BEGIN IMMEDIATE waits behind the busy timeout and then migrates.
+        var path = NewPath();
+        using (var setup = OpenRaw(path)) TranscriptMigrationRunner.Run(setup, 2);
+
+        using var holder = OpenRaw(path);
+        Exec(holder, "BEGIN IMMEDIATE");
+        Exec(holder, "INSERT INTO tx_state (key, value) VALUES ('holder', 'x')");
+
+        var run = Task.Run(() =>
+        {
+            using var conn = OpenRaw(path);
+            TranscriptMigrationRunner.Run(conn);
+            return TranscriptMigrationRunner.CurrentVersion(conn);
+        });
+        await Task.Delay(500);
+        Exec(holder, "COMMIT");
+
+        Assert.Equal(3, await run);
+        using var check = OpenRaw(path);
+        Assert.Equal(3, TranscriptMigrationRunner.CurrentVersion(check));
+        Assert.Equal("x", Text(check, "SELECT value FROM tx_state WHERE key = 'holder'"));
+    }
+
+    [Fact]
     public async Task Run_PendingMigration_StillAtomic()
     {
         var path = NewPath();
