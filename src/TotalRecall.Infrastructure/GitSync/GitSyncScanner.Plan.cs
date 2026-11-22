@@ -206,8 +206,14 @@ public sealed partial class GitSyncScanner
             plan.ClockText = SyncStamp.ClockModule.serialize(issuer.Clock!.Value);
         plan.WarningText = SyncScan.ClockWarning.addKinds(Opt(snap.WarningText), ListModule.OfSeq(kinds))?.Value;
 
+        // The secret check on the rows the plan now holds, before the summary (#161, decision D4).
+        var blocked = new List<string>();
+        var unblocked = new List<string>();
+        ApplySecretPass(snap, plan, blocked, unblocked);
+
         skipped = skipped.OrderBy(s => s.Id, StringComparer.Ordinal).ThenBy(s => s.Group, StringComparer.Ordinal).ToList();
-        plan.Summary = new ScanSummary(created, content, tags, sticky, tier, left, reactivated, snap.Ineligible.Count, deletions, skipped);
+        plan.Summary = new ScanSummary(
+            created, content, tags, sticky, tier, left, reactivated, snap.Ineligible.Count, deletions, skipped, blocked, unblocked);
         return plan;
     }
 

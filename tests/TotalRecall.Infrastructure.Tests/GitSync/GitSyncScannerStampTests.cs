@@ -164,7 +164,7 @@ public sealed class GitSyncScannerStampTests
     [Theory]
     [InlineData("content")]
     [InlineData("pin")]
-    public void AnUpdate_KeepsTheBaseAndEveryColumnItDoesNotOwn(string change)
+    public void AnUpdate_KeepsTheBaseAndTheColumnsTheScanDoesNotChange(string change)
     {
         using var rig = new ScanRig();
         rig.AddMemory(Tier.Hot, A, "one");
@@ -175,6 +175,7 @@ public sealed class GitSyncScannerStampTests
             RepushGroups = "tier",
             PushingStamps = "{\"content\":\"x\"}",
             BlockedHash = "bh",
+            // A reason that is neither the writer's nor a secret mark: the secret check leaves it as it is.
             BlockedReason = "secret",
             AllowedHash = "ah",
         };
