@@ -1,20 +1,26 @@
 using System;
-using System.Globalization;
 using System.IO;
 using System.Threading;
 using TotalRecall.Infrastructure.Config;
+using TotalRecall.Infrastructure.Diagnostics;
+using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Transcripts;
+using EmbeddingConfig = TotalRecall.Core.Config.EmbeddingConfig;
 
 namespace TotalRecall.Cli.Commands.Transcripts;
 
 /// <summary>
-/// <c>total-recall transcripts backfill [--host claude-code]</c> (spec section 9): stores the host's existing sessions in
-/// the archive and prints what it did. Needs no terminal and asks nothing. The order is part of the contract: arguments,
-/// the configuration (strictly), the archive on and the storage mode not postgres, the archive's location, the archive
+/// <c>total-recall transcripts backfill [--host claude-code] [--no-embed]</c> (spec section 9; search the archive,
+/// section 4): stores the host's existing sessions in the archive, then gives the waiting chunks their vectors, and
+/// prints what it did. Needs no terminal and asks nothing. The order is part of the contract: arguments, the
+/// configuration (strictly), the archive on and the storage mode not postgres, the archive's location, the archive
 /// opened without creating anything (an older one is migrated here), and only then the adapter, so that while the
-/// archive is off nothing under the host's directory is read. Exit 0 when no file failed (also an interrupted run), 1
-/// when a file failed or the archive cannot be used, 2 for a usage error. Ctrl+C stops after the current session; a
-/// second Ctrl+C ends the process.
+/// archive is off nothing under the host's directory is read. The embed step runs after the ingest, also when the host
+/// has no session files, and is skipped when the ingest was interrupted or <c>--no-embed</c> is given (which prints only
+/// the waiting count). Exit 0 when no file failed (also an interrupted run), 1 when a file failed or the archive cannot
+/// be used, 2 for a usage error; the embed step never changes it (an embed that cannot run is reported as
+/// <c>N chunks wait for embedding: &lt;state&gt;</c>). Ctrl+C stops after the current session or batch; a second
+/// Ctrl+C ends the process.
 /// </summary>
 public sealed class BackfillCommand : TranscriptsCommandBase
 {
@@ -23,6 +29,7 @@ public sealed class BackfillCommand : TranscriptsCommandBase
 
     private readonly Func<string, ITranscriptAdapter>? _adapterFactory;
     private readonly CancellationToken? _cancellation;
+    private readonly TimeProvider _time = TimeProvider.System;
 
     /// <summary>Production: the Claude Code adapter, cancelled by Ctrl+C.</summary>
     public BackfillCommand() { }
@@ -39,20 +46,25 @@ public sealed class BackfillCommand : TranscriptsCommandBase
         TextWriter error,
         string userConfigPath,
         Func<string, ITranscriptAdapter> adapterFactory,
-        CancellationToken cancellation)
-        : base(settings, mainDbPath, storageMode, sentinel, isInteractive, confirm, output, error, userConfigPath)
+        CancellationToken cancellation,
+        Func<EmbeddingConfig>? embeddingConfig = null,
+        Func<EmbeddingConfig, EmbedderInspectionResult>? inspector = null,
+        TimeProvider? time = null)
+        : base(settings, mainDbPath, storageMode, sentinel, isInteractive, confirm, output, error, userConfigPath,
+            embeddingConfig, inspector)
     {
         _adapterFactory = adapterFactory ?? throw new ArgumentNullException(nameof(adapterFactory));
         _cancellation = cancellation;
+        _time = time ?? TimeProvider.System;
     }
 
     public override string Name => "backfill";
     public override string Description => "Store the existing sessions of a host in the transcript archive";
-    protected override string Usage => "Usage: total-recall transcripts backfill [--host claude-code]";
+    protected override string Usage => "Usage: total-recall transcripts backfill [--host claude-code] [--no-embed]";
 
     protected override int Execute(string[] args)
     {
-        var host = ParseHost(args, out var usage);
+        var host = ParseHost(args, out var noEmbed, out var usage);
         if (host is null)
             return usage;
 
@@ -91,34 +103,88 @@ public sealed class BackfillCommand : TranscriptsCommandBase
         // Only now: nothing of the host's directory has been touched before this point.
         var adapter = CreateAdapter(host);
 
+        return WithCancelKey(_cancellation, ct => IngestThenEmbed(store, adapter, settings, noEmbed, ct));
+    }
+
+    private int IngestThenEmbed(
+        ITranscriptStore store, ITranscriptAdapter adapter, TranscriptsSettings settings, bool noEmbed, CancellationToken ct)
+    {
         if (!adapter.Detect())
         {
             Out.WriteLine($"no Claude Code sessions found at {adapter.Root}");
+            // The host's files may be gone while chunks still wait: that is the case the archive exists for.
+            EmbedStep(store, settings, noEmbed, ct);
             return 0;
         }
 
-        BackfillSummary summary;
-        if (_cancellation is { } injected)
+        var summary = Run(store, adapter, ct);
+        Print(adapter.Host, summary);
+        if (!summary.Cancelled) // the person asked to stop
+            EmbedStep(store, settings, noEmbed, ct);
+        return summary.Failed == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// The embed step: never changes the exit code and never throws. With <c>--no-embed</c> only the waiting count is
+    /// printed; with nothing waiting nothing is printed.
+    /// </summary>
+    private void EmbedStep(ITranscriptStore store, TranscriptsSettings settings, bool noEmbed, CancellationToken ct)
+    {
+        long waiting;
+        try
         {
-            summary = Run(store, adapter, injected);
+            waiting = store.CountEmbedding().Waiting;
         }
-        else
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            using var cts = new CancellationTokenSource();
-            ConsoleCancelEventHandler handler = (_, e) => e.Cancel = KeepProcessOnCancelKey(cts);
-            Console.CancelKeyPress += handler;
-            try
-            {
-                summary = Run(store, adapter, cts.Token);
-            }
-            finally
-            {
-                Console.CancelKeyPress -= handler;
-            }
+            ExceptionLogger.LogChain("[total-recall] transcripts backfill: counting the waiting chunks", ex);
+            Out.WriteLine($"  the chunks waiting for embedding could not be counted: {ex.Message}");
+            return;
         }
 
-        Print(adapter.Host, summary);
-        return summary.Failed == 0 ? 0 : 1;
+        if (noEmbed)
+        {
+            Out.WriteLine($"  {N(waiting)} chunks wait for embedding");
+            return;
+        }
+        if (waiting == 0)
+            return;
+
+        try
+        {
+            using var check = CheckEmbedGate(store, settings, archiveActive: true, postgres: false);
+            if (!check.Gate.CanEmbed)
+            {
+                Out.WriteLine($"  {N(waiting)} chunks wait for embedding: {check.Gate.Text}");
+                return;
+            }
+
+            var run = RunWorker(store, check, waiting, _time, ct, "  ");
+            switch (run.StoppedBy)
+            {
+                case EmbedStopReason.Done:
+                case EmbedStopReason.Budget:
+                case EmbedStopReason.Cancelled:
+                    var line = $"  embedded {N(run.Embedded)} chunks";
+                    var couldNot = CouldNotEmbed(run);
+                    if (couldNot > 0)
+                        line += $"; {N(couldNot)} could not be embedded";
+                    if (run.StoppedBy != EmbedStopReason.Done && run.Remaining > 0)
+                        line += $"; interrupted, {N(run.Remaining)} chunks wait for embedding";
+                    Out.WriteLine(line);
+                    break;
+                default:
+                    if (run.Embedded > 0)
+                        Out.WriteLine($"  embedded {N(run.Embedded)} chunks");
+                    Out.WriteLine($"  {N(run.Remaining)} chunks wait for embedding: {run.State.Text}");
+                    break;
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            ExceptionLogger.LogChain("[total-recall] transcripts backfill: embedding", ex);
+            Out.WriteLine($"  {N(waiting)} chunks wait for embedding: embedding failed: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -144,15 +210,23 @@ public sealed class BackfillCommand : TranscriptsCommandBase
     private ITranscriptAdapter CreateAdapter(string host) =>
         _adapterFactory is not null ? _adapterFactory(host) : new ClaudeCodeAdapter();
 
-    /// <summary>The host: <c>--host</c>'s value or <c>claude-code</c>; null after a usage error was printed.</summary>
-    private string? ParseHost(string[] args, out int usage)
+    /// <summary>
+    /// The host: <c>--host</c>'s value or <c>claude-code</c>, and whether <c>--no-embed</c> was given; null after a
+    /// usage error was printed.
+    /// </summary>
+    private string? ParseHost(string[] args, out bool noEmbed, out int usage)
     {
         usage = 0;
+        noEmbed = false;
         string? host = null;
         for (var i = 0; i < args.Length; i++)
         {
             var a = args[i];
-            if (a == "--host")
+            if (a == "--no-embed")
+            {
+                noEmbed = true;
+            }
+            else if (a == "--host")
             {
                 if (i + 1 >= args.Length || host is not null)
                 {
@@ -195,6 +269,4 @@ public sealed class BackfillCommand : TranscriptsCommandBase
         if (s.Cancelled)
             Out.WriteLine("  interrupted: the remaining sessions were not processed");
     }
-
-    private static string N(long n) => n.ToString(CultureInfo.InvariantCulture);
 }

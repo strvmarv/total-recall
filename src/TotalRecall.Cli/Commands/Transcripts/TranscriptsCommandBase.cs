@@ -9,18 +9,22 @@
 // (config, data directory, database path) is resolved when the command runs.
 
 using System;
+using System.Globalization;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.FSharp.Core;
 using Spectre.Console;
 using TotalRecall.Infrastructure.Config;
+using TotalRecall.Infrastructure.Diagnostics;
+using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Transcripts;
+using EmbeddingConfig = TotalRecall.Core.Config.EmbeddingConfig;
 
 namespace TotalRecall.Cli.Commands.Transcripts;
 
 public abstract class TranscriptsCommandBase : ICliCommand
 {
-    public const string SearchNotAvailableLine = "search: not available in this version yet";
-
     private readonly Func<TranscriptsSettings>? _settings;
     private readonly string? _mainDbPath;
     private readonly Func<string>? _storageMode;
@@ -30,6 +34,8 @@ public abstract class TranscriptsCommandBase : ICliCommand
     private readonly TextWriter? _output;
     private readonly TextWriter? _error;
     private readonly string? _userConfigPath;
+    private readonly Func<EmbeddingConfig>? _embeddingConfig;
+    private readonly Func<EmbeddingConfig, EmbedderInspectionResult>? _inspector;
 
     /// <summary>Production: every input is resolved when the command runs.</summary>
     protected TranscriptsCommandBase() { }
@@ -44,7 +50,9 @@ public abstract class TranscriptsCommandBase : ICliCommand
         Func<string, bool> confirm,
         TextWriter output,
         TextWriter error,
-        string userConfigPath)
+        string userConfigPath,
+        Func<EmbeddingConfig>? embeddingConfig = null,
+        Func<EmbeddingConfig, EmbedderInspectionResult>? inspector = null)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _mainDbPath = mainDbPath ?? throw new ArgumentNullException(nameof(mainDbPath));
@@ -55,6 +63,8 @@ public abstract class TranscriptsCommandBase : ICliCommand
         _output = output ?? throw new ArgumentNullException(nameof(output));
         _error = error ?? throw new ArgumentNullException(nameof(error));
         _userConfigPath = userConfigPath ?? throw new ArgumentNullException(nameof(userConfigPath));
+        _embeddingConfig = embeddingConfig;
+        _inspector = inspector;
     }
 
     public abstract string Name { get; }
@@ -85,6 +95,29 @@ public abstract class TranscriptsCommandBase : ICliCommand
 
     /// <summary>The main database path; throws <see cref="SqliteDbPathException"/> for an invalid TOTAL_RECALL_DB_PATH.</summary>
     protected string MainDbPath() => _mainDbPath ?? ConfigLoader.GetDbPath();
+
+    /// <summary>The effective <c>[embedding]</c> configuration.</summary>
+    protected EmbeddingConfig ReadEmbeddingConfig() => _embeddingConfig is not null
+        ? _embeddingConfig()
+        : new ConfigLoader().LoadEffectiveConfig().Embedding;
+
+    /// <summary>
+    /// Builds the configured embedder and reads its identity and readiness. The caller disposes the embedder. Call it
+    /// only after rules 1 and 2 of the gate passed from config: a failed inspection logs a stack trace.
+    /// </summary>
+    protected EmbedderInspectionResult Inspect()
+    {
+        var cfg = ReadEmbeddingConfig();
+        try
+        {
+            return _inspector is not null ? _inspector(cfg) : EmbedderInspection.Inspect(cfg);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            ExceptionLogger.LogChain($"[total-recall] transcripts {Name}: building the embedder", ex);
+            return new EmbedderInspectionResult(null, null, new EmbedderReadiness(false, ex.Message), ex.Message);
+        }
+    }
 
     private bool IsInteractive() => _isInteractive is not null ? _isInteractive() : !Console.IsInputRedirected;
 
@@ -190,6 +223,152 @@ public abstract class TranscriptsCommandBase : ICliCommand
         location.IsMainDatabase ? "the " + Describe(location) : "the file " + location.Path;
 
     protected static string Plural(long n, string noun) => n == 1 ? $"1 {noun}" : $"{n} {noun}s";
+
+    // ---- the embed gate and the embed step (embed, backfill, status) ---------------------------------------------
+
+    /// <summary>
+    /// The gate's verdict for this command (<c>ServerPass = false</c>) with what it read. Disposing it disposes the
+    /// embedder the inspection built.
+    /// </summary>
+    protected sealed class EmbedCheck : IDisposable
+    {
+        public EmbedCheck(EmbedGateResult gate, EmbedderInspectionResult? inspected, FingerprintState? fingerprint,
+            ArchiveFingerprint? stored)
+        {
+            Gate = gate;
+            Inspected = inspected;
+            Fingerprint = fingerprint;
+            Stored = stored;
+        }
+
+        public EmbedGateResult Gate { get; }
+        public EmbedderInspectionResult? Inspected { get; }
+
+        /// <summary>The fingerprint state against the running embedder; null when it was not read.</summary>
+        public FingerprintState? Fingerprint { get; }
+
+        /// <summary>The stored fingerprint when <see cref="Fingerprint"/> is a mismatch.</summary>
+        public ArchiveFingerprint? Stored { get; }
+
+        public ArchiveFingerprint? Current => Inspected?.Current;
+
+        public void Dispose()
+        {
+            try { (Inspected?.Embedder as IDisposable)?.Dispose(); }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                ExceptionLogger.LogChain("[total-recall] transcripts: disposing the embedder", ex);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Evaluates the embed gate (spec section 3). Rules 1 and 2 are evaluated from config first, so an archive that is
+    /// off, postgres, or a remote provider without <c>allow_remote_embedding</c> never builds (or inspects) an embedder
+    /// and no archive text can reach it. Store reads may throw; the caller handles that.
+    /// </summary>
+    protected EmbedCheck CheckEmbedGate(ITranscriptStore store, TranscriptsSettings settings, bool archiveActive, bool postgres)
+    {
+        var cfg = ReadEmbeddingConfig();
+        var provider = FSharpOption<string>.get_IsSome(cfg.Provider) ? cfg.Provider.Value : "local";
+        var allowRemote = settings.AllowRemoteEmbedding;
+
+        var preliminary = EmbedGate.Evaluate(new EmbedGateInput(
+            ArchiveActive: archiveActive, Postgres: postgres, Provider: provider, AllowRemoteEmbedding: allowRemote,
+            Dimensions: null, Fingerprint: null, Stored: null, Current: null,
+            Readiness: new EmbedderReadiness(true, null), MemoryReindexRunning: false, ServerPass: false));
+        if (!preliminary.CanEmbed)
+            return new EmbedCheck(preliminary, null, null, null);
+
+        var inspected = Inspect();
+        try
+        {
+            var current = inspected.Current;
+            FingerprintState? state = null;
+            ArchiveFingerprint? stored = null;
+            if (current is not null)
+            {
+                state = store.CheckFingerprint(current);
+                if (state == FingerprintState.Mismatch)
+                    stored = store.ReadEmbedFingerprint();
+            }
+
+            var gate = EmbedGate.Evaluate(new EmbedGateInput(
+                ArchiveActive: archiveActive,
+                Postgres: postgres,
+                Provider: provider,
+                AllowRemoteEmbedding: allowRemote,
+                Dimensions: current?.Dimensions,
+                Fingerprint: state,
+                Stored: stored,
+                Current: current,
+                Readiness: inspected.Readiness,
+                MemoryReindexRunning: false,
+                ServerPass: false));
+            if (gate.CanEmbed && (inspected.Embedder is null || current is null))
+                gate = EmbedGate.NotReady(inspected.FactoryError ?? "no embedder");
+            return new EmbedCheck(gate, inspected, state, stored);
+        }
+        catch
+        {
+            try { (inspected.Embedder as IDisposable)?.Dispose(); }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                ExceptionLogger.LogChain($"[total-recall] transcripts {Name}: disposing the embedder", ex);
+            }
+            throw;
+        }
+    }
+
+    /// <summary>How long the progress line waits before it is printed again.</summary>
+    protected static readonly TimeSpan ProgressInterval = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Runs the worker with no budget through a ready <paramref name="check"/>, printing
+    /// <c>embedded N of M (K remaining)</c> after the first batch and then at most once per <see cref="ProgressInterval"/>.
+    /// </summary>
+    protected EmbedRun RunWorker(ITranscriptStore store, EmbedCheck check, long total, TimeProvider time,
+        CancellationToken ct, string indent)
+    {
+        DateTimeOffset? last = null;
+        var worker = new TranscriptEmbedWorker(store, check.Inspected!.Embedder!, time);
+        return worker.Run(check.Gate, check.Current!, new EmbedBudget(null, null), ct, p =>
+        {
+            var now = time.GetUtcNow();
+            if (last is { } at && now - at < ProgressInterval)
+                return;
+            last = now;
+            Out.WriteLine($"{indent}embedded {N(p.Embedded)} of {N(total)} ({N(p.Remaining)} remaining)");
+        });
+    }
+
+    /// <summary>
+    /// The chunks a finished run could not embed: those that reached their third try, and when the run is done the ones
+    /// it left out after they failed alone (still waiting; the next run tries them again).
+    /// </summary>
+    protected static int CouldNotEmbed(EmbedRun run) =>
+        run.GaveUp + (run.StoppedBy == EmbedStopReason.Done ? run.Remaining : 0);
+
+    /// <summary>Waits for Ctrl+C (the first press cancels between steps, a second ends the process) unless injected.</summary>
+    protected static T WithCancelKey<T>(CancellationToken? injected, Func<CancellationToken, T> run)
+    {
+        if (injected is { } token)
+            return run(token);
+
+        using var cts = new CancellationTokenSource();
+        ConsoleCancelEventHandler handler = (_, e) => e.Cancel = BackfillCommand.KeepProcessOnCancelKey(cts);
+        Console.CancelKeyPress += handler;
+        try
+        {
+            return run(cts.Token);
+        }
+        finally
+        {
+            Console.CancelKeyPress -= handler;
+        }
+    }
+
+    protected static string N(long n) => n.ToString(CultureInfo.InvariantCulture);
 
     // ---- forget / unforget selectors -----------------------------------------------------------------------------
 

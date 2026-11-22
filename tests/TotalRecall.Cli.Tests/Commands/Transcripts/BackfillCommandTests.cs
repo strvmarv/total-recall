@@ -4,6 +4,7 @@ using System.IO;
 using System.Text.RegularExpressions;
 using System.Threading;
 using TotalRecall.Cli.Commands.Transcripts;
+using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Transcripts;
 using TotalRecall.TestSupport.Transcripts;
 using Xunit;
@@ -129,7 +130,7 @@ public sealed class BackfillCommandTests : IDisposable
 
         Assert.Equal(2, code);
         Assert.Empty(_factoryCalls);
-        Assert.Contains("Usage: total-recall transcripts backfill [--host claude-code]", _h.Err.ToString());
+        Assert.Contains("Usage: total-recall transcripts backfill [--host claude-code] [--no-embed]", _h.Err.ToString());
     }
 
     [Fact]
@@ -246,7 +247,8 @@ public sealed class BackfillCommandTests : IDisposable
         Assert.Contains("by project and kind:", status);
         Assert.Matches(@"(?m)^  proj interactive: 3 sessions, \d+ chunks$", status);
         Assert.Matches(@"(?m)^  proj automated: 1 sessions, \d+ chunks$", status);
-        Assert.Contains("search: not available in this version yet", status);
+        Assert.Contains("search:    meaning and words", status);
+        Assert.DoesNotContain("not available in this version", status);
     }
 
     [Fact]
@@ -397,6 +399,167 @@ public sealed class BackfillCommandTests : IDisposable
         Assert.Single(progress);
         Assert.Equal("  50/55 sessions", progress[0].TrimEnd());
         Assert.Contains("backfill claude-code: 55 sessions seen", _h.Out.ToString());
+    }
+
+    // ---- the embed step ----------------------------------------------------------------------------------------------
+
+    private long Embedded => _h.Scalar("SELECT count(*) FROM tx_chunk WHERE embedded = 1");
+
+    private long ChunkCount => _h.Scalar("SELECT count(*) FROM tx_chunk");
+
+    private static int WithSilentStderr(Func<int> run)
+    {
+        var original = Console.Error;
+        try
+        {
+            Console.SetError(new StringWriter());
+            return run();
+        }
+        finally
+        {
+            Console.SetError(original);
+        }
+    }
+
+    [Fact]
+    public void AfterIngest_ItEmbeds_AndSaysHowMany()
+    {
+        EnableArchive();
+        _home.Place("decision", Cwd);
+        _home.Place("compaction", Cwd);
+
+        var code = Backfill();
+
+        Assert.Equal(0, code);
+        var chunks = ChunkCount;
+        Assert.True(chunks > 0);
+        Assert.Equal(chunks, Embedded);
+        Assert.Contains($"  embedded {chunks} chunks", _h.Out.ToString());
+        Assert.Equal(1, _h.Embedder.Disposed);
+    }
+
+    [Fact]
+    public void NoEmbed_PrintsOnlyTheWaitingCount()
+    {
+        EnableArchive();
+        _home.Place("decision", Cwd);
+
+        var code = Backfill(Factory(), default, "--no-embed");
+
+        Assert.Equal(0, code);
+        var chunks = ChunkCount;
+        var output = _h.Out.ToString();
+        Assert.Contains($"  {chunks} chunks wait for embedding", output);
+        Assert.DoesNotContain("wait for embedding:", output);
+        Assert.DoesNotContain("embedded ", output);
+        Assert.Equal(0, Embedded);
+        Assert.Empty(_h.Inspections);
+        Assert.Empty(_h.Embedder.Texts);
+    }
+
+    [Fact]
+    public void GateRefuses_IngestResultAndExitUnchanged_SummarySaysWhy()
+    {
+        _h.WriteConfig("[transcripts]\nenabled = true\n[embedding]\nprovider = \"openai\"\n");
+        _h.CreateArchive();
+        _home.Place("decision", Cwd);
+
+        var code = Backfill();
+
+        Assert.Equal(0, code);
+        var chunks = ChunkCount;
+        Assert.True(chunks > 0);
+        Assert.Contains(
+            $"  {chunks} chunks wait for embedding: words only: the embedding provider is remote and allow_remote_embedding is off",
+            _h.Out.ToString());
+        Assert.Contains("  new 1,", _h.Out.ToString());
+        Assert.Equal(0, Embedded);
+        Assert.Empty(_h.Inspections);
+        Assert.Empty(_h.Embedder.Texts);
+    }
+
+    [Fact]
+    public void ThrowingFactory_KeepsTheIngestExitCode_AndReportsTheState()
+    {
+        _h.WriteConfig("[transcripts]\nenabled = true\nallow_remote_embedding = true\n[embedding]\nprovider = \"openai\"\n");
+        _h.CreateArchive();
+        _home.Place("decision", Cwd);
+        _h.Inspector = cfg => EmbedderInspection.Inspect(cfg);
+
+        var code = WithSilentStderr(() => Backfill());
+
+        Assert.Equal(0, code);
+        var chunks = ChunkCount;
+        Assert.Contains(
+            $"  {chunks} chunks wait for embedding: words only: embedding model not ready " +
+            "(embedding.endpoint required when provider = 'openai')",
+            _h.Out.ToString());
+        Assert.Equal(0, Embedded);
+    }
+
+    [Fact]
+    public void NoSessionsFound_StillEmbedsTheWaitingChunks()
+    {
+        EnableArchive();
+        _h.SeedChunks(3);
+        var missing = Path.Combine(_home.Root, "no-such-dir");
+
+        var code = Backfill(Factory(new ClaudeCodeAdapter(missing)));
+
+        Assert.Equal(0, code);
+        var output = _h.Out.ToString();
+        Assert.Contains($"no Claude Code sessions found at {missing}", output);
+        Assert.Contains("  embedded 3 chunks", output);
+        Assert.Equal(3, Embedded);
+    }
+
+    [Fact]
+    public void InterruptedIngest_SkipsTheEmbedStep()
+    {
+        EnableArchive();
+        _h.SeedChunks(3);
+        _home.Place("decision", Cwd);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var code = Backfill(Factory(), cts.Token);
+
+        Assert.Equal(0, code);
+        Assert.Contains("  interrupted: the remaining sessions were not processed", _h.Out.ToString());
+        Assert.Equal(0, Embedded);
+        Assert.Empty(_h.Inspections);
+        Assert.Empty(_h.Embedder.Texts);
+    }
+
+    [Fact]
+    public void FailingEmbedder_DoesNotChangeTheExitCode()
+    {
+        EnableArchive();
+        _home.Place("decision", Cwd);
+        _h.Embedder.OnEmbed = _ => throw new IOException("the disk went away");
+
+        var code = WithSilentStderr(() => Backfill());
+
+        Assert.Equal(0, code);
+        var chunks = ChunkCount;
+        Assert.Contains($"  {chunks} chunks wait for embedding: embedding failed: the disk went away", _h.Out.ToString());
+        Assert.Equal(0, Embedded);
+    }
+
+    [Fact]
+    public void FailingEmbedder_AfterAFailedFile_KeepsExit1()
+    {
+        EnableArchive();
+        var bad = _home.Place("decision", Cwd);
+        _home.Place("compaction", Cwd);
+        var adapter = new HookAdapter(new ClaudeCodeAdapter(_home.ProjectsDir),
+            s => { if (s.HostSessionId == bad.Id) throw new IOException("disk error"); }, everyTime: true);
+        _h.Embedder.OnEmbed = _ => throw new IOException("the disk went away");
+
+        var code = WithSilentStderr(() => Backfill(Factory(adapter)));
+
+        Assert.Equal(1, code);
+        Assert.Contains("wait for embedding: embedding failed: the disk went away", _h.Out.ToString());
     }
 
     [Fact]

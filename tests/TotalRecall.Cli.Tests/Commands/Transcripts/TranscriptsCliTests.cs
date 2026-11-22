@@ -10,7 +10,7 @@ namespace TotalRecall.Cli.Tests.Commands.Transcripts;
 [Collection("ConsoleCapture")]
 public sealed class TranscriptsCliTests : IDisposable
 {
-    private static readonly string[] Verbs = ["enable", "disable", "status", "backfill", "forget", "unforget"];
+    private static readonly string[] Verbs = ["enable", "disable", "status", "backfill", "embed", "forget", "unforget"];
 
     private readonly TranscriptsHarness _h = new();
     private readonly TextWriter _origOut = Console.Out;
@@ -43,7 +43,7 @@ public sealed class TranscriptsCliTests : IDisposable
     }
 
     [Fact]
-    public async Task TheGroupHelp_ListsTheSixVerbs_AndEachAnswersItsOwnHelp()
+    public async Task TheGroupHelp_ListsTheSevenVerbs_AndEachAnswersItsOwnHelp()
     {
         var group = await Capture("transcripts", "--help");
         Assert.Equal(0, group.Code);
@@ -65,7 +65,8 @@ public sealed class TranscriptsCliTests : IDisposable
 
         Assert.Equal(0, result.Code);
         Assert.Contains("off, nothing stored", result.Out);
-        Assert.Contains("search: not available in this version yet", result.Out);
+        Assert.DoesNotContain("search: not available in this version yet", result.Out);
+        Assert.DoesNotContain("search:", result.Out);
         Assert.Contains(_h.DbPath, result.Out);
         Assert.False(Directory.Exists(_h.DataDir));
     }

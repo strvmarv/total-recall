@@ -4,7 +4,9 @@ using System.IO;
 using System.Threading;
 using TotalRecall.Cli.Commands.Transcripts;
 using TotalRecall.Infrastructure.Config;
+using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Transcripts;
+using EmbeddingConfig = TotalRecall.Core.Config.EmbeddingConfig;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 using SqliteOpener = TotalRecall.Infrastructure.Storage.SqliteConnection;
 
@@ -94,11 +96,44 @@ internal sealed class TranscriptsHarness : IDisposable
         new(ReadSettings, DbPath, ReadStorageMode, Sentinel, () => Interactive, Confirm, Out, Err, ConfigPath);
 
     public StatusCommand Status() =>
-        new(ReadSettings, DbPath, ReadStorageMode, Sentinel, () => Interactive, Confirm, Out, Err, ConfigPath);
+        new(ReadSettings, DbPath, ReadStorageMode, Sentinel, () => Interactive, Confirm, Out, Err, ConfigPath,
+            ReadEmbeddingConfig, InspectSeam);
 
     public BackfillCommand Backfill(Func<string, ITranscriptAdapter> adapterFactory, CancellationToken cancellation = default) =>
         new(ReadSettings, DbPath, ReadStorageMode, Sentinel, () => Interactive, Confirm, Out, Err, ConfigPath,
-            adapterFactory, cancellation);
+            adapterFactory, cancellation, ReadEmbeddingConfig, InspectSeam, Time);
+
+    public EmbedCommand Embed(CancellationToken? cancellation = null) =>
+        new(ReadSettings, DbPath, ReadStorageMode, Sentinel, () => Interactive, Confirm, Out, Err, ConfigPath,
+            ReadEmbeddingConfig, InspectSeam, Time, cancellation ?? CancellationToken.None);
+
+    // ---- the embedder seam ----------------------------------------------------------------------------------------
+
+    /// <summary>The embedder the default inspector hands out (local bge-small, 384 floats, ready).</summary>
+    public FakeEmbedder Embedder { get; set; } = new();
+
+    /// <summary>The readiness the default inspector reports.</summary>
+    public EmbedderReadiness Readiness { get; set; } = new(true, null);
+
+    /// <summary>Replaces the default inspector (for example with the real <see cref="EmbedderInspection.Inspect"/>).</summary>
+    public Func<EmbeddingConfig, EmbedderInspectionResult>? Inspector { get; set; }
+
+    /// <summary>Every embedding config the commands inspected.</summary>
+    public List<EmbeddingConfig> Inspections { get; } = [];
+
+    public ManualTime Time { get; } = new(new DateTimeOffset(2026, 11, 21, 10, 0, 0, TimeSpan.Zero));
+
+    public EmbeddingConfig ReadEmbeddingConfig() => new ConfigLoader().LoadEffectiveConfig(ConfigPath).Embedding;
+
+    private EmbedderInspectionResult InspectSeam(EmbeddingConfig cfg)
+    {
+        Inspections.Add(cfg);
+        if (Inspector is not null)
+            return Inspector(cfg);
+        var d = Embedder.Descriptor;
+        return new EmbedderInspectionResult(
+            Embedder, new ArchiveFingerprint(d.Provider, d.Model, d.Revision, d.Dimensions), Readiness, null);
+    }
 
     public ForgetCommand Forget() =>
         new(ReadSettings, DbPath, ReadStorageMode, Sentinel, () => Interactive, Confirm, Out, Err, ConfigPath);
@@ -233,4 +268,53 @@ internal sealed class TranscriptsHarness : IDisposable
         cmd.CommandText = sql;
         return Convert.ToInt64(cmd.ExecuteScalar());
     }
+
+    /// <summary>A session with <paramref name="count"/> unembedded chunks whose content is <c>chunk-&lt;i&gt;</c>.</summary>
+    public void SeedChunks(int count, string hostSessionId = "seed", string prefix = "chunk-")
+    {
+        var session = AddSession("claude-code", hostSessionId);
+        for (var i = 0; i < count; i++)
+            AddChunk(session, prefix + i.ToString(System.Globalization.CultureInfo.InvariantCulture), exchangeStart: i);
+    }
+}
+
+/// <summary>A deterministic embedder: 384 floats by default, records every text, optional hooks per text.</summary>
+internal sealed class FakeEmbedder : IEmbedder, IDisposable
+{
+    public EmbedderDescriptor Descriptor { get; set; } = new("local", "bge-small-en-v1.5", "rev1", 384);
+
+    /// <summary>The length of the returned vectors (independent of the descriptor, to fake a lying remote).</summary>
+    public int Length { get; set; } = 384;
+
+    public List<string> Texts { get; } = [];
+
+    /// <summary>Runs before each embed; may throw to fail the text.</summary>
+    public Action<string>? OnEmbed { get; set; }
+
+    public int Disposed { get; private set; }
+
+    public float[] Embed(string text)
+    {
+        Texts.Add(text);
+        OnEmbed?.Invoke(text);
+        var v = new float[Length];
+        var seed = text.Length + 1;
+        for (var i = 0; i < v.Length; i++)
+            v[i] = (float)Math.Sin(seed * (i + 1));
+        return v;
+    }
+
+    public void Dispose() => Disposed++;
+}
+
+/// <summary>A clock that moves only when told to.</summary>
+internal sealed class ManualTime : TimeProvider
+{
+    private DateTimeOffset _now;
+
+    public ManualTime(DateTimeOffset start) => _now = start;
+
+    public override DateTimeOffset GetUtcNow() => _now;
+
+    public void Advance(TimeSpan by) => _now += by;
 }

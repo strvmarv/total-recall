@@ -3,16 +3,19 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using TotalRecall.Infrastructure.Config;
+using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Transcripts;
+using EmbeddingConfig = TotalRecall.Core.Config.EmbeddingConfig;
 
 namespace TotalRecall.Cli.Commands.Transcripts;
 
 /// <summary>
 /// <c>total-recall transcripts status</c> (spec section 8): the setting, whether the archive is active (the sentinel,
 /// and a difference between the two), the location, the counts, the forgotten sessions and projects with their
-/// identifiers, the cutoff, and always the line <see cref="TranscriptsCommandBase.SearchNotAvailableLine"/>. Needs no
-/// terminal and never creates anything: the store is opened only when the archive tables already exist. Exit 1 when
-/// the archive cannot be located or read (and then it never says that nothing is stored).
+/// identifiers, the cutoff, and (search the archive, spec section 6) after the chunk count the embedding lines: the
+/// counts, the embedder and its gate state, whose vectors are stored, the last embed run and how the archive is
+/// searched. Needs no terminal and never creates anything: the store is opened only when the archive tables already
+/// exist. Exit 1 when the archive cannot be located or read (and then it never says that nothing is stored).
 /// </summary>
 public sealed class StatusCommand : TranscriptsCommandBase
 {
@@ -29,8 +32,11 @@ public sealed class StatusCommand : TranscriptsCommandBase
         Func<string, bool> confirm,
         TextWriter output,
         TextWriter error,
-        string userConfigPath)
-        : base(settings, mainDbPath, storageMode, sentinel, isInteractive, confirm, output, error, userConfigPath) { }
+        string userConfigPath,
+        Func<EmbeddingConfig>? embeddingConfig = null,
+        Func<EmbeddingConfig, EmbedderInspectionResult>? inspector = null)
+        : base(settings, mainDbPath, storageMode, sentinel, isInteractive, confirm, output, error, userConfigPath,
+            embeddingConfig, inspector) { }
 
     public override string Name => "status";
     public override string Description => "Show whether the transcript archive is on, where it is and what it holds";
@@ -41,16 +47,7 @@ public sealed class StatusCommand : TranscriptsCommandBase
         if (RejectArguments(args) is { } usage)
             return usage;
 
-        var exit = 0;
-        try
-        {
-            exit = Report();
-        }
-        finally
-        {
-            Out.WriteLine(SearchNotAvailableLine);
-        }
-        return exit;
+        return Report();
     }
 
     private int Report()
@@ -111,11 +108,13 @@ public sealed class StatusCommand : TranscriptsCommandBase
         }
 
         TranscriptStatus status;
+        EmbeddingLines embedding;
         using (var store = opened.Store)
         {
             try
             {
                 status = store.Status();
+                embedding = ReadEmbedding(store, settings, storageMode);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
@@ -123,11 +122,96 @@ public sealed class StatusCommand : TranscriptsCommandBase
             }
         }
 
-        Print(status);
+        Print(status, embedding);
         return exit;
     }
 
-    private void Print(TranscriptStatus s)
+    /// <summary>The five embedding lines, in the layout of spec section 6.</summary>
+    private sealed record EmbeddingLines(string Counts, string Embedder, string Vectors, string LastRun, string Search);
+
+    private EmbeddingLines ReadEmbedding(ITranscriptStore store, TranscriptsSettings settings, string storageMode)
+    {
+        var postgres = string.Equals(storageMode, "postgres", StringComparison.OrdinalIgnoreCase);
+        var counts = store.CountEmbedding();
+        var record = store.ReadEmbedRun();
+
+        using var check = CheckEmbedGate(store, settings, archiveActive: settings.Enabled, postgres: postgres);
+        var gate = check.Gate;
+        var current = check.Current;
+
+        // A probe-time dimension refusal (the service ignored the configured dimensions) is not visible from config:
+        // it holds while the recorded run refused this very provider and model.
+        if (gate.CanEmbed && current is not null && record is not null
+            && record.StateKind == nameof(EmbedState.DimensionRefused)
+            && string.Equals(record.Provider, current.Provider, StringComparison.Ordinal)
+            && string.Equals(record.Model, current.Model, StringComparison.Ordinal))
+        {
+            gate = new EmbedGateResult(EmbedState.DimensionRefused, record.State);
+        }
+
+        var countsLine = $"embedding: {Thousands(counts.Embedded)} of {Thousands(counts.Total)} chunks embedded " +
+                         $"({Thousands(counts.Waiting)} waiting" +
+                         (counts.GaveUp > 0 ? $", {Thousands(counts.GaveUp)} could not be embedded)" : ")");
+
+        string embedder, search;
+        if (gate.State == EmbedState.NotApplicable)
+        {
+            var why = postgres ? "postgres storage" : "the archive is off";
+            embedder = $"not applicable ({why})";
+            search = $"not available ({why})";
+        }
+        else
+        {
+            embedder = gate.CanEmbed && current is not null ? $"{current.Provider} {current.Model} (ready)" : gate.Text;
+            search = gate.MeaningUsable ? "meaning and words" : "words only";
+        }
+
+        string vectors;
+        if (check.Fingerprint is { } state)
+        {
+            vectors = state switch
+            {
+                FingerprintState.Match => $"made by {Render(current)}",
+                FingerprintState.Mismatch => $"made by {Render(check.Stored)} (not used)",
+                _ => "none yet",
+            };
+        }
+        else
+        {
+            // The running embedder was not inspected (or could not be built): what is stored, from the archive alone.
+            var stored = store.ReadEmbedFingerprint();
+            vectors = stored is not null && counts.Embedded > 0 ? $"made by {Render(stored)}" : "none yet";
+        }
+
+        return new EmbeddingLines(
+            countsLine,
+            "embedder:  " + embedder,
+            "vectors:   " + vectors,
+            "last embed run: " + LastRun(record),
+            "search:    " + search);
+    }
+
+    private static string LastRun(EmbedRunRecord? r)
+    {
+        if (r is null)
+            return "none";
+        var at = r.At.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+        var how = r.StoppedBy switch
+        {
+            "done" => "finished",
+            "budget" => "stopped by budget",
+            "cancelled" => "cancelled",
+            "gate" or "failed" or "lease" => "stopped: " + r.State,
+            _ => "stopped by " + r.StoppedBy,
+        };
+        return $"{at}, embedded {N(r.Embedded)}, {N(r.Remaining)} remaining, {how}";
+    }
+
+    private static string Render(ArchiveFingerprint? f) => f is null ? "unknown" : $"{f.Provider} {f.Model}";
+
+    private static string Thousands(long n) => n.ToString("#,0", CultureInfo.InvariantCulture);
+
+    private void Print(TranscriptStatus s, EmbeddingLines embedding)
     {
         s.SessionsByKind.TryGetValue("interactive", out var interactive);
         s.SessionsByKind.TryGetValue("automated", out var automated);
@@ -135,6 +219,11 @@ public sealed class StatusCommand : TranscriptsCommandBase
         Out.WriteLine($"schema version: {s.SchemaVersion.ToString(CultureInfo.InvariantCulture)}");
         Out.WriteLine($"sessions: {N(s.Sessions)} (interactive {N(interactive)}, automated {N(automated)})");
         Out.WriteLine($"chunks: {N(s.Chunks)}");
+        Out.WriteLine(embedding.Counts);
+        Out.WriteLine(embedding.Embedder);
+        Out.WriteLine(embedding.Vectors);
+        Out.WriteLine(embedding.LastRun);
+        Out.WriteLine(embedding.Search);
 
         if (s.ByProjectAndKind.Count > 0)
         {
@@ -172,6 +261,4 @@ public sealed class StatusCommand : TranscriptsCommandBase
 
         Out.WriteLine($"cutoff: {s.IngestNotBefore ?? "none"}");
     }
-
-    private static string N(long n) => n.ToString(CultureInfo.InvariantCulture);
 }
