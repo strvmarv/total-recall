@@ -298,6 +298,31 @@ public sealed class SearchFixtureCorpusTests : IDisposable
             Assert.Null(attribute.Skip);
     }
 
+    [BgeModelFact]
+    public void BgeModel_Inspect_GivesTheReadyLocalBgeSmall_AndEmbedsTo384Floats()
+    {
+        var cfg = new Core.Config.EmbeddingConfig(
+            "bge-small-en-v1.5", 384, Microsoft.FSharp.Core.FSharpOption<string>.None,
+            Microsoft.FSharp.Core.FSharpOption<string>.None, Microsoft.FSharp.Core.FSharpOption<string>.None,
+            Microsoft.FSharp.Core.FSharpOption<string>.None, Microsoft.FSharp.Core.FSharpOption<string>.None,
+            Microsoft.FSharp.Core.FSharpOption<string>.None, Microsoft.FSharp.Core.FSharpOption<string>.None,
+            Microsoft.FSharp.Core.FSharpOption<string>.None);
+
+        var r = BgeModel.Inspect(cfg);
+        try
+        {
+            Assert.True(r.Readiness.Ready);
+            Assert.Equal("local", r.Embedder!.Descriptor.Provider);
+            Assert.Equal(BgeModel.ModelName, r.Embedder.Descriptor.Model);
+            Assert.Equal(384, r.Embedder.Embed("how do we ship the staging site").Length);
+            Assert.True(File.Exists(BgeModel.Require()));
+        }
+        finally
+        {
+            (r.Embedder as IDisposable)?.Dispose();
+        }
+    }
+
     // ---- RecordingEmbedder -------------------------------------------------------------------------------------
 
     [Fact]
