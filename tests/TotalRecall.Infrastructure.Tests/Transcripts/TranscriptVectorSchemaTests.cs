@@ -56,6 +56,10 @@ public sealed class TranscriptVectorSchemaTests : IDisposable
         return cmd.ExecuteScalar() as string;
     }
 
+    private static string FtsDataSnapshot(MsSqliteConnection conn) =>
+        Text(conn, "SELECT COALESCE(group_concat(id || ':' || hex(block), ','), '') FROM " +
+                   "(SELECT id, block FROM tx_chunk_fts_data ORDER BY id)") ?? "";
+
     private static long AddSession(MsSqliteConnection conn, string hostSessionId, string kind = "interactive", string project = "owner/repo")
     {
         Exec(conn,
@@ -158,13 +162,16 @@ public sealed class TranscriptVectorSchemaTests : IDisposable
         var sid = AddSession(conn, "s1");
         var cid = AddChunk(conn, sid, "stayputword");
         AddVector(conn, cid, sid, "owner/repo", "interactive", 1);
-        var docsize = Scalar(conn, "SELECT COUNT(*) FROM tx_chunk_fts_docsize");
+        // Every write to the FTS5 index (a 'delete' plus a re-insert of the same row included) flushes a new
+        // segment into the _data shadow table, so an unchanged _data table proves the index was not touched.
+        // A row count of _docsize could not tell: a delete and re-insert of one rowid leaves it equal.
+        var ftsData = FtsDataSnapshot(conn);
 
         Exec(conn, $"UPDATE tx_chunk SET embedded = 1 WHERE id = {cid}");
         Exec(conn, $"UPDATE tx_chunk SET embed_attempts = 1 WHERE id = {cid}");
 
         Assert.Equal(1, VectorCount(conn, $"rowid = {cid}"));
-        Assert.Equal(docsize, Scalar(conn, "SELECT COUNT(*) FROM tx_chunk_fts_docsize"));
+        Assert.Equal(ftsData, FtsDataSnapshot(conn));
         Assert.Equal(1, Scalar(conn, "SELECT COUNT(*) FROM tx_chunk_fts WHERE tx_chunk_fts MATCH 'stayputword'"));
         Assert.Equal(1, Scalar(conn, $"SELECT embedded FROM tx_chunk WHERE id = {cid}"));
         Assert.Equal(1, Scalar(conn, $"SELECT embed_attempts FROM tx_chunk WHERE id = {cid}"));

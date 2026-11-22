@@ -149,7 +149,7 @@ public sealed class TranscriptEmbedStoreTests : IDisposable
     }
 
     [Fact]
-    public void StoreEmbeddings_WrongLengthVector_Throws_RollsBackWholeBatch()
+    public void StoreEmbeddings_WrongLengthVector_Throws_StoresNothing()
     {
         var s = _db.AddSession("pi", "s1");
         var a = Chunk(s, "a", 0);
