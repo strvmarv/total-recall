@@ -169,6 +169,11 @@ public sealed class TranscriptSearchSessionStartAcceptanceTests : IDisposable
                     Assert.All(root.GetProperty("results").EnumerateArray(),
                         h => Assert.Equal(key, h.GetProperty("session").GetString()));
                     Assert.Contains(hits, h => h.GetProperty("text").GetString()!.Contains("exponential backoff", StringComparison.Ordinal));
+                    // the words run alone finds this chunk ("attempts" is in the query): it must also come from the
+                    // vector search, so a broken session filter on that search is detected
+                    Assert.Contains(hits, h =>
+                        h.GetProperty("text").GetString()!.Contains("exponential backoff", StringComparison.Ordinal)
+                        && h.GetProperty("via").EnumerateArray().Any(v => v.GetString() == "meaning"));
                     break;
             }
         }

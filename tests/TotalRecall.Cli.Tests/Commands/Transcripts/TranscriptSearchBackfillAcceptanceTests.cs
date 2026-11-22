@@ -225,6 +225,10 @@ public sealed class TranscriptSearchBackfillAcceptanceTests : IDisposable
         Assert.NotEmpty(r.Results);
         Assert.All(r.Results, h => Assert.Equal(key, h.Session));
         Assert.Contains(r.Results.Take(3), h => h.Text.Contains("exponential backoff", StringComparison.Ordinal));
+        // Both retry-backoff chunks share the query's word "attempts", so the words run alone would find them: the hit must
+        // also come from the vector search, or a broken session filter on that search would go unseen.
+        Assert.Contains(r.Results.Take(3), h =>
+            h.Text.Contains("exponential backoff", StringComparison.Ordinal) && h.Via.Contains("meaning"));
     }
 
     // ---- query 5: automated sessions -----------------------------------------------------------------------------------
