@@ -201,6 +201,42 @@ public sealed class TranscriptEmbedWorkerTests : IDisposable
         Assert.Equal(new[] { new EmbedProgress(16, 24), new EmbedProgress(32, 8), new EmbedProgress(40, 0) }, progress.ToArray());
     }
 
+    [Fact]
+    public void Run_Progress_CountsTheWaitingChunksOnce_NotAfterEveryBatch()
+    {
+        Seed(40);
+        var store = new DecoratingTranscriptStore(_db.Store);
+        var progress = new List<EmbedProgress>();
+
+        Worker(new ScriptedEmbedder(), store).Run(Ready, Fp, NoBudget, CancellationToken.None, progress.Add);
+
+        Assert.Equal(3, progress.Count);
+        // once before the first batch, once for the run's Remaining in finally; never a full count per batch
+        Assert.Equal(2, store.CountEmbeddingCalls);
+    }
+
+    [Theory]
+    [InlineData(0)] // fails alone once: still waiting
+    [InlineData(2)] // reaches its third try: leaves the work list
+    public void Run_Progress_RemainingMatchesTheStore_WithALoneFailure(int attemptsBefore)
+    {
+        var ids = Seed(20);
+        _db.Exec($"UPDATE tx_chunk SET embed_attempts = {attemptsBefore} WHERE id = {ids[0]}");
+        var e = new ScriptedEmbedder().Throw(Text(0), new KeyNotFoundException("bad"));
+        var progress = new List<EmbedProgress>();
+        var actual = new List<long>();
+
+        Worker(e).Run(Ready, Fp, NoBudget, CancellationToken.None, p =>
+        {
+            progress.Add(p);
+            actual.Add(_db.Store.CountEmbedding().Waiting);
+        });
+
+        var stillWaiting = attemptsBefore + 1 < 3 ? 1 : 0;
+        Assert.Equal(new[] { new EmbedProgress(15, 4 + stillWaiting), new EmbedProgress(19, stillWaiting) }, progress.ToArray());
+        Assert.Equal(actual, progress.Select(p => (long)p.Remaining).ToList());
+    }
+
     // ---------------- lease ----------------
 
     [Fact]
@@ -273,6 +309,27 @@ public sealed class TranscriptEmbedWorkerTests : IDisposable
         Assert.Equal(2, seamCalls); // no third batch
         Assert.StartsWith("host-b:5:taker:", LeaseValue()); // not deleted in finally
         Assert.Equal(0, AttemptSum());
+    }
+
+    [Fact]
+    public void Run_LostLeaseMidRun_DoesNotOverwriteNewHoldersLastRun()
+    {
+        Seed(40);
+        var seamCalls = 0;
+        var taker = new EmbedLeaseHolder("host-b", 5, "taker");
+        var takersRecord = new EmbedRunRecord(T0.AddMinutes(12), 7, 3, 0, "ready", "Ready", "local", "bge-small-en-v1.5", "budget");
+        var worker = Worker(new ScriptedEmbedder(), seam: () =>
+        {
+            if (++seamCalls != 2) return;
+            // the new holder takes the lease over and finishes a run of its own before this worker writes again
+            Assert.True(_db.Store.TryAcquireEmbedLease(taker, T0.AddMinutes(11), (_, _) => true));
+            _db.Store.WriteEmbedRun(takersRecord);
+        });
+
+        var run = worker.Run(Ready, Fp, NoBudget, CancellationToken.None);
+
+        Assert.Equal(EmbedStopReason.Lease, run.StoppedBy);
+        Assert.Equal(takersRecord, _db.Store.ReadEmbedRun()); // the run that lost the lease writes no record
     }
 
     [Fact]
@@ -555,13 +612,18 @@ public sealed class TranscriptEmbedWorkerTests : IDisposable
         Assert.Null(LeaseValue());
     }
 
-    [Fact]
-    public void Run_InsertRejectsValue_IsChunkFailure_RetriedAlone()
+    [Theory]
+    [InlineData(1)]   // SQLITE_ERROR
+    [InlineData(18)]  // SQLITE_TOOBIG
+    [InlineData(19)]  // SQLITE_CONSTRAINT
+    [InlineData(20)]  // SQLITE_MISMATCH
+    [InlineData(787)] // SQLITE_CONSTRAINT_FOREIGNKEY (extended: primary code 19)
+    public void Run_InsertRejectsValue_IsChunkFailure_RetriedAlone(int code)
     {
         var ids = Seed(3);
         var store = new DecoratingTranscriptStore(_db.Store);
         store.OnStoreEmbeddings = (b, c, h, n) =>
-            b.Any(x => x.Id == ids[1]) ? throw new SqliteException("constraint failed", 19) : _db.Store.StoreEmbeddings(b, c, h, n);
+            b.Any(x => x.Id == ids[1]) ? throw new SqliteException("value rejected", code) : _db.Store.StoreEmbeddings(b, c, h, n);
         var e = new ScriptedEmbedder();
 
         var run = Worker(e, store).Run(Ready, Fp, NoBudget, CancellationToken.None);
@@ -569,6 +631,53 @@ public sealed class TranscriptEmbedWorkerTests : IDisposable
         Assert.Equal(new EmbedRun(2, 1, 0, Ready, EmbedStopReason.Done), run);
         Assert.Equal(1, Attempts(ids[1]));
         Assert.Equal(0, Embedded(ids[1]));
+    }
+
+    [Theory]
+    [InlineData(7)]   // SQLITE_NOMEM
+    [InlineData(8)]   // SQLITE_READONLY
+    [InlineData(10)]  // SQLITE_IOERR
+    [InlineData(266)] // SQLITE_IOERR_READ (extended: primary code 10)
+    [InlineData(11)]  // SQLITE_CORRUPT
+    [InlineData(13)]  // SQLITE_FULL
+    [InlineData(14)]  // SQLITE_CANTOPEN
+    [InlineData(26)]  // SQLITE_NOTADB
+    public void Run_StoreFaultOnWrite_EndsFailed_NothingCounted(int code)
+    {
+        Seed(20);
+        var e = new ScriptedEmbedder();
+        var store = new DecoratingTranscriptStore(_db.Store)
+        {
+            OnStoreEmbeddings = (_, _, _, _) => throw new SqliteException("store fault", code),
+        };
+
+        var run = Worker(e, store).Run(Ready, Fp, NoBudget, CancellationToken.None);
+
+        Assert.Equal(EmbedStopReason.Failed, run.StoppedBy);
+        Assert.Equal(EmbedGate.Failed("store fault"), run.State);
+        Assert.Equal(0, run.Embedded);
+        Assert.Equal(0, AttemptSum());
+        Assert.Equal(0, VecRows());
+        Assert.Equal(16, ChunkCalls(e).Count); // one batch, no single-chunk retry
+        Assert.Equal(1, ProbeCalls(e));        // no probe after a chunk failure either
+        Assert.Null(LeaseValue());
+    }
+
+    [Fact]
+    public void Run_StoreFaultOnSingleChunkRetry_EndsFailed_NothingCounted()
+    {
+        Seed(3);
+        var store = new DecoratingTranscriptStore(_db.Store);
+        // the batch write rejects a value (a chunk failure), then the single-chunk write finds the disk full
+        store.OnStoreEmbeddings = (b, _, _, _) =>
+            b.Count > 1 ? throw new SqliteException("constraint failed", 19) : throw new SqliteException("database or disk is full", 13);
+
+        var run = Worker(new ScriptedEmbedder(), store).Run(Ready, Fp, NoBudget, CancellationToken.None);
+
+        Assert.Equal(EmbedStopReason.Failed, run.StoppedBy);
+        Assert.Equal(EmbedGate.Failed("database or disk is full"), run.State);
+        Assert.Equal(0, AttemptSum());
+        Assert.Equal(0, VecRows());
     }
 
     [Fact]

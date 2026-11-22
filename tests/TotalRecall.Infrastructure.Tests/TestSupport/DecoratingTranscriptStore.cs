@@ -21,6 +21,7 @@ public sealed class DecoratingTranscriptStore : ITranscriptStore
 
     public int ReleaseCalls { get; private set; }
     public int WriteRunCalls { get; private set; }
+    public int CountEmbeddingCalls { get; private set; }
 
     public ITranscriptStore Inner => _inner;
 
@@ -62,7 +63,11 @@ public sealed class DecoratingTranscriptStore : ITranscriptStore
 
     public ArchiveFingerprint? ReadEmbedFingerprint() => _inner.ReadEmbedFingerprint();
     public FingerprintState CheckFingerprint(ArchiveFingerprint current) => _inner.CheckFingerprint(current);
-    public EmbeddingCounts CountEmbedding() => _inner.CountEmbedding();
+    public EmbeddingCounts CountEmbedding()
+    {
+        CountEmbeddingCalls++;
+        return _inner.CountEmbedding();
+    }
 
     public void WriteEmbedRun(EmbedRunRecord run)
     {

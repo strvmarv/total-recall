@@ -103,8 +103,9 @@ public sealed class TranscriptEmbedWorker
     /// <summary>
     /// Runs when <paramref name="gate"/> says ready: takes the lease, probes, embeds batch by batch until the budget,
     /// the cancellation or the work runs out, then writes <c>embed.last_run</c> and releases the lease. A refused gate
-    /// does nothing (no lease, no record); a lease held by another run ends with <see cref="EmbedStopReason.Lease"/>
-    /// and writes no record (the holder's run owns it).
+    /// does nothing (no lease, no record); a lease held by another run, or taken over during this one, ends with
+    /// <see cref="EmbedStopReason.Lease"/> and writes no record (the holder's run owns it, and a run that lost the lease
+    /// must not overwrite what the new holder wrote).
     /// </summary>
     public EmbedRun Run(
         EmbedGateResult gate,
@@ -149,15 +150,18 @@ public sealed class TranscriptEmbedWorker
         finally
         {
             run.Remaining = SafeRemaining();
-            try
+            if (run.StoppedBy != EmbedStopReason.Lease)
             {
-                _store.WriteEmbedRun(new EmbedRunRecord(
-                    _time.GetUtcNow(), run.Embedded, run.Remaining, run.GaveUp, run.State.Text, StateName(run.State.State),
-                    current.Provider, current.Model, StopName(run.StoppedBy)));
-            }
-            catch (Exception ex)
-            {
-                ExceptionLogger.LogChain(LogPrefix + ": writing the last run", ex);
+                try
+                {
+                    _store.WriteEmbedRun(new EmbedRunRecord(
+                        _time.GetUtcNow(), run.Embedded, run.Remaining, run.GaveUp, run.State.Text, StateName(run.State.State),
+                        current.Provider, current.Model, StopName(run.StoppedBy)));
+                }
+                catch (Exception ex)
+                {
+                    ExceptionLogger.LogChain(LogPrefix + ": writing the last run", ex);
+                }
             }
 
             try
@@ -225,7 +229,13 @@ public sealed class TranscriptEmbedWorker
                 return;
 
             if (r.Progress is { } report)
-                report(new EmbedProgress(r.Embedded, Waiting()));
+            {
+                // Counted once per run, then followed locally: a chunk stored or given up on leaves the work list, one that
+                // failed alone with tries left (or was skipped by a race) still waits. A full count per batch would scan the
+                // table every 16 chunks. Ingest running at the same time is not seen here; the run's Remaining is fresh.
+                r.WaitingAtStart ??= Waiting() + r.Embedded + r.GaveUp;
+                report(new EmbedProgress(r.Embedded, Math.Max(0, r.WaitingAtStart.Value - r.Embedded - r.GaveUp)));
+            }
         }
     }
 
@@ -271,7 +281,7 @@ public sealed class TranscriptEmbedWorker
         }
         catch (Exception ex)
         {
-            if (!IsChunkWriteFailure(ex, r))
+            if (!IsChunkWriteFailure(ex))
             {
                 ExceptionLogger.LogChain(LogPrefix + ": writing a batch", ex);
                 r.End(EmbedGate.Failed(ex.Message), EmbedStopReason.Failed);
@@ -323,7 +333,7 @@ public sealed class TranscriptEmbedWorker
             }
             catch (Exception ex)
             {
-                if (!IsChunkWriteFailure(ex, r))
+                if (!IsChunkWriteFailure(ex))
                 {
                     ExceptionLogger.LogChain($"{LogPrefix}: writing chunk {chunk.Id}", ex);
                     r.End(EmbedGate.Failed(ex.Message), EmbedStopReason.Failed);
@@ -411,11 +421,18 @@ public sealed class TranscriptEmbedWorker
     }
 
     /// <summary>
-    /// A write failure counts against a chunk only when SQLite rejected something (not BUSY or LOCKED); any other
-    /// exception from the store ends the run uncounted, so a fault of the store never marks a chunk bad.
+    /// A write failure counts against a chunk only when SQLite rejected a value: SQLITE_ERROR (1), TOOBIG (18),
+    /// CONSTRAINT (19) or MISMATCH (20), by primary code. Every other exception from the store (BUSY, LOCKED, FULL,
+    /// READONLY, IOERR, CORRUPT, CANTOPEN, NOMEM, ...) ends the run uncounted as systemic, so a fault of the store never
+    /// marks a chunk bad.
     /// </summary>
-    private static bool IsChunkWriteFailure(Exception ex, RunState r) =>
-        ex is SqliteException && EmbedFailureClassifier.Classify(ex, r.Provider) == EmbedFailureClass.Chunk;
+    private static bool IsChunkWriteFailure(Exception ex) =>
+        ex is SqliteException sql && (sql.SqliteErrorCode & 0xFF) is SqliteError or SqliteTooBig or SqliteConstraint or SqliteMismatch;
+
+    private const int SqliteError = 1;
+    private const int SqliteTooBig = 18;
+    private const int SqliteConstraint = 19;
+    private const int SqliteMismatch = 20;
 
     /// <summary>Every returned vector is length-checked before anything is stored.</summary>
     private float[] EmbedChecked(string text)
@@ -546,6 +563,9 @@ public sealed class TranscriptEmbedWorker
         public int GaveUp { get; set; }
         public int Remaining { get; set; }
         public int ConsecutiveLoneFailures { get; set; }
+
+        /// <summary>The waiting chunks at the start of the run (counted after the first batch, with that batch added back).</summary>
+        public int? WaitingAtStart { get; set; }
         public EmbedGateResult State { get; private set; }
         public EmbedStopReason StoppedBy { get; private set; } = EmbedStopReason.Done;
 
