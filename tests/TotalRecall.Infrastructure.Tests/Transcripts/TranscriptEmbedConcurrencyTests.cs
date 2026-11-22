@@ -108,19 +108,25 @@ public sealed class TranscriptEmbedConcurrencyTests : IDisposable
 
         // Worker A takes the lease and is held inside its probe; worker B, on its own connection, comes next.
         var runA = Task.Run(() => new TranscriptEmbedWorker(_db.Store, a).Run(Ready, Fp, NoBudget, CancellationToken.None));
-        Assert.True(a.Entered.Wait(Wait), "worker A never reached its probe");
-        var leaseOfA = Lease();
-        Assert.NotNull(leaseOfA);
+        try
+        {
+            Assert.True(a.Entered.Wait(Wait), "worker A never reached its probe");
+            var leaseOfA = Lease();
+            Assert.NotNull(leaseOfA);
 
-        var resultB = new TranscriptEmbedWorker(SecondStore(), b).Run(Ready, Fp, NoBudget, CancellationToken.None);
+            var resultB = new TranscriptEmbedWorker(SecondStore(), b).Run(Ready, Fp, NoBudget, CancellationToken.None);
 
-        Assert.Equal(EmbedStopReason.Lease, resultB.StoppedBy);
-        Assert.Equal(EmbedState.AnotherRunActive, resultB.State.State);
-        Assert.Equal(0, resultB.Embedded);
-        Assert.Empty(b.Calls);
-        Assert.Equal(leaseOfA, Lease()); // B neither replaced nor deleted A's lease
+            Assert.Equal(EmbedStopReason.Lease, resultB.StoppedBy);
+            Assert.Equal(EmbedState.AnotherRunActive, resultB.State.State);
+            Assert.Equal(0, resultB.Embedded);
+            Assert.Empty(b.Calls);
+            Assert.Equal(leaseOfA, Lease()); // B neither replaced nor deleted A's lease
+        }
+        finally
+        {
+            hold.Set(); // also after a failed assertion: A is never left waiting on the event the using disposes
+        }
 
-        hold.Set();
         var resultA = await runA.WaitAsync(Wait);
 
         Assert.Equal(EmbedStopReason.Done, resultA.StoppedBy);
