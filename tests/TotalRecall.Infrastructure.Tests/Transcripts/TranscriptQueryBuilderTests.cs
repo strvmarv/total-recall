@@ -115,13 +115,29 @@ public sealed class TranscriptQueryBuilderTests : IDisposable
         Assert.Equal("\"über straße\"", TranscriptQueryBuilder.Phrase("über, Straße"));
     }
 
+    // These tests use no normalisation, so they hold with ICU and in invariant globalization mode (the shipped
+    // binaries set InvariantGlobalization, where string.Normalize does nothing).
     [Fact]
-    public void DecomposedQuery_IsNormalisedToOneToken()
+    public void DecomposedQuery_StaysOneToken()
     {
-        // "re\u0301sume" is e + COMBINING ACUTE ACCENT; NFC makes it the single letter \u00e9
-        Assert.Equal("\"r\u00e9sume\"", TranscriptQueryBuilder.Words("re\u0301sume"));
-        Assert.Equal("\"my r\u00e9sume\"", TranscriptQueryBuilder.Phrase("my re\u0301sume"));
+        // "re\u0301sume\u0301" is e + COMBINING ACUTE ACCENT: the mark is kept inside the token, not a separator.
+        Assert.Equal("\"re\u0301sume\u0301\"", TranscriptQueryBuilder.Words("Re\u0301sume\u0301"));
+        Assert.Equal("\"my re\u0301sume\u0301\"", TranscriptQueryBuilder.Phrase("my re\u0301sume\u0301"));
     }
+
+    [Theory]
+    [InlineData("a\u0903b")] // DEVANAGARI SIGN VISARGA, a spacing combining mark (Mc)
+    [InlineData("a\u20DDb")] // COMBINING ENCLOSING CIRCLE, an enclosing mark (Me)
+    [InlineData("a\u0301b")] // COMBINING ACUTE ACCENT, a non-spacing mark (Mn)
+    public void CombiningMarks_AreTokenCharacters(string word)
+    {
+        Assert.Equal("\"" + word + "\"", TranscriptQueryBuilder.Words(word));
+        Assert.Null(TranscriptQueryBuilder.Phrase(word));
+    }
+
+    [Fact]
+    public void LoneCombiningMark_AfterASeparator_IsNoToken() =>
+        Assert.Equal("\"ab\" OR \"cd\"", TranscriptQueryBuilder.Words("ab \u0301 cd"));
 
     [Fact]
     public void LoneSurrogate_DoesNotThrow()
@@ -137,8 +153,10 @@ public sealed class TranscriptQueryBuilderTests : IDisposable
         var hit = _db.AddChunk(sid, "please update the resume template", 0);
         _db.AddChunk(sid, "nothing relevant here", 1);
 
-        Assert.Equal(new[] { hit }, MatchIds(TranscriptQueryBuilder.Words("re\u0301sume")!));
-        Assert.Equal(new[] { hit }, MatchIds(TranscriptQueryBuilder.Phrase("the re\u0301sume")!));
+        Assert.Equal(new[] { hit }, MatchIds(TranscriptQueryBuilder.Words("re\u0301sume\u0301")!));
+        Assert.Equal(new[] { hit }, MatchIds(TranscriptQueryBuilder.Phrase("the re\u0301sume\u0301")!));
+        // The precomposed form folds the same way in the unicode61 tokenizer.
+        Assert.Equal(new[] { hit }, MatchIds(TranscriptQueryBuilder.Words("r\u00e9sum\u00e9")!));
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 
@@ -54,8 +55,12 @@ public static class TranscriptQueryBuilder
     }
 
     /// <summary>
-    /// Lower-cased runs of Unicode letters and digits, after NFC normalisation: a decomposed letter (<c>e</c> plus a
-    /// combining accent, which is not a letter) would otherwise split a word in two and miss the indexed form.
+    /// Lower-cased runs of Unicode letters, digits and combining marks. A combining mark (non-spacing, spacing or
+    /// enclosing) continues the current token, so a decomposed letter (<c>e</c> plus a combining accent) does not split a
+    /// word in two; the FTS5 unicode61 tokenizer also treats marks as token characters and folds the accent away, so the
+    /// decomposed query meets the indexed form. No normalisation is used: the shipped binaries run in invariant
+    /// globalization mode, where <c>string.Normalize</c> does nothing. A mark after a separator starts no token. Invalid
+    /// UTF-16 (a lone surrogate) is enumerated as U+FFFD, a separator.
     /// </summary>
     private static List<string> Tokenize(string query)
     {
@@ -63,22 +68,17 @@ public static class TranscriptQueryBuilder
         if (string.IsNullOrEmpty(query))
             return tokens;
 
-        string normalised;
-        try
-        {
-            normalised = query.Normalize(NormalizationForm.FormC);
-        }
-        catch (ArgumentException)
-        {
-            normalised = query; // invalid UTF-16 (a lone surrogate): tokenised as it is, the bad unit becomes U+FFFD
-        }
-
         var current = new StringBuilder();
-        foreach (var rune in normalised.EnumerateRunes())
+        foreach (var rune in query.EnumerateRunes())
         {
             if (Rune.IsLetterOrDigit(rune))
             {
                 current.Append(Rune.ToLowerInvariant(rune).ToString());
+            }
+            else if (IsCombiningMark(rune))
+            {
+                if (current.Length > 0)
+                    current.Append(rune.ToString());
             }
             else if (current.Length > 0)
             {
@@ -90,6 +90,9 @@ public static class TranscriptQueryBuilder
             tokens.Add(current.ToString());
         return tokens;
     }
+
+    private static bool IsCombiningMark(Rune rune) => Rune.GetUnicodeCategory(rune) is
+        UnicodeCategory.NonSpacingMark or UnicodeCategory.SpacingCombiningMark or UnicodeCategory.EnclosingMark;
 
     private static int RuneLength(string s)
     {
