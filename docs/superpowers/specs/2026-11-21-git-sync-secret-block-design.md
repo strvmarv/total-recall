@@ -86,10 +86,11 @@ the preparation, and Allow-clear is the scan's and `unblock`'s act):
 - **Hit and not allowed**: the row is written with the secret mark in the same transaction, the id is listed in `PushSummary.Blocked` with the
   reason `secret-detected`, and the entry is not written. No record, patch or write-back is built for it.
 
-The detectors do not run inside the transaction when they can be avoided: the preparation (which reads the candidates before the plan
-transaction opens) runs them on each candidate entry and keeps the result with its key; `PlanOne` reuses it when the re-read key
-equals the prepared one, and otherwise (the entry changed in between) runs them with the sync check's short timeout (D9), so a slow
-text cannot hold `BEGIN IMMEDIATE` and starve a concurrent writer.
+The detectors **never run inside the plan transaction**. The preparation (which reads the candidates before the transaction opens)
+runs them on each candidate entry and keeps the result with its key; `PlanOne` compares the key of the entry it re-read with the
+prepared one and, when they differ, defers the entry as `changed-since-scan` (the existing deferral for an entry that changed since
+the scan: such a change also changes `contentHash` or `tagsHash`, so `AgreesWithRow` already catches it), so a slow text can never
+hold `BEGIN IMMEDIATE` and starve a concurrent writer.
 
 An entry the **preparation** already excludes because its row carries a `secret-detected` mark is reported in `Skipped` with the
 reason `secret-detected` (today every non-writer reason reads `blocked-elsewhere`); other non-writer reasons keep that name.
@@ -114,8 +115,9 @@ transaction:
 2. Compute the current key. When it differs from the row's `blocked_hash`, the entry changed after the block was set and the person
    was not shown what it holds now: refuse `changed-since-blocked` ("changed since it was blocked; the next sync checks it again, then
    run this again if it is still blocked"), nothing written (the umbrella's stale-answer rule, Shared decision 3 of the parent).
-3. Run the detectors on the current content. Write the row with `allowed_hash` = the key and `blocked_reason` and `blocked_hash`
-   cleared. Print `unblocked <id>` and the categories found, never a value.
+3. Write the row with `allowed_hash` = the key and `blocked_reason` and `blocked_hash` cleared, and commit. Then, outside the
+   transaction and on the content already read (its key equals `blocked_hash`, so it is the content that was blocked), run the
+   detectors and print `unblocked <id>` and the categories found, never a value.
 
 A later change to any of the four fields changes the key, so the entry is checked again. **A release is per machine**: `allowed_hash`
 is local state and never synced. Once the released memory is published, another machine that pulls it checks it there too, and its
@@ -131,15 +133,21 @@ unknown state value). The rest of the `sync` block in `status` is Part 6.
 
 ### D9. The token detector
 
-`ScanSecrets` recognises the token shapes and the private-key begin line the transcript archive's `Redact` already recognises (the
-hyphenated `sk-ant-`, `sk-proj-`, `sk-svcacct-`, `sk-admin-` and the other `sk-` forms, and `-----BEGIN ... PRIVATE KEY BLOCK-----`,
-so a PGP private key is caught, which the current pattern misses), by sharing the pattern definitions between the two instead of
-copying them. The shared token set also keeps today's unbounded `sk-[A-Za-z0-9]{16,}` branch, so the widening is a union and never
-stops matching a string that matches today. Detection stays tokens and private keys only. Every pattern is matched with a timeout:
-`ScanSecrets` keeps its signature and uses a 1 s bound (an internal overload takes the bound, as `Redact(text, matchTimeout)` does,
-so a test can force a timeout); a timeout counts as a **hit** (fail closed: the entry is blocked) with the category `scan timed out`. The
-stale comment on the detector array ("runs only on eval_grow accept, over short strings") is corrected. `eval_grow`'s accept
-guard uses the same detector and so blocks more (never less, by the union above), which is the safe direction.
+`ScanSecrets` (the Token and PrivateKey detectors only; the Email detector stays out of the sync check) widens to cover everything
+the transcript archive's `Redact` recognises, **without changing `Redact`**: `Redact`'s pattern set, output and `RedactionVersion`
+stay as they are, and its existing tests (including `Redact_SkWithoutLeftBoundary_IsKept`) stay green. The detector's patterns become:
+`Redact`'s token patterns and its private-key begin line (`-----BEGIN ... PRIVATE KEY BLOCK-----` included, so a PGP private key is
+caught, which today's pattern misses), reused from the one place that defines them, **plus** today's own patterns kept as separate
+legacy entries (the unbounded `sk-[A-Za-z0-9]{16,}` and `-----BEGIN [A-Z ]*PRIVATE KEY-----`). The result is a union: nothing that
+matches today stops matching, and the one accepted false-positive class is the unbounded legacy `sk-` form (for example
+`mask-abcdefghijklmnopqrst` is held back by sync; a detector test names it). Detection stays tokens and private keys only.
+
+Every pattern is matched with a timeout, and **a timeout counts as a hit** (fail closed) with the category `scan timed out`, for
+`ScanSecrets` and for `Scan` (so `eval_grow`'s accept guard fails closed too, the safe direction). `ScanSecrets` keeps its signature
+and uses a 1 s bound per pattern match; an internal overload takes the bound, as `Redact(text, matchTimeout)` does, so a test can
+force a timeout. The stale comments are corrected: the one on the detector array ("runs only on eval_grow accept, over short
+strings") and the header note that `Scan` and `ScanSecrets` do not use the timeout machinery. `eval_grow`'s accept guard uses the same
+detector and so blocks more, never less, by the union above.
 
 ### D10. Cost and scope of the check
 
@@ -153,16 +161,16 @@ or allowed and unchanged, is skipped. The cost bound is stated in the contributo
 ## Tests (what proves it)
 
 Core: `SyncSecret` key (each of the four fields changes it; entry type, source and `created_at` do not; tag order does not), and
-the D3 table, row by row, as table tests. Infrastructure: the scanner pass (blocks a hit; keeps a blocked
+the D3 table, row by row, as table tests. The existing scanner and pusher tests that seed the placeholder reason `"secret"` keep it as a reason that is neither the writer's nor a secret mark (and `AnUpdate_KeepsTheBaseAndEveryColumnItDoesNotOwn` is renamed to say what it now pins); a `secret-detected` row whose content is edited clean is cleared. Infrastructure: the scanner pass (blocks a hit; keeps a blocked
 unchanged entry without scanning, observed through a counting detector seam; lifts on a clean edit; blocks again after an edit
 that adds a token **in a tag**; replaces a writer reason; checks an entry the plan calls `NoChange`; one write per id; a
 reactivated row starts clean); the pusher (a hit is not written and is listed by name; an allowed entry is written; an entry
 whose text the apply changed to hold a token is blocked at the push; a blocked entry does not stop other entries; the mark
-survives a finalize and a clean push of other entries; a writer reason is replaced and later re-marked); `unblock` (releases;
+survives a finalize and a clean push of other entries; a writer reason is replaced and later re-marked); `unblock` (releases; refuses `changed-since-blocked` after an edit made after the block, writing nothing; refuses `unreadable-entry` for an id in two tiers;
 refuses an unblocked or unknown entry; the allowed key survives a later unchanged scan; a later edit is checked again; the
 lock is taken; categories only are printed, never a value); `sync status` (lists, caps, no table, odd state); the detector
-(`sk-ant-`, `sk-proj-`, a PGP `PRIVATE KEY BLOCK`, a string the old `sk-` pattern matched, existing shapes, a private key, `git@github.com` and `noreply@x.com` clean, a timeout fails closed);
-a `TwoMachineRig` test (a token memory on A is never in the bare repository, B receives every other memory, a `git@github.com` memory arrives and syncs); a blocked entry still receives a remote edit through the apply; the detector timeout through the internal overload; `HiddenCommandTests` (the verb list and the phrase check include `unblock`, and `unblock` is not listed in top-level help); `GitSyncCycleCallerTests` unchanged and green.
+(`sk-ant-`, `sk-proj-`, a PGP `PRIVATE KEY BLOCK`, a string the old `sk-` pattern matched, existing shapes, a private key, `git@github.com` and `noreply@x.com` clean, a timeout fails closed in `ScanSecrets` and in `Scan`; `mask-abcdefghijklmnopqrst` is held back; `Redact`'s tests are unchanged and green);
+a `TwoMachineRig` test (a token memory on A is in no object of the bare repository, asserted over every object (`git cat-file --batch-all-objects --batch`), not only the head tree; B receives every other memory, a `git@github.com` memory arrives and syncs); a blocked entry still receives a remote edit through the apply; the detector timeout through the internal overload; `HiddenCommandTests` (the verb list and the phrase check include `unblock`, and `unblock` is not listed in top-level help); `GitSyncCycleCallerTests` unchanged and green.
 
 ## Documentation
 
