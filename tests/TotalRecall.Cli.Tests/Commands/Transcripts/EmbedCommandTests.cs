@@ -219,7 +219,7 @@ public sealed class EmbedCommandTests : IDisposable
         _h.Embedder.Length = 1536; // the service ignored the requested dimensions
         _h.SeedChunks(3, prefix: "zqx-secret-");
 
-        Assert.Equal(1, Embed());
+        Assert.Equal(1, WithSilentStderr(() => Embed()));
         Assert.Contains("words only: the provider's vectors have 1536 dimensions; the archive holds 384", _h.Err.ToString());
         Assert.Equal([EmbedProbe.Text], _h.Embedder.Texts);
         Assert.Equal(0, Embedded);
