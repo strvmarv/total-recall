@@ -131,4 +131,14 @@ public interface ITranscriptStore : IDisposable
 
     /// <summary>The last embed run, or null when none was written or the record is unreadable.</summary>
     EmbedRunRecord? ReadEmbedRun();
+
+    // ------------------------------------------------------------------
+    // The read side of a search (spec section 5, "Store read API")
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Starts one deferred read transaction for a whole search (vector candidates, word candidates, counts and chunk
+    /// rows). The caller disposes it at the end; until then the store's connection belongs to the search.
+    /// </summary>
+    ITranscriptSearchReads BeginSearchReads();
 }

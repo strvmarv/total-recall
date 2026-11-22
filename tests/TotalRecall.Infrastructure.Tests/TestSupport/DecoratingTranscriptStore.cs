@@ -73,6 +73,8 @@ public sealed class DecoratingTranscriptStore : ITranscriptStore
 
     public EmbedRunRecord? ReadEmbedRun() => _inner.ReadEmbedRun();
 
+    public ITranscriptSearchReads BeginSearchReads() => _inner.BeginSearchReads();
+
     public void Dispose()
     {
     }

@@ -898,5 +898,7 @@ public sealed partial class TranscriptStore : ITranscriptStore
         return cmd.ExecuteNonQuery();
     }
 
+    public ITranscriptSearchReads BeginSearchReads() => new SqliteTranscriptSearchReads(_conn);
+
     public void Dispose() => _conn.Dispose();
 }
