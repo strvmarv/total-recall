@@ -146,7 +146,7 @@ items moved to 1b-iii, see that section):
       is in no object of the repository and the other machine receives every other memory.
 - [ ] `sync unblock <id>` (hidden) releases it on this machine only, and refuses when the memory changed after
       the block; a later edit, including a token added in a tag after an unblock, is checked and blocked again.
-- [ ] `git@github.com` (and other email-shaped) text is never blocked.
+- [ ] `git@github.com` and plain addresses such as `noreply@example.com` are not blocked.
 - [ ] A restored, swapped or merged text (any text the apply writes after the scan) that holds a token is not
       pushed: the push re-checks every entry it is about to write.
 - [ ] The secret reason replaces a writer reason and is never cleared by the writer; a clean re-scan lifts it.

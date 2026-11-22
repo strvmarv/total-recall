@@ -27,7 +27,8 @@ public sealed partial class SyncSetupService
     /// <c>active</c>, or a reason other than <c>secret-detected</c>: <c>not-blocked</c>), then compares the current key with
     /// the row's <c>blocked_hash</c> (different: <c>changed-since-blocked</c>), and writes <c>allowed_hash</c> = the key with
     /// the mark cleared. Only after the commit it runs the detector on the content it read and prints the categories found,
-    /// never a value. A refusal writes nothing; a missing database is refused before anything is opened or created.
+    /// never a value; a detector that throws then still leaves the release done, with a line saying the categories could
+    /// not be checked. A refusal writes nothing; a missing database is refused before anything is opened or created.
     /// </summary>
     public async Task<SetupResult> UnblockAsync(string entryId, CancellationToken ct = default)
     {
@@ -75,7 +76,16 @@ public sealed partial class SyncSetupService
             }
 
             _phase = "checking the released content";
-            var found = Categories(released);
+            List<string> found;
+            try
+            {
+                found = Categories(released);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                // the release is committed: a detector failure must not turn it into one (no exception text, no value)
+                return SetupResult.Done("unblocked " + entryId, "the categories could not be checked");
+            }
             return SetupResult.Done(
                 "unblocked " + entryId,
                 found.Count == 0 ? "no secret was found in the current content" : "found: " + string.Join(", ", found));

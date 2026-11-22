@@ -78,6 +78,11 @@ public sealed class SyncSetupUnblockTests : IDisposable
         return SyncSecret.secretKey(read.View.Content, read.View.Tags);
     }
 
+    /// <summary>The content fields of the entry as the store holds it now.</summary>
+    private SyncMerge.ContentFields ContentOf(string id) =>
+        Assert.IsType<LocalRead.Present>(LocalEntryReader.Read(
+            t => Store.Get(t, ContentType.Memory, id), () => Store.IsSticky(ContentType.Memory, id))).View.Content;
+
     /// <summary>Every column of the row as stored, for a byte-for-byte comparison (or <c>none</c>).</summary>
     private string RowText(string id)
     {
@@ -183,6 +188,22 @@ public sealed class SyncSetupUnblockTests : IDisposable
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(["unblocked " + A, "no secret was found in the current content"], result.Lines);
         Assert.Equal(KeyOf(A), Row(A)!.AllowedHash);
+    }
+
+    [Fact]
+    public async Task ADetectorThatThrowsAfterTheCommit_StillReleases_WithALineSayingSo()
+    {
+        var token = Blocked(A, Fakes.Get("github-token"));
+        var key = KeyOf(A);
+        var before = Row(A)!;
+
+        var result = await Service(s => s.SecretDetector = text => throw new InvalidOperationException(text)).UnblockAsync(A);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Null(result.Refusal);
+        Assert.Equal(["unblocked " + A, "the categories could not be checked"], result.Lines);
+        Assert.Equal(before with { BlockedReason = null, BlockedHash = null, AllowedHash = key }, Row(A));
+        AssertNoToken(result, token);
     }
 
     [Fact]
@@ -321,7 +342,10 @@ public sealed class SyncSetupUnblockTests : IDisposable
         else
         {
             Blocked(A, token);
-            var row = Row(A)!;
+            // a real writer mark stores SyncScan.contentHash, never the secret key, so the key check could not accept these
+            // rows: the refusal can only come from the row check, which runs before it
+            var row = Row(A)! with { BlockedHash = SyncScan.contentHash(ContentOf(A)) };
+            Assert.NotEqual(KeyOf(A), row.BlockedHash);
             WriteRow(shape switch
             {
                 "forgotten" => row with { State = SyncMerge.RowState.Forgotten },

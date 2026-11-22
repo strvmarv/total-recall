@@ -211,6 +211,25 @@ public sealed class GitSyncScannerSecretTests
     }
 
     [Fact]
+    public void ABlockedRowEditedToASecondToken_IsListedAgain_WithTheNewKey()
+    {
+        using var rig = new ScanRig();
+        rig.AddMemory(Tier.Warm, A, "the token is " + Fakes.Get("github-token"));
+        Scan(rig, T1);
+        var firstKey = rig.Rows()[A].BlockedHash;
+        Edit(rig, A, new UpdateEntryOpts { Content = "the token is " + Fakes.Get("openai-key") });
+
+        var summary = Scan(rig, T2);
+
+        var row = rig.Rows()[A];
+        Assert.Equal("secret-detected", row.BlockedReason);
+        Assert.Equal(KeyOf(rig, A), row.BlockedHash);
+        Assert.NotEqual(firstKey, row.BlockedHash);
+        Assert.Equal([A], summary.Blocked);
+        Assert.Empty(summary.Unblocked);
+    }
+
+    [Fact]
     public void ATokenAddedInATagAfterAnUnblock_IsBlockedAgain()
     {
         using var rig = new ScanRig();

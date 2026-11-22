@@ -10,8 +10,9 @@ namespace TotalRecall.Infrastructure.GitSync;
 
 /// <summary>
 /// What one scan did (the counts are numbers of entries) and what it noticed. <paramref name="Blocked"/> and
-/// <paramref name="Unblocked"/> are the ids (ordinal) whose secret block this scan set, and the ids whose secret block it
-/// lifted (a clean re-scan, or fields the user allowed) (#161, decision D4).
+/// <paramref name="Unblocked"/> are the ids (ordinal) on whose changed row this scan set the secret block (a first block,
+/// a writer's reason it replaced, or a block it re-stamped with a new key after the fields changed to another secret),
+/// and the ids whose secret block it lifted (a clean re-scan, or fields the user allowed) (#161, decision D4).
 /// </summary>
 public sealed record ScanSummary(
     int New,

@@ -334,6 +334,38 @@ public sealed class GitSyncPusherSecretTests : IDisposable
     }
 
     [GitFact]
+    public async Task ACancellationDuringTheSecretCheck_StopsItBeforeTheNextCandidate()
+    {
+        _rig.Seed();
+        BlindScan();
+        _rig.AddMemory(Tier.Warm, A, content: "first memory");
+        _rig.AddMemory(Tier.Warm, B, content: "second memory");
+        _rig.Now += 1000;
+        var (apply, scan) = await _rig.PullAsync();
+        using var cts = new CancellationTokenSource();
+        var seen = new List<string?>();
+        var pusher = _rig.Pusher();
+        pusher.SecretDetector = text =>
+        {
+            seen.Add(text);
+            cts.Cancel();
+            return [];
+        };
+
+        var result = await pusher.PrepareAsync(apply, scan, cts.Token);
+
+        var stopped = Assert.IsType<PrepareResult.Stop>(result);
+        Assert.Equal("Cancelled", Assert.IsType<PushOutcome.Failed>(stopped.Outcome).Kind);
+        Assert.Contains("first memory", seen);
+        Assert.DoesNotContain("second memory", seen);
+    }
+
+    /// <summary>
+    /// A clean push of other entries leaves a secret mark alone: the blocked row is skipped (listed in <c>Skipped</c>), not
+    /// finalized. Finalize's own-mark test is pinned through the F# <c>isWriterReason</c> assertion
+    /// (<c>SyncPushTests</c>: <c>secret-detected</c> is not a writer reason), so this test shows the outcome of that rule.
+    /// </summary>
+    [GitFact]
     public async Task AFinalizeAndACleanPushOfOtherEntries_KeepTheMark()
     {
         _rig.Seed();

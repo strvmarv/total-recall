@@ -1,4 +1,3 @@
-using Microsoft.FSharp.Core;
 using TotalRecall.Core;
 
 namespace TotalRecall.Infrastructure.GitSync;
@@ -37,7 +36,7 @@ public sealed partial class GitSyncScanner
             var change =
                 check.IsAllowed ? SyncSecret.afterAllowed(reason)
                 : check.IsStillBlocked ? SyncSecret.MarkChange.KeepMark
-                : SyncSecret.afterScan(reason, IsHit(view), key);
+                : SyncSecret.afterScan(reason, SecretFields.AnyHit(view, SecretDetector), key);
 
             var next = change switch
             {
@@ -53,28 +52,11 @@ public sealed partial class GitSyncScanner
             else
                 plan.Rows.Add(next);
 
-            var wasBlocked = held.BlockedReason == SyncSecret.blockReason;
-            var isBlocked = next.BlockedReason == SyncSecret.blockReason;
-            if (isBlocked && !wasBlocked)
+            // a block the scan set on a changed row is listed even when the row was blocked before (a new key replaced the old)
+            if (change.IsSetBlock)
                 blocked.Add(id);
-            else if (wasBlocked && !isBlocked)
+            else if (held.BlockedReason == SyncSecret.blockReason && next.BlockedReason != SyncSecret.blockReason)
                 unblocked.Add(id);
         }
     }
-
-    /// <summary>Whether the detector finds anything in the text, the project, the scope or any tag (decision D2).</summary>
-    private bool IsHit(SyncMerge.LocalEntry view)
-    {
-        var content = view.Content;
-        if (Finds(content.Text) || Finds(Value(content.Project)) || Finds(Value(content.Scope)))
-            return true;
-        foreach (var tag in view.Tags)
-            if (Finds(tag))
-                return true;
-        return false;
-    }
-
-    private bool Finds(string? text) => text is not null && SecretDetector(text).Count > 0;
-
-    private static string? Value(FSharpOption<string>? option) => option?.Value;
 }

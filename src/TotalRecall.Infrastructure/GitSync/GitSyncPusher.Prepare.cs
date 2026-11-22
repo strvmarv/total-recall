@@ -224,7 +224,7 @@ public sealed partial class GitSyncPusher
         Dictionary<string, SecretCheck> secrets;
         try
         {
-            secrets = CheckSecrets(candidates, excluded);
+            secrets = CheckSecrets(candidates, excluded, ct);
         }
         catch (Exception ex) when (ex is SqliteException or InvalidOperationException)
         {
@@ -252,14 +252,17 @@ public sealed partial class GitSyncPusher
     /// The secret check of each candidate that is not excluded (#161, D3 and D5): an entry that is not readable now (absent,
     /// in two tiers, unreadable) gets none. Fields the row allows are no hit and fields it already blocks are a hit, both
     /// without a scan; any other entry is a hit when the detector finds something in its text, project, scope or a tag. A
-    /// database error propagates to the caller.
+    /// database error propagates to the caller, and so does a cancellation (checked before each candidate), which
+    /// <see cref="PrepareAsync"/> turns into the cancelled outcome.
     /// </summary>
     private Dictionary<string, SecretCheck> CheckSecrets(
-        IReadOnlyDictionary<string, CandidateInfo> candidates, IReadOnlyDictionary<string, SyncPush.Exclusion> excluded)
+        IReadOnlyDictionary<string, CandidateInfo> candidates, IReadOnlyDictionary<string, SyncPush.Exclusion> excluded,
+        CancellationToken ct)
     {
         var secrets = new Dictionary<string, SecretCheck>(StringComparer.Ordinal);
         foreach (var (id, info) in candidates)
         {
+            ct.ThrowIfCancellationRequested();
             if (excluded.ContainsKey(id))
                 continue;
             var read = LocalEntryReader.Read(t => _store.Get(t, ContentType.Memory, id), () => _store.IsSticky(ContentType.Memory, id));
@@ -269,25 +272,11 @@ public sealed partial class GitSyncPusher
             var key = SyncSecret.secretKey(view.Content, view.Tags);
             var row = info.Row;
             var check = SyncSecret.precheck(Opt(row.BlockedReason), Opt(row.BlockedHash), Opt(row.AllowedHash), key);
-            var hit = check.IsStillBlocked || (check.IsNeedsScan && IsSecretHit(view));
+            var hit = check.IsStillBlocked || (check.IsNeedsScan && SecretFields.AnyHit(view, SecretDetector));
             secrets[id] = new SecretCheck(key, hit);
         }
         return secrets;
     }
-
-    /// <summary>Whether the detector finds anything in the text, the project, the scope or any tag (#161, decision D2).</summary>
-    private bool IsSecretHit(SyncMerge.LocalEntry view)
-    {
-        var content = view.Content;
-        if (Finds(content.Text) || Finds(content.Project?.Value) || Finds(content.Scope?.Value))
-            return true;
-        foreach (var tag in view.Tags)
-            if (Finds(tag))
-                return true;
-        return false;
-    }
-
-    private bool Finds(string? text) => text is not null && SecretDetector(text).Count > 0;
 
     /// <summary>
     /// Decision 2: writes <c>.git/info/attributes</c> (every filter off), resets the clone to <c>L</c>, cleans it, and

@@ -89,6 +89,15 @@ public sealed class SensitiveContentScannerSecretsTests
     }
 
     [Fact]
+    public void Scan_EmailNearMiss_OnTimeout_FailsClosed()
+    {
+        // a mebibyte of local-part characters with no "@": the email pattern is tried at every position and runs to the end
+        var nearMiss = new string('a', 1024 * 1024);
+        var reasons = SensitiveContentScanner.Scan(nearMiss, null, Detectors.Email, TimeSpan.FromTicks(1));
+        Assert.Equal(new[] { TimedOut }, reasons);
+    }
+
+    [Fact]
     public void ScanSecrets_NearMissesWithTheDefaultBound_Completes()
     {
         var reasons = SensitiveContentScanner.ScanSecrets(SecretScanNearMisses.Text());

@@ -270,7 +270,7 @@ public sealed class SyncCommandTests : IDisposable
     // ---- load errors ------------------------------------------------------------------------------------------------
 
     [Fact]
-    public async Task AMalformedConfig_IsFailedForInitJoinAndLeave_AndUnknownForStatus()
+    public async Task AMalformedConfig_IsFailedForInitJoinLeaveAndUnblock_AndUnknownForStatus()
     {
         Directory.CreateDirectory(DataDir);
         File.WriteAllText(ConfigPath, "[storage\nmode = ");

@@ -69,8 +69,8 @@ public static class SensitiveContentScanner
 
     // Interpreted (not Compiled) regex: RegexOptions.Compiled emits IL at
     // runtime and is not NativeAOT-safe. These run on eval_grow accept and on
-    // every memory git sync is about to publish; each pattern is linear in the
-    // text, and the match timeout bounds a pathological input.
+    // every memory git sync is about to publish; a pattern can backtrack (the
+    // email one does), and the match timeout bounds a pathological input.
     private static readonly (Detectors Flag, string Reason, Regex[] Patterns)[] _detectors = BuildDetectors(SecretScanTimeout);
 
     private static (Detectors Flag, string Reason, Regex[] Patterns)[] BuildDetectors(TimeSpan timeout)

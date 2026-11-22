@@ -18,6 +18,27 @@ let private tags = [ "tooling"; "js" ]
 
 let private baseKey = secretKey fields tags
 
+/// The key as the stated byte layout builds it, without the production helpers: the prefix, then text, project and
+/// scope each as 0x00 (absent) or 0x01 + 4-byte big-endian length + UTF-8, then the 4-byte big-endian tag count and each
+/// tag as a 4-byte big-endian length + UTF-8 (the tags in ordinal order), hashed with SHA-256 into lowercase hex.
+let private independentKey (content: ContentFields) (tagList: string list) : string =
+    let utf8 (s: string) = System.Text.Encoding.UTF8.GetBytes s
+    let be32 (n: int) = [| byte (n >>> 24); byte (n >>> 16); byte (n >>> 8); byte n |]
+    let optional (value: string option) =
+        match value with
+        | None -> [| 0uy |]
+        | Some s -> Array.concat [ [| 1uy |]; be32 (utf8 s).Length; utf8 s ]
+    let sorted = tagList |> List.distinct |> List.sortWith (fun a b -> System.String.CompareOrdinal(a, b))
+    let bytes =
+        Array.concat
+            [ utf8 "total-recall/scan/secret/v1\n"
+              optional (Some content.Text)
+              optional content.Project
+              optional content.Scope
+              be32 sorted.Length
+              Array.concat (sorted |> List.map (fun t -> Array.append (be32 (utf8 t).Length) (utf8 t))) ]
+    System.Security.Cryptography.SHA256.HashData(bytes) |> System.Convert.ToHexString |> fun h -> h.ToLowerInvariant()
+
 [<Tests>]
 let secretKeyTests =
     testList
@@ -58,6 +79,13 @@ let secretKeyTests =
           }
           test "two different tag splits differ" {
               Expect.notEqual (secretKey fields [ "ab" ]) (secretKey fields [ "a"; "b" ]) "length-prefixed"
+          }
+          test "tag lists that differ only through the length prefix differ" {
+              Expect.notEqual (secretKey fields [ "a"; "bc" ]) (secretKey fields [ "ab"; "c" ]) "length prefix"
+          }
+          test "matches the key computed independently from the byte layout" {
+              Expect.equal (secretKey fields tags) (independentKey fields tags) "known answer"
+              Expect.equal (secretKey { fields with Project = None; Scope = None } []) (independentKey { fields with Project = None; Scope = None } []) "absent fields, no tags"
           } ]
 
 let private key = "k1"
