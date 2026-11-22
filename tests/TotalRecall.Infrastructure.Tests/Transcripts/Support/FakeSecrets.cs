@@ -32,6 +32,7 @@ public sealed class FakeSecrets(int seed)
         "aws-key" => "AK" + "IA" + Pick(name, Upper + Digits, 16),
         "private-key" => PrivateKey(name, terminated: true),
         "private-key-unterminated" => PrivateKey(name, terminated: false),
+        "pgp-private-key" => PgpPrivateKey(name),
         "bearer-token" => Pick(name, Alnum, 32),
         "url-password" => Pick(name + "a", Alnum, 4) + "@" + Pick(name + "b", Alnum, 4) + "/" + Pick(name + "c", Alnum, 3)
                           + "+" + Pick(name + "d", Alnum, 2),
@@ -48,6 +49,17 @@ public sealed class FakeSecrets(int seed)
         for (var i = 0; i < 4; i++) sb.Append(Pick(name + i, Base64, 64)).Append('\n');
         sb.Append(Pick(name + "last", Base64, 20)).Append("==");
         if (terminated) sb.Append('\n').Append(Dashes).Append("END ").Append(label).Append(Dashes);
+        return sb.ToString();
+    }
+
+    private string PgpPrivateKey(string name)
+    {
+        var label = "PGP " + "PRIVATE" + " KEY BLOCK";
+        var sb = new StringBuilder();
+        sb.Append(Dashes).Append("BEGIN ").Append(label).Append(Dashes).Append("\n\n");
+        for (var i = 0; i < 4; i++) sb.Append(Pick(name + i, Base64, 64)).Append('\n');
+        sb.Append('=').Append(Pick(name + "crc", Base64, 4)).Append('\n');
+        sb.Append(Dashes).Append("END ").Append(label).Append(Dashes);
         return sb.ToString();
     }
 

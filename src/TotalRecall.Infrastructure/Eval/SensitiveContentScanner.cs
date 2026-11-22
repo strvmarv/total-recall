@@ -17,14 +17,20 @@
 // Reasons are category labels, never the matched value, so scanning a secret
 // does not echo it back into logs or tool responses.
 //
-// A second consumer (git sync, later milestones) calls ScanSecrets, which runs
-// only the token and private-key detectors; the detectors are selectable via
-// the Detectors flags and Scan(text, terms) still runs all of them.
+// A second consumer (git sync, the secret block of milestone 1b-iii) calls
+// ScanSecrets, which runs only the token and private-key detectors; the
+// detectors are selectable via the Detectors flags and Scan(text, terms) still
+// runs all of them.
 //
 // A third consumer (the transcript archive) calls Redact, which replaces the
 // secrets it finds with [redacted:<category>] markers. Redact has its own
 // pattern set (it extends the sk- shape and adds bearer, URL-credential and
-// secret-assignment detectors); Scan and ScanSecrets do not use it.
+// secret-assignment detectors). The token and private-key detectors of Scan and
+// ScanSecrets reuse Redact's token patterns and its private-key begin line, plus
+// their own earlier patterns kept as legacy entries (the unbounded sk- form and
+// the BEGIN ... PRIVATE KEY line), so they find the union of both (git sync spec
+// D9). Every detector regex is matched with a 1 s timeout, and a timeout is a
+// hit: the reason "scan timed out" (fail closed).
 
 using System;
 using System.Collections.Generic;
@@ -56,18 +62,30 @@ public sealed record RedactionResult(string Text, int Count, IReadOnlyList<strin
 /// </summary>
 public static class SensitiveContentScanner
 {
+    /// <summary>The match timeout of every detector regex in <see cref="Scan(string?, IReadOnlyCollection{string}?)"/> and <see cref="ScanSecrets(string?)"/>.</summary>
+    internal static readonly TimeSpan SecretScanTimeout = TimeSpan.FromSeconds(1);
+
+    private const string TimedOutReason = "scan timed out";
+
     // Interpreted (not Compiled) regex: RegexOptions.Compiled emits IL at
-    // runtime and is not NativeAOT-safe. These run only on eval_grow accept,
-    // over short strings, so interpreted matching is more than fast enough.
-    private static readonly (Detectors Flag, string Reason, Regex Pattern)[] _detectors =
+    // runtime and is not NativeAOT-safe. These run on eval_grow accept and on
+    // every memory git sync is about to publish; each pattern is linear in the
+    // text, and the match timeout bounds a pathological input.
+    private static readonly (Detectors Flag, string Reason, Regex[] Patterns)[] _detectors = BuildDetectors(SecretScanTimeout);
+
+    private static (Detectors Flag, string Reason, Regex[] Patterns)[] BuildDetectors(TimeSpan timeout)
     {
-        (Detectors.Email, "email address",
-            new Regex(@"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")),
-        (Detectors.Token, "API token or secret",
-            new Regex(@"gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_\-]{16,}|xox[baprs]-[A-Za-z0-9\-]{10,}|sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}")),
-        (Detectors.PrivateKey, "private key block",
-            new Regex(@"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
-    };
+        var shared = new RedactionPatterns(timeout);
+        var tokens = new List<Regex>(shared.Tokens) { new(@"sk-[A-Za-z0-9]{16,}", RegexOptions.None, timeout) };
+        return new[]
+        {
+            (Detectors.Email, "email address",
+                new[] { new Regex(@"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", RegexOptions.None, timeout) }),
+            (Detectors.Token, "API token or secret", tokens.ToArray()),
+            (Detectors.PrivateKey, "private key block",
+                new[] { shared.PrivateKeyBegin, new Regex(@"-----BEGIN [A-Z ]*PRIVATE KEY-----", RegexOptions.None, timeout) }),
+        };
+    }
 
     /// <summary>
     /// Scan <paramref name="text"/> for secrets, PII, and any of
@@ -79,16 +97,31 @@ public static class SensitiveContentScanner
 
     /// <summary>
     /// The same scan with only the chosen built-in <paramref name="detectors"/> (the internal terms always run).
-    /// Reasons come in the order email, token, private key, internal term.
+    /// Reasons come in the order email, token, private key, internal term. A detector that runs into the 1-second match
+    /// timeout fails closed: the reason <c>scan timed out</c> is added and the scan stops there.
     /// </summary>
-    public static IReadOnlyList<string> Scan(string? text, IReadOnlyCollection<string>? internalTerms, Detectors detectors)
+    public static IReadOnlyList<string> Scan(string? text, IReadOnlyCollection<string>? internalTerms, Detectors detectors) =>
+        Scan(text, internalTerms, detectors, SecretScanTimeout);
+
+    /// <summary>Test seam: the same scan with a chosen regex match timeout.</summary>
+    internal static IReadOnlyList<string> Scan(
+        string? text, IReadOnlyCollection<string>? internalTerms, Detectors detectors, TimeSpan matchTimeout)
     {
         if (string.IsNullOrEmpty(text)) return Array.Empty<string>();
 
+        var table = matchTimeout == SecretScanTimeout ? _detectors : BuildDetectors(matchTimeout);
         var reasons = new List<string>();
-        foreach (var (flag, reason, pattern) in _detectors)
+        try
         {
-            if ((detectors & flag) != 0 && pattern.IsMatch(text)) reasons.Add(reason);
+            foreach (var (flag, reason, patterns) in table)
+            {
+                if ((detectors & flag) != 0 && Array.Exists(patterns, p => p.IsMatch(text))) reasons.Add(reason);
+            }
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            reasons.Add(TimedOutReason);
+            return reasons;
         }
 
         if (internalTerms is not null)
@@ -112,10 +145,14 @@ public static class SensitiveContentScanner
 
     /// <summary>
     /// Tokens and private keys only, with no internal terms: the check git sync runs on text it is about to publish to
-    /// the user's own private repository. Email addresses are not flagged (a memory may name a person).
+    /// the user's own private repository. Email addresses are not flagged (a memory may name a person). A match timeout
+    /// gives the reason <c>scan timed out</c>, which callers treat as a hit like any other reason.
     /// </summary>
-    public static IReadOnlyList<string> ScanSecrets(string? text) =>
-        Scan(text, null, Detectors.Token | Detectors.PrivateKey);
+    public static IReadOnlyList<string> ScanSecrets(string? text) => ScanSecrets(text, SecretScanTimeout);
+
+    /// <summary>Test seam: the same check with a chosen regex match timeout.</summary>
+    internal static IReadOnlyList<string> ScanSecrets(string? text, TimeSpan matchTimeout) =>
+        Scan(text, null, Detectors.Token | Detectors.PrivateKey, matchTimeout);
 
     // ------------------------------------------------------------------------------------------------------------
     // Redaction (transcript archive, spec section 4)
