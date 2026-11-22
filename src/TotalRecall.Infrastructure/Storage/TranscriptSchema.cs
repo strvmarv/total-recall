@@ -20,6 +20,8 @@ internal static class TranscriptMigrationRunner
         Migration1_Archive,
         // Migration 2: ingest state (settled turns, cutoff the row was built under, project root) and the status index
         Migration2_IngestState,
+        // Migration 3: the vector table, the triggers that keep it in step, the embed attempt count
+        Migration3_Vectors,
     };
 
     private const string VersionDdl = """
@@ -38,9 +40,15 @@ internal static class TranscriptMigrationRunner
         ArgumentNullException.ThrowIfNull(conn);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(targetVersion, Migrations.Length);
 
+        // Read the version first, outside any transaction: an archive that is already current must not take the
+        // write lock (BEGIN IMMEDIATE would queue every search and status behind an ingest). The version table may
+        // not exist yet, so CurrentVersion probes for it and returns 0.
+        if (CurrentVersion(conn) >= targetVersion) return;
+
         using var tx = conn.BeginTransaction();
 
         Exec(conn, tx, VersionDdl);
+        // Re-read under the write lock: another process may have migrated between the check above and BEGIN.
         var starting = (int)ReadVersion(conn, tx);
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
@@ -184,6 +192,70 @@ internal static class TranscriptMigrationRunner
         Exec(conn, tx, "ALTER TABLE tx_session ADD COLUMN project_root TEXT");
         Exec(conn, tx,
             "CREATE INDEX IF NOT EXISTS idx_tx_session_project_kind ON tx_session(project_key, kind)");
+    }
+
+    private static void Migration3_Vectors(
+        MsSqliteConnection conn,
+        Microsoft.Data.Sqlite.SqliteTransaction tx)
+    {
+        // The vector row of a chunk (rowid = tx_chunk.id) exists only while tx_chunk.embedded = 1. vec0 is loaded by
+        // every archive connection (SqliteConnection.Open); a connection without it cannot write tx_chunk or tx_session.
+        Exec(conn, tx, """
+            CREATE VIRTUAL TABLE IF NOT EXISTS tx_chunk_vec USING vec0(
+                session_id integer,
+                project text,
+                kind text,
+                ts integer,
+                embedding float[384] distance_metric=cosine
+            )
+            """);
+
+        Exec(conn, tx, "ALTER TABLE tx_chunk ADD COLUMN embed_attempts INTEGER NOT NULL DEFAULT 0");
+
+        Exec(conn, tx, """
+            CREATE TRIGGER IF NOT EXISTS tx_chunk_vec_ad AFTER DELETE ON tx_chunk BEGIN
+                DELETE FROM tx_chunk_vec WHERE rowid = old.id;
+            END
+            """);
+
+        Exec(conn, tx, """
+            CREATE TRIGGER IF NOT EXISTS tx_chunk_vec_au AFTER UPDATE OF content ON tx_chunk BEGIN
+                DELETE FROM tx_chunk_vec WHERE rowid = old.id;
+            END
+            """);
+
+        Exec(conn, tx, """
+            CREATE TRIGGER IF NOT EXISTS tx_session_vec_ku AFTER UPDATE OF kind, project_key ON tx_session
+            WHEN old.kind IS NOT new.kind OR old.project_key IS NOT new.project_key BEGIN
+                UPDATE tx_chunk_vec SET kind = new.kind, project = new.project_key
+                WHERE rowid IN (SELECT id FROM tx_chunk WHERE session_id = new.id);
+            END
+            """);
+
+        // Narrow the text-index update trigger to content changes: marking a chunk embedded must not delete and
+        // re-insert its text-index entry. Same body as migration 1.
+        Exec(conn, tx, "DROP TRIGGER IF EXISTS tx_chunk_fts_au");
+        Exec(conn, tx, """
+            CREATE TRIGGER tx_chunk_fts_au AFTER UPDATE OF content ON tx_chunk BEGIN
+                INSERT INTO tx_chunk_fts(tx_chunk_fts, rowid, content) VALUES('delete', old.id, old.content);
+                INSERT INTO tx_chunk_fts(rowid, content) VALUES (new.id, new.content);
+            END
+            """);
+
+        // A changed chunk gets a fresh embed state. The inner UPDATE does not set content, so it cannot fire again.
+        Exec(conn, tx, """
+            CREATE TRIGGER IF NOT EXISTS tx_chunk_reset_au AFTER UPDATE OF content ON tx_chunk BEGIN
+                UPDATE tx_chunk SET embedded = 0, embed_attempts = 0 WHERE id = new.id;
+            END
+            """);
+
+        Exec(conn, tx, """
+            CREATE INDEX IF NOT EXISTS idx_tx_chunk_unembedded ON tx_chunk(id)
+            WHERE embedded = 0 AND embed_attempts < 3
+            """);
+
+        // No vector exists yet, so an embedded flag of 1 (written by the earlier parts' tests) is wrong.
+        Exec(conn, tx, "UPDATE tx_chunk SET embedded = 0 WHERE embedded <> 0");
     }
 
     private static void Exec(

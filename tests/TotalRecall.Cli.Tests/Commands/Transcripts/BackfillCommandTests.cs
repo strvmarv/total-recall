@@ -268,17 +268,31 @@ public sealed class BackfillCommandTests : IDisposable
     }
 
     [Fact]
-    public void Version1Archive_IsMigratedTo2()
+    public void Version1Archive_IsMigratedTo3()
     {
         EnableArchive();
         _home.Place("decision", Cwd);
         Assert.Equal(0, Backfill());
-        Assert.Equal(2, _h.Scalar("SELECT MAX(version) FROM tx_schema_version"));
+        Assert.Equal(3, _h.Scalar("SELECT MAX(version) FROM tx_schema_version"));
 
+        // TranscriptMigrationRunner is internal to Infrastructure, so an old archive is rebuilt by undoing
+        // migrations 3 and 2 by hand (migration 3 first).
         using (var conn = _h.Connect())
         {
             foreach (var sql in new[]
                      {
+                         "DROP TRIGGER tx_chunk_vec_ad",
+                         "DROP TRIGGER tx_chunk_vec_au",
+                         "DROP TRIGGER tx_session_vec_ku",
+                         "DROP TRIGGER tx_chunk_reset_au",
+                         "DROP TRIGGER tx_chunk_fts_au",
+                         "CREATE TRIGGER tx_chunk_fts_au AFTER UPDATE ON tx_chunk BEGIN " +
+                         "INSERT INTO tx_chunk_fts(tx_chunk_fts, rowid, content) VALUES('delete', old.id, old.content); " +
+                         "INSERT INTO tx_chunk_fts(rowid, content) VALUES (new.id, new.content); END",
+                         "DROP INDEX idx_tx_chunk_unembedded",
+                         "DROP TABLE tx_chunk_vec",
+                         "ALTER TABLE tx_chunk DROP COLUMN embed_attempts",
+                         "DELETE FROM tx_schema_version WHERE version = 3",
                          "DROP INDEX idx_tx_session_project_kind",
                          "ALTER TABLE tx_session DROP COLUMN settled_user_turns",
                          "ALTER TABLE tx_session DROP COLUMN built_under_cutoff",
@@ -297,9 +311,9 @@ public sealed class BackfillCommandTests : IDisposable
         var code = Backfill();
 
         Assert.Equal(0, code);
-        Assert.Equal(2, _h.Scalar("SELECT MAX(version) FROM tx_schema_version"));
+        Assert.Equal(3, _h.Scalar("SELECT MAX(version) FROM tx_schema_version"));
         Assert.Equal(0, Status());
-        Assert.Contains("schema version: 2", _h.Out.ToString());
+        Assert.Contains("schema version: 3", _h.Out.ToString());
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Microsoft.Data.Sqlite;
 using TotalRecall.Infrastructure.Storage;
 using Xunit;
@@ -93,13 +94,20 @@ public sealed class TranscriptSchemaTests
         Assert.Equal(
             new[]
             {
+                "index:idx_tx_chunk_unembedded",
                 "index:idx_tx_forgotten_project", "index:idx_tx_forgotten_session", "index:idx_tx_session_project_kind",
                 "table:tx_chunk", "table:tx_chunk_fts", "table:tx_chunk_fts_config", "table:tx_chunk_fts_data",
                 "table:tx_chunk_fts_docsize", "table:tx_chunk_fts_idx",
                 "table:tx_forgotten", "table:tx_schema_version", "table:tx_session", "table:tx_state",
                 "trigger:tx_chunk_fts_ad", "trigger:tx_chunk_fts_ai", "trigger:tx_chunk_fts_au",
+                "trigger:tx_chunk_reset_au", "trigger:tx_chunk_vec_ad", "trigger:tx_chunk_vec_au",
+                "trigger:tx_session_vec_ku",
             },
-            SchemaObjects(conn));
+            SchemaObjects(conn).Where(o => !o.StartsWith("table:tx_chunk_vec_", StringComparison.Ordinal)
+                                           && o != "table:tx_chunk_vec").ToList());
+        // The vec0 virtual table and its shadow tables (named tx_chunk_vec_*).
+        Assert.Contains("table:tx_chunk_vec", SchemaObjects(conn));
+        Assert.Contains(SchemaObjects(conn), o => o.StartsWith("table:tx_chunk_vec_", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -141,6 +149,7 @@ public sealed class TranscriptSchemaTests
                 new Column("has_error", "INTEGER", true, 0, "0"), new Column("ts", "TEXT", false, 0),
                 new Column("redaction_version", "INTEGER", true, 0), new Column("embedded", "INTEGER", true, 0, "0"),
                 new Column("content", "TEXT", true, 0),
+                new Column("embed_attempts", "INTEGER", true, 0, "0"),
             },
             Columns(conn, "tx_chunk"));
     }
@@ -200,10 +209,10 @@ public sealed class TranscriptSchemaTests
     }
 
     [Fact]
-    public void Run_RecordsVersion2_AndIsIdempotent()
+    public void Run_RecordsVersion3_AndIsIdempotent()
     {
         using var conn = Migrated();
-        Assert.Equal(2, TranscriptMigrationRunner.CurrentVersion(conn));
+        Assert.Equal(3, TranscriptMigrationRunner.CurrentVersion(conn));
         Assert.True(TranscriptMigrationRunner.IsMigrated(conn));
         var before = SchemaObjects(conn);
         var versions = Rows(conn, "SELECT version, applied_at FROM tx_schema_version");
@@ -212,7 +221,7 @@ public sealed class TranscriptSchemaTests
 
         Assert.Equal(before, SchemaObjects(conn));
         Assert.Equal(versions, Rows(conn, "SELECT version, applied_at FROM tx_schema_version"));
-        Assert.Equal(2, TranscriptMigrationRunner.CurrentVersion(conn));
+        Assert.Equal(3, TranscriptMigrationRunner.CurrentVersion(conn));
     }
 
     [Fact]
@@ -226,7 +235,7 @@ public sealed class TranscriptSchemaTests
 
         TranscriptMigrationRunner.Run(conn);
 
-        Assert.Equal(2, TranscriptMigrationRunner.CurrentVersion(conn));
+        Assert.Equal(3, TranscriptMigrationRunner.CurrentVersion(conn));
         Assert.Equal(1, Scalar(conn, "SELECT COUNT(*) FROM tx_session"));
         Assert.Equal(1, Scalar(conn, "SELECT COUNT(*) FROM tx_chunk"));
         Assert.Equal(1, FtsHits(conn, "upgradekeeps"));
@@ -265,7 +274,7 @@ public sealed class TranscriptSchemaTests
         Assert.Equal(18, Scalar(conn, "SELECT COUNT(*) FROM _schema_version"));
         Assert.Equal(18, Scalar(conn, "SELECT MAX(version) FROM _schema_version"));
         Assert.Equal(meta, Rows(conn, "SELECT key, value FROM _meta ORDER BY key"));
-        Assert.Equal(2, TranscriptMigrationRunner.CurrentVersion(conn));
+        Assert.Equal(3, TranscriptMigrationRunner.CurrentVersion(conn));
     }
 
     [Theory]
