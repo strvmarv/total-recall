@@ -187,7 +187,7 @@ public sealed class TranscriptsRemoteEmbeddingCliTests : IDisposable
     // ---- the lease -----------------------------------------------------------------------------------------------
 
     /// <summary>An embedder that holds its first call (the other run's probe) until released.</summary>
-    private sealed class HoldingEmbedder : IEmbedder
+    private sealed class HoldingEmbedder : IEmbedder, IDisposable
     {
         private int _first = 1;
         public EmbedderDescriptor Descriptor { get; } = new("local", "bge-small-en-v1.5", "rev1", 384);
@@ -205,6 +205,12 @@ public sealed class TranscriptsRemoteEmbeddingCliTests : IDisposable
             v[text.Length % 384] = 1f;
             return v;
         }
+
+        public void Dispose()
+        {
+            Hold.Dispose();
+            Entered.Dispose();
+        }
     }
 
     [Fact]
@@ -219,7 +225,8 @@ public sealed class TranscriptsRemoteEmbeddingCliTests : IDisposable
         // Another run (a session_start pass of a server, say) holds the lease while it is inside its probe.
         var other = new HoldingEmbedder();
         var otherStore = _h.OpenArchive();
-        Task<EmbedRun> otherRun;
+        Task<EmbedRun>? otherRun = null;
+        EmbedRun result;
         try
         {
             otherRun = Task.Run(() => new TranscriptEmbedWorker(otherStore, other)
@@ -231,14 +238,24 @@ public sealed class TranscriptsRemoteEmbeddingCliTests : IDisposable
             Assert.Contains("another embed run is active; try again later", Err);
             Assert.Empty(mine.Calls);
             Assert.Equal(0, Embedded);
+
+            other.Hold.Set();
+            result = await otherRun.WaitAsync(TimeSpan.FromSeconds(30));
         }
         finally
         {
+            // Also after a failed assertion: release the other run, wait for it (bounded) so it never outlives the store
+            // and the events it uses, then dispose them.
             other.Hold.Set();
+            if (otherRun is not null)
+            {
+                try { await otherRun.WaitAsync(TimeSpan.FromSeconds(30)); }
+                catch (TimeoutException) { } // the failure that brought us here is the one to report
+            }
+            otherStore.Dispose();
+            other.Dispose();
         }
 
-        var result = await otherRun.WaitAsync(TimeSpan.FromSeconds(30));
-        otherStore.Dispose();
         Assert.Equal(EmbedStopReason.Done, result.StoppedBy);
         Assert.Equal(20, Embedded);           // the holder finished its work
         Assert.Empty(mine.Calls);
