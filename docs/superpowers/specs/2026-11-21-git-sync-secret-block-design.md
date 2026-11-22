@@ -90,7 +90,8 @@ The detectors **never run inside the plan transaction**. The preparation (which 
 runs them on each candidate entry and keeps the result with its key; `PlanOne` compares the key of the entry it re-read with the
 prepared one and, when they differ, defers the entry as `changed-since-scan` (the existing deferral for an entry that changed since
 the scan: such a change also changes `contentHash` or `tagsHash`, so `AgreesWithRow` already catches it), so a slow text can never
-hold `BEGIN IMMEDIATE` and starve a concurrent writer.
+hold `BEGIN IMMEDIATE` and starve a concurrent writer. A candidate with no prepared key (its entry was absent, in two tiers or
+unreadable when the preparation read it) is deferred: `unreadable-entry` when the re-read is not present, else `changed-since-scan`.
 
 An entry the **preparation** already excludes because its row carries a `secret-detected` mark is reported in `Skipped` with the
 reason `secret-detected` (today every non-writer reason reads `blocked-elsewhere`); other non-writer reasons keep that name.
@@ -106,7 +107,8 @@ row has no reason and the next push marks the writer's reason again (the existin
 ### D7. `sync unblock <id>`
 
 A hidden command (`SyncCommandBase.Hidden`) with one argument, the entry id, backed by a new partial of `SyncSetupService`
-(`SyncSetupService.Unblock.cs`, same environment, sync lock and refusal mechanism as `leave`). Under the sync lock, in one immediate
+(`SyncSetupService.Unblock.cs`, same environment, sync lock and refusal mechanism as `leave`; it opens the database read-write as
+`init` does, `SqliteConnection.Open` with migrations run, and a busy database or lock refuses `busy` and writes nothing). Under the sync lock, in one immediate
 transaction:
 
 1. Read the entry (`LocalEntryReader.Read`). `Absent`: refuse `unknown-entry`. `Duplicate` (in two tiers) or `Unreadable`: refuse
@@ -128,7 +130,7 @@ the other sync commands (0, 1 refused, 2 usage).
 ### D8. `sync status` lists blocked entries
 
 `sync status` (read-only, no network, no lock) gains a `blocked` section: each blocked entry's id and reason, at most 20 lines
-and then "and N more", from one read-only query on `git_sync_entry` **for `state = 'active'` rows only** (a forgotten or left row keeps its columns and is not listed; guarded for an unmigrated database and tolerant of an
+ordered by entry id (ordinal) and then "and N more", from one read-only query on `git_sync_entry` **for `state = 'active'` rows only** (a forgotten or left row keeps its columns and is not listed; guarded for an unmigrated database and tolerant of an
 unknown state value). The rest of the `sync` block in `status` is Part 6.
 
 ### D9. The token detector
@@ -146,7 +148,7 @@ Every pattern is matched with a timeout, and **a timeout counts as a hit** (fail
 `ScanSecrets` and for `Scan` (so `eval_grow`'s accept guard fails closed too, the safe direction). `ScanSecrets` keeps its signature
 and uses a 1 s bound per pattern match; an internal overload takes the bound, as `Redact(text, matchTimeout)` does, so a test can
 force a timeout. The stale comments are corrected: the one on the detector array ("runs only on eval_grow accept, over short
-strings") and the header note that `Scan` and `ScanSecrets` do not use the timeout machinery. `eval_grow`'s accept guard uses the same
+strings") and the header note that `Scan` and `ScanSecrets` do not use `Redact`'s patterns (they now reuse them); `Scan` uses the same 1 s bound as `ScanSecrets`. `eval_grow`'s accept guard uses the same
 detector and so blocks more, never less, by the union above.
 
 ### D10. Cost and scope of the check
@@ -168,7 +170,7 @@ reactivated row starts clean); the pusher (a hit is not written and is listed by
 whose text the apply changed to hold a token is blocked at the push; a blocked entry does not stop other entries; the mark
 survives a finalize and a clean push of other entries; a writer reason is replaced and later re-marked); `unblock` (releases; refuses `changed-since-blocked` after an edit made after the block, writing nothing; refuses `unreadable-entry` for an id in two tiers;
 refuses an unblocked or unknown entry; the allowed key survives a later unchanged scan; a later edit is checked again; the
-lock is taken; categories only are printed, never a value); `sync status` (lists, caps, no table, odd state); the detector
+lock is taken; categories only are printed, never a value); `sync status` (lists, caps with a test that asserts which entries are shown, no table, odd state); the detector
 (`sk-ant-`, `sk-proj-`, a PGP `PRIVATE KEY BLOCK`, a string the old `sk-` pattern matched, existing shapes, a private key, `git@github.com` and `noreply@x.com` clean, a timeout fails closed in `ScanSecrets` and in `Scan`; `mask-abcdefghijklmnopqrst` is held back; `Redact`'s tests are unchanged and green);
 a `TwoMachineRig` test (a token memory on A is in no object of the bare repository, asserted over every object (`git cat-file --batch-all-objects --batch`), not only the head tree; B receives every other memory, a `git@github.com` memory arrives and syncs); a blocked entry still receives a remote edit through the apply; the detector timeout through the internal overload; `HiddenCommandTests` (the verb list and the phrase check include `unblock`, and `unblock` is not listed in top-level help); `GitSyncCycleCallerTests` unchanged and green.
 
