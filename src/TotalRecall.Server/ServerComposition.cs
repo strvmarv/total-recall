@@ -657,7 +657,10 @@ public static class ServerComposition
             // Opt-in transcript archive tools (off by default; the gate reads the sentinel on every call so the
             // answer follows `transcripts enable|disable` without a restart). sqlite and cortex only.
             var transcriptSentinel = new Infrastructure.Transcripts.TranscriptSentinel(ConfigLoader.GetDataDir());
-            registry.Register(new TranscriptSearchHandler(transcriptSentinel.IsEnabled));
+            registry.Register(new TranscriptSearchHandler(
+                transcriptSentinel.IsEnabled,
+                new Infrastructure.Transcripts.TranscriptSearchService(
+                    () => TranscriptSearchContextFor(cfg, resolvedDbPath, storageMode, embedder))));
             registry.Register(new TranscriptGetHandler(transcriptSentinel.IsEnabled));
             registry.Register(new TranscriptSessionsHandler(transcriptSentinel.IsEnabled));
 
@@ -668,6 +671,21 @@ public static class ServerComposition
             try { conn.Dispose(); } catch { /* best-effort */ }
             throw;
         }
+    }
+
+    /// <summary>
+    /// The per-call context of <c>transcript_search</c>: the <c>[transcripts]</c> settings read now (so a changed
+    /// <c>db_path</c> applies without a restart), the archive's location beside the main database, the storage mode,
+    /// the effective <c>[embedding]</c> config and the composition's embedder. Nothing is opened here. Throws with
+    /// the reason when the location cannot be resolved; the service answers that as an error.
+    /// </summary>
+    private static Infrastructure.Transcripts.TranscriptSearchContext TranscriptSearchContextFor(
+        Core.Config.TotalRecallConfig cfg, string resolvedDbPath, string storageMode, IEmbedder embedder)
+    {
+        var settings = ConfigLoader.LoadTranscriptsSettings();
+        var location = Infrastructure.Transcripts.TranscriptStore.ResolveLocation(settings, resolvedDbPath, out var error)
+            ?? throw new InvalidOperationException(error ?? "transcripts.db_path cannot be resolved");
+        return new Infrastructure.Transcripts.TranscriptSearchContext(location, settings, storageMode, cfg.Embedding, embedder);
     }
 
     private static ServerCompositionHandles OpenPostgres(Core.Config.TotalRecallConfig cfg, string storageMode = "postgres", string querySource = "assistant")
@@ -995,7 +1013,10 @@ public static class ServerComposition
             // Opt-in transcript archive tools (off by default; the gate reads the sentinel on every call so the
             // answer follows `transcripts enable|disable` without a restart). sqlite and cortex only.
             var transcriptSentinel = new Infrastructure.Transcripts.TranscriptSentinel(ConfigLoader.GetDataDir());
-            registry.Register(new TranscriptSearchHandler(transcriptSentinel.IsEnabled));
+            registry.Register(new TranscriptSearchHandler(
+                transcriptSentinel.IsEnabled,
+                new Infrastructure.Transcripts.TranscriptSearchService(
+                    () => TranscriptSearchContextFor(cfg, resolvedDbPath, storageMode, embedder))));
             registry.Register(new TranscriptGetHandler(transcriptSentinel.IsEnabled));
             registry.Register(new TranscriptSessionsHandler(transcriptSentinel.IsEnabled));
 
