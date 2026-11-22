@@ -1,12 +1,14 @@
+using Microsoft.FSharp.Collections;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.GitSync;
 using TotalRecall.Infrastructure.Storage;
+using TotalRecall.TestSupport.Transcripts;
 using Xunit;
 using static TotalRecall.Infrastructure.Tests.GitSync.ApplyRig;
 
 namespace TotalRecall.Infrastructure.Tests.GitSync;
 
-/// <summary>Milestone 1b-ii: the two-machine rig, on deletions that cross machines.</summary>
+/// <summary>Milestone 1b-ii: the two-machine rig, on deletions that cross machines; 1b-iii part 1 (#161): the secret block across machines.</summary>
 public sealed class TwoMachineTests : IDisposable
 {
     private const string Id = "3f9c2a7e";
@@ -249,6 +251,87 @@ public sealed class TwoMachineTests : IDisposable
         Assert.Equal(Tier.Hot, ReadTier(RemoteText(demoted), demoted));
         Assert.NotNull(_rig.B.Pull.Store.Get(Tier.Warm, ContentType.Memory, demoted));
         Assert.NotNull(_rig.A.Pull.Store.Get(Tier.Hot, ContentType.Memory, demoted));
+    }
+
+    // ---- the secret block across machines (#161) ----
+
+    private static readonly FakeSecrets Fakes = new(161);
+
+    /// <summary>Every object of the bare repository, each header followed by its full content (<c>git cat-file --batch-all-objects --batch</c>).</summary>
+    private string EveryObject() => _rig.A.Push.Remote.Git("cat-file", "--batch-all-objects", "--batch");
+
+    [GitFact]
+    public async Task ATokenMemoryOnA_IsInNoObjectOfTheRepository_AndBGetsTheRest()
+    {
+        const string tokenId = "1a2b3c4d";
+        const string sshId = "2b3c4d5e";
+        const string plainId = "3c4d5e6f";
+        var token = Fakes.Get("github-token");
+        const string sshText = "Clone with git@github.com:o/r.git over ssh.";
+        _rig.Seed();
+        _rig.A.Push.AddMemory(Tier.Warm, tokenId, "The deploy token is " + token);
+        _rig.A.Push.AddMemory(Tier.Warm, sshId, sshText);
+        _rig.A.Push.AddMemory(Tier.Warm, plainId, "Use bun, not npm.");
+
+        var onA = Done(await _rig.RunA());
+
+        Assert.Equal([tokenId], onA.Scan.Blocked);
+        var pushed = Assert.IsType<PushOutcome.Pushed>(onA.Push).Summary;
+        Assert.Equal([sshId, plainId], pushed.Written.Order(StringComparer.Ordinal));
+        Assert.Contains(new PushItem(tokenId, SyncSecret.blockReason), pushed.Skipped);
+        var objects = EveryObject();
+        Assert.Contains(sshText, objects);   // the dump really holds the record texts
+        Assert.DoesNotContain(token, objects);
+        Assert.False(RemoteHas(tokenId));
+        Assert.Equal(
+            SyncSetup.BlockedFact.NewListed(1, ListModule.OfSeq([Tuple.Create(tokenId, SyncSecret.blockReason)])),
+            SyncSetupService.ReadBlocked(_rig.A.Pull.Connection));
+
+        _rig.JoinB();
+        Done(await _rig.RunB());
+
+        Assert.Equal(sshText, _rig.B.Pull.Store.Get(Tier.Warm, ContentType.Memory, sshId)!.Content);
+        Assert.Equal("Use bun, not npm.", _rig.B.Pull.Store.Get(Tier.Warm, ContentType.Memory, plainId)!.Content);
+        Assert.False(Has(_rig.B, tokenId));
+        Assert.Equal(SyncSetup.BlockedFact.NewListed(0, ListModule.Empty<Tuple<string, string>>()), SyncSetupService.ReadBlocked(_rig.B.Pull.Connection));
+        Assert.DoesNotContain(token, EveryObject());
+    }
+
+    [GitFact]
+    public async Task ABlockedMemory_StillReceivesARemoteChange()
+    {
+        const string clean = "Use bun, not npm.";
+        var token = Fakes.Get("openai-key");
+        _rig.Seed(Rec(Id, clean, minute: 10));
+        Done(await _rig.RunA());
+        Assert.NotNull(_rig.A.Pull.Store.Get(Tier.Warm, ContentType.Memory, Id));
+
+        // A puts a token in the text (a pending text change); another machine promotes the memory to hot (the tier group only)
+        _rig.A.Push.Now += 60_000;
+        var tainted = clean + " The key is " + token;
+        _rig.A.Push.Edit(Tier.Warm, Id, new UpdateEntryOpts { Content = tainted });
+        var source = _rig.A.Pull;
+        source.PutRecord(Rec(Id, clean, tier: Tier.Hot, minute: 10, tierMinute: 20));
+        source.Commit("another machine promotes " + Id);
+        source.Source.PushTo(_rig.A.Push.Remote.Path);
+
+        var onA = Done(await _rig.RunA());
+
+        Assert.Equal([Id], onA.Scan.Blocked);
+        Assert.Null(_rig.A.Pull.Store.Get(Tier.Warm, ContentType.Memory, Id));
+        Assert.Equal(tainted, _rig.A.Pull.Store.Get(Tier.Hot, ContentType.Memory, Id)!.Content);   // the remote change arrived
+        var push = onA.Push switch
+        {
+            PushOutcome.Pushed p => p.Summary,
+            PushOutcome.NothingToPush n => n.Summary,
+            var other => throw new Xunit.Sdk.XunitException("the push did not finish: " + other),
+        };
+        Assert.DoesNotContain(Id, push.Written);
+        Assert.Contains(new PushItem(Id, SyncSecret.blockReason), push.Skipped);
+        Assert.Equal(Tier.Hot, ReadTier(RemoteText(Id), Id));
+        Assert.Contains(clean, RemoteText(Id));
+        Assert.DoesNotContain(token, EveryObject());
+        Assert.Equal(SyncSecret.blockReason, RowOf(_rig.A, Id).BlockedReason);
     }
 
     private static bool ReadSticky(string text, string id) =>

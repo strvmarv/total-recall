@@ -1,7 +1,7 @@
 /// The pure rules of the git sync setup commands (milestone 1a-3): the refusal names, the storage-mode verdict,
 /// which addresses are refused and how an address is printed, whether a joined repository is the one this machine
 /// already knew, the ids a new repository and machine get, how to read an `ls-remote` listing, and how `sync
-/// status` is laid out. Reading the database, the config and the clone, and every git call, are in
+/// status` is laid out (its `blocked` section is milestone 1b-iii part 1, #161, spec D8). Reading the database, the config and the clone, and every git call, are in
 /// `TotalRecall.Infrastructure.GitSync`.
 module TotalRecall.Core.SyncSetup
 
@@ -252,6 +252,19 @@ type Fact =
     | Missing
     | Unknown of string
 
+/// How many blocked memories `sync status` lists by id; the rest are counted (#161, D8).
+let blockedShownLimit = 20
+
+/// The `blocked` section of `sync status` (#161, D8): the memories held back from the push, read from the active sync
+/// rows that carry a reason.
+type BlockedFact =
+    /// `total` blocked memories; `shown` is at most `blockedShownLimit` `(id, reason)` pairs, ordinal by id.
+    | Listed of total: int * shown: (string * string) list
+    /// The list could not be read (a settings error, a database that cannot be opened, no sync table); carries the reason.
+    | BlockedUnreadable of reason: string
+    /// The database file does not exist.
+    | NoDatabase
+
 type StatusFacts =
     { Mode: string
       Git: string
@@ -262,9 +275,12 @@ type StatusFacts =
       MachineId: Fact
       Host: HostCheck
       Join: string
-      Clone: string }
+      Clone: string
+      Blocked: BlockedFact }
 
-/// The lines of `sync status`, one labelled fact each, in a fixed order; addresses go through `displayRemote`.
+/// The lines of `sync status`, one labelled fact each, in a fixed order; addresses go through `displayRemote`. The
+/// `blocked` count is followed by one indented `  <id>  <reason>` line per shown memory and `  and N more` for the rest,
+/// right before the last line.
 let renderStatus (facts: StatusFacts) : string list =
     let show (absent: string) (render: string -> string) (f: Fact) =
         match f with
@@ -279,6 +295,16 @@ let renderStatus (facts: StatusFacts) : string list =
         | Unavailable -> "unavailable"
         | NotRecorded -> "not recorded"
         | HostUnknown r -> sprintf "unknown (%s)" r
+    let blocked =
+        match facts.Blocked with
+        | Listed(total, shown) ->
+            [ yield sprintf "blocked: %d" total
+              for id, reason in shown do
+                  yield sprintf "  %s  %s" id reason
+              if total > List.length shown then
+                  yield sprintf "  and %d more" (total - List.length shown) ]
+        | BlockedUnreadable r -> [ sprintf "blocked: unknown (%s)" r ]
+        | NoDatabase -> [ "blocked: unknown (no database)" ]
     [ sprintf "storage mode: %s" facts.Mode
       sprintf "git: %s" facts.Git
       sprintf "configured remote: %s" (show "not set" displayRemote facts.ConfiguredRemote)
@@ -288,5 +314,6 @@ let renderStatus (facts: StatusFacts) : string list =
       sprintf "machine id: %s" (show "not recorded" plain facts.MachineId)
       sprintf "host check: %s" host
       sprintf "join state: %s" facts.Join
-      sprintf "clone: %s" facts.Clone
-      "last sync: never (this build does not run the sync cycle)" ]
+      sprintf "clone: %s" facts.Clone ]
+    @ blocked
+    @ [ "last sync: never (this build does not run the sync cycle)" ]
