@@ -17,7 +17,7 @@ namespace TotalRecall.Infrastructure.Embedding;
 /// WordPiece vocabulary on first use, then runs inference, CLS-pools (takes
 /// the token-0 hidden state), and L2-normalizes the result.
 /// </summary>
-public sealed class OnnxEmbedder : IEmbedder, IDisposable
+public sealed class OnnxEmbedder : IEmbedder, IEmbedderReadiness, IDisposable
 {
     private const string ModelFileName = "model.onnx";
     private const string TokenizerFileName = "tokenizer.json";
@@ -29,6 +29,7 @@ public sealed class OnnxEmbedder : IEmbedder, IDisposable
     private readonly string _modelName;
     private readonly string _queryPrefix;
     private readonly object _loadLock = new();
+    private readonly int? _intraOpThreads;
 
     private InferenceSession? _session;
     private FSharpMap<string, int>? _vocab;
@@ -36,7 +37,7 @@ public sealed class OnnxEmbedder : IEmbedder, IDisposable
     private IReadOnlyList<string>? _inputNames;   // subset of input_ids/attention_mask/token_type_ids the graph declares
     private string? _outputName;                  // hidden-state output (prefers last_hidden_state)
 
-    public OnnxEmbedder(ModelManager modelManager, string modelName, string? queryPrefix = null)
+    public OnnxEmbedder(ModelManager modelManager, string modelName, string? queryPrefix = null, int? intraOpThreads = null)
     {
         ArgumentNullException.ThrowIfNull(modelManager);
         if (string.IsNullOrWhiteSpace(modelName))
@@ -46,6 +47,21 @@ public sealed class OnnxEmbedder : IEmbedder, IDisposable
         _modelManager = modelManager;
         _modelName = modelName;
         _queryPrefix = queryPrefix ?? DefaultQueryPrefix;
+        if (intraOpThreads is <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(intraOpThreads), "Thread count must be positive.");
+        }
+        _intraOpThreads = intraOpThreads;
+    }
+
+    /// <summary>Intra-op thread count the session is built with, or null for the runtime default.</summary>
+    internal int? IntraOpThreads => _intraOpThreads;
+
+    /// <inheritdoc />
+    public EmbedderReadiness CheckReady()
+    {
+        var problem = _modelManager.DescribeProblem(_modelName);
+        return problem is null ? new EmbedderReadiness(true, null) : new EmbedderReadiness(false, problem);
     }
 
     /// <summary>
@@ -180,6 +196,10 @@ public sealed class OnnxEmbedder : IEmbedder, IDisposable
             {
                 GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
             };
+            if (_intraOpThreads is int threads)
+            {
+                opts.IntraOpNumThreads = threads;
+            }
             var session = new InferenceSession(onnxPath, opts);
 
             var declared = session.InputMetadata.Keys.ToHashSet(StringComparer.Ordinal);

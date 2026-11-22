@@ -20,7 +20,7 @@ namespace TotalRecall.Infrastructure.Embedding;
 /// </summary>
 public static class EmbedderFactory
 {
-    public static OnnxEmbedder CreateProduction(string? queryPrefix = null)
+    public static OnnxEmbedder CreateProduction(string? queryPrefix = null, int? intraOpThreads = null)
     {
         var bundledModelsDir = FindBundledModelsDir();
         var registryPath = Path.Combine(bundledModelsDir, "registry.json");
@@ -33,7 +33,7 @@ public static class EmbedderFactory
         Directory.CreateDirectory(userModelsDir);
 
         var manager = new ModelManager(registry, bundledModelsDir, userModelsDir);
-        return new OnnxEmbedder(manager, "bge-small-en-v1.5", queryPrefix);
+        return new OnnxEmbedder(manager, "bge-small-en-v1.5", queryPrefix, intraOpThreads);
     }
 
     /// <summary>
@@ -42,7 +42,7 @@ public static class EmbedderFactory
     /// - "openai" → OpenAiEmbedder
     /// - "bedrock" → BedrockEmbedder
     /// </summary>
-    public static IEmbedder CreateFromConfig(Core.Config.EmbeddingConfig cfg)
+    public static IEmbedder CreateFromConfig(Core.Config.EmbeddingConfig cfg, int? intraOpThreads = null)
     {
         var provider = FSharpOption<string>.get_IsSome(cfg.Provider)
             ? cfg.Provider.Value : "local";
@@ -53,7 +53,7 @@ public static class EmbedderFactory
             {
                 var prefix = FSharpOption<string>.get_IsSome(cfg.EmbeddingQueryPrefix)
                     ? cfg.EmbeddingQueryPrefix.Value : null;
-                return CreateProduction(prefix);
+                return CreateProduction(prefix, intraOpThreads);
             }
 
             case "openai":
