@@ -472,7 +472,7 @@ public sealed class SyncSetupUnblockTests : IDisposable
         var result = await Service(cycleRan: false).UnblockAsync(A);
 
         AssertRefused(result, SyncSetup.Refusal.NotBlocked);
-        Assert.Equal("not blocked by a secret; nothing changed", result.RefusalText);
+        Assert.Equal("no sync has run on this database (there is no sync directory), so nothing is blocked; nothing changed", result.RefusalText);
         Assert.False(Directory.Exists(Path.Combine(dataDir, "sync")), "the sync directory was created");
         Assert.Equal(before, SnapshotOf(dataDir));
     }

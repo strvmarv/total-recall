@@ -43,7 +43,7 @@ public sealed partial class SyncSetupService
 
             var paths = GitSyncPaths.ForDatabase(env.DatabasePath, env.CaseInsensitive);
             if (!Directory.Exists(paths.SyncDirectory))
-                return Refuse(SyncSetup.Refusal.NotBlocked, NotBlockedText); // no cycle ever ran: no row can be secret-detected
+                return Refuse(SyncSetup.Refusal.NotBlocked, NoSyncDirectoryText); // no cycle ever ran: no row can be secret-detected
 
             _phase = "taking the sync lock";
             paths.EnsureCreated();
@@ -100,6 +100,7 @@ public sealed partial class SyncSetupService
     }
 
     private const string UnknownEntryText = "no memory has this id";
+    private const string NoSyncDirectoryText = "no sync has run on this database (there is no sync directory), so nothing is blocked; nothing changed";
     private const string NotBlockedText = "not blocked by a secret; nothing changed";
 
     /// <summary>The checks of decision D7 and the write, inside the caller's transaction; a refusal, or the entry that was released.</summary>
