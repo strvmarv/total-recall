@@ -544,6 +544,69 @@ public sealed class ArchivePassTests : IDisposable
     }
 
     [Fact]
+    public async Task Pass_DisabledBetweenAdapters_StopsBeforeTheNextAdapter_AndDoesNotEmbed()
+    {
+        Home.Place("decision", _h.Cwd, "flip-1");
+        var enabled = true;
+        // `transcripts disable` lands while the first adapter runs (after Kick's own check).
+        var first = new ControlAdapter(Claude()) { OnDetect = () => Volatile.Write(ref enabled, false) };
+        var second = new ControlAdapter(Claude());
+        var e = new TestEmbedder();
+        var inspect = new RecordingInspect(e);
+        var p = Pass(() => Context(inspect.Inspect, new ITranscriptAdapter[] { first, second }),
+            isEnabled: () => Volatile.Read(ref enabled));
+
+        var result = await Run(p);
+
+        Assert.Equal("off", result.Outcome);
+        Assert.Equal(1, first.DetectCalls);
+        Assert.Equal(0, second.DetectCalls);
+        Assert.Equal(1, result.SessionsIngested); // what the first adapter stored is kept
+        Assert.Null(result.Embed);
+        Assert.Empty(inspect.Threads); // no embedder was built
+        Assert.Empty(e.Calls);
+    }
+
+    [Fact]
+    public async Task Pass_DisabledDuringIngest_SkipsTheEmbedStep()
+    {
+        SeedChunks(3);
+        Home.Place("decision", _h.Cwd, "flip-2");
+        var enabled = true;
+        var only = new ControlAdapter(Claude()) { OnDetect = () => Volatile.Write(ref enabled, false) };
+        var e = new TestEmbedder();
+        var inspect = new RecordingInspect(e);
+        var p = Pass(() => Context(inspect.Inspect, new ITranscriptAdapter[] { only }),
+            isEnabled: () => Volatile.Read(ref enabled));
+
+        var result = await Run(p);
+
+        Assert.Equal("off", result.Outcome);
+        Assert.Equal(1, result.SessionsIngested);
+        Assert.Null(result.Embed);
+        Assert.Empty(inspect.Threads);
+        Assert.Equal(0, EmbeddedChunks());
+    }
+
+    [Fact]
+    public async Task Pass_IsEnabledThrowsMidPass_StopsQuietly()
+    {
+        SeedChunks(2);
+        var calls = 0;
+        var e = new TestEmbedder();
+        var inspect = new RecordingInspect(e);
+        // Kick's check passes; the pass's own re-check throws and counts as off.
+        var p = Pass(() => Context(inspect.Inspect),
+            isEnabled: () => Interlocked.Increment(ref calls) == 1 ? true : throw new IOException("marker unreadable"));
+
+        var result = await Run(p);
+
+        Assert.Equal("off", result.Outcome);
+        Assert.Null(result.Embed);
+        Assert.Empty(inspect.Threads);
+    }
+
+    [Fact]
     public async Task Pass_AdapterThrows_NextAdapterStillRuns_Logged()
     {
         Home.Place("decision", _h.Cwd, "next-1");

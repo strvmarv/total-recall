@@ -56,7 +56,9 @@ public sealed record ArchivePassResult(DateTimeOffset At, string Outcome, int Se
 /// once: it does nothing when the archive is off (one <c>File.Exists</c> through <c>isEnabled</c>), when a pass runs in
 /// this process or when the last one started less than the minimum interval ago; otherwise it starts the pass with
 /// <see cref="Task.Run(Func{Task})"/>. The pass re-checks the settings and the storage mode, opens the archive without
-/// creating it, ingests each adapter's sessions under one time budget for the whole pass, then evaluates the
+/// creating it, ingests each adapter's sessions under one time budget for the whole pass (re-checking
+/// <c>isEnabled</c> before each adapter and again before the embed step, and stopping with <see cref="OutcomeOff"/>
+/// once the archive was turned off), then evaluates the
 /// <see cref="EmbedGate"/> (rules 1 and 2 from config, before any embedder is built) and runs the
 /// <see cref="TranscriptEmbedWorker"/> under the embed budget on a dedicated background thread at below-normal priority
 /// with its own embedder (2 intra-op threads), disposed when the step ends. Each step logs its failures through
@@ -264,9 +266,12 @@ public sealed class ArchivePass : IArchivePass, IDisposable
         using var store = open.Store;
 
         // Step 2: ingest.
-        var ingested = Ingest(context, store, ct);
+        var (ingested, turnedOff) = Ingest(context, store, ct);
         if (ct.IsCancellationRequested)
             return new ArchivePassResult(at, OutcomeCancelled, ingested, null);
+        // `transcripts disable` while the pass runs: it stops at its next step, here before the embed step.
+        if (turnedOff || !StillEnabled())
+            return new ArchivePassResult(at, OutcomeOff, ingested, null);
 
         // Step 3: embed.
         EmbedRun? embed = null;
@@ -282,8 +287,11 @@ public sealed class ArchivePass : IArchivePass, IDisposable
         return new ArchivePassResult(at, ct.IsCancellationRequested ? OutcomeCancelled : OutcomeDone, ingested, embed);
     }
 
-    /// <summary>Each adapter's sessions under one token that cancels after the ingest budget; returns new plus updated.</summary>
-    private int Ingest(ArchivePassContext context, ITranscriptStore store, CancellationToken ct)
+    /// <summary>
+    /// Each adapter's sessions under one token that cancels after the ingest budget; returns new plus updated, and
+    /// whether the archive was turned off (<c>isEnabled</c> is re-checked before each adapter).
+    /// </summary>
+    private (int Sessions, bool TurnedOff) Ingest(ArchivePassContext context, ITranscriptStore store, CancellationToken ct)
     {
         IReadOnlyList<ITranscriptAdapter> adapters;
         try
@@ -293,7 +301,7 @@ public sealed class ArchivePass : IArchivePass, IDisposable
         catch (Exception ex)
         {
             Log("listing the adapters", ex);
-            return 0;
+            return (0, false);
         }
 
         // The budget runs on the pass's clock, so a test clock (and only it) decides when it is spent.
@@ -305,6 +313,8 @@ public sealed class ArchivePass : IArchivePass, IDisposable
         {
             if (budget.IsCancellationRequested)
                 break;
+            if (!StillEnabled())
+                return (sessions, true);
 
             var host = "unknown host";
             try
@@ -324,7 +334,24 @@ public sealed class ArchivePass : IArchivePass, IDisposable
             }
         }
 
-        return sessions;
+        return (sessions, false);
+    }
+
+    /// <summary>
+    /// The <c>isEnabled</c> gate again, inside the pass (the marker file, one <c>File.Exists</c>): false once
+    /// <c>transcripts disable</c> removed it. A throw counts as off and is logged.
+    /// </summary>
+    private bool StillEnabled()
+    {
+        try
+        {
+            return _isEnabled();
+        }
+        catch (Exception ex)
+        {
+            Log("re-checking whether the archive is on", ex);
+            return false;
+        }
     }
 
     /// <summary>

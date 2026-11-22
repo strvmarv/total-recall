@@ -53,7 +53,7 @@ To turn it off:
 total-recall transcripts disable
 ```
 
-`disable` needs no terminal. It sets `enabled = false` and removes the marker file. It stops the background pass too. **What the archive holds is kept**; use `transcripts forget --all` to delete it.
+`disable` needs no terminal. It sets `enabled = false` and removes the marker file. No new background pass starts, and a pass already running stops at its next step (before the next host's sessions are read, or before the embed step), within seconds; an embed step already under way ends at its own limit, at most 30 seconds. **What the archive holds is kept**; use `transcripts forget --all` to delete it.
 
 ## Backing up Claude Code sessions
 
