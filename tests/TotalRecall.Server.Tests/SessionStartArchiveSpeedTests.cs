@@ -31,6 +31,7 @@ using SqliteOpener = TotalRecall.Infrastructure.Storage.SqliteConnection;
 public sealed class SessionStartArchiveSpeedTests : IDisposable
 {
     private static readonly TimeSpan EnteredTimeout = TimeSpan.FromSeconds(30);
+    private const double WarmOnBoundMs = 500;
 
     private readonly ITestOutputHelper _output;
     private readonly Dictionary<string, string?> _saved = new();
@@ -241,6 +242,11 @@ public sealed class SessionStartArchiveSpeedTests : IDisposable
             _output.WriteLine(report);
 
             Assert.True(medianOn <= bound, report);
+            // The pass-starting path itself: a Kick that ran the ingest or waited for the embedder on the caller's thread
+            // would take seconds (the embedder holds every call until Release); the absolute bound leaves wide room for
+            // a slow machine and still catches that.
+            Assert.True(warmOn < WarmOnBoundMs,
+                string.Create(CultureInfo.InvariantCulture, $"the on-arm warm-up (the call that starts the pass) took {warmOn:F2} ms, bound {WarmOnBoundMs} ms. ") + report);
         }
         finally
         {
