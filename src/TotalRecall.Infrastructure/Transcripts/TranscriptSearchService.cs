@@ -102,13 +102,22 @@ public sealed class TranscriptSearchService
 
     private readonly Func<TranscriptSearchContext?> _context;
     private readonly TimeProvider _time;
+    private readonly Func<TranscriptLocation, TranscriptOpenResult> _open;
 
     /// <param name="context">Builds the call's context; evaluated on every search. Null or a throw is an error answer.</param>
     /// <param name="time">The clock of the recency boost.</param>
     public TranscriptSearchService(Func<TranscriptSearchContext?> context, TimeProvider? time = null)
+        : this(context, time, null)
+    {
+    }
+
+    /// <param name="open">A test seam that opens the archive; defaults to <see cref="TranscriptStore.Open"/> with <c>create: false</c>.</param>
+    internal TranscriptSearchService(
+        Func<TranscriptSearchContext?> context, TimeProvider? time, Func<TranscriptLocation, TranscriptOpenResult>? open)
     {
         _context = context ?? throw new ArgumentNullException(nameof(context));
         _time = time ?? TimeProvider.System;
+        _open = open ?? (static location => TranscriptStore.Open(location, create: false));
     }
 
     // ------------------------------------------------------------------
@@ -190,7 +199,7 @@ public sealed class TranscriptSearchService
         if (context is null)
             return Failure(request, plan, "the transcript archive is not available in this storage mode");
 
-        var open = TranscriptStore.Open(context.Location, create: false);
+        var open = _open(context.Location);
         switch (open.Status)
         {
             case TranscriptOpenStatus.Absent:
@@ -206,7 +215,9 @@ public sealed class TranscriptSearchService
         {
             return Run(request, plan, context, store, ct);
         }
-        catch (Exception ex) when (ex is not ArgumentException and not OperationCanceledException and not OutOfMemoryException)
+        // Every argument check is done above, before the archive is opened, so an ArgumentException from here on is a
+        // fault of the store or a read (logged and answered like any other), never the caller's argument error.
+        catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
         {
             ExceptionLogger.LogChain(LogPrefix + ": reading the archive", ex);
             return Failure(request, plan, "the transcript archive could not be read: " + ex.Message);
@@ -217,6 +228,10 @@ public sealed class TranscriptSearchService
         TranscriptSearchRequest request, ScopePlan plan, TranscriptSearchContext context, ITranscriptStore store, CancellationToken ct)
     {
         // The fingerprint reads open their own transaction, so they run before the search reads (one connection).
+        // Checking it outside the read transaction is deliberate and harmless: a fingerprint is never rewritten while a
+        // vector row exists (spec section 2), so a Match or Mismatch seen here still holds when the reads run. The only
+        // window is an Unstamped archive whose first vectors another process commits in between; that one call may
+        // then compare the query with those few vectors, and the next call sees the stamp.
         var gate = Gate(context, store.CheckFingerprint, store.ReadEmbedFingerprint);
 
         // A first, short read: an empty archive or an unknown session ends here, before any model is loaded.

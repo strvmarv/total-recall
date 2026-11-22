@@ -568,6 +568,28 @@ public sealed class TranscriptSearchServiceTests : IDisposable
     }
 
     [Fact]
+    public void Search_StoreThrowsArgumentException_IsAReadError_NotAnArgumentError()
+    {
+        Populate();
+        var store = new DecoratingTranscriptStore(_db.Store)
+        {
+            OnBeginSearchReads = () => throw new ArgumentOutOfRangeException("ordinal", "a fault inside the store"),
+        };
+        var svc = new TranscriptSearchService(
+            () => new TranscriptSearchContext(
+                new TranscriptLocation(_db.Path, IsMainDatabase: false), Settings(), "sqlite", Embedding(), new QueryEmbedder()),
+            new ManualTimeProvider(Now),
+            _ => new TranscriptOpenResult(TranscriptOpenStatus.Opened, store, null));
+
+        var r = svc.Search(Req("database locked"), default);
+
+        Assert.NotNull(r.Error);
+        Assert.StartsWith("the transcript archive could not be read: ", r.Error);
+        Assert.Contains("a fault inside the store", r.Error);
+        Assert.Empty(r.Results);
+    }
+
+    [Fact]
     public void Search_ContextFactoryThrows_ReturnsError()
     {
         var svc = new TranscriptSearchService(() => throw new InvalidOperationException("transcripts.db_path is invalid"));
