@@ -82,4 +82,53 @@ public interface ITranscriptStore : IDisposable
 
     /// <summary>True when a cutoff is set and <paramref name="timestamp"/> is earlier than it.</summary>
     bool IsBeforeCutoff(DateTimeOffset timestamp);
+
+    // ------------------------------------------------------------------
+    // The embed side (spec sections 2 and 3): queue, one-transaction vector write, lease, fingerprint, counts
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Up to <paramref name="limit"/> chunks with <c>embedded = 0 AND embed_attempts &lt; 3</c> by ascending id,
+    /// leaving out the ids in <paramref name="exclude"/>.
+    /// </summary>
+    IReadOnlyList<EmbedChunk> NextEmbedWork(int limit, IReadOnlyCollection<long> exclude);
+
+    /// <summary>
+    /// Writes the vectors of <paramref name="batch"/> and marks their chunks embedded in one immediate transaction: it
+    /// checks the lease still carries <paramref name="holder"/>'s run id, decides whether to stamp
+    /// <paramref name="current"/>, refuses (writing nothing) when vectors of another model exist, skips a chunk whose
+    /// content changed or that is gone, takes the scope columns from the live session and chunk rows, stamps, and renews
+    /// the lease time to <paramref name="now"/>.
+    /// </summary>
+    /// <exception cref="ArgumentException">Before any transaction: a vector is not 384 floats long.</exception>
+    EmbedBatchOutcome StoreEmbeddings(
+        IReadOnlyList<ChunkEmbedding> batch, ArchiveFingerprint current, EmbedLeaseHolder holder, DateTimeOffset now);
+
+    /// <summary>Adds one failed try to the chunk when it is still unembedded with this content; false otherwise.</summary>
+    bool RecordEmbedFailure(long chunkId, string content);
+
+    /// <summary>Sets every non-zero <c>embed_attempts</c> back to 0; returns how many chunks changed.</summary>
+    int ResetEmbedAttempts();
+
+    /// <summary>
+    /// Takes the embed lease in one immediate transaction: free, stale (over 10 minutes), or held by a process of this
+    /// machine that <paramref name="holderIsAlive"/> (called only for the same machine name) says is gone.
+    /// </summary>
+    bool TryAcquireEmbedLease(EmbedLeaseHolder holder, DateTimeOffset now, Func<string, int, bool> holderIsAlive);
+
+    /// <summary>Deletes the lease only while it still carries <paramref name="holder"/>'s run id.</summary>
+    void ReleaseEmbedLease(EmbedLeaseHolder holder);
+
+    /// <summary>The stored fingerprint, or null when none (or an incomplete one) is stored.</summary>
+    ArchiveFingerprint? ReadEmbedFingerprint();
+
+    /// <summary>Unstamped, Match or Mismatch (spec section 2).</summary>
+    FingerprintState CheckFingerprint(ArchiveFingerprint current);
+
+    EmbeddingCounts CountEmbedding();
+
+    void WriteEmbedRun(EmbedRunRecord run);
+
+    /// <summary>The last embed run, or null when none was written or the record is unreadable.</summary>
+    EmbedRunRecord? ReadEmbedRun();
 }
