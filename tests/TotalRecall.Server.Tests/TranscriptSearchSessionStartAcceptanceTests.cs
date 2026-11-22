@@ -50,8 +50,10 @@ public sealed class TranscriptSearchSessionStartAcceptanceTests : IDisposable
     }
 
     /// <summary>
-    /// The data directory with the archive on (config, sentinel, empty archive tables), HOME redirected to an empty
-    /// folder (so session_start's host imports read nothing real) and Claude Code's directory at the fixture home.
+    /// The data directory with the archive on (config, sentinel, empty archive tables), HOME and USERPROFILE redirected
+    /// to an empty folder and the XDG and Hermes directories to absent folders under the test directory (so
+    /// session_start's host imports, OpenCode's and Hermes's included, read nothing real), and Claude Code's directory at
+    /// the fixture home. Dispose restores every variable.
     /// </summary>
     private void ArchiveOn()
     {
@@ -63,6 +65,9 @@ public sealed class TranscriptSearchSessionStartAcceptanceTests : IDisposable
         Set("HOME", userHome);
         Set("USERPROFILE", userHome);
         Set("CLAUDE_CONFIG_DIR", _home.Root);
+        Set("XDG_CONFIG_HOME", Path.Combine(_dir, "xdg-config"));
+        Set("XDG_DATA_HOME", Path.Combine(_dir, "xdg-data"));
+        Set("HERMES_HOME", Path.Combine(_dir, "hermes"));
         File.WriteAllText(Path.Combine(DataDir, "config.toml"), "[transcripts]\nenabled = true\n");
         new TranscriptSentinel(DataDir).Write();
         var open = TranscriptStore.Open(new TranscriptLocation(Db, IsMainDatabase: true), create: true);
