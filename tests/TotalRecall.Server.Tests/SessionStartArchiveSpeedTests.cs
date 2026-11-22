@@ -207,9 +207,11 @@ public sealed class SessionStartArchiveSpeedTests : IDisposable
         var pass = onHandles.ArchivePass!;
         try
         {
-            // Two warm-up calls, discarded; the archive-on one starts the pass, whose worker then waits in its probe.
-            await Call(off);
-            await Call(on);
+            // Two warm-up calls, kept out of the medians; the archive-on one starts the pass (the first Kick's whole path:
+            // the interval check, the sentinel read and the Task.Run), whose worker then waits in its probe. Every later
+            // on-arm call returns at Kick's running check, so the warm-up is the one timing of the starting path.
+            var warmOff = await Call(off);
+            var warmOn = await Call(on);
             Assert.True(embedder.Entered.Wait(EnteredTimeout),
                 "the archive pass never reached the embedder within 30 s (the ingest or the gate stopped it): " +
                 (pass.Last is { } last ? $"{last.Outcome}, embed {last.Embed?.State.Text}" : "the pass has not finished"));
@@ -234,6 +236,7 @@ public sealed class SessionStartArchiveSpeedTests : IDisposable
             var report = string.Create(CultureInfo.InvariantCulture,
                 $"session_start medians over 10 calls each ({chunks} archived chunks, pass held in its probe): " +
                 $"off {medianOff:F2} ms, on {medianOn:F2} ms; bound off x 1.10{(slack > 0 ? " + 5 ms" : "")} = {bound:F2} ms. " +
+                $"Warm-up calls (first of each arm; the on one starts the pass): off {warmOff:F2} ms, on {warmOn:F2} ms. " +
                 $"All twenty, in order: {all}");
             _output.WriteLine(report);
 
