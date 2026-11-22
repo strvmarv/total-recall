@@ -119,7 +119,7 @@ public sealed class ArchivePassTests : IDisposable
         }
     }
 
-    /// <summary>Wraps an adapter: <see cref="Detect"/> may block or throw, and the n-th <see cref="ReadHead"/> may sleep.</summary>
+    /// <summary>Wraps an adapter: <see cref="Detect"/> may block, throw or run an action, and the n-th <see cref="ReadHead"/> may run an action.</summary>
     private sealed class ControlAdapter : ITranscriptAdapter
     {
         private readonly ITranscriptAdapter _inner;
@@ -130,9 +130,11 @@ public sealed class ArchivePassTests : IDisposable
         public ManualResetEventSlim? DetectGate { get; init; }
         public ManualResetEventSlim DetectEntered { get; } = new(false);
         public Exception? DetectThrows { get; init; }
-        public int SleepOnHead { get; init; }
-        public TimeSpan HeadSleep { get; init; }
-        public TimeSpan DetectSleep { get; init; }
+        public int OnHeadNumber { get; init; }
+        /// <summary>Runs inside <see cref="Detect"/> (a test advances its clock here).</summary>
+        public Action? OnDetect { get; init; }
+        /// <summary>Runs inside the <see cref="OnHeadNumber"/>-th <see cref="ReadHead"/> (a test advances its clock here).</summary>
+        public Action? OnHead { get; init; }
         public int DetectCalls;
 
         public string Host => _inner.Host;
@@ -143,7 +145,7 @@ public sealed class ArchivePassTests : IDisposable
             Interlocked.Increment(ref DetectCalls);
             DetectEntered.Set();
             DetectGate?.Wait(Wait);
-            if (DetectSleep > TimeSpan.Zero) Thread.Sleep(DetectSleep);
+            OnDetect?.Invoke();
             if (DetectThrows is not null) throw DetectThrows;
             return _inner.Detect();
         }
@@ -152,7 +154,8 @@ public sealed class ArchivePassTests : IDisposable
 
         public SessionHead ReadHead(SessionSource source)
         {
-            if (++_heads == SleepOnHead) Thread.Sleep(HeadSleep);
+            if (++_heads == OnHeadNumber)
+                OnHead?.Invoke();
             return _inner.ReadHead(source);
         }
 
@@ -232,7 +235,8 @@ public sealed class ArchivePassTests : IDisposable
         var sw = Stopwatch.StartNew();
         p1.Kick();
         sw.Stop();
-        Assert.True(sw.ElapsedMilliseconds < 100, $"Kick took {sw.ElapsedMilliseconds} ms with the adapter blocked");
+        // generous for a loaded machine; a synchronous Kick would block for the whole 30 s wait
+        Assert.True(sw.ElapsedMilliseconds < 2000, $"Kick took {sw.ElapsedMilliseconds} ms with the adapter blocked");
         Assert.True(adapter.DetectEntered.Wait(Wait));
         adapterGate.Set();
         await p1.WaitIdleAsync().WaitAsync(Wait);
@@ -246,7 +250,7 @@ public sealed class ArchivePassTests : IDisposable
         sw.Restart();
         p2.Kick();
         sw.Stop();
-        Assert.True(sw.ElapsedMilliseconds < 100, $"Kick took {sw.ElapsedMilliseconds} ms with the embedder blocked");
+        Assert.True(sw.ElapsedMilliseconds < 2000, $"Kick took {sw.ElapsedMilliseconds} ms with the embedder blocked");
         Assert.True(e2.Entered.Wait(Wait));
         embedGate.Set();
         await p2.WaitIdleAsync().WaitAsync(Wait);
@@ -310,6 +314,25 @@ public sealed class ArchivePassTests : IDisposable
         Assert.Equal(1, contextCalls);
 
         clock.Advance(TimeSpan.FromMinutes(1));
+        await Run(p);
+        Assert.Equal(2, contextCalls);
+    }
+
+    [Fact]
+    public async Task Kick_AfterTheClockMovedBackwards_IsDue()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 11, 21, 12, 0, 0, TimeSpan.Zero));
+        var contextCalls = 0;
+        var p = Pass(() => { contextCalls++; return Context(new RecordingInspect(new TestEmbedder()).Inspect); },
+            options: new ArchivePassOptions(EmbedBudget: NoBudget, MinInterval: TimeSpan.FromMinutes(10)),
+            time: clock);
+
+        await Run(p);
+        Assert.Equal(1, contextCalls);
+
+        // the wall clock was set back an hour (or the last start was recorded under a wrong time): a pass is due,
+        // not blocked until the clock catches up again
+        clock.Advance(TimeSpan.FromHours(-1));
         await Run(p);
         Assert.Equal(2, contextCalls);
     }
@@ -459,11 +482,14 @@ public sealed class ArchivePassTests : IDisposable
         Home.SetMtime(newest, Home.BaseTime.AddDays(3));
         Home.SetMtime(middle, Home.BaseTime.AddDays(2));
         Home.SetMtime(oldest, Home.BaseTime.AddDays(1));
-        // The second session's head read outlasts the budget: the first is stored, the rest wait.
-        var adapter = new ControlAdapter(Claude()) { SleepOnHead = 2, HeadSleep = TimeSpan.FromMilliseconds(1500) };
+        // The second session's head read outlasts the budget on the pass's clock: the first is stored, the rest wait.
+        // The budget is an hour, so only the fake clock can end it (no wall-clock margin is involved).
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 11, 21, 12, 0, 0, TimeSpan.Zero));
+        var adapter = new ControlAdapter(Claude()) { OnHeadNumber = 2, OnHead = () => clock.Advance(TimeSpan.FromHours(1)) };
         var e = new TestEmbedder();
         var p = Pass(() => Context(new RecordingInspect(e).Inspect, new ITranscriptAdapter[] { adapter }),
-            options: new ArchivePassOptions(IngestBudget: TimeSpan.FromMilliseconds(500), EmbedBudget: NoBudget, MinInterval: TimeSpan.Zero));
+            options: new ArchivePassOptions(IngestBudget: TimeSpan.FromHours(1), EmbedBudget: NoBudget, MinInterval: TimeSpan.Zero),
+            time: clock);
 
         var result = await Run(p);
 
@@ -479,10 +505,16 @@ public sealed class ArchivePassTests : IDisposable
     public async Task Pass_IngestBudgetIsForThePass_LaterAdaptersWait()
     {
         Home.Place("decision", _h.Cwd, "later-1");
-        var slow = new ControlAdapter(new ClaudeCodeAdapter(Path.Combine(Home.Root, "no-such-dir"))) { DetectSleep = TimeSpan.FromMilliseconds(800) };
+        // The first adapter's detection uses up the pass's budget on the pass's clock; the next adapter is not started.
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 11, 21, 12, 0, 0, TimeSpan.Zero));
+        var slow = new ControlAdapter(new ClaudeCodeAdapter(Path.Combine(Home.Root, "no-such-dir")))
+        {
+            OnDetect = () => clock.Advance(TimeSpan.FromHours(1)),
+        };
         var later = new ControlAdapter(Claude());
         var p = Pass(() => Context(new RecordingInspect(new TestEmbedder()).Inspect, new ITranscriptAdapter[] { slow, later }),
-            options: new ArchivePassOptions(IngestBudget: TimeSpan.FromMilliseconds(200), EmbedBudget: NoBudget, MinInterval: TimeSpan.Zero));
+            options: new ArchivePassOptions(IngestBudget: TimeSpan.FromHours(1), EmbedBudget: NoBudget, MinInterval: TimeSpan.Zero),
+            time: clock);
 
         var result = await Run(p);
 

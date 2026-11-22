@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using TotalRecall.Infrastructure.Embedding;
 
 namespace TotalRecall.Infrastructure.Tests.TestSupport;
@@ -66,14 +68,110 @@ public sealed class ScriptedEmbedder : IEmbedder
     }
 }
 
-/// <summary>A clock that moves only when told to.</summary>
+/// <summary>
+/// A clock that moves only when told to. Its timers (for example a <c>CancellationTokenSource</c> built with this
+/// provider) fire on the thread that calls <see cref="Advance"/>, once the clock reaches their due time; never by
+/// wall-clock time.
+/// </summary>
 public sealed class ManualTimeProvider : TimeProvider
 {
+    private readonly object _lock = new();
+    private readonly List<ManualTimer> _timers = new();
     private DateTimeOffset _now;
 
     public ManualTimeProvider(DateTimeOffset start) => _now = start;
 
-    public override DateTimeOffset GetUtcNow() => _now;
+    public override DateTimeOffset GetUtcNow()
+    {
+        lock (_lock) return _now;
+    }
 
-    public void Advance(TimeSpan by) => _now += by;
+    /// <summary>Moves the clock and runs, in due order, every timer callback that came due (periodic ones repeatedly).</summary>
+    public void Advance(TimeSpan by)
+    {
+        DateTimeOffset target;
+        lock (_lock)
+        {
+            target = _now + by;
+        }
+
+        while (true)
+        {
+            ManualTimer? next = null;
+            lock (_lock)
+            {
+                foreach (var t in _timers)
+                {
+                    if (t.Due is { } due && due <= target && (next is null || due < next.Due))
+                        next = t;
+                }
+                if (next is null)
+                {
+                    _now = target;
+                    break;
+                }
+                _now = next.Due!.Value;
+                next.Due = next.Period is { } p && p > TimeSpan.Zero ? _now + p : null;
+            }
+            next.Fire(); // outside the lock: a callback may read the clock or change timers
+        }
+    }
+
+    public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+        var timer = new ManualTimer(this, callback, state);
+        lock (_lock)
+            _timers.Add(timer);
+        timer.Change(dueTime, period);
+        return timer;
+    }
+
+    private sealed class ManualTimer : ITimer
+    {
+        private readonly ManualTimeProvider _owner;
+        private readonly TimerCallback _callback;
+        private readonly object? _state;
+
+        public ManualTimer(ManualTimeProvider owner, TimerCallback callback, object? state)
+        {
+            _owner = owner;
+            _callback = callback;
+            _state = state;
+        }
+
+        /// <summary>When it fires next; null when it is stopped. Guarded by the owner's lock.</summary>
+        public DateTimeOffset? Due { get; set; }
+
+        public TimeSpan? Period { get; private set; }
+
+        public void Fire() => _callback(_state);
+
+        public bool Change(TimeSpan dueTime, TimeSpan period)
+        {
+            lock (_owner._lock)
+            {
+                Due = dueTime == Timeout.InfiniteTimeSpan ? null : _owner._now + (dueTime < TimeSpan.Zero ? TimeSpan.Zero : dueTime);
+                Period = period == Timeout.InfiniteTimeSpan ? null : period;
+            }
+            if (dueTime == TimeSpan.Zero)
+                _owner.Advance(TimeSpan.Zero); // due now: fire as a real timer would, without moving the clock
+            return true;
+        }
+
+        public void Dispose()
+        {
+            lock (_owner._lock)
+            {
+                Due = null;
+                _owner._timers.Remove(this);
+            }
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            Dispose();
+            return ValueTask.CompletedTask;
+        }
+    }
 }

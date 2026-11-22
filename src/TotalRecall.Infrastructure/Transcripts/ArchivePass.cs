@@ -194,7 +194,12 @@ public sealed class ArchivePass : IArchivePass, IDisposable
             return TooSoonLocked(now);
     }
 
-    private bool TooSoonLocked(DateTimeOffset now) => _lastStart is { } last && now - last < _minInterval;
+    /// <summary>
+    /// Within the minimum interval of the last start. A clock that moved backwards (<c>now</c> before the last start)
+    /// counts as due, so setting the clock back cannot block passes until it catches up again.
+    /// </summary>
+    private bool TooSoonLocked(DateTimeOffset now) =>
+        _lastStart is { } last && now - last >= TimeSpan.Zero && now - last < _minInterval;
 
     // ------------------------------------------------------------------
     // The pass
@@ -291,8 +296,9 @@ public sealed class ArchivePass : IArchivePass, IDisposable
             return 0;
         }
 
-        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        budget.CancelAfter(_ingestBudget);
+        // The budget runs on the pass's clock, so a test clock (and only it) decides when it is spent.
+        using var timeout = new CancellationTokenSource(_ingestBudget, _time);
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
 
         var sessions = 0;
         foreach (var adapter in adapters)
@@ -451,6 +457,13 @@ public sealed class ArchivePass : IArchivePass, IDisposable
     private static string ProviderOf(Core.Config.EmbeddingConfig cfg) =>
         FSharpOption<string>.get_IsSome(cfg.Provider) ? cfg.Provider.Value : "local";
 
+    /// <summary>
+    /// The pass refuses only the exact storage label <c>postgres</c> (any case). A fallback label such as
+    /// <c>sqlite (postgres failed)</c> is not refused here; such a boot relies on the boot-time sentinel mirror
+    /// (<c>Program</c> calls <see cref="TranscriptSentinel.Mirror"/> with the configured mode, by
+    /// <see cref="TranscriptSentinel.EffectiveStorageMode"/>), which removes the <c>live/enabled</c> marker when Postgres
+    /// is configured, so <see cref="Kick"/>'s <c>isEnabled</c> check stops the pass first.
+    /// </summary>
     private static bool IsPostgres(string? storageMode) =>
         string.Equals(storageMode, "postgres", StringComparison.OrdinalIgnoreCase);
 
