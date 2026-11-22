@@ -206,7 +206,8 @@ fingerprint, the embedder's readiness. First failing rule wins; each gives a sta
    `idx_tx_chunk_unembedded`, ascending `id`: the order the chunks were ingested, newest sessions first within one backfill and later
    passes after earlier ones; no recency priority is attempted); embed their `content` with
    `IEmbedder.Embed` **outside any write transaction**; then one `BEGIN IMMEDIATE` transaction that (a) re-checks the gate's fingerprint
-   state, (b) for each chunk runs `UPDATE tx_chunk SET embedded = 1 WHERE id = $id AND embedded = 0 AND content = $content` and, only
+   state **and decides, before anything is inserted in this transaction, whether it stamps** (section 2: no fingerprint stored, or none
+   backed by a vector row), carrying the decision to (c), (b) for each chunk runs `UPDATE tx_chunk SET embedded = 1 WHERE id = $id AND embedded = 0 AND content = $content` and, only
    when it changed one row, `INSERT INTO tx_chunk_vec(rowid, session_id, project, kind, ts, embedding) SELECT c.id, c.session_id,
    s.project_key, s.kind, COALESCE(CAST(strftime('%s', c.ts) AS INTEGER), 0), $embedding FROM tx_chunk c JOIN tx_session s ON
    s.id = c.session_id WHERE c.id = $id` (the embedding bytes are the IEEE little-endian float array `VectorSearch` writes). **The
@@ -218,8 +219,9 @@ fingerprint, the embedder's readiness. First failing rule wins; each gives a sta
    query like "in project X last week" can find it), which is also what the text index holds. The embedder's own truncation applies
    (a chunk is at most about 450 tokens of a 512-token window).
 4. **Budget.** `EmbedBudget(MaxSeconds, MaxChunks)`; the pass uses 30 s or 256 chunks, whichever comes first, the commands none. The clock is checked between batches, so a
-   batch (16 chunks) may overrun it. The worker returns `EmbedRun(Embedded, Remaining, State, StoppedBy)` where `StoppedBy` is `done`,
-   `budget`, `cancelled`, `gate` or `lease`.
+   batch (16 chunks) may overrun it. The worker returns `EmbedRun(Embedded, Remaining, GaveUp, State, StoppedBy)` where `GaveUp` is the number of chunks that
+   reached their third failed try in this run and `StoppedBy` is `done`, `budget`, `cancelled`, `gate`, `lease` or `failed` (a run ended by
+   `embedding failed`, the dimension refusal or the five-lone-failures rule).
 5. **Threading and CPU.** The pass runs the worker on its own **background** thread (`IsBackground`, so it never keeps the process alive after the host closes it) at below-normal priority with its own connection and its own
    embedder instance (the pattern of `MaybeStartBackgroundReindex`; sharing the server's instance is the builder's option if its
    tokenizer is proven thread-safe, which the code does not say). Thread priority does not limit ONNX Runtime's own intra-op thread
@@ -229,10 +231,11 @@ fingerprint, the embedder's readiness. First failing rule wins; each gives a sta
 6. **Failure, and the chunk that never works.** Three classes:
    - *The embedder cannot run at all* (the model missing, as in the gate's rule 5; a returned vector that is not 384 floats, rule 3):
      the run ends with that state, and no `embed_attempts` changes.
-   - *Systemic or transient* (`IOException`, `HttpRequestException`, `TaskCanceledException`/timeout, `SqliteException` BUSY or LOCKED,
-     the lease lost): the batch rolls back, the run ends with state `embedding failed: <message>` (or `lease`), and no
+   - *Systemic or transient* (`IOException`, `TaskCanceledException`/timeout, `SqliteException` BUSY or LOCKED, the lease lost, and an
+     `HttpRequestException` that is a network error or has status 401, 403, 408, 429 or 5xx): the batch rolls back, the run ends with state `embedding failed: <message>` (or `lease`), and no
      `embed_attempts` changes, so an outage or a busy database never marks a chunk bad.
-   - *Anything else* (the embedder throws on a text, the response is malformed, the insert rejects a value): the batch rolls back, the
+   - *Anything else* (the embedder throws on a text, the response is malformed, the insert rejects a value, a remote answer with any
+     other 4xx status such as a 400 that rejects one chunk): the batch rolls back, the
      failure is logged through `ExceptionLogger.LogChain`, and the batch is **retried one chunk at a time**. When a chunk fails
      alone, the worker embeds **the probe string** (the fixed non-archive text of the gate's rule 3 note): if the probe fails too,
      the embedder is the problem, so the run ends with `embedding failed: <message>` and **nothing is counted**; if the probe
@@ -241,8 +244,9 @@ fingerprint, the embedder's readiness. First failing rule wins; each gives a sta
      queue is counted from its first failure. A run also ends, uncounted beyond what is already written, after **five consecutive
      chunks** that failed alone with a healthy probe (a failure that hits everything but the probe string must not walk the whole
      backlog to its three tries in one run).
-   - *Skipping within a run:* a chunk that failed alone is not read again by the same run (the loop keeps the highest id it has
-     tried and reads `id > that` first, then wraps to the lowest id once), so a run with no budget ends.
+   - *Skipping within a run:* the run keeps the set of ids that failed alone and excludes them from every read (`AND id NOT IN
+     (...)`, the set is small because five consecutive failures end the run), so a failed chunk is never read, and so never counted,
+     twice in one run, and a run with no budget ends.
    The run's result records how many chunks it gave up on. Nothing a pass does can fail `session_start`.
 7. **Last result.** After a run the worker writes `embed.last_run` (`{at, embedded, remaining, state}` JSON, no text) to `tx_state`
    for `status`.
