@@ -19,7 +19,11 @@ public enum FingerprintState
 }
 
 /// <summary>A chunk waiting for a vector: its id and the text read for embedding.</summary>
-public sealed record EmbedChunk(long Id, string Content);
+public sealed record EmbedChunk(long Id, string Content)
+{
+    /// <summary>The chunk's failed tries so far (<c>embed_attempts</c> when it was read).</summary>
+    public int Attempts { get; init; }
+}
 
 /// <summary>A chunk's vector with the content it was made from (the write checks the content is still current).</summary>
 public sealed record ChunkEmbedding(long Id, string Content, float[] Vector);

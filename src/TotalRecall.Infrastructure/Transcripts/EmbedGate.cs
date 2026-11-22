@@ -72,9 +72,7 @@ public static class EmbedGate
 
         if (input.Fingerprint == FingerprintState.Mismatch)
         {
-            return new EmbedGateResult(
-                EmbedState.FingerprintMismatch,
-                $"words only: vectors were made by {Render(input.Stored)}; the running embedder is {Render(input.Current)}");
+            return Mismatch(input.Stored, input.Current);
         }
 
         if (!input.Readiness.Ready)
@@ -103,6 +101,12 @@ public static class EmbedGate
         new(
             EmbedState.DimensionRefused,
             $"words only: the provider's vectors have {actual} dimensions; the archive holds {ArchiveDimensions}");
+
+    /// <summary>Vectors of another model exist (rule 4, or found by the worker's write).</summary>
+    public static EmbedGateResult Mismatch(ArchiveFingerprint? stored, ArchiveFingerprint? current) =>
+        new(
+            EmbedState.FingerprintMismatch,
+            $"words only: vectors were made by {Render(stored)}; the running embedder is {Render(current)}");
 
     /// <summary>The embed lease is held by another run.</summary>
     public static EmbedGateResult AnotherRun() =>

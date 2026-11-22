@@ -37,7 +37,7 @@ public sealed partial class TranscriptStore
         if (limit <= 0)
             return Array.Empty<EmbedChunk>();
 
-        var sql = new StringBuilder("SELECT id, content FROM tx_chunk WHERE embedded = 0 AND embed_attempts < 3");
+        var sql = new StringBuilder("SELECT id, content, embed_attempts FROM tx_chunk WHERE embedded = 0 AND embed_attempts < 3");
         var parameters = new List<(string, object)>();
         if (exclude.Count > 0)
         {
@@ -60,7 +60,7 @@ public sealed partial class TranscriptStore
         using var cmd = Command(null, sql.ToString(), parameters.ToArray());
         using var r = cmd.ExecuteReader();
         while (r.Read())
-            result.Add(new EmbedChunk(r.GetInt64(0), r.GetString(1)));
+            result.Add(new EmbedChunk(r.GetInt64(0), r.GetString(1)) { Attempts = r.GetInt32(2) });
         return result;
     }
 
