@@ -356,7 +356,7 @@ public abstract class TranscriptsCommandBase : ICliCommand
             return run(token);
 
         using var cts = new CancellationTokenSource();
-        ConsoleCancelEventHandler handler = (_, e) => e.Cancel = BackfillCommand.KeepProcessOnCancelKey(cts);
+        ConsoleCancelEventHandler handler = (_, e) => e.Cancel = KeepProcessOnCancelKey(cts);
         Console.CancelKeyPress += handler;
         try
         {
@@ -367,6 +367,20 @@ public abstract class TranscriptsCommandBase : ICliCommand
             Console.CancelKeyPress -= handler;
         }
     }
+    /// <summary>
+    /// The Ctrl+C handler's decision, the value for <see cref="ConsoleCancelEventArgs.Cancel"/>. The first press cancels
+    /// <paramref name="cts"/> and keeps the process, so the run stops at its next check (backfill after the current
+    /// session, embed between batches) and prints what it did; a second press (the run is already stopping) returns false
+    /// and ends the process as usual.
+    /// </summary>
+    public static bool KeepProcessOnCancelKey(CancellationTokenSource cts)
+    {
+        ArgumentNullException.ThrowIfNull(cts);
+        var keep = !cts.IsCancellationRequested;
+        try { cts.Cancel(); } catch (ObjectDisposedException) { }
+        return keep;
+    }
+
 
     protected static string N(long n) => n.ToString(CultureInfo.InvariantCulture);
 

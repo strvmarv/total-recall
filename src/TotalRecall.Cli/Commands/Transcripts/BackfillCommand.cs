@@ -187,19 +187,6 @@ public sealed class BackfillCommand : TranscriptsCommandBase
         }
     }
 
-    /// <summary>
-    /// The Ctrl+C handler's decision, the value for <see cref="ConsoleCancelEventArgs.Cancel"/>. The first press cancels
-    /// <paramref name="cts"/> and keeps the process, so the run stops after the current session and prints what it did;
-    /// a second press (the run is already stopping) returns false and ends the process as usual.
-    /// </summary>
-    public static bool KeepProcessOnCancelKey(CancellationTokenSource cts)
-    {
-        ArgumentNullException.ThrowIfNull(cts);
-        var keep = !cts.IsCancellationRequested;
-        try { cts.Cancel(); } catch (ObjectDisposedException) { }
-        return keep;
-    }
-
     private BackfillSummary Run(ITranscriptStore store, ITranscriptAdapter adapter, CancellationToken ct) =>
         new TranscriptBackfill(store, adapter).Run(ct, p =>
         {
