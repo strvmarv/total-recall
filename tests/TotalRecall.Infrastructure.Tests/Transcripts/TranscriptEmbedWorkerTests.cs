@@ -448,7 +448,7 @@ public sealed class TranscriptEmbedWorkerTests : IDisposable
 
         var run = Worker(e).Run(Ready, Fp, NoBudget, CancellationToken.None);
 
-        Assert.Equal(new EmbedRun(19, 1, 0, Ready, EmbedStopReason.Done), run);
+        Assert.Equal(new EmbedRun(19, 1, 0, Ready, EmbedStopReason.Done, FailedAlone: 1), run);
         Assert.Equal(1, Attempts(ids[0]));
         Assert.Equal(0, Embedded(ids[0]));
         Assert.All(ids.Skip(1), id => Assert.Equal(1, Embedded(id)));
@@ -467,7 +467,7 @@ public sealed class TranscriptEmbedWorkerTests : IDisposable
 
         var run = Worker(e).Run(Ready, Fp, NoBudget, CancellationToken.None);
 
-        Assert.Equal(new EmbedRun(17, 3, 0, Ready, EmbedStopReason.Done), run);
+        Assert.Equal(new EmbedRun(17, 3, 0, Ready, EmbedStopReason.Done, FailedAlone: 3), run);
         Assert.All(ids.Take(3), id => Assert.Equal(1, Attempts(id)));
         Assert.All(ids.Skip(3), id => Assert.Equal(1, Embedded(id)));
         Assert.Equal(17, VecRows());
@@ -537,7 +537,7 @@ public sealed class TranscriptEmbedWorkerTests : IDisposable
 
         var run = Worker(e, store).Run(Ready, Fp, NoBudget, CancellationToken.None);
 
-        Assert.Equal(new EmbedRun(2, 1, 0, Ready, EmbedStopReason.Done), run);
+        Assert.Equal(new EmbedRun(2, 1, 0, Ready, EmbedStopReason.Done, FailedAlone: 1), run);
         Assert.Equal(1, Attempts(ids[1]));
         Assert.Equal(2, ChunkCalls(e).Count(c => c == Text(1)));
         Assert.Equal(2, excludes.Count);
@@ -552,15 +552,15 @@ public sealed class TranscriptEmbedWorkerTests : IDisposable
         var e = new ScriptedEmbedder().Throw(Text(0), new KeyNotFoundException("bad"));
 
         var r1 = Worker(e).Run(Ready, Fp, NoBudget, CancellationToken.None);
-        Assert.Equal(new EmbedRun(2, 1, 0, Ready, EmbedStopReason.Done), r1);
+        Assert.Equal(new EmbedRun(2, 1, 0, Ready, EmbedStopReason.Done, FailedAlone: 1), r1);
         Assert.Equal(1, Attempts(ids[0]));
 
         var r2 = Worker(e).Run(Ready, Fp, NoBudget, CancellationToken.None);
-        Assert.Equal(new EmbedRun(0, 1, 0, Ready, EmbedStopReason.Done), r2);
+        Assert.Equal(new EmbedRun(0, 1, 0, Ready, EmbedStopReason.Done, FailedAlone: 1), r2);
         Assert.Equal(2, Attempts(ids[0]));
 
         var r3 = Worker(e).Run(Ready, Fp, NoBudget, CancellationToken.None);
-        Assert.Equal(new EmbedRun(0, 0, 1, Ready, EmbedStopReason.Done), r3);
+        Assert.Equal(new EmbedRun(0, 0, 1, Ready, EmbedStopReason.Done, FailedAlone: 1), r3);
         Assert.Equal(3, Attempts(ids[0]));
         Assert.Equal(new EmbeddingCounts(3, 2, 0, 1), _db.Store.CountEmbedding());
         Assert.Equal(1, _db.Store.ReadEmbedRun()!.GaveUp);
@@ -628,7 +628,7 @@ public sealed class TranscriptEmbedWorkerTests : IDisposable
 
         var run = Worker(e, store).Run(Ready, Fp, NoBudget, CancellationToken.None);
 
-        Assert.Equal(new EmbedRun(2, 1, 0, Ready, EmbedStopReason.Done), run);
+        Assert.Equal(new EmbedRun(2, 1, 0, Ready, EmbedStopReason.Done, FailedAlone: 1), run);
         Assert.Equal(1, Attempts(ids[1]));
         Assert.Equal(0, Embedded(ids[1]));
     }
@@ -689,7 +689,7 @@ public sealed class TranscriptEmbedWorkerTests : IDisposable
 
         var run = Worker(e).Run(Ready, OpenAiFp, NoBudget, CancellationToken.None);
 
-        Assert.Equal(new EmbedRun(4, 1, 0, Ready, EmbedStopReason.Done), run);
+        Assert.Equal(new EmbedRun(4, 1, 0, Ready, EmbedStopReason.Done, FailedAlone: 1), run);
         Assert.Equal(1, Attempts(ids[0]));
         Assert.All(ids.Skip(1), id => Assert.Equal(1, Embedded(id)));
         Assert.Equal(OpenAiFp, _db.Store.ReadEmbedFingerprint());
@@ -704,7 +704,7 @@ public sealed class TranscriptEmbedWorkerTests : IDisposable
 
         var run = Worker(e).Run(Ready, OpenAiFp, NoBudget, CancellationToken.None);
 
-        Assert.Equal(new EmbedRun(4, 1, 0, Ready, EmbedStopReason.Done), run);
+        Assert.Equal(new EmbedRun(4, 1, 0, Ready, EmbedStopReason.Done, FailedAlone: 1), run);
         Assert.Equal(1, Attempts(ids[2]));
         Assert.Equal(2, ProbeCalls(e));
     }

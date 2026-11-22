@@ -343,11 +343,10 @@ public abstract class TranscriptsCommandBase : ICliCommand
     }
 
     /// <summary>
-    /// The chunks a finished run could not embed: those that reached their third try, and when the run is done the ones
-    /// it left out after they failed alone (still waiting; the next run tries them again).
+    /// The chunks this run could not embed, exactly: those that failed alone in it (the ones that reached their third try
+    /// included; the others still wait and the next run tries them again).
     /// </summary>
-    protected static int CouldNotEmbed(EmbedRun run) =>
-        run.GaveUp + (run.StoppedBy == EmbedStopReason.Done ? run.Remaining : 0);
+    protected static int CouldNotEmbed(EmbedRun run) => run.FailedAlone;
 
     /// <summary>Waits for Ctrl+C (the first press cancels between steps, a second ends the process) unless injected.</summary>
     protected static T WithCancelKey<T>(CancellationToken? injected, Func<CancellationToken, T> run)
@@ -367,6 +366,7 @@ public abstract class TranscriptsCommandBase : ICliCommand
             Console.CancelKeyPress -= handler;
         }
     }
+
     /// <summary>
     /// The Ctrl+C handler's decision, the value for <see cref="ConsoleCancelEventArgs.Cancel"/>. The first press cancels
     /// <paramref name="cts"/> and keeps the process, so the run stops at its next check (backfill after the current
@@ -380,7 +380,6 @@ public abstract class TranscriptsCommandBase : ICliCommand
         try { cts.Cancel(); } catch (ObjectDisposedException) { }
         return keep;
     }
-
 
     protected static string N(long n) => n.ToString(CultureInfo.InvariantCulture);
 

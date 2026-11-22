@@ -318,6 +318,31 @@ public sealed class EmbedCommandTests : IDisposable
     }
 
     [Fact]
+    public void ChunkThatFailedAlone_InAnInterruptedRun_IsCountedExactly()
+    {
+        // A chunk that failed alone with tries left is counted in the closing line of a run that did not finish too:
+        // the count is the run's own, not an estimate from the end state.
+        EnableArchive();
+        _h.SeedChunks(20); // two batches
+        using var cts = new CancellationTokenSource();
+        _h.Embedder.OnEmbed = text =>
+        {
+            if (text == "chunk-1")
+            {
+                cts.Cancel(); // seen between batches: the first batch finishes, the second is never read
+                throw new ArgumentException("this chunk is bad");
+            }
+        };
+
+        var code = WithSilentStderr(() => Embed(cts.Token));
+
+        Assert.Equal(0, code);
+        Assert.Equal(15, Embedded);
+        var output = _h.Out.ToString();
+        Assert.Contains("interrupted: embedded 15 chunks, 5 remaining; 1 could not be embedded", output);
+    }
+
+    [Fact]
     public void RetryFailed_ResetsTheCountsFirst_AndSaysHowMany()
     {
         EnableArchive();

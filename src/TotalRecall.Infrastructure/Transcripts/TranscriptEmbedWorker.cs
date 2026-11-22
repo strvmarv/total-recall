@@ -38,9 +38,12 @@ public enum EmbedStopReason
 
 /// <summary>
 /// What a run did. <paramref name="GaveUp"/> counts the chunks that reached their third failed try in this run;
-/// <paramref name="Remaining"/> is the chunks still waiting (<c>embedded = 0 AND embed_attempts &lt; 3</c>) at the end.
+/// <paramref name="Remaining"/> is the chunks still waiting (<c>embedded = 0 AND embed_attempts &lt; 3</c>) at the end;
+/// <paramref name="FailedAlone"/> counts the distinct chunks that failed alone in this run (with a healthy probe), the
+/// ones it gave up on included: none of them was embedded by this run.
 /// </summary>
-public sealed record EmbedRun(int Embedded, int Remaining, int GaveUp, EmbedGateResult State, EmbedStopReason StoppedBy);
+public sealed record EmbedRun(
+    int Embedded, int Remaining, int GaveUp, EmbedGateResult State, EmbedStopReason StoppedBy, int FailedAlone = 0);
 
 /// <summary>Reported after every batch.</summary>
 public sealed record EmbedProgress(int Embedded, int Remaining);
@@ -174,7 +177,7 @@ public sealed class TranscriptEmbedWorker
             }
         }
 
-        return new EmbedRun(run.Embedded, run.Remaining, run.GaveUp, run.State, run.StoppedBy);
+        return new EmbedRun(run.Embedded, run.Remaining, run.GaveUp, run.State, run.StoppedBy, run.FailedAlone.Count);
     }
 
     // ------------------------------------------------------------------
