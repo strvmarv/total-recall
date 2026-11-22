@@ -131,6 +131,9 @@ UPDATE tx_chunk SET embedded = 0 WHERE embedded <> 0       -- no vector exists y
   through `SqliteOpener`) must load it too; the builder fixes them. An older engine (Part 2's) opening a version-3
   archive finds a higher version than it knows and leaves the schema alone (the runner's loop does not run); its writes still work,
   because it loads vec0 too.
+- **The runner begins its write transaction only when a migration is pending** (a small change to Part 1's `TranscriptMigrationRunner.Run`:
+  read the version first). Today it starts one on every open, and a `BEGIN IMMEDIATE` on the archive (the main database by default) would
+  make every `transcript_search` and `status` queue behind an ingest or a large `forget` for up to the 5 s busy timeout and fail.
 - **`Open(create:false)` keeps running the archive runner** on an archive it finds (Part 1's deferred finding): a version-2 archive is
   migrated to 3 by whichever command opens it first, `status` included. This is a one-time, small, transactional change and is kept;
   the builder documents it in `docs/transcripts.md`.
@@ -195,7 +198,8 @@ fingerprint, the embedder's readiness. First failing rule wins; each gives a sta
    stored time is more than 10 minutes old, **or** when the holder's machine name is this machine's and no process with that pid
    exists, so a second Ctrl+C or a crash does not lock others out for ten minutes; the check and write are one operation under the
    write lock, unlike the memory re-embed's advisory lock), renewed at every batch **only while the stored value still carries this run's id** (otherwise the batch's transaction rolls back and the
-   run ends with `StoppedBy = lease`), released in `finally`. A pass that cannot take it
+   run ends with `StoppedBy = lease`), released in `finally` **only if the stored value still carries this run's id** (a worker whose lease was taken over, for example a
+   laptop that slept, must not delete the new holder's lease). A pass that cannot take it
    ends with state `another embed run is active` and no error. `transcripts embed` and the embed step of `backfill` take it too (their
    handling when it is held is in section 4).
 2. **Batch loop.** Until the budget, the cancellation or no unembedded chunk is left: read up to 16 chunks with `embedded = 0 AND embed_attempts < 3` (index
@@ -216,7 +220,7 @@ fingerprint, the embedder's readiness. First failing rule wins; each gives a sta
 4. **Budget.** `EmbedBudget(MaxSeconds, MaxChunks)`; the pass uses 30 s or 256 chunks, whichever comes first, the commands none. The clock is checked between batches, so a
    batch (16 chunks) may overrun it. The worker returns `EmbedRun(Embedded, Remaining, State, StoppedBy)` where `StoppedBy` is `done`,
    `budget`, `cancelled`, `gate` or `lease`.
-5. **Threading and CPU.** The pass runs the worker on its own thread at below-normal priority with its own connection and its own
+5. **Threading and CPU.** The pass runs the worker on its own **background** thread (`IsBackground`, so it never keeps the process alive after the host closes it) at below-normal priority with its own connection and its own
    embedder instance (the pattern of `MaybeStartBackgroundReindex`; sharing the server's instance is the builder's option if its
    tokenizer is proven thread-safe, which the code does not say). Thread priority does not limit ONNX Runtime's own intra-op thread
    pool, so the pass's local embedder is limited to a small number of intra-op threads (an option the builder adds to
@@ -228,13 +232,18 @@ fingerprint, the embedder's readiness. First failing rule wins; each gives a sta
    - *Systemic or transient* (`IOException`, `HttpRequestException`, `TaskCanceledException`/timeout, `SqliteException` BUSY or LOCKED,
      the lease lost): the batch rolls back, the run ends with state `embedding failed: <message>` (or `lease`), and no
      `embed_attempts` changes, so an outage or a busy database never marks a chunk bad.
-   - *Anything else* in a batch (the embedder throws on a text, the insert rejects a value): the batch rolls back, the failure is
-     logged through `ExceptionLogger.LogChain`, and the batch is **retried one chunk at a time**; a chunk that fails alone, **after at
-     least one other chunk of the same run succeeded**, gets `embed_attempts + 1` (its own small transaction) and is skipped for this
-     run; after three tries it leaves the work list (section 1). When the first three chunks of a run all fail alone and none has
-     succeeded, nothing is counted and the run ends with `embedding failed: <message>` (a broken model or provider must not burn the
-     chunks). The run's result records how many chunks it gave up on.
-   Nothing a pass does can fail `session_start`.
+   - *Anything else* (the embedder throws on a text, the response is malformed, the insert rejects a value): the batch rolls back, the
+     failure is logged through `ExceptionLogger.LogChain`, and the batch is **retried one chunk at a time**. When a chunk fails
+     alone, the worker embeds **the probe string** (the fixed non-archive text of the gate's rule 3 note): if the probe fails too,
+     the embedder is the problem, so the run ends with `embedding failed: <message>` and **nothing is counted**; if the probe
+     succeeds, the failure is the chunk's, it gets `embed_attempts + 1` (its own small transaction), and the run goes on. After three
+     tries a chunk leaves the work list (section 1). This needs no earlier success in the run, so a bad chunk at the front of the
+     queue is counted from its first failure. A run also ends, uncounted beyond what is already written, after **five consecutive
+     chunks** that failed alone with a healthy probe (a failure that hits everything but the probe string must not walk the whole
+     backlog to its three tries in one run).
+   - *Skipping within a run:* a chunk that failed alone is not read again by the same run (the loop keeps the highest id it has
+     tried and reads `id > that` first, then wraps to the lowest id once), so a run with no budget ends.
+   The run's result records how many chunks it gave up on. Nothing a pass does can fail `session_start`.
 7. **Last result.** After a run the worker writes `embed.last_run` (`{at, embedded, remaining, state}` JSON, no text) to `tx_state`
    for `status`.
 
@@ -266,8 +275,9 @@ The pass's own `CancellationTokenSource` belongs to `ServerCompositionHandles` a
 `SessionStartHandler` is constructed inside `BuildRegistry`, which is shared with the Postgres and test paths and documented as pure
 (no I/O), and the transcript tools are registered after it returns. So `OpenSqlite` and `OpenCortexCore` build the `ArchivePass`
 (from the settings and the main database path; nothing is opened until the pass runs) before `BuildRegistry` and pass it in as a new
-optional parameter; it is null on the Postgres path, in `OpenProduction`'s boot work and in tests that do not give one. A test pins
-that Postgres gets null. **It is not
+optional parameter; it is null on the Postgres path and in tests that do not give one. (`OpenProduction` reaches `OpenSqlite`, so the pass object **exists**
+on the boot path; it only exists there, it is **never started** there: `Kick` is called from `SessionStartHandler` and nowhere else.) A
+test pins that Postgres gets null. **It is not
 started from `Program.RunServeAsync` or `OpenProduction`** (the boot-path rule of `Program.cs`): a source-scan test pins this the way
 `TranscriptSentinelIsolationTests` pins the sentinel mirror.
 
@@ -319,7 +329,11 @@ the id of an automated session comes from Part 4's `transcript_sessions`; the ki
 
 1. **By meaning**, when the gate is `ready` or `Unstamped`/`Match` (section 2): `IEmbedder.EmbedQuery(query)` (the bge instruction
    prefix applies), then `SELECT rowid, distance FROM tx_chunk_vec WHERE embedding MATCH $q AND k = $k AND <filters> ORDER BY distance`
-   with `k = max(40, 4 × top_k)`. Similarity is `1 - distance`. The query is not embedded when the provider is remote without the
+   with `k = max(40, 4 × top_k)`. Similarity is `1 - distance`. **Any failure of the meaning path at query time** (the model not
+   ready, an `OnnxRuntimeException`, a remote `HttpRequestException` or timeout, a query vector that is not 384 floats, a vec0 error)
+   falls back to words: `search.meaning` is `off` with the reason, the call is not an error, and a test with a throwing fake pins it.
+   The store reads of one search (vector candidates, word candidates, `pendingEmbedding`, the chunk rows) run inside one read
+   transaction, so a commit between them cannot pair a reused chunk id with the wrong text. The query is not embedded when the provider is remote without the
    opt-in or the fingerprint mismatches (nothing is sent anywhere), and a search that finds the embedder not ready answers by words.
 2. **By words**, always: two ranked lists from `tx_chunk_fts` joined to `tx_chunk` and `tx_session` for the filters, `bm25`-ordered,
    each `LIMIT k`:
@@ -443,7 +457,9 @@ CI runs them.
 
 The queries (each asserts the expected session is **in the top three** unless said otherwise):
 
-1. a **topic** query in other words than the text uses ("how do we ship the staging site" against a session about deploying staging);
+1. a **topic / how-to** query in other words than the text uses ("how do we ship the staging site" against a session about deploying
+   staging), plus a second how-to query ("how did we stop the flaky test" against a session about retrying a timeout), the parent's
+   four kinds being topic, how-to, compaction summary and exact error;
 2. a query answered **only by a compaction summary** (a fact present in no dialogue chunk, only in the summary);
 3. an **exact error string** (words and punctuation as in an error chunk);
 4. a **session-scope paraphrase** query, with the session argument, where the 39 other sessions would fill a global top-k, and
@@ -467,11 +483,12 @@ The queries (each asserts the expected session is **in the top three** unless sa
     flip is committed between a worker's read and its write** (a test seam between them) and likewise a project or `ts` change; a
     chunk id reused after a delete meets no old vector;
 12. **resume and races**: a worker stopped by the budget or by cancellation resumes with no chunk embedded twice and none lost;
-    a chunk changed between read and write stays `embedded = 0`; two workers (two connections) do not both embed (the lease);
+    a chunk changed between read and write stays `embedded = 0`; two workers (two connections, each with its own run id) do not both embed (the lease), and a worker that lost its lease does not delete the new holder's;
     a stale lease (older than 10 minutes) is taken over, and so is one whose pid on this machine no longer exists (a live pid on
     another machine name is not); a chunk whose embedding fails alone does not block the chunks behind it, is skipped after three
-    tries, stays `embedded = 0`, and gets a fresh count when its content changes; the first three failing chunks of a run end it
-    with no count; a transient failure (a fake that throws `HttpRequestException`, a `SQLITE_BUSY`) counts nothing and ends the run;
+    tries, stays `embedded = 0`, and gets a fresh count when its content changes; bad chunks at the **lowest ids** (one, and three in a row) are counted from their first failure while the
+    rest are embedded; a fake whose probe also fails ends the run with nothing counted; five consecutive lone failures with a healthy
+    probe end the run; a failed chunk is not re-read by the same run (a run with no budget ends); a transient failure (a fake that throws `HttpRequestException`, a `SQLITE_BUSY`) counts nothing and ends the run;
     `embed --retry-failed` resets the counts; a worker that lost its lease stops at its next batch; a forget of everything followed
     by a different model restamps the fingerprint instead of reporting a mismatch;
 13. **through the triggers, not the worker** (the parent's rule): the queries 1 to 4 run after `transcripts backfill` (the command's
@@ -481,8 +498,8 @@ The queries (each asserts the expected session is **in the top three** unless sa
     embedder, the **median of ten** `session_start` calls (a fresh lifecycle each, same harness) is within 10% of the median with
     the archive off; and `memory_search` returns **identical results** for a fixed query with the archive off, on and empty, on and
     populated (a deep equality of the result lists);
-15. the **source-scan** tests: `ArchivePass` is not referenced from `Program.cs` or `OpenProduction`, and the Postgres path builds the
-    registry with no pass; nothing under `Sync` or
+15. the **source-scan** tests: `Kick` is called only from `SessionStartHandler`, `ArchivePass` is not referenced from `Program.cs` or the body of `OpenProduction`, and the
+    Postgres path builds the registry with no pass; nothing under `Sync` or
     `GitSync` names the new types; the three tools' registration sites are the only places that construct the search service.
 
 Unit tests as usual: the gate table; the text query builder (quotes, operators such as `-`, `*`, `:`, `NEAR`, `OR`, empty, one
@@ -493,8 +510,9 @@ exit codes; `backfill --no-embed`.
 ## 9. Documentation (decision 14, and what goes stale)
 
 - **Consent wording (call 10).** The enable confirmation (`EnableCommand.cs`, the prompt that says "Nothing is read until you run
-  'total-recall transcripts backfill', and the archive cannot be searched yet"), `docs/transcripts.md` (around lines 25 and 29) and the
-  `PRIVACY.md` row (around line 26) say that the archive is read only on a backfill. With this part, enabling means: from now on, each
+  'total-recall transcripts backfill', and the archive cannot be searched yet"), `EnableCommand.cs` (also the text near line 120),
+  `docs/transcripts.md` (around lines 3, 13, 25, 29 and 45: "nothing runs on its own", "enabling stores nothing by itself") and
+  `PRIVACY.md` (around lines 26 and 90) say that the archive is read only on a backfill; the builder greps for every such sentence. With this part, enabling means: from now on, each
   session start reads the host's session files in the background and archives their dialogue (redacted, local, never synced), and
   turns it into vectors on this machine (or on the remote service only if `allow_remote_embedding` was set by hand). The three texts
   and their tests are rewritten to say so. No release carries the old text (the enable command is not in v4.8.0, the latest tag), so
