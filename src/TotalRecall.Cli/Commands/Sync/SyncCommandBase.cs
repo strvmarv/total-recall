@@ -43,7 +43,7 @@ public abstract class SyncCommandBase : ICliCommand
         }
     }
 
-    private static void Print(SetupResult result)
+    internal static void Print(SetupResult result)
     {
         foreach (var line in result.Lines)
         {
