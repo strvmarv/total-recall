@@ -142,7 +142,7 @@ item counts as touching the item, so the decision-13 no-op shortcut does not ski
 | the same, but the blob id **differs** | the item is re-opened (`open`, hash refreshed to the current blob id, cause kept) and the decision is W8.2 (`Ignore`): a record that changed after the person answered is shown again, never deleted blind |
 | the record's text is newer than the base (W8.1: an edit beats the deletion) | the entry is inserted as the apply does today and the approved item is removed |
 | the record is absent | the row is forgotten as today (W10) and the item is removed |
-| the id is skipped by the scan (an entry in two tiers, unreadable, or a group the clock could not stamp; such an id is not decided) | the approved item stays; nothing is deleted while the id is skipped, and when the skip clears the entry is present, so the visited id removes the item by the next row |
+| the id is skipped by the scan (an entry in two tiers, unreadable, or a group the clock could not stamp; such an id is not decided) | the approved item stays; nothing is deleted while the id is skipped, and when the skip clears the entry is present, so the next pull that decides the id removes the item |
 | the entry is present again while the row stays `active` (a memory with the id was re-created, for example by an import that keeps ids; the scanner reactivates only `forgotten` or `left` rows, so it does not remove the item) | the pull removes the item (the rule above) and decides with the real proof |
 
 `GitSyncReviews.ReadOpenHeld` keeps reading only `state = 'open'`, so the push exclusion (`Prepare`) and the existing readers are
