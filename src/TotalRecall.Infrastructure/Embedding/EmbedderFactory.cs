@@ -20,7 +20,15 @@ namespace TotalRecall.Infrastructure.Embedding;
 /// </summary>
 public static class EmbedderFactory
 {
-    public static OnnxEmbedder CreateProduction(string? queryPrefix = null)
+    public static OnnxEmbedder CreateProduction(string? queryPrefix = null, int? intraOpThreads = null) =>
+        CreateProduction(queryPrefix, intraOpThreads, createUserModelsDir: true);
+
+    /// <param name="createUserModelsDir">
+    /// False for a side-effect-free build (an inspection of identity and readiness): the user override directory is
+    /// only pointed at, not created. Nothing below creates it either: the model manager checks it with
+    /// <c>Directory.Exists</c>.
+    /// </param>
+    private static OnnxEmbedder CreateProduction(string? queryPrefix, int? intraOpThreads, bool createUserModelsDir)
     {
         var bundledModelsDir = FindBundledModelsDir();
         var registryPath = Path.Combine(bundledModelsDir, "registry.json");
@@ -30,10 +38,11 @@ public static class EmbedderFactory
             ?? Environment.GetEnvironmentVariable("USERPROFILE")
             ?? Path.GetTempPath();
         var userModelsDir = Path.Combine(home, ".total-recall", "models");
-        Directory.CreateDirectory(userModelsDir);
+        if (createUserModelsDir)
+            Directory.CreateDirectory(userModelsDir);
 
         var manager = new ModelManager(registry, bundledModelsDir, userModelsDir);
-        return new OnnxEmbedder(manager, "bge-small-en-v1.5", queryPrefix);
+        return new OnnxEmbedder(manager, "bge-small-en-v1.5", queryPrefix, intraOpThreads);
     }
 
     /// <summary>
@@ -42,7 +51,18 @@ public static class EmbedderFactory
     /// - "openai" → OpenAiEmbedder
     /// - "bedrock" → BedrockEmbedder
     /// </summary>
-    public static IEmbedder CreateFromConfig(Core.Config.EmbeddingConfig cfg)
+    public static IEmbedder CreateFromConfig(Core.Config.EmbeddingConfig cfg, int? intraOpThreads = null) =>
+        CreateFromConfig(cfg, intraOpThreads, createUserModelsDir: true);
+
+    /// <summary>
+    /// Like <see cref="CreateFromConfig(Core.Config.EmbeddingConfig, int?)"/>, but creates nothing on disk: for the
+    /// local provider the user models directory (<c>$HOME/.total-recall/models</c>) is not created. For reading the
+    /// embedder's descriptor and readiness only (the remote providers create nothing at construction either).
+    /// </summary>
+    public static IEmbedder CreateFromConfigWithoutSideEffects(Core.Config.EmbeddingConfig cfg) =>
+        CreateFromConfig(cfg, null, createUserModelsDir: false);
+
+    private static IEmbedder CreateFromConfig(Core.Config.EmbeddingConfig cfg, int? intraOpThreads, bool createUserModelsDir)
     {
         var provider = FSharpOption<string>.get_IsSome(cfg.Provider)
             ? cfg.Provider.Value : "local";
@@ -53,7 +73,7 @@ public static class EmbedderFactory
             {
                 var prefix = FSharpOption<string>.get_IsSome(cfg.EmbeddingQueryPrefix)
                     ? cfg.EmbeddingQueryPrefix.Value : null;
-                return CreateProduction(prefix);
+                return CreateProduction(prefix, intraOpThreads, createUserModelsDir);
             }
 
             case "openai":

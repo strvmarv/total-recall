@@ -239,6 +239,7 @@ public static class CliApp
             new Commands.Transcripts.DisableCommand(),
             new Commands.Transcripts.StatusCommand(),
             new Commands.Transcripts.BackfillCommand(),
+            new Commands.Transcripts.EmbedCommand(),
             new Commands.Transcripts.ForgetCommand(),
             new Commands.Transcripts.UnforgetCommand(),
         };

@@ -1,0 +1,116 @@
+{
+  "description": "Acceptance queries for the archive search corpus. scope is session, project or all; project is a project key (alpha or beta); sessionFixture names the session for a session-scope query; since is an ISO-8601 date or instant (optional); expectedFixture is the session the query must find in its top three, except for kind automated-excluded, where it is the session that must NOT appear.",
+  "queries": [
+    {
+      "name": "how-to-staging",
+      "query": "how do we ship the staging site",
+      "scope": "all",
+      "project": null,
+      "sessionFixture": null,
+      "includeAutomated": false,
+      "expectedFixture": "deploy-staging",
+      "kind": "how-to"
+    },
+    {
+      "name": "how-to-flaky-test",
+      "query": "how did we stop the flaky test",
+      "scope": "all",
+      "project": null,
+      "sessionFixture": null,
+      "includeAutomated": false,
+      "expectedFixture": "flaky-test-retries",
+      "kind": "how-to"
+    },
+    {
+      "name": "compaction-summary-fact",
+      "query": "how many requests per minute can we send to the invoice vendor",
+      "scope": "all",
+      "project": null,
+      "sessionFixture": null,
+      "includeAutomated": false,
+      "expectedFixture": "invoice-compaction",
+      "kind": "compaction-summary"
+    },
+    {
+      "name": "exact-error",
+      "query": "SQLITE_BUSY: database is locked while writing tx_chunk",
+      "scope": "all",
+      "project": null,
+      "sessionFixture": null,
+      "includeAutomated": false,
+      "expectedFixture": "sqlite-busy-error",
+      "kind": "error"
+    },
+    {
+      "name": "session-paraphrase",
+      "query": "wait longer between attempts",
+      "scope": "session",
+      "project": null,
+      "sessionFixture": "retry-backoff",
+      "includeAutomated": false,
+      "expectedFixture": "retry-backoff",
+      "kind": "session-paraphrase"
+    },
+    {
+      "name": "automated-hidden-without-flag",
+      "query": "nightly changelog summariser",
+      "scope": "project",
+      "project": "alpha",
+      "sessionFixture": null,
+      "includeAutomated": false,
+      "expectedFixture": "automated-changelog-sdk",
+      "kind": "automated-excluded"
+    },
+    {
+      "name": "automated-found-with-flag",
+      "query": "nightly changelog summariser",
+      "scope": "all",
+      "project": null,
+      "sessionFixture": null,
+      "includeAutomated": true,
+      "expectedFixture": "automated-changelog-sdk",
+      "kind": "automated-included"
+    },
+    {
+      "name": "automated-found-when-session-named",
+      "query": "nightly changelog summariser",
+      "scope": "session",
+      "project": null,
+      "sessionFixture": "automated-changelog-opening",
+      "includeAutomated": false,
+      "expectedFixture": "automated-changelog-opening",
+      "kind": "automated-session"
+    },
+    {
+      "name": "project-alpha-staging",
+      "query": "deploy to the staging environment",
+      "scope": "project",
+      "project": "alpha",
+      "sessionFixture": null,
+      "includeAutomated": false,
+      "expectedFixture": "deploy-staging",
+      "kind": "project"
+    },
+    {
+      "name": "project-beta-staging",
+      "query": "deploy to the staging environment",
+      "scope": "project",
+      "project": "beta",
+      "sessionFixture": null,
+      "includeAutomated": false,
+      "expectedFixture": "beta-deploy-staging",
+      "kind": "project"
+    },
+    {
+      "name": "since-staging",
+      "query": "how do we ship the staging site",
+      "scope": "all",
+      "project": null,
+      "sessionFixture": null,
+      "includeAutomated": false,
+      "since": "2026-01-10",
+      "expectedFixture": "deploy-staging",
+      "kind": "since"
+    }
+  ]
+}

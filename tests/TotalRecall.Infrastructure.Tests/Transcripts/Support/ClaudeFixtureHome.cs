@@ -38,20 +38,22 @@ public sealed class ClaudeFixtureHome : IDisposable
     }
 
     /// <summary>The committed fixtures, found by walking up from the test output directory.</summary>
-    public static string FixturesDir
+    public static string FixturesDir => FindFixtures("claude-code");
+
+    /// <summary>The hand-written query-set sessions and <c>queries.json</c> of the archive search (found the same way).</summary>
+    public static string SearchFixturesDir => FindFixtures("search");
+
+    private static string FindFixtures(string name)
     {
-        get
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
         {
-            var dir = new DirectoryInfo(AppContext.BaseDirectory);
-            while (dir is not null)
-            {
-                var candidate = System.IO.Path.Combine(dir.FullName, "tests", "fixtures", "transcripts", "claude-code");
-                if (Directory.Exists(candidate)) return candidate;
-                dir = dir.Parent;
-            }
-            throw new DirectoryNotFoundException(
-                "tests/fixtures/transcripts/claude-code was not found walking up from " + AppContext.BaseDirectory);
+            var candidate = System.IO.Path.Combine(dir.FullName, "tests", "fixtures", "transcripts", name);
+            if (Directory.Exists(candidate)) return candidate;
+            dir = dir.Parent;
         }
+        throw new DirectoryNotFoundException(
+            "tests/fixtures/transcripts/" + name + " was not found walking up from " + AppContext.BaseDirectory);
     }
 
     /// <summary>Claude Code's directory name for a working directory: every non-alphanumeric character becomes <c>-</c>.</summary>
