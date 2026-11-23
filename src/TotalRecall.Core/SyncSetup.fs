@@ -38,6 +38,14 @@ type Refusal =
     | UnreadableEntry
     /// `sync unblock`: the memory's pushed fields changed after the block was set.
     | ChangedSinceBlocked
+    /// `sync review` (#162): the entry has no held deletion to answer.
+    | NoHeldItem
+    /// `sync review`: the held deletion no longer matches the entry or the record it was opened for.
+    | StaleItem
+    /// `sync review`: the memory was edited here since the pull held its deletion.
+    | EditedLocally
+    /// `sync review`: a bulk answer without the shown hash of the item it names.
+    | ShownHashRequired
 
 let refusalName (r: Refusal) : string =
     match r with
@@ -62,6 +70,10 @@ let refusalName (r: Refusal) : string =
     | UnknownEntry -> "unknown-entry"
     | UnreadableEntry -> "unreadable-entry"
     | ChangedSinceBlocked -> "changed-since-blocked"
+    | NoHeldItem -> "no-held-item"
+    | StaleItem -> "stale-item"
+    | EditedLocally -> "edited-locally"
+    | ShownHashRequired -> "shown-hash-required"
 
 // ---------------------------------------------------------------------------
 // storage mode
