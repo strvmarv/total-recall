@@ -20,8 +20,8 @@ internal static class TranscriptChunker
     public const int BodyLimit = 1_800;
     public const int RepeatLimit = 300;
 
-    private const string Separator = "\n\n";
-    private const string ContinuedLabel = "User (continued): ";
+    internal const string Separator = "\n\n";
+    internal const string ContinuedLabel = "User (continued): ";
 
     public static IReadOnlyList<IngestChunk> Chunk(ExchangeUnit unit, ChunkHeaderFacts facts)
     {
