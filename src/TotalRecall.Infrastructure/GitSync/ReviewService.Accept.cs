@@ -40,7 +40,9 @@ public sealed partial class ReviewService
         var decision = SyncMerge.remoteDeletion(facts.Row.TierStamp is not null, oldBase.Record, present.View);
         var plan = ApplyPlanning.PlanStore(decision, null, present.View, env.HotMaxContentChars);
 
+        tx.BeforeStep = BeforeStep;
         tx.Delete(present.Tier, ContentType.Memory, entryId);
+        BeforeStep?.Invoke("row");
         // a deletion clears the pending stamps and issues none, so the row is planned with no clock
         var (next, error) = ApplyPlanning.BuildRow(
             entryId, decision, facts.Row, oldBase, theirs: null, stored: null, hadEntry: true, plan.Colder, _ => null);

@@ -10,8 +10,8 @@ namespace TotalRecall.Infrastructure.Tests.GitSync;
 /// Milestone 1b-iii (held deletions), D4: how the pull treats an approved local item. In the shape of W8 (row active with
 /// a base, entry gone, record present) the item is decided as proven with no held item, so its record's blob id equal to
 /// the item's hash gives an uncounted <c>PushDeletion</c> even in an unproven pull and a changed record re-opens the item;
-/// a newer text, a vanished record, a re-created entry and a scan-skipped id remove the item. Each test starts from a local
-/// hold of an unproven pull that is then approved.
+/// a newer text, a vanished record, a re-created entry, a scan-skipped id and a re-created entry whose record is rejected or
+/// invalid remove the item. Each test starts from a local hold of an unproven pull that is then approved.
 /// </summary>
 public sealed class GitSyncApplierApprovedTests : IDisposable
 {
@@ -224,6 +224,83 @@ public sealed class GitSyncApplierApprovedTests : IDisposable
         Assert.Empty(summary.PushDeletions);
         Assert.NotNull(_rig.Store.Get(Tier.Warm, ContentType.Memory, A));
         Assert.NotNull(_rig.Store.Get(Tier.Cold, ContentType.Memory, A));
+    }
+
+    /// <summary>Replaces A's record in the source with one the pull does not read: a rejected path or an invalid record.</summary>
+    private void UnreadableRecordOfA(string shape)
+    {
+        var path = SyncValidation.recordPath(A);
+        if (shape == "rejected")
+        {
+            // the record's own bytes under a mode the listing rejects: only the mode differs
+            var bytes = RecordWriter.Write(Rec(A)).Bytes!;
+            _rig.Remove(path);
+            _rig.PutRaw(path, bytes, "120000");
+        }
+        else
+        {
+            _rig.PutText(path, "{\"format\":\"total-recall/memory/v9\"}");
+        }
+        _rig.Commit("a record of A that is not read");
+    }
+
+    [GitTheory]
+    [InlineData("rejected", true)]
+    [InlineData("rejected", false)]
+    [InlineData("invalid", true)]
+    [InlineData("invalid", false)]
+    public async Task ARecreatedEntry_WhoseRecordIsNotRead_RemovesTheItem_AndChangesNothingElse(string shape, bool proven)
+    {
+        await ApprovedLocalHolds(A);
+        Recreate(A);
+        UnreadableRecordOfA(shape);
+        if (!proven)
+            Unproven();
+        Scan(); // the scan of the re-created entry, which the pull's own scan repeats unchanged
+        var row = Row(A);
+        var entry = _rig.Store.Get(Tier.Warm, ContentType.Memory, A);
+
+        var summary = await Pull();
+
+        Assert.Equal(proven, summary.Proven);
+        Assert.Null(Item(A));
+        Assert.Equal([A], summary.ClosedHeld);
+        Assert.Empty(summary.Deferred);
+        Assert.Empty(summary.PushDeletions);
+        Assert.Empty(summary.Held);
+        Assert.Empty(summary.Deleted);
+        Assert.DoesNotContain(summary.Skipped, s => s.Id == A);
+        Assert.Single(summary.Rejected);
+        Assert.Equal(row, Row(A));
+        Assert.Equal(entry, _rig.Store.Get(Tier.Warm, ContentType.Memory, A));
+        Assert.True(summary.Complete);
+    }
+
+    [GitTheory]
+    [InlineData("scan-skipped")]
+    [InlineData("rejected")]
+    public async Task AFaultAtTheCloseOfAnApprovedItem_LeavesItApproved_AndDefersTheId(string shape)
+    {
+        var approved = (await ApprovedLocalHolds(A))[A];
+        Recreate(A);
+        if (shape == "scan-skipped")
+            ScanRig.Exec(_rig.Connection, $"INSERT INTO cold_memories SELECT * FROM warm_memories WHERE id = '{A}'"); // in two tiers
+        else
+            UnreadableRecordOfA(shape);
+        _applier.BeforeEntryStep = (id, step) =>
+        {
+            if (id == A && step == "close")
+                throw new InvalidOperationException("fault at close");
+        };
+
+        var summary = await Pull();
+
+        Assert.Equal(approved, Item(A));
+        var deferred = Assert.Single(summary.Deferred);
+        Assert.Equal(A, deferred.Id);
+        Assert.Contains("fault at close", deferred.Reason);
+        Assert.DoesNotContain(A, summary.ClosedHeld);
+        Assert.False(summary.Complete);
     }
 
     [GitFact]

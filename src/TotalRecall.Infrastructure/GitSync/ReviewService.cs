@@ -44,7 +44,7 @@ public sealed partial class ReviewService(ReviewEnvironment env) : IDisposable
 
     private const string BusyLockText = "another total-recall process is syncing this database: try again in a moment";
     private const string BusyDatabaseText = "the database is busy: try again in a moment";
-    private const string NoHeldItemText = "no held deletion is open for this id; nothing changed";
+    private const string NoHeldItemText = "no open or approved held deletion for this id; nothing changed";
 
     private IEmbedder? _embedder;
 
@@ -53,6 +53,12 @@ public sealed partial class ReviewService(ReviewEnvironment env) : IDisposable
 
     /// <summary>Test seam: called with the id after the embedding, before <c>BEGIN IMMEDIATE</c> (a second connection edits here).</summary>
     internal Action<string>? BeforeTransaction { get; set; }
+
+    /// <summary>
+    /// Test seam: called with a step name inside a remote <c>Accept</c>'s transaction, before each of the store
+    /// transaction's own steps and before the <c>row</c> step that follows the deletion, so a test can throw at one of them.
+    /// </summary>
+    internal Action<string>? BeforeStep { get; set; }
 
     /// <summary>How many times the embedder was created (at most once).</summary>
     internal int EmbedderCreations { get; private set; }

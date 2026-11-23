@@ -1029,6 +1029,22 @@ public sealed class GitSyncApplierEntryTests : IDisposable
     }
 
     [Fact]
+    public void OpenLocalItem_WithAStaleHash_SkipsTheNoOpShortcut_AndRefreshesTheHashOnly()
+    {
+        SyncedThenDeletedHere();
+        _rig.SeedHeld(Id, "local", hash: "89abcdef0123456789abcdef0123456789abcdef");
+        var row = Row();
+        _rig.NewApplier(); // count only this apply's transactions
+
+        var carried = Is<EntryResult.Carried>(_rig.Apply(ApplyRig.Rec(Id, minute: 10), proven: true, BlobSha));
+
+        Assert.Equal(CarriedKind.Updated, carried.Kind);
+        Assert.Equal(BlobSha, _rig.Held(Id)!.RecordHash);
+        Assert.Equal(row, Row());
+        Assert.Equal(1, _rig.Applier.TransactionCount);
+    }
+
+    [Fact]
     public void OpenRemoteItem_ThenEntryDeletedHere_ReplacesItWithOneLocalItem()
     {
         _rig.Apply(ApplyRig.Rec(Id, minute: 10));

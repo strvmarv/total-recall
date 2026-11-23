@@ -134,6 +134,16 @@ public sealed class ReviewServiceTests : IDisposable
     }
 
     [Fact]
+    public void ShownText_RemovesTheLineAndParagraphSeparators_AndTheBidiControls()
+    {
+        var (text, cut) = ReviewService.ShownText(
+            "a\u2028b\u2029c\u202Ad\u202Be\u202Cf\u202Dg\u202Eh\u2066i\u2067j\u2068k\u2069l\n\u200Bm", 500);
+
+        Assert.Equal("abcdefghijkl\n\u200Bm", text); // a zero-width space is neither: it is kept
+        Assert.False(cut);
+    }
+
+    [Fact]
     public void ShownText_CutsAtTheCap_WithoutSplittingASurrogatePair()
     {
         var (text, cut) = ReviewService.ShownText(new string('x', 499) + "😀", 500);
@@ -158,6 +168,7 @@ public sealed class ReviewServiceTests : IDisposable
     [InlineData("no item", "no-held-item")]
     [InlineData("declined item", "no-held-item")]
     [InlineData("row forgotten", "failed")]
+    [InlineData("row with no base", "failed")]
     [InlineData("two tiers", "unreadable-entry")]
     [InlineData("remote entry gone", "stale-item")]
     [InlineData("local entry back", "stale-item")]
@@ -180,6 +191,10 @@ public sealed class ReviewServiceTests : IDisposable
             case "row forgotten":
                 _rig.LocalHold(Local, Sha);
                 _rig.Scan.Exec($"UPDATE git_sync_entry SET state = 'forgotten' WHERE entry_id = '{Local}'");
+                break;
+            case "row with no base":
+                _rig.LocalHold(Local, Sha);
+                _rig.Scan.Exec($"UPDATE git_sync_entry SET base_json = NULL WHERE entry_id = '{Local}'");
                 break;
             case "two tiers":
                 _rig.LocalHold(Local, Sha);
@@ -211,7 +226,9 @@ public sealed class ReviewServiceTests : IDisposable
 
         Assert.Equal(1, result.ExitCode);
         Assert.Equal(refusal, SyncSetup.refusalName(result.Refusal!));
-        if (situation == "row forgotten")
+        if (refusal == "no-held-item")
+            Assert.Equal("no open or approved held deletion for this id; nothing changed", result.RefusalText);
+        if (situation is "row forgotten" or "row with no base")
             Assert.Contains("the row no longer matches the item", result.RefusalText);
         if (situation is "remote entry gone" or "local entry back")
             Assert.Contains("the memory changed since the hold; the next sync closes the item", result.RefusalText);
@@ -311,6 +328,7 @@ public sealed class ReviewServiceTests : IDisposable
             .CheckForTestsAsync(Local, ReviewOperation.Restore, Sha);
 
         AssertRefused(result, SyncSetup.Refusal.NoHeldItem);
+        Assert.Equal("no open or approved held deletion for this id; nothing changed", result.RefusalText);
         Assert.False(File.Exists(EmptyDbPath), "a database file was created");
         Assert.False(Directory.Exists(Path.Combine(_empty, "data", "sync")), "the sync directory was created");
     }

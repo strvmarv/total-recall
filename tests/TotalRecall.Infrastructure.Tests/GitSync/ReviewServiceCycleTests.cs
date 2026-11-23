@@ -294,6 +294,7 @@ public sealed class ReviewServiceCycleTests
         Done(await rig.RunB());
         RemoveOnRemote(rig.A, Id);
         Assert.Equal([Id], Done(await rig.RunB()).Apply!.Deleted);   // B runs first and forgets it
+        var forgottenBase = BaseOf(rig.B, Id);
         Assert.Equal([new HeldEntry(Id, "remote", "unproven")], (await UnprovenCycle(rig.A)).Held);
 
         await Restore(rig.A, Id);
@@ -309,9 +310,21 @@ public sealed class ReviewServiceCycleTests
         Assert.Empty(b.Apply.Held);
         Assert.False(Has(rig.B, Id));
         Assert.Equal(SyncMerge.RowState.Forgotten, RowOf(rig.B, Id).State);
+        Assert.Equal(forgottenBase, BaseOf(rig.B, Id)); // W3 leaves the base alone
         Assert.IsType<PushOutcome.NothingToPush>(b.Push);
         Assert.True(RemoteHas(rig.A, Id));
         Assert.Equal(rig.A.Push.Remote.Head(), rig.B.Pull.Last);
+
+        // the contrast: a newer text published by A after the restore is inserted on B
+        rig.A.Push.Edit(Tier.Warm, Id, new UpdateEntryOpts { Content = "Restored on A, then edited." });
+        rig.A.Push.Now += 60_000;
+        Assert.Equal([Id], Pushed(Done(await rig.RunA())).Written);
+
+        var edited = Done(await rig.RunB());
+
+        Assert.Equal(1, edited.Apply!.Inserted);
+        Assert.True(Has(rig.B, Id));
+        Assert.Equal("Restored on A, then edited.", rig.B.Pull.Store.Get(Tier.Warm, ContentType.Memory, Id)!.Content);
     }
 
     // ---- restore, local hold (D5) ----

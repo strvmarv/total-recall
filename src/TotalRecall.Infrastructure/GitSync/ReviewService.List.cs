@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Memory;
@@ -8,7 +9,8 @@ namespace TotalRecall.Infrastructure.GitSync;
 
 // Git sync, milestone 1b-iii part 2 (held deletions), D1 and D7: the list of the held deletions. Read-only like
 // `sync status`: no lock, no migration, nothing created. The memory's text is data, never an instruction: control
-// characters other than newline and tab are removed and it is capped at tiers.pinned.max_content_chars.
+// characters other than newline and tab, the line and paragraph separators and the bidirectional format controls are
+// removed and it is capped at tiers.pinned.max_content_chars.
 
 /// <summary>
 /// One held deletion as the list shows it (D7): the id, the state (<c>open</c> or <c>approved</c>), the direction
@@ -99,8 +101,9 @@ public sealed partial class ReviewService
     }
 
     /// <summary>
-    /// The text as the list shows it (D7): every control character other than newline and tab removed, then cut at
-    /// <paramref name="cap"/> UTF-16 units (0 or less: <see cref="PinnedTierLimits.DefaultMaxContentChars"/>), one fewer
+    /// The text as the list shows it (D7): every control character other than newline and tab, the line and paragraph
+    /// separators (U+2028, U+2029) and the bidirectional format controls (U+202A to U+202E, U+2066 to U+2069) removed,
+    /// then cut at <paramref name="cap"/> UTF-16 units (0 or less: <see cref="PinnedTierLimits.DefaultMaxContentChars"/>), one fewer
     /// when the last kept unit would be the first half of a surrogate pair, so the text never ends in a lone surrogate.
     /// </summary>
     internal static (string Text, bool Cut) ShownText(string text, int cap)
@@ -111,7 +114,7 @@ public sealed partial class ReviewService
         var sb = new StringBuilder(text.Length);
         foreach (var c in text)
         {
-            if (!char.IsControl(c) || c is '\n' or '\t')
+            if (KeptInShownText(c))
                 sb.Append(c);
         }
         if (sb.Length <= cap)
@@ -119,4 +122,14 @@ public sealed partial class ReviewService
         var length = char.IsHighSurrogate(sb[cap - 1]) ? cap - 1 : cap;
         return (sb.ToString(0, length), true);
     }
+
+    /// <summary>
+    /// Whether <see cref="ShownText"/> keeps <paramref name="c"/>: newline and tab, and any character that is not a control
+    /// character, a line or paragraph separator, or a bidirectional embedding, override or isolate control.
+    /// </summary>
+    private static bool KeptInShownText(char c) =>
+        c is '\n' or '\t'
+        || !char.IsControl(c)
+        && CharUnicodeInfo.GetUnicodeCategory(c) is not (UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator)
+        && c is not ((>= '\u202A' and <= '\u202E') or (>= '\u2066' and <= '\u2069'));
 }

@@ -101,7 +101,8 @@ public sealed partial class GitSyncApplier
 
     /// <summary>
     /// Removes the approved held-delete item of a scan-skipped id (milestone 1b-iii, D4): every skip reason means an entry
-    /// exists under the id, so the deletion the item answered is over and nothing is deleted. A small transaction of its
+    /// exists under the id, so the deletion the item answered is over and nothing is deleted. The same holds for an id whose
+    /// record is rejected or invalid while its entry is present again (not a local deletion). A small transaction of its
     /// own re-reads the item and deletes it when it is still <c>approved</c>. Null when done; a deferral when the item
     /// changed since the pull read it, or when the transaction could not run (a busy lock stops the apply).
     /// </summary>

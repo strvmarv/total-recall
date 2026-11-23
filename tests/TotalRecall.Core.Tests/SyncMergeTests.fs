@@ -844,7 +844,7 @@ let remoteDeletionTests =
                 Expect.isFalse d.CloseHeldDelete "the caller removes the item"
                 Expect.isEmpty d.Reviews "no review"
 
-        testCase "a tag difference, a pending tier, a project or a scope difference each add PendingChangesDropped" <| fun _ ->
+        testCase "a tag difference, a pending tier, a project, a scope or an entry type difference each add PendingChangesDropped" <| fun _ ->
             let note (what: string) (pendingTier: bool) (l: LocalEntry) =
                 let d = remoteDeletion pendingTier neutralBase l
                 Expect.equal d.Entry DeleteEntry (what + ": delete")
@@ -853,6 +853,7 @@ let remoteDeletionTests =
             note "pending tier" true neutralLocal
             note "project" false { neutralLocal with Content = { neutralLocal.Content with Project = Some "p" } }
             note "scope" false { neutralLocal with Content = { neutralLocal.Content with Scope = Some "global" } }
+            note "entry type" false { neutralLocal with Content = { neutralLocal.Content with EntryType = Correction } }
             note "sticky with tags" false { neutralLocal with Sticky = true; Tags = [ "x" ] }
 
         testCase "a text difference alone is no note (the text goes with the entry)" <| fun _ ->

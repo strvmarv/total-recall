@@ -136,7 +136,7 @@ public sealed class ReviewCommand : ICliCommand
     /// <summary>
     /// The lines of one item (D7): a header, then the text between a delimiter that names its source and the end
     /// delimiter, every text line behind <c>| </c> (the service has already removed control characters other than newline
-    /// and tab), <c>| (unreadable)</c> for a text that cannot be read and a marker line when the text was cut.
+    /// and tab, the line and paragraph separators and the bidirectional format controls), <c>| (unreadable)</c> for a text that cannot be read and a marker line when the text was cut.
     /// </summary>
     private static IEnumerable<string> ItemLines(ReviewItem item)
     {

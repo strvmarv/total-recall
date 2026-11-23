@@ -174,6 +174,8 @@ public sealed partial class GitSyncApplier
                 // not postponed, so one bad record cannot stop every push (milestone 1b-ii, D13).
                 if (localDeletions.Contains(id))
                     skipped.Add(new SkippedItem(id, null, RecordRejected));
+                else if (approved.ContainsKey(id))
+                    RemoveApprovedOfPresentEntry();
                 continue;
             }
 
@@ -207,6 +209,8 @@ public sealed partial class GitSyncApplier
                     rejectedNow[key] = (sha, OneLine(SyncValidation.RejectModule.describe(parsed.Rejected!)));
                     if (localDeletions.Contains(id))
                         skipped.Add(new SkippedItem(id, null, RecordInvalid)); // D13, as for a rejected path
+                    else if (approved.ContainsKey(id))
+                        RemoveApprovedOfPresentEntry();
                     continue;
                 }
                 theirs = parsed.Parsed;
@@ -253,6 +257,22 @@ public sealed partial class GitSyncApplier
                         failed.Add(new FailedEntry(id, f.Attempts, f.Detail));
                         HoldIfUnprovenCandidate();
                         break;
+                }
+            }
+
+            // Milestone 1b-iii, D4: an id whose record is rejected or invalid is never decided, so an approved item of an
+            // entry that is present again (not a local deletion) is removed here, as for a scan-skipped id, or deferred.
+            void RemoveApprovedOfPresentEntry()
+            {
+                if (RemoveApprovedItem(id) is { } notRemoved)
+                {
+                    deferred.Add(new DeferredEntry(id, notRemoved.Reason));
+                    if (notRemoved.Busy)
+                        stopped = true;
+                }
+                else
+                {
+                    closedHeld.Add(id);
                 }
             }
 

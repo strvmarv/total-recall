@@ -130,6 +130,31 @@ public sealed class ReviewServiceAcceptTests : IDisposable
         Assert.Equal("A local edit.", _rig.Entry(Id)!.Row.Content);
     }
 
+    [Theory]
+    [InlineData("delete-vec")]
+    [InlineData("delete-row")]
+    [InlineData("row")]
+    public async Task AFaultInsideARemoteAccept_RollsEverythingBack_AndIsFailed(string step)
+    {
+        RemoteHold("unproven");
+        var before = _rig.Full();
+        var service = Service();
+        var seen = new List<string>();
+        service.BeforeStep = current =>
+        {
+            seen.Add(current);
+            if (current == step)
+                throw new InvalidOperationException("fault at " + step);
+        };
+
+        var result = await service.AcceptAsync(Id, null);
+
+        AssertRefused(result, SyncSetup.Refusal.Failed);
+        Assert.Contains("fault at " + step, result.RefusalText);
+        Assert.Contains(step, seen);
+        Assert.Equal(before, _rig.Full());
+    }
+
     [Fact]
     public async Task AnIdInTwoTiers_IsUnreadableEntry()
     {
