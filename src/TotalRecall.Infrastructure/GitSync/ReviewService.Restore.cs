@@ -38,8 +38,10 @@ public sealed partial class ReviewService
 
     /// <summary>
     /// The embedding of a local restore, before the transaction: the text of the row's base, embedded with
-    /// <see cref="Embedder"/>. Null, with no embedder created, for anything the checks refuse anyway (no open or approved
-    /// local item, a shown hash that is not the item's, no row or base, a base that does not parse) and for a remote hold.
+    /// <see cref="Embedder"/>. Null, with no embedder created, for a remote hold and for these refusals of the checks: no
+    /// open or approved local item, a missing shown hash or one that is not the item's, a row that cannot be read, no base,
+    /// a base that does not parse. Other refusals (an entry or a knowledge entry under the id, a row that is not active, an
+    /// entry in two tiers) are found only by the checks inside the transaction, after the embedding.
     /// </summary>
     private Embedded? EmbedBase(SqliteStore store, string entryId, string? shownHash)
     {
@@ -57,9 +59,9 @@ public sealed partial class ReviewService
         {
             row = GitSyncRows.Read(conn, entryId);
         }
-        catch (FormatException)
+        catch (Exception ex) when (ex is not (OutOfMemoryException or OperationCanceledException))
         {
-            return null; // the checks refuse the unreadable row
+            return null; // the checks inside the transaction report why the row cannot be read
         }
         if (row?.BaseJson is null)
             return null;

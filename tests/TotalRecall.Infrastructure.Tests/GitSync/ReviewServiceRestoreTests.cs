@@ -263,6 +263,26 @@ public sealed class ReviewServiceRestoreTests : IDisposable
     }
 
     [Fact]
+    public async Task AStickyBase_ThenTheSameRecordUnderAnUnprovenPull_IsNotPostponed_AndLeavesTheEntryAndTheNewPinItem()
+    {
+        var pinned = PinnedLocalHold();
+        Assert.Equal(0, (await Restore(Id, Sha)).ExitCode);
+        var entry = _rig.Entry(Id);
+        var newPin = NewPinRows(Id);
+        var row = Row(Id);
+
+        // An unproven pull decides every accepted record, the restored id included.
+        var result = _rig.Apply(pinned, proven: false, blobSha: Sha);
+
+        Assert.IsNotType<EntryResult.Postponed>(result);
+        Assert.False(IsSticky(Id));
+        Assert.Equal(entry, _rig.Entry(Id));
+        Assert.Equal(newPin, NewPinRows(Id));
+        Assert.Equal(row, Row(Id));
+        Assert.Null(Item(Id));
+    }
+
+    [Fact]
     public async Task ANonStickyBase_OpensNoNewPinItem()
     {
         _rig.LocalHold(Id, Sha);
@@ -422,7 +442,7 @@ public sealed class ReviewServiceRestoreTests : IDisposable
     }
 
     [GitFact]
-    public async Task AStickyBase_OpensANewPinItem_AndAFollowingPull_NeitherPostponesTheIdNorChangesTheItem()
+    public async Task AStickyBase_OpensANewPinItem_AndAFollowingUnprovenPull_NeitherPostponesTheIdNorChangesTheItem()
     {
         using var rig = new PushRig();
         var hash = await PinnedLocalHold(rig);
@@ -442,10 +462,12 @@ public sealed class ReviewServiceRestoreTests : IDisposable
         var items = Review();
         Assert.Equal($"new-pin|open|{hash}|{{\"origin\":\"restore\"}}|{rig.Now}\n", items);
 
+        // Unproven, so the pull decides every accepted record, the restored id included.
+        rig.Pull.CloneGit("update-ref", "-d", "refs/total-recall/last-synced");
         rig.Now += 1000;
         var (summary, _) = await rig.PullAsync();
 
-        Assert.True(summary.Proven);
+        Assert.False(summary.Proven);
         Assert.DoesNotContain(summary.Postponed, p => p.Id == Id);
         Assert.True(summary.Complete);
         Assert.Equal(items, Review());
