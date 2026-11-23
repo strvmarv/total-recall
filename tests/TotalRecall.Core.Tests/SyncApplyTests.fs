@@ -583,3 +583,33 @@ let planRowTotalityTests =
                     planRow d before None None hadEntry colder issue |> ignore
                     true))
     ]
+
+// ---- editedSinceHold ----
+
+let private heldEntry = local "kept" Warm false
+let private heldHash = Some(SyncScan.contentHash heldEntry.Content)
+
+[<Tests>]
+let editedSinceHoldTests =
+    testList "SyncApply.editedSinceHold (milestone 1b-iii part 2, D2)" [
+        testCase "an equal hash and no pending stamp: not edited" <| fun () ->
+            Expect.isFalse (editedSinceHold heldHash false "kept" heldEntry) "unchanged"
+
+        testCase "a different hash (an edit the scan has not stamped yet): edited" <| fun () ->
+            Expect.isTrue (editedSinceHold heldHash false "kept" (local "edited" Warm false)) "text"
+            let project = { heldEntry with Content = { heldEntry.Content with Project = Some "p" } }
+            Expect.isTrue (editedSinceHold heldHash false "kept" project) "project"
+            Expect.isTrue (editedSinceHold None false "kept" heldEntry) "no scanned hash"
+
+        testCase "a pending content stamp with the base's text (a project or scope edit, stamped): not edited" <| fun () ->
+            Expect.isFalse (editedSinceHold heldHash true "kept" heldEntry) "pending stamp, same text"
+
+        testCase "a pending content stamp with a text that differs from the base's (an edit, stamped): edited" <| fun () ->
+            Expect.isTrue (editedSinceHold heldHash true "base text" heldEntry) "pending stamp, other text"
+
+        testCase "a base text that differs, no stamp, an equal hash (a pin-edit merge's state): not edited" <| fun () ->
+            Expect.isFalse (editedSinceHold heldHash false "base text" heldEntry) "no stamp"
+
+        testCase "tags, tier and pin are not content: not edited" <| fun () ->
+            Expect.isFalse (editedSinceHold heldHash false "kept" { heldEntry with Tags = [ "x" ]; Tier = Hot; Sticky = true }) "not content"
+    ]

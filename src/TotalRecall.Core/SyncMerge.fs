@@ -423,6 +423,22 @@ let private textNewer (input: MergeInput) (b: SyncRecord) (t: SyncRecord) : bool
     let own = classify t.ContentStamp (Some b.ContentStamp) input.Pending.Content input.Pushing.Content = Own
     gt t.ContentStamp b.ContentStamp && t.Content <> b.Content && not own
 
+/// W6.4's decision, an applied remote deletion: delete the entry, forget the row (the base is kept), with the note
+/// `PendingChangesDropped` when a tag, tier (`pendingTier`: a pending tier stamp), project, scope or entry type change
+/// goes with the entry. It does not look at the pin: `decide` reaches it only for an entry that W6.2 did not hold, and a
+/// review answer (milestone 1b-iii part 2, D2) carries it out for a held one, pinned or not, because the person answered.
+let remoteDeletion (pendingTier: bool) (bb: SyncRecord) (l: LocalEntry) : MergeDecision =
+    let dropped =
+        normaliseTags l.Tags <> normaliseTags bb.Tags
+        || pendingTier
+        || l.Content.Project <> bb.Project
+        || l.Content.Scope <> bb.Scope
+        || l.Content.EntryType <> bb.EntryType
+    { baseDecision with
+        Entry = DeleteEntry
+        RowState = Some Forgotten
+        Notes = (if dropped then [ PendingChangesDropped ] else []) }
+
 /// W6: the record is absent, the entry is here, the row is `Active` with a base. The first that applies.
 let private absentRecordEntryPresent (input: MergeInput) (bb: SyncRecord) (l: LocalEntry) : MergeDecision * bool =
     let pendingText = input.Pending.Content.IsSome && l.Content.Text <> bb.Content
@@ -433,18 +449,7 @@ let private absentRecordEntryPresent (input: MergeInput) (bb: SyncRecord) (l: Lo
     elif sticky then                                                             // W6.2
         { baseDecision with Entry = (if remoteOpen then LeaveEntry else HoldDeletion RemoteDeletion) }, false
     elif remoteOpen then { baseDecision with Entry = LeaveEntry }, false         // W6.3
-    elif input.ApplyProven then                                                  // W6.4
-        let dropped =
-            normaliseTags l.Tags <> normaliseTags bb.Tags
-            || input.Pending.Tier.IsSome
-            || l.Content.Project <> bb.Project
-            || l.Content.Scope <> bb.Scope
-            || l.Content.EntryType <> bb.EntryType
-        { baseDecision with
-            Entry = DeleteEntry
-            RowState = Some Forgotten
-            Notes = (if dropped then [ PendingChangesDropped ] else []) },
-        false
+    elif input.ApplyProven then remoteDeletion input.Pending.Tier.IsSome bb l, false // W6.4
     else { baseDecision with Entry = HoldDeletion RemoteDeletion }, false        // W6.5
 
 /// W8: the record is present, the entry is gone, the row is `Active` with a base. The first that applies.

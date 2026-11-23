@@ -5,7 +5,8 @@
 /// (`planRow`). Pure and total: no I/O, no clock (a stamp is issued by the caller through a function). Milestone 1b-ii
 /// carries deletions out in both directions (D6 to D13) and marks the groups a reset reverted (D16): `postponement`
 /// keeps only reviews (D19), the visit set gains the marked rows, and `planRow` handles a fresh content stamp, an
-/// applied deletion and the `repush_groups` marker.
+/// applied deletion and the `repush_groups` marker. Milestone 1b-iii part 2 adds the edit test of an answer to a held
+/// remote deletion (`editedSinceHold`, D2).
 module TotalRecall.Core.SyncApply
 
 open System
@@ -288,3 +289,15 @@ let planRow
                       Comparison = comparison
                       Repush = repushMarker d }
             )
+
+// ---------------------------------------------------------------------------------------------
+// Answering a held remote deletion (milestone 1b-iii part 2, D2)
+
+/// The memory of a held remote deletion was edited after the hold was shown, so accepting the deletion is refused
+/// (`edited-locally`): its content hash differs from the row's `scanned_content_hash` (every hold write takes that column
+/// from the stored entry, so a difference is an edit the scan has not stamped yet), **or** W6.1's own condition holds, a
+/// pending content stamp with a text that differs from the base's `baseText` (an edit the scan has stamped). A pending
+/// stamp with the base's text (a project or scope edit) is not an edit here, nor is a base text that differs with no
+/// stamp and an equal hash (the state a pin-edit merge leaves): either would make the item unanswerable.
+let editedSinceHold (scannedContentHash: string option) (pendingContent: bool) (baseText: string) (local: LocalEntry) : bool =
+    Some(SyncScan.contentHash local.Content) <> scannedContentHash || (pendingContent && local.Content.Text <> baseText)

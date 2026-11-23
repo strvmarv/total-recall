@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Microsoft.FSharp.Core;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Diagnostics;
 using TotalRecall.Infrastructure.Embedding;
@@ -23,8 +24,11 @@ public sealed record ReviewEnvironment(SyncSetupEnvironment Setup, Func<IEmbedde
 /// <summary>Which answer an item is checked for.</summary>
 internal enum ReviewOperation { Accept, Restore }
 
-/// <summary>What the checks read inside the answer's transaction: the item, its row (active, with a base) and the local entry.</summary>
-internal sealed record ItemFacts(HeldItem Item, GitSyncRow Row, LocalRead Read);
+/// <summary>
+/// What the checks read inside the answer's transaction: the item, its row (active, with a base), the local entry and the
+/// row's base, parsed when a check needed it (the edit test of a remote <c>Accept</c>), else null.
+/// </summary>
+internal sealed record ItemFacts(HeldItem Item, GitSyncRow Row, LocalRead Read, ParsedRecord? Base);
 
 /// <summary>An embedding computed before the transaction: the base it was computed from and the vector.</summary>
 internal sealed record Embedded(string BaseJson, float[] Vector);
@@ -32,7 +36,7 @@ internal sealed record Embedded(string BaseJson, float[] Vector);
 /// <summary>
 /// Answers the held deletions of this machine (D1): <see cref="List"/> reads them; an answer runs under the sync lock in
 /// one immediate transaction whose checks refuse with <c>no-held-item</c>, <c>failed</c>, <c>unreadable-entry</c>,
-/// <c>stale-item</c> or <c>shown-hash-required</c> and change nothing. Disposing it disposes the embedder it created.
+/// <c>stale-item</c>, <c>shown-hash-required</c> or (a remote <c>Accept</c>) <c>edited-locally</c> and change nothing. Disposing it disposes the embedder it created.
 /// </summary>
 public sealed partial class ReviewService(ReviewEnvironment env) : IDisposable
 {
@@ -185,8 +189,10 @@ public sealed partial class ReviewService(ReviewEnvironment env) : IDisposable
     /// held-delete item <c>open</c> or <c>approved</c> (<c>no-held-item</c>); its row <c>active</c> with a base (<c>failed</c>);
     /// the local entry read (in two tiers or unreadable: <c>unreadable-entry</c>); the entry present for a remote hold and
     /// absent for a local one (<c>stale-item</c>: the next sync closes the item); for a local hold the shown hash (none:
-    /// <c>shown-hash-required</c>; another: <c>stale-item</c>, whose text ends with the item as it is now). A remote hold
-    /// ignores the hash. Null, with <paramref name="facts"/> set, when every check passed.
+    /// <c>shown-hash-required</c>; another: <c>stale-item</c>, whose text ends with the item as it is now); for a remote
+    /// hold answered with <see cref="ReviewOperation.Accept"/> the edit test of D2 on the parsed base (a base that does not
+    /// parse: <c>failed</c>; <c>SyncApply.editedSinceHold</c>: <c>edited-locally</c>). A remote hold ignores the hash. Null,
+    /// with <paramref name="facts"/> set, when every check passed.
     /// </summary>
     private static SetupResult? CheckItem(
         SqliteStoreTransaction tx, string entryId, ReviewOperation op, string? shownHash, out ItemFacts? facts)
@@ -240,7 +246,25 @@ public sealed partial class ReviewService(ReviewEnvironment env) : IDisposable
             }
         }
 
-        facts = new ItemFacts(item, row, read);
+        ParsedRecord? parsedBase = null;
+        if (remote && op == ReviewOperation.Accept)
+        {
+            var parsed = ApplyPlanning.ParseBase(entryId, row.BaseJson);
+            if (parsed.Parsed is null)
+                return Failed("the row's base cannot be read: " + SyncSql.OneLine(SyncValidation.RejectModule.describe(parsed.Rejected)));
+            var local = ((LocalRead.Present)read).View;
+            var scannedHash = row.ScannedContentHash is null ? null : FSharpOption<string>.Some(row.ScannedContentHash);
+            if (SyncApply.editedSinceHold(scannedHash, row.ContentStamp is not null, parsed.Parsed.Record.Content, local))
+            {
+                return Refuse(
+                    SyncSetup.Refusal.EditedLocally,
+                    "the memory was edited here after the hold was shown; nothing changed (an edit that kept the text "
+                    + "can be accepted after the next sync)");
+            }
+            parsedBase = parsed.Parsed;
+        }
+
+        facts = new ItemFacts(item, row, read, parsedBase);
         return null;
     }
 }
