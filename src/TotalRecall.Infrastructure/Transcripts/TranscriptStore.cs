@@ -900,5 +900,7 @@ public sealed partial class TranscriptStore : ITranscriptStore
 
     public ITranscriptSearchReads BeginSearchReads() => new SqliteTranscriptSearchReads(_conn);
 
+    public ITranscriptReads BeginReads() => new SqliteTranscriptReads(_conn);
+
     public void Dispose() => _conn.Dispose();
 }

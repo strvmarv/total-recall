@@ -2,7 +2,7 @@
 //
 // transcript_search: search the opt-in transcript archive by meaning and by words (search the archive, spec section
 // 5). The gate is the sentinel, read on every call: off gives Part 1's off answer. With no service (a composition that
-// gives none) the answer says the search is not set up. Otherwise the arguments are parsed here (argument errors are
+// gives none) the answer says the archive is not set up. Otherwise the arguments are parsed here (argument errors are
 // ArgumentExceptions, which ErrorTranslator turns into "Invalid arguments: ..."), the service opens the archive for the
 // call and closes it, and the answer is serialised through the source-generated JsonContext. A session is always
 // identified as "<host>:<host_session_id>". Registered only by OpenSqlite and OpenCortexCore.
@@ -60,7 +60,7 @@ public sealed class TranscriptSearchHandler : IToolHandler
     {
         var active = _isActive(); // read once per call
         if (!active || _service is null)
-            return TranscriptToolAnswers.ForSearchWithoutService(() => active);
+            return TranscriptToolAnswers.ForNotSetUp(active);
 
         if (!arguments.HasValue || arguments.Value.ValueKind != JsonValueKind.Object)
             throw new ArgumentException("transcript_search requires a JSON object of arguments with a query");
@@ -77,38 +77,16 @@ public sealed class TranscriptSearchHandler : IToolHandler
             TranscriptSearchService.SplitSession(session);
         var sinceText = ArgumentParsing.ReadOptionalString(args, "since");
         DateTimeOffset? since = sinceText is null ? null : TranscriptSearchService.ParseSince(sinceText);
-        var includeAutomated = ReadOptionalBool(args, "include_automated") ?? false;
+        var includeAutomated = ArgumentParsing.ReadOptionalBool(args, "include_automated") ?? false;
         var topK = ArgumentParsing.ReadOptionalInt(args, "top_k", 1, 50) ?? 10;
 
         var response = _service.Search(
             new TranscriptSearchRequest(query, scope, project, session, since, includeAutomated, topK), ct);
 
         if (response.Error is not null)
-        {
-            return Task.FromResult(new ToolCallResult
-            {
-                Content = new[] { new ToolContent { Type = "text", Text = response.Error } },
-                IsError = true,
-            });
-        }
+            return TranscriptToolAnswers.Text(response.Error, isError: true);
 
         var json = JsonSerializer.Serialize(TranscriptSearchResponseDto.From(response), JsonContext.Default.TranscriptSearchResponseDto);
-        return Task.FromResult(new ToolCallResult
-        {
-            Content = new[] { new ToolContent { Type = "text", Text = json } },
-            IsError = false,
-        });
-    }
-
-    private static bool? ReadOptionalBool(JsonElement args, string name)
-    {
-        if (!args.TryGetProperty(name, out var prop) || prop.ValueKind == JsonValueKind.Null)
-            return null;
-        return prop.ValueKind switch
-        {
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            _ => throw new ArgumentException($"{name} must be a boolean"),
-        };
+        return TranscriptToolAnswers.Text(json, isError: false);
     }
 }

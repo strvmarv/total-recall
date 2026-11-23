@@ -141,4 +141,11 @@ public interface ITranscriptStore : IDisposable
     /// rows). The caller disposes it at the end; until then the store's connection belongs to the search.
     /// </summary>
     ITranscriptSearchReads BeginSearchReads();
+
+    /// <summary>
+    /// Starts one deferred read transaction for a whole <c>transcript_get</c> or <c>transcript_sessions</c> call (sessions,
+    /// chunks, stored exchange numbers, the session list). The caller disposes it at the end; until then the store's
+    /// connection belongs to the call.
+    /// </summary>
+    ITranscriptReads BeginReads();
 }

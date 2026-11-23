@@ -184,10 +184,7 @@ internal sealed class SqliteTranscriptSearchReads : ITranscriptSearchReads
         for (var offset = 0; offset < list.Count; offset += IdBatch)
         {
             var take = Math.Min(IdBatch, list.Count - offset);
-            var sql = new StringBuilder(
-                "SELECT c.id, c.session_id, s.host, s.host_session_id, s.project_key, s.kind, s.title, c.ts, c.chunk_type, " +
-                "c.has_error, c.exchange_start, c.exchange_end, c.content " +
-                "FROM tx_chunk c JOIN tx_session s ON s.id = c.session_id WHERE c.id IN (");
+            var sql = new StringBuilder(ChunkRows.Select + " WHERE c.id IN (");
             using var cmd = Command(string.Empty);
             for (var i = 0; i < take; i++)
             {
@@ -202,20 +199,8 @@ internal sealed class SqliteTranscriptSearchReads : ITranscriptSearchReads
             using var r = cmd.ExecuteReader();
             while (r.Read())
             {
-                var id = r.GetInt64(0);
-                result[id] = new ChunkRow(
-                    id,
-                    r.GetInt64(1),
-                    r.GetString(2) + ":" + r.GetString(3),
-                    r.GetString(4),
-                    r.GetString(5),
-                    r.IsDBNull(6) ? null : r.GetString(6),
-                    r.IsDBNull(7) ? null : r.GetString(7),
-                    r.GetString(8),
-                    r.GetInt64(9) != 0,
-                    r.GetInt32(10),
-                    r.GetInt32(11),
-                    r.GetString(12));
+                var chunk = ChunkRows.Read(r);
+                result[chunk.Id] = chunk;
             }
         }
         return result;
