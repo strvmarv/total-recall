@@ -83,6 +83,11 @@ public sealed class DecoratingTranscriptStore : ITranscriptStore
     public ITranscriptSearchReads BeginSearchReads() =>
         OnBeginSearchReads is { } f ? f() : _inner.BeginSearchReads();
 
+    public Func<ITranscriptReads>? OnBeginReads { get; set; }
+
+    public ITranscriptReads BeginReads() =>
+        OnBeginReads is { } f ? f() : _inner.BeginReads();
+
     public void Dispose()
     {
     }
