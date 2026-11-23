@@ -91,9 +91,6 @@ public sealed partial class GitSyncApplier
     private bool InKnowledge(string id) =>
         new[] { Tier.Hot, Tier.Warm, Tier.Cold }.Any(tier => _store.Get(tier, ContentType.Knowledge, id) is not null);
 
-    private static bool InKnowledge(SqliteStoreTransaction tx, string id) =>
-        new[] { Tier.Hot, Tier.Warm, Tier.Cold }.Any(tier => tx.Get(tier, ContentType.Knowledge, id) is not null);
-
     // ---------------------------------------------------------------------------------------------
     // One entry
 
@@ -352,7 +349,7 @@ public sealed partial class GitSyncApplier
         var heldNow = GitSyncReviews.ReadHeldItem(conn, id, dbTx); // any state: an approved item is passed as read (D4)
         if (!Equals(row, rowNow) || !read.Equals(readNow) || !AgreesWithRow(rowNow, readNow) || !Equals(held, heldNow))
             return new EntryResult.Deferred("the entry changed since the decision was made", Busy: false);
-        if (plan.Insert && InKnowledge(tx, id))
+        if (plan.Insert && ApplyPlanning.InKnowledge(tx, id))
             return new EntryResult.Deferred("the id now exists as a knowledge entry", Busy: false);
 
         phase("work");

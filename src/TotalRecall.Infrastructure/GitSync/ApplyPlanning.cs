@@ -106,6 +106,10 @@ internal static class ApplyPlanning
     internal static ParseResult ParseBase(string id, string baseText) =>
         RecordReader.Parse(Encoding.UTF8.GetBytes(baseText), SyncValidation.recordPath(id));
 
+    /// <summary>Whether a knowledge entry in any tier has the id, read inside the caller's transaction (a memory is never inserted under it).</summary>
+    internal static bool InKnowledge(SqliteStoreTransaction tx, string id) =>
+        new[] { Tier.Hot, Tier.Warm, Tier.Cold }.Any(tier => tx.Get(tier, ContentType.Knowledge, id) is not null);
+
     /// <summary>
     /// Inserts the record as the memory <paramref name="id"/> in <paramref name="tier"/> with its vector (null: none), inside
     /// the caller's transaction: the record's text, source, project, tags, scope, type and <c>created_at</c>.

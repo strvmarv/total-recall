@@ -409,7 +409,10 @@ let private baseDecision : MergeDecision =
       CloseHeldDelete = false
       FreshContentStamp = false }
 
-let private insertFrom (t: SyncRecord) (editBeatsDeletion: bool) : MergeDecision =
+/// The decision that inserts the record `t` as the entry (W1, W8.1): the base becomes the record, the row `Active`, a
+/// `NewPin` review for a sticky record and the note `EditBeatsDeletion` when `editBeatsDeletion`. A review answer
+/// (milestone 1b-iii part 2, D5) carries it out to restore a held local deletion from the row's base.
+let insertFrom (t: SyncRecord) (editBeatsDeletion: bool) : MergeDecision =
     { baseDecision with
         Entry = InsertFromRecord
         Base = allTheirs

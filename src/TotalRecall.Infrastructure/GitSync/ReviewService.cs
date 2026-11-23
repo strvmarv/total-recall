@@ -81,6 +81,10 @@ public sealed partial class ReviewService(ReviewEnvironment env) : IDisposable
 
     private static SetupResult Failed(string text) => SetupResult.Refused(SyncSetup.Refusal.Failed, text);
 
+    /// <summary><c>failed</c> for a row's base that does not parse, with the reason.</summary>
+    private static SetupResult UnreadableBase(ParseResult parsed) =>
+        Failed("the row's base cannot be read: " + SyncSql.OneLine(SyncValidation.RejectModule.describe(parsed.Rejected)));
+
     /// <summary>Thrown by a <c>work</c> to leave the transaction without a commit and return <see cref="Result"/> as it is.</summary>
     private sealed class CheckedRollback(SetupResult result) : Exception("the checks passed; the transaction is rolled back")
     {
@@ -251,7 +255,7 @@ public sealed partial class ReviewService(ReviewEnvironment env) : IDisposable
         {
             var parsed = ApplyPlanning.ParseBase(entryId, row.BaseJson);
             if (parsed.Parsed is null)
-                return Failed("the row's base cannot be read: " + SyncSql.OneLine(SyncValidation.RejectModule.describe(parsed.Rejected)));
+                return UnreadableBase(parsed);
             var local = ((LocalRead.Present)read).View;
             var scannedHash = row.ScannedContentHash is null ? null : FSharpOption<string>.Some(row.ScannedContentHash);
             if (SyncApply.editedSinceHold(scannedHash, row.ContentStamp is not null, parsed.Parsed.Record.Content, local))
