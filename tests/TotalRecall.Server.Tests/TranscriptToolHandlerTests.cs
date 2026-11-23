@@ -1,5 +1,6 @@
-// The three archive tools in their off state (spec 2026-11-18, section 9): each answers from a per-call gate, the input
-// schemas are fixed, and the tools are registered only for the sqlite and cortex compositions.
+// The three archive tools in their off and not-set-up states (spec 2026-11-18, section 9; read spec 2026-11-23, section
+// 4): each answers from a per-call gate, the input schemas are fixed, and the tools are registered only for the sqlite
+// and cortex compositions.
 
 namespace TotalRecall.Server.Tests;
 
@@ -15,6 +16,7 @@ using TotalRecall.Infrastructure.Config;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Transcripts;
 using TotalRecall.Server.Handlers;
+using TotalRecall.TestSupport.Transcripts;
 using Xunit;
 using SqliteOpener = TotalRecall.Infrastructure.Storage.SqliteConnection;
 
@@ -23,10 +25,8 @@ public sealed class TranscriptToolHandlerTests
 {
     private const string OffText =
         "Run `total-recall transcripts enable` in a terminal to turn the archive on.";
-    private const string OnText =
-        "This tool is not available in this version yet.";
-    private const string SearchWithoutServiceText =
-        "The archive search is not set up in this server.";
+    private const string NotSetUpText =
+        "The transcript archive is not set up in this server.";
 
     private static readonly string[] ToolNames = { "transcript_search", "transcript_get", "transcript_sessions" };
 
@@ -58,28 +58,15 @@ public sealed class TranscriptToolHandlerTests
         Assert.Equal(OffText, json.GetProperty("hint").GetString());
     }
 
-    [Theory]
-    [InlineData("transcript_get")]
-    [InlineData("transcript_sessions")]
-    public async Task Active_GetAndSessions_AnswerNotAvailableYet(string name)
+    [Theory, MemberData(nameof(Names))]
+    public async Task Active_WithoutAService_AnswersNotSetUp(string name)
     {
         var json = await Call(Make(name, () => true));
         Assert.Equal(3, json.EnumerateObject().Count());
         Assert.True(json.GetProperty("enabled").GetBoolean());
         Assert.False(json.GetProperty("available").GetBoolean());
-        Assert.Equal(OnText, json.GetProperty("hint").GetString());
-        Assert.DoesNotContain("Searching", json.GetProperty("hint").GetString());
-    }
-
-    [Fact]
-    public async Task Active_SearchWithoutAService_NeverSaysSearchIsComingLater()
-    {
-        var json = await Call(Make("transcript_search", () => true));
-        Assert.Equal(3, json.EnumerateObject().Count());
-        Assert.True(json.GetProperty("enabled").GetBoolean());
-        Assert.False(json.GetProperty("available").GetBoolean());
         var hint = json.GetProperty("hint").GetString();
-        Assert.Equal(SearchWithoutServiceText, hint);
+        Assert.Equal(NotSetUpText, hint);
         Assert.DoesNotContain("not available in this version", hint);
     }
 
@@ -98,12 +85,12 @@ public sealed class TranscriptToolHandlerTests
     [Theory]
     [InlineData("transcript_get")]
     [InlineData("transcript_sessions")]
-    public void NameAndDescription_StateOffByDefaultAndNotAvailable(string name)
+    public void NameAndDescription_StateOffByDefaultAndNeverNotAvailable(string name)
     {
         var h = Make(name, () => false);
         Assert.Equal(name, h.Name);
         Assert.Contains("off by default", h.Description);
-        Assert.Contains("not available", h.Description);
+        Assert.DoesNotContain("not available", h.Description);
     }
 
     [Fact]
@@ -170,7 +157,7 @@ public sealed class TranscriptToolHandlerTests
     {
         var h = new TranscriptGetHandler(() => false);
         Assert.Equal(
-            new[] { "id", "session", "from_exchange", "to_exchange", "context" }.OrderBy(x => x),
+            new[] { "id", "session", "from_exchange", "to_exchange", "context", "max_tokens" }.OrderBy(x => x),
             PropNames(h).OrderBy(x => x));
         Assert.Empty(Required(h));
         AssertType(h, "id", "integer");
@@ -181,6 +168,13 @@ public sealed class TranscriptToolHandlerTests
         Assert.Equal(0, Prop(h, "context").GetProperty("minimum").GetInt32());
         Assert.Equal(10, Prop(h, "context").GetProperty("maximum").GetInt32());
         Assert.Equal(1, Prop(h, "context").GetProperty("default").GetInt32());
+        AssertType(h, "max_tokens", "integer");
+        Assert.Equal(200, Prop(h, "max_tokens").GetProperty("minimum").GetInt32());
+        Assert.Equal(20000, Prop(h, "max_tokens").GetProperty("maximum").GetInt32());
+        Assert.Equal(2000, Prop(h, "max_tokens").GetProperty("default").GetInt32());
+        var budget = Prop(h, "max_tokens").GetProperty("description").GetString()!;
+        Assert.Contains("token budget", budget);
+        Assert.Contains("context: 0", budget);
         var raw = h.InputSchema.GetRawText();
         Assert.DoesNotContain("oneOf", raw);
         Assert.DoesNotContain("anyOf", raw);
@@ -192,11 +186,13 @@ public sealed class TranscriptToolHandlerTests
     {
         var h = new TranscriptSessionsHandler(() => false);
         Assert.Equal(
-            new[] { "project", "since", "limit", "include_automated" }.OrderBy(x => x),
+            new[] { "project", "since", "before", "limit", "include_automated" }.OrderBy(x => x),
             PropNames(h).OrderBy(x => x));
         Assert.Empty(Required(h));
         AssertType(h, "project", "string");
         AssertType(h, "since", "string");
+        Assert.Contains("active since", Prop(h, "since").GetProperty("description").GetString());
+        AssertType(h, "before", "string");
         AssertType(h, "limit", "integer");
         Assert.Equal(1, Prop(h, "limit").GetProperty("minimum").GetInt32());
         Assert.Equal(100, Prop(h, "limit").GetProperty("maximum").GetInt32());
@@ -461,6 +457,53 @@ public sealed class TranscriptToolHandlerTests
         finally
         {
             Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", prev);
+            try { Directory.Delete(home, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public async Task SqliteRegistry_GetAndSessions_ReadAPopulatedArchive()
+    {
+        var home = Path.Combine(Path.GetTempPath(), "tr-tt-" + Guid.NewGuid().ToString("N"));
+        var prev = Environment.GetEnvironmentVariable("TOTAL_RECALL_HOME");
+        try
+        {
+            Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", home);
+            Directory.CreateDirectory(home);
+            var db = Path.Combine(home, "t.db");
+            // The archive lives in the main database by default ([transcripts] db_path unset).
+            var open = TranscriptStore.Open(new TranscriptLocation(db, IsMainDatabase: true), create: true);
+            Assert.Equal(TranscriptOpenStatus.Opened, open.Status);
+            using (var store = open.Store!)
+            {
+                new ReadArchiveBuilder(store)
+                    .Session("claude-code", "reg", title: "Registry session",
+                        endedAt: new DateTimeOffset(2026, 11, 20, 9, 0, 0, TimeSpan.Zero))
+                    .Exchange(0, "first exchange").Exchange(1, "second exchange").Commit();
+            }
+            new TranscriptSentinel(home).Write();
+
+            using var handles = ServerComposition.OpenLocalForCatalog(db);
+            Assert.True(handles.Registry.TryGet("transcript_sessions", out var sessions));
+            Assert.True(handles.Registry.TryGet("transcript_get", out var get));
+
+            var listed = await Call(sessions!);
+            Assert.Equal(1, listed.GetProperty("total").GetInt64());
+            var row = Assert.Single(listed.GetProperty("sessions").EnumerateArray());
+            Assert.Equal("claude-code:reg", row.GetProperty("session").GetString());
+            Assert.Equal("Registry session", row.GetProperty("title").GetString());
+
+            var r = await get!.ExecuteAsync(Args("{\"session\":\"claude-code:reg\",\"from_exchange\":1,\"context\":0}"), CancellationToken.None);
+            Assert.NotEqual(true, r.IsError);
+            var read = JsonDocument.Parse(Assert.Single(r.Content).Text).RootElement;
+            var ex = Assert.Single(read.GetProperty("exchanges").EnumerateArray());
+            Assert.Equal(1, ex.GetProperty("n").GetInt32());
+            Assert.Equal("second exchange", ex.GetProperty("text").GetString());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", prev);
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             try { Directory.Delete(home, recursive: true); } catch (IOException) { }
         }
     }
