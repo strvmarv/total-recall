@@ -56,28 +56,34 @@ machine has no sync identity to issue a stamp). Preconditions are checked **insi
 refusal that changes nothing: the item exists in a state the operation accepts (`no-held-item`); the row is `active` and, for
 the operations that need it, has a base (`failed`: "the row no longer matches the item"); the entry is read (`unreadable-entry`);
 the entry's presence matches the direction (a remote hold needs the entry present, a local hold needs it absent: otherwise
-`stale-item`: the next pull closes the item); the shown hash (D6). A refusal never changes the item's state, except
+`stale-item`: the next pull closes the item); for a local hold the shown hash (D6); for a remote hold `Accept`'s edit test (D2).
+A hash passed for a remote hold is ignored; `Accept` of an item that is already `approved`, with the matching hash, answers
+`already accepted` and changes nothing. A refusal never changes the item's state, except
 that a stale answer returns the item as it is now (Shared decision 3: a `held-delete` item stays `open` and never becomes
 `unseen`). The environment carries what the service needs and the setup environment lacks: a lazily created embedder
-(`Func<IEmbedder>`; restore of a local hold only) and the clock.
+(`Func<IEmbedder>`; restore of a local hold only).
 
 There is **no "all" in the service**; the bulk forms are CLI loops over `Accept`/`Restore` (D8). The service never names
 `GitSyncPusher` or `GitSyncCycle` (`GitSyncCycleCallerTests` stays unchanged): it leaves work for the next cycle through the
 rows and items it writes. The row and insert planning the apply uses (`BuildRow`, `PlanStore`, the tier choice) is **shared**:
 the pieces the service needs become internal static helpers that the applier and the service both call, not a second copy.
 The service reads `HotMaxContentChars`/the hot tier limit and `tiers.pinned.max_content_chars` from the loaded config the way
-the cycle's settings do. The environment already carries the clock (`SyncSetupEnvironment.Clock`); the embedder is added.
+the cycle's settings do. The shared helpers include `IssueStamp` (taking the clock as a parameter). The environment already carries the clock
+(`SyncSetupEnvironment.Clock`); the embedder is the only addition.
 
 ### D2. Accepting a held remote deletion
 
 The record is gone from the repository and the memory is still here. `Accept`:
 
-1. refuses `edited-locally` when the entry's current **text differs from the text of the row's base** (the base is the record
-   the hold was decided against; a hold can only exist while the text equals it, because a text edit makes the apply take W6.1,
-   which keeps the entry and closes the item, so a difference means the memory was edited after the hold was shown and before the
-   next pull ran; the item stays open). A pending content stamp alone does not refuse: a project or scope edit leaves one with the
-   text unchanged, and refusing on it would make a held deletion unanswerable for ever (the push excludes a held id, so the stamp
-   never clears);
+1. refuses `edited-locally` when the memory was edited after the hold was shown, that is when **either** the entry's current
+   content hash (`SyncScan.contentHash` of its text) differs from the row's `scanned_content_hash` (every hold write takes the
+   comparison columns from the stored entry, so a difference is an edit made since), **or** W6.1's own condition holds: a pending
+   content stamp **and** a text that differs from the base's (an edit the scan has not stamped as a change yet is covered by the
+   first test, an edit it has stamped by the second). A pending content stamp alone does not refuse: a project or scope edit
+   leaves one with the text unchanged, and refusing on it would make a held deletion unanswerable for ever (the push excludes a
+   held id, so the stamp never clears). A text that differs from the base's with no pending stamp and an unchanged hash does not
+   refuse either: it is the state a pin-edit merge leaves in a later part, where the base takes the record's text. The item stays
+   open on a refusal;
 2. otherwise, in the same transaction, deletes the entry and its vector (the apply's own `tx.Delete`), writes the row exactly as
    the apply writes it for a proven remote deletion (state `forgotten`, base kept, pending stamps and `repush_groups`
    cleared: the row `SyncApply.planRow` produces for `DeleteEntry`), and removes the item.
@@ -99,7 +105,8 @@ the pin. A tag, pin or tier edit made after the hold goes with the entry and is 
    comparison columns as they are;
 3. removes the item.
 
-The next push sees a row with no base and pending stamps, so it writes a new record (the existing `isNew` path; the item no
+The floors need the old base: when it does not parse the restore refuses `failed` with the reason and changes nothing (as D5
+does). The next push sees a row with no base and pending stamps, so it writes a new record (the existing `isNew` path; the item no
 longer excludes it). A restore of a pinned entry (cause `sticky`) publishes a sticky record, which other machines see as a
 new pin and answer through pin review (Part 3). **Documented limit** (umbrella, "same-text restore"): a machine that already
 forgot the memory applies W3 and does not resurrect it unless the record's text is newer than the base it kept, so a restore
@@ -111,7 +118,7 @@ The memory was deleted here and its record is still in the repository. Accepting
 and must not be stopped by the guard (the decision of the owner: **an approved item state**).
 
 `Accept` sets the item's `state` to `approved` (direction `local`, hash and cause unchanged) and writes nothing else; the row and
-the entry are untouched. The shown hash is required and compared first (D6). The item stays until the push has removed the record.
+the entry are untouched. The shown hash is required and compared after the presence checks of D1 (D6). The item stays until the push has removed the record.
 
 How the pull treats an approved item. `SyncMerge.decide` is unchanged. The applier's input builder gains the approved item
 beside the open one and, **only for the shape of W8** (row `active` with a base, entry absent, record present), calls `decide`
@@ -119,7 +126,11 @@ with `proven = true` and no held item, which is exactly W8.3 (and W8.1 first: ne
 shape (entry present, record absent) it decides with the pull's real proof and its open item, so an approved item can never
 turn a W6 case into an uncounted deletion. The approved item is **removed** whenever the entry is present again, the record is
 absent, or the decision is `InsertFromRecord`, the rule `finish` applies to an open local item. The in-transaction re-read of
-`CarryOut` compares the item of any state (`ReadHeldItem`), so an approved item does not defer every pull.
+`CarryOut` compares the item of any state (`ReadHeldItem`), so an approved item does not defer every pull. **Every approved id is
+added to the pull's visit set** (the applier concatenates them as it does the scan-skipped ids; no change to
+`SyncApply.visitSet`), because an id whose entry came back with the same content and whose record did not change is otherwise
+never visited, and its approved item would survive to pre-approve a later, unrelated deletion. Removing or re-opening an approved
+item counts as touching the item, so the decision-13 no-op shortcut does not skip its transaction.
 
 | the id's situation in this pull | what happens |
 |---|---|
@@ -150,9 +161,10 @@ The memory was deleted here and the record is still in the repository. `Restore`
   comparison columns taken from the stored entry, so `local_sticky` is false (Shared decision 4). **No unpin is pushed**: the
   writer patches only groups the person changed, and nothing changed;
 - when the base's record is sticky, a `new-pin` item is written (state `open`, `record_hash` = the held item's own hash, the
-  blob id of the record the person saw, `payload_json` `{"origin":"restore"}`). Nothing reads it in this part, and no pull
-  produces a `NewPin` request for this id (the restored entry's sticky group is unchanged against the base, so the pull does not
-  postpone it): the entry stays an ordinary hot entry and the item waits for Part 3, which answers it (approve pins it, decline
+  blob id of the record the person saw, `payload_json` `{"origin":"restore"}`). The item is written as an upsert on `(entry_id, kind)` (a second restore of the same id replaces it). Nothing reads it in
+  this part, and while the record's pin is unchanged no pull produces a `NewPin` request for this id (the restored entry's
+  sticky group is unchanged against the base, so the pull does not postpone it; a later record with a newer sticky stamp does,
+  as today, until Part 3): the entry stays an ordinary hot entry and the item waits for Part 3, which answers it (approve pins it, decline
   closes it) and keeps its hash current when the record changes (carried to Part 3's spec);
 - the item is removed.
 
@@ -239,14 +251,16 @@ Infrastructure (`GitSync`): `ReviewServiceTests` over the existing rigs (`ApplyR
 - accept, remote hold, refused: a text edited here after the hold (`edited-locally`, item still open, entry untouched); an id in
   two tiers (`unreadable-entry`); the entry already gone or the row no longer matching (`stale-item`/`failed`, nothing changed).
   Accepted, not refused: a project or scope edit that left a pending content stamp with the text unchanged (the case that would
-  otherwise never clear); a tag edit, which the answer reports as dropped;
+  otherwise never clear); a base whose text differs from the entry's with no pending stamp and an unchanged hash (the state a
+  later pin-edit merge leaves: seed it by hand); a tag edit, which the answer reports as dropped; refused: a text edited after
+  the hold, both before the scan stamped it (hash differs) and after (pending stamp and text differs);
 - accept, local hold: the item becomes `approved` and nothing else changes; a following **proven** cycle removes the record from
   the repository and the item is gone and the row `forgotten`; an **unproven** pull does not re-hold it; with more approved
   items than the guard's limit **all** are removed (the guard does not count them) while an unapproved one beside them is
   still counted and held; a record that changed (a tag edit on another machine) between the answer and the pull re-opens the
   item with the new hash and deletes nothing; a record with newer text beats the approved deletion (the entry is inserted, the item
-  gone); a record that vanished leaves the row forgotten and the item gone; the entry re-created under the `active` row removes
-  the item and an unrelated later deletion of that id is held as usual (decided with the real proof, W6 never becomes an
+  gone); a record that vanished leaves the row forgotten and the item gone; the entry re-created under the `active` row with the same content and an unchanged record (the id is not
+  otherwise visited) removes the item and an unrelated later deletion of that id is held as usual (decided with the real proof, W6 never becomes an
   uncounted deletion); an approved item does not defer the apply (the in-transaction re-read covers it); an approved item can
   still be restored; an answer without a shown hash is refused `shown-hash-required`;
 - restore, remote hold: every cause; the entry is untouched, the row has no base and three pending stamps, the next push writes
@@ -293,11 +307,13 @@ fallback fix (D10); hidden verbs and unchanged callers (Tests, Non-goals).
 - **The stale check of a local hold reads the item's own, refreshed hash**, not the clone's current tree (parent Part 2's
   scope text). The clone's HEAD after a rejected push is an unpublished local commit. Owner decision. This needs D10.1.
 - **`restore` of a local hold writes a `new-pin` item carrying the held item's hash** and the entry stays an ordinary hot entry;
-  nothing postpones the id (no pull produces a `NewPin` request for it), and answering the item is Part 3, which must keep its hash
+  nothing postpones the id while the record's pin is unchanged (a later newer sticky stamp is postponed as today, until Part 3),
+  and answering the item is Part 3, which must keep its hash
   current when the record changes (the parent's departures already say answering it is Part 3).
-- **`accept` of a remote hold is refused when the text differs from the base's**, not when the content hash differs from the
-  row's scanned hash or a content stamp is pending (the parent's wording): a pending stamp can outlive the hold for ever (a
-  project or scope edit), which would make the item unanswerable. The base's text is what the hold was decided against.
+- **`accept` of a remote hold is refused on an edit made since the hold** (the content hash differs from the row's scanned
+  hash, or a pending content stamp comes with a text that differs from the base's: W6.1's condition), not whenever a content stamp is
+  pending (the parent's wording). A pending stamp can outlive the hold for ever (a project or scope edit), which would make
+  the item unanswerable.
 - **The service refuses a local-hold answer with no shown hash** (`shown-hash-required`); the parent's Shared decision 3 says an
   answer that carries a hash is checked, and this makes carrying one mandatory at the service boundary. The CLI may read the
   current hash for a person who has just read the list.
