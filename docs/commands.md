@@ -41,14 +41,15 @@ Benchmark candidates captured from retrieval misses are reviewed (accepted or re
 
 ## Transcript archive commands
 
-The opt-in [transcript archive](transcripts.md) is managed with the `total-recall transcripts` command line (not the `/total-recall:commands` skill). It can be enabled, filled from your Claude Code sessions, inspected and emptied but not searched yet.
+The opt-in [transcript archive](transcripts.md) is managed with the `total-recall transcripts` command line (not the `/total-recall:commands` skill). Once enabled it archives your Claude Code sessions in the background at each session start, embeds them on your machine and can be searched by the assistant with `transcript_search`; these commands enable it, fill and embed it on demand, inspect and empty it.
 
 | Command | Description |
 |---|---|
 | `total-recall transcripts enable` | Turn the archive on (asks first; needs a terminal) |
-| `total-recall transcripts backfill [--host claude-code]` | Store your existing Claude Code sessions in the archive, with known secret shapes redacted (no terminal needed; refuses while the archive is off; safe to repeat) |
+| `total-recall transcripts backfill [--host claude-code] [--no-embed]` | Store your existing Claude Code sessions in the archive, with known secret shapes redacted, then embed the chunks that wait (`--no-embed` skips the embedding; no terminal needed; refuses while the archive is off; safe to repeat; Ctrl+C stops) |
+| `total-recall transcripts embed [--retry-failed]` | Turn the chunks that have no vector into vectors, in the foreground, until none is left or Ctrl+C (`--retry-failed` first gives chunks that failed three times a fresh start; no terminal needed; refuses while the archive is off) |
 | `total-recall transcripts disable` | Turn the archive off (no terminal needed; what it holds is kept) |
-| `total-recall transcripts status` | Show whether it is on, where it is and what it holds |
+| `total-recall transcripts status` | Show whether it is on, where it is, what it holds and how much of it is embedded (and whether search uses meaning and words or words only) |
 | `total-recall transcripts forget --session <host>:<id>` | Delete one session and keep it from being archived again (asks first; needs a terminal) |
 | `total-recall transcripts forget --project <key>` | Delete one project's sessions and keep the project from being archived again |
 | `total-recall transcripts forget --all` | Delete everything and set a cutoff so nothing older is archived later |

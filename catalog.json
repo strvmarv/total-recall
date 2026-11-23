@@ -1276,7 +1276,7 @@
     },
     {
       "name": "transcript_search",
-      "description": "Search archived conversation transcripts. The archive is off by default (turn it on with \u0060total-recall transcripts enable\u0060) and searching it is not available in this version yet.",
+      "description": "Search archived conversation transcripts by meaning and by words. The archive is off by default (turn it on with \u0060total-recall transcripts enable\u0060). With no \u0060scope\u0060, a \u0060session\u0060 argument searches that session, else a \u0060project\u0060 argument searches that project, else everything is searched. Automated sessions are left out unless include_automated is true (a named session is always searched). Each hit carries the chunk text, its session, which searches found it (\u0060via\u0060) and a relative score (the top hit is 1.0); \u0060pendingEmbedding\u0060 counts the chunks in scope that only the word search could cover.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1291,12 +1291,11 @@
               "project",
               "all"
             ],
-            "default": "project",
-            "description": "Where to search: one session, the current project (default) or everything"
+            "description": "Where to search: one session, one project or everything; when omitted, session if \u0060session\u0060 is given, else project if \u0060project\u0060 is given, else all"
           },
           "project": {
             "type": "string",
-            "description": "Project to search (default: the current project)"
+            "description": "Project key to search, as archived (for example owner/repo); without \u0060scope\u0060 it selects project scope"
           },
           "session": {
             "type": "string",

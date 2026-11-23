@@ -90,7 +90,13 @@ public sealed class ServerCompositionHandles : IDisposable
     /// </summary>
     public bool SkillAutoImportEnabled { get; }
 
-    internal ServerCompositionHandles(IDisposable resource, ToolRegistry registry, IStore store, string storageMode = "sqlite", Infrastructure.Sync.PeriodicSync? periodicSync = null, ReindexProgress? reindexProgress = null, System.Threading.CancellationTokenSource? reindexCts = null, bool skillAutoImportEnabled = false)
+    /// <summary>
+    /// The transcript archive's <c>session_start</c> pass (sqlite and cortex; null on Postgres). Built here, started
+    /// only by <c>session_start</c>; disposing the handles cancels a running pass. Exposed for tests.
+    /// </summary>
+    internal Infrastructure.Transcripts.ArchivePass? ArchivePass { get; }
+
+    internal ServerCompositionHandles(IDisposable resource, ToolRegistry registry, IStore store, string storageMode = "sqlite", Infrastructure.Sync.PeriodicSync? periodicSync = null, ReindexProgress? reindexProgress = null, System.Threading.CancellationTokenSource? reindexCts = null, bool skillAutoImportEnabled = false, Infrastructure.Transcripts.ArchivePass? archivePass = null)
     {
         _resource = resource;
         Registry = registry;
@@ -100,6 +106,7 @@ public sealed class ServerCompositionHandles : IDisposable
         ReindexProgress = reindexProgress;
         _reindexCts = reindexCts;
         SkillAutoImportEnabled = skillAutoImportEnabled;
+        ArchivePass = archivePass;
     }
 
     public void Dispose()
@@ -109,6 +116,9 @@ public sealed class ServerCompositionHandles : IDisposable
         // _resource), but RunBatched commits per batch + persists a resume cursor,
         // so cancelling between batches is a clean, resumable shutdown. Best-effort
         // — disposal must never throw.
+        // The archive pass owns its connection and embedder too; Dispose cancels its source (it stops between
+        // sessions or batches) and disposes the source once the pass has ended.
+        try { ArchivePass?.Dispose(); } catch { /* best-effort */ }
         try { _reindexCts?.Cancel(); } catch { /* best-effort */ }
         try { _reindexCts?.Dispose(); } catch { /* best-effort */ }
         try { _periodicSync?.Dispose(); } catch { /* best-effort */ }
@@ -148,7 +158,8 @@ public static class ServerComposition
         ReindexProgress? reindexProgress = null,
         string querySource = "assistant",
         Infrastructure.Eval.SessionConfigSnapshot? configSnapshot = null,
-        Infrastructure.WhatsNew.WhatsNewService? whatsNew = null)
+        Infrastructure.WhatsNew.WhatsNewService? whatsNew = null,
+        Infrastructure.Transcripts.IArchivePass? archivePass = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(vectors);
@@ -203,7 +214,7 @@ public static class ServerComposition
         registry.Register(new KbResolveHandler(store));
 
         // ---- Session (4) ----
-        registry.Register(new SessionStartHandler(sessionLifecycle, periodicSync, syncService, whatsNew));
+        registry.Register(new SessionStartHandler(sessionLifecycle, periodicSync, syncService, whatsNew, archivePass: archivePass));
         registry.Register(new SessionEndHandler(sessionLifecycle, store, compactionLogWriter, syncService: syncService, hotMaxContentChars: hotMaxChars, configSnapshot: configSnapshot));
         registry.Register(new SessionContextHandler(store));
         registry.Register(new SessionRefreshHandler(sessionLifecycle));
@@ -256,7 +267,8 @@ public static class ServerComposition
     /// a test passes its own so it need not change the process environment.
     /// </summary>
     internal static ServerCompositionHandles OpenConfigured(
-        Core.Config.TotalRecallConfig cfg, string? dbPath, string querySource, string? pathVariable)
+        Core.Config.TotalRecallConfig cfg, string? dbPath, string querySource, string? pathVariable,
+        Infrastructure.Transcripts.ArchivePassOptions? archivePassOptions = null)
     {
         var configuredMode = "local";
         if (FSharpOption<Core.Config.StorageConfig>.get_IsSome(cfg.Storage)
@@ -281,10 +293,10 @@ public static class ServerComposition
         {
             return configuredMode switch
             {
-                "cortex" => OpenCortex(cfg, dbPath, FriendlyName(configuredMode), querySource),
+                "cortex" => OpenCortex(cfg, dbPath, FriendlyName(configuredMode), querySource, archivePassOptions),
                 "postgres" => OpenPostgres(cfg, FriendlyName(configuredMode), querySource),
-                "git" => OpenGit(cfg, dbPath, querySource, pathVariable),
-                _ => OpenSqlite(cfg, dbPath, FriendlyName(configuredMode), querySource)
+                "git" => OpenGit(cfg, dbPath, querySource, pathVariable, archivePassOptions),
+                _ => OpenSqlite(cfg, dbPath, FriendlyName(configuredMode), querySource, archivePassOptions)
             };
         }
         catch (Exception ex) when (configuredMode is "cortex" or "postgres" or "git")
@@ -294,7 +306,7 @@ public static class ServerComposition
             var friendly = FriendlyName(configuredMode);
             Console.Error.WriteLine(
                 $"[total-recall] {friendly} storage failed, falling back to sqlite: {ex.Message}");
-            return OpenSqlite(cfg, dbPath, $"sqlite ({friendly} failed)", querySource);
+            return OpenSqlite(cfg, dbPath, $"sqlite ({friendly} failed)", querySource, archivePassOptions);
         }
     }
 
@@ -306,7 +318,8 @@ public static class ServerComposition
     /// reports, not a boot failure.
     /// </summary>
     internal static ServerCompositionHandles OpenGit(
-        Core.Config.TotalRecallConfig cfg, string? dbPath, string querySource, string? pathVariable)
+        Core.Config.TotalRecallConfig cfg, string? dbPath, string querySource, string? pathVariable,
+        Infrastructure.Transcripts.ArchivePassOptions? archivePassOptions = null)
     {
         var settings = FSharpOption<Core.Config.GitSyncConfig>.get_IsSome(cfg.GitSync)
             ? cfg.GitSync.Value
@@ -328,7 +341,7 @@ public static class ServerComposition
         foreach (var warning in settings.Warnings)
             Console.Error.WriteLine($"[total-recall] {warning}"); // normalise warnings never quote the remote
 
-        return OpenSqlite(cfg, dbPath, "git", querySource);
+        return OpenSqlite(cfg, dbPath, "git", querySource, archivePassOptions);
     }
 
     /// <summary>
@@ -340,10 +353,11 @@ public static class ServerComposition
     /// concurrently with tests that read TOTAL_RECALL_* env, and mutating that env
     /// would race them into flaky failures.
     /// </summary>
-    internal static ServerCompositionHandles OpenLocalForCatalog(string dbPath)
+    internal static ServerCompositionHandles OpenLocalForCatalog(
+        string dbPath, Infrastructure.Transcripts.ArchivePassOptions? archivePassOptions = null)
     {
         var cfg = new ConfigLoader().LoadEffectiveConfig();
-        return OpenSqlite(cfg, dbPath, "sqlite");
+        return OpenSqlite(cfg, dbPath, "sqlite", archivePassOptions: archivePassOptions);
     }
 
     /// <summary>
@@ -488,7 +502,7 @@ public static class ServerComposition
         return new SmokeTestGate(meta, version, run ?? DefaultRun, key).RunIfNeeded;
     }
 
-    private static ServerCompositionHandles OpenSqlite(Core.Config.TotalRecallConfig cfg, string? dbPath, string storageMode = "sqlite", string querySource = "assistant")
+    private static ServerCompositionHandles OpenSqlite(Core.Config.TotalRecallConfig cfg, string? dbPath, string storageMode = "sqlite", string querySource = "assistant", Infrastructure.Transcripts.ArchivePassOptions? archivePassOptions = null)
     {
         var resolvedDbPath = dbPath ?? ConfigLoader.GetDbPath();
         Directory.CreateDirectory(ConfigLoader.GetDataDir());
@@ -624,6 +638,12 @@ public static class ServerComposition
                 EmbeddingModel: cfg.Embedding.Model,
                 EmbeddingDimensions: cfg.Embedding.Dimensions);
 
+            // Opt-in transcript archive (off by default; the gate reads the sentinel on every call so the answer
+            // follows `transcripts enable|disable` without a restart). sqlite and cortex only. The pass is built here,
+            // before BuildRegistry (which stays pure), and only session_start starts it.
+            var transcriptSentinel = new Infrastructure.Transcripts.TranscriptSentinel(ConfigLoader.GetDataDir());
+            var archivePass = BuildArchivePass(cfg, resolvedDbPath, storageMode, reindexProgress, transcriptSentinel.IsEnabled, archivePassOptions);
+
             var registry = BuildRegistry(
                 store, vec, embedder, hybrid,
                 fileIngester, compactionLog, sessionLifecycle, statusOptions,
@@ -636,7 +656,8 @@ public static class ServerComposition
                 reindexProgress: reindexProgress,
                 querySource: querySource,
                 configSnapshot: configSnapshot,
-                whatsNew: BuildWhatsNew());
+                whatsNew: BuildWhatsNew(),
+                archivePass: archivePass);
 
             registry.Register(new UsageStatusHandler(usageQuery));
 
@@ -654,20 +675,68 @@ public static class ServerComposition
             registry.Register(new SkillImportHostHandler(
                 sqliteSkillService, () => Environment.CurrentDirectory));
 
-            // Opt-in transcript archive tools (off by default; the gate reads the sentinel on every call so the
-            // answer follows `transcripts enable|disable` without a restart). sqlite and cortex only.
-            var transcriptSentinel = new Infrastructure.Transcripts.TranscriptSentinel(ConfigLoader.GetDataDir());
-            registry.Register(new TranscriptSearchHandler(transcriptSentinel.IsEnabled));
+            // The transcript archive tools (the sentinel and the pass are built before BuildRegistry, above).
+            registry.Register(new TranscriptSearchHandler(
+                transcriptSentinel.IsEnabled,
+                new Infrastructure.Transcripts.TranscriptSearchService(
+                    () => TranscriptSearchContextFor(cfg, resolvedDbPath, storageMode, embedder))));
             registry.Register(new TranscriptGetHandler(transcriptSentinel.IsEnabled));
             registry.Register(new TranscriptSessionsHandler(transcriptSentinel.IsEnabled));
 
-            return new ServerCompositionHandles(conn, registry, store, storageMode, reindexProgress: reindexProgress, reindexCts: reindexCts);
+            return new ServerCompositionHandles(conn, registry, store, storageMode, reindexProgress: reindexProgress, reindexCts: reindexCts, archivePass: archivePass);
         }
         catch
         {
             try { conn.Dispose(); } catch { /* best-effort */ }
             throw;
         }
+    }
+
+    /// <summary>
+    /// The per-call context of <c>transcript_search</c>: the <c>[transcripts]</c> settings read now (so a changed
+    /// <c>db_path</c> applies without a restart), the archive's location beside the main database, the storage mode,
+    /// the effective <c>[embedding]</c> config and the composition's embedder. Nothing is opened here. Throws with
+    /// the reason when the location cannot be resolved; the service answers that as an error.
+    /// </summary>
+    private static Infrastructure.Transcripts.TranscriptSearchContext TranscriptSearchContextFor(
+        Core.Config.TotalRecallConfig cfg, string resolvedDbPath, string storageMode, IEmbedder embedder)
+    {
+        var settings = ConfigLoader.LoadTranscriptsSettings();
+        var location = Infrastructure.Transcripts.TranscriptStore.ResolveLocation(settings, resolvedDbPath, out var error)
+            ?? throw new InvalidOperationException(error ?? "transcripts.db_path cannot be resolved");
+        return new Infrastructure.Transcripts.TranscriptSearchContext(location, settings, storageMode, cfg.Embedding, embedder);
+    }
+
+    /// <summary>
+    /// The archive's <c>session_start</c> pass for the sqlite and cortex compositions. Construction does no I/O: the
+    /// context (the <c>[transcripts]</c> settings read when the pass runs, the archive's location beside the main
+    /// database, the storage mode, the effective <c>[embedding]</c> config, the embedder inspection, the memory
+    /// re-embed state and <see cref="Infrastructure.Transcripts.TranscriptAdapters.All"/>) is built by the pass itself.
+    /// <paramref name="isEnabled"/> is the sentinel check <c>Kick</c> makes. <paramref name="options"/> is a test seam.
+    /// </summary>
+    private static Infrastructure.Transcripts.ArchivePass BuildArchivePass(
+        Core.Config.TotalRecallConfig cfg, string resolvedDbPath, string storageMode, ReindexProgress? reindexProgress,
+        Func<bool> isEnabled, Infrastructure.Transcripts.ArchivePassOptions? options)
+    {
+        var inspect = options?.Inspect ?? ((c, threads) => EmbedderInspection.Inspect(c, threads));
+        return new Infrastructure.Transcripts.ArchivePass(
+            () =>
+            {
+                var settings = ConfigLoader.LoadTranscriptsSettings();
+                var location = Infrastructure.Transcripts.TranscriptStore.ResolveLocation(settings, resolvedDbPath, out var error);
+                if (location is null && settings.Enabled)
+                    Console.Error.WriteLine($"[total-recall] transcripts pass: the archive cannot be located: {error}");
+                return new Infrastructure.Transcripts.ArchivePassContext(
+                    settings,
+                    location,
+                    storageMode,
+                    cfg.Embedding,
+                    inspect,
+                    () => reindexProgress is { State: ReindexProgress.Phase.Running },
+                    Infrastructure.Transcripts.TranscriptAdapters.All);
+            },
+            isEnabled,
+            options);
     }
 
     private static ServerCompositionHandles OpenPostgres(Core.Config.TotalRecallConfig cfg, string storageMode = "postgres", string querySource = "assistant")
@@ -757,7 +826,7 @@ public static class ServerComposition
         }
     }
 
-    private static ServerCompositionHandles OpenCortex(Core.Config.TotalRecallConfig cfg, string? dbPath, string storageMode = "cortex", string querySource = "assistant")
+    private static ServerCompositionHandles OpenCortex(Core.Config.TotalRecallConfig cfg, string? dbPath, string storageMode = "cortex", string querySource = "assistant", Infrastructure.Transcripts.ArchivePassOptions? archivePassOptions = null)
     {
         // Cortex mode uses SQLite locally, plus a RoutingStore that enqueues
         // writes for eventual push to the remote Cortex backend.
@@ -779,7 +848,7 @@ public static class ServerComposition
         var cortexUrl = cfg.Cortex.Value.Url;
         var cortexPat = cfg.Cortex.Value.Pat;
 
-        return OpenCortexCore(cfg, resolvedDbPath, cortexUrl, cortexPat, storageMode, querySource);
+        return OpenCortexCore(cfg, resolvedDbPath, cortexUrl, cortexPat, storageMode, querySource, archivePassOptions);
     }
 
     /// <summary>
@@ -787,15 +856,17 @@ public static class ServerComposition
     /// instead of requiring config files.
     /// </summary>
     public static ServerCompositionHandles OpenCortexForTest(
-        string sqliteDbPath, string cortexUrl, string cortexPat)
+        string sqliteDbPath, string cortexUrl, string cortexPat,
+        Infrastructure.Transcripts.ArchivePassOptions? archivePassOptions = null)
     {
         var cfg = new ConfigLoader().LoadEffectiveConfig();
-        return OpenCortexCore(cfg, sqliteDbPath, cortexUrl, cortexPat, "cortex");
+        return OpenCortexCore(cfg, sqliteDbPath, cortexUrl, cortexPat, "cortex", archivePassOptions: archivePassOptions);
     }
 
     private static ServerCompositionHandles OpenCortexCore(
         Core.Config.TotalRecallConfig cfg, string resolvedDbPath,
-        string cortexUrl, string cortexPat, string storageMode = "cortex", string querySource = "assistant")
+        string cortexUrl, string cortexPat, string storageMode = "cortex", string querySource = "assistant",
+        Infrastructure.Transcripts.ArchivePassOptions? archivePassOptions = null)
     {
         var conn = SqliteConnection.Open(resolvedDbPath);
         try
@@ -960,6 +1031,10 @@ public static class ServerComposition
                 EmbeddingModel: cfg.Embedding.Model,
                 EmbeddingDimensions: cfg.Embedding.Dimensions);
 
+            // Opt-in transcript archive (see OpenSqlite): the sentinel and the pass come before BuildRegistry.
+            var transcriptSentinel = new Infrastructure.Transcripts.TranscriptSentinel(ConfigLoader.GetDataDir());
+            var archivePass = BuildArchivePass(cfg, resolvedDbPath, storageMode, reindexProgress, transcriptSentinel.IsEnabled, archivePassOptions);
+
             var registry = BuildRegistry(
                 routingStore, vec, embedder, hybrid,
                 fileIngester, compactionLog, sessionLifecycle, statusOptions,
@@ -975,7 +1050,8 @@ public static class ServerComposition
                 reindexProgress: reindexProgress,
                 querySource: querySource,
                 configSnapshot: configSnapshot,
-                whatsNew: BuildWhatsNew());
+                whatsNew: BuildWhatsNew(),
+                archivePass: archivePass);
 
             registry.Register(new UsageStatusHandler(usageQuery));
 
@@ -992,14 +1068,15 @@ public static class ServerComposition
             registry.Register(new SkillImportHostHandler(
                 skillImportService, () => Environment.CurrentDirectory));
 
-            // Opt-in transcript archive tools (off by default; the gate reads the sentinel on every call so the
-            // answer follows `transcripts enable|disable` without a restart). sqlite and cortex only.
-            var transcriptSentinel = new Infrastructure.Transcripts.TranscriptSentinel(ConfigLoader.GetDataDir());
-            registry.Register(new TranscriptSearchHandler(transcriptSentinel.IsEnabled));
+            // The transcript archive tools (the sentinel and the pass are built before BuildRegistry, above).
+            registry.Register(new TranscriptSearchHandler(
+                transcriptSentinel.IsEnabled,
+                new Infrastructure.Transcripts.TranscriptSearchService(
+                    () => TranscriptSearchContextFor(cfg, resolvedDbPath, storageMode, embedder))));
             registry.Register(new TranscriptGetHandler(transcriptSentinel.IsEnabled));
             registry.Register(new TranscriptSessionsHandler(transcriptSentinel.IsEnabled));
 
-            return new ServerCompositionHandles(conn, registry, routingStore, storageMode, periodicSync, reindexProgress, reindexCts, skillAutoImportEnabled: autoImportEnabled);
+            return new ServerCompositionHandles(conn, registry, routingStore, storageMode, periodicSync, reindexProgress, reindexCts, skillAutoImportEnabled: autoImportEnabled, archivePass: archivePass);
         }
         catch
         {

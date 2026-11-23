@@ -25,7 +25,7 @@ public sealed class TranscriptStoreTests : IDisposable
     {
         var s = Store.Status();
 
-        Assert.Equal(2, s.SchemaVersion);
+        Assert.Equal(3, s.SchemaVersion);
         Assert.Equal(_db.Path, s.Location);
         Assert.Equal(0, s.Sessions);
         Assert.Equal(0, s.Chunks);

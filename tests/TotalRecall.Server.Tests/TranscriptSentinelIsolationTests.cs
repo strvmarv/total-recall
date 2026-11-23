@@ -76,14 +76,14 @@ public sealed class TranscriptSentinelIsolationTests
         Assert.DoesNotContain("TranscriptSentinel", program.Replace(serve, string.Empty));
 
         // The composition root (reached by ui, dump-catalog and tests) never mirrors or writes the sentinel. It only
-        // READS it, through the gate of the three archive tools (OpenSqlite and OpenCortexCore, one each), evaluated
-        // on every tool call.
+        // READS it, through the gate of the three archive tools and the session_start pass's Kick (OpenSqlite and
+        // OpenCortexCore, one each), evaluated on every call.
         var composition = File.ReadAllText(Path.Combine(root, "src", "TotalRecall.Server", "ServerComposition.cs"));
         Assert.DoesNotContain(".Mirror(", composition);
         Assert.DoesNotContain("TranscriptSentinel.EffectiveStorageMode", composition);
         Assert.Equal(2, Count(composition, "new Infrastructure.Transcripts.TranscriptSentinel(ConfigLoader.GetDataDir())"));
         Assert.Equal(2, Count(composition, "TranscriptSentinel"));
-        Assert.Equal(6, Count(composition, "transcriptSentinel.IsEnabled"));
+        Assert.Equal(8, Count(composition, "transcriptSentinel.IsEnabled"));
         // The web UI never touches it.
         var web = Directory.EnumerateFiles(Path.Combine(root, "src", "TotalRecall.Web"), "*.cs", SearchOption.AllDirectories)
             .Where(f => !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar)

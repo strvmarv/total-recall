@@ -41,7 +41,7 @@ public sealed record TranscriptOpenResult(TranscriptOpenStatus Status, ITranscri
 /// with pooling off and <c>PRAGMA secure_delete = ON</c>. A separate file still loads sqlite-vec, because
 /// <see cref="SqliteOpener.Open"/> is the only open helper. All SQL is parameterised.
 /// </summary>
-public sealed class TranscriptStore : ITranscriptStore
+public sealed partial class TranscriptStore : ITranscriptStore
 {
     private const string CutoffKey = "ingest_not_before";
     private const int CheckpointRetries = 3;
@@ -897,6 +897,8 @@ public sealed class TranscriptStore : ITranscriptStore
         using var cmd = Command(tx, sql, parameters);
         return cmd.ExecuteNonQuery();
     }
+
+    public ITranscriptSearchReads BeginSearchReads() => new SqliteTranscriptSearchReads(_conn);
 
     public void Dispose() => _conn.Dispose();
 }

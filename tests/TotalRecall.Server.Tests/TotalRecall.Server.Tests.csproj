@@ -23,4 +23,7 @@
     <ProjectReference Include="..\..\src\TotalRecall.Infrastructure\TotalRecall.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\TotalRecall.Server\TotalRecall.Server.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\TotalRecall.Infrastructure.Tests\Transcripts\Support\*.cs" LinkBase="TranscriptSupport" />
+  </ItemGroup>
 </Project>

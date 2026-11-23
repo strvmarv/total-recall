@@ -10,8 +10,13 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.FSharp.Core;
+using TotalRecall.Infrastructure.Config;
+using TotalRecall.Infrastructure.Embedding;
+using TotalRecall.Infrastructure.Transcripts;
 using TotalRecall.Server.Handlers;
 using Xunit;
+using SqliteOpener = TotalRecall.Infrastructure.Storage.SqliteConnection;
 
 [Collection("process-environment-console")]
 public sealed class TranscriptToolHandlerTests
@@ -19,7 +24,9 @@ public sealed class TranscriptToolHandlerTests
     private const string OffText =
         "Run `total-recall transcripts enable` in a terminal to turn the archive on.";
     private const string OnText =
-        "Searching the archive is not available in this version yet.";
+        "This tool is not available in this version yet.";
+    private const string SearchWithoutServiceText =
+        "The archive search is not set up in this server.";
 
     private static readonly string[] ToolNames = { "transcript_search", "transcript_get", "transcript_sessions" };
 
@@ -51,14 +58,29 @@ public sealed class TranscriptToolHandlerTests
         Assert.Equal(OffText, json.GetProperty("hint").GetString());
     }
 
-    [Theory, MemberData(nameof(Names))]
-    public async Task Active_AnswersNotAvailableYet(string name)
+    [Theory]
+    [InlineData("transcript_get")]
+    [InlineData("transcript_sessions")]
+    public async Task Active_GetAndSessions_AnswerNotAvailableYet(string name)
     {
         var json = await Call(Make(name, () => true));
         Assert.Equal(3, json.EnumerateObject().Count());
         Assert.True(json.GetProperty("enabled").GetBoolean());
         Assert.False(json.GetProperty("available").GetBoolean());
         Assert.Equal(OnText, json.GetProperty("hint").GetString());
+        Assert.DoesNotContain("Searching", json.GetProperty("hint").GetString());
+    }
+
+    [Fact]
+    public async Task Active_SearchWithoutAService_NeverSaysSearchIsComingLater()
+    {
+        var json = await Call(Make("transcript_search", () => true));
+        Assert.Equal(3, json.EnumerateObject().Count());
+        Assert.True(json.GetProperty("enabled").GetBoolean());
+        Assert.False(json.GetProperty("available").GetBoolean());
+        var hint = json.GetProperty("hint").GetString();
+        Assert.Equal(SearchWithoutServiceText, hint);
+        Assert.DoesNotContain("not available in this version", hint);
     }
 
     [Theory, MemberData(nameof(Names))]
@@ -73,13 +95,30 @@ public sealed class TranscriptToolHandlerTests
         Assert.False((await Call(h)).GetProperty("enabled").GetBoolean());
     }
 
-    [Theory, MemberData(nameof(Names))]
+    [Theory]
+    [InlineData("transcript_get")]
+    [InlineData("transcript_sessions")]
     public void NameAndDescription_StateOffByDefaultAndNotAvailable(string name)
     {
         var h = Make(name, () => false);
         Assert.Equal(name, h.Name);
         Assert.Contains("off by default", h.Description);
         Assert.Contains("not available", h.Description);
+    }
+
+    [Fact]
+    public void SearchDescription_MeaningWordsAndTheScopeRule()
+    {
+        var h = new TranscriptSearchHandler(() => false);
+        Assert.Equal("transcript_search", h.Name);
+        var d = h.Description;
+        Assert.Contains("off by default", d);
+        Assert.Contains("by meaning and by words", d);
+        Assert.Contains("no `scope`", d);
+        Assert.Contains("`session`", d);
+        Assert.Contains("`project`", d);
+        Assert.Contains("everything", d);
+        Assert.DoesNotContain("not available", d);
     }
 
     private static JsonElement Prop(IToolHandler h, string name) => h.InputSchema.GetProperty("properties").GetProperty(name);
@@ -106,7 +145,15 @@ public sealed class TranscriptToolHandlerTests
         AssertType(h, "scope", "string");
         Assert.Equal(new[] { "session", "project", "all" }.OrderBy(x => x),
             Prop(h, "scope").GetProperty("enum").EnumerateArray().Select(e => e.GetString()!).OrderBy(x => x));
-        Assert.Equal("project", Prop(h, "scope").GetProperty("default").GetString());
+        Assert.False(Prop(h, "scope").TryGetProperty("default", out _));
+        foreach (var p in new[] { "scope", "project" })
+        {
+            var desc = Prop(h, p).GetProperty("description").GetString()!;
+            Assert.DoesNotContain("current project", desc);
+            Assert.DoesNotContain("(default)", desc);
+        }
+        Assert.Contains("when omitted", Prop(h, "scope").GetProperty("description").GetString());
+        Assert.Contains("without `scope`", Prop(h, "project").GetProperty("description").GetString());
         AssertType(h, "project", "string");
         AssertType(h, "session", "string");
         AssertType(h, "since", "string");
@@ -156,6 +203,245 @@ public sealed class TranscriptToolHandlerTests
         Assert.Equal(20, Prop(h, "limit").GetProperty("default").GetInt32());
         AssertType(h, "include_automated", "boolean");
         Assert.False(Prop(h, "include_automated").GetProperty("default").GetBoolean());
+    }
+
+    // ---- transcript_search with a service ----
+
+    private sealed class FixedEmbedder : IEmbedder
+    {
+        public List<string> Calls { get; } = new();
+        public EmbedderDescriptor Descriptor { get; } = new("local", "bge-small-en-v1.5", "rev1", 384);
+        public float[] Embed(string text)
+        {
+            Calls.Add(text);
+            var v = new float[384];
+            v[0] = 1f;
+            return v;
+        }
+    }
+
+    /// <summary>A temporary archive file with one session of two chunks, one with a vector.</summary>
+    private sealed class Archive : IDisposable
+    {
+        public string Dir { get; } = Path.Combine(Path.GetTempPath(), "tr-ts-" + Guid.NewGuid().ToString("N"));
+        public string File => Path.Combine(Dir, "archive.db");
+        public long VectorChunk { get; }
+        public long WordChunk { get; }
+
+        public Archive(bool populate = true)
+        {
+            Directory.CreateDirectory(Dir);
+            var open = TranscriptStore.Open(new TranscriptLocation(File, IsMainDatabase: false), create: true);
+            Assert.Equal(TranscriptOpenStatus.Opened, open.Status);
+            open.Store!.Dispose();
+            if (!populate) return;
+
+            using var conn = SqliteOpener.Open(File, pooling: false);
+            long Scalar(string sql, params (string, object)[] ps)
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = sql;
+                foreach (var (n, v) in ps) cmd.Parameters.AddWithValue(n, v);
+                return Convert.ToInt64(cmd.ExecuteScalar());
+            }
+            var s = Scalar(
+                "INSERT INTO tx_session (host, host_session_id, project_key, project_key_source, kind, title) " +
+                "VALUES ('claude-code', 'abc', 'owner/repo', 'remote', 'interactive', 'A title'); SELECT last_insert_rowid();");
+            const string insertChunk =
+                "INSERT INTO tx_chunk (session_id, exchange_start, exchange_end, part, chunk_type, has_error, ts, redaction_version, content) " +
+                "VALUES ($s, $e, $e + 1, 0, 'dialogue', 0, '2026-11-18T10:02:11.0000000Z', 1, $c); SELECT last_insert_rowid();";
+            VectorChunk = Scalar(insertChunk, ("$s", s), ("$e", 0), ("$c", "[owner/repo]\n\nwe deployed the staging site"));
+            WordChunk = Scalar(insertChunk, ("$s", s), ("$e", 2), ("$c", "[owner/repo]\n\nSQLITE_BUSY: database is locked"));
+            var vec = new float[384];
+            vec[0] = 1f;
+            var bytes = new byte[384 * sizeof(float)];
+            Buffer.BlockCopy(vec, 0, bytes, 0, bytes.Length);
+            Scalar("INSERT INTO tx_chunk_vec (rowid, session_id, project, kind, ts, embedding) VALUES ($r, $s, 'owner/repo', 'interactive', 0, $e); " +
+                   "UPDATE tx_chunk SET embedded = 1 WHERE id = $r; SELECT 0;", ("$r", VectorChunk), ("$s", s), ("$e", bytes));
+        }
+
+        public TranscriptSearchService Service(IEmbedder embedder) => new(() => new TranscriptSearchContext(
+            new TranscriptLocation(File, IsMainDatabase: false),
+            new TranscriptsSettings(true, string.Empty, null, 0, false),
+            "sqlite",
+            new Core.Config.EmbeddingConfig("bge-small-en-v1.5", 384,
+                FSharpOption<string>.None, FSharpOption<string>.None, FSharpOption<string>.None, FSharpOption<string>.None,
+                FSharpOption<string>.None, FSharpOption<string>.None, FSharpOption<string>.None, FSharpOption<string>.None),
+            embedder));
+
+        public void Dispose()
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try { Directory.Delete(Dir, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    private static JsonElement Args(string json) => JsonDocument.Parse(json).RootElement.Clone();
+
+    [Fact]
+    public async Task Search_InactiveWithService_IsTheOffAnswer()
+    {
+        using var a = new Archive();
+        var embedder = new FixedEmbedder();
+        var json = await Call(new TranscriptSearchHandler(() => false, a.Service(embedder)));
+        Assert.False(json.GetProperty("enabled").GetBoolean());
+        Assert.Equal(OffText, json.GetProperty("hint").GetString());
+        Assert.Empty(embedder.Calls);
+    }
+
+    [Fact]
+    public async Task Search_Active_ReturnsTheDtoJson()
+    {
+        using var a = new Archive();
+        var embedder = new FixedEmbedder();
+        var h = new TranscriptSearchHandler(() => true, a.Service(embedder));
+        var r = await h.ExecuteAsync(Args("{\"query\":\"SQLITE_BUSY: database is locked\",\"session\":\"claude-code:abc\"}"), CancellationToken.None);
+        Assert.NotEqual(true, r.IsError);
+        var json = JsonDocument.Parse(Assert.Single(r.Content).Text).RootElement;
+
+        Assert.True(json.GetProperty("enabled").GetBoolean());
+        Assert.Equal("SQLITE_BUSY: database is locked", json.GetProperty("query").GetString());
+        Assert.Equal("session", json.GetProperty("scope").GetString());
+        Assert.False(json.TryGetProperty("scopeNote", out _));
+        Assert.Equal("on", json.GetProperty("search").GetProperty("meaning").GetString());
+        Assert.False(json.GetProperty("search").TryGetProperty("reason", out _));
+        Assert.Equal(1, json.GetProperty("pendingEmbedding").GetInt64()); // the word chunk has no vector
+        Assert.False(json.TryGetProperty("truncated", out _));
+        Assert.False(json.TryGetProperty("truncatedHits", out _));
+        Assert.False(json.TryGetProperty("note", out _));
+
+        var results = json.GetProperty("results").EnumerateArray().ToArray();
+        Assert.Equal(2, results.Length);
+        var top = results[0];
+        Assert.Equal(a.WordChunk, top.GetProperty("id").GetInt64());
+        Assert.Equal("claude-code:abc", top.GetProperty("session").GetString());
+        Assert.Equal("owner/repo", top.GetProperty("project").GetString());
+        Assert.Equal("interactive", top.GetProperty("kind").GetString());
+        Assert.Equal("A title", top.GetProperty("title").GetString());
+        Assert.Equal("2026-11-18T10:02:11.0000000Z", top.GetProperty("ts").GetString());
+        Assert.Equal("dialogue", top.GetProperty("chunkType").GetString());
+        Assert.False(top.GetProperty("hasError").GetBoolean());
+        Assert.Equal("2-3", top.GetProperty("exchanges").GetString());
+        Assert.Equal(new[] { "phrase", "words" }, top.GetProperty("via").EnumerateArray().Select(e => e.GetString()).ToArray());
+        Assert.Equal(1.0, top.GetProperty("score").GetDouble(), 6);
+        Assert.Equal("SQLITE_BUSY: database is locked", top.GetProperty("text").GetString());
+
+        var second = results[1];
+        Assert.Equal(a.VectorChunk, second.GetProperty("id").GetInt64());
+        Assert.Equal(new[] { "meaning" }, second.GetProperty("via").EnumerateArray().Select(e => e.GetString()).ToArray());
+        Assert.Single(embedder.Calls);
+    }
+
+    [Fact]
+    public async Task Search_EmptyArchive_NoteAndEmptyResults()
+    {
+        using var a = new Archive(populate: false);
+        var r = await new TranscriptSearchHandler(() => true, a.Service(new FixedEmbedder()))
+            .ExecuteAsync(Args("{\"query\":\"anything\",\"scope\":\"project\"}"), CancellationToken.None);
+        var json = JsonDocument.Parse(Assert.Single(r.Content).Text).RootElement;
+        Assert.True(json.GetProperty("enabled").GetBoolean());
+        Assert.Empty(json.GetProperty("results").EnumerateArray());
+        Assert.Equal("nothing is archived yet; run total-recall transcripts backfill", json.GetProperty("note").GetString());
+        Assert.Equal("all", json.GetProperty("scope").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(json.GetProperty("scopeNote").GetString()));
+    }
+
+    [Fact]
+    public async Task Search_MeaningOff_CarriesTheReason()
+    {
+        using var a = new Archive();
+        var svc = new TranscriptSearchService(() => new TranscriptSearchContext(
+            new TranscriptLocation(a.File, IsMainDatabase: false),
+            new TranscriptsSettings(true, string.Empty, null, 0, false),
+            "sqlite",
+            new Core.Config.EmbeddingConfig("m", 384, FSharpOption<string>.Some("openai"), FSharpOption<string>.None, FSharpOption<string>.None,
+                FSharpOption<string>.None, FSharpOption<string>.None, FSharpOption<string>.None, FSharpOption<string>.None, FSharpOption<string>.None),
+            new FixedEmbedder()));
+        var r = await new TranscriptSearchHandler(() => true, svc).ExecuteAsync(Args("{\"query\":\"database\"}"), CancellationToken.None);
+        var json = JsonDocument.Parse(Assert.Single(r.Content).Text).RootElement;
+        Assert.Equal("off", json.GetProperty("search").GetProperty("meaning").GetString());
+        Assert.Equal("words only: the embedding provider is remote and allow_remote_embedding is off",
+            json.GetProperty("search").GetProperty("reason").GetString());
+        Assert.Equal(2, json.GetProperty("pendingEmbedding").GetInt64());
+    }
+
+    [Fact]
+    public async Task Search_Truncated_CarriesTheFlagAndCount()
+    {
+        using var a = new Archive(populate: false);
+        using (var conn = SqliteOpener.Open(a.File, pooling: false))
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "INSERT INTO tx_session (host, host_session_id, project_key, project_key_source, kind) VALUES ('pi', 'big', 'o/r', 'remote', 'interactive')";
+            cmd.ExecuteNonQuery();
+            var body = "zebra " + new string('x', 1794);
+            for (var i = 0; i < 30; i++)
+            {
+                using var ins = conn.CreateCommand();
+                ins.CommandText = "INSERT INTO tx_chunk (session_id, exchange_start, exchange_end, part, chunk_type, redaction_version, content) VALUES (1, $e, $e, 0, 'dialogue', 1, $c)";
+                ins.Parameters.AddWithValue("$e", i);
+                ins.Parameters.AddWithValue("$c", body);
+                ins.ExecuteNonQuery();
+            }
+        }
+        var r = await new TranscriptSearchHandler(() => true, a.Service(new FixedEmbedder()))
+            .ExecuteAsync(Args("{\"query\":\"zebra\",\"session\":\"pi:big\",\"top_k\":30}"), CancellationToken.None);
+        var json = JsonDocument.Parse(Assert.Single(r.Content).Text).RootElement;
+        Assert.True(json.GetProperty("truncated").GetBoolean());
+        Assert.Equal(8, json.GetProperty("truncatedHits").GetInt32());
+        Assert.Equal(22, json.GetProperty("results").GetArrayLength());
+    }
+
+    public static IEnumerable<object[]> BadArguments() => new[]
+    {
+        new object[] { "{}" },
+        new object[] { "{\"query\":\"\"}" },
+        new object[] { "{\"query\":\"   \"}" },
+        new object[] { "{\"query\":5}" },
+        new object[] { "{\"query\":\"x\",\"since\":\"yesterday\"}" },
+        new object[] { "{\"query\":\"x\",\"session\":\"nocolon\"}" },
+        new object[] { "{\"query\":\"x\",\"top_k\":0}" },
+        new object[] { "{\"query\":\"x\",\"top_k\":51}" },
+        new object[] { "{\"query\":\"x\",\"top_k\":\"ten\"}" },
+        new object[] { "{\"query\":\"x\",\"scope\":\"everything\"}" },
+        new object[] { "{\"query\":\"x\",\"scope\":\"session\"}" },
+        new object[] { "{\"query\":\"x\",\"include_automated\":\"yes\"}" },
+    };
+
+    [Theory, MemberData(nameof(BadArguments))]
+    public async Task Search_BadArguments_SurfaceThroughErrorTranslator(string args)
+    {
+        using var a = new Archive();
+        var h = new TranscriptSearchHandler(() => true, a.Service(new FixedEmbedder()));
+        var ex = await Assert.ThrowsAnyAsync<ArgumentException>(() => h.ExecuteAsync(Args(args), CancellationToken.None));
+        var r = ErrorTranslator.Translate(ex, new StringWriter());
+        Assert.True(r.IsError);
+        Assert.StartsWith("Invalid arguments:", Assert.Single(r.Content).Text);
+    }
+
+    [Fact]
+    public async Task Search_NullArguments_IsAnArgumentError()
+    {
+        using var a = new Archive();
+        var h = new TranscriptSearchHandler(() => true, a.Service(new FixedEmbedder()));
+        await Assert.ThrowsAnyAsync<ArgumentException>(() => h.ExecuteAsync(null, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Search_ServiceError_IsAnIsErrorResult()
+    {
+        using var a = new Archive();
+        // a separate archive file named as the main database: Open refuses it
+        var svc = new TranscriptSearchService(() => new TranscriptSearchContext(
+            new TranscriptLocation(a.File, IsMainDatabase: true),
+            new TranscriptsSettings(true, string.Empty, null, 0, false),
+            "sqlite",
+            new Core.Config.EmbeddingConfig("m", 384, FSharpOption<string>.None, FSharpOption<string>.None, FSharpOption<string>.None,
+                FSharpOption<string>.None, FSharpOption<string>.None, FSharpOption<string>.None, FSharpOption<string>.None, FSharpOption<string>.None),
+            new FixedEmbedder()));
+        var r = await new TranscriptSearchHandler(() => true, svc).ExecuteAsync(Args("{\"query\":\"x\"}"), CancellationToken.None);
+        Assert.True(r.IsError);
+        Assert.Contains("holds only a transcript archive", Assert.Single(r.Content).Text);
     }
 
     // ---- registration points ----

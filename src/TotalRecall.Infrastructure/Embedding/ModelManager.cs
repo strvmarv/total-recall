@@ -106,6 +106,49 @@ public sealed class ModelManager
     }
 
     /// <summary>
+    /// Null when the named model is structurally valid in the bundled or the user directory; otherwise a reason that
+    /// names the model and the missing or wrong-sized file (the bundled directory's when it exists, else the user's).
+    /// Loads nothing and hashes nothing.
+    /// </summary>
+    public string? DescribeProblem(string modelName)
+    {
+        if (!_registry.TryGetSpec(modelName, out var spec) || spec is null)
+        {
+            return $"model '{modelName}' is not in the model registry";
+        }
+
+        var bundled = GetBundledModelPath(modelName);
+        var user = GetUserModelPath(modelName);
+        if (IsStructurallyValid(bundled, spec) || IsStructurallyValid(user, spec))
+        {
+            return null;
+        }
+
+        var path = Directory.Exists(bundled) || !Directory.Exists(user) ? bundled : user;
+        if (!Directory.Exists(path))
+        {
+            return $"model '{modelName}' not found at {path}";
+        }
+
+        foreach (var fileName in spec.Files.Keys.OrderBy(k => k, StringComparer.Ordinal))
+        {
+            if (!File.Exists(Path.Combine(path, fileName)))
+            {
+                return $"model '{modelName}': {fileName} is missing from {path}";
+            }
+        }
+
+        var onnx = Path.Combine(path, ModelOnnxFileName);
+        if (!File.Exists(onnx))
+        {
+            return $"model '{modelName}': {ModelOnnxFileName} is missing from {path}";
+        }
+
+        var size = new FileInfo(onnx).Length;
+        return $"model '{modelName}': {ModelOnnxFileName} is {size} bytes, expected {spec.SizeBytes}";
+    }
+
+    /// <summary>
     /// Checksum validation: if a <c>.verified</c> sidecar is present and
     /// matches the expected SHA-256, returns true immediately (cache hit).
     /// Otherwise hashes <c>model.onnx</c>, writes the sidecar on match, and

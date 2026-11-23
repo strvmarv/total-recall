@@ -3,6 +3,8 @@ using System;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using TotalRecall.Infrastructure.Diagnostics;
+using TotalRecall.Infrastructure.Transcripts;
 using TotalRecall.Infrastructure.WhatsNew;
 
 namespace TotalRecall.Server.Handlers;
@@ -23,6 +25,7 @@ public sealed class SessionStartHandler : IToolHandler
     private readonly TotalRecall.Infrastructure.Sync.SyncService? _syncService;
     private readonly WhatsNewService? _whatsNew;
     private readonly TimeProvider _time;
+    private readonly IArchivePass? _archivePass;
 
     /// <summary>A call that took longer than this gets no notice: the model's
     /// own tool timeout is near, and a notice that is not shown must not be recorded.</summary>
@@ -33,7 +36,8 @@ public sealed class SessionStartHandler : IToolHandler
         TotalRecall.Infrastructure.Sync.PeriodicSync? periodicSync = null,
         TotalRecall.Infrastructure.Sync.SyncService? syncService = null,
         WhatsNewService? whatsNew = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IArchivePass? archivePass = null)
     {
         _sessionLifecycle = sessionLifecycle
             ?? throw new ArgumentNullException(nameof(sessionLifecycle));
@@ -41,6 +45,7 @@ public sealed class SessionStartHandler : IToolHandler
         _syncService = syncService;
         _whatsNew = whatsNew;
         _time = timeProvider ?? TimeProvider.System;
+        _archivePass = archivePass;
     }
 
     public string Name => "session_start";
@@ -93,6 +98,17 @@ public sealed class SessionStartHandler : IToolHandler
         {
             try { pending.MarkSeen(); }
             catch { /* best-effort: an unrecorded notice is simply offered again */ }
+        }
+
+        // The transcript archive's pass, after the response is built. Kick returns at once (it reads one
+        // sentinel file and may start a background task); nothing here waits for it or may fail session_start.
+        if (_archivePass is not null)
+        {
+            try { _archivePass.Kick(); }
+            catch (Exception ex)
+            {
+                try { ExceptionLogger.LogChain("[total-recall] transcripts pass: kick", ex); } catch { /* logging must not throw */ }
+            }
         }
         return new ToolCallResult
         {
