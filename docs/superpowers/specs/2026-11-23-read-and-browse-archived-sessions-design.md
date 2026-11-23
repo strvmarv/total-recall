@@ -239,7 +239,8 @@ without a note. When `more` is above 0 the note says that only the newest `limit
   set up in this server."}` (the search's `OnSearchNotSetUp`, whose text names only the search, is renamed and reworded to it, and
   `TranscriptToolHandlerTests` follows); on with a service runs it. `TranscriptToolAnswers.OnNotAvailable` and `For` go away (nothing answers "not available in this version yet"
   any more); the tests and docs that pin that text change with it.
-- Arguments are parsed in the handler as the search handler does (`ArgumentParsing`, `ReadOptionalBool` shared, not copied). An
+- Arguments are parsed in the handler (`ArgumentParsing`, with the two strict readers of section 2 and `ReadOptionalBool` shared with the
+  search handler, not copied; a missing `arguments` is as section 3 says). An
   `ArgumentException` is the caller's error. An archive that cannot be opened or read is an **error result**, written to stderr with
   the `[total-recall] transcript_get` prefix, never an exception that escapes.
 - `TranscriptReadService(Func<TranscriptReadContext?> context, TimeProvider? time = null)`, with an internal open seam for tests as the
@@ -249,7 +250,8 @@ without a note. When `more` is above 0 the note says that only the newest `limit
 - `ServerComposition` registers the new handlers in `OpenSqlite` and `OpenCortexCore`, beside the search handler, with a context
   built from the resolved location (the search's `TranscriptSearchContextFor` is split so the location part is shared). `OpenPostgres`
   registers no archive tool today and still registers none. The tool count (54), the announce files and the tool names do not change;
-  the two descriptions lose "not available in this version yet", and the `get` schema gains `max_tokens`.
+  the two descriptions lose "not available in this version yet"; the `get` schema gains `max_tokens` and the `sessions` schema gains
+  `before` (and its `since` becomes "active since"). `catalog.json` is regenerated.
 - Responses are source-generated DTOs in `JsonContext` (no reflection; NativeAOT). The strings of the off and not-set-up answers stay
   hard-coded JSON.
 
