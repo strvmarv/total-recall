@@ -466,6 +466,26 @@ public sealed class GitSyncPusherFinalizeTests : IDisposable
     }
 
     [GitFact]
+    public async Task AForgottenRemoval_StillRemovesItsHeldItem()
+    {
+        await SyncedThenDeleted();
+
+        // after the plan, the row is already forgotten and the id has an approved held-delete item (milestone 1b-iii, D4)
+        var (outcome, _, apply, _) = await PullAndPush(p => p.BeforePush = () =>
+        {
+            GitSyncRows.Write(_rig.Pull.Connection, Row(A) with { State = SyncMerge.RowState.Forgotten });
+            GitSyncReviews.UpsertHeld(_rig.Pull.Connection, new HeldItem(A, "local", "0123456789abcdef0123456789abcdef01234567", "guard", 1));
+            GitSyncReviews.ApproveHeld(_rig.Pull.Connection, A);
+        });
+
+        Assert.Equal([A], apply.PushDeletions);
+        Assert.Equal([A], Is<PushOutcome.Pushed>(outcome).Summary.Removed);
+        Assert.False(RemoteHas(A));
+        Assert.Null(GitSyncReviews.ReadHeldItem(_rig.Pull.Connection, A));
+        Assert.Equal(SyncMerge.RowState.Forgotten, Row(A).State);
+    }
+
+    [GitFact]
     public async Task FinalizeForgetsTheRow_EvenWhenTheMemoryExistsAgain_AndTheNextCycleRepublishesIt()
     {
         await SyncedThenDeleted();

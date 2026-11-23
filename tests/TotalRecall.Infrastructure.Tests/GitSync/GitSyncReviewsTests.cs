@@ -147,4 +147,117 @@ public sealed class GitSyncReviewsTests : IDisposable
 
         Assert.Null(GitSyncReviews.ReadOpenHeld(_conn)["k"].Cause);
     }
+
+    private void InsertHeld(string id, string state, string direction = "remote")
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText =
+            "INSERT INTO git_sync_review (entry_id, kind, state, direction, arrived_at) VALUES ($id, 'held-delete', $state, $direction, 1)";
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.Parameters.AddWithValue("$state", state);
+        cmd.Parameters.AddWithValue("$direction", direction);
+        cmd.ExecuteNonQuery();
+    }
+
+    [Fact]
+    public void ReadHeldItem_ReadsAnApprovedItem_WithItsState()
+    {
+        var item = new HeldItem("k", "local", "blob", "unproven", 10);
+        GitSyncReviews.UpsertHeld(_conn, item);
+        Assert.Equal(item, GitSyncReviews.ReadHeldItem(_conn, "k"));
+
+        GitSyncReviews.ApproveHeld(_conn, "k");
+
+        Assert.Equal(item with { State = "approved" }, GitSyncReviews.ReadHeldItem(_conn, "k"));
+        Assert.Null(GitSyncReviews.ReadHeldItem(_conn, "none"));
+    }
+
+    [Theory]
+    [InlineData("unseen")]
+    [InlineData("declined")]
+    [InlineData("resolved")]
+    public void ReadHeldItem_DoesNotReadARowThatIsNeitherOpenNorApproved(string state)
+    {
+        InsertHeld("k", state);
+
+        Assert.Null(GitSyncReviews.ReadHeldItem(_conn, "k"));
+    }
+
+    [Fact]
+    public void ReadOpenHeld_DoesNotReadAnApprovedItem()
+    {
+        GitSyncReviews.UpsertHeld(_conn, new HeldItem("k", "remote", null, "guard", 10));
+        GitSyncReviews.ApproveHeld(_conn, "k");
+
+        Assert.Empty(GitSyncReviews.ReadOpenHeld(_conn));
+        Assert.Null(GitSyncReviews.ReadOpenHeldItem(_conn, "k"));
+    }
+
+    [Fact]
+    public void ReadApprovedHeld_ReadsOnlyApproved()
+    {
+        InsertHeld("o", "open");
+        InsertHeld("a", "approved");
+        InsertHeld("r", "resolved");
+
+        var approved = GitSyncReviews.ReadApprovedHeld(_conn);
+
+        Assert.Equal(["a"], approved.Keys.ToArray());
+        Assert.Equal("approved", approved["a"].State);
+    }
+
+    [Fact]
+    public void Reopen_SetsOpenAndTheHash_KeepingCauseAndArrivedAt()
+    {
+        GitSyncReviews.UpsertHeld(_conn, new HeldItem("k", "local", "old", "sticky", 77));
+        GitSyncReviews.ApproveHeld(_conn, "k");
+
+        GitSyncReviews.ReopenHeld(_conn, "k", "new");
+
+        Assert.Equal(new HeldItem("k", "local", "new", "sticky", 77), GitSyncReviews.ReadOpenHeld(_conn)["k"]);
+    }
+
+    [Fact]
+    public void RefreshHeldHash_ChangesOnlyTheHash()
+    {
+        GitSyncReviews.UpsertHeld(_conn, new HeldItem("k", "local", "old", "unproven", 77));
+        GitSyncReviews.ApproveHeld(_conn, "k");
+
+        GitSyncReviews.RefreshHeldHash(_conn, "k", "new");
+
+        Assert.Equal(
+            new HeldItem("k", "local", "new", "unproven", 77, "approved"),
+            GitSyncReviews.ReadHeldItem(_conn, "k"));
+    }
+
+    [Fact]
+    public void UpsertNewPin_WritesAnOpenNewPinRow_AndASecondReplacesIt()
+    {
+        var held = new HeldItem("k", "local", "blob", "guard", 5);
+        GitSyncReviews.UpsertHeld(_conn, held);
+
+        GitSyncReviews.UpsertNewPin(_conn, "k", "hash1", 100);
+        GitSyncReviews.UpsertNewPin(_conn, "k", "hash2", 200);
+
+        const string where = " FROM git_sync_review WHERE entry_id = 'k' AND kind = 'new-pin'";
+        Assert.Equal("1", Scalar("SELECT COUNT(*)" + where));
+        Assert.Equal("hash2", Scalar("SELECT record_hash" + where));
+        Assert.Equal("open", Scalar("SELECT state" + where));
+        Assert.Equal("200", Scalar("SELECT arrived_at" + where));
+        Assert.Equal("""{"origin":"restore"}""", Scalar("SELECT payload_json" + where));
+        Assert.Null(Scalar("SELECT direction" + where));
+        Assert.Equal(held, GitSyncReviews.ReadOpenHeldItem(_conn, "k"));
+        Assert.Equal(held, GitSyncReviews.ReadHeldItem(_conn, "k"));
+        Assert.Equal(["k"], GitSyncReviews.ReadOpenHeld(_conn).Keys.ToArray());
+    }
+
+    [Fact]
+    public void ApproveHeld_OnAMissingRow_IsANoOp()
+    {
+        GitSyncReviews.ApproveHeld(_conn, "none");
+        GitSyncReviews.ReopenHeld(_conn, "none", "h");
+        GitSyncReviews.RefreshHeldHash(_conn, "none", "h");
+
+        Assert.Equal("0", Scalar("SELECT COUNT(*) FROM git_sync_review"));
+    }
 }

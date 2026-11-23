@@ -48,8 +48,10 @@ public sealed partial class GitSyncApplier
     /// a deletion candidate whose entry ended failed, skipped or scan-skipped got no hold from its own transaction (rolled
     /// back, or never opened), so it is held here, in a small transaction of its own opened after that rollback, as
     /// <see cref="RecordFailure"/> records the failure. Inside the transaction the row must still be <c>active</c> with a
-    /// base, the entry must exist for a <paramref name="direction"/> of <c>remote</c> and be gone for <c>local</c>, and an
-    /// open item of the id is never replaced; otherwise nothing is written and both results are null. The item is open,
+    /// base, the entry must exist for a <paramref name="direction"/> of <c>remote</c> and be gone for <c>local</c>, and the
+    /// id's open or approved item must not be one the fallback keeps (<see cref="FallbackKeeps"/>; milestone 1b-iii, D10);
+    /// otherwise nothing is written and both results are null. Any other item (an open one of the other direction, an
+    /// approved one against a remote hold) is replaced. The item is open,
     /// with the cause <c>unproven</c>, <paramref name="recordSha"/> (the blob id of the record in <c>R</c>, null when it has
     /// none) and the applier clock. When it cannot be written (a busy lock or a failure) the result is a deferral, which
     /// holds <c>L</c> back.
@@ -67,7 +69,7 @@ public sealed partial class GitSyncApplier
             var absent = LocalEntryReader.Read(t => tx.Get(t, ContentType.Memory, id), () => tx.IsSticky(ContentType.Memory, id)) is LocalRead.Absent;
             if (absent != direction.IsLocalDeletion)
                 return (null, null); // a remote candidate whose entry is gone, or a local one whose entry is back
-            if (GitSyncReviews.ReadOpenHeldItem(conn, id, tx.Transaction) is not null)
+            if (FallbackKeeps(GitSyncReviews.ReadHeldItem(conn, id, tx.Transaction), direction))
                 return (null, null);
             Step(id, "hold-unproven");
             var name = SyncDeletion.directionName(direction);
@@ -80,6 +82,47 @@ public sealed partial class GitSyncApplier
         {
             return (null, new EntryResult.Deferred(
                 "an unproven deletion candidate could not be held: " + OneLine(ex.Message), Busy: ex is SqliteException s && IsBusy(s)));
+        }
+    }
+
+    /// <summary>
+    /// The fallback hold of <paramref name="direction"/> leaves <paramref name="existing"/> as it is (milestone 1b-iii,
+    /// D10): an open item of the same direction (W6.3 and W8.2 protect it), and an approved item against a local hold (an
+    /// approved item is of the local direction). An open item of the other direction is stale, and an approved item
+    /// against a remote hold no longer answers the situation, so both are replaced.
+    /// </summary>
+    private static bool FallbackKeeps(HeldItem? existing, SyncMerge.Direction direction) =>
+        existing switch
+        {
+            { State: "open" } => string.Equals(existing.Direction, SyncDeletion.directionName(direction), StringComparison.Ordinal),
+            { State: "approved" } => direction.IsLocalDeletion,
+            _ => false,
+        };
+
+    /// <summary>
+    /// Removes the approved held-delete item of a scan-skipped id (milestone 1b-iii, D4): every skip reason means an entry
+    /// exists under the id, so the deletion the item answered is over and nothing is deleted. The same holds for an id whose
+    /// record is rejected or invalid while its entry is present again (not a local deletion). A small transaction of its
+    /// own re-reads the item and deletes it when it is still <c>approved</c>. Null when done; a deferral when the item
+    /// changed since the pull read it, or when the transaction could not run (a busy lock stops the apply).
+    /// </summary>
+    private EntryResult.Deferred? RemoveApprovedItem(string id)
+    {
+        try
+        {
+            using var tx = _store.BeginImmediateTransaction();
+            TransactionCount++;
+            if (GitSyncReviews.ReadHeldItem(tx.Connection, id, tx.Transaction) is not { State: "approved" })
+                return new EntryResult.Deferred("the held item changed since the pull read it", Busy: false);
+            Step(id, "close");
+            GitSyncReviews.DeleteHeld(tx.Connection, id, tx.Transaction);
+            tx.Commit();
+            return null;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
+        {
+            return new EntryResult.Deferred(
+                "the approved item could not be removed: " + OneLine(ex.Message), Busy: ex is SqliteException s && IsBusy(s));
         }
     }
 

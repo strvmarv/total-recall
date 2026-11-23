@@ -107,10 +107,13 @@ public sealed partial class GitSyncPusher
     /// example by an import that keeps ids): its record is gone from the repository, and an active row with a base would
     /// let the next proven pull delete it (D6). The next scan reactivates the forgotten row (base cleared, the entry
     /// stamped as new) and the next push publishes the memory again. No row, or a row that is not active, is left untouched.
+    /// The id's <c>held-delete</c> item (an approved one, milestone 1b-iii D4) is removed first, whatever the row says: this
+    /// is the last step that knows the record was removed.
     /// </summary>
     private void Forget(SqliteStoreTransaction tx, string id)
     {
         Step(id, "forget");
+        GitSyncReviews.DeleteHeld(tx.Connection, id, tx.Transaction);
         var row = GitSyncRows.Read(tx.Connection, id, tx.Transaction);
         if (row is null || row.State != SyncMerge.RowState.Active)
             return;

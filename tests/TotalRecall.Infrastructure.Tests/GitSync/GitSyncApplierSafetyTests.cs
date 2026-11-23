@@ -82,8 +82,11 @@ public sealed class GitSyncApplierSafetyTests
         _ => Drop(),
     };
 
+    /// <summary>Applies the scenario's id with its held-delete item of any state (as the pull passes it) and the blob id <c>abc</c>.</summary>
     private static EntryResult Run(Scenario s) =>
-        s.Rig.Applier.ApplyOne(s.Id, s.Record is null ? null : ApplyRig.Parsed(s.Record), s.Proven, s.Rig.Held(s.Id), blobSha: "abc", guard: default);
+        s.Rig.Applier.ApplyOne(
+            s.Id, s.Record is null ? null : ApplyRig.Parsed(s.Record), s.Proven, GitSyncReviews.ReadHeldItem(s.Rig.Scan.Connection, s.Id),
+            blobSha: "abc", guard: default);
 
     // ---- the deletion decisions (milestone 1b-ii) ----
 
@@ -147,8 +150,34 @@ public sealed class GitSyncApplierSafetyTests
         return new Scenario(rig, Id, ApplyRig.Rec(Id, minute: 10)) { Proven = false };
     }
 
+    /// <summary>A synced entry deleted here, its record unchanged in R, and a local item holding the hash <c>old</c>.</summary>
+    private static ApplyRig DeletedHereAndHeld()
+    {
+        var rig = new ApplyRig();
+        rig.Apply(ApplyRig.Rec(Id, minute: 10));
+        rig.Scan.Store.Delete(Tier.Warm, ContentType.Memory, Id);
+        rig.RunScan();
+        rig.SeedHeld(Id, "local", hash: "old");
+        return rig;
+    }
+
+    /// <summary>An open local item whose hash is not the record's blob id (<c>abc</c>): its hash is refreshed (milestone 1b-iii, D10).</summary>
+    private static Scenario Refresh() => new(DeletedHereAndHeld(), Id, ApplyRig.Rec(Id, minute: 10));
+
+    /// <summary>An approved local item whose record changed since the answer (blob id <c>abc</c>): the item is re-opened (D4).</summary>
+    private static Scenario Reopen()
+    {
+        var rig = DeletedHereAndHeld();
+        GitSyncReviews.ApproveHeld(rig.Scan.Connection, Id);
+        return new Scenario(rig, Id, ApplyRig.Rec(Id, minute: 10));
+    }
+
     public static IEnumerable<object[]> DeletionScenarios() =>
-        new[] { nameof(RemoteDelete), nameof(RemoteHold), nameof(CloseOnly), nameof(FreshStamp), nameof(PushDelete), nameof(LocalHold) }
+        new[]
+            {
+                nameof(RemoteDelete), nameof(RemoteHold), nameof(CloseOnly), nameof(FreshStamp), nameof(PushDelete), nameof(LocalHold),
+                nameof(Refresh), nameof(Reopen),
+            }
             .Select(n => new object[] { n });
 
     private static Scenario BuildDeletion(string name) => name switch
@@ -158,6 +187,8 @@ public sealed class GitSyncApplierSafetyTests
         nameof(CloseOnly) => CloseOnly(),
         nameof(PushDelete) => PushDelete(),
         nameof(LocalHold) => LocalHold(),
+        nameof(Refresh) => Refresh(),
+        nameof(Reopen) => Reopen(),
         _ => FreshStamp(),
     };
 
@@ -179,6 +210,8 @@ public sealed class GitSyncApplierSafetyTests
             nameof(CloseOnly) => ["close"],
             nameof(PushDelete) => ["row"],
             nameof(LocalHold) => ["row", "close", "hold"],
+            nameof(Refresh) => ["refresh"],
+            nameof(Reopen) => ["reopen"],
             _ => ["close", "row"],
         };
         Assert.All(expected, step => Assert.Contains(step, steps));

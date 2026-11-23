@@ -821,6 +821,45 @@ let absentRecordTests =
             never "an open item" (w6 |> item RemoteDeletion)
     ]
 
+/// The base and the local entry of the neutral input, for the decision a review answer carries out.
+let private neutralBase = record "base"
+let private neutralLocal = local "base"
+
+[<Tests>]
+let remoteDeletionTests =
+    testList "SyncMerge.remoteDeletion" [
+        testCase "is W6.4's decision: decide's proven deletion is exactly it" <| fun _ ->
+            Expect.equal (decide (noRecord input)) (remoteDeletion false neutralBase neutralLocal) "no note"
+            let tagged = noRecord input |> withLocal (fun l -> { l with Tags = [ "x" ] }) |> pendingTier (ours 4)
+            Expect.equal (decide tagged) (remoteDeletion true neutralBase tagged.Local.Value) "with the note"
+
+        testCase "deletes the entry and forgets the row, keeping the base, for a sticky entry too" <| fun _ ->
+            for sticky in [ false; true ] do
+                let d = remoteDeletion false neutralBase { neutralLocal with Sticky = sticky }
+                Expect.equal d.Entry DeleteEntry (sprintf "sticky %b: delete" sticky)
+                Expect.equal d.RowState (Some Forgotten) "forgotten"
+                Expect.equal d.Base (everyBase KeepBase) "base kept"
+                Expect.isEmpty d.Notes "nothing was pending"
+                Expect.isFalse d.FreshContentStamp "no fresh stamp"
+                Expect.isFalse d.CloseHeldDelete "the caller removes the item"
+                Expect.isEmpty d.Reviews "no review"
+
+        testCase "a tag difference, a pending tier, a project, a scope or an entry type difference each add PendingChangesDropped" <| fun _ ->
+            let note (what: string) (pendingTier: bool) (l: LocalEntry) =
+                let d = remoteDeletion pendingTier neutralBase l
+                Expect.equal d.Entry DeleteEntry (what + ": delete")
+                Expect.equal d.Notes [ PendingChangesDropped ] what
+            note "tags" false { neutralLocal with Tags = [ "x" ] }
+            note "pending tier" true neutralLocal
+            note "project" false { neutralLocal with Content = { neutralLocal.Content with Project = Some "p" } }
+            note "scope" false { neutralLocal with Content = { neutralLocal.Content with Scope = Some "global" } }
+            note "entry type" false { neutralLocal with Content = { neutralLocal.Content with EntryType = Correction } }
+            note "sticky with tags" false { neutralLocal with Sticky = true; Tags = [ "x" ] }
+
+        testCase "a text difference alone is no note (the text goes with the entry)" <| fun _ ->
+            Expect.isEmpty (remoteDeletion false neutralBase (withText "other" neutralLocal)).Notes "no note"
+    ]
+
 [<Tests>]
 let presentRecordTests =
     testList "SyncMerge W8: the record is here, the entry is gone" <| [

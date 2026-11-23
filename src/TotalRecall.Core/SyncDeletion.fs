@@ -2,7 +2,8 @@
 /// (decisions D3 to D5) and a decision that the guard or an unproven apply stops becomes a held item whose cause
 /// is recorded (D7). This module holds what is decided without touching anything: the guard's limit and verdict,
 /// the conversion of a deletion decision into a hold, the hold's cause word, and the text form of the
-/// `repush_groups` column. Pure and total: no I/O, no clock.
+/// `repush_groups` column. Milestone 1b-iii (held deletions, D4) adds how an approved local item is used by the
+/// pull. Pure and total: no I/O, no clock.
 module TotalRecall.Core.SyncDeletion
 
 open TotalRecall.Core.SyncMerge
@@ -48,6 +49,40 @@ let holdCause (proven: bool) (converted: bool) (direction: Direction) : string =
         match direction with
         | RemoteDeletion -> "sticky"
         | LocalDeletion -> "unproven"
+
+// ---------------------------------------------------------------------------------------------
+// Approved items (milestone 1b-iii, D4)
+
+/// How the pull uses an approved local item. `AsApproved`: the deletion is decided as proven with no held item (W8.3,
+/// or W8.1 first) and not counted by the guard; `Reopened`: the record changed after the answer, so the item is opened
+/// again and decided as an open item (W8.2); `NotApproved`: not the shape of W8, so the item gives the decision nothing.
+type ApprovedUse =
+    | AsApproved
+    | Reopened
+    | NotApproved
+
+/// The use of an approved item. Only W8's shape counts (row `Active` with a base, entry absent, record present): in it
+/// `AsApproved` when the record's blob id equals the item's hash, else `Reopened`; outside it `NotApproved`.
+let approvedUse
+    (row: RowState option)
+    (hasBase: bool)
+    (localPresent: bool)
+    (recordBlob: string option)
+    (itemHash: string option)
+    : ApprovedUse =
+    if row = Some Active && hasBase && not localPresent && recordBlob.IsSome then
+        if recordBlob = itemHash then AsApproved else Reopened
+    else
+        NotApproved
+
+/// The decision with the approved item removed when the situation it answered is over: the entry is present again,
+/// the record is absent, or the decision inserts the record (the rule `decide` applies to an open local item). Never
+/// for `Defer`; otherwise the decision is returned unchanged.
+let closeApproved (localPresent: bool) (theirsPresent: bool) (d: MergeDecision) : MergeDecision =
+    match d.Entry with
+    | Defer -> d
+    | e when localPresent || not theirsPresent || e = InsertFromRecord -> { d with CloseHeldDelete = true }
+    | _ -> d
 
 // ---------------------------------------------------------------------------------------------
 // The `repush_groups` column

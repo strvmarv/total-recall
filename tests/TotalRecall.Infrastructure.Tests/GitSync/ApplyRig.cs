@@ -94,18 +94,18 @@ internal sealed class ApplyRig : IDisposable
         Apply(record?.Id ?? throw new ArgumentNullException(nameof(record)), record, proven, blobSha);
 
     /// <summary>
-    /// Applies one id with the open held-delete item the pull would pass for it (read from the store, as the pull reads them)
-    /// and, when given, the record's blob id.
+    /// Applies one id with the held-delete item, open or approved, the pull would pass for it (read from the store, as the
+    /// pull reads them) and, when given, the record's blob id.
     /// </summary>
     public EntryResult Apply(string id, SyncRecordModule.SyncRecord? record, bool proven = true, string? blobSha = null) =>
-        Applier.ApplyOne(id, record is null ? null : Parsed(record), proven, Held(id), blobSha, guard: default);
+        Applier.ApplyOne(id, record is null ? null : Parsed(record), proven, GitSyncReviews.ReadHeldItem(Scan.Connection, id), blobSha, guard: default);
 
     // ---- held-delete items ----
 
     public HeldItem? Held(string id) => GitSyncReviews.ReadOpenHeld(Scan.Connection).GetValueOrDefault(id);
 
-    public void SeedHeld(string id, string direction = "remote", string cause = "unproven") =>
-        GitSyncReviews.UpsertHeld(Scan.Connection, new HeldItem(id, direction, null, cause, 1_700_000_000_000L));
+    public void SeedHeld(string id, string direction = "remote", string cause = "unproven", string? hash = null) =>
+        GitSyncReviews.UpsertHeld(Scan.Connection, new HeldItem(id, direction, hash, cause, 1_700_000_000_000L));
 
     public int ReviewRows()
     {

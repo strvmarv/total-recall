@@ -668,6 +668,29 @@ public sealed class GitSyncApplierEntryTests : IDisposable
         Assert.NotNull(_rig.Scan.Meta("git_sync_hlc"));
     }
 
+    [Theory]
+    [InlineData("unseen")]
+    [InlineData("declined")]
+    [InlineData("resolved")]
+    public void AHeldDeleteRowInAnotherState_IsNotAnItem_TheRemoteDeletionIsCarriedOut(string state)
+    {
+        _rig.Apply(ApplyRig.Rec(Id, minute: 10));
+        using (var cmd = _rig.Scan.Connection.CreateCommand())
+        {
+            cmd.CommandText =
+                "INSERT INTO git_sync_review (entry_id, kind, state, direction, arrived_at) VALUES ($id, 'held-delete', $state, 'remote', 1)";
+            cmd.Parameters.AddWithValue("$id", Id);
+            cmd.Parameters.AddWithValue("$state", state);
+            cmd.ExecuteNonQuery();
+        }
+
+        // the pull reads only open and approved items, so it passes none for this id
+        var effects = Effects(_rig.Applier.ApplyOne(Id, null, proven: true, held: null, blobSha: null, guard: default));
+
+        Assert.True(effects.Deleted);
+        Assert.Null(_rig.Entry(Id));
+    }
+
     [Fact]
     public void RecordReappearing_ClosesTheOpenRemoteItem()
     {
@@ -1019,13 +1042,29 @@ public sealed class GitSyncApplierEntryTests : IDisposable
     public void OpenLocalItem_LeavesTheDeletionHeld(bool proven)
     {
         SyncedThenDeletedHere();
-        _rig.SeedHeld(Id, "local");
+        _rig.SeedHeld(Id, "local", hash: BlobSha);
         var before = _rig.Full();
 
         Assert.IsType<EntryResult.NoOp>(_rig.Apply(ApplyRig.Rec(Id, minute: 10), proven, BlobSha));
 
         Assert.Equal(before, _rig.Full());
         Assert.NotNull(_rig.Held(Id));
+    }
+
+    [Fact]
+    public void OpenLocalItem_WithAStaleHash_SkipsTheNoOpShortcut_AndRefreshesTheHashOnly()
+    {
+        SyncedThenDeletedHere();
+        _rig.SeedHeld(Id, "local", hash: "89abcdef0123456789abcdef0123456789abcdef");
+        var row = Row();
+        _rig.NewApplier(); // count only this apply's transactions
+
+        var carried = Is<EntryResult.Carried>(_rig.Apply(ApplyRig.Rec(Id, minute: 10), proven: true, BlobSha));
+
+        Assert.Equal(CarriedKind.Updated, carried.Kind);
+        Assert.Equal(BlobSha, _rig.Held(Id)!.RecordHash);
+        Assert.Equal(row, Row());
+        Assert.Equal(1, _rig.Applier.TransactionCount);
     }
 
     [Fact]

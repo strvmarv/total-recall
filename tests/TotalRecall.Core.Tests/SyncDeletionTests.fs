@@ -107,6 +107,41 @@ let holdTests =
     ]
 
 [<Tests>]
+let approvedTests =
+    testList "SyncDeletion approved items" [
+        testCase "approvedUse_in_the_W8_shape_is_AsApproved_when_the_blob_equals_the_item_hash" <| fun () ->
+            Expect.equal (approvedUse (Some Active) true false (Some "b1") (Some "b1")) AsApproved "equal blob"
+        testCase "approvedUse_in_the_W8_shape_is_Reopened_when_the_blob_differs" <| fun () ->
+            Expect.equal (approvedUse (Some Active) true false (Some "b2") (Some "b1")) Reopened "different blob"
+            Expect.equal (approvedUse (Some Active) true false (Some "b2") None) Reopened "an item with no hash"
+        testCase "approvedUse_outside_the_W8_shape_is_NotApproved" <| fun () ->
+            Expect.equal (approvedUse (Some Active) true true (Some "b1") (Some "b1")) NotApproved "entry present"
+            Expect.equal (approvedUse (Some Active) true false None (Some "b1")) NotApproved "record absent"
+            Expect.equal (approvedUse (Some Forgotten) true false (Some "b1") (Some "b1")) NotApproved "row forgotten"
+            Expect.equal (approvedUse (Some Left) true false (Some "b1") (Some "b1")) NotApproved "row left"
+            Expect.equal (approvedUse None true false (Some "b1") (Some "b1")) NotApproved "no row"
+            Expect.equal (approvedUse (Some Active) false false (Some "b1") (Some "b1")) NotApproved "no base"
+        testCase "closeApproved_removes_the_item_when_the_entry_is_present" <| fun () ->
+            let d = { plain with Entry = LeaveEntry }
+            Expect.equal (closeApproved true false d) { d with CloseHeldDelete = true } "entry present, record absent"
+            Expect.equal (closeApproved true true d) { d with CloseHeldDelete = true } "entry present, record present"
+        testCase "closeApproved_removes_the_item_when_the_record_is_absent" <| fun () ->
+            let d = { plain with RowState = Some Forgotten }
+            Expect.equal (closeApproved false false d) { d with CloseHeldDelete = true } "record absent"
+        testCase "closeApproved_removes_the_item_on_an_insert" <| fun () ->
+            let d = { plain with Entry = InsertFromRecord }
+            Expect.equal (closeApproved false true d) { d with CloseHeldDelete = true } "insert"
+        testCase "closeApproved_keeps_the_item_for_W8_3_and_W8_2" <| fun () ->
+            let push = { plain with Entry = PushDeletion }
+            Expect.equal (closeApproved false true push) push "W8.3: the item stays approved"
+            Expect.equal (closeApproved false true plain) plain "W8.2: Ignore"
+        testCase "closeApproved_never_closes_on_Defer" <| fun () ->
+            let d = { plain with Entry = Defer }
+            Expect.equal (closeApproved true false d) d "defer, entry present, record absent"
+            Expect.equal (closeApproved false false d) d "defer, record absent"
+    ]
+
+[<Tests>]
 let repushGroupsTests =
     testList "SyncDeletion.RepushGroups" [
         testCase "repushGroups_roundtrip" <| fun () ->

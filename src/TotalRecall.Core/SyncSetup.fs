@@ -34,10 +34,18 @@ type Refusal =
     | NotBlocked
     /// `sync unblock`: no memory has the id.
     | UnknownEntry
-    /// `sync unblock`: the id is in two tiers, or the memory cannot be read.
+    /// Lifting a secret block, or answering a held deletion: the id is in two tiers, or the memory cannot be read.
     | UnreadableEntry
     /// `sync unblock`: the memory's pushed fields changed after the block was set.
     | ChangedSinceBlocked
+    /// `sync review` (#162): the entry has no held deletion to answer.
+    | NoHeldItem
+    /// `sync review`: the held deletion no longer matches the entry or the record it was opened for.
+    | StaleItem
+    /// `sync review`: the memory was edited here since the pull held its deletion.
+    | EditedLocally
+    /// An answer to a held local deletion given without the shown hash.
+    | ShownHashRequired
 
 let refusalName (r: Refusal) : string =
     match r with
@@ -62,6 +70,10 @@ let refusalName (r: Refusal) : string =
     | UnknownEntry -> "unknown-entry"
     | UnreadableEntry -> "unreadable-entry"
     | ChangedSinceBlocked -> "changed-since-blocked"
+    | NoHeldItem -> "no-held-item"
+    | StaleItem -> "stale-item"
+    | EditedLocally -> "edited-locally"
+    | ShownHashRequired -> "shown-hash-required"
 
 // ---------------------------------------------------------------------------
 // storage mode
