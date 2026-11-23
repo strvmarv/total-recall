@@ -42,7 +42,8 @@ the database like the setup service, runs the migrations, then works in **one im
 the row and the local entry**. Nothing is computed from a read taken before the transaction except the embedding of a restore
 (D5), which is re-validated inside it.
 
-- `List()` (opens the database read-only like `SyncSetupService.StatusAsync`, with no migration and no lock): the open and approved `held-delete` items, by id, each with its state, direction, cause, shown hash, `arrivedAt`
+- `List()` (opens the database read-only like `SyncSetupService.StatusAsync`, with no migration and no lock): the open and approved `held-delete` items (no database file or no review table: an empty list; any other unreadable database,
+including a pending write-ahead log: `failed` with the reason), by id, each with its state, direction, cause, shown hash, `arrivedAt`
   and the memory's text (D7).
 - `Accept(id, shownHash?)`, `Restore(id, shownHash?)`: answer the item of `id`. **A local hold (and an approved item, which
   is one) is answered only with the shown hash**: without it the service refuses `shown-hash-required`, so the later MCP tool
@@ -142,7 +143,7 @@ item counts as touching the item, so the decision-13 no-op shortcut does not ski
 | the same, but the blob id **differs** | the item is re-opened (`open`, hash refreshed to the current blob id, cause kept) and the decision is W8.2 (`Ignore`): a record that changed after the person answered is shown again, never deleted blind |
 | the record's text is newer than the base (W8.1: an edit beats the deletion) | the entry is inserted as the apply does today and the approved item is removed |
 | the record is absent | the row is forgotten as today (W10) and the item is removed |
-| the id is skipped by the scan (an entry in two tiers, unreadable, or a group the clock could not stamp; such an id is not decided) | the approved item stays; nothing is deleted while the id is skipped, and when the skip clears the entry is present, so the next pull that decides the id removes the item |
+| the id is skipped by the scan (an entry in two tiers, unreadable, or a group the clock could not stamp; such an id is not decided) | every skip reason means an entry exists under the id, so the **scan-skipped branch of the loop removes the approved item** (the "entry present again" rule) and nothing is deleted; a skip that later clears because the entry is deleted again starts from a fresh deletion that needs a fresh answer |
 | the entry is present again while the row stays `active` (a memory with the id was re-created, for example by an import that keeps ids; the scanner reactivates only `forgotten` or `left` rows, so it does not remove the item) | the pull removes the item (the rule above) and decides with the real proof |
 
 `GitSyncReviews.ReadOpenHeld` keeps reading only `state = 'open'`, so the push exclusion (`Prepare`) and the existing readers are
@@ -241,7 +242,9 @@ usual arithmetic.
    here, an open local item whose record then vanished) and the main path already closes and replaces it
    (`AnOpenRemoteItem_ThenTheEntryDeletedHere_…`). The fallback now **replaces an open item of the other direction and keeps
    skipping one of the same direction**; the fallback reads the item of any state, and an approved item (D4) counts as an item of
-the local direction (without this it would overwrite one with an open item). The contributor
+the local direction: a local fallback hold keeps it, and a **remote** fallback hold (unproven pull, record absent, entry present)
+replaces it as it replaces an open local item, so `L` never moves with no hold in place (without this it would overwrite one
+with an open item, or leave the entry to a later W6.4 deletion). The contributor
    guide line that says "an open item is never replaced" (`src/TotalRecall.Infrastructure/AGENTS.md`, the unproven fallback
    hold sentence) is corrected to say so.
 
@@ -267,7 +270,7 @@ Infrastructure (`GitSync`): `ReviewServiceTests` over the existing rigs (`ApplyR
   item with the new hash and deletes nothing; a record with newer text beats the approved deletion (the entry is inserted, the item
   gone); a record that vanished leaves the row forgotten and the item gone; the entry re-created under the `active` row with the same content and an unchanged record (the id is not
   otherwise visited) removes the item and an unrelated later deletion of that id is held as usual (decided with the real proof, W6 never becomes an
-  uncounted deletion); an open local item whose entry was re-created under the active row with an unchanged record is closed by one proven pull and both answers then refuse `no-held-item`; an approved item does not defer the apply (the in-transaction re-read covers it); an approved item can
+  uncounted deletion); a scan-skipped id (two tiers) removes its approved item and deletes nothing; an open local item whose entry was re-created under the active row with an unchanged record is closed by one proven pull and both answers then refuse `no-held-item`; an approved item does not defer the apply (the in-transaction re-read covers it); an approved item can
   still be restored; an answer without a shown hash is refused `shown-hash-required`;
 - restore, remote hold: every cause; the entry is untouched, the row has no base and three pending stamps, the next push writes
   a new record (check the clone's tree) whose stamps are above the old base's even with a clock set behind it, and the item is
@@ -283,7 +286,7 @@ Infrastructure (`GitSync`): `ReviewServiceTests` over the existing rigs (`ApplyR
   of the text;
 - some answered, the rest held: three items, answer one, the other two are `open` and still protected on the next pull;
 - D10: a pull that leaves a local item open refreshes its hash when the record's blob changed and leaves `arrived_at`; the fallback
-  replaces the other direction's item, keeps the same direction's item and keeps an approved item; the existing
+  replaces the other direction's item, keeps the same direction's item, keeps an approved item against a local fallback hold and is replaced by a remote one; the existing
   `AnOpenItemOfAScanSkippedCandidate_IsNotReplacedByTheFallback` stays green;
 - the service holds the sync lock (a held lock gives `busy` with nothing changed), and a cycle's lock is respected;
 - CLI: `list` shows the delimited, capped text and no control characters; `accept`, `restore`, `--shown` with a prefix, a short
