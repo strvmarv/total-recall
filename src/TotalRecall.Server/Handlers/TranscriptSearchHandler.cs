@@ -77,7 +77,7 @@ public sealed class TranscriptSearchHandler : IToolHandler
             TranscriptSearchService.SplitSession(session);
         var sinceText = ArgumentParsing.ReadOptionalString(args, "since");
         DateTimeOffset? since = sinceText is null ? null : TranscriptSearchService.ParseSince(sinceText);
-        var includeAutomated = ReadOptionalBool(args, "include_automated") ?? false;
+        var includeAutomated = ArgumentParsing.ReadOptionalBool(args, "include_automated") ?? false;
         var topK = ArgumentParsing.ReadOptionalInt(args, "top_k", 1, 50) ?? 10;
 
         var response = _service.Search(
@@ -98,17 +98,5 @@ public sealed class TranscriptSearchHandler : IToolHandler
             Content = new[] { new ToolContent { Type = "text", Text = json } },
             IsError = false,
         });
-    }
-
-    private static bool? ReadOptionalBool(JsonElement args, string name)
-    {
-        if (!args.TryGetProperty(name, out var prop) || prop.ValueKind == JsonValueKind.Null)
-            return null;
-        return prop.ValueKind switch
-        {
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            _ => throw new ArgumentException($"{name} must be a boolean"),
-        };
     }
 }
