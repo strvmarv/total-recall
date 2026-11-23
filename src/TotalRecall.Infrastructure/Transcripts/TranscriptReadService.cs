@@ -44,11 +44,34 @@ public sealed record TranscriptGetResponse(
     string? Note,
     string? Error);
 
+/// <summary>
+/// One <c>transcript_sessions</c> call (read spec section 3). <paramref name="Since"/> (at or after) and
+/// <paramref name="Before"/> (strictly before) bound a session's last activity; <paramref name="Limit"/> is 1 to 100.
+/// </summary>
+public sealed record TranscriptSessionsRequest(string? Project, DateTimeOffset? Since, DateTimeOffset? Before, int Limit, bool IncludeAutomated);
+
+/// <summary>
+/// One listed session: <paramref name="Session"/> is <c>&lt;host&gt;:&lt;host_session_id&gt;</c>, <paramref name="Exchanges"/>
+/// the session's exchange count (valid numbers are below it; some may hold no text) and <paramref name="Chunks"/> its
+/// stored chunk count.
+/// </summary>
+public sealed record SessionView(
+    string Session, string Project, string Kind, string? Title, string? StartedAt, string? EndedAt, int Exchanges, long Chunks);
+
+/// <summary>
+/// What a session list answers: <paramref name="Total"/> matches before the limit, <paramref name="More"/> =
+/// <c>Total</c> minus the sessions returned, <paramref name="AutomatedHidden"/> the automated sessions the filters left
+/// out, the sessions newest first, an optional note and, when the archive could not be read, an error (every other
+/// field empty).
+/// </summary>
+public sealed record TranscriptSessionsResponse(
+    long Total, long More, long AutomatedHidden, IReadOnlyList<SessionView> Sessions, string? Note, string? Error);
+
 /// <summary>What a read needs from the composition, built per call: the archive's location only (no settings, no embedder).</summary>
 public sealed record TranscriptReadContext(TranscriptLocation Location);
 
 /// <summary>
-/// The archive reads (read spec sections 2 and 4). <see cref="Get"/> returns a window of exchanges within a token
+/// The archive reads (read spec sections 2 to 4). <see cref="Sessions"/> lists sessions newest first. <see cref="Get"/> returns a window of exchanges within a token
 /// budget: the requested exchanges first, then context alternating before and after, an exchange whole or not at all
 /// (except a first requested exchange alone over the budget, which is cut and marked), with pointers to read on. The
 /// archive is opened per call with <c>create: false</c>, read in one <see cref="ITranscriptStore.BeginReads"/> and closed
@@ -80,8 +103,6 @@ public sealed class TranscriptReadService
 
     /// <summary>Added to an unknown-target error when the archive holds no chunk at all.</summary>
     public const string NothingArchivedSuffix = " (nothing is archived yet; run total-recall transcripts backfill)";
-
-    private const string LogPrefix = "[total-recall] transcript_get";
 
     private readonly Func<TranscriptReadContext?> _context;
     // Unused today; kept for the spec's constructor signature.
@@ -135,6 +156,21 @@ public sealed class TranscriptReadService
         var target = Plan(request);
         ct.ThrowIfCancellationRequested();
 
+        return Execute(
+            "transcript_get",
+            () => Failure(target.Unknown(anyChunk: false)),
+            Failure,
+            store => Run(request, target, store, ct));
+    }
+
+    /// <summary>
+    /// The shared frame of a read call: builds the context, opens the archive (never creating it) and runs
+    /// <paramref name="run"/> over it, answering every fault as <paramref name="failure"/> (logged under the tool's
+    /// prefix) and an absent file as <paramref name="absent"/>. Arguments are checked by the caller before this runs.
+    /// </summary>
+    private T Execute<T>(string tool, Func<T> absent, Func<string, T> failure, Func<ITranscriptStore, T> run)
+    {
+        var prefix = "[total-recall] " + tool;
         TranscriptReadContext? context;
         try
         {
@@ -142,36 +178,36 @@ public sealed class TranscriptReadService
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            ExceptionLogger.LogChain(LogPrefix + ": the archive's settings", ex);
-            return Failure("the transcript archive cannot be located: " + ex.Message);
+            ExceptionLogger.LogChain(prefix + ": the archive's settings", ex);
+            return failure("the transcript archive cannot be located: " + ex.Message);
         }
         if (context is null)
-            return Failure("the transcript archive is not available in this storage mode");
+            return failure("the transcript archive is not available in this storage mode");
 
         var open = _open(context.Location);
         switch (open.Status)
         {
             case TranscriptOpenStatus.Absent:
-                return Failure(target.Unknown(anyChunk: false));
+                return absent();
             case TranscriptOpenStatus.Refused:
             case TranscriptOpenStatus.Failed:
             case TranscriptOpenStatus.Opened when open.Store is null:
                 var why = open.Message ?? open.Status.ToString();
-                Console.Error.WriteLine(LogPrefix + ": the archive could not be opened: " + why);
-                return Failure("the transcript archive could not be opened: " + why);
+                Console.Error.WriteLine(prefix + ": the archive could not be opened: " + why);
+                return failure("the transcript archive could not be opened: " + why);
         }
 
         using var store = open.Store!;
         try
         {
-            return Run(request, target, store, ct);
+            return run(store);
         }
-        // Every argument check is done above, before the archive is opened, so an ArgumentException from here on is a
+        // Every argument check is done before the archive is opened, so an ArgumentException from here on is a
         // fault of the store or a read (logged and answered like any other), never the caller's argument error.
         catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
         {
-            ExceptionLogger.LogChain(LogPrefix + ": reading the archive", ex);
-            return Failure("the transcript archive could not be read: " + ex.Message);
+            ExceptionLogger.LogChain(prefix + ": reading the archive", ex);
+            return failure("the transcript archive could not be read: " + ex.Message);
         }
     }
 
@@ -278,6 +314,60 @@ public sealed class TranscriptReadService
 
         return Answer(views, used, leftOut > 0, null, leftOut > 0 ? ContextNote(leftOut, budget) : null);
     }
+
+    // ------------------------------------------------------------------
+    // The session list
+    // ------------------------------------------------------------------
+
+    /// <summary>The most sessions one list returns.</summary>
+    public const int MaxSessionLimit = 100;
+
+    /// <summary>
+    /// Lists archived sessions that hold at least one chunk, newest last activity first (read spec section 3).
+    /// <see cref="TranscriptSessionsResponse.Total"/> counts the matches before the limit.
+    /// </summary>
+    /// <exception cref="ArgumentException"><c>limit</c> outside 1 to <see cref="MaxSessionLimit"/>; checked before the archive is opened.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="ct"/> was cancelled.</exception>
+    public TranscriptSessionsResponse Sessions(TranscriptSessionsRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.Limit is < 1 or > MaxSessionLimit)
+            throw new ArgumentException(
+                $"limit must be between 1 and {I(MaxSessionLimit)}; got {I(request.Limit)}");
+        ct.ThrowIfCancellationRequested();
+
+        return Execute(
+            "transcript_sessions",
+            () => SessionsAnswer(0, 0, 0, Array.Empty<SessionView>(), TranscriptSearchService.NothingArchivedNote),
+            error => SessionsFailure(error),
+            store =>
+            {
+                using var reads = store.BeginReads();
+                var list = reads.ListSessions(
+                    new SessionFilter(request.Project, request.Since, request.Before, request.IncludeAutomated), request.Limit);
+                ct.ThrowIfCancellationRequested();
+                var views = list.Rows
+                    .Select(r => new SessionView(r.Ref, r.Project, r.Kind, r.Title, r.StartedAt, r.EndedAt, r.ExchangeCount, r.ChunkCount))
+                    .ToArray();
+                var more = list.Total - views.Length;
+
+                string? note = null;
+                // An empty list of an archive without any chunk says why; a filter that matches nothing in a non-empty one does not.
+                if (views.Length == 0 && list.Total == 0 && !reads.AnyChunk())
+                    note = TranscriptSearchService.NothingArchivedNote;
+                else if (more > 0)
+                    note = $"only the newest {I(request.Limit)} of {list.Total.ToString(CultureInfo.InvariantCulture)} sessions are listed; "
+                        + "narrow with project, since or before to list others";
+                return SessionsAnswer(list.Total, more, list.AutomatedHidden, views, note);
+            });
+    }
+
+    private static TranscriptSessionsResponse SessionsAnswer(
+        long total, long more, long automatedHidden, IReadOnlyList<SessionView> sessions, string? note) =>
+        new(total, more, automatedHidden, sessions, note, null);
+
+    private static TranscriptSessionsResponse SessionsFailure(string error) =>
+        new(0, 0, 0, Array.Empty<SessionView>(), null, error);
 
     private static ExchangeView Read(ITranscriptReads reads, long sessionId, int n, bool requested)
     {
