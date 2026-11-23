@@ -10,8 +10,10 @@ namespace TotalRecall.Infrastructure.Tests.Transcripts;
 /// <summary>
 /// <see cref="TranscriptReadService.Sessions"/> (read spec section 3): newest last activity first, the filters, the
 /// limit with <c>Total</c> and <c>More</c>, the hidden automated count, the notes and paging with <c>Before</c>. A real
-/// file-backed archive seeded through <see cref="ReadArchiveBuilder"/>.
+/// file-backed archive seeded through <see cref="ReadArchiveBuilder"/>. In the process-environment collection because
+/// the error-path test swaps <see cref="Console.Error"/>.
 /// </summary>
+[Collection("process-environment")]
 public sealed class TranscriptReadServiceSessionsTests : IDisposable
 {
     private static readonly DateTimeOffset T0 = new(2026, 3, 1, 12, 0, 0, TimeSpan.Zero);
