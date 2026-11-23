@@ -1,10 +1,9 @@
-using System.Text;
 using Microsoft.Data.Sqlite;
 using Microsoft.FSharp.Core;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Storage;
 using TotalRecall.Infrastructure.Telemetry;
-using SyncRecord = TotalRecall.Core.SyncRecord.SyncRecord;
+using StorePlan = TotalRecall.Infrastructure.GitSync.ApplyPlanning.StorePlan;
 using SyncRecordModule = TotalRecall.Core.SyncRecord;
 
 namespace TotalRecall.Infrastructure.GitSync;
@@ -162,7 +161,7 @@ public sealed partial class GitSyncApplier
         ParsedRecord? oldBase = null;
         if (row?.BaseJson is { } baseText)
         {
-            var parsedBase = ParseBase(id, baseText);
+            var parsedBase = ApplyPlanning.ParseBase(id, baseText);
             if (parsedBase.Parsed is null)
                 return new EntryResult.Failed("the row's base cannot be read: " + OneLine(SyncValidation.RejectModule.describe(parsedBase.Rejected)));
             oldBase = parsedBase.Parsed;
@@ -186,7 +185,7 @@ public sealed partial class GitSyncApplier
         StorePlan plan;
         try
         {
-            plan = PlanStore(decision, theirs?.Record, local);
+            plan = ApplyPlanning.PlanStore(decision, theirs?.Record, local, _options.HotMaxContentChars);
         }
         catch (InvalidOperationException ex)
         {
@@ -212,7 +211,7 @@ public sealed partial class GitSyncApplier
         if (!plan.HasStoreOps && !HasRestamp(decision) && !TouchesHeldItem(decision) && decision.Notes.IsEmpty
             && !decision.Entry.IsPushDeletion && !RefreshesHash(held, blobSha, decision) && !reopen)
         {
-            var (preview, error) = BuildRow(id, decision, row, oldBase, theirs, local, hadEntry: local is not null, plan.Colder, _ => null);
+            var (preview, error) = ApplyPlanning.BuildRow(id, decision, row, oldBase, theirs, local, hadEntry: local is not null, plan.Colder, _ => null);
             if (error is not null)
                 return new EntryResult.Failed(OneLine(error));
             if (Equals(preview, row))
@@ -292,10 +291,6 @@ public sealed partial class GitSyncApplier
                 _ => null, // no item (the column admits only these two words)
             });
 
-    /// <summary>The row's <c>base_json</c> read as the record at the id's path.</summary>
-    private static ParseResult ParseBase(string id, string baseText) =>
-        RecordReader.Parse(Encoding.UTF8.GetBytes(baseText), SyncValidation.recordPath(id));
-
     private static bool HasRestamp(SyncMerge.MergeDecision d) =>
         d.FreshContentStamp
         || d.Entry is SyncMerge.EntryOutcome.MergeGroups m
@@ -324,85 +319,6 @@ public sealed partial class GitSyncApplier
     /// <summary>The decision's notes as the words of <see cref="NoteEntry"/>.</summary>
     private static IReadOnlyList<string> NoteWords(SyncMerge.MergeDecision d) =>
         d.Notes.Select(n => n.IsEditBeatsDeletion ? "edit-beats-deletion" : "pending-changes-dropped").ToList();
-
-    private static bool AnyBaseBecomesTheirs(SyncMerge.BaseUpdate u) =>
-        u.Content.IsBaseBecomesTheirs || u.Tags.IsBaseBecomesTheirs || u.Sticky.IsBaseBecomesTheirs || u.Tier.IsBaseBecomesTheirs;
-
-    // ---------------------------------------------------------------------------------------------
-    // What the decision does to the store
-
-    /// <summary>
-    /// The store operations of a decision. <see cref="Delete"/>: a remote deletion removes the entry and its vector
-    /// (milestone 1b-ii, D6); the entry is gone afterwards, so it is not read back.
-    /// </summary>
-    private sealed record StorePlan(
-        bool Insert,
-        Tier? InsertTier,
-        bool Unpin,
-        UpdateEntryOpts? Update,
-        Tier? MoveTo,
-        bool TextChanged,
-        bool Colder,
-        bool Delete)
-    {
-        public bool NeedsVector => Insert || TextChanged;
-
-        public bool HasStoreOps => Insert || Unpin || Update is not null || MoveTo is not null || TextChanged || Delete;
-    }
-
-    private StorePlan PlanStore(SyncMerge.MergeDecision d, SyncRecord? theirs, SyncMerge.LocalEntry? local)
-    {
-        if (d.Entry.IsInsertFromRecord)
-        {
-            var record = theirs ?? throw new InvalidOperationException("an insert needs a record");
-            var colder = SyncApply.demotesToWarm(_options.HotMaxContentChars, d, record, null);
-            return new StorePlan(true, colder ? Tier.Warm : record.Placement.Tier, false, null, null, true, colder, false);
-        }
-
-        if (d.Entry.IsDeleteEntry)
-        {
-            if (local is null)
-                throw new InvalidOperationException("a deletion needs the local entry");
-            return new StorePlan(false, null, false, null, null, false, false, true);
-        }
-
-        if (d.Entry is not SyncMerge.EntryOutcome.MergeGroups merge)
-            return new StorePlan(false, null, false, null, null, false, false, false);
-
-        var m = merge.Item;
-        var l = local ?? throw new InvalidOperationException("a merge needs the local entry");
-        var colderResult = SyncApply.demotesToWarm(_options.HotMaxContentChars, d, theirs ?? throw new InvalidOperationException("a merge needs a record"), local);
-
-        var content = m.Content.Item1;
-        var takes = content.IsTakeTheirs;
-        var textChanged = takes && theirs.Content != l.Content.Text;
-        var apply = m.Tags.ApplyLocal;
-        UpdateEntryOpts? update = null;
-        if (takes || content.IsAdoptCreatedAt || apply)
-        {
-            var project = takes ? Unopt(theirs.Project) : null;
-            var scope = takes ? Unopt(theirs.Scope) : null;
-            var source = takes ? Unopt(theirs.Source) : null;
-            update = new UpdateEntryOpts
-            {
-                Content = takes ? theirs.Content : null,
-                Project = project,
-                ClearProject = takes && project is null,
-                Scope = takes ? scope ?? "" : null,
-                EntryType = takes ? theirs.EntryType : null,
-                SourceTool = source,
-                ClearSourceTool = takes && source is null,
-                CreatedAt = takes || content.IsAdoptCreatedAt ? theirs.CreatedAtMs : null,
-                Tags = apply ? m.Tags.Result.ToList() : null,
-            };
-        }
-
-        var desired = m.Tier.Item1 is null ? l.Tier : m.Tier.Item1.Value;
-        if (colderResult)
-            desired = Tier.Warm;
-        Tier? moveTo = desired.Equals(l.Tier) ? null : desired;
-        return new StorePlan(false, null, m.Sticky.Item1.IsUnpinLocally, update, moveTo, textChanged, colderResult, false);
-    }
 
     // ---------------------------------------------------------------------------------------------
     // The transaction
@@ -447,19 +363,7 @@ public sealed partial class GitSyncApplier
         }
         else if (plan.Insert)
         {
-            var record = theirs!.Record;
-            tx.Insert(
-                plan.InsertTier!, ContentType.Memory,
-                new InsertEntryOpts(
-                    Content: record.Content,
-                    SourceTool: Unopt(record.Source),
-                    Project: Unopt(record.Project),
-                    Tags: record.Tags.ToList(),
-                    Id: id,
-                    Scope: Unopt(record.Scope),
-                    EntryType: record.EntryType,
-                    CreatedAt: record.CreatedAtMs),
-                Memory(vector));
+            ApplyPlanning.InsertRecord(tx, id, plan.InsertTier!, theirs!.Record, vector);
         }
         else
         {
@@ -482,9 +386,9 @@ public sealed partial class GitSyncApplier
 
         // A deleted entry's row is planned with no stored entry, so its scanned comparison columns are left as they are.
         Step(id, "row");
-        var (next, error) = BuildRow(
+        var (next, error) = ApplyPlanning.BuildRow(
             id, decision, row, oldBase, theirs, plan.Delete ? null : stored ?? local, hadEntry: local is not null, plan.Colder,
-            floor => IssueStamp(conn, dbTx, floor));
+            floor => ApplyPlanning.IssueStamp(conn, dbTx, _nowMs(), floor));
         if (error is not null)
             throw new InvalidOperationException(error);
         var rowWritten = false;
@@ -495,12 +399,7 @@ public sealed partial class GitSyncApplier
         }
 
         if (plan.Insert)
-        {
-            var record = theirs!.Record;
-            var originHash = record.Origin is null ? null : record.Origin.Value.Hash;
-            var hash = originHash ?? SyncScan.contentHash(stored!.Content);
-            tx.LogImport("git-sync", "sync:" + id, hash, id, stored!.Tier, ContentType.Memory);
-        }
+            ApplyPlanning.LogImport(tx, id, theirs!.Record, stored!);
 
         // Milestone 1b-ii, D7 and D8: the close runs before the hold's upsert, so a decision with both leaves one open item.
         if (decision.CloseHeldDelete)
@@ -599,94 +498,4 @@ public sealed partial class GitSyncApplier
     }
 
     private static bool AgreesWithRow(GitSyncRow? row, LocalRead read) => LocalEntryReader.AgreesWithRow(row, read);
-
-    /// <summary>
-    /// A stamp above <paramref name="floor"/> from the persisted clock (read and written inside the entry's transaction),
-    /// or null when this machine has no valid id or the clock range is exhausted.
-    /// </summary>
-    private FSharpOption<SyncStamp.Stamp>? IssueStamp(Microsoft.Data.Sqlite.SqliteConnection conn, SqliteTransaction tx, FSharpOption<SyncStamp.Stamp>? floor)
-    {
-        var machineText = SyncSql.GetMeta(conn, SyncIdentity.MetaKeys.Machine, tx);
-        var machine = machineText is null ? null : SyncStamp.MachineIdModule.tryCreate(machineText);
-        if (machine is null)
-            return null;
-        var clockText = SyncSql.GetMeta(conn, SyncIdentity.MetaKeys.Hlc, tx);
-        var clock = clockText is null ? null : SyncStamp.ClockModule.tryDeserialize(clockText);
-        var result = SyncStamp.ClockModule.issue(machine.Value, _nowMs(), clock, floor);
-        if (!result.IsOk)
-            return null;
-        var issued = result.ResultValue;
-        if (issued.Clock is not null && (clock is null || !issued.Clock.Value.Equals(clock.Value)))
-            SyncSql.SetMeta(conn, SyncIdentity.MetaKeys.Hlc, SyncStamp.ClockModule.serialize(issued.Clock.Value), tx);
-        return FSharpOption<SyncStamp.Stamp>.Some(issued.Stamp);
-    }
-
-    // ---------------------------------------------------------------------------------------------
-    // The row
-
-    /// <summary>
-    /// The row the entry has after the decision (decision 12.3): <c>null</c> when no row is to be written. The base is
-    /// rendered only when a group's base becomes the record's; <c>repush_groups</c> is written or kept as <c>planRow</c>
-    /// says (milestone 1b-ii, D16; an <c>older</c> group keeps its base, which a later repush reads).
-    /// </summary>
-    private (GitSyncRow? Row, string? Error) BuildRow(
-        string id,
-        SyncMerge.MergeDecision decision,
-        GitSyncRow? row,
-        ParsedRecord? oldBase,
-        ParsedRecord? theirs,
-        SyncMerge.LocalEntry? stored,
-        bool hadEntry,
-        bool colder,
-        Func<FSharpOption<SyncStamp.Stamp>?, FSharpOption<SyncStamp.Stamp>?> issue)
-    {
-        var before = new SyncApply.RowBefore(
-            row is null ? null : Some(row.State),
-            new SyncMerge.GroupStamps(Opt(row?.ContentStamp), Opt(row?.StickyStamp), Opt(row?.TierStamp)),
-            Opt(row?.PushingStamps),
-            Opt(oldBase?.Record.Placement.Tier),
-            Opt(oldBase?.Record.ContentStamp));
-        var planned = SyncApply.planRow(
-            decision, before, Opt(theirs?.Record), Opt(stored), hadEntry, colder,
-            FuncConvert.FromFunc(issue));
-        if (planned.IsError)
-            return (null, planned.ErrorValue);
-        if (planned.ResultValue is null)
-            return (null, null);
-        var after = planned.ResultValue.Value;
-
-        var baseJson = row?.BaseJson;
-        if (AnyBaseBecomesTheirs(decision.Base))
-        {
-            if (theirs is null)
-                return (null, "the decision takes the record into the base but there is no record");
-            baseJson = BaseRenderer.Render(theirs, oldBase, decision.Base);
-            if (baseJson is null)
-                return (null, "the record cannot be encoded as the row's base");
-        }
-
-        var next = row ?? new GitSyncRow(id, after.State, null, null, null, null, null, null, null, null, null, null, null, null, null);
-        next = next with
-        {
-            State = after.State,
-            BaseJson = baseJson,
-            ContentStamp = Unopt(after.Pending.Content),
-            StickyStamp = Unopt(after.Pending.Sticky),
-            TierStamp = Unopt(after.Pending.Tier),
-            PushingStamps = Unopt(after.PushingText),
-            RepushGroups = after.Repush is SyncApply.MarkerChange.SetMarker set ? Unopt(set.Item) : next.RepushGroups,
-        };
-        if (after.Comparison is not null)
-        {
-            var c = after.Comparison.Value;
-            next = next with
-            {
-                ScannedContentHash = c.ContentHash,
-                ScannedTagsHash = c.TagsHash,
-                LocalSticky = c.Sticky,
-                LocalTier = c.Tier,
-            };
-        }
-        return (next, null);
-    }
 }

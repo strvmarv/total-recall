@@ -431,7 +431,7 @@ public sealed partial class GitSyncApplier
         ParsedRecord? oldBase = null;
         if (row?.BaseJson is { } baseText)
         {
-            oldBase = ParseBase(id, baseText).Parsed;
+            oldBase = ApplyPlanning.ParseBase(id, baseText).Parsed;
             if (oldBase is null)
                 return null;
         }
