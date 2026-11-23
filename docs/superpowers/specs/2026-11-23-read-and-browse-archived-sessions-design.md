@@ -53,10 +53,14 @@ This part adds, inside `TotalRecall.Infrastructure.Transcripts` unless said othe
 2. **A new optional argument `max_tokens`** (200 to 20,000, default 2,000). The parent says "capped to a token budget (default about
    2,000 tokens)" and names no argument; without one the budget could never be raised. The schema changes, so `catalog.json` is
    regenerated.
-3. **A budget is counted as `ceil(characters / 4)` of the exchange text** (the estimate the engine already uses for transcripts: 4
-   bytes a token, here characters), the JSON around it not counted. A first requested exchange that alone exceeds the budget is returned
-   **cut at the budget**, marked, with a note to raise `max_tokens`: a smaller unit than an exchange would need a cursor into parts,
-   and the archive keeps little per exchange (the average chunk is about 1,400 characters).
+3. **A budget is counted as the sum, over the returned exchanges, of `ceil(characters / 4)` of each exchange's text** (this part's own
+   estimate; the pinned-directive floor uses the same 4 per token for its transcript growth). Nothing else is counted: the JSON around
+   the text and the separators between exchanges (they are separate array items) are not. `approxTokens` is that same sum, so the fit
+   test and the reported number always agree. A first requested exchange that alone exceeds the budget is returned **cut**, marked,
+   with a note to raise `max_tokens`: the cut text plus its marker `[cut: raise max_tokens to read the rest]` is at most
+   `4 x max_tokens` characters (the text is cut at `TextCut.SafeLength` of `4 x max_tokens` minus the marker's length, so the marker is
+   counted), so `approxTokens` never exceeds `max_tokens`. A smaller unit than an exchange would need a cursor into parts, and the
+   archive keeps little per exchange (the average chunk is about 1,400 characters).
 4. **`context` counts stored exchanges**, not numbers: the `context` nearest exchanges that have text on each side of the requested
    range. A gap (a unit that kept nothing) therefore costs no context.
 5. **Reading a named session or a chunk id never applies the automated filter** (as a session-scope search does): naming is explicit
@@ -71,7 +75,15 @@ This part adds, inside `TotalRecall.Infrastructure.Transcripts` unless said othe
 9. **There is no default project** for either tool: no `project` means every project. The live marker's cwd and session (Part 5) apply
    to the search's default scope, not here.
 10. **Reading needs no embedder and no model**: both tools work whenever the archive is on and the file opens, whatever the state of
-    the embedding.
+    the embedding, and nothing they do sends anything to an embedding provider.
+11. **`transcript_sessions` gets an optional `before`** (an ISO-8601 date or date-time: sessions whose last activity is strictly
+    earlier). Without it nothing older than the newest `limit` (at most 100) sessions could ever be listed, however large `total` is;
+    `since` and `before` together bound a window to page through. It is the one new argument of that tool.
+12. **Unknown things are errors that name how to continue; an empty archive adds a reason.** A named session or chunk id that does not
+    exist (never archived, or forgotten) is an error result with the exact text of section 2, whether or not anything else is
+    archived; when the archive holds no chunk at all the text adds that nothing is archived yet and how to backfill. The one case
+    where `get` could not even look is the same text. `transcript_sessions` has no named target: an empty archive is an empty list with
+    a note, and a filter that matches nothing in a non-empty archive is an empty list without one.
 
 ## 1. The read API
 
@@ -81,6 +93,7 @@ queries cannot pair a session with another session's chunks. Dispose ends the tr
 interface and a new file (`TranscriptReads.cs`); `ITranscriptSearchReads` is not changed.
 
 ```
+bool        AnyChunk()                                                    // an EXISTS over tx_chunk, as the search's
 SessionRow? SessionByRef(string host, string hostSessionId)            // null when none
 SessionRow? SessionById(long sessionId)
 ChunkRow?   ChunkById(long chunkId)                                      // the search's ChunkRow, with SessionId
@@ -93,8 +106,9 @@ SessionList ListSessions(SessionFilter filter, int limit)
 
 - `SessionRow`: `Id`, `Ref` (`<host>:<host_session_id>`), `Project`, `Kind`, `Title`, `StartedAt`, `EndedAt`, `ExchangeCount`,
   `ChunkCount` (a count of the session's chunks).
-- `SessionFilter`: `Project` (exact key, as the search's), `SinceEpoch` (compared with `COALESCE(ended_at, started_at)` as epoch
-  seconds, by the same SQL expression the search uses for chunk times), `IncludeAutomated`.
+- `SessionFilter`: `Project` (exact key, as the search's), `SinceEpoch` (at or after) and `BeforeEpoch` (strictly before), each
+  compared with `COALESCE(ended_at, started_at)` as epoch seconds by the same SQL expression the search uses for chunk times (a
+  session with neither time matches neither bound), `IncludeAutomated`.
 - `SessionList`: the rows (newest first: `COALESCE(ended_at, started_at)` descending, sessions with neither time last, then `id`
   descending), `Total` (sessions that match, before the limit) and `AutomatedHidden` (as call 8).
 - Only sessions with at least one chunk are listed or counted (call 6). All SQL is parameterised. Exchange numbers are read from the
@@ -107,14 +121,22 @@ SessionList ListSessions(SessionFilter filter, int limit)
 optionally `to_exchange` (default: `from_exchange`). Also `context` (integer 0 to 10, default 1) and `max_tokens` (integer 200 to
 20,000, default 2,000). Errors are `ArgumentException`s, which `ErrorTranslator` turns into "Invalid arguments: ...": both forms or
 neither; `from_exchange` or `to_exchange` given with `id`, or `session` without `from_exchange`; a malformed session
-(`SplitSession`); `from_exchange` below 0; `to_exchange` below `from_exchange`; a range wider than 200 exchanges; `context` or
-`max_tokens` out of range or not an integer.
+(`SplitSession`); `from_exchange` below 0; `to_exchange` below `from_exchange`; a range wider than 200 exchanges; `context`,
+`max_tokens`, `from_exchange` or `to_exchange` out of range or not an integer (a number with a fractional part is refused, not
+truncated: `ArgumentParsing.ReadOptionalInt` truncates and is used by other tools, so two **new** strict readers are added beside it,
+one for an `int` and one for the `long` chunk `id`, and only these tools use them); a chunk `id` below 1. The width of a range is
+computed in `long`.
 
 **Resolving.** `id` finds the chunk, then its session; the requested range is that chunk's exchange. An id with no chunk, and a
-session with no row, are **error results** (`isError` true, plain text): "no archived chunk has id N (it may have been forgotten)";
-"no archived session <ref> (use transcript_sessions to list them)". With nothing archived at all (no file, or no chunk) the answer is
-the search's note, `nothing is archived yet; run total-recall transcripts backfill`, as an error result for `get` and as an empty
-list for `sessions` (section 3).
+session with no row, are **error results** (`isError` true, plain text), exactly:
+
+- `no archived chunk has id <N> (it may have been forgotten); use transcript_sessions to list sessions`
+- `no archived session <ref>; use transcript_sessions to list sessions`
+
+When the archive holds no chunk at all (no file, or no row in `tx_chunk`: `AnyChunk` is false) the same text is followed by
+` (nothing is archived yet; run total-recall transcripts backfill)`. The named target is checked first, so a forgotten session is
+reported unknown whatever else is archived (call 12). A `get` on an archive file that does not exist gives the same error with the
+suffix and creates nothing (the archive is opened with `create: false`).
 
 **The window.** The requested exchanges are the stored exchanges in `[from, to]`, ascending. Their context is the `context` nearest
 stored exchanges before the first and the `context` nearest after the last (call 4); none at a session's ends. If the range holds no
@@ -124,15 +146,17 @@ has; it is not an error.
 **The text of an exchange.** All chunks of the exchange, ascending part, each with its header line cut (`ChunkText`), joined with a
 blank line, with the continuation prefix of every part after the first removed: a part after the first starts with
 `User (continued): <the question, up to 300 characters>` and a blank line (`TranscriptChunker.ContinuedLabel`), repeated only so a
-part is searchable on its own. The prefix is removed only where it is literally present (an exchange with no user text, such as a
-compaction summary, has none); the label is private to the chunker today and becomes `internal` so the reader shares it. The text is returned as stored (it is already redacted; nothing is redacted or altered again). The
+part is searchable on its own. The prefix is removed from a later part only when the exchange's **first** part body begins with the
+chunker's `User: ` block (the unit had user text, which is the only case the chunker adds the prefix) and the later part begins with
+the label exactly; any other text, a compaction summary that happens to start with those words included, is returned as stored. The
+label is private to the chunker today and becomes `internal` so the reader shares it. The text is returned as stored (it is already redacted; nothing is redacted or altered again). The
 exchange is reported with its number, its `ts`, its chunk type and whether any chunk has an error.
 
 **The budget.** The budget is `max_tokens`, counted as call 3. Fill in this order and stop at the first exchange that does not fit:
 (1) the requested exchanges ascending; (2) the context, alternating one before and one after (before first), nearer before farther,
 until `context` on each side are in or the budget is full. (An exchange of the first step that does not fit ends the answer there; a
-**first** requested exchange that alone is over the budget is cut at the budget on a character-safe boundary and ends with
-`[cut: raise max_tokens to read the rest]`.) Reading stops as soon as the budget is known to be full, so a window over a huge session
+**first** requested exchange that alone is over the budget is cut on a character-safe boundary so that text and marker fit the budget
+(call 3) and ends with `[cut: raise max_tokens to read the rest]`; nothing follows it, no context included.) Reading stops as soon as the budget is known to be full, so a window over a huge session
 is not read whole.
 
 **The answer** (source-generated DTOs; a field that says nothing is omitted):
@@ -153,19 +177,25 @@ is not read whole.
   "approxTokens": 1840,                          // of the text returned
   "truncated": true,                             // only when something asked for was left out
   "nextFromExchange": 14,                        // only when requested exchanges were left out: the first one not returned
+  "nextToExchange": 14,                          // with it: the last exchange asked for (the answer's end of the asked range)
   "note": "..."                                  // only when it says something
 }
 ```
 
 `truncated` is true when any **requested** exchange was left out or cut, or any context exchange was left out for the budget (not
-when a session simply has no more exchanges). `nextFromExchange` appears only when requested exchanges after the last one returned
-were left out; reading on is `session` with `from_exchange: nextFromExchange`. A note says what was cut, and "raise `max_tokens`"
-for a cut exchange.
+when a session simply has no more exchanges). `nextFromExchange` and `nextToExchange` appear together, only when requested exchanges after the last one returned
+were left out; **reading on is `session` with `from_exchange: nextFromExchange`, `to_exchange: nextToExchange` and `context: 0`**
+(`context: 0` because the earlier answer already ended on the exchange just before; with the default context it would be returned
+again as context). The note spells out exactly those arguments. A note also says what was cut, and "raise `max_tokens`" for a cut
+exchange. When a **cut** first exchange ended the answer, `nextFromExchange` is absent (the cut exchange is not read on) and the
+note says to raise `max_tokens`.
 
 ## 3. `transcript_sessions`
 
-**Arguments** (the stub's schema, unchanged): `project` (exact key), `since` (ISO-8601 date or date-time, parsed by
-`TranscriptSearchService.ParseSince`), `limit` (1 to 100, default 20), `include_automated` (default false). Argument errors as above.
+**Arguments** (the stub's schema, unchanged): `project` (exact key), `since` and `before` (ISO-8601 date or date-time, parsed by
+`TranscriptSearchService.ParseSince`; `since` is at or after, `before` strictly earlier, both on the session's last activity (calls 7
+and 11); `before` not after `since` is not an error, it simply matches nothing), `limit` (1 to 100, default 20), `include_automated`
+(default false). Argument errors as above. `before` is new in the schema (call 11).
 
 **The answer:**
 
@@ -184,15 +214,18 @@ for a cut exchange.
 ```
 
 `exchanges` is the session's `exchange_count` (valid exchange numbers are below it, some may hold no text); `chunks` is the stored
-chunk count. `title` is the label and may be null. With nothing archived the answer is `total` 0, no sessions and the note of
-section 2. Order and filters are those of section 1.
+chunk count. `title` is the label and may be null. With no chunk archived (`AnyChunk` false) the answer is `total` 0, no sessions and the note
+`nothing is archived yet; run total-recall transcripts backfill`; a filter that matches nothing in a non-empty archive is the same
+without a note. When `more` is above 0 the note says that only the newest `limit` are listed and to narrow with `project`, `since` or
+`before`. Order and filters are those of section 1.
 
 ## 4. The handlers and the composition
 
 - `TranscriptGetHandler` and `TranscriptSessionsHandler` take `(Func<bool> isActive, TranscriptReadService? service = null)`. The
   gate is read **once per call**: off gives Part 1's off answer (`TranscriptToolAnswers.Off`, unchanged); on with no service gives
-  the not-set-up answer (the search's `OnSearchNotSetUp`, renamed `OnNotSetUp`, or a new constant for the two tools); on with a
-  service runs it. `TranscriptToolAnswers.OnNotAvailable` and `For` go away (nothing answers "not available in this version yet"
+  the not-set-up answer, one shared constant `OnNotSetUp`: `{"enabled":true,"available":false,"hint":"The transcript archive is not
+  set up in this server."}` (the search's `OnSearchNotSetUp`, whose text names only the search, is renamed and reworded to it, and
+  `TranscriptToolHandlerTests` follows); on with a service runs it. `TranscriptToolAnswers.OnNotAvailable` and `For` go away (nothing answers "not available in this version yet"
   any more); the tests and docs that pin that text change with it.
 - Arguments are parsed in the handler as the search handler does (`ArgumentParsing`, `ReadOptionalBool` shared, not copied). An
   `ArgumentException` is the caller's error. An archive that cannot be opened or read is an **error result**, written to stderr with
@@ -232,24 +265,34 @@ session with a **gap** (an exchange with no kept text) is added.
 3. A range by `session` with `from_exchange` and `to_exchange`; a range partly outside the session; a range over a gap (the gap is
    skipped, context still counts stored exchanges).
 4. A multi-part exchange: the parts are joined, no header line and no `User (continued):` prefix remains, the text equals the chunker's
-   own parts rejoined.
+   own parts rejoined; a multi-part **compaction summary** whose later part begins with the words `User (continued): ` is returned
+   as stored.
 5. The budget: a window over `max_tokens` keeps the requested exchanges and drops far context first, alternating before and after;
    `truncated` true, no `nextFromExchange`; a requested range over the budget ends at the last whole exchange with `nextFromExchange`
    (reading on from it returns the rest, and no exchange appears twice); a first exchange alone over the budget is cut, marked, with
-   the note; `approxTokens` is at most `max_tokens` (a cut exchange included).
-6. A named session or chunk id of an **automated** session is readable; a forgotten session or chunk gives the error result; a
-   session name that is malformed or both or neither form of arguments is an argument error; `context` 11, `max_tokens` 100 and a
-   range of 201 are argument errors.
+   the note; `approxTokens` is at most `max_tokens` (a cut exchange and its marker included). **Reading on** issues exactly the call
+   the answer names (`from_exchange: nextFromExchange`, `to_exchange: nextToExchange`, `context: 0`), repeated until no
+   `nextFromExchange` remains, and asserts that the union of the requested exchanges equals the original range with none twice.
+6. A named session or chunk id of an **automated** session is readable; a forgotten session or chunk gives the exact error results
+   of section 2; a session name that is malformed or both or neither form of arguments is an argument error; `context` 11,
+   `max_tokens` 100, a range of 201, `context: 1.5`, `max_tokens: 200.9`, `from_exchange: -1` and `id: 0` are argument errors.
 7. `transcript_sessions`: newest first (with a session without times last), the project filter, `since` (active-since, boundary
-   included), `limit` with `more` and `total`, automated hidden with `automatedHidden`, shown with `include_automated`, a reset
-   session (no chunks) absent, the title as label, an empty or missing archive gives `total` 0 and the note.
+   included) and `before` (strict) alone and together, `limit` with `more` and `total` and the narrowing note, automated hidden with
+   `automatedHidden`, shown with `include_automated`, a reset session (no chunks) absent, the title as label, an empty or missing
+   archive gives `total` 0 and the note, and a `project` that matches nothing in a non-empty archive gives `total` 0 and no note.
+   `get` on an absent archive file and on a file with no chunk gives the unknown-target error with the nothing-archived suffix, and
+   creates no file.
 8. Off: both tools answer the Part 1 off text, read the setting per call (`enable`/`disable` apply without a restart) and open no
    file; on with no service answers not-set-up. The registry's tool list and `catalog.json` agree (the drift check).
 9. Read-only and consistent: a read while another connection holds an ingest transaction succeeds; no row count changes; a forget
-   between two calls gives the error result on the second.
+   between two calls gives the error result on the second, **including when the forgotten session was the only archived one** (the
+   unknown-session text, with the nothing-archived suffix).
 10. The speed of the reads on a synthetic archive of 100,000 chunks and 2,000 sessions: `transcript_get` of a window and
-    `transcript_sessions` with filters each answer in well under a second (measured and recorded in the PR; the check asserts only a
-    generous bound).
+    `transcript_sessions` with filters each answer in under one second (the test asserts that bound on the median of five calls; the
+    measured values are recorded in the PR).
+11. **No embedding provider is touched**: with `[embedding] provider = openai` (and no `allow_remote_embedding`) and a recording
+    `IEmbedder`, and again with no local model files present, both tools answer normally and the recorder shows zero `Embed` and
+    zero `EmbedQuery`/probe calls.
 
 Use the exact error strings above in tests that pin them. Tests that change environment variables use
 `[Collection("process-environment-console")]`.
@@ -264,8 +307,10 @@ Use the exact error strings above in tests that pin them. Tests that change envi
   `src/TotalRecall.Server/Handlers/AGENTS.md` and `src/TotalRecall.Infrastructure/AGENTS.md`, `CHANGELOG.md` if the repository keeps
   an unreleased section for it, `catalog.json` (regenerated with `dump-catalog`), and the announce text of `using-total-recall` only if
   it names these tools (it does not today: grep).
-- A grep for `not available in this version yet`, `still stubs`, `waits for Part 4` and `until .transcript_get. arrives` finds every
-  stale line.
+- A grep (case-insensitive) for `not available in this version yet`, `not built yet`, `still stubs`, `waits for Part 4`,
+  `until .transcript_get. arrives`, `transcript_get. will take`, `later release`, `until they ship` and `Part 4` finds every stale
+  line in `docs/`, `AGENTS.md`, the `AGENTS.md` files under `src/`, `PRIVACY.md` and the handler descriptions. The hits in
+  `StatusCommandTests.cs` and `TranscriptsCliTests.cs` that pin the absence of the old search status line are intentional.
 
 ## Deviation from the parent design
 
@@ -278,13 +323,40 @@ Listed so the person sees each at sign-off. None edits the parent.
    parent lists `project`, `since`, `limit` and `include_automated`.
 4. **A named session or chunk is read whatever its kind** (call 5); the parent applies `include_automated` to the tool.
 5. **No default project** (call 9): the parent's "project and current session" resolution is written for the search.
+6. **`transcript_get` answers more than the parent's "surrounding exchanges, a token budget and a `truncated` flag"**: `requested`
+   marks which exchanges were asked for, `approxTokens` reports the budget used, `nextFromExchange` and `nextToExchange` say how to
+   read on, and an unknown session or chunk is an error result (call 12); the first exchange alone over the budget is cut (call 3).
+7. **`since` on `transcript_sessions` means the session's last activity** (call 7) and a **`before`** argument is added (call 11); the
+   parent's line has `since` only and does not say what it compares.
 
-## Acceptance (the parent's Done when, mapped)
+## Acceptance (the parent's Done when, and every criterion of the ticket, mapped)
 
-- "Given a hit from search, `transcript_get` returns the surrounding exchanges within the budget and flags truncation": tests 1, 2, 3
-  and 5.
-- "`transcript_sessions` lists a project's sessions newest first with their titles and hides automated ones unless asked": test 7.
-- "both answer that the archive is off while it is off": test 8.
+The parent's three lines: "Given a hit from search, `transcript_get` returns the surrounding exchanges within the budget and flags
+truncation": tests 1, 2, 3 and 5. "`transcript_sessions` lists a project's sessions newest first with their titles and hides
+automated ones unless asked": test 7. "Both answer that the archive is off while it is off": test 8.
+
+The ticket's criteria, in the order of the issue (number: where):
+
+| Criterion | Test |
+|---|---|
+| 1 a hit by id, default context | 1 |
+| 2 context 0, and 10 near the ends | 2 |
+| 3 a session range, gaps, past the end | 3 |
+| 4 a multi-part exchange | 4 |
+| 5 a window over the budget | 5 |
+| 6 a requested range over the budget, reading on | 5 |
+| 7 a first exchange alone over the budget | 5 |
+| 8 an automated session readable; unknown or forgotten target | 6 and 9 |
+| 9 invalid arguments | 6 |
+| 10 the session list: order, fields, project, `since`, `before` | 7 |
+| 11 the limit, `total`, `more` | 7 |
+| 12 automated hidden, `automatedHidden`, shown on request | 7 |
+| 13 a session with no readable chunks | 7 |
+| 14 off, follows enable and disable; on but empty | 8 and 7 |
+| 15 read during an ingest; forget between calls | 9 |
+| 16 no provider touched, no model needed | 11 |
+| 17 the speed at 100,000 chunks | 10 |
+| 18 the documentation, the catalog and the registered tools | 8 and the stale-text grep of section 7 |
 
 ## Left to the builder
 
