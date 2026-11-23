@@ -153,6 +153,46 @@ items moved to 1b-iii, see that section):
 - [ ] A blocked memory still takes part in the pull: a remote change to it that does not conflict is applied.
 - [ ] The cycle's tests still pass and nothing calls the cycle.
 
+### 1b-iii part 2. Answering held deletions (#162)
+- [ ] Given a deletion that another machine made and that sync held back (the memory is still here), when the
+      person accepts it, then the memory is deleted here, whether it was held because of the safety limit,
+      because the repository could not be proven, or because the memory is pinned.
+- [ ] Given such a held deletion of a memory that was edited here after sync last looked at it, when the person
+      accepts it, then the answer is refused with a clear message, the memory is kept and the deletion stays held.
+- [ ] Given a held deletion that another machine made, when the person restores it, then the memory stays here
+      and the next sync publishes it again as a new memory (a pinned memory is published as a pin).
+- [ ] Given a memory the person deleted here whose record is still in the repository and was held back, when the
+      person accepts the deletion, then the next sync removes the record, even when more deletions were accepted
+      than the safety limit allows, while a held deletion the person did not answer stays held.
+- [ ] Given an accepted deletion whose record was changed in the repository after the person answered, when the
+      next sync runs, then nothing is deleted and the deletion is shown as held again with the record's new state.
+- [ ] Given a memory deleted here that was held back, when the person restores it, then it comes back as an
+      ordinary, unpinned memory with its text, tags and id; a memory that was pinned here pushes no unpin to the
+      other machines, and a pinned version of it in the repository is queued for pin review instead of being
+      pinned.
+- [ ] Given a held deletion whose record changed since the person was shown it, when the person answers with what
+      they were shown, then the answer is refused, the deletion stays held and it is shown with its new state.
+- [ ] Given several held deletions, when the person answers one, then the others stay held and are not deleted or
+      released by that answer.
+- [ ] Given the list of held deletions, when it is shown, then each entry has its id, whether it is waiting or
+      already accepted, its direction, why it is held, the source of the text and the memory's text, marked as
+      text and never as an instruction, capped to the pinned-memory length, with control characters removed.
+- [ ] Given the bulk forms that accept or restore every held deletion, when standard input or output is not an
+      interactive terminal, then they refuse and change nothing; at a terminal they answer every held deletion
+      and say what each came to.
+- [ ] Given a memory that already has a held deletion of one direction, when an unproven sync holds a deletion of
+      the other direction for it, then the earlier item is replaced; a held deletion of the same direction is
+      kept as it is.
+- [ ] Given a sync cycle running or another answer in progress, when the person answers a held deletion, then the
+      answer is refused as busy and nothing changes.
+- [ ] Given an accepted deletion that has not been carried out yet, when another machine sends newer text for
+      that memory, then the memory comes back and nothing is deleted; when its record has vanished, then the
+      deletion is simply done; and when the person restores it first, then the memory comes back.
+- [ ] Given the command line help, when it is shown, then the review commands are not listed.
+- [ ] Given the existing automated checks, the shim tests, the tool catalog check and the release build, when
+      they run, then they pass and the release build shows no new warning, and nothing but the cycle and its
+      tests runs a cycle.
+
 ## 2. Automatic sync
 - [ ] Only the MCP server runs the timer; the CLI and web UI never start one.
 - [ ] A remote whose head equals `L` costs one `ls-remote` and no fetch.
