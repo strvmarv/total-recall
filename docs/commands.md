@@ -41,7 +41,7 @@ Benchmark candidates captured from retrieval misses are reviewed (accepted or re
 
 ## Transcript archive commands
 
-The opt-in [transcript archive](transcripts.md) is managed with the `total-recall transcripts` command line (not the `/total-recall:commands` skill). Once enabled it archives your Claude Code sessions in the background at each session start, embeds them on your machine and can be searched by the assistant with `transcript_search`; these commands enable it, fill and embed it on demand, inspect and empty it.
+The opt-in [transcript archive](transcripts.md) is managed with the `total-recall transcripts` command line (not the `/total-recall:commands` skill). Once enabled it archives your Claude Code sessions in the background at each session start, embeds them on your machine and can be searched by the assistant with `transcript_search`, read with `transcript_get` and browsed with `transcript_sessions`; these commands enable it, fill and embed it on demand, inspect and empty it.
 
 | Command | Description |
 |---|---|
