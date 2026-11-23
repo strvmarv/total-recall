@@ -1,6 +1,6 @@
 # Transcript archive
 
-> **Status: back up, embed and search.** Once the archive is on, total-recall archives your Claude Code sessions in the background at each session start (and on demand with `total-recall transcripts backfill`), turns the text into vectors on your machine and lets the assistant search it, by meaning and by words, with `transcript_search`. Backing up, embedding and searching are usable together. Reading a hit in full beyond the chunk the search returns (`transcript_get`), listing sessions (`transcript_sessions`) and other agent hosts arrive in a later release: until then those two tools only report whether the archive is on.
+> **Status: back up, embed, search, read and browse.** Once the archive is on, total-recall archives your Claude Code sessions in the background at each session start (and on demand with `total-recall transcripts backfill`), turns the text into vectors on your machine and lets the assistant search it, by meaning and by words, with `transcript_search`, read around a hit or a stated range of a session with `transcript_get`, and list the archived sessions with `transcript_sessions`. Backing up, embedding, searching, reading and browsing are usable together. Other agent hosts, and the default of searching the current project, arrive in a later release.
 
 ## What it is
 
@@ -144,7 +144,7 @@ The embedding feature adds a third schema version to the archive (a vector table
 
 ## Searching the archive
 
-The assistant searches with `transcript_search` (see [The three tools](#the-three-tools)). A hit is the whole chunk, at most 1,800 characters, so it is all the assistant sees of a past exchange until `transcript_get` arrives.
+The assistant searches with `transcript_search` (see [The three tools](#the-three-tools)). A hit is the whole chunk, at most 1,800 characters, so it is all the search shows of a past exchange; `transcript_get` reads the exchanges around it (see [Reading the archive](#reading-the-archive)).
 
 **By meaning and by words.** The query is embedded and compared with the chunks' vectors (finds paraphrases: "how did we decide to cache results" finds a chunk that says "we settled on an LRU"), and it is also run as a phrase and as a list of words against the text index (finds exact strings: an error message, an identifier, a file name). The phrase run matches the whole query as a sequence (a query longer than 32 tokens skips the phrase run and is searched by meaning and by words only); the word run matches any of up to twelve of its tokens, ranked by BM25, one-letter tokens dropped. A combining mark stays part of its word, so an accent typed as a separate combining mark (`re` + U+0301 + `sume`) finds the same chunks as `résume` and `resume`. When the meaning search is not possible (the gate above says words only, the model is not ready, the vector search failed) the call is not an error: the answer says `"search": {"meaning": "off", "reason": "..."}` and uses words.
 
@@ -163,13 +163,54 @@ The assistant searches with `transcript_search` (see [The three tools](#the-thre
 4. Sort by the final score (ties: newer, then lower id). **At most two chunks per session** among the results, so one long session cannot fill the answer, except when the scope is a single session.
 5. `score` in the answer is the final score divided by the best one: a relative number, the top hit is 1.0.
 
-**The answer**: `enabled`, `query`, `scope`, `scopeNote` (only when it changed the scope), `search` (`meaning` `on` or `off`, `reason` when off), `pendingEmbedding`, `results`, and `truncated` with `truncatedHits` when the size cap cut hits. Each result has `id` (the chunk id, which `transcript_get` will take), `session` (`<host>:<id>`), `project`, `kind`, `title`, `ts`, `chunkType` (`dialogue` or `compaction-summary`), `hasError`, `exchanges` (such as `3-4`), `via` (which of `meaning`, `phrase`, `words` found it, so an exact hit can be told from a paraphrase), `score` and `text` (the chunk body without its header line; the header's facts are fields).
+**The answer**: `enabled`, `query`, `scope`, `scopeNote` (only when it changed the scope), `search` (`meaning` `on` or `off`, `reason` when off), `pendingEmbedding`, `results`, and `truncated` with `truncatedHits` when the size cap cut hits. Each result has `id` (the chunk id, which `transcript_get` takes), `session` (`<host>:<id>`), `project`, `kind`, `title`, `ts`, `chunkType` (`dialogue` or `compaction-summary`), `hasError`, `exchanges` (such as `3-4`), `via` (which of `meaning`, `phrase`, `words` found it, so an exact hit can be told from a paraphrase), `score` and `text` (the chunk body without its header line; the header's facts are fields).
 
 - **`pendingEmbedding`** counts the chunks in the searched scope that cannot be found by meaning right now: those with no vector, or, when the meaning search is off, all of them. It tells the assistant how much of the scope was covered by words only (for example straight after enabling the archive, before the first passes finished).
 - **Size cap.** The `text` of all hits together is capped at 40,000 characters (about 10,000 tokens). Hits are added in rank order until the next would not fit; `truncated: true` and `truncatedHits` (the number left out) say so. The default of ten hits is at most 18,000 characters.
 - An archive that is absent or empty answers `results: []` with `note: nothing is archived yet; run total-recall transcripts backfill`. The search opens the archive per call and closes it, never opens the memory store, logs no retrieval event and writes nothing (apart from the one-time schema step, see above).
 
 **Measured.** A words query over a synthetic archive of 100,000 chunks (a debug build, twelve common tokens) took 154 to 182 milliseconds unfiltered (237 milliseconds for the twelve commonest tokens, the worst case) and about 86 to 101 milliseconds with project, kind and `since` filters together; `forget --all` on 10,000 chunks, with the vector triggers firing per row, took about one second.
+
+## Reading the archive
+
+Two tools read what the archive holds, and neither needs a model: they work whenever the archive is on and its file opens, whatever the state of the embedding, and nothing they do sends anything anywhere (no embedder, no embedding provider, no host file is touched). They open the archive for the call, read it in one read transaction and close it, so a `forget` or an ingest that commits in the middle of a call cannot mix two sessions' rows; they write nothing (apart from the one-time schema step, see above). Nothing is kept of what was read.
+
+### `transcript_get`
+
+Give **either** `id` (a chunk id from `transcript_search`) **or** `session` (`<host>:<host_session_id>`, as search names it) with `from_exchange` and optionally `to_exchange` (default: `from_exchange`; a range is at most 200 exchanges wide). Also `context` (0 to 10, default 1) and `max_tokens` (200 to 20,000, default 2,000). With `id` the requested range is that chunk's exchange.
+
+**Exchange numbers.** An exchange is the unit the adapter numbers from 0 in file order (a compaction summary counts as one). A unit that kept no text has no chunk, so the stored numbers can have gaps. `context` counts **stored** exchanges: the `context` nearest exchanges that have text before the first requested one and after the last, so a gap costs no context. A range that holds no stored exchange is not an error: the answer has no exchanges and a note says which numbers were asked and how many exchanges the session has.
+
+**What an exchange's text is.** All parts of the exchange, joined with a blank line, without the header line each chunk starts with and without the `User (continued): ...` line the chunker repeats at the top of every part after the first (only when the exchange is dialogue that began with your text; any other text, a compaction summary that happens to start with those words included, is returned as stored). The text is what was stored, so it is already redacted.
+
+**The answer.** `enabled`, `session`, `project`, `kind`, `title` (null when the session has none), `requested` (the asked range, such as `12-14`), `context`, `exchanges`, `approxTokens`, and, only when they say something, `truncated`, `nextFromExchange`, `nextToExchange` and `note`. Each exchange has `n`, `ts`, `chunkType`, `hasError`, `requested` (false for context) and `text`, and the exchanges are in ascending order.
+
+**The budget.** `max_tokens` is counted as the sum, over the returned exchanges, of `ceil(characters / 4)` of each exchange's text; nothing else (the JSON around it) is counted, and `approxTokens` is that same sum. The answer is filled in this order, stopping at the first exchange that does not fit: the requested exchanges ascending, then the context, alternating one before and one after (before first), nearest first. An exchange is returned whole or not at all, with one exception: a **first** requested exchange that alone is over the budget is returned cut, ending with `[cut: raise max_tokens to read the rest]`, and the cut text with its marker still fits the budget; nothing follows it, no context included, and the note says to raise `max_tokens`. So a window larger than the budget keeps what was asked for and loses the far context first.
+
+**`truncated`** is true when a requested exchange was left out or cut, or a context exchange was left out to fit the budget; it is not true merely because a session has no more exchanges.
+
+**Reading on.** When requested exchanges after the last returned one were left out (the budget ran out, or an exchange was returned cut), the answer gives `nextFromExchange` (the first one not returned; after a cut exchange, the next stored requested one) and `nextToExchange` (the end of the range that was asked), and the note spells out the call. **Reading on is `session`, `from_exchange: nextFromExchange`, `to_exchange: nextToExchange` and `context: 0`**: `context: 0` because the earlier answer already ended on the exchange just before, which with the default context would be returned again. Repeating that call until no `nextFromExchange` is given reaches every requested exchange, each once; a cut exchange is the only one not complete, and the note says which.
+
+**Errors.** Argument errors (answered as `Invalid arguments: ...`): both forms or neither; `from_exchange` or `to_exchange` with `id`, or `session` without `from_exchange`; a malformed session; `from_exchange` below 0; `to_exchange` below `from_exchange`; a range wider than 200; `context`, `max_tokens`, `from_exchange`, `to_exchange` out of range or not a whole number (`1.5` is refused, not truncated; `2.0` is accepted); an `id` below 1. A named session or chunk that is not in the archive (never archived, or forgotten) is an error result with exactly this text, whatever else is archived:
+
+- `no archived chunk has id <N> (it may have been forgotten); use transcript_sessions to list sessions`
+- `no archived session <ref>; use transcript_sessions to list sessions`
+
+When the archive holds no chunk at all (no file, or nothing in it) the text is followed by ` (nothing is archived yet; run total-recall transcripts backfill)`, and a read of a missing archive file creates nothing. An archive that cannot be opened or read is an error result too: its text names the cause (`the transcript archive could not be opened: <why>` or `the transcript archive could not be read: <message>`); two more texts say the archive cannot be reached at all: `the transcript archive cannot be located: <message>` (its settings could not be read) and `the transcript archive is not available in this storage mode`, the engine's stderr gets the cause (the full exception chain for a failed read), and nothing read from the archive is logged.
+
+**Automated sessions are readable.** Naming a session or a chunk is explicit intent, so `transcript_get` does not apply the automated filter (as a search of one session does). The id of an automated session comes from `transcript_sessions` with `include_automated`.
+
+### `transcript_sessions`
+
+Lists archived sessions, newest first by last activity (`ended_at`, else `started_at`; sessions with neither time last, then the newer id first). Arguments, all optional: `project` (the key as archived), `since` (ISO-8601 date or date-time; **active since**: last activity at or after it), `before` (the same format; last activity strictly earlier), `limit` (1 to 100, default 20), `include_automated` (default false). A date alone is read as 00:00 UTC. A session with neither time never matches `since` or `before`. There is no default project: without `project` every project is listed. Only sessions that hold at least one chunk are listed (a session a rewritten source file reset has nothing to read).
+
+**The answer.** `enabled`, `total` (the sessions that match, before the limit), `more` (`total` minus those returned, only when above 0), `automatedHidden`, `sessions` and, only when it says something (the empty-archive note or the narrowing note), `note`. `automatedHidden` is the number of automated sessions the filters would have shown had `include_automated` been true (only when above 0 and `include_automated` is false), so an assistant can tell that reviewer and subagent sessions exist. Each session has `session` (the `<host>:<id>` that `transcript_get` takes), `project`, `kind`, `title` (the label, may be null), `startedAt`, `endedAt`, `exchanges` (the session's exchange count: valid exchange numbers are below it, some may hold no text) and `chunks` (the stored chunk count).
+
+**Paging with `before`.** Only the newest `limit` (at most 100) sessions are listed, so when `more` is above 0 the note says to narrow with `project`, `since` or `before`. To page back, call again with `before` set to the `endedAt` (else `startedAt`) of the oldest session listed; `since` and `before` together bound a window. Times are compared in full precision, so a page boundary loses a session only when two last activities are identical to 100 nanoseconds. A session with neither time sorts last and is listed only while fewer than `limit` sessions match, for example after narrowing with `project`.
+
+An archive with no chunk answers `total` 0, no sessions and the note `nothing is archived yet; run total-recall transcripts backfill`; a filter that matches nothing in a non-empty archive answers `total` 0 without a note. Argument errors: `limit` outside 1 to 100 or not a whole number, a malformed `since` or `before` (the text names the argument), a non-boolean `include_automated`.
+
+**Measured.** On a synthetic archive of 100,000 chunks in 2,000 sessions, `transcript_get` of one chunk by id took a median of 1.3 ms, a window by range 1.4 ms, and a filtered `transcript_sessions` 6.8 ms. These are measurements on one machine, not a promise; the test that guards them only asserts that each answers in under one second.
 
 ## What is kept and what is dropped
 
@@ -312,13 +353,14 @@ The archive adds three MCP tools in SQLite and Cortex modes (not Postgres). They
 | Tool | Purpose |
 |---|---|
 | `transcript_search` | Search the archive. `query` is required; optional `scope` (`session`, `project`, `all`; omitted: see [Searching the archive](#searching-the-archive)), `project`, `session` (`<host>:<id>`), `since`, `include_automated`, `top_k` (1 to 50, default 10). |
-| `transcript_get` | Read the archive: one chunk by `id`, or a range of a `session` with `from_exchange` and `to_exchange`; `context` (0 to 10, default 1). |
-| `transcript_sessions` | List archived sessions. Optional `project`, `since`, `limit` (1 to 100, default 20), `include_automated`. |
+| `transcript_get` | Read the archive: the exchanges around a chunk `id`, or a range of a `session` with `from_exchange` and `to_exchange`; `context` (0 to 10, default 1), `max_tokens` (200 to 20,000, default 2,000). See [Reading the archive](#reading-the-archive). |
+| `transcript_sessions` | List archived sessions, newest first. Optional `project`, `since` (active since), `before`, `limit` (1 to 100, default 20), `include_automated`. |
 
-`transcript_search` works as described in [Searching the archive](#searching-the-archive). `transcript_get` and `transcript_sessions` are not built yet: they only say whether the archive is on. All three read the setting each call, so `enable` and `disable` apply at once:
+`transcript_search` works as described in [Searching the archive](#searching-the-archive). `transcript_get` and `transcript_sessions` work as described in [Reading the archive](#reading-the-archive). All three read the setting each call, so `enable` and `disable` apply at once:
 
 - off: `{"enabled":false,"hint":"Run `total-recall transcripts enable` in a terminal to turn the archive on."}`
-- on, `transcript_get` or `transcript_sessions`: `{"enabled":true,"available":false,"hint":"This tool is not available in this version yet."}`
+- on, but the server has no archive set up (a composition that gives the tool no reader): `{"enabled":true,"available":false,"hint":"The transcript archive is not set up in this server."}`
+- on and set up: the answers of [Reading the archive](#reading-the-archive) and [Searching the archive](#searching-the-archive).
 
 See [MCP tools](tools.md) for the full tool list.
 

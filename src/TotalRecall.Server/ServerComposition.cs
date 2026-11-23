@@ -680,8 +680,10 @@ public static class ServerComposition
                 transcriptSentinel.IsEnabled,
                 new Infrastructure.Transcripts.TranscriptSearchService(
                     () => TranscriptSearchContextFor(cfg, resolvedDbPath, storageMode, embedder))));
-            registry.Register(new TranscriptGetHandler(transcriptSentinel.IsEnabled));
-            registry.Register(new TranscriptSessionsHandler(transcriptSentinel.IsEnabled));
+            var transcriptReads = new Infrastructure.Transcripts.TranscriptReadService(
+                () => TranscriptReadContextFor(resolvedDbPath));
+            registry.Register(new TranscriptGetHandler(transcriptSentinel.IsEnabled, transcriptReads));
+            registry.Register(new TranscriptSessionsHandler(transcriptSentinel.IsEnabled, transcriptReads));
 
             return new ServerCompositionHandles(conn, registry, store, storageMode, reindexProgress: reindexProgress, reindexCts: reindexCts, archivePass: archivePass);
         }
@@ -702,10 +704,26 @@ public static class ServerComposition
         Core.Config.TotalRecallConfig cfg, string resolvedDbPath, string storageMode, IEmbedder embedder)
     {
         var settings = ConfigLoader.LoadTranscriptsSettings();
-        var location = Infrastructure.Transcripts.TranscriptStore.ResolveLocation(settings, resolvedDbPath, out var error)
-            ?? throw new InvalidOperationException(error ?? "transcripts.db_path cannot be resolved");
+        var location = TranscriptLocationFor(settings, resolvedDbPath);
         return new Infrastructure.Transcripts.TranscriptSearchContext(location, settings, storageMode, cfg.Embedding, embedder);
     }
+
+    /// <summary>
+    /// The per-call context of <c>transcript_get</c> and <c>transcript_sessions</c>: the archive's location only,
+    /// resolved from the <c>[transcripts]</c> settings read now (no embedder, no other setting). Nothing is opened here.
+    /// Throws with the reason when the location cannot be resolved; the service answers that as an error.
+    /// </summary>
+    private static Infrastructure.Transcripts.TranscriptReadContext TranscriptReadContextFor(string resolvedDbPath) =>
+        new(TranscriptLocationFor(ConfigLoader.LoadTranscriptsSettings(), resolvedDbPath));
+
+    /// <summary>
+    /// The archive's location for <paramref name="settings"/> beside the main database at
+    /// <paramref name="resolvedDbPath"/>; throws with the reason when it cannot be resolved.
+    /// </summary>
+    private static Infrastructure.Transcripts.TranscriptLocation TranscriptLocationFor(
+        Infrastructure.Config.TranscriptsSettings settings, string resolvedDbPath) =>
+        Infrastructure.Transcripts.TranscriptStore.ResolveLocation(settings, resolvedDbPath, out var error)
+            ?? throw new InvalidOperationException(error ?? "transcripts.db_path cannot be resolved");
 
     /// <summary>
     /// The archive's <c>session_start</c> pass for the sqlite and cortex compositions. Construction does no I/O: the
@@ -1073,8 +1091,10 @@ public static class ServerComposition
                 transcriptSentinel.IsEnabled,
                 new Infrastructure.Transcripts.TranscriptSearchService(
                     () => TranscriptSearchContextFor(cfg, resolvedDbPath, storageMode, embedder))));
-            registry.Register(new TranscriptGetHandler(transcriptSentinel.IsEnabled));
-            registry.Register(new TranscriptSessionsHandler(transcriptSentinel.IsEnabled));
+            var transcriptReads = new Infrastructure.Transcripts.TranscriptReadService(
+                () => TranscriptReadContextFor(resolvedDbPath));
+            registry.Register(new TranscriptGetHandler(transcriptSentinel.IsEnabled, transcriptReads));
+            registry.Register(new TranscriptSessionsHandler(transcriptSentinel.IsEnabled, transcriptReads));
 
             return new ServerCompositionHandles(conn, registry, routingStore, storageMode, periodicSync, reindexProgress, reindexCts, skillAutoImportEnabled: autoImportEnabled, archivePass: archivePass);
         }

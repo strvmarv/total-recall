@@ -352,6 +352,22 @@ public sealed class TranscriptSearchServiceTests : IDisposable
         Assert.Throws<ArgumentException>(() => TranscriptSearchService.ParseSince(text));
     }
 
+    [Fact]
+    public void ParseSince_BeforeName_InError()
+    {
+        var ex = Assert.Throws<ArgumentException>(() => TranscriptSearchService.ParseSince("yesterday", "before"));
+        Assert.StartsWith("before must be an ISO-8601 date", ex.Message);
+    }
+
+    [Fact]
+    public void ParseSince_DefaultName_IsSince()
+    {
+        var ex = Assert.Throws<ArgumentException>(() => TranscriptSearchService.ParseSince("yesterday"));
+        Assert.Equal(
+            "since must be an ISO-8601 date (2026-11-18) or date-time (2026-11-18T10:00:00Z); got 'yesterday'",
+            ex.Message);
+    }
+
     // ---- the meaning decision ---------------------------------------------------------------------------------------
 
     [Fact]

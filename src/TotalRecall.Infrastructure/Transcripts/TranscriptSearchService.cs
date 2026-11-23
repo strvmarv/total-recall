@@ -127,15 +127,16 @@ public sealed class TranscriptSearchService
     /// A full ISO-8601 instant (<c>2026-03-02T10:30:00Z</c>, an offset, fractions; no offset is read as UTC) or a date
     /// alone (read as 00:00:00 UTC).
     /// </summary>
+    /// <param name="argumentName">The argument the text came from; the error names it (<c>since</c>, <c>before</c>).</param>
     /// <exception cref="ArgumentException">Anything else.</exception>
-    public static DateTimeOffset ParseSince(string text)
+    public static DateTimeOffset ParseSince(string text, string argumentName = "since")
     {
         ArgumentNullException.ThrowIfNull(text);
         var t = text.Trim();
         const DateTimeStyles styles = DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal;
         if (DateTimeOffset.TryParseExact(t, SinceFormats, CultureInfo.InvariantCulture, styles, out var value))
             return value.ToUniversalTime();
-        throw new ArgumentException($"since must be an ISO-8601 date (2026-11-18) or date-time (2026-11-18T10:00:00Z); got '{text}'");
+        throw new ArgumentException($"{argumentName} must be an ISO-8601 date (2026-11-18) or date-time (2026-11-18T10:00:00Z); got '{text}'");
     }
 
     private static readonly string[] SinceFormats =

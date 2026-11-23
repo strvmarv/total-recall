@@ -1325,7 +1325,7 @@
     },
     {
       "name": "transcript_get",
-      "description": "Read archived conversation exchanges: give either id (a chunk id from transcript_search) or session with from_exchange and to_exchange. The archive is off by default (turn it on with \u0060total-recall transcripts enable\u0060) and reading it is not available in this version yet.",
+      "description": "Read archived conversation exchanges: give either id (a chunk id from transcript_search) or session with from_exchange and optionally to_exchange. The archive is off by default (turn it on with \u0060total-recall transcripts enable\u0060). The answer holds the requested exchanges (flagged \u0060requested\u0060) with \u0060context\u0060 exchanges on each side, within max_tokens; \u0060truncated\u0060 says something asked for was left out, and nextFromExchange and nextToExchange say how to read on.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1343,7 +1343,7 @@
           },
           "to_exchange": {
             "type": "integer",
-            "description": "Last exchange of the range (with session)"
+            "description": "Last exchange of the range (with session; default from_exchange, at most 200 exchanges wide)"
           },
           "context": {
             "type": "integer",
@@ -1351,13 +1351,20 @@
             "maximum": 10,
             "default": 1,
             "description": "Exchanges of context around the result (0 to 10, default 1)"
+          },
+          "max_tokens": {
+            "type": "integer",
+            "minimum": 200,
+            "maximum": 20000,
+            "default": 2000,
+            "description": "The token budget of the answer (200 to 20000, default 2000; about 4 characters per token). When requested exchanges are left out the answer gives nextFromExchange and nextToExchange: read on with session, from_exchange: nextFromExchange, to_exchange: nextToExchange and context: 0"
           }
         }
       }
     },
     {
       "name": "transcript_sessions",
-      "description": "List archived conversation sessions. The archive is off by default (turn it on with \u0060total-recall transcripts enable\u0060) and listing it is not available in this version yet.",
+      "description": "List archived conversation sessions, newest last activity first, each with its title. The archive is off by default (turn it on with \u0060total-recall transcripts enable\u0060). Automated sessions are left out unless include_automated is true (\u0060automatedHidden\u0060 counts them); \u0060total\u0060 counts the matches and \u0060more\u0060 those not listed.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1367,7 +1374,11 @@
           },
           "since": {
             "type": "string",
-            "description": "Only sessions since this ISO-8601 date or date-time"
+            "description": "Only sessions active since this ISO-8601 date or date-time (their last activity is at or after it)"
+          },
+          "before": {
+            "type": "string",
+            "description": "Only sessions whose last activity is before this ISO-8601 date or date-time; page back by passing the oldest listed session\u0027s endedAt (else startedAt)"
           },
           "limit": {
             "type": "integer",

@@ -20,8 +20,9 @@ internal static class TranscriptChunker
     public const int BodyLimit = 1_800;
     public const int RepeatLimit = 300;
 
-    private const string Separator = "\n\n";
-    private const string ContinuedLabel = "User (continued): ";
+    internal const string DialogueType = "dialogue";
+    internal const string Separator = "\n\n";
+    internal const string ContinuedLabel = "User (continued): ";
 
     public static IReadOnlyList<IngestChunk> Chunk(ExchangeUnit unit, ChunkHeaderFacts facts)
     {
@@ -98,7 +99,7 @@ internal static class TranscriptChunker
 
         var header = Header(unit, facts);
         var ts = unit.FirstTs is { } first ? TranscriptTime.Iso(first) : null;
-        var chunkType = unit.IsSummary ? "compaction-summary" : "dialogue";
+        var chunkType = unit.IsSummary ? "compaction-summary" : DialogueType;
         var chunks = new List<IngestChunk>(parts.Count);
         foreach (var part in parts)
         {
@@ -126,7 +127,7 @@ internal static class TranscriptChunker
             : "unknown";
         var number = unit.Number.ToString(CultureInfo.InvariantCulture);
         return $"{facts.Host} session {id} | project {facts.ProjectKey} | {date} | {facts.Kind} | "
-            + $"{(unit.IsSummary ? "compaction-summary" : "dialogue")} | exchanges {number}-{number}";
+            + $"{(unit.IsSummary ? "compaction-summary" : DialogueType)} | exchanges {number}-{number}";
     }
 
     /// <summary>

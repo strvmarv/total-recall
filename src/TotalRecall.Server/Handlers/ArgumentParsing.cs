@@ -66,6 +66,61 @@ internal static class ArgumentParsing
     }
 
     /// <summary>
+    /// Read an optional whole-number property constrained to <c>[min, max]</c>. Unlike <see cref="ReadOptionalInt"/>
+    /// a fractional value (<c>1.5</c>) is refused rather than truncated; a whole value written with a fraction part
+    /// (<c>2.0</c>) is accepted. Absent or null gives <c>null</c>.
+    /// </summary>
+    public static int? ReadOptionalStrictInt(JsonElement args, string name, int min, int max)
+    {
+        var v = ReadOptionalStrictInt64(args, name, min, max);
+        return v is null ? null : (int)v.Value;
+    }
+
+    /// <summary>
+    /// 64-bit variant of <see cref="ReadOptionalStrictInt"/>.
+    /// </summary>
+    public static long? ReadOptionalStrictInt64(JsonElement args, string name, long min, long max)
+    {
+        if (!args.TryGetProperty(name, out var prop) || prop.ValueKind == JsonValueKind.Null)
+            return null;
+        if (prop.ValueKind != JsonValueKind.Number)
+            throw new ArgumentException($"{name} must be a whole number");
+
+        long value;
+        if (!prop.TryGetInt64(out value))
+        {
+            if (!prop.TryGetDouble(out var d) || double.IsNaN(d) || double.IsInfinity(d))
+                throw new ArgumentException($"{name} must be a whole number");
+            if (d != Math.Floor(d))
+                throw new ArgumentException($"{name} must be a whole number");
+            // Whole but beyond the long range (or exactly 2^63): out of any range a caller can ask for.
+            if (d < -9.2233720368547758E+18 || d >= 9.2233720368547758E+18)
+                throw new ArgumentException($"{name} must be between {min} and {max}");
+            value = (long)d;
+        }
+
+        if (value < min || value > max)
+            throw new ArgumentException($"{name} must be between {min} and {max}");
+        return value;
+    }
+
+    /// <summary>
+    /// Read an optional boolean property. Returns <c>null</c> when absent or null; throws when present and not a
+    /// boolean.
+    /// </summary>
+    public static bool? ReadOptionalBool(JsonElement args, string name)
+    {
+        if (!args.TryGetProperty(name, out var prop) || prop.ValueKind == JsonValueKind.Null)
+            return null;
+        return prop.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => throw new ArgumentException($"{name} must be a boolean"),
+        };
+    }
+
+    /// <summary>
     /// Read an optional JSON array of strings. Returns <c>null</c> when the
     /// property is absent or null. Throws when present and not an array of
     /// strings.
