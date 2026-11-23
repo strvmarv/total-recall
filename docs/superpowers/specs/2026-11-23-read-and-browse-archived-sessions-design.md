@@ -106,12 +106,12 @@ SessionList ListSessions(SessionFilter filter, int limit)
 
 - `SessionRow`: `Id`, `Ref` (`<host>:<host_session_id>`), `Project`, `Kind`, `Title`, `StartedAt`, `EndedAt`, `ExchangeCount`,
   `ChunkCount` (a count of the session's chunks).
-- `SessionFilter`: `Project` (exact key, as the search's), `SinceEpoch` (at or after) and `BeforeEpoch` (strictly before), each
+- `SessionFilter`: `Project` (exact key, as the search's), `Since` (at or after) and `Before` (strictly before), both `DateTimeOffset?`, each
   compared with `COALESCE(ended_at, started_at)` **as text against `TranscriptTime.Iso(value)`** (the archive writes every time
   through `TranscriptTime.Iso`: fixed-width UTC with 7 fractional digits and `Z`, which sorts as text), so a bound keeps full
   precision and paging with `before` set to the oldest listed session's `endedAt` (else `startedAt`) loses a session only when two
   last activities are identical to the 100 ns; a session with neither time matches neither bound, so it is listed only while fewer than
-  `limit` sessions match (it sorts last) and can be reached only without a bound; the note of an overflowing list says to page with
+  `limit` sessions match (it sorts last), for example after narrowing with `project`; the note of an overflowing list says to page with
   `before`. `IncludeAutomated`.
 - `SessionList`: the rows (newest first: `COALESCE(ended_at, started_at)` descending, sessions with neither time last, then `id`
   descending), `Total` (sessions that match, before the limit) and `AutomatedHidden` (as call 8).
@@ -239,8 +239,9 @@ without a note. When `more` is above 0 the note says that only the newest `limit
   set up in this server."}` (the search's `OnSearchNotSetUp`, whose text names only the search, is renamed and reworded to it, and
   `TranscriptToolHandlerTests` follows); on with a service runs it. `TranscriptToolAnswers.OnNotAvailable` and `For` go away (nothing answers "not available in this version yet"
   any more); the tests and docs that pin that text change with it.
-- Arguments are parsed in the handler (`ArgumentParsing`, with the two strict readers of section 2 and `ReadOptionalBool` shared with the
-  search handler, not copied; a missing `arguments` is as section 3 says). An
+- Arguments are parsed in the handler (`ArgumentParsing`, with the two strict readers of section 2 and `ReadOptionalBool`, which moves there from
+  `TranscriptSearchHandler` as `internal` so the three handlers share it; a missing `arguments` is as section 3 says, and `arguments`
+  present but not an object is an argument error for both tools, as for the search). An
   `ArgumentException` is the caller's error. An archive that cannot be opened or read is an **error result**, written to stderr with
   the `[total-recall] transcript_get` prefix, never an exception that escapes.
 - `TranscriptReadService(Func<TranscriptReadContext?> context, TimeProvider? time = null)`, with an internal open seam for tests as the
