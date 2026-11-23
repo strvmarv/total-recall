@@ -14,7 +14,8 @@ public sealed partial class GitSyncApplier
 
     /// <summary>
     /// Applies the fetched repository (decisions 4 to 6, 10 and 14 to 16): reads the tree at <c>R</c>, builds the visit
-    /// set (the rows with a <c>repush_groups</c> marker included, milestone 1b-ii D16), previews the deletions for the
+    /// set (the rows with a <c>repush_groups</c> marker included, milestone 1b-ii D16, and every id with a held-delete item,
+    /// open or approved, milestone 1b-iii D4), previews the deletions for the
     /// delete guard (D1 to D4), decides each entry in ordinal id order (one transaction each), records the rejections,
     /// sweeps the cleared ones, and advances <c>L</c> only for a complete pull (a tripped guard does not hold it back, nor
     /// does a repush marker, D19). In an unproven pull every deletion candidate is held before <c>L</c> moves (D5 and the
@@ -38,12 +39,14 @@ public sealed partial class GitSyncApplier
         Dictionary<string, IssueRow> failures;
         Dictionary<string, IssueRow> rejections;
         Dictionary<string, HeldItem> openHeld;
+        Dictionary<string, HeldItem> approved;
         try
         {
             rows = GitSyncRows.ReadAll(conn);
             failures = GitSyncIssues.ReadOpen(conn, GitSyncIssues.ApplyFailed);
             rejections = GitSyncIssues.ReadOpen(conn, GitSyncIssues.RejectedRecord);
             openHeld = GitSyncReviews.ReadOpenHeld(conn);
+            approved = GitSyncReviews.ReadApprovedHeld(conn);
         }
         catch (Exception ex) when (ex is FormatException or SqliteException or InvalidOperationException)
         {
@@ -69,8 +72,12 @@ public sealed partial class GitSyncApplier
             SetModule.OfSeq(rows.Values.Where(r => r.BaseJson is not null && r.State.IsActive).Select(r => r.EntryId)),
             SetModule.OfSeq(localDeletions),
             SetModule.OfSeq(rows.Values.Where(r => r.RepushGroups is not null).Select(r => r.EntryId)));
+        // Milestone 1b-iii, D4: every id with a held-delete item, open or approved, is visited, so an entry re-created under
+        // its still-active row with an unchanged record still closes its item.
         var ids = SyncApply.visitSet(input)
             .Concat(skippedByScan.Keys)
+            .Concat(openHeld.Keys)
+            .Concat(approved.Keys)
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .ToList();

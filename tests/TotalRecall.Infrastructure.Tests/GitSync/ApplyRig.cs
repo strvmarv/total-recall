@@ -104,8 +104,8 @@ internal sealed class ApplyRig : IDisposable
 
     public HeldItem? Held(string id) => GitSyncReviews.ReadOpenHeld(Scan.Connection).GetValueOrDefault(id);
 
-    public void SeedHeld(string id, string direction = "remote", string cause = "unproven") =>
-        GitSyncReviews.UpsertHeld(Scan.Connection, new HeldItem(id, direction, null, cause, 1_700_000_000_000L));
+    public void SeedHeld(string id, string direction = "remote", string cause = "unproven", string? hash = null) =>
+        GitSyncReviews.UpsertHeld(Scan.Connection, new HeldItem(id, direction, hash, cause, 1_700_000_000_000L));
 
     public int ReviewRows()
     {

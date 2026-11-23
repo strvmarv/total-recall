@@ -1019,7 +1019,7 @@ public sealed class GitSyncApplierEntryTests : IDisposable
     public void OpenLocalItem_LeavesTheDeletionHeld(bool proven)
     {
         SyncedThenDeletedHere();
-        _rig.SeedHeld(Id, "local");
+        _rig.SeedHeld(Id, "local", hash: BlobSha);
         var before = _rig.Full();
 
         Assert.IsType<EntryResult.NoOp>(_rig.Apply(ApplyRig.Rec(Id, minute: 10), proven, BlobSha));

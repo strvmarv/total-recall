@@ -204,10 +204,10 @@ public sealed partial class GitSyncApplier
         }
 
         // Decision 13: a decision that changes nothing opens no transaction (unless a stamp must be issued). A held-delete
-        // write or close, and a decision with notes, always change something, and a push deletion is reported even when its
-        // row already agrees (milestone 1b-ii, D9).
+        // write, close or hash refresh (milestone 1b-iii, D10), and a decision with notes, always change something, and a
+        // push deletion is reported even when its row already agrees (milestone 1b-ii, D9).
         if (!plan.HasStoreOps && !HasRestamp(decision) && !TouchesHeldItem(decision) && decision.Notes.IsEmpty
-            && !decision.Entry.IsPushDeletion)
+            && !decision.Entry.IsPushDeletion && !RefreshesHash(held, blobSha, decision))
         {
             var (preview, error) = BuildRow(id, decision, row, oldBase, theirs, local, hadEntry: local is not null, plan.Colder, _ => null);
             if (error is not null)
@@ -275,6 +275,19 @@ public sealed partial class GitSyncApplier
 
     /// <summary>The decision writes a held-delete item or closes the open one.</summary>
     private static bool TouchesHeldItem(SyncMerge.MergeDecision d) => d.CloseHeldDelete || d.Entry.IsHoldDeletion;
+
+    /// <summary>
+    /// The decision leaves the open local item <paramref name="held"/> open (it neither closes nor writes a hold) and the
+    /// record's blob id <paramref name="blobSha"/> differs from the item's hash: the item's <c>record_hash</c> is refreshed
+    /// to it, its state, direction, cause and <c>arrived_at</c> kept (milestone 1b-iii, D10). A remote item has no hash and
+    /// is never refreshed; an id with no record has no blob id.
+    /// </summary>
+    private static bool RefreshesHash(HeldItem? held, string? blobSha, SyncMerge.MergeDecision d) =>
+        held is { State: "open", Direction: "local" }
+        && blobSha is not null
+        && !string.Equals(blobSha, held.RecordHash, StringComparison.Ordinal)
+        && !d.CloseHeldDelete
+        && !d.Entry.IsHoldDeletion;
 
     /// <summary>The <c>repush_groups</c> text the decision writes (milestone 1b-ii, D16); null when it clears or keeps the marker.</summary>
     private static string? MarkerSet(SyncMerge.MergeDecision d) =>
@@ -475,6 +488,14 @@ public sealed partial class GitSyncApplier
             GitSyncReviews.UpsertHeld(conn, new HeldItem(id, direction, theirs is null ? null : blobSha, cause, _nowMs()), dbTx);
             heldEntry = new HeldEntry(id, direction, cause);
         }
+        // Milestone 1b-iii, D10: an open local item the decision leaves open follows the record's blob id, so the stale
+        // check of a review answer reads the record as of this pull; nothing new is reported in the summary.
+        var refreshed = RefreshesHash(held, blobSha, decision);
+        if (refreshed)
+        {
+            Step(id, "refresh");
+            GitSyncReviews.RefreshHeldHash(conn, id, blobSha!, dbTx);
+        }
 
         phase("issue");
         Step(id, "issue");
@@ -488,7 +509,7 @@ public sealed partial class GitSyncApplier
         var effects = new EntryEffects(plan.Delete, pushDeletion, heldEntry, decision.CloseHeldDelete, NoteWords(decision), MarkerSet(decision));
         if (plan.Insert)
             return new EntryResult.Carried(CarriedKind.Inserted, plan.Colder, effects);
-        if (plan.HasStoreOps || rowWritten || TouchesHeldItem(decision))
+        if (plan.HasStoreOps || rowWritten || TouchesHeldItem(decision) || refreshed)
             return new EntryResult.Carried(CarriedKind.Updated, plan.Colder, effects);
         return pushDeletion ? new EntryResult.Carried(CarriedKind.Unchanged, false, effects) : new EntryResult.NoOp(effects.Repush);
     }
