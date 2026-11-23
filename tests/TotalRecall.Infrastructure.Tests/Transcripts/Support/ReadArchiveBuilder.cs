@@ -74,11 +74,22 @@ public sealed class SessionBuilder
     /// Adds exchange <paramref name="n"/> stored in several parts, one per body, in order. The caller writes each later
     /// part's <c>User (continued): &lt;question&gt;</c> prefix itself.
     /// </summary>
-    public SessionBuilder Parts(int n, params string[] bodies)
+    public SessionBuilder Parts(int n, params string[] bodies) => PartsCore(n, bodies, reverseInsertion: false);
+
+    /// <summary>
+    /// Like <see cref="Parts"/>, but the parts are handed to the ingest last first, so the rows are stored in descending
+    /// part order and only an ORDER BY on the part reads them back ascending.
+    /// </summary>
+    public SessionBuilder PartsStoredReversed(int n, params string[] bodies) => PartsCore(n, bodies, reverseInsertion: true);
+
+    private SessionBuilder PartsCore(int n, string[] bodies, bool reverseInsertion)
     {
         ArgumentNullException.ThrowIfNull(bodies);
+        var parts = new List<IngestChunk>();
         for (var part = 0; part < bodies.Length; part++)
-            _chunks.Add(new IngestChunk(n, n, part, "dialogue", false, null, 1, Content(n, "dialogue", null, bodies[part])));
+            parts.Add(new IngestChunk(n, n, part, "dialogue", false, null, 1, Content(n, "dialogue", null, bodies[part])));
+        if (reverseInsertion) parts.Reverse();
+        _chunks.AddRange(parts);
         return this;
     }
 

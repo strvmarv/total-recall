@@ -560,7 +560,7 @@ public sealed class TranscriptReadAcceptanceTests : IDisposable
             ("{\"id\":1,\"max_tokens\":200.9}", "max_tokens"),
             ("{\"id\":0}", "id"),
             ($"{{\"session\":\"{keep}\",\"from_exchange\":-1}}", "from_exchange"),
-            ($"{{\"session\":\"{keep}\",\"from_exchange\":0,\"to_exchange\":200}}", "200"), // 201 exchanges
+            ($"{{\"session\":\"{keep}\",\"from_exchange\":0,\"to_exchange\":200}}", "exchanges wide"), // 201 exchanges
             ($"{{\"session\":\"{keep}\",\"from_exchange\":2,\"to_exchange\":1}}", "to_exchange"),
         })
         {
@@ -572,6 +572,11 @@ public sealed class TranscriptReadAcceptanceTests : IDisposable
         var whole = await Call(h, "transcript_get", $"{{\"session\":\"{keep}\",\"from_exchange\":1.0,\"context\":2.0,\"max_tokens\":2000.0}}");
         Assert.Equal(new[] { 0, 1, 2 }, Ns(whole));
         Assert.Equal(new[] { 0, 1, 2 }, Ns(await Call(h, "transcript_get", GetArgs(keep, 0, 199, context: 0))));
+        // whole numbers written with a fraction pass the strict long (id) and int (to_exchange) readers
+        var wholeId = await Call(h, "transcript_get", $"{{\"id\":{ChunkId("keep", 1)}.0}}");
+        Assert.Equal(new[] { 1 }, RequestedNs(wholeId));
+        var wholeTo = await Call(h, "transcript_get", $"{{\"session\":\"{keep}\",\"from_exchange\":0,\"to_exchange\":2.0,\"context\":0}}");
+        Assert.Equal(new[] { 0, 1, 2 }, Ns(wholeTo));
 
         foreach (var (args, name) in new (string?, string)[]
         {
@@ -823,7 +828,8 @@ public sealed class TranscriptReadAcceptanceTests : IDisposable
 
         using (var writer = SqliteOpener.Open(Db, pooling: false))
         {
-            // Another connection holds a write transaction with uncommitted archive changes, as an ingest does.
+            // Another connection holds a write transaction with uncommitted archive changes, as an ingest does. The raw
+            // UPDATEs exist only to prove the reader never sees uncommitted text (the asserts below would show it).
             using (var begin = writer.CreateCommand())
             {
                 begin.CommandText = "BEGIN IMMEDIATE; UPDATE tx_chunk SET content = content || ' zqxuncommitted'; " +
@@ -897,7 +903,7 @@ public sealed class TranscriptReadAcceptanceTests : IDisposable
         Backfill(new TranscriptLocation(archive, IsMainDatabase: false));
         await AssertBothToolsAnswer(Compose());
 
-        // Again with the local provider and an empty home, so no model override exists.
+        // Again with the local provider and an empty home, so there is no user model override (the repo's bundled model is still found).
         File.WriteAllText(Path.Combine(DataDir, "config.toml"), archiveSetting);
         var emptyHome = Path.Combine(_dir, "empty-home");
         Directory.CreateDirectory(emptyHome);

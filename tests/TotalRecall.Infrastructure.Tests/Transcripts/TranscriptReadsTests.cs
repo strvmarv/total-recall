@@ -100,7 +100,7 @@ public sealed class TranscriptReadsTests : IDisposable
     {
         _archive.Session("claude-code", "s1")
             .Exchange(0, "zero")
-            .Parts(1, "first", "User (continued): q\n\nsecond", "User (continued): q\n\nthird")
+            .PartsStoredReversed(1, "first", "User (continued): q\n\nsecond", "User (continued): q\n\nthird")
             .Exchange(2, "two")
             .Commit();
         var session = IdOf("s1");

@@ -627,8 +627,8 @@ public sealed class TranscriptReadServiceGetTests : IDisposable
 
     public static IEnumerable<object[]> BadArguments() => new[]
     {
-        new object[] { new TranscriptGetRequest(5, "claude-code:s1", 0, null, 1, 2000), "id" },
-        new object[] { new TranscriptGetRequest(null, null, null, null, 1, 2000), "id" },
+        new object[] { new TranscriptGetRequest(5, "claude-code:s1", 0, null, 1, 2000), "not both" },
+        new object[] { new TranscriptGetRequest(null, null, null, null, 1, 2000), "give either id (a chunk id" },
         new object[] { new TranscriptGetRequest(5, null, 0, null, 1, 2000), "from_exchange" },
         new object[] { new TranscriptGetRequest(5, null, null, 3, 1, 2000), "to_exchange" },
         new object[] { new TranscriptGetRequest(null, "claude-code:s1", null, null, 1, 2000), "from_exchange" },
@@ -636,12 +636,12 @@ public sealed class TranscriptReadServiceGetTests : IDisposable
         new object[] { new TranscriptGetRequest(null, "no-colon", 0, null, 1, 2000), "session" },
         new object[] { new TranscriptGetRequest(null, ":id", 0, null, 1, 2000), "session" },
         new object[] { new TranscriptGetRequest(null, "host:", 0, null, 1, 2000), "session" },
-        new object[] { new TranscriptGetRequest(0, null, null, null, 1, 2000), "id" },
-        new object[] { new TranscriptGetRequest(-3, null, null, null, 1, 2000), "id" },
+        new object[] { new TranscriptGetRequest(0, null, null, null, 1, 2000), "id must be a chunk id of 1 or more" },
+        new object[] { new TranscriptGetRequest(-3, null, null, null, 1, 2000), "id must be a chunk id of 1 or more" },
         new object[] { new TranscriptGetRequest(null, "claude-code:s1", -1, null, 1, 2000), "from_exchange" },
         new object[] { new TranscriptGetRequest(null, "claude-code:s1", 5, 4, 1, 2000), "to_exchange" },
-        new object[] { new TranscriptGetRequest(null, "claude-code:s1", 0, 200, 1, 2000), "200" },
-        new object[] { new TranscriptGetRequest(null, "claude-code:s1", 0, int.MaxValue, 1, 2000), "200" }, // the width in int would overflow
+        new object[] { new TranscriptGetRequest(null, "claude-code:s1", 0, 200, 1, 2000), "exchanges wide" },
+        new object[] { new TranscriptGetRequest(null, "claude-code:s1", 0, int.MaxValue, 1, 2000), "exchanges wide" }, // the width in int would overflow
         new object[] { new TranscriptGetRequest(5, null, null, null, 11, 2000), "context" },
         new object[] { new TranscriptGetRequest(5, null, null, null, -1, 2000), "context" },
         new object[] { new TranscriptGetRequest(5, null, null, null, 1, 199), "max_tokens" },

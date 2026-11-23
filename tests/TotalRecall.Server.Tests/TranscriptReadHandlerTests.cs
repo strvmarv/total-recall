@@ -307,6 +307,11 @@ public sealed class TranscriptReadHandlerTests : IDisposable
 
         json = await Data(h, "{\"project\":\"owner/repo\",\"before\":\"2026-11-18T10:00:00.0000001Z\"}");
         Assert.Equal("claude-code:s1", Assert.Single(json.GetProperty("sessions").EnumerateArray()).GetProperty("session").GetString());
+
+        // since alone (T0 + 1.5 h): only the session whose last activity is later, pi:p2 at T0 + 2 h
+        json = await Data(h, "{\"since\":\"" + T0.AddMinutes(90).UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture) + "\"}");
+        Assert.Equal("pi:p2", Assert.Single(json.GetProperty("sessions").EnumerateArray()).GetProperty("session").GetString());
+        Assert.Equal(1, json.GetProperty("total").GetInt64());
     }
 
     [Theory]
@@ -386,7 +391,8 @@ public sealed class TranscriptReadHandlerTests : IDisposable
         var on = false;
         var calls = 0;
         var sessions = new TranscriptSessionsHandler(() => { calls++; return on; }, Service());
-        var get = new TranscriptGetHandler(() => on, Service());
+        var getCalls = 0;
+        var get = new TranscriptGetHandler(() => { getCalls++; return on; }, Service());
 
         Assert.False((await Data(sessions, null)).GetProperty("enabled").GetBoolean());
         Assert.Equal(1, calls);
@@ -394,9 +400,11 @@ public sealed class TranscriptReadHandlerTests : IDisposable
         Assert.Equal(2, (await Data(sessions, null)).GetProperty("total").GetInt64());
         Assert.Equal(2, calls);
         Assert.Equal(3, (await Data(get, $"{{\"id\":{ChunkId(1)}}}")).GetProperty("exchanges").GetArrayLength());
+        Assert.Equal(1, getCalls);
         on = false;
         Assert.False((await Data(sessions, null)).GetProperty("enabled").GetBoolean());
         Assert.False((await Data(get, "{\"id\":1}")).GetProperty("enabled").GetBoolean());
         Assert.Equal(3, calls);
+        Assert.Equal(2, getCalls);
     }
 }

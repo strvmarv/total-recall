@@ -40,7 +40,44 @@ public sealed class TranscriptReadServiceSessionsTests : IDisposable
         s.Commit();
     }
 
+    private static string CaptureError(Action action)
+    {
+        var original = Console.Error;
+        using var captured = new StringWriter();
+        try
+        {
+            Console.SetError(captured);
+            action();
+        }
+        finally
+        {
+            Console.SetError(original);
+        }
+        return captured.ToString();
+    }
+
     private static string[] Ids(TranscriptSessionsResponse r) => r.Sessions.Select(s => s.Session).ToArray();
+
+    [Fact]
+    public void Sessions_ArchiveThatCannotBeOpened_ErrorResult_NotException()
+    {
+        var svc = new TranscriptReadService(
+            () => new TranscriptReadContext(new TranscriptLocation(_db.Path, IsMainDatabase: false)),
+            null,
+            _ => new TranscriptOpenResult(TranscriptOpenStatus.Failed, null, "disk I/O error"));
+
+        TranscriptSessionsResponse? r = null;
+        var stderr = CaptureError(() => r = svc.Sessions(Req(), default));
+
+        Assert.NotNull(r);
+        Assert.NotNull(r!.Error);
+        Assert.StartsWith("the transcript archive could not be opened: ", r.Error);
+        Assert.Contains("disk I/O error", r.Error);
+        Assert.Equal(0, r.Total);
+        Assert.Empty(r.Sessions);
+        Assert.Contains("[total-recall] transcript_sessions", stderr);
+        Assert.Contains("disk I/O error", stderr);
+    }
 
     [Fact]
     public void Sessions_NewestFirst_WithTitlesAndFields()
