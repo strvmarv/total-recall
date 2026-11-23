@@ -49,7 +49,7 @@ public sealed partial class GitSyncApplier
     /// back, or never opened), so it is held here, in a small transaction of its own opened after that rollback, as
     /// <see cref="RecordFailure"/> records the failure. Inside the transaction the row must still be <c>active</c> with a
     /// base, the entry must exist for a <paramref name="direction"/> of <c>remote</c> and be gone for <c>local</c>, and the
-    /// id's item of any state must not be one the fallback keeps (<see cref="FallbackKeeps"/>; milestone 1b-iii, D10);
+    /// id's open or approved item must not be one the fallback keeps (<see cref="FallbackKeeps"/>; milestone 1b-iii, D10);
     /// otherwise nothing is written and both results are null. Any other item (an open one of the other direction, an
     /// approved one against a remote hold) is replaced. The item is open,
     /// with the cause <c>unproven</c>, <paramref name="recordSha"/> (the blob id of the record in <c>R</c>, null when it has

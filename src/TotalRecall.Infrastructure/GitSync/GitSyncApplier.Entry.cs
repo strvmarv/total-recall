@@ -346,7 +346,7 @@ public sealed partial class GitSyncApplier
         Step(id, "reread");
         var rowNow = GitSyncRows.Read(conn, id, dbTx);
         var readNow = LocalEntryReader.Read(t => tx.Get(t, ContentType.Memory, id), () => tx.IsSticky(ContentType.Memory, id));
-        var heldNow = GitSyncReviews.ReadHeldItem(conn, id, dbTx); // any state: an approved item is passed as read (D4)
+        var heldNow = GitSyncReviews.ReadHeldItem(conn, id, dbTx); // open or approved: an approved item is passed as read (D4)
         if (!Equals(row, rowNow) || !read.Equals(readNow) || !AgreesWithRow(rowNow, readNow) || !Equals(held, heldNow))
             return new EntryResult.Deferred("the entry changed since the decision was made", Busy: false);
         if (plan.Insert && ApplyPlanning.InKnowledge(tx, id))
