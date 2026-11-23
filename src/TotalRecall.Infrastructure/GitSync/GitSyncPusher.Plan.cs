@@ -87,7 +87,7 @@ public sealed partial class GitSyncPusher
             .Order(StringComparer.Ordinal)
             .ToList();
         var work = prepared.Candidates.Keys.Where(id => !prepared.Excluded.ContainsKey(id)).ToList();
-        var skipped = prepared.Excluded.Select(p => new PushItem(p.Key, SyncPush.exclusionName(p.Value)))
+        var skipped = prepared.Excluded.Select(p => new PushItem(p.Key, SkipReason(prepared, p.Key, p.Value)))
             .Concat(prepared.NotRemovable.Select(id => new PushItem(id, RemovalNotPossible)))
             .ToList();
         if (work.Count == 0 && clearable.Count == 0)
@@ -135,6 +135,16 @@ public sealed partial class GitSyncPusher
         }
     }
 
+    /// <summary>
+    /// The name an excluded candidate is listed under: <c>secret-detected</c> when it is blocked elsewhere by a secret mark
+    /// (#161, D5), else the exclusion's own name (so every other reason that is not the writer's reads
+    /// <c>blocked-elsewhere</c>).
+    /// </summary>
+    private static string SkipReason(PushPrepared prepared, string id, SyncPush.Exclusion exclusion) =>
+        exclusion.IsBlockedElsewhere && prepared.Candidates[id].Row.BlockedReason == SyncSecret.blockReason
+            ? SyncSecret.blockReason
+            : SyncPush.exclusionName(exclusion);
+
     private void ClearMarkOf(SqliteStoreTransaction tx, string id)
     {
         Step(id, "block");
@@ -168,6 +178,23 @@ public sealed partial class GitSyncPusher
         if (!LocalEntryReader.AgreesWithRow(row, read))
         {
             deferred.Add(new PushItem(id, "changed-since-scan"));
+            return;
+        }
+
+        // the secret check (#161, D5): the preparation ran the detectors; here the keys are only compared. No prepared
+        // check (the entry could not be read then) or another key (it changed since) defers the entry; a hit sets the
+        // secret mark and builds nothing. The push never clears or lifts a secret mark.
+        if (!prepared.Secrets.TryGetValue(id, out var secret)
+            || !string.Equals(secret.Key, SyncSecret.secretKey(present.View.Content, present.View.Tags), StringComparison.Ordinal))
+        {
+            deferred.Add(new PushItem(id, "changed-since-scan"));
+            return;
+        }
+        if (secret.Hit)
+        {
+            Step(id, "block");
+            GitSyncRows.Write(tx.Connection, row with { BlockedReason = SyncSecret.blockReason, BlockedHash = secret.Key }, tx.Transaction);
+            blocked.Add(new PushItem(id, SyncSecret.blockReason));
             return;
         }
 

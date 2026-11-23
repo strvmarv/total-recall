@@ -1,13 +1,19 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.FSharp.Core;
 using TotalRecall.Core;
+using TotalRecall.Infrastructure.Eval;
 using TotalRecall.Infrastructure.Storage;
 using SyncRecordModule = TotalRecall.Core.SyncRecord;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
 namespace TotalRecall.Infrastructure.GitSync;
 
-/// <summary>What one scan did (the counts are numbers of entries) and what it noticed.</summary>
+/// <summary>
+/// What one scan did (the counts are numbers of entries) and what it noticed. <paramref name="Blocked"/> and
+/// <paramref name="Unblocked"/> are the ids (ordinal) on whose changed row this scan set the secret block (a first block,
+/// a writer's reason it replaced, or a block it re-stamped with a new key after the fields changed to another secret),
+/// and the ids whose secret block it lifted (a clean re-scan, or fields the user allowed) (#161, decision D4).
+/// </summary>
 public sealed record ScanSummary(
     int New,
     int Content,
@@ -18,9 +24,11 @@ public sealed record ScanSummary(
     int Reactivated,
     int Ineligible,
     IReadOnlyList<LocalDeletion> LocalDeletions,
-    IReadOnlyList<SkippedItem> Skipped)
+    IReadOnlyList<SkippedItem> Skipped,
+    IReadOnlyList<string> Blocked,
+    IReadOnlyList<string> Unblocked)
 {
-    public static ScanSummary Empty { get; } = new(0, 0, 0, 0, 0, 0, 0, 0, [], []);
+    public static ScanSummary Empty { get; } = new(0, 0, 0, 0, 0, 0, 0, 0, [], [], [], []);
 }
 
 /// <summary>An active row whose memory exists in no table. The scan reports it and changes nothing; a later milestone acts on it.</summary>
@@ -48,7 +56,8 @@ public abstract record ScanOutcome
 /// <c>git</c>, uses no network, and never writes a memory, knowledge, vector, <c>import_log</c> or
 /// <c>compaction_log</c> row: only <c>git_sync_entry</c>, <c>git_sync_issue</c> and the two clock keys of <c>_meta</c>, and
 /// it removes the <c>held-delete</c> item of a row it moves to <c>left</c> or reactivates (milestone 1b-ii: the item
-/// cannot outlive the base it was opened for; no other <c>git_sync_review</c> row is touched).
+/// cannot outlive the base it was opened for; no other <c>git_sync_review</c> row is touched). Between the read and the
+/// write it checks each entry for a token or a private key and sets or lifts the row's secret block (#161, decision D4).
 /// </summary>
 public sealed partial class GitSyncScanner
 {
@@ -57,6 +66,12 @@ public sealed partial class GitSyncScanner
 
     /// <summary>Test seam (decision 13): called once, after the hot memory table was read and before the warm one.</summary>
     internal Action? AfterFirstTableRead { get; set; }
+
+    /// <summary>
+    /// Test seam (#161, decision D2): the secret detector the scan runs on each free-text field of an entry it checks.
+    /// A non-empty result is a hit.
+    /// </summary>
+    internal Func<string?, IReadOnlyList<string>> SecretDetector { get; set; } = SensitiveContentScanner.ScanSecrets;
 
     public GitSyncScanner(MsSqliteConnection connection, Func<long> nowMs)
     {

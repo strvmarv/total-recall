@@ -139,6 +139,20 @@ items moved to 1b-iii, see that section):
       re-cloned once per process with nothing deleted.
 - [ ] `status` shows the `sync` block; the sync verbs become advertised only when this milestone merges.
 
+### 1b-iii part 1. Secret block and `sync unblock` (#161)
+- [ ] A token or private key in a memory's text, tags, project or scope blocks only that memory: its row is
+      marked `secret-detected`, it is listed by `sync status` (at most 20 ids, ordinal, then "and N more";
+      active rows only), and no push writes it, while every other memory pushes. With two machines, the token
+      is in no object of the repository and the other machine receives every other memory.
+- [ ] `sync unblock <id>` (hidden) releases it on this machine only, and refuses when the memory changed after
+      the block; a later edit, including a token added in a tag after an unblock, is checked and blocked again.
+- [ ] `git@github.com` and plain addresses such as `noreply@example.com` are not blocked.
+- [ ] A restored, swapped or merged text (any text the apply writes after the scan) that holds a token is not
+      pushed: the push re-checks every entry it is about to write.
+- [ ] The secret reason replaces a writer reason and is never cleared by the writer; a clean re-scan lifts it.
+- [ ] A blocked memory still takes part in the pull: a remote change to it that does not conflict is applied.
+- [ ] The cycle's tests still pass and nothing calls the cycle.
+
 ## 2. Automatic sync
 - [ ] Only the MCP server runs the timer; the CLI and web UI never start one.
 - [ ] A remote whose head equals `L` costs one `ls-remote` and no fetch.

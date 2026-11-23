@@ -91,8 +91,9 @@ internal sealed class Prepared : IDisposable
 }
 
 /// <summary>
-/// The four setup commands as one service (spec decision 1): <c>init</c> starts a sync repository, <c>join</c> adopts one,
-/// <c>leave</c> turns git mode off, <c>status</c> reads. The commands in the CLI only parse arguments and print.
+/// The setup commands as one service (spec decision 1): <c>init</c> starts a sync repository, <c>join</c> adopts one,
+/// <c>leave</c> turns git mode off, <c>status</c> reads, <c>unblock</c> releases a memory held back by a secret (#161). The
+/// commands in the CLI only parse arguments and print.
 /// </summary>
 public sealed partial class SyncSetupService(SyncSetupEnvironment env)
 {

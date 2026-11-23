@@ -1,4 +1,4 @@
-// Shared by the four hidden `sync` commands: argument parsing and printing only. Everything else is SyncSetupService.
+// Shared by the hidden `sync` commands: argument parsing and printing only. Everything else is SyncSetupService.
 //
 // Output (spec decision 3): results go to standard output; standard error carries notices and git's progress as they
 // happen, then one `refused: <name>: <text>` line, then any `note:` lines. Exit 0 (done), 1 (refused or failed), 2 (usage).

@@ -1,4 +1,5 @@
 using TotalRecall.Core;
+using TotalRecall.Infrastructure.Eval;
 using TotalRecall.Infrastructure.Storage;
 
 namespace TotalRecall.Infrastructure.GitSync;
@@ -86,6 +87,12 @@ public sealed partial class GitSyncPusher
     /// it <c>ref</c>. A hook that throws is the fault of its step.
     /// </summary>
     internal Action<string, string>? BeforeStep { get; set; }
+
+    /// <summary>
+    /// The secret detector (#161, decision D5): the category labels it finds in one field, empty for none. Run only by the
+    /// preparation, never inside the plan transaction. A test replaces it to observe when it runs.
+    /// </summary>
+    internal Func<string?, IReadOnlyList<string>> SecretDetector { get; set; } = SensitiveContentScanner.ScanSecrets;
 
     /// <summary>Test seam: called immediately before the push command (a test makes the remote move here).</summary>
     internal Action? BeforePush { get; set; }

@@ -7,7 +7,11 @@ using System.Text;
 using System.Threading.Tasks;
 using TotalRecall.Cli;
 using TotalRecall.Cli.Tests.Commands;
+using TotalRecall.Core;
+using TotalRecall.Infrastructure.Config;
 using TotalRecall.Infrastructure.GitSync;
+using TotalRecall.Infrastructure.Storage;
+using TotalRecall.TestSupport.Transcripts;
 using Xunit;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
@@ -119,6 +123,10 @@ public sealed class SyncCommandTests : IDisposable
     [InlineData("join", "--branch")]
     [InlineData("leave", "x")]
     [InlineData("status", "--branch", "x")]
+    [InlineData("unblock")]
+    [InlineData("unblock", "a", "b")]
+    [InlineData("unblock", "--branch", "x")]
+    [InlineData("unblock", "--nope")]
     public async Task ArgumentErrors_ExitTwo_WithUsageOnStandardError(params string[] args)
     {
         var code = await Run(args);
@@ -133,6 +141,8 @@ public sealed class SyncCommandTests : IDisposable
     [InlineData("init", "--url=https://user:pwSECRET@host/o/r")]
     [InlineData("join", "https://tokenSECRET@host/o/r", "https://other:pwSECRET@host/o/r")]
     [InlineData("leave", "https://tokenSECRET@host/o/r")]
+    [InlineData("unblock", "a", "https://tokenSECRET@host/o/r")]
+    [InlineData("unblock", "--id=tokenSECRET")]
     public async Task AUsageError_NeverEchoesAnAddress(params string[] args)
     {
         var code = await Run(args);
@@ -193,15 +203,81 @@ public sealed class SyncCommandTests : IDisposable
         Assert.Contains("https://***@host/o/r", Out);
     }
 
+    // ---- unblock --------------------------------------------------------------------------------------------------
+
+    private static readonly FakeSecrets Fakes = new(61);
+
+    /// <summary>A memory with a token in the database the commands use, held back by a scan; returns the token.</summary>
+    private static string BlockedMemory(string id)
+    {
+        var token = Fakes.Get("github-token");
+        var dbPath = ConfigLoader.GetDbPath();
+        Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
+        using (var conn = TotalRecall.Infrastructure.Storage.SqliteConnection.Open(dbPath, pooling: false))
+        {
+            MigrationRunner.RunMigrations(conn);
+            var store = new SqliteStore(conn);
+            store.SetMeta("git_sync_machine", "4f2a9c1e");
+            store.Insert(Tier.Warm, ContentType.Memory, new InsertEntryOpts(Content: "the token is " + token, Id: id));
+            Assert.IsType<ScanOutcome.Done>(new GitSyncScanner(conn, () => 1_800_000_000_000L).Scan());
+            Assert.Equal("secret-detected", GitSyncRows.Read(conn, id)!.BlockedReason);
+        }
+        MsSqliteConnection.ClearAllPools();
+        // a block comes from a cycle's scan, and a cycle creates the sync directory; unblock refuses without it
+        GitSyncPaths.ForDatabase(dbPath, OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()).EnsureCreated();
+        return token;
+    }
+
+    [Fact]
+    public async Task Unblock_ABlockedMemory_ExitsZero_AndPrintsTheCategoriesOnly()
+    {
+        var token = BlockedMemory("3f9c2a7e");
+
+        var code = await Run("unblock", "3f9c2a7e");
+
+        Assert.Equal(0, code);
+        Assert.Contains("unblocked 3f9c2a7e", Out);
+        Assert.Contains("found: API token or secret", Out);
+        Assert.DoesNotContain(token, Out + Err);
+        Assert.DoesNotContain(token[4..20], Out + Err);
+    }
+
+    [Fact]
+    public async Task Unblock_ARefusal_ExitsOne_WithTheRefusalOnStandardError()
+    {
+        var token = BlockedMemory("3f9c2a7e");
+
+        var code = await Run("unblock", "aaaa1111");
+
+        Assert.Equal(1, code);
+        Assert.Equal("", Out);
+        Assert.StartsWith("refused: unknown-entry: ", Err);
+        Assert.DoesNotContain(token, Out + Err);
+
+        Assert.Equal(0, await Run("unblock", "3f9c2a7e"));
+        Assert.Equal(1, await Run("unblock", "3f9c2a7e"));
+        Assert.StartsWith("refused: not-blocked: ", Err);
+    }
+
+    [Fact]
+    public async Task Unblock_InAFreshDataDirectory_IsUnknownEntry_AndCreatesNothing()
+    {
+        var code = await Run("unblock", "3f9c2a7e");
+
+        Assert.Equal(1, code);
+        Assert.StartsWith("refused: unknown-entry: ", Err);
+        Assert.False(Directory.Exists(DataDir), "unblock created the data directory");
+    }
+
     // ---- load errors ------------------------------------------------------------------------------------------------
 
     [Fact]
-    public async Task AMalformedConfig_IsFailedForInitJoinAndLeave_AndUnknownForStatus()
+    public async Task AMalformedConfig_IsFailedForInitJoinLeaveAndUnblock_AndUnknownForStatus()
     {
         Directory.CreateDirectory(DataDir);
         File.WriteAllText(ConfigPath, "[storage\nmode = ");
 
-        foreach (var args in new[] { new[] { "init", "--url", "git@h:o/r" }, ["join", "git@h:o/r"], ["leave"] })
+        foreach (var args in new[] { new[] { "init", "--url", "git@h:o/r" }, ["join", "git@h:o/r"], ["leave"], ["unblock", "3f9c2a7e"] })
         {
             var code = await Run(args);
             Assert.Equal(1, code);

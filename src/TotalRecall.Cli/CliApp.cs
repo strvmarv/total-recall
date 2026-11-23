@@ -234,6 +234,7 @@ public static class CliApp
             new Commands.Sync.JoinCommand(),
             new Commands.Sync.LeaveCommand(),
             new Commands.Sync.StatusCommand(),
+            new Commands.Sync.UnblockCommand(),
             new Commands.Transcripts.EnableCommand(),
             new Commands.Transcripts.DisableCommand(),
             new Commands.Transcripts.StatusCommand(),

@@ -1,3 +1,4 @@
+using Microsoft.FSharp.Collections;
 using Microsoft.FSharp.Core;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Storage;
@@ -61,6 +62,7 @@ public sealed partial class SyncSetupService
             : SyncSetup.Fact.NewUnknown(loadError);
         SyncSetup.Fact storedRemote = Unknown(loadError), repoId = Unknown(loadError), machineId = Unknown(loadError);
         var host = loadError is null ? SyncSetup.HostCheck.NotRecorded : SyncSetup.HostCheck.NewHostUnknown(loadError);
+        var blocked = loadError is null ? SyncSetup.BlockedFact.NoDatabase : SyncSetup.BlockedFact.NewBlockedUnreadable(loadError);
         var join = loadError is null ? "unknown" : $"unknown ({loadError})";
         var clone = loadError is null ? "unknown" : $"unknown ({loadError})";
 
@@ -115,6 +117,7 @@ public sealed partial class SyncSetupService
                 {
                     storedRemote = repoId = machineId = SyncSetup.Fact.NewUnknown(open.Unknown);
                     host = SyncSetup.HostCheck.NewHostUnknown(open.Unknown);
+                    blocked = SyncSetup.BlockedFact.NewBlockedUnreadable(open.Unknown);
                 }
                 else
                 {
@@ -122,6 +125,8 @@ public sealed partial class SyncSetupService
                     repoId = ReadFact(meta, SyncIdentity.MetaKeys.RepoId);
                     machineId = ReadFact(meta, SyncIdentity.MetaKeys.Machine);
                     host = ReadHost(meta);
+                    if (connection is not null)
+                        blocked = ReadBlocked(connection);
                 }
 
                 (join, clone) = await JoinAndCloneAsync(open, meta, remote, pathsError is null ? paths : null, pathsError, client, ct).ConfigureAwait(false);
@@ -134,9 +139,55 @@ public sealed partial class SyncSetupService
 
         return new SetupResult(
             0, null, null,
-            SyncSetup.renderStatus(new SyncSetup.StatusFacts(mode, git, configuredRemote, configuredBranch, storedRemote, repoId, machineId, host, join, clone))
+            SyncSetup.renderStatus(new SyncSetup.StatusFacts(mode, git, configuredRemote, configuredBranch, storedRemote, repoId, machineId, host, join, clone, blocked))
                 .ToArray(),
             []);
+    }
+
+    internal const string NoSyncStateText = "the database has no git sync state: start total-recall once";
+
+    /// <summary>
+    /// The <c>blocked</c> section of <c>sync status</c> (#161, D8): the active sync rows that carry a reason, at most
+    /// <see cref="SyncSetup.blockedShownLimit"/> of them ordinal by id, and how many there are, from one statement on the
+    /// connection it is given (one snapshot; it writes nothing and takes no lock). The columns are read directly, never
+    /// through <see cref="GitSyncRows"/>, so a row with a state this build does not know is simply not listed. No
+    /// <c>git_sync_entry</c> table (an unmigrated database), or any read error, is <c>BlockedUnreadable</c>.
+    /// </summary>
+    internal static SyncSetup.BlockedFact ReadBlocked(MsSqliteConnection connection)
+    {
+        try
+        {
+            using (var probe = connection.CreateCommand())
+            {
+                probe.CommandText = "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'git_sync_entry'";
+                if ((long)probe.ExecuteScalar()! == 0)
+                    return SyncSetup.BlockedFact.NewBlockedUnreadable(NoSyncStateText);
+            }
+
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                SELECT entry_id, blocked_reason, count(*) OVER () FROM git_sync_entry
+                WHERE state = 'active' AND blocked_reason IS NOT NULL
+                ORDER BY entry_id COLLATE BINARY
+                LIMIT $limit
+                """;
+            cmd.Parameters.AddWithValue("$limit", SyncSetup.blockedShownLimit);
+            var total = 0;
+            var shown = new List<Tuple<string, string>>();
+            using (var reader = cmd.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    shown.Add(Tuple.Create(reader.GetString(0), reader.GetString(1)));
+                    total = checked((int)reader.GetInt64(2));
+                }
+            }
+            return SyncSetup.BlockedFact.NewListed(total, ListModule.OfSeq(shown));
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return SyncSetup.BlockedFact.NewBlockedUnreadable(ex.Message);
+        }
     }
 
     private static SyncSetup.Fact Opt(string? value) =>
