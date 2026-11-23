@@ -23,7 +23,7 @@ public sealed class HiddenCommandTests : IDisposable
         Console.SetError(_origErr);
     }
 
-    private static readonly string[] SyncVerbs = ["init", "join", "leave", "status"];
+    private static readonly string[] SyncVerbs = ["init", "join", "leave", "status", "unblock"];
 
     private sealed class Stub(string name, string? group, bool hidden = false) : ICliCommand
     {
@@ -69,10 +69,11 @@ public sealed class HiddenCommandTests : IDisposable
         Assert.Equal(0, withSync.Code);
         Assert.Equal(WithoutVersionLine(without.Out), WithoutVersionLine(withSync.Out));
         Assert.DoesNotContain("sync", withSync.Out, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("unblock", withSync.Out, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task TheGroupHelp_ListsTheFourCommands_AndEachAnswersItsOwnHelp()
+    public async Task TheGroupHelp_ListsTheFiveCommands_AndEachAnswersItsOwnHelp()
     {
         var group = await Capture("sync", "--help");
         Assert.Equal(0, group.Code);
@@ -131,7 +132,7 @@ public sealed class HiddenCommandTests : IDisposable
         throw new InvalidOperationException("catalog.json was not found above " + AppContext.BaseDirectory);
     }
 
-    private static readonly Regex Phrase = new(@"sync\s+(init|join|leave|status)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex Phrase = new(@"sync\s+(init|join|leave|status|unblock)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     [Fact]
     public async Task NoUserFacingDocumentNamesTheSyncCommands()

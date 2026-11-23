@@ -366,6 +366,158 @@ public sealed class SyncSetupLeaveStatusTests
         rig.AssertNothingCreated();
     }
 
+    // ---- status: the blocked list (#161, D8) ---------------------------------------------------------------------
+
+    private const string LastSyncLine = "last sync: never (this build does not run the sync cycle)";
+
+    /// <summary>A migrated database with these sync rows (an unknown state is written past the CHECK constraint).</summary>
+    private static void SeedRows(SetupRig rig, params (string Id, string State, string? Reason)[] rows)
+    {
+        using var conn = SyncDb.OpenMigrated(rig.DbPath);
+        SyncDb.Exec(conn, "PRAGMA ignore_check_constraints = 1");
+        foreach (var (id, state, reason) in rows)
+            SyncDb.Exec(
+                conn,
+                "INSERT INTO git_sync_entry (entry_id, state, blocked_reason, blocked_hash) VALUES ($id, $state, $reason, $hash)",
+                ("$id", id), ("$state", state), ("$reason", (object?)reason ?? DBNull.Value),
+                ("$hash", reason is null ? DBNull.Value : new string('a', 64)));
+        SyncDb.Exec(conn, "PRAGMA ignore_check_constraints = 0");
+        conn.Dispose();
+        MsSqliteConnection.ClearAllPools();
+    }
+
+    /// <summary>The <c>blocked</c> section: its count line and the indented lines after it, which end right before the last line.</summary>
+    private static string[] BlockedSection(SetupResult result)
+    {
+        var lines = result.Lines.ToArray();
+        var start = Array.FindIndex(lines, l => l.StartsWith("blocked:", StringComparison.Ordinal));
+        Assert.True(start >= 0, "no blocked line");
+        Assert.Equal(LastSyncLine, lines[^1]);
+        return lines[start..^1];
+    }
+
+    [GitFact]
+    public async Task Status_ListsOnlyActiveRowsWithAReason_OrderedById()
+    {
+        using var rig = new SetupRig { Settings = GuardSettings.For(Remote) };
+        SeedRows(
+            rig,
+            ("3c000000", "active", "secret-detected"),
+            ("1a000000", "active", "too-large"),
+            ("2b000000", "active", null),
+            ("0f000000", "forgotten", "secret-detected"),
+            ("0e000000", "left", "secret-detected"),
+            ("0d000000", "paused", "secret-detected"),
+            ("2c000000", "active", "secret-detected"));
+
+        var result = await rig.Service().StatusAsync();
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(
+            ["blocked: 3", "  1a000000  too-large", "  2c000000  secret-detected", "  3c000000  secret-detected"],
+            BlockedSection(result));
+    }
+
+    [GitFact]
+    public async Task Status_With25Blocked_ShowsTheFirst20ById_AndHowManyMore()
+    {
+        using var rig = new SetupRig { Settings = GuardSettings.For(Remote) };
+        var ids = Enumerable.Range(0, 25).Select(i => $"3f9c2a{i:x2}").ToArray();
+        SeedRows(rig, [.. ids.Reverse().Select(id => (id, "active", (string?)"secret-detected"))]);
+
+        var section = BlockedSection(await rig.Service().StatusAsync());
+
+        Assert.Equal(
+            ["blocked: 25", .. ids[..20].Select(id => $"  {id}  secret-detected"), "  and 5 more"],
+            section);
+    }
+
+    [GitFact]
+    public async Task Status_NoBlockedRow_PrintsZero()
+    {
+        using var rig = new SetupRig { Settings = GuardSettings.For(Remote) };
+        SeedRows(rig, ("3f9c2a7e", "active", null));
+        Assert.Equal(["blocked: 0"], BlockedSection(await rig.Service().StatusAsync()));
+    }
+
+    [GitFact]
+    public async Task Status_AnUnmigratedDatabase_PrintsTheBlockedListAsUnknown_AndCreatesNothing()
+    {
+        using var rig = new SetupRig();
+        SyncDb.CreatePlain(
+            rig.DbPath,
+            "CREATE TABLE _meta (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)",
+            "CREATE TABLE hot_memories (id TEXT PRIMARY KEY NOT NULL, content TEXT NOT NULL)");
+        var before = SyncDb.Snapshot(rig.Root);
+
+        var result = await rig.Service().StatusAsync();
+
+        MsSqliteConnection.ClearAllPools();
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(["blocked: unknown (the database has no git sync state: start total-recall once)"], BlockedSection(result));
+        Assert.Equal(before, SyncDb.Snapshot(rig.Root));
+    }
+
+    [GitFact]
+    public async Task Status_AMissingDatabaseFile_PrintsNoDatabase()
+    {
+        using var rig = new SetupRig { Settings = GuardSettings.For(Remote) };
+        Assert.False(File.Exists(rig.DbPath));
+
+        var result = await rig.Service().StatusAsync();
+
+        Assert.Equal(["blocked: unknown (no database)"], BlockedSection(result));
+        rig.AssertNothingCreated();
+    }
+
+    [GitFact]
+    public async Task Status_ALoadError_PrintsTheBlockedListAsUnknownWithTheReason()
+    {
+        using var rig = new SetupRig { LoadError = "config.toml is malformed" };
+        SeedRows(rig, ("3f9c2a7e", "active", "secret-detected"));
+
+        var result = await rig.Service().StatusAsync();
+
+        Assert.Equal(["blocked: unknown (config.toml is malformed)"], BlockedSection(result));
+    }
+
+    [GitFact]
+    public async Task Status_AnUnknownOpenState_PrintsTheBlockedListAsUnknownWithTheReason()
+    {
+        using var rig = new SetupRig { Settings = GuardSettings.For(Remote) };
+        SeedRows(rig, ("3f9c2a7e", "active", "secret-detected"));
+        File.WriteAllBytes(rig.DbPath + "-wal", []);
+
+        var result = await rig.Service().StatusAsync();
+
+        Assert.Equal(["blocked: unknown (" + ReadOnlyDatabase.PendingWalText + ")"], BlockedSection(result));
+    }
+
+    [GitFact]
+    public async Task Status_ListingBlockedRows_TakesNoLock_AndCreatesNothing()
+    {
+        using var rig = new SetupRig { Settings = GuardSettings.For(Remote) };
+        SeedRows(rig, ("3f9c2a7e", "active", "secret-detected"));
+        string[] expected = ["blocked: 1", "  3f9c2a7e  secret-detected"];
+        var before = SyncDb.Snapshot(rig.Root);
+
+        var result = await rig.Service().StatusAsync();
+
+        MsSqliteConnection.ClearAllPools();
+        Assert.Equal(expected, BlockedSection(result));
+        Assert.Equal(before, SyncDb.Snapshot(rig.Root));
+        Assert.False(Directory.Exists(rig.SyncDirectory), "status created the sync directory (and so a lock file)");
+
+        // another process holds the sync lock: status neither waits for it nor refuses
+        var paths = GitSyncPaths.ForDatabase(rig.DbPath, false);
+        paths.EnsureCreated();
+        using var held = await SyncLock.TryAcquireAsync(paths.LockPath, TimeSpan.Zero);
+        Assert.NotNull(held);
+        var whileHeld = await rig.Service().StatusAsync();
+        Assert.Equal(0, whileHeld.ExitCode);
+        Assert.Equal(expected, BlockedSection(whileHeld));
+    }
+
     // ---- status creates nothing -----------------------------------------------------------------------------
 
     private static async Task AssertStatusCreatesNothing(SetupRig rig, string watched)

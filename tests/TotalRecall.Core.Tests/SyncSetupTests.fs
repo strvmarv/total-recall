@@ -7,7 +7,8 @@ open TotalRecall.Core.SyncSetup
 
 let private allRefusals =
     [ NoGit; GitTooOld; WrongMode; BadRemote; BadBranch; PublicRepo; RepoExists; NotEmpty; NothingToJoin; NotASyncRepo
-      InvalidManifest; FormatTooNew; HostUnverified; Busy; NeedsAuth; Unreachable; Failed ]
+      InvalidManifest; FormatTooNew; HostUnverified; Busy; NeedsAuth; Unreachable; Failed; NotBlocked; UnknownEntry
+      UnreadableEntry; ChangedSinceBlocked ]
 
 [<Tests>]
 let refusalTests =
@@ -21,7 +22,8 @@ let refusalTests =
                 names
                 [ "no-git"; "git-too-old"; "wrong-mode"; "bad-remote"; "bad-branch"; "public-repo"; "repo-exists"; "not-empty"
                   "nothing-to-join"; "not-a-sync-repo"; "invalid-manifest"; "format-too-new"; "host-unverified"; "busy"
-                  "needs-auth"; "unreachable"; "failed" ]
+                  "needs-auth"; "unreachable"; "failed"; "not-blocked"; "unknown-entry"; "unreadable-entry"
+                  "changed-since-blocked" ]
                 "names"
 
         testCase "effectiveMode reduces like the server does and keeps the text as written" <| fun _ ->
@@ -192,14 +194,16 @@ let statusTests =
               MachineId = Known "01234567"
               Host = Matches
               Join = "joined"
-              Clone = "/d/repo" }
+              Clone = "/d/repo"
+              Blocked = Listed(0, []) }
         testCase "every label is present, in order, and no secret is printed" <| fun _ ->
-            let lines = renderStatus facts
-            let labels = lines |> List.map (fun l -> l.Substring(0, l.IndexOf ':'))
+            let lines = renderStatus { facts with Blocked = Listed(1, [ "3f9c2a7e", "secret-detected" ]) }
+            let labels =
+                lines |> List.filter (fun l -> not (l.StartsWith " ")) |> List.map (fun l -> l.Substring(0, l.IndexOf ':'))
             Expect.equal
                 labels
                 [ "storage mode"; "git"; "configured remote"; "configured branch"; "recorded remote"; "repository id"; "machine id"
-                  "host check"; "join state"; "clone"; "last sync" ]
+                  "host check"; "join state"; "clone"; "blocked"; "last sync" ]
                 "labels"
             Expect.isFalse (lines |> List.exists (fun l -> l.Contains "SECRETTOKEN")) "no secret"
             Expect.equal (List.last lines) "last sync: never (this build does not run the sync cycle)" "last line"
@@ -224,4 +228,41 @@ let statusTests =
         testCase "the host check words" <| fun _ ->
             for h, w in [ Matches, "matches"; Differs, "differs"; Unavailable, "unavailable"; NotRecorded, "not recorded"; HostUnknown "no such table", "unknown (no such table)" ] do
                 Expect.contains (renderStatus { facts with Host = h }) ("host check: " + w) w
+
+        // #161, D8: the blocked section, right before the last line
+        let blockedSection (lines: string list) =
+            let start = lines |> List.findIndex (fun l -> l.StartsWith "blocked:")
+            lines.[start .. lines.Length - 2]
+
+        testCase "no blocked memory prints a count of zero and no list" <| fun _ ->
+            let lines = renderStatus facts
+            Expect.equal (blockedSection lines) [ "blocked: 0" ] "section"
+            Expect.equal (List.last lines) "last sync: never (this build does not run the sync cycle)" "last line"
+
+        testCase "three blocked memories print one indented line each, in the order given" <| fun _ ->
+            let shown = [ "1a2b3c4d", "secret-detected"; "2b3c4d5e", "too-large"; "3c4d5e6f", "secret-detected" ]
+            let lines = renderStatus { facts with Blocked = Listed(3, shown) }
+            Expect.equal
+                (blockedSection lines)
+                [ "blocked: 3"; "  1a2b3c4d  secret-detected"; "  2b3c4d5e  too-large"; "  3c4d5e6f  secret-detected" ]
+                "section"
+            Expect.equal (List.last lines) "last sync: never (this build does not run the sync cycle)" "last line"
+
+        testCase "more blocked memories than shown end with 'and N more'" <| fun _ ->
+            let shown = [ for i in 0..19 -> sprintf "3f9c2a%02x" i, "secret-detected" ]
+            let lines = renderStatus { facts with Blocked = Listed(25, shown) }
+            let section = blockedSection lines
+            Expect.equal section.Head "blocked: 25" "count"
+            Expect.equal section.Length 22 "count, 20 shown and the rest"
+            Expect.equal section.[1] "  3f9c2a00  secret-detected" "first shown"
+            Expect.equal section.[20] "  3f9c2a13  secret-detected" "last shown"
+            Expect.equal (List.last section) "  and 5 more" "the rest"
+            Expect.equal (List.last lines) "last sync: never (this build does not run the sync cycle)" "last line"
+
+        testCase "an unreadable list and a missing database print as unknown" <| fun _ ->
+            let unreadable = renderStatus { facts with Blocked = BlockedUnreadable "no such table" }
+            Expect.equal (blockedSection unreadable) [ "blocked: unknown (no such table)" ] "unreadable"
+            let none = renderStatus { facts with Blocked = NoDatabase }
+            Expect.equal (blockedSection none) [ "blocked: unknown (no database)" ] "no database"
+            Expect.equal (List.last none) "last sync: never (this build does not run the sync cycle)" "last line"
     ]

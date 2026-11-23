@@ -16,13 +16,13 @@ open TotalRecall.Core.SyncMerge
 // ---------------------------------------------------------------------------------------------
 // The hashes
 
-let private lengthBytes (n: int) : byte[] =
+let internal lengthBytes (n: int) : byte[] =
     [| byte (n >>> 24); byte (n >>> 16); byte (n >>> 8); byte n |]
 
-let private addBytes (buf: ResizeArray<byte>) (bytes: byte[]) = buf.AddRange bytes
+let internal addBytes (buf: ResizeArray<byte>) (bytes: byte[]) = buf.AddRange bytes
 
 /// `0x00` for an absent value, else `0x01`, a 4-byte big-endian length and the UTF-8 bytes.
-let private addField (buf: ResizeArray<byte>) (value: string option) =
+let internal addField (buf: ResizeArray<byte>) (value: string option) =
     match value with
     | None -> buf.Add 0uy
     | Some s ->
@@ -31,7 +31,7 @@ let private addField (buf: ResizeArray<byte>) (value: string option) =
         addBytes buf (lengthBytes bytes.Length)
         addBytes buf bytes
 
-let private sha256Hex (buf: ResizeArray<byte>) : string =
+let internal sha256Hex (buf: ResizeArray<byte>) : string =
     Convert.ToHexString(SHA256.HashData(buf.ToArray())).ToLowerInvariant()
 
 /// SHA-256 (lowercase hex) of `total-recall/scan/content/v1\n` and the six content fields in this order: text,

@@ -21,6 +21,7 @@
     <Compile Include="SyncSettingsGuard.fs" />
     <Compile Include="SyncSetup.fs" />
     <Compile Include="SyncScan.fs" />
+    <Compile Include="SyncSecret.fs" />
     <Compile Include="SyncApply.fs" />
     <Compile Include="SyncPush.fs" />
     <Compile Include="SyncCycle.fs" />
