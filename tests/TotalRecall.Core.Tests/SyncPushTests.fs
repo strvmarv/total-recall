@@ -197,6 +197,12 @@ let markTests =
                   Some "secret", tooLarge, false, KeepMark ]
             for (reason, violation, candidate, expected) in table do
                 Expect.equal (markAction reason violation candidate) expected (sprintf "%A %A %b" reason violation candidate)
+        testCase "the writer never clears or replaces a secret mark (#161, D6)" <| fun () ->
+            let secret = Some SyncSecret.blockReason
+            Expect.isFalse (isWriterReason SyncSecret.blockReason) "secret-detected is not the writer's"
+            for violation in [ None; Some SyncValidation.TooLarge ] do
+                for candidate in [ true; false ] do
+                    Expect.equal (markAction secret violation candidate) KeepMark (sprintf "%A %b" violation candidate)
         testCase "blockName names every Block case, and only the first five are the writer's" <| fun () ->
             let names =
                 [ SyncValidation.TooLarge; SyncValidation.TooManyTags; SyncValidation.TagTooLong

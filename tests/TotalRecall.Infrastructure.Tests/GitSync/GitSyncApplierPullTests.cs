@@ -515,7 +515,7 @@ public sealed class GitSyncApplierPullTests : IDisposable
     public async Task AScanSkippedId_IsNotApplied_DoesNotHoldL_AndItsRowSurvivesTheCleanUp()
     {
         var head = PushRecords(Rec(A), Rec(B, "Other."));
-        var scan = new ScanSummary(0, 0, 0, 0, 0, 0, 0, 0, [], [new SkippedItem(A, "content", "unreadable entry")]);
+        var scan = new ScanSummary(0, 0, 0, 0, 0, 0, 0, 0, [], [new SkippedItem(A, "content", "unreadable entry")], [], []);
 
         var summary = await Pull(scan);
 
