@@ -172,6 +172,17 @@ public sealed class GitSyncReviewsTests : IDisposable
         Assert.Null(GitSyncReviews.ReadHeldItem(_conn, "none"));
     }
 
+    [Theory]
+    [InlineData("unseen")]
+    [InlineData("declined")]
+    [InlineData("resolved")]
+    public void ReadHeldItem_DoesNotReadARowThatIsNeitherOpenNorApproved(string state)
+    {
+        InsertHeld("k", state);
+
+        Assert.Null(GitSyncReviews.ReadHeldItem(_conn, "k"));
+    }
+
     [Fact]
     public void ReadOpenHeld_DoesNotReadAnApprovedItem()
     {

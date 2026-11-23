@@ -576,21 +576,32 @@ public sealed class SyncCommandTests : IDisposable
     }
 
     [Theory]
-    [InlineData("accept-deletions", "accepted", "the memory was deleted here")]
-    [InlineData("restore-deletions", "restored", "the next sync publishes it again")]
-    public async Task Review_BulkForms_WithATerminal_AnswerEveryItem(string form, string verb, string outcome)
+    [InlineData("accept-deletions", "accepted", "the memory was deleted here", true)]
+    [InlineData("restore-deletions", "restored", "the next sync publishes it again", false)]
+    public async Task Review_BulkForms_WithATerminal_AnswerEveryItem(string form, string verb, string outcome, bool withLocal)
     {
         CliApp.SetRegistryForTestsInternal([new TotalRecall.Cli.Commands.Sync.ReviewCommand(() => true)]);
-        SeedHolds(Remote("c3333333"), Remote("a1111111"));
+        // the accept form also answers an open local hold, which the service refuses without the shown hash
+        SeedHolds(withLocal ? [Remote("c3333333"), Local("b2222222"), Remote("a1111111")] : [Remote("c3333333"), Remote("a1111111")]);
 
         var code = await Run("review", form, "--all");
 
         Assert.Equal(0, code);
-        Assert.Equal(
-            [$"a1111111: {verb} a1111111: {outcome}", $"c3333333: {verb} c3333333: {outcome}", "answered 2 of 2"],
-            OutLines);
+        string[] expected = withLocal
+            ?
+            [
+                $"a1111111: {verb} a1111111: {outcome}",
+                "b2222222: accepted b2222222: the next sync removes its record from the repository",
+                $"c3333333: {verb} c3333333: {outcome}",
+                "answered 3 of 3",
+            ]
+            : [$"a1111111: {verb} a1111111: {outcome}", $"c3333333: {verb} c3333333: {outcome}", "answered 2 of 2"];
+        Assert.Equal(expected, OutLines);
         Assert.Equal(0, await Run("review", "list"));
-        Assert.Equal(["no held deletions"], OutLines);
+        if (withLocal)
+            Assert.StartsWith("b2222222  approved  local ", Assert.Single(OutLines, line => !line.StartsWith('|') && !line.StartsWith("-----")));
+        else
+            Assert.Equal(["no held deletions"], OutLines);
     }
 
     [Fact]

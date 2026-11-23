@@ -34,7 +34,7 @@ type Refusal =
     | NotBlocked
     /// `sync unblock`: no memory has the id.
     | UnknownEntry
-    /// `sync unblock`: the id is in two tiers, or the memory cannot be read.
+    /// Lifting a secret block, or answering a held deletion: the id is in two tiers, or the memory cannot be read.
     | UnreadableEntry
     /// `sync unblock`: the memory's pushed fields changed after the block was set.
     | ChangedSinceBlocked
@@ -44,7 +44,7 @@ type Refusal =
     | StaleItem
     /// `sync review`: the memory was edited here since the pull held its deletion.
     | EditedLocally
-    /// `sync review`: a bulk answer without the shown hash of the item it names.
+    /// An answer to a held local deletion given without the shown hash.
     | ShownHashRequired
 
 let refusalName (r: Refusal) : string =

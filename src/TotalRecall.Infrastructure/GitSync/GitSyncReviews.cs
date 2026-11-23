@@ -55,12 +55,16 @@ internal static class GitSyncReviews
         return rows;
     }
 
-    /// <summary>The entry's <c>held-delete</c> item of any state, or null when it has none.</summary>
+    /// <summary>
+    /// The entry's <c>held-delete</c> item, open or approved, or null when it has none. A row in any other state the
+    /// schema admits (<c>unseen</c>, <c>declined</c>, <c>resolved</c>) is not an item: the pull reads only open and
+    /// approved items, so the entry's transaction, which compares this read with the pull's, sees no item either.
+    /// </summary>
     public static HeldItem? ReadHeldItem(MsSqliteConnection conn, string entryId, SqliteTransaction? tx = null)
     {
         using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
-        cmd.CommandText = SelectHeld + " AND entry_id = $id";
+        cmd.CommandText = SelectHeld + " AND state IN ('open', 'approved') AND entry_id = $id";
         cmd.Parameters.AddWithValue("$id", entryId);
         using var r = cmd.ExecuteReader();
         return r.Read() ? ReadItem(r) : null;

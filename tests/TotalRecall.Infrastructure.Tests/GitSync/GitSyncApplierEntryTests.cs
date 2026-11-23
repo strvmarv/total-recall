@@ -668,6 +668,29 @@ public sealed class GitSyncApplierEntryTests : IDisposable
         Assert.NotNull(_rig.Scan.Meta("git_sync_hlc"));
     }
 
+    [Theory]
+    [InlineData("unseen")]
+    [InlineData("declined")]
+    [InlineData("resolved")]
+    public void AHeldDeleteRowInAnotherState_IsNotAnItem_TheRemoteDeletionIsCarriedOut(string state)
+    {
+        _rig.Apply(ApplyRig.Rec(Id, minute: 10));
+        using (var cmd = _rig.Scan.Connection.CreateCommand())
+        {
+            cmd.CommandText =
+                "INSERT INTO git_sync_review (entry_id, kind, state, direction, arrived_at) VALUES ($id, 'held-delete', $state, 'remote', 1)";
+            cmd.Parameters.AddWithValue("$id", Id);
+            cmd.Parameters.AddWithValue("$state", state);
+            cmd.ExecuteNonQuery();
+        }
+
+        // the pull reads only open and approved items, so it passes none for this id
+        var effects = Effects(_rig.Applier.ApplyOne(Id, null, proven: true, held: null, blobSha: null, guard: default));
+
+        Assert.True(effects.Deleted);
+        Assert.Null(_rig.Entry(Id));
+    }
+
     [Fact]
     public void RecordReappearing_ClosesTheOpenRemoteItem()
     {
