@@ -107,8 +107,12 @@ SessionList ListSessions(SessionFilter filter, int limit)
 - `SessionRow`: `Id`, `Ref` (`<host>:<host_session_id>`), `Project`, `Kind`, `Title`, `StartedAt`, `EndedAt`, `ExchangeCount`,
   `ChunkCount` (a count of the session's chunks).
 - `SessionFilter`: `Project` (exact key, as the search's), `SinceEpoch` (at or after) and `BeforeEpoch` (strictly before), each
-  compared with `COALESCE(ended_at, started_at)` as epoch seconds by the same SQL expression the search uses for chunk times (a
-  session with neither time matches neither bound), `IncludeAutomated`.
+  compared with `COALESCE(ended_at, started_at)` **as text against `TranscriptTime.Iso(value)`** (the archive writes every time
+  through `TranscriptTime.Iso`: fixed-width UTC with 7 fractional digits and `Z`, which sorts as text), so a bound keeps full
+  precision and paging with `before` set to the oldest listed session's `endedAt` (else `startedAt`) loses a session only when two
+  last activities are identical to the 100 ns; a session with neither time matches neither bound, so it is listed only while fewer than
+  `limit` sessions match (it sorts last) and can be reached only without a bound; the note of an overflowing list says to page with
+  `before`. `IncludeAutomated`.
 - `SessionList`: the rows (newest first: `COALESCE(ended_at, started_at)` descending, sessions with neither time last, then `id`
   descending), `Total` (sessions that match, before the limit) and `AutomatedHidden` (as call 8).
 - Only sessions with at least one chunk are listed or counted (call 6). All SQL is parameterised. Exchange numbers are read from the
@@ -146,7 +150,7 @@ has; it is not an error.
 **The text of an exchange.** All chunks of the exchange, ascending part, each with its header line cut (`ChunkText`), joined with a
 blank line, with the continuation prefix of every part after the first removed: a part after the first starts with
 `User (continued): <the question, up to 300 characters>` and a blank line (`TranscriptChunker.ContinuedLabel`), repeated only so a
-part is searchable on its own. The prefix is removed from a later part only when the exchange's **first** part body begins with the
+part is searchable on its own. The prefix is removed from a later part only when the exchange's chunk type is `dialogue` and its **first** part body begins with the
 chunker's `User: ` block (the unit had user text, which is the only case the chunker adds the prefix) and the later part begins with
 the label exactly; any other text, a compaction summary that happens to start with those words included, is returned as stored. The
 label is private to the chunker today and becomes `internal` so the reader shares it. The text is returned as stored (it is already redacted; nothing is redacted or altered again). The
@@ -154,7 +158,7 @@ exchange is reported with its number, its `ts`, its chunk type and whether any c
 
 **The budget.** The budget is `max_tokens`, counted as call 3. Fill in this order and stop at the first exchange that does not fit:
 (1) the requested exchanges ascending; (2) the context, alternating one before and one after (before first), nearer before farther,
-until `context` on each side are in or the budget is full. (An exchange of the first step that does not fit ends the answer there; a
+until `context` on each side are in or the budget is full. (An exchange of the first step that does not fit ends the answer there, and the answer points to it as `nextFromExchange`; a
 **first** requested exchange that alone is over the budget is cut on a character-safe boundary so that text and marker fit the budget
 (call 3) and ends with `[cut: raise max_tokens to read the rest]`; nothing follows it, no context included.) Reading stops as soon as the budget is known to be full, so a window over a huge session
 is not read whole.
@@ -187,15 +191,23 @@ when a session simply has no more exchanges). `nextFromExchange` and `nextToExch
 were left out; **reading on is `session` with `from_exchange: nextFromExchange`, `to_exchange: nextToExchange` and `context: 0`**
 (`context: 0` because the earlier answer already ended on the exchange just before; with the default context it would be returned
 again as context). The note spells out exactly those arguments. A note also says what was cut, and "raise `max_tokens`" for a cut
-exchange. When a **cut** first exchange ended the answer, `nextFromExchange` is absent (the cut exchange is not read on) and the
-note says to raise `max_tokens`.
+exchange.
+
+A **cut** first exchange ends the answer (nothing follows it, no context included), and the pointer is decided the same way: when
+stored requested exchanges follow the cut one, `nextFromExchange` is the next stored requested exchange after it and
+`nextToExchange` the asked end, and the note says exchange N was returned cut, is not read on, and that `max_tokens` must be raised
+to read it whole. The pointer is absent only when no requested exchange remains. So reading on always reaches every requested
+exchange: a cut exchange is the only one that is not complete, and the note says which.
 
 ## 3. `transcript_sessions`
 
-**Arguments** (the stub's schema, unchanged): `project` (exact key), `since` and `before` (ISO-8601 date or date-time, parsed by
+**Arguments** (the stub's schema plus `before`): `project` (exact key), `since` and `before` (ISO-8601 date or date-time, parsed by
 `TranscriptSearchService.ParseSince`; `since` is at or after, `before` strictly earlier, both on the session's last activity (calls 7
-and 11); `before` not after `since` is not an error, it simply matches nothing), `limit` (1 to 100, default 20), `include_automated`
-(default false). Argument errors as above. `before` is new in the schema (call 11).
+and 11); `before` not after `since` is not an error, it simply matches nothing; the error of a malformed value names its argument, so
+`ParseSince` gets an argument-name parameter, default `since`, and the handler passes `before`), `limit` (1 to 100, default 20), `include_automated`
+(default false). Argument errors as above, for either tool. A call with no `arguments` (or null) is an empty argument set for
+`transcript_sessions` (every argument is optional, as `MemoryRecentHandler` treats it); for `transcript_get` it is the "neither form"
+argument error. `before` is new in the schema (call 11), and the description of `since` becomes "active since".
 
 **The answer:**
 
@@ -261,21 +273,27 @@ session with a **gap** (an exchange with no kept text) is added.
 
 1. Follow a hit: backfill with `--no-embed`, `transcript_search` by words, then `transcript_get` with the hit's `id`: the requested
    exchange is there, one exchange of context on each side, ascending, flagged `requested`.
-2. `context` 0 returns the exchange alone; `context` 10 near a session's start or end returns what exists, with `truncated` false.
+2. `context` 0 returns the exchange alone; `context` 10 near a session's start or end returns what exists, with `truncated` false (the
+   test sets `max_tokens` high enough, or uses short fixture exchanges, so the budget is not what ends the window).
 3. A range by `session` with `from_exchange` and `to_exchange`; a range partly outside the session; a range over a gap (the gap is
    skipped, context still counts stored exchanges).
 4. A multi-part exchange: the parts are joined, no header line and no `User (continued):` prefix remains, the text equals the chunker's
-   own parts rejoined; a multi-part **compaction summary** whose later part begins with the words `User (continued): ` is returned
-   as stored.
+   own parts rejoined; a multi-part **compaction summary** whose first part begins with `User: ` and whose later part begins with
+   the words `User (continued): ` is returned as stored.
 5. The budget: a window over `max_tokens` keeps the requested exchanges and drops far context first, alternating before and after;
    `truncated` true, no `nextFromExchange`; a requested range over the budget ends at the last whole exchange with `nextFromExchange`
    (reading on from it returns the rest, and no exchange appears twice); a first exchange alone over the budget is cut, marked, with
    the note; `approxTokens` is at most `max_tokens` (a cut exchange and its marker included). **Reading on** issues exactly the call
    the answer names (`from_exchange: nextFromExchange`, `to_exchange: nextToExchange`, `context: 0`), repeated until no
-   `nextFromExchange` remains, and asserts that the union of the requested exchanges equals the original range with none twice.
+   `nextFromExchange` remains, and asserts that the union of the requested exchanges equals the original range with none twice. One
+   range holds an **oversized exchange in the middle** (alone over the budget): reading on cuts it, the note says so, the pointer
+   still moves past it, and every later requested exchange is reached.
 6. A named session or chunk id of an **automated** session is readable; a forgotten session or chunk gives the exact error results
    of section 2; a session name that is malformed or both or neither form of arguments is an argument error; `context` 11,
-   `max_tokens` 100, a range of 201, `context: 1.5`, `max_tokens: 200.9`, `from_exchange: -1` and `id: 0` are argument errors.
+   `max_tokens` 100, a range of 201, `context: 1.5`, `max_tokens: 200.9`, `from_exchange: -1` and `id: 0` are argument errors (a JSON number whose value is whole, such as
+   `2.0`, is accepted); a `transcript_get` call with no `arguments` is the "neither form" error. For `transcript_sessions`: `limit` 0,
+   101 and 1.5, a malformed `since`, a malformed `before` (the text names `before`), and a non-boolean `include_automated` are
+   argument errors, and a call with no `arguments` lists sessions.
 7. `transcript_sessions`: newest first (with a session without times last), the project filter, `since` (active-since, boundary
    included) and `before` (strict) alone and together, `limit` with `more` and `total` and the narrowing note, automated hidden with
    `automatedHidden`, shown with `include_automated`, a reset session (no chunks) absent, the title as label, an empty or missing
@@ -310,7 +328,10 @@ Use the exact error strings above in tests that pin them. Tests that change envi
 - A grep (case-insensitive) for `not available in this version yet`, `not built yet`, `still stubs`, `waits for Part 4`,
   `until .transcript_get. arrives`, `transcript_get. will take`, `later release`, `until they ship` and `Part 4` finds every stale
   line in `docs/`, `AGENTS.md`, the `AGENTS.md` files under `src/`, `PRIVACY.md` and the handler descriptions. The hits in
-  `StatusCommandTests.cs` and `TranscriptsCliTests.cs` that pin the absence of the old search status line are intentional.
+  `StatusCommandTests.cs` and `TranscriptsCliTests.cs` that pin the absence of the old search status line are intentional, and so
+  are hits about `retention_days` ("reserved for a later release") and the default scope ("a later release adds a default of the
+  current project"), which belong to Parts 5 and 8: a hit is changed only when it says `transcript_get` or `transcript_sessions` is
+  missing, unbuilt or coming.
 
 ## Deviation from the parent design
 
@@ -347,7 +368,7 @@ The ticket's criteria, in the order of the issue (number: where):
 | 6 a requested range over the budget, reading on | 5 |
 | 7 a first exchange alone over the budget | 5 |
 | 8 an automated session readable; unknown or forgotten target | 6 and 9 |
-| 9 invalid arguments | 6 |
+| 9 invalid arguments (either tool) | 6 and 7 |
 | 10 the session list: order, fields, project, `since`, `before` | 7 |
 | 11 the limit, `total`, `more` | 7 |
 | 12 automated hidden, `automatedHidden`, shown on request | 7 |
