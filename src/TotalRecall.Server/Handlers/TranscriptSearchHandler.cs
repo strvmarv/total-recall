@@ -60,7 +60,7 @@ public sealed class TranscriptSearchHandler : IToolHandler
     {
         var active = _isActive(); // read once per call
         if (!active || _service is null)
-            return TranscriptToolAnswers.ForNotSetUp(() => active);
+            return TranscriptToolAnswers.ForNotSetUp(active);
 
         if (!arguments.HasValue || arguments.Value.ValueKind != JsonValueKind.Object)
             throw new ArgumentException("transcript_search requires a JSON object of arguments with a query");

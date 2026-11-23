@@ -57,7 +57,7 @@ public sealed class TranscriptSessionsHandler : IToolHandler
     {
         var active = _isActive(); // read once per call
         if (!active || _service is null)
-            return TranscriptToolAnswers.ForNotSetUp(() => active);
+            return TranscriptToolAnswers.ForNotSetUp(active);
 
         var request = ParseArguments(arguments);
         var response = _service.Sessions(request, ct);

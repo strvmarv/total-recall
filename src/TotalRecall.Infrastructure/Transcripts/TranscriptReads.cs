@@ -82,11 +82,6 @@ internal sealed class SqliteTranscriptReads : ITranscriptReads
         "s.id, s.host, s.host_session_id, s.project_key, s.kind, s.title, s.started_at, s.ended_at, s.exchange_count, " +
         "(SELECT count(*) FROM tx_chunk c WHERE c.session_id = s.id)";
 
-    private const string ChunkSelect =
-        "SELECT c.id, c.session_id, s.host, s.host_session_id, s.project_key, s.kind, s.title, c.ts, c.chunk_type, " +
-        "c.has_error, c.exchange_start, c.exchange_end, c.content " +
-        "FROM tx_chunk c JOIN tx_session s ON s.id = c.session_id";
-
     private const string LastActivity = "COALESCE(s.ended_at, s.started_at)";
 
     private readonly SqliteConnection _conn;
@@ -125,21 +120,21 @@ internal sealed class SqliteTranscriptReads : ITranscriptReads
 
     public ChunkRow? ChunkById(long chunkId)
     {
-        using var cmd = Command(ChunkSelect + " WHERE c.id = $id");
+        using var cmd = Command(ChunkRows.Select + " WHERE c.id = $id");
         cmd.Parameters.AddWithValue("$id", chunkId);
         using var r = cmd.ExecuteReader();
-        return r.Read() ? ReadChunk(r) : null;
+        return r.Read() ? ChunkRows.Read(r) : null;
     }
 
     public IReadOnlyList<ChunkRow> ChunksOfExchange(long sessionId, int exchange)
     {
-        using var cmd = Command(ChunkSelect + " WHERE c.session_id = $session AND c.exchange_start = $e ORDER BY c.part");
+        using var cmd = Command(ChunkRows.Select + " WHERE c.session_id = $session AND c.exchange_start = $e ORDER BY c.part");
         cmd.Parameters.AddWithValue("$session", sessionId);
         cmd.Parameters.AddWithValue("$e", exchange);
         var rows = new List<ChunkRow>();
         using var r = cmd.ExecuteReader();
         while (r.Read())
-            rows.Add(ReadChunk(r));
+            rows.Add(ChunkRows.Read(r));
         return rows;
     }
 
@@ -257,21 +252,6 @@ internal sealed class SqliteTranscriptReads : ITranscriptReads
             r.IsDBNull(7) ? null : r.GetString(7),
             r.GetInt32(8),
             r.GetInt64(9));
-
-    private static ChunkRow ReadChunk(SqliteDataReader r) =>
-        new(
-            r.GetInt64(0),
-            r.GetInt64(1),
-            r.GetString(2) + ":" + r.GetString(3),
-            r.GetString(4),
-            r.GetString(5),
-            r.IsDBNull(6) ? null : r.GetString(6),
-            r.IsDBNull(7) ? null : r.GetString(7),
-            r.GetString(8),
-            r.GetInt64(9) != 0,
-            r.GetInt32(10),
-            r.GetInt32(11),
-            r.GetString(12));
 
     private SqliteCommand Command(string sql)
     {

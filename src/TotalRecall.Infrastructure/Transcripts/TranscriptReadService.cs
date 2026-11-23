@@ -71,8 +71,8 @@ public sealed record TranscriptSessionsResponse(
 public sealed record TranscriptReadContext(TranscriptLocation Location);
 
 /// <summary>
-/// The archive reads (read spec sections 2 to 4). <see cref="Sessions"/> lists sessions newest first. <see cref="Get"/> returns a window of exchanges within a token
-/// budget: the requested exchanges first, then context alternating before and after, an exchange whole or not at all
+/// The archive reads (read spec sections 2 to 4). <see cref="Sessions"/> lists sessions newest first. <see cref="Get"/>
+/// returns a window of exchanges within a token budget: the requested exchanges first, then context alternating before and after, an exchange whole or not at all
 /// (except a first requested exchange alone over the budget, which is cut and marked), with pointers to read on. The
 /// archive is opened per call with <c>create: false</c>, read in one <see cref="ITranscriptStore.BeginReads"/> and closed
 /// before returning; nothing is written (opening may apply a pending schema step), no embedder is used and the memory
@@ -339,7 +339,7 @@ public sealed class TranscriptReadService
         return Execute(
             "transcript_sessions",
             () => SessionsAnswer(0, 0, 0, Array.Empty<SessionView>(), TranscriptSearchService.NothingArchivedNote),
-            error => SessionsFailure(error),
+            SessionsFailure,
             store =>
             {
                 using var reads = store.BeginReads();
@@ -375,7 +375,7 @@ public sealed class TranscriptReadService
         return new ExchangeView(
             n,
             parts.Select(p => p.Ts).FirstOrDefault(ts => ts is not null),
-            parts.Count > 0 ? parts[0].ChunkType : "dialogue",
+            parts.Count > 0 ? parts[0].ChunkType : TranscriptChunker.DialogueType,
             parts.Any(p => p.HasError),
             requested,
             ExchangeText.Join(parts));

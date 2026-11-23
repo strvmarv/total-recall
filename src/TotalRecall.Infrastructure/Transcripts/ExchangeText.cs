@@ -12,7 +12,6 @@ namespace TotalRecall.Infrastructure.Transcripts;
 internal static class ExchangeText
 {
     private const string UserLabel = "User: ";
-    private const string DialogueType = "dialogue";
 
     /// <summary>
     /// <paramref name="partsAscending"/> are the chunks of one exchange ordered by part. From the second part on, the
@@ -26,7 +25,7 @@ internal static class ExchangeText
         if (partsAscending.Count == 0) return "";
 
         var first = TranscriptSearchService.ChunkText(partsAscending[0].Content);
-        var strip = partsAscending[0].ChunkType == DialogueType
+        var strip = partsAscending[0].ChunkType == TranscriptChunker.DialogueType
             && first.StartsWith(UserLabel, StringComparison.Ordinal);
 
         var text = new StringBuilder(first);
