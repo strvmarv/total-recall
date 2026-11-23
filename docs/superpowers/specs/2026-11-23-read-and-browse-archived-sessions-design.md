@@ -124,7 +124,8 @@ has; it is not an error.
 **The text of an exchange.** All chunks of the exchange, ascending part, each with its header line cut (`ChunkText`), joined with a
 blank line, with the continuation prefix of every part after the first removed: a part after the first starts with
 `User (continued): <the question, up to 300 characters>` and a blank line (`TranscriptChunker.ContinuedLabel`), repeated only so a
-part is searchable on its own. The text is returned as stored (it is already redacted; nothing is redacted or altered again). The
+part is searchable on its own. The prefix is removed only where it is literally present (an exchange with no user text, such as a
+compaction summary, has none); the label is private to the chunker today and becomes `internal` so the reader shares it. The text is returned as stored (it is already redacted; nothing is redacted or altered again). The
 exchange is reported with its number, its `ts`, its chunk type and whether any chunk has an error.
 
 **The budget.** The budget is `max_tokens`, counted as call 3. Fill in this order and stop at the first exchange that does not fit:
