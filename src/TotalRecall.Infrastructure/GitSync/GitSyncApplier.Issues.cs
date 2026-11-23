@@ -99,6 +99,32 @@ public sealed partial class GitSyncApplier
             _ => false,
         };
 
+    /// <summary>
+    /// Removes the approved held-delete item of a scan-skipped id (milestone 1b-iii, D4): every skip reason means an entry
+    /// exists under the id, so the deletion the item answered is over and nothing is deleted. A small transaction of its
+    /// own re-reads the item and deletes it when it is still <c>approved</c>. Null when done; a deferral when the item
+    /// changed since the pull read it, or when the transaction could not run (a busy lock stops the apply).
+    /// </summary>
+    private EntryResult.Deferred? RemoveApprovedItem(string id)
+    {
+        try
+        {
+            using var tx = _store.BeginImmediateTransaction();
+            TransactionCount++;
+            if (GitSyncReviews.ReadHeldItem(tx.Connection, id, tx.Transaction) is not { State: "approved" })
+                return new EntryResult.Deferred("the held item changed since the pull read it", Busy: false);
+            Step(id, "close");
+            GitSyncReviews.DeleteHeld(tx.Connection, id, tx.Transaction);
+            tx.Commit();
+            return null;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
+        {
+            return new EntryResult.Deferred(
+                "the approved item could not be removed: " + OneLine(ex.Message), Busy: ex is SqliteException s && IsBusy(s));
+        }
+    }
+
     private EntryResult RecordSkip(string id, EntryResult.Skipped skipped)
     {
         if (!SyncValidation.isEligibleId(id))

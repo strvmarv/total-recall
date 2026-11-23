@@ -102,8 +102,8 @@ public sealed partial class GitSyncApplier
     /// Applies one id: reads its row and local entry, runs <c>SyncMerge.decide</c>, postpones what this milestone does
     /// not carry out, computes the vector, then carries the decision out in one immediate transaction that first
     /// re-reads the entry (decisions 7 to 13). <paramref name="theirs"/> is null when the id has no accepted record;
-    /// <paramref name="held"/> is the id's open held-delete item as the pull read it (milestone 1b-ii, D8), null when it
-    /// has none; <paramref name="blobSha"/> is the record's blob id; <paramref name="guard"/> is the pull's delete guard verdict (required: <c>default</c> trips nothing),
+    /// <paramref name="held"/> is the id's held-delete item, open or approved, as the pull read it (milestone 1b-ii, D8;
+    /// milestone 1b-iii, D4), null when it has none; <paramref name="blobSha"/> is the record's blob id; <paramref name="guard"/> is the pull's delete guard verdict (required: <c>default</c> trips nothing),
     /// which turns a deletion of a tripped direction into a held item with the cause <c>guard</c> (D4).
     /// </summary>
     internal EntryResult ApplyOne(string id, ParsedRecord? theirs, bool proven, HeldItem? held, string? blobSha, DeleteGuardVerdict guard)
@@ -168,10 +168,13 @@ public sealed partial class GitSyncApplier
             oldBase = parsedBase.Parsed;
         }
 
-        var decision = SyncMerge.decide(BuildInput(row, oldBase, theirs, local, proven, held));
-        var converted = guard.Converts(decision);
+        var (decision, approved) = Decide(row, oldBase, theirs, blobSha, local, proven, held);
+        // Milestone 1b-iii, D4: a deletion an approved item answers is never converted by the guard.
+        var converted = approved?.IsAsApproved != true && guard.Converts(decision);
         if (converted)
             decision = SyncDeletion.holdInstead(decision); // D4: kept base update, no notes, no row state change
+        // An approved item whose record changed after the answer is opened again with the record's blob id.
+        var reopen = approved?.IsReopened == true && !decision.CloseHeldDelete;
 
         if (SyncApply.postponement(decision) is { } postponed)
             return new EntryResult.Postponed(SyncApply.reasonName(postponed.Value));
@@ -204,10 +207,10 @@ public sealed partial class GitSyncApplier
         }
 
         // Decision 13: a decision that changes nothing opens no transaction (unless a stamp must be issued). A held-delete
-        // write, close or hash refresh (milestone 1b-iii, D10), and a decision with notes, always change something, and a
-        // push deletion is reported even when its row already agrees (milestone 1b-ii, D9).
+        // write, close, hash refresh (milestone 1b-iii, D10) or re-open (D4), and a decision with notes, always change
+        // something, and a push deletion is reported even when its row already agrees (milestone 1b-ii, D9).
         if (!plan.HasStoreOps && !HasRestamp(decision) && !TouchesHeldItem(decision) && decision.Notes.IsEmpty
-            && !decision.Entry.IsPushDeletion && !RefreshesHash(held, blobSha, decision))
+            && !decision.Entry.IsPushDeletion && !RefreshesHash(held, blobSha, decision) && !reopen)
         {
             var (preview, error) = BuildRow(id, decision, row, oldBase, theirs, local, hadEntry: local is not null, plan.Colder, _ => null);
             if (error is not null)
@@ -232,13 +235,38 @@ public sealed partial class GitSyncApplier
             var phase = "reread";
             try
             {
-                return CarryOut(id, tx, decision, converted, plan, vector, row, read, held, proven, blobSha, oldBase, theirs, local, p => phase = p);
+                return CarryOut(id, tx, decision, converted, reopen, plan, vector, row, read, held, proven, blobSha, oldBase, theirs, local, p => phase = p);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
             {
                 return Classify(phase, ex);
             }
         }
+    }
+
+    /// <summary>
+    /// The decision for one id (milestone 1b-iii, D4), the one place it is made, so the preview and the loop decide an id
+    /// the same way. For an open item or none: <c>decide</c> on <see cref="BuildInput"/>, and <c>Approved</c> is null. For
+    /// an approved item, by <c>SyncDeletion.approvedUse</c>: <c>AsApproved</c> decides as proven with no held item (W8.3,
+    /// or W8.1 first); <c>Reopened</c> decides with the real proof and the item as the open item it becomes (W8.2), a
+    /// modified copy that is only the input of <c>decide</c>: the original <paramref name="held"/> is what the
+    /// transaction's re-read compares; <c>NotApproved</c> decides with the real proof and no held item. Each is then passed
+    /// through <c>SyncDeletion.closeApproved</c>, which removes the item when its situation is over.
+    /// </summary>
+    private static (SyncMerge.MergeDecision Decision, SyncDeletion.ApprovedUse? Approved) Decide(
+        GitSyncRow? row, ParsedRecord? oldBase, ParsedRecord? theirs, string? blobSha, SyncMerge.LocalEntry? local, bool proven, HeldItem? held)
+    {
+        if (held is not { State: "approved" })
+            return (SyncMerge.decide(BuildInput(row, oldBase, theirs, local, proven, held)), null);
+        var approved = SyncDeletion.approvedUse(
+            row is null ? null : Some(row.State), oldBase is not null, local is not null,
+            theirs is null ? null : Opt(blobSha), Opt(held.RecordHash));
+        var decision = approved.IsAsApproved
+            ? SyncMerge.decide(BuildInput(row, oldBase, theirs, local, proven: true, held: null))
+            : approved.IsReopened
+                ? SyncMerge.decide(BuildInput(row, oldBase, theirs, local, proven, held with { State = "open", RecordHash = blobSha }))
+                : SyncMerge.decide(BuildInput(row, oldBase, theirs, local, proven, held: null));
+        return (SyncDeletion.closeApproved(local is not null, theirs is not null, decision), approved);
     }
 
     /// <summary>
@@ -384,6 +412,7 @@ public sealed partial class GitSyncApplier
         SqliteStoreTransaction tx,
         SyncMerge.MergeDecision decision,
         bool converted,
+        bool reopen,
         StorePlan plan,
         float[]? vector,
         GitSyncRow? row,
@@ -404,7 +433,7 @@ public sealed partial class GitSyncApplier
         Step(id, "reread");
         var rowNow = GitSyncRows.Read(conn, id, dbTx);
         var readNow = LocalEntryReader.Read(t => tx.Get(t, ContentType.Memory, id), () => tx.IsSticky(ContentType.Memory, id));
-        var heldNow = GitSyncReviews.ReadOpenHeldItem(conn, id, dbTx);
+        var heldNow = GitSyncReviews.ReadHeldItem(conn, id, dbTx); // any state: an approved item is passed as read (D4)
         if (!Equals(row, rowNow) || !read.Equals(readNow) || !AgreesWithRow(rowNow, readNow) || !Equals(held, heldNow))
             return new EntryResult.Deferred("the entry changed since the decision was made", Busy: false);
         if (plan.Insert && InKnowledge(tx, id))
@@ -496,6 +525,12 @@ public sealed partial class GitSyncApplier
             Step(id, "refresh");
             GitSyncReviews.RefreshHeldHash(conn, id, blobSha!, dbTx);
         }
+        // Milestone 1b-iii, D4: an approved item whose record changed after the answer is shown again, never deleted blind.
+        if (reopen)
+        {
+            Step(id, "reopen");
+            GitSyncReviews.ReopenHeld(conn, id, blobSha!, dbTx);
+        }
 
         phase("issue");
         Step(id, "issue");
@@ -509,7 +544,7 @@ public sealed partial class GitSyncApplier
         var effects = new EntryEffects(plan.Delete, pushDeletion, heldEntry, decision.CloseHeldDelete, NoteWords(decision), MarkerSet(decision));
         if (plan.Insert)
             return new EntryResult.Carried(CarriedKind.Inserted, plan.Colder, effects);
-        if (plan.HasStoreOps || rowWritten || TouchesHeldItem(decision) || refreshed)
+        if (plan.HasStoreOps || rowWritten || TouchesHeldItem(decision) || refreshed || reopen)
             return new EntryResult.Carried(CarriedKind.Updated, plan.Colder, effects);
         return pushDeletion ? new EntryResult.Carried(CarriedKind.Unchanged, false, effects) : new EntryResult.NoOp(effects.Repush);
     }
@@ -536,7 +571,7 @@ public sealed partial class GitSyncApplier
                 Step(id, "reread");
                 var rowNow = GitSyncRows.Read(tx.Connection, id, tx.Transaction);
                 var readNow = LocalEntryReader.Read(t => tx.Get(t, ContentType.Memory, id), () => tx.IsSticky(ContentType.Memory, id));
-                var heldNow = GitSyncReviews.ReadOpenHeldItem(tx.Connection, id, tx.Transaction);
+                var heldNow = GitSyncReviews.ReadHeldItem(tx.Connection, id, tx.Transaction);
                 if (!Equals(row, rowNow) || !read.Equals(readNow) || readNow is not LocalRead.Absent || !Equals(held, heldNow))
                     return new EntryResult.Deferred("the entry changed since the decision was made", Busy: false);
                 phase = "work";
