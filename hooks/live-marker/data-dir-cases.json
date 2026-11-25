@@ -1,0 +1,37 @@
+[
+  {
+    "name": "TOTAL_RECALL_HOME absolute",
+    "env": { "TOTAL_RECALL_HOME": "{tmp}/trh", "HOME": "{tmp}/home" },
+    "dataDir": "{tmp}/trh"
+  },
+  {
+    "name": "TOTAL_RECALL_HOME empty, HOME set",
+    "env": { "TOTAL_RECALL_HOME": "", "HOME": "{tmp}/home" },
+    "dataDir": "{tmp}/home/.total-recall"
+  },
+  {
+    "name": "HOME with a trailing slash",
+    "env": { "TOTAL_RECALL_HOME": null, "HOME": "{tmp}/home/" },
+    "dataDir": "{tmp}/home/.total-recall"
+  },
+  {
+    "name": "TOTAL_RECALL_HOME relative (unusable)",
+    "env": { "TOTAL_RECALL_HOME": "rel/dir", "HOME": "{tmp}/home" },
+    "dataDir": null
+  },
+  {
+    "name": "HOME set but empty (unusable)",
+    "env": { "TOTAL_RECALL_HOME": null, "HOME": "" },
+    "dataDir": null
+  },
+  {
+    "name": "HOME unset, USERPROFILE set",
+    "env": { "TOTAL_RECALL_HOME": null, "HOME": null, "USERPROFILE": "{tmp}/profile" },
+    "dataDir": "{tmp}/profile/.total-recall"
+  },
+  {
+    "name": "neither set (unusable)",
+    "env": { "TOTAL_RECALL_HOME": null, "HOME": null, "USERPROFILE": null },
+    "dataDir": null
+  }
+]
