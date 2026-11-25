@@ -17,6 +17,9 @@ conflict stalls the whole cycle and the loser's text is nowhere. After this part
 
 - the pull applies the clock's winner at once and files the loser's text as a `conflict` item (the applied text, every losing text with
   its machine and stamp), and **no decision postpones any more**;
+- a conflict item is kept in the very pull that first holds a deletion for the id (W8.4 unproven), in a pull whose guard converts a push
+  deletion into a hold, and is removed in a pull that carries the deletion out (W8.3 or an approved hold); the item step's gates and the
+  in-transaction re-read cover conflict items (a conflict item changed before the transaction defers the entry);
 - a conflict item and a pin-edit rule 4 (a held edit applied on a local unpin) in one pull: the two plans agree, the entry is not deferred;
   a conflict item survives a held local deletion (W8.4) and is still listed after `restore`, and is removed when the deletion is carried out;
 - a second conflict on one entry appends its losing text to the same item without overwriting an earlier one;
@@ -65,10 +68,10 @@ text).
 
 ### D2. The shown hash
 
-A new pure Core function `SyncConflict.shownHash (applied: string) (losers: string list)`: SHA-256 (lowercase hex) over the prefix
+A new pure Core function `SyncConflict.shownHash (applied: string option) (losers: string list)`: SHA-256 (lowercase hex) over the prefix
 `total-recall/review/conflict/v1\n`, the applied text as a field (presence byte, 4-byte big-endian length, UTF-8 bytes, as
-`SyncPin.shownHash` writes a field), a 4-byte big-endian count and each loser's text as a field, in payload order. Stamps and machines are
-not hashed (a change of only those shows nothing new). The item's `record_hash` is the shown hash of the **stored entry's text** and the
+`SyncPin.shownHash` writes a field; `None`, the entry absent while a deletion is held (D4 rule 1), is presence byte 0), a 4-byte big-endian count and each loser's text as a field, in payload order. Stamps and machines are
+not hashed (a change of only those shows nothing new). The item's `record_hash` is the shown hash of the **stored entry's text** (none when the entry is absent) and the
 payload's losers after the carried-out decision; every writer (arrival, reconcile) and every reader (list, answers) computes it from the
 same raw fields. An answer carries the hash it was shown; a difference is **stale** (D6).
 
@@ -105,7 +108,10 @@ when pin-edit rule 4 will apply the held base content, the entry as that rule le
 pre-transaction plan and the in-transaction recompute both use it, so a conflict item and a pin-edit rule 4 in one pull do not make the
 two plans differ (a test covers it).
 
-**Early returns.** A conflict item whose id never reaches the decision in a pull (the memory moved to knowledge, the id was skipped or its
+**Gates.** Part 3's gates are widened to conflict items: the decision to plan the item step
+(`pinItems.Count > 0 || PinPlanning.Requests(decision).Count > 0`), `PinPlanning.Plan`'s early return and the in-transaction re-read all
+consider conflict items (the re-read compares each conflict item's state, hash and payload) and `Conflict` requests (`Requests` today
+ignores them). **Early returns.** A conflict item whose id never reaches the decision in a pull (the memory moved to knowledge, the id was skipped or its
 apply failed) is neither reconciled nor refused by this pull; it is reconciled by the next pull that decides the id. A known limit that costs
 nothing (an unanswered conflict blocks nothing).
 
@@ -118,14 +124,18 @@ Like Part 3's reconcile, a pure Core function `SyncConflict.reconcile` over the 
 the decision (absent, or its text and shown fields) and the row (none, active, forgotten or left); planned before the transaction on the
 expected post-decision state and recomputed inside it (a difference defers the entry, as Part 3). Rules, first match:
 
-1. the row is `forgotten` or `left`, or the entry is absent **and the id has no open or approved held-delete item**: remove the item (the
-   memory is gone). A held deletion of this machine's memory (W8.4: the entry is already gone here, the deletion is unproven or stopped by
+1. the row is `forgotten` or `left`, or the entry is absent **and the id has no held deletion after this decision**: remove the item (the
+   memory is gone). "Held after this decision" is one input, the same in the planned and the recomputed reconcile, and not a database read:
+   `decision.Entry` is `HoldDeletion` (including a push deletion the guard converted, `SyncDeletion.holdInstead`), or the id's pre-read held
+   item is open or approved and the decision does not close it (`CloseHeldDelete` false). The item step runs before the hold is upserted
+   (`CarryOut`), so reading the database would miss the pull that creates the hold. A held deletion of this machine's memory (W8.4: the entry is already gone here, the deletion is unproven or stopped by
    the guard) leaves the item, because for a record-wins conflict it holds the only copy of the local text and a later `restore` brings the
    memory back with its alternatives; accepting or carrying out the deletion removes the entry's row, which removes the item. **A row that
    does not exist yet is not a reason to remove**: after `sync init` or `sync join` the items survive and the rows come back later (the existing survival rule
    stays under test);
-2. losers whose text equals the entry's text are dropped (they were applied, typed or re-published); no loser left: remove the item;
-3. the shown hash differs from the item's (the applied text or the losers changed): `unseen` with the new hash and, when losers were
+2. (an entry is present) losers whose text equals the entry's text are dropped (they were applied, typed or re-published); no loser left: remove the item;
+3. the shown hash differs from the item's (the applied text or the losers changed; with the entry absent under a hold rules 2 and 3 do
+   nothing, the hash being the one with no applied text): `unseen` with the new hash and, when losers were
    dropped, the new payload;
 4. otherwise leave the item as it is.
 
@@ -148,7 +158,8 @@ payloads are not records), and a `swap`/`merge` of such text is held back by the
 service takes 1), with several it is required (`unknown-loser` when absent or out of range).
 
 Checks, in this order, each a refusal: the item exists and is `open`/`unseen` (`no-conflict-item`); the shown hash is present
-(`shown-hash-required`); the entry is read for all three verbs (absent: `stale-item`, "the next sync closes the item", nothing written;
+(`shown-hash-required`); the entry is read for all three verbs (absent: `stale-item`, nothing written, with the text "the next sync closes the item" or, while a held deletion exists for the id,
+"restore or accept the held deletion first";
 duplicated or unreadable: `unreadable-entry`); `swap` and `merge` also need the row `active` with a base (`failed`, with the text "not
 synced yet; run a sync first" when the row is missing, which is the state after `sync join` until the first cycle), while `keep` needs
 no row; the shown hash equals the live hash recomputed by D2 from the entry's text and the payload's losers (a
@@ -188,7 +199,7 @@ removed; machine and stamps through the field sanitiser). The hidden commands, i
   hash, as for `approve`). `--text-file -` reads standard input; the file or input is read as UTF-8, at most 262144 bytes, and an
   unreadable, invalid or oversized input is a usage error that changes nothing. The CLI resolves the item by `(id, conflict)`.
 - `list` prints, for a conflict, a header `<id>  conflict  <state>  arrived <ISO>  shown <h|->` followed by the applied text block (source
-  `local entry`) and one block per loser numbered `loser 1` (newest) upward, each labelled with its side, machine and stamp and its text
+  `local entry`; with the entry absent under a held deletion the line `entry deleted here, deletion held`) and one block per loser numbered `loser 1` (newest) upward, each labelled with its side, machine and stamp and its text
   behind the delimiter. The bulk forms and `accept`, `restore`, `approve`, `decline` look at their own kinds only and ignore conflicts.
 - An id can carry a conflict and another kind at once; each verb pair answers its own kind and refuses `no-conflict-item`/`no-pin-item`/
   `no-held-item` for the wrong one.
