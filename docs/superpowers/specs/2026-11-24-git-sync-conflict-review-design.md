@@ -17,10 +17,12 @@ conflict stalls the whole cycle and the loser's text is nowhere. After this part
 
 - the pull applies the clock's winner at once and files the loser's text as a `conflict` item (the applied text, every losing text with
   its machine and stamp), and **no decision postpones any more**;
+- a conflict item and a pin-edit rule 4 (a held edit applied on a local unpin) in one pull: the two plans agree, the entry is not deferred;
+  a conflict item survives a held local deletion (W8.4) and is still listed after `restore`, and is removed when the deletion is carried out;
 - a second conflict on one entry appends its losing text to the same item without overwriting an earlier one;
 - the person answers by id with `keep` (leave the applied text), `swap` (apply a losing text) or `merge` (apply a text they wrote),
   in the review service and in the hidden `sync review keep|swap|merge`; a `swap` or `merge` is an ordinary edit with a fresh stamp, so
-  it wins on every machine at the next sync;
+  it wins at the next sync on every machine where the memory is not pinned (where it is pinned the text arrives as Part 3's held `pin-edit`, as with a declined edit);
 - an unanswered conflict costs nothing and blocks nothing: the cycle completes, nothing is excluded from the push, and the item is
   only listed.
 
@@ -90,10 +92,22 @@ pull classifies the content group `Unchanged` and raises nothing: idempotent.
 operations: FC5 and NC4 file the local text although the apply overwrites it; FC4 files the record's text. The applier does not re-read
 the local text for this.
 
-The planning, the in-transaction recheck, the no-op shortcut and the visit set work as Part 3 built them, generalised: `PinPlan`/
-`PinWrite` carry the kind, `PinPlanning.ItemsOf` and `Plan` handle `conflict` through a conflict-specific reconcile (D4) and arrival, and
-every id with a conflict item (any state) is added to the visit set (as pin-item ids are). A pull with nothing to do for a conflict item
-opens no transaction and rewrites nothing.
+The planning, the in-transaction recheck, the no-op shortcut and the visit set work as Part 3 built them. Concretely: `GitSyncReviews` gains
+conflict members (`ReadConflictItems`, `ReadConflictItem`, `UpsertConflictItem` with the payload and hash, `DeleteConflictItem`; every
+member's SQL restricted to `kind = 'conflict'`, and the class doc's "conflict rows are read and changed by none" is corrected); a pure Core
+`SyncConflict.append` is the one append rule (D1: the dedupe and the bound); the applier's `PinPlan` gains the conflict writes
+(`ConflictWrite`: the action `Remove`, `Upsert` with the new payload, hash and machine, or `MarkUnseen`) and `PinPlan.Matches` compares them,
+payload and hash included, so a recompute that differs defers the entry; the arrival is planned through that plan (not applied behind it)
+and `ConflictItems.Append` is the same append rule applied by the writer for the alias pass. Every id with a conflict item (any state) is
+added to the visit set (as pin-item ids are). A pull with nothing to do for a conflict item opens no transaction and rewrites nothing.
+**The entry the conflict reconcile reads is the one `PinPlanning.Plan` reads for the pin rules**: the stored entry after the decision and,
+when pin-edit rule 4 will apply the held base content, the entry as that rule leaves it (its text from the post-decision base). The
+pre-transaction plan and the in-transaction recompute both use it, so a conflict item and a pin-edit rule 4 in one pull do not make the
+two plans differ (a test covers it).
+
+**Early returns.** A conflict item whose id never reaches the decision in a pull (the memory moved to knowledge, the id was skipped or its
+apply failed) is neither reconciled nor refused by this pull; it is reconciled by the next pull that decides the id. A known limit that costs
+nothing (an unanswered conflict blocks nothing).
 
 **Helper for Part 5.** The arrival is also exposed as `ConflictItems.Append(conn, tx, id, loser, nowMs)` (no `MergeDecision` needed), so
 the alias pass can file a differing local text; this part uses it for its own arrivals and tests it directly.
@@ -104,8 +118,11 @@ Like Part 3's reconcile, a pure Core function `SyncConflict.reconcile` over the 
 the decision (absent, or its text and shown fields) and the row (none, active, forgotten or left); planned before the transaction on the
 expected post-decision state and recomputed inside it (a difference defers the entry, as Part 3). Rules, first match:
 
-1. the entry is absent, or the row is `forgotten` or `left`: remove the item (the memory is gone). **A row that does not exist yet is not
-   a reason to remove**: after `sync init` or `sync join` the items survive and the rows come back later (the existing survival rule
+1. the row is `forgotten` or `left`, or the entry is absent **and the id has no open or approved held-delete item**: remove the item (the
+   memory is gone). A held deletion of this machine's memory (W8.4: the entry is already gone here, the deletion is unproven or stopped by
+   the guard) leaves the item, because for a record-wins conflict it holds the only copy of the local text and a later `restore` brings the
+   memory back with its alternatives; accepting or carrying out the deletion removes the entry's row, which removes the item. **A row that
+   does not exist yet is not a reason to remove**: after `sync init` or `sync join` the items survive and the rows come back later (the existing survival rule
    stays under test);
 2. losers whose text equals the entry's text are dropped (they were applied, typed or re-published); no loser left: remove the item;
 3. the shown hash differs from the item's (the applied text or the losers changed): `unseen` with the new hash and, when losers were
@@ -118,8 +135,8 @@ can still `swap` to a kept alternative. A text that came back equal closes it by
 ### D5. Held items, pins and secrets
 
 A conflict item is independent of the other kinds on the same id (the key includes the kind): a `held-delete` item, a `new-pin` and a
-`conflict` can coexist. A deletion of the entry (W6.4/W6.5) removes the item by D4 rule 1 once the entry is gone; a held deletion leaves
-the item. The push never excludes an entry for a conflict item (`SyncPush.exclusion` reads `held-delete` only). A secret-blocked entry
+`conflict` can coexist. A deletion that is carried out (W6.4, W8.3, an accepted held deletion) removes the item by D4 rule 1; a held deletion of either direction
+leaves it (D4 rule 1). The push never excludes an entry for a conflict item (`SyncPush.exclusion` reads `held-delete` only). A secret-blocked entry
 still takes part in the pull, so a conflict can arise on it; a loser holding a token stays local in the payload (it is never pushed:
 payloads are not records), and a `swap`/`merge` of such text is held back by the push's own secret check (Part 1).
 
@@ -131,12 +148,14 @@ payloads are not records), and a `swap`/`merge` of such text is held back by the
 service takes 1), with several it is required (`unknown-loser` when absent or out of range).
 
 Checks, in this order, each a refusal: the item exists and is `open`/`unseen` (`no-conflict-item`); the shown hash is present
-(`shown-hash-required`); `keep` needs nothing more from the row, `swap` and `merge` need the row `active` with a base and the entry read
-(`failed`, `unreadable-entry`, with the text "not synced yet; run a sync first" when the row is missing, which is the state after `sync
-join` until the first cycle); the shown hash equals the live hash recomputed by D2 from the entry's text and the payload's losers (a
+(`shown-hash-required`); the entry is read for all three verbs (absent: `stale-item`, "the next sync closes the item", nothing written;
+duplicated or unreadable: `unreadable-entry`); `swap` and `merge` also need the row `active` with a base (`failed`, with the text "not
+synced yet; run a sync first" when the row is missing, which is the state after `sync join` until the first cycle), while `keep` needs
+no row; the shown hash equals the live hash recomputed by D2 from the entry's text and the payload's losers (a
 difference is **stale**: the item is updated to the live hash and `unseen` and the answer is `stale-item` with what the item shows now;
-this is the one write of a refusal, committed as Part 3's stale refusal is); for `swap`, the loser index; for `swap`, the chosen text must
-be showable (no character the list would remove: `unshowable-text`; it came from a repository record); for `merge`, the text is not empty
+this is the one write of a refusal, committed as Part 3's stale refusal is); for `swap`, the loser index; for `swap` of a **remote** loser, the chosen text must
+be showable (no character the list would remove: `unshowable-text`; it came from a repository record; a local loser is this machine's own
+text and is swapped as it is, whatever characters it holds); for `merge`, the text is not empty
 or whitespace only and at most 262144 UTF-8 bytes (`bad-merge-text`, the record limit) and has no NUL; for `swap` and `merge` on a **pinned**
 entry the resulting text must fit the pinned cap (`tiers.pinned.max_content_chars`, 0 or less meaning 500; `over-pin-cap`, as `approve`
 does); a text equal to the entry's current text is accepted and writes nothing but the item's removal.
@@ -144,12 +163,15 @@ does); a text equal to the entry's current text is accepted and writes nothing b
 - **`keep`:** the item is removed. Nothing else changes (the applied text stays, a pending push stays pending).
 - **`swap`/`merge`:** the chosen text becomes the entry's text, and only the text: project, scope, entry type, source, `created_at`, tags and
   tier are untouched, except that the hot content limit rule `TakeTheirs` uses applies (a hot, non-pinned entry whose new text is over
-  `tiers.hot.max_content_chars` is stored warm). The entry is re-embedded (the vector for the new text is computed before the transaction
-  and the frame checks inside it that the entry's text is still the one it was computed against). The row gets a fresh content stamp above
+  `tiers.hot.max_content_chars` is stored warm). The entry is re-embedded (the vector for the chosen text is computed before the transaction; inside it the
+  stale-hash check, which covers the entry's text and every loser's text, proves the chosen loser is the one that was shown). The row gets a fresh content stamp above
   the greater of the base's content stamp and the row's pending content stamp (`IssueStamp`), left **pending**, and its scanned content
   hash and the other comparison columns recomputed from the stored entry (so the scan stamps nothing more and the pull's agreement check
   holds). The item is removed. Nothing is pushed by the answer: the next cycle writes the text as an ordinary edit, which wins on every
-  machine because its stamp is greater than the record's (and than the one the other machine holds); a machine that has meanwhile edited
+  machine because its stamp is greater than the record's (and than the one the other machine holds; where the memory is pinned it is
+  held there as a `pin-edit`, and the answer says so, as Part 3's decline does). The floor is the base's and the pending stamp: if the
+  clone's current record is newer than the base (an incomplete earlier pull), a later pull meets the swapped text as an ordinary conflict,
+  which is accepted; a machine that has meanwhile edited
   the text again meets it as an ordinary conflict. A text that holds a secret is held back by the push's own check.
 - A refusal other than `stale-item` leaves the item and everything else untouched.
 
@@ -174,7 +196,11 @@ removed; machine and stamps through the field sanitiser). The hidden commands, i
 ### D8. Removing the postponement: what changes in the tests
 
 Every test that asserted that a conflict postpones, and every cycle or pull test that used a conflict only to make the pull incomplete,
-changes in the task that lifts the postponement, each named in its commit message. A different incomplete-pull device is used where a test
+changes in the task that lifts the postponement, each named in its commit message: `SyncApplyTests.fs` (the postponement cases and the
+property), `GitSyncApplierEntryTests` (the NC4 and FC cases that asserted a postponement), `GitSyncApplierPinReviewTests`
+(`ANewPinWithAConflict_StillPostpones...`, `AnNC4Conflict_StillPostpones`), `PinReviewCycleTests` (`ANewPinWithAConflict_StillMakesBsCycleIncomplete`),
+`GitSyncApplierPullTests`, `GitSyncApplierSafetyTests`, `GitSyncCyclePullTests`, `GitSyncCyclePushTests` and `GitSyncCycleDeletionTests` (the
+cases that used an NC4 conflict as an incomplete-pull device), and `ReviewServiceCycleTests` where it relies on a conflict. A different incomplete-pull device is used where a test
 needs one (a deferral through the `BeforeTransaction` hook or a cancellation, which the rigs already have). The acceptance-criteria draft
 file gains this part's heading and replaces its sentence that a pin with a conflicting edit is "held back whole until conflicts can be
 answered".
@@ -182,8 +208,8 @@ answered".
 ## Tests (what proves it)
 
 Core: `SyncConflict.shownHash` (a fixed known answer built from the stated layout; field boundaries; losers' order and count matter),
-`SyncConflict.reconcile` (every rule and its order), `SyncApply` (nothing postpones: the former postponement cases now give `None`
-through the removal; the `decide` conflict cases unchanged).
+`SyncConflict.reconcile` (every rule and its order), `SyncConflict.append` (dedupe, bound, order), and the `decide` conflict cases unchanged. That nothing postpones is proved by applier and cycle
+tests: the former postponement cases (FC4, FC5, NC4, `NewPin` plus `Conflict`) are carried out and the pull is complete.
 
 Infrastructure (`GitSync`): `GitSyncReviews` conflict members (read, upsert, append with the dedupe and the bound of 8, mark unseen,
 delete) with kind-restricted SQL, applier tests, service tests, and cycle and two-machine proofs, one test per row:
@@ -228,6 +254,9 @@ existing checks (D7, Tests).
 
 ## Departures from the earlier designs
 
+- **The item stores the losers only; the applied text is read live** (parent and umbrella: "both versions, both machines, both stamps"). The
+  applied text, its machine and its stamp are the entry's own state and change with every later pull and edit, so a copy in the payload
+  would go stale; the list shows the applied text, and the losers carry their own side, machine and stamp.
 - **Nothing postpones any more** (parent Shared decision 7 says Part 4 lifts the postponement for `conflict`; being the last kind, the
   postponement code goes with it, while the summary members it fed stay, always empty, for a later clean-up).
 - **The losers list is bounded at 8** (the umbrella says the new text is appended and no earlier text is overwritten; an unbounded list
@@ -247,7 +276,7 @@ existing checks (D7, Tests).
 ## Deviation from the parent design
 
 The departures above that change the parent's wording are the deviations from the parent spec: nothing postpones (parent Shared decision 7,
-last kind), the shown hash on the item's own content (Shared decision 3), the required `--shown`, the bound on the losers list, and the
+last kind), the item keeping the losers only (Shared decision 1 and the umbrella's "both versions"), the shown hash on the item's own content (Shared decision 3), the required `--shown`, the bound on the losers list, and the
 answer-removes-item rule. Shared decisions 1 to 9 are otherwise followed unchanged: one item store keyed `(entry_id, kind)` and one service
 (1), answers per item by id (2), stale answers and `unseen` (3), non-sticky inserts (4: unchanged, no insert is added), text from the
 repository is data (5: the list delimits and sanitises it and `swap` refuses unshowable text), the verbs hidden and the cycle without a
