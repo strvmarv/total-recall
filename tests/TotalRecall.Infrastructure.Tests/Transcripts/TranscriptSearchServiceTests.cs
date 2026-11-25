@@ -305,6 +305,23 @@ public sealed class TranscriptSearchServiceTests : IDisposable
     }
 
     [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Plan_ScopeSessionDefaultedToMarker_NotArchived_NoteNamesTheSession(string? sessionArg)
+    {
+        // The marker's session is not in the archive (forgotten, excluded, or its first ingest ran out of budget) while
+        // other sessions are: the note names the session the scope defaulted to, not the (absent) argument.
+        Populate();
+        var r = Service(new QueryEmbedder()).Search(
+            Req("database locked", scope: "session", session: sessionArg, current: Marker(@ref: "claude-code:not-archived")), default);
+        Assert.Null(r.Error);
+        Assert.Equal("session", r.Scope);
+        Assert.Empty(r.Results);
+        Assert.Equal("no archived session claude-code:not-archived", r.Note);
+    }
+
+    [Theory]
     [InlineData("guessed")]
     [InlineData("none")]
     [InlineData(null)]

@@ -257,7 +257,7 @@ public sealed class TranscriptSearchService
             if (!pre.AnyChunk())
                 return Empty(request, plan, gate, NothingArchivedNote);
             if (plan.Session is { } named && pre.ResolveSession(named.Host, named.Id) is null)
-                return Empty(request, plan, gate, UnknownSession(request.Session!));
+                return Empty(request, plan, gate, UnknownSession(named));
         }
         ct.ThrowIfCancellationRequested();
 
@@ -307,7 +307,7 @@ public sealed class TranscriptSearchService
             {
                 sessionId = reads.ResolveSession(named.Host, named.Id);
                 if (sessionId is null) // removed since the first read
-                    return Empty(request, plan, gate, UnknownSession(request.Session!));
+                    return Empty(request, plan, gate, UnknownSession(named));
             }
 
             var filter = new ChunkFilter(
@@ -570,7 +570,8 @@ public sealed class TranscriptSearchService
     private static string? CurrentRef(TranscriptSearchRequest r) =>
         CurrentWire(r) == "none" ? null : r.Current!.Ref;
 
-    private static string UnknownSession(string session) => $"no archived session {session}";
+    // Built from the plan's session, not the argument: a scope defaulted to the marker's session has no argument.
+    private static string UnknownSession((string Host, string Id) session) => $"no archived session {session.Host}:{session.Id}";
 
     private static string Exchanges(int start, int end) =>
         start == end
