@@ -69,7 +69,9 @@ public sealed record SyncContext(TranscriptLocation Location, TranscriptsSetting
 /// session's file ingested through <see cref="TranscriptIngester"/> (the same path as the <c>session_start</c> pass, so
 /// the exclusions hold by construction) under the ingest budget on the service's clock. No step starts once the total
 /// deadline has passed. Every failure is logged to stderr through <see cref="ExceptionLogger"/> and reported as an
-/// incomplete sync; only the caller's cancellation is thrown. Text only: the embed step is not part of this class yet.
+/// incomplete sync; only the caller's cancellation is thrown. With an embed plan (search only), step 5 then embeds the
+/// session's waiting tail within the embed budget (see <see cref="EmbedTail"/>); a refused or failed embed step never
+/// makes the sync incomplete.
 /// </summary>
 public sealed class TranscriptSyncService : ITranscriptSync
 {
@@ -122,7 +124,6 @@ public sealed class TranscriptSyncService : ITranscriptSync
 
     public SyncResult SyncCurrent(SyncEmbedPlan? embed, CancellationToken ct)
     {
-        _ = embed;   // the embed step (search only) is not part of the text sync
         var current = CurrentSession.None;
         try
         {
@@ -139,7 +140,7 @@ public sealed class TranscriptSyncService : ITranscriptSync
                 return Incomplete(current, NoteWaitRanOut);
             try
             {
-                return SyncLocked(found, deadline.Token, ct);
+                return SyncLocked(found, embed, deadline.Token, ct);
             }
             finally
             {
@@ -157,7 +158,7 @@ public sealed class TranscriptSyncService : ITranscriptSync
         }
     }
 
-    private SyncResult SyncLocked(Found found, CancellationToken deadline, CancellationToken ct)
+    private SyncResult SyncLocked(Found found, SyncEmbedPlan? embed, CancellationToken deadline, CancellationToken ct)
     {
         var current = found.Current;
         if (current.Kind == CurrentKind.None || found.Adapter is null)
@@ -255,8 +256,49 @@ public sealed class TranscriptSyncService : ITranscriptSync
             }
         }
 
+        // Step 5 (search only): the new tail gets its vectors within a small budget, or is found by its words.
+        if (embed is not null)
+            EmbedTail(store, adapter.Host, source.HostSessionId, embed, deadline, ct);
+
         var key = status == SessionIngestStatus.Excluded ? null : KeyOf(current, adapter, store, source, archiveAbsent: false);
         return new SyncResult(current, note is null, note, key);
+    }
+
+    /// <summary>
+    /// Spec section 3 step 5: only when the session itself has chunks waiting (an indexed read; a fully embedded session
+    /// takes no lease even when an older backlog waits), under the pass's gate (<c>ServerPass</c>, the plan's re-embed
+    /// probe), one run of the Part 3 worker with the embed budget, the session preferred and no run record. A refusing
+    /// gate, a held lease, a descriptor that cannot be read or any failure ends the step silently (the worker logs its
+    /// own); nothing but the caller's cancellation is thrown, and nothing starts once the total deadline has passed.
+    /// </summary>
+    private void EmbedTail(
+        ITranscriptStore store, string host, string hostSessionId, SyncEmbedPlan embed, CancellationToken deadline, CancellationToken ct)
+    {
+        if (deadline.IsCancellationRequested) return;
+        try
+        {
+            if (!store.HasWaitingEmbedWork(host, hostSessionId)) return;
+
+            var (gate, current) = TranscriptSearchService.BuildEmbedGate(
+                embed.Embedder, embed.Settings, embed.StorageMode, embed.Embedding,
+                serverPass: true, embed.MemoryReindexRunning(), store.CheckFingerprint, store.ReadEmbedFingerprint);
+            if (current is null || !gate.CanEmbed) return;
+            if (deadline.IsCancellationRequested) return;
+
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, deadline);
+            new TranscriptEmbedWorker(store, embed.Embedder, _time).Run(
+                gate, current, _options.EmbedBudget ?? DefaultEmbedBudget, linked.Token,
+                preferSession: (host, hostSessionId), recordRun: false);
+            ct.ThrowIfCancellationRequested();
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Log("embedding the tail", ex);
+        }
     }
 
     /// <summary>Section 3 step 4: Retry, Skipped and Changed are incomplete; the other statuses are complete.</summary>

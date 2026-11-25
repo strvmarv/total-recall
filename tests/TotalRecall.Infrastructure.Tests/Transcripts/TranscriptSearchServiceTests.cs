@@ -384,6 +384,46 @@ public sealed class TranscriptSearchServiceTests : IDisposable
     }
 
     [Fact]
+    public void Search_Gate_Unchanged_AfterTheHelperIsFactored()
+    {
+        // The search keeps serverPass false and reindex false: a running memory re-embed does not touch it.
+        Populate();
+        var embedder = new QueryEmbedder();
+        var settings = Settings();
+        var config = Embedding();
+        var viaHelper = TranscriptSearchService.BuildEmbedGate(
+            embedder, settings, "sqlite", config, serverPass: false, memoryReindexRunning: true, _db.Store.CheckFingerprint, _db.Store.ReadEmbedFingerprint);
+        Assert.Equal(EmbedState.Ready, viaHelper.Gate.State);
+        Assert.Equal(new ArchiveFingerprint("local", "bge-small-en-v1.5", "rev1", 384), viaHelper.Current);
+
+        // The pass's gate (the sync's) does wait for the re-embed.
+        var pass = TranscriptSearchService.BuildEmbedGate(
+            embedder, settings, "sqlite", config, serverPass: true, memoryReindexRunning: true, _db.Store.CheckFingerprint, _db.Store.ReadEmbedFingerprint);
+        Assert.Equal(EmbedState.WaitingForReindex, pass.Gate.State);
+
+        // A remote provider without the opt-in ends before any store read; a descriptor that throws gives no fingerprint.
+        var remote = TranscriptSearchService.BuildEmbedGate(
+            new QueryEmbedder(new EmbedderDescriptor("openai", "m", "", 384)), settings, "sqlite", Embedding("openai"),
+            serverPass: true, memoryReindexRunning: false, _ => throw new InvalidOperationException("no store read"), null);
+        Assert.Equal(EmbedState.RemoteNotAllowed, remote.Gate.State);
+        var broken = TranscriptSearchService.BuildEmbedGate(
+            new ThrowingDescriptor(), settings, "sqlite", config, serverPass: true, memoryReindexRunning: false, null, null);
+        Assert.Null(broken.Current);
+        Assert.False(broken.Gate.CanEmbed);
+
+        var r = Service(embedder).Search(Req("database locked"), default);
+        Assert.True(r.MeaningOn);
+        Assert.Null(r.MeaningReason);
+    }
+
+    private sealed class ThrowingDescriptor : IEmbedder
+    {
+        public EmbedderDescriptor Descriptor => throw new InvalidOperationException("no descriptor");
+        public float[] Embed(string text) => throw new InvalidOperationException();
+        public float[] EmbedQuery(string text) => throw new InvalidOperationException();
+    }
+
+    [Fact]
     public void Search_Unstamped_UsesVectors()
     {
         var s = _db.AddSession("pi", "u1");

@@ -408,23 +408,46 @@ public sealed class TranscriptSearchService
     /// The gate of spec section 3 for a search: readiness from the embedder's own check, the fingerprint from its
     /// descriptor (no model is loaded; <c>EmbedderInspection</c> is not used, the composition's embedder is given).
     /// The tool is answered only while the sentinel says the archive is on, so the archive counts as active here.
+    /// A search is not a pass and assumes no memory re-embed (<c>serverPass</c> false, reindex false).
     /// </summary>
     private static EmbedGateResult Gate(
         TranscriptSearchContext context,
         Func<ArchiveFingerprint, FingerprintState>? check,
+        Func<ArchiveFingerprint?>? stored) =>
+        BuildEmbedGate(
+            context.Embedder, context.Settings, context.StorageMode, context.Embedding,
+            serverPass: false, memoryReindexRunning: false, check, stored).Gate;
+
+    /// <summary>
+    /// The one place that builds an <see cref="EmbedGateInput"/> from what a search context or a sync plan carries (the
+    /// embedder, the <c>[transcripts]</c> settings, the storage mode and the effective <c>[embedding]</c> config) and
+    /// evaluates it. Returns the gate and the embedder's fingerprint (<c>Current</c>, built from its descriptor: provider,
+    /// model, revision, dimensions), which is null when the descriptor could not be read (the gate then says not ready).
+    /// A remote provider without the opt-in stops before any readiness or store read. The search passes
+    /// <paramref name="serverPass"/> false and <paramref name="memoryReindexRunning"/> false; the sync's embed step passes
+    /// true and the composition's re-embed probe.
+    /// </summary>
+    internal static (EmbedGateResult Gate, ArchiveFingerprint? Current) BuildEmbedGate(
+        IEmbedder embedder,
+        TranscriptsSettings settings,
+        string storageMode,
+        Core.Config.EmbeddingConfig embedding,
+        bool serverPass,
+        bool memoryReindexRunning,
+        Func<ArchiveFingerprint, FingerprintState>? check,
         Func<ArchiveFingerprint?>? stored)
     {
-        var provider = FSharpOption<string>.get_IsSome(context.Embedding.Provider) ? context.Embedding.Provider.Value : "local";
-        var postgres = string.Equals(context.StorageMode, "postgres", StringComparison.OrdinalIgnoreCase);
-        var allowRemote = context.Settings.AllowRemoteEmbedding;
+        var provider = FSharpOption<string>.get_IsSome(embedding.Provider) ? embedding.Provider.Value : "local";
+        var postgres = string.Equals(storageMode, "postgres", StringComparison.OrdinalIgnoreCase);
+        var allowRemote = settings.AllowRemoteEmbedding;
 
         ArchiveFingerprint? current;
         EmbedderReadiness readiness;
         try
         {
-            var d = context.Embedder.Descriptor;
+            var d = embedder.Descriptor;
             current = new ArchiveFingerprint(d.Provider, d.Model, d.Revision, d.Dimensions);
-            readiness = (context.Embedder as IEmbedderReadiness)?.CheckReady() ?? new EmbedderReadiness(true, null);
+            readiness = (embedder as IEmbedderReadiness)?.CheckReady() ?? new EmbedderReadiness(true, null);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -437,7 +460,7 @@ public sealed class TranscriptSearchService
         var preliminary = EmbedGate.Evaluate(new EmbedGateInput(
             true, postgres, provider, allowRemote, null, null, null, null, new EmbedderReadiness(true, null), false, false));
         if (!preliminary.CanEmbed)
-            return preliminary;
+            return (preliminary, current);
 
         FingerprintState? state = null;
         ArchiveFingerprint? storedPrint = null;
@@ -448,7 +471,7 @@ public sealed class TranscriptSearchService
                 storedPrint = stored?.Invoke();
         }
 
-        return EmbedGate.Evaluate(new EmbedGateInput(
+        var gate = EmbedGate.Evaluate(new EmbedGateInput(
             ArchiveActive: true,
             Postgres: postgres,
             Provider: provider,
@@ -458,8 +481,9 @@ public sealed class TranscriptSearchService
             Stored: storedPrint,
             Current: current,
             Readiness: readiness,
-            MemoryReindexRunning: false,
-            ServerPass: false));
+            MemoryReindexRunning: memoryReindexRunning,
+            ServerPass: serverPass));
+        return (gate, current);
     }
 
     /// <summary>Any failure of the meaning path falls back to words; a cancellation of the call does not.</summary>

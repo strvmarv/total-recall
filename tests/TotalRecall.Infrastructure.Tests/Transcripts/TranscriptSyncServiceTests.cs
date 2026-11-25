@@ -8,7 +8,9 @@ using System.Text;
 using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.FSharp.Core;
 using TotalRecall.Infrastructure.Config;
+using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Tests.TestSupport;
 using TotalRecall.Infrastructure.Transcripts;
 using TotalRecall.TestSupport.Transcripts;
@@ -655,5 +657,257 @@ public sealed class TranscriptSyncServiceTests : IDisposable
         Assert.Equal(CurrentKind.Marker, unread.Current.Kind);
         Assert.False(unread.Complete);
         Assert.Null(unread.ProjectKey);
+    }
+
+    // ------------------------------------------------------------------
+    // The embed step (search only)
+    // ------------------------------------------------------------------
+
+    private static Core.Config.EmbeddingConfig EmbeddingConfig(string? provider = null) => new(
+        "bge-small-en-v1.5",
+        384,
+        provider is null ? FSharpOption<string>.None : FSharpOption<string>.Some(provider),
+        FSharpOption<string>.None,
+        FSharpOption<string>.None,
+        FSharpOption<string>.None,
+        FSharpOption<string>.None,
+        FSharpOption<string>.None,
+        FSharpOption<string>.None,
+        FSharpOption<string>.None);
+
+    private static SyncEmbedPlan Plan(IEmbedder embedder, Func<bool>? reindex = null, string? provider = null, bool allowRemote = false) =>
+        new(embedder, new TranscriptsSettings(true, string.Empty, null, 0, allowRemote), "sqlite", EmbeddingConfig(provider),
+            reindex ?? (() => false));
+
+    private static List<string> ChunkCalls(RecordingEmbedder e) => e.Calls.Where(c => c != EmbedProbe.Text).ToList();
+
+    /// <summary>An embedder that reports the model as not ready (a missing file).</summary>
+    private sealed class NotReadyEmbedder(IEmbedder inner) : IEmbedder, IEmbedderReadiness
+    {
+        public EmbedderDescriptor Descriptor => inner.Descriptor;
+        public float[] Embed(string text) => inner.Embed(text);
+        public float[] EmbedQuery(string text) => inner.EmbedQuery(text);
+        public EmbedderReadiness CheckReady() => new(false, "model.onnx missing");
+    }
+
+    /// <summary>An older session with <paramref name="n"/> waiting chunks, inserted before the current session's rows.</summary>
+    private void Backlog(int n)
+    {
+        var old = Db.AddSession(Host, "old-backlog", projectKey: "owner/old");
+        for (var i = 0; i < n; i++)
+        {
+            var id = Db.AddChunk(old, "backlog chunk " + i.ToString(CultureInfo.InvariantCulture), i);
+            Db.Exec($"UPDATE tx_chunk SET ts = '2026-01-02T03:04:05Z' WHERE id = {id}");
+        }
+    }
+
+    private long SessionChunks(string id) => Db.Scalar(
+        $"SELECT COUNT(*) FROM tx_chunk c JOIN tx_session s ON s.id = c.session_id WHERE s.host_session_id = '{id}'");
+
+    private long SessionEmbedded(string id) => Db.Scalar(
+        $"SELECT COUNT(*) FROM tx_chunk c JOIN tx_session s ON s.id = c.session_id WHERE s.host_session_id = '{id}' AND c.embedded = 1");
+
+    private long Waiting() => Db.Scalar("SELECT COUNT(*) FROM tx_chunk WHERE embedded = 0 AND embed_attempts < 3");
+
+    private PlacedSession PlaceMarked(string id, int exchanges)
+    {
+        var s = Home.Place("decision", _h.Cwd, id);
+        for (var i = 0; i < exchanges; i++)
+            Home.AppendExchange(s, $"zqxq{i} question {i}?", $"zqxa{i} answer {i}.", 50 + i * 10);
+        Marker(s);
+        return s;
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(12)]
+    public void SyncEmbed_EmbedsTheTailFirst_AtMostEight(int appended)
+    {
+        Backlog(200);
+        PlaceMarked("embed-1", appended);
+        var embedder = new RecordingEmbedder("local", 384);
+
+        var result = Service(Adapter()).SyncCurrent(Plan(embedder), CancellationToken.None);
+
+        Assert.True(result.Complete);
+        var mine = SessionChunks("embed-1");
+        Assert.True(mine > 0);
+        if (appended > 0) Assert.True(mine > 8, "the fixture should give more than eight chunks, got " + mine);
+        var expectedMine = Math.Min(mine, 8);
+        Assert.Equal(expectedMine, SessionEmbedded("embed-1"));          // the session's own chunks went first
+        Assert.Equal(8, ChunkCalls(embedder).Count);                     // the budget is eight chunks in all
+        Assert.Equal(8 - expectedMine, SessionEmbedded("old-backlog"));  // the rest of the slots, then it waits
+        Assert.Equal(200 + mine - 8, Waiting());
+    }
+
+    [Fact]
+    public void SyncEmbed_NothingWaiting_NoLeaseTaken()
+    {
+        PlaceMarked("embed-none", 0);
+        var embedder = new RecordingEmbedder("local", 384);
+        var service = Service(Adapter());
+        Assert.True(service.SyncCurrent(Plan(embedder), CancellationToken.None).Complete);
+        Assert.Equal(0, Waiting());
+        var before = embedder.Calls.Count;
+
+        // Everything is embedded now: nothing waits, so the second sync does not even probe, and no lease is left behind.
+        var again = service.SyncCurrent(Plan(embedder), CancellationToken.None);
+
+        Assert.True(again.Complete);
+        Assert.Equal(before, embedder.Calls.Count);
+        Assert.Null(Db.Text("SELECT value FROM tx_state WHERE key = 'embed.lease'"));
+    }
+
+    [Fact]
+    public void SyncEmbed_SessionFullyEmbedded_BacklogWaiting_NoEmbedderCall_NoLease()
+    {
+        PlaceMarked("embed-full", 0);
+        var service = Service(Adapter());
+        Assert.True(service.SyncCurrent(Plan(new RecordingEmbedder("local", 384)), CancellationToken.None).Complete);
+        Assert.Equal(SessionChunks("embed-full"), SessionEmbedded("embed-full"));
+        Backlog(50);   // an older backlog now waits, but the current session has nothing waiting
+        var embedder = new RecordingEmbedder("local", 384);
+
+        var result = service.SyncCurrent(Plan(embedder), CancellationToken.None);
+
+        Assert.True(result.Complete);
+        Assert.Empty(embedder.Calls);
+        Assert.Equal(50, Waiting());
+        Assert.Null(Db.Text("SELECT value FROM tx_state WHERE key = 'embed.lease'"));
+    }
+
+    [Fact]
+    public void SyncEmbed_GateRefuses_RemoteProviderWithoutOptIn_NeverBuilds()
+    {
+        PlaceMarked("embed-remote", 0);
+        var embedder = new RecordingEmbedder("openai", 384);
+
+        var result = Service(Adapter()).SyncCurrent(Plan(embedder, provider: "openai", allowRemote: false), CancellationToken.None);
+
+        Assert.True(result.Complete);   // the text was stored; the embed step ends silently
+        Assert.Empty(embedder.Calls);
+        Assert.True(Waiting() > 0);
+        Assert.Null(Db.Text("SELECT value FROM tx_state WHERE key = 'embed.lease'"));
+    }
+
+    [Fact]
+    public void SyncEmbed_LeaseHeld_SkipsSilently()
+    {
+        PlaceMarked("embed-lease", 0);
+        var now = _clock.GetUtcNow().ToUnixTimeMilliseconds();
+        var held = "other-machine:1:other-run:" + now.ToString(CultureInfo.InvariantCulture);
+        Db.Exec($"INSERT INTO tx_state (key, value) VALUES ('embed.lease', '{held}')");
+        var embedder = new RecordingEmbedder("local", 384);
+
+        var result = Service(Adapter()).SyncCurrent(Plan(embedder), CancellationToken.None);
+
+        Assert.True(result.Complete);
+        Assert.Empty(embedder.Calls);
+        Assert.Equal(held, Db.Text("SELECT value FROM tx_state WHERE key = 'embed.lease'"));
+        Assert.Equal(0, SessionEmbedded("embed-lease"));
+    }
+
+    [Fact]
+    public void SyncEmbed_ReindexRunning_Skips()
+    {
+        PlaceMarked("embed-reindex", 0);
+        var embedder = new RecordingEmbedder("local", 384);
+        var probes = 0;
+
+        var result = Service(Adapter()).SyncCurrent(Plan(embedder, () => { probes++; return true; }), CancellationToken.None);
+
+        Assert.True(result.Complete);
+        Assert.True(probes > 0);
+        Assert.Empty(embedder.Calls);
+        Assert.Equal(0, SessionEmbedded("embed-reindex"));
+        Assert.Null(Db.Text("SELECT value FROM tx_state WHERE key = 'embed.lease'"));
+    }
+
+    [Fact]
+    public void SyncEmbed_DoesNotOverwriteEmbedLastRun()
+    {
+        PlaceMarked("embed-record", 0);
+        var before = new EmbedRunRecord(
+            new DateTimeOffset(2026, 11, 20, 8, 0, 0, TimeSpan.Zero), 7, 99, 1, "ready", "Ready", "local", "bge-small-en-v1.5", "done");
+        Db.Store.WriteEmbedRun(before);
+        var embedder = new RecordingEmbedder("local", 384);
+
+        Service(Adapter()).SyncCurrent(Plan(embedder), CancellationToken.None);
+
+        Assert.True(SessionEmbedded("embed-record") > 0);   // it did embed
+        Assert.Equal(before, Db.Store.ReadEmbedRun());
+    }
+
+    [Fact]
+    public void SyncEmbed_ModelNotReady_Skips()
+    {
+        PlaceMarked("embed-notready", 0);
+        var inner = new RecordingEmbedder("local", 384);
+
+        var result = Service(Adapter()).SyncCurrent(Plan(new NotReadyEmbedder(inner)), CancellationToken.None);
+
+        Assert.True(result.Complete);
+        Assert.Empty(inner.Calls);
+        Assert.Equal(0, SessionEmbedded("embed-notready"));
+        Assert.Null(Db.Text("SELECT value FROM tx_state WHERE key = 'embed.lease'"));
+    }
+
+    [Fact]
+    public void SyncEmbed_DescriptorThrows_EndsSilently()
+    {
+        PlaceMarked("embed-descriptor", 0);
+
+        var result = Service(Adapter()).SyncCurrent(Plan(new ThrowingDescriptorEmbedder()), CancellationToken.None);
+
+        Assert.True(result.Complete);
+        Assert.Equal(0, SessionEmbedded("embed-descriptor"));
+    }
+
+    [Fact]
+    public void SyncEmbed_PastTheDeadline_DoesNotEmbed()
+    {
+        Backlog(5);
+        PlaceMarked("embed-late", 0);
+        var embedder = new RecordingEmbedder("local", 384);
+        // The ingest consumes the whole total deadline on the service's clock: the embed step then does not start.
+        var late = new TranscriptSyncOptions(TotalDeadline: TimeSpan.FromSeconds(6));
+        var adapter = Adapter(_ => _clock.Advance(TimeSpan.FromSeconds(7)));
+
+        var result = Service(adapter, late).SyncCurrent(Plan(embedder), CancellationToken.None);
+
+        Assert.Empty(embedder.Calls);
+        Assert.False(result.Current.Kind == CurrentKind.None);
+    }
+
+    [Fact]
+    public void SyncEmbed_CancelledByTheCaller_Throws()
+    {
+        PlaceMarked("embed-cancel", 0);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        Assert.ThrowsAny<OperationCanceledException>(
+            () => Service(Adapter()).SyncCurrent(Plan(new RecordingEmbedder("local", 384)), cts.Token));
+    }
+
+    [Fact]
+    public void SyncText_NoPlan_NeverTouchesAnEmbedder()
+    {
+        Backlog(5);
+        PlaceMarked("text-only", 0);
+
+        var result = Sync(Service(Adapter()));
+
+        Assert.True(result.Complete);
+        Assert.True(Waiting() > 0);
+        Assert.Equal(0, SessionEmbedded("text-only"));
+        Assert.Null(Db.Text("SELECT value FROM tx_state WHERE key = 'embed.lease'"));
+    }
+
+    private sealed class ThrowingDescriptorEmbedder : IEmbedder
+    {
+        public EmbedderDescriptor Descriptor => throw new InvalidOperationException("no descriptor");
+        public float[] Embed(string text) => throw new InvalidOperationException("must not be called");
+        public float[] EmbedQuery(string text) => throw new InvalidOperationException("must not be called");
     }
 }
