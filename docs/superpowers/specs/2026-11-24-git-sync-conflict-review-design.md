@@ -17,8 +17,10 @@ conflict stalls the whole cycle and the loser's text is nowhere. After this part
 
 - the pull applies the clock's winner at once and files the loser's text as a `conflict` item (the applied text, every losing text with
   its machine and stamp), and **no decision postpones any more**;
-- a conflict item is kept in the very pull that first holds a deletion for the id (W8.4 unproven), in a pull whose guard converts a push
-  deletion into a hold, and is removed in a pull that carries the deletion out (W8.3 or an approved hold); the item step's gates and the
+- reconcile tests, each naming its pull: the item is kept in the very pull that first holds a deletion for the id (W8.4 unproven); kept in a
+  pull whose guard converts a push deletion into a hold; kept in a pull over an open local hold (W8.2); removed in a pull that carries out a
+  proven W8.3 deletion; removed in the pull that carries out an approved hold; removed at the next pull after an accepted remote hold or a
+  pushed local deletion forgot the row; the item step's gates and the
   in-transaction re-read cover conflict items (a conflict item changed before the transaction defers the entry);
 - a conflict item and a pin-edit rule 4 (a held edit applied on a local unpin) in one pull: the two plans agree, the entry is not deferred;
   a conflict item survives a held local deletion (W8.4) and is still listed after `restore`, and is removed when the deletion is carried out;
@@ -127,10 +129,12 @@ expected post-decision state and recomputed inside it (a difference defers the e
 1. the row is `forgotten` or `left`, or the entry is absent **and the id has no held deletion after this decision**: remove the item (the
    memory is gone). "Held after this decision" is one input, the same in the planned and the recomputed reconcile, and not a database read:
    `decision.Entry` is `HoldDeletion` (including a push deletion the guard converted, `SyncDeletion.holdInstead`), or the id's pre-read held
-   item is open or approved and the decision does not close it (`CloseHeldDelete` false). The item step runs before the hold is upserted
+   item is open or approved, `CloseHeldDelete` is false and `decision.Entry` is neither `PushDeletion` nor `DeleteEntry` (so the pull that
+   carries out an approved hold, a W8.3 `PushDeletion`, does not count as held and removes the item in that pull). The item step runs before the hold is upserted
    (`CarryOut`), so reading the database would miss the pull that creates the hold. A held deletion of this machine's memory (W8.4: the entry is already gone here, the deletion is unproven or stopped by
    the guard) leaves the item, because for a record-wins conflict it holds the only copy of the local text and a later `restore` brings the
-   memory back with its alternatives; accepting or carrying out the deletion removes the entry's row, which removes the item. **A row that
+   memory back with its alternatives; accepting a remote hold or pushing a local deletion forgets the entry's row, and the next pull that visits the id (conflict ids are
+   always visited) removes the item (row `forgotten`); the accept and the push themselves do not touch it. **A row that
    does not exist yet is not a reason to remove**: after `sync init` or `sync join` the items survive and the rows come back later (the existing survival rule
    stays under test);
 2. (an entry is present) losers whose text equals the entry's text are dropped (they were applied, typed or re-published); no loser left: remove the item;
