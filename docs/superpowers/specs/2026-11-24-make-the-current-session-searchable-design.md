@@ -57,7 +57,7 @@ is portable shell and node; the engine side reads parents with `ps -o ppid= -p <
 by no run on a real Mac); **Windows** (Claude Code's hook shell there is Git Bash, whose `$PPID` is an MSYS pid and not a Windows
 pid, and the engine has no cheap parent lookup: Part 5 writes no marker on Windows, and a Windows user gets the guess and
 `currentSession: "guessed"`); a host process started under a wrapper that does not exec (the shim finds no marker among the
-ancestors it can read: the same guess); a Claude Code that does not send `transcript_path` (no marker is written); a Claude Code whose hook shell does not `exec` a single command (the spike ran with `/bin/sh` being bash; where a hook runs through a shell that stays as the parent, `$PPID` is that shell, and the writer's second pid, `CLAUDE_PID`, covers it when Claude Code sets it, else the guess applies); a session file whose first ingest needs more than the sync's 2 seconds (the sync cancels before it writes, so each call tries again and says so in `syncNote`; the 15-second `session_start` pass and `backfill` bring such a file in); a duplicate session id whose live file differs from the stored one (the ingester answers `Changed` and leaves the stored chunks; `syncNote` says so).
+ancestors it can read: the same guess); a Claude Code that does not send `transcript_path` (no marker is written); a Claude Code whose hook shell does not `exec` a single command (the spike ran with `/bin/sh` being bash; where a hook runs through a shell that stays as the parent, `$PPID` is that shell, the marker is named by a pid that is not the host's, and the guess applies; `CLAUDE_PID` is deliberately not used as a second name, because a nested `claude` inherits the outer one's value and could overwrite the outer marker); a **nested host** (a `claude -p` started from a tool of another Claude Code session): the inner session has its own process, hook and marker and resolves its own, but if its nearer marker were refused the walk would climb to the outer session's marker; a session file whose first ingest needs more than the sync's 2 seconds (the sync cancels before it writes, so each call tries again and says so in `syncNote`; the 15-second `session_start` pass and `backfill` bring such a file in); a duplicate session id whose live file differs from the stored one (the ingester answers `Changed` and leaves the stored chunks; `syncNote` says so).
 
 ## Calls made here (the person can overrule them at sign-off)
 
@@ -104,23 +104,23 @@ starts **no process** (only shell builtins run).
    wrapper's behaviour.
 2. Leave unless `<dataDir>/live/enabled` is a regular file (`[ -f ]`, a builtin). Archive off: nothing more runs.
 3. Leave when `$OSTYPE` is `msys*`, `cygwin*` or `win32*` (a builtin variable; no marker on Windows).
-4. Run `node "$PLUGIN_ROOT/hooks/live-marker/write-marker.js" "$PPID" "${CLAUDE_PID:-}"` with the hook's stdin passed through and
-   its stdout and stderr sent to `/dev/null`.
+4. Run `node "$PLUGIN_ROOT/hooks/live-marker/write-marker.js" "$PPID"` with the hook's stdin passed through and its stdout and
+   stderr sent to `/dev/null`. `$PLUGIN_ROOT` is derived from the script's own location (`$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)`),
+   as `hooks/user-prompt-submit/run.sh` does, never from an environment variable. A missing `node` is a failed command: the script
+   still exits 0 and prints nothing.
 
-**`hooks/live-marker/write-marker.js`** (plain ESM, no dependency, no build). Arguments: one or two host pids, each a decimal
-positive integer without leading zeros, at most 2147483647 (an invalid or empty one is skipped; none valid: leave; the same pid
-twice counts once). It reads the hook payload from stdin for at most 500 ms and 64 KiB. It writes **nothing** unless the payload is
+**`hooks/live-marker/write-marker.js`** (plain ESM, no dependency, no build). Argument: the host pid, a decimal
+positive integer without leading zeros, at most 2147483647 (anything else: leave). It reads the hook payload from stdin for at most 500 ms and 64 KiB. It writes **nothing** unless the payload is
 an object with: `session_id` an id the adapter accepts, **the same rule** `ClaudeCodeAdapter.IsValidId` applies (1 to 128 of
 `A-Za-z0-9._-`; the adapter's check is made `internal` and one shared list of accepted and refused ids is run against both test
-suites), `transcript_path` an absolute path of at most 4096 characters with no NUL, and `cwd` the same. It writes one marker per valid
-pid:
+suites), `transcript_path` an absolute path of at most 4096 characters with no NUL, and `cwd` the same. It writes one marker:
 
 ```json
 {"v":1,"host":"claude-code","host_pid":1234,"session_id":"…","transcript_path":"…","cwd":"…","at":"2026-11-24T10:00:00.000Z"}
 ```
 
 (`at` is the write time, UTC, milliseconds, `Z`.) The parent's shape is `{session_id, transcript_path, cwd, at}`; `v`, `host` and
-`host_pid` are added so the engine can refuse a file that is not what its name says. Each is written **atomically**: `live/`
+`host_pid` are added so the engine can refuse a file that is not what its name says. It is written **atomically**: `live/`
 created mode 0700 when absent, the content to a temporary file in `live/` mode 0600, then renamed over
 `claude-code-<pid>.json`. A write failure, a full disk or a read-only directory is swallowed. The process has an overall deadline of
 3 seconds and exits 0 on every path, and prints **nothing** to stdout or stderr on any path.
@@ -210,9 +210,10 @@ and no marker) follow the sync, which is cheap and idempotent. Steps:
 
 The total is bounded: 2 s of ingest, then at most one embed batch round of 2 s or 8 chunks (the time is checked between batches of
 up to 16, so one batch may overrun, as in Part 3), plus a model load the first time. It is the parent's "about 2 seconds or 8
-chunks". **SQLite lock waits are inside it:** the sync opens the archive with a short busy timeout of 500 ms
-(`TranscriptStore.Open` gets an optional busy timeout, default the current 5 seconds, so every other caller is unchanged); a write
-that cannot get the lock in that time ends the step as incomplete and the read goes on.
+chunks". **SQLite lock waits are inside it, loosely:** the sync opens the archive with a short busy timeout of about 500 ms **per lock
+wait** (`SqliteConnection.Open`, where the `busy_timeout` pragma is set today at 5 seconds, takes an optional timeout, and
+`TranscriptStore.Open` passes it through; every other caller is unchanged), and it checks its clock between the steps and runs no
+further step once 6 seconds in total have passed. A write that cannot get the lock ends the step as incomplete and the read goes on.
 
 `session_start`, `memory_search` and every other tool are untouched: no sync, no marker read, no new work at boot (the finder and the
 ancestry are built lazily by the first transcript tool call). The `ArchivePass` of Part 3 is unchanged and still runs from
@@ -245,27 +246,35 @@ when the head cannot be read there is no project, so the defaults are today's. T
 automated, a default project search leaves its own hits out (`include_automated` is false by default); a named session is always
 searched.
 
+**The exchange in flight.** The sync ingests the session's unfinished last exchange, which holds the user's prompt and the stub of
+the search being run, so a search can rank its own prompt among its hits. This is accepted and documented in `docs/transcripts.md`
+(the agent knows its own prompt; the hit costs one slot of `top_k`); the `session_start` pass already stored live sessions this way.
+
 **The answer gets three fields** (`TranscriptSearchResponseDto`; the existing ones are unchanged):
 
 - `currentSession`: `"marker"`, `"guessed"` or `"none"` (always present);
 - `currentSessionRef`: `"<host>:<host_session_id>"` for `marker` and `guessed`, else absent;
 - `syncNote`: a short sentence, present only when the catch-up of the current session was not complete ("the newest text of the
   current session may be missing: the catch-up ran out of time", "…: the session file could not be read", and so on); absent
-  otherwise, and absent for a skipped single-flight call.
+  otherwise. A call that waited for the running sync and then saw it complete has no note; only a wait that ran out sets one.
 
 `transcript_get` and `transcript_sessions` answer exactly as they do today (they sync, they do not report it).
 
 ## 5. The embed queue's session preference (the one change to Part 3)
 
-`ITranscriptStore.NextEmbedWork(int limit, IReadOnlyCollection<long> exclude, long? preferSession = null)`: when
-`preferSession` is set, it first reads that session's waiting chunks (`embedded = 0 AND embed_attempts < 3`, the same exclusions, up
-to `limit`, by id) and, if fewer than `limit` came back, fills the rest from the whole queue by id as now: two indexed reads, not a
-sort of the whole queue. `TranscriptEmbedWorker.Run` gets the same optional argument and passes it on every batch read. **Every
-implementer and seam is updated** (the compiler finds them: `TranscriptStore`, the test `DecoratingTranscriptStore` and its
-`OnNextEmbedWork` seam, the `ThrowingReadsStore` of the Part 4 tests, and any other). The `session_start` pass and `transcripts
-embed` pass nothing and behave as before. A test shows that with a backlog of 20,000 waiting chunks of an older session and 5 new
-chunks of the current one, an 8-chunk run embeds the 5 first, and that the read is not slower than the plain one by more than a
-constant (it uses the index of the session column).
+`ITranscriptStore.NextEmbedWork(int limit, IReadOnlyCollection<long> exclude, (string Host, string HostSessionId)? preferSession = null)`:
+when `preferSession` is set, the store resolves the session's row inside the read (no row id leaves the store, and
+`SessionIngestState` is unchanged), first reads that session's waiting chunks (`embedded = 0 AND embed_attempts < 3`, the same
+exclusions, up to `limit`, by id) and, if fewer than `limit` came back, fills the rest from the whole queue by id **excluding the ids
+the first read returned**: two indexed reads, not a sort of the whole queue, and no chunk twice in one batch (the current session's
+chunks are often the lowest ids of a small archive). `TranscriptEmbedWorker.Run` gets the same optional argument and passes it on every
+batch read, and a second optional argument `recordRun` (default true): the sync passes false, so a small catch-up does not overwrite
+`embed.last_run`, which `status` shows for the last full run. **Every implementer and seam is updated** (the compiler finds them:
+`TranscriptStore`, the test `DecoratingTranscriptStore` and its `OnNextEmbedWork` seam, the `ThrowingReadsStore` of the Part 4 tests,
+and any other). The `session_start` pass and `transcripts embed` pass nothing and behave as before. Tests: with a backlog of 20,000
+waiting chunks of an older session and 5 new chunks of the current one, an 8-chunk run embeds the 5 first; the same where the
+current session's chunk ids are **lower** than the backlog's (none embedded twice); the read is not slower than the plain one by more
+than a constant; a run with `recordRun = false` leaves `embed.last_run` as it was.
 
 ## 6. Fixtures and tests
 
@@ -279,7 +288,7 @@ New tests have no network, no real Claude Code and no model download; the real-h
   an old file removed, a live pid and `enabled` and a foreign name kept, at most 200 names looked at, only on `SessionStart`).
   `hooks/live-marker/run.test.js`: with the sentinel absent a recording `node` shim is **never started**; with it present the
   writer runs with the shell's `$PPID`; the data-directory table matches `ConfigLoader.GetDataDir` and `resolveDataDir` (the disagreement cases are named); a Windows
-  `$OSTYPE` leaves; the second pid (`CLAUDE_PID`) is written when it differs from `$PPID`; `hooks.json`
+  `$OSTYPE` leaves; with `node` missing from `PATH` (empty `PATH` after the sentinel passes) the script exits 0 and prints nothing; `hooks.json`
   holds the second entry in both groups with the timeout (`hooks/hooks.config.test.js` is updated for it); and the writer works in a
   plugin tree with no `binaries/` and with a floor that is disabled.
 - **Simulated host processes.** A node test starts two long-lived fake host processes (`sleep`-like node scripts) in one directory,
@@ -289,7 +298,7 @@ New tests have no network, no real Claude Code and no model download; the real-h
   from their own simulated chain (engine -> shim -> host A, and -> host B), a marker for a non-ancestor pid is never used, every
   refusal of section 2 (a `..` climbing out of the root, a symlinked directory inside the root pointing outside, a symlinked file,
   a file that is not `<session_id>.jsonl`, a file deeper than the layout, another session id than the file's, `host_pid` not equal to
-  the name, oversized, malformed, wrong `v`, wrong host, a path under the root of another host, a `.` component, a marker written
+  the name, oversized, malformed, wrong `v`, wrong host, a path under the root of another host, a `.` component, a nested host (the nearer marker refused, the outer one valid: documented as a known limit and pinned), a marker written
   before the process it names started (with a real short-lived process) and a root that is itself a link, which is accepted)
   skips it (or accepts it, for the root) and the walk continues; a valid farther marker
   is used when a nearer one is refused. The symlink cases are skipped on Windows. `ProcessAncestryTests`: a real child and
@@ -304,7 +313,7 @@ New tests have no network, no real Claude Code and no model download; the real-h
      cutoff: a sync of the current session ingests nothing it must not, and the file is not opened for a session forgotten by id.
   4. Budget: with a clock that is spent after the ingest, the ingest stops, the result is `Complete = false` and the search still
      answers; with a backlog of 200 older waiting chunks the sync embeds the current session's new chunks first, at most 8, and the
-     rest wait; a busy archive (a held write lock) ends the step in about the 500 ms timeout and the read answers.
+     rest wait; a busy archive (a held write lock) ends the step in about the 500 ms timeout per wait and the read answers, with no step started after 6 s.
   5. `transcript_get` and `transcript_sessions` sync text only: a recording embedder given to the composition is never called by
      them, and a remote provider without the opt-in is never built by any of the three.
   6. Defaults: the table of section 4 row by row, with a marker and without; a guessed session never changes a scope; the
@@ -361,13 +370,13 @@ New tests have no network, no real Claude Code and no model download; the real-h
 4. **The marker has `v`, `host` and `host_pid`** besides the parent's four fields.
 5. **The engine tries every ancestor, nearest first**, and the hook names the file by the host pid; the parent says the engine
    "finds its own entry by walking its ancestor process ids", which this makes exact.
-6. **A change to a Part 3 interface** (`NextEmbedWork` and `TranscriptEmbedWorker.Run` take an optional session preference), needed
+6. **A change to a Part 3 interface** (`NextEmbedWork` and `TranscriptEmbedWorker.Run` take an optional session preference, and `Run` an optional `recordRun`), needed
    for the parent's "about 8 chunks" to mean the tail (call 6).
 7. **The project of a default search is the one the archive stored for the session**, not the marker's `cwd` (decision 9 says "its
    recorded `cwd`"): the ingest's key comes from the file's first directory, and a `cd` would otherwise miss the session's own
    chunks.
-8. **A small change to `TranscriptStore.Open`**: an optional busy timeout (the sync passes 500 ms), so the sync's lock waits stay
-   inside its budget.
+8. **A small change to `TranscriptStore.Open` and `SqliteConnection.Open`**: an optional busy timeout (the sync passes 500 ms), so
+   the sync's lock waits stay short.
 9. **macOS is stated as unobserved** (the parent's scope says the spike "confirms the marker approach on Linux and macOS"): no Mac
    was available; the hook side is portable and the engine side is covered by a simulated parent reader.
 10. **Three new fields on a `transcript_search` answer** (`currentSession`, `currentSessionRef`, `syncNote`); the parent says only that
