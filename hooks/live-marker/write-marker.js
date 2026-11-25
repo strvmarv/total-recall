@@ -26,8 +26,11 @@ export const TMP_MAX_AGE_MS = 3600 * 1000;
 
 const SESSION_ID = /^[A-Za-z0-9._-]{1,128}$/;
 const PID_ARG = /^[1-9][0-9]{0,9}$/;
-const MARKER_NAME = /^claude-code-([0-9]{1,10})\.json$/;
-const TMP_NAME = /^claude-code-[0-9]{1,10}\.json\.[A-Za-z0-9._-]+\.tmp$/;
+// The pid in a name follows PID_ARG (no 0, no leading zero), so only names this writer can produce
+// are ever pruned. The engine looks only for `<host>-<pid>.json` with a pid of its ancestor chain
+// (never 0 or 1, printed without leading zeros), so the two sides agree.
+const MARKER_NAME = /^claude-code-([1-9][0-9]{0,9})\.json$/;
+const TMP_NAME = /^claude-code-[1-9][0-9]{0,9}\.json\.[A-Za-z0-9._-]+\.tmp$/;
 
 /** The same rule as ClaudeCodeAdapter.IsValidId: 1 to 128 of A-Za-z0-9._- . */
 export function isValidSessionId(id) {
@@ -87,11 +90,16 @@ export function buildMarker(payload, pid, now) {
 /** Writes the marker atomically (temp file mode 0600 in live/, then rename). Returns the file name. Throws on failure. */
 export function writeMarker({ dataDir, marker }) {
   const liveDir = path.join(dataDir, 'live');
+  // The mode applies only when `live/` (or a missing parent) is created here: an existing directory
+  // keeps its permissions (the engine's `transcripts enable` creates it first). The marker files
+  // themselves are always 0600.
   fs.mkdirSync(liveDir, { recursive: true, mode: 0o700 });
   const name = `${HOST}-${marker.host_pid}.json`;
   const tmp = path.join(liveDir, `${name}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`);
   try {
     fs.writeFileSync(tmp, JSON.stringify(marker), { flag: 'wx', mode: 0o600 });
+    // rename replaces the directory entry itself: a symlink at the marker's name is replaced, never
+    // written through.
     fs.renameSync(tmp, path.join(liveDir, name));
   } catch (e) {
     try { fs.unlinkSync(tmp); } catch { /* not created, or already moved */ }
@@ -130,7 +138,7 @@ export function prune({ liveDir, now, selfName }) {
       if (!marker && !isTmp) continue;
       const file = path.join(liveDir, name);
       const st = fs.lstatSync(file);
-      if (!st.isFile()) continue;
+      if (!st.isFile()) continue; // lstat: a symlink (or anything not a regular file) is never removed or followed
       const age = now - st.mtimeMs;
       const stale = isTmp
         ? age > TMP_MAX_AGE_MS
@@ -216,7 +224,12 @@ function isMainModule() {
 }
 
 if (isMainModule()) {
-  setTimeout(() => process.exit(0), DEADLINE_MS).unref();
-  run({ argv: process.argv.slice(2), env: process.env, stdin: process.stdin })
-    .finally(() => process.exit(0));
+  // Even a synchronous throw here (a stdin that cannot be opened, say) must not fail the hook.
+  try {
+    setTimeout(() => process.exit(0), DEADLINE_MS).unref();
+    run({ argv: process.argv.slice(2), env: process.env, stdin: process.stdin })
+      .finally(() => process.exit(0));
+  } catch {
+    process.exit(0);
+  }
 }

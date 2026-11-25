@@ -251,7 +251,37 @@ describe('bad input never fails', () => {
   test('no data directory in the environment writes nothing', () => {
     const { env } = freshEnv();
     const bare = { PATH: env.PATH };
-    assertSilent(run({ env: bare, input: payload() }));
+    // A fresh working directory: a relative fallback (such as `.total-recall`) would land here.
+    const cwd = fs.mkdtempSync(path.join(root, 'nodata-'));
+    const r = spawnSync(process.execPath, [SCRIPT, '4242'], {
+      env: bare, cwd, input: JSON.stringify(payload()), encoding: 'utf8', timeout: 10000,
+    });
+    assertSilent(r);
+    assert.deepEqual(fs.readdirSync(cwd), []);
+  });
+
+  test('a closed stdin exits 0 and writes nothing', () => {
+    const { env, liveDir } = freshEnv();
+    const r = spawnSync(process.execPath, [SCRIPT, '4242'], {
+      env, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', timeout: 10000,
+    });
+    assertSilent(r);
+    assert.deepEqual(markerFiles(liveDir), []);
+  });
+
+  test('a marker name that is a symlink is replaced, never written through', { skip: posix ? false : 'symlinks need a privilege on Windows' }, () => {
+    const { env, liveDir, dataDir } = freshEnv();
+    fs.mkdirSync(liveDir, { mode: 0o700 });
+    const target = path.join(dataDir, 'outside.txt');
+    fs.writeFileSync(target, 'keep');
+    const link = path.join(liveDir, 'claude-code-4242.json');
+    fs.symlinkSync(target, link);
+    assertSilent(run({ env, input: payload() }));
+    const st = fs.lstatSync(link);
+    assert.equal(st.isSymbolicLink(), false);
+    assert.equal(st.isFile(), true);
+    assert.equal(JSON.parse(fs.readFileSync(link, 'utf8')).host_pid, 4242);
+    assert.equal(fs.readFileSync(target, 'utf8'), 'keep');
   });
 
   test('a relative TOTAL_RECALL_HOME writes nothing', () => {
@@ -370,6 +400,32 @@ describe('pruning', () => {
     touch(liveDir, self, { ageMs: old });
     prune({ liveDir, now: Date.now(), selfName: self });
     assert.deepEqual(markerFiles(liveDir), [...names, self].sort());
+  });
+
+  test('prune never removes a pid of 0 or one with a leading zero, however old', () => {
+    const liveDir = liveDirFor();
+    const old = 90 * day;
+    const names = [
+      'claude-code-0.json', 'claude-code-00.json', 'claude-code-012.json',
+      'claude-code-0.json.1.abcd.tmp', 'claude-code-012.json.1.abcd.tmp',
+    ];
+    for (const n of names) touch(liveDir, n, { ageMs: old });
+    prune({ liveDir, now: Date.now(), selfName: 'claude-code-4242.json' });
+    assert.deepEqual(markerFiles(liveDir), [...names].sort());
+  });
+
+  test('prune neither removes nor follows a marker name that is a symlink', { skip: posix ? false : 'symlinks need a privilege on Windows' }, async () => {
+    const liveDir = liveDirFor();
+    const pid = await deadPid();
+    const target = path.join(path.dirname(liveDir), 'outside.json');
+    fs.writeFileSync(target, '{}');
+    const old = new Date(Date.now() - 90 * day);
+    fs.utimesSync(target, old, old);
+    const link = path.join(liveDir, `claude-code-${pid}.json`);
+    fs.symlinkSync(target, link);
+    prune({ liveDir, now: Date.now(), selfName: 'claude-code-4242.json' });
+    assert.equal(fs.lstatSync(link).isSymbolicLink(), true);
+    assert.equal(fs.readFileSync(target, 'utf8'), '{}');
   });
 
   test('prune does not touch a directory with a matching name', async () => {

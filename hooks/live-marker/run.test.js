@@ -15,6 +15,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { resolveDataDir } from '../../scripts/fetch-binary.js';
+import { resolveDataDir as writerResolveDataDir } from './write-marker.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../..');
@@ -196,6 +197,8 @@ describe('live-marker run.sh', { skip }, () => {
 
         // The JS rule of the provisioner agrees with the table (a relative result counts as null).
         assert.equal(resolveDataDir(env), expected, 'scripts/fetch-binary.js resolveDataDir');
+        // And so does the writer's own copy of the rule.
+        assert.equal(writerResolveDataDir(env), expected, 'hooks/live-marker/write-marker.js resolveDataDir');
 
         // Where the engine's rule would land, the sentinel exists; for an unusable row the sentinel
         // is planted where a relative reading would look (the working directory), and must be ignored.
@@ -246,6 +249,24 @@ describe('live-marker run.sh', { skip }, () => {
     });
     assert.equal(r.status, 0);
     assert.equal(fs.existsSync(shim.mark), true);
+  });
+
+  test('Run_CdpathSet_RelativeScriptPath_StillFindsThePluginRoot', () => {
+    // Run as `bash hooks/live-marker/run.sh` from the plugin root, with a CDPATH entry holding a decoy
+    // hooks/live-marker: the wrapper's `cd` must not search CDPATH (which would also print the directory).
+    const tree = pluginTree();
+    const decoy = tmpDir('decoy');
+    fs.mkdirSync(path.join(decoy, 'hooks', 'live-marker'), { recursive: true });
+    const dataDir = tmpDir('data');
+    enable(dataDir);
+    const r = spawnSync(BASH, ['hooks/live-marker/run.sh'], {
+      env: { PATH: NODE_DIR, TOTAL_RECALL_HOME: dataDir, HOME: tmpDir('home'), CDPATH: decoy },
+      cwd: tree, input: payload(), encoding: 'utf8', timeout: 20000,
+    });
+    assert.equal(r.status, 0);
+    assert.equal(r.stdout + r.stderr, '');
+    const written = fs.readdirSync(path.join(dataDir, 'live')).filter((n) => n.startsWith('claude-code-'));
+    assert.equal(written.length, 1, 'the writer must have run from the real plugin root');
   });
 
   test('Run_NodeMissing_ExitsZeroSilently', () => {

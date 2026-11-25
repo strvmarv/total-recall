@@ -50,7 +50,8 @@ case $src in
   */*) src_dir=${src%/*} ;;
   *) src_dir=. ;;
 esac
-PLUGIN_ROOT=$(cd "$src_dir/../.." 2>/dev/null && pwd) || exit 0
+# CDPATH is cleared for the cd: with a relative script path it would be searched (and print).
+PLUGIN_ROOT=$(CDPATH= cd "$src_dir/../.." 2>/dev/null && pwd) || exit 0
 [ -n "$PLUGIN_ROOT" ] || exit 0
 
 # The hook's stdin (the payload) passes through. A missing node is a failed command: still exit 0.
