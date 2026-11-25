@@ -121,7 +121,7 @@ are), so a local change that no record change accompanies still reaches it. The 
 Every update to `unseen` (these rules, the arrival rule, a stale refusal) also rewrites `machine` (the pull from the record's `WrittenBy`; a stale refusal from the parsed base's `WrittenBy`, NULL when absent). A
 state-mismatch `stale-item` (the entry's sticky state does not fit the kind) writes nothing. `ApplyDrop` (a row
 dropped without a decision) deletes the id's pin items in its own transaction. An `approved` item is removed by the same rules once its effect is in place (new-pin rule 2, pin-edit rule 2). **When it runs.** The applier already plans, embeds and takes the no-op shortcut before `BEGIN IMMEDIATE`, so it runs `SyncPin.reconcile` there on
-the **expected** post-decision state (the entry as the plan's store operations will leave it, the base from `BaseRenderer.Render(theirs, oldBase, decision.Base)`, and whether a content stamp is pending from the decision's
+the **expected** post-decision state (the entry as the plan's store operations will leave it, the base from the planned row's `base_json` (as `BuildRow` renders it with the placeholder issuer below), and whether a content stamp is pending from the decision's
 content action and its `FreshContentStamp`, none of which an issued stamp's value changes; the planned row is built with a placeholder stamp issuer that returns a
 dummy stamp, so a decision with a restamp (tier FR3 local-wins, sticky NS2) or a fresh content stamp is planned too, not failed), uses the
 result for the shortcut (every item write, update or removal counts as touching the item, as D10 of the held-deletion part did) and
