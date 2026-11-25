@@ -329,6 +329,30 @@ public sealed class TranscriptToolHandlerTests
     }
 
     [Fact]
+    public void Dto_CurrentSessionAlwaysPresent_RefAndSyncNoteOnlyWhenSet()
+    {
+        static JsonElement Wire(TranscriptSearchResponse r) =>
+            JsonDocument.Parse(JsonSerializer.Serialize(TranscriptSearchResponseDto.From(r), JsonContext.Default.TranscriptSearchResponseDto)).RootElement;
+        static TranscriptSearchResponse Response(string current = "none", string? @ref = null, string? sync = null) =>
+            new("q", "all", null, true, null, 0, Array.Empty<TranscriptSearchHit>(), 0, null, null, current, @ref, sync);
+
+        var none = Wire(Response());
+        Assert.Equal("none", none.GetProperty("currentSession").GetString());
+        Assert.False(none.TryGetProperty("currentSessionRef", out _));
+        Assert.False(none.TryGetProperty("syncNote", out _));
+
+        var marker = Wire(Response("marker", "claude-code:abc", "the newest text of the current session may be missing: the catch-up ran out of time"));
+        Assert.Equal("marker", marker.GetProperty("currentSession").GetString());
+        Assert.Equal("claude-code:abc", marker.GetProperty("currentSessionRef").GetString());
+        Assert.Equal("the newest text of the current session may be missing: the catch-up ran out of time", marker.GetProperty("syncNote").GetString());
+
+        var guessed = Wire(Response("guessed", "pi:x"));
+        Assert.Equal("guessed", guessed.GetProperty("currentSession").GetString());
+        Assert.Equal("pi:x", guessed.GetProperty("currentSessionRef").GetString());
+        Assert.False(guessed.TryGetProperty("syncNote", out _));
+    }
+
+    [Fact]
     public async Task Search_EmptyArchive_NoteAndEmptyResults()
     {
         using var a = new Archive(populate: false);
