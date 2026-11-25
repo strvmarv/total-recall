@@ -22,7 +22,8 @@ pinned here is held until the person decides. After this part:
 
 Success: with two machines, a local bare repository and temporary databases, a pin from A is an ordinary hot entry on B and absent
 from the pinned block until approved; approval pins without a push; a stale answer is refused; a decline never unpins A; a held edit
-never reverts the remote edit and never pushes the old text; every insert from a sticky record yields a non-sticky entry and an
+never reverts the remote edit or pushes the old text on a tag or tier edit (a local edit of the pinned text, project or scope is an ordinary edit and
+re-asserts the local content, as a decline does); every insert from a sticky record yields a non-sticky entry and an
 item; and the existing checks pass with nothing calling the cycle.
 
 ## Non-goals
@@ -97,7 +98,8 @@ are), so a local change that no record change accompanies still reaches it. The 
 
 1. the entry is absent or the row is forgotten or left: remove the item;
 2. the entry is sticky (pinned here, by the person or by an approval): remove the item;
-3. the record is absent or not sticky (a remote unpin or removal; the apply already applied it): remove the item;
+3. the record is absent, or the post-decision base is not sticky (a remote unpin or removal, which the apply applied; a record that merely regressed
+   to non-sticky while the base keeps the pin, and is republished by the push, does not count): remove the item;
 4. state `open` or `unseen` and the entry's shown hash differs from the item's (the record's text arrived, or the person edited the entry):
    `unseen` with the new hash;
 5. otherwise leave the item as it is (a `declined` item stays declined, a text change does not re-ask; only a new pin does, by the arrival rule).
@@ -105,19 +107,24 @@ are), so a local change that no record change accompanies still reaches it. The 
 `pin-edit`:
 
 1. the entry is absent, or the row is forgotten, left, or has no base: remove the item;
-2. the entry's content-group hash equals the base's (nothing is held any more: the apply took the record's content, the held text came to
+2. the entry's shown hash (text, project, scope) equals the base's (nothing is held any more: the apply took the record's content, the held text came to
    equal the pin text, or an earlier answer was carried out): remove the item;
 3. the entry was edited locally since the item arrived (the row has a pending content stamp, or the entry's content-group hash differs from
-   `scanned_content_hash`): remove the item; the local edit stands and meets the record as an ordinary pending change (this is also what
-   removes a declined item, whose fresh stamp is pending until pushed);
+   `scanned_content_hash`): remove the item; the local edit stands and meets the record as an ordinary pending change, so **any** local
+   content edit (text, project or scope, not only the text) re-asserts the local content group when pushed, as a decline does (this is
+   also what removes a declined item, whose fresh stamp is pending until pushed). A tag or tier edit does not close the item;
 4. the entry is not sticky (the person unpinned it, or a remote unpin was applied): **apply the base's content group to the entry**
    (D5) and remove the item;
 5. state `open` or `unseen` and the base's shown hash differs from the item's (a newer remote edit was held): `unseen` with the new hash;
 6. otherwise leave the item as it is (a record that is absent while the entry stays pinned is a held deletion; the item is unchanged).
 
-An `approved` item is removed by the same rules once its effect is in place (new-pin rule 2, pin-edit rule 2). The no-op shortcut of the
-apply counts every item write, update and removal as touching the item (as D10 of the held-deletion part did). The reconcile reads the stored
-entry after the apply's own store operations, so a decision that already unpinned and took the record's content (FS3/FS6 with FC3/FC5)
+Every update to `unseen` (these rules, the arrival rule, a stale refusal) also rewrites `machine` from the record's `WrittenBy`. `ApplyDrop` (a row
+dropped without a decision) deletes the id's pin items in its own transaction. An `approved` item is removed by the same rules once its effect is in place (new-pin rule 2, pin-edit rule 2). **When it runs.** The applier already plans, embeds and takes the no-op shortcut before `BEGIN IMMEDIATE`, so it runs `SyncPin.reconcile` there on
+the **expected** post-decision state (the entry as the plan's store operations will leave it, the base as `BuildRow` renders it), uses the
+result for the shortcut (every item write, update or removal counts as touching the item, as D10 of the held-deletion part did) and
+embeds the base's text when pin-edit rule 4 will fire. Inside the transaction it recomputes the reconcile from the re-read state and
+defers the entry (as `CarryOut` does for any difference) when the result differs from the planned one or the base text changed. The reconcile reads the entry
+after the apply's own store operations, so a decision that already unpinned and took the record's content (FS3/FS6 with FC3/FC5)
 reaches pin-edit rule 2, not rule 4.
 
 ### D5. A local unpin applies the held edit
@@ -138,18 +145,19 @@ frame (sync lock, migrations, one immediate transaction that re-reads the item, 
 changes nothing except as stated for `stale-item`: the item exists (`no-pin-item`); the row is `active` with a base and the entry is read
 (`failed`, `unreadable-entry`); the shown hash is present (`shown-hash-required`); the entry's state fits the kind (a `new-pin` needs an entry
 that is not sticky, a `pin-edit` one that is: otherwise `stale-item`, the next pull closes the item); for a `pin-edit`, the entry was not
-edited locally (the pending content stamp, or `SyncScan.contentHash(entry)` against `scanned_content_hash`: `edited-locally`, the
-`SyncApply.editedSinceHold` pattern), because approving would overwrite the person's newer pinned text; the shown hash equals the item's
+edited locally (the pending content stamp, or `SyncScan.contentHash(entry)` against `scanned_content_hash`: `edited-locally`; `SyncApply.editedSinceHold` is not
+reused as it is, because its pending-stamp clause ignores an edit of project or scope alone), because approving would overwrite the person's newer pinned text; the shown hash equals the item's
 live hash recomputed by D1 (a difference is **stale**: the answer is `stale-item` with what the item shows now, and the service commits the
 item's update to that hash and `unseen`, the only write of a refusal, so the frame's commit-on-success rule has this one exception; a test
-proves nothing else is written); the text to pin has no character the list would remove (`unshowable-text`: the person cannot approve what
+proves nothing else is written); the text, project and scope to pin hold no character the list would remove (`unshowable-text`: the person cannot approve what
 the list cannot show) and is within the **pinned cap** (below).
 
 - **`new-pin`:** applies the pin path inside the transaction: the entry moves to hot when it is not there (`Move`, which copies the vector),
   the sticky flag is set, `decay_score` is set to 1.0 as `memory_pin` does, and the row is written with `local_sticky` true, `local_tier`
   hot, the pending sticky stamp NULL and every other column as it was, so the approval is not a local change to push (the base already holds
   the record's pin and its stamp). The item becomes `approved`. Nothing is pushed.
-- **`pin-edit`:** the base's content group is applied to the pinned entry exactly as D5 does (`TakeTheirs`' fields, a new vector), the row's
+- **`pin-edit`:** the base's content group is applied to the pinned entry exactly as D5 does (`TakeTheirs`' fields, and a vector for the base's text
+  computed **before** the transaction and checked inside it against the row's `base_json`, as `RestoreLocal` does for its base), the row's
   scanned content hash is recomputed from the stored entry, the pending content stamp stays NULL, and the item becomes `approved`. The entry stays pinned.
   Nothing is pushed (the base already holds the record's content).
 - **The cap.** The text that becomes the pin (the entry's, or the held text) is checked against `tiers.pinned.max_content_chars` (a value of 0
@@ -177,8 +185,10 @@ TextCut, TextSource, CurrentText, CurrentTextCut)`: `Kind` is `held-delete`, `ne
 `Machine` and `CurrentText` are NULL where they do not apply. `List()` also returns the open and unseen pin items. A pin item shows, by the
 same text rules as a held deletion (delimited, `| `-prefixed, capped at `tiers.pinned.max_content_chars`, control, line-separator and bidi
 characters removed): for a `new-pin` the entry's text with the source `local entry`; for a `pin-edit` the held text with the source
-`repository record` and, beside it, `CurrentText` (the text pinned here) with the source `local entry`; both: project, scope, the shown hash,
-the record's machine and when it arrived, and the state (`open` or `unseen`). The hidden commands, in `ReviewCommand`:
+`repository record` and, beside it, `CurrentText` (the text pinned here) with the source `local entry`; both: project, scope, the shown hash (computed live by D1 from the fields the list shows, not read from the row),
+the record's machine and when it arrived, and the state (`open` or `unseen`). **Project, scope and machine come from a repository record**, so they
+are shown through the same sanitiser as the text (control, line-separator and bidi characters removed, newlines and tabs replaced, each capped at 200
+characters) and a record whose project or scope the list would change is refused by `approve` as `unshowable-text`. The hidden commands, in `ReviewCommand`:
 
 - `sync review approve <id> --shown <hash>` and `sync review decline <id> --shown <hash>`: **`--shown` is required** for both (a usage error, exit
   2, without it). It is 8 or more hex digits, a unique prefix of the item's hash, as for `accept`/`restore`. The held-deletion verbs keep Part 2's
@@ -232,6 +242,11 @@ proofs, one test per row:
   a following cycle pushes the unpin only; a local edit while held → item removed and the edit pushes as an ordinary change; both at once →
   the edit stands;
 - decisions with a `Conflict` still postpone (`NewPin` + `Conflict` and an NC4 case);
+- hostile project, scope and machine strings in a record (newline, escape, bidi, over-long) are sanitised in the list and make `approve` refuse
+  `unshowable-text`; a record that regresses to non-sticky while the base keeps the pin leaves a waiting pin in place; a held edit whose text comes
+  back equal to the pin text closes the item even when the source or `created_at` differ; a local project-only edit while held closes the item and
+  pushes the local content group; `ApplyDrop` removes pin items; the D4 reconcile is computed before the transaction (no embedding or transaction for
+  a no-op pull) and the entry is deferred when it differs inside;
 - the item readers treat `unseen` as open (reconcile, answer, list, the visit set); the visit set contains every pin-item id; a no-op pull
   does not rewrite an unchanged item;
 - the service holds the sync lock (busy), the answers are one transaction (a fault seam at the last write rolls everything back);
