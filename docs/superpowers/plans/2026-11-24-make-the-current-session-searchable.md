@@ -30,7 +30,7 @@
 2. **A hook that must never hurt a prompt**: garbage or oversized stdin, stdin that never closes, a `cwd` with a newline or unicode, a relative or NUL-holding `transcript_path`, `session_id` `..` or 129 characters, an unwritable `live/`, `node` missing from `PATH` (Task 1 table, Task 2 `Run_*`).
 3. **The tail of a growing file**: a session file that grows during the sync, is deleted between the stat and the read, or whose first ingest exceeds the budget; two syncs at once (Task 5 `Sync_*`).
 4. **The embed step under pressure**: a 20,000-chunk backlog older than the session, current-session chunk ids lower than the backlog's, a gate that refuses (remote provider without opt-in, model not ready), a held lease, a busy archive (Task 4 `NextEmbedWork_*`, Task 6 `SyncEmbed_*`, Task 9).
-5. **Defaults from a marker that disagrees with the archive**: a marker `cwd` different from the session file's first `cwd`, an automated current session, a session forgotten or unarchived, `scope: "session"` with no marker, an unknown scope (Task 7 `Plan_*`, Task 8 `Handler_*`).
+5. **Defaults from a marker that disagrees with the archive**: a marker `cwd` different from the session file's first `cwd`, an automated current session, a session forgotten or unarchived, `scope: "session"` with no marker, an unknown scope (Task 7 `Plan_*`, Task 8 `Search_*`).
 
 ---
 
