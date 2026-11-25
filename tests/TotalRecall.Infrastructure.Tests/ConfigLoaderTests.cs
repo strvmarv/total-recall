@@ -238,6 +238,16 @@ public sealed class ConfigLoaderTests : IDisposable
         Assert.Equal(Path.Combine(home, ".total-recall"), result);
     }
 
+    [Fact]
+    public void GetDataDir_RelativeTotalRecallHome_IsReturnedAsIs()
+    {
+        // The live-session marker side treats a non-absolute data directory as unusable
+        // (hooks/live-marker/data-dir-cases.json); the engine itself does not rewrite it.
+        Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", Path.Combine("rel", "dir"));
+
+        Assert.Equal(Path.Combine("rel", "dir"), ConfigLoader.GetDataDir());
+    }
+
     // --- GetDbPath --------------------------------------------------------
 
     [Fact]

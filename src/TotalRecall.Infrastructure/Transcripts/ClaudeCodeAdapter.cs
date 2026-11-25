@@ -229,7 +229,7 @@ public sealed class ClaudeCodeAdapter : ITranscriptAdapter
         info.LinkTarget is not null || (info.Attributes & FileAttributes.ReparsePoint) != 0;
 
     /// <summary>A character loop, not a regex: <c>$</c> would accept a trailing newline.</summary>
-    private static bool IsValidId(string id)
+    internal static bool IsValidId(string id)
     {
         if (id.Length is < 1 or > MaxIdLength) return false;
         foreach (var c in id)
