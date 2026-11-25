@@ -39,7 +39,7 @@ public sealed record SyncResult(CurrentSession Current, bool Complete, string? N
 /// <summary>
 /// Limits and test seams of <see cref="TranscriptSyncService"/>; null means the default: a 2 s ingest budget (also the
 /// longest wait for a running sync), <c>EmbedBudget(2 s, 8)</c>, a 30-minute guess window, a 6 s total deadline, a
-/// 500 ms busy timeout, this process's ancestors (<see cref="ProcessAncestry.Platform"/>, kept for the process),
+/// 500 ms busy timeout, this process's ancestors (<see cref="ProcessAncestry.PlatformTimed"/>, kept for the process once a walk ends normally),
 /// <see cref="ConfigLoader.GetDataDir"/>, the real process start time, <see cref="TranscriptAdapters.All"/>, the system
 /// clock and <see cref="TranscriptStore.Open"/> with <c>create: false</c>. <paramref name="Embedder"/>, when set, replaces
 /// the composition's own embedder for the transcript tools (composition tests use it to run without a model).
@@ -421,10 +421,13 @@ public sealed class TranscriptSyncService : ITranscriptSync
 
     private LiveSessionFinder BuildFinder()
     {
-        var chain = _options.Ancestors
-                    ?? (() => ProcessAncestry.Chain(Environment.ProcessId, ProcessAncestry.Platform()));
+        // The real walk is kept only when it ended normally (a failed or timed-out ps on macOS is walked again next
+        // time); a test seam's non-empty chain is kept as before.
+        var ancestry = _options.Ancestors is { } seam
+            ? new CachedAncestry(seam)
+            : new CachedAncestry(() => ProcessAncestry.Walk(Environment.ProcessId, ProcessAncestry.PlatformTimed()));
         var dataDir = _options.DataDir ?? ConfigLoader.GetDataDir();
-        return new LiveSessionFinder(dataDir, new CachedAncestry(chain), _options.ProcessStart);
+        return new LiveSessionFinder(dataDir, ancestry, _options.ProcessStart);
     }
 
     // ------------------------------------------------------------------
