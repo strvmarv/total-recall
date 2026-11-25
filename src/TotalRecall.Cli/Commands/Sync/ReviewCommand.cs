@@ -120,12 +120,13 @@ public sealed class ReviewCommand : ICliCommand
         var listing = service.List();
         if (listing.Failed is not null)
             return PrintFailed(listing.Failed);
-        if (listing.Items.Count == 0)
+        var held = Held(listing);
+        if (held.Count == 0)
         {
             WriteOut("no held deletions");
             return 0;
         }
-        foreach (var item in listing.Items)
+        foreach (var item in held)
         {
             foreach (var line in ItemLines(item))
                 WriteOut(line);
@@ -214,7 +215,7 @@ public sealed class ReviewCommand : ICliCommand
         var listing = service.List();
         if (listing.Failed is not null && shown is null)
             return PrintFailed(listing.Failed);
-        var current = listing.Items.FirstOrDefault(item => item.EntryId == id)?.ShownHash;
+        var current = Held(listing).FirstOrDefault(item => item.EntryId == id)?.ShownHash;
         var hash = shown is null
             ? current
             : current is not null && current.StartsWith(shown, StringComparison.Ordinal) ? current : shown;
@@ -236,7 +237,7 @@ public sealed class ReviewCommand : ICliCommand
         var listing = service.List();
         if (listing.Failed is not null)
             return PrintFailed(listing.Failed);
-        var items = listing.Items.Where(item => item.State == "open" || (!accept && item.State == "approved")).ToList();
+        var items = Held(listing).Where(item => item.State == "open" || (!accept && item.State == "approved")).ToList();
         var answered = 0;
         foreach (var item in items)
         {
@@ -256,6 +257,10 @@ public sealed class ReviewCommand : ICliCommand
         WriteOut($"answered {answered} of {items.Count}");
         return answered == items.Count ? 0 : 1;
     }
+
+    /// <summary>The listing's held deletions (the pin items the service also lists are answered by other verbs).</summary>
+    private static List<ReviewItem> Held(ReviewListing listing) =>
+        listing.Items.Where(item => item.Kind == "held-delete").ToList();
 
     // ---- output ---------------------------------------------------------------------------------------------------
 

@@ -21,8 +21,15 @@ namespace TotalRecall.Infrastructure.GitSync;
 /// </summary>
 public sealed record ReviewEnvironment(SyncSetupEnvironment Setup, Func<IEmbedder> Embedder, int HotMaxContentChars, int PinnedMaxContentChars);
 
-/// <summary>Which answer an item is checked for.</summary>
-internal enum ReviewOperation { Accept, Restore }
+/// <summary>Which answer an item is checked for: the held-deletion answers, then the pin answers (pin review D6, D7).</summary>
+internal enum ReviewOperation { Accept, Restore, Approve, Decline }
+
+/// <summary>
+/// What an answer's checks found inside its transaction: a refusal (then <see cref="Facts"/> is null) or the facts the work
+/// needs. A refusal is committed only when <see cref="CommitRefusal"/> is set (pin review D6: a stale hash updates the item).
+/// </summary>
+internal readonly record struct CheckOutcome<TFacts>(SetupResult? Refusal, TFacts? Facts, bool CommitRefusal = false)
+    where TFacts : class;
 
 /// <summary>
 /// What the checks read inside the answer's transaction: the item, its row (active, with a base), the local entry and the
@@ -36,7 +43,9 @@ internal sealed record Embedded(string BaseJson, float[] Vector);
 /// <summary>
 /// Answers the held deletions of this machine (D1): <see cref="List"/> reads them; an answer runs under the sync lock in
 /// one immediate transaction whose checks refuse with <c>no-held-item</c>, <c>failed</c>, <c>unreadable-entry</c>,
-/// <c>stale-item</c>, <c>shown-hash-required</c> or (a remote <c>Accept</c>) <c>edited-locally</c> and change nothing. Disposing it disposes the embedder it created.
+/// <c>stale-item</c>, <c>shown-hash-required</c> or (a remote <c>Accept</c>) <c>edited-locally</c> and change nothing. It also
+/// answers the pin items (pin review D6, D7: <see cref="ApproveAsync"/>, <see cref="DeclineAsync"/>) in the same frame.
+/// Disposing it disposes the embedder it created.
 /// </summary>
 public sealed partial class ReviewService(ReviewEnvironment env) : IDisposable
 {
@@ -99,24 +108,46 @@ public sealed partial class ReviewService(ReviewEnvironment env) : IDisposable
 
     /// <summary>The test entry point: every check of an answer, in a transaction that is always rolled back; <c>Done("checked")</c> when they all pass.</summary>
     internal Task<SetupResult> CheckForTestsAsync(string entryId, ReviewOperation op, string? shownHash, CancellationToken ct = default) =>
-        RunAsync(entryId, op, shownHash, embed: null, (_, _, _) => throw new CheckedRollback(SetupResult.Done("checked")), ct);
+        RunHeldAsync(entryId, op, shownHash, embed: null, (_, _, _) => throw new CheckedRollback(SetupResult.Done("checked")), ct);
 
-    /// <summary>
-    /// One answer (D1): a load error is <c>failed</c>; no database file is <c>no-held-item</c> before anything is created;
-    /// then the sync directory is created when missing, the sync lock taken (<c>busy</c>), the legacy check run, the
-    /// database opened read-write (<see cref="AfterOpen"/>) and migrated, <paramref name="embed"/> run on the store (an
-    /// exception is <c>failed</c> and nothing is written), <see cref="BeforeTransaction"/> called, and <c>BEGIN IMMEDIATE</c>
-    /// begun (a busy database is <c>busy</c>). Inside it <see cref="CheckItem"/> runs, then <paramref name="work"/>; the
-    /// transaction is committed only when <paramref name="work"/> returns exit code 0. A <see cref="CheckedRollback"/> thrown by
-    /// <paramref name="work"/> rolls the transaction back and its result is returned.
-    /// </summary>
-    private async Task<SetupResult> RunAsync(
+    /// <summary>A held-deletion answer: <see cref="RunAsync{TFacts}"/> with <c>no-held-item</c> and <see cref="CheckItem"/>.</summary>
+    private Task<SetupResult> RunHeldAsync(
         string entryId,
         ReviewOperation op,
         string? shownHash,
         Func<SqliteStore, Embedded?>? embed,
         Func<SqliteStoreTransaction, ItemFacts, Embedded?, SetupResult> work,
+        CancellationToken ct) =>
+        RunAsync(
+            entryId,
+            Refuse(SyncSetup.Refusal.NoHeldItem, NoHeldItemText),
+            tx =>
+            {
+                var refusal = CheckItem(tx, entryId, op, shownHash, out var facts);
+                return new CheckOutcome<ItemFacts>(refusal, facts);
+            },
+            embed,
+            work,
+            ct);
+
+    /// <summary>
+    /// One answer (D1): a load error is <c>failed</c>; no database file is <paramref name="noItem"/> before anything is created;
+    /// then the sync directory is created when missing, the sync lock taken (<c>busy</c>), the legacy check run, the
+    /// database opened read-write (<see cref="AfterOpen"/>) and migrated, <paramref name="embed"/> run on the store (an
+    /// exception is <c>failed</c> and nothing is written), <see cref="BeforeTransaction"/> called, and <c>BEGIN IMMEDIATE</c>
+    /// begun (a busy database is <c>busy</c>). Inside it <paramref name="check"/> runs, then <paramref name="work"/>; the
+    /// transaction is committed only when <paramref name="work"/> returns exit code 0, or when the check refused with
+    /// <see cref="CheckOutcome{TFacts}.CommitRefusal"/> set (pin review D6, the one refusal that writes). A
+    /// <see cref="CheckedRollback"/> thrown by <paramref name="work"/> rolls the transaction back and its result is returned.
+    /// </summary>
+    private async Task<SetupResult> RunAsync<TFacts>(
+        string entryId,
+        SetupResult noItem,
+        Func<SqliteStoreTransaction, CheckOutcome<TFacts>> check,
+        Func<SqliteStore, Embedded?>? embed,
+        Func<SqliteStoreTransaction, TFacts, Embedded?, SetupResult> work,
         CancellationToken ct)
+        where TFacts : class
     {
         ArgumentNullException.ThrowIfNull(entryId);
         var setup = env.Setup;
@@ -126,9 +157,9 @@ public sealed partial class ReviewService(ReviewEnvironment env) : IDisposable
             if (setup.LoadError is not null)
                 return Failed(setup.LoadError);
             if (!File.Exists(setup.DatabasePath))
-                return Refuse(SyncSetup.Refusal.NoHeldItem, NoHeldItemText);
+                return noItem;
 
-            // a missing sync directory is created, not a refusal: no-held-item comes only from the item read
+            // a missing sync directory is created, not a refusal: no-held-item (or no-pin-item) comes only from the item read
             phase = "taking the sync lock";
             var paths = GitSyncPaths.ForDatabase(setup.DatabasePath, setup.CaseInsensitive);
             paths.EnsureCreated();
@@ -166,13 +197,18 @@ public sealed partial class ReviewService(ReviewEnvironment env) : IDisposable
                 BeforeTransaction?.Invoke(entryId);
                 phase = "answering the item";
                 using var tx = store.BeginImmediateTransaction();
-                var refusal = CheckItem(tx, entryId, op, shownHash, out var facts);
-                if (refusal is not null)
-                    return refusal;
+                var outcome = check(tx);
+                if (outcome.Refusal is not null)
+                {
+                    if (outcome.CommitRefusal)
+                        tx.Commit();
+                    return outcome.Refusal;
+                }
+                var facts = outcome.Facts ?? throw new InvalidOperationException("the checks passed without the facts");
                 SetupResult result;
                 try
                 {
-                    result = work(tx, facts!, embedded);
+                    result = work(tx, facts, embedded);
                 }
                 catch (CheckedRollback rollback)
                 {
@@ -215,25 +251,11 @@ public sealed partial class ReviewService(ReviewEnvironment env) : IDisposable
         if (item is not { State: "open" or "approved" })
             return Refuse(SyncSetup.Refusal.NoHeldItem, NoHeldItemText);
 
-        GitSyncRow? row;
-        try
-        {
-            row = GitSyncRows.Read(conn, entryId, dbTx);
-        }
-        catch (FormatException ex)
-        {
-            return Failed("the row cannot be read: " + SyncSql.OneLine(ex.Message));
-        }
-        if (row is null || !row.State.IsActive || row.BaseJson is null)
-            return Failed("the row no longer matches the item; nothing changed");
-
-        var read = LocalEntryReader.Read(t => tx.Get(t, ContentType.Memory, entryId), () => tx.IsSticky(ContentType.Memory, entryId));
-        if (read is LocalRead.Duplicate or LocalRead.Unreadable)
-        {
-            return Refuse(
-                SyncSetup.Refusal.UnreadableEntry,
-                "the memory with this id is in more than one tier or cannot be read; nothing changed");
-        }
+        var rowRefusal = ReadRowAndEntry(tx, entryId, out var readRow, out var readEntry);
+        if (rowRefusal is not null)
+            return rowRefusal;
+        var row = readRow!;
+        var read = readEntry!;
 
         var remote = item.Direction == "remote";
         if (remote != read is LocalRead.Present)
@@ -259,7 +281,7 @@ public sealed partial class ReviewService(ReviewEnvironment env) : IDisposable
         ParsedRecord? parsedBase = null;
         if (remote && op == ReviewOperation.Accept)
         {
-            var parsed = ApplyPlanning.ParseBase(entryId, row.BaseJson);
+            var parsed = ApplyPlanning.ParseBase(entryId, row.BaseJson!); // ReadRowAndEntry: a base is present
             if (parsed.Parsed is null)
                 return UnreadableBase(parsed);
             var local = ((LocalRead.Present)read).View;
@@ -275,6 +297,37 @@ public sealed partial class ReviewService(ReviewEnvironment env) : IDisposable
         }
 
         facts = new ItemFacts(item, row, read, parsedBase);
+        return null;
+    }
+
+    /// <summary>
+    /// The row and entry checks every answer shares (D1, pin review D6), inside its transaction: the row read and
+    /// <c>active</c> with a base (else <c>failed</c>), then the local entry read (in two tiers or unreadable:
+    /// <c>unreadable-entry</c>). Null, with <paramref name="row"/> and <paramref name="read"/> set, when both passed.
+    /// </summary>
+    private static SetupResult? ReadRowAndEntry(
+        SqliteStoreTransaction tx, string entryId, out GitSyncRow? row, out LocalRead? read)
+    {
+        read = null;
+        try
+        {
+            row = GitSyncRows.Read(tx.Connection, entryId, tx.Transaction);
+        }
+        catch (FormatException ex)
+        {
+            row = null;
+            return Failed("the row cannot be read: " + SyncSql.OneLine(ex.Message));
+        }
+        if (row is null || !row.State.IsActive || row.BaseJson is null)
+            return Failed("the row no longer matches the item; nothing changed");
+
+        read = LocalEntryReader.Read(t => tx.Get(t, ContentType.Memory, entryId), () => tx.IsSticky(ContentType.Memory, entryId));
+        if (read is LocalRead.Duplicate or LocalRead.Unreadable)
+        {
+            return Refuse(
+                SyncSetup.Refusal.UnreadableEntry,
+                "the memory with this id is in more than one tier or cannot be read; nothing changed");
+        }
         return null;
     }
 }

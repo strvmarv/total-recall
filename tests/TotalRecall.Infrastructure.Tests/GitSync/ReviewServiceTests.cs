@@ -57,8 +57,12 @@ public sealed class ReviewServiceTests : IDisposable
         Assert.Null(listing.Failed);
         Assert.Equal(
             [
-                new ReviewItem(Local, "approved", "local", "unproven", Sha, _rig.Now, "Deleted here.", false, "repository record"),
-                new ReviewItem(Remote, "open", "remote", "unproven", null, _rig.Now, "Kept here.", false, "local entry"),
+                new ReviewItem(
+                    "held-delete", Local, "approved", "local", "unproven", Sha, _rig.Now, null, null, null, "Deleted here.", false,
+                    "repository record", null, false),
+                new ReviewItem(
+                    "held-delete", Remote, "open", "remote", "unproven", null, _rig.Now, null, null, null, "Kept here.", false,
+                    "local entry", null, false),
             ],
             listing.Items);
     }

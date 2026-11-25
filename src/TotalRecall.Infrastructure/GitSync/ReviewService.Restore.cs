@@ -26,7 +26,7 @@ public sealed partial class ReviewService
     /// an embedder that throws is <c>failed</c>; a sticky base opens a <c>new-pin</c> item, which the lines say.
     /// </summary>
     public Task<SetupResult> RestoreAsync(string entryId, string? shownHash, CancellationToken ct = default) =>
-        RunAsync(
+        RunHeldAsync(
             entryId,
             ReviewOperation.Restore,
             shownHash,

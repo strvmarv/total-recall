@@ -23,7 +23,7 @@ public sealed partial class ReviewService
     /// and changes nothing.
     /// </summary>
     public Task<SetupResult> AcceptAsync(string entryId, string? shownHash, CancellationToken ct = default) =>
-        RunAsync(entryId, ReviewOperation.Accept, shownHash, embed: null, (tx, facts, _) => Accept(tx, entryId, facts), ct);
+        RunHeldAsync(entryId, ReviewOperation.Accept, shownHash, embed: null, (tx, facts, _) => Accept(tx, entryId, facts), ct);
 
     private SetupResult Accept(SqliteStoreTransaction tx, string entryId, ItemFacts facts) =>
         facts.Item.Direction == "remote" ? AcceptRemote(tx, entryId, facts) : AcceptLocal(tx, entryId, facts);
