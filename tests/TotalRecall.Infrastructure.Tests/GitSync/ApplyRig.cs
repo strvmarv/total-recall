@@ -108,6 +108,13 @@ internal sealed class ApplyRig : IDisposable
     public void SeedHeld(string id, string direction = "remote", string cause = "unproven", string? hash = null) =>
         GitSyncReviews.UpsertHeld(Scan.Connection, new HeldItem(id, direction, hash, cause, 1_700_000_000_000L));
 
+    /// <summary>The id's pin items (both kinds, any of the four states) as <c>kind|state|hash|machine</c> lines, by kind.</summary>
+    public IReadOnlyList<string> PinItems(string id) =>
+        GitSyncReviews.ReadPinItems(Scan.Connection)
+            .Where(i => i.EntryId == id)
+            .Select(i => $"{i.Kind}|{i.State}|{i.RecordHash}|{i.Machine}")
+            .ToList();
+
     public int ReviewRows()
     {
         using var cmd = Scan.Connection.CreateCommand();

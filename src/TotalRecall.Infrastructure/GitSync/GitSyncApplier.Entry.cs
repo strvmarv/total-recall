@@ -74,9 +74,6 @@ public sealed partial class GitSyncApplier
 
     private static T? Unopt<T>(FSharpOption<T>? option) where T : class => option is null ? null : option.Value;
 
-    /// <summary>A null array must stay "no vector": the implicit array-to-memory conversion would make it an empty one.</summary>
-    private static ReadOnlyMemory<float>? Memory(float[]? vector) => vector is null ? null : new ReadOnlyMemory<float>(vector);
-
     private static bool IsBusy(SqliteException ex) => SyncSql.IsBusy(ex);
 
     private static string OneLine(string text) => SyncSql.OneLine(text);
@@ -124,10 +121,12 @@ public sealed partial class GitSyncApplier
 
         GitSyncRow? row;
         LocalRead read;
+        IReadOnlyList<PinItem> pinItems;
         try
         {
             row = GitSyncRows.Read(conn, id);
             read = ReadLocal(id);
+            pinItems = PinPlanning.ItemsOf(conn, id);
         }
         catch (FormatException ex)
         {
@@ -202,13 +201,53 @@ public sealed partial class GitSyncApplier
             }
         }
 
+        // Pin review D4 ("When it runs"): the reconcile and the arrivals are planned here on the expected post-decision state
+        // (the entry as the store operations will leave it, the row as BuildRow plans it with a placeholder stamp issuer,
+        // whose stamps the reconcile reads only as present or not); the transaction recomputes them and defers on a difference.
+        var pinPlan = PinPlan.Empty;
+        float[]? baseVector = null;
+        if (pinItems.Count > 0 || PinPlanning.Requests(decision).Count > 0)
+        {
+            string? heldText = null; // the held text to embed: the base's, when pin-edit rule 4 applies it and it differs
+            try
+            {
+                var expected = ApplyPlanning.ExpectedEntry(plan, theirs?.Record, local);
+                var (planned, planError) = ApplyPlanning.BuildRow(
+                    id, decision, row, oldBase, theirs, expected, hadEntry: local is not null, plan.Colder, ApplyPlanning.PlaceholderIssue);
+                if (planError is not null)
+                    return new EntryResult.Failed(OneLine(planError));
+                pinPlan = PinPlanning.Plan(pinItems, decision, expected, planned ?? row, theirs is not null, Unopt(theirs?.Record.WrittenBy));
+                if (pinPlan.ApplyBaseJson is { } applyBase)
+                {
+                    var text = BaseContent(id, applyBase);
+                    if (!string.Equals(text, expected?.Content.Text, StringComparison.Ordinal))
+                        heldText = text;
+                }
+            }
+            catch (InvalidOperationException ex)
+            {
+                return new EntryResult.Failed(OneLine(ex.Message));
+            }
+            if (heldText is not null)
+            {
+                try
+                {
+                    baseVector = _embedder.Embed(heldText);
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
+                {
+                    return new EntryResult.Failed("the embedder failed: " + OneLine(ex.Message));
+                }
+            }
+        }
+
         // Decision 13: a decision that changes nothing opens no transaction (unless a stamp must be issued). A held-delete
         // write, close, hash refresh (milestone 1b-iii, D10) or re-open (D4), and a decision with notes, always change
-        // something, and a push deletion is reported even when its row already agrees (milestone 1b-ii, D9). A decision
-        // with a pin request (pin review D3) may write its item, which only the transaction reads, so it never takes the shortcut.
+        // something, and a push deletion is reported even when its row already agrees (milestone 1b-ii, D9). A pin item
+        // write, update or removal, or a held edit to apply (pin review D4, D5), is a change too.
         if (!plan.HasStoreOps && !HasRestamp(decision) && !TouchesHeldItem(decision) && decision.Notes.IsEmpty
             && !decision.Entry.IsPushDeletion && !RefreshesHash(held, blobSha, decision) && !reopen
-            && PinPlanning.Requests(decision).Count == 0)
+            && pinPlan.IsEmpty)
         {
             var (preview, error) = ApplyPlanning.BuildRow(id, decision, row, oldBase, theirs, local, hadEntry: local is not null, plan.Colder, _ => null);
             if (error is not null)
@@ -233,7 +272,9 @@ public sealed partial class GitSyncApplier
             var phase = "reread";
             try
             {
-                return CarryOut(id, tx, decision, converted, reopen, plan, vector, row, read, held, proven, blobSha, oldBase, theirs, local, p => phase = p);
+                return CarryOut(
+                    id, tx, decision, converted, reopen, plan, vector, row, read, held, proven, blobSha, oldBase, theirs, local,
+                    pinItems, pinPlan, baseVector, p => phase = p);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
             {
@@ -290,6 +331,11 @@ public sealed partial class GitSyncApplier
                 _ => null, // no item (the column admits only these two words)
             });
 
+    /// <summary>The text of the base <paramref name="baseJson"/>; throws <see cref="InvalidOperationException"/> when it cannot be read.</summary>
+    private static string BaseContent(string id, string baseJson) =>
+        ApplyPlanning.ParseBase(id, baseJson).Parsed?.Record.Content
+        ?? throw new InvalidOperationException("the row's base cannot be read");
+
     private static bool HasRestamp(SyncMerge.MergeDecision d) =>
         d.FreshContentStamp
         || d.Entry is SyncMerge.EntryOutcome.MergeGroups m
@@ -338,6 +384,9 @@ public sealed partial class GitSyncApplier
         ParsedRecord? oldBase,
         ParsedRecord? theirs,
         SyncMerge.LocalEntry? local,
+        IReadOnlyList<PinItem> pinItems,
+        PinPlan pinPlan,
+        float[]? baseVector,
         Action<string> phase)
     {
         tx.BeforeStep = step => BeforeEntryStep?.Invoke(id, step);
@@ -349,7 +398,9 @@ public sealed partial class GitSyncApplier
         var rowNow = GitSyncRows.Read(conn, id, dbTx);
         var readNow = LocalEntryReader.Read(t => tx.Get(t, ContentType.Memory, id), () => tx.IsSticky(ContentType.Memory, id));
         var heldNow = GitSyncReviews.ReadHeldItem(conn, id, dbTx); // open or approved: an approved item is passed as read (D4)
-        if (!Equals(row, rowNow) || !read.Equals(readNow) || !AgreesWithRow(rowNow, readNow) || !Equals(held, heldNow))
+        var pinItemsNow = PinPlanning.ItemsOf(conn, id, dbTx);
+        if (!Equals(row, rowNow) || !read.Equals(readNow) || !AgreesWithRow(rowNow, readNow) || !Equals(held, heldNow)
+            || !pinItems.SequenceEqual(pinItemsNow))
             return new EntryResult.Deferred("the entry changed since the decision was made", Busy: false);
         if (plan.Insert && ApplyPlanning.InKnowledge(tx, id))
             return new EntryResult.Deferred("the id now exists as a knowledge entry", Busy: false);
@@ -366,14 +417,7 @@ public sealed partial class GitSyncApplier
         }
         else
         {
-            if (plan.Unpin)
-                tx.SetSticky(ContentType.Memory, id, false);
-            if (plan.Update is not null)
-                tx.Update(current!, ContentType.Memory, id, plan.Update);
-            if (plan.MoveTo is not null)
-                tx.Move(current!, ContentType.Memory, plan.MoveTo, ContentType.Memory, id, plan.TextChanged ? Memory(vector) : null);
-            else if (plan.TextChanged)
-                tx.ReplaceEmbedding(current!, ContentType.Memory, id, vector!);
+            ApplyPlanning.WriteStore(tx, id, current!, plan, vector);
         }
 
         var storedRead = LocalEntryReader.Read(t => tx.Get(t, ContentType.Memory, id), () => tx.IsSticky(ContentType.Memory, id));
@@ -400,17 +444,41 @@ public sealed partial class GitSyncApplier
         if (plan.Insert)
             ApplyPlanning.LogImport(tx, id, theirs!.Record, stored!);
 
-        // Pin review D3: each NewPin or PinEdit request the decision carried writes its item by the arrival rule, from the
-        // state the decision left (the stored entry for a new-pin item, the post-decision base for a pin-edit item).
-        Step(id, "pins");
-        IReadOnlyList<PinWrite> pinWrites = [];
-        if (PinPlanning.Requests(decision).Count > 0)
+        // Pin review D4 and D3: the id's items are reconciled with the state the decision left (the stored entry, the row
+        // and its post-decision base), then each NewPin or PinEdit request the decision carried writes its item by the
+        // arrival rule. The plan is recomputed here and must match the one made before the transaction; pin-edit rule 4
+        // first applies the held content group to the entry (D5) with the vector computed before the transaction.
+        var pinWrites = 0;
+        var appliedColder = false;
+        if (pinItems.Count > 0 || PinPlanning.Requests(decision).Count > 0)
         {
-            var baseText = (next ?? row)?.BaseJson;
-            var postBase = baseText is null ? null : ApplyPlanning.ParseBase(id, baseText).Parsed?.Record;
-            pinWrites = PinPlanning.Arrivals(
-                decision, kind => GitSyncReviews.ReadPinItem(conn, id, kind, dbTx), stored, postBase, Unopt(theirs?.Record.WrittenBy));
-            PinPlanning.Write(conn, dbTx, id, pinWrites, _nowMs());
+            Step(id, "pins");
+            var rowAfter = next ?? row;
+            var pins = PinPlanning.Plan(pinItems, decision, stored, rowAfter, theirs is not null, Unopt(theirs?.Record.WrittenBy));
+            if (!pins.Matches(pinPlan))
+                return new EntryResult.Deferred("the pin review changed since the decision was made", Busy: false);
+            if (pins.ApplyBaseJson is { } applyBase)
+            {
+                var baseRecord = ApplyPlanning.ParseBase(id, applyBase).Parsed?.Record
+                    ?? throw new InvalidOperationException("the row's base cannot be read");
+                if (storedRead is not LocalRead.Present present || rowAfter is null)
+                    throw new InvalidOperationException("a held edit is applied to an entry with a row");
+                var textChanges = !string.Equals(baseRecord.Content, present.View.Content.Text, StringComparison.Ordinal);
+                if ((baseVector is not null) != textChanges)
+                    return new EntryResult.Deferred("the pin review changed since the decision was made", Busy: false);
+                var applied = ApplyPlanning.ApplyBaseContent(tx, id, present, baseRecord, baseVector, _options.HotMaxContentChars);
+                appliedColder = !applied.Tier.Equals(present.Tier);
+                var rowApplied = ApplyPlanning.WithComparison(rowAfter, applied);
+                // As planRow does for a TakeTheirs the hot limit stored colder: a pending tier stamp that the stored tier
+                // no longer exceeds the base's for is dropped.
+                if (appliedColder && rowApplied.TierStamp is not null
+                    && SyncRecordModule.tierRank(applied.Tier) >= SyncRecordModule.tierRank(baseRecord.Placement.Tier))
+                    rowApplied = rowApplied with { TierStamp = null };
+                GitSyncRows.Write(conn, rowApplied, dbTx);
+                rowWritten = true;
+            }
+            PinPlanning.Write(conn, dbTx, id, pins.Writes, _nowMs());
+            pinWrites = pins.Writes.Count;
         }
 
         // Milestone 1b-ii, D7 and D8: the close runs before the hold's upsert, so a decision with both leaves one open item.
@@ -453,10 +521,11 @@ public sealed partial class GitSyncApplier
 
         var pushDeletion = decision.Entry.IsPushDeletion;
         var effects = new EntryEffects(plan.Delete, pushDeletion, heldEntry, decision.CloseHeldDelete, NoteWords(decision), MarkerSet(decision));
+        var colder = plan.Colder || appliedColder;
         if (plan.Insert)
-            return new EntryResult.Carried(CarriedKind.Inserted, plan.Colder, effects);
-        if (plan.HasStoreOps || rowWritten || TouchesHeldItem(decision) || refreshed || reopen || pinWrites.Count > 0)
-            return new EntryResult.Carried(CarriedKind.Updated, plan.Colder, effects);
+            return new EntryResult.Carried(CarriedKind.Inserted, colder, effects);
+        if (plan.HasStoreOps || rowWritten || TouchesHeldItem(decision) || refreshed || reopen || pinWrites > 0)
+            return new EntryResult.Carried(CarriedKind.Updated, colder, effects);
         return pushDeletion ? new EntryResult.Carried(CarriedKind.Unchanged, false, effects) : new EntryResult.NoOp(effects.Repush);
     }
 
@@ -493,6 +562,10 @@ public sealed partial class GitSyncApplier
                     Step(id, "close");
                     GitSyncReviews.DeleteHeld(tx.Connection, id, tx.Transaction);
                 }
+                // Pin review D4: a dropped row takes the id's pin items with it.
+                Step(id, "pins");
+                foreach (var kind in PinPlanning.Kinds)
+                    GitSyncReviews.DeletePinItem(tx.Connection, id, kind, tx.Transaction);
                 phase = "issue";
                 Step(id, "issue");
                 GitSyncIssues.Delete(tx.Connection, id, GitSyncIssues.ApplyFailed, tx.Transaction);

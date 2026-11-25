@@ -20,13 +20,44 @@ internal enum PinWriteAction { Remove, MarkUnseen, Open }
 /// </summary>
 internal sealed record PinWrite(string Kind, PinWriteAction Action, string? Hash, string? Machine);
 
-/// <summary>The pin item writes of a carried-out decision (pin review D1 to D3).</summary>
+/// <summary>
+/// What the pull does with an id's pin items (pin review D3 to D5): the item writes, reconcile first and arrivals last, in
+/// order, and the <c>base_json</c> whose content group is applied to the entry first (pin-edit rule 4, D5; null when none).
+/// Planned before the transaction on the expected post-decision state and again inside it on the stored one: the two must
+/// <see cref="Matches"/>, else the entry is deferred.
+/// </summary>
+internal sealed record PinPlan(IReadOnlyList<PinWrite> Writes, string? ApplyBaseJson)
+{
+    public static readonly PinPlan Empty = new([], null);
+
+    /// <summary>No item is written, updated or removed and no held edit is applied.</summary>
+    public bool IsEmpty => Writes.Count == 0 && ApplyBaseJson is null;
+
+    /// <summary>The same writes in the same order and the same base (ordinal).</summary>
+    public bool Matches(PinPlan other) =>
+        Writes.SequenceEqual(other.Writes) && string.Equals(ApplyBaseJson, other.ApplyBaseJson, StringComparison.Ordinal);
+}
+
+/// <summary>The pin item writes of a carried-out decision (pin review D1 to D5).</summary>
 internal static class PinPlanning
 {
     private static readonly string NewPinKind = SyncPin.kindName(SyncPin.ItemKind.NewPinItem);
     private static readonly string PinEditKind = SyncPin.kindName(SyncPin.ItemKind.PinEditItem);
 
     private static FSharpOption<T>? Opt<T>(T? value) where T : class => value is null ? null : FSharpOption<T>.Some(value);
+
+    /// <summary>The two pin item kinds, in ordinal order.</summary>
+    internal static readonly IReadOnlyList<string> Kinds = [NewPinKind, PinEditKind];
+
+    /// <summary>The id's pin items (any of the four states), by kind in ordinal order, read inside <paramref name="tx"/> when given.</summary>
+    internal static IReadOnlyList<PinItem> ItemsOf(MsSqliteConnection conn, string id, SqliteTransaction? tx = null)
+    {
+        var items = new List<PinItem>();
+        foreach (var kind in Kinds)
+            if (GitSyncReviews.ReadPinItem(conn, id, kind, tx) is { } item)
+                items.Add(item);
+        return items;
+    }
 
     /// <summary>
     /// The item kinds the decision's requests ask for, distinct, in the order the decision carries them: <c>new-pin</c>
@@ -87,6 +118,74 @@ internal static class PinPlanning
                 writes.Add(new PinWrite(kind, PinWriteAction.MarkUnseen, hash, machine));
         }
         return writes;
+    }
+
+    /// <summary>
+    /// The plan for an id's pin items (D4, then D3): <c>SyncPin.reconcile</c> for each of <paramref name="items"/> (the id's
+    /// items, any of the four states) on the post-decision state, the entry <paramref name="stored"/> (null: none), the row
+    /// <paramref name="rowAfter"/> (null: none) and its parsed base, and whether the record is present; then
+    /// <see cref="Arrivals"/> over the items as the reconcile leaves them. An update to <c>unseen</c> carries
+    /// <paramref name="machine"/>, the record's <c>WrittenBy</c>. Pin-edit rule 4 sets <see cref="PinPlan.ApplyBaseJson"/>
+    /// to the row's base and removes the item; the arrivals then see the entry with the base's content group. Throws
+    /// <see cref="InvalidOperationException"/> for a base that cannot be read, an unknown kind or state, or an arrival
+    /// input that is missing.
+    /// </summary>
+    public static PinPlan Plan(
+        IReadOnlyList<PinItem> items, SyncMerge.MergeDecision d, SyncMerge.LocalEntry? stored, GitSyncRow? rowAfter,
+        bool recordPresent, string? machine)
+    {
+        if (items.Count == 0 && Requests(d).Count == 0)
+            return PinPlan.Empty;
+
+        SyncRecord? postBase = null;
+        if (rowAfter?.BaseJson is { } baseText)
+        {
+            postBase = ApplyPlanning.ParseBase(rowAfter.EntryId, baseText).Parsed?.Record
+                ?? throw new InvalidOperationException("the row's base cannot be read");
+        }
+        var entryView = stored is null ? null : Opt(SyncPin.entryView(stored));
+        var rowView = rowAfter is null
+            ? null
+            : Opt(new SyncPin.PinRowView(
+                rowAfter.State, rowAfter.BaseJson is not null, rowAfter.ContentStamp is not null, Opt(rowAfter.ScannedContentHash)));
+        var baseView = postBase is null
+            ? null
+            : Opt(new SyncPin.BaseView(SyncPin.shownHash(postBase.Content, postBase.Project, postBase.Scope), postBase.Placement.Sticky));
+
+        var writes = new List<PinWrite>();
+        string? applyBase = null;
+        var after = new Dictionary<string, PinItem?>(StringComparer.Ordinal);
+        foreach (var item in items.OrderBy(i => i.Kind, StringComparer.Ordinal))
+        {
+            var kind = SyncPin.tryKind(item.Kind) ?? throw new InvalidOperationException("the pin item's kind is not known: " + item.Kind);
+            var state = SyncPin.tryState(item.State) ?? throw new InvalidOperationException("the pin item's state is not known: " + item.State);
+            var reconciled = SyncPin.reconcile(new SyncPin.ReconcileInput(
+                new SyncPin.PinItemView(kind.Value, state.Value, item.RecordHash ?? ""), entryView, rowView, baseView, recordPresent));
+            if (reconciled.IsKeep)
+            {
+                after[item.Kind] = item;
+            }
+            else if (reconciled is SyncPin.Reconciled.MarkUnseen unseen)
+            {
+                writes.Add(new PinWrite(item.Kind, PinWriteAction.MarkUnseen, unseen.hash, machine));
+                after[item.Kind] = item with { State = SyncPin.stateName(SyncPin.ItemState.Unseen), RecordHash = unseen.hash, Machine = machine };
+            }
+            else
+            {
+                if (reconciled.IsApplyBaseThenRemove)
+                    applyBase = rowAfter!.BaseJson;
+                writes.Add(new PinWrite(item.Kind, PinWriteAction.Remove, null, null));
+                after[item.Kind] = null;
+            }
+        }
+
+        // The arrivals see the entry as it is once the held content is applied (only the shown fields matter).
+        var shown = stored is not null && applyBase is not null && postBase is not null
+            ? new SyncMerge.LocalEntry(ApplyPlanning.RecordContent(postBase), stored.Tags, stored.Tier, stored.Sticky)
+            : stored;
+        writes.AddRange(Arrivals(
+            d, kind => after.TryGetValue(kind, out var left) ? left : null, shown, postBase, machine));
+        return writes.Count == 0 && applyBase is null ? PinPlan.Empty : new PinPlan(writes, applyBase);
     }
 
     /// <summary>
