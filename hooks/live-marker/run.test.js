@@ -77,6 +77,17 @@ function enable(dataDir) {
   fs.writeFileSync(path.join(dataDir, 'live', 'enabled'), '');
 }
 
+/**
+ * A script file that sets OSTYPE and then sources run.sh (OSTYPE is a plain shell variable, so the wrapper can fake
+ * the platform). It is a file run like every other script here, not a `bash -c` command line built from a path.
+ */
+function sourcingWrapper(ostype) {
+  const file = path.join(tmpDir('wrapper'), 'source-run.sh');
+  const quote = (text) => `'${text.replace(/'/g, `'\\''`)}'`;
+  fs.writeFileSync(file, `OSTYPE=${quote(ostype)}\n. ${quote(RUN_SH)}\n`);
+  return file;
+}
+
 function runScript(script, { env, cwd, input = '' }) {
   const r = spawnSync(BASH, [script], { env, cwd, input, encoding: 'utf8', timeout: 20000 });
   return { code: r.status, stdout: r.stdout, stderr: r.stderr };
@@ -233,21 +244,21 @@ describe('live-marker run.sh', { skip }, () => {
     enable(dataDir);
     for (const ostype of ['msys', 'cygwin', 'win32']) {
       const shim = recordingNode();
-      const r = spawnSync(BASH, ['-c', `OSTYPE=${ostype}; . "$0"`, RUN_SH], {
+      const r = runScript(sourcingWrapper(ostype), {
         env: { PATH: shim.dir, TOTAL_RECALL_HOME: dataDir, HOME: tmpDir('home') },
-        cwd: tmpDir('cwd'), input: payload(), encoding: 'utf8', timeout: 20000,
+        cwd: tmpDir('cwd'), input: payload(),
       });
-      assert.equal(r.status, 0, ostype);
+      assert.equal(r.code, 0, ostype);
       assert.equal(r.stdout + r.stderr, '', ostype);
       assert.equal(fs.existsSync(shim.mark), false, `${ostype} must not start node`);
     }
     // The same sourcing form with a Unix OSTYPE does start it, so the leave above is the OSTYPE test.
     const shim = recordingNode();
-    const r = spawnSync(BASH, ['-c', 'OSTYPE=linux-gnu; . "$0"', RUN_SH], {
+    const r = runScript(sourcingWrapper('linux-gnu'), {
       env: { PATH: shim.dir, TOTAL_RECALL_HOME: dataDir, HOME: tmpDir('home') },
-      cwd: tmpDir('cwd'), input: payload(), encoding: 'utf8', timeout: 20000,
+      cwd: tmpDir('cwd'), input: payload(),
     });
-    assert.equal(r.status, 0);
+    assert.equal(r.code, 0);
     assert.equal(fs.existsSync(shim.mark), true);
   });
 
