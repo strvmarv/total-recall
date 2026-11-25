@@ -6,7 +6,7 @@ No stop condition: Claude Code is the primary host.
 
 ### Plugin (recommended)
 
-The plugin gives Claude Code the MCP server, the startup instructions, the per-prompt pinned-directive floor and the `/total-recall:commands` skill. Tell the user that these two commands add a third-party marketplace and enable an MCP server and hooks, one of which runs on every prompt; the user's request to install the plugin covers them. Run both commands in a shell:
+The plugin gives Claude Code the MCP server, the startup instructions, the per-prompt pinned-directive floor and the `/total-recall:commands` skill. Tell the user that these two commands add a third-party marketplace and enable an MCP server and hooks, two of which run on every prompt (the second does nothing unless the transcript archive is on); the user's request to install the plugin covers them. Run both commands in a shell:
 
 ```sh
 claude plugin marketplace add strvmarv/total-recall-marketplace
