@@ -121,6 +121,31 @@ let reconcileTests =
             Expect.equal (reconcile { newPinInput Approved with Entry = e }) Keep "approved"
             Expect.equal (reconcile (newPinInput Open)) Keep "open same hash"
 
+        testCase "new-pin 1: no row at all removes" <| fun _ ->
+            Expect.equal (reconcile { newPinInput Open with Row = None }) Remove "no row"
+
+        // Rules 1-3 before 4: each condition holds together with "the entry's shown hash differs from the item's"
+        // (live item), which alone would give MarkUnseen. A reordering that tried rule 4 earlier would fail these.
+        testCase "new-pin 1 before 4: a forgotten or left row or no row removes although the shown hash changed" <| fun _ ->
+            let i = { newPinInput Open with Entry = Some(entry false "c" "changed") }
+            Expect.equal (reconcile { i with Row = Some { row true false (Some "c") with State = Forgotten } }) Remove "forgotten"
+            Expect.equal (reconcile { i with Row = Some { row true false (Some "c") with State = Left } }) Remove "left"
+            Expect.equal (reconcile { i with Row = None }) Remove "no row"
+            let u = { i with Item = newPin Unseen "h" }
+            Expect.equal (reconcile { u with Row = Some { row true false (Some "c") with State = Forgotten } }) Remove "unseen, forgotten"
+
+        testCase "new-pin 2 before 4: a sticky entry removes although the shown hash changed" <| fun _ ->
+            let i = { newPinInput Open with Entry = Some(entry true "c" "changed") }
+            Expect.equal (reconcile i) Remove "open"
+            Expect.equal (reconcile { i with Item = newPin Unseen "h" }) Remove "unseen"
+
+        testCase "new-pin 3 before 4: a base that is not pinned or missing removes although the shown hash changed" <| fun _ ->
+            let i = { newPinInput Open with Entry = Some(entry false "c" "changed") }
+            Expect.equal (reconcile { i with Base = Some(baseView "b" false) }) Remove "base not sticky"
+            Expect.equal (reconcile { i with Base = None }) Remove "no base"
+            Expect.equal (reconcile { i with RecordPresent = false; Base = Some(baseView "b" false) }) Remove "both"
+            Expect.equal (reconcile { i with Item = newPin Unseen "h"; Base = Some(baseView "b" false) }) Remove "unseen"
+
         // pin-edit
         testCase "pin-edit 1: entry absent removes" <| fun _ ->
             Expect.equal (reconcile { pinEditInput Open with Entry = None }) Remove "absent"
@@ -132,9 +157,7 @@ let reconcileTests =
             Expect.equal (reconcile { i with Row = Some(row false false (Some "c")) }) Remove "row without base"
             Expect.equal (reconcile { i with Row = None }) Remove "no row"
 
-        testCase "pin-edit 1: a missing base view removes through the entry shown rule only when equal" <| fun _ ->
-            // Row has a base but the view is absent: nothing equals, so the item is judged by the other rules.
-            // (The caller always gives a base when the row has one; this pins the total behaviour.)
+        testCase "pin-edit 1: a row with a base but no base view counts as no base" <| fun _ ->
             let i = { pinEditInput Open with Base = None }
             Expect.equal (reconcile i) Remove "no base view counts as no base"
 
@@ -143,6 +166,33 @@ let reconcileTests =
             Expect.equal (reconcile { pinEditInput Open with Entry = e }) Remove "open"
             Expect.equal (reconcile { pinEditInput Approved with Entry = e }) Remove "approved"
             Expect.equal (reconcile { pinEditInput Open with Entry = e; Row = Some(row true true (Some "c")) }) Remove "pending stamp"
+
+        // Rules 2-4 before 5: each condition holds together with "the base's shown hash differs from the item's"
+        // (live item, entry shown "e", base shown "newer", item hash "h"), which alone would give MarkUnseen.
+        testCase "pin-edit 2 before 4: an unpinned entry whose shown hash equals the base's removes without applying the base" <| fun _ ->
+            let i = { pinEditInput Open with Entry = Some(entry false "c" "h") }
+            Expect.equal (reconcile i) Remove "unpinned, shown = base shown"
+            Expect.equal (reconcile { i with Item = pinEdit Unseen "h"; Base = Some(baseView "h" false) }) Remove "unseen, base not sticky"
+
+        testCase "pin-edit 2 before 4: with a pending stamp and an unpinned entry equal to the base it still removes" <| fun _ ->
+            let i = { pinEditInput Open with Entry = Some(entry false "c" "h"); Row = Some(row true true (Some "other")) }
+            Expect.equal (reconcile i) Remove "rules 2, 3 and 4 all apply"
+
+        testCase "pin-edit 2 before 5: shown equal to the base's removes although the base differs from the item's" <| fun _ ->
+            let i = { pinEditInput Open with Entry = Some(entry true "c" "newer"); Base = Some(baseView "newer" true) }
+            Expect.equal (reconcile i) Remove "open"
+            Expect.equal (reconcile { i with Item = pinEdit Unseen "h" }) Remove "unseen"
+
+        testCase "pin-edit 3 before 5: a local edit removes although the base differs from the item's" <| fun _ ->
+            let b = Some(baseView "newer" true)
+            Expect.equal (reconcile { pinEditInput Open with Base = b; Row = Some(row true true (Some "c")) }) Remove "pending"
+            Expect.equal (reconcile { pinEditInput Open with Base = b; Row = Some(row true false (Some "other")) }) Remove "scanned differs"
+            Expect.equal (reconcile { pinEditInput Unseen with Base = b; Row = Some(row true true (Some "other")) }) Remove "unseen, both"
+
+        testCase "pin-edit 4 before 5: an unpinned entry applies the base although the base differs from the item's" <| fun _ ->
+            let i = { pinEditInput Open with Entry = Some(entry false "c" "e"); Base = Some(baseView "newer" true) }
+            Expect.equal (reconcile i) ApplyBaseThenRemove "open"
+            Expect.equal (reconcile { i with Item = pinEdit Unseen "h" }) ApplyBaseThenRemove "unseen"
 
         testCase "pin-edit 3: a pending content stamp removes" <| fun _ ->
             Expect.equal (reconcile { pinEditInput Open with Row = Some(row true true (Some "c")) }) Remove "pending"
