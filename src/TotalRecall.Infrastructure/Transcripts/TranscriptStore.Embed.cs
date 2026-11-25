@@ -7,13 +7,15 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using TotalRecall.Infrastructure.Diagnostics;
 
 namespace TotalRecall.Infrastructure.Transcripts;
 
 /// <summary>
 /// The embed side of the archive store (search the archive, spec sections 2 and 3): the work queue, the
 /// one-transaction vector write, the lease, the fingerprint, the counts and the last-run record. All SQL is
-/// parameterised; nothing here catches (the worker owns the failure policy).
+/// parameterised; nothing here catches (the worker owns the failure policy) except the restore of the busy timeout
+/// after a lease release.
 /// </summary>
 public sealed partial class TranscriptStore
 {
@@ -224,14 +226,44 @@ public sealed partial class TranscriptStore
         return true;
     }
 
+    /// <summary>
+    /// Releases the lease while it still carries this run's id. On a connection opened with a shorter busy timeout (the
+    /// sync's 500 ms) the release waits up to <see cref="ReleaseBusyTimeoutMs"/> for the write lock: a release that gave
+    /// up while another writer held the lock would leave the lease to refuse every run of this engine for ten minutes.
+    /// The connection's own timeout is restored afterwards (a failed restore is logged, never thrown).
+    /// </summary>
     public void ReleaseEmbedLease(EmbedLeaseHolder holder)
     {
         ArgumentNullException.ThrowIfNull(holder);
-        using var tx = _conn.BeginTransaction(deferred: false);
-        if (LeaseCarriesRun(tx, holder.RunId))
-            Exec(tx, "DELETE FROM tx_state WHERE key = $k", ("$k", LeaseKey));
-        tx.Commit();
+        var original = ReadBusyTimeoutMs();
+        var raise = original < ReleaseBusyTimeoutMs;
+        if (raise)
+            SetBusyTimeout(ReleaseBusyTimeoutMs);
+        try
+        {
+            using var tx = _conn.BeginTransaction(deferred: false);
+            if (LeaseCarriesRun(tx, holder.RunId))
+                Exec(tx, "DELETE FROM tx_state WHERE key = $k", ("$k", LeaseKey));
+            tx.Commit();
+        }
+        finally
+        {
+            if (raise)
+            {
+                try { SetBusyTimeout(original); }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    ExceptionLogger.LogChain("[total-recall] transcripts: could not restore busy_timeout after the lease release", ex);
+                }
+            }
+        }
     }
+
+    /// <summary>
+    /// The longest the lease release waits for the write lock (SQLite's own busy wait, which the driver's shorter
+    /// command timeout does not cut short), so a sync that fails busy still frees the lease within about 4 s.
+    /// </summary>
+    internal const int ReleaseBusyTimeoutMs = 4000;
 
     private static string LeaseValue(EmbedLeaseHolder h, DateTimeOffset now) =>
         string.Create(CultureInfo.InvariantCulture, $"{h.Machine}:{h.Pid}:{h.RunId}:{now.ToUnixTimeMilliseconds()}");

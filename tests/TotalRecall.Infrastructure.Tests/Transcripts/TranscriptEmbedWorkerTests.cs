@@ -692,6 +692,67 @@ public sealed class TranscriptEmbedWorkerTests : IDisposable
         Assert.Null(LeaseValue());
     }
 
+    [Fact]
+    public void Run_ShortBusyTimeout_WriteLockHeldPastIt_LeaseIsStillReleased()
+    {
+        // The sync's store (500 ms busy timeout, about 1 s with the driver's own wait): another connection takes the
+        // archive's write lock with a real BEGIN IMMEDIATE between the embed and the write, so the batch write fails
+        // busy. The lock is freed 2 s after the release starts: later than a short-timeout release would give up, well
+        // inside the release's own longer wait. The lease row must be gone, so the next run takes the lease at once.
+        Seed(3);
+        var opened = TranscriptStore.Open(
+            new TranscriptLocation(_db.Path, IsMainDatabase: false), create: false,
+            busyTimeoutMs: TranscriptSyncService.DefaultBusyTimeoutMs);
+        Assert.Equal(TranscriptOpenStatus.Opened, opened.Status);
+        using var shortStore = opened.Store!;
+        using var writer = _db.Connect();
+        using var freed = new ManualResetEventSlim(false);
+        Timer? timer = null;
+
+        void Run(string sql)
+        {
+            using var cmd = writer.CreateCommand();
+            cmd.CommandText = sql;
+            cmd.ExecuteNonQuery();
+        }
+
+        var store = new DecoratingTranscriptStore(shortStore)
+        {
+            OnReleaseEmbedLease = holder =>
+            {
+                timer = new Timer(_ => { Run("ROLLBACK;"); freed.Set(); }, null, 2000, Timeout.Infinite);
+                shortStore.ReleaseEmbedLease(holder);
+            },
+        };
+        var locked = false;
+        var worker = new TranscriptEmbedWorker(
+            store, new ScriptedEmbedder(), new ManualTimeProvider(T0), "host-a", 100, (_, _) => true,
+            () =>
+            {
+                if (locked) return;
+                Run("BEGIN IMMEDIATE;");
+                locked = true;
+            });
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var run = worker.Run(Ready, Fp, NoBudget, CancellationToken.None, recordRun: false);
+        sw.Stop();
+        Assert.True(freed.Wait(TimeSpan.FromSeconds(10)), "the lock was never freed");
+        timer?.Dispose();
+
+        Assert.Equal(EmbedStopReason.Failed, run.StoppedBy); // the batch write failed busy
+        Assert.Equal(0, VecRows());
+        Assert.Null(LeaseValue());
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(8), $"the run took {sw.Elapsed.TotalMilliseconds:F0} ms");
+        // the longer wait was only for the release: the connection is back on the sync's short timeout
+        Assert.Equal(TranscriptSyncService.DefaultBusyTimeoutMs, ((TranscriptStore)shortStore).ReadBusyTimeoutMs());
+
+        var second = Worker(new ScriptedEmbedder()).Run(Ready, Fp, NoBudget, CancellationToken.None);
+        Assert.Equal(EmbedStopReason.Done, second.StoppedBy);
+        Assert.Equal(3, second.Embedded);
+        Assert.Null(LeaseValue());
+    }
+
     [Theory]
     [InlineData(1)]   // SQLITE_ERROR
     [InlineData(18)]  // SQLITE_TOOBIG
