@@ -136,7 +136,9 @@ public sealed class GitSyncCyclePullTests : IDisposable
     {
         _rig.Push.Seed(Rec(A, "Use bun."), Rec(B, "Use pnpm."));
         Done(await _rig.Run());
-        _rig.AddRecordOnRemote(Rec(C, "A pin.", sticky: true)); // a record that pins an id this machine lacks: a review postpones it
+        // a local memory and a record of the same id with other text and no base: a conflict (NC4) postpones it
+        _rig.Push.AddMemory(Tier.Warm, C, "My own text.");
+        _rig.AddRecordOnRemote(Rec(C, "Their text."));
         _rig.Pull.Store.DeleteMeta(SyncIdentity.MetaKeys.LastOk);
         _rig.Now += TimeSpan.FromMinutes(1);
 
@@ -146,7 +148,7 @@ public sealed class GitSyncCyclePullTests : IDisposable
         Assert.NotEmpty(summary.Apply.Postponed);
         Assert.Equal("pull-incomplete", summary.PushSkipped);
         Assert.Null(summary.Push);
-        Assert.False(StoreHas(C));
+        Assert.Equal("My own text.", _rig.Pull.Store.Get(Tier.Warm, ContentType.Memory, C)!.Content);
         Assert.Equal(0, _rig.PushCalls());
         Assert.Equal(SyncCycle.okValue(_rig.Now), _rig.LastOk);
         Assert.Null(_rig.LastError);

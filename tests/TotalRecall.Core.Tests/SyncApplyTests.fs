@@ -80,23 +80,29 @@ let postponementTests =
             Expect.isNone (postponement { plain with RowState = Some Forgotten }) "forgotten"
             Expect.isNone (postponement { plain with Entry = InsertFromRecord; Notes = [ EditBeatsDeletion ]; CloseHeldDelete = true }) "a reinsert that closes"
 
-        testCase "any review is review, and a record that pins (InsertFromRecord with NewPin) is review" <| fun () ->
-            Expect.equal (postponement { plain with Reviews = [ NewPin ] }) (Some Review) "new pin"
-            Expect.equal (postponement { plain with Reviews = [ PinEdit ] }) (Some Review) "pin edit"
+        testCase "a pin request is carried out (pin review D3); a conflict, alone or with a NewPin, is review" <| fun () ->
+            Expect.isNone (postponement { plain with Reviews = [ NewPin ] }) "new pin"
+            Expect.isNone (postponement { plain with Reviews = [ PinEdit ] }) "pin edit"
+            Expect.isNone (postponement { plain with Reviews = [ NewPin; PinEdit ] }) "new pin and pin edit"
+            Expect.isNone (postponement { plain with Entry = InsertFromRecord; Reviews = [ NewPin ] }) "insert of a pin"
             let conflict = Conflict { Side = Side.Local; Text = "x"; Stamp = None }
             Expect.equal (postponement { plain with Reviews = [ conflict ] }) (Some Review) "conflict"
-            Expect.equal (postponement { plain with Entry = InsertFromRecord; Reviews = [ NewPin ] }) (Some Review) "insert of a pin"
+            Expect.equal (postponement { plain with Reviews = [ NewPin; conflict ] }) (Some Review) "new pin with a conflict"
+            Expect.equal (postponement { plain with Reviews = [ conflict; PinEdit ] }) (Some Review) "pin edit with a conflict"
 
-        testCase "postponement_is_review_only" <| fun () ->
+        testCase "postponement_is_conflict_only" <| fun () ->
+            let conflict = Conflict { Side = Side.Remote; Text = "y"; Stamp = None }
             for flags in [ { noRepush with Content = true }
                            { noRepush with Sticky = true }
                            { noRepush with Tier = true }
                            { GroupFlags.Content = true; Sticky = true; Tier = true } ] do
                 let repush = mergeWith (fun m -> { m with Repush = flags })
                 Expect.isNone (postponement repush) (sprintf "a repush flag is carried out: %A" flags)
-                Expect.equal (postponement { repush with Reviews = [ NewPin ] }) (Some Review) (sprintf "a review with %A" flags)
-            Expect.equal (postponement { plain with Entry = PushDeletion; Reviews = [ NewPin ] }) (Some Review) "a review on any outcome"
-            Expect.equal (postponement { plain with Reviews = [ PinEdit ]; Notes = [ EditBeatsDeletion ] }) (Some Review) "a note does not change it"
+                Expect.isNone (postponement { repush with Reviews = [ NewPin ] }) (sprintf "a new pin with %A" flags)
+                Expect.equal (postponement { repush with Reviews = [ conflict ] }) (Some Review) (sprintf "a conflict with %A" flags)
+            Expect.equal (postponement { plain with Entry = PushDeletion; Reviews = [ conflict ] }) (Some Review) "a conflict on any outcome"
+            Expect.equal (postponement { plain with Reviews = [ conflict ]; Notes = [ EditBeatsDeletion ] }) (Some Review) "a note does not change it"
+            Expect.isNone (postponement { plain with Reviews = [ PinEdit ]; Notes = [ EditBeatsDeletion ] }) "a pin edit with a note is carried out"
 
         testCase "Defer, Ignore, DropRow, LeaveEntry, an insert and a plain merge are carried out" <| fun () ->
             for e in [ Defer; Ignore; DropRow; LeaveEntry; InsertFromRecord ] do
@@ -338,7 +344,8 @@ let private genOutcome : Gen<EntryOutcome> =
 let private genDecision : Gen<MergeDecision> =
     gen {
         let! entry = genOutcome
-        let! reviews = Gen.elements [ []; [ NewPin ]; [ PinEdit ] ]
+        let conflict = Conflict { Side = Side.Local; Text = "x"; Stamp = None }
+        let! reviews = Gen.elements [ []; [ NewPin ]; [ PinEdit ]; [ conflict ]; [ NewPin; conflict ] ]
         let! notes = Gen.elements [ []; [ EditBeatsDeletion ] ]
         let! rowState = Gen.elements [ None; Some Active; Some Forgotten; Some Left ]
         let! close = Gen.elements [ true; false ]
@@ -360,8 +367,10 @@ let totalityTests =
 
         testPropertyWithConfig
             { FsCheckConfig.defaultConfig with maxTest = 2000 }
-            "only a review postpones"
-            (Prop.forAll (Arb.fromGen genDecision) (fun d -> postponement d = (if d.Reviews.IsEmpty then None else Some Review)))
+            "only a conflict postpones"
+            (Prop.forAll (Arb.fromGen genDecision) (fun d ->
+                let hasConflict = d.Reviews |> List.exists (function Conflict _ -> true | _ -> false)
+                postponement d = (if hasConflict then Some Review else None)))
 
         testPropertyWithConfig
             { FsCheckConfig.defaultConfig with maxTest = 2000 }

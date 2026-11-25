@@ -230,7 +230,9 @@ public sealed class GitSyncCyclePushTests : IDisposable
     public async Task ThePushIsNeverReached_AfterARefusedOrAnIncompletePull()
     {
         await SyncedWithAPendingMemory();
-        _rig.AddRecordOnRemote(Rec(D, "A pin.", sticky: true)); // a record that pins an id this machine lacks: a review, incomplete
+        // a local memory and a record of the same id with other text and no base: a conflict (NC4), incomplete
+        _rig.Push.AddMemory(Tier.Warm, D, "My own text.");
+        _rig.AddRecordOnRemote(Rec(D, "Their text."));
         var commits = RemoteCommits();
 
         var incomplete = Done(await _rig.Run());
@@ -240,6 +242,7 @@ public sealed class GitSyncCyclePushTests : IDisposable
         Assert.Equal(0, _rig.PushCalls());
         Assert.False(RemoteHas(C));
         Assert.NotNull(_rig.LastOk);
+        Assert.Equal("My own text.", _rig.Pull.Store.Get(Tier.Warm, ContentType.Memory, D)!.Content);
 
         _rig.ReplaceManifestOnRemote(PullRig.ManifestBytes(repoId: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
         Assert.IsType<CycleOutcome.Refused>(await _rig.Run());

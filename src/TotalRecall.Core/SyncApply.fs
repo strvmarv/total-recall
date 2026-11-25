@@ -6,7 +6,8 @@
 /// carries deletions out in both directions (D6 to D13) and marks the groups a reset reverted (D16): `postponement`
 /// keeps only reviews (D19), the visit set gains the marked rows, and `planRow` handles a fresh content stamp, an
 /// applied deletion and the `repush_groups` marker. Milestone 1b-iii part 2 adds the edit test of an answer to a held
-/// remote deletion (`editedSinceHold`, D2).
+/// remote deletion (`editedSinceHold`, D2). Part 3 (pin review, D3) narrows `postponement` to a conflict: a `NewPin` or
+/// `PinEdit` request is carried out and its item written by the applier.
 module TotalRecall.Core.SyncApply
 
 open System
@@ -20,18 +21,25 @@ open TotalRecall.Core.SyncMerge
 
 /// Why a decision is not carried out here: it needs a part of git sync that a later milestone builds.
 type PostponeReason =
-    /// The decision opens a review item (a pin, a pin-edit, a conflict).
+    /// The decision carries a conflict (a `Conflict` review request), which a later part answers.
     | Review
 
 let reasonName (r: PostponeReason) : string =
     match r with
     | Review -> "review"
 
-/// `Some Review` when the decision opens a review item, which milestone 1b-iii answers; `None` when it is carried out.
-/// Everything else is carried out (milestone 1b-ii, D19): a deletion in either direction (applied, pushed or held), a
-/// note, a fresh content stamp, a held-delete close, a `forgotten` row and the groups a reset reverted (D16).
+/// `Some Review` when the decision carries a `Conflict` request (alone or with a `NewPin` or `PinEdit`), which a later
+/// part answers; `None` when it is carried out. Everything else is carried out (milestone 1b-ii, D19; pin review D3): a
+/// `NewPin` or `PinEdit` request (the applier writes its item), a deletion in either direction (applied, pushed or held),
+/// a note, a fresh content stamp, a held-delete close, a `forgotten` row and the groups a reset reverted (D16).
 let postponement (d: MergeDecision) : PostponeReason option =
-    if d.Reviews.IsEmpty then None else Some Review
+    let conflict =
+        d.Reviews
+        |> List.exists (function
+            | Conflict _ -> true
+            | NewPin
+            | PinEdit -> false)
+    if conflict then Some Review else None
 
 // ---------------------------------------------------------------------------------------------
 // The `pushing_stamps` column

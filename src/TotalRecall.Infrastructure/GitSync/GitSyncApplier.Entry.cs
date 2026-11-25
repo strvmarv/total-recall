@@ -204,9 +204,11 @@ public sealed partial class GitSyncApplier
 
         // Decision 13: a decision that changes nothing opens no transaction (unless a stamp must be issued). A held-delete
         // write, close, hash refresh (milestone 1b-iii, D10) or re-open (D4), and a decision with notes, always change
-        // something, and a push deletion is reported even when its row already agrees (milestone 1b-ii, D9).
+        // something, and a push deletion is reported even when its row already agrees (milestone 1b-ii, D9). A decision
+        // with a pin request (pin review D3) may write its item, which only the transaction reads, so it never takes the shortcut.
         if (!plan.HasStoreOps && !HasRestamp(decision) && !TouchesHeldItem(decision) && decision.Notes.IsEmpty
-            && !decision.Entry.IsPushDeletion && !RefreshesHash(held, blobSha, decision) && !reopen)
+            && !decision.Entry.IsPushDeletion && !RefreshesHash(held, blobSha, decision) && !reopen
+            && PinPlanning.Requests(decision).Count == 0)
         {
             var (preview, error) = ApplyPlanning.BuildRow(id, decision, row, oldBase, theirs, local, hadEntry: local is not null, plan.Colder, _ => null);
             if (error is not null)
@@ -398,6 +400,19 @@ public sealed partial class GitSyncApplier
         if (plan.Insert)
             ApplyPlanning.LogImport(tx, id, theirs!.Record, stored!);
 
+        // Pin review D3: each NewPin or PinEdit request the decision carried writes its item by the arrival rule, from the
+        // state the decision left (the stored entry for a new-pin item, the post-decision base for a pin-edit item).
+        Step(id, "pins");
+        IReadOnlyList<PinWrite> pinWrites = [];
+        if (PinPlanning.Requests(decision).Count > 0)
+        {
+            var baseText = (next ?? row)?.BaseJson;
+            var postBase = baseText is null ? null : ApplyPlanning.ParseBase(id, baseText).Parsed?.Record;
+            pinWrites = PinPlanning.Arrivals(
+                decision, kind => GitSyncReviews.ReadPinItem(conn, id, kind, dbTx), stored, postBase, Unopt(theirs?.Record.WrittenBy));
+            PinPlanning.Write(conn, dbTx, id, pinWrites, _nowMs());
+        }
+
         // Milestone 1b-ii, D7 and D8: the close runs before the hold's upsert, so a decision with both leaves one open item.
         if (decision.CloseHeldDelete)
         {
@@ -440,7 +455,7 @@ public sealed partial class GitSyncApplier
         var effects = new EntryEffects(plan.Delete, pushDeletion, heldEntry, decision.CloseHeldDelete, NoteWords(decision), MarkerSet(decision));
         if (plan.Insert)
             return new EntryResult.Carried(CarriedKind.Inserted, plan.Colder, effects);
-        if (plan.HasStoreOps || rowWritten || TouchesHeldItem(decision) || refreshed || reopen)
+        if (plan.HasStoreOps || rowWritten || TouchesHeldItem(decision) || refreshed || reopen || pinWrites.Count > 0)
             return new EntryResult.Carried(CarriedKind.Updated, plan.Colder, effects);
         return pushDeletion ? new EntryResult.Carried(CarriedKind.Unchanged, false, effects) : new EntryResult.NoOp(effects.Repush);
     }

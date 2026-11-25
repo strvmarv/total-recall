@@ -507,10 +507,11 @@ public sealed class GitSyncApplierSafetyTests
         Assert.Empty(s.Rig.Scan.Issues());
         Assert.Equal(opened + 1, s.Rig.Applier.TransactionCount);
 
-        // postponed: a pinned record for an id with no entry
+        // postponed: a no-base text conflict (NC4) between a local memory and a record (pin review D3: a pin no longer postpones)
         const string other = "3f9c2a7e-0000-4000-8000-000000000009";
+        s.Rig.Scan.AddMemory(Tier.Warm, other, "Local text.");
         ScanRig.Exec(s.Rig.Scan.Connection, $"INSERT INTO git_sync_issue (entry_id, kind, record_hash, attempts, detail) VALUES ('{other}', 'apply-failed', 'old', 3, 'old')");
-        Is<EntryResult.Postponed>(s.Rig.Apply(ApplyRig.Rec(other, sticky: true)));
+        Is<EntryResult.Postponed>(s.Rig.Apply(ApplyRig.Rec(other, "Their text.")));
         Assert.Single(s.Rig.Scan.Issues());
     }
 
