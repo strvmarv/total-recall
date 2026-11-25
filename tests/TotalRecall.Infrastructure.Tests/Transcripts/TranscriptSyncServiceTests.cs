@@ -1,0 +1,1018 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Text.Json.Nodes;
+using System.Threading;
+using System.Threading.Tasks;
+using TotalRecall.Infrastructure.Config;
+using TotalRecall.Infrastructure.Embedding;
+using TotalRecall.Infrastructure.Tests.TestSupport;
+using TotalRecall.Infrastructure.Transcripts;
+using TotalRecall.TestSupport.Transcripts;
+using Xunit;
+
+namespace TotalRecall.Infrastructure.Tests.Transcripts;
+
+/// <summary>
+/// <see cref="TranscriptSyncService"/> (spec section 2, the guess, and section 3, steps 1 to 4): find the current session
+/// (a marker written by hand under the test's own data directory, an injected ancestor chain) or the bounded guess, open
+/// the archive without creating it, and ingest the session's new tail under a budget on the service's clock. A real
+/// archive in a temporary directory, fixture session files, explicit adapters (the real Claude directory is never read).
+/// In the process-environment collection because one test swaps the console.
+/// </summary>
+[Collection("process-environment")]
+public sealed class TranscriptSyncServiceTests : IDisposable
+{
+    private const string Host = "claude-code";
+    private const int HostPid = 4242;
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(30);
+
+    private readonly IngestHarness _h = new();
+    private readonly string _data;
+    private readonly ManualTimeProvider _clock = new(new DateTimeOffset(2026, 11, 24, 12, 0, 0, TimeSpan.Zero));
+
+    public TranscriptSyncServiceTests()
+    {
+        _data = Path.Combine(_h.Home.Root, "data");
+        Directory.CreateDirectory(Path.Combine(_data, "live"));
+    }
+
+    public void Dispose() => _h.Dispose();
+
+    private TranscriptTestDb Db => _h.Db;
+    private ClaudeFixtureHome Home => _h.Home;
+
+    // ------------------------------------------------------------------
+    // Helpers
+    // ------------------------------------------------------------------
+
+    private static TranscriptsSettings Settings(bool enabled = true) => new(enabled, string.Empty, null, 0, false);
+
+    private TranscriptLocation Location => new(Db.Path, IsMainDatabase: false);
+
+    private HookAdapter Adapter(Action<SessionSource>? hook = null) => _h.Adapter(hook);
+
+    /// <summary>The service over <paramref name="adapter"/>, the test's data directory, ancestors and clock.</summary>
+    private TranscriptSyncService Service(
+        ITranscriptAdapter adapter,
+        TranscriptSyncOptions? options = null,
+        Func<SyncContext?>? context = null,
+        TranscriptLocation? location = null)
+    {
+        var o = options ?? new TranscriptSyncOptions();
+        o = o with
+        {
+            Ancestors = o.Ancestors ?? (() => new[] { HostPid }),
+            DataDir = o.DataDir ?? _data,
+            ProcessStart = o.ProcessStart ?? (_ => null),
+            Adapters = o.Adapters ?? (() => new[] { adapter }),
+            Time = o.Time ?? _clock,
+        };
+        var loc = location ?? Location;
+        return new TranscriptSyncService(context ?? (() => new SyncContext(loc, Settings())), o);
+    }
+
+    /// <summary>Writes <c>&lt;data&gt;/live/claude-code-&lt;pid&gt;.json</c> naming <paramref name="s"/>.</summary>
+    private void Marker(PlacedSession s, string? cwd = null, int pid = HostPid)
+    {
+        var marker = new JsonObject
+        {
+            ["v"] = 1,
+            ["host"] = Host,
+            ["host_pid"] = pid,
+            ["session_id"] = s.Id,
+            ["transcript_path"] = s.Path,
+            ["cwd"] = cwd ?? s.Cwd,
+            ["at"] = DateTimeOffset.UtcNow.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
+        };
+        File.WriteAllText(Path.Combine(_data, "live", Host + "-" + pid.ToString(CultureInfo.InvariantCulture) + ".json"),
+            marker.ToJsonString());
+    }
+
+    private static SyncResult Sync(TranscriptSyncService service) => service.SyncCurrent(null, CancellationToken.None);
+
+    private long Sessions() => _h.Sessions(Db);
+    private long Chunks() => _h.Chunks(Db);
+    private string AllText() => string.Join("\n", IngestHarness.Contents(Db));
+
+    /// <summary>Appends the compaction fixture's boundary and its summary to <paramref name="s"/>, at T+60 and T+61.</summary>
+    private void AppendCompaction(PlacedSession s)
+    {
+        var lines = Encoding.UTF8.GetString(Home.Render("compaction", s.Cwd, s.Id)).Split('\n');
+        string Stamp(int seconds) => Home.BaseTime.AddSeconds(seconds).UtcDateTime
+            .ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+        var boundary = lines.Single(l => l.Contains("compact_boundary", StringComparison.Ordinal));
+        var summary = lines.Single(l => l.Contains("zqxsummary", StringComparison.Ordinal));
+        Home.AppendLine(s, boundary.Replace(Stamp(20), Stamp(60), StringComparison.Ordinal));
+        Home.AppendLine(s, summary.Replace(Stamp(21), Stamp(61), StringComparison.Ordinal));
+    }
+
+    /// <summary>Counts the opens and passes through to the real one (create: false, a short busy timeout).</summary>
+    private sealed class CountingOpen
+    {
+        public int Calls;
+        public Action? Before { get; init; }
+
+        public TranscriptOpenResult Open(TranscriptLocation location)
+        {
+            Interlocked.Increment(ref Calls);
+            Before?.Invoke();
+            return TranscriptStore.Open(location, create: false, busyTimeoutMs: 500);
+        }
+    }
+
+    /// <summary>Wraps an adapter: runs an action inside every <see cref="ReadHead"/> before the read.</summary>
+    private sealed class HeadHookAdapter(ITranscriptAdapter inner, Action<SessionSource> onHead) : ITranscriptAdapter
+    {
+        public string Host => inner.Host;
+        public string Root => inner.Root;
+        public bool Detect() => inner.Detect();
+        public SessionEnumeration EnumerateSessions() => inner.EnumerateSessions();
+
+        public SessionHead ReadHead(SessionSource source)
+        {
+            onHead(source);
+            return inner.ReadHead(source);
+        }
+
+        public bool IsLineStart(SessionSource source, long offset) => inner.IsLineStart(source, offset);
+
+        public IEnumerable<TranscriptRecord> ReadRecords(SessionSource source, long startOffset, ReadStats stats, CancellationToken ct) =>
+            inner.ReadRecords(source, startOffset, stats, ct);
+    }
+
+    // ------------------------------------------------------------------
+    // The tail
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Sync_AppendedTextAfterTheLastPass_IsStored()
+    {
+        var s = Home.Place("decision", _h.Cwd, "append-1");
+        Assert.Equal(SessionIngestStatus.New, _h.Ingest(Db, s).Status);   // the last pass
+        Home.AppendExchange(s, "zqxbefore1 what about the index?", "zqxbefore2 the index is fine.", 50);
+        AppendCompaction(s);
+        Home.AppendExchange(s, "zqxafter1 now add the column.", "zqxafter2 the column is added.", 100);
+        Marker(s);
+
+        var result = Sync(Service(Adapter()));
+
+        Assert.Equal(CurrentKind.Marker, result.Current.Kind);
+        Assert.Equal(Host + ":append-1", result.Current.Ref);
+        Assert.True(result.Complete);
+        Assert.Null(result.Note);
+        var text = AllText();
+        Assert.Contains("zqxbefore1", text);
+        Assert.Contains("zqxbefore2", text);
+        Assert.Contains("zqxsummary", text);
+        Assert.Contains("zqxafter1", text);
+        Assert.Contains("zqxafter2", text);
+    }
+
+    [Fact]
+    public void Sync_GrownAcrossTwoSyncs_EqualsOneIngest()
+    {
+        var s = Home.Place("decision", _h.Cwd, "grown-1");
+        Marker(s);
+        var service = Service(Adapter());
+
+        var first = Sync(service);
+        Assert.True(first.Complete);
+        Home.AppendExchange(s, "zqxgrow1 and the tests?", "zqxgrow2 they pass.", 50);
+        AppendCompaction(s);
+        Home.AppendExchange(s, "zqxgrow3 ship it.", "zqxgrow4 shipped.", 100);
+        var second = Sync(service);
+        Assert.True(second.Complete);
+        Assert.Null(second.Note);
+
+        IngestHarness.AssertSame(_h.Once(s), ArchiveSnapshot.Read(Db.Path), "two syncs against one ingest");
+    }
+
+    [Fact]
+    public void Sync_NothingNew_IsUnchanged()
+    {
+        var s = Home.Place("decision", _h.Cwd, "same-1");
+        Marker(s);
+        var adapter = Adapter();
+        var service = Service(adapter);
+        Assert.True(Sync(service).Complete);
+        var before = ArchiveSnapshot.Read(Db.Path, includeIds: true);
+        var heads = adapter.ReadHeadCalls;
+        var reads = adapter.ReadRecordsCalls;
+
+        var result = Sync(service);
+
+        Assert.True(result.Complete);
+        Assert.Null(result.Note);
+        Assert.Equal("proj", result.ProjectKey);
+        Assert.Equal(heads, adapter.ReadHeadCalls);
+        Assert.Equal(reads, adapter.ReadRecordsCalls);
+        IngestHarness.AssertSame(before, ArchiveSnapshot.Read(Db.Path, includeIds: true), "a sync with nothing new");
+    }
+
+    // ------------------------------------------------------------------
+    // Exclusions
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Sync_ForgottenById_FileNotOpened()
+    {
+        var s = Home.Place("decision", _h.Cwd, "forgot-1");
+        Db.Store.ForgetSession(Host, s.Id);
+        Marker(s);
+        var adapter = Adapter();
+
+        var result = Sync(Service(adapter));
+
+        Assert.Equal(CurrentKind.Marker, result.Current.Kind);
+        Assert.True(result.Complete);
+        Assert.Null(result.ProjectKey);
+        Assert.Equal(0, adapter.ReadHeadCalls);
+        Assert.Equal(0, adapter.IsLineStartCalls);
+        Assert.Equal(0, adapter.ReadRecordsCalls);
+        Assert.Equal(0, Sessions());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Sync_ForgottenByProjectKey_AndByRoot_StoresNothing(bool byRoot)
+    {
+        var repo = IngestHarness.MakeRepo(Path.Combine(Home.Root, "repos", "proj"), "https://github.com/Owner/Repo.git");
+        var sub = Path.Combine(repo, "sub");
+        Directory.CreateDirectory(sub);
+        var s = Home.Place("decision", sub, "fproj-1");
+        Assert.Equal(SessionIngestStatus.New, _h.Ingest(Db, s).Status);
+        Db.Store.ForgetProject("owner/repo");
+
+        var target = s;
+        if (byRoot)
+        {
+            // Re-keyed: only the stored root keeps a new session under the repository out.
+            IngestHarness.SetRemote(repo, "https://github.com/Other/Thing.git");
+            target = Home.Place("decision", sub, "fproj-2");
+        }
+        Marker(target);
+        var adapter = Adapter();
+
+        var result = Sync(Service(adapter));
+
+        Assert.True(result.Complete);
+        Assert.Null(result.ProjectKey);
+        Assert.Equal(0, adapter.ReadRecordsCalls);
+        Assert.Equal(0, Sessions());
+        Assert.Equal(0, Chunks());
+    }
+
+    [Fact]
+    public void Sync_GlobalCutoff_DropsOlderRecords()
+    {
+        var s = Home.Place("decision", _h.Cwd, "cutoff-1");
+        Db.Store.ForgetAll(Home.BaseTime.AddSeconds(100));
+        Home.AppendExchange(s, "zqxlate1 after the cutoff", "zqxlate2 kept", 200);
+        Marker(s);
+
+        var result = Sync(Service(Adapter()));
+
+        Assert.True(result.Complete);
+        var text = AllText();
+        Assert.Contains("zqxlate1", text);
+        Assert.Contains("zqxlate2", text);
+        Assert.DoesNotContain("schema migration", text);
+        Assert.DoesNotContain("zqxtoolresult", text);
+    }
+
+    // ------------------------------------------------------------------
+    // The guess
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Sync_Guess_NewestWithin30Minutes_ThenNone()
+    {
+        var now = _clock.GetUtcNow();
+        var a = Home.Place("decision", _h.Cwd, "guess-a");
+        var b = Home.Place("decision", _h.Cwd, "guess-b");
+        Home.SetMtime(a, now.AddMinutes(-10));
+        Home.SetMtime(b, now.AddMinutes(-31));
+        var adapter = Adapter();
+
+        var result = Sync(Service(adapter));
+
+        Assert.Equal(CurrentKind.Guessed, result.Current.Kind);
+        Assert.Equal(Host + ":guess-a", result.Current.Ref);
+        Assert.True(result.Complete);
+        Assert.Null(result.ProjectKey);
+        Assert.Equal("guess-a", Db.Text("SELECT host_session_id FROM tx_session"));
+
+        // Two files in the window at the same time: the ordinal path breaks the tie.
+        var d = Home.Place("decision", _h.Cwd, "guess-d");
+        var c = Home.Place("decision", _h.Cwd, "guess-c");
+        Home.SetMtime(c, now.AddMinutes(-5));
+        Home.SetMtime(d, now.AddMinutes(-5));
+        Assert.Equal(Host + ":guess-c", Sync(Service(Adapter())).Current.Ref);
+
+        // A newer file wins over the path.
+        var e = Home.Place("decision", _h.Cwd, "guess-e");
+        Home.SetMtime(e, now.AddMinutes(-4));
+        var newest = Sync(Service(Adapter()));
+        Assert.Equal(Host + ":guess-e", newest.Current.Ref);
+        Assert.Null(newest.ProjectKey);
+
+        // Forty minutes later every file is older than the window.
+        _clock.Advance(TimeSpan.FromMinutes(40));
+        var none = Sync(Service(Adapter()));
+        Assert.Equal(CurrentKind.None, none.Current.Kind);
+        Assert.Null(none.Current.Ref);
+        Assert.True(none.Complete);
+        Assert.Null(none.ProjectKey);
+    }
+
+    [Fact]
+    public void Sync_NoMarkerNoRecentFile_IsNone()
+    {
+        var old = Home.Place("decision", _h.Cwd, "old-1");
+        Home.SetMtime(old, _clock.GetUtcNow().AddMinutes(-31));
+        var adapter = Adapter();
+
+        var result = Sync(Service(adapter));
+
+        Assert.Equal(CurrentKind.None, result.Current.Kind);
+        Assert.True(result.Complete);
+        Assert.Null(result.Note);
+        Assert.Null(result.ProjectKey);
+        Assert.Equal(0, adapter.ReadHeadCalls);
+        Assert.Equal(0, adapter.ReadRecordsCalls);
+        Assert.Equal(0, Sessions());
+    }
+
+    // ------------------------------------------------------------------
+    // Budgets and failures
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Sync_IngestBudgetSpent_IsIncompleteWithNote()
+    {
+        var s = Home.Place("decision", _h.Cwd, "slow-1");
+        Marker(s);
+        // The service's clock passes the 2-second ingest budget once the read has started.
+        var adapter = Adapter(_ => _clock.Advance(TimeSpan.FromSeconds(3)));
+
+        var result = Sync(Service(adapter));
+
+        Assert.Equal(CurrentKind.Marker, result.Current.Kind);
+        Assert.False(result.Complete);
+        Assert.NotNull(result.Note);
+        Assert.Contains("ran out of time", result.Note);
+        Assert.Equal(1, adapter.ReadRecordsCalls);
+        Assert.Equal(0, Sessions());
+        Assert.Equal(0, Chunks());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Sync_IncompleteIngest_ForgottenDuringIt_GivesNoProjectKey(bool byId)
+    {
+        // The control first: an ingest that runs out of time stores no row, and the key comes from the head of the file.
+        var c = Home.Place("decision", _h.Cwd, "forget-control-" + (byId ? "id" : "key"));
+        Marker(c);
+        var control = Sync(Service(Adapter(_ => _clock.Advance(TimeSpan.FromSeconds(3)))));
+        Assert.False(control.Complete);
+        Assert.Equal("proj", control.ProjectKey);
+
+        // The session is forgotten while its first ingest runs, and the ingest then runs out of time: the exclusion
+        // is checked again before the key is derived, so there is none.
+        var s = Home.Place("decision", _h.Cwd, "forget-during-" + (byId ? "id" : "key"));
+        Marker(s);
+        var adapter = Adapter(_ =>
+        {
+            if (byId) Db.Store.ForgetSession(Host, s.Id);
+            else Db.Store.ForgetProject("proj");
+            _clock.Advance(TimeSpan.FromSeconds(3));
+        });
+
+        var result = Sync(Service(adapter));
+
+        Assert.Equal(CurrentKind.Marker, result.Current.Kind);
+        Assert.False(result.Complete);
+        Assert.Contains("ran out of time", result.Note);
+        Assert.Null(result.ProjectKey);
+        Assert.Equal(0, Sessions());
+    }
+
+    [Fact]
+    public void Sync_ChangedSource_SetsNote()
+    {
+        var s = Home.Place("decision", _h.Cwd, "changed-1");
+        Marker(s);
+        var service = Service(Adapter());
+        Assert.True(Sync(service).Complete);
+        var before = ArchiveSnapshot.Read(Db.Path, includeIds: true);
+
+        Home.Replace(s, "compaction");
+        var result = Sync(service);
+
+        Assert.False(result.Complete);
+        Assert.NotNull(result.Note);
+        Assert.Contains("replaced", result.Note);
+        Assert.Equal("proj", result.ProjectKey);
+        Assert.Equal(before.Chunks, ArchiveSnapshot.Read(Db.Path, includeIds: true).Chunks);
+    }
+
+    [Theory]
+    [InlineData("head")]
+    [InlineData("records")]
+    public void Sync_FileDeletedBetweenStatAndRead_DoesNotThrow(string when)
+    {
+        var s = Home.Place("decision", _h.Cwd, "gone-" + when);
+        Marker(s);
+        ITranscriptAdapter adapter = when == "head"
+            ? new HeadHookAdapter(_h.Adapter(), src => File.Delete(src.Path))
+            : _h.Adapter(src => File.Delete(src.Path));
+
+        var result = Sync(Service(adapter));
+
+        Assert.Equal(CurrentKind.Marker, result.Current.Kind);
+        Assert.False(result.Complete);
+        Assert.NotNull(result.Note);
+        Assert.Null(result.ProjectKey);
+        Assert.Equal(0, Sessions());
+    }
+
+    [Fact]
+    public void Sync_ArchiveAbsent_ReturnsCurrentAndComplete()
+    {
+        var s = Home.Place("decision", _h.Cwd, "absent-1");
+        Marker(s);
+        var missing = Path.Combine(Home.Root, "no-archive", "archive.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(missing)!);
+
+        var result = Sync(Service(Adapter(), location: new TranscriptLocation(missing, IsMainDatabase: false)));
+
+        Assert.Equal(CurrentKind.Marker, result.Current.Kind);
+        Assert.Equal(Host + ":absent-1", result.Current.Ref);
+        Assert.True(result.Complete);
+        Assert.Null(result.Note);
+        Assert.Equal("proj", result.ProjectKey);   // no row: derived from the head of the file
+        Assert.False(File.Exists(missing));
+    }
+
+    [Fact]
+    public void Sync_StoreThrowsOnOpen_IsLoggedNotThrown()
+    {
+        var s = Home.Place("decision", _h.Cwd, "throws-1");
+        Marker(s);
+        var service = Service(Adapter(), new TranscriptSyncOptions(
+            Open: _ => throw new InvalidOperationException("zqxopenboom")));
+
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var origOut = Console.Out;
+        var origErr = Console.Error;
+        SyncResult result;
+        Console.SetOut(stdout);
+        Console.SetError(stderr);
+        try
+        {
+            result = Sync(service);
+        }
+        finally
+        {
+            Console.SetOut(origOut);
+            Console.SetError(origErr);
+        }
+
+        Assert.Equal(CurrentKind.Marker, result.Current.Kind);
+        Assert.False(result.Complete);
+        Assert.NotNull(result.Note);
+        Assert.Contains("[total-recall]", stderr.ToString());
+        Assert.Contains("zqxopenboom", stderr.ToString());
+        Assert.Equal(string.Empty, stdout.ToString());
+    }
+
+    [Fact]
+    public void Sync_BusyArchive_EndsInAboutTheTimeout()
+    {
+        var s = Home.Place("decision", _h.Cwd, "busy-1");
+        Marker(s);
+        var service = Service(Adapter());
+
+        using var holder = Db.Connect();
+        using (var begin = holder.CreateCommand())
+        {
+            begin.CommandText = "BEGIN IMMEDIATE";
+            begin.ExecuteNonQuery();
+        }
+
+        SyncResult result;
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            result = Sync(service);
+        }
+        finally
+        {
+            sw.Stop();
+            using var rollback = holder.CreateCommand();
+            rollback.CommandText = "ROLLBACK";
+            rollback.ExecuteNonQuery();
+        }
+
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(3), $"the sync took {sw.ElapsedMilliseconds} ms against a held lock");
+        Assert.Equal(CurrentKind.Marker, result.Current.Kind);
+        Assert.False(result.Complete);
+        Assert.NotNull(result.Note);
+        Assert.Contains("could not be written", result.Note);
+        Assert.Equal(0, Sessions());
+    }
+
+    [Fact]
+    public async Task Sync_TwoConcurrentCalls_Serialize_SecondSeesUnchanged()
+    {
+        // 1. The second call waits for the first, then finds nothing new.
+        var s = Home.Place("decision", _h.Cwd, "twice-1");
+        Marker(s);
+        using var entered = new ManualResetEventSlim(false);
+        using var gate = new ManualResetEventSlim(false);
+        var adapter = Adapter(_ => { entered.Set(); gate.Wait(Wait); });
+        var service = Service(adapter, new TranscriptSyncOptions(IngestBudget: Wait));
+
+        var first = Task.Run(() => Sync(service));
+        Assert.True(entered.Wait(Wait));
+        var second = Task.Run(() => Sync(service));
+        Assert.NotSame(second, await Task.WhenAny(second, Task.Delay(300)));   // still waiting for the first
+        gate.Set();
+        var r1 = await first.WaitAsync(Wait);
+        var r2 = await second.WaitAsync(Wait);
+
+        Assert.True(r1.Complete);
+        Assert.True(r2.Complete);
+        Assert.Null(r2.Note);
+        Assert.Equal(CurrentKind.Marker, r2.Current.Kind);
+        Assert.Equal(1, adapter.ReadRecordsCalls);
+        Assert.Equal(1, Sessions());
+
+        // 2. A wait that outlasts the budget returns with a note.
+        var s2 = Home.Place("decision", _h.Cwd, "twice-2");
+        Marker(s2);
+        using var entered2 = new ManualResetEventSlim(false);
+        using var gate2 = new ManualResetEventSlim(false);
+        var service2 = Service(Adapter(_ => { entered2.Set(); gate2.Wait(Wait); }),
+            new TranscriptSyncOptions(IngestBudget: TimeSpan.FromMilliseconds(200)));
+        var blocked = Task.Run(() => Sync(service2));
+        Assert.True(entered2.Wait(Wait));
+        var late = await Task.Run(() => Sync(service2)).WaitAsync(Wait);
+        Assert.False(late.Complete);
+        Assert.NotNull(late.Note);
+        Assert.Contains("ran out of time", late.Note);
+        Assert.Equal(CurrentKind.Marker, late.Current.Kind);
+        gate2.Set();
+        await blocked.WaitAsync(Wait);
+
+        // 3. The wait honours the caller's token.
+        var s3 = Home.Place("decision", _h.Cwd, "twice-3");
+        Marker(s3);
+        using var entered3 = new ManualResetEventSlim(false);
+        using var gate3 = new ManualResetEventSlim(false);
+        var service3 = Service(Adapter(_ => { entered3.Set(); gate3.Wait(Wait); }), new TranscriptSyncOptions(IngestBudget: Wait));
+        var holding = Task.Run(() => Sync(service3));
+        Assert.True(entered3.Wait(Wait));
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        var sw = Stopwatch.StartNew();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Task.Run(() => service3.SyncCurrent(null, cts.Token)).WaitAsync(Wait));
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10), "the wait did not end with the token");
+        gate3.Set();
+        await holding.WaitAsync(Wait);
+    }
+
+    [Fact]
+    public void Sync_NoStepAfterTheTotalDeadline()
+    {
+        // The deadline passes while the marker is checked: the archive is never opened.
+        var s = Home.Place("decision", _h.Cwd, "late-1");
+        Marker(s);
+        var adapter = Adapter();
+        var open = new CountingOpen();
+        var result = Sync(Service(adapter, new TranscriptSyncOptions(
+            Open: open.Open,
+            ProcessStart: _ => { _clock.Advance(TimeSpan.FromSeconds(7)); return null; })));
+
+        Assert.Equal(CurrentKind.Marker, result.Current.Kind);
+        Assert.False(result.Complete);
+        Assert.NotNull(result.Note);
+        Assert.Contains("ran out of time", result.Note);
+        Assert.Equal(0, open.Calls);
+        Assert.Equal(0, adapter.ReadRecordsCalls);
+
+        // The deadline passes while the archive is opened: nothing is ingested.
+        var adapter2 = Adapter();
+        var slowOpen = new CountingOpen { Before = () => _clock.Advance(TimeSpan.FromSeconds(7)) };
+        var result2 = Sync(Service(adapter2, new TranscriptSyncOptions(Open: slowOpen.Open)));
+
+        Assert.False(result2.Complete);
+        Assert.Contains("ran out of time", result2.Note);
+        Assert.Equal(1, slowOpen.Calls);
+        Assert.Equal(0, adapter2.ReadRecordsCalls);
+        Assert.Equal(0, adapter2.ReadHeadCalls);   // no key is derived from the head past the deadline either
+        Assert.Null(result2.ProjectKey);
+        Assert.Equal(0, Sessions());
+    }
+
+    [Fact]
+    public void Sync_PastTheDeadline_ReadsNoProjectKey()
+    {
+        // An absent archive whose open outlasts the deadline: the head is not read for a key.
+        var s = Home.Place("decision", _h.Cwd, "late-absent");
+        Marker(s);
+        var missing = Path.Combine(Home.Root, "no-archive-late", "archive.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(missing)!);
+        var adapter = Adapter();
+        var slowOpen = new CountingOpen { Before = () => _clock.Advance(TimeSpan.FromSeconds(7)) };
+        var absent = Sync(Service(adapter, new TranscriptSyncOptions(Open: slowOpen.Open),
+            location: new TranscriptLocation(missing, IsMainDatabase: false)));
+        Assert.Equal(CurrentKind.Marker, absent.Current.Kind);
+        Assert.Null(absent.ProjectKey);
+        Assert.Equal(0, adapter.ReadHeadCalls);
+
+        // The ingest outlasts the deadline: after it, neither the stored row nor the head is read for a key.
+        var t = Home.Place("decision", _h.Cwd, "late-ingest");
+        Marker(t);
+        var slow = Adapter(_ => _clock.Advance(TimeSpan.FromSeconds(7)));
+        var ingested = Sync(Service(slow, new TranscriptSyncOptions(IngestBudget: TimeSpan.FromSeconds(30))));
+        Assert.False(ingested.Complete);
+        Assert.Null(ingested.ProjectKey);
+        Assert.Equal(1, slow.ReadHeadCalls);   // the ingest's own read only
+
+        // The control: in time, the same session gives its key.
+        Assert.Equal("proj", Sync(Service(Adapter())).ProjectKey);
+    }
+
+    [Fact]
+    public void Sync_FailedOpen_LogsTheMessage()
+    {
+        var s = Home.Place("decision", _h.Cwd, "failopen-1");
+        Marker(s);
+        var service = Service(Adapter(), new TranscriptSyncOptions(
+            Open: _ => new TranscriptOpenResult(TranscriptOpenStatus.Failed, null, "zqxfailedopen disk on fire")));
+
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var origOut = Console.Out;
+        var origErr = Console.Error;
+        SyncResult result;
+        Console.SetOut(stdout);
+        Console.SetError(stderr);
+        try
+        {
+            result = Sync(service);
+        }
+        finally
+        {
+            Console.SetOut(origOut);
+            Console.SetError(origErr);
+        }
+
+        Assert.False(result.Complete);
+        Assert.Contains("could not be opened", result.Note);
+        Assert.Contains("[total-recall] transcripts sync", stderr.ToString());
+        Assert.Contains("zqxfailedopen disk on fire", stderr.ToString());
+        Assert.Equal(string.Empty, stdout.ToString());
+    }
+
+    [Fact]
+    public async Task Sync_GuessAfterTheWait_UsesTheFileAsItIsNow()
+    {
+        // A guessed call that waited for a running sync stats the file again: what grew during the wait is recorded
+        // as the file's state, so the next call finds it unchanged.
+        var g = Home.Place("decision", _h.Cwd, "guess-wait");
+        Home.SetMtime(g, _clock.GetUtcNow().AddMinutes(-1));
+        using var entered = new ManualResetEventSlim(false);
+        using var gate = new ManualResetEventSlim(false);
+        var adapter = Adapter(_ => { entered.Set(); gate.Wait(Wait); });
+        var service = Service(adapter, new TranscriptSyncOptions(IngestBudget: Wait));
+
+        var first = Task.Run(() => Sync(service));
+        Assert.True(entered.Wait(Wait));
+        var second = Task.Run(() => Sync(service));
+        var sw = Stopwatch.StartNew();
+        while (adapter.EnumerateCalls < 2 && sw.Elapsed < Wait) Thread.Sleep(10);
+        Assert.Equal(2, adapter.EnumerateCalls);
+        Assert.NotSame(second, await Task.WhenAny(second, Task.Delay(300)));   // it has guessed and now waits
+        Home.AppendExchange(g, "zqxgrewwhilewaiting more?", "Yes.", 50);
+        gate.Set();
+        var r1 = await first.WaitAsync(Wait);
+        var r2 = await second.WaitAsync(Wait);
+
+        Assert.Equal(CurrentKind.Guessed, r2.Current.Kind);
+        Assert.True(r1.Complete);
+        Assert.True(r2.Complete);
+        Assert.Equal(new FileInfo(g.Path).Length, Db.Scalar("SELECT source_size FROM tx_session WHERE host_session_id = 'guess-wait'"));
+    }
+
+    [Fact]
+    public void Sync_SettingsDisabled_StoresNothing()
+    {
+        var s = Home.Place("decision", _h.Cwd, "off-1");
+        Marker(s);
+        var adapter = Adapter();
+        var open = new CountingOpen();
+
+        var off = Sync(Service(adapter, new TranscriptSyncOptions(Open: open.Open),
+            context: () => new SyncContext(Location, Settings(enabled: false))));
+        var none = Sync(Service(adapter, new TranscriptSyncOptions(Open: open.Open), context: () => null));
+
+        foreach (var result in new[] { off, none })
+        {
+            Assert.Equal(CurrentKind.Marker, result.Current.Kind);
+            Assert.True(result.Complete);
+            Assert.Null(result.Note);
+        }
+        Assert.Equal(0, open.Calls);
+        Assert.Equal(0, adapter.ReadHeadCalls);
+        Assert.Equal(0, adapter.ReadRecordsCalls);
+        Assert.Equal(0, Sessions());
+    }
+
+    // ------------------------------------------------------------------
+    // The project key
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Sync_ProjectKey_IsTheStoredKey_NotTheMarkerCwd()
+    {
+        // The marker's cwd is another directory (a `cd`): the key is the one stored from the file's first cwd.
+        var elsewhere = Path.Combine(Home.Root, "elsewhere", "other");
+        var s = Home.Place("decision", _h.Cwd, "key-1");
+        Marker(s, cwd: elsewhere);
+
+        var stored = Sync(Service(Adapter()));
+
+        Assert.Equal(elsewhere, stored.Current.Cwd);
+        Assert.Equal("proj", Db.Text("SELECT project_key FROM tx_session WHERE host_session_id = 'key-1'"));
+        Assert.Equal("proj", stored.ProjectKey);
+
+        // The stored key, not the head's: a repository whose directory is gone derives a path key from the head now.
+        var repo = IngestHarness.MakeRepo(Path.Combine(Home.Root, "repos", "app"), "https://github.com/Owner/App.git");
+        var r = Home.Place("decision", repo, "key-remote");
+        Marker(r, cwd: elsewhere);
+        Assert.Equal("owner/app", Sync(Service(Adapter())).ProjectKey);
+        Directory.Delete(repo, recursive: true);
+        Assert.Equal("app", ProjectIdentityRule.Derive(repo, "x", new TotalRecall.Infrastructure.Memory.ProjectResolver(), _h.UserHome).Key);
+        var afterDelete = Sync(Service(Adapter()));
+        Assert.True(afterDelete.Complete);
+        Assert.Equal("owner/app", afterDelete.ProjectKey);
+
+        // No row (no archive): derived from the head of the file.
+        var absent = Path.Combine(Home.Root, "no-archive", "archive.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(absent)!);
+        Marker(s, cwd: elsewhere);
+        var derived = Sync(Service(Adapter(), location: new TranscriptLocation(absent, IsMainDatabase: false)));
+        Assert.Equal("proj", derived.ProjectKey);
+
+        // The head cannot be read (no complete first line): no key.
+        var partial = Home.Place("decision", _h.Cwd, "key-partial");
+        Home.Write(partial, Encoding.UTF8.GetBytes("{\"type\":\"user\""));
+        Marker(partial, cwd: elsewhere);
+        var unread = Sync(Service(Adapter()));
+        Assert.Equal(CurrentKind.Marker, unread.Current.Kind);
+        Assert.False(unread.Complete);
+        Assert.Null(unread.ProjectKey);
+    }
+
+    // ------------------------------------------------------------------
+    // The embed step (search only)
+    // ------------------------------------------------------------------
+
+    private static SyncEmbedPlan Plan(IEmbedder embedder, Func<bool>? reindex = null, string? provider = null, bool allowRemote = false) =>
+        new(embedder, new TranscriptsSettings(true, string.Empty, null, 0, allowRemote), "sqlite", TestEmbedding.Config(provider),
+            reindex ?? (() => false));
+
+    private static List<string> ChunkCalls(RecordingEmbedder e) => e.Calls.Where(c => c != EmbedProbe.Text).ToList();
+
+    /// <summary>An embedder that reports the model as not ready (a missing file).</summary>
+    private sealed class NotReadyEmbedder(IEmbedder inner) : IEmbedder, IEmbedderReadiness
+    {
+        public EmbedderDescriptor Descriptor => inner.Descriptor;
+        public float[] Embed(string text) => inner.Embed(text);
+        public float[] EmbedQuery(string text) => inner.EmbedQuery(text);
+        public EmbedderReadiness CheckReady() => new(false, "model.onnx missing");
+    }
+
+    /// <summary>An older session with <paramref name="n"/> waiting chunks, inserted before the current session's rows.</summary>
+    private void Backlog(int n)
+    {
+        var old = Db.AddSession(Host, "old-backlog", projectKey: "owner/old");
+        for (var i = 0; i < n; i++)
+        {
+            var id = Db.AddChunk(old, "backlog chunk " + i.ToString(CultureInfo.InvariantCulture), i);
+            Db.Exec($"UPDATE tx_chunk SET ts = '2026-01-02T03:04:05Z' WHERE id = {id}");
+        }
+    }
+
+    private long SessionChunks(string id) => Db.Scalar(
+        $"SELECT COUNT(*) FROM tx_chunk c JOIN tx_session s ON s.id = c.session_id WHERE s.host_session_id = '{id}'");
+
+    private long SessionEmbedded(string id) => Db.Scalar(
+        $"SELECT COUNT(*) FROM tx_chunk c JOIN tx_session s ON s.id = c.session_id WHERE s.host_session_id = '{id}' AND c.embedded = 1");
+
+    private long Waiting() => Db.Scalar("SELECT COUNT(*) FROM tx_chunk WHERE embedded = 0 AND embed_attempts < 3");
+
+    private PlacedSession PlaceMarked(string id, int exchanges)
+    {
+        var s = Home.Place("decision", _h.Cwd, id);
+        for (var i = 0; i < exchanges; i++)
+            Home.AppendExchange(s, $"zqxq{i} question {i}?", $"zqxa{i} answer {i}.", 50 + i * 10);
+        Marker(s);
+        return s;
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(12)]
+    public void SyncEmbed_EmbedsTheTailFirst_AtMostEight(int appended)
+    {
+        Backlog(200);
+        PlaceMarked("embed-1", appended);
+        var embedder = new RecordingEmbedder("local", 384);
+
+        var result = Service(Adapter()).SyncCurrent(Plan(embedder), CancellationToken.None);
+
+        Assert.True(result.Complete);
+        var mine = SessionChunks("embed-1");
+        Assert.True(mine > 0);
+        if (appended > 0) Assert.True(mine > 8, "the fixture should give more than eight chunks, got " + mine);
+        var expectedMine = Math.Min(mine, 8);
+        Assert.Equal(expectedMine, SessionEmbedded("embed-1"));          // the session's own chunks went first
+        Assert.Equal(8, ChunkCalls(embedder).Count);                     // the budget is eight chunks in all
+        Assert.Equal(8 - expectedMine, SessionEmbedded("old-backlog"));  // the rest of the slots, then it waits
+        Assert.Equal(200 + mine - 8, Waiting());
+    }
+
+    [Fact]
+    public void SyncEmbed_NothingWaiting_NoLeaseTaken()
+    {
+        PlaceMarked("embed-none", 0);
+        var embedder = new RecordingEmbedder("local", 384);
+        var service = Service(Adapter());
+        Assert.True(service.SyncCurrent(Plan(embedder), CancellationToken.None).Complete);
+        Assert.Equal(0, Waiting());
+        var before = embedder.Calls.Count;
+
+        // Everything is embedded now: nothing waits, so the second sync does not even probe, and no lease is left behind.
+        var again = service.SyncCurrent(Plan(embedder), CancellationToken.None);
+
+        Assert.True(again.Complete);
+        Assert.Equal(before, embedder.Calls.Count);
+        Assert.Null(Db.Text("SELECT value FROM tx_state WHERE key = 'embed.lease'"));
+    }
+
+    [Fact]
+    public void SyncEmbed_SessionFullyEmbedded_BacklogWaiting_NoEmbedderCall_NoLease()
+    {
+        PlaceMarked("embed-full", 0);
+        var service = Service(Adapter());
+        Assert.True(service.SyncCurrent(Plan(new RecordingEmbedder("local", 384)), CancellationToken.None).Complete);
+        Assert.Equal(SessionChunks("embed-full"), SessionEmbedded("embed-full"));
+        Backlog(50);   // an older backlog now waits, but the current session has nothing waiting
+        var embedder = new RecordingEmbedder("local", 384);
+
+        var result = service.SyncCurrent(Plan(embedder), CancellationToken.None);
+
+        Assert.True(result.Complete);
+        Assert.Empty(embedder.Calls);
+        Assert.Equal(50, Waiting());
+        Assert.Null(Db.Text("SELECT value FROM tx_state WHERE key = 'embed.lease'"));
+    }
+
+    [Fact]
+    public void SyncEmbed_GateRefuses_RemoteProviderWithoutOptIn_NeverBuilds()
+    {
+        PlaceMarked("embed-remote", 0);
+        var embedder = new RecordingEmbedder("openai", 384);
+
+        var result = Service(Adapter()).SyncCurrent(Plan(embedder, provider: "openai", allowRemote: false), CancellationToken.None);
+
+        Assert.True(result.Complete);   // the text was stored; the embed step ends silently
+        Assert.Empty(embedder.Calls);
+        Assert.True(Waiting() > 0);
+        Assert.Null(Db.Text("SELECT value FROM tx_state WHERE key = 'embed.lease'"));
+    }
+
+    [Fact]
+    public void SyncEmbed_LeaseHeld_SkipsSilently()
+    {
+        PlaceMarked("embed-lease", 0);
+        var now = _clock.GetUtcNow().ToUnixTimeMilliseconds();
+        var held = "other-machine:1:other-run:" + now.ToString(CultureInfo.InvariantCulture);
+        Db.Exec($"INSERT INTO tx_state (key, value) VALUES ('embed.lease', '{held}')");
+        var embedder = new RecordingEmbedder("local", 384);
+
+        var result = Service(Adapter()).SyncCurrent(Plan(embedder), CancellationToken.None);
+
+        Assert.True(result.Complete);
+        Assert.Empty(embedder.Calls);
+        Assert.Equal(held, Db.Text("SELECT value FROM tx_state WHERE key = 'embed.lease'"));
+        Assert.Equal(0, SessionEmbedded("embed-lease"));
+    }
+
+    [Fact]
+    public void SyncEmbed_ReindexRunning_Skips()
+    {
+        PlaceMarked("embed-reindex", 0);
+        var embedder = new RecordingEmbedder("local", 384);
+        var probes = 0;
+
+        var result = Service(Adapter()).SyncCurrent(Plan(embedder, () => { probes++; return true; }), CancellationToken.None);
+
+        Assert.True(result.Complete);
+        Assert.True(probes > 0);
+        Assert.Empty(embedder.Calls);
+        Assert.Equal(0, SessionEmbedded("embed-reindex"));
+        Assert.Null(Db.Text("SELECT value FROM tx_state WHERE key = 'embed.lease'"));
+    }
+
+    [Fact]
+    public void SyncEmbed_DoesNotOverwriteEmbedLastRun()
+    {
+        PlaceMarked("embed-record", 0);
+        var before = new EmbedRunRecord(
+            new DateTimeOffset(2026, 11, 20, 8, 0, 0, TimeSpan.Zero), 7, 99, 1, "ready", "Ready", "local", "bge-small-en-v1.5", "done");
+        Db.Store.WriteEmbedRun(before);
+        var embedder = new RecordingEmbedder("local", 384);
+
+        Service(Adapter()).SyncCurrent(Plan(embedder), CancellationToken.None);
+
+        Assert.True(SessionEmbedded("embed-record") > 0);   // it did embed
+        Assert.Equal(before, Db.Store.ReadEmbedRun());
+    }
+
+    [Fact]
+    public void SyncEmbed_ModelNotReady_Skips()
+    {
+        PlaceMarked("embed-notready", 0);
+        var inner = new RecordingEmbedder("local", 384);
+
+        var result = Service(Adapter()).SyncCurrent(Plan(new NotReadyEmbedder(inner)), CancellationToken.None);
+
+        Assert.True(result.Complete);
+        Assert.Empty(inner.Calls);
+        Assert.Equal(0, SessionEmbedded("embed-notready"));
+        Assert.Null(Db.Text("SELECT value FROM tx_state WHERE key = 'embed.lease'"));
+    }
+
+    [Fact]
+    public void SyncEmbed_DescriptorThrows_EndsSilently()
+    {
+        PlaceMarked("embed-descriptor", 0);
+
+        var result = Service(Adapter()).SyncCurrent(Plan(new ThrowingDescriptorEmbedder()), CancellationToken.None);
+
+        Assert.True(result.Complete);
+        Assert.Equal(0, SessionEmbedded("embed-descriptor"));
+    }
+
+    [Fact]
+    public void SyncEmbed_PastTheDeadline_DoesNotEmbed()
+    {
+        Backlog(5);
+        PlaceMarked("embed-late", 0);
+        var embedder = new RecordingEmbedder("local", 384);
+        // The ingest consumes the whole total deadline on the service's clock: the embed step then does not start.
+        var late = new TranscriptSyncOptions(TotalDeadline: TimeSpan.FromSeconds(6));
+        var adapter = Adapter(_ => _clock.Advance(TimeSpan.FromSeconds(7)));
+
+        var result = Service(adapter, late).SyncCurrent(Plan(embedder), CancellationToken.None);
+
+        Assert.Empty(embedder.Calls);
+        Assert.False(result.Current.Kind == CurrentKind.None);
+    }
+
+    [Fact]
+    public void SyncEmbed_CancelledByTheCaller_Throws()
+    {
+        PlaceMarked("embed-cancel", 0);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        Assert.ThrowsAny<OperationCanceledException>(
+            () => Service(Adapter()).SyncCurrent(Plan(new RecordingEmbedder("local", 384)), cts.Token));
+    }
+
+    [Fact]
+    public void SyncText_NoPlan_NeverTouchesAnEmbedder()
+    {
+        Backlog(5);
+        PlaceMarked("text-only", 0);
+
+        var result = Sync(Service(Adapter()));
+
+        Assert.True(result.Complete);
+        Assert.True(Waiting() > 0);
+        Assert.Equal(0, SessionEmbedded("text-only"));
+        Assert.Null(Db.Text("SELECT value FROM tx_state WHERE key = 'embed.lease'"));
+    }
+}

@@ -2,7 +2,7 @@
 //
 // The wire shape of a transcript_search answer (search the archive, spec section 5, "Response"), serialised through
 // the source-generated JsonContext (registered there). The context default is to write nulls; the fields that appear
-// only when they say something (scopeNote, search.reason, truncated, truncatedHits, note) are omitted when null.
+// only when they say something (scopeNote, search.reason, truncated, truncatedHits, note, currentSessionRef, syncNote) are omitted when null.
 
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
@@ -38,7 +38,10 @@ public sealed record TranscriptSearchResponseDto(
     [property: JsonPropertyName("results")] TranscriptSearchHitDto[] Results,
     [property: JsonPropertyName("truncated"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Truncated,
     [property: JsonPropertyName("truncatedHits"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? TruncatedHits,
-    [property: JsonPropertyName("note"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Note)
+    [property: JsonPropertyName("note"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Note,
+    [property: JsonPropertyName("currentSession")] string CurrentSession,
+    [property: JsonPropertyName("currentSessionRef"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CurrentSessionRef,
+    [property: JsonPropertyName("syncNote"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SyncNote)
 {
     /// <summary>The answer of a successful search (an <see cref="TranscriptSearchResponse.Error"/> is not mapped here).</summary>
     public static TranscriptSearchResponseDto From(TranscriptSearchResponse r)
@@ -64,6 +67,9 @@ public sealed record TranscriptSearchResponseDto(
             Results: hits,
             Truncated: truncated ? true : null,
             TruncatedHits: truncated ? r.TruncatedHits : null,
-            Note: r.Note);
+            Note: r.Note,
+            CurrentSession: r.CurrentSession,
+            CurrentSessionRef: r.CurrentSessionRef,
+            SyncNote: r.SyncNote);
     }
 }

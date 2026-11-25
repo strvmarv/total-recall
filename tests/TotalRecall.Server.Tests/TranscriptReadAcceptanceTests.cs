@@ -100,7 +100,7 @@ public sealed class TranscriptReadAcceptanceTests : IDisposable
 
     private ServerCompositionHandles Compose(string? dbPath = null)
     {
-        var handles = ServerComposition.OpenLocalForCatalog(dbPath ?? Db);
+        var handles = ServerComposition.OpenLocalForCatalog(dbPath ?? Db, new ArchivePassOptions(Sync: HermeticSync.Options));
         _compositions.Add(handles);
         return handles;
     }

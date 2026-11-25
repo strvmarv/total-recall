@@ -7,6 +7,11 @@
           {
             "type": "command",
             "command": "bash \"$CLAUDE_PLUGIN_ROOT/hooks/session-start/run.sh\""
+          },
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PLUGIN_ROOT/hooks/live-marker/run.sh\"",
+            "timeout": 5
           }
         ]
       }
@@ -18,6 +23,11 @@
           {
             "type": "command",
             "command": "bash \"$CLAUDE_PLUGIN_ROOT/hooks/user-prompt-submit/run.sh\""
+          },
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PLUGIN_ROOT/hooks/live-marker/run.sh\"",
+            "timeout": 5
           }
         ]
       }

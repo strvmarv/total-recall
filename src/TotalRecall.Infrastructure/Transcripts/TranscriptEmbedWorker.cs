@@ -109,13 +109,18 @@ public sealed class TranscriptEmbedWorker
     /// does nothing (no lease, no record); a lease held by another run, or taken over during this one, ends with
     /// <see cref="EmbedStopReason.Lease"/> and writes no record (the holder's run owns it, and a run that lost the lease
     /// must not overwrite what the new holder wrote).
+    /// <paramref name="preferSession"/>, when set, is passed to every batch read so that session's waiting chunks come
+    /// first (the current-session sync); <paramref name="recordRun"/> false skips the <c>embed.last_run</c> write, so a
+    /// small catch-up does not replace the record of the last full run. The defaults keep the earlier behaviour.
     /// </summary>
     public EmbedRun Run(
         EmbedGateResult gate,
         ArchiveFingerprint current,
         EmbedBudget budget,
         CancellationToken ct,
-        Action<EmbedProgress>? progress = null)
+        Action<EmbedProgress>? progress = null,
+        (string, string)? preferSession = null,
+        bool recordRun = true)
     {
         ArgumentNullException.ThrowIfNull(gate);
         ArgumentNullException.ThrowIfNull(current);
@@ -139,7 +144,7 @@ public sealed class TranscriptEmbedWorker
         if (!acquired)
             return new EmbedRun(0, SafeRemaining(), 0, EmbedGate.AnotherRun(), EmbedStopReason.Lease);
 
-        var run = new RunState(gate, current, holder, ProviderOf(current), budget, ct, progress, _time.GetUtcNow());
+        var run = new RunState(gate, current, holder, ProviderOf(current), budget, ct, progress, _time.GetUtcNow(), preferSession);
         try
         {
             Loop(run);
@@ -153,7 +158,7 @@ public sealed class TranscriptEmbedWorker
         finally
         {
             run.Remaining = SafeRemaining();
-            if (run.StoppedBy != EmbedStopReason.Lease)
+            if (run.StoppedBy != EmbedStopReason.Lease && recordRun)
             {
                 try
                 {
@@ -205,7 +210,7 @@ public sealed class TranscriptEmbedWorker
             if (r.Budget.MaxChunks is int max)
                 limit = Math.Min(limit, max - read);
 
-            var work = _store.NextEmbedWork(limit, r.FailedAlone);
+            var work = _store.NextEmbedWork(limit, r.FailedAlone, r.PreferSession);
             if (work.Count == 0)
             {
                 r.End(r.Gate, EmbedStopReason.Done);
@@ -536,9 +541,11 @@ public sealed class TranscriptEmbedWorker
             EmbedBudget budget,
             CancellationToken ct,
             Action<EmbedProgress>? progress,
-            DateTimeOffset started)
+            DateTimeOffset started,
+            (string, string)? preferSession)
         {
             Gate = gate;
+            PreferSession = preferSession;
             Current = current;
             Holder = holder;
             Provider = provider;
@@ -557,6 +564,7 @@ public sealed class TranscriptEmbedWorker
         public CancellationToken Ct { get; }
         public Action<EmbedProgress>? Progress { get; }
         public DateTimeOffset Started { get; }
+        public (string Host, string HostSessionId)? PreferSession { get; }
 
         /// <summary>Ids that failed alone in this run; left out of every later read.</summary>
         public HashSet<long> FailedAlone { get; } = new();

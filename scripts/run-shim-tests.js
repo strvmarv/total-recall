@@ -39,6 +39,7 @@ export const SHIM_TEST_TARGETS = [
   'hooks/hooks.config.test.js',
   'hooks/claude-hooks.test.js',
   'hooks/session-start/whats-new.test.js',
+  'hooks/live-marker/',
 ];
 
 const TEST_FILE = /\.test\.(?:js|mjs|cjs)$/;

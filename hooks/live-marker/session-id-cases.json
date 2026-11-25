@@ -1,0 +1,20 @@
+{
+  "accepted": [
+    "3f2a9c1e-5b7d-4e08-9a41-0c6d2f8b7a15",
+    "a",
+    "A.b_c-1",
+    "..",
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  ],
+  "refused": [
+    "",
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "a b",
+    "a/b",
+    "a\\b",
+    "a\n",
+    "é",
+    "a:b",
+    "a\u0000b"
+  ]
+}

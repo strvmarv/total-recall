@@ -1,0 +1,295 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using TotalRecall.Infrastructure.Transcripts;
+using Xunit;
+
+namespace TotalRecall.Infrastructure.Tests.Transcripts;
+
+/// <summary>Spec section 2, step 1: the ancestors of the engine, read through an injected parent function.</summary>
+public sealed class ProcessAncestryTests
+{
+    private sealed class ManualClock : TimeProvider
+    {
+        private long _ticks;
+        public void Advance(TimeSpan by) => _ticks += by.Ticks;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => _ticks;
+    }
+
+    private static Func<int, int?> Map(params (int Pid, int? Parent)[] edges)
+    {
+        var d = edges.ToDictionary(e => e.Pid, e => e.Parent);
+        return pid => d.TryGetValue(pid, out var p) ? p : null;
+    }
+
+    [Fact]
+    public void Chain_StopsAtPid1_AtRepeat_AtNull_AndAt12Hops()
+    {
+        // pid 1 ends the chain and is not listed
+        Assert.Equal(new[] { 20, 10 }, ProcessAncestry.Chain(30, Map((30, 20), (20, 10), (10, 1), (1, 0))));
+        // a parent of 0 (or lower) ends it too
+        Assert.Equal(new[] { 20 }, ProcessAncestry.Chain(30, Map((30, 20), (20, 0))));
+        // a repeat ends it (a cycle back to a listed pid, and back to self)
+        Assert.Equal(new[] { 20, 10 }, ProcessAncestry.Chain(30, Map((30, 20), (20, 10), (10, 20))));
+        Assert.Equal(new[] { 20 }, ProcessAncestry.Chain(30, Map((30, 20), (20, 30))));
+        // a failed read (null) ends it, whether at the first hop or later
+        Assert.Empty(ProcessAncestry.Chain(30, Map()));
+        Assert.Equal(new[] { 20 }, ProcessAncestry.Chain(30, Map((30, 20))));
+        // at most 12 ancestors, nearest first, the engine itself excluded
+        var chain = ProcessAncestry.Chain(1000, pid => pid - 1);
+        Assert.Equal(Enumerable.Range(988, 12).Reverse().ToArray(), chain);
+    }
+
+    [Fact]
+    public void Chain_StopsAtTheTotalDeadline()
+    {
+        var clock = new ManualClock();
+        var calls = 0;
+        int? Slow(int pid)
+        {
+            calls++;
+            clock.Advance(TimeSpan.FromSeconds(2));
+            return pid - 1;
+        }
+
+        // hop 1 starts at 0 s, hop 2 at 2 s, hop 3 would start at 4 s >= 3 s: not made
+        var chain = ProcessAncestry.Chain(100, Slow, TimeSpan.FromSeconds(3), clock);
+        Assert.Equal(new[] { 99, 98 }, chain);
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
+    public void Chain_DefaultLimitIsThreeSeconds()
+    {
+        var clock = new ManualClock();
+        int? Slow(int pid)
+        {
+            clock.Advance(TimeSpan.FromSeconds(1.5));
+            return pid - 1;
+        }
+        // 0 s, 1.5 s: made; 3.0 s: spent (checked between hops)
+        Assert.Equal(new[] { 99, 98 }, ProcessAncestry.Chain(100, Slow, time: clock));
+    }
+
+    [Fact]
+    public void ProcParent_RealChildAndGrandchild_OnLinux()
+    {
+        if (!OperatingSystem.IsLinux()) return;   // /proc only
+
+        // a node child that spawns a node grandchild which sleeps: neither is exec-collapsed
+        const string grand = "setTimeout(()=>{},60000)";
+        var child = "const {spawn}=require('child_process');" +
+                    $"const g=spawn(process.execPath,['-e','{grand}'],{{stdio:'ignore'}});" +
+                    "console.log(g.pid);setTimeout(()=>{},60000)";
+        var psi = new ProcessStartInfo("node") { RedirectStandardOutput = true, UseShellExecute = false };
+        psi.ArgumentList.Add("-e");
+        psi.ArgumentList.Add(child);
+        using var proc = Process.Start(psi)!;
+        int grandPid = 0;
+        try
+        {
+            var line = proc.StandardOutput.ReadLine();
+            Assert.True(int.TryParse(line, out grandPid), "the child prints its child's pid: " + line);
+
+            Assert.Equal(proc.Id, ProcessAncestry.ProcParent(grandPid));
+            Assert.Equal(Environment.ProcessId, ProcessAncestry.ProcParent(proc.Id));
+            Assert.Equal(new[] { proc.Id, Environment.ProcessId },
+                ProcessAncestry.Chain(grandPid, ProcessAncestry.ProcParent).Take(2));
+        }
+        finally
+        {
+            try { proc.Kill(entireProcessTree: true); } catch { }
+            if (grandPid > 0) { try { Process.GetProcessById(grandPid).Kill(); } catch { } }
+        }
+    }
+
+    [Fact]
+    public void ProcParent_NoSuchPid_IsNull()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        Assert.Null(ProcessAncestry.ProcParent(int.MaxValue));
+    }
+
+    [Fact]
+    public void ProcParent_CommandNameWithSpaceAndParenthesis()
+    {
+        Assert.Equal(77, ProcessAncestry.ParseStatParent("123 (a b) c) S 77 123 123 0 -1 4194560"));
+        Assert.Equal(1, ProcessAncestry.ParseStatParent("1 (systemd) S 1 1 1 0"));
+        Assert.Null(ProcessAncestry.ParseStatParent("123 (a b"));
+        Assert.Null(ProcessAncestry.ParseStatParent("123 (a) S"));
+        Assert.Null(ProcessAncestry.ParseStatParent("123 (a) S xyz 1"));
+        Assert.Null(ProcessAncestry.ParseStatParent(""));
+    }
+
+    [Fact]
+    public void PsParent_UsesRunner_Timeout_Failure()
+    {
+        var seen = new List<(int Pid, TimeSpan Timeout)>();
+        var ok = ProcessAncestry.PsParent((pid, timeout) => { seen.Add((pid, timeout)); return " 4242\n"; });
+        Assert.Equal(4242, ok(99));
+        Assert.Equal((99, TimeSpan.FromSeconds(1)), Assert.Single(seen));   // 1 s per hop
+
+        Assert.Null(ProcessAncestry.PsParent((_, _) => null)(99));                          // timeout / failure
+        Assert.Null(ProcessAncestry.PsParent((_, _) => throw new IOException("no ps"))(99)); // cannot start
+        Assert.Null(ProcessAncestry.PsParent((_, _) => "")(99));
+        Assert.Null(ProcessAncestry.PsParent((_, _) => "not a number\n")(99));
+        Assert.Null(ProcessAncestry.PsParent((_, _) => "-5\n")(99));
+        Assert.Null(ProcessAncestry.PsParent((_, _) => "0\n")(99));
+    }
+
+    [Fact]
+    public void PsParent_DefaultRunner_ReadsTheRealParent()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return;
+        if (!File.Exists("/bin/ps") && !File.Exists("/usr/bin/ps")) return;
+        // `ps -o ppid= -p <pid>` is the macOS form; procps on Linux accepts it as well
+        var viaPs = ProcessAncestry.PsParent()(Environment.ProcessId);
+        // A ps that cannot answer (a restricted container, a minimal ps without -o) gives null, which the finder
+        // treats as the end of the chain: that is allowed. An answer must be the real parent.
+        if (viaPs is null) return;
+        Assert.True(viaPs > 0);
+        if (OperatingSystem.IsLinux()) Assert.Equal(ProcessAncestry.ProcParent(Environment.ProcessId), viaPs);
+    }
+
+    [Fact]
+    public void Platform_ReturnsAFunction()
+    {
+        var f = ProcessAncestry.Platform();
+        Assert.NotNull(f);
+        if (OperatingSystem.IsLinux()) Assert.NotNull(f(Environment.ProcessId));
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) Assert.Null(f(Environment.ProcessId));
+    }
+
+    // ---- how a walk ended (a failed or short-of-time walk is not kept) ------------------------------------------
+
+    private static Func<int, TimeSpan, int?> Timed(Func<int, int?> parentOf) => (pid, _) => parentOf(pid);
+
+    [Fact]
+    public void Walk_ReportsWhetherItEndedNormally()
+    {
+        // normal ends: pid 1 (or lower), a repeat, the hop limit
+        var pid1 = ProcessAncestry.Walk(30, Timed(Map((30, 20), (20, 10), (10, 1))));
+        Assert.Equal(new[] { 20, 10 }, pid1.Pids);
+        Assert.True(pid1.EndedNormally);
+        Assert.True(ProcessAncestry.Walk(30, Timed(Map((30, 20), (20, 0)))).EndedNormally);
+        Assert.True(ProcessAncestry.Walk(30, Timed(Map((30, 20), (20, 30)))).EndedNormally);
+        var hops = ProcessAncestry.Walk(1000, Timed(pid => pid - 1));
+        Assert.Equal(12, hops.Pids.Count);
+        Assert.True(hops.EndedNormally);
+
+        // failed reads: null (at the first hop or later) and a throw
+        var none = ProcessAncestry.Walk(30, Timed(Map()));
+        Assert.Empty(none.Pids);
+        Assert.False(none.EndedNormally);
+        var shortChain = ProcessAncestry.Walk(30, Timed(Map((30, 20))));
+        Assert.Equal(new[] { 20 }, shortChain.Pids);
+        Assert.False(shortChain.EndedNormally);
+        var threw = ProcessAncestry.Walk(30, (pid, _) => pid == 30 ? 20 : throw new IOException("ps failed"));
+        Assert.Equal(new[] { 20 }, threw.Pids);
+        Assert.False(threw.EndedNormally);
+
+        // the time limit
+        var clock = new ManualClock();
+        var late = ProcessAncestry.Walk(100, (pid, _) => { clock.Advance(TimeSpan.FromSeconds(2)); return pid - 1; },
+            TimeSpan.FromSeconds(3), clock);
+        Assert.Equal(new[] { 99, 98 }, late.Pids);
+        Assert.False(late.EndedNormally);
+    }
+
+    [Fact]
+    public void Walk_EachHopGetsTheRemainingTime_NoHopStartsAfterTheLimit()
+    {
+        var clock = new ManualClock();
+        var given = new List<TimeSpan>();
+        int? Lookup(int pid, TimeSpan remaining)
+        {
+            given.Add(remaining);
+            clock.Advance(TimeSpan.FromSeconds(1.2));
+            return pid - 1;
+        }
+
+        // hops start at 0 s, 1.2 s and 2.4 s; at 3.6 s nothing is left, so no fourth hop starts
+        var walk = ProcessAncestry.Walk(100, Lookup, TimeSpan.FromSeconds(3), clock);
+        Assert.Equal(new[] { 99, 98, 97 }, walk.Pids);
+        Assert.False(walk.EndedNormally);
+        Assert.Equal(new[] { TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(1.8), TimeSpan.FromSeconds(0.6) }, given);
+    }
+
+    [Fact]
+    public void PsParentTimed_LastHopGetsTheRemainingTime_NotTheFullSecond()
+    {
+        // ps that answers after 0.9 s each time: hops at 0, 0.9 and 1.8 s get the full second, the hop at 2.7 s gets
+        // the 0.3 s left of the 3 s limit, and none starts at 3.0 s
+        var clock = new ManualClock();
+        var timeouts = new List<TimeSpan>();
+        var lookup = ProcessAncestry.PsParentTimed((pid, timeout) =>
+        {
+            timeouts.Add(timeout);
+            clock.Advance(TimeSpan.FromSeconds(0.9));
+            return (pid - 1).ToString(System.Globalization.CultureInfo.InvariantCulture) + "\n";
+        });
+
+        var walk = ProcessAncestry.Walk(100, lookup, TimeSpan.FromSeconds(3), clock);
+        Assert.Equal(new[] { 99, 98, 97, 96 }, walk.Pids);
+        Assert.False(walk.EndedNormally);
+        Assert.Equal(4, timeouts.Count);
+        Assert.Equal(TimeSpan.FromSeconds(1), timeouts[0]);
+        Assert.Equal(TimeSpan.FromSeconds(1), timeouts[1]);
+        Assert.Equal(TimeSpan.FromSeconds(1), timeouts[2]);
+        Assert.Equal(TimeSpan.FromSeconds(0.3).TotalMilliseconds, timeouts[3].TotalMilliseconds, 3);
+
+        // a failed ps (null, a throw) is a failed read
+        Assert.Null(ProcessAncestry.PsParentTimed((_, _) => null)(99, TimeSpan.FromSeconds(3)));
+        Assert.Null(ProcessAncestry.PsParentTimed((_, _) => throw new IOException("no ps"))(99, TimeSpan.FromSeconds(3)));
+    }
+
+    [Fact]
+    public void CachedAncestry_KeepsOnlyANormallyEndedChain()
+    {
+        var calls = 0;
+        var results = new Queue<AncestryWalk>(new[]
+        {
+            new AncestryWalk(new[] { 5 }, EndedNormally: false),      // ps timed out after the first hop
+            new AncestryWalk(new[] { 5, 4 }, EndedNormally: true),
+            new AncestryWalk(new[] { 9 }, EndedNormally: true),
+        });
+        var cached = new CachedAncestry(() => { calls++; return results.Dequeue(); });
+
+        Assert.Equal(new[] { 5 }, cached.Get());          // returned for this call
+        Assert.Equal(new[] { 5, 4 }, cached.Get());       // not kept: the next call read again
+        Assert.Equal(2, calls);
+        Assert.Equal(new[] { 5, 4 }, cached.Get());       // a normally ended chain is kept
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
+    public void CachedAncestry_NormallyEndedButEmpty_IsNotKept()
+    {
+        var calls = 0;
+        var cached = new CachedAncestry(() => { calls++; return new AncestryWalk(Array.Empty<int>(), EndedNormally: true); });
+        Assert.Empty(cached.Get());
+        Assert.Empty(cached.Get());
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
+    public void CachedAncestry_KeepsNonEmpty_RetriesEmpty()
+    {
+        var calls = 0;
+        var results = new Queue<IReadOnlyList<int>>(new IReadOnlyList<int>[]
+        {
+            Array.Empty<int>(), Array.Empty<int>(), new[] { 5, 4 }, new[] { 9 },
+        });
+        var cached = new CachedAncestry(() => { calls++; return results.Dequeue(); });
+
+        Assert.Empty(cached.Get());
+        Assert.Empty(cached.Get());          // an empty result is not kept: asked again
+        Assert.Equal(2, calls);
+        Assert.Equal(new[] { 5, 4 }, cached.Get());
+        Assert.Equal(new[] { 5, 4 }, cached.Get());   // kept for the life of the process
+        Assert.Equal(3, calls);
+    }
+}

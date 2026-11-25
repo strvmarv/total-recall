@@ -268,7 +268,7 @@ internal sealed class TranscriptIngester
     }
 
     /// <summary>The encoded project directory: the name of the file's parent directory.</summary>
-    private static string ProjectDirName(string path) =>
+    internal static string ProjectDirName(string path) =>
         Path.GetFileName(Path.GetDirectoryName(path) ?? string.Empty) ?? string.Empty;
 
     private static string? IsoOrNull(DateTimeOffset? t) => t is { } v ? TranscriptTime.Iso(v) : null;

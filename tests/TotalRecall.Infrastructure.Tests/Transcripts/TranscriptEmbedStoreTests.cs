@@ -68,6 +68,200 @@ public sealed class TranscriptEmbedStoreTests : IDisposable
         Assert.Equal(new[] { a, excluded }, limited.Select(w => w.Id).ToArray());
     }
 
+    // ---------------- queue: a preferred session ----------------
+
+    private static readonly (string Host, string HostSessionId) Cur = ("pi", "cur");
+
+    /// <summary>Bulk-seeds waiting chunks of a session in one transaction (ids ascend with <paramref name="count"/>).</summary>
+    private void Bulk(long session, int count, int firstExchange = 0)
+    {
+        using var conn = _db.Connect();
+        using var tx = conn.BeginTransaction();
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText =
+            "WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i + 1 < $count) " +
+            "INSERT INTO tx_chunk (session_id, exchange_start, exchange_end, part, chunk_type, redaction_version, content) " +
+            "SELECT $s, $first + i, $first + i, 0, 'dialogue', 1, 'bulk ' || (i + $first) FROM n";
+        cmd.Parameters.AddWithValue("$count", count);
+        cmd.Parameters.AddWithValue("$s", session);
+        cmd.Parameters.AddWithValue("$first", firstExchange);
+        cmd.ExecuteNonQuery();
+        tx.Commit();
+    }
+
+    private List<long> SessionChunkIds(long session)
+    {
+        using var conn = _db.Connect();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT id FROM tx_chunk WHERE session_id = {session} ORDER BY id";
+        using var r = cmd.ExecuteReader();
+        var list = new List<long>();
+        while (r.Read()) list.Add(r.GetInt64(0));
+        return list;
+    }
+
+    [Fact]
+    public void NextEmbedWork_PreferSession_ReturnsItsChunksFirst_ThenTheRest()
+    {
+        var older = _db.AddSession("pi", "older");
+        Bulk(older, 50);
+        var cur = _db.AddSession("pi", "cur");
+        Bulk(cur, 5);
+        var olderIds = SessionChunkIds(older);
+        var curIds = SessionChunkIds(cur);
+
+        var work = Store.NextEmbedWork(8, Array.Empty<long>(), Cur);
+
+        Assert.Equal(curIds.Concat(olderIds.Take(3)).ToArray(), work.Select(w => w.Id).ToArray());
+    }
+
+    [Fact]
+    public void NextEmbedWork_PreferSession_LowerIds_NoChunkTwice()
+    {
+        var cur = _db.AddSession("pi", "cur");
+        Bulk(cur, 5);
+        var older = _db.AddSession("pi", "older");
+        Bulk(older, 50);
+        var curIds = SessionChunkIds(cur);
+        var olderIds = SessionChunkIds(older);
+        Assert.True(curIds.Max() < olderIds.Min());
+
+        var work = Store.NextEmbedWork(8, Array.Empty<long>(), Cur);
+
+        var got = work.Select(w => w.Id).ToArray();
+        Assert.Equal(8, got.Length);
+        Assert.Equal(8, got.Distinct().Count());
+        Assert.Equal(curIds.Concat(olderIds.Take(3)).ToArray(), got);
+    }
+
+    [Fact]
+    public void NextEmbedWork_PreferUnknownSession_IsThePlainRead()
+    {
+        var s = _db.AddSession("pi", "other");
+        Bulk(s, 12);
+
+        var plain = Store.NextEmbedWork(8, Array.Empty<long>());
+        var preferred = Store.NextEmbedWork(8, Array.Empty<long>(), ("pi", "no-such-session"));
+        var otherHost = Store.NextEmbedWork(8, Array.Empty<long>(), ("claude-code", "other"));
+
+        Assert.Equal(8, plain.Count);
+        Assert.Equal(plain.Select(w => w.Id), preferred.Select(w => w.Id));
+        Assert.Equal(plain.Select(w => w.Id), otherHost.Select(w => w.Id));
+    }
+
+    [Fact]
+    public void NextEmbedWork_PreferSession_FewerWaitingThanLimit_AndNothingElse_ReturnsJustThose()
+    {
+        var cur = _db.AddSession("pi", "cur");
+        Bulk(cur, 3);
+
+        var work = Store.NextEmbedWork(8, Array.Empty<long>(), Cur);
+
+        Assert.Equal(SessionChunkIds(cur), work.Select(w => w.Id).ToList());
+    }
+
+    [Fact]
+    public void HasWaitingEmbedWork_TrueOnlyForASessionWithWaitingChunks()
+    {
+        var done = _db.AddSession("pi", "done");
+        var doneChunk = Chunk(done, "x", 0);
+        _db.Exec($"UPDATE tx_chunk SET embedded = 1 WHERE id = {doneChunk}");
+        var waiting = _db.AddSession("pi", "waiting");
+        Chunk(waiting, "y", 0);
+        var gaveUp = _db.AddSession("pi", "gaveup");
+        var gaveUpChunk = Chunk(gaveUp, "z", 0);
+        _db.Exec($"UPDATE tx_chunk SET embed_attempts = 3 WHERE id = {gaveUpChunk}");
+        var retrying = _db.AddSession("pi", "retrying");
+        var retryChunk = Chunk(retrying, "w", 0);
+        _db.Exec($"UPDATE tx_chunk SET embed_attempts = 2 WHERE id = {retryChunk}");
+        _db.AddSession("pi", "empty");
+
+        Assert.False(Store.HasWaitingEmbedWork("pi", "done"));
+        Assert.True(Store.HasWaitingEmbedWork("pi", "waiting"));
+        Assert.False(Store.HasWaitingEmbedWork("pi", "gaveup"));
+        Assert.True(Store.HasWaitingEmbedWork("pi", "retrying"));
+        Assert.False(Store.HasWaitingEmbedWork("pi", "empty"));
+        Assert.False(Store.HasWaitingEmbedWork("pi", "unknown"));
+        Assert.False(Store.HasWaitingEmbedWork("claude-code", "waiting"));
+    }
+
+    [Fact]
+    public void NextEmbedWork_PreferSession_RespectsExcludeAndAttempts()
+    {
+        var cur = _db.AddSession("pi", "cur");
+        var a = Chunk(cur, "a", 0);
+        var b = Chunk(cur, "b", 1);
+        var c = Chunk(cur, "c", 2);
+        var d = Chunk(cur, "d", 3);
+        _db.Exec($"UPDATE tx_chunk SET embed_attempts = 3 WHERE id = {c}");
+        _db.Exec($"UPDATE tx_chunk SET embedded = 1 WHERE id = {d}");
+        var older = _db.AddSession("pi", "older");
+        var o1 = Chunk(older, "o1", 0);
+        var o2 = Chunk(older, "o2", 1);
+        var oGone = Chunk(older, "o3", 2);
+        _db.Exec($"UPDATE tx_chunk SET embed_attempts = 3 WHERE id = {oGone}");
+
+        var work = Store.NextEmbedWork(10, new[] { b, o1 }, Cur);
+
+        // the session's waiting chunks first without the excluded b, the gave-up c and the embedded d; then the rest
+        Assert.Equal(new[] { a, o2 }, work.Select(w => w.Id).ToArray());
+        Assert.Equal(new[] { "a", "o2" }, work.Select(w => w.Content).ToArray());
+        Assert.All(work, w => Assert.True(w.Attempts < 3));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(3)]
+    public void NextEmbedWork_PreferSession_UsesTheSessionIndex(int excludeCount)
+    {
+        var sqls = new[]
+        {
+            TranscriptStore.BuildSessionFirstSql(excludeCount),
+            TranscriptStore.HasWaitingEmbedWorkSql,
+        };
+
+        foreach (var sql in sqls)
+        {
+            using var conn = _db.Connect();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "EXPLAIN QUERY PLAN " + sql;
+            cmd.Parameters.AddWithValue("$host", "pi");
+            cmd.Parameters.AddWithValue("$hid", "cur");
+            cmd.Parameters.AddWithValue("$limit", 8);
+            for (var i = 0; i < excludeCount; i++)
+                cmd.Parameters.AddWithValue("$x" + i, (long)i + 1);
+            var plan = new List<string>();
+            using (var r = cmd.ExecuteReader())
+                while (r.Read()) plan.Add(r.GetString(3));
+
+            var chunkLine = Assert.Single(plan, l => l.Contains("tx_chunk", StringComparison.Ordinal));
+            Assert.Contains("SEARCH", chunkLine);
+            Assert.Contains("USING INDEX", chunkLine);
+            Assert.Contains("session_id=", chunkLine);
+            Assert.DoesNotContain(plan, l => l.Contains("idx_tx_chunk_unembedded", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public void NextEmbedWork_PreferSession_LargeBacklog_StaysFast()
+    {
+        var older = _db.AddSession("pi", "older");
+        Bulk(older, 20_000);
+        var cur = _db.AddSession("pi", "cur");
+        Bulk(cur, 5);
+        var curIds = SessionChunkIds(cur);
+        Store.NextEmbedWork(8, Array.Empty<long>(), Cur); // warm the statement and the page cache
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var work = Store.NextEmbedWork(8, Array.Empty<long>(), Cur);
+        watch.Stop();
+
+        Assert.Equal(curIds, work.Take(5).Select(w => w.Id).ToList());
+        Assert.Equal(8, work.Count);
+        Assert.True(watch.ElapsedMilliseconds < 500, $"took {watch.ElapsedMilliseconds} ms");
+    }
+
     // ---------------- write ----------------
 
     [Fact]

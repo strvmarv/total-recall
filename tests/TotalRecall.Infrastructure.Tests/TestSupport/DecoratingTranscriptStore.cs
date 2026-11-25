@@ -14,7 +14,7 @@ public sealed class DecoratingTranscriptStore : ITranscriptStore
 
     public DecoratingTranscriptStore(ITranscriptStore inner) => _inner = inner;
 
-    public Func<int, IReadOnlyCollection<long>, IReadOnlyList<EmbedChunk>>? OnNextEmbedWork { get; set; }
+    public Func<int, IReadOnlyCollection<long>, (string Host, string HostSessionId)?, IReadOnlyList<EmbedChunk>>? OnNextEmbedWork { get; set; }
     public Func<IReadOnlyList<ChunkEmbedding>, ArchiveFingerprint, EmbedLeaseHolder, DateTimeOffset, EmbedBatchOutcome>? OnStoreEmbeddings { get; set; }
     public Action<EmbedRunRecord>? OnWriteEmbedRun { get; set; }
     public Action<EmbedLeaseHolder>? OnReleaseEmbedLease { get; set; }
@@ -42,8 +42,11 @@ public sealed class DecoratingTranscriptStore : ITranscriptStore
     public IngestOutcome ApplyIngest(SessionIngest ingest) => _inner.ApplyIngest(ingest);
     public bool IsBeforeCutoff(DateTimeOffset timestamp) => _inner.IsBeforeCutoff(timestamp);
 
-    public IReadOnlyList<EmbedChunk> NextEmbedWork(int limit, IReadOnlyCollection<long> exclude) =>
-        OnNextEmbedWork is { } f ? f(limit, exclude) : _inner.NextEmbedWork(limit, exclude);
+    public IReadOnlyList<EmbedChunk> NextEmbedWork(
+        int limit, IReadOnlyCollection<long> exclude, (string Host, string HostSessionId)? preferSession = null) =>
+        OnNextEmbedWork is { } f ? f(limit, exclude, preferSession) : _inner.NextEmbedWork(limit, exclude, preferSession);
+
+    public bool HasWaitingEmbedWork(string host, string hostSessionId) => _inner.HasWaitingEmbedWork(host, hostSessionId);
 
     public EmbedBatchOutcome StoreEmbeddings(
         IReadOnlyList<ChunkEmbedding> batch, ArchiveFingerprint current, EmbedLeaseHolder holder, DateTimeOffset now) =>
