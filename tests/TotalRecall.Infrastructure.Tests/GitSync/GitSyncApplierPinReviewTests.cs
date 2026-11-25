@@ -343,6 +343,28 @@ public sealed class GitSyncApplierPinReviewTests : IDisposable
         Assert.Equal("Pinned text.", r.Entry(Id)!.Row.Content);
     }
 
+    /// <summary>The plan <see cref="ApplyPlanning.PlanStore"/> makes for a merge that takes the record's content group and nothing else.</summary>
+    private static ApplyPlanning.StorePlan TakeTheirsPlan(SyncMerge.LocalEntry local, SyncRecord.SyncRecord record)
+    {
+        var keep = SyncMerge.StampAction.KeepPending;
+        var merged = new SyncMerge.Merged(
+            Tuple.Create(SyncMerge.ContentApply.TakeTheirs, keep),
+            new SyncMerge.TagsOutcome(local.Tags, false, false),
+            Tuple.Create(SyncMerge.StickyApply.LeaveSticky, keep),
+            Tuple.Create<FSharpOption<Tier>, SyncMerge.StampAction>(null!, keep),
+            new SyncMerge.GroupFlags(false, false, false));
+        var keepBase = SyncMerge.BaseChange.KeepBase;
+        var decision = new SyncMerge.MergeDecision(
+            SyncMerge.EntryOutcome.NewMergeGroups(merged),
+            new SyncMerge.BaseUpdate(keepBase, keepBase, keepBase, keepBase),
+            null,
+            Microsoft.FSharp.Collections.FSharpList<SyncMerge.ReviewRequest>.Empty,
+            Microsoft.FSharp.Collections.FSharpList<SyncMerge.MergeNote>.Empty,
+            false,
+            false);
+        return ApplyPlanning.PlanStore(decision, record, local, 0);
+    }
+
     /// <summary>
     /// The entry <see cref="ApplyPlanning.ExpectedEntry"/> predicts for a plan equals the entry the store holds after the
     /// plan is carried out, for every plan shape; an empty project or scope in the record reads back as none.
@@ -351,6 +373,8 @@ public sealed class GitSyncApplierPinReviewTests : IDisposable
     [InlineData("insert")]
     [InlineData("insert-colder")]
     [InlineData("take-theirs")]
+    [InlineData("take-theirs-no-project")]
+    [InlineData("take-theirs-source")]
     [InlineData("adopt")]
     [InlineData("tags")]
     [InlineData("unpin")]
@@ -358,8 +382,13 @@ public sealed class GitSyncApplierPinReviewTests : IDisposable
     [InlineData("delete")]
     public void ExpectedEntry_EqualsTheStoredEntry_ForEveryPlanShape(string shape)
     {
+        // take-theirs: an empty project and scope and no source (the local entry has a source, so it is cleared); -no-project: a
+        // record with none (ClearProject) and no source; -source: a project, a scope and a source tool of the record's
+        var theirsProject = shape switch { "take-theirs-no-project" => null, "take-theirs-source" => "o/r", _ => "" };
+        var theirsScope = shape switch { "take-theirs-no-project" => null, "take-theirs-source" => "s", _ => "" };
         var record = ApplyRig.Rec(
-            Id, "Their text.", tier: Tier.Hot, tags: ["z", "a"], project: "", scope: "", createdAt: 1_710_000_000_000L);
+            Id, "Their text.", tier: Tier.Hot, tags: ["z", "a"], project: theirsProject, scope: theirsScope,
+            source: shape == "take-theirs-source" ? SourceTool.Cursor : null, createdAt: 1_710_000_000_000L);
         SyncMerge.LocalEntry? local = null;
         Tier? current = null;
         if (!shape.StartsWith("insert", StringComparison.Ordinal))
@@ -376,14 +405,7 @@ public sealed class GitSyncApplierPinReviewTests : IDisposable
         {
             "insert" => new ApplyPlanning.StorePlan(true, Tier.Hot, false, null, null, true, false, false),
             "insert-colder" => new ApplyPlanning.StorePlan(true, Tier.Warm, false, null, null, true, true, false),
-            "take-theirs" => new ApplyPlanning.StorePlan(
-                false, null, false,
-                new UpdateEntryOpts
-                {
-                    Content = record.Content, Project = "", ClearProject = false, Scope = "", EntryType = record.EntryType,
-                    SourceTool = null, ClearSourceTool = true, CreatedAt = record.CreatedAtMs,
-                },
-                null, true, false, false),
+            var t when t.StartsWith("take-theirs", StringComparison.Ordinal) => TakeTheirsPlan(local!, record),
             "adopt" => new ApplyPlanning.StorePlan(false, null, false, new UpdateEntryOpts { CreatedAt = 1_720_000_000_000L }, null, false, false, false),
             "tags" => new ApplyPlanning.StorePlan(false, null, false, new UpdateEntryOpts { Tags = ["c", "b", "c"] }, null, false, false, false),
             "unpin" => new ApplyPlanning.StorePlan(false, null, true, null, null, false, false, false),
@@ -413,10 +435,18 @@ public sealed class GitSyncApplierPinReviewTests : IDisposable
             return;
         }
         Assert.Equal(Assert.IsType<LocalRead.Present>(read).View, expected);
-        if (shape.StartsWith("insert", StringComparison.Ordinal) || shape == "take-theirs")
+        if (shape.StartsWith("insert", StringComparison.Ordinal) || shape is "take-theirs" or "take-theirs-no-project")
         {
             Assert.Null(expected!.Content.Project);
             Assert.Null(expected.Content.Scope);
+        }
+        if (shape.StartsWith("take-theirs", StringComparison.Ordinal))
+        {
+            // the paths the hand-built plan used to skip: ClearProject, the set source tool and the cleared one
+            Assert.Equal(shape == "take-theirs-source", plan.Update!.SourceTool is not null);
+            Assert.Equal(shape != "take-theirs-source", plan.Update.ClearSourceTool);
+            Assert.Equal(shape == "take-theirs-no-project", plan.Update.ClearProject);
+            Assert.Equal(shape == "take-theirs-source" ? SourceTool.Cursor : null, expected!.Content.Source?.Value);
         }
     }
 
@@ -589,7 +619,8 @@ public sealed class GitSyncApplierPinReviewTests : IDisposable
         var item = Item("new-pin");
 
         // the same stamps with the pin dropped: the base keeps the pin (the push republishes it)
-        _rig.Apply(ApplyRig.Rec(Id, tier: Tier.Hot, minute: 10, writtenBy: MachineA));
+        // nothing changes (no postponement, no failure): a wrongly deferred entry would not be a no-op
+        Is<EntryResult.NoOp>(_rig.Apply(ApplyRig.Rec(Id, tier: Tier.Hot, minute: 10, writtenBy: MachineA)));
 
         Assert.True(Base().Placement.Sticky);
         Assert.Equal(item, Item("new-pin"));

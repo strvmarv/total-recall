@@ -249,6 +249,32 @@ public sealed class ReviewServicePinTests : IDisposable
         Assert.Equal(before, NonReview());
     }
 
+    /// <summary>
+    /// Review Focus 4 (the commit itself): a freshly made OPEN item answered with a hash that is not its live one goes
+    /// open to <c>unseen</c> with the live hash and the base's machine, and nothing else changes. Unlike a pull that made
+    /// the item unseen already, this can fail if the stale refusal is not committed.
+    /// </summary>
+    [Theory]
+    [InlineData("approve", "new-pin")]
+    [InlineData("approve", "pin-edit")]
+    [InlineData("decline", "new-pin")]
+    [InlineData("decline", "pin-edit")]
+    public async Task AWrongHashOnAnOpenItem_MarksItUnseenWithTheLiveHash_AndNothingElseChanges(string verb, string kind)
+    {
+        var live = Make(kind);
+        var before = NonReview();
+        var open = Item(kind)!;
+        Assert.Equal("open", open.State);
+        Assert.Equal(MachineA, open.Machine);
+
+        var result = await Answer(verb, kind, Shown("A hash that is not this item's."));
+
+        AssertRefused(result, SyncSetup.Refusal.StaleItem);
+        Assert.EndsWith($"now: unseen {kind} {live}", result.RefusalText);
+        Assert.Equal(new PinItem(Id, kind, "unseen", live, MachineA, open.ArrivedAt), Item(kind));
+        Assert.Equal(before, NonReview());
+    }
+
     [Theory]
     [InlineData("approve", null)]
     [InlineData("approve", "")]
@@ -452,6 +478,54 @@ public sealed class ReviewServicePinTests : IDisposable
 
         AssertRefused(await Answer(verb, "pin-edit", shown, service), SyncSetup.Refusal.EditedLocally);
         Assert.Equal(before, _rig.Full());
+    }
+
+    /// <summary>
+    /// D6 order: the state test and the local-edit test come BEFORE the hash test, so a wrong hash does not hide them and
+    /// does not commit the item's update (all rows, the items included, stay as they were).
+    /// </summary>
+    [Theory]
+    [InlineData("approve", "text", false)]
+    [InlineData("approve", "text", true)]
+    [InlineData("approve", "project", false)]
+    [InlineData("approve", "project", true)]
+    [InlineData("decline", "text", false)]
+    [InlineData("decline", "project", true)]
+    public async Task AWrongHashAfterALocalEdit_IsEditedLocally_NotStale_AndNothingIsWritten(string verb, string field, bool scanned)
+    {
+        Make("pin-edit");
+        _rig.Scan.Store.Update(
+            Tier.Hot, ContentType.Memory, Id,
+            field == "text" ? new UpdateEntryOpts { Content = "My own edit." } : new UpdateEntryOpts { Project = "mine" });
+        if (scanned)
+            _rig.RunScan();
+        var before = _rig.Full();
+
+        AssertRefused(await Answer(verb, "pin-edit", Shown("A hash that is not this item's.")), SyncSetup.Refusal.EditedLocally);
+        Assert.Equal(before, _rig.Full());
+        Assert.Equal("open", Item("pin-edit")!.State);
+    }
+
+    [Theory]
+    [InlineData("approve", "new-pin")]
+    [InlineData("approve", "pin-edit")]
+    [InlineData("decline", "new-pin")]
+    [InlineData("decline", "pin-edit")]
+    public async Task AWrongHashWithAStateMismatch_IsStaleItemOfTheNextSync_AndTheItemStaysOpen(string verb, string kind)
+    {
+        Make(kind);
+        if (kind == "new-pin")
+            _rig.Scan.Pin(Id);
+        else
+            _rig.Scan.Store.SetSticky(ContentType.Memory, Id, false);
+        var before = _rig.Full();
+
+        var result = await Answer(verb, kind, Shown("A hash that is not this item's."));
+
+        AssertRefused(result, SyncSetup.Refusal.StaleItem);
+        Assert.Contains("the next sync closes the item", result.RefusalText);
+        Assert.Equal(before, _rig.Full());
+        Assert.Equal("open", Item(kind)!.State);
     }
 
     // ---- unseen, the list ----

@@ -155,6 +155,11 @@ internal static class PinPlanning
         var writes = new List<PinWrite>();
         string? applyBase = null;
         var after = new Dictionary<string, PinItem?>(StringComparer.Ordinal);
+        // Known limitation, accepted: items are reconciled in kind order, so a `new-pin` item of this id is checked against
+        // `stored` BEFORE pin-edit rule 4 (below) applies the held content to the entry. When both kinds exist on one id and
+        // rule 4 fires in the same plan, the new-pin item can be marked unseen with a hash of the pre-apply text. A pull never
+        // leaves both kinds on one id (a new-pin needs the entry unpinned, a pin-edit pinned), and the next pull corrects
+        // the hash, so the case is not planned for.
         foreach (var item in items.OrderBy(i => i.Kind, StringComparer.Ordinal))
         {
             var kind = SyncPin.tryKind(item.Kind) ?? throw new InvalidOperationException("the pin item's kind is not known: " + item.Kind);

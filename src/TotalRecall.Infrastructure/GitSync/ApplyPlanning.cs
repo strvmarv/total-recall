@@ -1,10 +1,10 @@
 using System.Text;
 using Microsoft.Data.Sqlite;
+using Microsoft.FSharp.Collections;
 using Microsoft.FSharp.Core;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Storage;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
-using Microsoft.FSharp.Collections;
 using SyncRecord = TotalRecall.Core.SyncRecord.SyncRecord;
 using SyncRecordModule = TotalRecall.Core.SyncRecord;
 

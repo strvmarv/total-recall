@@ -959,6 +959,28 @@ public sealed class SyncCommandTests : IDisposable
         Assert.Equal("declined", ReviewState(PinA, "pin-edit"));
     }
 
+    /// <summary>
+    /// The spec says the warning is printed before the decline runs: so a decline that is then refused (a wrong hash) shows the
+    /// warning first and the refusal after it. Both streams go to one writer to pin the order.
+    /// </summary>
+    [Fact]
+    public async Task Review_DeclineOfAPinEdit_WithAWrongHash_PrintsTheWarningBeforeTheRefusal()
+    {
+        SeedPins(new Pin(PinA, "pin-edit", "Pinned text here.", HeldText: "Held edit."));
+        var both = new StringWriter();
+        Console.SetOut(both);
+        Console.SetError(both);
+
+        var code = await Run("review", "decline", PinA, "--shown", "deadbeef");
+
+        Assert.Equal(1, code);
+        var lines = both.ToString().Replace("\r\n", "\n").TrimEnd('\n').Split('\n');
+        Assert.Equal($"warning: {Warning}", lines[0]);
+        Assert.StartsWith("refused: stale-item: ", lines[1]);
+        Assert.Equal(2, lines.Length);
+        Assert.Equal("unseen", ReviewState(PinA, "pin-edit")); // only the item moved
+    }
+
     [Fact]
     public async Task Review_ApproveOfAPinEdit_PrintsNoWarning()
     {
@@ -1017,6 +1039,28 @@ public sealed class SyncCommandTests : IDisposable
         Assert.Equal(0, code);
         Assert.Equal([$"accepted {PinA}: the memory was deleted here"], OutLines);
         Assert.Null(ReviewState(PinA, "held-delete")); // a remote hold's answer closes its item
+        Assert.Equal("open", ReviewState(PinA, "new-pin"));
+    }
+
+    /// <summary>
+    /// A LOCAL hold (its hash is not null) beside a pin item of the same id: <c>accept</c> without <c>--shown</c> must pass the
+    /// held deletion's hash, not the pin item's. A remote hold's null hash would hide that mix-up. A local hold has no entry
+    /// here, so the pin item's entry is removed after seeding (a state a pull would close, which is fine for the lookup).
+    /// </summary>
+    [Fact]
+    public async Task Review_Accept_OfAnIdWithAPinItemToo_PassesTheLocalHoldsHash()
+    {
+        SeedPins(new Pin(PinA, "new-pin", "Pin me."));
+        using (var conn = TotalRecall.Infrastructure.Storage.SqliteConnection.Open(ConfigLoader.GetDbPath(), pooling: false))
+            new SqliteStore(conn).Delete(Tier.Warm, ContentType.Memory, PinA);
+        MsSqliteConnection.ClearAllPools();
+        AddReview(PinA, "held-delete", "open", HashA, "local", "{\"cause\":\"guard\"}");
+
+        var code = await Run("review", "accept", PinA);
+
+        Assert.Equal(0, code);
+        Assert.Equal([$"accepted {PinA}: the next sync removes its record from the repository"], OutLines);
+        Assert.Equal("approved", ReviewState(PinA, "held-delete"));
         Assert.Equal("open", ReviewState(PinA, "new-pin"));
     }
 
