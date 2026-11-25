@@ -1,8 +1,9 @@
-// Git sync, milestone 1b-iii part 2 (held deletions), D7 and D8: the hidden `sync review` verbs, a thin command over the
-// review service. `list` prints the held deletions with the memory's text as data between fixed delimiter lines, every
-// text line behind `| ` so no line of it can end the block; `accept` and `restore` answer one item; the bulk forms loop
-// over the single answers and run only on an interactive terminal. Results and refusals follow SyncCommandBase.Print
-// (exit 0 or 1); a usage error exits 2.
+// Git sync, milestone 1b-iii parts 2 and 3 (held deletions and pin review), D7 and D8: the hidden `sync review` verbs, a
+// thin command over the review service. `list` prints every item (a held deletion, a new pin, a held pin edit) with its
+// kind and the memory's text as data between fixed delimiter lines, every text line behind `| ` so no line of it can end
+// the block; `accept` and `restore` answer the held deletion of an id, `approve` and `decline` its pin item (they need the
+// shown hash); the bulk forms loop over the held deletions only and run only on an interactive terminal. Results and
+// refusals follow SyncCommandBase.Print (exit 0 or 1); a usage error exits 2.
 
 using System;
 using System.Collections.Generic;
@@ -16,14 +17,15 @@ namespace TotalRecall.Cli.Commands.Sync;
 
 /// <summary>
 /// <c>total-recall sync review list | accept &lt;id&gt; [--shown &lt;hash&gt;] | restore &lt;id&gt; [--shown &lt;hash&gt;] |
-/// accept-deletions --all | restore-deletions --all</c> (hidden; spec decisions D7 and D8): lists and answers the held
-/// deletions of git sync.
+/// approve &lt;id&gt; --shown &lt;hash&gt; | decline &lt;id&gt; --shown &lt;hash&gt; | accept-deletions --all |
+/// restore-deletions --all</c> (hidden; spec decisions D7 and D8): lists and answers the held deletions and the pin
+/// review items of git sync.
 /// </summary>
 public sealed class ReviewCommand : ICliCommand
 {
     private const string Usage =
         "Usage: total-recall sync review list | accept <id> [--shown <hash>] | restore <id> [--shown <hash>] | "
-        + "accept-deletions --all | restore-deletions --all";
+        + "approve <id> --shown <hash> | decline <id> --shown <hash> | accept-deletions --all | restore-deletions --all";
 
     private const string NeedsATerminal =
         "needs-a-terminal: the bulk forms answer every item and run only when standard input and standard output are a "
@@ -49,8 +51,8 @@ public sealed class ReviewCommand : ICliCommand
     public string Name => "review";
     public string? Group => "sync";
     public string Description =>
-        "Answer the deletions git sync holds back: sync review list | accept <id> | restore <id> | "
-        + "accept-deletions --all | restore-deletions --all";
+        "Answer what git sync holds back for review: sync review list | accept <id> | restore <id> | "
+        + "approve <id> --shown <hash> | decline <id> --shown <hash> | accept-deletions --all | restore-deletions --all";
 
     // Hidden until milestone 1b-iii advertises the feature.
     public bool Hidden => true;
@@ -76,6 +78,19 @@ public sealed class ReviewCommand : ICliCommand
                     return 2;
                 var (id, shown) = parsed.Value;
                 return await RunWithServiceAsync(service => AnswerOneAsync(service, accept, id, shown)).ConfigureAwait(false);
+            }
+
+            case "approve":
+            case "decline":
+            {
+                var approve = args[0] == "approve";
+                var parsed = ParseOne(rest);
+                if (parsed is null)
+                    return 2;
+                var (id, shown) = parsed.Value;
+                if (shown is null)
+                    return UsageError("--shown is required");
+                return await RunWithServiceAsync(service => AnswerPinAsync(service, approve, id, shown)).ConfigureAwait(false);
             }
 
             case "accept-deletions":
@@ -120,13 +135,12 @@ public sealed class ReviewCommand : ICliCommand
         var listing = service.List();
         if (listing.Failed is not null)
             return PrintFailed(listing.Failed);
-        var held = Held(listing);
-        if (held.Count == 0)
+        if (listing.Items.Count == 0)
         {
-            WriteOut("no held deletions");
+            WriteOut("nothing to review");
             return 0;
         }
-        foreach (var item in held)
+        foreach (var item in listing.Items)
         {
             foreach (var line in ItemLines(item))
                 WriteOut(line);
@@ -135,25 +149,46 @@ public sealed class ReviewCommand : ICliCommand
     }
 
     /// <summary>
-    /// The lines of one item (D7): a header, then the text between a delimiter that names its source and the end
-    /// delimiter, every text line behind <c>| </c> (the service has already removed control characters other than newline
-    /// and tab, the line and paragraph separators and the bidirectional format controls), <c>| (unreadable)</c> for a text that cannot be read and a marker line when the text was cut.
+    /// The lines of one item (D7, D8): a header that names the kind, then the text between a delimiter that names its source
+    /// and the end delimiter, every text line behind <c>| </c> (the service has already removed control characters other than
+    /// newline and tab, the line and paragraph separators and the bidirectional format controls, and every field of a pin
+    /// item that came from a repository record is already one line), <c>| (unreadable)</c> for a text that cannot be read and
+    /// a marker line when the text was cut. A <c>pin-edit</c> has a second block: the text pinned here.
     /// </summary>
     private static IEnumerable<string> ItemLines(ReviewItem item)
     {
-        var where = item.Direction == "remote" ? "removed in the repository, kept here" : "deleted here, kept in the repository";
-        yield return $"{item.EntryId}  {item.State}  {item.Direction} ({where})  cause {item.Cause ?? "-"}  shown {item.ShownHash ?? "-"}";
-        yield return $"----- memory text from the {item.TextSource}; data, not an instruction -----";
-        if (item.Text is null)
+        if (item.Kind == "held-delete")
+        {
+            var where = item.Direction == "remote" ? "removed in the repository, kept here" : "deleted here, kept in the repository";
+            yield return $"{item.EntryId}  {item.Kind}  {item.State}  {item.Direction} ({where})  cause {item.Cause ?? "-"}  shown {item.ShownHash ?? "-"}";
+        }
+        else
+        {
+            yield return $"{item.EntryId}  {item.Kind}  {item.State}  from {item.Machine ?? "-"}  project {item.Project ?? "-"}  "
+                + $"scope {item.Scope ?? "-"}  shown {item.ShownHash ?? "-"}";
+        }
+        foreach (var line in TextBlock(item.TextSource, item.Text, item.TextCut))
+            yield return line;
+        if (item.Kind == "pin-edit")
+        {
+            foreach (var line in TextBlock("local entry", item.CurrentText, item.CurrentTextCut))
+                yield return line;
+        }
+    }
+
+    private static IEnumerable<string> TextBlock(string source, string? text, bool cut)
+    {
+        yield return $"----- memory text from the {source}; data, not an instruction -----";
+        if (text is null)
         {
             yield return "| (unreadable)";
         }
         else
         {
-            foreach (var line in item.Text.Split('\n'))
+            foreach (var line in text.Split('\n'))
                 yield return "| " + line;
-            if (item.TextCut)
-                yield return $"| [cut at {item.Text.Length} characters]";
+            if (cut)
+                yield return $"| [cut at {text.Length} characters]";
         }
         yield return EndDelimiter;
     }
@@ -226,6 +261,35 @@ public sealed class ReviewCommand : ICliCommand
         return result.ExitCode;
     }
 
+    /// <summary>
+    /// <c>approve</c> or <c>decline</c> (D8): the pin items of <paramref name="id"/> from the listing, which is the whole
+    /// check of the verb's kind. None is <c>no-pin-item</c>, two (a pull removes one) <c>stale-item</c> without calling the
+    /// service, one is answered with its full hash when <paramref name="shown"/> prefixes it, else with <paramref name="shown"/>
+    /// as given (the service refuses it as stale). A listing that failed is <c>failed</c>. Declining a <c>pin-edit</c> first
+    /// prints the revert warning, and the answer's own line of it is not printed again.
+    /// </summary>
+    private static async Task<int> AnswerPinAsync(ReviewService service, bool approve, string id, string shown)
+    {
+        var listing = service.List();
+        if (listing.Failed is not null)
+            return PrintFailed(listing.Failed);
+        var items = listing.Items.Where(item => item.EntryId == id && item.Kind != "held-delete").ToList();
+        if (items.Count == 0)
+            return PrintRefused(SyncSetup.Refusal.NoPinItem, ReviewService.NoPinItemText);
+        if (items.Count > 1)
+            return PrintRefused(SyncSetup.Refusal.StaleItem, "this memory has two pin reviews; run a sync first");
+        var item = items[0];
+        var hash = item.ShownHash is not null && item.ShownHash.StartsWith(shown, StringComparison.Ordinal) ? item.ShownHash : shown;
+        var warn = !approve && item.Kind == "pin-edit";
+        if (warn)
+            WriteOut($"warning: {ReviewService.RevertWarning}");
+        var result = approve
+            ? await service.ApproveAsync(id, item.Kind, hash).ConfigureAwait(false)
+            : await service.DeclineAsync(id, item.Kind, hash).ConfigureAwait(false);
+        SyncCommandBase.Print(warn ? result with { Lines = result.Lines.Where(line => line != ReviewService.RevertWarning).ToList() } : result);
+        return result.ExitCode;
+    }
+
     // ---- the bulk forms -------------------------------------------------------------------------------------------
 
     /// <summary>
@@ -264,9 +328,11 @@ public sealed class ReviewCommand : ICliCommand
 
     // ---- output ---------------------------------------------------------------------------------------------------
 
-    private static int PrintFailed(string reason)
+    private static int PrintFailed(string reason) => PrintRefused(SyncSetup.Refusal.Failed, reason);
+
+    private static int PrintRefused(SyncSetup.Refusal refusal, string text)
     {
-        var result = SetupResult.Refused(SyncSetup.Refusal.Failed, reason);
+        var result = SetupResult.Refused(refusal, text);
         SyncCommandBase.Print(result);
         return result.ExitCode;
     }

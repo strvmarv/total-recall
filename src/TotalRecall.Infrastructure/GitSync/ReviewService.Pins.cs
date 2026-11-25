@@ -26,8 +26,8 @@ public sealed partial class ReviewService
     private const string NewPinKind = "new-pin";
     private const string PinEditKind = "pin-edit";
 
-    /// <summary>The line a declined <c>pin-edit</c> carries (D7).</summary>
-    private const string RevertWarning =
+    /// <summary>The line a declined <c>pin-edit</c> carries (D7); the CLI prints it, as a warning, before it runs the answer.</summary>
+    public const string RevertWarning =
         "this replaces that change in the repository and on your other machines where the memory is not pinned; "
         + "where it is pinned it is held there as an edit";
 
