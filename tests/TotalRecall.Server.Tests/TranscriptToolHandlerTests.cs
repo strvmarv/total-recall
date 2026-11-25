@@ -105,6 +105,9 @@ public sealed class TranscriptToolHandlerTests
         Assert.Contains("`session`", d);
         Assert.Contains("`project`", d);
         Assert.Contains("everything", d);
+        Assert.Contains("the current project", d);
+        Assert.Contains("`currentSession`", d);
+        Assert.Contains("`syncNote`", d);
         Assert.DoesNotContain("not available", d);
     }
 
@@ -133,14 +136,18 @@ public sealed class TranscriptToolHandlerTests
         Assert.Equal(new[] { "session", "project", "all" }.OrderBy(x => x),
             Prop(h, "scope").GetProperty("enum").EnumerateArray().Select(e => e.GetString()!).OrderBy(x => x));
         Assert.False(Prop(h, "scope").TryGetProperty("default", out _));
-        foreach (var p in new[] { "scope", "project" })
-        {
-            var desc = Prop(h, p).GetProperty("description").GetString()!;
-            Assert.DoesNotContain("current project", desc);
-            Assert.DoesNotContain("(default)", desc);
-        }
-        Assert.Contains("when omitted", Prop(h, "scope").GetProperty("description").GetString());
-        Assert.Contains("without `scope`", Prop(h, "project").GetProperty("description").GetString());
+        // The defaults of spec 2026-11-24 section 4: the current project (from the session's marker) when nothing names
+        // a scope, and the current project or session for a scope asked without its argument.
+        var scopeDesc = Prop(h, "scope").GetProperty("description").GetString()!;
+        Assert.Contains("when omitted", scopeDesc);
+        Assert.Contains("else the current project when the current session is known from its marker, else all", scopeDesc);
+        Assert.Contains("project without a `project` argument means the current project", scopeDesc);
+        Assert.Contains("session without a `session` argument the current session", scopeDesc);
+        var projectDesc = Prop(h, "project").GetProperty("description").GetString()!;
+        Assert.Contains("without `scope` it selects project scope", projectDesc);
+        Assert.Contains("when omitted, the current project is searched if the current session is known from its marker", projectDesc);
+        Assert.DoesNotContain("(default)", scopeDesc);
+        Assert.DoesNotContain("(default)", projectDesc);
         AssertType(h, "project", "string");
         AssertType(h, "session", "string");
         AssertType(h, "since", "string");
@@ -256,14 +263,19 @@ public sealed class TranscriptToolHandlerTests
                    "UPDATE tx_chunk SET embedded = 1 WHERE id = $r; SELECT 0;", ("$r", VectorChunk), ("$s", s), ("$e", bytes));
         }
 
-        public TranscriptSearchService Service(IEmbedder embedder) => new(() => new TranscriptSearchContext(
-            new TranscriptLocation(File, IsMainDatabase: false),
-            new TranscriptsSettings(true, string.Empty, null, 0, false),
-            "sqlite",
-            new Core.Config.EmbeddingConfig("bge-small-en-v1.5", 384,
-                FSharpOption<string>.None, FSharpOption<string>.None, FSharpOption<string>.None, FSharpOption<string>.None,
-                FSharpOption<string>.None, FSharpOption<string>.None, FSharpOption<string>.None, FSharpOption<string>.None),
-            embedder));
+        public static Core.Config.EmbeddingConfig LocalEmbedding { get; } = new("bge-small-en-v1.5", 384,
+            FSharpOption<string>.None, FSharpOption<string>.None, FSharpOption<string>.None, FSharpOption<string>.None,
+            FSharpOption<string>.None, FSharpOption<string>.None, FSharpOption<string>.None, FSharpOption<string>.None);
+
+        public static TranscriptsSettings Settings { get; } = new(true, string.Empty, null, 0, false);
+
+        /// <summary>The search over this archive; <paramref name="onContext"/> runs when the service reads its context.</summary>
+        public TranscriptSearchService Service(IEmbedder embedder, Action? onContext = null) => new(() =>
+        {
+            onContext?.Invoke();
+            return new TranscriptSearchContext(
+                new TranscriptLocation(File, IsMainDatabase: false), Settings, "sqlite", LocalEmbedding, embedder);
+        });
 
         public void Dispose()
         {
@@ -279,10 +291,192 @@ public sealed class TranscriptToolHandlerTests
     {
         using var a = new Archive();
         var embedder = new FixedEmbedder();
-        var json = await Call(new TranscriptSearchHandler(() => false, a.Service(embedder)));
+        var sync = new UntouchableSync();
+        var json = await Call(new TranscriptSearchHandler(() => false, a.Service(embedder), sync,
+            () => throw new InvalidOperationException("no embed plan while off")));
         Assert.False(json.GetProperty("enabled").GetBoolean());
         Assert.Equal(OffText, json.GetProperty("hint").GetString());
         Assert.Empty(embedder.Calls);
+        Assert.Equal(0, sync.Calls);
+    }
+
+    // ---- the sync before a read (spec 2026-11-24, section 3) ----
+
+    private static SyncEmbedPlan Plan(IEmbedder embedder) =>
+        new(embedder, Archive.Settings, "sqlite", Archive.LocalEmbedding, () => false);
+
+    private const string IncompleteNote = "the newest text of the current session may be missing: the catch-up ran out of time";
+    private const string FailedNote = "the newest text of the current session may be missing: the catch-up failed";
+
+    private static CurrentSession MarkerSession(string id = "abc") =>
+        new(CurrentKind.Marker, "claude-code", id, "/tmp/projects/x/" + id + ".jsonl", "/tmp/x");
+
+    private static async Task<JsonElement> SearchJson(IToolHandler h, string args, CancellationToken ct = default)
+    {
+        var r = await h.ExecuteAsync(Args(args), ct);
+        Assert.NotEqual(true, r.IsError);
+        return JsonDocument.Parse(Assert.Single(r.Content).Text).RootElement.Clone();
+    }
+
+    [Theory, MemberData(nameof(Names))]
+    public async Task Off_NoSyncCalled_NoMarkerRead(string name)
+    {
+        using var a = new Archive();
+        var untouchable = new UntouchableSync();
+        var ancestors = 0;
+        var adapters = 0;
+        var real = new TranscriptSyncService(
+            () => throw new InvalidOperationException("no context while off"),
+            new TranscriptSyncOptions(
+                Ancestors: () => { Interlocked.Increment(ref ancestors); return new[] { 4242 }; },
+                Adapters: () => { Interlocked.Increment(ref adapters); return Array.Empty<ITranscriptAdapter>(); },
+                DataDir: a.Dir));
+        var plans = 0;
+        Func<SyncEmbedPlan?> plan = () => { plans++; return Plan(new FixedEmbedder()); };
+        var reads = new TranscriptReadService(() => new TranscriptReadContext(new TranscriptLocation(a.File, IsMainDatabase: false)));
+
+        foreach (ITranscriptSync sync in new ITranscriptSync[] { untouchable, real })
+        {
+            IToolHandler h = name switch
+            {
+                "transcript_search" => new TranscriptSearchHandler(() => false, a.Service(new FixedEmbedder()), sync, plan),
+                "transcript_get" => new TranscriptGetHandler(() => false, reads, sync),
+                _ => new TranscriptSessionsHandler(() => false, reads, sync),
+            };
+            var args = name == "transcript_search" ? "{\"query\":\"x\"}" : "{}";
+            var json = await SearchJson(h, args);
+            Assert.False(json.GetProperty("enabled").GetBoolean());
+            Assert.Equal(OffText, json.GetProperty("hint").GetString());
+        }
+
+        Assert.Equal(0, untouchable.Calls);
+        Assert.Equal(0, ancestors);
+        Assert.Equal(0, adapters);
+        Assert.Equal(0, plans);
+    }
+
+    [Fact]
+    public async Task Search_CallsSyncAfterValidation_AndBeforeTheService()
+    {
+        using var a = new Archive();
+        var order = new List<string>();
+        var sync = new RecordingSync { OnCall = _ => order.Add("sync") };
+        var embedder = new FixedEmbedder();
+        var plan = Plan(embedder);
+        var plans = 0;
+        var h = new TranscriptSearchHandler(() => true, a.Service(embedder, () => order.Add("service")), sync,
+            () => { plans++; return plan; });
+
+        // Argument errors (an unknown scope, a malformed session, and the rest of the handler's parsing) sync nothing.
+        foreach (var bad in new[]
+                 {
+                     "{\"query\":\"x\",\"scope\":\"everything\"}",
+                     "{\"query\":\"x\",\"scope\":\"\"}",
+                     "{\"query\":\"x\",\"session\":\"nocolon\"}",
+                     "{\"query\":\"x\",\"since\":\"yesterday\"}",
+                     "{\"query\":\"x\",\"top_k\":0}",
+                     "{\"query\":\"\"}",
+                 })
+        {
+            await Assert.ThrowsAnyAsync<ArgumentException>(() => h.ExecuteAsync(Args(bad), CancellationToken.None));
+        }
+        Assert.Empty(sync.Plans);
+        Assert.Empty(order);
+        Assert.Equal(0, plans);
+
+        // A valid call syncs once, with the search's embed plan, and only then searches.
+        var json = await SearchJson(h, "{\"query\":\"SQLITE_BUSY: database is locked\",\"session\":\"claude-code:abc\"}");
+        Assert.Equal(2, json.GetProperty("results").GetArrayLength());
+        Assert.Same(plan, Assert.Single(sync.Plans));
+        Assert.Equal(1, plans);
+        Assert.Equal(new[] { "sync", "service" }, order);
+    }
+
+    [Fact]
+    public async Task Search_SyncThrowing_StillAnswers_AndSaysTheTextMayBeMissing()
+    {
+        using var a = new Archive();
+        const string args = "{\"query\":\"SQLITE_BUSY: database is locked\",\"session\":\"claude-code:abc\"}";
+
+        void AssertMapped(JsonElement json)
+        {
+            Assert.True(json.GetProperty("enabled").GetBoolean());
+            Assert.Equal(2, json.GetProperty("results").GetArrayLength());
+            Assert.Equal("none", json.GetProperty("currentSession").GetString());
+            Assert.False(json.TryGetProperty("currentSessionRef", out _));
+            Assert.Equal(FailedNote, json.GetProperty("syncNote").GetString());
+        }
+
+        // A sync that throws (despite its contract), one that is cancelled by something other than this call, and an
+        // embed plan that cannot be built: each is logged, and the search answers without the current session.
+        var throwing = new RecordingSync { OnCall = _ => throw new InvalidOperationException("boom") };
+        AssertMapped(await SearchJson(new TranscriptSearchHandler(() => true, a.Service(new FixedEmbedder()), throwing, () => null), args));
+        Assert.Single(throwing.Plans);
+
+        var otherCancel = new RecordingSync { OnCall = _ => throw new OperationCanceledException() };
+        AssertMapped(await SearchJson(new TranscriptSearchHandler(() => true, a.Service(new FixedEmbedder()), otherCancel, () => null), args));
+
+        var noPlan = new RecordingSync();
+        AssertMapped(await SearchJson(new TranscriptSearchHandler(() => true, a.Service(new FixedEmbedder()), noPlan,
+            () => throw new InvalidOperationException("settings unreadable")), args));
+        Assert.Empty(noPlan.Plans);
+
+        // The call's own cancellation is not swallowed.
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var cancelled = new RecordingSync { OnCall = ct => ct.ThrowIfCancellationRequested() };
+        var serviceRead = false;
+        var h = new TranscriptSearchHandler(() => true, a.Service(new FixedEmbedder(), () => serviceRead = true), cancelled, () => null);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => h.ExecuteAsync(Args(args), cts.Token));
+        Assert.False(serviceRead);
+    }
+
+    [Fact]
+    public async Task Search_Answer_HasCurrentSessionFields_AndSyncNoteOnlyWhenIncomplete()
+    {
+        using var a = new Archive();
+        var sync = new RecordingSync();
+        var h = new TranscriptSearchHandler(() => true, a.Service(new FixedEmbedder()), sync, () => null);
+        const string noScope = "{\"query\":\"SQLITE_BUSY: database is locked\"}";
+
+        // A marker, complete: the current project is the default scope; no syncNote.
+        sync.Answer = new SyncResult(MarkerSession(), true, null, "owner/repo");
+        var marker = await SearchJson(h, noScope);
+        Assert.Equal("marker", marker.GetProperty("currentSession").GetString());
+        Assert.Equal("claude-code:abc", marker.GetProperty("currentSessionRef").GetString());
+        Assert.False(marker.TryGetProperty("syncNote", out _));
+        Assert.Equal("project", marker.GetProperty("scope").GetString());
+        Assert.Equal("defaulted to the current project (owner/repo)", marker.GetProperty("scopeNote").GetString());
+        Assert.Equal(2, marker.GetProperty("results").GetArrayLength());
+
+        // A marker, incomplete: the note is passed through.
+        sync.Answer = new SyncResult(MarkerSession(), false, IncompleteNote, "owner/repo");
+        var late = await SearchJson(h, noScope);
+        Assert.Equal("marker", late.GetProperty("currentSession").GetString());
+        Assert.Equal(IncompleteNote, late.GetProperty("syncNote").GetString());
+
+        // A marker for scope session without a session argument: the marker's session.
+        sync.Answer = new SyncResult(MarkerSession(), true, null, "owner/repo");
+        var own = await SearchJson(h, "{\"query\":\"SQLITE_BUSY: database is locked\",\"scope\":\"session\"}");
+        Assert.Equal("session", own.GetProperty("scope").GetString());
+
+        // A guess never chooses the scope, but is reported.
+        sync.Answer = new SyncResult(new CurrentSession(CurrentKind.Guessed, "claude-code", "abc", "/p/abc.jsonl", null), true, null, null);
+        var guessed = await SearchJson(h, noScope);
+        Assert.Equal("guessed", guessed.GetProperty("currentSession").GetString());
+        Assert.Equal("claude-code:abc", guessed.GetProperty("currentSessionRef").GetString());
+        Assert.Equal("all", guessed.GetProperty("scope").GetString());
+        Assert.False(guessed.TryGetProperty("syncNote", out _));
+
+        // None: no ref, no note.
+        sync.Answer = new SyncResult(CurrentSession.None, true, null, null);
+        var none = await SearchJson(h, noScope);
+        Assert.Equal("none", none.GetProperty("currentSession").GetString());
+        Assert.False(none.TryGetProperty("currentSessionRef", out _));
+        Assert.False(none.TryGetProperty("syncNote", out _));
+        Assert.Equal("all", none.GetProperty("scope").GetString());
+
+        Assert.Equal(5, sync.Plans.Count);
     }
 
     [Fact]

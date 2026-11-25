@@ -6,6 +6,7 @@
 namespace TotalRecall.Server.Tests;
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -358,8 +359,9 @@ public sealed class TranscriptReadHandlerTests : IDisposable
     [Fact]
     public async Task Off_BothTools_AnswerOffText_AndOpenNoFile()
     {
-        var get = new TranscriptGetHandler(() => false, Service());
-        var sessions = new TranscriptSessionsHandler(() => false, Service());
+        var sync = new UntouchableSync();
+        var get = new TranscriptGetHandler(() => false, Service(), sync);
+        var sessions = new TranscriptSessionsHandler(() => false, Service(), sync);
         foreach (var (h, args) in new (IToolHandler, string?)[]
                  { (get, "{\"id\":1}"), (get, null), (sessions, null), (sessions, "{\"limit\":0}") })
         {
@@ -369,6 +371,57 @@ public sealed class TranscriptReadHandlerTests : IDisposable
             Assert.Equal(OffText, json.GetProperty("hint").GetString());
         }
         Assert.False(System.IO.File.Exists(File));
+        Assert.Equal(0, sync.Calls);
+    }
+
+    // ---- the sync before a read (spec 2026-11-24, section 3) ----
+
+    [Fact]
+    public async Task Get_And_Sessions_SyncWithoutAnEmbedPlan()
+    {
+        SeedSmall();
+        var order = new List<string>();
+        var sync = new RecordingSync
+        {
+            OnCall = _ => order.Add("sync"),
+            // What the sync found is not reported by these two tools.
+            Answer = new SyncResult(new CurrentSession(CurrentKind.Marker, "claude-code", "s1", "/p/s1.jsonl", "/p"), false,
+                "the newest text of the current session may be missing: the catch-up ran out of time", "owner/repo"),
+        };
+        var service = new TranscriptReadService(() => { order.Add("service"); return new TranscriptReadContext(Location); });
+        var get = new TranscriptGetHandler(() => true, service, sync);
+        var sessions = new TranscriptSessionsHandler(() => true, service, sync);
+
+        var read = await Data(get, $"{{\"id\":{ChunkId(1)}}}");
+        Assert.Equal(3, read.GetProperty("exchanges").GetArrayLength());
+        var list = await Data(sessions, null);
+        Assert.Equal(2, list.GetProperty("total").GetInt64());
+        foreach (var json in new[] { read, list })
+        {
+            Assert.False(json.TryGetProperty("currentSession", out _));
+            Assert.False(json.TryGetProperty("syncNote", out _));
+        }
+        Assert.Equal(new SyncEmbedPlan?[] { null, null }, sync.Plans.ToArray());
+        Assert.Equal(new[] { "sync", "service", "sync", "service" }, order);
+
+        // An argument error syncs nothing.
+        await ArgumentError(get, "{\"id\":0}");
+        await ArgumentError(sessions, "{\"limit\":0}");
+        Assert.Equal(2, sync.Plans.Count);
+
+        // A sync that throws is logged and the read goes on; the call's own cancellation is not swallowed.
+        var throwing = new RecordingSync { OnCall = _ => throw new InvalidOperationException("boom") };
+        Assert.Equal(3, (await Data(new TranscriptGetHandler(() => true, Service(), throwing), $"{{\"id\":{ChunkId(1)}}}"))
+            .GetProperty("exchanges").GetArrayLength());
+        Assert.Equal(2, (await Data(new TranscriptSessionsHandler(() => true, Service(), throwing), null)).GetProperty("total").GetInt64());
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var cancelled = new RecordingSync { OnCall = ct => ct.ThrowIfCancellationRequested() };
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => new TranscriptGetHandler(() => true, Service(), cancelled).ExecuteAsync(Args($"{{\"id\":{ChunkId(1)}}}"), cts.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => new TranscriptSessionsHandler(() => true, Service(), cancelled).ExecuteAsync(null, cts.Token));
     }
 
     [Fact]

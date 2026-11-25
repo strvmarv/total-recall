@@ -7,7 +7,9 @@
 // "Invalid arguments: ..."), the service opens the archive for the call and closes it, an unknown target or an archive
 // that cannot be read is an error result, and the answer is serialised through the source-generated JsonContext. The
 // two alternatives are described in the text, not expressed with oneOf, so every client accepts the schema.
-// Registered only by OpenSqlite and OpenCortexCore.
+// Between the parsing and the read, the sync brings the current session's new tail in (no embed step; spec
+// 2026-11-24, section 3; TranscriptSyncCall); the answer does not report it. Registered only by OpenSqlite and
+// OpenCortexCore.
 
 using System;
 using System.Text.Json;
@@ -35,13 +37,16 @@ public sealed class TranscriptGetHandler : IToolHandler
 
     private readonly Func<bool> _isActive;
     private readonly TranscriptReadService? _service;
+    private readonly ITranscriptSync? _sync;
 
     /// <param name="isActive">Reads whether the archive is on; evaluated on every call.</param>
     /// <param name="service">The reads; null answers "not set up" while the archive is on.</param>
-    public TranscriptGetHandler(Func<bool> isActive, TranscriptReadService? service = null)
+    /// <param name="sync">The sync-on-read (no embed plan); null syncs nothing.</param>
+    public TranscriptGetHandler(Func<bool> isActive, TranscriptReadService? service = null, ITranscriptSync? sync = null)
     {
         _isActive = isActive ?? throw new ArgumentNullException(nameof(isActive));
         _service = service;
+        _sync = sync;
     }
 
     public string Name => "transcript_get";
@@ -62,6 +67,7 @@ public sealed class TranscriptGetHandler : IToolHandler
             return TranscriptToolAnswers.ForNotSetUp(active);
 
         var request = ParseArguments(arguments);
+        TranscriptSyncCall.Run(_sync, null, Name, ct); // the tail is brought in; the answer does not report it
         var response = _service.Get(request, ct);
         if (response.Error is not null)
             return TranscriptToolAnswers.Text(response.Error, isError: true);
