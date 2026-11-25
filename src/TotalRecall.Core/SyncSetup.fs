@@ -48,7 +48,7 @@ type Refusal =
     | ShownHashRequired
     /// `sync review` (#163): the entry has no pin item (a `new-pin` or `pin-edit`) to answer.
     | NoPinItem
-    /// Approving a new pin: pinning it would take the pinned memories over the pin cap.
+    /// Approving a pin item: the text to pin is longer than the per-text pinned limit (`tiers.pinned.max_content_chars`).
     | OverPinCap
     /// A pin item whose text cannot be shown (it does not survive sanitising unchanged).
     | UnshowableText

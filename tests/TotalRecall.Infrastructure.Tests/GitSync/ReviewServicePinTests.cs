@@ -704,6 +704,64 @@ public sealed class ReviewServicePinTests : IDisposable
         Assert.Null(GitSyncReviews.ReadHeldItem(_rig.Scan.Connection, Id));
     }
 
+    // ---- a held record whose project or scope is "" (the base's shown hash reads as the store reads it back) ----
+
+    /// <summary>A synced memory pinned here (project and scope none), then a newer record with <paramref name="field"/> <c>""</c>.</summary>
+    private SyncRecord.SyncRecord HeldWithEmpty(string field, string text)
+    {
+        Is<EntryResult.Carried>(_rig.Apply(ApplyRig.Rec(Id, "Pinned text.", minute: 10)));
+        _rig.Scan.Store.Move(Tier.Warm, ContentType.Memory, Tier.Hot, ContentType.Memory, Id);
+        _rig.Scan.Pin(Id);
+        _rig.RunScan();
+        var record = ApplyRig.Rec(
+            Id, text, tier: Tier.Hot, project: field == "project" ? "" : null, scope: field == "scope" ? "" : null,
+            minute: 20, stickyMinute: 10, writtenBy: MachineA);
+        Is<EntryResult.Carried>(_rig.Apply(record));
+        Assert.Equal("open", Item("pin-edit")!.State);
+        Assert.Equal("Pinned text.", _rig.Entry(Id)!.Row.Content);
+        return record;
+    }
+
+    [Theory]
+    [InlineData("project")]
+    [InlineData("scope")]
+    public async Task AHeldRecordWithAnEmptyProjectOrScopeAndTheSameText_IsRemovedByTheNextPullAfterApproval(string field)
+    {
+        var record = HeldWithEmpty(field, "Pinned text.");
+        var shown = Shown("Pinned text.");   // "" reads back as none
+        Assert.Equal(shown, Item("pin-edit")!.RecordHash);
+
+        var result = await Service().ApproveAsync(Id, "pin-edit", shown);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal("approved", Item("pin-edit")!.State);
+        Is<EntryResult.Carried>(_rig.Apply(record));   // pin-edit rule 2: the entry shows what the base shows
+        Assert.Null(Item("pin-edit"));
+        Is<EntryResult.NoOp>(_rig.Apply(record));
+        Assert.Null(Item("pin-edit"));
+    }
+
+    [Theory]
+    [InlineData("project")]
+    [InlineData("scope")]
+    public async Task AHeldRecordWithAnEmptyProjectOrScope_ShowsOneHashInTheItemTheListAndTheStaleCheck(string field)
+    {
+        var record = HeldWithEmpty(field, "A remote edit, held.");
+        var shown = Shown("A remote edit, held.");   // "" reads back as none
+
+        Assert.Equal(shown, Item("pin-edit")!.RecordHash);
+        var listed = Assert.Single(Service().List().Items);
+        Assert.Equal(shown, listed.ShownHash);
+
+        var result = await Service().ApproveAsync(Id, "pin-edit", listed.ShownHash);   // not stale-item: the live hash agrees
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal("A remote edit, held.", _rig.Entry(Id)!.Row.Content);
+        Is<EntryResult.Carried>(_rig.Apply(record));
+        Assert.Null(Item("pin-edit"));
+        Is<EntryResult.NoOp>(_rig.Apply(record));
+    }
+
     [Fact]
     public async Task AMissingDatabase_IsNoPinItem()
     {

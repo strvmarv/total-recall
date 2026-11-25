@@ -7,6 +7,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -153,7 +154,7 @@ public sealed class ReviewCommand : ICliCommand
     /// and the end delimiter, every text line behind <c>| </c> (the service has already removed control characters other than
     /// newline and tab, the line and paragraph separators and the bidirectional format controls, and every field of a pin
     /// item that came from a repository record is already one line), <c>| (unreadable)</c> for a text that cannot be read and
-    /// a marker line when the text was cut. A <c>pin-edit</c> has a second block: the text pinned here.
+    /// a marker line when the text was cut. A pin item's header also carries <c>arrived &lt;UTC ISO-8601&gt;</c> after <c>from</c>. A <c>pin-edit</c> has a second block: the text pinned here.
     /// </summary>
     private static IEnumerable<string> ItemLines(ReviewItem item)
     {
@@ -164,8 +165,8 @@ public sealed class ReviewCommand : ICliCommand
         }
         else
         {
-            yield return $"{item.EntryId}  {item.Kind}  {item.State}  from {item.Machine ?? "-"}  project {item.Project ?? "-"}  "
-                + $"scope {item.Scope ?? "-"}  shown {item.ShownHash ?? "-"}";
+            yield return $"{item.EntryId}  {item.Kind}  {item.State}  from {item.Machine ?? "-"}  arrived {ArrivedText(item.ArrivedAt)}  "
+                + $"project {item.Project ?? "-"}  scope {item.Scope ?? "-"}  shown {item.ShownHash ?? "-"}";
         }
         foreach (var line in TextBlock(item.TextSource, item.Text, item.TextCut))
             yield return line;
@@ -175,6 +176,12 @@ public sealed class ReviewCommand : ICliCommand
                 yield return line;
         }
     }
+
+    /// <summary>The arrival time (Unix milliseconds) as UTC ISO-8601 to the second; <c>-</c> for a value outside the range of a date.</summary>
+    private static string ArrivedText(long unixMs) =>
+        unixMs is >= -62135596800000L and <= 253402300799999L
+            ? DateTimeOffset.FromUnixTimeMilliseconds(unixMs).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture)
+            : "-";
 
     private static IEnumerable<string> TextBlock(string source, string? text, bool cut)
     {

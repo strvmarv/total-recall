@@ -100,7 +100,7 @@ internal static class PinPlanning
             else
             {
                 var record = postBase ?? throw new InvalidOperationException("a pin-edit item needs the row's base");
-                hash = SyncPin.shownHash(record.Content, record.Project, record.Scope);
+                hash = ApplyPlanning.BaseShownHash(record);
             }
 
             FSharpOption<Tuple<SyncPin.ItemState, string>>? existing = null;
@@ -150,7 +150,7 @@ internal static class PinPlanning
                 rowAfter.State, rowAfter.BaseJson is not null, rowAfter.ContentStamp is not null, Opt(rowAfter.ScannedContentHash)));
         var baseView = postBase is null
             ? null
-            : Opt(new SyncPin.BaseView(SyncPin.shownHash(postBase.Content, postBase.Project, postBase.Scope), postBase.Placement.Sticky));
+            : Opt(new SyncPin.BaseView(ApplyPlanning.BaseShownHash(postBase), postBase.Placement.Sticky));
 
         var writes = new List<PinWrite>();
         string? applyBase = null;

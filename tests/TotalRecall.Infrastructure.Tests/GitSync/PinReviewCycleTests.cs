@@ -285,7 +285,7 @@ public sealed class PinReviewCycleTests : IDisposable
     }
 
     [GitFact]
-    public async Task DecliningAHeldEditOnB_PushesBsText_AndAThenHoldsIt()
+    public async Task DecliningAHeldEditOnB_PushesBsText_AndAThenTakesItAsAnOrdinaryEdit()
     {
         await AnEditIsHeldOnB();
         var before = RemoteRecord();

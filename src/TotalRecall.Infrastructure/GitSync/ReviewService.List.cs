@@ -174,7 +174,7 @@ public sealed partial class ReviewService
             text = record?.Content;
             project = OptText(record?.Project);
             scope = OptText(record?.Scope);
-            hash = record is null ? null : SyncPin.shownHash(record.Content, record.Project, record.Scope);
+            hash = record is null ? null : ApplyPlanning.BaseShownHash(record);
             if (entry is not null)
                 (current, currentCut) = ShownText(entry.Content.Text, cap);
         }

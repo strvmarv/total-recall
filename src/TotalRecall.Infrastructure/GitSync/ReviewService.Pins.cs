@@ -86,7 +86,7 @@ public sealed partial class ReviewService
     private static string LiveHash(string kind, SyncMerge.LocalEntry entry, SyncRecord.SyncRecord baseRecord) =>
         kind == NewPinKind
             ? SyncPin.shownHash(entry.Content.Text, entry.Content.Project, entry.Content.Scope)
-            : SyncPin.shownHash(baseRecord.Content, baseRecord.Project, baseRecord.Scope);
+            : ApplyPlanning.BaseShownHash(baseRecord);
 
     /// <summary>
     /// The checks of a pin answer inside its transaction (D6, D7), in this order, each a refusal that changes nothing unless
@@ -201,7 +201,7 @@ public sealed partial class ReviewService
             return null;
         var record = ApplyPlanning.ParseBase(entryId, row.BaseJson).Parsed?.Record;
         if (record is null
-            || !string.Equals(shownHash, SyncPin.shownHash(record.Content, record.Project, record.Scope), StringComparison.Ordinal))
+            || !string.Equals(shownHash, ApplyPlanning.BaseShownHash(record), StringComparison.Ordinal))
         {
             return null;
         }

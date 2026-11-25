@@ -118,6 +118,17 @@ internal static class ApplyPlanning
             record.CreatedAtMs);
 
     /// <summary>
+    /// The shown hash (<c>SyncPin.shownHash</c>) of a held base's content group as the store reads it back: an empty project or
+    /// scope is none (<see cref="RecordContent"/>), because applying the base stores <c>""</c> and the stored entry reads it as
+    /// none. The one place a pin-edit item's, the list's and the stale check's hash of a base is computed, so they cannot differ.
+    /// </summary>
+    internal static string BaseShownHash(SyncRecord record)
+    {
+        var content = RecordContent(record);
+        return SyncPin.shownHash(content.Text, content.Project, content.Scope);
+    }
+
+    /// <summary>
     /// The entry as the store holds it after <paramref name="plan"/> is carried out (pin review D4, "When it runs"), read the
     /// way <see cref="LocalEntryReader.ToLocalEntry"/> reads it: null for a deletion; for an insert the record's content
     /// and tags, non-sticky, in the insert tier; otherwise <paramref name="local"/> with the update applied (the content

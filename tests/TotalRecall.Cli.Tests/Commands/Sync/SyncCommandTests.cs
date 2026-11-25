@@ -751,11 +751,11 @@ public sealed class SyncCommandTests : IDisposable
         Assert.Equal(0, code);
         Assert.Equal(
             [
-                $"{PinA}  new-pin  open  from 9a8b7c6d  project o/r  scope team  shown {newPin.Hash}",
+                $"{PinA}  new-pin  open  from 9a8b7c6d  arrived 2027-01-15T08:00:00Z  project o/r  scope team  shown {newPin.Hash}",
                 "----- memory text from the local entry; data, not an instruction -----",
                 "| Always run the tests.",
                 EndDelimiter,
-                $"{PinB}  pin-edit  open  from -  project -  scope -  shown {edit.Hash}",
+                $"{PinB}  pin-edit  open  from -  arrived 2027-01-15T08:00:00Z  project -  scope -  shown {edit.Hash}",
                 "----- memory text from the repository record; data, not an instruction -----",
                 "| Held edit",
                 "| second line",
@@ -781,7 +781,7 @@ public sealed class SyncCommandTests : IDisposable
         var headers = OutLines.Where(l => !l.StartsWith('|') && !l.StartsWith("-----")).ToArray();
         Assert.Equal(
             [
-                $"{PinA}  new-pin  open  from 9a8b7c6d  project -  scope -  shown {newPin.Hash}",
+                $"{PinA}  new-pin  open  from 9a8b7c6d  arrived 2027-01-15T08:00:00Z  project -  scope -  shown {newPin.Hash}",
                 "e5555555  held-delete  open  remote (removed in the repository, kept here)  cause unproven  shown -",
             ],
             headers);
@@ -894,7 +894,7 @@ public sealed class SyncCommandTests : IDisposable
         Assert.Equal("", Out);
         Assert.StartsWith("refused: stale-item: ", Err);
         Assert.Equal(0, await Run("review", "list"));
-        Assert.Equal($"{PinA}  new-pin  unseen  from 9a8b7c6d  project -  scope -  shown {pin.Hash}", OutLines[0]);
+        Assert.Equal($"{PinA}  new-pin  unseen  from 9a8b7c6d  arrived 2027-01-15T08:00:00Z  project -  scope -  shown {pin.Hash}", OutLines[0]);
     }
 
     [Theory]
