@@ -112,7 +112,8 @@ public sealed class TranscriptSearchSessionStartAcceptanceTests : IDisposable
         var options = new ArchivePassOptions(
             EmbedBudget: new EmbedBudget(null, null),
             MinInterval: TimeSpan.Zero,
-            Inspect: (cfg, threads) => BgeModel.Inspect(cfg, threads));
+            Inspect: (cfg, threads) => BgeModel.Inspect(cfg, threads),
+            Sync: HermeticSync.Options);
 
         using var handles = ServerComposition.OpenLocalForCatalog(Db, options);
         var pass = handles.ArchivePass;

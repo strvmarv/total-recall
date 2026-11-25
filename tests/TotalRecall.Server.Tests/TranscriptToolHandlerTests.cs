@@ -507,7 +507,7 @@ public sealed class TranscriptToolHandlerTests
             }
             new TranscriptSentinel(home).Write();
 
-            using var handles = ServerComposition.OpenLocalForCatalog(db);
+            using var handles = ServerComposition.OpenLocalForCatalog(db, new ArchivePassOptions(Sync: HermeticSync.Options));
             Assert.True(handles.Registry.TryGet("transcript_sessions", out var sessions));
             Assert.True(handles.Registry.TryGet("transcript_get", out var get));
 
