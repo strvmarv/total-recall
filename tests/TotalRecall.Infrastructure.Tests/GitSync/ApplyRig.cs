@@ -73,7 +73,8 @@ internal sealed class ApplyRig : IDisposable
         int minute = 10,
         int? tierMinute = null,
         int? stickyMinute = null,
-        string? originHash = null) =>
+        string? originHash = null,
+        string? writtenBy = null) =>
         new(
             id, content, EntryType.Correction,
             ListModule.OfSeq((tags ?? []).Order(StringComparer.Ordinal).Distinct()),
@@ -84,7 +85,7 @@ internal sealed class ApplyRig : IDisposable
             new SyncRecordModule.Placement(sticky ? Tier.Hot : tier ?? Tier.Warm, St(tierMinute ?? minute), sticky, St(stickyMinute ?? minute)),
             St(minute),
             originHash is null ? FSharpOption<SyncRecordModule.Origin>.None : FSharpOption<SyncRecordModule.Origin>.Some(new SyncRecordModule.Origin("claude-code", originHash)),
-            FSharpOption<string>.None);
+            writtenBy is null ? FSharpOption<string>.None : FSharpOption<string>.Some(writtenBy));
 
     public static ParsedRecord Parsed(SyncRecordModule.SyncRecord record) =>
         RecordReader.Parse(RecordWriter.Write(record).Bytes!, SyncValidation.recordPath(record.Id)).Parsed

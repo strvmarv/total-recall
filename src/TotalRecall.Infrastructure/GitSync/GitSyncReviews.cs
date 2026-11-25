@@ -16,11 +16,21 @@ internal sealed record HeldItem(
     string EntryId, string Direction, string? RecordHash, string? Cause, long ArrivedAt, string State = "open");
 
 /// <summary>
-/// The <c>held-delete</c> rows of <c>git_sync_review</c>, read and changed here, and the <c>new-pin</c> rows, which are
-/// only written, through <see cref="UpsertNewPin"/>. Plain SQL on the caller's connection; every command carries the
-/// optional transaction, so the statements run inside an entry's <see cref="SqliteTransaction"/>. Rows of the
-/// <c>pin-edit</c> and <c>conflict</c> kinds are never read or changed here, nor are <c>new-pin</c> rows read or
-/// changed by anything but <see cref="UpsertNewPin"/>.
+/// One pin item (pin review, decisions D1 and D2): a <c>new-pin</c> item (a record pins an entry that is not pinned here)
+/// or a <c>pin-edit</c> item (a held edit of a pinned entry). <paramref name="State"/> is <c>open</c>, <c>unseen</c>,
+/// <c>approved</c> or <c>declined</c>; <paramref name="RecordHash"/> is the shown hash of what the item shows;
+/// <paramref name="Machine"/> is the machine that wrote the record; <paramref name="ArrivedAt"/> is the applier clock in
+/// milliseconds; <paramref name="Origin"/> is <c>restore</c> for an item a restore opened, null for one a pull made.
+/// </summary>
+internal sealed record PinItem(
+    string EntryId, string Kind, string State, string? RecordHash, string? Machine, long ArrivedAt, string? Origin = null);
+
+/// <summary>
+/// The <c>held-delete</c> rows of <c>git_sync_review</c>, read and changed by the held members, and the <c>new-pin</c> and
+/// <c>pin-edit</c> rows, read and changed only by the pin members (<see cref="ReadPinItems"/> and the members after it).
+/// <c>conflict</c> rows are read and changed by none. Plain SQL on the caller's connection; every command carries the
+/// optional transaction, so the statements run inside an entry's <see cref="SqliteTransaction"/>. Every member's SQL is
+/// restricted to its own kind.
 /// </summary>
 internal static class GitSyncReviews
 {
@@ -133,25 +143,117 @@ internal static class GitSyncReviews
         cmd.ExecuteNonQuery();
     }
 
-    /// <summary>
-    /// Inserts the open <c>new-pin</c> row of a restored memory (<c>{"origin":"restore"}</c>, no direction), or replaces
-    /// the row with the same <c>(entry_id, 'new-pin')</c>.
-    /// </summary>
-    public static void UpsertNewPin(
-        MsSqliteConnection conn, string entryId, string recordHash, long arrivedAt, SqliteTransaction? tx = null)
+    private const string SelectPin =
+        "SELECT entry_id, kind, state, record_hash, machine, arrived_at, payload_json FROM git_sync_review " +
+        "WHERE kind IN ('new-pin', 'pin-edit') AND state IN ('open', 'unseen', 'approved', 'declined')";
+
+    /// <summary>Every pin item (kinds <c>new-pin</c> and <c>pin-edit</c>, states <c>open</c>, <c>unseen</c>, <c>approved</c>, <c>declined</c>), ordinal by id, then kind.</summary>
+    public static IReadOnlyList<PinItem> ReadPinItems(MsSqliteConnection conn, SqliteTransaction? tx = null)
+    {
+        var items = new List<PinItem>();
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = SelectPin + " ORDER BY entry_id COLLATE BINARY, kind COLLATE BINARY";
+        using var r = cmd.ExecuteReader();
+        while (r.Read())
+            items.Add(ReadPin(r));
+        return items;
+    }
+
+    /// <summary>The entry's pin item of <paramref name="kind"/> in one of the four states, or null when it has none.</summary>
+    public static PinItem? ReadPinItem(MsSqliteConnection conn, string entryId, string kind, SqliteTransaction? tx = null)
     {
         using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
-        cmd.CommandText =
-            "INSERT INTO git_sync_review (entry_id, kind, state, record_hash, direction, payload_json, arrived_at) " +
-            "VALUES ($id, 'new-pin', 'open', $hash, NULL, $payload, $arrived) " +
-            "ON CONFLICT(entry_id, kind) DO UPDATE SET state = 'open', record_hash = excluded.record_hash, " +
-            "direction = NULL, payload_json = excluded.payload_json, arrived_at = excluded.arrived_at";
+        cmd.CommandText = SelectPin + " AND entry_id = $id AND kind = $kind";
         cmd.Parameters.AddWithValue("$id", entryId);
-        cmd.Parameters.AddWithValue("$hash", recordHash);
-        cmd.Parameters.AddWithValue("$payload", RestorePayload());
-        cmd.Parameters.AddWithValue("$arrived", arrivedAt);
+        cmd.Parameters.AddWithValue("$kind", kind);
+        using var r = cmd.ExecuteReader();
+        return r.Read() ? ReadPin(r) : null;
+    }
+
+    private static PinItem ReadPin(SqliteDataReader r) =>
+        new(
+            r.GetString(0), r.GetString(1), r.GetString(2),
+            r.IsDBNull(3) ? null : r.GetString(3),
+            r.IsDBNull(4) ? null : r.GetString(4),
+            r.GetInt64(5),
+            r.IsDBNull(6) ? null : ParseString(r.GetString(6), "origin"));
+
+    /// <summary>
+    /// Inserts the pin item, or replaces the row with the same <c>(entry_id, kind)</c> (whatever its state): state, hash,
+    /// machine, <c>arrived_at</c>, no direction, and the payload <c>{}</c> (a pull) or <c>{"origin":"restore"}</c>.
+    /// </summary>
+    public static void UpsertPinItem(MsSqliteConnection conn, PinItem item, SqliteTransaction? tx = null)
+    {
+        RequirePinKind(item.Kind);
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText =
+            "INSERT INTO git_sync_review (entry_id, kind, state, record_hash, machine, direction, payload_json, arrived_at) " +
+            "VALUES ($id, $kind, $state, $hash, $machine, NULL, $payload, $arrived) " +
+            "ON CONFLICT(entry_id, kind) DO UPDATE SET state = excluded.state, record_hash = excluded.record_hash, " +
+            "machine = excluded.machine, direction = NULL, payload_json = excluded.payload_json, arrived_at = excluded.arrived_at";
+        cmd.Parameters.AddWithValue("$id", item.EntryId);
+        cmd.Parameters.AddWithValue("$kind", item.Kind);
+        cmd.Parameters.AddWithValue("$state", item.State);
+        cmd.Parameters.AddWithValue("$hash", (object?)item.RecordHash ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$machine", (object?)item.Machine ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$payload", StringPayload("origin", item.Origin));
+        cmd.Parameters.AddWithValue("$arrived", item.ArrivedAt);
         cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>Sets the pin item to <c>unseen</c> with the hash and machine it is now shown for; payload and <c>arrived_at</c> are kept; a missing row is a no-op.</summary>
+    public static void MarkPinUnseen(
+        MsSqliteConnection conn, string entryId, string kind, string recordHash, string? machine, SqliteTransaction? tx = null)
+    {
+        RequirePinKind(kind);
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText =
+            "UPDATE git_sync_review SET state = 'unseen', record_hash = $hash, machine = $machine " +
+            "WHERE entry_id = $id AND kind = $kind";
+        cmd.Parameters.AddWithValue("$id", entryId);
+        cmd.Parameters.AddWithValue("$kind", kind);
+        cmd.Parameters.AddWithValue("$hash", recordHash);
+        cmd.Parameters.AddWithValue("$machine", (object?)machine ?? DBNull.Value);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>Sets the pin item's state to <c>approved</c> or <c>declined</c> and changes nothing else; a missing row is a no-op.</summary>
+    public static void ResolvePinItem(
+        MsSqliteConnection conn, string entryId, string kind, string state, SqliteTransaction? tx = null)
+    {
+        if (state is not ("approved" or "declined"))
+            throw new ArgumentException("a pin item is answered approved or declined", nameof(state));
+        RequirePinKind(kind);
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "UPDATE git_sync_review SET state = $state WHERE entry_id = $id AND kind = $kind";
+        cmd.Parameters.AddWithValue("$id", entryId);
+        cmd.Parameters.AddWithValue("$kind", kind);
+        cmd.Parameters.AddWithValue("$state", state);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>Deletes the entry's pin item of <paramref name="kind"/>; a missing row is a no-op.</summary>
+    public static void DeletePinItem(MsSqliteConnection conn, string entryId, string kind, SqliteTransaction? tx = null)
+    {
+        RequirePinKind(kind);
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "DELETE FROM git_sync_review WHERE entry_id = $id AND kind = $kind";
+        cmd.Parameters.AddWithValue("$id", entryId);
+        cmd.Parameters.AddWithValue("$kind", kind);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>The pin members touch only the two pin kinds: any other kind is a programming error, never a statement against another kind's rows.</summary>
+    private static void RequirePinKind(string kind)
+    {
+        if (kind is not ("new-pin" or "pin-edit"))
+            throw new ArgumentException("a pin item is a new-pin or a pin-edit", nameof(kind));
     }
 
     /// <summary>Deletes the entry's <c>held-delete</c> row; a missing row is a no-op.</summary>
@@ -164,42 +266,35 @@ internal static class GitSyncReviews
         cmd.ExecuteNonQuery();
     }
 
-    /// <summary><c>{"origin":"restore"}</c>, written without reflection.</summary>
-    private static string RestorePayload()
-    {
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream))
-        {
-            writer.WriteStartObject();
-            writer.WriteString("origin", "restore");
-            writer.WriteEndObject();
-        }
-        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
-    }
-
     /// <summary><c>{"cause":"&lt;cause&gt;"}</c>, written without reflection (the engine is NativeAOT).</summary>
-    private static string CausePayload(string cause)
+    private static string CausePayload(string cause) => StringPayload("cause", cause);
+
+    /// <summary><c>{"&lt;name&gt;":"&lt;value&gt;"}</c>, or <c>{}</c> when the value is null, written without reflection.</summary>
+    private static string StringPayload(string name, string? value)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
         {
             writer.WriteStartObject();
-            writer.WriteString("cause", cause);
+            if (value is not null)
+                writer.WriteString(name, value);
             writer.WriteEndObject();
         }
         return System.Text.Encoding.UTF8.GetString(stream.ToArray());
     }
 
-    /// <summary>The <c>cause</c> of a payload, or null when the payload is not a JSON object holding a string <c>cause</c>.</summary>
-    private static string? ParseCause(string payload)
+    private static string? ParseCause(string payload) => ParseString(payload, "cause");
+
+    /// <summary>The string member <paramref name="name"/> of a payload, or null when the payload is not a JSON object holding it.</summary>
+    private static string? ParseString(string payload, string name)
     {
         try
         {
             using var doc = JsonDocument.Parse(payload);
             return doc.RootElement.ValueKind == JsonValueKind.Object
-                && doc.RootElement.TryGetProperty("cause", out var cause)
-                && cause.ValueKind == JsonValueKind.String
-                    ? cause.GetString()
+                && doc.RootElement.TryGetProperty(name, out var member)
+                && member.ValueKind == JsonValueKind.String
+                    ? member.GetString()
                     : null;
         }
         catch (JsonException)
