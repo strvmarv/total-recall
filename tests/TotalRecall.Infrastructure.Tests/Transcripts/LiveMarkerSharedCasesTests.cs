@@ -72,7 +72,11 @@ public sealed class LiveMarkerSharedCasesTests
                 if (value == "" && Environment.GetEnvironmentVariable(kv.Name) is null)
                 {
                     // The platform cannot hold a set-but-empty variable in-process (Windows deletes it).
-                    // Row "HOME set but empty (unusable)" is then asserted only by the node side.
+                    // Row "HOME set but empty (unusable)" is then asserted only by the node side. xunit 2 has no
+                    // run-time skip, so this row is reported as passed there without checking the engine: only
+                    // the rows that set a variable to "" may take this exit, and only on such a platform.
+                    Assert.True(OperatingSystem.IsWindows(),
+                        "a set-but-empty variable could not be held on a platform other than Windows: " + name);
                     return;
                 }
             }

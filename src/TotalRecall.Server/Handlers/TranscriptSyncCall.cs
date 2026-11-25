@@ -15,8 +15,8 @@ namespace TotalRecall.Server.Handlers;
 
 internal static class TranscriptSyncCall
 {
-    /// <summary>The note of a catch-up that threw (the sync's own notes share the prefix).</summary>
-    public const string FailedNote = "the newest text of the current session may be missing: the catch-up failed";
+    /// <summary>The note of a catch-up that threw: the sync's own note for a failed catch-up.</summary>
+    public const string FailedNote = TranscriptSyncService.NoteFailed;
 
     /// <summary>
     /// Runs <paramref name="sync"/> (nothing when null) with the plan of <paramref name="embedPlan"/> (none when null)

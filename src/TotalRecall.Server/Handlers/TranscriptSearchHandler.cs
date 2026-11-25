@@ -25,7 +25,7 @@ public sealed class TranscriptSearchHandler : IToolHandler
           "type": "object",
           "properties": {
             "query": {"type":"string","description":"What to look for in the archived conversations"},
-            "scope": {"type":"string","enum":["session","project","all"],"description":"Where to search: one session, one project or everything; when omitted, session if `session` is given, else project if `project` is given, else the current project when the current session is known from its marker, else all. project without a `project` argument means the current project (else all), session without a `session` argument the current session"},
+            "scope": {"type":"string","enum":["session","project","all"],"description":"Where to search: one session, one project or everything; when omitted, session if `session` is given, else project if `project` is given, else the current project when the current session is known from its marker, else all. project without a `project` argument means the current project (else all), session without a `session` argument the current session (known from its marker; else an argument error)"},
             "project": {"type":"string","description":"Project key to search, as archived (for example owner/repo); without `scope` it selects project scope; when omitted, the current project is searched if the current session is known from its marker and neither `scope` nor `session` says otherwise"},
             "session": {"type":"string","description":"Session to search, as <host>:<host_session_id>"},
             "since": {"type":"string","description":"Only exchanges since this ISO-8601 date or date-time"},
@@ -61,8 +61,9 @@ public sealed class TranscriptSearchHandler : IToolHandler
         "Search archived conversation transcripts by meaning and by words. The archive is off by default (turn it on with " +
         "`total-recall transcripts enable`). With no `scope`, a `session` argument searches that session, else a `project` " +
         "argument searches that project, else the current project is searched when the current session is known from " +
-        "its marker, else everything; `scope` project or session without its argument means the current project or " +
-        "session. Before the search the current session's newest text is brought into the archive: `currentSession` " +
+        "its marker, else everything; `scope` project without a `project` argument means the current project (else " +
+        "everything), and `scope` session without a `session` argument the current session (known from its marker; " +
+        "else an argument error). Before the search the current session's newest text is brought into the archive: `currentSession` " +
         "says how it was found (marker, guessed or none) and `syncNote` says when its newest text may be missing. " +
         "Automated sessions are left out unless " +
         "include_automated is true (a named session is always searched). Each hit carries the chunk text, its session, " +

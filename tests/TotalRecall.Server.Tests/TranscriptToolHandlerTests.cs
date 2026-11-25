@@ -142,7 +142,8 @@ public sealed class TranscriptToolHandlerTests
         Assert.Contains("when omitted", scopeDesc);
         Assert.Contains("else the current project when the current session is known from its marker, else all", scopeDesc);
         Assert.Contains("project without a `project` argument means the current project", scopeDesc);
-        Assert.Contains("session without a `session` argument the current session", scopeDesc);
+        Assert.Contains("session without a `session` argument the current session (known from its marker; else an argument error)", scopeDesc);
+        Assert.Contains("the current session (known from its marker; else an argument error)", h.Description);
         var projectDesc = Prop(h, "project").GetProperty("description").GetString()!;
         Assert.Contains("without `scope` it selects project scope", projectDesc);
         Assert.Contains("when omitted, the current project is searched if the current session is known from its marker", projectDesc);
@@ -668,7 +669,7 @@ public sealed class TranscriptToolHandlerTests
         try
         {
             Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", home);
-            using var handles = ServerComposition.OpenLocalForCatalog(Path.Combine(home, "t.db"));
+            using var handles = ServerComposition.OpenLocalForCatalog(Path.Combine(home, "t.db"), new ArchivePassOptions(Sync: HermeticSync.Options));
             foreach (var n in ToolNames) Assert.True(handles.Registry.TryGet(n, out _), n);
             Assert.Equal(53, handles.Registry.Count);
         }
@@ -734,7 +735,7 @@ public sealed class TranscriptToolHandlerTests
         try
         {
             Environment.SetEnvironmentVariable("TOTAL_RECALL_HOME", home);
-            using var handles = ServerComposition.OpenCortexForTest(":memory:", "https://cortex.test", "tr_test123");
+            using var handles = ServerComposition.OpenCortexForTest(":memory:", "https://cortex.test", "tr_test123", new ArchivePassOptions(Sync: HermeticSync.Options));
             foreach (var n in ToolNames) Assert.True(handles.Registry.TryGet(n, out _), n);
             Assert.Equal(54, handles.Registry.Count);
         }

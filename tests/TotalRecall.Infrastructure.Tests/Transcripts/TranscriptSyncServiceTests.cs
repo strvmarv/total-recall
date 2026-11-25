@@ -8,7 +8,6 @@ using System.Text;
 using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.FSharp.Core;
 using TotalRecall.Infrastructure.Config;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Tests.TestSupport;
@@ -373,6 +372,38 @@ public sealed class TranscriptSyncServiceTests : IDisposable
         Assert.Equal(0, Chunks());
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Sync_IncompleteIngest_ForgottenDuringIt_GivesNoProjectKey(bool byId)
+    {
+        // The control first: an ingest that runs out of time stores no row, and the key comes from the head of the file.
+        var c = Home.Place("decision", _h.Cwd, "forget-control-" + (byId ? "id" : "key"));
+        Marker(c);
+        var control = Sync(Service(Adapter(_ => _clock.Advance(TimeSpan.FromSeconds(3)))));
+        Assert.False(control.Complete);
+        Assert.Equal("proj", control.ProjectKey);
+
+        // The session is forgotten while its first ingest runs, and the ingest then runs out of time: the exclusion
+        // is checked again before the key is derived, so there is none.
+        var s = Home.Place("decision", _h.Cwd, "forget-during-" + (byId ? "id" : "key"));
+        Marker(s);
+        var adapter = Adapter(_ =>
+        {
+            if (byId) Db.Store.ForgetSession(Host, s.Id);
+            else Db.Store.ForgetProject("proj");
+            _clock.Advance(TimeSpan.FromSeconds(3));
+        });
+
+        var result = Sync(Service(adapter));
+
+        Assert.Equal(CurrentKind.Marker, result.Current.Kind);
+        Assert.False(result.Complete);
+        Assert.Contains("ran out of time", result.Note);
+        Assert.Null(result.ProjectKey);
+        Assert.Equal(0, Sessions());
+    }
+
     [Fact]
     public void Sync_ChangedSource_SetsNote()
     {
@@ -586,7 +617,100 @@ public sealed class TranscriptSyncServiceTests : IDisposable
         Assert.Contains("ran out of time", result2.Note);
         Assert.Equal(1, slowOpen.Calls);
         Assert.Equal(0, adapter2.ReadRecordsCalls);
+        Assert.Equal(0, adapter2.ReadHeadCalls);   // no key is derived from the head past the deadline either
+        Assert.Null(result2.ProjectKey);
         Assert.Equal(0, Sessions());
+    }
+
+    [Fact]
+    public void Sync_PastTheDeadline_ReadsNoProjectKey()
+    {
+        // An absent archive whose open outlasts the deadline: the head is not read for a key.
+        var s = Home.Place("decision", _h.Cwd, "late-absent");
+        Marker(s);
+        var missing = Path.Combine(Home.Root, "no-archive-late", "archive.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(missing)!);
+        var adapter = Adapter();
+        var slowOpen = new CountingOpen { Before = () => _clock.Advance(TimeSpan.FromSeconds(7)) };
+        var absent = Sync(Service(adapter, new TranscriptSyncOptions(Open: slowOpen.Open),
+            location: new TranscriptLocation(missing, IsMainDatabase: false)));
+        Assert.Equal(CurrentKind.Marker, absent.Current.Kind);
+        Assert.Null(absent.ProjectKey);
+        Assert.Equal(0, adapter.ReadHeadCalls);
+
+        // The ingest outlasts the deadline: after it, neither the stored row nor the head is read for a key.
+        var t = Home.Place("decision", _h.Cwd, "late-ingest");
+        Marker(t);
+        var slow = Adapter(_ => _clock.Advance(TimeSpan.FromSeconds(7)));
+        var ingested = Sync(Service(slow, new TranscriptSyncOptions(IngestBudget: TimeSpan.FromSeconds(30))));
+        Assert.False(ingested.Complete);
+        Assert.Null(ingested.ProjectKey);
+        Assert.Equal(1, slow.ReadHeadCalls);   // the ingest's own read only
+
+        // The control: in time, the same session gives its key.
+        Assert.Equal("proj", Sync(Service(Adapter())).ProjectKey);
+    }
+
+    [Fact]
+    public void Sync_FailedOpen_LogsTheMessage()
+    {
+        var s = Home.Place("decision", _h.Cwd, "failopen-1");
+        Marker(s);
+        var service = Service(Adapter(), new TranscriptSyncOptions(
+            Open: _ => new TranscriptOpenResult(TranscriptOpenStatus.Failed, null, "zqxfailedopen disk on fire")));
+
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var origOut = Console.Out;
+        var origErr = Console.Error;
+        SyncResult result;
+        Console.SetOut(stdout);
+        Console.SetError(stderr);
+        try
+        {
+            result = Sync(service);
+        }
+        finally
+        {
+            Console.SetOut(origOut);
+            Console.SetError(origErr);
+        }
+
+        Assert.False(result.Complete);
+        Assert.Contains("could not be opened", result.Note);
+        Assert.Contains("[total-recall] transcripts sync", stderr.ToString());
+        Assert.Contains("zqxfailedopen disk on fire", stderr.ToString());
+        Assert.Equal(string.Empty, stdout.ToString());
+    }
+
+    [Fact]
+    public async Task Sync_GuessAfterTheWait_UsesTheFileAsItIsNow()
+    {
+        // A guessed call that waited for a running sync stats the file again: what grew during the wait is recorded
+        // as the file's state, so the next call finds it unchanged.
+        var g = Home.Place("decision", _h.Cwd, "guess-wait");
+        Home.SetMtime(g, _clock.GetUtcNow().AddMinutes(-1));
+        using var entered = new ManualResetEventSlim(false);
+        using var gate = new ManualResetEventSlim(false);
+        var adapter = Adapter(_ => { entered.Set(); gate.Wait(Wait); });
+        var service = Service(adapter, new TranscriptSyncOptions(IngestBudget: Wait));
+
+        var first = Task.Run(() => Sync(service));
+        Assert.True(entered.Wait(Wait));
+        var second = Task.Run(() => Sync(service));
+        var sw = Stopwatch.StartNew();
+        while (adapter.EnumerateCalls < 2 && sw.Elapsed < Wait) Thread.Sleep(10);
+        Assert.Equal(2, adapter.EnumerateCalls);
+        Assert.NotSame(second, await Task.WhenAny(second, Task.Delay(300)));   // it has guessed and now waits
+        Home.AppendExchange(g, "zqxgrewwhilewaiting more?", "Yes.", 50);
+        gate.Set();
+        var r1 = await first.WaitAsync(Wait);
+        var r2 = await second.WaitAsync(Wait);
+
+        Assert.Equal(CurrentKind.Guessed, r2.Current.Kind);
+        Assert.True(r1.Complete);
+        Assert.True(r2.Complete);
+        Assert.Equal(new FileInfo(g.Path).Length, Db.Scalar("SELECT source_size FROM tx_session WHERE host_session_id = 'guess-wait'"));
     }
 
     [Fact]
@@ -663,20 +787,8 @@ public sealed class TranscriptSyncServiceTests : IDisposable
     // The embed step (search only)
     // ------------------------------------------------------------------
 
-    private static Core.Config.EmbeddingConfig EmbeddingConfig(string? provider = null) => new(
-        "bge-small-en-v1.5",
-        384,
-        provider is null ? FSharpOption<string>.None : FSharpOption<string>.Some(provider),
-        FSharpOption<string>.None,
-        FSharpOption<string>.None,
-        FSharpOption<string>.None,
-        FSharpOption<string>.None,
-        FSharpOption<string>.None,
-        FSharpOption<string>.None,
-        FSharpOption<string>.None);
-
     private static SyncEmbedPlan Plan(IEmbedder embedder, Func<bool>? reindex = null, string? provider = null, bool allowRemote = false) =>
-        new(embedder, new TranscriptsSettings(true, string.Empty, null, 0, allowRemote), "sqlite", EmbeddingConfig(provider),
+        new(embedder, new TranscriptsSettings(true, string.Empty, null, 0, allowRemote), "sqlite", TestEmbedding.Config(provider),
             reindex ?? (() => false));
 
     private static List<string> ChunkCalls(RecordingEmbedder e) => e.Calls.Where(c => c != EmbedProbe.Text).ToList();
@@ -902,12 +1014,5 @@ public sealed class TranscriptSyncServiceTests : IDisposable
         Assert.True(Waiting() > 0);
         Assert.Equal(0, SessionEmbedded("text-only"));
         Assert.Null(Db.Text("SELECT value FROM tx_state WHERE key = 'embed.lease'"));
-    }
-
-    private sealed class ThrowingDescriptorEmbedder : IEmbedder
-    {
-        public EmbedderDescriptor Descriptor => throw new InvalidOperationException("no descriptor");
-        public float[] Embed(string text) => throw new InvalidOperationException("must not be called");
-        public float[] EmbedQuery(string text) => throw new InvalidOperationException("must not be called");
     }
 }

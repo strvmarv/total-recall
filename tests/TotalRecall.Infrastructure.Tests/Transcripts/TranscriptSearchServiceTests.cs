@@ -6,12 +6,12 @@ using System.Linq;
 using System.Net.Http;
 using System.Runtime.CompilerServices;
 using System.Threading;
-using Microsoft.FSharp.Core;
 using Microsoft.ML.OnnxRuntime;
 using TotalRecall.Infrastructure.Config;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Tests.TestSupport;
 using TotalRecall.Infrastructure.Transcripts;
+using TotalRecall.TestSupport.Transcripts;
 using Xunit;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
@@ -67,17 +67,7 @@ public sealed class TranscriptSearchServiceTests : IDisposable
         return v;
     }
 
-    private static Core.Config.EmbeddingConfig Embedding(string? provider = null) => new(
-        "bge-small-en-v1.5",
-        384,
-        provider is null ? FSharpOption<string>.None : FSharpOption<string>.Some(provider),
-        FSharpOption<string>.None,
-        FSharpOption<string>.None,
-        FSharpOption<string>.None,
-        FSharpOption<string>.None,
-        FSharpOption<string>.None,
-        FSharpOption<string>.None,
-        FSharpOption<string>.None);
+    private static Core.Config.EmbeddingConfig Embedding(string? provider = null) => TestEmbedding.Config(provider);
 
     private static TranscriptsSettings Settings(bool allowRemote = false) =>
         new(Enabled: true, DbPath: string.Empty, DbPathError: null, RetentionDays: 0, AllowRemoteEmbedding: allowRemote);
@@ -395,6 +385,42 @@ public sealed class TranscriptSearchServiceTests : IDisposable
         Assert.Equal(new[] { seed.C1a, seed.C1b }.OrderBy(x => x), Ids(session).OrderBy(x => x));
     }
 
+    [Theory]
+    [InlineData("nocolon", null, false)]             // a reference that does not split is no session
+    [InlineData("nocolon", "   ", false)]
+    [InlineData("claude-code:sess-1", "   ", true)]   // a whitespace-only key is no project, like null
+    [InlineData("claude-code:sess-1", "", true)]
+    public void Plan_MarkerWithUnusableRefOrKey_FallsBackToTodaysBehaviour(string @ref, string? projectKey, bool sessionKnown)
+    {
+        var seed = Populate();
+        var svc = Service(new QueryEmbedder());
+        var current = Marker(projectKey: projectKey, @ref: @ref);
+
+        var none = svc.Search(Req("database locked", current: current), default);
+        Assert.Equal("all", none.Scope);
+        Assert.Null(none.ScopeNote);
+        Assert.Contains(seed.C3, Ids(none));
+        Assert.Contains(seed.C1a, Ids(none));
+
+        var project = svc.Search(Req("database locked", scope: "project", current: current), default);
+        Assert.Equal("all", project.Scope);
+        Assert.Contains("the current project could not be determined", project.ScopeNote);
+        Assert.Contains(seed.C3, Ids(project));
+
+        if (sessionKnown)
+        {
+            var session = svc.Search(Req("database locked", scope: "session", current: current), default);
+            Assert.Equal("session", session.Scope);
+            Assert.Equal(new[] { seed.C1a, seed.C1b }.OrderBy(x => x), Ids(session).OrderBy(x => x));
+        }
+        else
+        {
+            var ex = Assert.Throws<ArgumentException>(
+                () => svc.Search(Req("database locked", scope: "session", current: current), default));
+            Assert.Contains("the current session is not known here", ex.Message);
+        }
+    }
+
     [Fact]
     public void Response_CarriesCurrentSessionFields()
     {
@@ -635,20 +661,13 @@ public sealed class TranscriptSearchServiceTests : IDisposable
             serverPass: true, memoryReindexRunning: false, _ => throw new InvalidOperationException("no store read"), null);
         Assert.Equal(EmbedState.RemoteNotAllowed, remote.Gate.State);
         var broken = TranscriptSearchService.BuildEmbedGate(
-            new ThrowingDescriptor(), settings, "sqlite", config, serverPass: true, memoryReindexRunning: false, null, null);
+            new ThrowingDescriptorEmbedder(), settings, "sqlite", config, serverPass: true, memoryReindexRunning: false, null, null);
         Assert.Null(broken.Current);
         Assert.False(broken.Gate.CanEmbed);
 
         var r = Service(embedder).Search(Req("database locked"), default);
         Assert.True(r.MeaningOn);
         Assert.Null(r.MeaningReason);
-    }
-
-    private sealed class ThrowingDescriptor : IEmbedder
-    {
-        public EmbedderDescriptor Descriptor => throw new InvalidOperationException("no descriptor");
-        public float[] Embed(string text) => throw new InvalidOperationException();
-        public float[] EmbedQuery(string text) => throw new InvalidOperationException();
     }
 
     [Fact]

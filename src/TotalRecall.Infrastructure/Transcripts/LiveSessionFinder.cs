@@ -39,7 +39,11 @@ public sealed class LiveSessionFinder
         _log = log ?? (line => Console.Error.WriteLine(line));   // stderr only: stdout is the MCP channel
     }
 
-    /// <summary>The first accepted marker (nearest ancestor first), as <see cref="CurrentKind.Marker"/>; null when none.</summary>
+    /// <summary>
+    /// The first accepted marker (nearest ancestor first), as <see cref="CurrentKind.Marker"/>; null when none. Its
+    /// <see cref="CurrentSession.TranscriptPath"/> is the marker's path normalised with <see cref="Path.GetFullPath(string)"/>;
+    /// <see cref="CurrentSession.Cwd"/> is the marker's text as written.
+    /// </summary>
     public CurrentSession? Find(IReadOnlyList<ITranscriptAdapter> adapters)
     {
         ArgumentNullException.ThrowIfNull(adapters);
@@ -77,6 +81,11 @@ public sealed class LiveSessionFinder
     private CurrentSession? Check(string file, int pid, ITranscriptAdapter adapter, out string? refusal)
     {
         refusal = null;
+
+        // The marker itself must be a plain file: a link at its name (which could point anywhere) is refused.
+        var info = new FileInfo(file);
+        if (info.LinkTarget is not null || (info.Exists && (info.Attributes & FileAttributes.ReparsePoint) != 0))
+        { refusal = "the marker file is a link"; return null; }
 
         byte[] bytes;
         try
@@ -131,7 +140,8 @@ public sealed class LiveSessionFinder
                 if (written < started - StartSlack) { refusal = "written before the process it names started"; return null; }
             }
 
-            return new CurrentSession(CurrentKind.Marker, adapter.Host, id, transcriptPath, cwd);
+            // The checked path, normalised (doubled or mixed separators collapsed; it has no . or .. to resolve).
+            return new CurrentSession(CurrentKind.Marker, adapter.Host, id, Path.GetFullPath(transcriptPath), cwd);
         }
     }
 

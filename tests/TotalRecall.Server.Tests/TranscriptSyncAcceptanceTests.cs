@@ -494,6 +494,7 @@ public sealed class TranscriptSyncAcceptanceTests : IDisposable
         Marker(proj, HostA);
         await AssertNothing(proj, "zqxproj", "zqxprojtail");
         Assert.Equal(0, adapter.RecordReadsOf(proj.Path));
+        Assert.True(adapter.HeadsOf(proj.Path) > 0, "the head of the project's session was read: the adapter counts reads");
         Assert.Equal(0, SessionRows(proj.Id));
 
         // Forgotten by root: the repository is re-keyed, so only the stored root keeps a new session under it out.
@@ -514,6 +515,7 @@ public sealed class TranscriptSyncAcceptanceTests : IDisposable
             ReadFixtureHome.Dialogue(2, n => $"Late question {n} zqxearly", n => $"Late answer {n}."));
         Marker(late, HostA);
         Assert.True(Finds(await Search(h, "zqxearly", scope: "all"), "zqxearly"));
+        Assert.True(adapter.AnyReadOf(late.Path) > 0, "the control session was read through the counting adapter");
 
         // Forget all: the global cutoff. Text written at or before it never comes back; text after it is kept.
         WithStore(store => Assert.True(store.ForgetAll(DateTimeOffset.UtcNow).Sessions >= 2));
@@ -747,10 +749,11 @@ public sealed class TranscriptSyncAcceptanceTests : IDisposable
                 begin.ExecuteNonQuery();
             }
 
-            // Each call waits for the lock once (the short busy timeout, not the 5 s default), well inside the 6 s
-            // deadline; the bound leaves room for a slow machine and still catches a 5 s wait.
+            // Each call waits for the lock once, for about 1 s (the 500 ms busy timeout, but the driver's Default
+            // Timeout rounded up to whole seconds), not the 5 s default and well inside the 6 s deadline; the bound
+            // leaves room for a slow machine and still catches a wait of two seconds or more.
             var times = await AssertReadAnswers("a store busy past the timeout");
-            Assert.All(times, ms => Assert.True(ms < 4000, $"a read took {ms:F0} ms against a held lock"));
+            Assert.All(times, ms => Assert.True(ms < 2500, $"a read took {ms:F0} ms against a held lock"));
             Assert.Equal(0, ChunksWith("zqxbusytail"));
 
             using var rollback = writer.CreateCommand();
@@ -776,7 +779,7 @@ public sealed class TranscriptSyncAcceptanceTests : IDisposable
         });
         if (CanRead(s.Path))
         {
-            _output.WriteLine("this user reads a mode-000 file (root?): the unreadable-file case was not run");
+            ModeCheckUnavailable("this user reads a mode-000 file (root?): the unreadable-file case was not run");
         }
         else
         {
@@ -806,7 +809,7 @@ public sealed class TranscriptSyncAcceptanceTests : IDisposable
         });
         if (CanWrite(archive))
         {
-            _output.WriteLine("this user writes a read-only file (root?): the read-only-store case was not run");
+            ModeCheckUnavailable("this user writes a read-only file (root?): the read-only-store case was not run");
         }
         else
         {
@@ -824,6 +827,17 @@ public sealed class TranscriptSyncAcceptanceTests : IDisposable
         Assert.True(Opt(healed, "syncNote") is null, healed.ToString());
         Assert.True(Finds(healed, "zqxreadonlytail"));
         Assert.Equal(1, ChunksWith("zqxreadonlytail", archive));
+    }
+
+    /// <summary>
+    /// A Unix-mode case that cannot take effect (the user can read or write the file anyway, as root can): skipped with
+    /// a line in the test output, except under CI (the <c>CI</c> variable is set), where it fails instead.
+    /// </summary>
+    private void ModeCheckUnavailable(string why)
+    {
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CI")))
+            Assert.Fail(why + " (CI is set: run the tests as a user that file modes apply to)");
+        _output.WriteLine(why);
     }
 
     private static bool CanRead(string path)
@@ -1084,7 +1098,8 @@ public sealed class TranscriptSyncAcceptanceTests : IDisposable
         {
             ["LiveSessionFinder"] = new[] { "LiveSessionFinder.cs", "TranscriptSyncService.cs" },
             ["ProcessAncestry"] = new[] { "ProcessAncestry.cs", "LiveSessionFinder.cs", "TranscriptSyncService.cs" },
-            ["TranscriptSyncService"] = new[] { "TranscriptSyncService.cs", "ServerComposition.cs" },
+            // TranscriptSyncCall.cs names only its NoteFailed constant (checked below).
+            ["TranscriptSyncService"] = new[] { "TranscriptSyncService.cs", "ServerComposition.cs", "TranscriptSyncCall.cs" },
             ["ITranscriptSync"] = new[]
             {
                 "TranscriptSyncService.cs", "TranscriptSearchHandler.cs", "TranscriptGetHandler.cs", "TranscriptSessionsHandler.cs",
@@ -1106,6 +1121,9 @@ public sealed class TranscriptSyncAcceptanceTests : IDisposable
             Assert.Contains(files[0], naming); // the scan sees the type itself
             Assert.True(naming.All(files.Contains), $"{name} is named in {string.Join(", ", naming.Except(files))}");
         }
+        var syncCall = sources.Single(f => f.Name == "TranscriptSyncCall.cs").Code;
+        Assert.All(Regex.Matches(syncCall, @"\bTranscriptSyncService\b(\.\w+)?").Select(m => m.Value),
+            v => Assert.Equal("TranscriptSyncService.NoteFailed", v));
         var composition = sources.Single(f => f.Name == "ServerComposition.cs").Code;
         foreach (var line in composition.Split('\n').Where(l => Regex.IsMatch(l, @"\btranscriptSync\b")))
             Assert.Matches(@"BuildTranscriptSync\(|TranscriptGetHandler\(|TranscriptSessionsHandler\(|^\s*transcriptSync,\s*$", line.TrimEnd('\r'));

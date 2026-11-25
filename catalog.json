@@ -1276,7 +1276,7 @@
     },
     {
       "name": "transcript_search",
-      "description": "Search archived conversation transcripts by meaning and by words. The archive is off by default (turn it on with \u0060total-recall transcripts enable\u0060). With no \u0060scope\u0060, a \u0060session\u0060 argument searches that session, else a \u0060project\u0060 argument searches that project, else the current project is searched when the current session is known from its marker, else everything; \u0060scope\u0060 project or session without its argument means the current project or session. Before the search the current session\u0027s newest text is brought into the archive: \u0060currentSession\u0060 says how it was found (marker, guessed or none) and \u0060syncNote\u0060 says when its newest text may be missing. Automated sessions are left out unless include_automated is true (a named session is always searched). Each hit carries the chunk text, its session, which searches found it (\u0060via\u0060) and a relative score (the top hit is 1.0); \u0060pendingEmbedding\u0060 counts the chunks in scope that only the word search could cover.",
+      "description": "Search archived conversation transcripts by meaning and by words. The archive is off by default (turn it on with \u0060total-recall transcripts enable\u0060). With no \u0060scope\u0060, a \u0060session\u0060 argument searches that session, else a \u0060project\u0060 argument searches that project, else the current project is searched when the current session is known from its marker, else everything; \u0060scope\u0060 project without a \u0060project\u0060 argument means the current project (else everything), and \u0060scope\u0060 session without a \u0060session\u0060 argument the current session (known from its marker; else an argument error). Before the search the current session\u0027s newest text is brought into the archive: \u0060currentSession\u0060 says how it was found (marker, guessed or none) and \u0060syncNote\u0060 says when its newest text may be missing. Automated sessions are left out unless include_automated is true (a named session is always searched). Each hit carries the chunk text, its session, which searches found it (\u0060via\u0060) and a relative score (the top hit is 1.0); \u0060pendingEmbedding\u0060 counts the chunks in scope that only the word search could cover.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1291,7 +1291,7 @@
               "project",
               "all"
             ],
-            "description": "Where to search: one session, one project or everything; when omitted, session if \u0060session\u0060 is given, else project if \u0060project\u0060 is given, else the current project when the current session is known from its marker, else all. project without a \u0060project\u0060 argument means the current project (else all), session without a \u0060session\u0060 argument the current session"
+            "description": "Where to search: one session, one project or everything; when omitted, session if \u0060session\u0060 is given, else project if \u0060project\u0060 is given, else the current project when the current session is known from its marker, else all. project without a \u0060project\u0060 argument means the current project (else all), session without a \u0060session\u0060 argument the current session (known from its marker; else an argument error)"
           },
           "project": {
             "type": "string",

@@ -71,7 +71,8 @@ public sealed record SyncContext(TranscriptLocation Location, TranscriptsSetting
 /// deadline has passed. Every failure is logged to stderr through <see cref="ExceptionLogger"/> and reported as an
 /// incomplete sync; only the caller's cancellation is thrown. With an embed plan (search only), step 5 then embeds the
 /// session's waiting tail within the embed budget (see <see cref="EmbedTail"/>); a refused or failed embed step never
-/// makes the sync incomplete.
+/// makes the sync incomplete. The single-flight lock is held through the embed step too, so a concurrent caller can wait
+/// for an embed as well as an ingest; the server handles tool calls one at a time, so such a waiter is unlikely.
 /// </summary>
 public sealed class TranscriptSyncService : ITranscriptSync
 {
@@ -93,7 +94,8 @@ public sealed class TranscriptSyncService : ITranscriptSync
     internal const string NoteNotOpened = NotePrefix + "the archive could not be opened";
     internal const string NoteNotWritten = NotePrefix + "the archive could not be written (it may be busy)";
     internal const string NoteSettings = NotePrefix + "the archive's settings could not be read";
-    internal const string NoteFailed = NotePrefix + "the catch-up failed";
+    /// <summary>The note of a catch-up that failed; the server's own catch-up guard reports the same text.</summary>
+    public const string NoteFailed = NotePrefix + "the catch-up failed";
 
     private readonly Func<SyncContext?> _context;
     private readonly TranscriptSyncOptions _options;
@@ -201,7 +203,7 @@ public sealed class TranscriptSyncService : ITranscriptSync
             case TranscriptOpenStatus.Absent:
                 // Nothing is archived, so nothing is forgotten: the key may come from the head of the file.
                 open.Store?.Dispose();
-                return new SyncResult(current, true, null, KeyOf(current, adapter, null, null, archiveAbsent: true));
+                return new SyncResult(current, true, null, KeyOf(current, adapter, null, null, archiveAbsent: true, deadline));
             case TranscriptOpenStatus.Refused:
                 // Nothing to sync; the read answers as it does today.
                 open.Store?.Dispose();
@@ -209,13 +211,16 @@ public sealed class TranscriptSyncService : ITranscriptSync
             case TranscriptOpenStatus.Failed:
             case TranscriptOpenStatus.Opened when open.Store is null:
                 open.Store?.Dispose();
+                LogLine("opening the archive: " + (open.Message ?? "no reason given"));
                 return Incomplete(current, NoteNotOpened);
         }
 
         using var store = open.Store!;
-        var source = found.GuessSource ?? Stat(current);
+        // The file as it is now, for a guess too: a call that waited for another sync must not use the size and time
+        // it saw before the wait.
+        var source = Stat(current);
         if (deadline.IsCancellationRequested)
-            return Incomplete(current, NoteOutOfTime, KeyOf(current, adapter, store, source, archiveAbsent: false));
+            return Incomplete(current, NoteOutOfTime);
         if (source is null)
             return Incomplete(current, NoteUnreadable);
 
@@ -260,7 +265,7 @@ public sealed class TranscriptSyncService : ITranscriptSync
         if (embed is not null)
             EmbedTail(store, adapter.Host, source.HostSessionId, embed, deadline, ct);
 
-        var key = status == SessionIngestStatus.Excluded ? null : KeyOf(current, adapter, store, source, archiveAbsent: false);
+        var key = status == SessionIngestStatus.Excluded ? null : KeyOf(current, adapter, store, source, archiveAbsent: false, deadline);
         return new SyncResult(current, note is null, note, key);
     }
 
@@ -317,10 +322,10 @@ public sealed class TranscriptSyncService : ITranscriptSync
     // Finding the current session
     // ------------------------------------------------------------------
 
-    /// <summary>The current session, its adapter, and (for a guess) the enumerated source.</summary>
-    private sealed record Found(CurrentSession Current, ITranscriptAdapter? Adapter, SessionSource? GuessSource)
+    /// <summary>The current session and its adapter.</summary>
+    private sealed record Found(CurrentSession Current, ITranscriptAdapter? Adapter)
     {
-        public static Found None { get; } = new(CurrentSession.None, null, null);
+        public static Found None { get; } = new(CurrentSession.None, null);
     }
 
     private IReadOnlyList<ITranscriptAdapter> Adapters()
@@ -348,7 +353,7 @@ public sealed class TranscriptSyncService : ITranscriptSync
                 foreach (var adapter in adapters)
                 {
                     if (string.Equals(adapter.Host, marked.Host, StringComparison.Ordinal))
-                        return new Found(marked, adapter, null);
+                        return new Found(marked, adapter);
                 }
             }
         }
@@ -394,10 +399,10 @@ public sealed class TranscriptSyncService : ITranscriptSync
 
         if (best is null || bestAdapter is null) return Found.None;
         var current = new CurrentSession(CurrentKind.Guessed, bestAdapter.Host, best.HostSessionId, best.Path, null);
-        return new Found(current, bestAdapter, best);
+        return new Found(current, bestAdapter);
     }
 
-    /// <summary>The marker's file as it is now (size and modification time), or null when it is gone or unreadable.</summary>
+    /// <summary>The session's file as it is now (size and modification time), or null when it is gone or unreadable.</summary>
     private static SessionSource? Stat(CurrentSession current)
     {
         if (current.TranscriptPath is null || current.HostSessionId is null) return null;
@@ -430,13 +435,15 @@ public sealed class TranscriptSyncService : ITranscriptSync
     /// For a marker session only: the key stored for it, else the key derived from the head of its file as the ingest
     /// derives it. Never for a session the archive excludes (by id, by project key or root, or by the cutoff): its file
     /// is not read for a key. Without an open store the head is read only when the archive is absent (nothing can be
-    /// forgotten then). Null on any failure.
+    /// forgotten then). Null on any failure, and once the total deadline has passed (no read starts after it).
     /// </summary>
     private string? KeyOf(
-        CurrentSession current, ITranscriptAdapter adapter, ITranscriptStore? store, SessionSource? source, bool archiveAbsent)
+        CurrentSession current, ITranscriptAdapter adapter, ITranscriptStore? store, SessionSource? source, bool archiveAbsent,
+        CancellationToken deadline)
     {
         if (current.Kind != CurrentKind.Marker || current.HostSessionId is null) return null;
         if (store is null && !archiveAbsent) return null;
+        if (deadline.IsCancellationRequested) return null;
         try
         {
             var id = current.HostSessionId;
@@ -447,6 +454,7 @@ public sealed class TranscriptSyncService : ITranscriptSync
                 if (store.IsExcluded(adapter.Host, id, null, null)) return null;
             }
 
+            if (deadline.IsCancellationRequested) return null;
             source ??= Stat(current);
             if (source is null) return null;
             if (store?.IngestNotBefore() is { } cutoff
@@ -470,6 +478,13 @@ public sealed class TranscriptSyncService : ITranscriptSync
     /// <summary>The user's home directory, as <see cref="TranscriptBackfill"/> resolves it.</summary>
     private static string UserHome() =>
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) ?? string.Empty;
+
+    /// <summary>One line to stderr (never stdout: it is the MCP channel), for a failure that carries no exception.</summary>
+    private static void LogLine(string what)
+    {
+        try { Console.Error.WriteLine(LogPrefix + ": " + what); }
+        catch { /* logging must not throw */ }
+    }
 
     private static void Log(string what, Exception ex)
     {

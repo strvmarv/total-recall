@@ -22,6 +22,9 @@ public sealed class LiveSessionFinderTests : IDisposable
     private const string Id = "aaaaaaaa-1111-4222-8333-444444444444";
     private const string OuterId = "bbbbbbbb-1111-4222-8333-444444444444";
 
+    /// <summary>The default marker cwd: a rooted temporary path, fully qualified on every platform.</summary>
+    private static readonly string DefaultCwd = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "work", "proj"));
+
     private readonly string _tmp;
     private readonly string _data;
     private readonly string _root;
@@ -68,14 +71,14 @@ public sealed class LiveSessionFinderTests : IDisposable
         return file;
     }
 
-    private static JsonObject Marker(int pid, string id, string path, string cwd = "/work/proj", string host = Host, DateTimeOffset? at = null) => new()
+    private static JsonObject Marker(int pid, string id, string path, string? cwd = null, string host = Host, DateTimeOffset? at = null) => new()
     {
         ["v"] = 1,
         ["host"] = host,
         ["host_pid"] = pid,
         ["session_id"] = id,
         ["transcript_path"] = path,
-        ["cwd"] = cwd,
+        ["cwd"] = cwd ?? DefaultCwd,
         ["at"] = (at ?? DateTimeOffset.UtcNow).UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'"),
     };
 
@@ -109,7 +112,7 @@ public sealed class LiveSessionFinderTests : IDisposable
         Assert.Equal(Host, found.Host);
         Assert.Equal(Id, found.HostSessionId);
         Assert.Equal(inner, found.TranscriptPath);
-        Assert.Equal("/work/proj", found.Cwd);
+        Assert.Equal(DefaultCwd, found.Cwd);
         Assert.Equal(Host + ":" + Id, found.Ref);
         Assert.Empty(_log);
     }
@@ -149,18 +152,41 @@ public sealed class LiveSessionFinderTests : IDisposable
 
     // --- refusals ----------------------------------------------------------------------------------------
 
-    public static IEnumerable<object[]> Refusals() => new[]
+    /// <summary>Each refusal and a substring of the reason it must log.</summary>
+    private static readonly Dictionary<string, string> RefusalReasons = new(StringComparer.Ordinal)
     {
-        "dotdot", "dot", "symlink-dir", "symlink-file", "wrong-name", "deep", "id-mismatch", "pid-mismatch",
-        "oversize", "malformed", "not-object", "wrong-v", "wrong-host", "other-root", "relative-path", "relative-cwd",
-        "stale-at", "bad-id", "missing-file", "path-not-string", "cwd-missing", "first-component-is-a-file",
-    }.Select(n => new object[] { n });
+        ["dotdot"] = "has a . or .. component",
+        ["dot"] = "has a . or .. component",
+        ["symlink-dir"] = "the project directory is a link",
+        ["symlink-file"] = "the session file is a link",
+        ["marker-link"] = "the marker file is a link",
+        ["wrong-name"] = "is not named <session_id>.jsonl",
+        ["deep"] = "is not <root>/<project>/<session>.jsonl",
+        ["id-mismatch"] = "is not named <session_id>.jsonl",
+        ["pid-mismatch"] = "host_pid does not match the file name",
+        ["oversize"] = "larger than 16 KiB",
+        ["malformed"] = "not valid JSON",
+        ["not-object"] = "not a JSON object",
+        ["wrong-v"] = "unknown version",
+        ["wrong-host"] = "host does not match",
+        ["other-root"] = "is not under the transcript root",
+        ["relative-path"] = "transcript_path is not an absolute path",
+        ["relative-cwd"] = "cwd is not an absolute path",
+        ["stale-at"] = "written before the process it names started",
+        ["bad-id"] = "session_id is not a valid session id",
+        ["missing-file"] = "the session file does not exist",
+        ["path-not-string"] = "transcript_path is not an absolute path",
+        ["cwd-missing"] = "cwd is not an absolute path",
+        ["first-component-is-a-file"] = "the project directory does not exist",
+    };
+
+    public static IEnumerable<object[]> Refusals() => RefusalReasons.Keys.Select(n => new object[] { n });
 
     [Theory]
     [MemberData(nameof(Refusals))]
     public void Find_RefusalsSkipAndContinue(string kind)
     {
-        var isLink = kind is "symlink-dir" or "symlink-file";
+        var isLink = kind is "symlink-dir" or "symlink-file" or "marker-link";
         if (isLink && OperatingSystem.IsWindows()) return;   // creating links needs a privilege there
 
         const int near = 100, far = 200;
@@ -196,6 +222,16 @@ public sealed class LiveSessionFinderTests : IDisposable
                     Directory.CreateDirectory(Path.Combine(_root, "-l"));
                     File.CreateSymbolicLink(Path.Combine(_root, "-l", Id + ".jsonl"), real);
                     Put(near, Marker(near, Id, Path.Combine(_root, "-l", Id + ".jsonl")));
+                    break;
+                }
+            case "marker-link":
+                {
+                    // a valid marker, reached only through a symbolic link at the marker's name
+                    Directory.CreateDirectory(elsewhere);
+                    var real = Path.Combine(elsewhere, "marker.json");
+                    File.WriteAllText(real, Marker(near, Id, good).ToJsonString());
+                    Directory.CreateDirectory(Path.GetDirectoryName(name)!);
+                    File.CreateSymbolicLink(name, real);
                     break;
                 }
             case "wrong-name":
@@ -297,6 +333,7 @@ public sealed class LiveSessionFinderTests : IDisposable
         var line = Assert.Single(_log);
         Assert.StartsWith("[total-recall] transcripts live marker: ignoring ", line);
         Assert.Contains(name, line);
+        Assert.Contains(RefusalReasons[kind], line);   // the refusal is the expected one, not another check
 
         // once per file per process: a second look logs nothing more
         Assert.NotNull(finder.Find(Adapters));
@@ -355,6 +392,21 @@ public sealed class LiveSessionFinderTests : IDisposable
         Put(100, Marker(100, Id, f));
         var found = Finder(new[] { 100 }).Find(new ITranscriptAdapter[] { new FakeAdapter(Host, _root + Path.DirectorySeparatorChar) });
         Assert.Equal(Id, found!.HostSessionId);
+    }
+
+    [Fact]
+    public void Find_TranscriptPathWithADoubledSeparator_IsReturnedNormalised()
+    {
+        var f = Session("-p", Id);
+        var sep = Path.DirectorySeparatorChar;
+        var doubled = _root + sep + sep + "-p" + sep + sep + Id + ".jsonl";
+        Put(100, Marker(100, Id, doubled));
+
+        var found = Finder(new[] { 100 }).Find(Adapters);
+
+        Assert.Equal(Id, found!.HostSessionId);
+        Assert.Equal(f, found.TranscriptPath);   // the checked path, normalised; never the marker's raw text
+        Assert.Empty(_log);
     }
 
     [Fact]
