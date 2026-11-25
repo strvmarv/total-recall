@@ -149,7 +149,7 @@ can still `swap` to a kept alternative. A text that came back equal closes it by
 ### D5. Held items, pins and secrets
 
 A conflict item is independent of the other kinds on the same id (the key includes the kind): a `held-delete` item, a `new-pin` and a
-`conflict` can coexist. A deletion that is carried out (W6.4, W8.3, an accepted held deletion) removes the item by D4 rule 1; a held deletion of either direction
+`conflict` can coexist. W6.4 and W8.3 (an approved hold carried out included) remove the item in that pull by D4 rule 1; an accepted remote hold or a pushed local deletion removes it at the next pull (row `forgotten`); a held deletion of either direction
 leaves it (D4 rule 1). The push never excludes an entry for a conflict item (`SyncPush.exclusion` reads `held-delete` only). A secret-blocked entry
 still takes part in the pull, so a conflict can arise on it; a loser holding a token stays local in the payload (it is never pushed:
 payloads are not records), and a `swap`/`merge` of such text is held back by the push's own secret check (Part 1).
