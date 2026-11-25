@@ -119,14 +119,20 @@ public sealed partial class TranscriptStore : ITranscriptStore
     /// The home directory <see cref="ForgetProject"/> never records as a root; null means the UserProfile folder
     /// (an empty string when that is unknown, which skips only the home check).
     /// </param>
-    public static TranscriptOpenResult Open(TranscriptLocation location, bool create, string? userHome = null)
+    /// <param name="busyTimeoutMs">
+    /// A shorter (or longer) SQLite lock wait than the 5 s default, for a caller that must not block (the sync-on-read
+    /// uses about 500 ms); null keeps the default.
+    /// </param>
+    public static TranscriptOpenResult Open(TranscriptLocation location, bool create, string? userHome = null, int? busyTimeoutMs = null)
     {
         ArgumentNullException.ThrowIfNull(location);
         try
         {
             var path = Path.GetFullPath(location.Path);
             var home = userHome ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) ?? string.Empty;
-            return location.IsMainDatabase ? OpenMain(path, create, home) : OpenSeparate(path, create, home);
+            return location.IsMainDatabase
+                ? OpenMain(path, create, home, busyTimeoutMs)
+                : OpenSeparate(path, create, home, busyTimeoutMs);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -162,7 +168,7 @@ public sealed partial class TranscriptStore : ITranscriptStore
         return (FileState.Other, null);
     }
 
-    private static TranscriptOpenResult OpenMain(string path, bool create, string userHome)
+    private static TranscriptOpenResult OpenMain(string path, bool create, string userHome, int? busyTimeoutMs)
     {
         var (state, unknown) = Inspect(path);
         if (unknown is not null)
@@ -179,7 +185,7 @@ public sealed partial class TranscriptStore : ITranscriptStore
         if (!create)
         {
             return state == FileState.Archive
-                ? Opened(OpenStore(path, isMain: true, runMainSchema: false, userHome))
+                ? Opened(OpenStore(path, isMain: true, runMainSchema: false, userHome, busyTimeoutMs))
                 : new TranscriptOpenResult(TranscriptOpenStatus.Absent, null, null);
         }
 
@@ -196,16 +202,16 @@ public sealed partial class TranscriptStore : ITranscriptStore
                 var dir = Path.GetDirectoryName(path);
                 if (!string.IsNullOrEmpty(dir))
                     Directory.CreateDirectory(dir); // as the main store does: the main database is not made user-only
-                return Opened(OpenStore(path, isMain: true, runMainSchema: true, userHome));
+                return Opened(OpenStore(path, isMain: true, runMainSchema: true, userHome, busyTimeoutMs));
             case FileState.Archive:
             case FileState.MainSchema:
-                return Opened(OpenStore(path, isMain: true, runMainSchema: false, userHome));
+                return Opened(OpenStore(path, isMain: true, runMainSchema: false, userHome, busyTimeoutMs));
             default:
                 return new TranscriptOpenResult(TranscriptOpenStatus.Refused, null, LegacyDatabaseProbe.RefusalText);
         }
     }
 
-    private static TranscriptOpenResult OpenSeparate(string path, bool create, string userHome)
+    private static TranscriptOpenResult OpenSeparate(string path, bool create, string userHome, int? busyTimeoutMs)
     {
         var (state, unknown) = Inspect(path);
         if (unknown is not null)
@@ -214,7 +220,7 @@ public sealed partial class TranscriptStore : ITranscriptStore
         if (!create)
         {
             return state is FileState.Archive or FileState.ArchiveOnly
-                ? Opened(OpenStore(path, isMain: false, runMainSchema: false, userHome))
+                ? Opened(OpenStore(path, isMain: false, runMainSchema: false, userHome, busyTimeoutMs))
                 : new TranscriptOpenResult(TranscriptOpenStatus.Absent, null, null);
         }
 
@@ -225,13 +231,13 @@ public sealed partial class TranscriptStore : ITranscriptStore
                 if (!string.IsNullOrEmpty(dir))
                     PrivateFiles.EnsureDirectory(dir);
                 PrivateFiles.CreateEmptyFile(path);
-                return Opened(OpenStore(path, isMain: false, runMainSchema: false, userHome));
+                return Opened(OpenStore(path, isMain: false, runMainSchema: false, userHome, busyTimeoutMs));
             case FileState.Empty:
                 PrivateFiles.CreateEmptyFile(path); // keeps the (empty) content, tightens the mode
-                return Opened(OpenStore(path, isMain: false, runMainSchema: false, userHome));
+                return Opened(OpenStore(path, isMain: false, runMainSchema: false, userHome, busyTimeoutMs));
             case FileState.Archive:
             case FileState.ArchiveOnly:
-                return Opened(OpenStore(path, isMain: false, runMainSchema: false, userHome));
+                return Opened(OpenStore(path, isMain: false, runMainSchema: false, userHome, busyTimeoutMs));
             default:
                 return new TranscriptOpenResult(TranscriptOpenStatus.Refused, null,
                     $"{path} is an existing database that does not hold the transcript archive; " +
@@ -242,9 +248,12 @@ public sealed partial class TranscriptStore : ITranscriptStore
     private static TranscriptOpenResult Opened(TranscriptStore store) =>
         new(TranscriptOpenStatus.Opened, store, null);
 
-    private static TranscriptStore OpenStore(string path, bool isMain, bool runMainSchema, string userHome)
+    private static TranscriptStore OpenStore(
+        string path, bool isMain, bool runMainSchema, string userHome, int? busyTimeoutMs)
     {
-        var conn = SqliteOpener.Open(path, pooling: false);
+        var conn = busyTimeoutMs is int ms
+            ? SqliteOpener.Open(path, pooling: false, busyTimeoutMs: ms)
+            : SqliteOpener.Open(path, pooling: false);
         try
         {
             using (var cmd = conn.CreateCommand())
@@ -262,6 +271,13 @@ public sealed partial class TranscriptStore : ITranscriptStore
             conn.Dispose();
             throw;
         }
+    }
+
+    internal int ReadBusyTimeoutMs()
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "PRAGMA busy_timeout";
+        return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
 
     private static long CountRo(MsSqliteConnection conn, string sql)

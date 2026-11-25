@@ -726,7 +726,10 @@ public sealed class TranscriptReadServiceGetTests : IDisposable
         public IngestCutoff? IngestNotBefore() => throw new NotSupportedException();
         public IngestOutcome ApplyIngest(SessionIngest ingest) => throw new NotSupportedException();
         public bool IsBeforeCutoff(DateTimeOffset timestamp) => throw new NotSupportedException();
-        public IReadOnlyList<EmbedChunk> NextEmbedWork(int limit, IReadOnlyCollection<long> exclude) => throw new NotSupportedException();
+        public IReadOnlyList<EmbedChunk> NextEmbedWork(
+            int limit, IReadOnlyCollection<long> exclude, (string Host, string HostSessionId)? preferSession = null) =>
+            throw new NotSupportedException();
+        public bool HasWaitingEmbedWork(string host, string hostSessionId) => throw new NotSupportedException();
         public EmbedBatchOutcome StoreEmbeddings(
             IReadOnlyList<ChunkEmbedding> batch, ArchiveFingerprint current, EmbedLeaseHolder holder, DateTimeOffset now) =>
             throw new NotSupportedException();

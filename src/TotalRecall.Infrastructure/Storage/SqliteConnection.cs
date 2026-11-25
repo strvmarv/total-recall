@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
@@ -16,6 +17,9 @@ namespace TotalRecall.Infrastructure.Storage;
 /// </summary>
 public static class SqliteConnection
 {
+    /// <summary>The <c>busy_timeout</c> of every connection that does not ask for another one.</summary>
+    public const int DefaultBusyTimeoutMs = 5000;
+
     /// <summary>
     /// Open a SQLite connection, load the sqlite-vec extension, and apply
     /// the standard pragmas (WAL, foreign keys, synchronous=NORMAL).
@@ -39,12 +43,23 @@ public static class SqliteConnection
     /// that must be deletable right after use; default <c>true</c> preserves
     /// pooling for the long-lived shared store.
     /// </param>
-    public static MsSqliteConnection Open(string dbPath, bool pooling = true)
+    /// <param name="busyTimeoutMs">
+    /// The <c>busy_timeout</c> pragma in milliseconds; the default 5000 keeps every existing caller unchanged. A
+    /// different value also sets the connection string's <c>Default Timeout</c> to the same time in whole seconds,
+    /// rounded up: the driver retries a busy statement until that timeout, so it could otherwise wait far longer than
+    /// the pragma says. Must be at least 1.
+    /// </param>
+    public static MsSqliteConnection Open(string dbPath, bool pooling = true, int busyTimeoutMs = DefaultBusyTimeoutMs)
     {
+        if (busyTimeoutMs < 1)
+            throw new ArgumentOutOfRangeException(nameof(busyTimeoutMs), busyTimeoutMs, "The busy timeout must be at least 1 ms.");
+
         // Build via the typed builder so a dbPath containing reserved
         // characters (e.g. a semicolon) can't bleed into the connection string.
         var csb = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = dbPath };
         if (!pooling) csb.Pooling = false;
+        if (busyTimeoutMs != DefaultBusyTimeoutMs)
+            csb.DefaultTimeout = (busyTimeoutMs + 999) / 1000; // whole seconds, rounded up (never 0 = wait forever)
         var conn = new MsSqliteConnection(csb.ConnectionString);
         try
         {
@@ -60,7 +75,7 @@ public static class SqliteConnection
                 // MCP server holds a write lock on the same file.
                 cmd.CommandText =
                     "PRAGMA journal_mode=WAL;" +
-                    "PRAGMA busy_timeout=5000;" +
+                    "PRAGMA busy_timeout=" + busyTimeoutMs.ToString(CultureInfo.InvariantCulture) + ";" +
                     "PRAGMA foreign_keys=ON;" +
                     "PRAGMA synchronous=NORMAL;";
                 cmd.ExecuteNonQuery();

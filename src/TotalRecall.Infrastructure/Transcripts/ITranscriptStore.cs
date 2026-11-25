@@ -89,9 +89,19 @@ public interface ITranscriptStore : IDisposable
 
     /// <summary>
     /// Up to <paramref name="limit"/> chunks with <c>embedded = 0 AND embed_attempts &lt; 3</c> by ascending id,
-    /// leaving out the ids in <paramref name="exclude"/>.
+    /// leaving out the ids in <paramref name="exclude"/>. With <paramref name="preferSession"/> the waiting chunks of that
+    /// session come first (by id, the same exclusions), then, when fewer than <paramref name="limit"/> came back, the rest
+    /// of the whole queue by id without the ids of the first read: two indexed reads, no chunk twice in one batch. A session
+    /// that does not exist gives the plain read.
     /// </summary>
-    IReadOnlyList<EmbedChunk> NextEmbedWork(int limit, IReadOnlyCollection<long> exclude);
+    IReadOnlyList<EmbedChunk> NextEmbedWork(
+        int limit, IReadOnlyCollection<long> exclude, (string Host, string HostSessionId)? preferSession = null);
+
+    /// <summary>
+    /// True when the session has a chunk with <c>embedded = 0 AND embed_attempts &lt; 3</c>; false for a session that is
+    /// unknown or whose chunks are all embedded or given up on.
+    /// </summary>
+    bool HasWaitingEmbedWork(string host, string hostSessionId);
 
     /// <summary>
     /// Writes the vectors of <paramref name="batch"/> and marks their chunks embedded in one immediate transaction: it

@@ -10,6 +10,7 @@ using Microsoft.Data.Sqlite;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Tests.TestSupport;
 using TotalRecall.Infrastructure.Transcripts;
+using TotalRecall.TestSupport.Transcripts;
 using Xunit;
 
 namespace TotalRecall.Infrastructure.Tests.Transcripts;
@@ -126,6 +127,85 @@ public sealed class TranscriptEmbedWorkerTests : IDisposable
         Assert.Empty(e.Calls);
         Assert.Null(LeaseValue());
         Assert.Equal("done", _db.Store.ReadEmbedRun()!.StoppedBy);
+    }
+
+    [Fact]
+    public void Run_PreferSession_EmbedsCurrentFirst_WithinEightChunks()
+    {
+        var older = Seed(50);
+        var cur = _db.AddSession("pi", "cur");
+        var curIds = new List<long>();
+        for (var i = 0; i < 5; i++)
+            curIds.Add(_db.AddChunk(cur, $"current text {i}", i));
+        var embedder = new RecordingEmbedder("local", 384);
+
+        var run = Worker(embedder).Run(
+            Ready, Fp, new EmbedBudget(null, 8), CancellationToken.None, preferSession: ("pi", "cur"));
+
+        Assert.Equal(EmbedStopReason.Budget, run.StoppedBy);
+        Assert.Equal(8, run.Embedded);
+        Assert.All(curIds, id => Assert.Equal(1, Embedded(id)));
+        Assert.Equal(new long[] { 1, 1, 1 }, older.Take(3).Select(Embedded).ToArray());
+        Assert.All(older.Skip(3), id => Assert.Equal(0, Embedded(id)));
+        // the probe is the only call that is not a chunk; the 5 current chunks were embedded in this one run
+        var chunkCalls = embedder.Calls.Where(c => c != EmbedProbe.Text).ToList();
+        Assert.Equal(8, chunkCalls.Count);
+        Assert.Equal(Enumerable.Range(0, 5).Select(i => $"current text {i}"), chunkCalls.Take(5));
+    }
+
+    [Fact]
+    public void Run_PreferSession_PassesThePreferenceOnEveryBatchRead()
+    {
+        Seed(40);
+        var store = new DecoratingTranscriptStore(_db.Store);
+        var seen = new List<(string, string)?>();
+        store.OnNextEmbedWork = (limit, exclude, prefer) => { seen.Add(prefer); return _db.Store.NextEmbedWork(limit, exclude, prefer); };
+
+        Worker(new ScriptedEmbedder(), store).Run(
+            Ready, Fp, NoBudget, CancellationToken.None, preferSession: ("pi", "cur"));
+
+        Assert.True(seen.Count >= 3);
+        Assert.All(seen, p => Assert.Equal(("pi", "cur"), p));
+    }
+
+    [Fact]
+    public void Run_NoPreference_PassesNullOnEveryBatchRead()
+    {
+        Seed(20);
+        var store = new DecoratingTranscriptStore(_db.Store);
+        var seen = new List<(string, string)?>();
+        store.OnNextEmbedWork = (limit, exclude, prefer) => { seen.Add(prefer); return _db.Store.NextEmbedWork(limit, exclude, prefer); };
+
+        Worker(new ScriptedEmbedder(), store).Run(Ready, Fp, NoBudget, CancellationToken.None);
+
+        Assert.NotEmpty(seen);
+        Assert.All(seen, p => Assert.Null(p));
+    }
+
+    [Fact]
+    public void Run_RecordRunFalse_LeavesLastRunUntouched()
+    {
+        Seed(20);
+        var before = new EmbedRunRecord(T0.AddDays(-3), 7, 99, 1, "ready", "Ready", "local", "bge-small-en-v1.5", "done");
+        _db.Store.WriteEmbedRun(before);
+        var later = new ManualTimeProvider(T0);
+
+        var quiet = Worker(new ScriptedEmbedder(), time: later).Run(
+            Ready, Fp, new EmbedBudget(null, 16), CancellationToken.None, recordRun: false);
+
+        Assert.Equal(16, quiet.Embedded);
+        Assert.Equal(before, _db.Store.ReadEmbedRun());
+        Assert.Null(LeaseValue()); // the lease is still released
+
+        var loud = Worker(new ScriptedEmbedder(), time: later).Run(
+            Ready, Fp, NoBudget, CancellationToken.None, recordRun: true);
+
+        Assert.Equal(4, loud.Embedded);
+        var after = _db.Store.ReadEmbedRun();
+        Assert.NotNull(after);
+        Assert.NotEqual(before, after);
+        Assert.Equal(T0, after!.At);
+        Assert.Equal(4, after.Embedded);
     }
 
     [Fact]
@@ -338,8 +418,8 @@ public sealed class TranscriptEmbedWorkerTests : IDisposable
         Seed(20);
         var store = new DecoratingTranscriptStore(_db.Store);
         var reads = 0;
-        store.OnNextEmbedWork = (limit, exclude) =>
-            ++reads == 2 ? throw new InvalidOperationException("read broke") : _db.Store.NextEmbedWork(limit, exclude);
+        store.OnNextEmbedWork = (limit, exclude, prefer) =>
+            ++reads == 2 ? throw new InvalidOperationException("read broke") : _db.Store.NextEmbedWork(limit, exclude, prefer);
 
         var run = Worker(new ScriptedEmbedder(), store).Run(Ready, Fp, NoBudget, CancellationToken.None);
 
@@ -533,7 +613,7 @@ public sealed class TranscriptEmbedWorkerTests : IDisposable
         var e = new ScriptedEmbedder().Throw(Text(1), new KeyNotFoundException("bad"));
         var store = new DecoratingTranscriptStore(_db.Store);
         var excludes = new List<long[]>();
-        store.OnNextEmbedWork = (limit, exclude) => { excludes.Add(exclude.ToArray()); return _db.Store.NextEmbedWork(limit, exclude); };
+        store.OnNextEmbedWork = (limit, exclude, prefer) => { excludes.Add(exclude.ToArray()); return _db.Store.NextEmbedWork(limit, exclude, prefer); };
 
         var run = Worker(e, store).Run(Ready, Fp, NoBudget, CancellationToken.None);
 

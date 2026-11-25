@@ -31,37 +31,94 @@ public sealed partial class TranscriptStore
     // Queue
     // ------------------------------------------------------------------
 
-    public IReadOnlyList<EmbedChunk> NextEmbedWork(int limit, IReadOnlyCollection<long> exclude)
+    internal const string HasWaitingEmbedWorkSql =
+        "SELECT 1 FROM tx_chunk WHERE session_id = (SELECT id FROM tx_session WHERE host = $host AND host_session_id = $hid) " +
+        "AND embedded = 0 AND embed_attempts < 3 LIMIT 1";
+
+    internal static string BuildSessionFirstSql(int excludeCount) =>
+        "SELECT id, content, embed_attempts FROM tx_chunk WHERE session_id = " +
+        "(SELECT id FROM tx_session WHERE host = $host AND host_session_id = $hid) " +
+        "AND embedded = 0 AND embed_attempts < 3" + ExcludeClause(excludeCount) + " ORDER BY id LIMIT $limit";
+
+    internal static string BuildPlainSql(int excludeCount) =>
+        "SELECT id, content, embed_attempts FROM tx_chunk WHERE embedded = 0 AND embed_attempts < 3" +
+        ExcludeClause(excludeCount) + " ORDER BY id LIMIT $limit";
+
+    private static string ExcludeClause(int count)
+    {
+        if (count <= 0)
+            return string.Empty;
+        var sb = new StringBuilder(" AND id NOT IN (");
+        for (var i = 0; i < count; i++)
+        {
+            if (i > 0) sb.Append(", ");
+            sb.Append("$x").Append(i.ToString(CultureInfo.InvariantCulture));
+        }
+        return sb.Append(')').ToString();
+    }
+
+    public bool HasWaitingEmbedWork(string host, string hostSessionId)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+        ArgumentNullException.ThrowIfNull(hostSessionId);
+        using var cmd = Command(null, HasWaitingEmbedWorkSql, ("$host", host), ("$hid", hostSessionId));
+        return cmd.ExecuteScalar() is not null;
+    }
+
+    public IReadOnlyList<EmbedChunk> NextEmbedWork(
+        int limit, IReadOnlyCollection<long> exclude, (string Host, string HostSessionId)? preferSession = null)
     {
         ArgumentNullException.ThrowIfNull(exclude);
         if (limit <= 0)
             return Array.Empty<EmbedChunk>();
 
-        var sql = new StringBuilder("SELECT id, content, embed_attempts FROM tx_chunk WHERE embedded = 0 AND embed_attempts < 3");
-        var parameters = new List<(string, object)>();
-        if (exclude.Count > 0)
-        {
-            sql.Append(" AND id NOT IN (");
-            var i = 0;
-            foreach (var id in exclude)
-            {
-                if (i > 0) sql.Append(", ");
-                var name = "$x" + i.ToString(CultureInfo.InvariantCulture);
-                sql.Append(name);
-                parameters.Add((name, id));
-                i++;
-            }
-            sql.Append(')');
-        }
-        sql.Append(" ORDER BY id LIMIT $limit");
-        parameters.Add(("$limit", (long)limit));
-
         var result = new List<EmbedChunk>();
-        using var cmd = Command(null, sql.ToString(), parameters.ToArray());
+        IReadOnlyCollection<long> rest = exclude;
+        if (preferSession is { } prefer)
+        {
+            // Read one: the session's own waiting chunks (the (session_id, ...) unique index), in id order.
+            var parameters = new List<(string, object)> { ("$host", prefer.Host), ("$hid", prefer.HostSessionId) };
+            AddExcludeParameters(parameters, exclude);
+            parameters.Add(("$limit", (long)limit));
+            ReadChunks(BuildSessionFirstSql(exclude.Count), parameters, result);
+
+            if (result.Count >= limit)
+                return result;
+
+            // Read two: the rest of the whole queue, never a chunk that read one returned.
+            if (result.Count > 0)
+            {
+                var combined = new List<long>(exclude.Count + result.Count);
+                combined.AddRange(exclude);
+                foreach (var c in result)
+                    combined.Add(c.Id);
+                rest = combined;
+            }
+        }
+
+        var restParameters = new List<(string, object)>();
+        AddExcludeParameters(restParameters, rest);
+        restParameters.Add(("$limit", (long)(limit - result.Count)));
+        ReadChunks(BuildPlainSql(rest.Count), restParameters, result);
+        return result;
+    }
+
+    private static void AddExcludeParameters(List<(string, object)> parameters, IReadOnlyCollection<long> exclude)
+    {
+        var i = 0;
+        foreach (var id in exclude)
+        {
+            parameters.Add(("$x" + i.ToString(CultureInfo.InvariantCulture), id));
+            i++;
+        }
+    }
+
+    private void ReadChunks(string sql, List<(string, object)> parameters, List<EmbedChunk> into)
+    {
+        using var cmd = Command(null, sql, parameters.ToArray());
         using var r = cmd.ExecuteReader();
         while (r.Read())
-            result.Add(new EmbedChunk(r.GetInt64(0), r.GetString(1)) { Attempts = r.GetInt32(2) });
-        return result;
+            into.Add(new EmbedChunk(r.GetInt64(0), r.GetString(1)) { Attempts = r.GetInt32(2) });
     }
 
     // ------------------------------------------------------------------
