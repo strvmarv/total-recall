@@ -23,6 +23,7 @@
     <Compile Include="SyncScan.fs" />
     <Compile Include="SyncSecret.fs" />
     <Compile Include="SyncApply.fs" />
+    <Compile Include="SyncPin.fs" />
     <Compile Include="SyncPush.fs" />
     <Compile Include="SyncCycle.fs" />
     <Compile Include="Tokenizer.fs" />

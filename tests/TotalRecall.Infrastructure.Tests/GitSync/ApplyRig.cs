@@ -73,7 +73,8 @@ internal sealed class ApplyRig : IDisposable
         int minute = 10,
         int? tierMinute = null,
         int? stickyMinute = null,
-        string? originHash = null) =>
+        string? originHash = null,
+        string? writtenBy = null) =>
         new(
             id, content, EntryType.Correction,
             ListModule.OfSeq((tags ?? []).Order(StringComparer.Ordinal).Distinct()),
@@ -84,7 +85,7 @@ internal sealed class ApplyRig : IDisposable
             new SyncRecordModule.Placement(sticky ? Tier.Hot : tier ?? Tier.Warm, St(tierMinute ?? minute), sticky, St(stickyMinute ?? minute)),
             St(minute),
             originHash is null ? FSharpOption<SyncRecordModule.Origin>.None : FSharpOption<SyncRecordModule.Origin>.Some(new SyncRecordModule.Origin("claude-code", originHash)),
-            FSharpOption<string>.None);
+            writtenBy is null ? FSharpOption<string>.None : FSharpOption<string>.Some(writtenBy));
 
     public static ParsedRecord Parsed(SyncRecordModule.SyncRecord record) =>
         RecordReader.Parse(RecordWriter.Write(record).Bytes!, SyncValidation.recordPath(record.Id)).Parsed
@@ -106,6 +107,13 @@ internal sealed class ApplyRig : IDisposable
 
     public void SeedHeld(string id, string direction = "remote", string cause = "unproven", string? hash = null) =>
         GitSyncReviews.UpsertHeld(Scan.Connection, new HeldItem(id, direction, hash, cause, 1_700_000_000_000L));
+
+    /// <summary>The id's pin items (both kinds, any of the four states) as <c>kind|state|hash|machine</c> lines, by kind.</summary>
+    public IReadOnlyList<string> PinItems(string id) =>
+        GitSyncReviews.ReadPinItems(Scan.Connection)
+            .Where(i => i.EntryId == id)
+            .Select(i => $"{i.Kind}|{i.State}|{i.RecordHash}|{i.Machine}")
+            .ToList();
 
     public int ReviewRows()
     {

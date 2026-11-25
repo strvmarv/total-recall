@@ -471,9 +471,18 @@ public sealed class GitSyncApplierEntryTests : IDisposable
     }
 
     [Fact]
-    public void APostponedNewPin_ChangesNothing_AndNeverCallsTheEmbedder()
+    public void ANewPin_IsInsertedNonSticky_WithAnOpenNewPinItem()
     {
-        AssertPostponed("review", () => _rig.Apply(ApplyRig.Rec(Id, sticky: true)));
+        // pin review D3: a record that pins is no longer postponed; it is inserted as an ordinary entry with a new-pin item
+        var carried = Is<EntryResult.Carried>(_rig.Apply(ApplyRig.Rec(Id, sticky: true)));
+
+        Assert.Equal(CarriedKind.Inserted, carried.Kind);
+        Assert.Equal(Tier.Hot, _rig.Entry(Id)!.Tier);
+        Assert.False(_rig.Scan.Store.IsSticky(ContentType.Memory, Id));
+        var item = GitSyncReviews.ReadPinItem(_rig.Scan.Connection, Id, "new-pin");
+        Assert.Equal("open", item!.State);
+        Assert.Equal(SyncPin.shownHash("Use bun, not npm.", null, null), item.RecordHash);
+        AssertScanQuiet();
     }
 
     [Fact]
@@ -796,11 +805,22 @@ public sealed class GitSyncApplierEntryTests : IDisposable
     [Theory]
     [InlineData("forgotten")]
     [InlineData("active")]
-    public void NewerTextThanTheDeletion_ThatPins_IsPostponedAsAReview(string rowState)
+    public void NewerTextThanTheDeletion_ThatPins_IsInsertedNonSticky_WithANewPinItem(string rowState)
     {
         EntryGone(rowState);
 
-        AssertPostponed("review", () => _rig.Apply(ApplyRig.Rec(Id, content: "Newer text.", sticky: true, minute: 20)));
+        // W3 (forgotten) and W8.1 (active): pin review D3 inserts the record non-sticky and opens a new-pin item
+        var carried = Is<EntryResult.Carried>(_rig.Apply(ApplyRig.Rec(Id, content: "Newer text.", sticky: true, minute: 20)));
+
+        Assert.Equal(CarriedKind.Inserted, carried.Kind);
+        Assert.Equal(["edit-beats-deletion"], carried.Effects.Notes);
+        Assert.Equal("Newer text.", _rig.Entry(Id)!.Row.Content);
+        Assert.False(_rig.Scan.Store.IsSticky(ContentType.Memory, Id));
+        Assert.Equal(SyncMerge.RowState.Active, Row().State);
+        var item = GitSyncReviews.ReadPinItem(_rig.Scan.Connection, Id, "new-pin");
+        Assert.Equal("open", item!.State);
+        Assert.Equal(SyncPin.shownHash("Newer text.", null, null), item.RecordHash);
+        AssertScanQuiet();
     }
 
     [Fact]

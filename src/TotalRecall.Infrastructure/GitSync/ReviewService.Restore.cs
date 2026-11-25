@@ -26,7 +26,7 @@ public sealed partial class ReviewService
     /// an embedder that throws is <c>failed</c>; a sticky base opens a <c>new-pin</c> item, which the lines say.
     /// </summary>
     public Task<SetupResult> RestoreAsync(string entryId, string? shownHash, CancellationToken ct = default) =>
-        RunAsync(
+        RunHeldAsync(
             entryId,
             ReviewOperation.Restore,
             shownHash,
@@ -112,7 +112,8 @@ public sealed partial class ReviewService
     /// D5: inserts the row's base as the memory the apply's <c>InsertFromRecord</c> inserts (the record's tier, or warm
     /// over the hot limit; never sticky) with the embedding computed before the transaction, writes the row the apply writes
     /// for it (pending stamps cleared, comparison columns from the stored entry) and its <c>import_log</c> line, opens a
-    /// <c>new-pin</c> item with the held item's hash when the base is sticky, and removes the item.
+    /// <c>new-pin</c> item when the base is sticky (keyed on the shown hash of the entry just inserted, with the record's
+    /// <c>written_by</c> as its machine), and removes the item.
     /// </summary>
     private SetupResult RestoreLocal(SqliteStoreTransaction tx, string entryId, ItemFacts facts, Embedded? embedded)
     {
@@ -146,7 +147,15 @@ public sealed partial class ReviewService
 
         var pinned = record.Placement.Sticky;
         if (pinned)
-            GitSyncReviews.UpsertNewPin(conn, entryId, facts.Item.RecordHash!, NowMs(), dbTx);
+            GitSyncReviews.UpsertPinItem(
+                conn,
+                new PinItem(
+                    entryId, "new-pin", "open",
+                    SyncPin.shownHash(stored.Content.Text, stored.Content.Project, stored.Content.Scope),
+                    record.WrittenBy is null ? null : record.WrittenBy.Value,
+                    NowMs(),
+                    Origin: "restore"),
+                dbTx);
         GitSyncReviews.DeleteHeld(conn, entryId, dbTx);
 
         var back = $"restored {entryId}: the memory is back on this machine";

@@ -50,15 +50,19 @@ public sealed class ReviewServiceTests : IDisposable
     {
         _rig.RemoteHold(Remote, "Kept here.");
         _rig.LocalHold(Local, Sha, "Deleted here.", approve: true);
-        GitSyncReviews.UpsertNewPin(_rig.Scan.Connection, Other, Sha, 1); // another kind is not listed
+        GitSyncReviews.UpsertPinItem(_rig.Scan.Connection, new PinItem(Other, "new-pin", "declined", Sha, null, 1)); // another kind is not listed
 
         var listing = Service().List();
 
         Assert.Null(listing.Failed);
         Assert.Equal(
             [
-                new ReviewItem(Local, "approved", "local", "unproven", Sha, _rig.Now, "Deleted here.", false, "repository record"),
-                new ReviewItem(Remote, "open", "remote", "unproven", null, _rig.Now, "Kept here.", false, "local entry"),
+                new ReviewItem(
+                    "held-delete", Local, "approved", "local", "unproven", Sha, _rig.Now, null, null, null, "Deleted here.", false,
+                    "repository record", null, false),
+                new ReviewItem(
+                    "held-delete", Remote, "open", "remote", "unproven", null, _rig.Now, null, null, null, "Kept here.", false,
+                    "local entry", null, false),
             ],
             listing.Items);
     }

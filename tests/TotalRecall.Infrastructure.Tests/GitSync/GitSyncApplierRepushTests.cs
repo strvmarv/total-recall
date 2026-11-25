@@ -319,23 +319,27 @@ public sealed class GitSyncApplierRepushTests : IDisposable
     }
 
     [GitFact]
-    public async Task ReviewStillPostpones()
+    public async Task ANewPinOnTopOfAReset_IsCarriedOut_WithAnItem_AndKeepsTheMarker()
     {
         await MarkedByAReset(A);
-        // a newer pin on top of the reset, while content and tier stay reverted: a new-pin review
+        // a newer pin on top of the reset, while content and tier stay reverted: pin review D3 carries it out with a new-pin
+        // item, the entry stays unpinned, and the groups still reverted stay marked
         _rig.PutRecord(Rec(A, Older(A), 10, sticky: true, stickyMinute: 30));
         var head = _rig.Commit("a pin");
         var entry = Snapshot(A);
-        var row = Row(A);
 
         var summary = await Pull();
 
-        Assert.Equal([new PostponedEntry(A, "review")], summary.Postponed);
-        Assert.False(summary.Complete);
-        Assert.NotEqual(head, _rig.Last);
-        Assert.Empty(summary.RepushMarked);
-        Assert.Equal(row, Row(A)); // the marker is kept with the rest
-        Assert.Equal(entry, Snapshot(A));
+        Assert.Empty(summary.Postponed);
+        Assert.True(summary.Complete);
+        Assert.Equal(head, _rig.Last);
+        Assert.Equal([new RepushEntry(A, "content,tier")], summary.RepushMarked);
+        Assert.Equal("content,tier", Row(A).RepushGroups);
+        Assert.Equal(entry, Snapshot(A)); // not sticky, the text and tier as they were
+        Assert.False(Local(A).Sticky);
+        var item = GitSyncReviews.ReadPinItem(_rig.Connection, A, "new-pin");
+        Assert.Equal("open", item!.State);
+        Assert.Equal(SyncPin.shownHash(Newer(A), null, null), item.RecordHash); // the entry's own text: the record's is reverted
     }
 
     // ---- what clears the marker, and a fault at every step ----

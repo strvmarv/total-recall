@@ -230,25 +230,157 @@ public sealed class GitSyncReviewsTests : IDisposable
             GitSyncReviews.ReadHeldItem(_conn, "k"));
     }
 
+    private void InsertRow(string id, string kind, string state, string? direction = null, string? hash = null, string? machine = null)
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText =
+            "INSERT INTO git_sync_review (entry_id, kind, state, record_hash, direction, machine, payload_json, arrived_at) " +
+            "VALUES ($id, $kind, $state, $hash, $direction, $machine, '{}', 7)";
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.Parameters.AddWithValue("$kind", kind);
+        cmd.Parameters.AddWithValue("$state", state);
+        cmd.Parameters.AddWithValue("$hash", (object?)hash ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$direction", (object?)direction ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$machine", (object?)machine ?? DBNull.Value);
+        cmd.ExecuteNonQuery();
+    }
+
     [Fact]
-    public void UpsertNewPin_WritesAnOpenNewPinRow_AndASecondReplacesIt()
+    public void ReadPinItems_ReadsBothKindsInEveryAnswerState_AndNoHeldDelete()
+    {
+        InsertRow("d", "new-pin", "open", hash: "h1", machine: "m1");
+        InsertRow("c", "pin-edit", "unseen", hash: "h2");
+        InsertRow("b", "new-pin", "declined", hash: "h3");
+        InsertRow("a", "pin-edit", "approved", hash: "h4");
+        InsertRow("a", "held-delete", "open", direction: "remote");
+        InsertRow("e", "pin-edit", "resolved", hash: "h5");
+
+        var items = GitSyncReviews.ReadPinItems(_conn);
+
+        Assert.Equal(
+            [
+                new PinItem("a", "pin-edit", "approved", "h4", null, 7),
+                new PinItem("b", "new-pin", "declined", "h3", null, 7),
+                new PinItem("c", "pin-edit", "unseen", "h2", null, 7),
+                new PinItem("d", "new-pin", "open", "h1", "m1", 7),
+            ],
+            items);
+    }
+
+    [Fact]
+    public void ReadPinItem_ReadsOneByIdAndKind()
+    {
+        InsertRow("k", "new-pin", "open", hash: "h1");
+        InsertRow("k", "pin-edit", "unseen", hash: "h2", machine: "m");
+        InsertRow("r", "new-pin", "resolved", hash: "h3");
+        InsertRow("k", "held-delete", "open", direction: "local");
+
+        Assert.Equal(new PinItem("k", "new-pin", "open", "h1", null, 7), GitSyncReviews.ReadPinItem(_conn, "k", "new-pin"));
+        Assert.Equal(new PinItem("k", "pin-edit", "unseen", "h2", "m", 7), GitSyncReviews.ReadPinItem(_conn, "k", "pin-edit"));
+        Assert.Null(GitSyncReviews.ReadPinItem(_conn, "r", "new-pin")); // resolved is not an item
+        Assert.Null(GitSyncReviews.ReadPinItem(_conn, "k", "held-delete"));
+        Assert.Null(GitSyncReviews.ReadPinItem(_conn, "none", "new-pin"));
+    }
+
+    [Fact]
+    public void ReadPinItem_ReadsTheOriginOfTheRestorePayload()
+    {
+        GitSyncReviews.UpsertPinItem(_conn, new PinItem("k", "new-pin", "open", "h", "m", 5, Origin: "restore"));
+
+        Assert.Equal("restore", GitSyncReviews.ReadPinItem(_conn, "k", "new-pin")!.Origin);
+        Assert.Equal("restore", GitSyncReviews.ReadPinItems(_conn).Single().Origin);
+    }
+
+    [Fact]
+    public void UpsertPinItem_WritesTheItem_AndASecondReplacesIt()
     {
         var held = new HeldItem("k", "local", "blob", "guard", 5);
         GitSyncReviews.UpsertHeld(_conn, held);
 
-        GitSyncReviews.UpsertNewPin(_conn, "k", "hash1", 100);
-        GitSyncReviews.UpsertNewPin(_conn, "k", "hash2", 200);
+        GitSyncReviews.UpsertPinItem(_conn, new PinItem("k", "new-pin", "open", "h1", "m1", 100));
+        GitSyncReviews.UpsertPinItem(_conn, new PinItem("k", "new-pin", "open", "h2", "m", 200));
 
         const string where = " FROM git_sync_review WHERE entry_id = 'k' AND kind = 'new-pin'";
         Assert.Equal("1", Scalar("SELECT COUNT(*)" + where));
-        Assert.Equal("hash2", Scalar("SELECT record_hash" + where));
-        Assert.Equal("open", Scalar("SELECT state" + where));
-        Assert.Equal("200", Scalar("SELECT arrived_at" + where));
+        Assert.Equal(
+            "open|h2|m|NULL|{}|200",
+            Scalar(
+                "SELECT state || '|' || record_hash || '|' || machine || '|' || COALESCE(direction, 'NULL') || '|' || payload_json || '|' || arrived_at" + where));
+
+        GitSyncReviews.UpsertPinItem(_conn, new PinItem("k", "new-pin", "unseen", "h3", "m2", 300, Origin: "restore"));
+        Assert.Equal("unseen", Scalar("SELECT state" + where));
+        Assert.Equal("m2", Scalar("SELECT machine" + where));
         Assert.Equal("""{"origin":"restore"}""", Scalar("SELECT payload_json" + where));
-        Assert.Null(Scalar("SELECT direction" + where));
+        Assert.Equal("300", Scalar("SELECT arrived_at" + where));
+
         Assert.Equal(held, GitSyncReviews.ReadOpenHeldItem(_conn, "k"));
         Assert.Equal(held, GitSyncReviews.ReadHeldItem(_conn, "k"));
         Assert.Equal(["k"], GitSyncReviews.ReadOpenHeld(_conn).Keys.ToArray());
+    }
+
+    [Fact]
+    public void MarkPinUnseen_SetsStateHashAndMachine_KeepingPayloadAndArrivedAt()
+    {
+        GitSyncReviews.UpsertPinItem(_conn, new PinItem("k", "pin-edit", "open", "h1", "m1", 100, Origin: "restore"));
+        GitSyncReviews.UpsertPinItem(_conn, new PinItem("k", "new-pin", "open", "n1", "m1", 100));
+
+        GitSyncReviews.MarkPinUnseen(_conn, "k", "pin-edit", "h2", null);
+
+        const string where = " FROM git_sync_review WHERE entry_id = 'k' AND kind = ";
+        Assert.Equal("unseen", Scalar("SELECT state" + where + "'pin-edit'"));
+        Assert.Equal("h2", Scalar("SELECT record_hash" + where + "'pin-edit'"));
+        Assert.Null(Scalar("SELECT machine" + where + "'pin-edit'"));
+        Assert.Equal("""{"origin":"restore"}""", Scalar("SELECT payload_json" + where + "'pin-edit'"));
+        Assert.Equal("100", Scalar("SELECT arrived_at" + where + "'pin-edit'"));
+        Assert.Equal("open", Scalar("SELECT state" + where + "'new-pin'")); // the other kind is untouched
+        Assert.Equal("n1", Scalar("SELECT record_hash" + where + "'new-pin'"));
+    }
+
+    [Fact]
+    public void ResolvePinItem_SetsOnlyTheState()
+    {
+        GitSyncReviews.UpsertPinItem(_conn, new PinItem("k", "new-pin", "open", "h1", "m1", 100, Origin: "restore"));
+        GitSyncReviews.UpsertPinItem(_conn, new PinItem("k", "pin-edit", "open", "h2", "m1", 100));
+        GitSyncReviews.UpsertHeld(_conn, new HeldItem("k", "local", "blob", "guard", 5));
+
+        GitSyncReviews.ResolvePinItem(_conn, "k", "new-pin", "approved");
+
+        Assert.Equal(new PinItem("k", "new-pin", "approved", "h1", "m1", 100, "restore"), GitSyncReviews.ReadPinItem(_conn, "k", "new-pin"));
+        GitSyncReviews.ResolvePinItem(_conn, "k", "new-pin", "declined");
+        Assert.Equal("declined", GitSyncReviews.ReadPinItem(_conn, "k", "new-pin")!.State);
+        Assert.Equal("open", GitSyncReviews.ReadPinItem(_conn, "k", "pin-edit")!.State);
+        Assert.Equal(new HeldItem("k", "local", "blob", "guard", 5), GitSyncReviews.ReadHeldItem(_conn, "k"));
+        Assert.Throws<ArgumentException>(() => GitSyncReviews.ResolvePinItem(_conn, "k", "new-pin", "open"));
+        Assert.Throws<ArgumentException>(() => GitSyncReviews.ResolvePinItem(_conn, "k", "new-pin", "resolved"));
+        Assert.Equal("declined", GitSyncReviews.ReadPinItem(_conn, "k", "new-pin")!.State);
+    }
+
+    [Fact]
+    public void DeletePinItem_RemovesOnlyThatKind()
+    {
+        GitSyncReviews.UpsertPinItem(_conn, new PinItem("k", "new-pin", "open", "h1", null, 1));
+        GitSyncReviews.UpsertPinItem(_conn, new PinItem("k", "pin-edit", "open", "h2", null, 1));
+        GitSyncReviews.UpsertHeld(_conn, new HeldItem("k", "remote", null, "guard", 1));
+        InsertRow("k", "conflict", "open");
+
+        GitSyncReviews.DeletePinItem(_conn, "k", "new-pin");
+        GitSyncReviews.DeletePinItem(_conn, "missing", "new-pin");
+
+        Assert.Null(GitSyncReviews.ReadPinItem(_conn, "k", "new-pin"));
+        Assert.NotNull(GitSyncReviews.ReadPinItem(_conn, "k", "pin-edit"));
+        Assert.NotNull(GitSyncReviews.ReadHeldItem(_conn, "k"));
+        Assert.Equal("1", Scalar("SELECT COUNT(*) FROM git_sync_review WHERE kind = 'conflict'"));
+    }
+
+    [Fact]
+    public void ReadOpenHeld_StillIgnoresPinRows()
+    {
+        GitSyncReviews.UpsertPinItem(_conn, new PinItem("p", "new-pin", "open", "h", null, 1));
+        GitSyncReviews.UpsertPinItem(_conn, new PinItem("q", "pin-edit", "open", "h", null, 1));
+
+        Assert.Empty(GitSyncReviews.ReadOpenHeld(_conn));
+        Assert.Empty(GitSyncReviews.ReadApprovedHeld(_conn));
+        Assert.Null(GitSyncReviews.ReadHeldItem(_conn, "p"));
     }
 
     [Fact]

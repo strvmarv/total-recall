@@ -1,10 +1,12 @@
 using System.Text;
 using Microsoft.Data.Sqlite;
+using Microsoft.FSharp.Collections;
 using Microsoft.FSharp.Core;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Storage;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 using SyncRecord = TotalRecall.Core.SyncRecord.SyncRecord;
+using SyncRecordModule = TotalRecall.Core.SyncRecord;
 
 namespace TotalRecall.Infrastructure.GitSync;
 
@@ -101,6 +103,142 @@ internal static class ApplyPlanning
         Tier? moveTo = desired.Equals(l.Tier) ? null : desired;
         return new StorePlan(false, null, m.Sticky.Item1.IsUnpinLocally, update, moveTo, textChanged, colderResult, false);
     }
+
+    /// <summary>A project or scope as the store reads it back (<see cref="LocalEntryReader.ToLocalEntry"/>): an empty one is none.</summary>
+    private static FSharpOption<string>? NoneIfEmpty(string? value) => string.IsNullOrEmpty(value) ? null : Some(value);
+
+    /// <summary>The content group of <paramref name="record"/> as an entry written from it reads back: an empty project or scope is none.</summary>
+    internal static SyncMerge.ContentFields RecordContent(SyncRecord record) =>
+        new(
+            record.Content,
+            NoneIfEmpty(Unopt(record.Project)),
+            NoneIfEmpty(Unopt(record.Scope)),
+            record.EntryType,
+            record.Source,
+            record.CreatedAtMs);
+
+    /// <summary>
+    /// The shown hash (<c>SyncPin.shownHash</c>) of a held base's content group as the store reads it back: an empty project or
+    /// scope is none (<see cref="RecordContent"/>), because applying the base stores <c>""</c> and the stored entry reads it as
+    /// none. The one place a pin-edit item's, the list's and the stale check's hash of a base is computed, so they cannot differ.
+    /// </summary>
+    internal static string BaseShownHash(SyncRecord record)
+    {
+        var content = RecordContent(record);
+        return SyncPin.shownHash(content.Text, content.Project, content.Scope);
+    }
+
+    /// <summary>
+    /// The entry as the store holds it after <paramref name="plan"/> is carried out (pin review D4, "When it runs"), read the
+    /// way <see cref="LocalEntryReader.ToLocalEntry"/> reads it: null for a deletion; for an insert the record's content
+    /// and tags, non-sticky, in the insert tier; otherwise <paramref name="local"/> with the update applied (the content
+    /// group of a TakeTheirs, a <c>created_at</c>, the tags), in <c>MoveTo</c> or its own tier, and not sticky after an
+    /// unpin or a move (a move does not carry the flag). An empty project or scope becomes none. Null when there is no entry.
+    /// </summary>
+    internal static SyncMerge.LocalEntry? ExpectedEntry(StorePlan plan, SyncRecord? theirs, SyncMerge.LocalEntry? local)
+    {
+        if (plan.Delete)
+            return null;
+        if (plan.Insert)
+        {
+            var record = theirs ?? throw new InvalidOperationException("an insert needs a record");
+            var tier = plan.InsertTier ?? throw new InvalidOperationException("an insert needs a tier");
+            return new SyncMerge.LocalEntry(RecordContent(record), SyncRecordModule.normaliseTags(record.Tags), tier, false);
+        }
+        if (local is null)
+            return null;
+
+        var content = local.Content;
+        var tags = local.Tags;
+        if (plan.Update is { } u)
+        {
+            content = new SyncMerge.ContentFields(
+                u.Content ?? content.Text,
+                u.Project is not null ? NoneIfEmpty(u.Project) : u.ClearProject ? null : content.Project,
+                u.Scope is not null ? NoneIfEmpty(u.Scope) : content.Scope,
+                u.EntryType ?? content.EntryType,
+                u.ClearSourceTool ? null : u.SourceTool is not null ? Some(u.SourceTool) : content.Source,
+                u.CreatedAt ?? content.CreatedAtMs);
+            if (u.Tags is not null)
+                tags = SyncRecordModule.normaliseTags(ListModule.OfSeq(u.Tags));
+        }
+        return new SyncMerge.LocalEntry(
+            content, tags, plan.MoveTo ?? local.Tier, local.Sticky && !plan.Unpin && plan.MoveTo is null);
+    }
+
+    /// <summary>
+    /// A stand-in for <see cref="IssueStamp"/> when a row is only planned before the transaction (pin review D4): the floor,
+    /// else a fixed valid stamp. The planned row's pending stamps are then present where the real ones will be, which is
+    /// all the reconcile reads of them; the transaction issues the real stamps.
+    /// </summary>
+    internal static FSharpOption<SyncStamp.Stamp> PlaceholderIssue(FSharpOption<SyncStamp.Stamp>? floor) =>
+        floor ?? Some(PlaceholderStamp);
+
+    private static readonly SyncStamp.Stamp PlaceholderStamp =
+        SyncStamp.StampModule.tryParse("1970-01-01T00:00:00.000Z.000000.00000000")!.Value;
+
+    /// <summary>
+    /// The store operations of a merge on the existing entry <paramref name="id"/> in <paramref name="current"/>, inside the
+    /// caller's transaction: the unpin, the update, the move (with <paramref name="vector"/> when the text changed) or, with
+    /// no move, the replaced vector of a changed text.
+    /// </summary>
+    internal static void WriteStore(SqliteStoreTransaction tx, string id, Tier current, StorePlan plan, float[]? vector)
+    {
+        if (plan.TextChanged && vector is null)
+            throw new InvalidOperationException("a changed text needs a vector");
+        if (plan.Unpin)
+            tx.SetSticky(ContentType.Memory, id, false);
+        if (plan.Update is not null)
+            tx.Update(current, ContentType.Memory, id, plan.Update);
+        if (plan.MoveTo is not null)
+            tx.Move(current, ContentType.Memory, plan.MoveTo, ContentType.Memory, id, plan.TextChanged ? Memory(vector) : null);
+        else if (plan.TextChanged)
+            tx.ReplaceEmbedding(current, ContentType.Memory, id, vector!);
+    }
+
+    /// <summary>
+    /// Pin review D5: applies the base's content group to the existing entry exactly as a <c>TakeTheirs</c> does. A
+    /// <c>MergeGroups</c> decision with content <c>(TakeTheirs, KeepPending)</c>, the entry's own tags (not applied), the
+    /// sticky flag left and no tier change is planned through <see cref="PlanStore"/>, so the fields written (text, project
+    /// or clear, scope, entry type, source or clear, <c>created_at</c>) and the hot limit are those of a <c>TakeTheirs</c>;
+    /// <paramref name="vector"/> is the vector of the base's text (null when the text does not change). Written with
+    /// <see cref="WriteStore"/> inside the caller's transaction; returns the entry as read back.
+    /// </summary>
+    internal static SyncMerge.LocalEntry ApplyBaseContent(
+        SqliteStoreTransaction tx, string id, LocalRead.Present current, SyncRecord baseRecord, float[]? vector, int hotMaxContentChars)
+    {
+        var keep = SyncMerge.StampAction.KeepPending;
+        var merged = new SyncMerge.Merged(
+            Tuple.Create(SyncMerge.ContentApply.TakeTheirs, keep),
+            new SyncMerge.TagsOutcome(current.View.Tags, false, false),
+            Tuple.Create(SyncMerge.StickyApply.LeaveSticky, keep),
+            Tuple.Create<FSharpOption<Tier>, SyncMerge.StampAction>(null!, keep),
+            new SyncMerge.GroupFlags(false, false, false));
+        var keepBase = SyncMerge.BaseChange.KeepBase;
+        var decision = new SyncMerge.MergeDecision(
+            SyncMerge.EntryOutcome.NewMergeGroups(merged),
+            new SyncMerge.BaseUpdate(keepBase, keepBase, keepBase, keepBase),
+            null,
+            FSharpList<SyncMerge.ReviewRequest>.Empty,
+            FSharpList<SyncMerge.MergeNote>.Empty,
+            false,
+            false);
+        var plan = PlanStore(decision, baseRecord, current.View, hotMaxContentChars);
+        WriteStore(tx, id, current.Tier, plan, vector);
+        var read = LocalEntryReader.Read(t => tx.Get(t, ContentType.Memory, id), () => tx.IsSticky(ContentType.Memory, id));
+        return (read as LocalRead.Present)?.View
+            ?? throw new InvalidOperationException("the entry cannot be read back after the held edit was applied");
+    }
+
+    /// <summary>The row with the four columns the scan compares (content and tags hashes, sticky flag, tier) taken from <paramref name="stored"/>.</summary>
+    internal static GitSyncRow WithComparison(GitSyncRow row, SyncMerge.LocalEntry stored) =>
+        row with
+        {
+            ScannedContentHash = SyncScan.contentHash(stored.Content),
+            ScannedTagsHash = SyncScan.tagsHash(stored.Tags),
+            LocalSticky = stored.Sticky,
+            LocalTier = stored.Tier,
+        };
 
     /// <summary>The row's <c>base_json</c> read as the record at the id's path.</summary>
     internal static ParseResult ParseBase(string id, string baseText) =>

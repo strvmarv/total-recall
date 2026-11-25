@@ -84,7 +84,8 @@ public abstract record ApplyOutcome
 /// the limit carries none of them out and holds each with the cause <c>guard</c> (<see cref="ApplySummary.GuardTripped"/>),
 /// and the pull is still complete. A record whose stamp for a group is older than the base's (a reset reverted it) leaves
 /// the entry alone and marks the group in the row's <c>repush_groups</c> for the push (D16); a marked row is decided on every
-/// pull. Only a decision that opens a review item is postponed (D19), and it changes nothing. In an unproven pull a
+/// pull. Only a decision that carries a conflict is postponed (D19; pin review D3), and it changes nothing: a decision with
+/// a <c>NewPin</c> or <c>PinEdit</c> request is carried out and writes its pin item by the arrival rule. In an unproven pull a
 /// deletion candidate whose entry failed or was skipped is still held before <c>L</c> moves (D5). Nothing calls it yet.
 /// </summary>
 public sealed partial class GitSyncApplier

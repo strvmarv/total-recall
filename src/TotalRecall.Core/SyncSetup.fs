@@ -46,6 +46,12 @@ type Refusal =
     | EditedLocally
     /// An answer to a held local deletion given without the shown hash.
     | ShownHashRequired
+    /// `sync review` (#163): the entry has no pin item (a `new-pin` or `pin-edit`) to answer.
+    | NoPinItem
+    /// Approving a pin item: the text to pin is longer than the per-text pinned limit (`tiers.pinned.max_content_chars`).
+    | OverPinCap
+    /// A pin item whose text cannot be shown (it does not survive sanitising unchanged).
+    | UnshowableText
 
 let refusalName (r: Refusal) : string =
     match r with
@@ -74,6 +80,9 @@ let refusalName (r: Refusal) : string =
     | StaleItem -> "stale-item"
     | EditedLocally -> "edited-locally"
     | ShownHashRequired -> "shown-hash-required"
+    | NoPinItem -> "no-pin-item"
+    | OverPinCap -> "over-pin-cap"
+    | UnshowableText -> "unshowable-text"
 
 // ---------------------------------------------------------------------------
 // storage mode

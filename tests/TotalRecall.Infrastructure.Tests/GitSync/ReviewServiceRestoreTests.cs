@@ -60,17 +60,17 @@ public sealed class ReviewServiceRestoreTests : IDisposable
         Assert.Empty(result.Lines);
     }
 
-    /// <summary>The <c>new-pin</c> rows of <paramref name="id"/>, one line each: state, record hash, direction, payload, arrived_at.</summary>
+    /// <summary>The <c>new-pin</c> rows of <paramref name="id"/>, one line each: state, record hash, direction, machine, payload, arrived_at.</summary>
     private List<string> NewPinRows(string id)
     {
         using var cmd = _rig.Scan.Connection.CreateCommand();
         cmd.CommandText =
-            "SELECT state, record_hash, direction, payload_json, arrived_at FROM git_sync_review WHERE entry_id = $id AND kind = 'new-pin'";
+            "SELECT state, record_hash, direction, machine, payload_json, arrived_at FROM git_sync_review WHERE entry_id = $id AND kind = 'new-pin'";
         cmd.Parameters.AddWithValue("$id", id);
         using var r = cmd.ExecuteReader();
         var rows = new List<string>();
         while (r.Read())
-            rows.Add($"{r.GetString(0)}|{r.GetString(1)}|{(r.IsDBNull(2) ? "NULL" : r.GetString(2))}|{r.GetString(3)}|{r.GetInt64(4)}");
+            rows.Add($"{r.GetString(0)}|{r.GetString(1)}|{(r.IsDBNull(2) ? "NULL" : r.GetString(2))}|{(r.IsDBNull(3) ? "NULL" : r.GetString(3))}|{r.GetString(4)}|{r.GetInt64(5)}");
         return rows;
     }
 
@@ -108,7 +108,7 @@ public sealed class ReviewServiceRestoreTests : IDisposable
         _rig.Apply(ApplyRig.Rec(Id, PinnedText, tier: Tier.Hot, tags: ["b", "a"]));
         _rig.Scan.Pin(Id);
         _rig.RunScan();
-        var pinned = ApplyRig.Rec(Id, PinnedText, sticky: true, tags: ["b", "a"], tierMinute: 20, stickyMinute: 20);
+        var pinned = ApplyRig.Rec(Id, PinnedText, sticky: true, tags: ["b", "a"], tierMinute: 20, stickyMinute: 20, writtenBy: "machine-a");
         SetBase(Id, Render(pinned));
         _rig.Scan.Exec($"UPDATE git_sync_entry SET content_stamp = NULL, sticky_stamp = NULL, tier_stamp = NULL WHERE entry_id = '{Id}'");
         _rig.Scan.Store.Delete(Tier.Hot, ContentType.Memory, Id);
@@ -250,13 +250,13 @@ public sealed class ReviewServiceRestoreTests : IDisposable
     }
 
     [Fact]
-    public async Task AStickyBase_OpensANewPinItem_WithTheHeldItemsHash()
+    public async Task AStickyBase_OpensANewPinItem_WithTheShownHashAndTheRecordsMachine()
     {
         PinnedLocalHold();
 
         Assert.Equal(0, (await Restore(Id, Sha)).ExitCode);
 
-        Assert.Equal([$"open|{Sha}|NULL|{{\"origin\":\"restore\"}}|{_rig.Now}"], NewPinRows(Id));
+        Assert.Equal([$"open|{SyncPin.shownHash(PinnedText, null, null)}|NULL|machine-a|{{\"origin\":\"restore\"}}|{_rig.Now}"], NewPinRows(Id));
         Assert.Null(Item(Id));
         Assert.Equal(Tier.Hot, _rig.Entry(Id)!.Tier);
         Assert.False(IsSticky(Id));
@@ -460,7 +460,7 @@ public sealed class ReviewServiceRestoreTests : IDisposable
             return sb.ToString();
         }
         var items = Review();
-        Assert.Equal($"new-pin|open|{hash}|{{\"origin\":\"restore\"}}|{rig.Now}\n", items);
+        Assert.Equal($"new-pin|open|{SyncPin.shownHash(PinnedText, null, null)}|{{\"origin\":\"restore\"}}|{rig.Now}\n", items);
 
         // Unproven, so the pull decides every accepted record, the restored id included.
         rig.Pull.CloneGit("update-ref", "-d", "refs/total-recall/last-synced");

@@ -196,7 +196,8 @@ public sealed class GitSyncCycleDeletionTests : IDisposable
                 Assert.Equal(SyncMerge.RowState.Forgotten, RowOf(machine, id).State);
             }
 
-        // newer text that does not pin brings X back, non-sticky, with a note; newer text that pins Y goes to review
+        // newer text brings X back, non-sticky, with a note; newer text that pins brings Y back the same way, non-sticky with
+        // an open new-pin item (pin review D3)
         AnotherMachine(pull =>
         {
             pull.PutRecord(Rec(X, "Newer text of X", minute: 40));
@@ -206,16 +207,18 @@ public sealed class GitSyncCycleDeletionTests : IDisposable
         {
             var newer = Done(await machine.Run());
             Assert.True(newer.Apply!.Proven);
-            Assert.Equal(1, newer.Apply.Inserted);
-            Assert.Equal([new NoteEntry(X, "edit-beats-deletion")], newer.Apply.Notes);
-            Assert.Equal([new PostponedEntry(Y, "review")], newer.Apply.Postponed);
-            Assert.False(newer.Apply.Complete);
+            Assert.Equal(2, newer.Apply.Inserted);
+            Assert.Equal([new NoteEntry(X, "edit-beats-deletion"), new NoteEntry(Y, "edit-beats-deletion")], newer.Apply.Notes);
+            Assert.Empty(newer.Apply.Postponed);
+            Assert.True(newer.Apply.Complete);
+            Assert.False(machine.Pull.Store.IsSticky(ContentType.Memory, Y));
+            Assert.Equal("open", GitSyncReviews.ReadPinItem(machine.Pull.Connection, Y, "new-pin")!.State);
             var entry = machine.Pull.Store.Get(Tier.Warm, ContentType.Memory, X);
             Assert.NotNull(entry);
             Assert.Equal("Newer text of X", entry!.Content);
             Assert.False(machine.Pull.Store.IsSticky(ContentType.Memory, X));
             Assert.Equal(SyncMerge.RowState.Active, RowOf(machine, X).State);
-            Assert.False(Has(machine, Y));
+            Assert.True(Has(machine, Y));
         }
     }
 
@@ -436,11 +439,12 @@ public sealed class GitSyncCycleDeletionTests : IDisposable
         await BothSynced();
         var l0 = _rig.B.Pull.Last!;
         _rig.A.Push.AddMemory(Tier.Warm, X, "Added between two pulls of B.");
-        _rig.A.Push.AddMemory(Tier.Warm, P, "A pin of A.");
-        _rig.A.Push.Pin(P);
+        _rig.A.Push.AddMemory(Tier.Warm, P, "A memory of A.");
         Assert.Equal([X, P], Pushed(Done(await _rig.RunA())).Written.Order(StringComparer.Ordinal));
+        _rig.B.Push.AddMemory(Tier.Warm, P, "B's own text.");
 
-        // B takes X, but the pin of P waits for a review: the pull is incomplete and L stays at l0
+        // B takes X, but P is a text conflict with B's own memory (NC4) that waits for a review: the pull is incomplete and
+        // L stays at l0
         var taken = Done(await _rig.RunB());
         Assert.False(taken.Apply!.Complete);
         Assert.Equal([new PostponedEntry(P, "review")], taken.Apply.Postponed);
@@ -462,6 +466,7 @@ public sealed class GitSyncCycleDeletionTests : IDisposable
         var row = RowOf(_rig.B, X);
         Assert.Equal(SyncMerge.RowState.Forgotten, row.State);
         Assert.NotNull(row.BaseJson);
+        Assert.Equal("B's own text.", _rig.B.Pull.Store.Get(Tier.Warm, ContentType.Memory, P)!.Content);
     }
 
     [GitFact]
@@ -651,8 +656,10 @@ public sealed class GitSyncCycleDeletionTests : IDisposable
         var l = Remote.Head();
         Assert.Equal(l, _rig.B.Pull.Last);
 
-        // a record that pins an id B lacks needs a review: the pull is incomplete, the push is skipped and L stays
-        AnotherMachine(pull => pull.PutRecord(Rec(Y, "A pin of another machine.", sticky: true, minute: 30)));
+        // a record of an id B added with other text and no base is a conflict (NC4) that needs a review: the pull is
+        // incomplete, the push is skipped and L stays
+        _rig.B.Push.AddMemory(Tier.Warm, Y, "B's own text of Y.");
+        AnotherMachine(pull => pull.PutRecord(Rec(Y, "Another machine's text of Y.", minute: 30)));
         Tick();
         var review = Done(await _rig.RunB());
 
@@ -662,6 +669,6 @@ public sealed class GitSyncCycleDeletionTests : IDisposable
         Assert.Equal("pull-incomplete", review.PushSkipped);
         Assert.Null(review.Push);
         Assert.Equal(l, _rig.B.Pull.Last);
-        Assert.False(Has(_rig.B, Y));
+        Assert.Equal("B's own text of Y.", _rig.B.Pull.Store.Get(Tier.Warm, ContentType.Memory, Y)!.Content);
     }
 }

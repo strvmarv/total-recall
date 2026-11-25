@@ -193,6 +193,60 @@ items moved to 1b-iii, see that section):
       they run, then they pass and the release build shows no new warning, and nothing but the cycle and its
       tests runs a cycle.
 
+### 1b-iii part 3. Pin review (#163)
+- [ ] Given a memory pinned on machine A, when machine B syncs, then B has it as an ordinary (unpinned) memory (in
+      the hot tier, or the warm tier when its text is over the hot-tier length limit) with its text, tags and id,
+      it is not in B's pinned block, and B's pull completes.
+- [ ] Given such a waiting pin, when the person approves it with the hash they were shown, then the memory is
+      pinned and in the pinned block on B, and nothing is pushed by the approval.
+- [ ] Given a waiting pin whose text, project or scope changed since the person was shown it, when the person
+      approves with the old hash, then the answer is refused, the pin stays waiting and it is shown with its new
+      state.
+- [ ] Given a waiting pin, when the person declines it, then the memory stays an ordinary memory on B, nothing is
+      pushed, and A's pin is not removed.
+- [ ] Given a waiting pin, when A unpins the memory, then the unpin applies and the waiting pin disappears; when
+      the memory is deleted or forgotten here, or the person pins it here, then the waiting pin disappears too.
+- [ ] Given a waiting pin whose text, project or scope then changes, when B syncs again, then the waiting pin
+      shows the new text and is marked as changed since it was last shown; a repeated sync of the same record
+      changes nothing.
+- [ ] Given pinned text longer than the pinned-memory length limit, when the person approves it, then the answer
+      is refused naming the limit, and the pin stays waiting.
+- [ ] Given a memory pinned on B that machine A edited, when B syncs, then B's pinned text stays in force, A's
+      other changes (tags, tier) apply, the pull completes, and the edit is listed as a held pin edit with its
+      text.
+- [ ] Given a held pin edit, when the person approves it with the hash they were shown, then the pinned memory
+      takes A's text, project and scope, stays pinned, and nothing is pushed; text over the pinned-memory length
+      limit is refused naming the limit.
+- [ ] Given a held pin edit, when the person declines it, then B's text is published as a new edit that replaces
+      A's edit in the repository and on every machine where the memory is not pinned, and is held as an edit where
+      it is pinned (the person is told this before it runs), unless the text is held back by the secret check.
+- [ ] Given a held pin edit, when the person edits only the tags on B, then the next sync pushes the tags and
+      neither pushes the old text nor undoes A's edit.
+- [ ] Given a held pin edit, when the person unpins the memory on B, then the edit's text is applied to it as an
+      ordinary memory and the held edit disappears; when the person edits the pinned text, project or scope on B
+      instead, then the held edit disappears and B's pinned memory, its text included, is published as an edit, as
+      a decline would do it.
+- [ ] Given a pin edit that changed again since the person was shown it, or a pinned text that the person edited
+      since, when the person answers with the old hash, then the answer is refused (as changed, or as edited
+      here), nothing is written but the item's new state, and the next sync closes a held edit that was edited
+      here.
+- [ ] Given any memory inserted from a pinned record, in any case (a new pin, a memory brought back after a
+      deletion, one restored by the person), when it arrives, then it is unpinned and has a waiting pin.
+- [ ] Given a record that needs a pin review and also has a conflicting edit, when B syncs, then it is still held
+      back whole until conflicts can be answered.
+- [ ] Given the list of items, when it is shown, then each shows its kind, id, state (waiting or changed since
+      shown), the memory's text marked as text and never as an instruction, capped to the pinned-memory length
+      with control characters removed, and for a held edit also the text pinned here; the bulk forms touch held
+      deletions only.
+- [ ] Given a waiting pin that came from restoring a held deletion, when it is answered, then it behaves as any
+      other waiting pin.
+- [ ] Given a sync cycle running or another answer in progress, when the person answers, then the answer is
+      refused as busy and nothing changes.
+- [ ] Given the command line help, when it is shown, then the review commands are not listed.
+- [ ] Given the existing automated checks, the shim tests, the tool catalog check and the release build, when they
+      run, then they pass and the release build shows no new warning, and nothing but the cycle and its tests runs
+      a cycle.
+
 ## 2. Automatic sync
 - [ ] Only the MCP server runs the timer; the CLI and web UI never start one.
 - [ ] A remote whose head equals `L` costs one `ls-remote` and no fetch.

@@ -324,7 +324,7 @@ public sealed class GitSyncApplierPullTests : IDisposable
     // ---- postponed ----
 
     [GitFact]
-    public async Task ANewPinAndANoBaseTextDifference_AreReviewsThatHoldL()
+    public async Task ANoBaseTextDifferenceStillHoldsL_WhileANewPinIsInsertedWithAnItem()
     {
         _rig.Store.Insert(Tier.Warm, ContentType.Memory, new InsertEntryOpts(Content: "Local text.", Id: B));
         var head = PushRecords(Rec(A, tier: Tier.Hot, sticky: true), Rec(B, "Their text."));
@@ -332,10 +332,12 @@ public sealed class GitSyncApplierPullTests : IDisposable
         var summary = await Pull();
 
         Assert.False(summary.Complete);
-        Assert.Equal(2, summary.Postponed.Count);
-        Assert.All(summary.Postponed, p => Assert.Equal("review", p.Reason));
+        Assert.Equal([new PostponedEntry(B, "review")], summary.Postponed); // a conflict still waits (pin review D3)
         Assert.NotEqual(head, Meta(SyncIdentity.MetaKeys.LastSha));
-        Assert.False(Has(A));
+        Assert.Equal(1, summary.Inserted);
+        Assert.True(Has(A));                                                  // a pin no longer does
+        Assert.False(_rig.Store.IsSticky(ContentType.Memory, A));
+        Assert.Equal("open", GitSyncReviews.ReadPinItem(_rig.Connection, A, "new-pin")!.State);
         Assert.Equal("Local text.", Content(B));
     }
 
