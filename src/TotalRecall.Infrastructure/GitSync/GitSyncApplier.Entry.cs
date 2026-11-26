@@ -4,7 +4,6 @@ using TotalRecall.Core;
 using TotalRecall.Infrastructure.Storage;
 using TotalRecall.Infrastructure.Telemetry;
 using StorePlan = TotalRecall.Infrastructure.GitSync.ApplyPlanning.StorePlan;
-using SyncRecordModule = TotalRecall.Core.SyncRecord;
 
 namespace TotalRecall.Infrastructure.GitSync;
 
@@ -493,12 +492,10 @@ public sealed partial class GitSyncApplier
                     return new EntryResult.Deferred("the pin review changed since the decision was made", Busy: false);
                 var applied = ApplyPlanning.ApplyBaseContent(tx, id, present, baseRecord, baseVector, _options.HotMaxContentChars);
                 appliedColder = !applied.Tier.Equals(present.Tier);
-                var rowApplied = ApplyPlanning.WithComparison(rowAfter, applied);
                 // As planRow does for a TakeTheirs the hot limit stored colder: a pending tier stamp that the stored tier
                 // no longer exceeds the base's for is dropped.
-                if (appliedColder && rowApplied.TierStamp is not null
-                    && SyncRecordModule.tierRank(applied.Tier) >= SyncRecordModule.tierRank(baseRecord.Placement.Tier))
-                    rowApplied = rowApplied with { TierStamp = null };
+                var rowApplied = ApplyPlanning.DropBeatenTierStamp(
+                    ApplyPlanning.WithComparison(rowAfter, applied), applied.Tier, baseRecord, appliedColder);
                 GitSyncRows.Write(conn, rowApplied, dbTx);
                 rowWritten = true;
             }

@@ -563,13 +563,13 @@ public sealed class ReviewServicePinTests : IDisposable
             [
                 new ReviewItem(
                     "new-pin", Id, "open", null, null, Shown("Pin this.", "o/n", "sc"), _rig.Now, MachineA, "o/n", "sc",
-                    "Pin this.", false, "local entry", null, false),
+                    "Pin this.", false, "local entry", null, false, ReviewItem.NoLosers),
                 new ReviewItem(
                     "pin-edit", Id2, "open", null, null, Shown("A remote edit, held.", "o/r", "s"), _rig.Now, MachineA, "o/r", "s",
-                    "A remote edi", true, "repository record", "Pinned text.", false),
+                    "A remote edi", true, "repository record", "Pinned text.", false, ReviewItem.NoLosers),
                 new ReviewItem(
                     "held-delete", "3f9c2a7e-0000-4000-8000-000000000003", "open", "remote", "unproven", null, _rig.Now, null, null,
-                    null, "Kept here.", false, "local entry", null, false),
+                    null, "Kept here.", false, "local entry", null, false, ReviewItem.NoLosers),
             ],
             listing.Items);
     }

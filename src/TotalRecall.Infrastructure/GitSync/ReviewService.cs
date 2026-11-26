@@ -21,8 +21,11 @@ namespace TotalRecall.Infrastructure.GitSync;
 /// </summary>
 public sealed record ReviewEnvironment(SyncSetupEnvironment Setup, Func<IEmbedder> Embedder, int HotMaxContentChars, int PinnedMaxContentChars);
 
-/// <summary>Which answer an item is checked for: the held-deletion answers, then the pin answers (pin review D6, D7).</summary>
-internal enum ReviewOperation { Accept, Restore, Approve, Decline }
+/// <summary>
+/// Which answer an item is checked for: the held-deletion answers, the pin answers (pin review D6, D7), then the conflict
+/// answers (conflict review D6).
+/// </summary>
+internal enum ReviewOperation { Accept, Restore, Approve, Decline, Keep, Swap, Merge }
 
 /// <summary>
 /// What an answer's checks found inside its transaction: a refusal (then <see cref="Facts"/> is null) or the facts the work
@@ -37,14 +40,18 @@ internal readonly record struct CheckOutcome<TFacts>(SetupResult? Refusal, TFact
 /// </summary>
 internal sealed record ItemFacts(HeldItem Item, GitSyncRow Row, LocalRead Read, ParsedRecord? Base);
 
-/// <summary>An embedding computed before the transaction: the base it was computed from and the vector.</summary>
+/// <summary>
+/// An embedding computed before the transaction: the base it was computed from (a conflict answer: the text embedded) and
+/// the vector.
+/// </summary>
 internal sealed record Embedded(string BaseJson, float[] Vector);
 
 /// <summary>
 /// Answers the held deletions of this machine (D1): <see cref="List"/> reads them; an answer runs under the sync lock in
 /// one immediate transaction whose checks refuse with <c>no-held-item</c>, <c>failed</c>, <c>unreadable-entry</c>,
 /// <c>stale-item</c>, <c>shown-hash-required</c> or (a remote <c>Accept</c>) <c>edited-locally</c> and change nothing. It also
-/// answers the pin items (pin review D6, D7: <see cref="ApproveAsync"/>, <see cref="DeclineAsync"/>) in the same frame.
+/// answers the pin items (pin review D6, D7: <see cref="ApproveAsync"/>, <see cref="DeclineAsync"/>) and the conflict items
+/// (conflict review D6: <see cref="KeepAsync"/>, <see cref="SwapAsync"/>, <see cref="MergeAsync"/>) in the same frame.
 /// Disposing it disposes the embedder it created.
 /// </summary>
 public sealed partial class ReviewService(ReviewEnvironment env) : IDisposable

@@ -280,7 +280,7 @@ public sealed class ReviewCommand : ICliCommand
         var listing = service.List();
         if (listing.Failed is not null)
             return PrintFailed(listing.Failed);
-        var items = listing.Items.Where(item => item.EntryId == id && item.Kind != "held-delete").ToList();
+        var items = listing.Items.Where(item => item.EntryId == id && item.Kind is "new-pin" or "pin-edit").ToList();
         if (items.Count == 0)
             return PrintRefused(SyncSetup.Refusal.NoPinItem, ReviewService.NoPinItemText);
         if (items.Count > 1)
