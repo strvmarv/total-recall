@@ -41,6 +41,7 @@ public sealed partial class GitSyncApplier
         Dictionary<string, HeldItem> openHeld;
         Dictionary<string, HeldItem> approved;
         List<string> pinIds;
+        List<string> conflictIds;
         try
         {
             rows = GitSyncRows.ReadAll(conn);
@@ -49,6 +50,7 @@ public sealed partial class GitSyncApplier
             openHeld = GitSyncReviews.ReadOpenHeld(conn);
             approved = GitSyncReviews.ReadApprovedHeld(conn);
             pinIds = GitSyncReviews.ReadPinItems(conn).Select(i => i.EntryId).ToList();
+            conflictIds = GitSyncReviews.ReadConflictItems(conn).Select(i => i.EntryId).ToList();
         }
         catch (Exception ex) when (ex is FormatException or SqliteException or InvalidOperationException)
         {
@@ -77,11 +79,13 @@ public sealed partial class GitSyncApplier
         // Milestone 1b-iii, D4: every id with a held-delete item, open or approved, is visited, so an entry re-created under
         // its still-active row with an unchanged record still closes its item. Pin review D4: likewise every id with a pin
         // item in any of its four states, so a local pin, unpin, edit or deletion with no record change still reaches it.
+        // Conflict review D3: and every id with a conflict item.
         var ids = SyncApply.visitSet(input)
             .Concat(skippedByScan.Keys)
             .Concat(openHeld.Keys)
             .Concat(approved.Keys)
             .Concat(pinIds)
+            .Concat(conflictIds)
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .ToList();
@@ -109,7 +113,6 @@ public sealed partial class GitSyncApplier
             .ConfigureAwait(false);
 
         int inserted = 0, updated = 0, dropped = 0, unchanged = 0, notAttempted = 0;
-        var postponed = new List<PostponedEntry>();
         var deferred = new List<DeferredEntry>();
         var failed = new List<FailedEntry>();
         var skipped = new List<SkippedItem>(scan.Skipped);
@@ -245,9 +248,6 @@ public sealed partial class GitSyncApplier
                         unchanged++;
                         if (n.Repush is { } kept) repushMarked.Add(new RepushEntry(id, kept));
                         break;
-                    case EntryResult.Postponed p:
-                        postponed.Add(new PostponedEntry(id, p.Reason));
-                        break;
                     case EntryResult.Deferred d:
                         deferred.Add(new DeferredEntry(id, d.Reason));
                         if (d.Busy)
@@ -314,7 +314,8 @@ public sealed partial class GitSyncApplier
         if (everyIdProcessed && !cancelled && !blobReadFailed && recordedEveryIssue)
             SweepRejections(keys);
 
-        var complete = everyIdProcessed && !cancelled && postponed.Count == 0 && deferred.Count == 0 && recordedEveryIssue;
+        // Conflict review D3: no decision is postponed any more, so ApplySummary.Postponed is always empty (kept for its shape).
+        var complete = everyIdProcessed && !cancelled && deferred.Count == 0 && recordedEveryIssue;
         if (complete && !(fetch.Proven && string.Equals(fetch.Last, fetch.Head, StringComparison.Ordinal)))
         {
             try
@@ -332,7 +333,7 @@ public sealed partial class GitSyncApplier
 
         return new ApplyOutcome.Done(new ApplySummary(
             inserted, updated, dropped, unchanged, notAttempted, complete, fetch.Head, fetch.Proven,
-            postponed, deferred, failed,
+            Array.Empty<PostponedEntry>(), deferred, failed,
             rejectedNow.Select(p => new RejectedItem(p.Key, p.Value.Reason)).OrderBy(r => r.Key, StringComparer.Ordinal).ToList(),
             skipped, colder, deleted, heldNow, preview.Trips, pushDeletions, closedHeld, notes, repushMarked));
     }

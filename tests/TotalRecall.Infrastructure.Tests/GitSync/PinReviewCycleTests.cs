@@ -16,7 +16,7 @@ namespace TotalRecall.Infrastructure.Tests.GitSync;
 /// ordinary pin. A remote edit of a memory pinned on B is held as a <c>pin-edit</c> item: a tag edit on B pushes the tags
 /// only, an approval pushes nothing, a decline pushes B's text (held back by the push's secret check when it holds a
 /// token), a local unpin applies the held edit and pushes only the unpin, and a local text or project edit pushes B's
-/// content group. A new pin that is also a conflict still postpones the entry. Answers go through
+/// content group. A new pin that is also a conflict is carried out with both items and B's cycle completes. Answers go through
 /// <see cref="ReviewService"/> over B's database file (<see cref="ReviewServices.For"/>).
 /// </summary>
 public sealed class PinReviewCycleTests : IDisposable
@@ -432,17 +432,16 @@ public sealed class PinReviewCycleTests : IDisposable
         Assert.Equal(expectedText, Found(_rig.A).Entry.Content);
     }
 
-    // ---- a conflict still waits ----
+    // ---- a conflict no longer waits (conflict review D3) ----
 
     [GitFact]
-    public async Task ANewPinWithAConflict_StillMakesBsCycleIncomplete()
+    public async Task ANewPinWithAConflict_IsCarriedOutOnB_WithBothItems_AndBsCycleCompletes()
     {
         _rig.Seed();
         Done(await _rig.RunA());
         _rig.JoinB();
         Done(await _rig.RunB());
-        var last = _rig.B.Pull.Last;
-        Assert.Equal(Remote.Head(), last);
+        Assert.Equal(Remote.Head(), _rig.B.Pull.Last);
         Tick(_rig.A);
         _rig.A.Push.AddMemory(Tier.Warm, Id, "A's text, pinned.");
         _rig.A.Push.Pin(Id);
@@ -452,14 +451,19 @@ public sealed class PinReviewCycleTests : IDisposable
 
         var b = Done(await _rig.RunB());
 
-        Assert.False(b.Apply!.Complete);
-        Assert.Equal([new PostponedEntry(Id, "review")], b.Apply.Postponed);
-        Assert.Equal("pull-incomplete", b.PushSkipped);
-        Assert.Null(b.Push);
-        Assert.Equal(last, _rig.B.Pull.Last);
-        Assert.Equal("B's own text.", Found(_rig.B).Entry.Content);
+        Assert.True(b.Apply!.Complete);
+        Assert.Empty(b.Apply.Postponed);
+        Assert.Empty(b.Apply.Deferred);
+        Assert.Null(b.PushSkipped);
+        Assert.Equal(Remote.Head(), _rig.B.Pull.Last);
+        Assert.Equal("A's text, pinned.", Found(_rig.B).Entry.Content);
         Assert.False(Sticky(_rig.B));
-        Assert.Null(Item(_rig.B, "new-pin"));
+        Assert.Equal("open", Item(_rig.B, "new-pin")!.State);
         Assert.Null(Item(_rig.B, "pin-edit"));
+        var conflict = GitSyncReviews.ReadConflictItem(_rig.B.Pull.Connection, Id)!;
+        Assert.Equal("open", conflict.State);
+        Assert.Equal(
+            ["local|B's own text."],
+            GitSyncReviews.ReadConflictLosers(conflict.PayloadJson).Select(l => $"{SyncConflict.sideName(l.Side)}|{l.Text}").ToList());
     }
 }

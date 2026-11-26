@@ -230,13 +230,19 @@ public sealed class GitSyncCyclePushTests : IDisposable
     public async Task ThePushIsNeverReached_AfterARefusedOrAnIncompletePull()
     {
         await SyncedWithAPendingMemory();
-        // a local memory and a record of the same id with other text and no base: a conflict (NC4), incomplete
-        _rig.Push.AddMemory(Tier.Warm, D, "My own text.");
+        // a new record whose id gets a local memory just before its transaction: deferred, so the pull is incomplete
+        // (conflict review D8: a conflict no longer is)
         _rig.AddRecordOnRemote(Rec(D, "Their text."));
+        _rig.ConfigureApplier = a => a.BeforeTransaction = id =>
+        {
+            if (id == D)
+                _rig.Push.AddMemory(Tier.Warm, D, "My own text.");
+        };
         var commits = RemoteCommits();
 
         var incomplete = Done(await _rig.Run());
 
+        Assert.Equal(D, Assert.Single(incomplete.Apply!.Deferred).Id);
         Assert.Equal("pull-incomplete", incomplete.PushSkipped);
         Assert.Null(incomplete.Push);
         Assert.Equal(0, _rig.PushCalls());

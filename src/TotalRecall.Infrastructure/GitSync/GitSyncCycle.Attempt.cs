@@ -157,8 +157,9 @@ public sealed partial class GitSyncCycle
 
         // the apply, after both a fetch and a "nothing new" (it retries deferred and failed entries)
         Enter(state, SyncCycle.Step.Apply, ct);
-        var applied = await new GitSyncApplier(_client, _store, _embedder, new ApplyOptions(_settings.HotMaxContentChars, _settings.DeleteGuardPercent), _nowMs)
-            .ApplyAsync(pulled, state.Scan, ct).ConfigureAwait(false);
+        var applier = new GitSyncApplier(_client, _store, _embedder, new ApplyOptions(_settings.HotMaxContentChars, _settings.DeleteGuardPercent), _nowMs);
+        ConfigureApplier?.Invoke(applier);
+        var applied = await applier.ApplyAsync(pulled, state.Scan, ct).ConfigureAwait(false);
         if (ct.IsCancellationRequested)
             return Cancelled();
         if (applied is ApplyOutcome.Failed applyFailed)
