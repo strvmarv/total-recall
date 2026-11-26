@@ -52,6 +52,12 @@ type Refusal =
     | OverPinCap
     /// A pin item whose text cannot be shown (it does not survive sanitising unchanged).
     | UnshowableText
+    /// `sync review` (#164): the entry has no conflict item to answer.
+    | NoConflictItem
+    /// Answering a conflict item: the chosen alternative is not among the item's kept losers.
+    | UnknownLoser
+    /// Answering a conflict item with merged text: the text cannot be used (empty, too long, or it does not survive sanitising unchanged).
+    | BadMergeText
 
 let refusalName (r: Refusal) : string =
     match r with
@@ -83,6 +89,9 @@ let refusalName (r: Refusal) : string =
     | NoPinItem -> "no-pin-item"
     | OverPinCap -> "over-pin-cap"
     | UnshowableText -> "unshowable-text"
+    | NoConflictItem -> "no-conflict-item"
+    | UnknownLoser -> "unknown-loser"
+    | BadMergeText -> "bad-merge-text"
 
 // ---------------------------------------------------------------------------
 // storage mode
