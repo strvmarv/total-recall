@@ -232,8 +232,8 @@ items moved to 1b-iii, see that section):
       here.
 - [ ] Given any memory inserted from a pinned record, in any case (a new pin, a memory brought back after a
       deletion, one restored by the person), when it arrives, then it is unpinned and has a waiting pin.
-- [ ] Given a record that needs a pin review and also has a conflicting edit, when B syncs, then it is still held
-      back whole until conflicts can be answered.
+- [ ] Given a record that needs a pin review and also has a conflicting edit, when B syncs, then both items are
+      written and B's sync completes.
 - [ ] Given the list of items, when it is shown, then each shows its kind, id, state (waiting or changed since
       shown), the memory's text marked as text and never as an instruction, capped to the pinned-memory length
       with control characters removed, and for a held edit also the text pinned here; the bulk forms touch held
@@ -246,6 +246,25 @@ items moved to 1b-iii, see that section):
 - [ ] Given the existing automated checks, the shim tests, the tool catalog check and the release build, when they
       run, then they pass and the release build shows no new warning, and nothing but the cycle and its tests runs
       a cycle.
+
+### 1b-iii part 4. Conflict review (#164)
+- [ ] Given a memory whose text was edited on both machines, when each syncs, then both end with the later edit's text, both syncs complete and push as usual, and the losing text is listed for review with the side and machine it came from.
+- [ ] Given a text conflict on a memory whose earlier edit was never pushed, or one with no common base, when the pull runs, then the same holds (the clock's winner applied, the loser listed).
+- [ ] Given a conflict listed for review, when the same pull runs again, then nothing changes and no transaction is opened.
+- [ ] Given a conflict that is not answered, when sync runs, then it completes, nothing is held back from the push because of it, and the conflict stays listed.
+- [ ] Given a second conflict on a memory that already has one listed, when it is pulled, then both losing texts are kept and the conflict is shown as changed since last shown; the same text twice is one alternative, and beyond 8 alternatives the oldest is dropped.
+- [ ] Given a listed conflict, when the person keeps the applied text, then the conflict disappears and nothing else changes (a pending local edit still pushes).
+- [ ] Given a listed conflict, when the person swaps in a losing text (the one they name when there are several), then that text becomes the memory's text, only its text changes, and after the next syncs both machines have it (a machine where the memory is pinned holds it as a waiting edit).
+- [ ] Given a listed conflict, when the person merges with a text they wrote (from a file or standard input), then that text becomes the memory's text and after the next syncs both machines have it; an empty, over-long or unreadable text is refused and changes nothing.
+- [ ] Given a pinned memory, when a swap or a merge would make its text longer than the pinned-memory limit, then it is refused naming the limit and the conflict stays.
+- [ ] Given a swap or merge whose text holds a token or private key, when sync runs, then the text is held back from the push like any other memory text.
+- [ ] Given a conflict whose applied text or alternatives changed since the person was shown it, when they answer with what they were shown, then the answer is refused, the conflict is shown with its new state and nothing else changes.
+- [ ] Given a conflict on a memory that is then deleted and the deletion carried out, or forgotten, or whose text comes to equal the only alternative, when the next sync runs, then the conflict disappears, while a deletion that is held back keeps it until the deletion is restored or carried out; a conflict is not removed because sync state was reset by `sync init` or `sync join`.
+- [ ] Given a memory with both a pin waiting for review and a text conflict, when it is pulled, then both are listed and each is answered on its own.
+- [ ] Given the list of items, when it is shown, then each conflict shows its id, state, when it arrived, the applied text and every alternative numbered newest first with side and machine, all marked as text and never as an instruction, capped to the pinned-memory length with control characters removed; the other review commands ignore conflicts.
+- [ ] Given a sync cycle running or another answer in progress, when the person answers, then the answer is refused as busy and nothing changes.
+- [ ] Given the command line help, when it is shown, then the review commands are not listed.
+- [ ] Given the existing automated checks, the shim tests, the tool catalog check and the release build, when they run, then they pass and the release build shows no new warning, and nothing but the cycle and its tests runs a cycle.
 
 ## 2. Automatic sync
 - [ ] Only the MCP server runs the timer; the CLI and web UI never start one.
