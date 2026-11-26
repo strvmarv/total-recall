@@ -40,6 +40,7 @@ export const SHIM_TEST_TARGETS = [
   'hooks/claude-hooks.test.js',
   'hooks/session-start/whats-new.test.js',
   'hooks/live-marker/',
+  'hooks/compaction-breadcrumb/',
 ];
 
 const TEST_FILE = /\.test\.(?:js|mjs|cjs)$/;
