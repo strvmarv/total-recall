@@ -4,6 +4,7 @@ using Microsoft.FSharp.Core;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Memory;
 using TotalRecall.Infrastructure.Storage;
+using SyncRecord = TotalRecall.Core.SyncRecord.SyncRecord;
 
 namespace TotalRecall.Infrastructure.GitSync;
 
@@ -16,11 +17,13 @@ namespace TotalRecall.Infrastructure.GitSync;
 
 /// <summary>
 /// What the checks of a conflict answer read inside its transaction: the item, its losers (oldest first, as stored), the
-/// local entry, the row (<c>swap</c> and <c>merge</c>: active with a base; <c>keep</c>: not read, null) and the chosen text
-/// (<c>swap</c>: the named loser's; <c>merge</c>: the given one; <c>keep</c>: null).
+/// local entry, the row (<c>swap</c> and <c>merge</c>: active with a base; <c>keep</c>: not read, null), the row's parsed
+/// base (<c>swap</c> and <c>merge</c>; <c>keep</c>: null) and the chosen text (<c>swap</c>: the named loser's; <c>merge</c>:
+/// the given one; <c>keep</c>: null).
 /// </summary>
 internal sealed record ConflictFacts(
-    ConflictItem Item, FSharpList<SyncConflict.Loser> Losers, LocalRead.Present Entry, GitSyncRow? Row, string? Text);
+    ConflictItem Item, FSharpList<SyncConflict.Loser> Losers, LocalRead.Present Entry, GitSyncRow? Row,
+    SyncRecord? Base, string? Text);
 
 public sealed partial class ReviewService
 {
@@ -68,7 +71,7 @@ public sealed partial class ReviewService
     /// <summary>
     /// The text a <c>swap</c> or <c>merge</c> sets, or the refusal: <c>swap</c> takes loser <paramref name="loserIndex"/>
     /// (1-based, newest first; omitted with exactly one loser: 1; else <c>unknown-loser</c>), and a <c>remote</c> loser must
-    /// survive <see cref="ShownText"/> unchanged (<c>unshowable-text</c>); <c>merge</c> takes <paramref name="mergeText"/>,
+    /// be <see cref="Showable"/> (<c>unshowable-text</c>); <c>merge</c> takes <paramref name="mergeText"/>,
     /// which must not be empty or whitespace only, must have at most 262144 UTF-8 bytes and no NUL (<c>bad-merge-text</c>).
     /// </summary>
     private static (string? Text, SetupResult? Refusal) ChosenText(
@@ -87,7 +90,7 @@ public sealed partial class ReviewService
                         : $"name a loser by its number in the list, 1 (the newest) to {count}; nothing changed"));
             }
             var loser = losers[count - index];
-            if (loser.Side.IsRemote && !string.Equals(ShownText(loser.Text, int.MaxValue).Text, loser.Text, StringComparison.Ordinal))
+            if (loser.Side.IsRemote && !Showable(loser.Text, null, null))
             {
                 return (null, Refuse(
                     SyncSetup.Refusal.UnshowableText,
@@ -114,7 +117,7 @@ public sealed partial class ReviewService
     /// (<c>shown-hash-required</c>); the local entry read (absent: <c>stale-item</c>, the next sync closes the item, or while a
     /// held deletion of the id is open or approved, restore or accept it first; in two tiers or unreadable:
     /// <c>unreadable-entry</c>); for <c>swap</c> and <c>merge</c> the row <c>active</c> with a base (missing: <c>failed</c>,
-    /// run a sync first; otherwise <c>failed</c>); the shown hash equal to the live one (else <c>stale-item</c> with the item as
+    /// run a sync first; otherwise <c>failed</c>) and the base parsed (else <c>failed</c>); the shown hash equal to the live one (else <c>stale-item</c> with the item as
     /// it is now, and the item's update to the live hash and <c>unseen</c> is committed); the chosen text
     /// (<see cref="ChosenText"/>); for a sticky entry the chosen text within the pinned cap (0 or less: 500;
     /// <c>over-pin-cap</c>, worded by <see cref="PinnedTierLimits.ContentLimitMessage"/>).
@@ -155,6 +158,7 @@ public sealed partial class ReviewService
         }
 
         GitSyncRow? row = null;
+        SyncRecord? baseRecord = null;
         if (op != ReviewOperation.Keep)
         {
             try
@@ -169,6 +173,10 @@ public sealed partial class ReviewService
                 return No(Failed("this memory is not synced yet; run a sync first; nothing changed"));
             if (!row.State.IsActive || row.BaseJson is null)
                 return No(Failed("the row no longer matches the item; nothing changed"));
+            var parsed = ApplyPlanning.ParseBase(entryId, row.BaseJson);
+            if (parsed.Parsed is null)
+                return No(UnreadableBase(parsed));
+            baseRecord = parsed.Parsed.Record;
         }
 
         var losers = GitSyncReviews.ReadConflictLosers(item.PayloadJson);
@@ -195,7 +203,7 @@ public sealed partial class ReviewService
                 return No(over);
         }
 
-        return new CheckOutcome<ConflictFacts>(null, new ConflictFacts(item, losers, entry, row, text));
+        return new CheckOutcome<ConflictFacts>(null, new ConflictFacts(item, losers, entry, row, baseRecord, text));
     }
 
     /// <summary>For a sticky entry, <c>over-pin-cap</c> when <paramref name="text"/> is over the pinned cap (0 or less: 500); else null.</summary>
@@ -211,7 +219,7 @@ public sealed partial class ReviewService
     /// The embedding of a <c>swap</c> or <c>merge</c>, before the transaction: the chosen text, embedded with
     /// <see cref="Embedder"/>, as <c>Embedded(text, vector)</c>. Null, with no embedder created, when the item is not open or
     /// unseen, the hash is missing, the entry cannot be read, the row is missing, cannot be read, not active or without a
-    /// base, the hash is not the live one, the text cannot be chosen (<see cref="ChosenText"/>), is over the pinned cap of a
+    /// base, the base does not parse, the hash is not the live one, the text cannot be chosen (<see cref="ChosenText"/>), is over the pinned cap of a
     /// sticky entry or equals the entry's text. The checks inside the transaction report every refusal.
     /// </summary>
     private Embedded? EmbedConflictText(
@@ -233,7 +241,7 @@ public sealed partial class ReviewService
         {
             return null; // the checks inside the transaction report why the row cannot be read
         }
-        if (row is null || !row.State.IsActive || row.BaseJson is null)
+        if (row is null || !row.State.IsActive || row.BaseJson is null || ApplyPlanning.ParseBase(entryId, row.BaseJson).Parsed is null)
             return null;
         var losers = GitSyncReviews.ReadConflictLosers(item.PayloadJson);
         if (!string.Equals(shownHash, ConflictLiveHash(entry.View.Content.Text, losers), StringComparison.Ordinal))
@@ -275,10 +283,7 @@ public sealed partial class ReviewService
             return Refuse(SyncSetup.Refusal.StaleItem, "the memory changed while the text was prepared; nothing changed");
 
         var row = facts.Row ?? throw new InvalidOperationException("a swap or merge needs the row");
-        var parsed = ApplyPlanning.ParseBase(entryId, row.BaseJson!); // CheckConflict: a base is present
-        if (parsed.Parsed is null)
-            return UnreadableBase(parsed);
-        var baseRecord = parsed.Parsed.Record;
+        var baseRecord = facts.Base ?? throw new InvalidOperationException("a swap or merge needs the parsed base");
 
         var conn = tx.Connection;
         var dbTx = tx.Transaction;

@@ -66,7 +66,9 @@ internal static class ConflictItems
     /// (<paramref name="heldAfter"/>, <see cref="SyncConflict.heldAfter"/>): null when the item is removed (or there is
     /// none), <paramref name="current"/> itself when it is kept, else <c>unseen</c> with the new hash, the kept losers and the
     /// machine of the last kept loser (D1: the newest loser's). Throws <see cref="InvalidOperationException"/> for an item
-    /// whose state is not <c>open</c> or <c>unseen</c>.
+    /// whose state is not <c>open</c> or <c>unseen</c>; the applier cannot reach it, because
+    /// <see cref="GitSyncReviews.ReadConflictItem"/> only returns <c>open</c> or <c>unseen</c> items, so it is a defensive
+    /// guard for callers that build the state themselves.
     /// </summary>
     public static ConflictState? Reconcile(ConflictState? current, string? entryText, SyncMerge.RowState? row, bool heldAfter)
     {
@@ -90,13 +92,16 @@ internal static class ConflictItems
 
     /// <summary>
     /// The write that turns <paramref name="before"/> (the stored item) into <paramref name="after"/>, or null when there is
-    /// nothing to write: neither exists, or they are equal. Only state and hash changed: <c>MarkUnseen</c>.
+    /// nothing to write: neither exists, or they are equal. Only state and hash changed: <c>MarkUnseen</c>. A
+    /// <paramref name="after"/> that is <c>Fresh</c> is a new item even when <paramref name="before"/> exists (the reconcile
+    /// removed the stored item and an arrival of the same pull filed a new one): it replaces the row with a new
+    /// <c>arrived_at</c>.
     /// </summary>
     public static ConflictWrite? Diff(ConflictItem? before, ConflictState? after)
     {
         if (after is null)
             return before is null ? null : new ConflictWrite(ConflictWriteAction.Remove, null, null, null, null, false);
-        if (before is null)
+        if (before is null || after.Fresh)
             return Upsert(after, fresh: true);
 
         var sameLosers = GitSyncReviews.ReadConflictLosers(before.PayloadJson).Equals(after.Losers);

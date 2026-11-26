@@ -455,6 +455,7 @@ public sealed class PinReviewCycleTests : IDisposable
         Assert.Empty(b.Apply.Postponed);
         Assert.Empty(b.Apply.Deferred);
         Assert.Null(b.PushSkipped);
+        Assert.NotNull(b.Push);
         Assert.Equal(Remote.Head(), _rig.B.Pull.Last);
         Assert.Equal("A's text, pinned.", Found(_rig.B).Entry.Content);
         Assert.False(Sticky(_rig.B));

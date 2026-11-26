@@ -433,7 +433,8 @@ public sealed class ReviewCommand : ICliCommand
     /// <summary>
     /// The text of <c>--text-file</c>: the file, or the injected standard input for <c>-</c>, read as strict UTF-8 (a leading
     /// byte order mark dropped) up to <see cref="MaxTextFileBytes"/> bytes. Null after a usage error when it cannot be read, is
-    /// not valid UTF-8 or is larger (neither the path nor the content is echoed).
+    /// not valid UTF-8 or is larger (neither the path nor the content is echoed). The text is passed exactly as read, with no
+    /// trimming, so <c>echo text | ... --text-file -</c> stores the text with its trailing newline.
     /// </summary>
     private string? ReadTextFile(string file)
     {

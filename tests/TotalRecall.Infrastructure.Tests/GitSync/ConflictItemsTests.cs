@@ -107,6 +107,38 @@ public sealed class ConflictItemsTests : IDisposable
         Assert.Null(GitSyncReviews.ReadConflictItem(_rig.Scan.Connection, Id));
     }
 
+    [Fact]
+    public void Append_ToAnEntryInTwoTiers_Throws_AndWritesNothing()
+    {
+        _rig.Scan.AddMemory(Tier.Warm, Id, content: Applied);
+        _rig.Scan.AddMemory(Tier.Hot, Id, content: Applied);
+        var before = Row();
+
+        Assert.Throws<InvalidOperationException>(() => Append(Loser("Their text."), 100));
+
+        Assert.Equal(before, Row());
+        Assert.Null(GitSyncReviews.ReadConflictItem(_rig.Scan.Connection, Id));
+    }
+
+    [Fact]
+    public void Append_ADuplicateLoser_OnAStaleStoredHash_MarksUnseen_KeepingMachinePayloadAndArrivedAt()
+    {
+        _rig.Scan.AddMemory(Tier.Warm, Id, content: Applied);
+        var kept = Loser("Their text.", machine: "11111111", stamp: "2026-11-12T09:10:00.000Z.000000.11111111");
+        var payload = GitSyncReviews.ConflictPayload([kept]);
+        GitSyncReviews.UpsertConflictItem(
+            _rig.Scan.Connection, new ConflictItem(Id, "open", "stale", "11111111", 100, payload), keepArrivedAt: false);
+
+        Append(Loser("Their text.", SyncMerge.Side.Local, machine: "99999999"), 200);
+
+        var item = Item();
+        Assert.Equal("unseen", item.State);
+        Assert.Equal(Hash(Applied, "Their text."), item.RecordHash);
+        Assert.Equal("11111111", item.Machine);
+        Assert.Equal(payload, item.PayloadJson);
+        Assert.Equal(100, item.ArrivedAt);
+    }
+
     // ---- the pure parts ----
 
     private static ConflictItem Stored(string state, string hash, string machine, params SyncConflict.Loser[] losers) =>
@@ -165,6 +197,12 @@ public sealed class ConflictItemsTests : IDisposable
         var created = ConflictItems.Diff(null, ConflictItems.Arrive(null, Loser("a"), Applied))!;
         Assert.Equal(ConflictWriteAction.Upsert, created.Action);
         Assert.True(created.Fresh);
+
+        // removed by the reconcile and filed again by an arrival of the same pull: a new item over the stored one
+        var refiled = ConflictItems.Diff(item, ConflictItems.Arrive(null, Loser("c"), Applied))!;
+        Assert.Equal(ConflictWriteAction.Upsert, refiled.Action);
+        Assert.Equal("open", refiled.State);
+        Assert.True(refiled.Fresh);
     }
 
     [Fact]

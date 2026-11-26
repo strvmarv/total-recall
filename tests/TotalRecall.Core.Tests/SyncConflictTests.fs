@@ -176,8 +176,9 @@ let private quiet : ReconcileInput =
 [<Tests>]
 let reconcileTests =
     testList "SyncConflict.reconcile" [
-        // Rule 1 before rules 2 and 3: every case below also has a changed hash and a loser equal to the entry's text,
-        // each of which alone would give Rewrite or Remove through rule 2/3. Only the outcome of rule 1 differs.
+        // Rule 1: a forgotten or left row, or an absent entry that is not held, removes. The cases below add, one at a
+        // time, a condition that alone would give another outcome (a changed hash: Rewrite through rule 3; a loser equal
+        // to the entry's text: Rewrite through rule 2; a held deletion: Keep), and rule 1 still decides.
         testCase "rule 1: a forgotten or left row removes" <| fun _ ->
             Expect.equal (reconcile { quiet with Row = Some Forgotten }) Remove "forgotten"
             Expect.equal (reconcile { quiet with Row = Some Left }) Remove "left"
@@ -238,7 +239,7 @@ let reconcileTests =
             let i = { quiet with Item = item Open (shownHash (Some "w") [ "x"; "y" ]) [ "x" ] }
             Expect.equal (reconcile i) (Rewrite(shownHash (Some "w") [ "x" ], [ loser Remote "x" ])) "losers differ from the hash"
 
-        testCase "rule 3 before 4: an unseen item with the same hash is kept" <| fun _ ->
+        testCase "rule 4: an unseen item with the same hash is kept" <| fun _ ->
             Expect.equal (reconcile { quiet with Item = { quiet.Item with State = Unseen } }) Keep "unseen, same hash"
 
         testCase "a row of none with the entry present does not remove" <| fun _ ->

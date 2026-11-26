@@ -307,11 +307,9 @@ public sealed class ConflictReviewCycleTests : IDisposable
     /// <summary>
     /// B writes a text holding a token (its scan blocks it) while A's later clean edit is published: B's pull applies A's text
     /// and files B's token text as a local loser, and B's next scan lifts the block. Swapping the loser back makes it B's text
-    /// again with a pending stamp; B's next cycle blocks it again and the push holds it back: the record keeps A's text, the
-    /// token is in no object of the repository and the stamp stays pending.
+    /// again with a pending stamp. Returns the token, the swapped text, the remote record and the head before the swap's cycle.
     /// </summary>
-    [GitFact]
-    public async Task ASwapOfATextHoldingAToken_IsHeldBackByThePush()
+    private async Task<(string Token, string Tainted, SyncRecordModule.SyncRecord Before, string Head)> SwapInATokenText()
     {
         var token = Fakes.Get("github-token");
         var tainted = SharedText + " The deploy token is " + token;
@@ -338,6 +336,20 @@ public sealed class ConflictReviewCycleTests : IDisposable
         Assert.Equal(tainted, TextOf(_rig.B));
         Assert.NotNull(RowOf(_rig.B).ContentStamp);
         _rig.B.Push.Now += 60_000;
+        return (token, tainted, before, head);
+    }
+
+    /// <summary>
+    /// After the swap of a token text (<see cref="SwapInATokenText"/>) B's next cycle: the scan's secret pass blocks the
+    /// swapped text and the push skips the blocked row, so the record keeps A's text, the token is in no object of the
+    /// repository and the stamp stays pending. The push's own re-check is proven by the blind-scan variant below and by
+    /// <c>GitSyncPusherSecretTests</c>.
+    /// </summary>
+    [GitFact]
+    public async Task ASwapOfATextHoldingAToken_IsBlockedByTheScanAndSkippedByThePush()
+    {
+        var (token, tainted, before, head) = await SwapInATokenText();
+
         var b = Done(await _rig.RunB());
 
         var push = Finished(b);
@@ -347,6 +359,37 @@ public sealed class ConflictReviewCycleTests : IDisposable
         Assert.Equal(head, Remote.Head());
         Assert.Equal(before, RemoteRecord());
         Assert.Equal(TextOnA, RemoteRecord().Content);
+        Assert.DoesNotContain(token, EveryObject());
+        Assert.Equal(SyncSecret.blockReason, RowOf(_rig.B).BlockedReason);
+        Assert.NotNull(RowOf(_rig.B).ContentStamp);   // still pending: pushed once the token is gone
+        Assert.Equal(tainted, TextOf(_rig.B));
+    }
+
+    /// <summary>
+    /// As above, but B runs the cycle's steps with a scan that misses the token (<see cref="PushRig.ScanDetector"/>), so the
+    /// push's own secret check is what holds the swapped text back.
+    /// </summary>
+    [GitFact]
+    public async Task ASwapOfATextHoldingAToken_WithABlindScan_IsHeldBackByThePushsSecretCheck()
+    {
+        var (token, tainted, before, head) = await SwapInATokenText();
+        _rig.B.Push.ScanDetector = _ => [];
+
+        var (apply, scan) = await _rig.B.Push.PullAsync();
+        Assert.Empty(scan.Blocked);
+        Assert.True(apply.Complete);
+        var outcome = await _rig.B.Push.Push(apply, scan);
+
+        var push = outcome switch
+        {
+            PushOutcome.Pushed p => p.Summary,
+            PushOutcome.NothingToPush n => n.Summary,
+            var other => throw new Xunit.Sdk.XunitException("the push did not finish: " + other),
+        };
+        Assert.DoesNotContain(Id, push.Written);
+        Assert.Equal([new PushItem(Id, SyncSecret.blockReason)], push.Blocked);   // found by the push's own check
+        Assert.Equal(head, Remote.Head());
+        Assert.Equal(before, RemoteRecord());
         Assert.DoesNotContain(token, EveryObject());
         Assert.Equal(SyncSecret.blockReason, RowOf(_rig.B).BlockedReason);
         Assert.NotNull(RowOf(_rig.B).ContentStamp);   // still pending: pushed once the token is gone

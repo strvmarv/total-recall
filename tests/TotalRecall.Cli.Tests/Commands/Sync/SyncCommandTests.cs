@@ -1422,6 +1422,19 @@ public sealed class SyncCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task Review_Merge_FromStandardInput_KeepsATrailingNewline()
+    {
+        UseReviewCommand(() => new MemoryStream(Encoding.UTF8.GetBytes("Merged from echo.\n")));
+        var conflict = TwoLoserConflict();
+        SeedConflicts(conflict);
+
+        var code = await Run("review", "merge", ConflictA, "--shown", conflict.Hash[..8], "--text-file", "-");
+
+        Assert.Equal(0, code);
+        Assert.Equal("Merged from echo.\n", EntryText(ConflictA));
+    }
+
+    [Fact]
     public async Task Review_Merge_OfExactlyTheLimit_IsReadWhole_AndOneByteMoreIsAUsageError()
     {
         var conflict = TwoLoserConflict();
@@ -1497,6 +1510,7 @@ public sealed class SyncCommandTests : IDisposable
     [InlineData("merge")]
     public async Task Review_ConflictVerbs_OfAnIdWithoutAConflict_AreNoConflictItem(string verb)
     {
+        UseReviewCommand();
         SeedHolds(Remote("a1111111"));
         var before = DatabaseBytes();
         string[] extra = verb == "merge" ? ["--text-file", "-"] : [];

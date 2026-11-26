@@ -263,6 +263,22 @@ public sealed class ReviewServiceConflictTests : IDisposable
     }
 
     [Fact]
+    public async Task AfterASwap_ThePullTreatsTheEntryAsAnOrdinaryLocalEdit()
+    {
+        var record = Conflict(_rig, "Local edit.", Earlier);
+        Assert.Equal(0, (await Service().SwapAsync(Id, Shown("Their edit.", "Local edit."), 1)).ExitCode);
+        var pending = Row().ContentStamp;
+        Assert.NotNull(pending);
+
+        var result = _rig.Apply(record);
+
+        Assert.False(result is EntryResult.Deferred or EntryResult.Failed, result.ToString());
+        Assert.Null(Item());
+        Assert.Equal("Local edit.", Text());
+        Assert.Equal(pending, Row().ContentStamp);   // still pending: the push writes it
+    }
+
+    [Fact]
     public async Task Merge_MakesTheGivenTextTheText()
     {
         var shown = Fc5();
@@ -398,6 +414,8 @@ public sealed class ReviewServiceConflictTests : IDisposable
     [InlineData("absent")]
     [InlineData("absent-held")]
     [InlineData("no-row")]
+    [InlineData("unreadable-base-swap")]
+    [InlineData("unreadable-base-merge")]
     [InlineData("several-no-index")]
     [InlineData("index-0")]
     [InlineData("index-3")]
@@ -454,6 +472,13 @@ public sealed class ReviewServiceConflictTests : IDisposable
                 refusal = SyncSetup.Refusal.Failed;
                 contains = "not synced yet; run a sync first";
                 answer = s => s.SwapAsync(Id, shown, 1);
+                break;
+            case "unreadable-base-swap" or "unreadable-base-merge":
+                shown = Fc5();
+                GitSyncRows.Write(_rig.Scan.Connection, Row() with { BaseJson = "not a record" });
+                refusal = SyncSetup.Refusal.Failed;
+                contains = "the row's base cannot be read";
+                answer = kase == "unreadable-base-swap" ? s => s.SwapAsync(Id, shown, 1) : s => s.MergeAsync(Id, shown, "Merged.");
                 break;
             case "several-no-index" or "index-0" or "index-3":
                 shown = TwoLosers();

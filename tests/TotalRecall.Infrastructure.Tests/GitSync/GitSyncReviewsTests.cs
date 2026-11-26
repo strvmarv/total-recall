@@ -494,6 +494,7 @@ public sealed class GitSyncReviewsTests : IDisposable
         var hostile = new[]
         {
             "nul \0 byte", "crlf \r\n line", "bidi \u202E override", "quote \" and \\ backslash", new string('x', 300_000), "",
+            "astral \U0001F600 and \U0001D11E",
         };
         var losers = hostile
             .Select((t, i) => Loser(i % 2 == 0 ? SyncMerge.Side.Local : SyncMerge.Side.Remote, t, i == 0 ? "" : "2026-11-12T09:10:00.000Z.000000.7b3d1e55"))
@@ -505,6 +506,19 @@ public sealed class GitSyncReviewsTests : IDisposable
         Assert.Equal(losers, back.ToList());
         Assert.StartsWith("{\"losers\":[{\"side\":\"local\",\"text\":", payload);
         Assert.Equal("""{"losers":[]}""", GitSyncReviews.ConflictPayload([]));
+    }
+
+    [Fact]
+    public void ConflictPayload_OfAHugeText_RoundTripsThroughSqlite()
+    {
+        var losers = new[] { Loser(SyncMerge.Side.Remote, new string('x', 300_000) + "\U0001F600") };
+        var payload = GitSyncReviews.ConflictPayload(losers);
+
+        GitSyncReviews.UpsertConflictItem(_conn, new ConflictItem("k", "open", "h", "m", 100, payload), keepArrivedAt: false);
+
+        var item = GitSyncReviews.ReadConflictItem(_conn, "k")!;
+        Assert.Equal(payload, item.PayloadJson);
+        Assert.Equal(losers, GitSyncReviews.ReadConflictLosers(item.PayloadJson).ToArray());
     }
 
     [Theory]

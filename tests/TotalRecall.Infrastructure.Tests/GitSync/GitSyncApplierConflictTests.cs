@@ -351,6 +351,28 @@ public sealed class GitSyncApplierConflictTests : IDisposable
     }
 
     [Fact]
+    public void AnFC5WhoseRecordEqualsTheOnlyLoser_RemovesTheItem_AndItsArrivalFilesAFreshOne()
+    {
+        Conflicted();
+        Assert.Equal(Earlier, Item()!.ArrivedAt);
+        _rig.Now = Earlier + 60_000;
+        Edit("Second local edit.");
+        var pending = SyncStamp.StampModule.format(Row().ContentStamp!);
+        _rig.Now = Earlier + 120_000;
+
+        // FC5: the record's text is the item's only loser, so the reconcile empties the item; the arrival files the local text.
+        Is<EntryResult.Carried>(_rig.Apply(Rec("Local edit.", 30)));
+
+        Assert.Equal("Local edit.", _rig.Entry(Id)!.Row.Content);
+        var item = Item()!;
+        Assert.Equal("open", item.State);
+        Assert.Equal(Earlier + 120_000, item.ArrivedAt);
+        Assert.Equal([$"local|Second local edit.|{pending}|{ThisMachine}"], Losers(item));
+        Assert.Equal(Shown("Local edit.", "Second local edit."), item.RecordHash);
+        Assert.Equal(ThisMachine, item.Machine);
+    }
+
+    [Fact]
     public void AnAppliedTextChange_MarksTheItemUnseen_WithTheSameLosers()
     {
         Conflicted();
