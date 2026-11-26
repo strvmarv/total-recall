@@ -152,13 +152,16 @@ internal static class PinPlanning
     /// (conflict review D3), over that same entry, each <c>Conflict</c> request files its loser
     /// (<c>SyncConflict.loserOf</c> with <paramref name="thisMachine"/>, the machine of a loser with no stamp) into the id's
     /// conflict item <paramref name="conflict"/> by <see cref="ConflictItems.Arrive"/>, and <see cref="PinPlan.Conflict"/>
-    /// is the one write that takes the item there (<see cref="ConflictItems.Diff"/>). Throws
+    /// is the one write that takes the item there (<see cref="ConflictItems.Diff"/>). Before those arrivals the item is
+    /// reconciled with the pull (conflict review D4, <see cref="ConflictItems.Reconcile"/>) over the same entry, the row's
+    /// state and <paramref name="heldAfter"/> (whether the id has a held deletion after the decision, computed once by the
+    /// caller with <c>SyncConflict.heldAfter</c>, the same value before and inside the transaction). Throws
     /// <see cref="InvalidOperationException"/> for a base that cannot be read, an unknown kind or state, or an arrival
     /// input that is missing (a conflict request with no entry included).
     /// </summary>
     public static PinPlan Plan(
         IReadOnlyList<PinItem> items, ConflictItem? conflict, SyncMerge.MergeDecision d, SyncMerge.LocalEntry? stored,
-        GitSyncRow? rowAfter, bool recordPresent, string? machine, string thisMachine)
+        GitSyncRow? rowAfter, bool recordPresent, string? machine, string thisMachine, bool heldAfter)
     {
         if (!HasWork(items, conflict, d))
             return PinPlan.Empty;
@@ -217,9 +220,9 @@ internal static class PinPlanning
         writes.AddRange(Arrivals(
             d, kind => after.TryGetValue(kind, out var left) ? left : null, shown, postBase, machine));
 
-        // Conflict review D3: the arrival of each loser, over the entry as the pin rules leave it, so the plan before the
-        // transaction and the one inside it read the same text.
-        var conflictState = ConflictItems.Of(conflict);
+        // Conflict review D4 then D3: the reconcile and the arrival of each loser, over the entry as the pin rules leave it,
+        // so the plan before the transaction and the one inside it read the same text.
+        var conflictState = ConflictItems.Reconcile(ConflictItems.Of(conflict), shown?.Content.Text, rowAfter?.State, heldAfter);
         foreach (var loser in ConflictRequests(d))
         {
             var entry = shown ?? throw new InvalidOperationException("a conflict item needs the stored entry");

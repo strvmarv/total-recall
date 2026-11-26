@@ -171,6 +171,10 @@ public sealed partial class GitSyncApplier
             decision = SyncDeletion.holdInstead(decision); // D4: kept base update, no notes, no row state change
         // An approved item whose record changed after the answer is opened again with the record's blob id.
         var reopen = approved?.IsReopened == true && !decision.CloseHeldDelete;
+        // Conflict review D4: whether a deletion is held after this decision (the guard's conversion included), computed
+        // once from the decision and the held item the pull read, so both plans see the same value. Not a database read:
+        // the item step runs before the hold is upserted.
+        var heldAfter = SyncConflict.heldAfter(decision, held is not null);
 
         if (decision.Entry.IsDefer)
             return new EntryResult.Deferred("the merge rules leave this entry for the next pull", Busy: false);
@@ -217,7 +221,8 @@ public sealed partial class GitSyncApplier
                 if (planError is not null)
                     return new EntryResult.Failed(OneLine(planError));
                 pinPlan = PinPlanning.Plan(
-                    pinItems, conflictItem, decision, expected, planned ?? row, theirs is not null, Unopt(theirs?.Record.WrittenBy), thisMachine);
+                    pinItems, conflictItem, decision, expected, planned ?? row, theirs is not null, Unopt(theirs?.Record.WrittenBy), thisMachine,
+                    heldAfter);
                 if (pinPlan.ApplyBaseJson is { } applyBase)
                 {
                     var text = BaseContent(id, applyBase);
@@ -276,7 +281,7 @@ public sealed partial class GitSyncApplier
             {
                 return CarryOut(
                     id, tx, decision, converted, reopen, plan, vector, row, read, held, proven, blobSha, oldBase, theirs, local,
-                    pinItems, conflictItem, thisMachine, pinPlan, baseVector, p => phase = p);
+                    pinItems, conflictItem, thisMachine, heldAfter, pinPlan, baseVector, p => phase = p);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
             {
@@ -400,6 +405,7 @@ public sealed partial class GitSyncApplier
         IReadOnlyList<PinItem> pinItems,
         ConflictItem? conflictItem,
         string thisMachine,
+        bool heldAfter,
         PinPlan pinPlan,
         float[]? baseVector,
         Action<string> phase)
@@ -472,7 +478,8 @@ public sealed partial class GitSyncApplier
             Step(id, "pins");
             var rowAfter = next ?? row;
             var pins = PinPlanning.Plan(
-                pinItems, conflictItem, decision, stored, rowAfter, theirs is not null, Unopt(theirs?.Record.WrittenBy), thisMachine);
+                pinItems, conflictItem, decision, stored, rowAfter, theirs is not null, Unopt(theirs?.Record.WrittenBy), thisMachine,
+                heldAfter);
             if (!pins.Matches(pinPlan))
                 return new EntryResult.Deferred("the pin review changed since the decision was made", Busy: false);
             if (pins.ApplyBaseJson is { } applyBase)

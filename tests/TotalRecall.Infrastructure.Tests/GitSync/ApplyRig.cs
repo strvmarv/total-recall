@@ -115,6 +115,12 @@ internal sealed class ApplyRig : IDisposable
             .Select(i => $"{i.Kind}|{i.State}|{i.RecordHash}|{i.Machine}")
             .ToList();
 
+    /// <summary>The id's conflict item as <c>state|hash|machine|&lt;loser texts joined by '¦'&gt;</c>, oldest first; null when none.</summary>
+    public string? ConflictItem(string id) =>
+        GitSyncReviews.ReadConflictItem(Scan.Connection, id) is { } item
+            ? $"{item.State}|{item.RecordHash}|{item.Machine}|{string.Join('¦', GitSyncReviews.ReadConflictLosers(item.PayloadJson).Select(l => l.Text))}"
+            : null;
+
     public int ReviewRows()
     {
         using var cmd = Scan.Connection.CreateCommand();

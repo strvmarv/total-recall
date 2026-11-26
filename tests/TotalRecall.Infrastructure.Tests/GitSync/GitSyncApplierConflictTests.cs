@@ -244,6 +244,275 @@ public sealed class GitSyncApplierConflictTests : IDisposable
         Assert.Equal(0, _rig.ReviewRows());
     }
 
+    // ---- D4: the reconcile with the pull ----
+
+    private const string Sha = "1111111111111111111111111111111111111111";
+    private const string Sha2 = "2222222222222222222222222222222222222222";
+
+    /// <summary>An FC5 carried out: the entry has the record's text <c>Their edit.</c>, the item keeps <c>Local edit.</c>.</summary>
+    private SyncRecordModule.SyncRecord Conflicted()
+    {
+        SyncedThenEditedHere("Local edit.", Earlier);
+        var record = Rec("Their edit.", 20);
+        Is<EntryResult.Carried>(_rig.Apply(record));
+        Assert.Equal($"open|{Shown("Their edit.", "Local edit.")}|{ThisMachine}|Local edit.", _rig.ConflictItem(Id));
+        return record;
+    }
+
+    /// <summary>The entry deleted here and the deletion scanned.</summary>
+    private void DeletedHere()
+    {
+        _rig.Scan.Store.Delete(_rig.Entry(Id)!.Tier, ContentType.Memory, Id);
+        _rig.RunScan();
+    }
+
+    [Fact]
+    public void TheEntryDeletedHereByARemoteDeletion_RemovesTheItem()
+    {
+        Conflicted();
+
+        Is<EntryResult.Carried>(_rig.Apply(Id, null)); // W6.4
+
+        Assert.Null(_rig.Entry(Id));
+        Assert.Equal(SyncMerge.RowState.Forgotten, Row().State);
+        Assert.Null(_rig.ConflictItem(Id));
+    }
+
+    [Fact]
+    public void AForgottenRow_RemovesTheItemAtTheNextPull()
+    {
+        Conflicted();
+        DeletedHere();
+        // As the push's Forget leaves the row once the local deletion is written.
+        GitSyncRows.Write(_rig.Scan.Connection, Row() with
+        {
+            State = SyncMerge.RowState.Forgotten, ContentStamp = null, StickyStamp = null, TierStamp = null,
+            PushingStamps = null, RepushGroups = null,
+        });
+        Assert.NotNull(_rig.ConflictItem(Id));
+
+        Is<EntryResult.Carried>(_rig.Apply(Id, null));
+
+        Assert.Null(_rig.ConflictItem(Id));
+        Assert.Equal(SyncMerge.RowState.Forgotten, Row().State);
+    }
+
+    [Fact]
+    public void ALeftRow_RemovesTheItem()
+    {
+        var record = Conflicted();
+        _rig.Scan.Store.Move(Tier.Warm, ContentType.Memory, Tier.Warm, ContentType.Knowledge, Id);
+        _rig.RunScan();
+        Assert.Equal(SyncMerge.RowState.Left, Row().State);
+
+        Is<EntryResult.Carried>(_rig.Apply(record)); // W2
+
+        Assert.Null(_rig.ConflictItem(Id));
+    }
+
+    [Fact]
+    public void ARowThatDoesNotExistYet_KeepsTheItem()
+    {
+        Conflicted();
+        _rig.Scan.Exec($"DELETE FROM git_sync_entry WHERE entry_id = '{Id}'");
+        var item = _rig.ConflictItem(Id);
+
+        var result = _rig.Apply(Id, null); // W7: entry present, no record, no row
+
+        Assert.False(result is EntryResult.Deferred or EntryResult.Failed, result.ToString());
+        Assert.Equal(item, _rig.ConflictItem(Id));
+    }
+
+    [Fact]
+    public void ALoserEqualToTheEntryText_IsDropped_AndTheLastOneRemovesTheItem()
+    {
+        SyncedThenEditedHere("Local edit.", Earlier);
+        Is<EntryResult.Carried>(_rig.Apply(Rec("Their edit.", 20)));
+        _rig.Now = Earlier + 60_000;
+        Edit("Second local edit.");
+        var record = Rec("Third edit.", 30);
+        Is<EntryResult.Carried>(_rig.Apply(record));
+        Assert.Equal("unseen", Item()!.State);
+        _rig.Now = Earlier + 120_000;
+        Edit("Local edit.");
+
+        Is<EntryResult.Carried>(_rig.Apply(record));
+
+        Assert.Equal("Local edit.", _rig.Entry(Id)!.Row.Content);
+        Assert.Equal(
+            $"unseen|{Shown("Local edit.", "Second local edit.")}|{ThisMachine}|Second local edit.", _rig.ConflictItem(Id));
+
+        _rig.Now = Earlier + 180_000;
+        Edit("Second local edit.");
+
+        Is<EntryResult.Carried>(_rig.Apply(record));
+
+        Assert.Null(_rig.ConflictItem(Id));
+    }
+
+    [Fact]
+    public void AnAppliedTextChange_MarksTheItemUnseen_WithTheSameLosers()
+    {
+        Conflicted();
+        var arrived = Item()!.ArrivedAt;
+
+        Is<EntryResult.Carried>(_rig.Apply(Rec("Newer edit.", 30))); // the record's text taken: no new conflict
+
+        Assert.Equal("Newer edit.", _rig.Entry(Id)!.Row.Content);
+        Assert.Equal($"unseen|{Shown("Newer edit.", "Local edit.")}|{ThisMachine}|Local edit.", _rig.ConflictItem(Id));
+        Assert.Equal(arrived, Item()!.ArrivedAt);
+    }
+
+    [Fact]
+    public void AnUnchangedPull_RewritesNothing()
+    {
+        var record = Conflicted();
+        var before = _rig.Full();
+        var transactions = _rig.Applier.TransactionCount;
+
+        Is<EntryResult.NoOp>(_rig.Apply(record));
+
+        Assert.Equal(transactions, _rig.Applier.TransactionCount);
+        Assert.Equal(before, _rig.Full());
+    }
+
+    [Fact]
+    public void AFirstW8_4Hold_KeepsTheItem()
+    {
+        var record = Conflicted();
+        var item = _rig.ConflictItem(Id);
+        DeletedHere();
+
+        Is<EntryResult.Carried>(_rig.Apply(record, proven: false, blobSha: Sha)); // W8.4
+
+        Assert.Equal("local", _rig.Held(Id)?.Direction);
+        Assert.Equal(item, _rig.ConflictItem(Id));
+    }
+
+    [Fact]
+    public void AFirstLocalHold_KeepsTheItem_AndTheNextPullIsANoOp()
+    {
+        var record = Conflicted();
+        var item = _rig.ConflictItem(Id);
+        DeletedHere();
+        Is<EntryResult.Carried>(_rig.Apply(record, proven: false, blobSha: Sha));
+        Assert.Equal(item, _rig.ConflictItem(Id));
+        var before = _rig.Full();
+        var transactions = _rig.Applier.TransactionCount;
+
+        Is<EntryResult.NoOp>(_rig.Apply(record, proven: false, blobSha: Sha)); // W8.2: the hold stays open
+
+        Assert.Equal(transactions, _rig.Applier.TransactionCount);
+        Assert.Equal(before, _rig.Full());
+    }
+
+    [Fact]
+    public void AGuardConvertedHold_KeepsTheItem()
+    {
+        var record = Conflicted();
+        var item = _rig.ConflictItem(Id);
+        DeletedHere();
+
+        var result = _rig.Applier.ApplyOne(
+            Id, ApplyRig.Parsed(record), proven: true, GitSyncReviews.ReadHeldItem(_rig.Scan.Connection, Id), Sha,
+            new GitSyncApplier.DeleteGuardVerdict(false, true)); // W8.3 converted by the guard
+
+        Is<EntryResult.Carried>(result);
+        Assert.Equal("local", _rig.Held(Id)?.Direction);
+        Assert.Equal("guard", _rig.Held(Id)?.Cause);
+        Assert.Equal(item, _rig.ConflictItem(Id));
+    }
+
+    [Fact]
+    public void AnOpenLocalHold_KeepsTheItem()
+    {
+        var record = Conflicted();
+        var item = _rig.ConflictItem(Id);
+        DeletedHere();
+        Is<EntryResult.Carried>(_rig.Apply(record, proven: false, blobSha: Sha));
+        // A record that changed in its placement only: W8.2 leaves the hold open and refreshes its hash.
+        var moved = ApplyRig.Rec(Id, "Their edit.", tier: Tier.Cold, minute: 20, tierMinute: 30, writtenBy: Other);
+
+        Is<EntryResult.Carried>(_rig.Apply(moved, proven: true, blobSha: Sha2));
+
+        Assert.Equal(Sha2, _rig.Held(Id)?.RecordHash);
+        Assert.Equal(item, _rig.ConflictItem(Id));
+    }
+
+    [Fact]
+    public void AProvenW8_3Deletion_RemovesTheItemInThatPull()
+    {
+        var record = Conflicted();
+        DeletedHere();
+
+        Is<EntryResult.Carried>(_rig.Apply(record, proven: true, blobSha: Sha)); // W8.3: the push deletes the record
+
+        Assert.Null(_rig.Held(Id));
+        Assert.Null(_rig.ConflictItem(Id));
+    }
+
+    [Fact]
+    public void AnApprovedHoldCarriedOut_RemovesTheItemInThatPull()
+    {
+        var record = Conflicted();
+        DeletedHere();
+        Is<EntryResult.Carried>(_rig.Apply(record, proven: false, blobSha: Sha));
+        GitSyncReviews.ApproveHeld(_rig.Scan.Connection, Id);
+        Assert.NotNull(_rig.ConflictItem(Id));
+
+        Is<EntryResult.Carried>(_rig.Apply(record, proven: false, blobSha: Sha)); // the approved hold: W8.3
+
+        Assert.Null(_rig.ConflictItem(Id));
+    }
+
+    [Fact]
+    public void AConflictItemAndPinEditRule4InOnePull_AgreeAndAreNotDeferred()
+    {
+        var remote = ApplyRig.Rec(
+            Id, "Remote edit.", tier: Tier.Hot, tags: ["r"], project: "o/r", scope: "s", minute: 20, stickyMinute: 10, writtenBy: Other);
+        Is<EntryResult.Carried>(_rig.Apply(Rec("Pinned text.", 10)));
+        _rig.Scan.Store.Move(Tier.Warm, ContentType.Memory, Tier.Hot, ContentType.Memory, Id);
+        _rig.Scan.Pin(Id);
+        _rig.RunScan();
+        Is<EntryResult.Carried>(_rig.Apply(remote)); // the remote edit is held as a pin-edit
+        Assert.Equal("open", GitSyncReviews.ReadPinItem(_rig.Scan.Connection, Id, "pin-edit")!.State);
+        Assert.Equal("Pinned text.", _rig.Entry(Id)!.Row.Content);
+        GitSyncReviews.UpsertConflictItem(
+            _rig.Scan.Connection,
+            new ConflictItem(Id, "open", Shown("Pinned text.", "Older text."), Other, _rig.Now,
+                GitSyncReviews.ConflictPayload([new SyncConflict.Loser(SyncMerge.Side.Remote, "Older text.", StampText(5), Other)])),
+            keepArrivedAt: false);
+        _rig.Scan.Store.SetSticky(ContentType.Memory, Id, false);
+        _rig.RunScan();
+
+        Is<EntryResult.Carried>(_rig.Apply(remote)); // pin-edit rule 4 applies the held text
+
+        Assert.Equal("Remote edit.", _rig.Entry(Id)!.Row.Content);
+        Assert.Empty(_rig.PinItems(Id));
+        Assert.Equal($"unseen|{Shown("Remote edit.", "Older text.")}|{Other}|Older text.", _rig.ConflictItem(Id));
+
+        var transactions = _rig.Applier.TransactionCount;
+        Is<EntryResult.NoOp>(_rig.Apply(remote));
+        Assert.Equal(transactions, _rig.Applier.TransactionCount);
+    }
+
+    [Fact]
+    public void AConflictItemChangedBeforeTheTransaction_DefersTheEntry()
+    {
+        Conflicted();
+        string? before = null;
+        _rig.Applier.BeforeTransaction = id =>
+        {
+            GitSyncReviews.MarkConflictUnseen(_rig.Scan.Connection, id, Shown("x", "y"));
+            before = _rig.Full();
+        };
+
+        Is<EntryResult.Deferred>(_rig.Apply(Rec("Newer edit.", 30)));
+
+        Assert.Equal(before, _rig.Full());
+        Assert.Equal("Their edit.", _rig.Entry(Id)!.Row.Content);
+    }
+
     // ---- the pull ----
 
     private const string A = "3f9c2a7e-0000-4000-8000-0000000000a1";

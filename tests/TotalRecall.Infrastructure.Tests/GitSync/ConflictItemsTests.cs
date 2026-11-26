@@ -166,4 +166,28 @@ public sealed class ConflictItemsTests : IDisposable
         Assert.Equal(ConflictWriteAction.Upsert, created.Action);
         Assert.True(created.Fresh);
     }
+
+    [Fact]
+    public void Reconcile_KeepsRemovesOrRewrites_WithTheLastKeptLosersMachine()
+    {
+        var active = SyncMerge.RowState.Active;
+        var item = ConflictItems.Of(Stored("open", Hash(Applied, "a", "b"), "m2", Loser("a", machine: "m1"), Loser("b", machine: "m2")))!;
+
+        Assert.Null(ConflictItems.Reconcile(null, Applied, active, heldAfter: false));
+        Assert.Same(item, ConflictItems.Reconcile(item, Applied, active, heldAfter: false));
+        Assert.Same(item, ConflictItems.Reconcile(item, Applied, null, heldAfter: false));     // no row yet
+        Assert.Null(ConflictItems.Reconcile(item, Applied, SyncMerge.RowState.Forgotten, heldAfter: true));
+        Assert.Null(ConflictItems.Reconcile(item, null, active, heldAfter: false));
+        Assert.Same(item, ConflictItems.Reconcile(item, null, active, heldAfter: true));
+
+        var dropped = ConflictItems.Reconcile(item, "b", active, heldAfter: false)!;
+        Assert.Equal(new[] { "unseen", Hash("b", "a"), "m1" }, new[] { dropped.State, dropped.Hash, dropped.Machine });
+        Assert.Equal(["a"], dropped.Losers.Select(l => l.Text).ToArray());
+
+        var edited = ConflictItems.Reconcile(item, "c", active, heldAfter: false)!;
+        Assert.Equal(new[] { "unseen", Hash("c", "a", "b"), "m2" }, new[] { edited.State, edited.Hash, edited.Machine });
+        Assert.Equal(ConflictWriteAction.MarkUnseen, ConflictItems.Diff(Stored("open", Hash(Applied, "a", "b"), "m2", Loser("a", machine: "m1"), Loser("b", machine: "m2")), edited)!.Action);
+
+        Assert.Throws<InvalidOperationException>(() => ConflictItems.Reconcile(item with { State = "approved" }, Applied, active, false));
+    }
 }

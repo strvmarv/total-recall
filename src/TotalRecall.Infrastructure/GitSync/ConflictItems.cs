@@ -60,6 +60,35 @@ internal static class ConflictItems
     }
 
     /// <summary>
+    /// The item as the pull leaves it after the decision (conflict review D4, <see cref="SyncConflict.reconcile"/>), from the
+    /// stored entry's text <paramref name="entryText"/> (null: none; the entry as the pin rules leave it), the row's state
+    /// <paramref name="row"/> (null: no row) and whether a deletion is held after the decision
+    /// (<paramref name="heldAfter"/>, <see cref="SyncConflict.heldAfter"/>): null when the item is removed (or there is
+    /// none), <paramref name="current"/> itself when it is kept, else <c>unseen</c> with the new hash, the kept losers and the
+    /// machine of the last kept loser (D1: the newest loser's). Throws <see cref="InvalidOperationException"/> for an item
+    /// whose state is not <c>open</c> or <c>unseen</c>.
+    /// </summary>
+    public static ConflictState? Reconcile(ConflictState? current, string? entryText, SyncMerge.RowState? row, bool heldAfter)
+    {
+        if (current is null)
+            return null;
+        var state = SyncConflict.tryState(current.State)
+            ?? throw new InvalidOperationException("the conflict item's state is not known: " + current.State);
+        var reconciled = SyncConflict.reconcile(new SyncConflict.ReconcileInput(
+            new SyncConflict.ItemView(state.Value, current.Hash, current.Losers),
+            entryText is null ? FSharpOption<string>.None : FSharpOption<string>.Some(entryText),
+            row is null ? FSharpOption<SyncMerge.RowState>.None : FSharpOption<SyncMerge.RowState>.Some(row),
+            heldAfter));
+        return reconciled switch
+        {
+            SyncConflict.Reconciled.Rewrite rewrite =>
+                new ConflictState("unseen", rewrite.hash, LastMachine(rewrite.losers, current.Machine), rewrite.losers, current.Fresh),
+            _ when reconciled.IsRemove => null,
+            _ => current,
+        };
+    }
+
+    /// <summary>
     /// The write that turns <paramref name="before"/> (the stored item) into <paramref name="after"/>, or null when there is
     /// nothing to write: neither exists, or they are equal. Only state and hash changed: <c>MarkUnseen</c>.
     /// </summary>
