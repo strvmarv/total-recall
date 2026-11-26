@@ -1,3 +1,4 @@
+using TotalRecall.Core;
 using TotalRecall.Infrastructure.GitSync;
 using Xunit;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
@@ -230,12 +231,13 @@ public sealed class GitSyncReviewsTests : IDisposable
             GitSyncReviews.ReadHeldItem(_conn, "k"));
     }
 
-    private void InsertRow(string id, string kind, string state, string? direction = null, string? hash = null, string? machine = null)
+    private void InsertRow(string id, string kind, string state, string? direction = null, string? hash = null, string? machine = null, string? payload = "{}")
     {
         using var cmd = _conn.CreateCommand();
         cmd.CommandText =
             "INSERT INTO git_sync_review (entry_id, kind, state, record_hash, direction, machine, payload_json, arrived_at) " +
-            "VALUES ($id, $kind, $state, $hash, $direction, $machine, '{}', 7)";
+            "VALUES ($id, $kind, $state, $hash, $direction, $machine, $payload, 7)";
+        cmd.Parameters.AddWithValue("$payload", (object?)payload ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$id", id);
         cmd.Parameters.AddWithValue("$kind", kind);
         cmd.Parameters.AddWithValue("$state", state);
@@ -391,5 +393,158 @@ public sealed class GitSyncReviewsTests : IDisposable
         GitSyncReviews.RefreshHeldHash(_conn, "none", "h");
 
         Assert.Equal("0", Scalar("SELECT COUNT(*) FROM git_sync_review"));
+    }
+
+    // ---- conflict items ----
+
+    private static SyncConflict.Loser Loser(SyncMerge.Side side, string text, string stamp = "", string machine = "7b3d1e55") =>
+        new(side, text, stamp, machine);
+
+    private string Row(string id, string kind) =>
+        Scalar(
+            "SELECT state || '|' || ifnull(record_hash, 'NULL') || '|' || ifnull(machine, 'NULL') || '|' || ifnull(direction, 'NULL') || '|' || " +
+            $"ifnull(payload_json, 'NULL') || '|' || arrived_at FROM git_sync_review WHERE entry_id = '{id}' AND kind = '{kind}'")
+        ?? "none";
+
+    [Fact]
+    public void ReadConflictItems_ReadsOpenAndUnseenConflictRows_AndNoOtherKind()
+    {
+        var payload = GitSyncReviews.ConflictPayload([Loser(SyncMerge.Side.Local, "a")]);
+        InsertRow("c", "conflict", "unseen", hash: "h2", machine: "m2", payload: payload);
+        InsertRow("b", "conflict", "open", hash: "h1", machine: "m1", payload: payload);
+        InsertRow("a", "conflict", "resolved", hash: "h0", payload: payload);
+        InsertRow("d", "held-delete", "open", direction: "remote");
+        InsertRow("e", "new-pin", "open", hash: "h");
+
+        var items = GitSyncReviews.ReadConflictItems(_conn);
+
+        Assert.Equal(
+            [new ConflictItem("b", "open", "h1", "m1", 7, payload), new ConflictItem("c", "unseen", "h2", "m2", 7, payload)],
+            items);
+        Assert.Equal(items[0], GitSyncReviews.ReadConflictItem(_conn, "b"));
+        Assert.Null(GitSyncReviews.ReadConflictItem(_conn, "a"));
+        Assert.Null(GitSyncReviews.ReadConflictItem(_conn, "d"));
+        Assert.Null(GitSyncReviews.ReadConflictItem(_conn, "none"));
+    }
+
+    [Fact]
+    public void ReadConflictItems_ReadsARowWithNoPayloadHashOrMachine_AsEmpty()
+    {
+        InsertRow("k", "conflict", "open", payload: null);
+
+        var item = Assert.Single(GitSyncReviews.ReadConflictItems(_conn));
+
+        Assert.Equal(new ConflictItem("k", "open", "", "", 7, ""), item);
+        Assert.Empty(GitSyncReviews.ReadConflictLosers(item.PayloadJson));
+    }
+
+    [Fact]
+    public void UpsertConflictItem_WritesTheRow_AndAReplaceKeepsArrivedAt()
+    {
+        InsertRow("k", "new-pin", "open", hash: "pin");
+        var p1 = GitSyncReviews.ConflictPayload([Loser(SyncMerge.Side.Local, "one")]);
+        var p2 = GitSyncReviews.ConflictPayload([Loser(SyncMerge.Side.Local, "one"), Loser(SyncMerge.Side.Remote, "two")]);
+
+        GitSyncReviews.UpsertConflictItem(_conn, new ConflictItem("k", "open", "h", "m", 100, p1), keepArrivedAt: false);
+        Assert.Equal($"open|h|m|NULL|{p1}|100", Row("k", "conflict"));
+
+        GitSyncReviews.UpsertConflictItem(_conn, new ConflictItem("k", "unseen", "h2", "m2", 200, p2), keepArrivedAt: true);
+        Assert.Equal($"unseen|h2|m2|NULL|{p2}|100", Row("k", "conflict"));
+
+        GitSyncReviews.UpsertConflictItem(_conn, new ConflictItem("k", "unseen", "h2", "m2", 200, p2), keepArrivedAt: false);
+        Assert.Equal($"unseen|h2|m2|NULL|{p2}|200", Row("k", "conflict"));
+        Assert.Equal("open|pin|NULL|NULL|{}|7", Row("k", "new-pin"));
+    }
+
+    [Fact]
+    public void MarkConflictUnseen_SetsStateAndHashOnly()
+    {
+        var payload = GitSyncReviews.ConflictPayload([Loser(SyncMerge.Side.Local, "one")]);
+        GitSyncReviews.UpsertConflictItem(_conn, new ConflictItem("k", "open", "h", "m", 100, payload), keepArrivedAt: false);
+        InsertRow("k", "new-pin", "open", hash: "pin");
+
+        GitSyncReviews.MarkConflictUnseen(_conn, "k", "h2");
+        GitSyncReviews.MarkConflictUnseen(_conn, "missing", "h3");
+
+        Assert.Equal($"unseen|h2|m|NULL|{payload}|100", Row("k", "conflict"));
+        Assert.Equal("open|pin|NULL|NULL|{}|7", Row("k", "new-pin"));
+        Assert.Equal("none", Row("missing", "conflict"));
+    }
+
+    [Fact]
+    public void DeleteConflictItem_RemovesOnlyTheConflictRow()
+    {
+        InsertRow("k", "conflict", "open");
+        InsertRow("k", "new-pin", "open", hash: "pin");
+        InsertRow("k", "held-delete", "open", direction: "remote");
+        InsertRow("j", "conflict", "open");
+
+        GitSyncReviews.DeleteConflictItem(_conn, "k");
+        GitSyncReviews.DeleteConflictItem(_conn, "missing");
+
+        Assert.Equal("none", Row("k", "conflict"));
+        Assert.NotEqual("none", Row("k", "new-pin"));
+        Assert.NotEqual("none", Row("k", "held-delete"));
+        Assert.NotEqual("none", Row("j", "conflict"));
+    }
+
+    [Fact]
+    public void ConflictPayload_RoundTrips_HostileText()
+    {
+        var hostile = new[]
+        {
+            "nul \0 byte", "crlf \r\n line", "bidi \u202E override", "quote \" and \\ backslash", new string('x', 300_000), "",
+        };
+        var losers = hostile
+            .Select((t, i) => Loser(i % 2 == 0 ? SyncMerge.Side.Local : SyncMerge.Side.Remote, t, i == 0 ? "" : "2026-11-12T09:10:00.000Z.000000.7b3d1e55"))
+            .ToList();
+
+        var payload = GitSyncReviews.ConflictPayload(losers);
+        var back = GitSyncReviews.ReadConflictLosers(payload);
+
+        Assert.Equal(losers, back.ToList());
+        Assert.StartsWith("{\"losers\":[{\"side\":\"local\",\"text\":", payload);
+        Assert.Equal("""{"losers":[]}""", GitSyncReviews.ConflictPayload([]));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("{}")]
+    [InlineData("[]")]
+    [InlineData("not json")]
+    [InlineData("""{"losers":5}""")]
+    [InlineData("""{"losers":{"side":"local"}}""")]
+    public void ReadConflictLosers_OfAMalformedPayload_IsEmpty(string payload) =>
+        Assert.Empty(GitSyncReviews.ReadConflictLosers(payload));
+
+    [Fact]
+    public void ReadConflictLosers_SkipsALoserWithAnUnknownSideOrAMissingKey()
+    {
+        var payload =
+            """{"losers":[{"side":"local","text":"a","stamp":"","machine":"m"},{"side":"sideways","text":"b","stamp":"","machine":"m"},""" +
+            """{"side":"remote","text":"c","stamp":""},{"side":"remote","text":5,"stamp":"","machine":"m"},7,""" +
+            """{"side":"remote","text":"d","stamp":"s","machine":"m"}]}""";
+
+        var losers = GitSyncReviews.ReadConflictLosers(payload).ToList();
+
+        Assert.Equal([Loser(SyncMerge.Side.Local, "a", "", "m"), Loser(SyncMerge.Side.Remote, "d", "s", "m")], losers);
+    }
+
+    [Fact]
+    public void ThePinAndHeldMembers_StillIgnoreConflictRows()
+    {
+        InsertRow("k", "conflict", "open", hash: "h", payload: """{"losers":[]}""");
+        InsertRow("j", "conflict", "approved", hash: "h");
+
+        Assert.Empty(GitSyncReviews.ReadPinItems(_conn));
+        Assert.Null(GitSyncReviews.ReadPinItem(_conn, "k", "new-pin"));
+        Assert.Empty(GitSyncReviews.ReadOpenHeld(_conn));
+        Assert.Empty(GitSyncReviews.ReadApprovedHeld(_conn));
+        Assert.Null(GitSyncReviews.ReadHeldItem(_conn, "k"));
+        Assert.Throws<ArgumentException>(() => GitSyncReviews.DeletePinItem(_conn, "k", "conflict"));
+        GitSyncReviews.DeleteHeld(_conn, "k");
+        GitSyncReviews.ApproveHeld(_conn, "k");
+        Assert.Equal("2", Scalar("SELECT COUNT(*) FROM git_sync_review WHERE kind = 'conflict'"));
+        Assert.StartsWith("open|", Row("k", "conflict"));
     }
 }

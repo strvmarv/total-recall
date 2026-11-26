@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using Microsoft.FSharp.Collections;
+using TotalRecall.Core;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
 namespace TotalRecall.Infrastructure.GitSync;
@@ -26,9 +28,20 @@ internal sealed record PinItem(
     string EntryId, string Kind, string State, string? RecordHash, string? Machine, long ArrivedAt, string? Origin = null);
 
 /// <summary>
-/// The <c>held-delete</c> rows of <c>git_sync_review</c>, read and changed by the held members, and the <c>new-pin</c> and
-/// <c>pin-edit</c> rows, read and changed only by the pin members (<see cref="ReadPinItems"/> and the members after it).
-/// <c>conflict</c> rows are read and changed by none. Plain SQL on the caller's connection; every command carries the
+/// One conflict item (conflict review, decision D1): the text that lost a merge, kept as an alternative next to the text
+/// that was applied. <paramref name="State"/> is <c>open</c> or <c>unseen</c>; <paramref name="RecordHash"/> is the shown
+/// hash (<see cref="SyncConflict.shownHash"/>), <c>""</c> when the row has none; <paramref name="Machine"/> is the machine of
+/// the newest loser's stamp, <c>""</c> when the row has none; <paramref name="ArrivedAt"/> is the applier clock in
+/// milliseconds of the first conflict; <paramref name="PayloadJson"/> is <c>{"losers":[...]}</c> (<c>""</c> when the row has
+/// no payload, which reads as no losers). Every member is a value, so a re-read compares by value.
+/// </summary>
+internal sealed record ConflictItem(string EntryId, string State, string RecordHash, string Machine, long ArrivedAt, string PayloadJson);
+
+/// <summary>
+/// The <c>held-delete</c> rows of <c>git_sync_review</c>, read and changed by the held members, the <c>new-pin</c> and
+/// <c>pin-edit</c> rows, read and changed only by the pin members (<see cref="ReadPinItems"/> and the members after it), and
+/// the <c>conflict</c> rows, read and changed only by the conflict members (<see cref="ReadConflictItems"/> and the members
+/// after it, and <see cref="ConflictItems"/> on top of them). Plain SQL on the caller's connection; every command carries the
 /// optional transaction, so the statements run inside an entry's <see cref="SqliteTransaction"/>. Every member's SQL is
 /// restricted to its own kind.
 /// </summary>
@@ -255,6 +268,149 @@ internal static class GitSyncReviews
         if (kind is not ("new-pin" or "pin-edit"))
             throw new ArgumentException("a pin item is a new-pin or a pin-edit", nameof(kind));
     }
+
+    private const string SelectConflict =
+        "SELECT entry_id, state, record_hash, machine, arrived_at, payload_json FROM git_sync_review " +
+        "WHERE kind = 'conflict' AND state IN ('open', 'unseen')";
+
+    /// <summary>Every conflict item (kind <c>conflict</c>, states <c>open</c>, <c>unseen</c>), ordinal by id.</summary>
+    public static IReadOnlyList<ConflictItem> ReadConflictItems(MsSqliteConnection conn, SqliteTransaction? tx = null)
+    {
+        var items = new List<ConflictItem>();
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = SelectConflict + " ORDER BY entry_id COLLATE BINARY";
+        using var r = cmd.ExecuteReader();
+        while (r.Read())
+            items.Add(ReadConflict(r));
+        return items;
+    }
+
+    /// <summary>The entry's conflict item, open or unseen, or null when it has none.</summary>
+    public static ConflictItem? ReadConflictItem(MsSqliteConnection conn, string entryId, SqliteTransaction? tx = null)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = SelectConflict + " AND entry_id = $id";
+        cmd.Parameters.AddWithValue("$id", entryId);
+        using var r = cmd.ExecuteReader();
+        return r.Read() ? ReadConflict(r) : null;
+    }
+
+    private static ConflictItem ReadConflict(SqliteDataReader r) =>
+        new(
+            r.GetString(0), r.GetString(1),
+            r.IsDBNull(2) ? "" : r.GetString(2),
+            r.IsDBNull(3) ? "" : r.GetString(3),
+            r.GetInt64(4),
+            r.IsDBNull(5) ? "" : r.GetString(5));
+
+    /// <summary>
+    /// Inserts the conflict item with <see cref="ConflictItem.ArrivedAt"/>, or replaces the row with the same
+    /// <c>(entry_id, 'conflict')</c> (whatever its state): state, hash, machine, payload, no direction, and
+    /// <c>arrived_at</c> only when <paramref name="keepArrivedAt"/> is false.
+    /// </summary>
+    public static void UpsertConflictItem(
+        MsSqliteConnection conn, ConflictItem item, bool keepArrivedAt, SqliteTransaction? tx = null)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText =
+            "INSERT INTO git_sync_review (entry_id, kind, state, record_hash, machine, direction, payload_json, arrived_at) " +
+            "VALUES ($id, 'conflict', $state, $hash, $machine, NULL, $payload, $arrived) " +
+            "ON CONFLICT(entry_id, kind) DO UPDATE SET state = excluded.state, record_hash = excluded.record_hash, " +
+            "machine = excluded.machine, direction = NULL, payload_json = excluded.payload_json" +
+            (keepArrivedAt ? "" : ", arrived_at = excluded.arrived_at");
+        cmd.Parameters.AddWithValue("$id", item.EntryId);
+        cmd.Parameters.AddWithValue("$state", item.State);
+        cmd.Parameters.AddWithValue("$hash", item.RecordHash);
+        cmd.Parameters.AddWithValue("$machine", item.Machine);
+        cmd.Parameters.AddWithValue("$payload", item.PayloadJson);
+        cmd.Parameters.AddWithValue("$arrived", item.ArrivedAt);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>Sets the conflict item to <c>unseen</c> with the hash it is now shown for; payload, machine and <c>arrived_at</c> are kept; a missing row is a no-op.</summary>
+    public static void MarkConflictUnseen(MsSqliteConnection conn, string entryId, string recordHash, SqliteTransaction? tx = null)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText =
+            "UPDATE git_sync_review SET state = 'unseen', record_hash = $hash WHERE entry_id = $id AND kind = 'conflict'";
+        cmd.Parameters.AddWithValue("$id", entryId);
+        cmd.Parameters.AddWithValue("$hash", recordHash);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>Deletes the entry's <c>conflict</c> row (whatever its state); a missing row is a no-op.</summary>
+    public static void DeleteConflictItem(MsSqliteConnection conn, string entryId, SqliteTransaction? tx = null)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "DELETE FROM git_sync_review WHERE entry_id = $id AND kind = 'conflict'";
+        cmd.Parameters.AddWithValue("$id", entryId);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary><c>{"losers":[{"side":..,"text":..,"stamp":..,"machine":..}]}</c>, oldest first, written without reflection (the engine is NativeAOT).</summary>
+    internal static string ConflictPayload(IEnumerable<SyncConflict.Loser> losers)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteStartArray("losers");
+            foreach (var l in losers)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("side", SyncConflict.sideName(l.Side));
+                writer.WriteString("text", l.Text);
+                writer.WriteString("stamp", l.Stamp);
+                writer.WriteString("machine", l.Machine);
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+        }
+        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    /// <summary>
+    /// The losers of a conflict payload, oldest first. A payload that is not that shape reads as no losers; a loser with an
+    /// unknown side or a missing or non-string key is skipped.
+    /// </summary>
+    internal static FSharpList<SyncConflict.Loser> ReadConflictLosers(string payload)
+    {
+        var losers = new List<SyncConflict.Loser>();
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("losers", out var array)
+                && array.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var element in array.EnumerateArray())
+                {
+                    if (element.ValueKind != JsonValueKind.Object
+                        || StringMember(element, "side") is not { } side
+                        || SyncConflict.trySide(side) is not { } parsed
+                        || StringMember(element, "text") is not { } text
+                        || StringMember(element, "stamp") is not { } stamp
+                        || StringMember(element, "machine") is not { } machine)
+                        continue;
+                    losers.Add(new SyncConflict.Loser(parsed.Value, text, stamp, machine));
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            return FSharpList<SyncConflict.Loser>.Empty;
+        }
+        return ListModule.OfSeq(losers);
+    }
+
+    private static string? StringMember(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var member) && member.ValueKind == JsonValueKind.String ? member.GetString() : null;
 
     /// <summary>Deletes the entry's <c>held-delete</c> row; a missing row is a no-op.</summary>
     public static void DeleteHeld(MsSqliteConnection conn, string entryId, SqliteTransaction? tx = null)
