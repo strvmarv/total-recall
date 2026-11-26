@@ -10,6 +10,7 @@ using Microsoft.Data.Sqlite;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Tests.TestSupport;
 using TotalRecall.Infrastructure.Transcripts;
+using TotalRecall.TestSupport.Transcripts;
 using Xunit;
 
 namespace TotalRecall.Infrastructure.Tests.Transcripts;
@@ -126,6 +127,85 @@ public sealed class TranscriptEmbedWorkerTests : IDisposable
         Assert.Empty(e.Calls);
         Assert.Null(LeaseValue());
         Assert.Equal("done", _db.Store.ReadEmbedRun()!.StoppedBy);
+    }
+
+    [Fact]
+    public void Run_PreferSession_EmbedsCurrentFirst_WithinEightChunks()
+    {
+        var older = Seed(50);
+        var cur = _db.AddSession("pi", "cur");
+        var curIds = new List<long>();
+        for (var i = 0; i < 5; i++)
+            curIds.Add(_db.AddChunk(cur, $"current text {i}", i));
+        var embedder = new RecordingEmbedder("local", 384);
+
+        var run = Worker(embedder).Run(
+            Ready, Fp, new EmbedBudget(null, 8), CancellationToken.None, preferSession: ("pi", "cur"));
+
+        Assert.Equal(EmbedStopReason.Budget, run.StoppedBy);
+        Assert.Equal(8, run.Embedded);
+        Assert.All(curIds, id => Assert.Equal(1, Embedded(id)));
+        Assert.Equal(new long[] { 1, 1, 1 }, older.Take(3).Select(Embedded).ToArray());
+        Assert.All(older.Skip(3), id => Assert.Equal(0, Embedded(id)));
+        // the probe is the only call that is not a chunk; the 5 current chunks were embedded in this one run
+        var chunkCalls = embedder.Calls.Where(c => c != EmbedProbe.Text).ToList();
+        Assert.Equal(8, chunkCalls.Count);
+        Assert.Equal(Enumerable.Range(0, 5).Select(i => $"current text {i}"), chunkCalls.Take(5));
+    }
+
+    [Fact]
+    public void Run_PreferSession_PassesThePreferenceOnEveryBatchRead()
+    {
+        Seed(40);
+        var store = new DecoratingTranscriptStore(_db.Store);
+        var seen = new List<(string, string)?>();
+        store.OnNextEmbedWork = (limit, exclude, prefer) => { seen.Add(prefer); return _db.Store.NextEmbedWork(limit, exclude, prefer); };
+
+        Worker(new ScriptedEmbedder(), store).Run(
+            Ready, Fp, NoBudget, CancellationToken.None, preferSession: ("pi", "cur"));
+
+        Assert.True(seen.Count >= 3);
+        Assert.All(seen, p => Assert.Equal(("pi", "cur"), p));
+    }
+
+    [Fact]
+    public void Run_NoPreference_PassesNullOnEveryBatchRead()
+    {
+        Seed(20);
+        var store = new DecoratingTranscriptStore(_db.Store);
+        var seen = new List<(string, string)?>();
+        store.OnNextEmbedWork = (limit, exclude, prefer) => { seen.Add(prefer); return _db.Store.NextEmbedWork(limit, exclude, prefer); };
+
+        Worker(new ScriptedEmbedder(), store).Run(Ready, Fp, NoBudget, CancellationToken.None);
+
+        Assert.NotEmpty(seen);
+        Assert.All(seen, p => Assert.Null(p));
+    }
+
+    [Fact]
+    public void Run_RecordRunFalse_LeavesLastRunUntouched()
+    {
+        Seed(20);
+        var before = new EmbedRunRecord(T0.AddDays(-3), 7, 99, 1, "ready", "Ready", "local", "bge-small-en-v1.5", "done");
+        _db.Store.WriteEmbedRun(before);
+        var later = new ManualTimeProvider(T0);
+
+        var quiet = Worker(new ScriptedEmbedder(), time: later).Run(
+            Ready, Fp, new EmbedBudget(null, 16), CancellationToken.None, recordRun: false);
+
+        Assert.Equal(16, quiet.Embedded);
+        Assert.Equal(before, _db.Store.ReadEmbedRun());
+        Assert.Null(LeaseValue()); // the lease is still released
+
+        var loud = Worker(new ScriptedEmbedder(), time: later).Run(
+            Ready, Fp, NoBudget, CancellationToken.None, recordRun: true);
+
+        Assert.Equal(4, loud.Embedded);
+        var after = _db.Store.ReadEmbedRun();
+        Assert.NotNull(after);
+        Assert.NotEqual(before, after);
+        Assert.Equal(T0, after!.At);
+        Assert.Equal(4, after.Embedded);
     }
 
     [Fact]
@@ -338,8 +418,8 @@ public sealed class TranscriptEmbedWorkerTests : IDisposable
         Seed(20);
         var store = new DecoratingTranscriptStore(_db.Store);
         var reads = 0;
-        store.OnNextEmbedWork = (limit, exclude) =>
-            ++reads == 2 ? throw new InvalidOperationException("read broke") : _db.Store.NextEmbedWork(limit, exclude);
+        store.OnNextEmbedWork = (limit, exclude, prefer) =>
+            ++reads == 2 ? throw new InvalidOperationException("read broke") : _db.Store.NextEmbedWork(limit, exclude, prefer);
 
         var run = Worker(new ScriptedEmbedder(), store).Run(Ready, Fp, NoBudget, CancellationToken.None);
 
@@ -533,7 +613,7 @@ public sealed class TranscriptEmbedWorkerTests : IDisposable
         var e = new ScriptedEmbedder().Throw(Text(1), new KeyNotFoundException("bad"));
         var store = new DecoratingTranscriptStore(_db.Store);
         var excludes = new List<long[]>();
-        store.OnNextEmbedWork = (limit, exclude) => { excludes.Add(exclude.ToArray()); return _db.Store.NextEmbedWork(limit, exclude); };
+        store.OnNextEmbedWork = (limit, exclude, prefer) => { excludes.Add(exclude.ToArray()); return _db.Store.NextEmbedWork(limit, exclude, prefer); };
 
         var run = Worker(e, store).Run(Ready, Fp, NoBudget, CancellationToken.None);
 
@@ -609,6 +689,67 @@ public sealed class TranscriptEmbedWorkerTests : IDisposable
         Assert.Equal(0, AttemptSum());
         Assert.Equal(0, VecRows());
         Assert.Equal(16, ChunkCalls(e).Count); // one batch, no single-chunk retry
+        Assert.Null(LeaseValue());
+    }
+
+    [Fact]
+    public void Run_ShortBusyTimeout_WriteLockHeldPastIt_LeaseIsStillReleased()
+    {
+        // The sync's store (500 ms busy timeout, about 1 s with the driver's own wait): another connection takes the
+        // archive's write lock with a real BEGIN IMMEDIATE between the embed and the write, so the batch write fails
+        // busy. The lock is freed 2 s after the release starts: later than a short-timeout release would give up, well
+        // inside the release's own longer wait. The lease row must be gone, so the next run takes the lease at once.
+        Seed(3);
+        var opened = TranscriptStore.Open(
+            new TranscriptLocation(_db.Path, IsMainDatabase: false), create: false,
+            busyTimeoutMs: TranscriptSyncService.DefaultBusyTimeoutMs);
+        Assert.Equal(TranscriptOpenStatus.Opened, opened.Status);
+        using var shortStore = opened.Store!;
+        using var writer = _db.Connect();
+        using var freed = new ManualResetEventSlim(false);
+        Timer? timer = null;
+
+        void Run(string sql)
+        {
+            using var cmd = writer.CreateCommand();
+            cmd.CommandText = sql;
+            cmd.ExecuteNonQuery();
+        }
+
+        var store = new DecoratingTranscriptStore(shortStore)
+        {
+            OnReleaseEmbedLease = holder =>
+            {
+                timer = new Timer(_ => { Run("ROLLBACK;"); freed.Set(); }, null, 2000, Timeout.Infinite);
+                shortStore.ReleaseEmbedLease(holder);
+            },
+        };
+        var locked = false;
+        var worker = new TranscriptEmbedWorker(
+            store, new ScriptedEmbedder(), new ManualTimeProvider(T0), "host-a", 100, (_, _) => true,
+            () =>
+            {
+                if (locked) return;
+                Run("BEGIN IMMEDIATE;");
+                locked = true;
+            });
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var run = worker.Run(Ready, Fp, NoBudget, CancellationToken.None, recordRun: false);
+        sw.Stop();
+        Assert.True(freed.Wait(TimeSpan.FromSeconds(10)), "the lock was never freed");
+        timer?.Dispose();
+
+        Assert.Equal(EmbedStopReason.Failed, run.StoppedBy); // the batch write failed busy
+        Assert.Equal(0, VecRows());
+        Assert.Null(LeaseValue());
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(8), $"the run took {sw.Elapsed.TotalMilliseconds:F0} ms");
+        // the longer wait was only for the release: the connection is back on the sync's short timeout
+        Assert.Equal(TranscriptSyncService.DefaultBusyTimeoutMs, ((TranscriptStore)shortStore).ReadBusyTimeoutMs());
+
+        var second = Worker(new ScriptedEmbedder()).Run(Ready, Fp, NoBudget, CancellationToken.None);
+        Assert.Equal(EmbedStopReason.Done, second.StoppedBy);
+        Assert.Equal(3, second.Embedded);
         Assert.Null(LeaseValue());
     }
 

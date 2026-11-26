@@ -32,3 +32,25 @@ test('hooks.json registers no SessionEnd hook and hooks/session-end is gone', ()
   assert.equal(fs.existsSync(path.join(__dirname, 'session-end')), false,
     'hooks/session-end/ must not exist');
 });
+
+test('hooks.json registers the live-marker wrapper second in SessionStart and UserPromptSubmit', () => {
+  const config = loadHooksConfig();
+  const original = {
+    SessionStart: 'bash "$CLAUDE_PLUGIN_ROOT/hooks/session-start/run.sh"',
+    UserPromptSubmit: 'bash "$CLAUDE_PLUGIN_ROOT/hooks/user-prompt-submit/run.sh"',
+  };
+  for (const event of ['SessionStart', 'UserPromptSubmit']) {
+    const groups = config.hooks[event];
+    assert.equal(groups.length, 1, `${event} keeps its single group`);
+    const entries = groups[0].hooks;
+    assert.equal(entries.length, 2, `${event} holds the original entry and the live-marker entry`);
+    assert.deepEqual(entries[0], { type: 'command', command: original[event] }, `${event}: the original entry is first and unchanged`);
+    assert.deepEqual(entries[1], {
+      type: 'command',
+      command: 'bash "$CLAUDE_PLUGIN_ROOT/hooks/live-marker/run.sh"',
+      timeout: 5,
+    }, `${event}: the live-marker entry is second, with a 5 s timeout`);
+  }
+  assert.equal(config.hooks.SessionStart[0].matcher, 'startup|resume|clear|compact', 'the SessionStart matcher is unchanged');
+  assert.equal(config.hooks.UserPromptSubmit[0].matcher, '');
+});

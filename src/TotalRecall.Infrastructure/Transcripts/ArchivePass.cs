@@ -18,13 +18,15 @@ public interface IArchivePass
 /// <summary>
 /// Overrides of the pass's limits and of the embedder inspection (tests). Null means the default:
 /// <see cref="ArchivePass.DefaultIngestBudget"/>, <see cref="ArchivePass.DefaultEmbedBudget"/>,
-/// <see cref="ArchivePass.DefaultMinInterval"/> and the context's own <c>Inspect</c>.
+/// <see cref="ArchivePass.DefaultMinInterval"/> and the context's own <c>Inspect</c>. <c>Sync</c> is not used by
+/// the pass: it carries the sync-on-read's options (<see cref="TranscriptSyncService"/>) to the composition, its test seam.
 /// </summary>
 public sealed record ArchivePassOptions(
     TimeSpan? IngestBudget = null,
     EmbedBudget? EmbedBudget = null,
     TimeSpan? MinInterval = null,
-    Func<Core.Config.EmbeddingConfig, int?, EmbedderInspectionResult>? Inspect = null);
+    Func<Core.Config.EmbeddingConfig, int?, EmbedderInspectionResult>? Inspect = null,
+    TranscriptSyncOptions? Sync = null);
 
 /// <summary>
 /// What one pass reads, built when the pass runs (never in <see cref="ArchivePass.Kick"/>): the <c>[transcripts]</c>

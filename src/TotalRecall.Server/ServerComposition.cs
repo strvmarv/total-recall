@@ -675,15 +675,20 @@ public static class ServerComposition
             registry.Register(new SkillImportHostHandler(
                 sqliteSkillService, () => Environment.CurrentDirectory));
 
-            // The transcript archive tools (the sentinel and the pass are built before BuildRegistry, above).
+            // The transcript archive tools (the sentinel and the pass are built before BuildRegistry, above), with the
+            // one sync-on-read they share (built lazily: nothing is read until a transcript tool is called).
+            var transcriptEmbedder = archivePassOptions?.Sync?.Embedder ?? embedder;
+            var transcriptSync = BuildTranscriptSync(resolvedDbPath, archivePassOptions);
             registry.Register(new TranscriptSearchHandler(
                 transcriptSentinel.IsEnabled,
                 new Infrastructure.Transcripts.TranscriptSearchService(
-                    () => TranscriptSearchContextFor(cfg, resolvedDbPath, storageMode, embedder))));
+                    () => TranscriptSearchContextFor(cfg, resolvedDbPath, storageMode, transcriptEmbedder)),
+                transcriptSync,
+                () => TranscriptSyncEmbedPlanFor(cfg, storageMode, transcriptEmbedder, reindexProgress)));
             var transcriptReads = new Infrastructure.Transcripts.TranscriptReadService(
                 () => TranscriptReadContextFor(resolvedDbPath));
-            registry.Register(new TranscriptGetHandler(transcriptSentinel.IsEnabled, transcriptReads));
-            registry.Register(new TranscriptSessionsHandler(transcriptSentinel.IsEnabled, transcriptReads));
+            registry.Register(new TranscriptGetHandler(transcriptSentinel.IsEnabled, transcriptReads, transcriptSync));
+            registry.Register(new TranscriptSessionsHandler(transcriptSentinel.IsEnabled, transcriptReads, transcriptSync));
 
             return new ServerCompositionHandles(conn, registry, store, storageMode, reindexProgress: reindexProgress, reindexCts: reindexCts, archivePass: archivePass);
         }
@@ -697,7 +702,8 @@ public static class ServerComposition
     /// <summary>
     /// The per-call context of <c>transcript_search</c>: the <c>[transcripts]</c> settings read now (so a changed
     /// <c>db_path</c> applies without a restart), the archive's location beside the main database, the storage mode,
-    /// the effective <c>[embedding]</c> config and the composition's embedder. Nothing is opened here. Throws with
+    /// the effective <c>[embedding]</c> config and the embedder (the composition's, or the test seam's
+    /// <c>ArchivePassOptions.Sync.Embedder</c>). Nothing is opened here. Throws with
     /// the reason when the location cannot be resolved; the service answers that as an error.
     /// </summary>
     private static Infrastructure.Transcripts.TranscriptSearchContext TranscriptSearchContextFor(
@@ -707,6 +713,35 @@ public static class ServerComposition
         var location = TranscriptLocationFor(settings, resolvedDbPath);
         return new Infrastructure.Transcripts.TranscriptSearchContext(location, settings, storageMode, cfg.Embedding, embedder);
     }
+
+    /// <summary>
+    /// The sync-on-read of the three transcript tools (spec 2026-11-24, section 3) for the sqlite and cortex
+    /// compositions. Construction does no I/O: the context (the <c>[transcripts]</c> settings read per sync and the
+    /// archive's location beside the main database) is evaluated by each sync, and the marker finder and the process
+    /// ancestry are built by the first one. The <c>Sync</c> of <paramref name="options"/> is the test seam (null: the
+    /// real ancestors, data directory and host adapters).
+    /// </summary>
+    private static Infrastructure.Transcripts.TranscriptSyncService BuildTranscriptSync(
+        string resolvedDbPath, Infrastructure.Transcripts.ArchivePassOptions? options) =>
+        new(() =>
+            {
+                var settings = ConfigLoader.LoadTranscriptsSettings();
+                return new Infrastructure.Transcripts.SyncContext(TranscriptLocationFor(settings, resolvedDbPath), settings);
+            },
+            options?.Sync);
+
+    /// <summary>
+    /// The embed plan of a <c>transcript_search</c> sync, built per call: the search's embedder, the
+    /// <c>[transcripts]</c> settings read now, the storage mode, the effective <c>[embedding]</c> config and the memory
+    /// re-embed probe the pass uses (the sync's embed step takes the pass's gate).
+    /// </summary>
+    private static Infrastructure.Transcripts.SyncEmbedPlan TranscriptSyncEmbedPlanFor(
+        Core.Config.TotalRecallConfig cfg, string storageMode, IEmbedder embedder, ReindexProgress? reindexProgress) =>
+        new(embedder,
+            ConfigLoader.LoadTranscriptsSettings(),
+            storageMode,
+            cfg.Embedding,
+            () => reindexProgress is { State: ReindexProgress.Phase.Running });
 
     /// <summary>
     /// The per-call context of <c>transcript_get</c> and <c>transcript_sessions</c>: the archive's location only,
@@ -1086,15 +1121,20 @@ public static class ServerComposition
             registry.Register(new SkillImportHostHandler(
                 skillImportService, () => Environment.CurrentDirectory));
 
-            // The transcript archive tools (the sentinel and the pass are built before BuildRegistry, above).
+            // The transcript archive tools (the sentinel and the pass are built before BuildRegistry, above), with the
+            // one sync-on-read they share (built lazily: nothing is read until a transcript tool is called).
+            var transcriptEmbedder = archivePassOptions?.Sync?.Embedder ?? embedder;
+            var transcriptSync = BuildTranscriptSync(resolvedDbPath, archivePassOptions);
             registry.Register(new TranscriptSearchHandler(
                 transcriptSentinel.IsEnabled,
                 new Infrastructure.Transcripts.TranscriptSearchService(
-                    () => TranscriptSearchContextFor(cfg, resolvedDbPath, storageMode, embedder))));
+                    () => TranscriptSearchContextFor(cfg, resolvedDbPath, storageMode, transcriptEmbedder)),
+                transcriptSync,
+                () => TranscriptSyncEmbedPlanFor(cfg, storageMode, transcriptEmbedder, reindexProgress)));
             var transcriptReads = new Infrastructure.Transcripts.TranscriptReadService(
                 () => TranscriptReadContextFor(resolvedDbPath));
-            registry.Register(new TranscriptGetHandler(transcriptSentinel.IsEnabled, transcriptReads));
-            registry.Register(new TranscriptSessionsHandler(transcriptSentinel.IsEnabled, transcriptReads));
+            registry.Register(new TranscriptGetHandler(transcriptSentinel.IsEnabled, transcriptReads, transcriptSync));
+            registry.Register(new TranscriptSessionsHandler(transcriptSentinel.IsEnabled, transcriptReads, transcriptSync));
 
             return new ServerCompositionHandles(conn, registry, routingStore, storageMode, periodicSync, reindexProgress, reindexCts, skillAutoImportEnabled: autoImportEnabled, archivePass: archivePass);
         }

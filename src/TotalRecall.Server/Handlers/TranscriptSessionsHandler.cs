@@ -6,7 +6,9 @@
 // arguments are parsed here (every one is optional, so missing or null arguments are an empty set; argument errors are
 // ArgumentExceptions, which ErrorTranslator turns into "Invalid arguments: ..."), the service opens the archive for the
 // call and closes it, an archive that cannot be read is an error result, and the answer is serialised through the
-// source-generated JsonContext. Registered only by OpenSqlite and OpenCortexCore.
+// source-generated JsonContext. Between the parsing and the read, the sync brings the current session's new tail in
+// (no embed step; spec 2026-11-24, section 3; TranscriptSyncCall); the answer does not report it. Registered only by
+// OpenSqlite and OpenCortexCore.
 
 using System;
 using System.Text.Json;
@@ -35,13 +37,16 @@ public sealed class TranscriptSessionsHandler : IToolHandler
 
     private readonly Func<bool> _isActive;
     private readonly TranscriptReadService? _service;
+    private readonly ITranscriptSync? _sync;
 
     /// <param name="isActive">Reads whether the archive is on; evaluated on every call.</param>
     /// <param name="service">The reads; null answers "not set up" while the archive is on.</param>
-    public TranscriptSessionsHandler(Func<bool> isActive, TranscriptReadService? service = null)
+    /// <param name="sync">The sync-on-read (no embed plan); null syncs nothing.</param>
+    public TranscriptSessionsHandler(Func<bool> isActive, TranscriptReadService? service = null, ITranscriptSync? sync = null)
     {
         _isActive = isActive ?? throw new ArgumentNullException(nameof(isActive));
         _service = service;
+        _sync = sync;
     }
 
     public string Name => "transcript_sessions";
@@ -60,6 +65,7 @@ public sealed class TranscriptSessionsHandler : IToolHandler
             return TranscriptToolAnswers.ForNotSetUp(active);
 
         var request = ParseArguments(arguments);
+        TranscriptSyncCall.Run(_sync, null, Name, ct); // the tail is brought in; the answer does not report it
         var response = _service.Sessions(request, ct);
         if (response.Error is not null)
             return TranscriptToolAnswers.Text(response.Error, isError: true);

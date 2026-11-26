@@ -11,9 +11,19 @@ using TotalRecall.Infrastructure.Embedding;
 namespace TotalRecall.Infrastructure.Transcripts;
 
 /// <summary>
+/// The current session as a search sees it (spec 2026-11-24, section 4). <paramref name="Kind"/> is <c>marker</c>,
+/// <c>guessed</c> or <c>none</c>; <paramref name="Ref"/> is <c>&lt;host&gt;:&lt;host_session_id&gt;</c> (null for
+/// <c>none</c>); <paramref name="ProjectKey"/> is the key the archive stored for the session (null when unknown).
+/// Only a <c>marker</c> changes the search's scope defaults.
+/// </summary>
+public sealed record CurrentSessionInfo(string Kind, string? Ref, string? ProjectKey);
+
+/// <summary>
 /// One <c>transcript_search</c> call (search the archive, spec section 5). <paramref name="Scope"/> is
 /// <c>session</c>, <c>project</c>, <c>all</c> or null (inferred); <paramref name="Session"/> is
-/// <c>&lt;host&gt;:&lt;host_session_id&gt;</c>; <paramref name="TopK"/> is 1 to 50.
+/// <c>&lt;host&gt;:&lt;host_session_id&gt;</c>; <paramref name="TopK"/> is 1 to 50. <paramref name="Current"/> is the
+/// current session (null is none) and <paramref name="SyncNote"/> the note of an incomplete catch-up of it; both are
+/// passed through to the answer.
 /// </summary>
 public sealed record TranscriptSearchRequest(
     string Query,
@@ -22,7 +32,9 @@ public sealed record TranscriptSearchRequest(
     string? Session,
     DateTimeOffset? Since,
     bool IncludeAutomated,
-    int TopK);
+    int TopK,
+    CurrentSessionInfo? Current = null,
+    string? SyncNote = null);
 
 /// <summary>
 /// One result. <paramref name="Session"/> is <c>&lt;host&gt;:&lt;host_session_id&gt;</c>; <paramref name="Via"/> lists
@@ -47,7 +59,9 @@ public sealed record TranscriptSearchHit(
 /// What a search answers. <paramref name="ScopeNote"/> is set only when the effective scope differs from the asked one;
 /// <paramref name="MeaningReason"/> only when meaning is off; <paramref name="TruncatedHits"/> is the number of hits
 /// left out by the text cap (0 when none). <paramref name="Error"/> is set when the archive could not be opened or
-/// read; the handler answers it as an error result.
+/// read; the handler answers it as an error result. <paramref name="CurrentSession"/> (<c>marker</c>, <c>guessed</c>
+/// or <c>none</c>), <paramref name="CurrentSessionRef"/> and <paramref name="SyncNote"/> come from the request on every
+/// path, so an answer is truthful about the current session whatever else happened.
 /// </summary>
 public sealed record TranscriptSearchResponse(
     string Query,
@@ -59,7 +73,10 @@ public sealed record TranscriptSearchResponse(
     IReadOnlyList<TranscriptSearchHit> Results,
     int TruncatedHits,
     string? Note,
-    string? Error);
+    string? Error,
+    string CurrentSession = "none",
+    string? CurrentSessionRef = null,
+    string? SyncNote = null);
 
 /// <summary>
 /// What a search needs from the composition, built per call: the archive's location, the <c>[transcripts]</c>
@@ -240,7 +257,7 @@ public sealed class TranscriptSearchService
             if (!pre.AnyChunk())
                 return Empty(request, plan, gate, NothingArchivedNote);
             if (plan.Session is { } named && pre.ResolveSession(named.Host, named.Id) is null)
-                return Empty(request, plan, gate, UnknownSession(request.Session!));
+                return Empty(request, plan, gate, UnknownSession(named));
         }
         ct.ThrowIfCancellationRequested();
 
@@ -290,7 +307,7 @@ public sealed class TranscriptSearchService
             {
                 sessionId = reads.ResolveSession(named.Host, named.Id);
                 if (sessionId is null) // removed since the first read
-                    return Empty(request, plan, gate, UnknownSession(request.Session!));
+                    return Empty(request, plan, gate, UnknownSession(named));
             }
 
             var filter = new ChunkFilter(
@@ -358,7 +375,8 @@ public sealed class TranscriptSearchService
         }
 
         return new TranscriptSearchResponse(
-            request.Query, plan.Scope, plan.Note, meaningOn, meaningOn ? null : reason, pending, hits, truncated, null, null);
+            request.Query, plan.Scope, plan.Note, meaningOn, meaningOn ? null : reason, pending, hits, truncated, null, null,
+            CurrentWire(request), CurrentRef(request), request.SyncNote);
     }
 
     // ------------------------------------------------------------------
@@ -368,35 +386,74 @@ public sealed class TranscriptSearchService
     private sealed record ScopePlan(string Scope, string? Note, (string Host, string Id)? Session, string? Project);
 
     /// <summary>
-    /// The effective scope (spec section 5): an explicit scope wins; otherwise a session argument means session, a
-    /// project argument project, nothing all. <c>scope=project</c> with no project is all, with a note;
-    /// <c>scope=session</c> with no session is an argument error; <c>scope=all</c> ignores the project (and the
-    /// session); a session scope ignores the project (the named session decides it).
+    /// <c>scope</c> must be null, <c>session</c>, <c>project</c> or <c>all</c> (the handler checks it before any
+    /// sync, so a bad argument never costs a catch-up).
+    /// </summary>
+    /// <exception cref="ArgumentException">Any other value (an empty string included).</exception>
+    public static void ValidateScope(string? scope)
+    {
+        if (scope is null || scope is "session" or "project" or "all")
+            return;
+        throw new ArgumentException($"scope must be session, project or all; got '{scope}'");
+    }
+
+    /// <summary>
+    /// The effective scope (spec section 5, and 2026-11-24 section 4): an explicit scope wins; otherwise a session
+    /// argument means session, a project argument project, and with neither a <c>marker</c> current session with a known
+    /// project means that project (with a note), else all. <c>scope=project</c> with no project is the marker's project,
+    /// else all with a note; <c>scope=session</c> with no session is the marker's session, else an argument error;
+    /// <c>scope=all</c> ignores the project (and the session); a session scope ignores the project (the named session
+    /// decides it). A guessed or absent current session never chooses anything.
     /// </summary>
     private static ScopePlan Plan(TranscriptSearchRequest r)
     {
+        ValidateScope(r.Scope);
         var session = string.IsNullOrWhiteSpace(r.Session) ? null : r.Session;
         var project = string.IsNullOrWhiteSpace(r.Project) ? null : r.Project;
         (string Host, string Id)? named = session is null ? null : SplitSession(session);
 
+        var marker = r.Current is { Kind: "marker" } m ? m : null;
+        var markerProject = string.IsNullOrWhiteSpace(marker?.ProjectKey) ? null : marker!.ProjectKey;
+        (string Host, string Id)? markerSession = null;
+        if (marker is { Ref: { } markerRef } && !string.IsNullOrWhiteSpace(markerRef))
+        {
+            try
+            {
+                markerSession = SplitSession(markerRef);
+            }
+            catch (ArgumentException)
+            {
+                // A reference that does not split is no session: today's behaviour applies.
+            }
+        }
+
         var scope = r.Scope;
         if (scope is null)
-            scope = named is not null ? "session" : project is not null ? "project" : "all";
+        {
+            if (named is not null) scope = "session";
+            else if (project is not null) scope = "project";
+            else if (markerProject is not null)
+                return new ScopePlan("project", $"defaulted to the current project ({markerProject})", null, markerProject);
+            else scope = "all";
+        }
 
         switch (scope)
         {
             case "session":
-                if (named is null)
-                    throw new ArgumentException("scope session needs a session argument (<host>:<host_session_id>)");
-                return new ScopePlan("session", null, named, null);
+                if (named is not null)
+                    return new ScopePlan("session", null, named, null);
+                if (markerSession is not null)
+                    return new ScopePlan("session", null, markerSession, null);
+                throw new ArgumentException(
+                    "scope session needs a session argument (<host>:<host_session_id>); the current session is not known here");
             case "project":
-                return project is null
-                    ? new ScopePlan("all", "scope project was asked without a project argument (the current project is not detected yet), so every project was searched", null, null)
-                    : new ScopePlan("project", null, null, project);
-            case "all":
+                if (project is not null)
+                    return new ScopePlan("project", null, null, project);
+                if (markerProject is not null)
+                    return new ScopePlan("project", null, null, markerProject);
+                return new ScopePlan("all", "scope project was asked without a project argument (the current project could not be determined), so every project was searched", null, null);
+            default: // "all"
                 return new ScopePlan("all", null, null, null);
-            default:
-                throw new ArgumentException($"scope must be session, project or all; got '{scope}'");
         }
     }
 
@@ -408,23 +465,46 @@ public sealed class TranscriptSearchService
     /// The gate of spec section 3 for a search: readiness from the embedder's own check, the fingerprint from its
     /// descriptor (no model is loaded; <c>EmbedderInspection</c> is not used, the composition's embedder is given).
     /// The tool is answered only while the sentinel says the archive is on, so the archive counts as active here.
+    /// A search is not a pass and assumes no memory re-embed (<c>serverPass</c> false, reindex false).
     /// </summary>
     private static EmbedGateResult Gate(
         TranscriptSearchContext context,
         Func<ArchiveFingerprint, FingerprintState>? check,
+        Func<ArchiveFingerprint?>? stored) =>
+        BuildEmbedGate(
+            context.Embedder, context.Settings, context.StorageMode, context.Embedding,
+            serverPass: false, memoryReindexRunning: false, check, stored).Gate;
+
+    /// <summary>
+    /// The one place that builds an <see cref="EmbedGateInput"/> from what a search context or a sync plan carries (the
+    /// embedder, the <c>[transcripts]</c> settings, the storage mode and the effective <c>[embedding]</c> config) and
+    /// evaluates it. Returns the gate and the embedder's fingerprint (<c>Current</c>, built from its descriptor: provider,
+    /// model, revision, dimensions), which is null when the descriptor could not be read (the gate then says not ready).
+    /// A remote provider without the opt-in stops before any readiness or store read. The search passes
+    /// <paramref name="serverPass"/> false and <paramref name="memoryReindexRunning"/> false; the sync's embed step passes
+    /// true and the composition's re-embed probe.
+    /// </summary>
+    internal static (EmbedGateResult Gate, ArchiveFingerprint? Current) BuildEmbedGate(
+        IEmbedder embedder,
+        TranscriptsSettings settings,
+        string storageMode,
+        Core.Config.EmbeddingConfig embedding,
+        bool serverPass,
+        bool memoryReindexRunning,
+        Func<ArchiveFingerprint, FingerprintState>? check,
         Func<ArchiveFingerprint?>? stored)
     {
-        var provider = FSharpOption<string>.get_IsSome(context.Embedding.Provider) ? context.Embedding.Provider.Value : "local";
-        var postgres = string.Equals(context.StorageMode, "postgres", StringComparison.OrdinalIgnoreCase);
-        var allowRemote = context.Settings.AllowRemoteEmbedding;
+        var provider = FSharpOption<string>.get_IsSome(embedding.Provider) ? embedding.Provider.Value : "local";
+        var postgres = string.Equals(storageMode, "postgres", StringComparison.OrdinalIgnoreCase);
+        var allowRemote = settings.AllowRemoteEmbedding;
 
         ArchiveFingerprint? current;
         EmbedderReadiness readiness;
         try
         {
-            var d = context.Embedder.Descriptor;
+            var d = embedder.Descriptor;
             current = new ArchiveFingerprint(d.Provider, d.Model, d.Revision, d.Dimensions);
-            readiness = (context.Embedder as IEmbedderReadiness)?.CheckReady() ?? new EmbedderReadiness(true, null);
+            readiness = (embedder as IEmbedderReadiness)?.CheckReady() ?? new EmbedderReadiness(true, null);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -437,7 +517,7 @@ public sealed class TranscriptSearchService
         var preliminary = EmbedGate.Evaluate(new EmbedGateInput(
             true, postgres, provider, allowRemote, null, null, null, null, new EmbedderReadiness(true, null), false, false));
         if (!preliminary.CanEmbed)
-            return preliminary;
+            return (preliminary, current);
 
         FingerprintState? state = null;
         ArchiveFingerprint? storedPrint = null;
@@ -448,7 +528,7 @@ public sealed class TranscriptSearchService
                 storedPrint = stored?.Invoke();
         }
 
-        return EmbedGate.Evaluate(new EmbedGateInput(
+        var gate = EmbedGate.Evaluate(new EmbedGateInput(
             ArchiveActive: true,
             Postgres: postgres,
             Provider: provider,
@@ -458,8 +538,9 @@ public sealed class TranscriptSearchService
             Stored: storedPrint,
             Current: current,
             Readiness: readiness,
-            MemoryReindexRunning: false,
-            ServerPass: false));
+            MemoryReindexRunning: memoryReindexRunning,
+            ServerPass: serverPass));
+        return (gate, current);
     }
 
     /// <summary>Any failure of the meaning path falls back to words; a cancellation of the call does not.</summary>
@@ -472,12 +553,25 @@ public sealed class TranscriptSearchService
 
     private static TranscriptSearchResponse Empty(TranscriptSearchRequest r, ScopePlan plan, EmbedGateResult gate, string note) =>
         new(r.Query, plan.Scope, plan.Note, gate.MeaningUsable, gate.MeaningUsable ? null : gate.Text, 0,
-            Array.Empty<TranscriptSearchHit>(), 0, note, null);
+            Array.Empty<TranscriptSearchHit>(), 0, note, null, CurrentWire(r), CurrentRef(r), r.SyncNote);
 
     private static TranscriptSearchResponse Failure(TranscriptSearchRequest r, ScopePlan plan, string error) =>
-        new(r.Query, plan.Scope, plan.Note, false, null, 0, Array.Empty<TranscriptSearchHit>(), 0, null, error);
+        new(r.Query, plan.Scope, plan.Note, false, null, 0, Array.Empty<TranscriptSearchHit>(), 0, null, error,
+            CurrentWire(r), CurrentRef(r), r.SyncNote);
 
-    private static string UnknownSession(string session) => $"no archived session {session}";
+    // Only the three known kinds are answered; anything else (or no current session) is "none", with no reference.
+    private static string CurrentWire(TranscriptSearchRequest r) => r.Current?.Kind switch
+    {
+        "marker" => "marker",
+        "guessed" => "guessed",
+        _ => "none",
+    };
+
+    private static string? CurrentRef(TranscriptSearchRequest r) =>
+        CurrentWire(r) == "none" ? null : r.Current!.Ref;
+
+    // Built from the plan's session, not the argument: a scope defaulted to the marker's session has no argument.
+    private static string UnknownSession((string Host, string Id) session) => $"no archived session {session.Host}:{session.Id}";
 
     private static string Exchanges(int start, int end) =>
         start == end

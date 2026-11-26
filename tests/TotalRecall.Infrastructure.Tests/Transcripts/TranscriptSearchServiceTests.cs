@@ -6,12 +6,12 @@ using System.Linq;
 using System.Net.Http;
 using System.Runtime.CompilerServices;
 using System.Threading;
-using Microsoft.FSharp.Core;
 using Microsoft.ML.OnnxRuntime;
 using TotalRecall.Infrastructure.Config;
 using TotalRecall.Infrastructure.Embedding;
 using TotalRecall.Infrastructure.Tests.TestSupport;
 using TotalRecall.Infrastructure.Transcripts;
+using TotalRecall.TestSupport.Transcripts;
 using Xunit;
 using MsSqliteConnection = Microsoft.Data.Sqlite.SqliteConnection;
 
@@ -67,17 +67,7 @@ public sealed class TranscriptSearchServiceTests : IDisposable
         return v;
     }
 
-    private static Core.Config.EmbeddingConfig Embedding(string? provider = null) => new(
-        "bge-small-en-v1.5",
-        384,
-        provider is null ? FSharpOption<string>.None : FSharpOption<string>.Some(provider),
-        FSharpOption<string>.None,
-        FSharpOption<string>.None,
-        FSharpOption<string>.None,
-        FSharpOption<string>.None,
-        FSharpOption<string>.None,
-        FSharpOption<string>.None,
-        FSharpOption<string>.None);
+    private static Core.Config.EmbeddingConfig Embedding(string? provider = null) => TestEmbedding.Config(provider);
 
     private static TranscriptsSettings Settings(bool allowRemote = false) =>
         new(Enabled: true, DbPath: string.Empty, DbPathError: null, RetentionDays: 0, AllowRemoteEmbedding: allowRemote);
@@ -93,8 +83,9 @@ public sealed class TranscriptSearchServiceTests : IDisposable
 
     private static TranscriptSearchRequest Req(
         string query, string? scope = null, string? project = null, string? session = null,
-        DateTimeOffset? since = null, bool includeAutomated = false, int topK = 10) =>
-        new(query, scope, project, session, since, includeAutomated, topK);
+        DateTimeOffset? since = null, bool includeAutomated = false, int topK = 10,
+        CurrentSessionInfo? current = null, string? syncNote = null) =>
+        new(query, scope, project, session, since, includeAutomated, topK, current, syncNote);
 
     private long AddChunk(
         long session, string body, int start, string ts = "2026-11-01T00:00:00.0000000Z", string type = "dialogue",
@@ -260,6 +251,286 @@ public sealed class TranscriptSearchServiceTests : IDisposable
         Assert.Throws<ArgumentException>(() => Service(new QueryEmbedder()).Search(Req("database locked", scope: scope), default));
     }
 
+    // ---- defaults from the current session (spec 2026-11-24, section 4) ---------------------------------------------
+
+    private static CurrentSessionInfo Marker(string? projectKey = "owner/repo", string @ref = "claude-code:sess-1") =>
+        new("marker", @ref, projectKey);
+
+    private static CurrentSessionInfo Guessed() => new("guessed", "claude-code:sess-1", "owner/repo");
+
+    [Fact]
+    public void Plan_NoScopeNothingGiven_Marker_DefaultsToCurrentProject_WithNote()
+    {
+        var seed = Populate();
+        var r = Service(new QueryEmbedder()).Search(Req("database locked", current: Marker()), default);
+        Assert.Equal("project", r.Scope);
+        Assert.Equal("defaulted to the current project (owner/repo)", r.ScopeNote);
+        Assert.Equal(new[] { seed.C1a, seed.C1b }.OrderBy(x => x), Ids(r).OrderBy(x => x));
+    }
+
+    [Fact]
+    public void Plan_ScopeProjectNoProject_Marker_UsesCurrentProject()
+    {
+        var seed = Populate();
+        var r = Service(new QueryEmbedder()).Search(Req("database locked", scope: "project", current: Marker()), default);
+        Assert.Equal("project", r.Scope);
+        Assert.Null(r.ScopeNote);
+        Assert.Equal(new[] { seed.C1a, seed.C1b }.OrderBy(x => x), Ids(r).OrderBy(x => x));
+    }
+
+    [Theory]
+    [InlineData("guessed")]
+    [InlineData("none")]
+    [InlineData(null)]
+    public void Plan_ScopeProjectNoProject_NoMarker_AllWithNewNote(string? kind)
+    {
+        var seed = Populate();
+        CurrentSessionInfo? current = kind is null ? null : new(kind, kind == "none" ? null : "claude-code:sess-1", kind == "none" ? null : "owner/repo");
+        var r = Service(new QueryEmbedder()).Search(Req("database locked", scope: "project", current: current), default);
+        Assert.Equal("all", r.Scope);
+        Assert.Contains("the current project could not be determined", r.ScopeNote);
+        Assert.DoesNotContain("not detected yet", r.ScopeNote);
+        Assert.Contains(seed.C3, Ids(r));
+        Assert.Contains(seed.C1a, Ids(r));
+    }
+
+    [Fact]
+    public void Plan_ScopeSessionNoSession_Marker_UsesCurrentSession()
+    {
+        var seed = Populate();
+        var r = Service(new QueryEmbedder()).Search(Req("database locked", scope: "session", current: Marker()), default);
+        Assert.Equal("session", r.Scope);
+        Assert.Null(r.ScopeNote);
+        Assert.Equal(new[] { seed.C1a, seed.C1b }.OrderBy(x => x), Ids(r).OrderBy(x => x));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Plan_ScopeSessionDefaultedToMarker_NotArchived_NoteNamesTheSession(string? sessionArg)
+    {
+        // The marker's session is not in the archive (forgotten, excluded, or its first ingest ran out of budget) while
+        // other sessions are: the note names the session the scope defaulted to, not the (absent) argument.
+        Populate();
+        var r = Service(new QueryEmbedder()).Search(
+            Req("database locked", scope: "session", session: sessionArg, current: Marker(@ref: "claude-code:not-archived")), default);
+        Assert.Null(r.Error);
+        Assert.Equal("session", r.Scope);
+        Assert.Empty(r.Results);
+        Assert.Equal("no archived session claude-code:not-archived", r.Note);
+    }
+
+    [Theory]
+    [InlineData("guessed")]
+    [InlineData("none")]
+    [InlineData(null)]
+    public void Plan_ScopeSessionNoSession_NoMarker_ErrorMentionsCurrentSessionUnknown(string? kind)
+    {
+        Populate();
+        CurrentSessionInfo? current = kind is null ? null : new(kind, kind == "none" ? null : "claude-code:sess-1", kind == "none" ? null : "owner/repo");
+        var ex = Assert.Throws<ArgumentException>(
+            () => Service(new QueryEmbedder()).Search(Req("database locked", scope: "session", current: current), default));
+        Assert.Contains("scope session needs a session argument (<host>:<host_session_id>)", ex.Message);
+        Assert.Contains("the current session is not known here", ex.Message);
+    }
+
+    [Fact]
+    public void Plan_ExplicitArgumentsAlwaysWin()
+    {
+        var seed = Populate();
+        var svc = Service(new QueryEmbedder());
+
+        var project = svc.Search(Req("database locked", project: "other/proj", current: Marker()), default);
+        Assert.Equal("project", project.Scope);
+        Assert.Null(project.ScopeNote);
+        Assert.Equal(new[] { seed.C3, seed.C3Unembedded }.OrderBy(x => x), Ids(project).OrderBy(x => x));
+
+        var session = svc.Search(Req("database locked", session: "pi:sess-3", current: Marker()), default);
+        Assert.Equal("session", session.Scope);
+        Assert.Equal(new[] { seed.C3, seed.C3Unembedded }.OrderBy(x => x), Ids(session).OrderBy(x => x));
+
+        var namedWithScopeSession = svc.Search(Req("database locked", scope: "session", session: "pi:sess-3", current: Marker()), default);
+        Assert.Equal(new[] { seed.C3, seed.C3Unembedded }.OrderBy(x => x), Ids(namedWithScopeSession).OrderBy(x => x));
+
+        var all = svc.Search(Req("database locked", scope: "all", current: Marker()), default);
+        Assert.Equal("all", all.Scope);
+        Assert.Null(all.ScopeNote);
+        Assert.Contains(seed.C3, Ids(all));
+        Assert.Contains(seed.C1a, Ids(all));
+
+        var projectArg = svc.Search(Req("database locked", scope: "project", project: "other/proj", current: Marker()), default);
+        Assert.Equal(new[] { seed.C3, seed.C3Unembedded }.OrderBy(x => x), Ids(projectArg).OrderBy(x => x));
+    }
+
+    [Fact]
+    public void Plan_Guessed_NeverChoosesAScope()
+    {
+        var seed = Populate();
+        var svc = Service(new QueryEmbedder());
+
+        var none = svc.Search(Req("database locked", current: Guessed()), default);
+        Assert.Equal("all", none.Scope);
+        Assert.Null(none.ScopeNote);
+        Assert.Contains(seed.C3, Ids(none));
+
+        Assert.Throws<ArgumentException>(() => svc.Search(Req("database locked", scope: "session", current: Guessed()), default));
+
+        var project = svc.Search(Req("database locked", scope: "project", current: Guessed()), default);
+        Assert.Equal("all", project.Scope);
+        Assert.Contains("the current project could not be determined", project.ScopeNote);
+    }
+
+    [Fact]
+    public void Plan_MarkerWithNoProjectKey_IsTodaysBehaviour()
+    {
+        var seed = Populate();
+        var svc = Service(new QueryEmbedder());
+
+        var none = svc.Search(Req("database locked", current: Marker(projectKey: null)), default);
+        Assert.Equal("all", none.Scope);
+        Assert.Null(none.ScopeNote);
+        Assert.Contains(seed.C3, Ids(none));
+
+        var project = svc.Search(Req("database locked", scope: "project", current: Marker(projectKey: null)), default);
+        Assert.Equal("all", project.Scope);
+        Assert.Contains("the current project could not be determined", project.ScopeNote);
+
+        // The session itself is still known, so scope=session works without a project.
+        var session = svc.Search(Req("database locked", scope: "session", current: Marker(projectKey: null)), default);
+        Assert.Equal("session", session.Scope);
+        Assert.Equal(new[] { seed.C1a, seed.C1b }.OrderBy(x => x), Ids(session).OrderBy(x => x));
+    }
+
+    [Theory]
+    [InlineData("nocolon", null, false)]             // a reference that does not split is no session
+    [InlineData("nocolon", "   ", false)]
+    [InlineData("claude-code:sess-1", "   ", true)]   // a whitespace-only key is no project, like null
+    [InlineData("claude-code:sess-1", "", true)]
+    public void Plan_MarkerWithUnusableRefOrKey_FallsBackToTodaysBehaviour(string @ref, string? projectKey, bool sessionKnown)
+    {
+        var seed = Populate();
+        var svc = Service(new QueryEmbedder());
+        var current = Marker(projectKey: projectKey, @ref: @ref);
+
+        var none = svc.Search(Req("database locked", current: current), default);
+        Assert.Equal("all", none.Scope);
+        Assert.Null(none.ScopeNote);
+        Assert.Contains(seed.C3, Ids(none));
+        Assert.Contains(seed.C1a, Ids(none));
+
+        var project = svc.Search(Req("database locked", scope: "project", current: current), default);
+        Assert.Equal("all", project.Scope);
+        Assert.Contains("the current project could not be determined", project.ScopeNote);
+        Assert.Contains(seed.C3, Ids(project));
+
+        if (sessionKnown)
+        {
+            var session = svc.Search(Req("database locked", scope: "session", current: current), default);
+            Assert.Equal("session", session.Scope);
+            Assert.Equal(new[] { seed.C1a, seed.C1b }.OrderBy(x => x), Ids(session).OrderBy(x => x));
+        }
+        else
+        {
+            var ex = Assert.Throws<ArgumentException>(
+                () => svc.Search(Req("database locked", scope: "session", current: current), default));
+            Assert.Contains("the current session is not known here", ex.Message);
+        }
+    }
+
+    [Fact]
+    public void Response_CarriesCurrentSessionFields()
+    {
+        Populate();
+        var svc = Service(new QueryEmbedder());
+
+        var marker = svc.Search(Req("database locked", current: Marker(), syncNote: "the newest text of the current session may be missing: the catch-up ran out of time"), default);
+        Assert.Equal("marker", marker.CurrentSession);
+        Assert.Equal("claude-code:sess-1", marker.CurrentSessionRef);
+        Assert.Equal("the newest text of the current session may be missing: the catch-up ran out of time", marker.SyncNote);
+
+        var guessed = svc.Search(Req("database locked", current: Guessed()), default);
+        Assert.Equal("guessed", guessed.CurrentSession);
+        Assert.Equal("claude-code:sess-1", guessed.CurrentSessionRef);
+        Assert.Null(guessed.SyncNote);
+
+        var none = svc.Search(Req("database locked", current: new CurrentSessionInfo("none", null, null)), default);
+        Assert.Equal("none", none.CurrentSession);
+        Assert.Null(none.CurrentSessionRef);
+
+        var absent = svc.Search(Req("database locked"), default);
+        Assert.Equal("none", absent.CurrentSession);
+        Assert.Null(absent.CurrentSessionRef);
+        Assert.Null(absent.SyncNote);
+    }
+
+    [Fact]
+    public void Search_AbsentArchive_WithMarker_AnswersCurrentSessionMarkerWithTheRef()
+    {
+        var missing = Path.Combine(Path.GetTempPath(), "tr-absent-" + Guid.NewGuid().ToString("N"), "archive.db");
+        var r = Service(new QueryEmbedder(), location: new TranscriptLocation(missing, IsMainDatabase: false))
+            .Search(Req("database locked", current: Marker(), syncNote: "a note"), default);
+        Assert.Null(r.Error);
+        Assert.Equal(TranscriptSearchService.NothingArchivedNote, r.Note);
+        Assert.Equal("marker", r.CurrentSession);
+        Assert.Equal("claude-code:sess-1", r.CurrentSessionRef);
+        Assert.Equal("a note", r.SyncNote);
+        Assert.Equal("project", r.Scope);
+        Assert.Equal("defaulted to the current project (owner/repo)", r.ScopeNote);
+    }
+
+    [Fact]
+    public void Search_EmptyArchive_And_FailurePath_CarryTheCurrentSessionFields()
+    {
+        // Empty archive (no chunk).
+        var empty = Service(new QueryEmbedder()).Search(Req("database locked", current: Marker(), syncNote: "n"), default);
+        Assert.Equal(TranscriptSearchService.NothingArchivedNote, empty.Note);
+        Assert.Equal("marker", empty.CurrentSession);
+        Assert.Equal("claude-code:sess-1", empty.CurrentSessionRef);
+        Assert.Equal("n", empty.SyncNote);
+
+        // Failure: no context in this storage mode.
+        var noContext = new TranscriptSearchService(() => null)
+            .Search(Req("database locked", current: Marker(), syncNote: "n"), default);
+        Assert.NotNull(noContext.Error);
+        Assert.Equal("marker", noContext.CurrentSession);
+        Assert.Equal("claude-code:sess-1", noContext.CurrentSessionRef);
+        Assert.Equal("n", noContext.SyncNote);
+
+        // Failure: the factory throws.
+        var throws = new TranscriptSearchService(() => throw new InvalidOperationException("bad"))
+            .Search(Req("database locked", current: Guessed()), default);
+        Assert.NotNull(throws.Error);
+        Assert.Equal("guessed", throws.CurrentSession);
+        Assert.Equal("claude-code:sess-1", throws.CurrentSessionRef);
+
+        // Failure: the archive is refused.
+        var refused = Service(new QueryEmbedder(), location: new TranscriptLocation(_db.Path, IsMainDatabase: true))
+            .Search(Req("database locked", current: Marker()), default);
+        Assert.NotNull(refused.Error);
+        Assert.Equal("marker", refused.CurrentSession);
+        Assert.Equal("claude-code:sess-1", refused.CurrentSessionRef);
+
+        // Unknown session answer.
+        Populate();
+        var unknown = Service(new QueryEmbedder()).Search(Req("database locked", session: "pi:nope", current: Marker()), default);
+        Assert.Equal("no archived session pi:nope", unknown.Note);
+        Assert.Equal("marker", unknown.CurrentSession);
+        Assert.Equal("claude-code:sess-1", unknown.CurrentSessionRef);
+    }
+
+    [Fact]
+    public void ValidateScope_AcceptsNullAndTheThree_RefusesOthers()
+    {
+        foreach (var ok in new string?[] { null, "session", "project", "all" })
+            TranscriptSearchService.ValidateScope(ok);
+        foreach (var bad in new[] { "sessions", "", "ALL" })
+        {
+            var ex = Assert.Throws<ArgumentException>(() => TranscriptSearchService.ValidateScope(bad));
+            Assert.Equal($"scope must be session, project or all; got '{bad}'", ex.Message);
+        }
+    }
+
     [Theory]
     [InlineData("no-colon")]
     [InlineData(":id")]
@@ -381,6 +652,39 @@ public sealed class TranscriptSearchServiceTests : IDisposable
         Assert.Equal(new[] { "query:zzqv" }, embedder.Calls);
         Assert.Equal(seed.C2, r.Results[0].Id); // the nearest vector
         Assert.Equal(new[] { "meaning" }, r.Results[0].Via);
+    }
+
+    [Fact]
+    public void Search_Gate_Unchanged_AfterTheHelperIsFactored()
+    {
+        // The search keeps serverPass false and reindex false: a running memory re-embed does not touch it.
+        Populate();
+        var embedder = new QueryEmbedder();
+        var settings = Settings();
+        var config = Embedding();
+        var viaHelper = TranscriptSearchService.BuildEmbedGate(
+            embedder, settings, "sqlite", config, serverPass: false, memoryReindexRunning: true, _db.Store.CheckFingerprint, _db.Store.ReadEmbedFingerprint);
+        Assert.Equal(EmbedState.Ready, viaHelper.Gate.State);
+        Assert.Equal(new ArchiveFingerprint("local", "bge-small-en-v1.5", "rev1", 384), viaHelper.Current);
+
+        // The pass's gate (the sync's) does wait for the re-embed.
+        var pass = TranscriptSearchService.BuildEmbedGate(
+            embedder, settings, "sqlite", config, serverPass: true, memoryReindexRunning: true, _db.Store.CheckFingerprint, _db.Store.ReadEmbedFingerprint);
+        Assert.Equal(EmbedState.WaitingForReindex, pass.Gate.State);
+
+        // A remote provider without the opt-in ends before any store read; a descriptor that throws gives no fingerprint.
+        var remote = TranscriptSearchService.BuildEmbedGate(
+            new QueryEmbedder(new EmbedderDescriptor("openai", "m", "", 384)), settings, "sqlite", Embedding("openai"),
+            serverPass: true, memoryReindexRunning: false, _ => throw new InvalidOperationException("no store read"), null);
+        Assert.Equal(EmbedState.RemoteNotAllowed, remote.Gate.State);
+        var broken = TranscriptSearchService.BuildEmbedGate(
+            new ThrowingDescriptorEmbedder(), settings, "sqlite", config, serverPass: true, memoryReindexRunning: false, null, null);
+        Assert.Null(broken.Current);
+        Assert.False(broken.Gate.CanEmbed);
+
+        var r = Service(embedder).Search(Req("database locked"), default);
+        Assert.True(r.MeaningOn);
+        Assert.Null(r.MeaningReason);
     }
 
     [Fact]

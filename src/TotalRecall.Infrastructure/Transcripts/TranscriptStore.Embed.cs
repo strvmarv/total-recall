@@ -7,13 +7,15 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using TotalRecall.Infrastructure.Diagnostics;
 
 namespace TotalRecall.Infrastructure.Transcripts;
 
 /// <summary>
 /// The embed side of the archive store (search the archive, spec sections 2 and 3): the work queue, the
 /// one-transaction vector write, the lease, the fingerprint, the counts and the last-run record. All SQL is
-/// parameterised; nothing here catches (the worker owns the failure policy).
+/// parameterised; nothing here catches (the worker owns the failure policy) except the restore of the busy timeout
+/// after a lease release.
 /// </summary>
 public sealed partial class TranscriptStore
 {
@@ -31,37 +33,94 @@ public sealed partial class TranscriptStore
     // Queue
     // ------------------------------------------------------------------
 
-    public IReadOnlyList<EmbedChunk> NextEmbedWork(int limit, IReadOnlyCollection<long> exclude)
+    internal const string HasWaitingEmbedWorkSql =
+        "SELECT 1 FROM tx_chunk WHERE session_id = (SELECT id FROM tx_session WHERE host = $host AND host_session_id = $hid) " +
+        "AND embedded = 0 AND embed_attempts < 3 LIMIT 1";
+
+    internal static string BuildSessionFirstSql(int excludeCount) =>
+        "SELECT id, content, embed_attempts FROM tx_chunk WHERE session_id = " +
+        "(SELECT id FROM tx_session WHERE host = $host AND host_session_id = $hid) " +
+        "AND embedded = 0 AND embed_attempts < 3" + ExcludeClause(excludeCount) + " ORDER BY id LIMIT $limit";
+
+    internal static string BuildPlainSql(int excludeCount) =>
+        "SELECT id, content, embed_attempts FROM tx_chunk WHERE embedded = 0 AND embed_attempts < 3" +
+        ExcludeClause(excludeCount) + " ORDER BY id LIMIT $limit";
+
+    private static string ExcludeClause(int count)
+    {
+        if (count <= 0)
+            return string.Empty;
+        var sb = new StringBuilder(" AND id NOT IN (");
+        for (var i = 0; i < count; i++)
+        {
+            if (i > 0) sb.Append(", ");
+            sb.Append("$x").Append(i.ToString(CultureInfo.InvariantCulture));
+        }
+        return sb.Append(')').ToString();
+    }
+
+    public bool HasWaitingEmbedWork(string host, string hostSessionId)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+        ArgumentNullException.ThrowIfNull(hostSessionId);
+        using var cmd = Command(null, HasWaitingEmbedWorkSql, ("$host", host), ("$hid", hostSessionId));
+        return cmd.ExecuteScalar() is not null;
+    }
+
+    public IReadOnlyList<EmbedChunk> NextEmbedWork(
+        int limit, IReadOnlyCollection<long> exclude, (string Host, string HostSessionId)? preferSession = null)
     {
         ArgumentNullException.ThrowIfNull(exclude);
         if (limit <= 0)
             return Array.Empty<EmbedChunk>();
 
-        var sql = new StringBuilder("SELECT id, content, embed_attempts FROM tx_chunk WHERE embedded = 0 AND embed_attempts < 3");
-        var parameters = new List<(string, object)>();
-        if (exclude.Count > 0)
-        {
-            sql.Append(" AND id NOT IN (");
-            var i = 0;
-            foreach (var id in exclude)
-            {
-                if (i > 0) sql.Append(", ");
-                var name = "$x" + i.ToString(CultureInfo.InvariantCulture);
-                sql.Append(name);
-                parameters.Add((name, id));
-                i++;
-            }
-            sql.Append(')');
-        }
-        sql.Append(" ORDER BY id LIMIT $limit");
-        parameters.Add(("$limit", (long)limit));
-
         var result = new List<EmbedChunk>();
-        using var cmd = Command(null, sql.ToString(), parameters.ToArray());
+        IReadOnlyCollection<long> rest = exclude;
+        if (preferSession is { } prefer)
+        {
+            // Read one: the session's own waiting chunks (the (session_id, ...) unique index), in id order.
+            var parameters = new List<(string, object)> { ("$host", prefer.Host), ("$hid", prefer.HostSessionId) };
+            AddExcludeParameters(parameters, exclude);
+            parameters.Add(("$limit", (long)limit));
+            ReadChunks(BuildSessionFirstSql(exclude.Count), parameters, result);
+
+            if (result.Count >= limit)
+                return result;
+
+            // Read two: the rest of the whole queue, never a chunk that read one returned.
+            if (result.Count > 0)
+            {
+                var combined = new List<long>(exclude.Count + result.Count);
+                combined.AddRange(exclude);
+                foreach (var c in result)
+                    combined.Add(c.Id);
+                rest = combined;
+            }
+        }
+
+        var restParameters = new List<(string, object)>();
+        AddExcludeParameters(restParameters, rest);
+        restParameters.Add(("$limit", (long)(limit - result.Count)));
+        ReadChunks(BuildPlainSql(rest.Count), restParameters, result);
+        return result;
+    }
+
+    private static void AddExcludeParameters(List<(string, object)> parameters, IReadOnlyCollection<long> exclude)
+    {
+        var i = 0;
+        foreach (var id in exclude)
+        {
+            parameters.Add(("$x" + i.ToString(CultureInfo.InvariantCulture), id));
+            i++;
+        }
+    }
+
+    private void ReadChunks(string sql, List<(string, object)> parameters, List<EmbedChunk> into)
+    {
+        using var cmd = Command(null, sql, parameters.ToArray());
         using var r = cmd.ExecuteReader();
         while (r.Read())
-            result.Add(new EmbedChunk(r.GetInt64(0), r.GetString(1)) { Attempts = r.GetInt32(2) });
-        return result;
+            into.Add(new EmbedChunk(r.GetInt64(0), r.GetString(1)) { Attempts = r.GetInt32(2) });
     }
 
     // ------------------------------------------------------------------
@@ -167,14 +226,44 @@ public sealed partial class TranscriptStore
         return true;
     }
 
+    /// <summary>
+    /// Releases the lease while it still carries this run's id. On a connection opened with a shorter busy timeout (the
+    /// sync's 500 ms) the release waits up to <see cref="ReleaseBusyTimeoutMs"/> for the write lock: a release that gave
+    /// up while another writer held the lock would leave the lease to refuse every run of this engine for ten minutes.
+    /// The connection's own timeout is restored afterwards (a failed restore is logged, never thrown).
+    /// </summary>
     public void ReleaseEmbedLease(EmbedLeaseHolder holder)
     {
         ArgumentNullException.ThrowIfNull(holder);
-        using var tx = _conn.BeginTransaction(deferred: false);
-        if (LeaseCarriesRun(tx, holder.RunId))
-            Exec(tx, "DELETE FROM tx_state WHERE key = $k", ("$k", LeaseKey));
-        tx.Commit();
+        var original = ReadBusyTimeoutMs();
+        var raise = original < ReleaseBusyTimeoutMs;
+        if (raise)
+            SetBusyTimeout(ReleaseBusyTimeoutMs);
+        try
+        {
+            using var tx = _conn.BeginTransaction(deferred: false);
+            if (LeaseCarriesRun(tx, holder.RunId))
+                Exec(tx, "DELETE FROM tx_state WHERE key = $k", ("$k", LeaseKey));
+            tx.Commit();
+        }
+        finally
+        {
+            if (raise)
+            {
+                try { SetBusyTimeout(original); }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    ExceptionLogger.LogChain("[total-recall] transcripts: could not restore busy_timeout after the lease release", ex);
+                }
+            }
+        }
     }
+
+    /// <summary>
+    /// The longest the lease release waits for the write lock (SQLite's own busy wait, which the driver's shorter
+    /// command timeout does not cut short), so a sync that fails busy still frees the lease within about 4 s.
+    /// </summary>
+    internal const int ReleaseBusyTimeoutMs = 4000;
 
     private static string LeaseValue(EmbedLeaseHolder h, DateTimeOffset now) =>
         string.Create(CultureInfo.InvariantCulture, $"{h.Machine}:{h.Pid}:{h.RunId}:{now.ToUnixTimeMilliseconds()}");
