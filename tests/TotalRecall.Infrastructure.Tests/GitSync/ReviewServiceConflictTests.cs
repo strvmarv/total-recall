@@ -571,7 +571,9 @@ public sealed class ReviewServiceConflictTests : IDisposable
         Assert.Equal(shown, item.ShownHash);
 
         var before = _rig.Full();
-        AssertRefused(await Service().SwapAsync(Id, shown, null), SyncSetup.Refusal.UnshowableText);
+        var refused = await Service().SwapAsync(Id, shown, null);
+        AssertRefused(refused, SyncSetup.Refusal.UnshowableText);
+        Assert.Contains("use merge with the text typed or edited instead", refused.RefusalText);
         Assert.Equal(before, _rig.Full());
 
         using var rig = new ApplyRig();

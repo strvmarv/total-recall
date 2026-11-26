@@ -12,8 +12,9 @@ namespace TotalRecall.Infrastructure.Tests.GitSync;
 /// Milestone 1b-iii part 4 (conflict review, #164): the whole path over two machines on one local bare repository
 /// (<see cref="TwoMachineRig"/>). Two text edits of one memory leave the later one on both machines and the losing text
 /// in a <c>conflict</c> item on the machine that met the conflict, whichever side wins; <c>keep</c>, <c>swap</c> and
-/// <c>merge</c> each leave the stated text on both machines after the next cycles; a second conflict keeps both losing
-/// texts; an unanswered conflict blocks nothing; a swapped text holding a token is held back by the push. Answers go
+/// <c>merge</c> each leave the stated text on both machines after the next cycles (A has taken B's winning text first, so
+/// a swap or merge has to change it again); a swapped text reaching a machine where the memory is pinned is held there as a
+/// <c>pin-edit</c> item; a second conflict keeps both losing texts; an unanswered conflict blocks nothing; a swapped text holding a token is held back by the push. Answers go
 /// through <see cref="ReviewService"/> over B's database file (<see cref="ReviewServices.For"/>).
 /// </summary>
 public sealed class ConflictReviewCycleTests : IDisposable
@@ -191,6 +192,10 @@ public sealed class ConflictReviewCycleTests : IDisposable
         const string merged = "Use pnpm or yarn, never npm.";
         await SyncedOnBoth();
         await BsLaterEditMeetsAs();
+        // A takes B's winning text first, so for swap and merge the text on A has to change again to the answered text
+        _rig.A.Push.Now += 120_000;
+        Assert.IsType<PushOutcome.NothingToPush>(Done(await _rig.RunA()).Push);
+        Assert.Equal(TextOnB, TextOf(_rig.A));
         var hash = Item(_rig.B)!.RecordHash;
         var service = Service(_rig.B);
 
@@ -211,6 +216,7 @@ public sealed class ConflictReviewCycleTests : IDisposable
             Assert.IsType<PushOutcome.NothingToPush>(b.Push);
         else
             Assert.Equal([Id], Pushed(b).Written);
+        Assert.Equal(TextOnB, TextOf(_rig.A));   // unchanged until A's next cycle
         _rig.A.Push.Now += 180_000;
         var a = Done(await _rig.RunA());
 
@@ -222,6 +228,53 @@ public sealed class ConflictReviewCycleTests : IDisposable
             Assert.Null(Item(machine));
             Assert.Null(RowOf(machine).ContentStamp);
         }
+    }
+
+    /// <summary>
+    /// Criterion 7's parenthetical: on a machine where the memory is pinned, a swapped text arrives as an ordinary remote edit
+    /// and is held as a <c>pin-edit</c> item. A pins the memory and later writes a newer text; B's earlier edit loses on B
+    /// (filed as a local loser beside the <c>new-pin</c> item the pin raises there), B swaps it back and pushes it, and A's
+    /// next cycle holds B's text in an open <c>pin-edit</c> item while A's pinned text stays.
+    /// </summary>
+    [GitFact]
+    public async Task ASwapPushedToAMachineWhereTheMemoryIsPinned_IsHeldThereAsAPinEdit()
+    {
+        await SyncedOnBoth();
+        _rig.B.Push.Now += 60_000;
+        Edit(_rig.B, TextOnB);
+        _rig.A.Push.Now += 120_000;
+        _rig.A.Push.Pin(Id);
+        _rig.A.Push.Edit(Tier.Hot, Id, new UpdateEntryOpts { Content = TextOnA });
+        Assert.Equal([Id], Pushed(Done(await _rig.RunA())).Written);
+        Assert.True(RemoteRecord().Placement.Sticky);
+
+        Done(await _rig.RunB());
+        Assert.Equal(TextOnA, TextOf(_rig.B));
+        Assert.Equal([$"local|{TextOnB}|{TwoMachineRig.MachineB}"], Losers(_rig.B));
+        Assert.Equal("open", GitSyncReviews.ReadPinItem(_rig.B.Pull.Connection, Id, "new-pin")!.State);
+        Assert.False(_rig.B.Pull.Store.IsSticky(ContentType.Memory, Id));
+
+        Assert.Equal(0, (await Service(_rig.B).SwapAsync(Id, Item(_rig.B)!.RecordHash, 1)).ExitCode);
+        Assert.Equal(TextOnB, TextOf(_rig.B));
+        _rig.B.Push.Now += 60_000;
+        Assert.Equal([Id], Pushed(Done(await _rig.RunB())).Written);
+        var published = RemoteRecord();
+        Assert.Equal(TextOnB, published.Content);
+        Assert.True(published.Placement.Sticky);   // B pushed the content group only: A's pin stays in the record
+
+        _rig.A.Push.Now += 180_000;
+        var a = Done(await _rig.RunA());
+
+        Assert.IsType<PushOutcome.NothingToPush>(a.Push);
+        Assert.Equal(TextOnA, TextOf(_rig.A));
+        Assert.True(_rig.A.Pull.Store.IsSticky(ContentType.Memory, Id));
+        Assert.Null(Item(_rig.A));
+        var pinEdit = GitSyncReviews.ReadPinItem(_rig.A.Pull.Connection, Id, "pin-edit")!;
+        Assert.Equal("open", pinEdit.State);
+        Assert.Equal(published.WrittenBy!.Value, pinEdit.Machine);
+        Assert.Equal(TextOnB, ApplyPlanning.ParseBase(Id, RowOf(_rig.A).BaseJson!).Parsed!.Record.Content);
+        var listed = Assert.Single(Service(_rig.A).List().Items, i => i.Kind == "pin-edit");
+        Assert.Equal((TextOnB, TextOnA), (listed.Text, listed.CurrentText));
     }
 
     [GitFact]

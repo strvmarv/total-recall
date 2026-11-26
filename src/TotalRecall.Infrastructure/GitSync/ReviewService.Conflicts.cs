@@ -94,7 +94,8 @@ public sealed partial class ReviewService
             {
                 return (null, Refuse(
                     SyncSetup.Refusal.UnshowableText,
-                    "the loser's text holds characters the list does not show, so it cannot be swapped in; nothing changed"));
+                    "the loser's text holds characters the list does not show, so it cannot be swapped in; "
+                    + "use merge with the text typed or edited instead; nothing changed"));
             }
             return (loser.Text, null);
         }
