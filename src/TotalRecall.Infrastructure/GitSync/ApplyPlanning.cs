@@ -230,6 +230,40 @@ internal static class ApplyPlanning
             ?? throw new InvalidOperationException("the entry cannot be read back after the held edit was applied");
     }
 
+    /// <summary>
+    /// Conflict review D6: makes <paramref name="text"/> the existing entry's text and nothing else (project, scope, type,
+    /// source, <c>created_at</c>, tags and the sticky flag stay), inside the caller's transaction, with
+    /// <paramref name="vector"/>, the vector of <paramref name="text"/>. The hot limit of a <c>TakeTheirs</c> applies: a hot,
+    /// non-sticky entry whose new text is over <paramref name="hotMaxContentChars"/> (0 or less: none) is moved to warm
+    /// with the vector; otherwise the vector is replaced in place. Returns the entry as read back.
+    /// </summary>
+    internal static SyncMerge.LocalEntry ApplyText(
+        SqliteStoreTransaction tx, string id, LocalRead.Present current, string text, float[] vector, int hotMaxContentChars)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        ArgumentNullException.ThrowIfNull(vector);
+        tx.Update(current.Tier, ContentType.Memory, id, new UpdateEntryOpts { Content = text });
+        var colder = current.Tier.Equals(Tier.Hot) && !current.View.Sticky && hotMaxContentChars > 0 && text.Length > hotMaxContentChars;
+        if (colder)
+            tx.Move(current.Tier, ContentType.Memory, Tier.Warm, ContentType.Memory, id, Memory(vector));
+        else
+            tx.ReplaceEmbedding(current.Tier, ContentType.Memory, id, vector);
+        var read = LocalEntryReader.Read(t => tx.Get(t, ContentType.Memory, id), () => tx.IsSticky(ContentType.Memory, id));
+        return (read as LocalRead.Present)?.View
+            ?? throw new InvalidOperationException("the entry cannot be read back after its text was set");
+    }
+
+    /// <summary>
+    /// As <c>planRow</c> does for a <c>TakeTheirs</c> the hot limit stored colder: when <paramref name="appliedColder"/> (the
+    /// hot limit moved the entry colder), a pending tier stamp is dropped once the stored <paramref name="tier"/> no longer
+    /// ranks below the base's tier; otherwise <paramref name="row"/> is returned as it is.
+    /// </summary>
+    internal static GitSyncRow DropBeatenTierStamp(GitSyncRow row, Tier tier, SyncRecord baseRecord, bool appliedColder) =>
+        appliedColder && row.TierStamp is not null
+        && SyncRecordModule.tierRank(tier) >= SyncRecordModule.tierRank(baseRecord.Placement.Tier)
+            ? row with { TierStamp = null }
+            : row;
+
     /// <summary>The row with the four columns the scan compares (content and tags hashes, sticky flag, tier) taken from <paramref name="stored"/>.</summary>
     internal static GitSyncRow WithComparison(GitSyncRow row, SyncMerge.LocalEntry stored) =>
         row with

@@ -441,13 +441,20 @@ public sealed class GitSyncCycleDeletionTests : IDisposable
         _rig.A.Push.AddMemory(Tier.Warm, X, "Added between two pulls of B.");
         _rig.A.Push.AddMemory(Tier.Warm, P, "A memory of A.");
         Assert.Equal([X, P], Pushed(Done(await _rig.RunA())).Written.Order(StringComparer.Ordinal));
-        _rig.B.Push.AddMemory(Tier.Warm, P, "B's own text.");
+        // B writes its own memory P just before P's transaction, so the re-read defers P (conflict review D8: a conflict no
+        // longer makes the pull incomplete)
+        _rig.B.ConfigureApplier = a => a.BeforeTransaction = id =>
+        {
+            if (id == P)
+                _rig.B.Push.AddMemory(Tier.Warm, P, "B's own text.");
+        };
 
-        // B takes X, but P is a text conflict with B's own memory (NC4) that waits for a review: the pull is incomplete and
-        // L stays at l0
+        // B takes X, but P is deferred: the pull is incomplete and L stays at l0
         var taken = Done(await _rig.RunB());
+        _rig.B.ConfigureApplier = null;
         Assert.False(taken.Apply!.Complete);
-        Assert.Equal([new PostponedEntry(P, "review")], taken.Apply.Postponed);
+        Assert.Empty(taken.Apply.Postponed);
+        Assert.Equal(P, Assert.Single(taken.Apply.Deferred).Id);
         Assert.Equal(l0, _rig.B.Pull.Last);
         Assert.True(Has(_rig.B, X));
         Assert.NotNull(RowOf(_rig.B, X).BaseJson);
@@ -466,7 +473,10 @@ public sealed class GitSyncCycleDeletionTests : IDisposable
         var row = RowOf(_rig.B, X);
         Assert.Equal(SyncMerge.RowState.Forgotten, row.State);
         Assert.NotNull(row.BaseJson);
-        Assert.Equal("B's own text.", _rig.B.Pull.Store.Get(Tier.Warm, ContentType.Memory, P)!.Content);
+        // P is now a text conflict with no base (NC4): A's text is applied and B's is kept in the conflict item
+        Assert.Equal("A memory of A.", _rig.B.Pull.Store.Get(Tier.Warm, ContentType.Memory, P)!.Content);
+        var item = GitSyncReviews.ReadConflictItem(_rig.B.Pull.Connection, P)!;
+        Assert.Equal(["B's own text."], GitSyncReviews.ReadConflictLosers(item.PayloadJson).Select(l => l.Text).ToArray());
     }
 
     [GitFact]
@@ -621,10 +631,10 @@ public sealed class GitSyncCycleDeletionTests : IDisposable
         Assert.True(Has(_rig.B, Y));
     }
 
-    // ---- AC 11: deletions, held items and repush markers never make a pull incomplete; a review does ----
+    // ---- AC 11: deletions, held items, repush markers and (conflict review D3) a conflict never make a pull incomplete ----
 
     [GitFact]
-    public async Task AfterAPullOfOnlyDeletionsHeldItemsAndRepushMarkers_TheCycleIsComplete_AndAReviewStillMakesItIncomplete()
+    public async Task AfterAPullOfOnlyDeletionsHeldItemsAndRepushMarkers_TheCycleIsComplete_AndAConflictNoLongerMakesItIncomplete()
     {
         await BothSynced(Rec(X, "Text of X"), Rec(P, "Text of P"), Rec(Z, "Text of Z", tier: Tier.Hot, minute: 20));
         var zBase = ReadRecord(RemoteText(Z), Z);
@@ -656,19 +666,22 @@ public sealed class GitSyncCycleDeletionTests : IDisposable
         var l = Remote.Head();
         Assert.Equal(l, _rig.B.Pull.Last);
 
-        // a record of an id B added with other text and no base is a conflict (NC4) that needs a review: the pull is
-        // incomplete, the push is skipped and L stays
+        // a record of an id B added with other text and no base is a conflict (NC4): the record's text is applied and B's
+        // kept in a conflict item, the pull is complete, the push runs and L moves on
         _rig.B.Push.AddMemory(Tier.Warm, Y, "B's own text of Y.");
         AnotherMachine(pull => pull.PutRecord(Rec(Y, "Another machine's text of Y.", minute: 30)));
         Tick();
-        var review = Done(await _rig.RunB());
+        var conflict = Done(await _rig.RunB());
 
-        Assert.False(review.Apply!.Complete);
-        Assert.Equal([new PostponedEntry(Y, "review")], review.Apply.Postponed);
-        Assert.All(new[] { b, review }.SelectMany(s => s.Apply!.Postponed), p => Assert.Equal("review", p.Reason));
-        Assert.Equal("pull-incomplete", review.PushSkipped);
-        Assert.Null(review.Push);
-        Assert.Equal(l, _rig.B.Pull.Last);
-        Assert.Equal("B's own text of Y.", _rig.B.Pull.Store.Get(Tier.Warm, ContentType.Memory, Y)!.Content);
+        Assert.True(conflict.Apply!.Complete);
+        Assert.Empty(conflict.Apply.Postponed);
+        Assert.Empty(conflict.Apply.Deferred);
+        Assert.Null(conflict.PushSkipped);
+        Assert.NotNull(conflict.Push);
+        Assert.NotEqual(l, _rig.B.Pull.Last);
+        Assert.Equal(Remote.Head(), _rig.B.Pull.Last);
+        Assert.Equal("Another machine's text of Y.", _rig.B.Pull.Store.Get(Tier.Warm, ContentType.Memory, Y)!.Content);
+        var item = GitSyncReviews.ReadConflictItem(_rig.B.Pull.Connection, Y)!;
+        Assert.Equal(["B's own text of Y."], GitSyncReviews.ReadConflictLosers(item.PayloadJson).Select(x => x.Text).ToArray());
     }
 }

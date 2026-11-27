@@ -59,10 +59,10 @@ public sealed class ReviewServiceTests : IDisposable
             [
                 new ReviewItem(
                     "held-delete", Local, "approved", "local", "unproven", Sha, _rig.Now, null, null, null, "Deleted here.", false,
-                    "repository record", null, false),
+                    "repository record", null, false, ReviewItem.NoLosers),
                 new ReviewItem(
                     "held-delete", Remote, "open", "remote", "unproven", null, _rig.Now, null, null, null, "Kept here.", false,
-                    "local entry", null, false),
+                    "local entry", null, false, ReviewItem.NoLosers),
             ],
             listing.Items);
     }

@@ -4,7 +4,6 @@ using TotalRecall.Core;
 using TotalRecall.Infrastructure.Storage;
 using TotalRecall.Infrastructure.Telemetry;
 using StorePlan = TotalRecall.Infrastructure.GitSync.ApplyPlanning.StorePlan;
-using SyncRecordModule = TotalRecall.Core.SyncRecord;
 
 namespace TotalRecall.Infrastructure.GitSync;
 
@@ -40,9 +39,6 @@ internal abstract record EntryResult
     /// the <c>repush_groups</c> marker the decision set, already on the row (milestone 1b-ii, D16).
     /// </summary>
     public sealed record NoOp(string? Repush = null) : EntryResult;
-
-    /// <summary>The decision needs a part of git sync that is not built; nothing was changed.</summary>
-    public sealed record Postponed(string Reason) : EntryResult;
 
     /// <summary>Left for the next pull; nothing was changed. <paramref name="Busy"/>: the database was locked, so the apply stops.</summary>
     public sealed record Deferred(string Reason, bool Busy) : EntryResult;
@@ -92,9 +88,9 @@ public sealed partial class GitSyncApplier
     // One entry
 
     /// <summary>
-    /// Applies one id: reads its row and local entry, runs <c>SyncMerge.decide</c>, postpones what this milestone does
-    /// not carry out, computes the vector, then carries the decision out in one immediate transaction that first
-    /// re-reads the entry (decisions 7 to 13). <paramref name="theirs"/> is null when the id has no accepted record;
+    /// Applies one id: reads its row and local entry, runs <c>SyncMerge.decide</c>, computes the vector, then carries the
+    /// decision out in one immediate transaction that first re-reads the entry (decisions 7 to 13). No decision is
+    /// postponed (conflict review D3): a text conflict is carried out and its loser filed as a <c>conflict</c> item. <paramref name="theirs"/> is null when the id has no accepted record;
     /// <paramref name="held"/> is the id's held-delete item, open or approved, as the pull read it (milestone 1b-ii, D8;
     /// milestone 1b-iii, D4), null when it has none; <paramref name="blobSha"/> is the record's blob id; <paramref name="guard"/> is the pull's delete guard verdict (required: <c>default</c> trips nothing),
     /// which turns a deletion of a tripped direction into a held item with the cause <c>guard</c> (D4).
@@ -122,11 +118,15 @@ public sealed partial class GitSyncApplier
         GitSyncRow? row;
         LocalRead read;
         IReadOnlyList<PinItem> pinItems;
+        ConflictItem? conflictItem;
+        string thisMachine;
         try
         {
             row = GitSyncRows.Read(conn, id);
             read = ReadLocal(id);
             pinItems = PinPlanning.ItemsOf(conn, id);
+            conflictItem = GitSyncReviews.ReadConflictItem(conn, id);
+            thisMachine = ThisMachine(conn);
         }
         catch (FormatException ex)
         {
@@ -170,9 +170,11 @@ public sealed partial class GitSyncApplier
             decision = SyncDeletion.holdInstead(decision); // D4: kept base update, no notes, no row state change
         // An approved item whose record changed after the answer is opened again with the record's blob id.
         var reopen = approved?.IsReopened == true && !decision.CloseHeldDelete;
+        // Conflict review D4: whether a deletion is held after this decision (the guard's conversion included), computed
+        // once from the decision and the held item the pull read, so both plans see the same value. Not a database read:
+        // the item step runs before the hold is upserted.
+        var heldAfter = SyncConflict.heldAfter(decision, held is not null);
 
-        if (SyncApply.postponement(decision) is { } postponed)
-            return new EntryResult.Postponed(SyncApply.reasonName(postponed.Value));
         if (decision.Entry.IsDefer)
             return new EntryResult.Deferred("the merge rules leave this entry for the next pull", Busy: false);
         if (decision.Entry.IsDropRow)
@@ -204,9 +206,10 @@ public sealed partial class GitSyncApplier
         // Pin review D4 ("When it runs"): the reconcile and the arrivals are planned here on the expected post-decision state
         // (the entry as the store operations will leave it, the row as BuildRow plans it with a placeholder stamp issuer,
         // whose stamps the reconcile reads only as present or not); the transaction recomputes them and defers on a difference.
+        // Conflict review D3: the conflict item's arrival is planned in the same plan.
         var pinPlan = PinPlan.Empty;
         float[]? baseVector = null;
-        if (pinItems.Count > 0 || PinPlanning.Requests(decision).Count > 0)
+        if (PinPlanning.HasWork(pinItems, conflictItem, decision))
         {
             string? heldText = null; // the held text to embed: the base's, when pin-edit rule 4 applies it and it differs
             try
@@ -216,7 +219,9 @@ public sealed partial class GitSyncApplier
                     id, decision, row, oldBase, theirs, expected, hadEntry: local is not null, plan.Colder, ApplyPlanning.PlaceholderIssue);
                 if (planError is not null)
                     return new EntryResult.Failed(OneLine(planError));
-                pinPlan = PinPlanning.Plan(pinItems, decision, expected, planned ?? row, theirs is not null, Unopt(theirs?.Record.WrittenBy));
+                pinPlan = PinPlanning.Plan(
+                    pinItems, conflictItem, decision, expected, planned ?? row, theirs is not null, Unopt(theirs?.Record.WrittenBy), thisMachine,
+                    heldAfter);
                 if (pinPlan.ApplyBaseJson is { } applyBase)
                 {
                     var text = BaseContent(id, applyBase);
@@ -244,7 +249,8 @@ public sealed partial class GitSyncApplier
         // Decision 13: a decision that changes nothing opens no transaction (unless a stamp must be issued). A held-delete
         // write, close, hash refresh (milestone 1b-iii, D10) or re-open (D4), and a decision with notes, always change
         // something, and a push deletion is reported even when its row already agrees (milestone 1b-ii, D9). A pin item
-        // write, update or removal, or a held edit to apply (pin review D4, D5), is a change too.
+        // write, update or removal, or a held edit to apply (pin review D4, D5), is a change too, and so is a conflict item
+        // write (conflict review D3).
         if (!plan.HasStoreOps && !HasRestamp(decision) && !TouchesHeldItem(decision) && decision.Notes.IsEmpty
             && !decision.Entry.IsPushDeletion && !RefreshesHash(held, blobSha, decision) && !reopen
             && pinPlan.IsEmpty)
@@ -274,7 +280,7 @@ public sealed partial class GitSyncApplier
             {
                 return CarryOut(
                     id, tx, decision, converted, reopen, plan, vector, row, read, held, proven, blobSha, oldBase, theirs, local,
-                    pinItems, pinPlan, baseVector, p => phase = p);
+                    pinItems, conflictItem, thisMachine, heldAfter, pinPlan, baseVector, p => phase = p);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
             {
@@ -331,6 +337,17 @@ public sealed partial class GitSyncApplier
                 _ => null, // no item (the column admits only these two words)
             });
 
+    /// <summary>
+    /// This machine's id (<c>_meta git_sync_machine</c>, read as <c>IssueStamp</c> reads it), the machine of a conflict loser
+    /// with no stamp (conflict review D1); <c>""</c> when it is missing or not a valid id.
+    /// </summary>
+    private static string ThisMachine(Microsoft.Data.Sqlite.SqliteConnection conn)
+    {
+        var text = SyncSql.GetMeta(conn, SyncIdentity.MetaKeys.Machine);
+        var machine = text is null ? null : SyncStamp.MachineIdModule.tryCreate(text);
+        return machine is null ? "" : SyncStamp.MachineIdModule.value(machine.Value);
+    }
+
     /// <summary>The text of the base <paramref name="baseJson"/>; throws <see cref="InvalidOperationException"/> when it cannot be read.</summary>
     private static string BaseContent(string id, string baseJson) =>
         ApplyPlanning.ParseBase(id, baseJson).Parsed?.Record.Content
@@ -385,6 +402,9 @@ public sealed partial class GitSyncApplier
         ParsedRecord? theirs,
         SyncMerge.LocalEntry? local,
         IReadOnlyList<PinItem> pinItems,
+        ConflictItem? conflictItem,
+        string thisMachine,
+        bool heldAfter,
         PinPlan pinPlan,
         float[]? baseVector,
         Action<string> phase)
@@ -399,8 +419,9 @@ public sealed partial class GitSyncApplier
         var readNow = LocalEntryReader.Read(t => tx.Get(t, ContentType.Memory, id), () => tx.IsSticky(ContentType.Memory, id));
         var heldNow = GitSyncReviews.ReadHeldItem(conn, id, dbTx); // open or approved: an approved item is passed as read (D4)
         var pinItemsNow = PinPlanning.ItemsOf(conn, id, dbTx);
+        var conflictItemNow = GitSyncReviews.ReadConflictItem(conn, id, dbTx);
         if (!Equals(row, rowNow) || !read.Equals(readNow) || !AgreesWithRow(rowNow, readNow) || !Equals(held, heldNow)
-            || !pinItems.SequenceEqual(pinItemsNow))
+            || !pinItems.SequenceEqual(pinItemsNow) || !Equals(conflictItem, conflictItemNow))
             return new EntryResult.Deferred("the entry changed since the decision was made", Busy: false);
         if (plan.Insert && ApplyPlanning.InKnowledge(tx, id))
             return new EntryResult.Deferred("the id now exists as a knowledge entry", Busy: false);
@@ -447,14 +468,17 @@ public sealed partial class GitSyncApplier
         // Pin review D4 and D3: the id's items are reconciled with the state the decision left (the stored entry, the row
         // and its post-decision base), then each NewPin or PinEdit request the decision carried writes its item by the
         // arrival rule. The plan is recomputed here and must match the one made before the transaction; pin-edit rule 4
-        // first applies the held content group to the entry (D5) with the vector computed before the transaction.
+        // first applies the held content group to the entry (D5) with the vector computed before the transaction. Conflict
+        // review D3: in the same step and the same plan, each Conflict request files its loser in the conflict item.
         var pinWrites = 0;
         var appliedColder = false;
-        if (pinItems.Count > 0 || PinPlanning.Requests(decision).Count > 0)
+        if (PinPlanning.HasWork(pinItems, conflictItem, decision))
         {
             Step(id, "pins");
             var rowAfter = next ?? row;
-            var pins = PinPlanning.Plan(pinItems, decision, stored, rowAfter, theirs is not null, Unopt(theirs?.Record.WrittenBy));
+            var pins = PinPlanning.Plan(
+                pinItems, conflictItem, decision, stored, rowAfter, theirs is not null, Unopt(theirs?.Record.WrittenBy), thisMachine,
+                heldAfter);
             if (!pins.Matches(pinPlan))
                 return new EntryResult.Deferred("the pin review changed since the decision was made", Busy: false);
             if (pins.ApplyBaseJson is { } applyBase)
@@ -468,17 +492,20 @@ public sealed partial class GitSyncApplier
                     return new EntryResult.Deferred("the pin review changed since the decision was made", Busy: false);
                 var applied = ApplyPlanning.ApplyBaseContent(tx, id, present, baseRecord, baseVector, _options.HotMaxContentChars);
                 appliedColder = !applied.Tier.Equals(present.Tier);
-                var rowApplied = ApplyPlanning.WithComparison(rowAfter, applied);
                 // As planRow does for a TakeTheirs the hot limit stored colder: a pending tier stamp that the stored tier
                 // no longer exceeds the base's for is dropped.
-                if (appliedColder && rowApplied.TierStamp is not null
-                    && SyncRecordModule.tierRank(applied.Tier) >= SyncRecordModule.tierRank(baseRecord.Placement.Tier))
-                    rowApplied = rowApplied with { TierStamp = null };
+                var rowApplied = ApplyPlanning.DropBeatenTierStamp(
+                    ApplyPlanning.WithComparison(rowAfter, applied), applied.Tier, baseRecord, appliedColder);
                 GitSyncRows.Write(conn, rowApplied, dbTx);
                 rowWritten = true;
             }
             PinPlanning.Write(conn, dbTx, id, pins.Writes, _nowMs());
             pinWrites = pins.Writes.Count;
+            if (pins.Conflict is { } conflictWrite)
+            {
+                ConflictItems.Write(conn, dbTx, id, conflictWrite, _nowMs());
+                pinWrites++;
+            }
         }
 
         // Milestone 1b-ii, D7 and D8: the close runs before the hold's upsert, so a decision with both leaves one open item.
@@ -562,10 +589,11 @@ public sealed partial class GitSyncApplier
                     Step(id, "close");
                     GitSyncReviews.DeleteHeld(tx.Connection, id, tx.Transaction);
                 }
-                // Pin review D4: a dropped row takes the id's pin items with it.
+                // Pin review D4: a dropped row takes the id's pin items with it, and its conflict item (conflict review D3).
                 Step(id, "pins");
                 foreach (var kind in PinPlanning.Kinds)
                     GitSyncReviews.DeletePinItem(tx.Connection, id, kind, tx.Transaction);
+                GitSyncReviews.DeleteConflictItem(tx.Connection, id, tx.Transaction);
                 phase = "issue";
                 Step(id, "issue");
                 GitSyncIssues.Delete(tx.Connection, id, GitSyncIssues.ApplyFailed, tx.Transaction);

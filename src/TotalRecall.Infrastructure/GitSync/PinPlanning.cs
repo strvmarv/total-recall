@@ -10,6 +10,8 @@ namespace TotalRecall.Infrastructure.GitSync;
 // as for any entry (a sticky record is inserted non-sticky, FS4, FS7 and NS3 leave the entry unpinned, FC2 and NC2 hold
 // the content); then, in the entry's transaction, each NewPin or PinEdit request the decision carried writes its item by
 // the arrival rule (SyncPin.arrival). Pure planning (Arrivals) and the writes (Write) are apart so a caller can plan first.
+// Conflict review (Part 4), D3: the same step plans the conflict item's one write (ConflictWrite): each Conflict request
+// files its loser by the shared arrival rule (ConflictItems), so the plan the transaction recomputes covers it too.
 
 /// <summary>What a pin item write does: remove the item, mark it <c>unseen</c> with a new hash, or write it <c>open</c>.</summary>
 internal enum PinWriteAction { Remove, MarkUnseen, Open }
@@ -22,20 +24,21 @@ internal sealed record PinWrite(string Kind, PinWriteAction Action, string? Hash
 
 /// <summary>
 /// What the pull does with an id's pin items (pin review D3 to D5): the item writes, reconcile first and arrivals last, in
-/// order, and the <c>base_json</c> whose content group is applied to the entry first (pin-edit rule 4, D5; null when none).
-/// Planned before the transaction on the expected post-decision state and again inside it on the stored one: the two must
-/// <see cref="Matches"/>, else the entry is deferred.
+/// order, and the <c>base_json</c> whose content group is applied to the entry first (pin-edit rule 4, D5; null when none);
+/// and the conflict item's one write (conflict review D3; null when none). Planned before the transaction on the expected
+/// post-decision state and again inside it on the stored one: the two must <see cref="Matches"/>, else the entry is deferred.
 /// </summary>
-internal sealed record PinPlan(IReadOnlyList<PinWrite> Writes, string? ApplyBaseJson)
+internal sealed record PinPlan(IReadOnlyList<PinWrite> Writes, string? ApplyBaseJson, ConflictWrite? Conflict = null)
 {
     public static readonly PinPlan Empty = new([], null);
 
     /// <summary>No item is written, updated or removed and no held edit is applied.</summary>
-    public bool IsEmpty => Writes.Count == 0 && ApplyBaseJson is null;
+    public bool IsEmpty => Writes.Count == 0 && ApplyBaseJson is null && Conflict is null;
 
-    /// <summary>The same writes in the same order and the same base (ordinal).</summary>
+    /// <summary>The same writes in the same order, the same base (ordinal) and the same conflict write (by value: payload and hash included).</summary>
     public bool Matches(PinPlan other) =>
-        Writes.SequenceEqual(other.Writes) && string.Equals(ApplyBaseJson, other.ApplyBaseJson, StringComparison.Ordinal);
+        Writes.SequenceEqual(other.Writes) && string.Equals(ApplyBaseJson, other.ApplyBaseJson, StringComparison.Ordinal)
+        && Equals(Conflict, other.Conflict);
 }
 
 /// <summary>The pin item writes of a carried-out decision (pin review D1 to D5).</summary>
@@ -61,7 +64,8 @@ internal static class PinPlanning
 
     /// <summary>
     /// The item kinds the decision's requests ask for, distinct, in the order the decision carries them: <c>new-pin</c>
-    /// for a <c>NewPin</c>, <c>pin-edit</c> for a <c>PinEdit</c>. A <c>Conflict</c> asks for none (the decision is postponed).
+    /// for a <c>NewPin</c>, <c>pin-edit</c> for a <c>PinEdit</c>. A <c>Conflict</c> asks for no pin item (see
+    /// <see cref="ConflictRequests"/>).
     /// </summary>
     internal static IReadOnlyList<string> Requests(SyncMerge.MergeDecision d)
     {
@@ -74,6 +78,24 @@ internal static class PinPlanning
         }
         return kinds;
     }
+
+    /// <summary>The losers of the decision's <c>Conflict</c> requests, in the order the decision carries them (conflict review D3).</summary>
+    internal static IReadOnlyList<SyncMerge.ConflictLoser> ConflictRequests(SyncMerge.MergeDecision d)
+    {
+        var losers = new List<SyncMerge.ConflictLoser>();
+        foreach (var request in d.Reviews)
+            if (request is SyncMerge.ReviewRequest.Conflict conflict)
+                losers.Add(conflict.Item);
+        return losers;
+    }
+
+    /// <summary>
+    /// Whether the item step has anything to look at for an id: a pin item (<paramref name="pins"/>), a conflict item
+    /// (<paramref name="conflict"/>), or a pin or conflict request of <paramref name="d"/>. The one gate of the plan before
+    /// the transaction, of <see cref="Plan"/> and of the step inside the transaction.
+    /// </summary>
+    internal static bool HasWork(IReadOnlyList<PinItem> pins, ConflictItem? conflict, SyncMerge.MergeDecision d) =>
+        pins.Count > 0 || conflict is not null || Requests(d).Count > 0 || ConflictRequests(d).Count > 0;
 
     /// <summary>
     /// The arrival rule (D3) for each <c>NewPin</c> or <c>PinEdit</c> request of <paramref name="d"/>, from the state after
@@ -126,15 +148,22 @@ internal static class PinPlanning
     /// <paramref name="rowAfter"/> (null: none) and its parsed base, and whether the record is present; then
     /// <see cref="Arrivals"/> over the items as the reconcile leaves them. An update to <c>unseen</c> carries
     /// <paramref name="machine"/>, the record's <c>WrittenBy</c>. Pin-edit rule 4 sets <see cref="PinPlan.ApplyBaseJson"/>
-    /// to the row's base and removes the item; the arrivals then see the entry with the base's content group. Throws
+    /// to the row's base and removes the item; the arrivals then see the entry with the base's content group. Then
+    /// (conflict review D3), over that same entry, each <c>Conflict</c> request files its loser
+    /// (<c>SyncConflict.loserOf</c> with <paramref name="thisMachine"/>, the machine of a loser with no stamp) into the id's
+    /// conflict item <paramref name="conflict"/> by <see cref="ConflictItems.Arrive"/>, and <see cref="PinPlan.Conflict"/>
+    /// is the one write that takes the item there (<see cref="ConflictItems.Diff"/>). Before those arrivals the item is
+    /// reconciled with the pull (conflict review D4, <see cref="ConflictItems.Reconcile"/>) over the same entry, the row's
+    /// state and <paramref name="heldAfter"/> (whether the id has a held deletion after the decision, computed once by the
+    /// caller with <c>SyncConflict.heldAfter</c>, the same value before and inside the transaction). Throws
     /// <see cref="InvalidOperationException"/> for a base that cannot be read, an unknown kind or state, or an arrival
-    /// input that is missing.
+    /// input that is missing (a conflict request with no entry included).
     /// </summary>
     public static PinPlan Plan(
-        IReadOnlyList<PinItem> items, SyncMerge.MergeDecision d, SyncMerge.LocalEntry? stored, GitSyncRow? rowAfter,
-        bool recordPresent, string? machine)
+        IReadOnlyList<PinItem> items, ConflictItem? conflict, SyncMerge.MergeDecision d, SyncMerge.LocalEntry? stored,
+        GitSyncRow? rowAfter, bool recordPresent, string? machine, string thisMachine, bool heldAfter)
     {
-        if (items.Count == 0 && Requests(d).Count == 0)
+        if (!HasWork(items, conflict, d))
             return PinPlan.Empty;
 
         SyncRecord? postBase = null;
@@ -190,7 +219,20 @@ internal static class PinPlanning
             : stored;
         writes.AddRange(Arrivals(
             d, kind => after.TryGetValue(kind, out var left) ? left : null, shown, postBase, machine));
-        return writes.Count == 0 && applyBase is null ? PinPlan.Empty : new PinPlan(writes, applyBase);
+
+        // Conflict review D4 then D3: the reconcile and the arrival of each loser, over the entry as the pin rules leave it,
+        // so the plan before the transaction and the one inside it read the same text.
+        var conflictState = ConflictItems.Reconcile(ConflictItems.Of(conflict), shown?.Content.Text, rowAfter?.State, heldAfter);
+        foreach (var loser in ConflictRequests(d))
+        {
+            var entry = shown ?? throw new InvalidOperationException("a conflict item needs the stored entry");
+            conflictState = ConflictItems.Arrive(conflictState, SyncConflict.loserOf(thisMachine, loser), entry.Content.Text);
+        }
+        var conflictWrite = ConflictItems.Diff(conflict, conflictState);
+
+        return writes.Count == 0 && applyBase is null && conflictWrite is null
+            ? PinPlan.Empty
+            : new PinPlan(writes, applyBase, conflictWrite);
     }
 
     /// <summary>

@@ -36,7 +36,9 @@ public sealed record NoteEntry(string Id, string Note);
 public sealed record RepushEntry(string Id, string Groups);
 
 /// <summary>
-/// What one pull did. <see cref="Complete"/> is true when every id of the set was processed and none was postponed or deferred.
+/// What one pull did. <see cref="Complete"/> is true when every id of the set was processed and none was deferred.
+/// <see cref="Postponed"/> is always empty: no decision is postponed any more (conflict review D3); it stays for the shape
+/// of the report.
 /// <see cref="Held"/> lists every held-delete item the pull wrote, the fallback holds of an unproven pull included: a
 /// deletion candidate whose entry is also in <see cref="Failed"/> or <see cref="Skipped"/> is held all the same, and one
 /// whose hold could not be written is in <see cref="Deferred"/> (milestone 1b-ii, D5).
@@ -84,8 +86,9 @@ public abstract record ApplyOutcome
 /// the limit carries none of them out and holds each with the cause <c>guard</c> (<see cref="ApplySummary.GuardTripped"/>),
 /// and the pull is still complete. A record whose stamp for a group is older than the base's (a reset reverted it) leaves
 /// the entry alone and marks the group in the row's <c>repush_groups</c> for the push (D16); a marked row is decided on every
-/// pull. Only a decision that carries a conflict is postponed (D19; pin review D3), and it changes nothing: a decision with
-/// a <c>NewPin</c> or <c>PinEdit</c> request is carried out and writes its pin item by the arrival rule. In an unproven pull a
+/// pull. No decision is postponed (D19; pin review D3; conflict review D3): a decision with a <c>NewPin</c> or <c>PinEdit</c>
+/// request is carried out and writes its pin item by the arrival rule, and a text conflict (FC4, FC5, NC4) applies or keeps
+/// the clock's winner and files the losing text as a <c>conflict</c> item in the same transaction. In an unproven pull a
 /// deletion candidate whose entry failed or was skipped is still held before <c>L</c> moves (D5). Nothing calls it yet.
 /// </summary>
 public sealed partial class GitSyncApplier

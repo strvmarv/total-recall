@@ -116,6 +116,12 @@ public sealed partial class GitSyncCycle
     internal Action<string, string?>? BeforeMetaWrite { get; set; }
 
     /// <summary>
+    /// Test seam: called with the applier the cycle builds for its apply, before it runs (a test sets the applier's own
+    /// seams here, such as <c>BeforeTransaction</c>, to defer one named id and so make the pull incomplete).
+    /// </summary>
+    internal Action<GitSyncApplier>? ConfigureApplier { get; set; }
+
+    /// <summary>
     /// Runs one cycle. Under the lock, in order: the identity check, the removal of stale lock files, the scan, the clone
     /// check, the fetch, the apply, the push gate and the push (decisions 3 to 6), then the recording (decision 10).
     /// </summary>

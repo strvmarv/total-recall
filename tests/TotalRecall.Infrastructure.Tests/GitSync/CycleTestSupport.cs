@@ -19,6 +19,9 @@ internal sealed partial class CycleRig : IDisposable
     public List<string> Steps { get; } = [];
     public DateTimeOffset Now { get; set; } = StartTime;
 
+    /// <summary>Passed to each cycle <see cref="Cycle"/> builds as its <c>ConfigureApplier</c> seam (null: none).</summary>
+    public Action<GitSyncApplier>? ConfigureApplier { get; set; }
+
     /// <param name="sharedRemote">The bare remote of another machine (see <see cref="TwoMachineRig"/>); none: this rig makes its own.</param>
     public CycleRig(BareRemote? sharedRemote = null) => Push = new PushRig(configuredRemote: true, sharedRemote);
 
@@ -30,6 +33,7 @@ internal sealed partial class CycleRig : IDisposable
         var cycle = new GitSyncCycle(
             Pull.Client, Pull.Guard, Pull.Store, Push.Embedder, Pull.Paths, settings ?? Settings(), () => Now, () => Push.Now);
         cycle.OnStep = Steps.Add;
+        cycle.ConfigureApplier = ConfigureApplier;
         return cycle;
     }
 

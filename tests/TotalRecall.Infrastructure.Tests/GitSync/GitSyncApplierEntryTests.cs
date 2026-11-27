@@ -135,15 +135,20 @@ public sealed class GitSyncApplierEntryTests : IDisposable
     }
 
     [Fact]
-    public void ANoBaseFirstSync_WithDifferingText_IsPostponedAsAReview_AndNothingChanges()
+    public void ANoBaseFirstSync_WithDifferingText_TakesTheRecord_AndFilesTheLocalText()
     {
         _rig.Scan.AddMemory(Tier.Warm, Id, content: "Local text.");
-        var before = _rig.Full();
 
         var result = _rig.Apply(ApplyRig.Rec(Id, content: "Their text.", minute: 11));
 
-        Assert.Equal("review", Is<EntryResult.Postponed>(result).Reason);
-        Assert.Equal(before, _rig.Full());
+        // conflict review D3: NC4 is carried out; the local text is kept as the conflict item's loser
+        Assert.Equal(CarriedKind.Updated, Is<EntryResult.Carried>(result).Kind);
+        Assert.Equal("Their text.", _rig.Entry(Id)!.Row.Content);
+        Assert.NotNull(_rig.Scan.Rows()[Id].BaseJson);
+        var item = GitSyncReviews.ReadConflictItem(_rig.Scan.Connection, Id)!;
+        Assert.Equal("open", item.State);
+        Assert.Equal(["Local text."], GitSyncReviews.ReadConflictLosers(item.PayloadJson).Select(l => l.Text).ToArray());
+        AssertScanQuiet();
     }
 
     [Fact]
@@ -456,19 +461,7 @@ public sealed class GitSyncApplierEntryTests : IDisposable
         Assert.Equal(1, _rig.Applier.TransactionCount);
     }
 
-    // ---- postponed ----
-
-    private void AssertPostponed(string reason, Func<EntryResult> act)
-    {
-        var before = _rig.Full();
-        var calls = _rig.Embedder.Calls;
-
-        var result = act();
-
-        Assert.Equal(reason, Is<EntryResult.Postponed>(result).Reason);
-        Assert.Equal(before, _rig.Full());
-        Assert.Equal(calls, _rig.Embedder.Calls);
-    }
+    // ---- formerly postponed, now carried out ----
 
     [Fact]
     public void ANewPin_IsInsertedNonSticky_WithAnOpenNewPinItem()
@@ -505,14 +498,22 @@ public sealed class GitSyncApplierEntryTests : IDisposable
     }
 
     [Fact]
-    public void APostponedTextConflict_ChangesNothing()
+    public void AnFC5Conflict_TakesTheRecord_AndFilesTheLocalEdit()
     {
         _rig.Now = 1_780_000_000_000L;
         _rig.Apply(ApplyRig.Rec(Id, minute: 10));
         _rig.Scan.Store.Update(Tier.Warm, ContentType.Memory, Id, new TotalRecall.Infrastructure.Storage.UpdateEntryOpts { Content = "Local edit." });
         _rig.RunScan();
 
-        AssertPostponed("review", () => _rig.Apply(ApplyRig.Rec(Id, content: "Their edit.", minute: 20)));
+        var result = _rig.Apply(ApplyRig.Rec(Id, content: "Their edit.", minute: 20));
+
+        // conflict review D3: the record's newer text is applied, the pending stamp cleared and the local edit filed
+        Assert.Equal(CarriedKind.Updated, Is<EntryResult.Carried>(result).Kind);
+        Assert.Equal("Their edit.", _rig.Entry(Id)!.Row.Content);
+        Assert.Null(Row().ContentStamp);
+        var item = GitSyncReviews.ReadConflictItem(_rig.Scan.Connection, Id)!;
+        Assert.Equal(["Local edit."], GitSyncReviews.ReadConflictLosers(item.PayloadJson).Select(l => l.Text).ToArray());
+        AssertScanQuiet();
     }
 
     // ---- remote deletions (milestone 1b-ii, D6 to D12) ----

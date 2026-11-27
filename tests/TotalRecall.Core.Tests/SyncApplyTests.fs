@@ -58,72 +58,6 @@ let private fields (text: string) : ContentFields =
 let private local (text: string) (tier: Tier) (sticky: bool) : LocalEntry =
     { LocalEntry.Content = fields text; Tags = []; Tier = tier; Sticky = sticky }
 
-let private isNone (r: PostponeReason option) = r.IsNone
-
-// ---- postponement ----
-
-[<Tests>]
-let postponementTests =
-    testList "SyncApply.postponement (decision 8; milestone 1b-ii D19)" [
-        testCase "PushDeletion and a local-deletion hold are carried out, also when they close an item" <| fun () ->
-            for e in [ PushDeletion; HoldDeletion LocalDeletion ] do
-                Expect.isNone (postponement { plain with Entry = e }) (sprintf "%A" e)
-                Expect.isNone (postponement { plain with Entry = e; CloseHeldDelete = true }) (sprintf "%A closing" e)
-
-        testCase "DeleteEntry, a remote-deletion hold, a note, FreshContentStamp, CloseHeldDelete and a forgotten row state are carried out" <| fun () ->
-            Expect.isNone (postponement { plain with Entry = DeleteEntry; RowState = Some Forgotten; Notes = [ PendingChangesDropped ] }) "delete"
-            Expect.isNone (postponement { plain with Entry = HoldDeletion RemoteDeletion }) "remote hold"
-            Expect.isNone (postponement { plain with Notes = [ EditBeatsDeletion ] }) "note"
-            Expect.isNone (postponement { plain with Notes = [ PendingChangesDropped ] }) "note 2"
-            Expect.isNone (postponement { plain with Entry = LeaveEntry; FreshContentStamp = true }) "fresh stamp"
-            Expect.isNone (postponement { plain with CloseHeldDelete = true }) "close"
-            Expect.isNone (postponement { plain with RowState = Some Forgotten }) "forgotten"
-            Expect.isNone (postponement { plain with Entry = InsertFromRecord; Notes = [ EditBeatsDeletion ]; CloseHeldDelete = true }) "a reinsert that closes"
-
-        testCase "a pin request is carried out (pin review D3); a conflict, alone or with a NewPin, is review" <| fun () ->
-            Expect.isNone (postponement { plain with Reviews = [ NewPin ] }) "new pin"
-            Expect.isNone (postponement { plain with Reviews = [ PinEdit ] }) "pin edit"
-            Expect.isNone (postponement { plain with Reviews = [ NewPin; PinEdit ] }) "new pin and pin edit"
-            Expect.isNone (postponement { plain with Entry = InsertFromRecord; Reviews = [ NewPin ] }) "insert of a pin"
-            let conflict = Conflict { Side = Side.Local; Text = "x"; Stamp = None }
-            Expect.equal (postponement { plain with Reviews = [ conflict ] }) (Some Review) "conflict"
-            Expect.equal (postponement { plain with Reviews = [ NewPin; conflict ] }) (Some Review) "new pin with a conflict"
-            Expect.equal (postponement { plain with Reviews = [ conflict; PinEdit ] }) (Some Review) "pin edit with a conflict"
-
-        testCase "postponement_is_conflict_only" <| fun () ->
-            let conflict = Conflict { Side = Side.Remote; Text = "y"; Stamp = None }
-            for flags in [ { noRepush with Content = true }
-                           { noRepush with Sticky = true }
-                           { noRepush with Tier = true }
-                           { GroupFlags.Content = true; Sticky = true; Tier = true } ] do
-                let repush = mergeWith (fun m -> { m with Repush = flags })
-                Expect.isNone (postponement repush) (sprintf "a repush flag is carried out: %A" flags)
-                Expect.isNone (postponement { repush with Reviews = [ NewPin ] }) (sprintf "a new pin with %A" flags)
-                Expect.equal (postponement { repush with Reviews = [ conflict ] }) (Some Review) (sprintf "a conflict with %A" flags)
-            Expect.equal (postponement { plain with Entry = PushDeletion; Reviews = [ conflict ] }) (Some Review) "a conflict on any outcome"
-            Expect.equal (postponement { plain with Reviews = [ conflict ]; Notes = [ EditBeatsDeletion ] }) (Some Review) "a note does not change it"
-            Expect.isNone (postponement { plain with Reviews = [ PinEdit ]; Notes = [ EditBeatsDeletion ] }) "a pin edit with a note is carried out"
-
-        testCase "Defer, Ignore, DropRow, LeaveEntry, an insert and a plain merge are carried out" <| fun () ->
-            for e in [ Defer; Ignore; DropRow; LeaveEntry; InsertFromRecord ] do
-                Expect.isTrue (isNone (postponement { plain with Entry = e })) (sprintf "%A" e)
-            let m =
-                mergeWith (fun m ->
-                    { m with
-                        Content = (TakeTheirs, ClearPending)
-                        Tags = { tagsOutcome with ApplyLocal = true; Result = [ "x" ] }
-                        Sticky = (UnpinLocally, ClearPending)
-                        Tier = (Some Hot, ClearPending) })
-            Expect.isTrue (isNone (postponement m)) "content, tags, unpin and promotion"
-    ]
-
-[<Tests>]
-let reasonNameTests =
-    testList "SyncApply.reasonName" [
-        testCase "the word is review" <| fun () ->
-            Expect.equal (reasonName Review) "review" "word"
-    ]
-
 // ---- pushing_stamps ----
 
 let private text (s: Stamp) = Stamp.format s
@@ -358,19 +292,11 @@ let totalityTests =
     testList "SyncApply is total" [
         testPropertyWithConfig
             { FsCheckConfig.defaultConfig with maxTest = 2000 }
-            "postponement and demotesToWarm never throw over generated decisions"
+            "demotesToWarm never throws over generated decisions"
             (Prop.forAll (Arb.fromGen genDecision) (fun d ->
-                postponement d |> ignore
                 demotesToWarm 10 d (record long Hot false) (Some(local "short" Warm false)) |> ignore
                 demotesToWarm 10 d (record long Hot false) None |> ignore
                 true))
-
-        testPropertyWithConfig
-            { FsCheckConfig.defaultConfig with maxTest = 2000 }
-            "only a conflict postpones"
-            (Prop.forAll (Arb.fromGen genDecision) (fun d ->
-                let hasConflict = d.Reviews |> List.exists (function Conflict _ -> true | _ -> false)
-                postponement d = (if hasConflict then Some Review else None)))
 
         testPropertyWithConfig
             { FsCheckConfig.defaultConfig with maxTest = 2000 }

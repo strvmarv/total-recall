@@ -136,16 +136,22 @@ public sealed class GitSyncCyclePullTests : IDisposable
     {
         _rig.Push.Seed(Rec(A, "Use bun."), Rec(B, "Use pnpm."));
         Done(await _rig.Run());
-        // a local memory and a record of the same id with other text and no base: a conflict (NC4) postpones it
-        _rig.Push.AddMemory(Tier.Warm, C, "My own text.");
+        // a new record whose id gets a local memory just before its transaction: the re-read defers it (conflict review D8:
+        // a conflict no longer makes the pull incomplete)
         _rig.AddRecordOnRemote(Rec(C, "Their text."));
+        _rig.ConfigureApplier = a => a.BeforeTransaction = id =>
+        {
+            if (id == C)
+                _rig.Push.AddMemory(Tier.Warm, C, "My own text.");
+        };
         _rig.Pull.Store.DeleteMeta(SyncIdentity.MetaKeys.LastOk);
         _rig.Now += TimeSpan.FromMinutes(1);
 
         var summary = Done(await _rig.Run());
 
         Assert.False(summary.Apply!.Complete);
-        Assert.NotEmpty(summary.Apply.Postponed);
+        Assert.Empty(summary.Apply.Postponed);
+        Assert.Equal(C, Assert.Single(summary.Apply.Deferred).Id);
         Assert.Equal("pull-incomplete", summary.PushSkipped);
         Assert.Null(summary.Push);
         Assert.Equal("My own text.", _rig.Pull.Store.Get(Tier.Warm, ContentType.Memory, C)!.Content);

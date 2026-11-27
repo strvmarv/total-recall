@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using Microsoft.FSharp.Collections;
 using Microsoft.FSharp.Core;
 using TotalRecall.Core;
 using TotalRecall.Infrastructure.Memory;
@@ -17,7 +18,7 @@ namespace TotalRecall.Infrastructure.GitSync;
 
 /// <summary>
 /// One review item as the list shows it (D7 of the held deletions, D8 of pin review). <paramref name="Kind"/> is
-/// <c>held-delete</c>, <c>new-pin</c> or <c>pin-edit</c>. A held deletion: the state (<c>open</c> or <c>approved</c>), the
+/// <c>held-delete</c>, <c>new-pin</c>, <c>pin-edit</c> or <c>conflict</c>. A held deletion: the state (<c>open</c> or <c>approved</c>), the
 /// direction (<c>remote</c>: removed in the repository, kept here; <c>local</c>: deleted here, kept in the repository), the
 /// cause, the shown hash (null for a remote hold), when it arrived (milliseconds), the memory's text as shown (null when it
 /// cannot be read), whether the text was cut at the cap, and the text's source (<c>local entry</c> or
@@ -25,7 +26,10 @@ namespace TotalRecall.Infrastructure.GitSync;
 /// <paramref name="CurrentText"/> are null. A pin item: the state (<c>open</c> or <c>unseen</c>), no direction or cause,
 /// the shown hash computed live (null when what it shows cannot be read), the record's machine, the project and scope of
 /// what it shows (each through <see cref="ReviewService.ShownField"/>), the text (a <c>new-pin</c>: the local entry's; a
-/// <c>pin-edit</c>: the held text of the row's base, with <paramref name="CurrentText"/> the text pinned here).
+/// <c>pin-edit</c>: the held text of the row's base, with <paramref name="CurrentText"/> the text pinned here). A
+/// <c>conflict</c> item (conflict review D7): the state (<c>open</c> or <c>unseen</c>), the live shown hash, the item's
+/// machine, the applied text (the local entry's), and <paramref name="Losers"/>, the kept alternatives newest first; every
+/// other kind has <see cref="NoLosers"/>.
 /// </summary>
 public sealed record ReviewItem(
     string Kind,
@@ -42,7 +46,19 @@ public sealed record ReviewItem(
     bool TextCut,
     string TextSource,
     string? CurrentText,
-    bool CurrentTextCut);
+    bool CurrentTextCut,
+    IReadOnlyList<ConflictLoser> Losers)
+{
+    /// <summary>The <see cref="Losers"/> of every kind but <c>conflict</c>: one shared empty list, so items compare by value.</summary>
+    public static readonly IReadOnlyList<ConflictLoser> NoLosers = Array.Empty<ConflictLoser>();
+}
+
+/// <summary>
+/// One kept alternative of a <c>conflict</c> item as the list shows it (conflict review D7): its side (<c>local</c> or
+/// <c>remote</c>), the machine and stamp text through <see cref="ReviewService.ShownField"/> (null when the item stores
+/// none), and the text through <see cref="ReviewService.ShownText"/> at the pinned cap, with whether it was cut.
+/// </summary>
+public sealed record ConflictLoser(string Side, string? Machine, string? Stamp, string? Text, bool TextCut);
 
 /// <summary>The review items by id, then kind, or why the database could not be read (<see cref="Failed"/>; then no items).</summary>
 public sealed record ReviewListing(IReadOnlyList<ReviewItem> Items, string? Failed);
@@ -52,17 +68,20 @@ public sealed partial class ReviewService
     private const string LocalEntrySource = "local entry";
     private const string RepositoryRecordSource = "repository record";
     private const string HeldDeleteKind = "held-delete";
+    private const string ConflictKind = "conflict";
+    private const string HeldDeletionSource = "held deletion";
 
     /// <summary>The cap of a shown machine, project or scope (D8).</summary>
     private const int ShownFieldCap = 200;
 
     /// <summary>
-    /// The open and approved held-delete items and the open and unseen pin items, ordinal by id, then kind (D1, D7; pin
-    /// review D8). Opens the database with
+    /// The open and approved held-delete items and the open and unseen pin and conflict items, ordinal by id, then kind (D1,
+    /// D7; pin review D8; conflict review D7). Opens the database with
     /// <see cref="ReadOnlyDatabase.Open"/>: no file or no <c>git_sync_review</c> table is an empty list; a load error, a
     /// database that cannot be opened (a pending write-ahead log included) or a read error is <see cref="ReviewListing.Failed"/>.
     /// The text of a remote hold is the local entry's, that of a local hold the row's base; it is null when the entry or the
-    /// base cannot be read, and the item is listed all the same. A pin item is shown by <see cref="PinListItem"/>.
+    /// base cannot be read, and the item is listed all the same. A pin item is shown by <see cref="PinListItem"/>, a conflict
+    /// item by <see cref="ConflictListItem"/>.
     /// </summary>
     public ReviewListing List()
     {
@@ -90,12 +109,17 @@ public sealed partial class ReviewService
                 var (shown, cut) = text is null ? (null, false) : ShownText(text, env.PinnedMaxContentChars);
                 items.Add(new ReviewItem(
                     HeldDeleteKind, item.EntryId, item.State, item.Direction, item.Cause, remote ? null : item.RecordHash, item.ArrivedAt,
-                    null, null, null, shown, cut, remote ? LocalEntrySource : RepositoryRecordSource, null, false));
+                    null, null, null, shown, cut, remote ? LocalEntrySource : RepositoryRecordSource, null, false, ReviewItem.NoLosers));
             }
             foreach (var pin in GitSyncReviews.ReadPinItems(connection))
             {
                 if (pin.State is "open" or "unseen")
                     items.Add(PinListItem(store, connection, pin));
+            }
+            foreach (var conflict in GitSyncReviews.ReadConflictItems(connection))
+            {
+                if (conflict.State is "open" or "unseen")
+                    items.Add(ConflictListItem(store, connection, conflict));
             }
             items.Sort((a, b) =>
             {
@@ -181,8 +205,51 @@ public sealed partial class ReviewService
         var (shown, cut) = text is null ? (null, false) : ShownText(text, cap);
         return new ReviewItem(
             pin.Kind, pin.EntryId, pin.State, null, null, hash, pin.ArrivedAt,
-            ShownField(pin.Machine), ShownField(project), ShownField(scope), shown, cut, source, current, currentCut);
+            ShownField(pin.Machine), ShownField(project), ShownField(scope), shown, cut, source, current, currentCut, ReviewItem.NoLosers);
     }
+
+    /// <summary>
+    /// A conflict item as the list shows it (conflict review D7): the applied text is the local entry's (source
+    /// <c>local entry</c>, <see cref="ShownText"/> at the pinned cap); with the entry absent while a held deletion of the id is
+    /// open or approved the text is null and the source <c>held deletion</c>; an entry absent otherwise, in two tiers or
+    /// unreadable has a null text. The shown hash is <see cref="SyncConflict.shownHash"/> of the raw entry text (none when the
+    /// entry is absent) and the payload's loser texts, null when the entry cannot be read. The losers are newest first; the
+    /// item's machine and each loser's machine and stamp go through <see cref="ShownField"/>, an empty one being null.
+    /// </summary>
+    private ReviewItem ConflictListItem(SqliteStore store, MsSqliteConnection connection, ConflictItem item)
+    {
+        var cap = env.PinnedMaxContentChars;
+        var losers = GitSyncReviews.ReadConflictLosers(item.PayloadJson);
+        var texts = ListModule.OfSeq(losers.Select(l => l.Text));
+        var read = LocalEntryReader.Read(
+            t => store.Get(t, ContentType.Memory, item.EntryId), () => store.IsSticky(ContentType.Memory, item.EntryId));
+        string? text = null;
+        var cut = false;
+        string? hash = null;
+        var source = LocalEntrySource;
+        if (read is LocalRead.Present present)
+        {
+            (text, cut) = ShownText(present.View.Content.Text, cap);
+            hash = SyncConflict.shownHash(FSharpOption<string>.Some(present.View.Content.Text), texts);
+        }
+        else if (read is LocalRead.Absent)
+        {
+            hash = SyncConflict.shownHash(FSharpOption<string>.None, texts);
+            if (GitSyncReviews.ReadHeldItem(connection, item.EntryId) is { State: "open" or "approved" })
+                source = HeldDeletionSource;
+        }
+        var shownLosers = losers.Reverse().Select(l =>
+        {
+            var (loserText, loserCut) = ShownText(l.Text, cap);
+            return new ConflictLoser(
+                SyncConflict.sideName(l.Side), ShownField(NullIfEmpty(l.Machine)), ShownField(NullIfEmpty(l.Stamp)), loserText, loserCut);
+        }).ToList();
+        return new ReviewItem(
+            ConflictKind, item.EntryId, item.State, null, null, hash, item.ArrivedAt, ShownField(NullIfEmpty(item.Machine)), null, null,
+            text, cut, source, null, false, shownLosers);
+    }
+
+    private static string? NullIfEmpty(string value) => value.Length == 0 ? null : value;
 
     private static string? OptText(FSharpOption<string>? option) => option is null ? null : option.Value;
 

@@ -274,7 +274,7 @@ public sealed class ReviewServiceRestoreTests : IDisposable
         // An unproven pull decides every accepted record, the restored id included.
         var result = _rig.Apply(pinned, proven: false, blobSha: Sha);
 
-        Assert.IsNotType<EntryResult.Postponed>(result);
+        Assert.IsType<EntryResult.NoOp>(result);
         Assert.False(IsSticky(Id));
         Assert.Equal(entry, _rig.Entry(Id));
         Assert.Equal(newPin, NewPinRows(Id));

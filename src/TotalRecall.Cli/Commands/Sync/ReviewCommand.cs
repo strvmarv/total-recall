@@ -1,9 +1,10 @@
-// Git sync, milestone 1b-iii parts 2 and 3 (held deletions and pin review), D7 and D8: the hidden `sync review` verbs, a
-// thin command over the review service. `list` prints every item (a held deletion, a new pin, a held pin edit) with its
-// kind and the memory's text as data between fixed delimiter lines, every text line behind `| ` so no line of it can end
-// the block; `accept` and `restore` answer the held deletion of an id, `approve` and `decline` its pin item (they need the
-// shown hash); the bulk forms loop over the held deletions only and run only on an interactive terminal. Results and
-// refusals follow SyncCommandBase.Print (exit 0 or 1); a usage error exits 2.
+// Git sync, milestone 1b-iii parts 2 to 4 (held deletions, pin review and conflict review), D7 and D8: the hidden
+// `sync review` verbs, a thin command over the review service. `list` prints every item (a held deletion, a new pin, a held
+// pin edit, a conflict) with its kind and the memory's text as data between fixed delimiter lines, every text line behind
+// `| ` so no line of it can end the block; `accept` and `restore` answer the held deletion of an id, `approve` and
+// `decline` its pin item, `keep`, `swap` and `merge` its conflict item (these need the shown hash); the bulk forms loop
+// over the held deletions only and run only on an interactive terminal. Results and refusals follow SyncCommandBase.Print
+// (exit 0 or 1); a usage error exits 2.
 
 using System;
 using System.Collections.Generic;
@@ -18,15 +19,21 @@ namespace TotalRecall.Cli.Commands.Sync;
 
 /// <summary>
 /// <c>total-recall sync review list | accept &lt;id&gt; [--shown &lt;hash&gt;] | restore &lt;id&gt; [--shown &lt;hash&gt;] |
-/// approve &lt;id&gt; --shown &lt;hash&gt; | decline &lt;id&gt; --shown &lt;hash&gt; | accept-deletions --all |
-/// restore-deletions --all</c> (hidden; spec decisions D7 and D8): lists and answers the held deletions and the pin
-/// review items of git sync.
+/// approve &lt;id&gt; --shown &lt;hash&gt; | decline &lt;id&gt; --shown &lt;hash&gt; | keep &lt;id&gt; --shown &lt;hash&gt; |
+/// swap &lt;id&gt; --shown &lt;hash&gt; [--loser &lt;n&gt;] | merge &lt;id&gt; --shown &lt;hash&gt; --text-file &lt;path|-&gt; |
+/// accept-deletions --all | restore-deletions --all</c> (hidden; spec decisions D7 and D8): lists and answers the held
+/// deletions, the pin review items and the conflict items of git sync.
 /// </summary>
 public sealed class ReviewCommand : ICliCommand
 {
     private const string Usage =
         "Usage: total-recall sync review list | accept <id> [--shown <hash>] | restore <id> [--shown <hash>] | "
-        + "approve <id> --shown <hash> | decline <id> --shown <hash> | accept-deletions --all | restore-deletions --all";
+        + "approve <id> --shown <hash> | decline <id> --shown <hash> | "
+        + "keep <id> --shown <hash> | swap <id> --shown <hash> [--loser <n>] | merge <id> --shown <hash> --text-file <path|-> | "
+        + "accept-deletions --all | restore-deletions --all";
+
+    /// <summary>The most bytes <c>merge --text-file</c> reads (the service's own cap on a merged text).</summary>
+    private const int MaxTextFileBytes = 262144;
 
     private const string NeedsATerminal =
         "needs-a-terminal: the bulk forms answer every item and run only when standard input and standard output are a "
@@ -35,6 +42,7 @@ public sealed class ReviewCommand : ICliCommand
     private const string EndDelimiter = "----- end of memory text -----";
 
     private readonly Func<bool> _isTerminal;
+    private readonly Func<Stream> _openStandardInput;
 
     /// <summary>The production command: the bulk forms run only when neither standard input nor standard output is redirected.</summary>
     public ReviewCommand()
@@ -44,16 +52,26 @@ public sealed class ReviewCommand : ICliCommand
 
     /// <summary>The command with the terminal test of the bulk forms injected (a test cannot fake a redirected console).</summary>
     public ReviewCommand(Func<bool> isTerminal)
+        : this(isTerminal, Console.OpenStandardInput)
+    {
+    }
+
+    /// <summary>The command with the terminal test and the standard input stream (<c>merge --text-file -</c>) injected.</summary>
+    public ReviewCommand(Func<bool> isTerminal, Func<Stream> openStandardInput)
     {
         ArgumentNullException.ThrowIfNull(isTerminal);
+        ArgumentNullException.ThrowIfNull(openStandardInput);
         _isTerminal = isTerminal;
+        _openStandardInput = openStandardInput;
     }
 
     public string Name => "review";
     public string? Group => "sync";
     public string Description =>
         "Answer what git sync holds back for review: sync review list | accept <id> | restore <id> | "
-        + "approve <id> --shown <hash> | decline <id> --shown <hash> | accept-deletions --all | restore-deletions --all";
+        + "approve <id> --shown <hash> | decline <id> --shown <hash> | keep <id> --shown <hash> | "
+        + "swap <id> --shown <hash> [--loser <n>] | merge <id> --shown <hash> --text-file <path|-> | "
+        + "accept-deletions --all | restore-deletions --all";
 
     // Hidden until milestone 1b-iii advertises the feature.
     public bool Hidden => true;
@@ -92,6 +110,16 @@ public sealed class ReviewCommand : ICliCommand
                 if (shown is null)
                     return UsageError("--shown is required");
                 return await RunWithServiceAsync(service => AnswerPinAsync(service, approve, id, shown)).ConfigureAwait(false);
+            }
+
+            case "keep":
+            case "swap":
+            case "merge":
+            {
+                var parsed = ParseConflict(args[0], rest);
+                if (parsed is null)
+                    return 2;
+                return await RunWithServiceAsync(service => AnswerConflictAsync(service, args[0], parsed)).ConfigureAwait(false);
             }
 
             case "accept-deletions":
@@ -158,6 +186,12 @@ public sealed class ReviewCommand : ICliCommand
     /// </summary>
     private static IEnumerable<string> ItemLines(ReviewItem item)
     {
+        if (item.Kind == "conflict")
+        {
+            foreach (var line in ConflictLines(item))
+                yield return line;
+            yield break;
+        }
         if (item.Kind == "held-delete")
         {
             var where = item.Direction == "remote" ? "removed in the repository, kept here" : "deleted here, kept in the repository";
@@ -173,6 +207,34 @@ public sealed class ReviewCommand : ICliCommand
         if (item.Kind == "pin-edit")
         {
             foreach (var line in TextBlock("local entry", item.CurrentText, item.CurrentTextCut))
+                yield return line;
+        }
+    }
+
+    /// <summary>
+    /// A conflict item (conflict review D7): the header (no machine: each loser names its own), the applied text block, or the
+    /// line <c>entry deleted here, deletion held</c> when the entry is absent under a held deletion, then per kept alternative,
+    /// newest first and numbered from 1, a line with its side, machine and stamp (<c>-</c> for none) and its text block. The
+    /// machine and stamp are already one sanitised line; the texts follow the rules of <see cref="TextBlock"/>.
+    /// </summary>
+    private static IEnumerable<string> ConflictLines(ReviewItem item)
+    {
+        yield return $"{item.EntryId}  {item.Kind}  {item.State}  arrived {ArrivedText(item.ArrivedAt)}  shown {item.ShownHash ?? "-"}";
+        if (item.TextSource == "held deletion")
+        {
+            yield return "entry deleted here, deletion held";
+        }
+        else
+        {
+            foreach (var line in TextBlock(item.TextSource, item.Text, item.TextCut))
+                yield return line;
+        }
+        for (var i = 0; i < item.Losers.Count; i++)
+        {
+            var loser = item.Losers[i];
+            var n = i + 1;
+            yield return $"loser {n}  {loser.Side}  machine {loser.Machine ?? "-"}  stamp {loser.Stamp ?? "-"}";
+            foreach (var line in TextBlock($"loser {n}", loser.Text, loser.TextCut))
                 yield return line;
         }
     }
@@ -280,7 +342,7 @@ public sealed class ReviewCommand : ICliCommand
         var listing = service.List();
         if (listing.Failed is not null)
             return PrintFailed(listing.Failed);
-        var items = listing.Items.Where(item => item.EntryId == id && item.Kind != "held-delete").ToList();
+        var items = listing.Items.Where(item => item.EntryId == id && item.Kind is "new-pin" or "pin-edit").ToList();
         if (items.Count == 0)
             return PrintRefused(SyncSetup.Refusal.NoPinItem, ReviewService.NoPinItemText);
         if (items.Count > 1)
@@ -294,6 +356,143 @@ public sealed class ReviewCommand : ICliCommand
             ? await service.ApproveAsync(id, item.Kind, hash).ConfigureAwait(false)
             : await service.DeclineAsync(id, item.Kind, hash).ConfigureAwait(false);
         SyncCommandBase.Print(warn ? result with { Lines = result.Lines.Where(line => line != ReviewService.RevertWarning).ToList() } : result);
+        return result.ExitCode;
+    }
+
+    // ---- conflict verbs -------------------------------------------------------------------------------------------
+
+    /// <summary>The arguments of <c>keep</c>, <c>swap</c> or <c>merge</c>: the id, the hash as given (lower case), the loser number of a swap and the text of a merge.</summary>
+    private sealed record ConflictArgs(string Id, string Shown, int? Loser, string? Text);
+
+    /// <summary>
+    /// Reads <c>&lt;id&gt; --shown &lt;hash&gt; [--loser &lt;n&gt;] [--text-file &lt;path|-&gt;]</c> for <paramref name="verb"/> (D7):
+    /// <c>--shown</c> is required (at least 8 hex digits), <c>--loser</c> (a positive integer) only for <c>swap</c>,
+    /// <c>--text-file</c> only, and always, for <c>merge</c>; a text file that cannot be read whole, as UTF-8, within the cap is
+    /// a usage error, so nothing is changed. Null (after printing usage) on any of these, an unknown option or an extra argument.
+    /// </summary>
+    private ConflictArgs? ParseConflict(string verb, string[] args)
+    {
+        string? id = null;
+        string? shown = null;
+        string? loserText = null;
+        string? file = null;
+        for (var i = 0; i < args.Length; i++)
+        {
+            var a = args[i];
+            if (a is "--shown" or "--loser" or "--text-file")
+            {
+                var allowed = a == "--shown" || (a == "--loser" && verb == "swap") || (a == "--text-file" && verb == "merge");
+                if (!allowed) { UsageError($"{a} is not an option of {verb}"); return null; }
+                var seen = a == "--shown" ? shown : a == "--loser" ? loserText : file;
+                if (i + 1 >= args.Length || seen is not null) { UsageError($"{a} needs one value"); return null; }
+                var value = args[++i];
+                if (a == "--shown") shown = value.ToLowerInvariant();
+                else if (a == "--loser") loserText = value;
+                else file = value;
+            }
+            else if (a.StartsWith('-') && a.Length > 1)
+            {
+                var eq = a.IndexOf('=');
+                UsageError($"unknown option '{(eq > 0 ? a[..eq] : a)}'");
+                return null;
+            }
+            else if (id is null)
+            {
+                id = a;
+            }
+            else
+            {
+                // never echo the value: it may be something pasted by mistake
+                UsageError("unexpected extra argument");
+                return null;
+            }
+        }
+        if (id is null) { UsageError("a memory id is required"); return null; }
+        if (shown is null) { UsageError("--shown is required"); return null; }
+        if (!IsHexHash(shown)) { UsageError("--shown needs a hash of at least 8 hex digits"); return null; }
+        int? loser = null;
+        if (loserText is not null)
+        {
+            if (!int.TryParse(loserText, NumberStyles.None, CultureInfo.InvariantCulture, out var n) || n < 1)
+            {
+                UsageError("--loser needs a positive whole number");
+                return null;
+            }
+            loser = n;
+        }
+        string? text = null;
+        if (verb == "merge")
+        {
+            if (file is null) { UsageError("--text-file is required"); return null; }
+            text = ReadTextFile(file);
+            if (text is null) return null;
+        }
+        return new ConflictArgs(id, shown, loser, text);
+    }
+
+    /// <summary>
+    /// The text of <c>--text-file</c>: the file, or the injected standard input for <c>-</c>, read as strict UTF-8 (a leading
+    /// byte order mark dropped) up to <see cref="MaxTextFileBytes"/> bytes. Null after a usage error when it cannot be read, is
+    /// not valid UTF-8 or is larger (neither the path nor the content is echoed). The text is passed exactly as read, with no
+    /// trimming, so <c>echo text | ... --text-file -</c> stores the text with its trailing newline.
+    /// </summary>
+    private string? ReadTextFile(string file)
+    {
+        try
+        {
+            using var stream = file == "-"
+                ? _openStandardInput()
+                : new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            var buffer = new MemoryStream();
+            var chunk = new byte[8192];
+            int read;
+            while ((read = stream.Read(chunk, 0, Math.Min(chunk.Length, MaxTextFileBytes + 1 - (int)buffer.Length))) > 0)
+            {
+                buffer.Write(chunk, 0, read);
+                if (buffer.Length > MaxTextFileBytes)
+                {
+                    UsageError($"--text-file is larger than {MaxTextFileBytes} bytes");
+                    return null;
+                }
+            }
+            var text = new System.Text.UTF8Encoding(false, true).GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
+            return text.Length > 0 && text[0] == '\uFEFF' ? text[1..] : text;
+        }
+        catch (System.Text.DecoderFallbackException)
+        {
+            UsageError("--text-file is not valid UTF-8");
+            return null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException
+            or System.Security.SecurityException)
+        {
+            UsageError("--text-file cannot be read");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// <c>keep</c>, <c>swap</c> or <c>merge</c> (D7): the conflict item of the id from the listing, which is the whole check of
+    /// the verb's kind. None is <c>no-conflict-item</c>, a listing that failed is <c>failed</c> (the service is not called
+    /// in either case). The hash passed is the item's full hash when the given one prefixes it, else the given one (the
+    /// service refuses it as stale).
+    /// </summary>
+    private static async Task<int> AnswerConflictAsync(ReviewService service, string verb, ConflictArgs args)
+    {
+        var listing = service.List();
+        if (listing.Failed is not null)
+            return PrintFailed(listing.Failed);
+        var item = listing.Items.FirstOrDefault(i => i.EntryId == args.Id && i.Kind == "conflict");
+        if (item is null)
+            return PrintRefused(SyncSetup.Refusal.NoConflictItem, ReviewService.NoConflictItemText);
+        var hash = item.ShownHash is not null && item.ShownHash.StartsWith(args.Shown, StringComparison.Ordinal) ? item.ShownHash : args.Shown;
+        var result = verb switch
+        {
+            "keep" => await service.KeepAsync(args.Id, hash).ConfigureAwait(false),
+            "swap" => await service.SwapAsync(args.Id, hash, args.Loser).ConfigureAwait(false),
+            _ => await service.MergeAsync(args.Id, hash, args.Text).ConfigureAwait(false),
+        };
+        SyncCommandBase.Print(result);
         return result.ExitCode;
     }
 

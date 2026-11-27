@@ -10,7 +10,8 @@ namespace TotalRecall.Infrastructure.Tests.GitSync;
 /// Pin review D3 (the arrival): the pull no longer postpones a decision with a <c>NewPin</c> or <c>PinEdit</c> request. It
 /// carries the decision out as for any entry (a sticky record is inserted non-sticky, FS4, FS7 and NS3 leave the entry
 /// unpinned, FC2 and NC2 hold the content) and writes the <c>new-pin</c> or <c>pin-edit</c> item in the entry's transaction
-/// by the arrival rule. A decision with a <c>Conflict</c> still postpones and writes nothing.
+/// by the arrival rule. A decision that also carries a <c>Conflict</c> is carried out too (conflict review D3): the pin item
+/// and the <c>conflict</c> item are both written in the same transaction.
 /// </summary>
 public sealed class GitSyncApplierPinReviewTests : IDisposable
 {
@@ -290,36 +291,42 @@ public sealed class GitSyncApplierPinReviewTests : IDisposable
         Assert.Contains("fault at " + faultStep, Assert.Single(_rig.Scan.Issues()).Detail);
     }
 
-    // ---- a conflict still postpones ----
+    // ---- a conflict is carried out beside the pin rules (conflict review D3) ----
 
-    private void AssertPostponed(SyncRecord.SyncRecord record)
-    {
-        var before = _rig.Full();
-        var calls = _rig.Embedder.Calls;
-
-        var result = _rig.Apply(record);
-
-        Assert.Equal("review", Is<EntryResult.Postponed>(result).Reason);
-        Assert.Equal(before, _rig.Full());
-        Assert.Equal(calls, _rig.Embedder.Calls);
-        Assert.Equal(0, _rig.ReviewRows());
-    }
+    private IReadOnlyList<string> ConflictLosers() =>
+        GitSyncReviews.ReadConflictLosers(GitSyncReviews.ReadConflictItem(_rig.Scan.Connection, Id)!.PayloadJson)
+            .Select(l => $"{SyncConflict.sideName(l.Side)}|{l.Text}")
+            .ToList();
 
     [Fact]
-    public void ANewPinWithAConflict_StillPostpones_AndWritesNothing()
+    public void ANewPinWithAConflict_WritesBothItems()
     {
         _rig.Scan.AddMemory(Tier.Warm, Id, "Local text.");
 
-        AssertPostponed(ApplyRig.Rec(Id, "Their text.", sticky: true, writtenBy: MachineA)); // NS3 and NC4
+        var carried = Is<EntryResult.Carried>(_rig.Apply(ApplyRig.Rec(Id, "Their text.", sticky: true, writtenBy: MachineA))); // NS3 and NC4
+
+        Assert.Equal(CarriedKind.Updated, carried.Kind);
+        Assert.Equal("Their text.", _rig.Entry(Id)!.Row.Content);
+        Assert.False(Sticky());
+        Assert.Equal(new PinItem(Id, "new-pin", "open", Shown("Their text."), MachineA, _rig.Now), Item("new-pin"));
+        Assert.Equal(["local|Local text."], ConflictLosers());
+        Assert.Equal(2, _rig.ReviewRows());
     }
 
     [Fact]
-    public void AnNC4Conflict_StillPostpones()
+    public void AnNC4Conflict_IsCarriedOut_WithAConflictItem()
     {
         _rig.Scan.AddMemory(Tier.Warm, Id, "Local text.");
         _rig.RunScan();
 
-        AssertPostponed(ApplyRig.Rec(Id, "Their text.", writtenBy: MachineA));
+        var carried = Is<EntryResult.Carried>(_rig.Apply(ApplyRig.Rec(Id, "Their text.", writtenBy: MachineA)));
+
+        Assert.Equal(CarriedKind.Updated, carried.Kind);
+        Assert.Equal("Their text.", _rig.Entry(Id)!.Row.Content);
+        Assert.Null(Row().ContentStamp);
+        Assert.Equal(["local|Local text."], ConflictLosers());
+        Assert.Empty(_rig.PinItems(Id));
+        Assert.Equal(1, _rig.ReviewRows());
     }
 
     // ---- D4: the reconcile, planned before the transaction ----

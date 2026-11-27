@@ -321,24 +321,29 @@ public sealed class GitSyncApplierPullTests : IDisposable
         Assert.Equal(blob, Assert.Single(Issues("apply-failed")).RecordHash);
     }
 
-    // ---- postponed ----
+    // ---- a conflict is carried out (conflict review D3) ----
 
     [GitFact]
-    public async Task ANoBaseTextDifferenceStillHoldsL_WhileANewPinIsInsertedWithAnItem()
+    public async Task ANoBaseTextDifference_IsAppliedWithAConflictItem_AndLAdvances()
     {
         _rig.Store.Insert(Tier.Warm, ContentType.Memory, new InsertEntryOpts(Content: "Local text.", Id: B));
         var head = PushRecords(Rec(A, tier: Tier.Hot, sticky: true), Rec(B, "Their text."));
 
         var summary = await Pull();
 
-        Assert.False(summary.Complete);
-        Assert.Equal([new PostponedEntry(B, "review")], summary.Postponed); // a conflict still waits (pin review D3)
-        Assert.NotEqual(head, Meta(SyncIdentity.MetaKeys.LastSha));
+        Assert.True(summary.Complete);
+        Assert.Empty(summary.Postponed);
+        Assert.Equal(head, Meta(SyncIdentity.MetaKeys.LastSha));
         Assert.Equal(1, summary.Inserted);
-        Assert.True(Has(A));                                                  // a pin no longer does
+        Assert.Equal(1, summary.Updated);
+        Assert.True(Has(A));
         Assert.False(_rig.Store.IsSticky(ContentType.Memory, A));
         Assert.Equal("open", GitSyncReviews.ReadPinItem(_rig.Connection, A, "new-pin")!.State);
-        Assert.Equal("Local text.", Content(B));
+        Assert.Equal("Their text.", Content(B));
+        var item = GitSyncReviews.ReadConflictItem(_rig.Connection, B)!;
+        Assert.Equal("open", item.State);
+        Assert.Equal(["Local text."], GitSyncReviews.ReadConflictLosers(item.PayloadJson).Select(l => l.Text).ToArray());
+        Assert.Null(GitSyncReviews.ReadConflictItem(_rig.Connection, A));
     }
 
     // ---- failures and rejections ----

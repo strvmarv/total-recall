@@ -495,7 +495,7 @@ public sealed class GitSyncApplierSafetyTests
             $"INSERT INTO git_sync_issue (entry_id, kind, record_hash, attempts, detail) VALUES ('{Id}', 'apply-failed', 'old', {attempts}, '{detail}')");
 
     [Fact]
-    public void ANoOp_RemovesTheFailureRow_InOneSmallTransaction_AndAPostponedOrSkippedEntryDoesNot()
+    public void ANoOp_RemovesTheFailureRow_InOneSmallTransaction_AndADeferredOrSkippedEntryDoesNot()
     {
         using var s = Insert();
         Is<EntryResult.Carried>(Run(s));
@@ -507,12 +507,19 @@ public sealed class GitSyncApplierSafetyTests
         Assert.Empty(s.Rig.Scan.Issues());
         Assert.Equal(opened + 1, s.Rig.Applier.TransactionCount);
 
-        // postponed: a no-base text conflict (NC4) between a local memory and a record (pin review D3: a pin no longer postpones)
+        // deferred: a no-base text conflict (NC4) whose local text is edited before the transaction (conflict review D3: a
+        // conflict no longer postpones, so the re-read is the device that leaves the entry for the next pull)
         const string other = "3f9c2a7e-0000-4000-8000-000000000009";
         s.Rig.Scan.AddMemory(Tier.Warm, other, "Local text.");
         ScanRig.Exec(s.Rig.Scan.Connection, $"INSERT INTO git_sync_issue (entry_id, kind, record_hash, attempts, detail) VALUES ('{other}', 'apply-failed', 'old', 3, 'old')");
-        Is<EntryResult.Postponed>(s.Rig.Apply(ApplyRig.Rec(other, "Their text.")));
+        s.Rig.Applier.BeforeTransaction = id =>
+        {
+            if (id == other)
+                s.Rig.Scan.Store.Update(Tier.Warm, ContentType.Memory, other, new UpdateEntryOpts { Content = "Edited meanwhile." });
+        };
+        Is<EntryResult.Deferred>(s.Rig.Apply(ApplyRig.Rec(other, "Their text.")));
         Assert.Single(s.Rig.Scan.Issues());
+        Assert.Null(GitSyncReviews.ReadConflictItem(s.Rig.Scan.Connection, other));
     }
 
     [Fact]
