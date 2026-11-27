@@ -90,9 +90,9 @@ any deferral does.
 
 Before the delete-guard preview, one pre-pass reads the open `git_sync_alias` rows and the detections of the candidate ids (D1), and
 computes the set of **converging ids** and the set of **ignored ids** (D3: conditions 1 to 3 hold and either no candidate canonical
-record is accepted and parses, or the canonical id is not free, or the id is not the member chosen to converge). It runs only when some
-active row with a base is absent from R (otherwise nothing can converge), keeps the origin hashes and the records' ids, not the blobs
-(the loop reads a blob when it needs it), and **chooses at most one local member per canonical id to converge: the ordinally lowest
+record is accepted and parses, or the canonical id is not free, or the id is not the member chosen to converge, and `x` has no held-delete item: D3 condition 7). It runs only when some
+active row with a base is absent from R (otherwise nothing can converge), keeps the origin hashes and the records' ids (and whether a
+candidate canonical record parses, reading its blob through the existing `blobs` map so that no blob is read twice), and **chooses at most one local member per canonical id to converge: the ordinally lowest
 qualifying one**; the other members of the group are ignored (D3), also when the chosen one defers. The preview counts neither set as a
 remote deletion (without that it would count them as W6.4). The loop uses the same map, and each entry recomputes
 inside its transaction. Ids are visited in ordinal order, so the canonical id of a group (the lowest) is visited before the others, but
@@ -107,9 +107,9 @@ An id `x` **converges** in a pull when all of these hold:
 1. `x` has a local memory entry (one tier) and a `git_sync_entry` row that is active with a base (the record was reconciled once);
 2. `x`'s record is **absent** from R (no path at all, not a rejected one);
 3. `x` is the other id of an `open` alias row `(c, x)`, **or** of a detection made by this pull's pre-pass (D2); with several candidates
-   the target is the lowest `c` whose record is accepted at R;
+   the target is the lowest `c` whose record is accepted at R **and parses**, and conditions 4 and 5 are checked against that target;
 4. the canonical record `c` is accepted at R and parses;
-5. no entry (memory or knowledge) and no `git_sync_entry` row with id `c` exist locally (a `forgotten` row or an active one with a
+5. no entry (memory or knowledge), no `git_sync_entry` row and no `git_sync_review` row with id `c` exist locally (a `forgotten` row or an active one with a
    pending local deletion would be overwritten);
 6. `x` is the ordinally lowest local member of its group that meets conditions 1 to 5 (D2);
 7. `x` has no held-delete item, open or approved (a person's pending decision stands: the ordinary rules decide for `x`, which is the
@@ -117,7 +117,8 @@ An id `x` **converges** in a pull when all of these hold:
 
 In **one `BEGIN IMMEDIATE` transaction**, after embedding the canonical text outside it (when the text differs from the local one):
 
-1. re-read `x` and `c` and compare with the plan (a difference defers the entry);
+1. re-read `x`, `c` and `x`'s conflict item and compare with the plan (a difference defers the entry; the plan before the transaction
+   passes `x`'s conflict item as `c`'s expected item);
 2. **re-key** the entry from `x` to `c`: its row in its tier table (id, with the vector, which follows the row, the tags, `sticky`,
    `access_count`, summary, source, metadata, decay score and timestamps, all of which stay), the `parent_id` of any other entry that
    names `x`, and `x`'s `conflict` review row (its `entry_id` becomes `c`, so that the reads that follow see it as `c`'s item); nothing is
@@ -145,8 +146,9 @@ the alias is never read as a deletion by the fallback either, and condition 5 ne
 
 An open alias for `x` for which conditions 1 to 3 hold but one of 4 to 6 does not (the canonical record is **absent or does not parse**;
 the canonical id is **already in use** here, for instance by the member that has just converged; `x` is **not the chosen member**) is
-**not a deletion**: the decision is `Ignore`, the entry and its row stay as they are, no hold is opened and nothing is counted by the
-guard. The group is left `open`; closing it as `abandoned` and removing a true duplicate are milestone 5. Condition 7 is the one
+**not a deletion**: the decision is `Ignore`, the entry (tier, tags, text) and its row stay as they are, no hold is opened and nothing
+is counted by the guard. The review items of `x` still follow the unchanged Part 3 and Part 4 reconcile rules, as for any visited id
+whose record is absent (a `new-pin` item is removed, a `pin-edit` item on an unpinned entry is applied from the base). The group is left `open`; closing it as `abandoned` and removing a true duplicate are milestone 5. Condition 7 is the one
 exception, because a person's pending question is theirs to answer.
 
 ### D4. What convergence carries
