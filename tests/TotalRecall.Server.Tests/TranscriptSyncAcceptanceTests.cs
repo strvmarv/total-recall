@@ -397,6 +397,46 @@ public sealed class TranscriptSyncAcceptanceTests : IDisposable
         Assert.Equal(1, SessionRows(s.Id));
     }
 
+    // ---- 1b: what the compaction breadcrumb tells the model to do (#153) --------------------------------------------
+
+    /// <summary>
+    /// After a compaction the model is told to call <c>transcript_search</c> with <c>scope: "session"</c> and no
+    /// session (hooks/compaction-breadcrumb). A characterization of what Part 5 already does, on the real path: the
+    /// exchanges the host removed from the model's context (everything before the compaction boundary) are found,
+    /// together with the summary and the text after it, in the current session and by that scope.
+    /// </summary>
+    [Fact]
+    public async Task CompactedSession_ScopeSessionNoSession_FindsTheTextTheCompactionRemoved()
+    {
+        ArchiveOn();
+        var s = ReadFixtureHome.Place(_home, Alpha, "breadcrumb",
+            ReadFixtureHome.Dialogue(3, n => $"Opening question {n} zqxopen{n}", n => $"Opening answer {n}."));
+        Assert.Equal(1, Backfill().New);
+        _home.AppendExchange(s, "zqxremoved1 how is the cache keyed?", "zqxremoved2 it is keyed by the path.", 50);
+        AppendCompaction(s, 60);
+        _home.AppendExchange(s, "zqxlive1 now add the column.", "zqxlive2 the column is added.", 100);
+        Marker(s, HostA);
+
+        var h = Compose(Sync(new[] { ShimA, HostA }));
+
+        foreach (var (word, chunkType) in new[]
+                 {
+                     ("zqxopen1", "dialogue"), ("zqxremoved1", "dialogue"), ("zqxremoved2", "dialogue"),
+                     ("zqxsummary", "compaction-summary"), ("zqxlive1", "dialogue"),
+                 })
+        {
+            var r = await Search(h, word, scope: "session"); // the arguments the note names: no `session`
+            AssertMarker(r, s.Id);
+            Assert.Equal("session", r.GetProperty("scope").GetString());
+            Assert.Null(Opt(r, "scopeNote")); // the scope is as asked
+            Assert.Null(Opt(r, "syncNote"));
+            var hit = Hits(r).FirstOrDefault(x => x.GetProperty("text").GetString()!.Contains(word, StringComparison.Ordinal));
+            Assert.True(hit.ValueKind == JsonValueKind.Object, $"{word} was not found: {r}");
+            Assert.Equal(Key(s.Id), hit.GetProperty("session").GetString());
+            Assert.Equal(chunkType, hit.GetProperty("chunkType").GetString());
+        }
+    }
+
     // ---- 2: two sessions in one directory --------------------------------------------------------------------------
 
     [Fact]

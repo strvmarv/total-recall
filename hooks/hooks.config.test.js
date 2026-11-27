@@ -41,7 +41,8 @@ test('hooks.json registers the live-marker wrapper second in SessionStart and Us
   };
   for (const event of ['SessionStart', 'UserPromptSubmit']) {
     const groups = config.hooks[event];
-    assert.equal(groups.length, 1, `${event} keeps its single group`);
+    // SessionStart also has the compact-only group of the compaction breadcrumb (next test), after this one.
+    assert.equal(groups.length, event === 'SessionStart' ? 2 : 1, `${event} groups`);
     const entries = groups[0].hooks;
     assert.equal(entries.length, 2, `${event} holds the original entry and the live-marker entry`);
     assert.deepEqual(entries[0], { type: 'command', command: original[event] }, `${event}: the original entry is first and unchanged`);
@@ -53,4 +54,28 @@ test('hooks.json registers the live-marker wrapper second in SessionStart and Us
   }
   assert.equal(config.hooks.SessionStart[0].matcher, 'startup|resume|clear|compact', 'the SessionStart matcher is unchanged');
   assert.equal(config.hooks.UserPromptSubmit[0].matcher, '');
+});
+
+test('hooks.json registers the compaction breadcrumb in its own compact-only SessionStart group', () => {
+  const config = loadHooksConfig();
+  const groups = config.hooks.SessionStart;
+  assert.equal(groups.length, 2, 'SessionStart holds the original group and the breadcrumb group');
+  assert.deepEqual(groups[1], {
+    matcher: 'compact',
+    hooks: [{
+      type: 'command',
+      command: 'bash "$CLAUDE_PLUGIN_ROOT/hooks/compaction-breadcrumb/run.sh"',
+      timeout: 5,
+    }],
+  }, 'the matcher is exactly compact (the source is the signal) and the entry has a 5 s timeout');
+  // The script the entry names exists and is the one the tests run.
+  const script = path.join(__dirname, 'compaction-breadcrumb', 'run.sh');
+  assert.ok(fs.existsSync(script));
+  // No other event carries it: the breadcrumb is said after a compaction only.
+  for (const [event, eventGroups] of Object.entries(config.hooks)) {
+    for (const [i, group] of eventGroups.entries()) {
+      const holds = group.hooks.some((h) => h.command.includes('compaction-breadcrumb'));
+      assert.equal(holds, event === 'SessionStart' && i === 1, `${event}[${i}]`);
+    }
+  }
 });
