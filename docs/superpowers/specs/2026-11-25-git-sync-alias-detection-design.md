@@ -55,20 +55,27 @@ id and the record has `origin.hash` `h`, look up the local ids for `h`:
 
 - `import_log` rows with `content_hash = h` and `target_type = 'memory'`, from **any** `source_tool` (a host tool's import, or a
   `git-sync` row written by an earlier pull of a record carrying the same origin), taking `target_entry_id`;
-- keep the ids that **exist** as a memory in the hot, warm or cold table and **differ from the record's id**. An id whose entry was
-  deleted is no alias target, and a log row for the record's own id is the ordinary case.
+- keep the ids that **exist** as a memory in the hot, warm or cold table, **differ from the record's id** and are **eligible ids**
+  (`SyncValidation.isEligibleId`: an ineligible id is never synced, so it can neither be a record nor the canonical id). An id whose
+  entry was deleted is no alias target, and a log row for the record's own id is the ordinary case.
 
-With one or more such ids the **group** is the record's id plus those ids, the canonical id is the ordinal minimum, and one
-`git_sync_alias` row `(canonical, x, h, 'open')` is written for every other member `x`, with `INSERT OR IGNORE`: an existing row of any
-state is left as it is, so a re-detection never reopens a `resolved` group. The insert is skipped, whichever of the group is canonical:
-the record's holder of the other id must not get a second copy, and the canonical entry still has to arrive through the pass (milestone 5)
-or, for a machine that does not hold it, through convergence (D3).
+With one or more such ids the **group** is the record's id, those ids, and **both ids of every `open` alias row with the same
+`origin_hash`** (so groups that grow one arrival at a time keep one canonical id: the ordinal minimum of the union, which every machine
+computes alike). One `git_sync_alias` row `(canonical, x, h, 'open')` is written for every member `x` that is the record's id or a local
+entry and is not the canonical one, with `INSERT OR IGNORE`: an existing row of any state is left as it is, so a re-detection never
+reopens a `resolved` group. The insert is skipped, whichever of the group is canonical: the record's holder of the other id must not get
+a second copy, and the canonical entry still has to arrive through the pass (milestone 5) or, for a machine that holds the other id as an
+entry, through convergence (D3).
 
 The skip is a change of the decision after `decide` returns, in the way `SyncDeletion.holdInstead` already is: a new Core function
-(`SyncAlias.skipInstead`) turns `InsertFromRecord` of a no-row, no-entry id into `Ignore`, and `planRow` then writes nothing. Nothing in
-`decide`, `MergeInput` or the record format changes. It is a pure function of the `import_log` rows and the entries, **not** of the alias
-rows or their state, so it is the same on every pull. A restore, an edit that beats a deletion and any other re-insert (W3, W8.1) are not
-W1 and are untouched.
+(`SyncAlias.skipInstead`) replaces the decision of a no-row, no-entry id that inserts from the record by the plain `Ignore` decision
+(`RowState` none, the base kept, no reviews, no notes: not just a changed `Entry`, because `insertFrom` also sets the new row and a
+`NewPin` request, and a row or a `new-pin` item must not be written for an entry that is not inserted). Nothing in `decide`,
+`MergeInput` or the record format changes. The skip is a pure function of the `import_log` rows, the alias rows' ids and the entries,
+**not** of the alias rows' state, so it is the same on every pull. The detection is computed **when the id is visited** (the pre-pass of D2
+is for the preview and for convergence), so a fresh machine whose first pull holds both records of a group inserts the canonical-or-first
+record and skips the other, deferring nothing. A restore, an edit that beats a deletion and any other re-insert (W3, W8.1) are not W1 and
+are untouched.
 
 The alias row is the only write. It is an `AliasPlan` (like the pin plan): planned before `BEGIN IMMEDIATE`, recomputed inside from the
 same inputs, and the entry is deferred (the existing deferral, with its existing reason text) when the two differ, for example because an
@@ -78,10 +85,12 @@ opens no transaction. A skip itself never defers and never makes a pull incomple
 ### D2. Aliases before the deletion checks
 
 Before the delete-guard preview, one pre-pass reads the open `git_sync_alias` rows and the detections of every candidate id (D1), and
-computes the set of **converging ids** (D3). The preview counts no converging id as a remote deletion. The loop uses the same map, and
-each entry recomputes inside its transaction. Ids are visited in ordinal order, so the canonical id of a group (the lowest) is visited
-before the others, but nothing relies on it: the pre-pass makes the result the same in any order, and a record added and a record removed
-in one pull are read together.
+computes the set of **converging ids** and the set of **ignored ids** (D3: an open alias whose canonical record is absent). The preview
+counts neither set as a remote deletion (without that it would count them as W6.4). The loop uses the same map, and each entry recomputes
+inside its transaction. Ids are visited in ordinal order, so the canonical id of a group (the lowest) is visited before the others, but
+nothing relies on it: a detection of this pull's pre-pass counts like an open row (D3 condition 3), so a canonical id whose visit defers
+(a racing importer) still leaves the removal of the other id read as convergence, not as a deletion, and a record added and a record
+removed in one pull are read together.
 
 ### D3. Convergence
 
@@ -89,32 +98,40 @@ An id `x` **converges** in a pull when all of these hold:
 
 1. `x` has a local memory entry (one tier) and a `git_sync_entry` row that is active with a base (the record was reconciled once);
 2. `x`'s record is **absent** from R (no path at all, not a rejected one);
-3. an alias row `(c, x)` is `open` and `x` is the other id;
+3. `x` is the other id of an `open` alias row `(c, x)`, **or** of a detection made by this pull's pre-pass (D2); with several candidates
+   the target is the lowest `c` whose record is accepted at R;
 4. the canonical record `c` is accepted at R and parses;
-5. no entry with id `c` exists locally, and `x` has no held-delete item (open or approved: a person's pending decision stands).
+5. no entry and no `git_sync_entry` row with id `c` exist locally (a `forgotten` row or an active one with a pending local deletion
+   would be overwritten), and `x` has no held-delete item (open or approved: a person's pending decision stands).
 
 In **one `BEGIN IMMEDIATE` transaction**, after embedding the canonical text outside it (when the text differs from the local one):
 
 1. re-read `x` and `c` and compare with the plan (a difference defers the entry);
-2. **re-key** the entry from `x` to `c`: the memory row, its tier, its vector and its tags move under the new id; nothing else of the
-   entry changes yet;
-3. apply the canonical record to `c` **as the ordinary first-sync merge of a record against an existing local entry with no base** (row
-   `None`, record `c`, local view = the entry): the unchanged no-base rules decide (D4), including the pin and conflict items they
+2. **re-key** the entry from `x` to `c`: its row in its tier table (id, with the vector, which follows the row, the tags, `sticky`,
+   `access_count`, summary, source, metadata, decay score and timestamps, all of which stay), and the `parent_id` of any other entry
+   that names `x`; nothing is rewritten yet;
+3. apply the canonical record to `c` **as the ordinary first-sync merge of a record against an existing local entry with no base**: the
+   `MergeInput` has row `None`, theirs = the canonical record, local = the entry as it reads now, `Pending` and `Pushing` empty,
+   `HeldDelete` none and `ApplyProven` as the pull's. The unchanged no-base rules decide (D4), including the pin and conflict items they
    request, planned before the transaction and recomputed inside as in Parts 3 and 4;
 4. delete `x`'s `git_sync_entry` row and write `c`'s row as the apply does (base := the canonical record, stamps as the decision says);
 5. retarget the `import_log` rows of `x` (`target_entry_id` := `c`) and write the `git-sync` row for `c` as an insert does, so the later
    reappearance of `x`'s record is read as an alias again (D1) and never inserts;
 6. carry `x`'s review items (D5);
-7. mark the alias `resolved`.
+7. write the alias `(c, x)` as `resolved` (a detection of this pull's pre-pass has no row yet; an open one is updated).
 
 The state is `resolved`, not `converged`: the umbrella's `converged` means "the entry is converged and this machine's own record still
 has to be deleted", and a machine whose record has already disappeared has none. A crash leaves the transaction rolled back, so the
 next pull converges again. **It also happens in an unproven pull** ("a missing file is never proof"): convergence loses no content (the
 local text is carried, D4), and if the record was only missing, its return is an alias skip.
 
+**A converging or ignored id is never a candidate of the unproven fallback hold** (`HoldIfUnprovenCandidate`/`UnprovenCandidate`):
+when its convergence fails, is skipped by the scan or defers, the entry and its row stay as they are and the next pull tries again, so
+the alias is never read as a deletion by the fallback either, and condition 5 never becomes false by a hold the alias itself caused.
+
 An open alias for `x` whose canonical record is **absent or does not parse** (conditions 1 to 3 hold, 4 fails) is **not a deletion**:
 the decision is `Ignore`, the entry and its row stay as they are, no hold is opened and nothing is counted by the guard. The group is
-left `open`; closing it as `abandoned` is milestone 5. If condition 5 fails because an entry with the canonical id already exists, or
+left `open`; closing it as `abandoned` is milestone 5. If condition 5 fails because an entry or a row with the canonical id exists, or
 a held deletion exists, the ordinary rules decide for `x` (the entry is a duplicate of one the machine has, or a person has the question).
 
 ### D4. What convergence carries
@@ -134,23 +151,26 @@ that name them:
 | tier | the warmer of the two tiers (the no-base tier rule); a local winner is re-stamped so it is pushed |
 | a pending local text edit on `x` | its text is the local view, so a differing one is filed as a conflict (it is **not** written back as W6.1 would: that would recreate the other record) |
 
-`access_count` is not carried (it is not synced and no store method sets it). Historical `compaction_log` and `retrieval_events` rows
-keep the old id (umbrella). The conflict arrival uses the existing arrival rule (Part 4 D3) and the bound of 8.
+`access_count`, the summary, the source, the metadata and the decay score stay with the re-keyed row (they are local, not synced).
+Historical `compaction_log` and `retrieval_events` rows keep the old id (umbrella). The conflict arrival uses the existing arrival rule
+(Part 4 D3) and the bound of 8.
 
 ### D5. The old id's review items
 
 `x`'s items cannot follow it blindly, because a hash covers the applied text:
 
 - `new-pin` and `pin-edit` items on `x` are removed (the record they were about is gone; the sticky flag itself is carried by D4);
-- a `conflict` item on `x` holds the only copy of earlier losing texts: each of its losers is **re-filed on `c`**, in order, with
-  `ConflictItems.Append` (the helper Part 4 built for this part; it throws `InvalidOperationException` when the entry is absent,
-  unreadable or in two tiers, which cannot happen here because the re-key came first), after the item D4 files, so the shared bound of 8 and
-  the dedupe by text apply; then `x`'s item is removed;
+- a `conflict` item on `x` holds the only copy of earlier losing texts. They are carried **ahead of** the loser D4 files: `c`'s item
+  starts from `x`'s losers, oldest first (re-keyed to `c`, the hash recomputed from the applied text), and D4's arrival is then applied
+  to it by the existing arrival rule (Part 4 D3: dedupe by text, the bound of 8 dropping the **oldest**), in the one planned write, so the
+  newest local text, which the merge has just replaced and is held nowhere else, always survives. `ConflictItems.Append` (Part 4's
+  helper, which throws `InvalidOperationException` for an absent, unreadable or two-tier entry) is used for the carried losers only when
+  D4 files nothing; it cannot throw here because the re-key came first. Then `x`'s item is removed;
 - there is no held-delete item on `x` (condition 5).
 
 ### D6. Interplay with the delete guard and the push
 
-- A converging id is not a deletion in the guard's preview (D2) and does not count toward the active-row total's ratio as removed.
+- A converging or ignored id is not a deletion in the guard's preview (D2) and does not count toward the active-row total's ratio as removed.
 - The skipped record has no row, so the pusher sees nothing for it. A non-canonical entry is still pushed (no withhold, Non-goals).
 - The cycle's result and `ApplySummary` are unchanged: a skip is a `NoOp`, a convergence counts as `Updated`.
 
@@ -171,18 +191,28 @@ At the applier (`ApplyRig`, with a helper that seeds an entry and its `import_lo
 - a `git-sync` log row (a pulled copy with the same origin) is a target; an `import_log` row of another type is not;
 - an existing alias row of each state is left alone and the skip still applies;
 - a racing importer (an `import_log` row or a deleted entry between the plan and the transaction) defers the entry, nothing is written;
-- an unproven pull decides the skip the same way.
+- an unproven pull decides the skip the same way;
+- a fresh machine whose first pull holds both records of a group: one is inserted, the other skipped, nothing deferred (per-visit detection);
+- three members arriving one at a time (the group's canonical id stays the union's minimum; one id never keeps two open rows that name
+  different canonical ids after the third arrival), and an ineligible local id is no alias target;
+- the skip returns the plain `Ignore` (a sticky record's skip writes no row and no `new-pin` item).
 
 Convergence (applier, one test per row of D4's table, each asserting the entry's id, tier, tags, sticky, content, row base, the items,
 the `import_log` retarget, the alias state and that `x` is gone from the store, the vectors and the rows):
 
 - the canonical record present in R while `x`'s record is absent, in a pull that also adds the canonical record, and in a later pull;
-- the two orders of the catch-up (canonical added and other removed in one pull) with the same final state;
+- the catch-up in one pull (canonical added and other removed together) and in two successive pulls (the add, then the removal) with
+  the same final state, and with the canonical id's visit deferred by a racing importer (the removal is still read as convergence, the
+  convergence writes the group itself);
 - the delete guard's preview does not count it (a pull whose only removals converge does not trip a guard limit of 1);
 - the canonical record absent as well: `Ignore`, the entry kept, no hold, alias still `open`; the canonical record not parsing the same;
-- an existing entry under the canonical id, and a held-delete item on `x`: the ordinary rules decide (the deletion path, the hold stands);
-- an unproven pull converges; a rolled-back transaction (a fault injected after the re-key) leaves `x` and its row untouched;
-- `x`'s conflict item losers re-filed on `c` (order, dedupe, bound of 8); `x`'s pin items removed;
+- an existing entry, or a `forgotten` or pending-deletion row, under the canonical id, and a held-delete item on `x`: the ordinary rules
+  decide (the deletion path, the hold stands);
+- an unproven pull converges; in an unproven pull a convergence that fails, a scan-skipped `x` and an ignored `x` open **no** fallback hold
+  and are tried again next pull; a rolled-back transaction (a fault injected after the re-key) leaves `x` and its row untouched;
+- `x`'s conflict item losers carried onto `c` ahead of D4's loser (order, dedupe, bound of 8; with 8 old losers and a differing local
+  text, the newest local text survives and the oldest loser is the one dropped); `x`'s pin items removed; `parent_id`, `access_count`
+  and the vector follow the re-key;
 - the reappearance of `x`'s record after convergence is skipped as an alias (no entry `x`).
 
 Across machines (`TwoMachineRig` extended with a third machine, `CycleRig` on the same bare repository): A and B import the same host
@@ -214,7 +244,11 @@ convergence (D3), carry-over and differing text (D4, D5), the open alias that is
   reasons in D3 and D4.
 - **A canonical record that is also absent keeps the entry and leaves the alias `open`.** The umbrella's `abandoned` close belongs to
   the pass (milestone 5); here the point is only that nothing reads an open alias as a deletion.
-- **Convergence ends in `resolved`, not `converged`** (D3).
+- **Convergence ends in `resolved`, not `converged`** (D3); the parent's Non-goals put the `converged`/`resolved` steps in milestone 5
+  with the pass, and here only the ending of the machine's own convergence is written.
+- **A machine that holds its own legacy `x` converges too**, not only "a machine that holds neither id" (the parent's wording): the
+  rule is about the disappearance of `x`'s record under an open alias, whoever holds `x`; it is exactly step 1 of the umbrella's pass for
+  a machine whose record has already gone.
 - **A difference in project or scope alone follows NC3** (the record's wins, no item), because the no-base rules decide and are not
   changed here; the parent's wording "(text, project or scope)" is met by NC2 (pinned) and NC4 (text differs).
 - **A held deletion already on the old id stands** (D3, condition 5): the alias does not override a pending question to the person.
@@ -227,9 +261,12 @@ convergence (D3), carry-over and differing text (D4, D5), the open alias that is
   target is not resurrected" belongs to the pass, milestone 5).
 - Both records stay in the repository and the non-canonical entry is still pushed until the withhold rule and the pass (milestone 5).
 - An open group whose canonical record is gone stays open and its entry is kept.
-- `access_count` and a summary or source path are not carried.
+- Nothing closes a group: an open group stays open until milestone 5; an alias target with an ineligible id is no alias target (a
+  local-only duplicate of it can still show).
 
 ## Deviation from the parent design
 
-None to the breakdown. Detail the parent leaves open and this part fixes: the lookup source (any `source_tool`), the state after
-convergence, the unproven and both-gone behaviour, and the re-key, as listed under "Departures".
+None to the breakdown. The parent's Part 5 text says "a machine that holds neither id" and its Non-goals leave the `converged`/`resolved`
+steps to milestone 5: both are named under "Departures" (the holder of its own `x` converges too, and the ending is `resolved`). Detail the
+parent leaves open and this part fixes: the lookup source (any `source_tool`), the group's union rule, the unproven and both-gone
+behaviour and the re-key, as listed under "Departures".
