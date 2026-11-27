@@ -111,7 +111,7 @@ An id `x` **converges** in a pull when all of these hold:
 4. the canonical record `c` is accepted at R and parses;
 5. no entry (memory or knowledge), no `git_sync_entry` row and no `git_sync_review` row with id `c` exist locally (a `forgotten` row or an active one with a
    pending local deletion would be overwritten);
-6. `x` is the ordinally lowest local member of its group that meets conditions 1 to 5 (D2);
+6. `x` is the ordinally lowest local member of its group that meets conditions 1 to 5 and 7 (D2);
 7. `x` has no held-delete item, open or approved (a person's pending decision stands: the ordinary rules decide for `x`, which is the
    only case where a disappearance under an open alias takes the ordinary deletion path).
 
