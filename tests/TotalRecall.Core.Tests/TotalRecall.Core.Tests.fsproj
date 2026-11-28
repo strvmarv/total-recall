@@ -32,6 +32,7 @@
     <Compile Include="SyncApplyTests.fs" />
     <Compile Include="SyncPinTests.fs" />
     <Compile Include="SyncConflictTests.fs" />
+    <Compile Include="SyncAliasTests.fs" />
     <Compile Include="SyncPushTests.fs" />
     <Compile Include="SyncCycleTests.fs" />
     <Compile Include="Program.fs" />
