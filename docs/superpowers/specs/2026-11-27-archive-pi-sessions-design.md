@@ -76,7 +76,8 @@ setting pointing elsewhere, and an automatic (threshold or overflow) compaction.
    any other relative value, or no home, means pi is not detected. The adapter exposes the layout as `SessionPathDepth` (1 flat, 2
    nested), used by the enumeration and by the finder's path rule. The `--session-dir` flag and the `sessionDir` setting are not
    visible to the engine: sessions stored there are not archived and a marker for them is refused (a recorded limit), as are files
-   opened with `pi --session <any path>` whose name does not fit section 1.
+   opened with `pi --session <any path>` whose name does not fit section 1. When `PI_CODING_AGENT_SESSION_DIR` is set, the earlier
+   sessions under `<agent dir>/sessions` are not enumerated either (the environment directory is the only root): also a recorded limit.
 5. **The marker is written by the extension, with the code of the Claude Code writer.** `hooks/live-marker/write-marker.js` takes the
    host as a parameter (default `claude-code`), and the extension calls its `buildMarker`, `writeMarker` and `prune` for host `pi`
    with `process.pid`, so there is one writer and one set of rules (shape, private modes, atomic write, pruning).
@@ -259,14 +260,14 @@ Server and Cli test projects like `ClaudeFixtureHome`).
    session with no file, with the archive off, on Windows, with an unfollowable server; two
    extension instances in one process (a user session and a child) leave one marker, naming the user's session; the breadcrumb is in
    the hidden message after `session_compact` once; added again by `session_tree` and by a reload when no context message has followed the last compaction, and not when one has; absent after a failed compaction and with the archive off; the breadcrumb text
-   equals the text `hooks/compaction-breadcrumb/run.sh` prints; a failing step never throws into pi.
+   equals the text `hooks/compaction-breadcrumb/run.sh` prints; a marker with the same fields and an `at` from before the process started is rewritten, and one with a later `at` is left untouched (same mtime); a foreign marker is overwritten at the next turn; a failing step never throws into pi.
 9. The commands: `transcripts backfill` with no `--host` archives every detected host (one report per host, a host with no sessions
    says so), `--host pi` and `--host claude-code` limit it, any other host is a usage error naming both; `transcripts status` counts
-   sessions and chunks per host; the `enable` text names both hosts.
-10. Hermetic: every composition and pass test that isolates `HOME` and `CLAUDE_CONFIG_DIR` (for example `SessionStartArchivePassTests`'
-    `ArchiveHome`, `HermeticSync.Options`) also points `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR` at its temporary directory,
-    and `TranscriptToolHermeticGuardTests` fails when a test that registers the transcript tools leaves them unset, so no test reads the
-    developer's real pi sessions.
+   sessions and chunks per host; the `enable` text names both hosts. The existing CLI tests pass an adapter factory that ignores the host: the command calls the factory once per host, and a test fails if one host's fixture is archived under two reports.
+10. Hermetic: `ArchiveHome` and every other helper that isolates `HOME` and `CLAUDE_CONFIG_DIR` for a composition or pass test also set
+    `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR` to their temporary directory; `HermeticSync.Options` stays as it is (it
+    names no adapters and reads no environment). `TranscriptToolHermeticGuardTests` gains a source scan that fails where a test file sets
+    `CLAUDE_CONFIG_DIR` without `PI_CODING_AGENT_DIR`, so no test reads the developer's real pi sessions.
 11. Speed: the Part 5 and Part 3 checks pass unchanged with two adapters registered; the cost of enumerating a large pi directory is
    measured once and recorded.
 12. A manual check on a real pi (Linux), recorded in the PR and the docs: the extension loaded with `-e`, a temporary data directory
