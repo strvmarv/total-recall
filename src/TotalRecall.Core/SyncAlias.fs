@@ -1,4 +1,4 @@
-/// Git sync, milestone 1b-iii part 5 (#165): the pure rules of alias detection and convergence. Pure and total: no I/O.
+/// Git sync, milestone 1b-iii part 5 (#165): the pure rules of alias detection and convergence. Pure: no I/O.
 module TotalRecall.Core.SyncAlias
 
 open System
@@ -62,7 +62,9 @@ let ignored : MergeDecision =
       CloseHeldDelete = false
       FreshContentStamp = false }
 
-/// D1: an InsertFromRecord becomes `ignored`; every other decision is returned unchanged.
+/// D1: an InsertFromRecord becomes `ignored`; every other decision is returned unchanged. Precondition: only the
+/// decision for an id with no row and no local entry (W1) is passed through it; a restore, an edit that beats a deletion
+/// or any other re-insert (W3, W8.1) is never passed through it, as it would read that re-insert as an alias skip.
 let skipInstead (d: MergeDecision) : MergeDecision =
     match d.Entry with
     | InsertFromRecord -> ignored
@@ -87,9 +89,9 @@ let choose (candidates: Candidate list) : Choice =
         |> List.groupBy (fun c -> c.Target.Value)
         |> List.map (fun (t, group) -> (canonical (group |> List.map (fun c -> c.Id)), t))
     let converging = Map.ofList winners
-    let ignored =
+    let ignoredIds =
         candidates
         |> List.map (fun c -> c.Id)
         |> List.filter (fun id -> not (converging.ContainsKey id))
         |> Set.ofList
-    { Converging = converging; Ignored = ignored }
+    { Converging = converging; Ignored = ignoredIds }

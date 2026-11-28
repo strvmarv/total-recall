@@ -8,7 +8,8 @@ public sealed partial class GitSyncApplier
     /// <summary>
     /// What a convergence (alias D3) read of the other id <paramref name="OtherId"/> before its transaction: its row, its entry,
     /// its pin items and its conflict item (null: none), the canonical id <paramref name="CanonicalId"/> and the group's origin
-    /// hash <paramref name="Hash"/>. The transaction re-reads them and defers on any difference.
+    /// hash <paramref name="Hash"/>. The transaction re-reads them and defers on any difference. <paramref name="OtherRows"/>
+    /// are the open rows of the other members that this pull's detections planned (<see cref="ConvergeTarget.OtherRows"/>).
     /// </summary>
     private sealed record Convergence(
         string OtherId,
@@ -17,7 +18,8 @@ public sealed partial class GitSyncApplier
         GitSyncRow OtherRow,
         LocalRead.Present OtherRead,
         IReadOnlyList<PinItem> OtherPins,
-        ConflictItem? OtherConflict);
+        ConflictItem? OtherConflict,
+        IReadOnlyList<(string Other, string Hash)> OtherRows);
 
     /// <summary>
     /// Converges the memory <paramref name="x"/>, whose record disappeared under an open alias, onto the canonical record of
@@ -89,7 +91,7 @@ public sealed partial class GitSyncApplier
             c, decision, converted: false, reopen: false, heldAfter: SyncConflict.heldAfter(decision, false), row: null, read: present,
             held: null, proven, blobSha: target.Sha, oldBase: null, theirs: target.Record, pinItems: [],
             conflictItem: conflictX is null ? null : conflictX with { EntryId = c }, thisMachine, aliasPlan: null,
-            convergence: new Convergence(x, c, target.Hash, rowX, present, pinsX, conflictX));
+            convergence: new Convergence(x, c, target.Hash, rowX, present, pinsX, conflictX, target.OtherRows));
     }
 
     /// <summary>

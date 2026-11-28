@@ -49,19 +49,6 @@ internal sealed record ConflictItem(string EntryId, string State, string RecordH
 /// </summary>
 internal static class GitSyncReviews
 {
-    /// <summary>
-    /// True when the entry has a <c>git_sync_review</c> row of any kind and any state: the one cross-kind read of this class
-    /// (alias convergence, D3 condition 5).
-    /// </summary>
-    public static bool HasAnyItem(MsSqliteConnection conn, string entryId, SqliteTransaction? tx = null)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = "SELECT 1 FROM git_sync_review WHERE entry_id = $id LIMIT 1";
-        cmd.Parameters.AddWithValue("$id", entryId);
-        return cmd.ExecuteScalar() is not null;
-    }
-
     private const string HeldDelete = "held-delete";
 
     private const string SelectHeld =
@@ -117,6 +104,19 @@ internal static class GitSyncReviews
         cmd.Parameters.AddWithValue("$id", entryId);
         using var r = cmd.ExecuteReader();
         return r.Read() ? ReadItem(r) : null;
+    }
+
+    /// <summary>
+    /// True when the entry has a <c>git_sync_review</c> row of any kind and any state: the one cross-kind read of this class
+    /// (alias convergence, D3 condition 5).
+    /// </summary>
+    public static bool HasAnyItem(MsSqliteConnection conn, string entryId, SqliteTransaction? tx = null)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "SELECT 1 FROM git_sync_review WHERE entry_id = $id LIMIT 1";
+        cmd.Parameters.AddWithValue("$id", entryId);
+        return cmd.ExecuteScalar() is not null;
     }
 
     private static HeldItem ReadItem(SqliteDataReader r) =>

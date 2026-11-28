@@ -538,6 +538,31 @@ public sealed class GitSyncApplierConvergenceTests
             Assert.True(Has(rig, X) || Has(rig, C));
     }
 
+    [GitFact]
+    public async Task InAnUnprovenPull_AnIgnoredIdWhoseApplyFails_OpensNoFallbackHold()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        await SyncedPair(rig, applier, X, C);
+        ScanRig.Exec(rig.Connection, $"UPDATE git_sync_entry SET base_json = '{{' WHERE entry_id = '{X}'");
+        var rowBefore = Row(rig, X);
+
+        rig.Remove(SyncValidation.recordPath(X));
+        rig.Remove(SyncValidation.recordPath(C));
+        rig.Commit("remove both");
+        rig.CloneGit("update-ref", "-d", "refs/total-recall/last-synced");
+        var summary = await Pull(rig, applier);
+
+        Assert.False(summary.Proven);
+        var failed = Assert.Single(summary.Failed);
+        Assert.Equal(X, failed.Id);
+        Assert.StartsWith("the row's base cannot be read", failed.Detail, StringComparison.Ordinal);
+        AssertKept(rig, summary, X, rowBefore);
+        Assert.Empty(summary.Held);
+        Assert.Equal(0, Scalar(rig, "SELECT count(*) FROM git_sync_review WHERE kind = 'held-delete'"));
+        Assert.Equal([$"{C}|{X}|{H}|open"], Aliases(rig));
+    }
+
     // =============================================================================================
     // Convergence (alias D3, D4, D5, D6): the other id is re-keyed onto the canonical id and the canonical record is applied
     // as a first sync, in one transaction.
@@ -1011,6 +1036,50 @@ public sealed class GitSyncApplierConvergenceTests
         Assert.False(Has(rig, C));
         Assert.Equal([$"{C}|{X}|{H}|open", $"{C}|{X2}|{H}|open"], Aliases(rig));
         return (rig, applier);
+    }
+
+    [GitFact]
+    public async Task ACanonicalVisitDeferredInThePullWhereXConverges_StillOpensTheOtherMembersRow()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        rig.PutRecord(R(X, origin: false));
+        rig.PutRecord(R(X2, origin: false));
+        rig.Commit("x1, x2");
+        await Pull(rig, applier);
+        foreach (var id in new[] { X, X2 })
+            new ImportLog(rig.Connection).LogImport("claude-code", "/home/u/.claude/memory/" + id + ".md", H, id, Tier.Warm, ContentType.Memory);
+        var rowBefore = Row(rig, X2);
+
+        var cRec = R(C);
+        rig.PutRecord(cRec);
+        rig.Remove(SyncValidation.recordPath(X));
+        rig.Commit("c added, x removed");
+        var seeded = false;
+        applier.BeforeTransaction = id =>
+        {
+            if (id == C && !seeded)
+            {
+                seeded = true;
+                AliasTestSupport.SeedLegacy(rig.Store, rig.Connection, Y, "Use bun, again.", H);
+            }
+        };
+        var s = await Pull(rig, applier);
+        applier.BeforeTransaction = null;
+
+        Assert.True(seeded);
+        Assert.Contains(s.Deferred, d => d.Id == C);
+        Assert.False(Has(rig, X));
+        Assert.True(Has(rig, C));
+        Assert.Contains($"{C}|{X}|{H}|resolved", Aliases(rig));
+        Assert.Contains($"{C}|{X2}|{H}|open", Aliases(rig));
+        await Pull(rig, applier);
+
+        // X2's record disappears later: the open row keeps it (C is taken here, so X2 is ignored), never deleted.
+        var later = await RemoveAndPull(rig, applier, X2);
+        AssertKept(rig, later, X2, rowBefore);
+        Assert.True(Has(rig, C));
+        Assert.Contains($"{C}|{X2}|{H}|open", Aliases(rig));
     }
 
     [GitFact]

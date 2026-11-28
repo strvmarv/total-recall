@@ -48,10 +48,21 @@ public sealed class GitSyncAliasesTests : IDisposable
         Seed("bbbb5555"); // the record's own id
         Seed("LEGACY_ID"); // an existing entry with an ineligible id
         Seed("ffff6666", hash: Hash("another text"));
+        _rig.AddMemory(Tier.Warm, "abcd7777"); // a memory whose only log row of the hash is a knowledge row
+        Log("abcd7777", H, type: ContentType.Knowledge);
 
         var targets = GitSyncAliases.ImportTargets(_rig.Connection, H, "bbbb5555");
 
         Assert.Equal(["aaaa2222", "cccc1111"], targets);
+    }
+
+    [Fact]
+    public void ImportTargets_LeavesOutTheRecordsOwnId_EvenWhenItExistsWithAMatchingLogRow()
+    {
+        Seed("bbbb5555");
+
+        Assert.Empty(GitSyncAliases.ImportTargets(_rig.Connection, H, "bbbb5555"));
+        Assert.Equal(["bbbb5555"], GitSyncAliases.ImportTargets(_rig.Connection, H, "aaaa1111"));
     }
 
     [Fact]

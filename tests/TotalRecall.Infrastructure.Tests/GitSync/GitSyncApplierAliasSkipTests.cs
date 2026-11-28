@@ -206,6 +206,8 @@ public sealed class GitSyncApplierAliasSkipTests : IDisposable
     [Fact]
     public void ALogRowForTheRecordsOwnId_IsNoAlias()
     {
+        // Guards the outcome (inserted, no alias row) only. W1 needs no entry under the record's id, so ImportTargets' own-id
+        // filter (it needs an existing memory under that id) is unreachable from here; GitSyncAliasesTests covers it directly.
         new ImportLog(_rig.Scan.Connection).LogImport(
             "claude-code", "/home/u/.claude/memory/own.md", H, Hi, Tier.Warm, ContentType.Memory);
 

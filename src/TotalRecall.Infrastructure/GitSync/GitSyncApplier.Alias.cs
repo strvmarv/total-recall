@@ -5,9 +5,12 @@ namespace TotalRecall.Infrastructure.GitSync;
 
 /// <summary>
 /// The target of a converging id (alias D3): the canonical id, its record as read at <c>R</c>, the record's blob id and the
-/// group's origin hash.
+/// group's origin hash. <paramref name="OtherRows"/> are the other ids, with their origin hash, of the <c>open</c> rows
+/// <c>(CanonicalId, other)</c> that this pull's detections of the canonical id planned (D1), without the converging id
+/// itself; the convergence writes those whose id still exists here as a memory, as a skip would.
 /// </summary>
-internal sealed record ConvergeTarget(string CanonicalId, ParsedRecord Record, string Sha, string Hash);
+internal sealed record ConvergeTarget(
+    string CanonicalId, ParsedRecord Record, string Sha, string Hash, IReadOnlyList<(string Other, string Hash)> OtherRows);
 
 public sealed partial class GitSyncApplier
 {
@@ -96,7 +99,10 @@ public sealed partial class GitSyncApplier
             return blob;
         }
 
-        // 3. The detections of this pull's W1 candidates (a detection counts like an open row, D2).
+        // 3. The detections of this pull's W1 candidates (a detection counts like an open row, D2). The open rows each
+        // detection would write are kept per canonical id: a convergence onto it writes them too (D1), as the canonical
+        // id's own visit may defer or fail in this pull and nothing detects them once the canonical id exists here.
+        var detectedRows = new Dictionary<string, List<(string Other, string Hash)>>(StringComparer.Ordinal);
         var hashesOfQ = q.SelectMany(x => GitSyncAliases.HashesOf(conn, x)).ToHashSet(StringComparer.Ordinal);
         foreach (var id in ids)
         {
@@ -135,9 +141,19 @@ public sealed partial class GitSyncApplier
             var hash = origin.Value.Hash;
             if (!hashesOfQ.Contains(hash) || GitSyncAliases.PlanSkip(conn, id, hash) is not { } detection)
                 continue;
+            var linked = false;
             foreach (var x in q)
                 if (!string.Equals(x, detection.Canonical, StringComparison.Ordinal) && detection.Targets.Contains(x, StringComparer.Ordinal))
+                {
                     candidates[x].Add((detection.Canonical, hash));
+                    linked = true;
+                }
+            if (linked)
+            {
+                if (!detectedRows.TryGetValue(detection.Canonical, out var list))
+                    detectedRows[detection.Canonical] = list = [];
+                list.AddRange(detection.Inserts.Select(other => (other, hash)));
+            }
         }
 
         // 4. The candidate canonical records accepted at R that parse. A read that is not ok is not "does not parse".
@@ -180,7 +196,10 @@ public sealed partial class GitSyncApplier
         {
             var (record, sha) = parses[t];
             var hash = candidates[x].First(c => string.Equals(c.Canonical, t, StringComparison.Ordinal)).Hash;
-            converging[x] = new ConvergeTarget(t, record, sha, hash);
+            var others = detectedRows.TryGetValue(t, out var rowsOfT)
+                ? rowsOfT.Where(r => !string.Equals(r.Other, x, StringComparison.Ordinal)).Distinct().ToList()
+                : [];
+            converging[x] = new ConvergeTarget(t, record, sha, hash, others);
         }
         return new AliasPass(converging, choice.Ignored.ToHashSet(StringComparer.Ordinal));
 

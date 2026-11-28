@@ -540,9 +540,13 @@ public sealed partial class GitSyncApplier
             floor => ApplyPlanning.IssueStamp(conn, dbTx, _nowMs(), floor));
         if (error is not null)
             throw new InvalidOperationException(error);
-        // Alias D3 step 4: the canonical id's new row carries the other row's allowed hash; blocked_* stay NULL.
-        if (convergence is not null && next is not null)
-            next = next with { AllowedHash = convergence.OtherRow.AllowedHash };
+        // Alias D3 step 4: the canonical id's new row carries the other row's allowed hash; blocked_* stay NULL. A
+        // convergence always writes the canonical id's row (ConvergeCore requires an active row state), so none here is a bug
+        // and nothing of the other id may be deleted.
+        if (convergence is not null)
+            next = next is null
+                ? throw new InvalidOperationException("a convergence has no row to write")
+                : next with { AllowedHash = convergence.OtherRow.AllowedHash };
         var rowWritten = false;
         if (next is not null && !next.Equals(row))
         {
@@ -611,7 +615,9 @@ public sealed partial class GitSyncApplier
 
         // Alias D3 steps 4 to 7: the other id's row, apply-failed issue and pin items go (D5; its conflict item was re-keyed),
         // its import_log rows point at the canonical id, the canonical id gets its git-sync row as an insert would write it,
-        // and the alias is resolved.
+        // and the alias is resolved. The open rows that this pull's detections planned for the group's other local members
+        // are written too (D1, INSERT OR IGNORE): the canonical id's own visit may have deferred or failed, and once it exists
+        // here nothing detects them again.
         if (convergence is not null)
         {
             Step(seam, "converge");
@@ -623,6 +629,9 @@ public sealed partial class GitSyncApplier
             GitSyncAliases.RetargetImports(conn, x, id, dbTx);
             ApplyPlanning.LogImport(tx, id, theirs!.Record, stored ?? throw new InvalidOperationException("the converged entry cannot be read back"));
             GitSyncAliases.MarkResolved(conn, id, x, convergence.Hash, dbTx);
+            foreach (var (other, hash) in convergence.OtherRows)
+                if (GitSyncAliases.MemoryExists(conn, other, dbTx))
+                    GitSyncAliases.InsertOpen(conn, id, other, hash, dbTx);
         }
 
         // Milestone 1b-ii, D7 and D8: the close runs before the hold's upsert, so a decision with both leaves one open item.

@@ -341,7 +341,9 @@ public class SqliteStoreTransactionTests
                 tx.Insert(Tier.Warm, ContentType.Memory,
                     new InsertEntryOpts("extra", Id: "extra"), Embed("extra"));
                 tx.BeforeStep = FailAt(step);
-                Assert.Throws<InvalidOperationException>(() => op(tx));
+                // The injected fault, not a refusal (also an InvalidOperationException), so the test cannot pass vacuously.
+                var ex = Assert.Throws<InvalidOperationException>(() => op(tx));
+                Assert.Equal("injected at " + step, ex.Message);
             }
 
             Assert.Equal(before, StoreSnapshot.Take(conn));
@@ -869,7 +871,8 @@ public class SqliteStoreTransactionTests
             using (var tx = store.BeginTransaction())
             {
                 tx.BeforeStep = FailAt("rekey-parent");
-                Assert.Throws<InvalidOperationException>(() => tx.RekeyMemory(Tier.Hot, OldId, NewId));
+                var ex = Assert.Throws<InvalidOperationException>(() => tx.RekeyMemory(Tier.Hot, OldId, NewId));
+                Assert.Equal("injected at rekey-parent", ex.Message); // the fault, not a refusal
             }
 
             Assert.Equal(before, StoreSnapshot.Take(conn));
