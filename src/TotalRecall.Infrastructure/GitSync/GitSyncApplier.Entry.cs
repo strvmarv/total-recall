@@ -107,6 +107,10 @@ public sealed partial class GitSyncApplier
         };
     }
 
+    /// <summary>
+    /// The work of <see cref="ApplyOne"/> before its issue bookkeeping. An insert (W1) whose record's origin hash maps in
+    /// <c>import_log</c> to a different existing memory is skipped and recorded in <c>git_sync_alias</c> (alias D1).
+    /// </summary>
     private EntryResult ApplyCore(string id, ParsedRecord? theirs, bool proven, HeldItem? held, string? blobSha, DeleteGuardVerdict guard)
     {
         BeforeEntry?.Invoke(id);
@@ -164,6 +168,26 @@ public sealed partial class GitSyncApplier
         }
 
         var (decision, approved) = Decide(row, oldBase, theirs, blobSha, local, proven, held);
+        // Alias D1: an insert (W1) whose record's origin hash maps in import_log to a different existing memory is skipped;
+        // the alias rows are the only write, planned here and recomputed inside the transaction.
+        AliasPlan? aliasPlan = null;
+        if (row is null && local is null && decision.Entry.IsInsertFromRecord && theirs!.Record.Origin is { } origin)
+        {
+            try
+            {
+                aliasPlan = GitSyncAliases.PlanSkip(conn, id, origin.Value.Hash);
+            }
+            catch (SqliteException ex) when (IsBusy(ex))
+            {
+                return new EntryResult.Deferred("the database is busy", Busy: true);
+            }
+            catch (SqliteException ex)
+            {
+                return new EntryResult.Failed("the alias lookup failed: " + OneLine(ex.Message));
+            }
+            if (aliasPlan is not null)
+                decision = SyncAlias.skipInstead(decision); // D1: the plain Ignore, so no row and no new-pin item
+        }
         // Milestone 1b-iii, D4: a deletion an approved item answers is never converted by the guard.
         var converted = approved?.IsAsApproved != true && guard.Converts(decision);
         if (converted)
@@ -253,7 +277,7 @@ public sealed partial class GitSyncApplier
         // write (conflict review D3).
         if (!plan.HasStoreOps && !HasRestamp(decision) && !TouchesHeldItem(decision) && decision.Notes.IsEmpty
             && !decision.Entry.IsPushDeletion && !RefreshesHash(held, blobSha, decision) && !reopen
-            && pinPlan.IsEmpty)
+            && pinPlan.IsEmpty && (aliasPlan is null || aliasPlan.IsEmpty))
         {
             var (preview, error) = ApplyPlanning.BuildRow(id, decision, row, oldBase, theirs, local, hadEntry: local is not null, plan.Colder, _ => null);
             if (error is not null)
@@ -280,7 +304,7 @@ public sealed partial class GitSyncApplier
             {
                 return CarryOut(
                     id, tx, decision, converted, reopen, plan, vector, row, read, held, proven, blobSha, oldBase, theirs, local,
-                    pinItems, conflictItem, thisMachine, heldAfter, pinPlan, baseVector, p => phase = p);
+                    pinItems, conflictItem, thisMachine, heldAfter, pinPlan, baseVector, aliasPlan, p => phase = p);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
             {
@@ -407,6 +431,7 @@ public sealed partial class GitSyncApplier
         bool heldAfter,
         PinPlan pinPlan,
         float[]? baseVector,
+        AliasPlan? aliasPlan,
         Action<string> phase)
     {
         tx.BeforeStep = step => BeforeEntryStep?.Invoke(id, step);
@@ -506,6 +531,19 @@ public sealed partial class GitSyncApplier
                 ConflictItems.Write(conn, dbTx, id, conflictWrite, _nowMs());
                 pinWrites++;
             }
+        }
+
+        // Alias D1: the skip's rows are recomputed from the same inputs and must match the plan, else the entry is deferred
+        // (an importer wrote a matching import_log row or deleted a target in between). The writes are not counted: a skip
+        // is a NoOp (D6).
+        if (aliasPlan is not null)
+        {
+            Step(id, "alias");
+            var aliasNow = GitSyncAliases.PlanSkip(conn, id, aliasPlan.Hash, dbTx);
+            if (!aliasPlan.Matches(aliasNow))
+                return new EntryResult.Deferred("the entry changed since the decision was made", Busy: false);
+            foreach (var other in aliasNow!.Inserts)
+                GitSyncAliases.InsertOpen(conn, aliasNow.Canonical, other, aliasNow.Hash, dbTx);
         }
 
         // Milestone 1b-ii, D7 and D8: the close runs before the hold's upsert, so a decision with both leaves one open item.

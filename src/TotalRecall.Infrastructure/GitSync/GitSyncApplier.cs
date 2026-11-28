@@ -89,7 +89,9 @@ public abstract record ApplyOutcome
 /// pull. No decision is postponed (D19; pin review D3; conflict review D3): a decision with a <c>NewPin</c> or <c>PinEdit</c>
 /// request is carried out and writes its pin item by the arrival rule, and a text conflict (FC4, FC5, NC4) applies or keeps
 /// the clock's winner and files the losing text as a <c>conflict</c> item in the same transaction. In an unproven pull a
-/// deletion candidate whose entry failed or was skipped is still held before <c>L</c> moves (D5). Nothing calls it yet.
+/// deletion candidate whose entry failed or was skipped is still held before <c>L</c> moves (D5). An insert (W1) whose
+/// record's origin hash maps in <c>import_log</c> to a different existing memory is skipped and recorded in
+/// <c>git_sync_alias</c> (alias D1). Nothing calls it yet.
 /// </summary>
 public sealed partial class GitSyncApplier
 {
