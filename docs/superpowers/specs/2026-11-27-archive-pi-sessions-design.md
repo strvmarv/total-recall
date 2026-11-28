@@ -33,14 +33,14 @@ marker and search from either resolves to it; after a pi compaction the next tur
 
 Observed on pi 1.6.1 (Linux), with a throwaway extension and a throwaway MCP server in a temporary directory, with `--session-dir`
 pointing at a temporary directory (the author's real sessions, `~/.pi` and `~/.total-recall` were not written by the spike), and in the
-author's own pi history (809 session files, read only). The spike's scripts are not committed.
+author's own pi history (821 session files at the last count, read only; the counts below are from that survey). The spike's scripts are not committed.
 
 | What | Observed |
 |---|---|
 | The extension's process and the MCP server | the extension's `process.pid` is the **direct parent** of an MCP server it registers (chain: server, then `pi`, then `timeout`/`bash`/the outer shell). The engine's chain under the plugin is engine, shim (`node`), the pi process, so the extension's pid is an ancestor of the engine, as the marker design needs |
 | What an extension can read | at `session_start` and `before_agent_start`: `ctx.sessionManager.getSessionId()` (the uuid), `getSessionFile()` (`<dir>/<timestamp>_<uuid>.jsonl`), `getHeader()` (`{type: "session", version: 3, id, timestamp, cwd}`; a root session has no `parentSession`) and `ctx.cwd` |
 | Compaction | `-p` (print mode) does not run `/compact` (the model answers that it is a harness command); in `--mode rpc` the `compact` command ran: `session_compact` fired (`reason: "manual"`), the file got a `compaction` entry, and a hidden message returned from the **next** `before_agent_start` was stored **once**, as a `custom_message` with `display: false`, after the user message of that turn. A session too small to compact answers "Nothing to compact"; `ctx.compact()` at `agent_end` in `-p` is cancelled by the shutdown |
-| The author's history | 790 of 809 files have a `parentSession` (pi-subagents children, and forks); 781 of them hold **one** user turn, 9 hold **two** (a task prompt and one follow-up), 1 holds more; the 19 files without a parent are the author's own conversations (1 to many turns). Entry types seen: `message` (roles `user`, `assistant`, `toolResult`, `system`), `compaction` (28), `custom_message` (`total-recall-context` hidden, `subagent-notification`), `custom`, `usage`, `model_change`, `thinking_level_change`, `session_info`. Tool calls are blocks `{type: "toolCall", name, arguments}` in assistant messages; the names seen are `bash`, `read`, `edit`, `write`, `Agent`, `codemode`, `grep` and others |
+| The author's history | 802 of 821 files have a `parentSession` (pi-subagents children, and forks); 792 of them hold **one** user turn, 9 hold **two** (a task prompt and one follow-up), 1 holds more; the 19 files without a parent are the author's own conversations (1 to many turns). Entry types seen: `message` (roles `user`, `assistant`, `toolResult`, `system`), `compaction` (28), `custom_message` (`total-recall-context` hidden, `subagent-notification`), `custom`, `usage`, `model_change`, `thinking_level_change`, `session_info`. Tool calls are blocks `{type: "toolCall", name, arguments}` in assistant messages; the names seen are `bash`, `read`, `edit`, `write`, `Agent`, `codemode`, `grep` and others |
 | The file | an append-only tree: entries carry `id` and `parentId`; `/tree` navigation adds entries on another branch of the same file, so file order is not one conversation |
 
 Not observed: macOS and Windows, a real `/fork` file and a real `branch_summary` entry (their shapes are from pi's documentation,
@@ -52,11 +52,11 @@ setting pointing elsewhere, and an automatic (threshold or overflow) compaction.
 1. **The session id is pi's own id.** `pi:<uuid>`, the id pi shows, not the whole file name. The adapter parses it out of
    `<timestamp>_<id>.jsonl`, so the marker, the `session` argument and the results all say `pi:<uuid>`.
 2. **A pi session is `automated` when it is a child: its header names a `parentSession`, it carries no copied history, and it holds at
-   most two real user turns.** The parent says "at most one"; in the author's history that would file 9 of 790 children as
+   most two real user turns.** The parent says "at most one"; in the author's history that would file 9 of 801 children as
    `interactive` (a child that got a task prompt and one follow-up). `/fork` and `/clone` copy the entries of the parent's branch into
    the new file, with their **old timestamps**, so a session whose first entry after the header is older than the header's own
    `timestamp` is a fork or clone, never a child, whatever its turn count (checked on the author's files: the one real fork has 119
-   copied entries, all older than its header; none of the 796 other files with a parent has one). Every real pi file starts with a setup entry (`model_change` or `thinking_level_change`), and a fork at any message copies at least
+   copied entries, all older than its header; none of the 801 other files with a parent has one). Every real pi file starts with a setup entry (`model_change` or `thinking_level_change`), and a fork at any message copies at least
    that, so a `/fork` or `/clone` always has copied history. The recorded limits: a **real conversation created with
    `newSession({parentSession})`** (the handoff example, RPC `new_session`) names a parent, copies nothing and is `automated` until it
    passes two turns; and a pi-subagents child **reopened after the user forked** (pi-subagents reopens it with pi's `forkFrom`, which
@@ -170,8 +170,13 @@ with exactly `SessionPathDepth` components below it, neither a link (the check c
   runs after the assistant message that makes the call, which is after the file exists, and before the tool runs, so the marker is
   there for the first transcript tool call of a new session. When the session file does not exist yet, `session_start` and
   `before_agent_start` **remove this process's marker** (`remove` is added to the shared writer), so that after `/new` the previous
-  session's marker is never read for the new one; the finder then falls back to the guess and the working-directory default. A call
-  that finds an identical marker skips the write. At `session_start` it also prunes the markers of ended pi processes, as the Claude
+  session's marker is never read for the new one; the finder then falls back to the guess and the working-directory default. The finder walks every ancestor across both hosts: a pi started
+  under a Claude Code process that has a live `claude-code-<pid>.json` (for example from Claude's shell tool) and has no pi marker of its own
+  resolves to that Claude Code session (a recorded limit, in `docs/hosts/pi.md`). The marker's `session_id` is the id parsed from the session file's **name** with the rule of section 1 (so a re-imported file
+  `<timestamp>_<id>-1.jsonl` is named `<id>-1`, as the adapter archives it; a name that does not parse writes no marker). A call
+  that finds the marker file on disk with every field equal except `at`, and an `at` not earlier than this process's start, skips the
+  write; any other state, including a leftover file of a crashed process whose pid was reused, is rewritten (the comparison is with
+  the file, never with a memory of the last write). At `session_start` it also prunes the markers of ended pi processes, as the Claude
   Code hook does at `SessionStart`. The builder checks the event order against pi's code and the manual check observes that the marker
   exists before the first transcript tool call.
 - **Which archive.** The data directory is resolved as the engine does (`resolveDataDir` over the environment and, when pi follows a
@@ -181,7 +186,8 @@ with exactly `SessionPathDepth` components below it, neither a link (the check c
   (the session file), `cwd` (`ctx.cwd`) and `at`, through the shared writer (call 5): private modes, atomic rename.
 - **Never a failure.** Every step is inside a try, writes nothing to stdout or stderr, and takes no await: the marker is a small file
   written synchronously.
-- **Children.** pi-subagents builds a child in the same process, so it would share the pid and overwrite the user's marker; it is
+- **Children.** (Recorded limit: with `pi --no-session` the user's session has no file, a pi-subagents child is saved with no
+  `parentSession`, is not recognised as a child by the extension, and may write a marker and be archived `interactive`.) pi-subagents builds a child in the same process, so it would share the pid and overwrite the user's marker; it is
   never written for. A child's own tool calls therefore resolve to the **user's** session through the same pid (parent decision 12,
   accepted: children do not search the archive).
 
@@ -254,13 +260,21 @@ Server and Cli test projects like `ClaudeFixtureHome`).
    extension instances in one process (a user session and a child) leave one marker, naming the user's session; the breadcrumb is in
    the hidden message after `session_compact` once; added again by `session_tree` and by a reload when no context message has followed the last compaction, and not when one has; absent after a failed compaction and with the archive off; the breadcrumb text
    equals the text `hooks/compaction-breadcrumb/run.sh` prints; a failing step never throws into pi.
-9. Speed: the Part 5 and Part 3 checks pass unchanged with two adapters registered; the cost of enumerating a large pi directory is
+9. The commands: `transcripts backfill` with no `--host` archives every detected host (one report per host, a host with no sessions
+   says so), `--host pi` and `--host claude-code` limit it, any other host is a usage error naming both; `transcripts status` counts
+   sessions and chunks per host; the `enable` text names both hosts.
+10. Hermetic: every composition and pass test that isolates `HOME` and `CLAUDE_CONFIG_DIR` (for example `SessionStartArchivePassTests`'
+    `ArchiveHome`, `HermeticSync.Options`) also points `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR` at its temporary directory,
+    and `TranscriptToolHermeticGuardTests` fails when a test that registers the transcript tools leaves them unset, so no test reads the
+    developer's real pi sessions.
+11. Speed: the Part 5 and Part 3 checks pass unchanged with two adapters registered; the cost of enumerating a large pi directory is
    measured once and recorded.
-10. A manual check on a real pi (Linux), recorded in the PR and the docs: the extension loaded with `-e`, a temporary data directory
+12. A manual check on a real pi (Linux), recorded in the PR and the docs: the extension loaded with `-e`, a temporary data directory
     where `transcripts enable` was run, the freshly built engine given to pi through a project `mcp.json` entry named `total-recall`
     (which takes precedence over the extension's own registration, so no engine is downloaded; the run uses `--approve` for project
-    trust and never `/trust`, which writes `~/.pi/agent/trust.json`), only the worktree's extension loaded (`--no-extensions -e <path>`
-    if pi has the flag, else the installed package is disabled for the run), a throwaway working directory and
+    trust and never `/trust`, which writes `~/.pi/agent/trust.json`), only the worktree's extension loaded and pi's built-in MCP support kept (`--no-extensions` also disables the built-in `mcp`, `codemode`
+    and `tool-search` extensions, so the run adds `-e builtin:mcp` and the built-in matching the entry's exposure, `-e builtin:codemode` by
+    default, or sets `"exposure": "direct"` in the temporary entry; the builder confirms the flags against pi 1.6.1), a throwaway working directory and
     `PI_CODING_AGENT_SESSION_DIR` itself set to a temporary directory (the flat layout): the marker appears
     named by the pi pid, text added to the running session is found, and after `compact` over RPC the next turn carries the note once.
     What is not run is recorded as not observed.
@@ -278,7 +292,7 @@ markers), `README.md` (the table row), `docs/configuration.md` (the `enabled` se
 ## Deviation from the parent design
 
 1. **A child is `automated` with at most two user turns, not one, and a fork is told from a child by copied history** (call 2), from the author's history.
-2. **`SessionHead` gains `ParentSession` and `CopiedHistory`, `SessionKindRule.Decide` gains the nullable `isChild`, `SyncResult.ProjectKey` and `Plan` change for the working-directory default, and the adapter gains `SessionPathDepth`**, and the finder's id and file-name rules move
+2. **`SessionHead` gains `ParentSession` and `CopiedHistory`, `SessionKindRule.Decide` gains the nullable `isChild`, `SyncResult.ProjectKey` and `Plan` change for the working-directory default, and the adapter gains `SessionPathDepth` and `UsesProjectFolderFallback`**, and the finder's id and file-name rules move
    to the adapter: changes to Part 2 and Part 5 interfaces, needed for the second host.
 3. **`branch_summary` is kept as a summary chunk** (call 3); the parent names only pi's `compaction` entry.
 4. **The working directory is a default project only inside a git repository** (call 8), and the host comes from `session_start` as
@@ -293,7 +307,8 @@ markers), `README.md` (the table row), `docs/configuration.md` (the `enabled` se
 | and is searchable like the Claude Code fixture | test 5 |
 | the child as `automated` and the fork as `interactive` | tests 3 and 4 |
 | text added to a running pi session is found by search | test 7, the manual check |
-| the forgotten text stays out of the pass and the sync; the record is private and absent for children, no file, Windows, archive off; a failed compaction adds no note; the default project from the working directory; backfill hosts and status; speed; documentation | tests 4, 7, 8, 9, the documentation grep |
+| the forgotten text stays out of the pass and the sync; the record is private and absent for children, no file, Windows, archive off; a failed compaction adds no note; the default project from the working directory | tests 4, 7, 8 |
+| backfill hosts and status; no test reads real pi sessions; speed; the manual check; documentation | tests 9, 10, 11, 12, the documentation grep |
 | with a user session and an in-process child both live, only the user's session has a marker and search from either resolves to it | test 8 (one marker naming the user's session) and test 6 (a lookup by the shared pid) |
 | after a pi compaction the next turn carries the breadcrumb once | test 8, the manual check |
 
