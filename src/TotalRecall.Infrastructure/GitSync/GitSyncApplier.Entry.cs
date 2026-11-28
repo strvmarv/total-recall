@@ -94,7 +94,8 @@ public sealed partial class GitSyncApplier
     /// <paramref name="held"/> is the id's held-delete item, open or approved, as the pull read it (milestone 1b-ii, D8;
     /// milestone 1b-iii, D4), null when it has none; <paramref name="blobSha"/> is the record's blob id; <paramref name="guard"/> is the pull's delete guard verdict (required: <c>default</c> trips nothing),
     /// which turns a deletion of a tripped direction into a held item with the cause <c>guard</c> (D4). With
-    /// <paramref name="aliasIgnored"/> (an id the alias pre-pass found converging or ignored, alias D3) the decision is the
+    /// <paramref name="aliasIgnored"/> (an id the alias pre-pass found ignored, alias D3; a converging id goes to
+    /// <see cref="ApplyConvergence"/> instead) the decision is the
     /// plain <c>Ignore</c>: the entry and its row stay, and its review items are reconciled as for any absent record.
     /// </summary>
     internal EntryResult ApplyOne(
@@ -212,6 +213,40 @@ public sealed partial class GitSyncApplier
         if (decision.Entry.IsDropRow)
             return ApplyDrop(id, decision, row, read, held);
 
+        return PlanAndCarry(
+            id, decision, converted, reopen, heldAfter, row, read, held, proven, blobSha, oldBase, theirs, pinItems, conflictItem,
+            thisMachine, aliasPlan, convergence: null);
+    }
+
+    /// <summary>
+    /// The plan and the transaction of a decision (the tail of <see cref="ApplyCore"/>, shared with a convergence, alias D3):
+    /// the store plan, the vector, the pin and conflict item plan on the expected post-decision state, the no-op shortcut, and
+    /// <see cref="CarryOut"/> in one immediate transaction. With <paramref name="convergence"/> the id is the canonical id
+    /// <c>c</c>, which has no row, and <paramref name="read"/> and <paramref name="conflictItem"/> are the other id's entry and
+    /// conflict item as <c>c</c>'s: the shortcut is never taken (the row is always written), the seams get the other id, and
+    /// <see cref="CarryOut"/> re-keys the entry before its ordinary re-read.
+    /// </summary>
+    private EntryResult PlanAndCarry(
+        string id,
+        SyncMerge.MergeDecision decision,
+        bool converted,
+        bool reopen,
+        bool heldAfter,
+        GitSyncRow? row,
+        LocalRead read,
+        HeldItem? held,
+        bool proven,
+        string? blobSha,
+        ParsedRecord? oldBase,
+        ParsedRecord? theirs,
+        IReadOnlyList<PinItem> pinItems,
+        ConflictItem? conflictItem,
+        string thisMachine,
+        AliasPlan? aliasPlan,
+        Convergence? convergence)
+    {
+        var local = (read as LocalRead.Present)?.View;
+
         StorePlan plan;
         try
         {
@@ -283,7 +318,8 @@ public sealed partial class GitSyncApplier
         // something, and a push deletion is reported even when its row already agrees (milestone 1b-ii, D9). A pin item
         // write, update or removal, or a held edit to apply (pin review D4, D5), is a change too, and so is a conflict item
         // write (conflict review D3).
-        if (!plan.HasStoreOps && !HasRestamp(decision) && !TouchesHeldItem(decision) && decision.Notes.IsEmpty
+        if (convergence is null
+            && !plan.HasStoreOps && !HasRestamp(decision) && !TouchesHeldItem(decision) && decision.Notes.IsEmpty
             && !decision.Entry.IsPushDeletion && !RefreshesHash(held, blobSha, decision) && !reopen
             && pinPlan.IsEmpty && (aliasPlan is null || aliasPlan.IsEmpty))
         {
@@ -294,7 +330,7 @@ public sealed partial class GitSyncApplier
                 return new EntryResult.NoOp(MarkerSet(decision));
         }
 
-        BeforeTransaction?.Invoke(id);
+        BeforeTransaction?.Invoke(convergence?.OtherId ?? id);
         SqliteStoreTransaction tx;
         try
         {
@@ -312,7 +348,7 @@ public sealed partial class GitSyncApplier
             {
                 return CarryOut(
                     id, tx, decision, converted, reopen, plan, vector, row, read, held, proven, blobSha, oldBase, theirs, local,
-                    pinItems, conflictItem, thisMachine, heldAfter, pinPlan, baseVector, aliasPlan, p => phase = p);
+                    pinItems, conflictItem, thisMachine, heldAfter, pinPlan, baseVector, aliasPlan, convergence, p => phase = p);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
             {
@@ -440,14 +476,30 @@ public sealed partial class GitSyncApplier
         PinPlan pinPlan,
         float[]? baseVector,
         AliasPlan? aliasPlan,
+        Convergence? convergence,
         Action<string> phase)
     {
-        tx.BeforeStep = step => BeforeEntryStep?.Invoke(id, step);
+        // Alias D3: the seams of a convergence get the other id, the id the pull visited.
+        var seam = convergence?.OtherId ?? id;
+        tx.BeforeStep = step => BeforeEntryStep?.Invoke(seam, step);
         var conn = tx.Connection;
         var dbTx = tx.Transaction;
 
+        // Alias D3 steps 1 and 2: the other id and the canonical id are re-read and compared with the plan, then the entry
+        // and its conflict item are re-keyed to the canonical id, so the ordinary re-read below reads them as its own.
+        if (convergence is not null)
+        {
+            phase("reread");
+            if (!ConvergenceHolds(tx, id, convergence))
+                return new EntryResult.Deferred("the entry changed since the decision was made", Busy: false);
+            phase("work");
+            Step(seam, "rekey");
+            tx.RekeyMemory(convergence.OtherRead.Tier, convergence.OtherId, id);
+            GitSyncReviews.RekeyConflictItem(conn, convergence.OtherId, id, dbTx);
+        }
+
         phase("reread");
-        Step(id, "reread");
+        Step(seam, "reread");
         var rowNow = GitSyncRows.Read(conn, id, dbTx);
         var readNow = LocalEntryReader.Read(t => tx.Get(t, ContentType.Memory, id), () => tx.IsSticky(ContentType.Memory, id));
         var heldNow = GitSyncReviews.ReadHeldItem(conn, id, dbTx); // open or approved: an approved item is passed as read (D4)
@@ -482,12 +534,15 @@ public sealed partial class GitSyncApplier
             throw new InvalidOperationException("the entry cannot be read back after it was written");
 
         // A deleted entry's row is planned with no stored entry, so its scanned comparison columns are left as they are.
-        Step(id, "row");
+        Step(seam, "row");
         var (next, error) = ApplyPlanning.BuildRow(
             id, decision, row, oldBase, theirs, plan.Delete ? null : stored ?? local, hadEntry: local is not null, plan.Colder,
             floor => ApplyPlanning.IssueStamp(conn, dbTx, _nowMs(), floor));
         if (error is not null)
             throw new InvalidOperationException(error);
+        // Alias D3 step 4: the canonical id's new row carries the other row's allowed hash; blocked_* stay NULL.
+        if (convergence is not null && next is not null)
+            next = next with { AllowedHash = convergence.OtherRow.AllowedHash };
         var rowWritten = false;
         if (next is not null && !next.Equals(row))
         {
@@ -507,7 +562,7 @@ public sealed partial class GitSyncApplier
         var appliedColder = false;
         if (PinPlanning.HasWork(pinItems, conflictItem, decision))
         {
-            Step(id, "pins");
+            Step(seam, "pins");
             var rowAfter = next ?? row;
             var pins = PinPlanning.Plan(
                 pinItems, conflictItem, decision, stored, rowAfter, theirs is not null, Unopt(theirs?.Record.WrittenBy), thisMachine,
@@ -546,7 +601,7 @@ public sealed partial class GitSyncApplier
         // is a NoOp (D6).
         if (aliasPlan is not null)
         {
-            Step(id, "alias");
+            Step(seam, "alias");
             var aliasNow = GitSyncAliases.PlanSkip(conn, id, aliasPlan.Hash, dbTx);
             if (!aliasPlan.Matches(aliasNow))
                 return new EntryResult.Deferred("the entry changed since the decision was made", Busy: false);
@@ -554,16 +609,32 @@ public sealed partial class GitSyncApplier
                 GitSyncAliases.InsertOpen(conn, aliasNow.Canonical, other, aliasNow.Hash, dbTx);
         }
 
+        // Alias D3 steps 4 to 7: the other id's row, apply-failed issue and pin items go (D5; its conflict item was re-keyed),
+        // its import_log rows point at the canonical id, the canonical id gets its git-sync row as an insert would write it,
+        // and the alias is resolved.
+        if (convergence is not null)
+        {
+            Step(seam, "converge");
+            var x = convergence.OtherId;
+            GitSyncRows.Delete(conn, x, dbTx);
+            GitSyncIssues.Delete(conn, x, GitSyncIssues.ApplyFailed, dbTx);
+            foreach (var kind in PinPlanning.Kinds)
+                GitSyncReviews.DeletePinItem(conn, x, kind, dbTx);
+            GitSyncAliases.RetargetImports(conn, x, id, dbTx);
+            ApplyPlanning.LogImport(tx, id, theirs!.Record, stored ?? throw new InvalidOperationException("the converged entry cannot be read back"));
+            GitSyncAliases.MarkResolved(conn, id, x, convergence.Hash, dbTx);
+        }
+
         // Milestone 1b-ii, D7 and D8: the close runs before the hold's upsert, so a decision with both leaves one open item.
         if (decision.CloseHeldDelete)
         {
-            Step(id, "close");
+            Step(seam, "close");
             GitSyncReviews.DeleteHeld(conn, id, dbTx);
         }
         HeldEntry? heldEntry = null;
         if (decision.Entry is SyncMerge.EntryOutcome.HoldDeletion hold)
         {
-            Step(id, "hold");
+            Step(seam, "hold");
             var direction = SyncDeletion.directionName(hold.Item);
             var cause = SyncDeletion.holdCause(proven, converted, hold.Item);
             GitSyncReviews.UpsertHeld(conn, new HeldItem(id, direction, theirs is null ? null : blobSha, cause, _nowMs()), dbTx);
@@ -574,22 +645,22 @@ public sealed partial class GitSyncApplier
         var refreshed = RefreshesHash(held, blobSha, decision);
         if (refreshed)
         {
-            Step(id, "refresh");
+            Step(seam, "refresh");
             GitSyncReviews.RefreshHeldHash(conn, id, blobSha!, dbTx);
         }
         // Milestone 1b-iii, D4: an approved item whose record changed after the answer is shown again, never deleted blind.
         if (reopen)
         {
-            Step(id, "reopen");
+            Step(seam, "reopen");
             GitSyncReviews.ReopenHeld(conn, id, blobSha!, dbTx);
         }
 
         phase("issue");
-        Step(id, "issue");
+        Step(seam, "issue");
         GitSyncIssues.Delete(conn, id, GitSyncIssues.ApplyFailed, dbTx);
 
         phase("commit");
-        Step(id, "commit");
+        Step(seam, "commit");
         tx.Commit();
 
         var pushDeletion = decision.Entry.IsPushDeletion;

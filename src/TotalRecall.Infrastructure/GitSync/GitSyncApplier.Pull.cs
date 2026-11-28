@@ -236,9 +236,15 @@ public sealed partial class GitSyncApplier
 
             // A deletion decided here for an id the preview did not count (the entry was deleted after the scan, or changed
             // concurrently) is carried out under this untripped verdict: an accepted race (D1).
-            // Alias D3: a converging or ignored id is never decided as a deletion (convergence itself is carried out by a
-            // later step; until then a converging id takes the ignored path).
-            Tally(ApplyOne(id, theirs, fetch.Proven, held.GetValueOrDefault(id), sha, preview.Verdict, aliasIgnored: aliases.Excludes(id)));
+            // Alias D3: a converging id converges onto its canonical record in one transaction; an ignored id is never
+            // decided as a deletion (its entry and row stay). A convergence that fails, is skipped or defers leaves the entry
+            // and its row as they are, and HoldIfUnprovenCandidate holds neither.
+            if (aliases.Converging.TryGetValue(id, out var target))
+            {
+                Tally(ApplyConvergence(id, target, fetch.Proven));
+                continue;
+            }
+            Tally(ApplyOne(id, theirs, fetch.Proven, held.GetValueOrDefault(id), sha, preview.Verdict, aliasIgnored: aliases.Ignored.Contains(id)));
 
             void Tally(EntryResult result)
             {

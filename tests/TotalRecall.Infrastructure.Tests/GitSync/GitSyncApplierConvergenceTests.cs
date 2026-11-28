@@ -11,9 +11,10 @@ namespace TotalRecall.Infrastructure.Tests.GitSync;
 /// <summary>
 /// Alias D2, D3 (conditions) and D6 (git sync part 5, #165): before the deletion preview a pre-pass computes the converging
 /// and ignored ids; neither is counted by the delete guard, deleted, or held by the unproven fallback. The pre-pass fails
-/// closed: a blob or knowledge read it cannot make keeps every local id that could have converged. Until convergence itself
-/// is carried out (a later task), a converging id is routed through the ignored path, so these tests assert only what holds
-/// either way: never deleted, never held, never counted, and <c>Has(x) || Has(canonical)</c> where a canonical is present.
+/// closed: a blob or knowledge read it cannot make keeps every local id that could have converged. The pre-pass tests assert
+/// what holds whether an id converges or is ignored: never deleted, never held, never counted, and
+/// <c>Has(x) || Has(canonical)</c> where a canonical is present. The convergence tests (alias D3 to D6) assert the re-key
+/// onto the canonical id and the first-sync merge that follows it, one test per row of D4's table.
 /// </summary>
 public sealed class GitSyncApplierConvergenceTests
 {
@@ -535,5 +536,960 @@ public sealed class GitSyncApplierConvergenceTests
             Assert.True(Has(rig, X));
         else
             Assert.True(Has(rig, X) || Has(rig, C));
+    }
+
+    // =============================================================================================
+    // Convergence (alias D3, D4, D5, D6): the other id is re-keyed onto the canonical id and the canonical record is applied
+    // as a first sync, in one transaction.
+
+    private const string X2 = "3f9c2a7e-0000-4000-8000-0000000000b7";
+    private const string Y = "3f9c2a7e-0000-4000-8000-0000000000c7";
+    private const string K = "3f9c2a7e-0000-4000-8000-0000000000d1";
+
+    private static SyncRecordModule.SyncRecord R(
+        string id,
+        string text = "Use bun.",
+        Tier? tier = null,
+        bool sticky = false,
+        IEnumerable<string>? tags = null,
+        string? project = null,
+        long createdAt = 1_700_000_000_000L,
+        bool origin = true) =>
+        ApplyRig.Rec(
+            id, text, tier: tier, sticky: sticky, tags: tags, project: project, createdAt: createdAt,
+            originHash: origin ? H : null, writtenBy: ApplyRig.OtherMachine);
+
+    /// <summary>Syncs <paramref name="xRec"/>, then pulls <paramref name="cRec"/> (skipped: the open row <c>c|x|H</c>).</summary>
+    private static async Task SyncedRecords(PullRig rig, GitSyncApplier applier, SyncRecordModule.SyncRecord xRec, SyncRecordModule.SyncRecord cRec)
+    {
+        rig.PutRecord(xRec);
+        rig.Commit("x");
+        await Pull(rig, applier);
+        Assert.True(Has(rig, xRec.Id));
+        rig.PutRecord(cRec);
+        rig.Commit("c");
+        await Pull(rig, applier);
+        Assert.False(Has(rig, cRec.Id));
+        Assert.Contains($"{cRec.Id}|{xRec.Id}|{H}|open", Aliases(rig));
+    }
+
+    private static async Task<ApplySummary> RemoveAndPull(PullRig rig, GitSyncApplier applier, string x, bool proven = true)
+    {
+        rig.Remove(SyncValidation.recordPath(x));
+        rig.Commit("remove x");
+        if (!proven)
+            rig.CloneGit("update-ref", "-d", "refs/total-recall/last-synced");
+        var summary = await Pull(rig, applier);
+        Assert.Equal(proven, summary.Proven);
+        return summary;
+    }
+
+    private static long Scalar(PullRig rig, string sql, params (string Name, object Value)[] parameters)
+    {
+        using var cmd = rig.Connection.CreateCommand();
+        cmd.CommandText = sql;
+        foreach (var (name, value) in parameters)
+            cmd.Parameters.AddWithValue(name, value);
+        return Convert.ToInt64(cmd.ExecuteScalar());
+    }
+
+    private static long Vectors(PullRig rig) =>
+        Scalar(rig, "SELECT (SELECT count(*) FROM hot_memories_vec) + (SELECT count(*) FROM warm_memories_vec) + (SELECT count(*) FROM cold_memories_vec)");
+
+    private static LocalRead.Present View(PullRig rig, string id) =>
+        Assert.IsType<LocalRead.Present>(LocalEntryReader.Read(t => rig.Store.Get(t, ContentType.Memory, id), () => rig.Store.IsSticky(ContentType.Memory, id)));
+
+    /// <summary>The id's conflict item as <c>state|hash|machine</c> and its losers as <c>side|text|stamp|machine</c>; null when none.</summary>
+    private static (string Head, IReadOnlyList<string> Losers)? Conflict(PullRig rig, string id) =>
+        GitSyncReviews.ReadConflictItem(rig.Connection, id) is { } item
+            ? ($"{item.State}|{item.RecordHash}|{item.Machine}",
+                GitSyncReviews.ReadConflictLosers(item.PayloadJson).Select(l => $"{SyncConflict.sideName(l.Side)}|{l.Text}|{l.Stamp}|{l.Machine}").ToList())
+            : null;
+
+    private static IReadOnlyList<string> LoserTexts(PullRig rig, string id) =>
+        GitSyncReviews.ReadConflictItem(rig.Connection, id) is { } item
+            ? GitSyncReviews.ReadConflictLosers(item.PayloadJson).Select(l => l.Text).ToList()
+            : [];
+
+    private static string ShownHash(string applied, params string[] losers) =>
+        SyncConflict.shownHash(Microsoft.FSharp.Core.FSharpOption<string>.Some(applied), Microsoft.FSharp.Collections.ListModule.OfSeq(losers));
+
+    private static IReadOnlyList<PinItem> PinsOf(PullRig rig, string id) =>
+        GitSyncReviews.ReadPinItems(rig.Connection).Where(i => i.EntryId == id).ToList();
+
+    private static long ReviewRows(PullRig rig, string id) =>
+        Scalar(rig, "SELECT count(*) FROM git_sync_review WHERE entry_id = $id", ("$id", id));
+
+    private static void SeedConflict(PullRig rig, string id, params string[] losers) =>
+        GitSyncReviews.UpsertConflictItem(
+            rig.Connection,
+            new ConflictItem(
+                id, "open", ShownHash("seeded", losers), ApplyRig.OtherMachine, 1_700_000_000_000L,
+                GitSyncReviews.ConflictPayload(losers.Select(t => new SyncConflict.Loser(SyncMerge.Side.Remote, t, "", ApplyRig.OtherMachine)))),
+            keepArrivedAt: false);
+
+    /// <summary>
+    /// <paramref name="x"/> converged onto <paramref name="cRec"/>'s id: <paramref name="x"/> is gone from the store, the rows
+    /// and <c>import_log</c>; the vectors are as many as before; <c>c</c>'s row is active with the canonical record as its base
+    /// and the stored entry's comparison columns; a <c>git-sync</c> log row for <c>c</c>; the alias row <c>c|x|H|resolved</c>;
+    /// the pull counted it as updated, deleted and held nothing and (with <paramref name="complete"/>) is complete.
+    /// </summary>
+    private static void AssertConverged(
+        PullRig rig, string x, SyncRecordModule.SyncRecord cRec, ApplySummary s, long vectorsBefore, bool complete = true)
+    {
+        var c = cRec.Id;
+        Assert.False(Has(rig, x));
+        Assert.True(Has(rig, c));
+        Assert.Equal(vectorsBefore, Vectors(rig));
+        Assert.Null(Row(rig, x));
+        var row = Assert.IsType<GitSyncRow>(Row(rig, c));
+        Assert.True(row.State.IsActive);
+        var parsed = ApplyPlanning.ParseBase(c, row.BaseJson!).Parsed;
+        Assert.NotNull(parsed);
+        Assert.Equal(ApplyRig.Parsed(cRec).Record, parsed!.Record);
+        var view = View(rig, c).View;
+        Assert.Equal(SyncScan.contentHash(view.Content), row.ScannedContentHash);
+        Assert.Equal(SyncScan.tagsHash(view.Tags), row.ScannedTagsHash);
+        Assert.Equal(view.Sticky, row.LocalSticky);
+        Assert.Equal(view.Tier, row.LocalTier);
+        Assert.Equal(0, Scalar(rig, "SELECT count(*) FROM import_log WHERE target_entry_id = $x", ("$x", x)));
+        Assert.Equal(1, Scalar(
+            rig,
+            "SELECT count(*) FROM import_log WHERE source_tool = 'git-sync' AND source_path = $p AND content_hash = $h AND target_entry_id = $c",
+            ("$p", "sync:" + c), ("$h", H), ("$c", c)));
+        Assert.Contains($"{c}|{x}|{H}|resolved", Aliases(rig));
+        Assert.DoesNotContain(Aliases(rig), a => a.StartsWith($"{c}|{x}|", StringComparison.Ordinal) && !a.EndsWith("|resolved", StringComparison.Ordinal));
+        Assert.True(s.Updated >= 1);
+        Assert.Empty(s.Deleted);
+        Assert.Empty(s.Held);
+        Assert.False(HasHeldRow(rig, x));
+        Assert.False(HasHeldRow(rig, c));
+        if (complete)
+        {
+            Assert.True(s.Complete);
+            Assert.Empty(s.Deferred);
+        }
+    }
+
+    // ---- D4: one test per row ----
+
+    [GitFact]
+    public async Task SameContent_AdoptsCreatedAt_AndFilesNothing()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        var cRec = R(C, createdAt: 1_600_000_000_000L);
+        await SyncedRecords(rig, applier, R(X), cRec);
+        var vectors = Vectors(rig);
+
+        var s = await RemoveAndPull(rig, applier, X);
+
+        AssertConverged(rig, X, cRec, s, vectors);
+        var view = View(rig, C).View;
+        Assert.Equal(1_600_000_000_000L, view.Content.CreatedAtMs);
+        Assert.Equal("Use bun.", view.Content.Text);
+        Assert.Equal(Tier.Warm, view.Tier);
+        Assert.False(view.Sticky);
+        Assert.Equal(0, ReviewRows(rig, C));
+        Assert.Equal(0, ReviewRows(rig, X));
+    }
+
+    [GitFact]
+    public async Task ADifferentText_TakesTheCanonicalText_AndFilesTheLocalTextAsAConflict()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        var cRec = R(C, "Use pnpm.");
+        await SyncedRecords(rig, applier, R(X, "Use bun."), cRec);
+        var vectors = Vectors(rig);
+
+        var s = await RemoveAndPull(rig, applier, X);
+
+        AssertConverged(rig, X, cRec, s, vectors);
+        Assert.Equal("Use pnpm.", View(rig, C).View.Content.Text);
+        var item = Conflict(rig, C);
+        Assert.NotNull(item);
+        Assert.Equal($"open|{ShownHash("Use pnpm.", "Use bun.")}|{PullRig.MachineId}", item!.Value.Head);
+        Assert.Equal([$"local|Use bun.||{PullRig.MachineId}"], item.Value.Losers);
+        Assert.Empty(PinsOf(rig, C));
+    }
+
+    [GitFact]
+    public async Task APinnedEntryWithADifferentText_KeepsThePinText_AndHoldsAPinEdit()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        var cRec = R(C, "Use pnpm.");
+        await SyncedRecords(rig, applier, R(X, "Use bun."), cRec);
+        rig.Store.Move(Tier.Warm, ContentType.Memory, Tier.Hot, ContentType.Memory, X);
+        rig.Store.SetSticky(ContentType.Memory, X, true);
+        var vectors = Vectors(rig);
+
+        var s = await RemoveAndPull(rig, applier, X);
+
+        AssertConverged(rig, X, cRec, s, vectors);
+        var view = View(rig, C).View;
+        Assert.Equal("Use bun.", view.Content.Text);
+        Assert.True(view.Sticky);
+        Assert.Equal(Tier.Hot, view.Tier);
+        var pin = Assert.Single(PinsOf(rig, C));
+        Assert.Equal("pin-edit", pin.Kind);
+        Assert.Equal("open", pin.State);
+        Assert.Equal(ApplyPlanning.BaseShownHash(cRec), pin.RecordHash);
+        Assert.Null(Conflict(rig, C));
+    }
+
+    [GitFact]
+    public async Task OnlyProjectOrScopeDiffers_TakesTheRecords_WithNoItem()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        var cRec = R(C, project: "p-remote");
+        await SyncedRecords(rig, applier, R(X, project: "p-local"), cRec);
+        var vectors = Vectors(rig);
+
+        var s = await RemoveAndPull(rig, applier, X);
+
+        AssertConverged(rig, X, cRec, s, vectors);
+        var view = View(rig, C).View;
+        Assert.Equal("p-remote", view.Content.Project?.Value);
+        Assert.Equal("Use bun.", view.Content.Text);
+        Assert.Equal(0, ReviewRows(rig, C));
+    }
+
+    [GitFact]
+    public async Task APinnedEntryAndANonStickyRecord_StaysPinned_AndTheStickyStampIsRestamped()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        var cRec = R(C);
+        await SyncedRecords(rig, applier, R(X), cRec);
+        rig.Store.Move(Tier.Warm, ContentType.Memory, Tier.Hot, ContentType.Memory, X);
+        rig.Store.SetSticky(ContentType.Memory, X, true);
+        var vectors = Vectors(rig);
+
+        var s = await RemoveAndPull(rig, applier, X);
+
+        AssertConverged(rig, X, cRec, s, vectors);
+        Assert.True(View(rig, C).View.Sticky);
+        Assert.NotNull(Row(rig, C)!.StickyStamp);
+        Assert.Equal(0, ReviewRows(rig, C));
+    }
+
+    [GitFact]
+    public async Task AStickyRecordAndAnUnpinnedEntry_StaysUnpinned_WithANewPinItem()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        var cRec = R(C, sticky: true);
+        await SyncedRecords(rig, applier, R(X), cRec);
+        var vectors = Vectors(rig);
+
+        var s = await RemoveAndPull(rig, applier, X);
+
+        AssertConverged(rig, X, cRec, s, vectors);
+        Assert.False(View(rig, C).View.Sticky);
+        var pin = Assert.Single(PinsOf(rig, C));
+        Assert.Equal("new-pin", pin.Kind);
+        Assert.Equal("open", pin.State);
+    }
+
+    [GitFact]
+    public async Task TheTags_AreTheUnion()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        var cRec = R(C, tags: ["t-remote"]);
+        await SyncedRecords(rig, applier, R(X, tags: ["t-local"]), cRec);
+        var vectors = Vectors(rig);
+
+        var s = await RemoveAndPull(rig, applier, X);
+
+        AssertConverged(rig, X, cRec, s, vectors);
+        Assert.Equal(["t-local", "t-remote"], View(rig, C).View.Tags.ToList());
+    }
+
+    [GitTheory]
+    [InlineData("hot", "hot", true)]
+    [InlineData("cold", "warm", false)]
+    public async Task TheWarmerTierWins_AndALocalWinnerIsRestamped(string local, string expected, bool restamped)
+    {
+        var localTier = local == "hot" ? Tier.Hot : Tier.Cold;
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        var cRec = R(C, tier: Tier.Warm);
+        await SyncedRecords(rig, applier, R(X, tier: localTier), cRec);
+        var vectors = Vectors(rig);
+
+        var s = await RemoveAndPull(rig, applier, X);
+
+        AssertConverged(rig, X, cRec, s, vectors);
+        Assert.Equal(expected == "hot" ? Tier.Hot : Tier.Warm, View(rig, C).View.Tier);
+        Assert.Equal(restamped, Row(rig, C)!.TierStamp is not null);
+    }
+
+    [GitFact]
+    public async Task APendingLocalTextEdit_IsFiledAsAConflict_NotWrittenBack()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        var cRec = R(C);
+        await SyncedRecords(rig, applier, R(X), cRec);
+        rig.Store.Update(Tier.Warm, ContentType.Memory, X, new UpdateEntryOpts { Content = "Use yarn." });
+        Assert.IsType<ScanOutcome.Done>(new GitSyncScanner(rig.Connection, () => Now).Scan());
+        Assert.NotNull(Row(rig, X)!.ContentStamp);
+        var vectors = Vectors(rig);
+
+        var s = await RemoveAndPull(rig, applier, X);
+
+        AssertConverged(rig, X, cRec, s, vectors);
+        Assert.Equal("Use bun.", View(rig, C).View.Content.Text);
+        Assert.Equal(["Use yarn."], LoserTexts(rig, C));
+        Assert.Empty(s.Notes);
+        Assert.Null(Row(rig, C)!.ContentStamp);
+    }
+
+    // ---- order and pulls ----
+
+    [GitFact]
+    public async Task TheCanonicalAddAndTheRemoval_InOnePull_Converge()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        rig.PutRecord(R(X));
+        rig.Commit("x");
+        await Pull(rig, applier);
+        var vectors = Vectors(rig);
+
+        var cRec = R(C);
+        rig.PutRecord(cRec);
+        rig.Remove(SyncValidation.recordPath(X));
+        rig.Commit("c added, x removed");
+        var s = await Pull(rig, applier);
+
+        AssertConverged(rig, X, cRec, s, vectors);
+    }
+
+    [GitFact]
+    public async Task TheAddThenTheRemoval_InTwoPulls_EndTheSame()
+    {
+        var (one, applierOne) = NewPull();
+        using var rigOne = one;
+        one.PutRecord(R(X, "Use bun."));
+        one.Commit("x");
+        await Pull(one, applierOne);
+        one.PutRecord(R(C, "Use pnpm."));
+        one.Remove(SyncValidation.recordPath(X));
+        one.Commit("c added, x removed");
+        await Pull(one, applierOne);
+
+        var (two, applierTwo) = NewPull();
+        using var rigTwo = two;
+        await SyncedRecords(two, applierTwo, R(X, "Use bun."), R(C, "Use pnpm."));
+        await RemoveAndPull(two, applierTwo, X);
+
+        Assert.False(Has(one, X));
+        Assert.True(Has(one, C));
+        Assert.Equal(Snapshot(one), Snapshot(two));
+    }
+
+    [GitFact]
+    public async Task TheCanonicalPresent_ConvergesInALaterPull()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        var cRec = R(C);
+        await SyncedRecords(rig, applier, R(X), cRec);
+        await Pull(rig, applier); // nothing new: x stays
+        Assert.True(Has(rig, X));
+        var vectors = Vectors(rig);
+
+        var s = await RemoveAndPull(rig, applier, X);
+
+        AssertConverged(rig, X, cRec, s, vectors);
+    }
+
+    [GitFact]
+    public async Task ACanonicalVisitDeferredByARacingImporter_StillConvergesTheOther()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        rig.PutRecord(R(X));
+        rig.Commit("x");
+        await Pull(rig, applier);
+        var vectors = Vectors(rig);
+
+        var cRec = R(C);
+        rig.PutRecord(cRec);
+        rig.Remove(SyncValidation.recordPath(X));
+        var head = rig.Commit("c added, x removed");
+        var seeded = false;
+        applier.BeforeTransaction = id =>
+        {
+            if (id == C && !seeded)
+            {
+                seeded = true;
+                AliasTestSupport.SeedLegacy(rig.Store, rig.Connection, Y, "Use bun, again.", H);
+            }
+        };
+        var s = await Pull(rig, applier);
+
+        Assert.True(seeded);
+        Assert.Contains(s.Deferred, d => d.Id == C);
+        Assert.False(s.Complete);
+        AssertConverged(rig, X, cRec, s, vectors, complete: false); // Y is seeded with no vector
+        Assert.NotEqual(head, rig.Last);
+
+        applier.BeforeTransaction = null;
+        var next = await Pull(rig, applier);
+        Assert.True(next.Complete);
+        Assert.Equal(head, rig.Last);
+        Assert.True(Has(rig, C));
+        Assert.False(Has(rig, X));
+    }
+
+    [GitFact]
+    public async Task TheTwoLocalMembers_TheLowestConverges_TheOtherIsIgnored()
+    {
+        var (rig, applier) = await TwoLocalMembers();
+        using var pullRig = rig;
+        var rowBefore = Row(rig, X2);
+        var vectors = Vectors(rig);
+
+        rig.Remove(SyncValidation.recordPath(X));
+        rig.Remove(SyncValidation.recordPath(X2));
+        rig.Commit("remove both");
+        var s = await Pull(rig, applier);
+
+        AssertConverged(rig, X, R(C), s, vectors);
+        AssertKept(rig, s, X2, rowBefore);
+        Assert.Contains($"{C}|{X2}|{H}|open", Aliases(rig));
+    }
+
+    [GitFact]
+    public async Task TheTwoLocalMembers_TheLowestConverges_TheOtherIsIgnored_AlsoWhenTheLowestDefers()
+    {
+        var (rig, applier) = await TwoLocalMembers();
+        using var pullRig = rig;
+        var rowBefore1 = Row(rig, X);
+        var rowBefore2 = Row(rig, X2);
+        applier.BeforeTransaction = id =>
+        {
+            if (id == X)
+                rig.Store.Update(Tier.Warm, ContentType.Memory, X, new UpdateEntryOpts { Content = "Changed meanwhile." });
+        };
+
+        rig.Remove(SyncValidation.recordPath(X));
+        rig.Remove(SyncValidation.recordPath(X2));
+        rig.Commit("remove both");
+        var s = await Pull(rig, applier);
+
+        Assert.Contains(s.Deferred, d => d.Id == X);
+        AssertKept(rig, s, X, rowBefore1);
+        AssertKept(rig, s, X2, rowBefore2);
+        Assert.False(Has(rig, C));
+        Assert.Empty(s.Held);
+        Assert.Equal([$"{C}|{X}|{H}|open", $"{C}|{X2}|{H}|open"], Aliases(rig));
+    }
+
+    /// <summary>
+    /// Two local members <c>X &lt; X2</c> of one group with the canonical <c>C</c>: their records are synced without an origin,
+    /// then host <c>import_log</c> rows of <see cref="H"/> are added for both, then <c>C</c>'s record is pulled (skipped).
+    /// </summary>
+    private static async Task<(PullRig Rig, GitSyncApplier Applier)> TwoLocalMembers()
+    {
+        var (rig, applier) = NewPull();
+        rig.PutRecord(R(X, origin: false));
+        rig.PutRecord(R(X2, origin: false));
+        rig.Commit("x1, x2");
+        await Pull(rig, applier);
+        foreach (var id in new[] { X, X2 })
+            new ImportLog(rig.Connection).LogImport("claude-code", "/home/u/.claude/memory/" + id + ".md", H, id, Tier.Warm, ContentType.Memory);
+        rig.PutRecord(R(C));
+        rig.Commit("c");
+        await Pull(rig, applier);
+        Assert.False(Has(rig, C));
+        Assert.Equal([$"{C}|{X}|{H}|open", $"{C}|{X2}|{H}|open"], Aliases(rig));
+        return (rig, applier);
+    }
+
+    [GitFact]
+    public async Task TheLowestCandidateNotParsing_ConvergesOntoAHigherOne()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        rig.PutRecord(R(X));
+        rig.Commit("x");
+        await Pull(rig, applier);
+        var bRec = R(B);
+        rig.PutRecord(bRec);
+        rig.Commit("b");
+        await Pull(rig, applier);
+        rig.PutRecord(R(A));
+        rig.Commit("a");
+        await Pull(rig, applier);
+        Assert.Equal([$"{A}|{X}|{H}|open", $"{B}|{X}|{H}|open"], Aliases(rig));
+        var vectors = Vectors(rig);
+
+        rig.PutText(SyncValidation.recordPath(A), "{not json");
+        rig.Remove(SyncValidation.recordPath(X));
+        rig.Commit("a broken, x removed");
+        var s = await Pull(rig, applier);
+
+        AssertConverged(rig, X, bRec, s, vectors);
+        Assert.Contains($"{A}|{X}|{H}|open", Aliases(rig));
+        Assert.False(Has(rig, A));
+    }
+
+    [GitFact]
+    public async Task ThreeMembersOneAtATime_ConvergeOntoTheLowestParsingCandidate()
+    {
+        // B is the local member; C then the lower A arrive: rows C|B then A|B.
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        rig.PutRecord(R(B));
+        rig.Commit("b");
+        await Pull(rig, applier);
+        rig.PutRecord(R(C));
+        rig.Commit("c");
+        await Pull(rig, applier);
+        var aRec = R(A);
+        rig.PutRecord(aRec);
+        rig.Commit("a");
+        await Pull(rig, applier);
+        Assert.Equal([$"{A}|{B}|{H}|open", $"{C}|{B}|{H}|open"], Aliases(rig));
+        var vectors = Vectors(rig);
+
+        var s = await RemoveAndPull(rig, applier, B);
+
+        AssertConverged(rig, B, aRec, s, vectors);
+        Assert.Contains($"{C}|{B}|{H}|open", Aliases(rig));
+        Assert.False(Has(rig, C));
+    }
+
+    // ---- what the other id leaves ----
+
+    [GitFact]
+    public async Task AnEarlierApplyFailedIssueOfTheOther_IsRemoved()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        var cRec = R(C);
+        await SyncedRecords(rig, applier, R(X), cRec);
+        GitSyncIssues.Upsert(rig.Connection, X, GitSyncIssues.ApplyFailed, null, 1, "an earlier failure");
+        var vectors = Vectors(rig);
+
+        var s = await RemoveAndPull(rig, applier, X);
+
+        AssertConverged(rig, X, cRec, s, vectors);
+        Assert.Equal(0, Scalar(rig, "SELECT count(*) FROM git_sync_issue WHERE entry_id IN ($x, $c)", ("$x", X), ("$c", C)));
+    }
+
+    [GitFact]
+    public async Task TheAllowedHash_IsCarried()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        var cRec = R(C);
+        await SyncedRecords(rig, applier, R(X), cRec);
+        ScanRig.Exec(rig.Connection, $"UPDATE git_sync_entry SET allowed_hash = 'abc' WHERE entry_id = '{X}'");
+        var vectors = Vectors(rig);
+
+        var s = await RemoveAndPull(rig, applier, X);
+
+        AssertConverged(rig, X, cRec, s, vectors);
+        var row = Row(rig, C)!;
+        Assert.Equal("abc", row.AllowedHash);
+        Assert.Null(row.BlockedHash);
+        Assert.Null(row.BlockedReason);
+    }
+
+    [GitFact]
+    public async Task TheOthersConflictItem_IsReKeyed_AndALoserEqualToTheAppliedTextIsDropped()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        var cRec = R(C);
+        await SyncedRecords(rig, applier, R(X), cRec);
+        SeedConflict(rig, X, "Use bun.", "Old loser.");
+        var vectors = Vectors(rig);
+
+        var s = await RemoveAndPull(rig, applier, X);
+
+        AssertConverged(rig, X, cRec, s, vectors);
+        var item = Conflict(rig, C);
+        Assert.NotNull(item);
+        Assert.Equal($"unseen|{ShownHash("Use bun.", "Old loser.")}|{ApplyRig.OtherMachine}", item!.Value.Head);
+        Assert.Equal(["Old loser."], LoserTexts(rig, C));
+        Assert.Null(Conflict(rig, X));
+    }
+
+    [GitFact]
+    public async Task TheOthersConflictItem_LeftWithNoLoser_IsRemoved()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        var cRec = R(C);
+        await SyncedRecords(rig, applier, R(X), cRec);
+        SeedConflict(rig, X, "Use bun.");
+        var vectors = Vectors(rig);
+
+        var s = await RemoveAndPull(rig, applier, X);
+
+        AssertConverged(rig, X, cRec, s, vectors);
+        Assert.Null(Conflict(rig, C));
+        Assert.Null(Conflict(rig, X));
+        Assert.Equal(0, ReviewRows(rig, C) + ReviewRows(rig, X));
+    }
+
+    [GitFact]
+    public async Task EightOldLosersAndADifferingLocalText_KeepTheNewestLocalText_AndDropTheOldest()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        var cRec = R(C, "Use pnpm.");
+        await SyncedRecords(rig, applier, R(X, "Use bun."), cRec);
+        var old = Enumerable.Range(1, 8).Select(i => $"l{i}").ToArray();
+        SeedConflict(rig, X, old);
+        var vectors = Vectors(rig);
+
+        var s = await RemoveAndPull(rig, applier, X);
+
+        AssertConverged(rig, X, cRec, s, vectors);
+        Assert.Equal([.. old.Skip(1), "Use bun."], LoserTexts(rig, C));
+        Assert.Equal(ShownHash("Use pnpm.", [.. old.Skip(1), "Use bun."]), GitSyncReviews.ReadConflictItem(rig.Connection, C)!.RecordHash);
+    }
+
+    [GitFact]
+    public async Task D4sArrival_IsDedupedAgainstTheOthersReKeyedLosers()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        var cRec = R(C, "Use pnpm.");
+        await SyncedRecords(rig, applier, R(X, "Use bun."), cRec);
+        SeedConflict(rig, X, "Old loser.", "Use bun.");
+        var vectors = Vectors(rig);
+
+        var s = await RemoveAndPull(rig, applier, X);
+
+        AssertConverged(rig, X, cRec, s, vectors);
+        Assert.Equal(["Old loser.", "Use bun."], LoserTexts(rig, C));
+        Assert.Equal(ShownHash("Use pnpm.", "Old loser.", "Use bun."), GitSyncReviews.ReadConflictItem(rig.Connection, C)!.RecordHash);
+    }
+
+    [GitFact]
+    public async Task TheOthersPinItems_AreRemoved()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        var cRec = R(C);
+        await SyncedRecords(rig, applier, R(X), cRec);
+        GitSyncReviews.UpsertPinItem(rig.Connection, new PinItem(X, "new-pin", "approved", "shown", ApplyRig.OtherMachine, 1_700_000_000_000L));
+        GitSyncReviews.UpsertPinItem(rig.Connection, new PinItem(X, "pin-edit", "open", "shown", ApplyRig.OtherMachine, 1_700_000_000_000L));
+        Assert.Equal(2, PinsOf(rig, X).Count);
+        var vectors = Vectors(rig);
+
+        var s = await RemoveAndPull(rig, applier, X);
+
+        AssertConverged(rig, X, cRec, s, vectors);
+        Assert.Empty(PinsOf(rig, X));
+        Assert.Empty(PinsOf(rig, C));
+        Assert.Equal(0, ReviewRows(rig, X));
+    }
+
+    [GitFact]
+    public async Task ParentIdAccessCountAndVector_FollowTheReKey()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        var cRec = R(C);
+        await SyncedRecords(rig, applier, R(X), cRec);
+        rig.Store.Insert(Tier.Cold, ContentType.Memory, new InsertEntryOpts(Content: "A child.", Id: K, ParentId: X));
+        ScanRig.Exec(rig.Connection, $"UPDATE warm_memories SET access_count = 5 WHERE id = '{X}'");
+        var vectorBefore = VectorBytes(rig, X);
+        var vectors = Vectors(rig);
+
+        var s = await RemoveAndPull(rig, applier, X);
+
+        AssertConverged(rig, X, cRec, s, vectors);
+        Assert.Equal(C, rig.Store.Get(Tier.Cold, ContentType.Memory, K)!.ParentId?.Value);
+        Assert.Equal(5, Scalar(rig, "SELECT access_count FROM warm_memories WHERE id = $c", ("$c", C)));
+        Assert.Equal(vectorBefore, VectorBytes(rig, C));
+    }
+
+    private static byte[] VectorBytes(PullRig rig, string id)
+    {
+        var rowid = Scalar(rig, "SELECT rowid FROM warm_memories WHERE id = $id", ("$id", id));
+        using var cmd = rig.Connection.CreateCommand();
+        cmd.CommandText = "SELECT embedding FROM warm_memories_vec WHERE rowid = $r";
+        cmd.Parameters.AddWithValue("$r", rowid);
+        return (byte[])cmd.ExecuteScalar()!;
+    }
+
+    // ---- unproven pulls, faults and deferrals ----
+
+    [GitFact]
+    public async Task AnUnprovenPull_Converges()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        var cRec = R(C);
+        await SyncedRecords(rig, applier, R(X), cRec);
+        var vectors = Vectors(rig);
+
+        var s = await RemoveAndPull(rig, applier, X, proven: false);
+
+        AssertConverged(rig, X, cRec, s, vectors);
+    }
+
+    [GitFact]
+    public async Task InAnUnprovenPull_AFailedConvergence_OpensNoFallbackHold_AndTheNextPullConverges()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        var cRec = R(C);
+        await SyncedRecords(rig, applier, R(X), cRec);
+        var rowBefore = Row(rig, X);
+        var vectors = Vectors(rig);
+        var fault = true;
+        applier.BeforeEntryStep = (id, step) =>
+        {
+            if (fault && id == X && step == "converge")
+                throw new InvalidOperationException("synthetic fault");
+        };
+
+        var s = await RemoveAndPull(rig, applier, X, proven: false);
+
+        Assert.Equal(X, Assert.Single(s.Failed).Id);
+        Assert.Empty(s.Held);
+        AssertKept(rig, s, X, rowBefore);
+        Assert.False(Has(rig, C));
+        Assert.Equal([$"{C}|{X}|{H}|open"], Aliases(rig));
+
+        fault = false;
+        var next = await Pull(rig, applier);
+
+        AssertConverged(rig, X, cRec, next, vectors);
+    }
+
+    [GitFact]
+    public async Task AFaultAfterTheReKey_RollsEverythingBack()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        await SyncedRecords(rig, applier, R(X, "Use bun."), R(C, "Use pnpm."));
+        SeedConflict(rig, X, "Old loser.");
+        rig.Remove(SyncValidation.recordPath(X));
+        rig.Commit("remove x");
+        var before = Dump(rig);
+        var vectorBefore = VectorBytes(rig, X);
+        applier.BeforeEntryStep = (id, step) =>
+        {
+            if (id == X && step == "converge")
+                throw new InvalidOperationException("synthetic fault");
+        };
+
+        var s = await Pull(rig, applier);
+
+        Assert.Equal(X, Assert.Single(s.Failed).Id);
+        Assert.False(Has(rig, C));
+        Assert.Equal([$"{C}|{X}|{H}|open"], Aliases(rig));
+        Assert.Equal(vectorBefore, VectorBytes(rig, X));
+        Assert.Equal(X, FtsId(rig, "bun"));
+        Assert.Single(GitSyncIssues.ReadOpen(rig.Connection, GitSyncIssues.ApplyFailed).Keys, k => k == X);
+        GitSyncIssues.Delete(rig.Connection, X, GitSyncIssues.ApplyFailed);
+        Assert.Equal(before, Dump(rig));
+    }
+
+    private static string? FtsId(PullRig rig, string word)
+    {
+        using var cmd = rig.Connection.CreateCommand();
+        cmd.CommandText = "SELECT t.id FROM warm_memories_fts f JOIN warm_memories t ON t.rowid = f.rowid WHERE warm_memories_fts MATCH $w";
+        cmd.Parameters.AddWithValue("$w", word);
+        return cmd.ExecuteScalar() as string;
+    }
+
+    [GitFact]
+    public async Task AChangedEntryBeforeTheTransaction_DefersTheConvergence()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        await SyncedRecords(rig, applier, R(X), R(C));
+        var rowBefore = Row(rig, X);
+        applier.BeforeTransaction = id =>
+        {
+            if (id == X)
+                rig.Store.Update(Tier.Warm, ContentType.Memory, X, new UpdateEntryOpts { Content = "Changed meanwhile." });
+        };
+
+        var s = await RemoveAndPull(rig, applier, X);
+
+        Assert.Contains(s.Deferred, d => d.Id == X);
+        Assert.False(s.Complete);
+        AssertKept(rig, s, X, rowBefore);
+        Assert.Equal("Changed meanwhile.", View(rig, X).View.Content.Text);
+        Assert.False(Has(rig, C));
+        Assert.Null(Row(rig, C));
+        Assert.Equal(0, ReviewRows(rig, C));
+        Assert.Equal([$"{C}|{X}|{H}|open"], Aliases(rig));
+        Assert.Equal(0, Scalar(rig, "SELECT count(*) FROM import_log WHERE target_entry_id = $c", ("$c", C)));
+        Assert.Equal(0, s.Updated);
+    }
+
+    [GitFact]
+    public async Task TheReappearanceOfTheOthersRecord_IsSkippedAsAnAlias()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        await SyncedRecords(rig, applier, R(X), R(C));
+        await RemoveAndPull(rig, applier, X);
+        Assert.False(Has(rig, X));
+
+        rig.PutRecord(R(X));
+        rig.Commit("x again");
+        var s = await Pull(rig, applier);
+
+        Assert.False(Has(rig, X));
+        Assert.Null(Row(rig, X));
+        Assert.True(Has(rig, C));
+        Assert.Equal(0, s.Inserted);
+        Assert.True(s.Unchanged >= 1);
+        Assert.True(s.Complete);
+        Assert.Equal([$"{C}|{X}|{H}|resolved"], Aliases(rig));
+    }
+
+    [GitFact]
+    public async Task AfterConvergence_ARepeatedPullIsANoOp()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        await SyncedRecords(rig, applier, R(X), R(C));
+        var converged = await RemoveAndPull(rig, applier, X);
+        Assert.True(converged.Complete);
+        var before = Dump(rig);
+        var transactions = applier.TransactionCount;
+
+        var s = await Pull(rig, applier);
+
+        Assert.True(s.Complete);
+        Assert.Empty(s.Deferred);
+        Assert.Equal(transactions, applier.TransactionCount);
+        Assert.Equal(before, Dump(rig));
+    }
+
+    /// <summary>
+    /// An id whose canonical id is taken or cannot be read is ignored in one go: not routed to a convergence that then
+    /// defers or fails on every pull (the pull is complete, nothing deferred or failed), and the convergence changes nothing
+    /// under the canonical id.
+    /// </summary>
+    [GitTheory]
+    [InlineData("memory")]
+    [InlineData("knowledge")]
+    [InlineData("forgotten")]
+    [InlineData("pending-deletion")]
+    [InlineData("held-delete")]
+    [InlineData("unreadable-knowledge")]
+    public async Task ATakenCanonicalId_IgnoresTheOther_WithNoDeferralAndNoFailure(string what)
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        await SyncedPair(rig, applier, X, C);
+        var rowBefore = Row(rig, X);
+        var baseJson = RecordJson(Rec(C));
+        switch (what)
+        {
+            case "memory":
+                rig.Store.Insert(Tier.Warm, ContentType.Memory, new InsertEntryOpts(Content: "Taken.", Id: C));
+                break;
+            case "knowledge":
+                rig.Store.Insert(Tier.Warm, ContentType.Knowledge, new InsertEntryOpts(Content: "Taken.", Id: C));
+                break;
+            case "forgotten":
+                GitSyncRows.Write(rig.Connection, new GitSyncRow(C, SyncMerge.RowState.Forgotten, baseJson, null, null, null, null, null, null, null, null, null, null, null, null));
+                break;
+            case "pending-deletion":
+                GitSyncRows.Write(rig.Connection, new GitSyncRow(C, SyncMerge.RowState.Active, baseJson, null, null, null, null, null, null, null, null, null, null, null, null));
+                break;
+            case "held-delete":
+                GitSyncReviews.UpsertHeld(rig.Connection, new HeldItem(C, "local", null, "unproven", 1_700_000_000_000L));
+                break;
+            default:
+                InsertCorruptKnowledge(rig, C);
+                break;
+        }
+        var cRow = Row(rig, C);
+
+        var s = await RemoveAndPull(rig, applier, X);
+
+        AssertKept(rig, s, X, rowBefore);
+        Assert.Empty(s.Deferred);
+        Assert.Empty(s.Failed);
+        Assert.True(s.Complete);
+        if (what != "memory") // a local memory under C meets its own record by the ordinary first-sync merge
+            Assert.Equal(cRow, Row(rig, C));
+        Assert.Equal([$"{C}|{X}|{H}|open"], Aliases(rig));
+    }
+
+    // ---- the follow-up pulls of the pre-pass faults ----
+
+    [GitFact]
+    public async Task AFailedCandidateBlobRead_TheOtherConvergesOnTheNextPull()
+    {
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        await SyncedAlone(rig, applier, X);
+        var vectors = Vectors(rig);
+
+        var cRec = Rec(C);
+        rig.PutRecord(cRec);
+        rig.Remove(SyncValidation.recordPath(X));
+        rig.Commit("c added, x removed");
+        var cBlob = BlobOf(rig, C);
+        rig.Fault = c => c.IsCatBlob && ((SyncGit.GitCommand.CatBlob)c).sha == cBlob ? FaultingGitProcess.Failure(SyncGit.FailureKind.Other, "bad object") : null;
+        var first = await Pull(rig, applier);
+        Assert.True(Has(rig, X));
+        Assert.Equal(C, Assert.Single(first.Failed).Id);
+
+        rig.Fault = _ => null;
+        var next = await Pull(rig, applier);
+
+        AssertConverged(rig, X, cRec, next, vectors);
+    }
+
+    [GitTheory]
+    [InlineData("other")]
+    [InlineData("cancelled")]
+    public async Task AFailedBlobReadOfTheLowestCandidate_XConvergesOntoTheLowestOnTheNextPull(string kindName)
+    {
+        var kind = kindName == "other" ? SyncGit.FailureKind.Other : SyncGit.FailureKind.Cancelled;
+        var (rig, applier) = NewPull();
+        using var pullRig = rig;
+        rig.PutRecord(Rec(X));
+        rig.Commit("x");
+        await Pull(rig, applier);
+        rig.PutRecord(Rec(B));
+        rig.Commit("b");
+        await Pull(rig, applier);
+        var aRec = Rec(A);
+        rig.PutRecord(aRec);
+        rig.Commit("a");
+        await Pull(rig, applier);
+        var vectors = Vectors(rig);
+
+        rig.Remove(SyncValidation.recordPath(X));
+        rig.Commit("remove x");
+        var aBlob = BlobOf(rig, A);
+        rig.Fault = c => c.IsCatBlob && ((SyncGit.GitCommand.CatBlob)c).sha == aBlob ? FaultingGitProcess.Failure(kind, "bad object") : null;
+        await Pull(rig, applier);
+        Assert.True(Has(rig, X));
+        Assert.False(Has(rig, B));
+
+        rig.Fault = _ => null;
+        var next = await Pull(rig, applier);
+
+        AssertConverged(rig, X, aRec, next, vectors);
+        Assert.Contains($"{A}|{X}|{H}|resolved", Aliases(rig));
+        Assert.Contains($"{B}|{X}|{H}|open", Aliases(rig));
+        Assert.False(Has(rig, B));
     }
 }
